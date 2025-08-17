@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ m['business_name'] }} — Pay with Pi</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
+    header,main{max-width:980px;margin:0 auto;padding:16px}
+    header{display:flex;align-items:center;justify-content:space-between}
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand img{height:36px;border-radius:6px}
+    .muted{opacity:.85;color:#bcd0ff}
+    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:700;text-decoration:none;display:inline-block}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:16px}
+    .card{background:#111a2b;border:1px solid #1f2a44;border-radius:12px;padding:12px}
+    .card img{width:100%;height:180px;object-fit:cover;border-radius:10px}
+    .qty{width:68px}
+    @media(max-width:860px){ .grid{grid-template-columns:1fr 1fr} }
+    @media(max-width:560px){ .grid{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="{{ m['logo_url'] }}" alt="">
+    <div>
+      <div style="font-weight:800">{{ m['business_name'] }}</div>
+      <div class="muted">Hello, @{{ username }}</div>
+    </div>
+  </div>
+  <div>
+    <a class="btn" href="/cart/{{ cid }}">Cart ({{ cart_count }})</a>
+  </div>
+</header>
+
+<main>
+  <div class="muted" style="margin:0 16px 6px">Pay with Pi — select items below, then checkout.</div>
+  <div class="grid">
+    {% for it in items %}
+      <div class="card">
+        {% if it['image_url'] %}<img src="{{ it['image_url'] }}" alt="">{% endif %}
+        <div style="font-weight:700;margin-top:8px">{{ it['title'] }}</div>
+        <div class="muted">{{ it['pi_price'] }} Pi</div>
+        <form method="POST" action="/store/{{ m['slug'] }}/add">
+          <input type="hidden" name="cid" value="{{ cid }}">
+          <input type="hidden" name="item_id" value="{{ it['id'] }}">
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <input class="qty" name="qty" type="number" min="1" value="1">
+            <button class="btn" type="submit">Add to cart</button>
+            <a class="btn" href="{{ app_base }}/checkout/{{ it['link_id'] }}" target="_top">Buy now</a>
+          </div>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+</main>
+</body>
+</html>
