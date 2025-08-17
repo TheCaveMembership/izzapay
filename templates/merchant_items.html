@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Merchant</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f5f7fb}
+.wrap{max-width:1000px;margin:0 auto;padding:24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+.card{background:#fff;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:16px}
+input,button{padding:10px;border-radius:8px;border:1px solid #ccd;width:100%}
+button{background:#1f6fff;color:#fff;border:none;cursor:pointer}
+button:hover{background:#155de0}
+pre{white-space:pre-wrap;background:#f2f4f8;padding:8px;border-radius:8px;font-size:12px}
+.err{color:#c00}
+img{max-width:100%;border-radius:8px}
+</style>
+</head><body>
+<div class="wrap">
+{% if setup_mode %}
+  <h2>Create your merchant profile</h2>
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <form method="post" action="/merchant/setup" class="card">
+    <p><input name="business_name" placeholder="Business name" required></p>
+    <p><input name="slug" placeholder="Store slug (e.g., yourshop)" required></p>
+    <p><input name="pi_wallet" placeholder="Pi wallet (e.g., @yourhandle)" required></p>
+    <p><input name="logo_url" placeholder="Logo URL (optional)"></p>
+    <p><input name="reply_to_email" type="email" placeholder="Notification email (optional)"></p>
+    <p>
+      Theme:
+      <label><input type="radio" name="theme_mode" value="dark" checked> Dark</label>
+      <label><input type="radio" name="theme_mode" value="light"> Light</label>
+    </p>
+    <p><button type="submit">Create Merchant</button></p>
+  </form>
+  <form method="post" action="/logout" style="margin-top:10px"><button>Log out</button></form>
+{% else %}
+  <h2>{{ m['business_name'] }} — Items</h2>
+  <form method="post" action="/logout"><button>Log out</button></form>
+
+  <h3>Add Item</h3>
+  <form method="post" action="/merchant/{{ m['slug'] }}/items/new" class="card">
+    <p><input name="title" placeholder="Title" required></p>
+    <p><input name="sku" placeholder="SKU"></p>
+    <p><input name="image_url" placeholder="Image URL"></p>
+    <p><input name="pi_price" type="number" step="0.0001" placeholder="Price in Pi (incl. shipping)" required></p>
+    <p><input name="stock_qty" type="number" value="10"> Stock</p>
+    <p><label><input type="checkbox" name="allow_backorder"> Allow backorder</label></p>
+    <p><button type="submit">Create</button></p>
+  </form>
+
+  <h3>Your Items</h3>
+  <div class="grid">
+  {% for it in items %}
+    <div class="card">
+      {% if it['image_url'] %}<img src="{{ it['image_url'] }}">{% endif %}
+      <h4>{{ it['title'] }}</h4>
+      <p>Price: {{ it['pi_price'] }} Pi &nbsp;&nbsp; Stock: {{ it['stock_qty'] }}</p>
+      <p>Checkout link:<br>
+        <a href="{{ app_base }}/checkout/{{ it['link_id'] }}">{{ app_base }}/checkout/{{ it['link_id'] }}</a>
+      </p>
+      <details>
+        <summary>Copy “Pay with Pi” button</summary>
+<pre>&lt;link rel="stylesheet" href="{{ app_base }}/static/merchant_button.css"&gt;
+&lt;a class="pi-button" href="{{ app_base }}/checkout/{{ it['link_id'] }}"&gt;Pay with Pi&lt;/a&gt;</pre>
+      </details>
+      <p><a href="/merchant/{{ m['slug'] }}/orders">View Orders</a></p>
+    </div>
+  {% endfor %}
+  </div>
+{% endif %}
+</div>
+</body></html>
