@@ -51,7 +51,7 @@ def require_merchant_owner(slug):
 # -------------------------
 @app.get("/")
 def home():
-    # Redirect root to the Pi sign-in page (helps in sandbox)
+    # Redirect root to the Pi sign-in page (handy in sandbox links)
     return redirect("/signin")
 
 @app.get("/signin")
@@ -69,29 +69,32 @@ def logout():
 def auth_exchange():
     """
     Front-end sends: { user: {uid, username}, accessToken: "..." }
-    TODO (production): verify accessToken with Pi Platform.
+    TODO (production): verify accessToken with Pi Platform on server side.
     """
-    data = request.get_json(force=True) or {}
-    user = (data.get("user") or {})
-    uid = user.get("uid")
-    username = user.get("username")
-    if not uid or not username:
-        return {"ok": False, "error": "invalid_payload"}, 400
+    try:
+        data = request.get_json(silent=True) or {}
+        user = (data.get("user") or {})
+        uid = user.get("uid")
+        username = user.get("username")
 
-    # TODO: verify token with Pi Platform on the server side
-    verify_ok = True
-    if not verify_ok:
-        return {"ok": False, "error": "auth_verify_failed"}, 401
+        if not uid or not username:
+            return {"ok": False, "error": "invalid_payload"}, 400
 
-    with conn() as cx:
-        row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-        if not row:
-            cx.execute("""INSERT INTO users(pi_uid, pi_username, role, created_at)
-                          VALUES(?, ?, 'buyer', ?)""",
-                       (uid, username, int(time.time())))
+        # TODO: verify accessToken via Pi Platform API
+
+        with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-    session["user_id"] = row["id"]
-    return {"ok": True, "redirect": "/dashboard"}
+            if not row:
+                cx.execute("""INSERT INTO users(pi_uid, pi_username, role, created_at)
+                              VALUES(?, ?, 'buyer', ?)""",
+                           (uid, username, int(time.time())))
+                row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
+        session["user_id"] = row["id"]
+        return {"ok": True, "redirect": "/dashboard"}
+
+    except Exception as e:
+        print("auth_exchange error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
 
 @app.get("/dashboard")
 def dashboard():
@@ -111,10 +114,9 @@ def merchant_setup_form():
     if not isinstance(u, dict) and not u:
         return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         return redirect(f"/merchant/{m['slug']}/items")
-    # Reuse the items template in setup mode
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                            app_base=APP_BASE_URL)
 
@@ -263,7 +265,7 @@ def pi_confirm():
     # split funds and write order
     gross, fee, net = split_amounts(float(amt))
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
         if i and not i["allow_backorder"]:
             cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                        (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -280,7 +282,7 @@ def pi_confirm():
                    (tx_hash, session_id))
 
     # send merchant net (developer fee already excluded by split_amounts)
-    ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_MAME if False else APP_NAME}")
+    ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
