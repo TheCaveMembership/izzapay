@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in with Pi</title>
+<script src="https://downloads.minepi.com/sdk/v1/prod.js"></script>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
+.card{background:#121826;border:1px solid #1f2a44;padding:24px;border-radius:12px;max-width:420px;width:92%}
+button{width:100%;padding:12px;border-radius:10px;border:0;background:#6e9fff;color:#0b0f17;font-weight:700;cursor:pointer}
+button:hover{opacity:.95}
+.small{opacity:.8;font-size:.9em;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Sign in with Pi</h2>
+  <p class="small">No email or password. Secure, Pi-only authentication.</p>
+  <button id="pi-signin">Continue with Pi</button>
+  <div id="msg" class="small" style="color:#d7e3ff;margin-top:12px"></div>
+</div>
+<script>
+const Pi = window.Pi;
+document.getElementById('pi-signin').addEventListener('click', async () => {
+  if (!Pi) { document.getElementById('msg').innerText='Open in Pi Browser to continue.'; return; }
+  try {
+    Pi.init({version:"2.0"});
+    const scopes = ['username','payments']; // minimal scopes
+    const auth = await Pi.authenticate(scopes, (p)=>{});
+    const res = await fetch('/auth/exchange', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ user: auth.user, accessToken: auth.accessToken })
+    }).then(r=>r.json());
+    if (res.ok && res.redirect) { window.location.href = res.redirect; }
+    else { document.getElementById('msg').innerText='Auth failed. Try again.'; }
+  } catch (e) {
+    document.getElementById('msg').innerText = 'Error: ' + (e?.message||e);
+  }
+});
+</script>
+</body>
+</html>
