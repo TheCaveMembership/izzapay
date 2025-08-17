@@ -3,7 +3,7 @@ from decimal import Decimal
 from datetime import timedelta
 from flask import Flask, request, render_template, redirect, session, abort, Response
 from dotenv import load_dotenv
-import requests  # <-- needed for calling Pi API
+import requests
 
 from db import init_db, conn
 from emailer import send_email
@@ -25,31 +25,39 @@ app = Flask(__name__)
 # --- Secret key ---
 _secret = os.getenv("FLASK_SECRET")
 if not _secret:
-    _secret = os.urandom(32)  # fallback so the app boots
+    _secret = os.urandom(32)
     print("[WARN] FLASK_SECRET not set; generated a temporary secret (sessions reset on redeploy).")
 app.secret_key = _secret
 
-# --- Session cookie tuned for Pi sandbox wrapper (third-party/iframe context) ---
+# --- Session cookie for Pi sandbox (third-party/iframe context) ---
 app.config.update(
     SESSION_COOKIE_NAME="izzapay_session",
-    SESSION_COOKIE_SAMESITE="None",  # allow third-party context
-    SESSION_COOKIE_SECURE=True,      # required with SameSite=None
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
-    PERMANENT_SESSION_LIFETIME=timedelta(days=7),  # keep users signed in for a week
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 
-# Initialize DB
+# Initialize DB (base schema)
 init_db()
 
+# ---- Ensure new columns exist (idempotent) ----
+def ensure_schema():
+    with conn() as cx:
+        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)") }
+        if "pi_wallet_address" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+        if "pi_handle" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+ensure_schema()
+
 # ---------- TOKEN AUTH (cookie-free fallback) ----------
-TOKEN_TTL = 60 * 10  # 10 minutes validity for login handoff
+TOKEN_TTL = 60 * 10  # 10 minutes
 
 def _b64url(data: bytes) -> str:
-    import base64
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 def _b64url_dec(s: str) -> bytes:
-    import base64
     pad = "=" * (-len(s) % 4)
     return base64.urlsafe_b64decode(s + pad)
 
@@ -75,7 +83,8 @@ def verify_login_token(token: str):
         return None
 
 def get_bearer_token_from_request() -> str | None:
-    t = request.args.get("t")
+    # 1) URL query ?t=..., 2) Form field t (HTML POST), 3) Authorization: Bearer ...
+    t = request.args.get("t") or request.form.get("t")
     if t:
         return t.strip()
     auth = request.headers.get("Authorization", "")
@@ -119,7 +128,7 @@ def require_merchant_owner(slug):
     return u, m
 
 # -------------------------
-# Debug helper (optional; remove later)
+# Debug helper
 # -------------------------
 @app.get("/whoami")
 def whoami():
@@ -149,11 +158,6 @@ def logout():
 # -------------------------
 @app.post("/api/pi/me")
 def pi_me():
-    """
-    Body: { accessToken: "..." }
-    Calls Pi API /v2/me with Authorization: Bearer <token> to verify and fetch user info.
-    Returns user JSON from Pi if valid, else 401.
-    """
     try:
         data = request.get_json(force=True)
         token = (data or {}).get("accessToken")
@@ -174,12 +178,6 @@ def pi_me():
 # -------------------------
 @app.post("/auth/exchange")
 def auth_exchange():
-    """
-    Accepts either:
-      - JSON body: { user: {uid, username}, accessToken: "..." }   (XHR)
-      - or form field 'payload' = same JSON string                 (top-level form POST)
-    Verifies token with /api/pi/me (server-to-Pi), then upserts user.
-    """
     try:
         if request.is_json:
             data = request.get_json(silent=True) or {}
@@ -191,7 +189,7 @@ def auth_exchange():
                 data = {}
 
         user = (data.get("user") or {})
-        uid = user.get("uid") or user.get("id")  # tolerate 'id' if SDK variant
+        uid = user.get("uid") or user.get("id")
         username = user.get("username")
         token = data.get("accessToken")
 
@@ -205,7 +203,6 @@ def auth_exchange():
         headers = {"Authorization": f"Bearer {token}"}
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code != 200:
-            # hard fail auth
             if not request.is_json:
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
@@ -226,7 +223,7 @@ def auth_exchange():
         except Exception:
             pass
 
-        # Always mint a URL token so we work even if the cookie is blocked.
+        # URL token fallback
         tok = mint_login_token(row["id"])
         target = f"/dashboard?t={tok}"
 
@@ -265,8 +262,10 @@ def merchant_setup_form():
     if m:
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
+    # Pass token to template so form includes it as hidden field
+    tok = get_bearer_token_from_request()
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                           app_base=APP_BASE_URL)
+                           app_base=APP_BASE_URL, t=tok)
 
 @app.post("/merchant/setup")
 def merchant_setup():
@@ -276,20 +275,33 @@ def merchant_setup():
     data = request.form
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
     business_name = data.get("business_name") or f"{u['pi_username']}'s Shop"
-    pi_wallet = data.get("pi_wallet") or "@merchant"
     logo_url = data.get("logo_url") or "https://via.placeholder.com/160x40?text=Logo"
     theme_mode = data.get("theme_mode", "dark")
     reply_to_email = (data.get("reply_to_email") or "").strip()
+    # NEW payout fields
+    pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
+    pi_handle = (data.get("pi_handle") or "").strip()
+
+    # Basic wallet validation (Pi public keys are 56-char, start with 'G')
+    if not (len(pi_wallet_address) == 56 and pi_wallet_address.startswith("G")):
+        tok = get_bearer_token_from_request()
+        return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
+                               app_base=APP_BASE_URL, t=tok,
+                               error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').")
 
     with conn() as cx:
         exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
         if exists:
+            tok = get_bearer_token_from_request()
             return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                                   app_base=APP_BASE_URL, error="Slug already taken.")
+                                   app_base=APP_BASE_URL, t=tok,
+                                   error="Slug already taken.")
         cx.execute("""INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
-                      theme_mode, reply_to_email, pi_wallet)
-                      VALUES(?,?,?,?,?,?,?)""",
-                   (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email, pi_wallet))
+                      theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle)
+                      VALUES(?,?,?,?,?,?,?,?,?)""",
+                   (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email,
+                    "@deprecated", pi_wallet_address, pi_handle))
+
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
@@ -305,7 +317,7 @@ def merchant_items(slug):
         items = cx.execute("SELECT * FROM items WHERE merchant_id=? ORDER BY id DESC",
                            (m["id"],)).fetchall()
     return render_template("merchant_items.html", setup_mode=False, m=m, items=items,
-                           app_base=APP_BASE_URL)
+                           app_base=APP_BASE_URL, t=get_bearer_token_from_request())
 
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
@@ -436,7 +448,7 @@ def pi_confirm():
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                    (tx_hash, session_id))
 
-    ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_NAME}")
+    ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
@@ -457,12 +469,12 @@ def pi_confirm():
     buyer_url = f"{APP_BASE_URL}/o/{buyer_token}"
     if buyer.get("email"):
         try:
-            send_email(
-              buyer["email"],
-              f"Thanks for your order at {m['business_name']}",
-              f"<p>Your order is paid in full with Pi.</p>"
-              f"<p><a href='{buyer_url}'>Track your order here</a>.</p>"
-            )
+          send_email(
+            buyer["email"],
+            f"Thanks for your order at {m['business_name']}",
+            f"<p>Your order is paid in full with Pi.</p>"
+            f"<p><a href='{buyer_url}'>Track your order here</a>.</p>"
+          )
         except Exception:
             pass
 
@@ -488,7 +500,6 @@ def success():
 # -------------------------
 @app.get("/validation-key.txt")
 def validation_key():
-    # Put your key at static/validation-key.txt
     return app.send_static_file("validation-key.txt")
 
 # -------------------------
