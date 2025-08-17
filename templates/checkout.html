@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pay with Pi</title>
-  <!-- Pi SDK (canonical URL) -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#fff;margin:0;padding:20px}
@@ -49,14 +48,8 @@
 
   function initPiSandbox() {
     if (!Pi) return false;
-    try {
-      // Sandbox ON for dev testing. Switch to {version:"2.0"} for production.
-      Pi.init({ version: "2.0", sandbox: true });
-      return true;
-    } catch (e) {
-      setStatus('Pi SDK init error: ' + (e?.message||e));
-      return false;
-    }
+    try { Pi.init({ version: "2.0", sandbox: true }); return true; }
+    catch (e) { setStatus('Pi SDK init error: ' + (e?.message||e)); return false; }
   }
 
   function setStatus(msg){ const el=document.getElementById('status'); if(el) el.innerText=msg; }
@@ -72,7 +65,7 @@
   function val(id){ const el=document.getElementById(id); return (el?el.value:'').trim(); }
 
   document.getElementById('pay-btn')?.addEventListener('click', async ()=>{
-    if (!initPiSandbox()) { setStatus('Open this page in Pi Browser and enable Sandbox in Utilities.'); return; }
+    if (!initPiSandbox()) { setStatus('Open in Pi Browser and enable Sandbox in Utilities.'); return; }
 
     try{
       await Pi.createPayment({
@@ -81,10 +74,9 @@
         metadata: { session_id: sessionId }
       }, {
         onReadyForServerApproval: async (paymentId) => {
-          // Optional: you could POST to your server here if you later add server approval.
+          // optional server approval step (not used in this minimal flow)
         },
         onReadyForServerCompletion: async (paymentId, tx) => {
-          // Confirm on server and move to status page
           const res = await fetch(appBase + "/api/pi/confirm", {
             method:"POST",
             headers:{"Content-Type":"application/json"},
