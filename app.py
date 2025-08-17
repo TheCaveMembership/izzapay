@@ -106,19 +106,33 @@ def logout():
     return redirect("/signin")
 
 # Exchange Pi auth payload for a server session
+# Accept BOTH: JSON (XHR) and form POST (top-level) — we'll prefer redirect on success.
 @app.post("/auth/exchange")
 def auth_exchange():
     """
-    Front-end sends: { user: {uid, username}, accessToken: "..." }
+    Front-end sends either:
+      - JSON body: { user: {uid, username}, accessToken: "..." }   (XHR)
+      - or form field 'payload' = same JSON string                 (top-level form POST)
     TODO (production): verify accessToken with Pi Platform on server side.
     """
     try:
-        data = request.get_json(silent=True) or {}
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+        else:
+            payload = request.form.get("payload", "")
+            try:
+                data = json.loads(payload) if payload else {}
+            except Exception:
+                data = {}
+
         user = (data.get("user") or {})
         uid = user.get("uid")
         username = user.get("username")
 
         if not uid or not username:
+            # If this was a top-level form POST, send the user back to /signin with error.
+            if not request.is_json:
+                return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
         # TODO: verify accessToken via Pi Platform API here (server side)
@@ -132,10 +146,17 @@ def auth_exchange():
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
         session["user_id"] = row["id"]
         session.permanent = True  # use PERMANENT_SESSION_LIFETIME
+
+        # If it was a top-level form POST, do a server-side redirect (best for cookies).
+        if not request.is_json:
+            return redirect("/dashboard")
+        # For XHR callers, return JSON and let the client redirect.
         return {"ok": True, "redirect": "/dashboard"}
 
     except Exception as e:
         print("auth_exchange error:", repr(e))
+        if not request.is_json:
+            return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
 
 @app.get("/dashboard")
@@ -156,7 +177,7 @@ def merchant_setup_form():
     if isinstance(u, Response):
         return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
     if m:
         return redirect(f"/merchant/{m['slug']}/items")
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
@@ -367,8 +388,8 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
