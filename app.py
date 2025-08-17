@@ -1,6 +1,7 @@
 import os, json, uuid, time
 from decimal import Decimal
-from flask import Flask, request, render_template, redirect, session, abort
+from datetime import timedelta
+from flask import Flask, request, render_template, redirect, session, abort, Response
 from dotenv import load_dotenv
 
 from db import init_db, conn
@@ -9,8 +10,29 @@ from payments import verify_pi_tx, send_pi_payout, split_amounts
 
 load_dotenv()
 
+# Minimal env sanity log (won't print secrets)
+if os.getenv("PI_PLATFORM_API_KEY"):
+    print("[IZZA PAY] PI_PLATFORM_API_KEY detected (masked).")
+else:
+    print("[IZZA PAY] WARNING: PI_PLATFORM_API_KEY is not set.")
+
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET", "change_me")
+
+# --- Secret key ---
+_secret = os.getenv("FLASK_SECRET")
+if not _secret:
+    _secret = os.urandom(32)  # fallback so the app boots
+    print("[WARN] FLASK_SECRET not set; generated a temporary secret (sessions reset on redeploy).")
+app.secret_key = _secret
+
+# --- Session cookie tuned for Pi sandbox wrapper (third-party/iframe context) ---
+app.config.update(
+    SESSION_COOKIE_NAME="izzapay_session",
+    SESSION_COOKIE_SAMESITE="None",  # allow third-party context
+    SESSION_COOKIE_SECURE=True,      # required with SameSite=None
+    SESSION_COOKIE_HTTPONLY=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),  # keep users signed in for a week
+)
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
 APP_NAME = os.getenv("APP_NAME", "IZZA PAY")
@@ -21,7 +43,8 @@ init_db()
 # -------------------------
 # Helpers
 # -------------------------
-def current_user():
+def current_user_row():
+    """Return sqlite3.Row for the logged-in user, or None."""
     uid = session.get("user_id")
     if not uid:
         return None
@@ -29,15 +52,21 @@ def current_user():
         return cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
 
 def require_user():
+    """Return a redirect Response to /signin if not logged in, else the user Row."""
     uid = session.get("user_id")
     if not uid:
-        return redirect("/signin")  # returns a Response
+        return redirect("/signin")
     with conn() as cx:
-        return cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        row = cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not row:
+        session.clear()
+        return redirect("/signin")
+    return row
 
 def require_merchant_owner(slug):
+    """Return (Response, None) if redirect; else (user_row, merchant_row)."""
     u = require_user()
-    if not isinstance(u, dict):   # if it's a redirect Response, pass it through
+    if isinstance(u, Response):
         return u, None
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE slug=?", (slug,)).fetchone()
@@ -48,14 +77,27 @@ def require_merchant_owner(slug):
     return u, m
 
 # -------------------------
+# Debug helper (optional; remove later)
+# -------------------------
+@app.get("/whoami")
+def whoami():
+    uid = session.get("user_id")
+    return {"logged_in": bool(uid), "user_id": uid}, 200
+
+# -------------------------
 # Public
 # -------------------------
 @app.get("/")
 def home():
+    # Redirect root to the Pi sign-in page (helpful for sandbox)
     return redirect("/signin")
 
 @app.get("/signin")
 def signin():
+    # allow force-refresh of auth/session with /signin?fresh=1
+    if request.args.get("fresh") == "1":
+        session.clear()
+    # Pi-only auth page (no email/password)
     return render_template("pi_signin.html", app_base=APP_BASE_URL)
 
 @app.post("/logout")
@@ -79,7 +121,7 @@ def auth_exchange():
         if not uid or not username:
             return {"ok": False, "error": "invalid_payload"}, 400
 
-        # TODO: verify accessToken via Pi Platform API
+        # TODO: verify accessToken via Pi Platform API here (server side)
 
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
@@ -89,6 +131,7 @@ def auth_exchange():
                            (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
         session["user_id"] = row["id"]
+        session.permanent = True  # use PERMANENT_SESSION_LIFETIME
         return {"ok": True, "redirect": "/dashboard"}
 
     except Exception as e:
@@ -98,7 +141,7 @@ def auth_exchange():
 @app.get("/dashboard")
 def dashboard():
     u = require_user()
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
@@ -110,7 +153,7 @@ def dashboard():
 @app.get("/merchant/setup")
 def merchant_setup_form():
     u = require_user()
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
@@ -122,7 +165,7 @@ def merchant_setup_form():
 @app.post("/merchant/setup")
 def merchant_setup():
     u = require_user()
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     data = request.form
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
@@ -149,7 +192,7 @@ def merchant_setup():
 @app.get("/merchant/<slug>/items")
 def merchant_items(slug):
     u, m = require_merchant_owner(slug)
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     with conn() as cx:
         items = cx.execute("SELECT * FROM items WHERE merchant_id=? ORDER BY id DESC",
@@ -160,7 +203,7 @@ def merchant_items(slug):
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
     u, m = require_merchant_owner(slug)
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     data = request.form
     link_id = uuid.uuid4().hex[:8]
@@ -176,7 +219,7 @@ def merchant_new_item(slug):
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
     u, m = require_merchant_owner(slug)
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     with conn() as cx:
         orders = cx.execute("""
@@ -190,7 +233,7 @@ def merchant_orders(slug):
 @app.post("/merchant/<slug>/orders/update")
 def merchant_orders_update(slug):
     u, m = require_merchant_owner(slug)
-    if not isinstance(u, dict):
+    if isinstance(u, Response):
         return u
     order_id = int(request.form.get("order_id"))
     status = request.form.get("status")
@@ -207,6 +250,7 @@ def merchant_orders_update(slug):
                    (status or o["status"], tracking_carrier, tracking_number,
                     tracking_url, order_id))
 
+    # Tracking email
     if (status or o["status"]) == "shipped" and o["buyer_email"]:
         body = f"<p>Your {m['business_name']} order has shipped.</p>"
         if tracking_number:
@@ -272,7 +316,7 @@ def pi_confirm():
         if i and not i["allow_backorder"]:
             cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                        (max(0, i["stock_qty"] - s["qty"]), i["id"]))
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
         buyer_token = uuid.uuid4().hex
         cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                      shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
@@ -323,7 +367,7 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
@@ -336,6 +380,7 @@ def success():
 # -------------------------
 @app.get("/validation-key.txt")
 def validation_key():
+    # Put your key at static/validation-key.txt
     return app.send_static_file("validation-key.txt")
 
 # -------------------------
