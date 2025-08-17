@@ -1,0 +1,11 @@
+.pi-button{
+  display:inline-block;
+  padding:10px 14px;
+  border-radius:10px;
+  background:#1f6fff;
+  color:#fff;
+  text-decoration:none;
+  font-weight:700;
+  border:0;
+}
+.pi-button:hover{ opacity:.92; }
