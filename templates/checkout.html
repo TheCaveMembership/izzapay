@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pay with Pi</title>
+<script src="https://downloads.minepi.com/sdk/v1/prod.js"></script>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#fff;margin:0;padding:20px}
+.card{max-width:520px;margin:0 auto;background:#111a2b;border:1px solid #1f2a44;padding:20px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+input,button{width:100%;padding:12px;border-radius:10px;border:1px solid #2b3b61;background:#0e1422;color:#e8f0ff;margin:6px 0}
+button{background:#6e9fff;color:#0b0f17;border:0;font-weight:700}
+button:hover{opacity:.95}
+small{opacity:.8}
+</style>
+</head>
+<body>
+<div class="card">
+{% if sold_out %}
+  <h2>Sold Out</h2>
+  <p>This item is currently out of stock.</p>
+{% else %}
+  <h2>{{ i['business_name'] }}</h2>
+  <p><strong>{{ i['title'] }}</strong></p>
+  <p>Qty: {{ qty }} — <strong>Total: {{ expected_pi }} Pi</strong> <small>(shipping included)</small></p>
+  <h3>Delivery Info</h3>
+  <input id="name" placeholder="Full Name">
+  <input id="email" placeholder="Email (for updates, optional)">
+  <input id="addr1" placeholder="Address line 1">
+  <input id="addr2" placeholder="Address line 2">
+  <input id="city" placeholder="City">
+  <input id="region" placeholder="State/Province">
+  <input id="postal" placeholder="Postal Code">
+  <input id="country" placeholder="Country">
+  <button id="pay-btn">Pay with Pi</button>
+  <div id="status" style="color:#ffb3b3;margin-top:10px"></div>
+{% endif %}
+</div>
+
+<script>
+const Pi=window.Pi;
+const sessionId="{{ session_id }}";
+const expectedPi={{ expected_pi|default(0) }};
+const appBase="{{ app_base }}";
+
+function ship(){
+  return {
+    name:document.getElementById('name').value.trim(),
+    email:document.getElementById('email').value.trim(),
+    address1:document.getElementById('addr1').value.trim(),
+    address2:document.getElementById('addr2').value.trim(),
+    city:document.getElementById('city').value.trim(),
+    region:document.getElementById('region').value.trim(),
+    postal:document.getElementById('postal').value.trim(),
+    country:document.getElementById('country').value.trim()
+  };
+}
+
+document.getElementById('pay-btn')?.addEventListener('click', async ()=>{
+  if(!Pi){ document.getElementById('status').innerText="Open in Pi Browser to pay."; return; }
+  try{
+    Pi.init({version:"2.0"});
+    await Pi.createPayment({
+      amount: expectedPi,
+      memo: "IZZA PAY checkout",
+      metadata: { session_id: sessionId }
+    }, {
+      onReadyForServerApproval: async (paymentId)=>{},
+      onReadyForServerCompletion: async (paymentId, tx)=>{
+        const res = await fetch(appBase + "/api/pi/confirm", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ session_id: sessionId, tx_hash: tx.txid || paymentId,
+            buyer:{ name: ship().name, email: ship().email }, shipping: ship() })
+        }).then(r=>r.json());
+        if(res.ok){ window.location.href = res.buyer_status_url; }
+        else{ document.getElementById('status').innerText="Payment confirmation failed."; }
+      },
+      onCancel: ()=>{ document.getElementById('status').innerText="Payment cancelled."; },
+      onError: (e)=>{ document.getElementById('status').innerText="Error: "+(e?.message||e); }
+    });
+  }catch(e){
+    document.getElementById('status').innerText="Error: "+(e?.message||e);
+  }
+});
+</script>
+</body>
+</html>
