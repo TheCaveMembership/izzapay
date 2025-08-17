@@ -1,0 +1,78 @@
+<!-- templates/merchant_store.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ merchant.store_name }} - Pay with Pi</title>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+  <h1>{{ merchant.store_name }}</h1>
+
+  <p id="auth-status">
+    {% if username %}
+      Signed in as <span id="username">{{ username }}</span>
+    {% else %}
+      <button id="pi-auth-btn">Sign in with Pi</button>
+    {% endif %}
+  </p>
+
+  <h2>Products</h2>
+  <ul id="products">
+    {% for product in products %}
+      <li>
+        {{ product.name }} - {{ product.price_pi }} π  
+        <button class="add-to-cart" data-id="{{ product.id }}" data-name="{{ product.name }}" data-price="{{ product.price_pi }}">Add to Cart</button>
+      </li>
+    {% else %}
+      <p>No products available.</p>
+    {% endfor %}
+  </ul>
+
+  <h2>Your Cart</h2>
+  <ul id="cart"></ul>
+  <button id="checkout-btn" style="display:none;">Checkout</button>
+
+  <script>
+    const scopes = ['payments','username'];
+    let accessToken, username, cart = [];
+
+    // Pi authentication
+    function onIncompletePaymentFound(payment) {
+      console.log("Incomplete payment:", payment);
+    }
+
+    document.getElementById("pi-auth-btn")?.addEventListener("click", () => {
+      Pi.authenticate(scopes, onIncompletePaymentFound).then(function(auth) {
+        accessToken = auth.accessToken;
+        username = auth.user.username;
+        document.getElementById("auth-status").innerHTML = "Signed in as <span id='username'>" + username + "</span>";
+      }).catch(function(error) {
+        console.error(error);
+      });
+    });
+
+    // Cart logic
+    $(".add-to-cart").click(function() {
+      const id = $(this).data("id");
+      const name = $(this).data("name");
+      const price = $(this).data("price");
+      cart.push({id, name, price});
+      $("#cart").append("<li>" + name + " - " + price + "π</li>");
+      $("#checkout-btn").show();
+    });
+
+    // Checkout logic
+    $("#checkout-btn").click(function() {
+      if (!accessToken) {
+        alert("Please sign in with Pi first.");
+        return;
+      }
+      const total = cart.reduce((sum, item) => sum + item.price, 0);
+      alert("Triggering Pi payment for " + total + "π");
+      // TODO: call backend to initiate payment and complete flow
+    });
+  </script>
+</body>
+</html>
