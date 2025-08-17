@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sign in with Pi</title>
+  <!-- Canonical Pi SDK -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
@@ -33,16 +34,38 @@
       catch(e){ document.getElementById('msg').innerText='Pi SDK init error: '+(e?.message||e); return false; }
     }
 
+    // If Pi finds an incomplete payment after auth, tell our server to complete it.
+    async function onIncompletePaymentFound(payment) {
+      try {
+        const txid = payment?.transaction?.txid || payment?.identifier;
+        const sessionId = payment?.metadata?.session_id;
+        if (!txid || !sessionId) return;
+
+        await fetch(appBase + "/api/pi/confirm", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({
+            session_id: sessionId,
+            tx_hash: txid,
+            buyer: {},
+            shipping: {}
+          })
+        });
+      } catch (e) {
+        console.log("Incomplete payment reconcile error:", e);
+      }
+    }
+
     document.getElementById('pi-signin').addEventListener('click', async () => {
       if (!initPiSandbox()) {
         document.getElementById('msg').innerText = 'Open in Pi Browser and enable Sandbox in Utilities.';
         return;
       }
       try {
-        const scopes = ['username','payments'];
-        const auth = await Pi.authenticate(scopes, ()=>{});
+        const scopes = ['payments','username'];
+        const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
 
-        // Build a TOP-LEVEL form POST so Safari/Pi keeps the session cookie
+        // Top-level form POST so Safari/Pi keeps cookie; server also adds token fallback.
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = appBase + '/auth/exchange';
