@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pay with Pi</title>
+  <!-- Canonical Pi SDK -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#fff;margin:0;padding:20px}
@@ -64,8 +65,34 @@
   }
   function val(id){ const el=document.getElementById(id); return (el?el.value:'').trim(); }
 
+  // Resume/complete an unfinished Pi payment if the SDK finds one
+  async function onIncompletePaymentFound(payment) {
+    try {
+      const txid = payment?.transaction?.txid || payment?.identifier;
+      const sid = payment?.metadata?.session_id || sessionId;
+      if (!txid || !sid) return;
+
+      const res = await fetch(appBase + "/api/pi/confirm", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          session_id: sid,
+          tx_hash: txid,
+          buyer:{ name: shippingForm().name, email: shippingForm().email },
+          shipping: shippingForm()
+        })
+      }).then(r=>r.json());
+
+      if (res.ok && res.buyer_status_url) {
+        window.location.href = res.buyer_status_url;
+      }
+    } catch (e) {
+      console.log("Incomplete payment reconcile error:", e);
+    }
+  }
+
   document.getElementById('pay-btn')?.addEventListener('click', async ()=>{
-    if (!initPiSandbox()) { setStatus('Open in Pi Browser and enable Sandbox in Utilities.'); return; }
+    if (!initPiSandbox()) { setStatus('Open this page in Pi Browser and enable Sandbox in Utilities.'); return; }
 
     try{
       await Pi.createPayment({
@@ -73,8 +100,9 @@
         memo: "IZZA PAY checkout",
         metadata: { session_id: sessionId }
       }, {
+        onIncompletePaymentFound,            // added
         onReadyForServerApproval: async (paymentId) => {
-          // optional server approval step (not used in this minimal flow)
+          // optional server approval step (unused in this minimal flow)
         },
         onReadyForServerCompletion: async (paymentId, tx) => {
           const res = await fetch(appBase + "/api/pi/confirm", {
