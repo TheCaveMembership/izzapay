@@ -1,20 +1,24 @@
-import os, json, uuid, time
+import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal
 from datetime import timedelta
 from flask import Flask, request, render_template, redirect, session, abort, Response
 from dotenv import load_dotenv
+import requests  # <-- needed for calling Pi API
 
 from db import init_db, conn
 from emailer import send_email
 from payments import verify_pi_tx, send_pi_payout, split_amounts
 
+# ---------- ENV ----------
 load_dotenv()
-
-# Minimal env sanity log (won't print secrets)
 if os.getenv("PI_PLATFORM_API_KEY"):
     print("[IZZA PAY] PI_PLATFORM_API_KEY detected (masked).")
 else:
     print("[IZZA PAY] WARNING: PI_PLATFORM_API_KEY is not set.")
+
+PI_API_BASE = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
+APP_NAME = os.getenv("APP_NAME", "IZZA PAY")
 
 app = Flask(__name__)
 
@@ -34,32 +38,70 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),  # keep users signed in for a week
 )
 
-APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
-APP_NAME = os.getenv("APP_NAME", "IZZA PAY")
-
 # Initialize DB
 init_db()
+
+# ---------- TOKEN AUTH (cookie-free fallback) ----------
+TOKEN_TTL = 60 * 10  # 10 minutes validity for login handoff
+
+def _b64url(data: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+def _b64url_dec(s: str) -> bytes:
+    import base64
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+def mint_login_token(user_id: int, ttl: int = TOKEN_TTL) -> str:
+    payload = {"uid": user_id, "exp": int(time.time()) + ttl, "v": 1}
+    body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    key_bytes = app.secret_key if isinstance(app.secret_key, bytes) else app.secret_key.encode("utf-8")
+    sig = hmac.new(key_bytes, body.encode("utf-8"), hashlib.sha256).digest()
+    return body + "." + _b64url(sig)
+
+def verify_login_token(token: str):
+    try:
+        body, sig = token.split(".")
+        key_bytes = app.secret_key if isinstance(app.secret_key, bytes) else app.secret_key.encode("utf-8")
+        want = hmac.new(key_bytes, body.encode("utf-8"), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64url(want), sig):
+            return None
+        payload = json.loads(_b64url_dec(body))
+        if payload.get("exp", 0) < int(time.time()):
+            return None
+        return int(payload.get("uid"))
+    except Exception:
+        return None
+
+def get_bearer_token_from_request() -> str | None:
+    t = request.args.get("t")
+    if t:
+        return t.strip()
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return None
 
 # -------------------------
 # Helpers
 # -------------------------
 def current_user_row():
-    """Return sqlite3.Row for the logged-in user, or None."""
+    """Return sqlite3.Row for the logged-in user, or None (checks cookie OR token)."""
     uid = session.get("user_id")
+    if not uid:
+        tok = get_bearer_token_from_request()
+        if tok:
+            uid = verify_login_token(tok)
     if not uid:
         return None
     with conn() as cx:
         return cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
 
 def require_user():
-    """Return a redirect Response to /signin if not logged in, else the user Row."""
-    uid = session.get("user_id")
-    if not uid:
-        return redirect("/signin")
-    with conn() as cx:
-        row = cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    """Return redirect Response to /signin if not logged in, else the user Row."""
+    row = current_user_row()
     if not row:
-        session.clear()
         return redirect("/signin")
     return row
 
@@ -81,23 +123,20 @@ def require_merchant_owner(slug):
 # -------------------------
 @app.get("/whoami")
 def whoami():
-    uid = session.get("user_id")
-    return {"logged_in": bool(uid), "user_id": uid}, 200
+    row = current_user_row()
+    return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
 
 # -------------------------
 # Public
 # -------------------------
 @app.get("/")
 def home():
-    # Redirect root to the Pi sign-in page (helpful for sandbox)
     return redirect("/signin")
 
 @app.get("/signin")
 def signin():
-    # allow force-refresh of auth/session with /signin?fresh=1
     if request.args.get("fresh") == "1":
         session.clear()
-    # Pi-only auth page (no email/password)
     return render_template("pi_signin.html", app_base=APP_BASE_URL)
 
 @app.post("/logout")
@@ -105,15 +144,41 @@ def logout():
     session.clear()
     return redirect("/signin")
 
-# Exchange Pi auth payload for a server session
-# Accept BOTH: JSON (XHR) and form POST (top-level) — we'll prefer redirect on success.
+# -------------------------
+# Pi API: verify access token and get /v2/me
+# -------------------------
+@app.post("/api/pi/me")
+def pi_me():
+    """
+    Body: { accessToken: "..." }
+    Calls Pi API /v2/me with Authorization: Bearer <token> to verify and fetch user info.
+    Returns user JSON from Pi if valid, else 401.
+    """
+    try:
+        data = request.get_json(force=True)
+        token = (data or {}).get("accessToken")
+        if not token:
+            return {"ok": False, "error": "missing_token"}, 400
+        url = f"{PI_API_BASE}/v2/me"
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return {"ok": False, "error": "token_invalid", "status": r.status_code}, 401
+        return {"ok": True, "me": r.json()}
+    except Exception as e:
+        print("pi_me error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
+
+# -------------------------
+# Exchange auth -> session (and token fallback)
+# -------------------------
 @app.post("/auth/exchange")
 def auth_exchange():
     """
-    Front-end sends either:
+    Accepts either:
       - JSON body: { user: {uid, username}, accessToken: "..." }   (XHR)
       - or form field 'payload' = same JSON string                 (top-level form POST)
-    TODO (production): verify accessToken with Pi Platform on server side.
+    Verifies token with /api/pi/me (server-to-Pi), then upserts user.
     """
     try:
         if request.is_json:
@@ -126,17 +191,26 @@ def auth_exchange():
                 data = {}
 
         user = (data.get("user") or {})
-        uid = user.get("uid")
+        uid = user.get("uid") or user.get("id")  # tolerate 'id' if SDK variant
         username = user.get("username")
+        token = data.get("accessToken")
 
-        if not uid or not username:
-            # If this was a top-level form POST, send the user back to /signin with error.
+        if not uid or not username or not token:
             if not request.is_json:
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
-        # TODO: verify accessToken via Pi Platform API here (server side)
+        # Verify token with Pi API
+        url = f"{PI_API_BASE}/v2/me"
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            # hard fail auth
+            if not request.is_json:
+                return redirect("/signin?fresh=1")
+            return {"ok": False, "error": "token_invalid"}, 401
 
+        # Upsert user
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
@@ -144,14 +218,21 @@ def auth_exchange():
                               VALUES(?, ?, 'buyer', ?)""",
                            (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-        session["user_id"] = row["id"]
-        session.permanent = True  # use PERMANENT_SESSION_LIFETIME
 
-        # If it was a top-level form POST, do a server-side redirect (best for cookies).
+        # Try cookie session (best-effort)
+        try:
+            session["user_id"] = row["id"]
+            session.permanent = True
+        except Exception:
+            pass
+
+        # Always mint a URL token so we work even if the cookie is blocked.
+        tok = mint_login_token(row["id"])
+        target = f"/dashboard?t={tok}"
+
         if not request.is_json:
-            return redirect("/dashboard")
-        # For XHR callers, return JSON and let the client redirect.
-        return {"ok": True, "redirect": "/dashboard"}
+            return redirect(target)
+        return {"ok": True, "redirect": target}
 
     except Exception as e:
         print("auth_exchange error:", repr(e))
@@ -166,7 +247,10 @@ def dashboard():
         return u
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
-    return redirect("/merchant/setup" if not m else f"/merchant/{m['slug']}/items")
+    tok = get_bearer_token_from_request()
+    if not m:
+        return redirect(f"/merchant/setup{('?t='+tok) if tok else ''}")
+    return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
 
 # -------------------------
 # Merchant setup
@@ -177,9 +261,10 @@ def merchant_setup_form():
     if isinstance(u, Response):
         return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
-        return redirect(f"/merchant/{m['slug']}/items")
+        tok = get_bearer_token_from_request()
+        return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                            app_base=APP_BASE_URL)
 
@@ -205,7 +290,8 @@ def merchant_setup():
                       theme_mode, reply_to_email, pi_wallet)
                       VALUES(?,?,?,?,?,?,?)""",
                    (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email, pi_wallet))
-    return redirect(f"/merchant/{slug}/items")
+    tok = get_bearer_token_from_request()
+    return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
 # -------------------------
 # Merchant item management
@@ -235,7 +321,8 @@ def merchant_new_item(slug):
                    (m["id"], link_id, data.get("title"), data.get("sku"),
                     data.get("image_url"), float(data.get("pi_price", "0")),
                     int(data.get("stock_qty", "0")), int(bool(data.get("allow_backorder")))))
-    return redirect(f"/merchant/{slug}/items")
+    tok = get_bearer_token_from_request()
+    return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
@@ -271,7 +358,6 @@ def merchant_orders_update(slug):
                    (status or o["status"], tracking_carrier, tracking_number,
                     tracking_url, order_id))
 
-    # Tracking email
     if (status or o["status"]) == "shipped" and o["buyer_email"]:
         body = f"<p>Your {m['business_name']} order has shipped.</p>"
         if tracking_number:
@@ -280,7 +366,8 @@ def merchant_orders_update(slug):
                     f"<a href='{link}'>track package</a></p>"
         send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body)
 
-    return redirect(f"/merchant/{slug}/orders")
+    tok = get_bearer_token_from_request()
+    return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
 
 # -------------------------
 # Buyer checkout
