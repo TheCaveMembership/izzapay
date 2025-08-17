@@ -23,7 +23,9 @@ const Pi = window.Pi;
 document.getElementById('pi-signin').addEventListener('click', async () => {
   if (!Pi) { document.getElementById('msg').innerText='Open in Pi Browser to continue.'; return; }
   try {
-    Pi.init({version:"2.0"});
+    <script>
+  Pi.init({ version: "2.0", sandbox: true });
+</script>
     const scopes = ['username','payments']; // minimal scopes
     const auth = await Pi.authenticate(scopes, (p)=>{});
     const res = await fetch('/auth/exchange', {
