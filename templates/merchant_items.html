@@ -1,71 +1,119 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Merchant</title>
-<style>
-body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f5f7fb}
-.wrap{max-width:1000px;margin:0 auto;padding:24px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
-.card{background:#fff;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:16px}
-input,button{padding:10px;border-radius:8px;border:1px solid #ccd;width:100%}
-button{background:#1f6fff;color:#fff;border:none;cursor:pointer}
-button:hover{background:#155de0}
-pre{white-space:pre-wrap;background:#f2f4f8;padding:8px;border-radius:8px;font-size:12px}
-.err{color:#c00}
-img{max-width:100%;border-radius:8px}
-</style>
-</head><body>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Izza Pay – Merchant</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0;padding:20px}
+    .wrap{max-width:920px;margin:0 auto}
+    .card{background:#111a2b;border:1px solid #1f2a44;padding:20px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.25);margin-bottom:16px}
+    input,button,select,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #2b3b61;background:#0e1422;color:#e8f0ff;margin:6px 0}
+    button{background:#6e9fff;color:#0b0f17;border:0;font-weight:700;cursor:pointer}
+    button:hover{opacity:.95}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .error{background:#3b0e17;color:#ffd5d5;padding:10px;border-radius:8px;margin-bottom:10px}
+    .muted{opacity:.85;font-size:.95em}
+    .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
+    a.nav{color:#bcd0ff;text-decoration:none;margin-right:10px}
+  </style>
+</head>
+<body>
 <div class="wrap">
-{% if setup_mode %}
-  <h2>Create your merchant profile</h2>
-  {% if error %}<p class="err">{{ error }}</p>{% endif %}
-  <form method="post" action="/merchant/setup" class="card">
-    <p><input name="business_name" placeholder="Business name" required></p>
-    <p><input name="slug" placeholder="Store slug (e.g., yourshop)" required></p>
-    <p><input name="pi_wallet" placeholder="Pi wallet (e.g., @yourhandle)" required></p>
-    <p><input name="logo_url" placeholder="Logo URL (optional)"></p>
-    <p><input name="reply_to_email" type="email" placeholder="Notification email (optional)"></p>
-    <p>
-      Theme:
-      <label><input type="radio" name="theme_mode" value="dark" checked> Dark</label>
-      <label><input type="radio" name="theme_mode" value="light"> Light</label>
-    </p>
-    <p><button type="submit">Create Merchant</button></p>
-  </form>
-  <form method="post" action="/logout" style="margin-top:10px"><button>Log out</button></form>
-{% else %}
-  <h2>{{ m['business_name'] }} — Items</h2>
-  <form method="post" action="/logout"><button>Log out</button></form>
-
-  <h3>Add Item</h3>
-  <form method="post" action="/merchant/{{ m['slug'] }}/items/new" class="card">
-    <p><input name="title" placeholder="Title" required></p>
-    <p><input name="sku" placeholder="SKU"></p>
-    <p><input name="image_url" placeholder="Image URL"></p>
-    <p><input name="pi_price" type="number" step="0.0001" placeholder="Price in Pi (incl. shipping)" required></p>
-    <p><input name="stock_qty" type="number" value="10"> Stock</p>
-    <p><label><input type="checkbox" name="allow_backorder"> Allow backorder</label></p>
-    <p><button type="submit">Create</button></p>
-  </form>
-
-  <h3>Your Items</h3>
-  <div class="grid">
-  {% for it in items %}
-    <div class="card">
-      {% if it['image_url'] %}<img src="{{ it['image_url'] }}">{% endif %}
-      <h4>{{ it['title'] }}</h4>
-      <p>Price: {{ it['pi_price'] }} Pi &nbsp;&nbsp; Stock: {{ it['stock_qty'] }}</p>
-      <p>Checkout link:<br>
-        <a href="{{ app_base }}/checkout/{{ it['link_id'] }}">{{ app_base }}/checkout/{{ it['link_id'] }}</a>
-      </p>
-      <details>
-        <summary>Copy “Pay with Pi” button</summary>
-<pre>&lt;link rel="stylesheet" href="{{ app_base }}/static/merchant_button.css"&gt;
-&lt;a class="pi-button" href="{{ app_base }}/checkout/{{ it['link_id'] }}"&gt;Pay with Pi&lt;/a&gt;</pre>
-      </details>
-      <p><a href="/merchant/{{ m['slug'] }}/orders">View Orders</a></p>
-    </div>
-  {% endfor %}
+  <div class="card">
+    <div class="badge">MERCHANT DASHBOARD</div>
+    {% if m %}
+      <h2>{{ m['business_name'] }}</h2>
+      <div class="muted">Store slug: <strong>{{ m['slug'] }}</strong></div>
+      <div style="margin-top:8px">
+        <a class="nav" href="/merchant/{{ m['slug'] }}/items{% if t %}?t={{t}}{% endif %}">Items</a>
+        <a class="nav" href="/merchant/{{ m['slug'] }}/orders{% if t %}?t={{t}}{% endif %}">Orders</a>
+      </div>
+    {% else %}
+      <h2>Create your merchant profile</h2>
+      <p class="muted">Choose a short, unique <strong>store slug</strong> (lowercase, a-z, 0-9, hyphens).  
+      Set your payout <strong>Pi Wallet Address</strong> (public key, 56 chars starting with G).  
+      @handle is optional and for display only.</p>
+    {% endif %}
   </div>
-{% endif %}
+
+  {% if error %}
+    <div class="card error">{{ error }}</div>
+  {% endif %}
+
+  {% if setup_mode %}
+    <form class="card" method="POST" action="/merchant/setup">
+      {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
+      <label>Business name</label>
+      <input name="business_name" placeholder="e.g., Izza Pay Collectibles">
+      <div class="row">
+        <div>
+          <label>Store slug</label>
+          <input name="slug" placeholder="e.g., izzapay-collectibles">
+        </div>
+        <div>
+          <label>Theme</label>
+          <select name="theme_mode">
+            <option value="dark" selected>Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+      </div>
+      <label>Logo URL</label>
+      <input name="logo_url" placeholder="https://.../logo.png">
+      <div class="row">
+        <div>
+          <label>Contact email (order alerts)</label>
+          <input name="reply_to_email" placeholder="name@store.com">
+        </div>
+        <div>
+          <label>@handle (optional)</label>
+          <input name="pi_handle" placeholder="@yourhandle">
+        </div>
+      </div>
+      <label>Payout Pi Wallet Address (public key)</label>
+      <input name="pi_wallet_address" placeholder="G................................................." maxlength="56">
+
+      <button type="submit">Create merchant</button>
+    </form>
+  {% else %}
+    <div class="card">
+      <h3>Create a new item</h3>
+      <form method="POST" action="/merchant/{{ m['slug'] }}/items/new{% if t %}?t={{t}}{% endif %}">
+        <div class="row">
+          <div><label>Title</label><input name="title" placeholder="e.g., Sports Card Pack A"></div>
+          <div><label>SKU</label><input name="sku" placeholder="SKU-001"></div>
+        </div>
+        <label>Image URL</label>
+        <input name="image_url" placeholder="https://.../image.jpg">
+        <div class="row">
+          <div><label>Price (Pi)</label><input name="pi_price" type="number" step="0.0000001" placeholder="1.5"></div>
+          <div><label>Stock Qty</label><input name="stock_qty" type="number" step="1" placeholder="10"></div>
+        </div>
+        <label><input type="checkbox" name="allow_backorder"> Allow backorder when out of stock</label>
+        <button type="submit">Add item</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Your items</h3>
+      {% if items|length == 0 %}
+        <p class="muted">No items yet.</p>
+      {% else %}
+        <ul>
+          {% for it in items %}
+            <li style="margin-bottom:8px">
+              <strong>{{ it['title'] }}</strong> — {{ it['pi_price'] }} Pi
+              <div class="muted">
+                Link ID: <code>{{ it['link_id'] }}</code> •
+                Pay button URL: <code>{{ app_base }}/checkout/{{ it['link_id'] }}</code>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  {% endif %}
 </div>
-</body></html>
+</body>
+</html>
