@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sign in with Pi</title>
-  <!-- Pi SDK -->
-  <script src="https://downloads.minepi.com/sdk/v1/prod.js"></script>
+  <!-- Pi SDK (canonical URL) -->
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
     .card{background:#121826;border:1px solid #1f2a44;padding:24px;border-radius:12px;max-width:420px;width:92%}
     button{width:100%;padding:12px;border-radius:10px;border:0;background:#6e9fff;color:#0b0f17;font-weight:700;cursor:pointer}
     button:hover{opacity:.95}
-    .small{opacity:.8;font-size:.9em;margin-top:10px}
+    .small{opacity:.85;font-size:.9em;margin-top:10px}
     .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
   </style>
 </head>
@@ -25,11 +25,12 @@
   </div>
 
   <script>
-    // IMPORTANT: sandbox true for development testing
     const Pi = window.Pi;
-    function initPi() {
-      if (!Pi) return false;
+
+    function initPiSandbox() {
+      if (!Pi) { return false; }
       try {
+        // Sandbox ON for dev testing. Switch to {version:"2.0"} for production.
         Pi.init({ version: "2.0", sandbox: true });
         return true;
       } catch (e) {
@@ -39,24 +40,23 @@
     }
 
     document.getElementById('pi-signin').addEventListener('click', async () => {
-      if (!initPi()) {
-        document.getElementById('msg').innerText = 'Open this page in Pi Browser to continue.';
+      if (!Pi || !initPiSandbox()) {
+        document.getElementById('msg').innerText = 'Open this page in Pi Browser and ensure Sandbox is enabled in Utilities.';
         return;
       }
       try {
-        const scopes = ['username','payments']; // minimal
-        const auth = await Pi.authenticate(scopes, (payment)=>{ /* optional */ });
+        const scopes = ['username','payments']; // keep minimal
+        const auth = await Pi.authenticate(scopes, (payment)=>{ /* no-op for now */ });
+
         const res = await fetch('/auth/exchange', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ user: auth.user, accessToken: auth.accessToken })
         });
         const data = await res.json();
-        if (data.ok && data.redirect) {
-          window.location.href = data.redirect;
-        } else {
-          document.getElementById('msg').innerText = 'Auth failed. Try again.';
-        }
+
+        if (data.ok && data.redirect) window.location.href = data.redirect;
+        else document.getElementById('msg').innerText = 'Auth failed. Try again.';
       } catch (e) {
         document.getElementById('msg').innerText = 'Error: ' + (e?.message||e);
       }
