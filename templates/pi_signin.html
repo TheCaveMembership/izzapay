@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sign in with Pi</title>
-  <!-- Pi SDK (canonical URL) -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
@@ -26,35 +25,28 @@
 
   <script>
     const Pi = window.Pi;
+    const appBase = "{{ app_base }}";   // absolute back to your server
 
     function initPiSandbox() {
-      if (!Pi) { return false; }
-      try {
-        // Sandbox ON for dev testing. Switch to {version:"2.0"} for production.
-        Pi.init({ version: "2.0", sandbox: true });
-        return true;
-      } catch (e) {
-        document.getElementById('msg').innerText = 'Pi SDK init error: ' + (e?.message||e);
-        return false;
-      }
+      if (!Pi) return false;
+      try { Pi.init({ version: "2.0", sandbox: true }); return true; }
+      catch(e){ document.getElementById('msg').innerText='Pi SDK init error: '+(e?.message||e); return false; }
     }
 
     document.getElementById('pi-signin').addEventListener('click', async () => {
-      if (!Pi || !initPiSandbox()) {
-        document.getElementById('msg').innerText = 'Open this page in Pi Browser and ensure Sandbox is enabled in Utilities.';
+      if (!initPiSandbox()) {
+        document.getElementById('msg').innerText = 'Open in Pi Browser and enable Sandbox in Utilities.';
         return;
       }
       try {
-        const scopes = ['username','payments']; // keep minimal
-        const auth = await Pi.authenticate(scopes, (payment)=>{ /* no-op for now */ });
-
-        const res = await fetch('/auth/exchange', {
+        const scopes = ['username','payments'];
+        const auth = await Pi.authenticate(scopes, ()=>{});
+        const res = await fetch(appBase + '/auth/exchange', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ user: auth.user, accessToken: auth.accessToken })
         });
         const data = await res.json();
-
         if (data.ok && data.redirect) window.location.href = data.redirect;
         else document.getElementById('msg').innerText = 'Auth failed. Try again.';
       } catch (e) {
