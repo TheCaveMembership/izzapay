@@ -29,14 +29,15 @@ def current_user():
         return cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
 
 def require_user():
-    u = current_user()
-    if not u:
-        return redirect("/signin")
-    return u
+    uid = session.get("user_id")
+    if not uid:
+        return redirect("/signin")  # returns a Response
+    with conn() as cx:
+        return cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
 
 def require_merchant_owner(slug):
     u = require_user()
-    if not isinstance(u, dict) and not u:
+    if not isinstance(u, dict):   # if it's a redirect Response, pass it through
         return u, None
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE slug=?", (slug,)).fetchone()
@@ -51,12 +52,10 @@ def require_merchant_owner(slug):
 # -------------------------
 @app.get("/")
 def home():
-    # Redirect root to the Pi sign-in page (handy in sandbox links)
     return redirect("/signin")
 
 @app.get("/signin")
 def signin():
-    # Pi-only auth page (no email/password)
     return render_template("pi_signin.html", app_base=APP_BASE_URL)
 
 @app.post("/logout")
@@ -99,7 +98,7 @@ def auth_exchange():
 @app.get("/dashboard")
 def dashboard():
     u = require_user()
-    if not isinstance(u, dict) and not u:
+    if not isinstance(u, dict):
         return u
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
@@ -111,7 +110,7 @@ def dashboard():
 @app.get("/merchant/setup")
 def merchant_setup_form():
     u = require_user()
-    if not isinstance(u, dict) and not u:
+    if not isinstance(u, dict):
         return u
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
@@ -123,7 +122,7 @@ def merchant_setup_form():
 @app.post("/merchant/setup")
 def merchant_setup():
     u = require_user()
-    if not isinstance(u, dict) and not u:
+    if not isinstance(u, dict):
         return u
     data = request.form
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
@@ -150,6 +149,8 @@ def merchant_setup():
 @app.get("/merchant/<slug>/items")
 def merchant_items(slug):
     u, m = require_merchant_owner(slug)
+    if not isinstance(u, dict):
+        return u
     with conn() as cx:
         items = cx.execute("SELECT * FROM items WHERE merchant_id=? ORDER BY id DESC",
                            (m["id"],)).fetchall()
@@ -159,6 +160,8 @@ def merchant_items(slug):
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
     u, m = require_merchant_owner(slug)
+    if not isinstance(u, dict):
+        return u
     data = request.form
     link_id = uuid.uuid4().hex[:8]
     with conn() as cx:
@@ -173,6 +176,8 @@ def merchant_new_item(slug):
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
     u, m = require_merchant_owner(slug)
+    if not isinstance(u, dict):
+        return u
     with conn() as cx:
         orders = cx.execute("""
           SELECT orders.*, items.title as item_title
@@ -185,6 +190,8 @@ def merchant_orders(slug):
 @app.post("/merchant/<slug>/orders/update")
 def merchant_orders_update(slug):
     u, m = require_merchant_owner(slug)
+    if not isinstance(u, dict):
+        return u
     order_id = int(request.form.get("order_id"))
     status = request.form.get("status")
     tracking_carrier = request.form.get("tracking_carrier")
@@ -200,7 +207,6 @@ def merchant_orders_update(slug):
                    (status or o["status"], tracking_carrier, tracking_number,
                     tracking_url, order_id))
 
-    # Send tracking email if buyer provided email and status moved to shipped
     if (status or o["status"]) == "shipped" and o["buyer_email"]:
         body = f"<p>Your {m['business_name']} order has shipped.</p>"
         if tracking_number:
@@ -249,20 +255,17 @@ def pi_confirm():
     buyer = data.get("buyer", {})
     shipping = data.get("shipping", {})
 
-    # session must be valid and in correct state
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
     if not s or s["state"] != "initiated":
         return {"ok": False, "error": "bad_session"}, 400
 
-    # verify tx with expected amount
     amt = Decimal(str(s["expected_pi"]))
     if not verify_pi_tx(tx_hash, amt):
         with conn() as cx:
             cx.execute("UPDATE sessions SET state='failed' WHERE id=?", (session_id,))
         return {"ok": False, "error": "verify_failed"}, 400
 
-    # split funds and write order
     gross, fee, net = split_amounts(float(amt))
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
@@ -281,13 +284,11 @@ def pi_confirm():
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                    (tx_hash, session_id))
 
-    # send merchant net (developer fee already excluded by split_amounts)
     ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
 
-    # notify merchant (optional)
     if m["reply_to_email"]:
         try:
             send_email(
@@ -301,7 +302,6 @@ def pi_confirm():
         except Exception:
             pass
 
-    # send buyer confirmation + status link
     buyer_url = f"{APP_BASE_URL}/o/{buyer_token}"
     if buyer.get("email"):
         try:
@@ -323,7 +323,7 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
@@ -336,7 +336,6 @@ def success():
 # -------------------------
 @app.get("/validation-key.txt")
 def validation_key():
-    # Place your validation file at: static/validation-key.txt
     return app.send_static_file("validation-key.txt")
 
 # -------------------------
