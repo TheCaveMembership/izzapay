@@ -2,6 +2,7 @@ import os, json, uuid, time
 from decimal import Decimal
 from flask import Flask, request, render_template, redirect, session, abort
 from dotenv import load_dotenv
+
 from db import init_db, conn
 from emailer import send_email
 from payments import verify_pi_tx, send_pi_payout, split_amounts
@@ -14,9 +15,12 @@ app.secret_key = os.getenv("FLASK_SECRET", "change_me")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
 APP_NAME = os.getenv("APP_NAME", "IZZA PAY")
 
+# initialize db
 init_db()
 
-# ---------- Helpers ----------
+# -------------------------
+# Helpers
+# -------------------------
 def current_user():
     uid = session.get("user_id")
     if not uid:
@@ -42,7 +46,9 @@ def require_merchant_owner(slug):
         abort(403)
     return u, m
 
-# ---------- Public ----------
+# -------------------------
+# Public
+# -------------------------
 @app.get("/")
 def home():
     return f"{APP_NAME} is running."
@@ -62,7 +68,7 @@ def logout():
 def auth_exchange():
     """
     Front-end sends: { user: {uid, username}, accessToken: "..." }
-    TODO: verify accessToken with Pi Platform on server (prod).
+    TODO (production): verify accessToken with Pi Platform.
     """
     data = request.get_json(force=True) or {}
     user = (data.get("user") or {})
@@ -71,7 +77,8 @@ def auth_exchange():
     if not uid or not username:
         return {"ok": False, "error": "invalid_payload"}, 400
 
-    verify_ok = True  # TODO: replace with real token verification
+    # TODO: verify token with Pi Platform on the server side
+    verify_ok = True
     if not verify_ok:
         return {"ok": False, "error": "auth_verify_failed"}, 401
 
@@ -94,7 +101,9 @@ def dashboard():
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     return redirect("/merchant/setup" if not m else f"/merchant/{m['slug']}/items")
 
-# ---------- Merchant setup ----------
+# -------------------------
+# Merchant setup
+# -------------------------
 @app.get("/merchant/setup")
 def merchant_setup_form():
     u = require_user()
@@ -104,6 +113,7 @@ def merchant_setup_form():
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         return redirect(f"/merchant/{m['slug']}/items")
+    # Reuse the items template in setup mode
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                            app_base=APP_BASE_URL)
 
@@ -131,7 +141,9 @@ def merchant_setup():
                    (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email, pi_wallet))
     return redirect(f"/merchant/{slug}/items")
 
-# ---------- Merchant item management ----------
+# -------------------------
+# Merchant item management
+# -------------------------
 @app.get("/merchant/<slug>/items")
 def merchant_items(slug):
     u, m = require_merchant_owner(slug)
@@ -185,12 +197,9 @@ def merchant_orders_update(slug):
                    (status or o["status"], tracking_carrier, tracking_number,
                     tracking_url, order_id))
 
-    # Send tracking/ship email if buyer provided email and status moved to shipped
+    # Send tracking email if buyer provided email and status moved to shipped
     if (status or o["status"]) == "shipped" and o["buyer_email"]:
-        body = (
-          f"<p>Your {m['business_name']} order has shipped.</p>"
-          f"<p><strong>Item:</strong> {o['qty']} × {o['item_id']}</p>"
-        )
+        body = f"<p>Your {m['business_name']} order has shipped.</p>"
         if tracking_number:
             link = tracking_url or "#"
             body += f"<p><strong>Tracking:</strong> {tracking_carrier} {tracking_number} — " \
@@ -199,7 +208,9 @@ def merchant_orders_update(slug):
 
     return redirect(f"/merchant/{slug}/orders")
 
-# ---------- Buyer checkout ----------
+# -------------------------
+# Buyer checkout
+# -------------------------
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
     with conn() as cx:
@@ -210,9 +221,11 @@ def checkout(link_id):
         """, (link_id,)).fetchone()
     if not i:
         abort(404)
+
     qty = max(1, int(request.args.get("qty", "1")))
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i)
+
     sid = uuid.uuid4().hex
     expected = float(i["pi_price"]) * qty
     now = int(time.time())
@@ -220,8 +233,10 @@ def checkout(link_id):
         cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state,
                    created_at) VALUES(?,?,?,?,?,?,?)""",
                    (sid, i["mid"], i["id"], qty, expected, "initiated", now))
-    return render_template("checkout.html", sold_out=False, i=i,
-                           qty=qty, session_id=sid, expected_pi=expected, app_base=APP_BASE_URL)
+    return render_template(
+        "checkout.html",
+        sold_out=False, i=i, qty=qty, session_id=sid, expected_pi=expected, app_base=APP_BASE_URL
+    )
 
 @app.post("/api/pi/confirm")
 def pi_confirm():
@@ -231,19 +246,21 @@ def pi_confirm():
     buyer = data.get("buyer", {})
     shipping = data.get("shipping", {})
 
+    # session must be valid and in correct state
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
     if not s or s["state"] != "initiated":
         return {"ok": False, "error": "bad_session"}, 400
 
+    # verify tx with expected amount
     amt = Decimal(str(s["expected_pi"]))
     if not verify_pi_tx(tx_hash, amt):
         with conn() as cx:
             cx.execute("UPDATE sessions SET state='failed' WHERE id=?", (session_id,))
         return {"ok": False, "error": "verify_failed"}, 400
 
+    # split funds and write order
     gross, fee, net = split_amounts(float(amt))
-
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
         if i and not i["allow_backorder"]:
@@ -261,13 +278,13 @@ def pi_confirm():
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                    (tx_hash, session_id))
 
-    # Server-side payout split (merchant 99% / dev 1%)
+    # send merchant net (developer fee already excluded by split_amounts)
     ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
 
-    # Merchant email (optional)
+    # notify merchant (optional)
     if m["reply_to_email"]:
         try:
             send_email(
@@ -281,7 +298,7 @@ def pi_confirm():
         except Exception:
             pass
 
-    # Buyer confirmation email (receipt / status link)
+    # send buyer confirmation + status link
     buyer_url = f"{APP_BASE_URL}/o/{buyer_token}"
     if buyer.get("email"):
         try:
@@ -304,19 +321,25 @@ def buyer_status(token):
         abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        # IMPORTANT: the comma here makes it a tuple parameter
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
 def success():
     return render_template("success.html")
 
-# ---- Pi domain validation (place static/validation-key.txt) ----
+# -------------------------
+# Domain validation for Pi
+# -------------------------
 @app.get("/validation-key.txt")
 def validation_key():
+    # Place your validation file at: static/validation-key.txt
     return app.send_static_file("validation-key.txt")
 
-# ---- Policies (you already have these templates) ----
+# -------------------------
+# Policies (your templates already exist)
+# -------------------------
 @app.get("/privacy")
 def privacy():
     return render_template("privacy.html")
@@ -324,3 +347,7 @@ def privacy():
 @app.get("/terms")
 def terms():
     return render_template("terms.html")
+
+# -------------------------
+# Static files are served automatically via app.send_static_file
+# -------------------------
