@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orders</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f6f7fb}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden}
+th,td{padding:10px;border-bottom:1px solid #eee;font-size:14px;text-align:left;vertical-align:top}
+th{background:#fafbff;color:#333}
+form.inline{display:flex;gap:6px;flex-wrap:wrap}
+input,select,button{padding:6px;border-radius:6px;border:1px solid #ccd}
+button{background:#1f6fff;color:#fff;border:none}
+button:hover{background:#155de0}
+</style>
+</head><body>
+<div class="wrap">
+<h2>Orders</h2>
+<table>
+<thead><tr>
+  <th>ID</th><th>Item</th><th>Qty</th><th>Buyer</th><th>Status</th>
+  <th>Pi (Gross/Fee/Net)</th><th>Payout</th><th>Tracking</th><th>Update</th>
+</tr></thead>
+<tbody>
+{% for o in orders %}
+<tr>
+<td>{{ o['id'] }}</td>
+<td>{{ o['item_title'] }}</td>
+<td>{{ o['qty'] }}</td>
+<td>{{ o['buyer_email'] or '' }}</td>
+<td>{{ o['status'] }}</td>
+<td>{{ o['pi_amount'] }} / {{ o['pi_fee'] }} / {{ o['pi_merchant_net'] }}</td>
+<td>{{ o['payout_status'] }}</td>
+<td>
+{% if o['tracking_number'] %}
+  {{ o['tracking_carrier'] }} {{ o['tracking_number'] }}
+  {% if o['tracking_url'] %}<br><a href="{{ o['tracking_url'] }}">track</a>{% endif %}
+{% endif %}
+</td>
+<td>
+<form class="inline" method="post" action="/merchant/{{ m['slug'] }}/orders/update">
+  <input type="hidden" name="order_id" value="{{ o['id'] }}">
+  <select name="status">
+    <option value="">—</option>
+    {% for st in ["paid","processing","shipped","delivered","cancelled","refunded"] %}
+      <option value="{{ st }}">{{ st }}</option>
+    {% endfor %}
+  </select>
+  <input name="tracking_carrier" placeholder="Carrier">
+  <input name="tracking_number" placeholder="Number">
+  <input name="tracking_url" placeholder="URL">
+  <button>Save</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p><a href="/merchant/{{ m['slug'] }}/items">Back to Items</a></p>
+</div>
+</body></html>
