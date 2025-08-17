@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sign in with Pi</title>
-  <!-- Canonical Pi SDK -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
@@ -13,6 +12,7 @@
     button:hover{opacity:.95}
     .small{opacity:.85;font-size:.9em;margin-top:10px}
     .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
+    #username{display:inline-block;margin-top:8px;opacity:.9}
   </style>
 </head>
 <body>
@@ -21,12 +21,13 @@
     <h2>Sign in with Pi</h2>
     <p class="small">No email or password. Secure, Pi-only authentication.</p>
     <button id="pi-signin">Continue with Pi</button>
+    <div class="small">Signed in as: <span id="username">—</span></div>
     <div id="msg" class="small" style="color:#d7e3ff;margin-top:12px"></div>
   </div>
 
   <script>
     const Pi = window.Pi;
-    const appBase = "{{ app_base }}";   // absolute back to your server
+    const appBase = "{{ app_base }}";
 
     function initPiSandbox() {
       if (!Pi) return false;
@@ -34,26 +35,17 @@
       catch(e){ document.getElementById('msg').innerText='Pi SDK init error: '+(e?.message||e); return false; }
     }
 
-    // If Pi finds an incomplete payment after auth, tell our server to complete it.
     async function onIncompletePaymentFound(payment) {
       try {
         const txid = payment?.transaction?.txid || payment?.identifier;
         const sessionId = payment?.metadata?.session_id;
         if (!txid || !sessionId) return;
-
         await fetch(appBase + "/api/pi/confirm", {
           method: "POST",
           headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({
-            session_id: sessionId,
-            tx_hash: txid,
-            buyer: {},
-            shipping: {}
-          })
+          body: JSON.stringify({ session_id: sessionId, tx_hash: txid, buyer:{}, shipping:{} })
         });
-      } catch (e) {
-        console.log("Incomplete payment reconcile error:", e);
-      }
+      } catch (e) { console.log("Incomplete payment reconcile error:", e); }
     }
 
     document.getElementById('pi-signin').addEventListener('click', async () => {
@@ -65,16 +57,24 @@
         const scopes = ['payments','username'];
         const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
 
-        // Top-level form POST so Safari/Pi keeps cookie; server also adds token fallback.
+        // Show username on the page
+        try { document.getElementById('username').innerText = auth?.user?.username || '—'; } catch(e){}
+
+        // Verify the token server-side by calling Pi /v2/me through our backend
+        await fetch(appBase + "/api/pi/me", {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ accessToken: auth.accessToken })
+        });
+
+        // Top-level form POST to set server session; server also issues URL token fallback
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = appBase + '/auth/exchange';
-
         const input = document.createElement('input');
         input.type = 'hidden';
         input.name = 'payload';
         input.value = JSON.stringify({ user: auth.user, accessToken: auth.accessToken });
-
         form.appendChild(input);
         document.body.appendChild(form);
         form.submit();
