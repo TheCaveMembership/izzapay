@@ -57,7 +57,9 @@ function ship(){
 document.getElementById('pay-btn')?.addEventListener('click', async ()=>{
   if(!Pi){ document.getElementById('status').innerText="Open in Pi Browser to pay."; return; }
   try{
-    Pi.init({version:"2.0"});
+    <script>
+  Pi.init({ version: "2.0", sandbox: true });
+</script>
     await Pi.createPayment({
       amount: expectedPi,
       memo: "IZZA PAY checkout",
