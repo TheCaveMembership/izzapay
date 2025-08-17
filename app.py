@@ -15,7 +15,7 @@ app.secret_key = os.getenv("FLASK_SECRET", "change_me")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
 APP_NAME = os.getenv("APP_NAME", "IZZA PAY")
 
-# initialize db
+# Initialize DB
 init_db()
 
 # -------------------------
@@ -51,7 +51,8 @@ def require_merchant_owner(slug):
 # -------------------------
 @app.get("/")
 def home():
-    return f"{APP_NAME} is running."
+    # Redirect root to the Pi sign-in page (helps in sandbox)
+    return redirect("/signin")
 
 @app.get("/signin")
 def signin():
@@ -110,7 +111,7 @@ def merchant_setup_form():
     if not isinstance(u, dict) and not u:
         return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
     if m:
         return redirect(f"/merchant/{m['slug']}/items")
     # Reuse the items template in setup mode
@@ -262,7 +263,7 @@ def pi_confirm():
     # split funds and write order
     gross, fee, net = split_amounts(float(amt))
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
         if i and not i["allow_backorder"]:
             cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                        (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -279,7 +280,7 @@ def pi_confirm():
                    (tx_hash, session_id))
 
     # send merchant net (developer fee already excluded by split_amounts)
-    ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_NAME}")
+    ok = send_pi_payout(m["pi_wallet"], Decimal(str(net)), f"Order via {APP_MAME if False else APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
@@ -321,7 +322,6 @@ def buyer_status(token):
         abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        # IMPORTANT: the comma here makes it a tuple parameter
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
@@ -338,7 +338,7 @@ def validation_key():
     return app.send_static_file("validation-key.txt")
 
 # -------------------------
-# Policies (your templates already exist)
+# Policies
 # -------------------------
 @app.get("/privacy")
 def privacy():
@@ -347,7 +347,3 @@ def privacy():
 @app.get("/terms")
 def terms():
     return render_template("terms.html")
-
-# -------------------------
-# Static files are served automatically via app.send_static_file
-# -------------------------
