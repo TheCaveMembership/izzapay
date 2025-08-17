@@ -41,14 +41,20 @@
       try {
         const scopes = ['username','payments'];
         const auth = await Pi.authenticate(scopes, ()=>{});
-        const res = await fetch(appBase + '/auth/exchange', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ user: auth.user, accessToken: auth.accessToken })
-        });
-        const data = await res.json();
-        if (data.ok && data.redirect) window.location.href = data.redirect;
-        else document.getElementById('msg').innerText = 'Auth failed. Try again.';
+
+        // Build a TOP-LEVEL form POST so Safari/Pi keeps the session cookie
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = appBase + '/auth/exchange';
+
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'payload';
+        input.value = JSON.stringify({ user: auth.user, accessToken: auth.accessToken });
+
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
       } catch (e) {
         document.getElementById('msg').innerText = 'Error: ' + (e?.message||e);
       }
