@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in to shop with Pi</title>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
+    .card{background:#121826;border:1px solid #1f2a44;padding:24px;border-radius:12px;max-width:420px;width:92%}
+    button{width:100%;padding:12px;border-radius:10px;border:0;background:#6e9fff;color:#0b0f17;font-weight:700;cursor:pointer}
+    button:hover{opacity:.95}
+    .small{opacity:.85;font-size:.9em;margin-top:10px}
+    .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">SANDBOX MODE</div>
+    <h2>Sign in with Pi to shop</h2>
+    <p class="small">Secure Pi authentication. No email or password.</p>
+    <button id="pi-signin">Continue with Pi</button>
+    <div id="msg" class="small" style="color:#d7e3ff;margin-top:12px"></div>
+
+    <p class="small" style="margin-top:14px;opacity:.9">
+      New to Pi? <a target="_top" href="https://minepi.com/" style="color:#bcd0ff">Start mining Pi</a>
+    </p>
+  </div>
+
+  <script>
+    const Pi = window.Pi;
+    const appBase = "{{ app_base }}";
+    const nextUrl = "{{ next_url }}";
+    const slug = "{{ slug }}";
+
+    function initPiSandbox(){
+      try { Pi.init({version:"2.0", sandbox:true}); return true; }
+      catch(e){ document.getElementById('msg').innerText = 'Open in Pi Browser (enable Sandbox).'; return false; }
+    }
+
+    document.getElementById('pi-signin').addEventListener('click', async ()=>{
+      if(!initPiSandbox()) return;
+      try{
+        const scopes = ['payments','username'];
+        const auth = await Pi.authenticate(scopes, function(){});
+        // round-trip through backend to set cookie & URL token, then back to nextUrl
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = appBase + '/auth/exchange/store' + '?next=' + encodeURIComponent(nextUrl) + '&slug=' + encodeURIComponent(slug);
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'payload';
+        input.value = JSON.stringify({ user: auth.user, accessToken: auth.accessToken });
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+      }catch(e){
+        document.getElementById('msg').innerText = 'Error: ' + (e?.message || e);
+      }
+    });
+  </script>
+</body>
+</html>
