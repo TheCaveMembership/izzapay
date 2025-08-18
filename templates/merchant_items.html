@@ -18,6 +18,8 @@
     .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
     .title{font-weight:900;font-size:1.1rem;margin:0 0 8px}
     .small{font-size:.9rem}
+    .copybar{display:flex;gap:8px;margin-top:8px}
+    .copybar input{flex:1}
   </style>
 </head>
 <body>
@@ -78,8 +80,9 @@
     <div class="card">
       <div class="title">Your storefront link</div>
       <div class="small muted">Share this with customers. It opens your Pi store directly (authentication required):</div>
-      <div class="mono" style="margin-top:8px;word-break:break-all">
-        {{ share_base }}/store/{{ m.slug }}
+      <div class="copybar">
+        <input id="storeLink" class="mono" value="{{ share_base }}/store/{{ m.slug }}" readonly>
+        <button class="btn" type="button" onclick="copyVal('storeLink')">Copy</button>
       </div>
     </div>
 
@@ -137,8 +140,9 @@
               <div class="muted small">Price: {{ '%.7f'|format(it.pi_price) }} Pi</div>
               <div class="muted small">Stock: {{ it.stock_qty }}</div>
               <div class="small" style="margin-top:8px"><strong>Buy-Now link:</strong></div>
-              <div class="mono small" style="word-break:break-all">
-                {{ share_base }}/checkout/{{ it.link_id }}
+              <div class="copybar">
+                <input id="prod_{{ it.id }}" class="mono small" value="{{ share_base }}/checkout/{{ it.link_id }}" readonly>
+                <button class="btn" type="button" onclick="copyVal('prod_{{ it.id }}')">Copy</button>
               </div>
             </div>
           {% endfor %}
@@ -153,5 +157,17 @@
   {% endif %}
 
 </div>
+<script>
+  function copyVal(id){
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.select(); el.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(el.value).then(()=> {
+      const orig = el.value;
+      el.value = "Copied!";
+      setTimeout(()=>{ el.value = orig; }, 900);
+    }).catch(()=>{ /* ignore */ });
+  }
+</script>
 </body>
 </html>
