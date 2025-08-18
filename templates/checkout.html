@@ -12,7 +12,6 @@
     .row{display:flex;gap:12px;align-items:center}
     .muted{color:var(--muted)}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -41,7 +40,6 @@
       <div style="margin-top:16px">
         <button id="payBtn" class="btn">Pay with Pi</button>
         <p id="msg" class="muted" style="margin-top:10px;"></p>
-        <div id="err" class="err"></div>
       </div>
     </div>
   {% endif %}
@@ -54,124 +52,75 @@
   const cartMode = {{ 'true' if cart_mode else 'false' }};
   const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
   const appId = "{{ PI_APP_ID }}";
+  const redirectSlug = "{{ slug if slug else '' }}"; // provided by server
 
   const btn = document.getElementById('payBtn');
   const msg = document.getElementById('msg');
-  const err = document.getElementById('err');
 
   function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
-  function setErr(t){ if(err){ err.textContent = t || ''; } }
 
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
       Pi.init({ version: "2.0", sandbox: sandbox, appId: appId });
       return true;
-    }catch(e){
-      console.error("Pi.init failed", e);
-      setErr("Pi.init failed: " + (e?.message || e));
-      return false;
-    }
+    }catch(e){ return false; }
   }
 
   function ensureAuth(){
-    // Authenticate before createPayment so SDK has a valid auth context
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){
-      // Optionally auto-complete old payments, not used here
-      console.log('Incomplete payment found:', payment);
-    }
-    return Pi.authenticate(scopes, onIncompletePaymentFound)
-      .then(auth => {
-        console.log('Authenticated as', auth.user?.username);
-        return auth;
-      });
+    function onIncompletePaymentFound(payment){ /* optional */ }
+    return Pi.authenticate(scopes, onIncompletePaymentFound);
   }
 
-  if (!initPi()){
-    setMsg("Open in Pi Browser (and Sandbox ON if testing).");
-  }
-
-  let watchdog;
-  function startWatchdog(){
-    clearTimeout(watchdog);
-    watchdog = setTimeout(() => {
-      setErr("Still waiting… Make sure you accepted the Pi payment prompt.");
-    }, 15000);
-  }
+  initPi();
 
   btn?.addEventListener('click', function(){
-    setErr('');
-    setMsg('Authenticating with Pi…');
+    setMsg('Opening Pi payment…');
 
     if (!window.Pi || !Pi.createPayment){
-      setErr("Pi SDK unavailable — open this in Pi Browser.");
+      setMsg("Open this page in Pi Browser.");
       return;
     }
 
     ensureAuth().then(() => {
-      setMsg('Opening Pi payment…');
-
       const paymentData = {
         amount: amount,
         memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
         metadata: { session_id: sessionId }
       };
 
-      startWatchdog();
-
       Pi.createPayment(paymentData, {
         onReadyForServerApproval: function(paymentId){
-          // Tell our server to call Pi /approve for this payment
           fetch('/api/pi/approve', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentId, session_id: sessionId })
-          }).then(r => r.json()).then(res => {
-            if(!res.ok){ setErr("Server approve failed: " + (res.error||'')); }
-          }).catch(e => {
-            setErr("Approve request failed: " + (e?.message || e));
           });
         },
         onReadyForServerCompletion: function(paymentId, txid){
-          // Tell our server to call Pi /complete and fulfill the order
           fetch('/api/pi/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentId, session_id: sessionId, txid })
-          }).then(r => r.json()).then(res => {
-            clearTimeout(watchdog);
-            if(!res || !res.ok){
-              setMsg("Could not confirm payment.");
-              setErr((res && res.error) ? res.error : "server_error");
-              return;
-            }
-            setMsg("Payment complete!");
-            window.location.href = res.buyer_status_url || "/success";
-          }).catch(e => {
-            clearTimeout(watchdog);
-            setErr("Complete request failed: " + (e?.message || e));
+          })
+          .then(r => r.json())
+          .then(res => {
+            // Always send buyer back to the storefront with success flag
+            const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
+            const target = (res && (res.redirect_url || res.buyer_status_url)) || fallback;
+            window.location.href = target;
+          })
+          .catch(() => {
+            const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
+            window.location.href = fallback;
           });
         },
-        onCancel: function(paymentId){
-          clearTimeout(watchdog);
-          setMsg("Payment canceled.");
-        },
-        onError: function(error, paymentId){
-          clearTimeout(watchdog);
-          console.error("Payment error:", error);
-          setMsg("Payment error. Try again.");
-          setErr(error?.message || String(error));
-        }
-      }).catch(e => {
-        clearTimeout(watchdog);
-        console.error("createPayment failed:", e);
-        setMsg("Payment failed.");
-        setErr(e?.message || String(e));
+        onCancel: function(){ setMsg("Payment canceled."); },
+        onError: function(){ setMsg("Please try again."); }
       });
-
-    }).catch(e => {
-      setErr("Authentication failed: " + (e?.message || e));
+    }).catch(() => {
+      setMsg("Please try again.");
     });
   });
 })();
