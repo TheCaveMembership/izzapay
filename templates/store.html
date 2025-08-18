@@ -16,7 +16,6 @@
     .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:12px}
     .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .banner{margin-top:10px;padding:10px 12px;border-radius:10px;background:#13301b;border:1px solid #1e6c36;color:#9ee2b0}
     .cart{position:relative}
     .cart a{display:inline-block}
     .badge{position:absolute;top:-6px;right:-6px;background:#6e9fff;color:#0b0f17;border-radius:999px;font-weight:900;font-size:.8rem;padding:2px 6px;min-width:16px;text-align:center}
@@ -45,12 +44,6 @@
       {% endif %}
     </div>
   </div>
-
-  {% if request.args.get('success') %}
-    <div class="banner">
-      Payment complete ✅ — we’ll email you a receipt and tracking once the merchant ships.
-    </div>
-  {% endif %}
 
   <div class="grid">
     {% for it in items %}
