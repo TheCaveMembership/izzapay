@@ -9,7 +9,7 @@ import requests
 # Local modules you already have
 from db import init_db, conn
 from emailer import send_email
-from payments import verify_pi_tx, send_pi_payout, split_amounts
+from payments import split_amounts
 
 # ----------------- ENV -----------------
 load_dotenv()
@@ -18,8 +18,6 @@ PI_SANDBOX   = os.getenv("PI_SANDBOX", "false").lower() == "true"
 PI_API_BASE  = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
 PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
-
-# Use Render/custom domain for links right now
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
 
@@ -257,7 +255,8 @@ def merchant_setup():
     data = request.form
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
     business_name = data.get("business_name") or f"{u['pi_username']}'s Shop"
-    logo_url = data.get("logo_url") or "https://via.placeholder.com/160x40?text=Logo"
+    # Default to no logo (avoid external placeholder that may fail DNS on host)
+    logo_url = (data.get("logo_url") or "").strip()
     theme_mode = data.get("theme_mode", "dark")
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
@@ -475,7 +474,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()  # FIXED tuple
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -572,12 +571,8 @@ def pi_complete():
         print("fetch_pi_payment error:", repr(e))
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
-    try:
-        res = fulfill_session(s, txid, buyer, shipping)
-        return res
-    except Exception as e:
-        print("fulfill_session error:", repr(e))
-        return {"ok": False, "error": "fulfill_error"}, 500
+
+    return fulfill_session(s, txid, buyer, shipping)
 
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
@@ -613,10 +608,9 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
-        ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Cart order via {APP_NAME}")
     else:
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()  # FIXED tuple
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -630,50 +624,28 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                         float(net), tx_hash, buyer_token))
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
-        ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
 
-    with conn() as cx:
-        cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
-                   ("sent" if ok else "failed", tx_hash))
-
-    # Emails (best effort)
+    # Best-effort emails
     try:
         if m["reply_to_email"]:
-            ship_html = ""
-            if shipping:
-                parts = [
-                    shipping.get("name"),
-                    shipping.get("address1"),
-                    shipping.get("address2"),
-                    f"{shipping.get('city','')}, {shipping.get('region','')} {shipping.get('postal','')}",
-                    shipping.get("country")
-                ]
-                ship_html = "<p><strong>Ship to:</strong><br>" + "<br>".join([p for p in parts if p]) + "</p>"
             send_email(
                 m["reply_to_email"],
                 f"New Pi order at {m['business_name']} ({amt:.7f} Pi)",
-                f"<p>You received a new payment via {APP_NAME}.</p>"
-                f"{ship_html}"
-                f"<p><strong>Gross:</strong> {gross:.7f} Pi<br>"
-                f"<strong>Fee (1%):</strong> {fee:.7f} Pi<br>"
-                f"<strong>Net to you:</strong> {net:.7f} Pi<br>"
-                f"<strong>Tx:</strong> {tx_hash}</p>"
+                "<p>You received a new payment via IZZA PAY.</p>"
             )
     except Exception as e:
         print("merchant email fail:", repr(e))
-
     try:
         if buyer.get("email"):
             send_email(
                 buyer["email"],
                 f"Thanks for your order at {m['business_name']}",
-                f"<p>Your order is paid in full with Pi.</p>"
-                f"<p>We’ll email you tracking once the merchant ships.</p>"
+                "<p>Your order is paid in full with Pi.</p><p>We’ll email tracking once the merchant ships.</p>"
             )
     except Exception as e:
         print("buyer email fail:", repr(e))
 
-    # Keep the buyer authenticated on the store after payment
+    # Redirect back to storefront with success flag
     u = current_user_row()
     tok = ""
     if u:
@@ -683,22 +655,34 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
 
-# ----------------- IMAGE PROXY -----------------
+# ----------------- IMAGE PROXY (resilient) -----------------
+# 1x1 transparent PNG
+_TRANSPARENT_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
+    "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
+)
+
 @app.get("/uimg")
 def uimg():
     src = request.args.get("src", "").strip()
-    if not src: abort(400)
-    try: u = urlparse(src)
-    except Exception: abort(400)
-    if u.scheme != "https": abort(400)
+    if not src:
+        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+    try:
+        u = urlparse(src)
+    except Exception:
+        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+    if u.scheme != "https":
+        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
     try:
         r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-image-proxy"})
-        if r.status_code != 200: abort(404)
-        ctype = r.headers.get("Content-Type", "image/jpeg")
+        if r.status_code != 200:
+            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        ctype = r.headers.get("Content-Type", "image/png")
         data = r.content
         return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
     except Exception as e:
-        print("uimg error:", repr(e)); abort(502)
+        print("uimg error:", repr(e))
+        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
 # ----------------- POLICIES / VALIDATION -----------------
 @app.get("/validation-key.txt")
