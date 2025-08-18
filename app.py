@@ -6,22 +6,26 @@ from flask import Flask, request, render_template, redirect, session, abort, Res
 from dotenv import load_dotenv
 import requests
 
-# Local helpers
+# ----- Local helpers (these are in your repo) -----
 from db import init_db, conn
 from emailer import send_email
 from payments import verify_pi_tx, send_pi_payout, split_amounts
 
-# ----------------- ENV -----------------
+# ================= ENV =================
 load_dotenv()
-PI_API_BASE      = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
-APP_BASE_URL     = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com")
-APP_NAME         = os.getenv("APP_NAME", "IZZA PAY")
-PI_SANDBOX       = os.getenv("PI_SANDBOX", "true").lower() == "true"
-PI_APP_ID        = os.getenv("PI_APP_ID", "izza-pay")  # your Pi app identifier from Dev Portal
-PI_WRAPPER_BASE  = f"https://{'sandbox.minepi.com' if PI_SANDBOX else 'minepi.com'}/app/{PI_APP_ID}"
 
-# ----------------- APP -----------------
+PI_API_BASE       = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
+PI_API_KEY        = os.getenv("PI_PLATFORM_API_KEY", "")  # used by your payments.py helpers
+APP_BASE_URL      = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com")
+APP_NAME          = os.getenv("APP_NAME", "IZZA PAY")
+
+PI_SANDBOX        = os.getenv("PI_SANDBOX", "true").lower() == "true"
+PI_APP_ID         = os.getenv("PI_APP_ID", "izza-pay")  # your Pi Dev Portal app identifier
+PI_WRAPPER_BASE   = f"https://{'sandbox.minepi.com' if PI_SANDBOX else 'minepi.com'}/app/{PI_APP_ID}"
+
+# ================= APP =================
 app = Flask(__name__)
+
 _secret = os.getenv("FLASK_SECRET")
 if not _secret:
     _secret = os.urandom(32)
@@ -36,7 +40,17 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 
-# ----------------- DB & SCHEMA -----------------
+# Make common values available to ALL templates automatically
+@app.context_processor
+def inject_globals():
+    return {
+        "APP_BASE_URL": APP_BASE_URL,
+        "PI_SANDBOX": PI_SANDBOX,
+        "PI_APP_ID": PI_APP_ID,
+        "PI_WRAPPER_BASE": PI_WRAPPER_BASE,
+    }
+
+# ================= DB & SCHEMA =================
 init_db()
 
 def ensure_schema():
@@ -46,6 +60,7 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
@@ -61,7 +76,7 @@ def ensure_schema():
         )""")
 ensure_schema()
 
-# ----------------- URL TOKEN (cookie fallback) -----------------
+# ================= URL TOKEN (cookie fallback) =================
 TOKEN_TTL = 60 * 10
 
 def _b64url(b: bytes) -> str:
@@ -100,7 +115,7 @@ def get_bearer_token_from_request() -> str | None:
         return auth.split(" ", 1)[1].strip()
     return None
 
-# ----------------- HELPERS -----------------
+# ================= HELPERS =================
 def current_user_row():
     uid = session.get("user_id")
     if not uid:
@@ -142,23 +157,22 @@ def get_or_create_cart(merchant_id, cid=None):
                    (cid, merchant_id, int(time.time())))
         return cid
 
-# ----------------- DEBUG -----------------
+# ================= DEBUG =================
 @app.get("/whoami")
 def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
 
-# ----------------- MERCHANT SIGN-IN -----------------
+# ================= APP ENTRY / WRAPPER PATH =================
 @app.get("/")
 def home():
-    # If the wrapper launched us without the original deep path, accept ?path=/store/<slug> etc.
+    # If Pi wrapper dropped our deep link, honor ?path=/store/<slug> etc.
     desired = request.args.get("path")
-    if desired:
-        # Guard: only allow internal redirects
-        if desired.startswith("/"):
-            return redirect(desired)
+    if desired and desired.startswith("/"):
+        return redirect(desired)
     return redirect("/signin")
 
+# ================= MERCHANT SIGN-IN =================
 @app.get("/signin")
 def signin():
     if request.args.get("fresh") == "1":
@@ -208,6 +222,7 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
+        # Verify token with Pi
         url = f"{PI_API_BASE}/v2/me"
         headers = {"Authorization": f"Bearer {token}"}
         r = requests.get(url, headers=headers, timeout=10)
@@ -216,6 +231,7 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
 
+        # Upsert user
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
@@ -224,6 +240,7 @@ def auth_exchange():
                            (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
 
+        # Session + URL token
         try:
             session["user_id"] = row["id"]
             session.permanent = True
@@ -252,7 +269,7 @@ def dashboard():
         return redirect(f"/merchant/setup{('?t='+tok) if tok else ''}")
     return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
 
-# ----------------- MERCHANT SETUP + DASHBOARD -----------------
+# ================= MERCHANT SETUP + DASHBOARD =================
 @app.get("/merchant/setup")
 def merchant_setup_form():
     u = require_user()
@@ -375,7 +392,7 @@ def merchant_orders_update(slug):
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
 
-# ----------------- CUSTOMER SIGN-IN (storefront) -----------------
+# ================= CUSTOMER SIGN-IN (storefront) =================
 @app.get("/store/<slug>/signin")
 def store_signin(slug):
     m = resolve_merchant_by_slug(slug)
@@ -421,48 +438,87 @@ def auth_exchange_store():
         except Exception:
             pass
         tok = mint_login_token(row["id"])
-        return redirect(f"{next_url}{'&' if ('?' in next_url) else '?'}t={tok}")
+        # Append t to the next URL
+        join = "&" if ("?" in next_url) else "?"
+        return redirect(f"{next_url}{join}t={tok}")
     except Exception as e:
         print("auth_exchange_store error:", repr(e))
         return redirect("/signin?fresh=1")
 
-# ----------------- STOREFRONT + CART + CHECKOUT -----------------
+# ================= STOREFRONT + CART + CHECKOUT =================
 @app.get("/store/<slug>")
 def storefront(slug):
     m = resolve_merchant_by_slug(slug)
     if not m: abort(404)
+
+    # Must be authenticated (via cookie or ?t)
     u = current_user_row()
     if not u:
         return redirect(f"/store/{slug}/signin?next=/store/{slug}")
+
+    # keep t for links/forms
+    tok = get_bearer_token_from_request()
+
     cid = request.args.get("cid")
     cid = get_or_create_cart(m["id"], cid)
+
     with conn() as cx:
-        items = cx.execute("SELECT * FROM items WHERE merchant_id=? AND active=1 ORDER BY id DESC", (m["id"],)).fetchall()
-        cnt = cx.execute("SELECT COALESCE(SUM(qty),0) as n FROM cart_items WHERE cart_id=?", (cid,)).fetchone()["n"]
-    return render_template("store.html", m=m, items=items, cid=cid, cart_count=cnt,
-                           app_base=APP_BASE_URL, username=u["pi_username"])
+        items = cx.execute(
+            "SELECT * FROM items WHERE merchant_id=? AND active=1 ORDER BY id DESC",
+            (m["id"],)
+        ).fetchall()
+        cnt = cx.execute(
+            "SELECT COALESCE(SUM(qty),0) as n FROM cart_items WHERE cart_id=?",
+            (cid,)
+        ).fetchone()["n"]
+
+    return render_template(
+        "store.html",
+        m=m,
+        items=items,
+        cid=cid,
+        cart_count=cnt,
+        app_base=APP_BASE_URL,
+        username=u["pi_username"],
+        t=tok  # <-- critical so templates can carry it forward
+    )
 
 @app.post("/store/<slug>/add")
 def store_add(slug):
     m = resolve_merchant_by_slug(slug)
     if not m: abort(404)
+
+    # require auth
     if not current_user_row():
         return redirect(f"/store/{slug}/signin?next=/store/{slug}")
-    cid = request.form.get("cid")
+
+    cid = request.args.get("cid") or request.form.get("cid")
     cid = get_or_create_cart(m["id"], cid)
+
     item_id = int(request.form.get("item_id"))
     qty = max(1, int(request.form.get("qty", "1")))
     with conn() as cx:
-        it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=? AND active=1", (item_id, m["id"])).fetchone()
-        if not it: abort(400)
-        cx.execute("INSERT INTO cart_items(cart_id, item_id, qty) VALUES(?,?,?)", (cid, item_id, qty))
-    return redirect(f"/store/{slug}?cid={cid}")
+        it = cx.execute(
+            "SELECT * FROM items WHERE id=? AND merchant_id=? AND active=1",
+            (item_id, m["id"])
+        ).fetchone()
+        if not it:
+            abort(400)
+        cx.execute("INSERT INTO cart_items(cart_id, item_id, qty) VALUES(?,?,?)",
+                   (cid, item_id, qty))
+
+    tok = get_bearer_token_from_request()
+    join = "&" if tok else ""
+    return redirect(f"/store/{slug}?cid={cid}{(join + 't=' + tok) if tok else ''}")
 
 @app.get("/cart/<cid>")
 def cart_view(cid):
     u = current_user_row()
     if not u:
         return redirect("/signin?fresh=1")
+
+    tok = get_bearer_token_from_request()
+
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
@@ -472,25 +528,32 @@ def cart_view(cid):
           FROM cart_items JOIN items ON items.id=cart_items.item_id
           WHERE cart_items.cart_id=?
         """, (cid,)).fetchall()
+
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
-    return render_template("cart.html", m=m, rows=rows, cid=cid, total=total,
-                           app_base=APP_BASE_URL)
+
+    return render_template("cart.html",
+                           m=m, rows=rows, cid=cid, total=total,
+                           app_base=APP_BASE_URL, t=tok)
 
 @app.post("/cart/<cid>/remove")
 def cart_remove(cid):
     u = current_user_row()
     if not u:
         return redirect("/signin?fresh=1")
-    row_id = int(request.form.get("row_id"))
     with conn() as cx:
-        cx.execute("DELETE FROM cart_items WHERE id=? AND cart_id=?", (row_id, cid))
-    return redirect(f"/cart/{cid}")
+        cx.execute("DELETE FROM cart_items WHERE id=? AND cart_id=?",
+                   (int(request.form.get("row_id")), cid))
+    tok = get_bearer_token_from_request()
+    return redirect(f"/cart/{cid}{('?t='+tok) if tok else ''}")
 
 @app.get("/checkout/cart/<cid>")
 def checkout_cart(cid):
     u = current_user_row()
     if not u:
         return redirect("/signin?fresh=1")
+
+    tok = get_bearer_token_from_request()
+
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
@@ -500,21 +563,28 @@ def checkout_cart(cid):
           FROM cart_items JOIN items ON items.id=cart_items.item_id
           WHERE cart_items.cart_id=?
         """, (cid,)).fetchall()
+
     if not rows:
-        return redirect(f"/store/{m['slug']}?cid={cid}")
+        return redirect(f"/store/{m['slug']}{('?t='+tok) if tok else ''}?cid={cid}")
+
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
+
     sid = uuid.uuid4().hex
     with conn() as cx:
         cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state, created_at)
                       VALUES(?,?,?,?,?,?,?)""",
                    (sid, m["id"], None, 1, float(total), "initiated", int(time.time())))
+
+    # Minimal item info for the checkout page header
     i = {"business_name": m["business_name"], "title": "Cart total", "logo_url": m["logo_url"]}
+
     return render_template("checkout.html",
                            sold_out=False, i=i, qty=1, session_id=sid,
                            expected_pi=total, app_base=APP_BASE_URL, cart_mode=True)
 
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
+    # (Optional) you can require auth here; Pi SDK will also prompt if needed
     with conn() as cx:
         i = cx.execute("""
            SELECT items.*, merchants.business_name, merchants.logo_url, merchants.id as mid
@@ -523,20 +593,23 @@ def checkout(link_id):
         """, (link_id,)).fetchone()
     if not i:
         abort(404)
+
     qty = max(1, int(request.args.get("qty", "1")))
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i)
+
     sid = uuid.uuid4().hex
     expected = float(i["pi_price"]) * qty
     with conn() as cx:
         cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state,
                    created_at) VALUES(?,?,?,?,?,?,?)""",
                    (sid, i["mid"], i["id"], qty, expected, "initiated", int(time.time())))
+
     return render_template("checkout.html",
         sold_out=False, i=i, qty=qty, session_id=sid, expected_pi=expected, app_base=APP_BASE_URL
     )
 
-# ----------------- PAYMENT CONFIRMATION (split 99/1) -----------------
+# ================= PAYMENT CONFIRMATION (split 99/1) =================
 @app.post("/api/pi/confirm")
 def pi_confirm():
     data = request.get_json(force=True)
@@ -559,6 +632,7 @@ def pi_confirm():
     if s["item_id"] is None:
         return _confirm_cart_order(s, tx_hash, buyer, shipping)
 
+    # Single-item order
     gross, fee, net = split_amounts(float(amt))
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
@@ -577,11 +651,13 @@ def pi_confirm():
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                    (tx_hash, session_id))
 
+    # payout to merchant
     ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
 
+    # merchant email
     if m["reply_to_email"]:
         try:
             send_email(
@@ -648,7 +724,7 @@ def _confirm_cart_order(s, tx_hash, buyer, shipping):
 
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                    (tx_hash, s["id"]))
-        cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"]),)
+        cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
 
     ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Cart order via {APP_NAME}")
     with conn() as cx:
@@ -657,7 +733,7 @@ def _confirm_cart_order(s, tx_hash, buyer, shipping):
     buyer_url = f"{APP_BASE_URL}/success"
     return {"ok": True, "buyer_status_url": buyer_url}
 
-# ----------------- IMAGE PROXY -----------------
+# ================= IMAGE PROXY =================
 @app.get("/uimg")
 def uimg():
     src = request.args.get("src", "").strip()
@@ -675,12 +751,15 @@ def uimg():
             abort(404)
         ctype = r.headers.get("Content-Type", "image/jpeg")
         data = r.content
-        return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
+        return Response(data, headers={
+            "Content-Type": ctype,
+            "Cache-Control": "public, max-age=86400"
+        })
     except Exception as e:
         print("uimg error:", repr(e))
         abort(502)
 
-# ----------------- POLICIES / VALIDATION -----------------
+# ================= POLICIES / VALIDATION =================
 @app.get("/validation-key.txt")
 def validation_key():
     return app.send_static_file("validation-key.txt")
@@ -693,7 +772,7 @@ def privacy():
 def terms():
     return render_template("terms.html")
 
-# ----------------- OPTIONAL: BUYER STATUS -----------------
+# ================= OPTIONAL: BUYER STATUS =================
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
@@ -709,7 +788,7 @@ def buyer_status(token):
 def success():
     return render_template("success.html")
 
-# ----------------- MAIN -----------------
+# ================= MAIN =================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=True)
