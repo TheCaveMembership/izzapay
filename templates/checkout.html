@@ -21,14 +21,9 @@
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <script>
-    // Initialize SDK respecting server-side sandbox toggle
     document.addEventListener('DOMContentLoaded', () => {
       const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
-      try {
-        Pi.init({ version: "2.0", sandbox });
-      } catch (e) {
-        console.error("Pi.init failed", e);
-      }
+      try { Pi.init({ version: "2.0", sandbox }); } catch(e){ console.error(e); }
     });
   </script>
 </head>
@@ -51,7 +46,6 @@
       <p><strong>Total:</strong> <span class="mono">{{ '%.7f'|format(expected_pi) }}</span> Pi</p>
     </div>
 
-    <!-- (Optional) buyer contact/shipping the merchant may need -->
     <div class="card">
       <div class="row">
         <div style="flex:1;min-width:220px">
@@ -151,12 +145,10 @@
     try{
       setStatus("Opening Pi payment…", "wait");
 
-      // Gather memo/metadata
       const memo = cartMode ? `Cart ${sessionId}` : `Order ${sessionId}`;
       const metadata = { session_id: sessionId, cart: !!cartMode };
 
-      // Payment flow with strongly-handled callbacks
-      const payment = await Pi.createPayment({
+      await Pi.createPayment({
         amount: amount,
         memo: memo,
         metadata: metadata,
@@ -175,9 +167,8 @@
             buyer: buyerPayload(),
             shipping: shippingPayload()
           });
-          if(res.ok && res.data && res.data.ok === true && res.data.redirect_url){
-            // ✅ Redirect back to the merchant’s storefront with success flag
-            window.location.href = res.data.redirect_url;
+          if(res.ok && res.data && res.data.ok === true){
+            setStatus("Payment complete! You can close this page and return to the store.", "ok");
             return;
           }
           console.error("complete failed", res);
@@ -192,14 +183,10 @@
         }
       });
 
-      // If the SDK returns normally without calling completion (edge), poll as fallback:
-      setStatus("Still waiting… Ensure Pi Browser prompt was approved.", "wait");
-      await new Promise(r => setTimeout(r, 1500));
-
+      setStatus("Still waiting… Ensure Pi Browser is active and you approved the payment prompt.", "wait");
     }catch(err){
       console.error("payment error", err);
-      // Do NOT dump user back to checkout with “failed”; show a gentle message instead.
-      setStatus("Could not confirm payment. If Pi showed success, please wait a moment then refresh the store.", "warn");
+      setStatus("Could not confirm payment. If Pi showed success, please refresh later.", "warn");
     }
   }
 
