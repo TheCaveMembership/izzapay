@@ -74,6 +74,20 @@
     }
   }
 
+  function ensureAuth(){
+    // Authenticate before createPayment so SDK has a valid auth context
+    const scopes = ['payments','username'];
+    function onIncompletePaymentFound(payment){
+      // Optionally auto-complete old payments, not used here
+      console.log('Incomplete payment found:', payment);
+    }
+    return Pi.authenticate(scopes, onIncompletePaymentFound)
+      .then(auth => {
+        console.log('Authenticated as', auth.user?.username);
+        return auth;
+      });
+  }
+
   if (!initPi()){
     setMsg("Open in Pi Browser (and Sandbox ON if testing).");
   }
@@ -82,79 +96,83 @@
   function startWatchdog(){
     clearTimeout(watchdog);
     watchdog = setTimeout(() => {
-      setErr("Still waiting… Ensure Pi Browser is active and you approved the payment prompt.");
+      setErr("Still waiting… Make sure you accepted the Pi payment prompt.");
     }, 15000);
   }
 
   btn?.addEventListener('click', function(){
     setErr('');
-    setMsg('Opening Pi payment…');
+    setMsg('Authenticating with Pi…');
+
     if (!window.Pi || !Pi.createPayment){
-      setErr("Pi.createPayment unavailable — open in Pi Browser.");
+      setErr("Pi SDK unavailable — open this in Pi Browser.");
       return;
     }
 
-    const paymentData = {
-      amount: amount,
-      memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
-      metadata: { session_id: sessionId }
-    };
+    ensureAuth().then(() => {
+      setMsg('Opening Pi payment…');
 
-    function onIncompletePaymentFound(payment) {
-      console.log("Incomplete payment detected:", payment);
-    }
+      const paymentData = {
+        amount: amount,
+        memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
+        metadata: { session_id: sessionId }
+      };
 
-    startWatchdog();
+      startWatchdog();
 
-    Pi.createPayment(paymentData, {
-      onReadyForServerApproval: function(paymentId){ console.log("Ready for approval:", paymentId); },
-      onReadyForServerCompletion: function(paymentId, txid){ console.log("Ready for completion:", paymentId, txid); },
-      onCancel: function(paymentId){
-        clearTimeout(watchdog);
-        setMsg("Payment canceled.");
-      },
-      onError: function(error, paymentId){
-        clearTimeout(watchdog);
-        console.error("Payment error:", error);
-        setMsg("Payment error. Try again.");
-        setErr(error?.message || String(error));
-      }
-    }).then(function(payment){
-      const txid = payment?.transaction?.txid || payment?.txid || "";
-      confirmServer(txid);
-    }).catch(function(e){
-      clearTimeout(watchdog);
-      console.error("createPayment failed:", e);
-      setMsg("Payment failed.");
-      setErr(e?.message || String(e));
-    });
-
-    function confirmServer(txid){
-      fetch("/api/pi/confirm", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          tx_hash: txid,
-          buyer: {},
-          shipping: {}
-        })
-      }).then(r=>r.json()).then(function(res){
-        clearTimeout(watchdog);
-        if(!res || !res.ok){
-          setMsg("Could not confirm payment.");
-          setErr((res && res.error) ? res.error : "server_error");
-          return;
+      Pi.createPayment(paymentData, {
+        onReadyForServerApproval: function(paymentId){
+          // Tell our server to call Pi /approve for this payment
+          fetch('/api/pi/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId, session_id: sessionId })
+          }).then(r => r.json()).then(res => {
+            if(!res.ok){ setErr("Server approve failed: " + (res.error||'')); }
+          }).catch(e => {
+            setErr("Approve request failed: " + (e?.message || e));
+          });
+        },
+        onReadyForServerCompletion: function(paymentId, txid){
+          // Tell our server to call Pi /complete and fulfill the order
+          fetch('/api/pi/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId, session_id: sessionId, txid })
+          }).then(r => r.json()).then(res => {
+            clearTimeout(watchdog);
+            if(!res || !res.ok){
+              setMsg("Could not confirm payment.");
+              setErr((res && res.error) ? res.error : "server_error");
+              return;
+            }
+            setMsg("Payment complete!");
+            window.location.href = res.buyer_status_url || "/success";
+          }).catch(e => {
+            clearTimeout(watchdog);
+            setErr("Complete request failed: " + (e?.message || e));
+          });
+        },
+        onCancel: function(paymentId){
+          clearTimeout(watchdog);
+          setMsg("Payment canceled.");
+        },
+        onError: function(error, paymentId){
+          clearTimeout(watchdog);
+          console.error("Payment error:", error);
+          setMsg("Payment error. Try again.");
+          setErr(error?.message || String(error));
         }
-        setMsg("Payment complete!");
-        window.location.href = res.buyer_status_url || "/success";
-      }).catch(function(e){
+      }).catch(e => {
         clearTimeout(watchdog);
-        console.error(e);
-        setMsg("Could not confirm payment (network).");
+        console.error("createPayment failed:", e);
+        setMsg("Payment failed.");
         setErr(e?.message || String(e));
       });
-    }
+
+    }).catch(e => {
+      setErr("Authentication failed: " + (e?.message || e));
+    });
   });
 })();
 </script>
