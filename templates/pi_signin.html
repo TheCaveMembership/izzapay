@@ -2,86 +2,96 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <title>Sign in with Pi — IZZA PAY</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sign in with Pi</title>
-  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#fff;margin:0}
-    .card{background:#121826;border:1px solid #1f2a44;padding:24px;border-radius:12px;max-width:420px;width:92%}
-    button{width:100%;padding:12px;border-radius:10px;border:0;background:#6e9fff;color:#0b0f17;font-weight:700;cursor:pointer}
-    button:hover{opacity:.95}
-    .small{opacity:.85;font-size:.9em;margin-top:10px}
-    .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
-    #username{display:inline-block;margin-top:8px;opacity:.9}
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
+    .wrap{max-width:640px;margin:0 auto;padding:24px}
+    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:20px}
+    h1{margin:0 0 8px}
+    p{color:#bcd0ff}
+    button{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800}
+    .muted{color:#bcd0ff;opacity:.9}
+    .err{color:#ff9aa2;margin-top:10px;white-space:pre-wrap}
   </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
+<div class="wrap">
   <div class="card">
-    <div class="badge">SANDBOX MODE</div>
-    <h2>Sign in with Pi</h2>
-    <p class="small">No email or password. Secure, Pi-only authentication.</p>
-    <button id="pi-signin">Continue with Pi</button>
-    <div class="small">Signed in as: <span id="username">—</span></div>
-    <div id="msg" class="small" style="color:#d7e3ff;margin-top:12px"></div>
+    <h1>Sign in with Pi</h1>
+    <p class="muted">Access your IZZA PAY merchant dashboard.</p>
+
+    <button id="piSignInBtn">Authorize with Pi</button>
+
+    <p id="msg" class="muted" style="margin-top:12px;"></p>
+    <div id="err" class="err"></div>
   </div>
+</div>
 
-  <script>
-    const Pi = window.Pi;
-    const appBase = "{{ app_base }}";
+<script>
+(function(){
+  const btn = document.getElementById('piSignInBtn');
+  const msg = document.getElementById('msg');
+  const err = document.getElementById('err');
+  const postUrl = "/auth/exchange";
+  const sandbox = {{ 'true' if sandbox else 'false' }};
 
-    function initPiSandbox() {
-      if (!Pi) return false;
-      try { Pi.init({ version: "2.0", sandbox: true }); return true; }
-      catch(e){ document.getElementById('msg').innerText='Pi SDK init error: '+(e?.message||e); return false; }
+  function setMsg(t){ if(msg){ msg.textContent = t; } }
+  function setErr(t){ if(err){ err.textContent = t || ''; } }
+
+  function initPi(){
+    if (!window.Pi || !Pi.init) return false;
+    try {
+      Pi.init({ version: "2.0", sandbox: sandbox });
+      return true;
+    } catch(e){
+      console.error("Pi.init failed", e);
+      setErr("Pi.init failed: " + (e?.message || e));
+      return false;
+    }
+  }
+
+  const inited = initPi();
+  if (!inited) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+
+  btn?.addEventListener('click', function(){
+    setErr('');
+    if (!window.Pi || !Pi.authenticate) {
+      setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
+      return;
+    }
+    setMsg("Requesting authorization…");
+
+    const scopes = ['payments','username'];
+    function onIncompletePaymentFound(payment){
+      console.log("Incomplete payment found:", payment);
     }
 
-    async function onIncompletePaymentFound(payment) {
-      try {
-        const txid = payment?.transaction?.txid || payment?.identifier;
-        const sessionId = payment?.metadata?.session_id;
-        if (!txid || !sessionId) return;
-        await fetch(appBase + "/api/pi/confirm", {
-          method: "POST",
-          headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({ session_id: sessionId, tx_hash: txid, buyer:{}, shipping:{} })
-        });
-      } catch (e) { console.log("Incomplete payment reconcile error:", e); }
-    }
-
-    document.getElementById('pi-signin').addEventListener('click', async () => {
-      if (!initPiSandbox()) {
-        document.getElementById('msg').innerText = 'Open in Pi Browser and enable Sandbox in Utilities.';
-        return;
-      }
-      try {
-        const scopes = ['payments','username'];
-        const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
-
-        // Show username on the page
-        try { document.getElementById('username').innerText = auth?.user?.username || '—'; } catch(e){}
-
-        // Verify the token server-side by calling Pi /v2/me through our backend
-        await fetch(appBase + "/api/pi/me", {
-          method: "POST",
-          headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ accessToken: auth.accessToken })
-        });
-
-        // Top-level form POST to set server session; server also issues URL token fallback
+    Pi.authenticate(scopes, onIncompletePaymentFound)
+      .then(function(auth){
+        const payload = {
+          accessToken: auth.accessToken,
+          user: auth.user
+        };
         const form = document.createElement('form');
         form.method = 'POST';
-        form.action = appBase + '/auth/exchange';
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'payload';
-        input.value = JSON.stringify({ user: auth.user, accessToken: auth.accessToken });
-        form.appendChild(input);
+        form.action = postUrl;
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'payload';
+        inp.value = JSON.stringify(payload);
+        form.appendChild(inp);
         document.body.appendChild(form);
         form.submit();
-      } catch (e) {
-        document.getElementById('msg').innerText = 'Error: ' + (e?.message||e);
-      }
-    });
-  </script>
+      })
+      .catch(function(e){
+        console.error(e);
+        setMsg("Authorization failed. Please try again.");
+        setErr(e && e.message ? e.message : String(e));
+      });
+  });
+})();
+</script>
 </body>
 </html>
