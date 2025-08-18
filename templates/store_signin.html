@@ -13,17 +13,20 @@
     button{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800}
     .muted{color:#bcd0ff;opacity:.9}
     .err{color:#ff9aa2;margin-top:10px;white-space:pre-wrap}
+    .warn{background:#332100;color:#ffd599;border:1px solid #664300;padding:10px;border-radius:8px;margin-bottom:12px}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
 <div class="wrap">
+  <div id="envWarn" class="warn" style="display:none">
+    Open this link in <strong>Pi Browser</strong> with <strong>Sandbox ON</strong> (Pi app → Utilities → Sandbox).
+  </div>
+
   <div class="card">
     <h1>Sign in with Pi</h1>
     <p class="muted">Authenticate with Pi to shop at <strong>{{ slug }}</strong>.</p>
-
     <button id="piSignInBtn">Authorize with Pi</button>
-
     <p id="msg" class="muted" style="margin-top:12px;"></p>
     <div id="err" class="err"></div>
   </div>
@@ -34,62 +37,59 @@
   const btn = document.getElementById('piSignInBtn');
   const msg = document.getElementById('msg');
   const err = document.getElementById('err');
-  const nextUrl = "{{ next_url|e }}";      // e.g. /store/<slug>
+  const envWarn = document.getElementById('envWarn');
+  const nextUrl = "{{ next_url|e }}";
   const postUrl = "/auth/exchange/store?next=" + encodeURIComponent(nextUrl);
   const sandbox = {{ 'true' if sandbox else 'false' }};
 
-  function setMsg(t){ if(msg){ msg.textContent = t; } }
+  function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
   function setErr(t){ if(err){ err.textContent = t || ''; } }
 
-  function initPi(){
-    if (!window.Pi || !Pi.init) return false;
-    try {
-      Pi.init({ version: "2.0", sandbox: sandbox });
-      return true;
-    } catch(e){
-      console.error("Pi.init failed", e);
-      setErr("Pi.init failed: " + (e?.message || e));
-      return false;
-    }
-  }
+  // Show environment warning if SDK missing
+  if (!window.Pi) { envWarn.style.display = 'block'; }
 
-  const inited = initPi();
-  if (!inited) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+  // Init SDK
+  let ready = false;
+  try { if (window.Pi && Pi.init) { Pi.init({ version:"2.0", sandbox: sandbox }); ready = true; } }
+  catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); }
+  if (!ready) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+
+  // Watchdog to avoid “stuck” feeling
+  let watchdog;
+  function startWatchdog(){
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      setErr("Still waiting… Check: Pi Browser, Sandbox ON, and Dev URL is correct.");
+    }, 10000);
+  }
 
   btn?.addEventListener('click', function(){
     setErr('');
     if (!window.Pi || !Pi.authenticate) {
       setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
+      envWarn.style.display = 'block';
       return;
     }
     setMsg("Requesting authorization…");
+    startWatchdog();
 
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){
-      console.log("Incomplete payment found:", payment);
-    }
+    function onIncompletePaymentFound(payment){ console.log("Incomplete payment:", payment); }
 
     Pi.authenticate(scopes, onIncompletePaymentFound)
       .then(function(auth){
-        const payload = {
-          accessToken: auth.accessToken,
-          user: auth.user
-        };
+        clearTimeout(watchdog);
         const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = postUrl;
+        form.method = 'POST'; form.action = postUrl;
         const inp = document.createElement('input');
-        inp.type = 'hidden';
-        inp.name = 'payload';
-        inp.value = JSON.stringify(payload);
-        form.appendChild(inp);
-        document.body.appendChild(form);
-        form.submit();
+        inp.type='hidden'; inp.name='payload'; inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+        form.appendChild(inp); document.body.appendChild(form); form.submit();
       })
       .catch(function(e){
+        clearTimeout(watchdog);
         console.error(e);
         setMsg("Authorization failed. Please try again.");
-        setErr(e && e.message ? e.message : String(e));
+        setErr(e?.message || String(e));
       });
   });
 })();
