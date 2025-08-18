@@ -40,7 +40,7 @@
       <h2 style="margin:0 0 8px">{{ i.title }}</h2>
       <p class="muted">{{ i.business_name }}</p>
       {% if i.logo_url %}
-        <img src="{{ app_base }}/uimg?src={{ i.logo_url | urlencode }}" alt="Logo" style="max-height:40px;margin:8px 0;">
+        <img src="{{ app_base }}/uimg?src={{ i.logo_url | urlencode }}" alt="Logo" style="max-height:40px;margin:8px 0;" onerror="this.remove()">
       {% endif %}
       <p><strong>Quantity:</strong> {{ qty }}</p>
       <p><strong>Total:</strong> <span class="mono">{{ '%.7f'|format(expected_pi) }}</span> Pi</p>
@@ -186,7 +186,7 @@
       setStatus("Still waiting… Ensure Pi Browser is active and you approved the payment prompt.", "wait");
     }catch(err){
       console.error("payment error", err);
-      setStatus("Could not confirm payment. If Pi showed success, please refresh later.", "warn");
+      setStatus("Could not confirm payment. If Pi showed success, please refresh the store later.", "warn");
     }
   }
 
