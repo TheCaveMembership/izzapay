@@ -1,21 +1,21 @@
 import os, json, uuid, time, hmac, base64, hashlib
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 from urllib.parse import urlparse
 from flask import Flask, request, render_template, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
 
-# ----- Local helpers (in your repo) -----
+# ----- Local helpers you already have -----
 from db import init_db, conn
 from emailer import send_email
 from payments import verify_pi_tx, send_pi_payout, split_amounts
 
-# ================= ENV =================
 load_dotenv()
 
+# ================= ENV =================
 PI_API_BASE       = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
-PI_API_KEY        = os.getenv("PI_PLATFORM_API_KEY", "")    # REQUIRED for approve/complete
+PI_API_KEY        = os.getenv("PI_PLATFORM_API_KEY", "")    # REQUIRED (Approve/Complete/Fetch)
 APP_BASE_URL      = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com")
 APP_NAME          = os.getenv("APP_NAME", "IZZA PAY")
 
@@ -23,7 +23,6 @@ PI_SANDBOX        = os.getenv("PI_SANDBOX", "true").lower() == "true"
 PI_APP_ID         = os.getenv("PI_APP_ID", "izza-pay")
 PI_WRAPPER_BASE   = f"https://{'sandbox.minepi.com' if PI_SANDBOX else 'minepi.com'}/app/{PI_APP_ID}"
 
-# ================= APP =================
 app = Flask(__name__)
 
 _secret = os.getenv("FLASK_SECRET")
@@ -31,7 +30,6 @@ if not _secret:
     _secret = os.urandom(32)
     print("[WARN] FLASK_SECRET not set; generated a temporary secret (not persistent).")
 app.secret_key = _secret
-
 app.config.update(
     SESSION_COOKIE_NAME="izzapay_session",
     SESSION_COOKIE_SAMESITE="None",
@@ -40,7 +38,6 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 
-# Make common values available to all templates
 @app.context_processor
 def inject_globals():
     return {
@@ -164,13 +161,20 @@ def pi_headers():
         "Content-Type": "application/json"
     }
 
-# ================= DEBUG =================
+def fetch_pi_payment(payment_id: str):
+    url = f"{PI_API_BASE}/v2/payments/{payment_id}"
+    r = requests.get(url, headers=pi_headers(), timeout=15)
+    return r
+
+def almost_equal(a: float, b: float, tol=1e-7):
+    return abs(a - b) <= tol
+
+# ================= DEBUG / ENTRY =================
 @app.get("/whoami")
 def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
 
-# ================= APP ENTRY / WRAPPER PATH =================
 @app.get("/")
 def home():
     desired = request.args.get("path")
@@ -607,14 +611,12 @@ def checkout(link_id):
 # ================== PI SERVER APPROVAL/COMPLETION ==================
 @app.post("/api/pi/approve")
 def pi_approve():
-    """Called from frontend on onReadyForServerApproval(paymentId). We verify the session and approve with Pi."""
     data = request.get_json(force=True)
     payment_id = data.get("paymentId")
     session_id = data.get("session_id")
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
 
-    # Optional: verify session exists
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
     if not s:
@@ -632,15 +634,18 @@ def pi_approve():
 
 @app.post("/api/pi/complete")
 def pi_complete():
-    """Called from frontend on onReadyForServerCompletion(paymentId, txid). We complete with Pi and fulfill the order."""
+    """Frontend calls this from onReadyForServerCompletion(paymentId, txid)."""
     data = request.get_json(force=True)
     payment_id = data.get("paymentId")
     session_id = data.get("session_id")
     txid       = data.get("txid") or ""
+    buyer      = data.get("buyer") or {}
+    shipping   = data.get("shipping") or {}
+
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
 
-    # 1) Tell Pi we are completing (important for clearing incomplete payments)
+    # 1) Mark complete with Pi (clears incomplete)
     try:
         url = f"{PI_API_BASE}/v2/payments/{payment_id}/complete"
         r = requests.post(url, headers=pi_headers(), json={"txid": txid})
@@ -650,59 +655,155 @@ def pi_complete():
         print("pi_complete call error:", repr(e))
         return {"ok": False, "error": "server_error"}, 500
 
-    # 2) Fulfill in our system (uses your existing verification & payout)
-    # If you want, you can fetch payment details from Pi and verify the amount
-    # matches s['expected_pi'] before fulfilling.
-    try:
-        res = pi_confirm_internal(session_id, txid)
-        return res
-    except Exception as e:
-        print("pi_complete fulfill error:", repr(e))
-        return {"ok": False, "error": "fulfill_error"}, 500
-
-def pi_confirm_internal(session_id, tx_hash):
-    """Calls the same logic as /api/pi/confirm but directly, to avoid double HTTP hop."""
+    # 2) Verify against Pi Payments API (amount matches)
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
     if not s or s["state"] != "initiated":
         return {"ok": False, "error": "bad_session"}, 400
 
-    amt = Decimal(str(s["expected_pi"]))
-    if not verify_pi_tx(tx_hash, amt):
-        with conn() as cx:
-            cx.execute("UPDATE sessions SET state='failed' WHERE id=?", (session_id,))
-        return {"ok": False, "error": "verify_failed"}, 400
+    expected_amt = float(Decimal(str(s["expected_pi"])).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP))
+
+    try:
+        r = fetch_pi_payment(payment_id)
+        if r.status_code == 200:
+            pdata = r.json()
+            paid_amt = float(pdata.get("amount", 0))
+            if not almost_equal(paid_amt, expected_amt):
+                print("Amount mismatch:", paid_amt, "expected:", expected_amt)
+                if not PI_SANDBOX:
+                    return {"ok": False, "error": "amount_mismatch"}, 400
+        else:
+            print("fetch payment failed", r.status_code, r.text)
+            if not PI_SANDBOX:
+                return {"ok": False, "error": "fetch_payment_failed"}, 502
+    except Exception as e:
+        print("fetch_pi_payment error:", repr(e))
+        if not PI_SANDBOX:
+            return {"ok": False, "error": "payment_verify_error"}, 500
+
+    # 3) Fulfill (create orders, inventory, payout, emails)
+    try:
+        res = fulfill_session(s, txid, buyer, shipping)
+        return res
+    except Exception as e:
+        print("fulfill_session error:", repr(e))
+        return {"ok": False, "error": "fulfill_error"}, 500
+
+def fulfill_session(s, tx_hash, buyer, shipping):
+    """Common fulfillment used after we have approved+completed with Pi."""
+    # Single item vs cart
+    with conn() as cx:
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+
+    amt = float(s["expected_pi"])
+    gross, fee, net = split_amounts(amt)
 
     if s["item_id"] is None:
-        return _confirm_cart_order(s, tx_hash, {}, {})
+        # Cart order
+        with conn() as cx:
+            cart = cx.execute("""
+              SELECT c.* FROM carts c
+              WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1
+            """, (m["id"],)).fetchone()
+            rows = cx.execute("""
+              SELECT cart_items.qty, items.*
+              FROM cart_items JOIN items ON items.id=cart_items.item_id
+              WHERE cart_items.cart_id=?
+            """, (cart["id"],)).fetchall()
 
-    gross, fee, net = split_amounts(float(amt))
-    with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
-        if i and not i["allow_backorder"]:
-            cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
-                       (max(0, i["stock_qty"] - s["qty"]), i["id"]))
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
-        buyer_token = uuid.uuid4().hex
-        cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
-                     shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
-                     status,buyer_token)
-                     VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
-                   (s["merchant_id"], s["item_id"], s["qty"], None,
-                    None, json.dumps({}), float(gross), float(fee),
-                    float(net), tx_hash, buyer_token))
-        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-                   (tx_hash, s["id"]))
+        # line-item orders
+        with conn() as cx:
+            for r in rows:
+                line_gross = float(r["pi_price"]) * r["qty"]
+                line_fee   = fee * (line_gross / amt) if amt > 0 else 0.0
+                line_net   = line_gross - line_fee
+                buyer_token = uuid.uuid4().hex
 
-    ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
+                if not r["allow_backorder"]:
+                    cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                               (max(0, r["stock_qty"] - r["qty"]), r["id"]))
+
+                cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
+                             shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
+                             status,buyer_token)
+                             VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
+                           (s["merchant_id"], r["id"], r["qty"], buyer.get("email"),
+                            buyer.get("name"), json.dumps(shipping), float(line_gross), float(line_fee),
+                            float(line_net), tx_hash, buyer_token))
+
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                       (tx_hash, s["id"]))
+            cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
+
+        # one payout for net
+        ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Cart order via {APP_NAME}")
+    else:
+        # Single item
+        with conn() as cx:
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+            if i and not i["allow_backorder"]:
+                cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                           (max(0, i["stock_qty"] - s["qty"]), i["id"]))
+            buyer_token = uuid.uuid4().hex
+            cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
+                         shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
+                         status,buyer_token)
+                         VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
+                       (s["merchant_id"], s["item_id"], s["qty"], buyer.get("email"),
+                        buyer.get("name"), json.dumps(shipping), float(gross), float(fee),
+                        float(net), tx_hash, buyer_token))
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                       (tx_hash, s["id"]))
+        ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
+
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
 
-    buyer_url = f"{APP_BASE_URL}/success"
-    return {"ok": True, "buyer_status_url": buyer_url}
+    # Emails
+    try:
+        if m["reply_to_email"]:
+            # Human-friendly shipping block
+            ship_html = ""
+            if shipping:
+                parts = [
+                    shipping.get("name"),
+                    shipping.get("address1"),
+                    shipping.get("address2"),
+                    f"{shipping.get('city','')}, {shipping.get('region','')} {shipping.get('postal','')}",
+                    shipping.get("country")
+                ]
+                ship_html = "<p><strong>Ship to:</strong><br>" + "<br>".join([p for p in parts if p]) + "</p>"
 
-# Keep legacy confirm endpoint (used by older template version)
+            send_email(
+                m["reply_to_email"],
+                f"New Pi order at {m['business_name']} ({amt:.7f} Pi)",
+                f"<p>You received a new payment via {APP_NAME}.</p>"
+                f"{ship_html}"
+                f"<p><strong>Gross:</strong> {gross:.7f} Pi<br>"
+                f"<strong>Fee (1%):</strong> {fee:.7f} Pi<br>"
+                f"<strong>Net to you:</strong> {net:.7f} Pi<br>"
+                f"<strong>Tx:</strong> {tx_hash}</p>"
+            )
+    except Exception as e:
+        print("merchant email fail:", repr(e))
+
+    try:
+        if buyer.get("email"):
+            send_email(
+                buyer["email"],
+                f"Thanks for your order at {m['business_name']}",
+                f"<p>Your order is paid in full with Pi.</p>"
+                f"<p>We’ll email you tracking once the merchant ships.</p>"
+            )
+    except Exception as e:
+        print("buyer email fail:", repr(e))
+
+    # Redirect the buyer back to the merchant’s storefront in Pi Browser
+    redirect_url = f"{PI_WRAPPER_BASE}?path=/store/{m['slug']}"
+    return {"ok": True, "redirect_url": redirect_url}
+
+# ============ Legacy confirm (kept for backwards compatibility) ============
 @app.post("/api/pi/confirm")
 def pi_confirm():
     data = request.get_json(force=True)
@@ -722,81 +823,9 @@ def pi_confirm():
             cx.execute("UPDATE sessions SET state='failed' WHERE id=?", (session_id,))
         return {"ok": False, "error": "verify_failed"}, 400
 
-    if s["item_id"] is None:
-        return _confirm_cart_order(s, tx_hash, buyer, shipping)
-
-    gross, fee, net = split_amounts(float(amt))
-    with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
-        if i and not i["allow_backorder"]:
-            cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
-                       (max(0, i["stock_qty"] - s["qty"]), i["id"]))
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
-        buyer_token = uuid.uuid4().hex
-        cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
-                     shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
-                     status,buyer_token)
-                     VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
-                   (s["merchant_id"], s["item_id"], s["qty"], buyer.get("email"),
-                    buyer.get("name"), json.dumps(shipping), float(gross), float(fee),
-                    float(net), tx_hash, buyer_token))
-        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-                   (tx_hash, session_id))
-
-    ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
-    with conn() as cx:
-        cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
-                   ("sent" if ok else "failed", tx_hash))
-    buyer_url = f"{APP_BASE_URL}/success"
-    return {"ok": True, "buyer_status_url": buyer_url}
-
-def _confirm_cart_order(s, tx_hash, buyer, shipping):
-    with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
-        cart = cx.execute("""
-          SELECT c.* FROM carts c
-          WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1
-        """, (m["id"],)).fetchone()
-        if not cart:
-            return {"ok": False, "error": "cart_missing"}, 400
-        rows = cx.execute("""
-          SELECT cart_items.qty, items.*
-          FROM cart_items JOIN items ON items.id=cart_items.item_id
-          WHERE cart_items.cart_id=?
-        """, (cart["id"],)).fetchall()
-
-    total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
-    gross, fee, net = split_amounts(total)
-
-    with conn() as cx:
-        for r in rows:
-            line_gross = float(r["pi_price"]) * r["qty"]
-            line_fee   = fee * (line_gross / total) if total > 0 else 0.0
-            line_net   = line_gross - line_fee
-            buyer_token = uuid.uuid4().hex
-
-            if not r["allow_backorder"]:
-                cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
-                           (max(0, r["stock_qty"] - r["qty"]), r["id"]))
-
-            cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
-                         shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
-                         status,buyer_token)
-                         VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
-                       (s["merchant_id"], r["id"], r["qty"], buyer.get("email"),
-                        buyer.get("name"), json.dumps(shipping), float(line_gross), float(line_fee),
-                        float(line_net), tx_hash, buyer_token))
-
-        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-                   (tx_hash, s["id"]))
-        cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
-
-    ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Cart order via {APP_NAME}")
-    with conn() as cx:
-        cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
-                   ("sent" if ok else "failed", tx_hash))
-    buyer_url = f"{APP_BASE_URL}/success"
-    return {"ok": True, "buyer_status_url": buyer_url}
+    # Use fulfill_session to unify behavior
+    res = fulfill_session(s, tx_hash, buyer, shipping)
+    return res
 
 # ================= IMAGE PROXY =================
 @app.get("/uimg")
@@ -845,7 +874,7 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
@@ -853,7 +882,6 @@ def buyer_status(token):
 def success():
     return render_template("success.html")
 
-# ================= MAIN =================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=True)
