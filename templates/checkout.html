@@ -9,9 +9,13 @@
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
     .wrap{max-width:620px;margin:0 auto;padding:20px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
-    .row{display:flex;gap:12px;align-items:center}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .col{flex:1;min-width:220px}
     .muted{color:var(--muted)}
+    .label{display:block;color:var(--muted);font-size:.9rem;margin:6px 0 4px}
+    input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    .hint{color:var(--muted);font-size:.9rem;margin-top:10px}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -24,7 +28,7 @@
     </div>
   {% else %}
     <div class="card">
-      <div class="row">
+      <div class="row" style="align-items:center">
         {% if i and i.logo_url %}<img src="{{ i.logo_url }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">{% endif %}
         <div>
           <div style="font-weight:800">{{ i.business_name if i else 'Cart' }}</div>
@@ -36,28 +40,75 @@
         <div>Quantity: <strong>{{ qty }}</strong></div>
         <div>Total: <strong>{{ '%.7f'|format(expected_pi) }} Pi</strong></div>
       </div>
+    </div>
 
-      <div style="margin-top:16px">
-        <button id="payBtn" class="btn">Pay with Pi</button>
-        <p id="msg" class="muted" style="margin-top:10px;"></p>
+    <!-- Buyer & Shipping details -->
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <label class="label">Email (for receipt/tracking)</label>
+          <input id="buyer_email" placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="col">
+          <label class="label">Full name</label>
+          <input id="buyer_name" placeholder="Your name" autocomplete="name">
+        </div>
       </div>
+
+      <div class="row">
+        <div class="col" style="flex:2">
+          <label class="label">Address line 1</label>
+          <input id="ship_address1" placeholder="Street address" autocomplete="address-line1">
+        </div>
+        <div class="col">
+          <label class="label">Address line 2</label>
+          <input id="ship_address2" placeholder="Unit / Apt (optional)" autocomplete="address-line2">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label class="label">City</label>
+          <input id="ship_city" placeholder="City" autocomplete="address-level2">
+        </div>
+        <div class="col">
+          <label class="label">State/Region</label>
+          <input id="ship_region" placeholder="State/Region" autocomplete="address-level1">
+        </div>
+        <div class="col">
+          <label class="label">Postal</label>
+          <input id="ship_postal" placeholder="Postal code" autocomplete="postal-code">
+        </div>
+        <div class="col">
+          <label class="label">Country</label>
+          <input id="ship_country" placeholder="Country" autocomplete="country-name">
+        </div>
+      </div>
+
+      <div class="hint">Tip: If shipping isn’t needed, you can leave address fields blank.</div>
+    </div>
+
+    <div class="card">
+      <button id="payBtn" class="btn">Pay with Pi</button>
+      <p id="msg" class="muted" style="margin-top:10px;"></p>
     </div>
   {% endif %}
 </div>
 
 <script>
 (function(){
+  // Template variables provided by server
   const sessionId = "{{ session_id|e }}";
   const amount = {{ expected_pi if expected_pi else 0 }};
   const cartMode = {{ 'true' if cart_mode else 'false' }};
   const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
   const appId = "{{ PI_APP_ID }}";
-  const redirectSlug = "{{ slug if slug else '' }}"; // provided by server
+  const redirectSlug = "{{ slug if slug else '' }}"; // storefront slug to return to
 
   const btn = document.getElementById('payBtn');
   const msg = document.getElementById('msg');
 
-  function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
+  function setMsg(t){ if(msg) msg.textContent = t || ''; }
 
   function initPi(){
     try{
@@ -69,20 +120,38 @@
 
   function ensureAuth(){
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){ /* optional */ }
+    function onIncompletePaymentFound(payment){ /* optional resume */ }
     return Pi.authenticate(scopes, onIncompletePaymentFound);
+  }
+
+  function buyerPayload(){
+    return {
+      email:   (document.getElementById('buyer_email')?.value || '').trim(),
+      name:    (document.getElementById('buyer_name')?.value || '').trim()
+    };
+  }
+
+  function shippingPayload(){
+    return {
+      address1: (document.getElementById('ship_address1')?.value || '').trim(),
+      address2: (document.getElementById('ship_address2')?.value || '').trim(),
+      city:     (document.getElementById('ship_city')?.value || '').trim(),
+      region:   (document.getElementById('ship_region')?.value || '').trim(),
+      postal:   (document.getElementById('ship_postal')?.value || '').trim(),
+      country:  (document.getElementById('ship_country')?.value || '').trim(),
+      name:     (document.getElementById('buyer_name')?.value || '').trim()
+    };
   }
 
   initPi();
 
   btn?.addEventListener('click', function(){
-    setMsg('Opening Pi payment…');
-
     if (!window.Pi || !Pi.createPayment){
-      setMsg("Open this page in Pi Browser.");
+      setMsg("Open this page in the Pi Browser.");
       return;
     }
 
+    setMsg('Opening Pi payment…');
     ensureAuth().then(() => {
       const paymentData = {
         amount: amount,
@@ -102,11 +171,14 @@
           fetch('/api/pi/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentId, session_id: sessionId, txid })
+            body: JSON.stringify({
+              paymentId, session_id: sessionId, txid,
+              buyer: buyerPayload(),
+              shipping: shippingPayload()
+            })
           })
           .then(r => r.json())
           .then(res => {
-            // Always send buyer back to the storefront with success flag
             const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
             const target = (res && (res.redirect_url || res.buyer_status_url)) || fallback;
             window.location.href = target;
