@@ -2,88 +2,54 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Cart — {{ m['business_name'] }}</title>
+  <title>Cart — {{ m.business_name }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
-    header,main{max-width:980px;margin:0 auto;padding:16px}
-    header{display:flex;align-items:center;justify-content:space-between}
-    .brand{display:flex;align-items:center;gap:10px}
-    .brand img{height:36px;border-radius:6px}
-    .muted{opacity:.85;color:#bcd0ff}
-    table{width:100%;border-collapse:collapse;background:#101828;border:1px solid #1f2a44;border-radius:12px;overflow:hidden}
-    th,td{padding:12px;border-bottom:1px solid #1f2a44;text-align:left}
-    th{background:#0f1728;color:#bcd0ff}
-    tr:last-child td{border-bottom:0}
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:700;text-decoration:none;display:inline-block}
-    .btn.secondary{background:#1f2a44;color:#cfe0ff}
-    .right{display:flex;gap:10px;align-items:center}
-    .total{font-weight:800;font-size:1.1rem}
-    @media (max-width:640px){
-      .hide-sm{display:none}
-      td,th{font-size:.95rem}
-    }
+    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:820px;margin:0 auto;padding:20px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+    .row{display:flex;gap:12px;align-items:center}
+    .item{display:flex;gap:12px;align-items:center;border-top:1px solid var(--line);padding:10px 0}
+    .item img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#0c1424}
+    .muted{color:var(--muted)}
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    form{display:inline}
   </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <img src="{{ m['logo_url'] }}" alt="">
-    <div>
-      <div style="font-weight:800">{{ m['business_name'] }}</div>
-      <div class="muted">Your cart</div>
-    </div>
-  </div>
-  <div class="right">
-    <a class="btn secondary" href="/store/{{ m['slug'] }}?cid={{ cid }}">Continue shopping</a>
-    <a class="btn" href="/checkout/cart/{{ cid }}">Checkout</a>
-  </div>
-</header>
-
-<main>
-  {% if rows and rows|length %}
-    <table>
-      <thead>
-        <tr>
-          <th>Item</th>
-          <th class="hide-sm">Price (Pi)</th>
-          <th>Qty</th>
-          <th>Subtotal (Pi)</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-          <tr>
-            <td>{{ r['title'] }}</td>
-            <td class="hide-sm">{{ "%.6f"|format(r['pi_price']) }}</td>
-            <td>{{ r['qty'] }}</td>
-            <td>{{ "%.6f"|format(r['pi_price'] * r['qty']) }}</td>
-            <td>
-              <form method="POST" action="/cart/{{ cid }}/remove">
-                <input type="hidden" name="row_id" value="{{ r['cid'] }}">
-                <button class="btn secondary" type="submit">Remove</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
-      <div class="muted">Shipping should be included in Pi price (merchant-set).</div>
-      <div class="right">
-        <div class="total">Total: {{ "%.6f"|format(total) }} Pi</div>
-        <a class="btn" href="/checkout/cart/{{ cid }}">Checkout</a>
+<div class="wrap">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div style="font-weight:800">{{ m.business_name }} — Cart</div>
+      <div>
+        <a class="btn" href="/store/{{ m.slug }}?{% if request.args.get('t') %}t={{ request.args.get('t') }}&{% endif %}cid={{ cid }}">Continue shopping</a>
       </div>
     </div>
-  {% else %}
-    <p class="muted">Your cart is empty.</p>
-    <div style="margin-top:10px">
-      <a class="btn" href="/store/{{ m['slug'] }}?cid={{ cid }}">Browse products</a>
-    </div>
-  {% endif %}
-</main>
+    {% if rows|length == 0 %}
+      <p class="muted">Your cart is empty.</p>
+    {% else %}
+      {% for r in rows %}
+        <div class="item">
+          <img src="{{ r.image_url }}" onerror="this.src='{{ app_base }}/uimg?src='+encodeURIComponent('{{ r.image_url }}')" alt="">
+          <div style="flex:1">
+            <div style="font-weight:700">{{ r.title }}</div>
+            <div class="muted">{{ r.pi_price }} Pi × {{ r.qty }}</div>
+          </div>
+          <form method="post" action="/cart/{{ cid }}/remove?{% if request.args.get('t') %}t={{ request.args.get('t') }}&{% endif %}">
+            <input type="hidden" name="row_id" value="{{ r.cid }}">
+            <button class="btn" type="submit">Remove</button>
+          </form>
+        </div>
+      {% endfor %}
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <div style="font-size:18px;font-weight:800">Total: {{ '%.7f'|format(total) }} Pi</div>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <a class="btn" href="/checkout/cart/{{ cid }}?{% if request.args.get('t') %}t={{ request.args.get('t') }}{% endif %}">Proceed to Checkout</a>
+      </div>
+    {% endif %}
+  </div>
+</div>
 </body>
 </html>
