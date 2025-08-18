@@ -12,8 +12,8 @@
     p{color:#bcd0ff}
     button{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800}
     .muted{color:#bcd0ff;opacity:.9}
+    .err{color:#ff9aa2;margin-top:10px;white-space:pre-wrap}
   </style>
-  <!-- Pi SDK -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
@@ -25,6 +25,7 @@
     <button id="piSignInBtn">Authorize with Pi</button>
 
     <p id="msg" class="muted" style="margin-top:12px;"></p>
+    <div id="err" class="err"></div>
   </div>
 </div>
 
@@ -32,17 +33,31 @@
 (function(){
   const btn = document.getElementById('piSignInBtn');
   const msg = document.getElementById('msg');
+  const err = document.getElementById('err');
   const nextUrl = "{{ next_url|e }}";      // e.g. /store/<slug>
   const postUrl = "/auth/exchange/store?next=" + encodeURIComponent(nextUrl);
+  const sandbox = {{ 'true' if sandbox else 'false' }};
 
   function setMsg(t){ if(msg){ msg.textContent = t; } }
+  function setErr(t){ if(err){ err.textContent = t || ''; } }
 
-  // Guard if SDK failed to load
-  if (!window.Pi || !Pi.authenticate) {
-    setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
+  function initPi(){
+    if (!window.Pi || !Pi.init) return false;
+    try {
+      Pi.init({ version: "2.0", sandbox: sandbox });
+      return true;
+    } catch(e){
+      console.error("Pi.init failed", e);
+      setErr("Pi.init failed: " + (e?.message || e));
+      return false;
+    }
   }
 
+  const inited = initPi();
+  if (!inited) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+
   btn?.addEventListener('click', function(){
+    setErr('');
     if (!window.Pi || !Pi.authenticate) {
       setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
       return;
@@ -51,35 +66,30 @@
 
     const scopes = ['payments','username'];
     function onIncompletePaymentFound(payment){
-      // Optionally handle any incomplete payments
       console.log("Incomplete payment found:", payment);
     }
 
     Pi.authenticate(scopes, onIncompletePaymentFound)
       .then(function(auth){
-        // Build payload similar to merchant flow
         const payload = {
           accessToken: auth.accessToken,
-          user: auth.user    // { uid / id, username }
+          user: auth.user
         };
-
-        // Submit as a normal form-post so redirects work seamlessly
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = postUrl;
-
         const inp = document.createElement('input');
         inp.type = 'hidden';
         inp.name = 'payload';
         inp.value = JSON.stringify(payload);
-
         form.appendChild(inp);
         document.body.appendChild(form);
         form.submit();
       })
-      .catch(function(err){
-        console.error(err);
+      .catch(function(e){
+        console.error(e);
         setMsg("Authorization failed. Please try again.");
+        setErr(e && e.message ? e.message : String(e));
       });
   });
 })();
