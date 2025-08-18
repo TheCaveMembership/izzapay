@@ -151,6 +151,12 @@ def whoami():
 # ----------------- MERCHANT SIGN-IN -----------------
 @app.get("/")
 def home():
+    # If the wrapper launched us without the original deep path, accept ?path=/store/<slug> etc.
+    desired = request.args.get("path")
+    if desired:
+        # Guard: only allow internal redirects
+        if desired.startswith("/"):
+            return redirect(desired)
     return redirect("/signin")
 
 @app.get("/signin")
