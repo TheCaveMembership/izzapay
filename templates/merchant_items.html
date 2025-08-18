@@ -2,30 +2,22 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>IZZA PAY — Merchant</title>
+  <title>Merchant Dashboard — {{ m.business_name if m else 'Setup' }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:980px;margin:0 auto;padding:24px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
-    h1,h2{margin:0 0 10px}
-    p{color:var(--muted)}
-    label{display:block;margin:10px 0 6px}
-    input[type="text"],input[type="email"],input[type="url"],input[type="number"],select{
-      width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0c1424;color:var(--txt)
-    }
-    .row{display:flex;gap:16px;flex-wrap:wrap}
-    .col{flex:1 1 320px}
-    button,.btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    .muted{color:var(--muted)}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .copybox{display:flex;gap:8px;align-items:center;margin-top:6px}
-    .copybox input{flex:1}
-    .pill{display:inline-block;background:#1a2440;color:#cfe1ff;border:1px solid #2a3a66;border-radius:999px;padding:6px 10px;font-size:12px;margin:4px 0}
-    .item{display:flex;gap:14px;align-items:center;border-top:1px solid var(--line);padding:12px 0}
-    .item img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
-    .err{color:#ff9aa2}
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
+    a{color:#87b4ff;text-decoration:none}
+    .wrap{max-width:1000px;margin:0 auto;padding:20px}
+    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:16px;margin-bottom:16px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+    input,select{background:#0b1222;border:1px solid #233251;color:#e8f0ff;border-radius:10px;padding:10px;width:100%}
+    label{font-size:.9rem;color:#bcd0ff}
+    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}
+    .muted{color:#bcd0ff}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+    .title{font-weight:900;font-size:1.1rem;margin:0 0 8px}
+    .small{font-size:.9rem}
   </style>
 </head>
 <body>
@@ -33,160 +25,133 @@
 
   {% if setup_mode %}
     <div class="card">
-      <h1>Create your merchant profile</h1>
-      <p class="muted">This profile powers your public Pi store and payouts.</p>
-      {% if error %}<p class="err">{{ error }}</p>{% endif %}
+      <div class="title">Create your merchant profile</div>
+      {% if error %}<p style="color:#ff9f9f">{{ error }}</p>{% endif %}
       <form method="post" action="/merchant/setup{% if t %}?t={{ t }}{% endif %}">
         <div class="row">
-          <div class="col">
-            <label>Store slug (shown in links)</label>
-            <input type="text" name="slug" placeholder="e.g. cave" required>
-          </div>
-          <div class="col">
+          <div style="flex:1;min-width:240px">
             <label>Business name</label>
-            <input type="text" name="business_name" placeholder="Your store name" required>
+            <input name="business_name" placeholder="e.g. Cave Collectibles">
+          </div>
+          <div style="flex:1;min-width:240px">
+            <label>Store slug (URL)</label>
+            <input name="slug" placeholder="e.g. cave">
           </div>
         </div>
-        <div class="row">
-          <div class="col">
-            <label>Logo URL</label>
-            <input type="url" name="logo_url" placeholder="https://...">
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1;min-width:240px">
+            <label>Logo URL (https://)</label>
+            <input name="logo_url" placeholder="https://...">
           </div>
-          <div class="col">
+          <div style="flex:1;min-width:240px">
             <label>Theme</label>
             <select name="theme_mode">
-              <option value="dark" selected>Dark</option>
+              <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
           </div>
         </div>
-        <div class="row">
-          <div class="col">
-            <label>Notification email (optional)</label>
-            <input type="email" name="reply_to_email" placeholder="you@store.com">
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1;min-width:240px">
+            <label>Merchant email (notifications)</label>
+            <input name="reply_to_email" placeholder="you@example.com">
           </div>
-          <div class="col">
-            <label>Pi wallet public key (starts with G..., 56 chars)</label>
-            <input type="text" name="pi_wallet_address" placeholder="G..." required>
+          <div style="flex:1;min-width:240px">
+            <label>Pi Wallet Public Key (starts with G..., 56 chars)</label>
+            <input name="pi_wallet_address" placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX">
           </div>
         </div>
-        <div class="row">
-          <div class="col">
-            <label>Pi @handle (optional)</label>
-            <input type="text" name="pi_handle" placeholder="@yourhandle">
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1;min-width:240px">
+            <label>Pi Handle (optional)</label>
+            <input name="pi_handle" placeholder="@yourhandle">
           </div>
         </div>
         <div style="margin-top:14px">
-          <button type="submit">Create merchant</button>
+          <button class="btn" type="submit">Create merchant</button>
         </div>
       </form>
     </div>
 
   {% else %}
+
     <div class="card">
-      <h1>{{ m.business_name }}</h1>
-      <p class="muted">Share your Pi store link with customers. This link is Pi-wrapped so authentication works in Sandbox/Mainnet.</p>
-
-      <!-- CUSTOMER STORE LINK (Pi wrapper base + ?path=/store/<slug>) -->
-      <label>Your public Pi store link</label>
-      <div class="copybox">
-        <input class="mono" id="storeLink" value="{{ share_base }}?path=/store/{{ m.slug }}" readonly>
-        <button class="btn" onclick="copy('#storeLink')">Copy</button>
-      </div>
-
-      <p class="muted" style="margin-top:8px">
-        Tip: add this link as a menu item (e.g., “Pay with Pi”) on your website.
-      </p>
-      <div style="margin-top:8px">
-        <a class="btn" href="{{ share_base }}?path=/store/{{ m.slug }}" target="_blank" rel="noopener">Open store (Pi Browser)</a>
+      <div class="title">Your storefront link</div>
+      <div class="small muted">Share this with customers. It opens your Pi store directly (authentication required):</div>
+      <div class="mono" style="margin-top:8px;word-break:break-all">
+        {{ share_base }}/store/{{ m.slug }}
       </div>
     </div>
 
     <div class="card">
-      <h2>Add a product</h2>
+      <div class="title">Add a product</div>
       <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
         <div class="row">
-          <div class="col">
+          <div style="flex:2;min-width:240px">
             <label>Title</label>
-            <input type="text" name="title" placeholder="e.g., Sports Card Pack" required>
+            <input name="title" placeholder="e.g. Starter Card Pack">
           </div>
-          <div class="col">
+          <div style="flex:1;min-width:160px">
             <label>SKU (optional)</label>
-            <input type="text" name="sku" placeholder="SKU-1234">
+            <input name="sku" placeholder="SKU123">
           </div>
         </div>
-        <div class="row">
-          <div class="col">
-            <label>Image URL</label>
-            <input type="url" name="image_url" placeholder="https://...">
-            <p class="muted">If an image won’t show in Pi Browser, use our proxy: <span class="mono">{{ app_base }}/uimg?src=YOUR_HTTPS_IMAGE_URL</span></p>
+        <div class="row" style="margin-top:10px">
+          <div style="flex:2;min-width:240px">
+            <label>Image URL (https://)</label>
+            <input name="image_url" placeholder="https://...">
           </div>
-          <div class="col">
+          <div style="flex:1;min-width:160px">
             <label>Price (Pi)</label>
-            <input type="number" name="pi_price" min="0" step="0.0000001" placeholder="0.5" required>
-            <p class="muted">Include shipping in your Pi price.</p>
+            <input name="pi_price" placeholder="0.5">
           </div>
         </div>
-        <div class="row">
-          <div class="col">
-            <label>Stock quantity</label>
-            <input type="number" name="stock_qty" min="0" step="1" value="0">
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1;min-width:160px">
+            <label>Stock Qty</label>
+            <input name="stock_qty" placeholder="10" value="10">
           </div>
-          <div class="col">
-            <label>Allow backorder?</label>
+          <div style="flex:1;min-width:160px">
+            <label>Allow Backorder?</label>
             <select name="allow_backorder">
               <option value="">No</option>
               <option value="1">Yes</option>
             </select>
           </div>
         </div>
-        <div style="margin-top:14px">
-          <button type="submit">Create product</button>
+        <div style="margin-top:12px">
+          <button class="btn" type="submit">Create product</button>
         </div>
       </form>
     </div>
 
     <div class="card">
-      <h2>Your products</h2>
+      <div class="title">Products</div>
       {% if items|length == 0 %}
-        <p class="muted">No products yet. Add your first one above.</p>
+        <p class="muted small">No products yet.</p>
       {% else %}
-        {% for it in items %}
-          <div class="item">
-            <img src="{{ it.image_url }}"
-                 onerror="this.src='{{ app_base }}/uimg?src='+encodeURIComponent('{{ it.image_url }}')"
-                 alt="">
-            <div style="flex:1">
-              <div><strong>{{ it.title }}</strong> <span class="pill">{{ it.pi_price }} Pi</span></div>
-              {% if it.sku %}<div class="muted">SKU: {{ it.sku }}</div>{% endif %}
-
-              <!-- DIRECT BUY LINK (Pi wrapper base + ?path=/checkout/<link_id>) -->
-              <div style="margin-top:8px">
-                <label style="display:block;margin:0 0 6px">Direct “Buy with Pi” link (for this item)</label>
-                <div class="copybox">
-                  <input class="mono" id="buy_{{ it.link_id }}" value="{{ share_base }}?path=/checkout/{{ it.link_id }}" readonly>
-                  <button class="btn" onclick="copy('#buy_{{ it.link_id }}')">Copy</button>
-                </div>
-                <div style="margin-top:6px">
-                  <a class="btn" href="{{ share_base }}?path=/checkout/{{ it.link_id }}" target="_blank" rel="noopener">Open test (Pi Browser)</a>
-                </div>
+        <div class="grid">
+          {% for it in items %}
+            <div style="background:#0b1222;border:1px solid #233251;border-radius:12px;padding:12px">
+              <div style="font-weight:800">{{ it.title }}</div>
+              <div class="muted small">Price: {{ '%.7f'|format(it.pi_price) }} Pi</div>
+              <div class="muted small">Stock: {{ it.stock_qty }}</div>
+              <div class="small" style="margin-top:8px"><strong>Buy-Now link:</strong></div>
+              <div class="mono small" style="word-break:break-all">
+                {{ share_base }}/checkout/{{ it.link_id }}
               </div>
             </div>
-          </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
       {% endif %}
     </div>
+
+    <div class="card">
+      <a class="btn" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">View orders</a>
+    </div>
+
   {% endif %}
 
 </div>
-
-<script>
-function copy(sel){
-  const el = document.querySelector(sel);
-  if(!el) return;
-  el.select(); el.setSelectionRange(0, 99999);
-  try { document.execCommand('copy'); } catch(e){}
-}
-</script>
 </body>
 </html>
