@@ -9,13 +9,12 @@
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
     .wrap{max-width:620px;margin:0 auto;padding:20px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
-    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
     .col{flex:1;min-width:220px}
     .muted{color:var(--muted)}
     .label{display:block;color:var(--muted);font-size:.9rem;margin:6px 0 4px}
     input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    .hint{color:var(--muted);font-size:.9rem;margin-top:10px}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -42,50 +41,50 @@
       </div>
     </div>
 
-    <!-- Buyer & Shipping details -->
+    <!-- Buyer & Shipping details (email required) -->
     <div class="card">
       <div class="row">
         <div class="col">
-          <label class="label">Email (for receipt/tracking)</label>
-          <input id="buyer_email" placeholder="you@example.com" autocomplete="email">
+          <label class="label" for="buyer_email">Email (required for receipt/tracking)</label>
+          <input id="buyer_email" type="email" placeholder="you@example.com" autocomplete="email" required>
         </div>
         <div class="col">
-          <label class="label">Full name</label>
+          <label class="label" for="buyer_name">Full name</label>
           <input id="buyer_name" placeholder="Your name" autocomplete="name">
         </div>
       </div>
 
       <div class="row">
         <div class="col" style="flex:2">
-          <label class="label">Address line 1</label>
+          <label class="label" for="ship_address1">Address line 1</label>
           <input id="ship_address1" placeholder="Street address" autocomplete="address-line1">
         </div>
         <div class="col">
-          <label class="label">Address line 2</label>
+          <label class="label" for="ship_address2">Address line 2</label>
           <input id="ship_address2" placeholder="Unit / Apt (optional)" autocomplete="address-line2">
         </div>
       </div>
 
       <div class="row">
         <div class="col">
-          <label class="label">City</label>
+          <label class="label" for="ship_city">City</label>
           <input id="ship_city" placeholder="City" autocomplete="address-level2">
         </div>
         <div class="col">
-          <label class="label">State/Region</label>
+          <label class="label" for="ship_region">State/Region</label>
           <input id="ship_region" placeholder="State/Region" autocomplete="address-level1">
         </div>
         <div class="col">
-          <label class="label">Postal</label>
+          <label class="label" for="ship_postal">Postal</label>
           <input id="ship_postal" placeholder="Postal code" autocomplete="postal-code">
         </div>
         <div class="col">
-          <label class="label">Country</label>
+          <label class="label" for="ship_country">Country</label>
           <input id="ship_country" placeholder="Country" autocomplete="country-name">
         </div>
       </div>
 
-      <div class="hint">Tip: If shipping isn’t needed, you can leave address fields blank.</div>
+      <p class="muted" style="margin-top:8px">If shipping isn’t needed, you can leave the address fields blank.</p>
     </div>
 
     <div class="card">
@@ -97,16 +96,25 @@
 
 <script>
 (function(){
-  // Template variables provided by server
-  const sessionId = "{{ session_id|e }}";
-  const amount = {{ expected_pi if expected_pi else 0 }};
-  const cartMode = {{ 'true' if cart_mode else 'false' }};
-  const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
-  const appId = "{{ PI_APP_ID }}";
-  const redirectSlug = "{{ slug if slug else '' }}"; // storefront slug to return to
+  // Template vars from server
+  const sessionId   = "{{ session_id|e }}";
+  const amount      = {{ expected_pi if expected_pi else 0 }};
+  const cartMode    = {{ 'true' if cart_mode else 'false' }};
+  const sandbox     = {{ 'true' if PI_SANDBOX else 'false' }};
+  const appId       = "{{ PI_APP_ID }}";
+  const redirectSlug= "{{ slug if slug else '' }}"; // storefront slug for return
 
   const btn = document.getElementById('payBtn');
   const msg = document.getElementById('msg');
+
+  const emailEl = document.getElementById('buyer_email');
+  const nameEl  = document.getElementById('buyer_name');
+  const a1El    = document.getElementById('ship_address1');
+  const a2El    = document.getElementById('ship_address2');
+  const cityEl  = document.getElementById('ship_city');
+  const regEl   = document.getElementById('ship_region');
+  const postEl  = document.getElementById('ship_postal');
+  const ctryEl  = document.getElementById('ship_country');
 
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
 
@@ -126,32 +134,41 @@
 
   function buyerPayload(){
     return {
-      email:   (document.getElementById('buyer_email')?.value || '').trim(),
-      name:    (document.getElementById('buyer_name')?.value || '').trim()
+      email: (emailEl?.value || '').trim(),
+      name:  (nameEl?.value || '').trim()
     };
   }
 
   function shippingPayload(){
     return {
-      address1: (document.getElementById('ship_address1')?.value || '').trim(),
-      address2: (document.getElementById('ship_address2')?.value || '').trim(),
-      city:     (document.getElementById('ship_city')?.value || '').trim(),
-      region:   (document.getElementById('ship_region')?.value || '').trim(),
-      postal:   (document.getElementById('ship_postal')?.value || '').trim(),
-      country:  (document.getElementById('ship_country')?.value || '').trim(),
-      name:     (document.getElementById('buyer_name')?.value || '').trim()
+      address1: (a1El?.value || '').trim(),
+      address2: (a2El?.value || '').trim(),
+      city:     (cityEl?.value || '').trim(),
+      region:   (regEl?.value || '').trim(),
+      postal:   (postEl?.value || '').trim(),
+      country:  (ctryEl?.value || '').trim(),
+      name:     (nameEl?.value || '').trim()
     };
   }
 
   initPi();
 
   btn?.addEventListener('click', function(){
+    // Require email before triggering Pi
+    const emailVal = (emailEl?.value || '').trim();
+    if (!emailVal){
+      setMsg('Please enter your email before continuing.');
+      emailEl?.focus();
+      return;
+    }
+
     if (!window.Pi || !Pi.createPayment){
       setMsg("Open this page in the Pi Browser.");
       return;
     }
 
     setMsg('Opening Pi payment…');
+
     ensureAuth().then(() => {
       const paymentData = {
         amount: amount,
@@ -189,7 +206,7 @@
           });
         },
         onCancel: function(){ setMsg("Payment canceled."); },
-        onError: function(){ setMsg("Please try again."); }
+        onError:  function(){ setMsg("Please try again."); }
       });
     }).catch(() => {
       setMsg("Please try again.");
