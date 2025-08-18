@@ -1,197 +1,51 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Checkout — {{ i.business_name if i else 'IZZA PAY' }}</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
-    .wrap{max-width:720px;margin:0 auto;padding:24px}
-    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:16px;margin-bottom:16px}
-    .row{display:flex;gap:12px;flex-wrap:wrap}
-    label{color:#bcd0ff;font-size:.9rem}
-    input,textarea{width:100%;background:#0b1222;border:1px solid #233251;border-radius:10px;color:#e8f0ff;padding:10px}
-    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800;cursor:pointer}
-    .muted{color:#bcd0ff}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .status{padding:10px 12px;border-radius:10px;margin-top:10px}
-    .ok{background:#13301b;border:1px solid #1e6c36;color:#9ee2b0}
-    .warn{background:#301313;border:1px solid #6c1e1e;color:#ffb7b7}
-    .wait{background:#131e30;border:1px solid #1e3d6c;color:#a6c6ff}
-  </style>
+  <meta charset="UTF-8">
+  <title>Checkout</title>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <script>
-    // Production mode — no sandbox checks, no gating
-    document.addEventListener('DOMContentLoaded', () => {
-      try { Pi.init({ version: "2.0", sandbox: false }); } catch(e){ console.error(e); }
+    document.addEventListener("DOMContentLoaded", () => {
+      const payBtn = document.getElementById("payWithPi");
+      payBtn.addEventListener("click", async () => {
+        try {
+          const paymentData = {
+            amount: {{ total }},
+            memo: "Purchase from {{ merchant.name }}",
+            metadata: { cart: {{ cart|tojson }} },
+          };
+
+          const payment = await Pi.createPayment(paymentData, {
+            onReadyForServerApproval: (paymentId) => {
+              fetch(`/approve_payment/${paymentId}`, { method: "POST" });
+            },
+            onReadyForServerCompletion: (paymentId, txid) => {
+              fetch(`/complete_payment/${paymentId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ txid }),
+              }).then(() => {
+                alert("Payment complete!");
+                window.location.href = "{{ merchant.store_url }}";
+              });
+            },
+            onCancel: (paymentId) => {
+              console.log("Payment cancelled", paymentId);
+            },
+            onError: (error, paymentId) => {
+              console.error("Payment error", error, paymentId);
+            },
+          });
+        } catch (err) {
+          console.error("Payment initiation failed", err);
+        }
+      });
     });
   </script>
 </head>
 <body>
-<div class="wrap">
-
-  {% if sold_out %}
-    <div class="card">
-      <h2 style="margin:0 0 8px">{{ i.title }}</h2>
-      <p class="muted">Sorry, this item is currently unavailable.</p>
-    </div>
-  {% else %}
-    <div class="card">
-      <h2 style="margin:0 0 8px">{{ i.title }}</h2>
-      <p class="muted">{{ i.business_name }}</p>
-      {% if i.logo_url %}
-        <img src="{{ app_base }}/uimg?src={{ i.logo_url | urlencode }}" alt="Logo" style="max-height:40px;margin:8px 0;" onerror="this.remove()">
-      {% endif %}
-      <p><strong>Quantity:</strong> {{ qty }}</p>
-      <p><strong>Total:</strong> <span class="mono">{{ '%.7f'|format(expected_pi) }}</span> Pi</p>
-    </div>
-
-    <div class="card">
-      <div class="row">
-        <div style="flex:1;min-width:220px">
-          <label>Your email (for receipts/tracking)</label>
-          <input id="buyer_email" placeholder="you@example.com">
-        </div>
-        <div style="flex:1;min-width:220px">
-          <label>Your name</label>
-          <input id="buyer_name" placeholder="Full name">
-        </div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <div style="flex:2;min-width:220px">
-          <label>Address line 1</label>
-          <input id="ship_address1" placeholder="Street address">
-        </div>
-        <div style="flex:1;min-width:140px">
-          <label>Address line 2</label>
-          <input id="ship_address2" placeholder="Unit / Apt (optional)">
-        </div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <div style="flex:1;min-width:120px">
-          <label>City</label>
-          <input id="ship_city" placeholder="City">
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label>Region/State</label>
-          <input id="ship_region" placeholder="Region">
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label>Postal</label>
-          <input id="ship_postal" placeholder="Postal code">
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label>Country</label>
-          <input id="ship_country" placeholder="Country">
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <button id="payBtn" class="btn">Pay with Pi</button>
-      <div id="status" class="status wait" style="display:none"></div>
-    </div>
-  {% endif %}
-
-</div>
-
-<script>
-(function(){
-  const payBtn = document.getElementById('payBtn');
-  const statusEl = document.getElementById('status');
-  const sessionId = "{{ session_id }}";
-  const amount = {{ '%.7f'|format(expected_pi) }};
-  const cartMode = {{ 'true' if cart_mode else 'false' }};
-  const appBase = "{{ app_base }}";
-
-  function setStatus(msg, cls){
-    statusEl.textContent = msg;
-    statusEl.className = "status " + (cls || "wait");
-    statusEl.style.display = "block";
-  }
-
-  function buyerPayload(){
-    return {
-      email:   document.getElementById('buyer_email').value.trim(),
-      name:    document.getElementById('buyer_name').value.trim()
-    };
-  }
-
-  function shippingPayload(){
-    return {
-      address1: document.getElementById('ship_address1').value.trim(),
-      address2: document.getElementById('ship_address2').value.trim(),
-      city:     document.getElementById('ship_city').value.trim(),
-      region:   document.getElementById('ship_region').value.trim(),
-      postal:   document.getElementById('ship_postal').value.trim(),
-      country:  document.getElementById('ship_country').value.trim(),
-      name:     document.getElementById('buyer_name').value.trim()
-    };
-  }
-
-  async function postJSON(url, body){
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body || {})
-    });
-    let data = null;
-    try { data = await r.json(); } catch(e){}
-    return { ok: r.ok, status: r.status, data };
-  }
-
-  async function startPayment(){
-    try{
-      if (typeof window.Pi === 'undefined') {
-        setStatus("Pi SDK not available. Please open this page in the Pi Browser.", "warn");
-        return;
-      }
-
-      setStatus("Opening Pi payment…", "wait");
-
-      const memo = cartMode ? `Cart ${sessionId}` : `Order ${sessionId}`;
-      const metadata = { session_id: sessionId, cart: !!cartMode };
-
-      await Pi.createPayment({
-        amount: amount,
-        memo: memo,
-        metadata: metadata,
-        onReadyForServerApproval: async (paymentId) => {
-          const res = await postJSON(`${appBase}/api/pi/approve`, { paymentId, session_id: sessionId });
-          if(!res.ok || !res.data || res.data.ok !== true){
-            console.error("approve failed", res);
-            throw new Error("approve_failed");
-          }
-        },
-        onReadyForServerCompletion: async (paymentId, txid) => {
-          const res = await postJSON(`${appBase}/api/pi/complete`, {
-            paymentId, session_id: sessionId, txid,
-            buyer: buyerPayload(),
-            shipping: shippingPayload()
-          });
-          if(res.ok && res.data && res.data.ok === True || res.data.ok === true){
-            setStatus("Payment complete! You can close this page and return to the store.", "ok");
-            return;
-          }
-          console.error("complete failed", res);
-          throw new Error("complete_failed");
-        },
-        onCancel: () => setStatus("Payment was cancelled.", "warn"),
-        onError: (error) => {
-          console.error("Pi SDK error", error);
-          setStatus("An error occurred. Please try again.", "warn");
-        }
-      });
-
-      setStatus("Still waiting… Ensure Pi Browser is active and you approved the prompt.", "wait");
-    }catch(err){
-      console.error("payment error", err);
-      setStatus("Could not start or confirm payment. If Pi showed success, you can return to the store.", "warn");
-    }
-  }
-
-  payBtn.addEventListener('click', startPayment);
-})();
-</script>
+  <h1>Checkout</h1>
+  <p>Total: {{ total }} Pi</p>
+  <button id="payWithPi">Pay with Pi</button>
 </body>
 </html>
