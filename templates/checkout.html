@@ -1,201 +1,75 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Checkout — {{ i.title if i else 'Cart' }}</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:620px;margin:0 auto;padding:20px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
-    .row{display:flex;gap:12px;flex-wrap:wrap}
-    .col{flex:1;min-width:220px}
-    .muted{color:var(--muted)}
-    .label{display:block;color:var(--muted);font-size:.9rem;margin:6px 0 4px}
-    input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
-    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    .hint{color:var(--muted);font-size:.9rem;margin-top:10px}
-  </style>
+  <meta charset="UTF-8">
+  <title>Checkout</title>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
-<div class="wrap">
-  {% if sold_out %}
-    <div class="card">
-      <h2>Sold out</h2>
-      <p class="muted">This item is not available.</p>
-    </div>
-  {% else %}
-    <div class="card">
-      <div class="row" style="align-items:center">
-        {% if i and i.logo_url %}<img src="{{ i.logo_url }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">{% endif %}
-        <div>
-          <div style="font-weight:800">{{ i.business_name if i else 'Cart' }}</div>
-          <div class="muted">{{ i.title if i else 'Cart total' }}</div>
-        </div>
-      </div>
+  <h1>Checkout</h1>
 
-      <div style="margin-top:12px">
-        <div>Quantity: <strong>{{ qty }}</strong></div>
-        <div>Total: <strong>{{ '%.7f'|format(expected_pi) }} Pi</strong></div>
-      </div>
-    </div>
+  <form id="checkout-form">
+    <label for="email">Email (for receipt & tracking):</label><br>
+    <input type="email" id="email" name="email" required><br><br>
 
-    <!-- Buyer & Shipping details -->
-    <div class="card">
-      <div class="row">
-        <div class="col">
-          <label class="label">Email (for receipt/tracking)</label>
-          <input id="buyer_email" placeholder="you@example.com" autocomplete="email">
-        </div>
-        <div class="col">
-          <label class="label">Full name</label>
-          <input id="buyer_name" placeholder="Your name" autocomplete="name">
-        </div>
-      </div>
+    <label for="address">Shipping Address:</label><br>
+    <textarea id="address" name="address"></textarea><br><br>
 
-      <div class="row">
-        <div class="col" style="flex:2">
-          <label class="label">Address line 1</label>
-          <input id="ship_address1" placeholder="Street address" autocomplete="address-line1">
-        </div>
-        <div class="col">
-          <label class="label">Address line 2</label>
-          <input id="ship_address2" placeholder="Unit / Apt (optional)" autocomplete="address-line2">
-        </div>
-      </div>
+    <label for="name">Full Name:</label><br>
+    <input type="text" id="name" name="name"><br><br>
 
-      <div class="row">
-        <div class="col">
-          <label class="label">City</label>
-          <input id="ship_city" placeholder="City" autocomplete="address-level2">
-        </div>
-        <div class="col">
-          <label class="label">State/Region</label>
-          <input id="ship_region" placeholder="State/Region" autocomplete="address-level1">
-        </div>
-        <div class="col">
-          <label class="label">Postal</label>
-          <input id="ship_postal" placeholder="Postal code" autocomplete="postal-code">
-        </div>
-        <div class="col">
-          <label class="label">Country</label>
-          <input id="ship_country" placeholder="Country" autocomplete="country-name">
-        </div>
-      </div>
+    <button type="button" id="pay-with-pi">Pay with Pi</button>
+  </form>
 
-      <div class="hint">Tip: If shipping isn’t needed, you can leave address fields blank.</div>
-    </div>
+  <script>
+    const payButton = document.getElementById("pay-with-pi");
 
-    <div class="card">
-      <button id="payBtn" class="btn">Pay with Pi</button>
-      <p id="msg" class="muted" style="margin-top:10px;"></p>
-    </div>
-  {% endif %}
-</div>
+    payButton.addEventListener("click", async () => {
+      const email = document.getElementById("email").value.trim();
+      const address = document.getElementById("address").value.trim();
+      const name = document.getElementById("name").value.trim();
 
-<script>
-(function(){
-  // Template variables provided by server
-  const sessionId = "{{ session_id|e }}";
-  const amount = {{ expected_pi if expected_pi else 0 }};
-  const cartMode = {{ 'true' if cart_mode else 'false' }};
-  const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
-  const appId = "{{ PI_APP_ID }}";
-  const redirectSlug = "{{ slug if slug else '' }}"; // storefront slug to return to
+      // Require email
+      if (!email) {
+        alert("Please enter your email before proceeding.");
+        return;
+      }
 
-  const btn = document.getElementById('payBtn');
-  const msg = document.getElementById('msg');
+      try {
+        const paymentData = {
+          amount: localStorage.getItem("cart_total"),
+          memo: "IzzaPay Purchase",
+          metadata: { email, address, name },
+        };
 
-  function setMsg(t){ if(msg) msg.textContent = t || ''; }
+        const payment = await window.Pi.createPayment(paymentData, {
+          onReadyForServerApproval: (paymentId) => {
+            fetch("/approve_payment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ paymentId, email, address, name }),
+            });
+          },
+          onReadyForServerCompletion: (paymentId, txid) => {
+            fetch("/complete_payment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ paymentId, txid, email, address, name }),
+            });
+          },
+          onCancel: (paymentId) => {
+            console.log("Payment cancelled", paymentId);
+          },
+          onError: (error, paymentId) => {
+            console.error("Payment error", error, paymentId);
+          },
+        });
 
-  function initPi(){
-    try{
-      if (!window.Pi || !Pi.init) return false;
-      Pi.init({ version: "2.0", sandbox: sandbox, appId: appId });
-      return true;
-    }catch(e){ return false; }
-  }
-
-  function ensureAuth(){
-    const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){ /* optional resume */ }
-    return Pi.authenticate(scopes, onIncompletePaymentFound);
-  }
-
-  function buyerPayload(){
-    return {
-      email:   (document.getElementById('buyer_email')?.value || '').trim(),
-      name:    (document.getElementById('buyer_name')?.value || '').trim()
-    };
-  }
-
-  function shippingPayload(){
-    return {
-      address1: (document.getElementById('ship_address1')?.value || '').trim(),
-      address2: (document.getElementById('ship_address2')?.value || '').trim(),
-      city:     (document.getElementById('ship_city')?.value || '').trim(),
-      region:   (document.getElementById('ship_region')?.value || '').trim(),
-      postal:   (document.getElementById('ship_postal')?.value || '').trim(),
-      country:  (document.getElementById('ship_country')?.value || '').trim(),
-      name:     (document.getElementById('buyer_name')?.value || '').trim()
-    };
-  }
-
-  initPi();
-
-  btn?.addEventListener('click', function(){
-    if (!window.Pi || !Pi.createPayment){
-      setMsg("Open this page in the Pi Browser.");
-      return;
-    }
-
-    setMsg('Opening Pi payment…');
-    ensureAuth().then(() => {
-      const paymentData = {
-        amount: amount,
-        memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
-        metadata: { session_id: sessionId }
-      };
-
-      Pi.createPayment(paymentData, {
-        onReadyForServerApproval: function(paymentId){
-          fetch('/api/pi/approve', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentId, session_id: sessionId })
-          });
-        },
-        onReadyForServerCompletion: function(paymentId, txid){
-          fetch('/api/pi/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              paymentId, session_id: sessionId, txid,
-              buyer: buyerPayload(),
-              shipping: shippingPayload()
-            })
-          })
-          .then(r => r.json())
-          .then(res => {
-            const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
-            const target = (res && (res.redirect_url || res.buyer_status_url)) || fallback;
-            window.location.href = target;
-          })
-          .catch(() => {
-            const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
-            window.location.href = fallback;
-          });
-        },
-        onCancel: function(){ setMsg("Payment canceled."); },
-        onError: function(){ setMsg("Please try again."); }
-      });
-    }).catch(() => {
-      setMsg("Please try again.");
+        console.log("Payment created", payment);
+      } catch (err) {
+        console.error("Error creating payment", err);
+      }
     });
-  });
-})();
-</script>
+  </script>
 </body>
 </html>
