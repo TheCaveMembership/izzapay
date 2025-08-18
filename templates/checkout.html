@@ -7,11 +7,15 @@
   <style>
     :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:620px;margin:0 auto;padding:20px}
+    .wrap{max-width:720px;margin:0 auto;padding:20px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
     .row{display:flex;gap:12px;align-items:center}
     .muted{color:var(--muted)}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .grid-1{display:grid;grid-template-columns:1fr;gap:10px}
+    input,select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b1322;color:var(--txt)}
+    label{font-size:.9rem;color:var(--muted)}
     .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
@@ -37,12 +41,26 @@
         <div>Quantity: <strong>{{ qty }}</strong></div>
         <div>Total: <strong>{{ '%.7f'|format(expected_pi) }} Pi</strong></div>
       </div>
+    </div>
 
-      <div style="margin-top:16px">
-        <button id="payBtn" class="btn">Pay with Pi</button>
-        <p id="msg" class="muted" style="margin-top:10px;"></p>
-        <div id="err" class="err"></div>
+    <div class="card">
+      <h3 style="margin-top:0">Contact & Shipping (optional)</h3>
+      <div class="grid">
+        <div><label>Name</label><input id="name" placeholder="Full name"></div>
+        <div><label>Email</label><input id="email" placeholder="you@example.com" type="email"></div>
+        <div class="grid-1"><label>Address line 1</label><input id="address1" placeholder="Street, number"></div>
+        <div class="grid-1"><label>Address line 2</label><input id="address2" placeholder="Apartment, suite (optional)"></div>
+        <div><label>City</label><input id="city"></div>
+        <div><label>Region / State</label><input id="region"></div>
+        <div><label>Postal code</label><input id="postal"></div>
+        <div><label>Country</label><input id="country" placeholder="Canada"></div>
       </div>
+    </div>
+
+    <div class="card">
+      <button id="payBtn" class="btn">Pay with Pi</button>
+      <p id="msg" class="muted" style="margin-top:10px;"></p>
+      <div id="err" class="err"></div>
     </div>
   {% endif %}
 </div>
@@ -75,29 +93,40 @@
   }
 
   function ensureAuth(){
-    // Authenticate before createPayment so SDK has a valid auth context
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){
-      // Optionally auto-complete old payments, not used here
-      console.log('Incomplete payment found:', payment);
-    }
+    function onIncompletePaymentFound(payment){ console.log('Incomplete payment found:', payment); }
     return Pi.authenticate(scopes, onIncompletePaymentFound)
-      .then(auth => {
-        console.log('Authenticated as', auth.user?.username);
-        return auth;
-      });
+      .then(auth => { console.log('Authenticated as', auth.user?.username); return auth; });
   }
 
   if (!initPi()){
-    setMsg("Open in Pi Browser (and Sandbox ON if testing).");
+    setMsg("Open in Pi Browser (Sandbox ON if testing).");
   }
 
   let watchdog;
   function startWatchdog(){
     clearTimeout(watchdog);
     watchdog = setTimeout(() => {
-      setErr("Still waiting… Make sure you accepted the Pi payment prompt.");
+      setErr("Still waiting… Make sure you approved the Pi payment prompt.");
     }, 15000);
+  }
+
+  function readBuyer(){
+    return {
+      name: document.getElementById('name')?.value || '',
+      email: document.getElementById('email')?.value || ''
+    };
+  }
+  function readShipping(){
+    return {
+      name: document.getElementById('name')?.value || '',
+      address1: document.getElementById('address1')?.value || '',
+      address2: document.getElementById('address2')?.value || '',
+      city: document.getElementById('city')?.value || '',
+      region: document.getElementById('region')?.value || '',
+      postal: document.getElementById('postal')?.value || '',
+      country: document.getElementById('country')?.value || ''
+    };
   }
 
   btn?.addEventListener('click', function(){
@@ -105,7 +134,7 @@
     setMsg('Authenticating with Pi…');
 
     if (!window.Pi || !Pi.createPayment){
-      setErr("Pi SDK unavailable — open this in Pi Browser.");
+      setErr("Pi SDK unavailable — open in Pi Browser.");
       return;
     }
 
@@ -122,7 +151,6 @@
 
       Pi.createPayment(paymentData, {
         onReadyForServerApproval: function(paymentId){
-          // Tell our server to call Pi /approve for this payment
           fetch('/api/pi/approve', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -134,11 +162,13 @@
           });
         },
         onReadyForServerCompletion: function(paymentId, txid){
-          // Tell our server to call Pi /complete and fulfill the order
           fetch('/api/pi/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentId, session_id: sessionId, txid })
+            body: JSON.stringify({
+              paymentId, session_id: sessionId, txid,
+              buyer: readBuyer(), shipping: readShipping()
+            })
           }).then(r => r.json()).then(res => {
             clearTimeout(watchdog);
             if(!res || !res.ok){
@@ -146,26 +176,17 @@
               setErr((res && res.error) ? res.error : "server_error");
               return;
             }
-            setMsg("Payment complete!");
-            window.location.href = res.buyer_status_url || "/success";
+            const to = res.redirect_url || res.buyer_status_url || "/success";
+            window.location.href = to;
           }).catch(e => {
             clearTimeout(watchdog);
             setErr("Complete request failed: " + (e?.message || e));
           });
         },
-        onCancel: function(paymentId){
-          clearTimeout(watchdog);
-          setMsg("Payment canceled.");
-        },
-        onError: function(error, paymentId){
-          clearTimeout(watchdog);
-          console.error("Payment error:", error);
-          setMsg("Payment error. Try again.");
-          setErr(error?.message || String(error));
-        }
+        onCancel: function(){ clearTimeout(watchdog); setMsg("Payment canceled."); },
+        onError: function(error){ clearTimeout(watchdog); setMsg("Payment error."); setErr(error?.message || String(error)); }
       }).catch(e => {
         clearTimeout(watchdog);
-        console.error("createPayment failed:", e);
         setMsg("Payment failed.");
         setErr(e?.message || String(e));
       });
