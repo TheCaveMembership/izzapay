@@ -15,7 +15,7 @@ from payments import verify_pi_tx, send_pi_payout, split_amounts
 load_dotenv()
 
 PI_API_BASE       = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
-PI_API_KEY        = os.getenv("PI_PLATFORM_API_KEY", "")  # used by your payments.py helpers
+PI_API_KEY        = os.getenv("PI_PLATFORM_API_KEY", "")    # REQUIRED for approve/complete
 APP_BASE_URL      = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com")
 APP_NAME          = os.getenv("APP_NAME", "IZZA PAY")
 
@@ -155,6 +155,14 @@ def get_or_create_cart(merchant_id, cid=None):
         cx.execute("INSERT INTO carts(id, merchant_id, created_at) VALUES(?,?,?)",
                    (cid, merchant_id, int(time.time())))
         return cid
+
+def pi_headers():
+    if not PI_API_KEY:
+        raise RuntimeError("PI_PLATFORM_API_KEY is required")
+    return {
+        "Authorization": f"Key {PI_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
 # ================= DEBUG =================
 @app.get("/whoami")
@@ -596,7 +604,105 @@ def checkout(link_id):
         sold_out=False, i=i, qty=qty, session_id=sid, expected_pi=expected, app_base=APP_BASE_URL
     )
 
-# ================= PAYMENT CONFIRMATION (split 99/1) =================
+# ================== PI SERVER APPROVAL/COMPLETION ==================
+@app.post("/api/pi/approve")
+def pi_approve():
+    """Called from frontend on onReadyForServerApproval(paymentId). We verify the session and approve with Pi."""
+    data = request.get_json(force=True)
+    payment_id = data.get("paymentId")
+    session_id = data.get("session_id")
+    if not payment_id or not session_id:
+        return {"ok": False, "error": "missing_params"}, 400
+
+    # Optional: verify session exists
+    with conn() as cx:
+        s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+    if not s:
+        return {"ok": False, "error": "unknown_session"}, 400
+
+    try:
+        url = f"{PI_API_BASE}/v2/payments/{payment_id}/approve"
+        r = requests.post(url, headers=pi_headers(), json={})
+        if r.status_code != 200:
+            return {"ok": False, "error": "approve_failed", "status": r.status_code, "body": r.text}, 502
+        return {"ok": True}
+    except Exception as e:
+        print("pi_approve error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
+
+@app.post("/api/pi/complete")
+def pi_complete():
+    """Called from frontend on onReadyForServerCompletion(paymentId, txid). We complete with Pi and fulfill the order."""
+    data = request.get_json(force=True)
+    payment_id = data.get("paymentId")
+    session_id = data.get("session_id")
+    txid       = data.get("txid") or ""
+    if not payment_id or not session_id:
+        return {"ok": False, "error": "missing_params"}, 400
+
+    # 1) Tell Pi we are completing (important for clearing incomplete payments)
+    try:
+        url = f"{PI_API_BASE}/v2/payments/{payment_id}/complete"
+        r = requests.post(url, headers=pi_headers(), json={"txid": txid})
+        if r.status_code != 200:
+            return {"ok": False, "error": "complete_failed", "status": r.status_code, "body": r.text}, 502
+    except Exception as e:
+        print("pi_complete call error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
+
+    # 2) Fulfill in our system (uses your existing verification & payout)
+    # If you want, you can fetch payment details from Pi and verify the amount
+    # matches s['expected_pi'] before fulfilling.
+    try:
+        res = pi_confirm_internal(session_id, txid)
+        return res
+    except Exception as e:
+        print("pi_complete fulfill error:", repr(e))
+        return {"ok": False, "error": "fulfill_error"}, 500
+
+def pi_confirm_internal(session_id, tx_hash):
+    """Calls the same logic as /api/pi/confirm but directly, to avoid double HTTP hop."""
+    with conn() as cx:
+        s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+    if not s or s["state"] != "initiated":
+        return {"ok": False, "error": "bad_session"}, 400
+
+    amt = Decimal(str(s["expected_pi"]))
+    if not verify_pi_tx(tx_hash, amt):
+        with conn() as cx:
+            cx.execute("UPDATE sessions SET state='failed' WHERE id=?", (session_id,))
+        return {"ok": False, "error": "verify_failed"}, 400
+
+    if s["item_id"] is None:
+        return _confirm_cart_order(s, tx_hash, {}, {})
+
+    gross, fee, net = split_amounts(float(amt))
+    with conn() as cx:
+        i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+        if i and not i["allow_backorder"]:
+            cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                       (max(0, i["stock_qty"] - s["qty"]), i["id"]))
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+        buyer_token = uuid.uuid4().hex
+        cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
+                     shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
+                     status,buyer_token)
+                     VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
+                   (s["merchant_id"], s["item_id"], s["qty"], None,
+                    None, json.dumps({}), float(gross), float(fee),
+                    float(net), tx_hash, buyer_token))
+        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                   (tx_hash, s["id"]))
+
+    ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
+    with conn() as cx:
+        cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
+                   ("sent" if ok else "failed", tx_hash))
+
+    buyer_url = f"{APP_BASE_URL}/success"
+    return {"ok": True, "buyer_status_url": buyer_url}
+
+# Keep legacy confirm endpoint (used by older template version)
 @app.post("/api/pi/confirm")
 def pi_confirm():
     data = request.get_json(force=True)
@@ -625,7 +731,7 @@ def pi_confirm():
         if i and not i["allow_backorder"]:
             cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                        (max(0, i["stock_qty"] - s["qty"]), i["id"]))
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
         buyer_token = uuid.uuid4().hex
         cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                      shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
@@ -641,32 +747,7 @@ def pi_confirm():
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
-
-    if m["reply_to_email"]:
-        try:
-            send_email(
-              m["reply_to_email"],
-              f"New Pi order: {i['title']} x{s['qty']}",
-              f"<p><strong>Gross:</strong> {gross} Pi<br>"
-              f"<strong>Fee (1%):</strong> {fee} Pi<br>"
-              f"<strong>Net to you:</strong> {net} Pi<br>"
-              f"<strong>Tx:</strong> {tx_hash}</p>"
-            )
-        except Exception:
-            pass
-
     buyer_url = f"{APP_BASE_URL}/success"
-    if buyer.get("email"):
-        try:
-            send_email(
-              buyer["email"],
-              f"Thanks for your order at {m['business_name']}",
-              f"<p>Your order is paid in full with Pi.</p>"
-              f"<p><a href='{buyer_url}'>Track your order here</a>.</p>"
-            )
-        except Exception:
-            pass
-
     return {"ok": True, "buyer_status_url": buyer_url}
 
 def _confirm_cart_order(s, tx_hash, buyer, shipping):
@@ -764,8 +845,8 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
