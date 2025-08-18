@@ -14,7 +14,7 @@ from payments import verify_pi_tx, send_pi_payout, split_amounts
 # ----------------- ENV -----------------
 load_dotenv()
 
-# Sandbox (False on production)
+# Toggle sandbox only if you need it; production = false
 PI_SANDBOX        = os.getenv("PI_SANDBOX", "false").lower() == "true"
 
 # Pi Platform API base + key
@@ -24,15 +24,9 @@ PI_API_KEY        = os.getenv("PI_PLATFORM_API_KEY", "")
 # App name
 APP_NAME          = os.getenv("APP_NAME", "IZZA PAY")
 
-# Your public host(s)
-# Prefer a PiNet subdomain if present (e.g., izzapay4006.minepi.com). Fallback to custom/base domain.
-PINET_SUBDOMAIN   = os.getenv("PINET_SUBDOMAIN", "").strip()  # e.g., "izzapay4006"
+# Always use Render/custom domain for links right now
 APP_BASE_URL      = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
-
-if PINET_SUBDOMAIN:
-    BASE_ORIGIN = f"https://{PINET_SUBDOMAIN}.minepi.com"
-else:
-    BASE_ORIGIN = APP_BASE_URL
+BASE_ORIGIN       = APP_BASE_URL  # <— force Render domain for all share links
 
 # ----------------- APP -----------------
 app = Flask(__name__)
@@ -54,7 +48,6 @@ def inject_globals():
         "APP_BASE_URL": APP_BASE_URL,
         "BASE_ORIGIN": BASE_ORIGIN,
         "PI_SANDBOX": PI_SANDBOX,
-        "PINET_SUBDOMAIN": PINET_SUBDOMAIN
     }
 
 # ----------------- DB & SCHEMA -----------------
@@ -179,9 +172,6 @@ def fetch_pi_payment(payment_id: str):
     url = f"{PI_API_BASE}/v2/payments/{payment_id}"
     r = requests.get(url, headers=pi_headers(), timeout=15)
     return r
-
-def almost_equal(a: float, b: float, tol=1e-7):
-    return abs(a - b) <= tol
 
 # ----------------- DEBUG -----------------
 @app.get("/whoami")
@@ -582,7 +572,7 @@ def checkout_cart(cid):
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart:
             abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -633,14 +623,6 @@ def checkout(link_id):
     )
 
 # ----------------- PI PAYMENTS (approve/complete) -----------------
-def pi_headers():
-    if not PI_API_KEY:
-        raise RuntimeError("PI_PLATFORM_API_KEY is required")
-    return {
-        "Authorization": f"Key {PI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
 @app.post("/api/pi/approve")
 def pi_approve():
     data = request.get_json(force=True)
@@ -723,12 +705,12 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     if s["item_id"] is None:
         with conn() as cx:
             cart = cx.execute("SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
-                              (m["id"],)).fetchone()
+                              (m["id"]),).fetchone()
             rows = cx.execute("""
               SELECT cart_items.qty, items.*
               FROM cart_items JOIN items ON items.id=cart_items.item_id
               WHERE cart_items.cart_id=?
-            """, (cart["id"]),).fetchall()
+            """, (cart["id"],)).fetchall()
         with conn() as cx:
             for r in rows:
                 line_gross = float(r["pi_price"]) * r["qty"]
