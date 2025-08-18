@@ -20,9 +20,7 @@
 <div class="wrap">
 
   {% if sold_out %}
-    <div class="card">
-      <p class="err">Sorry, this item is sold out.</p>
-    </div>
+    <div class="card"><p class="err">Sorry, this item is sold out.</p></div>
   {% else %}
     <div class="card">
       <div class="row">
@@ -44,14 +42,21 @@
   const sessionId = "{{ session_id }}";
   const expectedPi = {{ expected_pi|round(7) }};
   const cartMode = {{ 'true' if cart_mode else 'false' }};
+  const isSandbox = {{ 'true' if PI_SANDBOX else 'false' }};
 
-  const scopes = ['payments','username'];
   const statusEl = document.getElementById('status');
   const errorEl  = document.getElementById('error');
   const payBtn   = document.getElementById('payBtn');
 
   function setStatus(msg){ if(statusEl) statusEl.textContent = msg || ''; }
   function setError(msg){ if(errorEl) errorEl.textContent = msg || ''; }
+
+  // Initialize SDK
+  if (!window.Pi) {
+    setError('Pi SDK not available. Please open this page in the Pi Browser.');
+  } else {
+    try { Pi.init({ version: "2.0", sandbox: isSandbox }); } catch(e){ console.warn(e); }
+  }
 
   async function postJSON(url, body){
     const r = await fetch(url, {
@@ -61,14 +66,41 @@
     });
     return r;
   }
+  async function getJSON(url){
+    const r = await fetch(url, {method:'GET', headers:{'Accept':'application/json'}});
+    return r;
+  }
 
-  function openPi(){
-    setError('');
-    setStatus('Opening Pi payment…');
+  // Polling fallback — if user closes the sheet, we still detect PAID
+  let pollTimer = null;
+  function startPolling(){
+    stopPolling();
+    let tries = 0;
+    pollTimer = setInterval(async ()=>{
+      tries++;
+      try{
+        const r = await getJSON(`/api/session/${sessionId}/status`);
+        const data = await r.json().catch(()=>({}));
+        if (r.ok && data.ok){
+          if (data.state === 'paid' && data.redirect_url){
+            window.location.replace(data.redirect_url);
+          }
+        }
+      }catch(e){ /* ignore */ }
+      if (tries > 60) stopPolling(); // ~2 minutes if you change to 2s interval
+    }, 2000);
+  }
+  function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+
+  async function openPi(){
+    if (!window.Pi) { setError('Pi SDK not available. Please use the Pi Browser.'); return; }
+    setError(''); setStatus('Opening Pi payment…');
+
+    const scopes = ['payments','username'];
 
     function onIncompletePaymentFound(payment) {
-      // Incomplete found -> try to complete anyway (user might have approved already)
-      tryComplete(payment);
+      // If Pi reports one, we’ll just poll server for state and let complete/redirect happen.
+      startPolling();
     }
 
     Pi.authenticate(scopes, onIncompletePaymentFound)
@@ -80,43 +112,44 @@
           metadata: { session_id: sessionId }
         };
 
-        // Create payment
         const payment = await Pi.createPayment(paymentData, {
           onReadyForServerApproval: async function(paymentId) {
             setStatus('Waiting for server approval…');
+            startPolling(); // begin polling in case the close button is used
             const r = await postJSON('/api/pi/approve', { paymentId, session_id: sessionId });
-            if(!r.ok){
-              setError('Approval failed.'); setStatus('');
-            }
+            if(!r.ok){ setError('Approval failed.'); setStatus(''); }
           },
           onReadyForServerCompletion: async function(paymentId, txid) {
             setStatus('Completing payment…');
-            const buyer = { name: user?.username || '', email: '' };   // (optional email)
-            const shipping = {};                                        // (optional shipping)
+            const buyer = { name: user?.username || '', email: '' };
+            const shipping = {};
             const r = await postJSON('/api/pi/complete', {
               paymentId, session_id: sessionId, txid, buyer, shipping
             });
             const data = await r.json().catch(()=>({}));
             if(r.ok && data.ok && data.redirect_url){
-              setStatus('Done! Redirecting…');
-              window.location.href = data.redirect_url;   // <<< GO BACK TO STORE WITH SUCCESS=1
-            }else{
-              setError('Could not confirm payment. ' + (data && data.error ? data.error : ''));
-              setStatus('');
+              stopPolling();
+              window.location.replace(data.redirect_url);  // replace history to avoid back to checkout
+            } else {
+              // Don’t show failure; let polling detect the paid state shortly after.
+              setStatus('Waiting for network confirmation…');
+              startPolling();
             }
           },
-          onCancel: function(paymentId) {
+          onCancel: function() {
             setError('Payment cancelled.');
             setStatus('');
+            stopPolling();
           },
-          onError: function(error, payment) {
+          onError: function(error) {
             console.error(error);
             setError('Payment error. Please try again.');
             setStatus('');
+            stopPolling();
           }
         });
 
-        await payment.open(); // open Pi browser flow
+        await payment.open();
 
       })
       .catch(function(err){
