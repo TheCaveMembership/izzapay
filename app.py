@@ -13,10 +13,12 @@ from payments import verify_pi_tx, send_pi_payout, split_amounts
 
 # ----------------- ENV -----------------
 load_dotenv()
-PI_API_BASE   = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
-APP_BASE_URL  = os.getenv("APP_BASE_URL", "http://localhost:5000")
-APP_NAME      = os.getenv("APP_NAME", "IZZA PAY")
-PI_SANDBOX    = os.getenv("PI_SANDBOX", "true").lower() == "true"  # <-- added
+PI_API_BASE      = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
+APP_BASE_URL     = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com")
+APP_NAME         = os.getenv("APP_NAME", "IZZA PAY")
+PI_SANDBOX       = os.getenv("PI_SANDBOX", "true").lower() == "true"
+PI_APP_ID        = os.getenv("PI_APP_ID", "izza-pay")  # your Pi app identifier from Dev Portal
+PI_WRAPPER_BASE  = f"https://{'sandbox.minepi.com' if PI_SANDBOX else 'minepi.com'}/app/{PI_APP_ID}"
 
 # ----------------- APP -----------------
 app = Flask(__name__)
@@ -44,7 +46,6 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
@@ -156,7 +157,7 @@ def home():
 def signin():
     if request.args.get("fresh") == "1":
         session.clear()
-    return render_template("pi_signin.html", app_base=APP_BASE_URL, sandbox=PI_SANDBOX)  # <-- pass sandbox
+    return render_template("pi_signin.html", app_base=APP_BASE_URL, sandbox=PI_SANDBOX)
 
 @app.post("/logout")
 def logout():
@@ -258,7 +259,7 @@ def merchant_setup_form():
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     tok = get_bearer_token_from_request()
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                           app_base=APP_BASE_URL, t=tok)
+                           app_base=APP_BASE_URL, t=tok, share_base=PI_WRAPPER_BASE)
 
 @app.post("/merchant/setup")
 def merchant_setup():
@@ -277,7 +278,7 @@ def merchant_setup():
     if not (len(pi_wallet_address) == 56 and pi_wallet_address.startswith("G")):
         tok = get_bearer_token_from_request()
         return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                               app_base=APP_BASE_URL, t=tok,
+                               app_base=APP_BASE_URL, t=tok, share_base=PI_WRAPPER_BASE,
                                error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').")
 
     with conn() as cx:
@@ -285,7 +286,7 @@ def merchant_setup():
         if exists:
             tok = get_bearer_token_from_request()
             return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                                   app_base=APP_BASE_URL, t=tok,
+                                   app_base=APP_BASE_URL, t=tok, share_base=PI_WRAPPER_BASE,
                                    error="Slug already taken.")
         cx.execute("""INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
                       theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle)
@@ -305,7 +306,8 @@ def merchant_items(slug):
         items = cx.execute("SELECT * FROM items WHERE merchant_id=? ORDER BY id DESC",
                            (m["id"],)).fetchall()
     return render_template("merchant_items.html", setup_mode=False, m=m, items=items,
-                           app_base=APP_BASE_URL, t=get_bearer_token_from_request())
+                           app_base=APP_BASE_URL, t=get_bearer_token_from_request(),
+                           share_base=PI_WRAPPER_BASE)
 
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
@@ -375,7 +377,7 @@ def store_signin(slug):
         abort(404)
     next_url = request.args.get("next") or f"/store/{slug}"
     return render_template("store_signin.html", app_base=APP_BASE_URL,
-                           next_url=next_url, slug=slug, sandbox=PI_SANDBOX)  # <-- pass sandbox
+                           next_url=next_url, slug=slug, sandbox=PI_SANDBOX)
 
 @app.post("/auth/exchange/store")
 def auth_exchange_store():
@@ -486,7 +488,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -603,18 +605,18 @@ def pi_confirm():
 
 def _confirm_cart_order(s, tx_hash, buyer, shipping):
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
         cart = cx.execute("""
           SELECT c.* FROM carts c
           WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1
-        """, (m["id"],)).fetchone()
+        """, (m["id"]),).fetchone()
         if not cart:
             return {"ok": False, "error": "cart_missing"}, 400
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
           WHERE cart_items.cart_id=?
-        """, (cart["id"],)).fetchall()
+        """, (cart["id"]),).fetchall()
 
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
     gross, fee, net = split_amounts(total)
@@ -693,7 +695,7 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
