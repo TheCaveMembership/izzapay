@@ -6,7 +6,7 @@ from flask import Flask, request, render_template, redirect, session, abort, Res
 from dotenv import load_dotenv
 import requests
 
-# ----- Local helpers (these are in your repo) -----
+# ----- Local helpers (in your repo) -----
 from db import init_db, conn
 from emailer import send_email
 from payments import verify_pi_tx, send_pi_payout, split_amounts
@@ -20,7 +20,7 @@ APP_BASE_URL      = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com")
 APP_NAME          = os.getenv("APP_NAME", "IZZA PAY")
 
 PI_SANDBOX        = os.getenv("PI_SANDBOX", "true").lower() == "true"
-PI_APP_ID         = os.getenv("PI_APP_ID", "izza-pay")  # your Pi Dev Portal app identifier
+PI_APP_ID         = os.getenv("PI_APP_ID", "izza-pay")
 PI_WRAPPER_BASE   = f"https://{'sandbox.minepi.com' if PI_SANDBOX else 'minepi.com'}/app/{PI_APP_ID}"
 
 # ================= APP =================
@@ -40,7 +40,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 
-# Make common values available to ALL templates automatically
+# Make common values available to all templates
 @app.context_processor
 def inject_globals():
     return {
@@ -60,7 +60,6 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
@@ -166,7 +165,6 @@ def whoami():
 # ================= APP ENTRY / WRAPPER PATH =================
 @app.get("/")
 def home():
-    # If Pi wrapper dropped our deep link, honor ?path=/store/<slug> etc.
     desired = request.args.get("path")
     if desired and desired.startswith("/"):
         return redirect(desired)
@@ -222,7 +220,6 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
-        # Verify token with Pi
         url = f"{PI_API_BASE}/v2/me"
         headers = {"Authorization": f"Bearer {token}"}
         r = requests.get(url, headers=headers, timeout=10)
@@ -231,7 +228,6 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
 
-        # Upsert user
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
@@ -240,7 +236,6 @@ def auth_exchange():
                            (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
 
-        # Session + URL token
         try:
             session["user_id"] = row["id"]
             session.permanent = True
@@ -375,7 +370,7 @@ def merchant_orders_update(slug):
     tracking_url = request.form.get("tracking_url")
     with conn() as cx:
         o = cx.execute("SELECT * FROM orders WHERE id=? AND merchant_id=?",
-                       (order_id, m["id"]),).fetchone()
+                       (order_id, m["id"])).fetchone()
         if not o:
             abort(404)
         cx.execute("""UPDATE orders SET status=?, tracking_carrier=?, tracking_number=?,
@@ -438,7 +433,6 @@ def auth_exchange_store():
         except Exception:
             pass
         tok = mint_login_token(row["id"])
-        # Append t to the next URL
         join = "&" if ("?" in next_url) else "?"
         return redirect(f"{next_url}{join}t={tok}")
     except Exception as e:
@@ -451,14 +445,11 @@ def storefront(slug):
     m = resolve_merchant_by_slug(slug)
     if not m: abort(404)
 
-    # Must be authenticated (via cookie or ?t)
     u = current_user_row()
     if not u:
         return redirect(f"/store/{slug}/signin?next=/store/{slug}")
 
-    # keep t for links/forms
     tok = get_bearer_token_from_request()
-
     cid = request.args.get("cid")
     cid = get_or_create_cart(m["id"], cid)
 
@@ -480,15 +471,13 @@ def storefront(slug):
         cart_count=cnt,
         app_base=APP_BASE_URL,
         username=u["pi_username"],
-        t=tok  # <-- critical so templates can carry it forward
+        t=tok
     )
 
 @app.post("/store/<slug>/add")
 def store_add(slug):
     m = resolve_merchant_by_slug(slug)
     if not m: abort(404)
-
-    # require auth
     if not current_user_row():
         return redirect(f"/store/{slug}/signin?next=/store/{slug}")
 
@@ -557,7 +546,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -575,7 +564,6 @@ def checkout_cart(cid):
                       VALUES(?,?,?,?,?,?,?)""",
                    (sid, m["id"], None, 1, float(total), "initiated", int(time.time())))
 
-    # Minimal item info for the checkout page header
     i = {"business_name": m["business_name"], "title": "Cart total", "logo_url": m["logo_url"]}
 
     return render_template("checkout.html",
@@ -584,7 +572,6 @@ def checkout_cart(cid):
 
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
-    # (Optional) you can require auth here; Pi SDK will also prompt if needed
     with conn() as cx:
         i = cx.execute("""
            SELECT items.*, merchants.business_name, merchants.logo_url, merchants.id as mid
@@ -632,7 +619,6 @@ def pi_confirm():
     if s["item_id"] is None:
         return _confirm_cart_order(s, tx_hash, buyer, shipping)
 
-    # Single-item order
     gross, fee, net = split_amounts(float(amt))
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
@@ -651,13 +637,11 @@ def pi_confirm():
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                    (tx_hash, session_id))
 
-    # payout to merchant
     ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Order via {APP_NAME}")
     with conn() as cx:
         cx.execute("UPDATE orders SET payout_status=? WHERE pi_tx_hash=?",
                    ("sent" if ok else "failed", tx_hash))
 
-    # merchant email
     if m["reply_to_email"]:
         try:
             send_email(
@@ -687,18 +671,18 @@ def pi_confirm():
 
 def _confirm_cart_order(s, tx_hash, buyer, shipping):
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
         cart = cx.execute("""
           SELECT c.* FROM carts c
           WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1
-        """, (m["id"]),).fetchone()
+        """, (m["id"],)).fetchone()
         if not cart:
             return {"ok": False, "error": "cart_missing"}, 400
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
           WHERE cart_items.cart_id=?
-        """, (cart["id"]),).fetchall()
+        """, (cart["id"],)).fetchall()
 
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
     gross, fee, net = split_amounts(total)
@@ -780,8 +764,8 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
