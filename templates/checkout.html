@@ -24,7 +24,7 @@
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <script>
-    // We’re in PRODUCTION now
+    // Force PRODUCTION mode (no sandbox)
     document.addEventListener('DOMContentLoaded', () => {
       try { Pi.init({ version: "2.0", sandbox: false }); } catch(e){ console.error("Pi.init failed", e); }
     });
@@ -33,15 +33,16 @@
 <body>
 <div class="wrap">
 
-  <!-- Environment diagnostics -->
+  <!-- Diagnostics (warnings only; no blockers) -->
   <div class="card diag">
-    <div style="font-weight:800; margin-bottom:8px">Environment checks</div>
+    <div style="font-weight:800; margin-bottom:8px">Environment</div>
     <div class="kv">
       <div>Pi SDK present</div><div id="diag-sdk">checking…</div>
-      <div>Pi Browser</div><div id="diag-browser">checking…</div>
+      <div>Likely Pi Browser</div><div id="diag-browser">checking…</div>
       <div>Current origin</div><div id="diag-origin"></div>
-      <div>Expected</div><div id="diag-expected">{{ APP_BASE_URL }}</div>
+      <div>Configured base</div><div id="diag-expected">{{ APP_BASE_URL }}</div>
     </div>
+    <div id="diag-note" style="margin-top:8px;opacity:.8"></div>
   </div>
 
   {% if sold_out %}
@@ -116,12 +117,24 @@
   const diagBrowser = document.getElementById('diag-browser');
   const diagOrigin = document.getElementById('diag-origin');
   const diagExpected = document.getElementById('diag-expected');
+  const diagNote = document.getElementById('diag-note');
 
-  const isPiBrowser = (navigator.userAgent || '').toLowerCase().includes('pibrowser');
-  diagBrowser.textContent = isPiBrowser ? 'Yes' : 'No (open inside Pi Browser)';
-  diagSDK.textContent = (typeof window.Pi !== 'undefined') ? 'Yes' : 'No (SDK not loaded)';
+  const ua = (navigator.userAgent || '');
+  const isPiUA = /pibrowser/i.test(ua) || /pi browser/i.test(ua) || /PiBrowser/i.test(ua);
+  const hasPi = (typeof window.Pi !== 'undefined');
+  const likelyPiBrowser = hasPi || isPiUA; // <- treat SDK presence as signal
+
+  diagSDK.textContent = hasPi ? 'Yes' : 'No';
+  diagBrowser.textContent = likelyPiBrowser ? 'Likely' : 'Unclear';
   diagOrigin.textContent = window.location.origin;
 
+  if (hasPi && !isPiUA) {
+    diagNote.textContent = 'SDK loaded, UA not obvious — still proceeding.';
+  } else if (!hasPi) {
+    diagNote.textContent = 'If the button does nothing, open this page inside the Pi Browser.';
+  }
+
+  // Payment
   const payBtn = document.getElementById('payBtn');
   const statusEl = document.getElementById('status');
   const sessionId = "{{ session_id }}";
@@ -167,22 +180,12 @@
   }
 
   async function startPayment(){
-    // Hard-stop if not in Pi Browser or SDK missing
-    if (typeof window.Pi === 'undefined') {
-      setStatus("Pi SDK not available. Open this page inside the Pi Browser using your registered Production URL.", "warn");
-      return;
-    }
-    if (!isPiBrowser) {
-      setStatus("Not in Pi Browser. Open inside Pi Browser to launch payment.", "warn");
-      return;
-    }
-    const expected = "{{ APP_BASE_URL }}";
-    if (expected && expected.length && !window.location.origin.startsWith(expected)) {
-      setStatus("This page URL doesn't match your registered Production URL. Open the app at: " + expected, "warn");
-      return;
-    }
-
     try{
+      if (!hasPi) {
+        setStatus("Pi SDK not available. Please open this page inside Pi Browser.", "warn");
+        return;
+      }
+
       setStatus("Opening Pi payment…", "wait");
 
       const memo = cartMode ? `Cart ${sessionId}` : `Order ${sessionId}`;
@@ -226,7 +229,7 @@
       setStatus("Still waiting… Ensure Pi Browser is active and you approved the payment prompt.", "wait");
     }catch(err){
       console.error("payment error", err);
-      setStatus("Could not start or confirm payment. Make sure you opened this page in Pi Browser at the registered Production URL.", "warn");
+      setStatus("Could not start or confirm payment. If Pi showed success, return to the store; otherwise try again in Pi Browser.", "warn");
     }
   }
 
