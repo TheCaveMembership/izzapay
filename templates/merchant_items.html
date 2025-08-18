@@ -2,186 +2,139 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <title>{% if setup_mode %}Create Your Store — IZZA PAY{% else %}Merchant Dashboard — {{ m['business_name'] }}{% endif %}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Izza Pay – Merchant</title>
   <style>
-    :root{
-      --bg:#0b0f17; --card:#111a2b; --border:#1f2a44; --text:#e8f0ff;
-      --muted:#bcd0ff; --accent:#6e9fff; --input:#0e1422; --input-b:#2b3b61;
-    }
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:20px}
-    .wrap{max-width:960px;margin:0 auto}
-    .card{background:var(--card);border:1px solid var(--border);padding:20px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.25);margin-bottom:16px}
-    input,button,select,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid var(--input-b);background:var(--input);color:var(--text);margin:6px 0}
-    textarea{min-height:110px;resize:vertical}
-    button{background:var(--accent);color:#0b0f17;border:0;font-weight:700;cursor:pointer}
-    button:hover{opacity:.95}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-    .error{background:#3b0e17;color:#ffd5d5;padding:10px;border-radius:8px;margin-bottom:10px}
-    .muted{opacity:.85;font-size:.95em;color:var(--muted)}
-    .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
-    a.nav{color:#bcd0ff;text-decoration:none;margin-right:10px}
-    code.inline{background:#0e1422;border:1px solid var(--input-b);padding:2px 6px;border-radius:6px}
-    .item{border-top:1px dashed var(--border);padding-top:14px;margin-top:14px}
-    .snippet{background:#0c1322;border:1px solid var(--border);padding:12px;border-radius:8px}
-    .copybar{display:flex;gap:8px;align-items:center}
-    .copybar input{flex:1}
-    @media (max-width: 720px){
-      .row, .row-3{grid-template-columns:1fr}
-    }
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
+    .wrap{max-width:1000px;margin:0 auto;padding:16px}
+    h1,h2{margin:10px 0}
+    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;margin:12px 0}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 320px}
+    label{display:block;margin:8px 0 4px}
+    input,textarea,select{width:100%;padding:10px;border-radius:10px;border:1px solid #26324d;background:#101828;color:#e8f0ff}
+    button{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 16px;font-weight:700;margin-top:10px}
+    .muted{color:#bcd0ff;opacity:.9}
+    .product{display:flex;gap:12px;align-items:center}
+    .product img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid #1f2a44;background:#0b0f17}
+    .inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-size:.9rem}
+    .copybtn{background:#1f2a44;color:#cfe0ff}
+    .error{color:#ff9aa2;margin:8px 0}
   </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <div class="badge">MERCHANT DASHBOARD</div>
-    {% if m %}
-      <h2>{{ m['business_name'] }}</h2>
-      <div class="muted">Store slug: <strong>{{ m['slug'] }}</strong></div>
-      <div style="margin-top:8px">
-        <a class="nav" href="/merchant/{{ m['slug'] }}/items{% if t %}?t={{t}}{% endif %}">Items</a>
-        <a class="nav" href="/merchant/{{ m['slug'] }}/orders{% if t %}?t={{t}}{% endif %}">Orders</a>
-      </div>
-    {% else %}
-      <h2>Create your merchant profile</h2>
-      <p class="muted">
-        Choose a short, unique <strong>store slug</strong> (lowercase a–z, 0–9, hyphens).<br>
-        Set your payout <strong>Pi Wallet Address</strong> (public key, 56 chars starting with <code class="inline">G</code>).<br>
-        <em>@handle</em> is optional and for display only.
-      </p>
-    {% endif %}
-  </div>
-
-  {% if error %}
-    <div class="card error">{{ error }}</div>
-  {% endif %}
-
   {% if setup_mode %}
-    <form class="card" method="POST" action="/merchant/setup">
-      {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
-      <label>Business name</label>
-      <input name="business_name" placeholder="e.g., Izza Pay Collectibles">
-
-      <div class="row">
-        <div>
-          <label>Store slug</label>
-          <input name="slug" placeholder="e.g., izzapay-collectibles">
-        </div>
-        <div>
-          <label>Theme</label>
-          <!-- FIX: no overlap; proper box sizing via grid & consistent input styles -->
-          <select name="theme_mode">
-            <option value="dark" selected>Dark</option>
-            <option value="light">Light</option>
-          </select>
-        </div>
-      </div>
-
-      <label>Logo URL</label>
-      <input name="logo_url" placeholder="https://.../logo.png">
-
-      <div class="row">
-        <div>
-          <label>Contact email (order alerts)</label>
-          <input name="reply_to_email" placeholder="name@store.com">
-        </div>
-        <div>
-          <label>@handle (optional)</label>
-          <input name="pi_handle" placeholder="@yourhandle">
-        </div>
-      </div>
-
-      <label>Payout Pi Wallet Address (public key)</label>
-      <input name="pi_wallet_address" placeholder="G................................................." maxlength="56">
-
-      <button type="submit">Create merchant</button>
-    </form>
-  {% else %}
-    <!-- New Item Form -->
+    <h1>Create your merchant profile</h1>
     <div class="card">
-      <h3>Create a new item</h3>
-      <form method="POST" action="/merchant/{{ m['slug'] }}/items/new{% if t %}?t={{t}}{% endif %}">
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <form method="POST" action="/merchant/setup">
         <div class="row">
-          <div><label>Title</label><input name="title" placeholder="e.g., Sports Card Pack A"></div>
-          <div><label>SKU</label><input name="sku" placeholder="SKU-001"></div>
+          <div class="col">
+            <label>Store Name</label>
+            <input name="business_name" placeholder="e.g., Toronto Sport Cards" required>
+            <label>Store Slug (URL)</label>
+            <input name="slug" placeholder="e.g., toronto-sport-cards">
+            <label>Logo URL (https)</label>
+            <input name="logo_url" placeholder="https://...">
+          </div>
+          <div class="col">
+            <label>Theme</label>
+            <select name="theme_mode">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+            <label>Merchant Contact Email (for order emails)</label>
+            <input name="reply_to_email" type="email" placeholder="name@business.com">
+            <label>Pi Wallet Public Key (56 chars, starts with G)</label>
+            <input name="pi_wallet_address" placeholder="G................................................." required>
+            <label>Pi Handle (optional)</label>
+            <input name="pi_handle" placeholder="@yourhandle">
+          </div>
         </div>
-        <label>Image URL</label>
-        <input name="image_url" placeholder="https://.../image.jpg">
+        {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
+        <button type="submit">Create Merchant</button>
+      </form>
+    </div>
+  {% else %}
+    <div class="inline">
+      <img src="{{ m['logo_url'] }}" alt="" style="height:36px;border-radius:8px;border:1px solid #1f2a44">
+      <h1 style="margin:0">{{ m['business_name'] }}</h1>
+    </div>
+
+    <div class="card">
+      <h2>Your Storefront</h2>
+      <p class="muted">This is the **single link** you give customers or place on your website navigation to show all items payable with Pi.</p>
+      <div class="inline">
+        <input class="mono" id="storeUrl" value="{{ request.host_url }}store/{{ m['slug'] }}" readonly>
+        <button class="copybtn" onclick="copy('storeUrl')">Copy</button>
+        <a href="/store/{{ m['slug'] }}" target="_blank"><button>Open</button></a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Add a Product</h2>
+      <form method="POST" action="/merchant/{{ m['slug'] }}/items/new">
         <div class="row">
-          <div><label>Price (Pi)</label><input name="pi_price" type="number" step="0.0000001" placeholder="1.5"></div>
-          <div><label>Stock Qty</label><input name="stock_qty" type="number" step="1" placeholder="10"></div>
+          <div class="col">
+            <label>Title</label>
+            <input name="title" required placeholder="e.g., 2024 Pro Pack">
+            <label>SKU (optional)</label>
+            <input name="sku" placeholder="SKU-1234">
+            <label>Image URL (https)</label>
+            <input name="image_url" placeholder="https://cdn.shopify.com/s/files/.../image.png?v=...">
+          </div>
+          <div class="col">
+            <label>Price (Pi)</label>
+            <input name="pi_price" type="number" step="0.000001" min="0" required>
+            <label>Stock Qty</label>
+            <input name="stock_qty" type="number" min="0" value="0">
+            <label>
+              <input type="checkbox" name="allow_backorder"> Allow backorder
+            </label>
+          </div>
         </div>
-        <label><input type="checkbox" name="allow_backorder"> Allow backorder when out of stock</label>
-        <button type="submit">Add item</button>
+        {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
+        <button type="submit">Add Product</button>
       </form>
     </div>
 
-    <!-- Items List + Snippets -->
     <div class="card">
-      <h3>Your items</h3>
-      {% if items|length == 0 %}
-        <p class="muted">No items yet.</p>
-      {% else %}
-        {% for it in items %}
-          <div class="item">
-            <strong>{{ it['title'] }}</strong> — {{ it['pi_price'] }} Pi
-            <div class="muted">SKU: {{ it['sku'] or '—' }}</div>
-
-            <!-- Public checkout URL (customer goes here) -->
-            <p class="muted" style="margin-top:6px">
-              Public checkout URL: <code class="inline">{{ app_base }}/checkout/{{ it['link_id'] }}</code>
-            </p>
-
-            <!-- Embeddable Button Snippet -->
-            <div class="snippet">
-              <div class="muted" style="margin-bottom:6px"><strong>“Pay with Pi” button — copy into your product page</strong></div>
-              <div class="copybar">
-                <input id="url-{{ it['id'] }}" value="{{ app_base }}/checkout/{{ it['link_id'] }}" readonly>
-                <button type="button" onclick="copyToClipboard('url-{{ it['id'] }}')">Copy URL</button>
+      <h2>Your Products</h2>
+      {% if items %}
+        <div class="row">
+          {% for it in items %}
+          <div class="col">
+            <div class="product">
+              <img src="/uimg?src={{ (it['image_url'] or '')|urlencode }}" onerror="this.src='https://via.placeholder.com/72?text=PI'">
+              <div>
+                <div style="font-weight:800">{{ it['title'] }}</div>
+                <div class="muted">{{ '%.6f'|format(it['pi_price']) }} Pi • Stock: {{ it['stock_qty'] }}</div>
+                <div class="inline" style="margin-top:6px">
+                  <a href="/checkout/{{ it['link_id'] }}" target="_blank"><button>Direct checkout</button></a>
+                  <input class="mono" id="link-{{ it['id'] }}" value="{{ request.host_url }}checkout/{{ it['link_id'] }}" readonly>
+                  <button class="copybtn" onclick="copy('link-{{ it['id'] }}')">Copy</button>
+                </div>
               </div>
-
-              <div class="muted" style="margin:10px 0 4px">HTML snippet:</div>
-              <textarea id="html-{{ it['id'] }}" readonly>
-<!-- Place this in your product page (Custom HTML block or theme code) -->
-<a href="{{ app_base }}/checkout/{{ it['link_id'] }}" class="izza-pay-btn">Pay with Pi</a>
-<style>
-.izza-pay-btn{display:inline-block;padding:10px 16px;border-radius:8px;text-decoration:none;
-background:#6e9fff;color:#0b0f17;font-weight:700}
-.izza-pay-btn:hover{opacity:.92}
-</style>
-              </textarea>
-              <button type="button" onclick="copyToClipboard('html-{{ it['id'] }}')">Copy HTML</button>
-
-              <div class="muted" style="margin:10px 0 4px">Shopify (Theme 2.0) quick steps:</div>
-              <ol class="muted" style="margin-top:0">
-                <li>In Shopify admin, open <strong>Online Store → Themes → Customize</strong>.</li>
-                <li>Open your <strong>Product</strong> template (choose the product that matches this item).</li>
-                <li>Add a block: <strong>Custom liquid</strong> or <strong>Custom HTML</strong>.</li>
-                <li>Paste the <strong>HTML snippet</strong> above, then <strong>Save</strong>.</li>
-                <li>Preview the product: the “Pay with Pi” button should link to<br>
-                    <code class="inline">{{ app_base }}/checkout/{{ it['link_id'] }}</code>
-                </li>
-              </ol>
             </div>
           </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No products yet. Add your first one above.</p>
       {% endif %}
     </div>
+
   {% endif %}
 </div>
 
 <script>
-  function copyToClipboard(id){
-    const el = document.getElementById(id);
-    if(!el) return;
-    el.select?.(); el.setSelectionRange?.(0, 99999);
-    try{
-      navigator.clipboard?.writeText(el.value || el.textContent || el.innerText);
-    }catch(e){
-      document.execCommand?.('copy');
-    }
-  }
+function copy(id){
+  const el = document.getElementById(id);
+  el.select(); el.setSelectionRange(0, 99999);
+  document.execCommand("copy");
+}
 </script>
 </body>
 </html>
