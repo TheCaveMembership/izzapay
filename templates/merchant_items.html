@@ -9,7 +9,7 @@
     a{color:#87b4ff;text-decoration:none}
     .wrap{max-width:1000px;margin:0 auto;padding:20px}
     .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:16px;margin-bottom:16px}
-    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
     input,select{background:#0b1222;border:1px solid #233251;color:#e8f0ff;border-radius:10px;padding:10px;width:100%}
     label{font-size:.9rem;color:#bcd0ff}
@@ -20,6 +20,8 @@
     .small{font-size:.9rem}
     .copybar{display:flex;gap:8px;margin-top:8px}
     .copybar input{flex:1}
+    .preview{background:#0b1222;border:1px solid #233251;border-radius:10px;padding:8px;display:inline-block}
+    .preview img{max-height:48px;max-width:160px;display:block}
   </style>
 </head>
 <body>
@@ -42,8 +44,11 @@
         </div>
         <div class="row" style="margin-top:10px">
           <div style="flex:1;min-width:240px">
-            <label>Logo URL (https://)</label>
-            <input name="logo_url" placeholder="https://...">
+            <label>Logo URL (https://) — jpg/png/gif</label>
+            <input name="logo_url" id="logo_url" placeholder="https://...">
+            <div class="preview" id="logo_prev" style="margin-top:8px;display:none">
+              <img id="logo_img" alt="logo preview">
+            </div>
           </div>
           <div style="flex:1;min-width:240px">
             <label>Theme</label>
@@ -84,10 +89,34 @@
         <input id="storeLink" class="mono" value="{{ share_base }}/store/{{ m.slug }}" readonly>
         <button class="btn" type="button" onclick="copyVal('storeLink')">Copy</button>
       </div>
+      {% if m.logo_url %}
+        <div style="margin-top:12px" class="small muted">Current logo:</div>
+        <div class="preview"><img src="/uimg?src={{ m.logo_url|urlencode }}" alt="logo"></div>
+      {% endif %}
     </div>
 
     <div class="card">
       <div class="title">Add a product</div>
+
+      <!-- Quick upload (device) -->
+      <form method="post" action="/merchant/{{ m.slug }}/upload{% if t %}?t={{ t }}{% endif %}" enctype="multipart/form-data" style="margin-bottom:10px">
+        <div class="row">
+          <div style="flex:2;min-width:240px">
+            <label>Upload image (jpg/png/gif)</label>
+            <input type="file" name="image" accept=".jpg,.jpeg,.png,.gif">
+          </div>
+          <div style="flex:1;min-width:160px;align-self:end">
+            <button class="btn" type="submit">Upload</button>
+          </div>
+        </div>
+        {% if request.args.get('uploaded') %}
+          <div class="small" style="margin-top:6px">Uploaded URL:
+            <span class="mono">{{ request.args.get('uploaded') }}</span>
+          </div>
+        {% endif %}
+      </form>
+
+      <!-- Create product -->
       <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
         <div class="row">
           <div style="flex:2;min-width:240px">
@@ -101,8 +130,11 @@
         </div>
         <div class="row" style="margin-top:10px">
           <div style="flex:2;min-width:240px">
-            <label>Image URL (https://)</label>
-            <input name="image_url" placeholder="https://...">
+            <label>Image URL (https://) or use the Uploaded URL above</label>
+            <input name="image_url" id="image_url" placeholder="https://...">
+            <div class="preview" id="img_prev" style="margin-top:8px;display:none">
+              <img id="img_preview" alt="image preview">
+            </div>
           </div>
           <div style="flex:1;min-width:160px">
             <label>Price (Pi)</label>
@@ -136,6 +168,11 @@
         <div class="grid">
           {% for it in items %}
             <div style="background:#0b1222;border:1px solid #233251;border-radius:12px;padding:12px">
+              {% if it.image_url %}
+                <div class="preview" style="margin-bottom:8px">
+                  <img src="/uimg?src={{ it.image_url|urlencode }}" alt="product">
+                </div>
+              {% endif %}
               <div style="font-weight:800">{{ it.title }}</div>
               <div class="muted small">Price: {{ '%.7f'|format(it.pi_price) }} Pi</div>
               <div class="muted small">Stock: {{ it.stock_qty }}</div>
@@ -168,6 +205,26 @@
       setTimeout(()=>{ el.value = orig; }, 900);
     }).catch(()=>{ /* ignore */ });
   }
+
+  // live previews for URL fields
+  function preview(idInput, idBox, idImg){
+    const inp = document.getElementById(idInput);
+    const box = document.getElementById(idBox);
+    const img = document.getElementById(idImg);
+    if(!inp || !box || !img) return;
+    function upd(){
+      const v = inp.value.trim();
+      if(v.startsWith('http')){
+        img.src = '/uimg?src=' + encodeURIComponent(v);
+        box.style.display = 'inline-block';
+      }else{
+        box.style.display = 'none';
+      }
+    }
+    inp.addEventListener('input', upd); upd();
+  }
+  preview('logo_url','logo_prev','logo_img');
+  preview('image_url','img_prev','img_preview');
 </script>
 </body>
 </html>
