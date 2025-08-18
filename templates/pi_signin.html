@@ -21,9 +21,7 @@
   <div class="card">
     <h1>Sign in with Pi</h1>
     <p class="muted">Access your IZZA PAY merchant dashboard.</p>
-
     <button id="piSignInBtn">Authorize with Pi</button>
-
     <p id="msg" class="muted" style="margin-top:12px;"></p>
     <div id="err" class="err"></div>
   </div>
@@ -37,59 +35,31 @@
   const postUrl = "/auth/exchange";
   const sandbox = {{ 'true' if sandbox else 'false' }};
 
-  function setMsg(t){ if(msg){ msg.textContent = t; } }
+  function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
   function setErr(t){ if(err){ err.textContent = t || ''; } }
 
   function initPi(){
     if (!window.Pi || !Pi.init) return false;
-    try {
-      Pi.init({ version: "2.0", sandbox: sandbox });
-      return true;
-    } catch(e){
-      console.error("Pi.init failed", e);
-      setErr("Pi.init failed: " + (e?.message || e));
-      return false;
-    }
+    try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+    catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
   }
-
-  const inited = initPi();
-  if (!inited) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+  if (!initPi()) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
 
   btn?.addEventListener('click', function(){
     setErr('');
-    if (!window.Pi || !Pi.authenticate) {
-      setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
-      return;
-    }
+    if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
     setMsg("Requesting authorization…");
-
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){
-      console.log("Incomplete payment found:", payment);
-    }
-
+    function onIncompletePaymentFound(payment){ console.log("Incomplete payment:", payment); }
     Pi.authenticate(scopes, onIncompletePaymentFound)
       .then(function(auth){
-        const payload = {
-          accessToken: auth.accessToken,
-          user: auth.user
-        };
         const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = postUrl;
+        form.method = 'POST'; form.action = postUrl;
         const inp = document.createElement('input');
-        inp.type = 'hidden';
-        inp.name = 'payload';
-        inp.value = JSON.stringify(payload);
-        form.appendChild(inp);
-        document.body.appendChild(form);
-        form.submit();
+        inp.type='hidden'; inp.name='payload'; inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+        form.appendChild(inp); document.body.appendChild(form); form.submit();
       })
-      .catch(function(e){
-        console.error(e);
-        setMsg("Authorization failed. Please try again.");
-        setErr(e && e.message ? e.message : String(e));
-      });
+      .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message || String(e)); });
   });
 })();
 </script>
