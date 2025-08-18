@@ -2,9 +2,10 @@ import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 from urllib.parse import urlparse
-from flask import Flask, request, render_template, redirect, session, abort, Response
+from flask import Flask, request, render_template, redirect, session, abort, Response, send_from_directory, url_for, flash
 from dotenv import load_dotenv
 import requests
+from werkzeug.utils import secure_filename
 
 # Local modules you already have
 from db import init_db, conn
@@ -19,12 +20,16 @@ PI_API_BASE  = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
 PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
 
-# Use Render/custom domain for links right now
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
 
+# uploads
+ALLOWED_EXT = {"jpg", "jpeg", "png", "gif"}
+UPLOAD_DIR  = os.path.join("static", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 # ----------------- APP -----------------
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 _secret = os.getenv("FLASK_SECRET") or os.urandom(32)
 app.secret_key = _secret
 app.config.update(
@@ -33,6 +38,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+    MAX_CONTENT_LENGTH=10 * 1024 * 1024,  # 10MB uploads
 )
 
 @app.context_processor
@@ -146,6 +152,11 @@ def pi_headers():
 def fetch_pi_payment(payment_id: str):
     url = f"{PI_API_BASE}/v2/payments/{payment_id}"
     return requests.get(url, headers=pi_headers(), timeout=15)
+
+def allowed_ext(filename: str) -> bool:
+    if "." not in filename: return False
+    ext = filename.rsplit(".", 1)[-1].lower()
+    return ext in ALLOWED_EXT
 
 # ----------------- DEBUG -----------------
 @app.get("/whoami")
@@ -299,15 +310,45 @@ def merchant_new_item(slug):
     if isinstance(u, Response): return u
     data = request.form
     link_id = uuid.uuid4().hex[:8]
+    image_url = data.get("image_url")
+    # if an upload was just made, the upload handler set ?uploaded=URL
+    if (not image_url) and request.args.get("uploaded"):
+        image_url = request.args.get("uploaded")
     with conn() as cx:
         cx.execute("""INSERT INTO items(merchant_id, link_id, title, sku, image_url, pi_price,
                       stock_qty, allow_backorder, active)
                       VALUES(?,?,?,?,?,?,?,?,1)""",
                    (m["id"], link_id, data.get("title"), data.get("sku"),
-                    data.get("image_url"), float(data.get("pi_price", "0")),
+                    image_url, float(data.get("pi_price", "0")),
                     int(data.get("stock_qty", "0")), int(bool(data.get("allow_backorder")))))
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
+
+# -------- image upload (merchant) --------
+@app.post("/merchant/<slug>/upload")
+def merchant_upload(slug):
+    u, m = require_merchant_owner(slug)
+    if isinstance(u, Response): return u
+    f = request.files.get("image")
+    if not f or not f.filename:
+        return redirect(f"/merchant/{slug}/items?err=nofile")
+    if not allowed_ext(f.filename):
+        return redirect(f"/merchant/{slug}/items?err=badext")
+    fname_base = secure_filename(f.filename)
+    ext = fname_base.rsplit(".", 1)[-1].lower()
+    new_name = f"{uuid.uuid4().hex}.{ext}"
+    save_path = os.path.join(UPLOAD_DIR, new_name)
+    f.save(save_path)
+    public_url = f"{BASE_ORIGIN}/static/uploads/{new_name}"
+    # bounce back to the form with that URL prefilled (via ?uploaded=)
+    return redirect(f"/merchant/{slug}/items?uploaded={public_url}")
+
+@app.get("/static/uploads/<path:fname>")
+def serve_upload(fname):
+    # basic safety: only allow configured folder and allowed extensions
+    if not allowed_ext(fname):
+        abort(404)
+    return send_from_directory(UPLOAD_DIR, fname)
 
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
@@ -414,8 +455,10 @@ def storefront(slug):
             "SELECT COALESCE(SUM(qty),0) as n FROM cart_items WHERE cart_id=?",
             (cid,)
         ).fetchone()["n"]
+    success = request.args.get("success") == "1"
     return render_template("store.html", m=m, items=items, cid=cid, cart_count=cnt,
-                           app_base=APP_BASE_URL, username=u["pi_username"], t=tok)
+                           app_base=APP_BASE_URL, username=u["pi_username"], t=tok,
+                           success=success)
 
 @app.post("/store/<slug>/add")
 def store_add(slug):
@@ -475,7 +518,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()  # FIXED tuple
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -616,7 +659,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         ok = send_pi_payout(m["pi_wallet_address"], Decimal(str(net)), f"Cart order via {APP_NAME}")
     else:
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()  # FIXED tuple
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -720,8 +763,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
