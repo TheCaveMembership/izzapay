@@ -26,7 +26,6 @@
     .item{display:flex;gap:14px;align-items:center;border-top:1px solid var(--line);padding:12px 0}
     .item img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
     .err{color:#ff9aa2}
-    .ok{color:#9affb0}
   </style>
 </head>
 <body>
@@ -68,7 +67,7 @@
           </div>
           <div class="col">
             <label>Pi wallet public key (starts with G..., 56 chars)</label>
-            <input type="text" name="pi_wallet_address" placeholder="G...">
+            <input type="text" name="pi_wallet_address" placeholder="G..." required>
           </div>
         </div>
         <div class="row">
@@ -86,18 +85,21 @@
   {% else %}
     <div class="card">
       <h1>{{ m.business_name }}</h1>
-      <p class="muted">Share your Pi store link with customers. This link is **Pi-wrapped** so authentication works in Sandbox/Mainnet.</p>
+      <p class="muted">Share your Pi store link with customers. This link is Pi-wrapped so authentication works in Sandbox/Mainnet.</p>
 
-      <!-- CUSTOMER STORE LINK (Pi wrapper base) -->
+      <!-- CUSTOMER STORE LINK (Pi wrapper base + ?path=/store/<slug>) -->
       <label>Your public Pi store link</label>
       <div class="copybox">
-        <input class="mono" id="storeLink" value="{{ share_base }}/store/{{ m.slug }}" readonly>
+        <input class="mono" id="storeLink" value="{{ share_base }}?path=/store/{{ m.slug }}" readonly>
         <button class="btn" onclick="copy('#storeLink')">Copy</button>
       </div>
 
       <p class="muted" style="margin-top:8px">
         Tip: add this link as a menu item (e.g., “Pay with Pi”) on your website.
       </p>
+      <div style="margin-top:8px">
+        <a class="btn" href="{{ share_base }}?path=/store/{{ m.slug }}" target="_blank" rel="noopener">Open store (Pi Browser)</a>
+      </div>
     </div>
 
     <div class="card">
@@ -151,20 +153,22 @@
       {% else %}
         {% for it in items %}
           <div class="item">
-            <img src="{{ it.image_url }}" onerror="this.src='{{ app_base }}/uimg?src='+encodeURIComponent('{{ it.image_url }}')" alt="">
+            <img src="{{ it.image_url }}"
+                 onerror="this.src='{{ app_base }}/uimg?src='+encodeURIComponent('{{ it.image_url }}')"
+                 alt="">
             <div style="flex:1">
               <div><strong>{{ it.title }}</strong> <span class="pill">{{ it.pi_price }} Pi</span></div>
               {% if it.sku %}<div class="muted">SKU: {{ it.sku }}</div>{% endif %}
 
-              <!-- DIRECT BUY LINK (Pi wrapper base) -->
+              <!-- DIRECT BUY LINK (Pi wrapper base + ?path=/checkout/<link_id>) -->
               <div style="margin-top:8px">
                 <label style="display:block;margin:0 0 6px">Direct “Buy with Pi” link (for this item)</label>
                 <div class="copybox">
-                  <input class="mono" id="buy_{{ it.link_id }}" value="{{ share_base }}/checkout/{{ it.link_id }}" readonly>
+                  <input class="mono" id="buy_{{ it.link_id }}" value="{{ share_base }}?path=/checkout/{{ it.link_id }}" readonly>
                   <button class="btn" onclick="copy('#buy_{{ it.link_id }}')">Copy</button>
                 </div>
                 <div style="margin-top:6px">
-                  <a class="btn" href="{{ share_base }}/checkout/{{ it.link_id }}" target="_blank" rel="noopener">Open test</a>
+                  <a class="btn" href="{{ share_base }}?path=/checkout/{{ it.link_id }}" target="_blank" rel="noopener">Open test (Pi Browser)</a>
                 </div>
               </div>
             </div>
