@@ -2,128 +2,173 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <title>Checkout — {{ i.title if i else 'Cart' }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Pay with Pi</title>
-  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#fff;margin:0;padding:20px}
-    .card{max-width:520px;margin:0 auto;background:#111a2b;border:1px solid #1f2a44;padding:20px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
-    input,button{width:100%;padding:12px;border-radius:10px;border:1px solid #2b3b61;background:#0e1422;color:#e8f0ff;margin:6px 0}
-    button{background:#6e9fff;color:#0b0f17;border:0;font-weight:700}
-    button:hover{opacity:.95}
-    small{opacity:.8}
-    .badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#20304f;color:#b2c7ff;font-size:12px;margin-bottom:10px}
+    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:620px;margin:0 auto;padding:20px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+    .row{display:flex;gap:12px;align-items:center}
+    .muted{color:var(--muted)}
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
-<div class="card">
-  <div class="badge">SANDBOX MODE</div>
+<div class="wrap">
   {% if sold_out %}
-    <h2>Sold Out</h2>
-    <p>This item is currently out of stock.</p>
+    <div class="card">
+      <h2>Sold out</h2>
+      <p class="muted">This item is not available.</p>
+    </div>
   {% else %}
-    <h2>{{ i['business_name'] }}</h2>
-    <p><strong>{{ i['title'] }}</strong></p>
-    <p>Qty: {{ qty }} — <strong>Total: {{ expected_pi }} Pi</strong> <small>(shipping included)</small></p>
+    <div class="card">
+      <div class="row">
+        {% if i and i.logo_url %}<img src="{{ i.logo_url }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">{% endif %}
+        <div>
+          <div style="font-weight:800">{{ i.business_name if i else 'Cart' }}</div>
+          <div class="muted">{{ i.title if i else 'Cart total' }}</div>
+        </div>
+      </div>
 
-    <h3>Delivery Info</h3>
-    <input id="name" placeholder="Full Name">
-    <input id="email" placeholder="Email (for updates, optional)">
-    <input id="addr1" placeholder="Address line 1">
-    <input id="addr2" placeholder="Address line 2">
-    <input id="city" placeholder="City">
-    <input id="region" placeholder="State/Province">
-    <input id="postal" placeholder="Postal Code">
-    <input id="country" placeholder="Country">
-    <button id="pay-btn">Pay with Pi</button>
-    <div id="status" style="color:#ffb3b3;margin-top:10px"></div>
+      <div style="margin-top:12px">
+        <div>Quantity: <strong>{{ qty }}</strong></div>
+        <div>Total: <strong>{{ '%.7f'|format(expected_pi) }} Pi</strong></div>
+      </div>
+
+      <div style="margin-top:16px">
+        <button id="payBtn" class="btn">Pay with Pi</button>
+        <p id="msg" class="muted" style="margin-top:10px;"></p>
+        <div id="err" class="err"></div>
+      </div>
+    </div>
   {% endif %}
 </div>
 
 <script>
-  const Pi = window.Pi;
-  const sessionId = "{{ session_id }}";
-  const expectedPi = {{ expected_pi|default(0) }};
-  const appBase = "{{ app_base }}";
+(function(){
+  const sessionId = "{{ session_id|e }}";
+  const amount = {{ expected_pi if expected_pi else 0 }};
+  const cartMode = {{ 'true' if cart_mode else 'false' }};
+  const sandbox = {{ 'true' if (globals().get('PI_SANDBOX') or false) else 'false' }};  /* server may not inject; we’ll detect anyway */
 
-  function initPiSandbox() {
-    if (!Pi) return false;
-    try { Pi.init({ version: "2.0", sandbox: true }); return true; }
-    catch (e) { setStatus('Pi SDK init error: ' + (e?.message||e)); return false; }
-  }
+  const btn = document.getElementById('payBtn');
+  const msg = document.getElementById('msg');
+  const err = document.getElementById('err');
 
-  function setStatus(msg){ const el=document.getElementById('status'); if(el) el.innerText=msg; }
+  function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
+  function setErr(t){ if(err){ err.textContent = t || ''; } }
 
-  function shippingForm(){
-    return {
-      name:val('name'), email:val('email'),
-      address1:val('addr1'), address2:val('addr2'),
-      city:val('city'), region:val('region'),
-      postal:val('postal'), country:val('country')
-    };
-  }
-  function val(id){ const el=document.getElementById(id); return (el?el.value:'').trim(); }
-
-  async function onIncompletePaymentFound(payment) {
-    try {
-      const txid = payment?.transaction?.txid || payment?.identifier;
-      const sid = payment?.metadata?.session_id || sessionId;
-      if (!txid || !sid) return;
-
-      const res = await fetch(appBase + "/api/pi/confirm", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          session_id: sid,
-          tx_hash: txid,
-          buyer:{ name: shippingForm().name, email: shippingForm().email },
-          shipping: shippingForm()
-        })
-      }).then(r=>r.json());
-
-      if (res.ok && res.buyer_status_url) {
-        window.location.href = res.buyer_status_url;
-      }
-    } catch (e) {
-      console.log("Incomplete payment reconcile error:", e);
+  function initPi(){
+    try{
+      if (!window.Pi || !Pi.init) return false;
+      // NOTE: sandbox is enforced by wrapper too, but we pass it for consistency
+      Pi.init({ version: "2.0", sandbox: true });
+      return true;
+    }catch(e){
+      console.error("Pi.init failed", e);
+      setErr("Pi.init failed: " + (e?.message || e));
+      return false;
     }
   }
 
-  document.getElementById('pay-btn')?.addEventListener('click', async ()=>{
-    if (!initPiSandbox()) { setStatus('Open this page in Pi Browser and enable Sandbox in Utilities.'); return; }
+  if (!initPi()){
+    setMsg("Open in Pi Browser (and Sandbox ON if testing).");
+  }
 
-    try{
-      await Pi.createPayment({
-        amount: expectedPi,
-        memo: "IZZA PAY checkout",
-        metadata: { session_id: sessionId }
-      }, {
-        onIncompletePaymentFound,            // resume if needed
-        onReadyForServerApproval: async (paymentId) => {
-          // optional server approval step (unused in this minimal flow)
-        },
-        onReadyForServerCompletion: async (paymentId, tx) => {
-          const res = await fetch(appBase + "/api/pi/confirm", {
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({
-              session_id: sessionId,
-              tx_hash: tx?.txid || paymentId,
-              buyer:{ name: shippingForm().name, email: shippingForm().email },
-              shipping: shippingForm()
-            })
-          }).then(r=>r.json());
+  let watchdog;
+  function startWatchdog(){
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      setErr("Still waiting… Ensure Pi Browser is active and you approved the payment prompt.");
+    }, 15000);
+  }
 
-          if (res.ok) { window.location.href = res.buyer_status_url; }
-          else { setStatus("Payment confirmation failed."); }
-        },
-        onCancel: () => { setStatus("Payment cancelled."); },
-        onError: (e) => { setStatus("Error: " + (e?.message||e)); }
+  btn?.addEventListener('click', function(){
+    setErr('');
+    setMsg('Opening Pi payment…');
+    if (!window.Pi || !Pi.createPayment){
+      setErr("Pi.createPayment unavailable — open in Pi Browser.");
+      return;
+    }
+
+    // Minimal payment data. You can extend with metadata if needed.
+    const paymentData = {
+      amount: amount,
+      memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
+      metadata: { session_id: sessionId }
+    };
+
+    function onIncompletePaymentFound(payment) {
+      console.log("Incomplete payment detected:", payment);
+      // Let completion path handle it below
+    }
+
+    startWatchdog();
+
+    Pi.createPayment(paymentData, {
+      onReadyForServerApproval: function(paymentId){
+        // Optional: tell your server you’re about to approve paymentId
+        // We skip separate approval route for simplicity; rely on onCompleted + /api/pi/confirm
+        console.log("Ready for server approval:", paymentId);
+      },
+      onReadyForServerCompletion: function(paymentId, txid){
+        console.log("Ready for server completion:", paymentId, txid);
+        // We’ll confirm/fulfill now.
+      },
+      onCancel: function(paymentId){
+        clearTimeout(watchdog);
+        setMsg("Payment canceled.");
+      },
+      onError: function(error, paymentId){
+        clearTimeout(watchdog);
+        console.error("Payment error:", error);
+        setMsg("Payment error. Try again.");
+        setErr(error?.message || String(error));
+      }
+    }).then(function(payment){
+      // The promise resolves when payment flow completes in the client.
+      // Some SDKs return a structure including txid; we’ll read it if present.
+      console.log("Pi.createPayment result:", payment);
+      const txid = payment?.transaction?.txid || payment?.txid || "";
+      confirmServer(txid);
+    }).catch(function(e){
+      clearTimeout(watchdog);
+      console.error("createPayment failed:", e);
+      setMsg("Payment failed.");
+      setErr(e?.message || String(e));
+    });
+
+    function confirmServer(txid){
+      fetch("/api/pi/confirm", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          tx_hash: txid,
+          buyer: {},          // optionally collect shipping/email pre-payment
+          shipping: {}
+        })
+      }).then(r=>r.json()).then(function(res){
+        clearTimeout(watchdog);
+        if(!res || !res.ok){
+          setMsg("Could not confirm payment.");
+          setErr((res && res.error) ? res.error : "server_error");
+          return;
+        }
+        setMsg("Payment complete!");
+        window.location.href = res.buyer_status_url || "/success";
+      }).catch(function(e){
+        clearTimeout(watchdog);
+        console.error(e);
+        setMsg("Could not confirm payment (network).");
+        setErr(e?.message || String(e));
       });
-    } catch(e){
-      setStatus("Error: " + (e?.message||e));
     }
   });
+})();
 </script>
 </body>
 </html>
