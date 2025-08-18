@@ -52,7 +52,8 @@
   const sessionId = "{{ session_id|e }}";
   const amount = {{ expected_pi if expected_pi else 0 }};
   const cartMode = {{ 'true' if cart_mode else 'false' }};
-  const sandbox = {{ 'true' if (globals().get('PI_SANDBOX') or false) else 'false' }};  /* server may not inject; we’ll detect anyway */
+  const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
+  const appId = "{{ PI_APP_ID }}";
 
   const btn = document.getElementById('payBtn');
   const msg = document.getElementById('msg');
@@ -64,8 +65,7 @@
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
-      // NOTE: sandbox is enforced by wrapper too, but we pass it for consistency
-      Pi.init({ version: "2.0", sandbox: true });
+      Pi.init({ version: "2.0", sandbox: sandbox, appId: appId });
       return true;
     }catch(e){
       console.error("Pi.init failed", e);
@@ -94,7 +94,6 @@
       return;
     }
 
-    // Minimal payment data. You can extend with metadata if needed.
     const paymentData = {
       amount: amount,
       memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
@@ -103,21 +102,13 @@
 
     function onIncompletePaymentFound(payment) {
       console.log("Incomplete payment detected:", payment);
-      // Let completion path handle it below
     }
 
     startWatchdog();
 
     Pi.createPayment(paymentData, {
-      onReadyForServerApproval: function(paymentId){
-        // Optional: tell your server you’re about to approve paymentId
-        // We skip separate approval route for simplicity; rely on onCompleted + /api/pi/confirm
-        console.log("Ready for server approval:", paymentId);
-      },
-      onReadyForServerCompletion: function(paymentId, txid){
-        console.log("Ready for server completion:", paymentId, txid);
-        // We’ll confirm/fulfill now.
-      },
+      onReadyForServerApproval: function(paymentId){ console.log("Ready for approval:", paymentId); },
+      onReadyForServerCompletion: function(paymentId, txid){ console.log("Ready for completion:", paymentId, txid); },
       onCancel: function(paymentId){
         clearTimeout(watchdog);
         setMsg("Payment canceled.");
@@ -129,9 +120,6 @@
         setErr(error?.message || String(error));
       }
     }).then(function(payment){
-      // The promise resolves when payment flow completes in the client.
-      // Some SDKs return a structure including txid; we’ll read it if present.
-      console.log("Pi.createPayment result:", payment);
       const txid = payment?.transaction?.txid || payment?.txid || "";
       confirmServer(txid);
     }).catch(function(e){
@@ -148,7 +136,7 @@
         body: JSON.stringify({
           session_id: sessionId,
           tx_hash: txid,
-          buyer: {},          // optionally collect shipping/email pre-payment
+          buyer: {},
           shipping: {}
         })
       }).then(r=>r.json()).then(function(res){
