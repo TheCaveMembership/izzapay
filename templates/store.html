@@ -19,6 +19,7 @@
     .cart{position:relative}
     .cart a{display:inline-block}
     .badge{position:absolute;top:-6px;right:-6px;background:#6e9fff;color:#0b0f17;border-radius:999px;font-weight:900;font-size:.8rem;padding:2px 6px;min-width:16px;text-align:center}
+    .banner{margin-top:10px;padding:10px 12px;border-radius:10px;background:#13301b;border:1px solid #1e6c36;color:#9ee2b0}
   </style>
 </head>
 <body>
@@ -27,7 +28,7 @@
   <div class="top">
     <div class="logo">
       {% if m.logo_url %}
-        <img src="{{ APP_BASE_URL }}/uimg?src={{ m.logo_url | urlencode }}" alt="logo">
+        <img src="{{ APP_BASE_URL }}/uimg?src={{ m.logo_url | urlencode }}" alt="logo" onerror="this.remove()">
       {% endif %}
       <div>
         <div style="font-weight:900">{{ m.business_name }}</div>
@@ -45,12 +46,16 @@
     </div>
   </div>
 
+  {% if request.args.get('success') %}
+    <div class="banner">Payment complete ✅ — we’ll email you a receipt and tracking once the merchant ships.</div>
+  {% endif %}
+
   <div class="grid">
     {% for it in items %}
       <div class="card">
         <div style="font-weight:800;margin-bottom:6px">{{ it.title }}</div>
         {% if it.image_url %}
-          <img src="{{ APP_BASE_URL }}/uimg?src={{ it.image_url | urlencode }}" alt="" style="width:100%;height:auto;border-radius:8px;margin:6px 0;">
+          <img src="{{ APP_BASE_URL }}/uimg?src={{ it.image_url | urlencode }}" alt="" style="width:100%;height:auto;border-radius:8px;margin:6px 0;" onerror="this.remove()">
         {% endif %}
         <div class="mono" style="margin:6px 0">{{ '%.7f'|format(it.pi_price) }} Pi</div>
         <form method="post" action="/store/{{ m.slug }}/add{% if t %}?t={{ t }}{% endif %}">
