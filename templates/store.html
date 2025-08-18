@@ -2,61 +2,68 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>{{ m['business_name'] }} — Pay with Pi</title>
+  <title>{{ m.business_name }} — Pay with Pi</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
-    header{display:flex;align-items:center;justify-content:space-between}
-    .brand{display:flex;align-items:center;gap:10px}
-    .brand img{height:36px;border-radius:8px;border:1px solid #1f2a44}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:16px}
-    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:12px}
-    .card img{width:100%;height:160px;object-fit:cover;border-radius:10px;border:1px solid #1f2a44;background:#0b0f17}
-    .price{font-weight:800;margin:6px 0}
-    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:700}
-    .muted{color:#bcd0ff;opacity:.9}
+    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:980px;margin:0 auto;padding:20px}
+    header{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+    header img{height:36px;border-radius:6px;border:1px solid var(--line);background:#0c1424}
+    .pill{display:inline-block;background:#1a2440;color:#cfe1ff;border:1px solid #2a3a66;border-radius:999px;padding:6px 10px;font-size:12px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column}
+    .card img{width:100%;height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:#0c1424}
+    .title{font-weight:700;margin:8px 0 4px}
+    .muted{color:var(--muted)}
+    .row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:8px}
+    input[type="number"]{width:80px;padding:8px;border-radius:10px;border:1px solid var(--line);background:#0c1424;color:var(--txt)}
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+    .right a{margin-left:8px}
   </style>
 </head>
 <body>
 <div class="wrap">
-
-  <header>
-    <div class="brand">
-      <img src="{{ m['logo_url'] }}" alt="">
+  <div class="topbar">
+    <header>
+      <img src="{{ m.logo_url }}" alt="">
       <div>
-        <div style="font-weight:800">{{ m['business_name'] }}</div>
-        <div class="muted">Pay with Pi</div>
+        <div style="font-weight:800">{{ m.business_name }}</div>
+        <div class="muted">Welcome{% if username %}, {{ username }}{% endif %}</div>
       </div>
+    </header>
+    <div class="right">
+      <a class="btn" href="/cart/{{ cid }}?{% if t %}t={{ t }}&{% endif %}cid={{ cid }}">Cart ({{ cart_count }})</a>
     </div>
-    <div>
-      <a class="btn" href="/cart/{{ cid }}">Cart ({{ cart_count }})</a>
-    </div>
-  </header>
-
-  <div class="grid">
-    {% for it in items %}
-      <div class="card">
-        <img src="/uimg?src={{ (it['image_url'] or '')|urlencode }}" onerror="this.src='https://via.placeholder.com/400x240?text=PI'">
-        <div style="font-weight:800; margin-top:8px">{{ it['title'] }}</div>
-        <div class="price">{{ '%.6f'|format(it['pi_price']) }} Pi</div>
-        <form method="POST" action="/store/{{ m['slug'] }}/add">
-          <input type="hidden" name="cid" value="{{ cid }}">
-          <input type="hidden" name="item_id" value="{{ it['id'] }}">
-          <button class="btn" type="submit">Add to cart</button>
-        </form>
-        <div style="margin-top:8px">
-          <a href="/checkout/{{ it['link_id'] }}" class="muted">Buy now (direct)</a>
-        </div>
-      </div>
-    {% else %}
-      <p class="muted">No products available.</p>
-    {% endfor %}
   </div>
 
-  <p class="muted" style="margin-top:16px">
-    Shipping should be included in the Pi price set by the merchant.
-  </p>
+  {% if items|length == 0 %}
+    <p class="muted">No items available yet.</p>
+  {% else %}
+    <div class="grid">
+      {% for it in items %}
+        <div class="card">
+          <img src="{{ it.image_url }}"
+               onerror="this.src='{{ app_base }}/uimg?src='+encodeURIComponent('{{ it.image_url }}')"
+               alt="">
+          <div class="title">{{ it.title }}</div>
+          {% if it.sku %}<div class="muted">SKU: {{ it.sku }}</div>{% endif %}
+          <div class="row">
+            <span class="pill">{{ it.pi_price }} Pi</span>
+            <form method="post" action="/store/{{ m.slug }}/add?{% if t %}t={{ t }}&{% endif %}cid={{ cid }}">
+              <input type="hidden" name="item_id" value="{{ it.id }}">
+              <input type="number" min="1" step="1" name="qty" value="1">
+              <button class="btn" type="submit">Add to Cart</button>
+            </form>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <a class="btn" href="/checkout/{{ it.link_id }}?{% if t %}t={{ t }}&{% endif %}qty=1">Buy now</a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
 </div>
 </body>
 </html>
