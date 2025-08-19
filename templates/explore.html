@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Explore stores & products — IZZA PAY</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    .wrap{max-width:1080px;margin:0 auto;padding:16px}
+    .hdr{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:6px 0 16px}
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand img{height:36px}
+    .lead{color:var(--muted)}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
+    .search{display:flex;gap:8px}
+    .search input{flex:1;background:#0b1222;border:1px solid var(--line);border-radius:12px;color:var(--txt);padding:12px}
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:12px;padding:12px 16px;font-weight:900;cursor:pointer;text-decoration:none}
+    .ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px}
+    .store{border:1px solid var(--line);border-radius:14px;background:#0b1222;padding:12px}
+    .row{display:flex;align-items:center;gap:10px}
+    .logo{height:40px;width:40px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:#0b1222;display:flex;align-items:center;justify-content:center}
+    .logo img{max-width:100%;max-height:100%}
+    .small{font-size:.92rem}
+    .subtle{color:var(--muted)}
+    .product{background:#0b1222;border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+    .product img{width:100%;height:180px;object-fit:cover;display:block}
+    .pdx{padding:12px}
+    .price{font-weight:900}
+  </style>
+</head>
+<body data-color="blue">
+  <div class="wrap">
+    <div class="hdr">
+      <div class="brand">
+        <img src="/static/izzapay-mark.svg" alt="IZZA PAY">
+        <div>
+          <div style="font-weight:900">Explore IZZA PAY</div>
+          <div class="lead small">Search stores and products across the network</div>
+        </div>
+      </div>
+      <a class="btn ghost" href="/">Home</a>
+    </div>
+
+    <div class="card">
+      <form class="search" action="/explore" method="get">
+        <input type="search" name="q" placeholder="Try a store or product name…" value="{{ q or '' }}">
+        <button class="btn" type="submit">Search</button>
+      </form>
+      {% if q %}
+        <p class="subtle small" style="margin-top:8px">Results for: <strong>{{ q }}</strong></p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <strong>Stores</strong>
+        <a class="small subtle" href="/signin">Become a merchant →</a>
+      </div>
+      {% if stores and stores|length > 0 %}
+      <div class="grid">
+        {% for m in stores %}
+        <div class="store">
+          <div class="row">
+            <div class="logo">
+              {% if m.logo_url %}
+                <img src="{{ m.logo_url }}" alt="{{ m.business_name }}">
+              {% else %}
+                <img src="/static/izzapay-mark.svg" alt="Logo">
+              {% endif %}
+            </div>
+            <div>
+              <div style="font-weight:800">{{ m.business_name }}</div>
+              <div class="subtle small">@{{ m.slug }}</div>
+            </div>
+            <a class="btn" style="margin-left:auto" href="/store/{{ m.slug }}">Visit</a>
+          </div>
+          {% if m.description %}
+            <p class="subtle small" style="margin:10px 0 0">{{ m.description[:160] }}{% if m.description|length > 160 %}…{% endif %}</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+        <p class="subtle">No stores found.</p>
+      {% endif %}
+    </div>
+
+    {% if items is not none %}
+    <div class="card">
+      <strong>Products</strong>
+      {% if items and items|length > 0 %}
+      <div class="grid">
+        {% for it in items %}
+        <div class="product">
+          {% if it.image_url %}
+            <img src="{{ it.image_url }}" alt="{{ it.title }}">
+          {% endif %}
+          <div class="pdx">
+            <div style="font-weight:900">{{ it.title }}</div>
+            <div class="subtle small">by <a href="/store/{{ it.mslug }}">@{{ it.mslug }}</a></div>
+            {% if it.description %}<div class="subtle small" style="margin-top:6px">{{ it.description[:140] }}{% if it.description|length>140 %}…{% endif %}</div>{% endif %}
+            <div class="row" style="margin-top:8px">
+              <div class="price">{{ '%.7f'|format(it.pi_price) }} Pi</div>
+              <a class="btn" style="margin-left:auto" href="/checkout/{{ it.link_id }}">Buy</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+        <p class="subtle">No products found.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>
