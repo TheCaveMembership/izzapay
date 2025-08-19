@@ -50,6 +50,7 @@ def ensure_schema():
         if "colorway" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
+        # persistent carts
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
@@ -62,6 +63,16 @@ def ensure_schema():
           cart_id TEXT NOT NULL,
           item_id INTEGER NOT NULL,
           qty INTEGER NOT NULL
+        )""")
+
+        # persistent media (device uploads + url fetches)
+        cx.execute("""
+        CREATE TABLE IF NOT EXISTS media(
+          id TEXT PRIMARY KEY,
+          owner_user_id INTEGER,
+          ctype TEXT,
+          data BLOB,
+          created_at INTEGER
         )""")
 ensure_schema()
 
@@ -242,6 +253,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
+        # FIX: must pass a 1-tuple (u["id"],) not (u["id"])
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -258,18 +270,27 @@ def merchant_setup():
     data = request.form
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
     business_name = data.get("business_name") or f"{u['pi_username']}'s Shop"
-    logo_url = (data.get("logo_url") or "").strip()
+
+    # Prefer device upload id -> /media/<id>, else use URL field
+    logo_upload_id = (data.get("logo_upload_id") or "").strip()
+    if logo_upload_id:
+        logo_url = f"/media/{logo_upload_id}"
+    else:
+        logo_url = (data.get("logo_url") or "").strip()
+
     theme_mode = data.get("theme_mode", "dark")
     colorway = (data.get("colorway") or "cw-blue").strip() or "cw-blue"
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
     pi_handle = (data.get("pi_handle") or "").strip()
+
     if not (len(pi_wallet_address) == 56 and pi_wallet_address.startswith("G")):
         tok = get_bearer_token_from_request()
         return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                                app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
                                error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').",
                                username=u["pi_username"])
+
     with conn() as cx:
         exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
         if exists:
@@ -313,12 +334,19 @@ def merchant_new_item(slug):
     price = _to_float(data.get("pi_price"), 0.0)
     stock = _to_int(data.get("stock_qty"), 0)
 
+    # Prefer device upload id -> /media/<id>, else use URL field
+    image_upload_id = (data.get("image_upload_id") or "").strip()
+    if image_upload_id:
+        image_url = f"/media/{image_upload_id}"
+    else:
+        image_url = (data.get("image_url") or "").strip()
+
     with conn() as cx:
         cx.execute("""INSERT INTO items(merchant_id, link_id, title, sku, image_url, pi_price,
                       stock_qty, allow_backorder, active)
                       VALUES(?,?,?,?,?,?,?,?,1)""",
                    (m["id"], link_id, data.get("title"), data.get("sku"),
-                    data.get("image_url"), price, stock,
+                    image_url, price, stock,
                     int(bool(data.get("allow_backorder")))))
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
@@ -603,7 +631,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
               SELECT cart_items.qty, items.*
               FROM cart_items JOIN items ON items.id=cart_items.item_id
               WHERE cart_items.cart_id=?
-            """, (cart["id"],)).fetchall()
+            """, (cart["id"]),).fetchall()
         with conn() as cx:
             for r in rows:
                 line_gross = float(r["pi_price"]) * r["qty"]
@@ -668,7 +696,80 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
 
-# ----------------- IMAGE PROXY (resilient) -----------------
+# ----------------- IMAGE STORAGE (persisted) -----------------
+
+MAX_IMG_BYTES = 5 * 1024 * 1024  # 5MB
+
+def _safe_image_content_type(ct: str) -> bool:
+    if not ct: return False
+    ct = ct.lower()
+    return ct.startswith("image/") and any(x in ct for x in ["png","jpeg","jpg","webp","gif","svg"])
+
+@app.post("/api/upload")
+def upload_image():
+    """Device upload (mobile/desktop). Field name: file"""
+    u = current_user_row()
+    if not u: return {"ok": False, "error": "auth_required"}, 401
+    if "file" not in request.files:
+        return {"ok": False, "error": "no_file"}, 400
+    f = request.files["file"]
+    data = f.read()
+    if not data: return {"ok": False, "error": "empty_file"}, 400
+    if len(data) > MAX_IMG_BYTES:
+        return {"ok": False, "error": "too_large"}, 400
+    ctype = f.mimetype or "application/octet-stream"
+    if not _safe_image_content_type(ctype):
+        return {"ok": False, "error": "bad_type"}, 400
+    mid = uuid.uuid4().hex
+    with conn() as cx:
+        cx.execute("INSERT INTO media(id, owner_user_id, ctype, data, created_at) VALUES(?,?,?,?,?)",
+                   (mid, u["id"], ctype, data, int(time.time())))
+    url = f"/media/{mid}"
+    return {"ok": True, "id": mid, "url": url}
+
+@app.post("/api/upload-by-url")
+def upload_by_url():
+    """Backup option: save image by HTTPS URL (server fetches & persists)."""
+    u = current_user_row()
+    if not u: return {"ok": False, "error": "auth_required"}, 401
+    data = request.get_json(silent=True) or {}
+    src = (data.get("url") or "").strip()
+    try:
+        up = urlparse(src)
+    except Exception:
+        return {"ok": False, "error": "bad_url"}, 400
+    if up.scheme != "https":
+        return {"ok": False, "error": "https_only"}, 400
+    try:
+        r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-fetch"})
+        if r.status_code != 200:
+            return {"ok": False, "error": "fetch_fail"}, 400
+        ctype = r.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if not _safe_image_content_type(ctype):
+            return {"ok": False, "error": "bad_type"}, 400
+        data_bytes = r.content
+        if len(data_bytes) > MAX_IMG_BYTES:
+            return {"ok": False, "error": "too_large"}, 400
+        mid = uuid.uuid4().hex
+        with conn() as cx:
+            cx.execute("INSERT INTO media(id, owner_user_id, ctype, data, created_at) VALUES(?,?,?,?,?)",
+                       (mid, u["id"], ctype, data_bytes, int(time.time())))
+        return {"ok": True, "id": mid, "url": f"/media/{mid}"}
+    except Exception as e:
+        print("upload_by_url error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
+
+@app.get("/media/<mid>")
+def media_serve(mid):
+    with conn() as cx:
+        row = cx.execute("SELECT ctype, data FROM media WHERE id=?", (mid,)).fetchone()
+    if not row: abort(404)
+    return Response(row["data"], headers={
+        "Content-Type": row["ctype"] or "application/octet-stream",
+        "Cache-Control": "public, max-age=31536000"
+    })
+
+# ----------------- IMAGE PROXY (legacy) -----------------
 _TRANSPARENT_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
     "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
@@ -717,7 +818,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
