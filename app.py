@@ -240,6 +240,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
+        # FIX: make single-parameter tuple
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -256,7 +257,7 @@ def merchant_setup():
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
     business_name = data.get("business_name") or f"{u['pi_username']}'s Shop"
     # Default to no logo (avoid external placeholder that may fail DNS on host)
-    logo_url = (data.get("logo_url") or "").strip()
+    logo_url = (data.get("logo_url") or "").trim() if hasattr(str, 'trim') else (data.get("logo_url") or "").strip()
     theme_mode = data.get("theme_mode", "dark")
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
