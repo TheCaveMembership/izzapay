@@ -334,9 +334,16 @@ def merchant_setup_form():
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     tok = get_bearer_token_from_request()
-    # reuse merchant_items for setup mode
-    return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                           app_base=APP_BASE_URL, t=tok)
+    # pass username so the page can display “Signed in as @username”
+    return render_template(
+        "merchant_items.html",
+        setup_mode=True,
+        m=None,
+        items=[],
+        app_base=APP_BASE_URL,
+        t=tok,
+        username=u["pi_username"]  # <-- this is the key addition
+    )
 
 @app.post("/merchant/setup")
 def merchant_setup():
