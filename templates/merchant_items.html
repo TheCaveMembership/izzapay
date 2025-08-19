@@ -27,6 +27,7 @@
 
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
     .h1{font-size:24px;font-weight:800;margin:2px 0 10px}
+    .h2{font-size:18px;font-weight:800;margin:0 0 10px}
     .muted{color:var(--muted)}
 
     .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -87,9 +88,10 @@
         </div>
       {% endif %}
 
-      <!-- IMPORTANT: carry token t so auth persists -->
+      <!-- carry token -->
       <form class="grid" method="post" action="/merchant/setup">
         <input type="hidden" name="t" value="{{ t or '' }}">
+        <input type="hidden" name="colorway" id="colorway" value="cw-blue">
 
         <div class="card stack">
           <div class="field">
@@ -185,7 +187,7 @@
             </div>
           </div>
           <p class="muted" style="margin-top:8px">
-            These previews help you choose a vibe. Actual storefront layout can be switched later.
+            Tap a color to preview instantly. We’ll save this choice with your store.
           </p>
         </div>
       </form>
@@ -193,9 +195,11 @@
     {% else %}
       <div class="h1">{{ m.business_name }}</div>
 
-      <div class="card">
-        <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new">
-          <!-- carry token on item creation, too -->
+      <!-- CREATE PRODUCT -->
+      <div class="card" id="create-product">
+        <div class="h2">Create Product</div>
+        <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
+          <!-- also carry token in body -->
           <input type="hidden" name="t" value="{{ t or '' }}">
           <div class="field-inline">
             <div class="field">
@@ -229,15 +233,17 @@
             </div>
           </div>
 
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <label class="ip-label" style="display:flex;gap:6px;align-items:center">
-              <input type="checkbox" name="allow_backorder" value="1"> Allow backorder
-            </label>
-            <button class="ip-btn" type="submit">Add Item</button>
+          <label class="ip-label" style="display:flex;gap:6px;align-items:center">
+            <input type="checkbox" name="allow_backorder" value="1"> Allow backorder
+          </label>
+
+          <div class="row" style="justify-content:flex-end">
+            <button class="ip-btn" type="submit" id="addItemBtn">Add Item</button>
           </div>
         </form>
       </div>
 
+      <!-- LIST -->
       <div class="card" style="margin-top:12px;overflow:auto">
         <table>
           <thead>
@@ -280,6 +286,7 @@
     if(!j.ok || !j.url) throw new Error('bad response'); return j.url;
   }
 
+  // Logo upload + preview
   (function(){
     const file = document.getElementById('logoFile');
     const btn  = document.getElementById('logoUploadBtn');
@@ -295,6 +302,7 @@
     inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('logoThumb', v); });
   })();
 
+  // Banner upload + preview
   (function(){
     const file = document.getElementById('bannerFile');
     const btn  = document.getElementById('bannerUploadBtn');
@@ -310,6 +318,7 @@
     inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('bannerThumb', v); });
   })();
 
+  // Item upload + preview
   (function(){
     const file = document.getElementById('itFile');
     const btn  = document.getElementById('itUploadBtn');
@@ -325,13 +334,37 @@
     inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('itThumb', v); });
   })();
 
+  // Colorway picker (setup page) — live preview + hidden field
   (function(){
     const swatches = document.querySelectorAll('.swatch');
+    const hidden = document.getElementById('colorway');
     swatches.forEach(sw => {
       sw.addEventListener('click', () => {
         document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
-        const cw = sw.getAttribute('data-cw'); if(cw) document.body.classList.add(cw);
+        const cw = sw.getAttribute('data-cw'); if(cw) {
+          document.body.classList.add(cw);
+          if(hidden) hidden.value = cw;
+        }
       });
+    });
+  })();
+
+  // Guard: simple client validation for price before "Add Item"
+  (function(){
+    const form = document.querySelector('#create-product form');
+    if(!form) return;
+    form.addEventListener('submit', (e) => {
+      const priceEl = form.querySelector('input[name="pi_price"]');
+      const titleEl = form.querySelector('input[name="title"]');
+      const v = (priceEl?.value || '').trim();
+      const price = Number(v);
+      if(!titleEl?.value.trim()){
+        e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
+      }
+      if(!v || isNaN(price) || price <= 0){
+        e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
+      }
+      return true;
     });
   })();
   </script>
