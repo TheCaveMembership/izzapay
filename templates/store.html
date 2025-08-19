@@ -11,7 +11,8 @@
     .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     .muted{color:var(--muted)}
     .grid{display:grid;gap:12px}
-    @media(min-width:720px){ .grid.items{grid-template-columns:1fr 1fr} }
+    /* TRUE responsive grid: 2+ columns whenever width allows, including mobile landscape */
+    .items{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
     input{padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b1322;color:var(--txt)}
@@ -21,6 +22,7 @@
     .top{display:flex;justify-content:space-between;align-items:center;gap:10px}
     .cart{position:relative}
     .cart .count{position:absolute;top:-8px;right:-8px;background:#fff;color:#000;border-radius:999px;font-size:12px;padding:2px 6px;font-weight:800}
+    .price{font-weight:800}
   </style>
 </head>
 <body>
@@ -36,10 +38,11 @@
         </div>
       </div>
       <div class="row">
-        <form method="get" action="/store/{{ m.slug }}">
+        <form method="get" action="/store/{{ m.slug }}{% if t %}?t={{ t|e }}{% endif %}">
           <input name="q" value="{{ q or '' }}" placeholder="Search {{ m.business_name }}…">
+          {% if t %}<input type="hidden" name="t" value="{{ t|e }}">{% endif %}
         </form>
-        <a class="btn cart" href="/cart/{{ cid }}">Cart <span class="count">{{ cart_count }}</span></a>
+        <a class="btn cart" href="/cart/{{ cid }}{% if t %}?t={{ t|e }}{% endif %}">Cart <span class="count">{{ cart_count }}</span></a>
       </div>
     </div>
     {% if m.banner_url %}<div style="margin-top:10px"><img src="{{ m.banner_url }}" alt="" class="banner"></div>{% endif %}
@@ -56,12 +59,17 @@
         <div style="margin-top:8px;font-weight:800">{{ it.title }}</div>
         {% if it.description %}<div class="muted" style="font-size:13px">{{ it.description }}</div>{% endif %}
         <div class="row" style="justify-content:space-between;margin-top:8px">
-          <div>{{ '%.7f'|format(it.pi_price) }} Pi</div>
-          <form method="post" action="/store/{{ m.slug }}/add">
+          <div class="price">{{ '%.7f'|format(it.pi_price) }} Pi</div>
+          <form method="post" action="/store/{{ m.slug }}/add{% if t %}?t={{ t|e }}{% endif %}">
             <input type="hidden" name="cid" value="{{ cid }}">
             <input type="hidden" name="item_id" value="{{ it.id }}">
+            {% if t %}<input type="hidden" name="t" value="{{ t|e }}">{% endif %}
             <button class="btn">Add to cart</button>
           </form>
+        </div>
+        <div style="margin-top:8px">
+          <!-- Optional: direct buy link to checkout for this item -->
+          <a class="btn" href="/checkout/{{ it.link_id }}{% if t %}?t={{ t|e }}{% endif %}">Buy now</a>
         </div>
       </div>
     {% else %}
