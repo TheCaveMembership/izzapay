@@ -2,25 +2,32 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>{{ 'Create your IZZA PAY Store' if setup_mode else 'Your Products' }}</title>
+  <title>{{ 'Create your IZZA PAY Store' if setup_mode else (m.business_name ~ ' — Dashboard') }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
-    .wrap{max-width:980px;margin:0 auto;padding:20px}
-    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:18px;margin-bottom:16px}
-    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    .btn.secondary{background:transparent;border:1px solid #1f2a44;color:#e8f0ff}
-    .muted{color:#bcd0ff}
-    input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid #1f2a44;background:#0b1322;color:#e8f0ff}
-    label{font-size:13px;color:#bcd0ff;display:block;margin:8px 0 4px}
+    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:1040px;margin:0 auto;padding:20px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    .btn.secondary{background:transparent;border:1px solid var(--line);color:var(--txt)}
+    .btn.small{padding:6px 10px;font-weight:700;border-radius:8px}
+    .muted{color:var(--muted)}
+    input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b1322;color:var(--txt)}
+    label{font-size:13px;color:var(--muted);display:block;margin:8px 0 4px}
     .grid{display:grid;gap:12px}
-    @media(min-width:760px){ .grid.cols-2{grid-template-columns:1fr 1fr} }
-    table{width:100%;border-collapse:collapse}
-    th,td{border-bottom:1px solid #1f2a44;padding:10px;text-align:left;font-size:14px}
+    @media(min-width:840px){ .grid.cols-2{grid-template-columns:1fr 1fr} .grid.cols-3{grid-template-columns:1fr 1fr 1fr} }
     .err{color:#ff9aa2;white-space:pre-wrap;margin-top:8px}
-    .note{font-size:12px;color:#bcd0ff}
+    .note{font-size:12px;color:var(--muted)}
+    .thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#0b1322}
+    .banner-prev{width:100%;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:#0b1322}
+    .logo-prev{width:auto;height:48px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#0b1322;padding:6px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;font-size:14px;vertical-align:middle}
+    .split{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .copy{cursor:pointer}
   </style>
 </head>
 <body>
@@ -28,16 +35,22 @@
 
   {% if setup_mode %}
     <div class="card">
-      <h2 style="margin:0 0 6px">Create your IZZA PAY Store</h2>
-      <div class="muted">Signed in as <strong>@{{ username }}</strong></div>
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h2 style="margin:0 0 6px">Create your IZZA PAY Store</h2>
+          <div class="muted">Signed in as <strong>@{{ username }}</strong></div>
+        </div>
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY" style="height:28px;opacity:.9">
+      </div>
 
       {% if error %}<div class="err" style="margin-top:10px">{{ error }}</div>{% endif %}
 
-      <form method="post" action="/merchant/setup{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2" style="margin-top:12px">
+      <form method="post" action="/merchant/setup{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2" style="margin-top:12px" enctype="application/x-www-form-urlencoded">
+
         <div>
           <label>Store slug</label>
           <input name="slug" placeholder="e.g. cavestore" required>
-          <div class="note">Your store link: {{ app_base }}/store/&lt;slug&gt;</div>
+          <div class="note">Your store link will be: {{ app_base }}/store/&lt;slug&gt;</div>
         </div>
         <div>
           <label>Business name</label>
@@ -45,12 +58,23 @@
         </div>
 
         <div>
-          <label>Logo URL (or use Upload button elsewhere)</label>
-          <input name="logo_url" placeholder="https://.../logo.png">
+          <label>Logo URL</label>
+          <input id="logo_url" name="logo_url" placeholder="https://.../logo.png">
+          <div class="split">
+            <input id="logo_file" type="file" accept="image/*" style="width:auto">
+            <button class="btn small secondary" type="button" onclick="uploadImage('logo_file','logo_url','logoPrev')">Upload from device</button>
+          </div>
+          <div style="margin-top:8px"><img id="logoPrev" class="logo-prev" alt="" style="display:none"></div>
         </div>
+
         <div>
           <label>Banner URL</label>
-          <input name="banner_url" placeholder="https://.../banner.jpg">
+          <input id="banner_url" name="banner_url" placeholder="https://.../banner.jpg">
+          <div class="split">
+            <input id="banner_file" type="file" accept="image/*" style="width:auto">
+            <button class="btn small secondary" type="button" onclick="uploadImage('banner_file','banner_url','bannerPrev')">Upload from device</button>
+          </div>
+          <div style="margin-top:8px"><img id="bannerPrev" class="banner-prev" alt="" style="display:none"></div>
         </div>
 
         <div>
@@ -115,19 +139,106 @@
     </div>
 
   {% else %}
+    <!-- Store header + link -->
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <h2 style="margin:0">{{ m.business_name }}</h2>
-        <div class="muted">Owner: <strong>@{{ username }}</strong></div>
+        <div class="row">
+          {% if m.logo_url %}
+            <img src="{{ m.logo_url }}" alt="" class="logo-prev">
+          {% endif %}
+          <div>
+            <h2 style="margin:0">{{ m.business_name }}</h2>
+            <div class="muted">Owner: <strong>@{{ username }}</strong></div>
+          </div>
+        </div>
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY" style="height:28px;opacity:.9">
       </div>
-      <div class="muted" style="margin-top:6px">Store link:
-        <a href="{{ app_base }}/store/{{ m.slug }}" class="btn secondary" style="padding:6px 10px">{{ app_base }}/store/{{ m.slug }}</a>
+
+      {% if m.banner_url %}
+        <div style="margin-top:10px">
+          <img src="{{ m.banner_url }}" alt="" class="banner-prev">
+        </div>
+      {% endif %}
+
+      <div class="row" style="margin-top:10px">
+        <div class="muted">Store link:</div>
+        <code id="storeLink">{{ app_base }}/store/{{ m.slug }}</code>
+        <button class="btn small secondary copy" type="button" onclick="copyStore()">Copy</button>
+        <a class="btn small" href="/store/{{ m.slug }}">Open storefront</a>
       </div>
     </div>
 
+    <!-- Appearance editor -->
+    <div class="card">
+      <h3 style="margin:0 0 10px">Appearance</h3>
+      <form method="post" action="/merchant/{{ m.slug }}/appearance{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2">
+        <div>
+          <label>Business name</label>
+          <input name="business_name" value="{{ m.business_name }}">
+        </div>
+
+        <div>
+          <label>Logo URL</label>
+          <input id="logo_url" name="logo_url" value="{{ m.logo_url or '' }}">
+          <div class="split">
+            <input id="logo_file" type="file" accept="image/*" style="width:auto">
+            <button class="btn small secondary" type="button" onclick="uploadImage('logo_file','logo_url','logoPrev')">Upload from device</button>
+          </div>
+          <div style="margin-top:8px"><img id="logoPrev" class="logo-prev" src="{{ m.logo_url or '' }}" style="display:{{ 'block' if m.logo_url else 'none' }}"></div>
+        </div>
+
+        <div style="grid-column:1/-1">
+          <label>Store description</label>
+          <textarea name="description" rows="3">{{ m.description or '' }}</textarea>
+        </div>
+
+        <div>
+          <label>Banner URL</label>
+          <input id="banner_url" name="banner_url" value="{{ m.banner_url or '' }}">
+          <div class="split">
+            <input id="banner_file" type="file" accept="image/*" style="width:auto">
+            <button class="btn small secondary" type="button" onclick="uploadImage('banner_file','banner_url','bannerPrev')">Upload from device</button>
+          </div>
+          <div style="margin-top:8px"><img id="bannerPrev" class="banner-prev" src="{{ m.banner_url or '' }}" style="display:{{ 'block' if m.banner_url else 'none' }}"></div>
+        </div>
+
+        <div>
+          <label>Theme</label>
+          <select name="theme">
+            <option value="theme-a" {{ 'selected' if m.theme=='theme-a' else '' }}>Theme A</option>
+            <option value="theme-b" {{ 'selected' if m.theme=='theme-b' else '' }}>Theme B</option>
+            <option value="theme-c" {{ 'selected' if m.theme=='theme-c' else '' }}>Theme C</option>
+            <option value="theme-d" {{ 'selected' if m.theme=='theme-d' else '' }}>Theme D</option>
+          </select>
+        </div>
+        <div>
+          <label>Colorway</label>
+          <select name="colorway">
+            {% for cw in ['blue','purple','green','orange'] %}
+              <option value="{{ cw }}" {{ 'selected' if m.colorway==cw else '' }}>{{ cw|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label>Font Family</label>
+          <input name="font_family" value="{{ m.font_family or 'system-ui' }}">
+        </div>
+        <div>
+          <label>Font CSS URL (optional)</label>
+          <input name="font_url" value="{{ m.font_url or '' }}">
+        </div>
+
+        <div style="grid-column:1/-1">
+          <button class="btn" type="submit">Save appearance</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Add product -->
     <div class="card">
       <h3 style="margin:0 0 10px">Add a product</h3>
-      <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2">
+      <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-3">
         <div>
           <label>Title</label>
           <input name="title" required>
@@ -137,12 +248,16 @@
           <input name="sku">
         </div>
         <div>
-          <label>Image URL</label>
-          <input name="image_url" placeholder="https://...">
-        </div>
-        <div>
           <label>Price (Pi)</label>
           <input name="pi_price" type="number" step="0.0000001" required>
+        </div>
+        <div>
+          <label>Image URL</label>
+          <input id="new_image_url" name="image_url" placeholder="https://...">
+          <div class="split" style="margin-top:6px">
+            <input id="new_image_file" type="file" accept="image/*" style="width:auto">
+            <button class="btn small secondary" type="button" onclick="uploadImage('new_image_file','new_image_url','newImagePrev')">Upload from device</button>
+          </div>
         </div>
         <div>
           <label>Stock qty</label>
@@ -160,28 +275,39 @@
           <textarea name="description" rows="3" placeholder="Details about this item…"></textarea>
         </div>
         <div style="grid-column:1/-1">
+          <img id="newImagePrev" class="thumb" alt="" style="display:none">
+        </div>
+        <div style="grid-column:1/-1">
           <button class="btn" type="submit">Create product</button>
         </div>
       </form>
     </div>
 
+    <!-- Products list -->
     <div class="card">
       <h3 style="margin:0 0 10px">Your products</h3>
       <table>
-        <thead><tr><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Active</th><th></th></tr></thead>
+        <thead><tr><th>Item</th><th>Price (Pi)</th><th>Stock</th><th>Active</th><th>Actions</th></tr></thead>
         <tbody>
           {% for it in items %}
           <tr>
-            <td>{{ it.title }}</td>
+            <td class="row" style="gap:10px">
+              {% if it.image_url %}<img src="{{ it.image_url }}" class="thumb" alt="">{% else %}<div class="thumb"></div>{% endif %}
+              <div>
+                <div style="font-weight:700">{{ it.title }}</div>
+                <div class="muted" style="font-size:12px">SKU: {{ it.sku or '—' }}</div>
+              </div>
+            </td>
             <td>{{ '%.7f'|format(it.pi_price) }}</td>
             <td>{{ it.stock_qty }}</td>
             <td>{{ 'Yes' if it.active else 'No' }}</td>
-            <td>
-              <a class="btn secondary" href="/merchant/{{ m.slug }}/items/{{ it.id }}/edit{% if t %}?t={{ t|e }}{% endif %}">Edit</a>
-              <form method="post" action="/merchant/{{ m.slug }}/items/{{ it.id }}/delete{% if t %}?t={{ t|e }}{% endif %}" style="display:inline">
-                <button class="btn secondary" onclick="return confirm('Delete this item?')">Delete</button>
+            <td class="row">
+              <a class="btn small secondary" href="/merchant/{{ m.slug }}/items/{{ it.id }}/edit{% if t %}?t={{ t|e }}{% endif %}">Edit</a>
+              <form method="post" action="/merchant/{{ m.slug }}/items/{{ it.id }}/delete{% if t %}?t={{ t|e }}{% endif %}" style="display:inline" onsubmit="return confirm('Delete this item?')">
+                <button class="btn small secondary">Delete</button>
               </form>
-              <a class="btn" href="/checkout/{{ it.link_id }}">Buy link</a>
+              <a class="btn small" href="/checkout/{{ it.link_id }}">Buy link</a>
+              <button class="btn small secondary copy" type="button" onclick="copyText('{{ app_base }}/checkout/{{ it.link_id }}')">Copy buy link</button>
             </td>
           </tr>
           {% else %}
@@ -193,5 +319,53 @@
   {% endif %}
 
 </div>
+
+<script>
+  // Live preview when typing URLs
+  function bindPreview(inputId, imgId){
+    const inp = document.getElementById(inputId);
+    const img = document.getElementById(imgId);
+    if(!inp || !img) return;
+    const show = () => {
+      const v = inp.value.trim();
+      if(v){ img.src = v; img.style.display = 'block'; }
+      else { img.removeAttribute('src'); img.style.display = 'none'; }
+    };
+    inp.addEventListener('input', show);
+    show();
+  }
+
+  // Upload to /upload and set the URL input + preview
+  async function uploadImage(fileInputId, urlInputId, previewImgId){
+    try{
+      const f = document.getElementById(fileInputId);
+      if(!f || !f.files || !f.files[0]){ alert('Choose a file first'); return; }
+      const fd = new FormData();
+      fd.append('file', f.files[0]);
+      const res = await fetch('/upload', { method: 'POST', body: fd });
+      const j = await res.json();
+      if(!j.ok) throw new Error(j.error || 'upload_failed');
+      const inp = document.getElementById(urlInputId);
+      const img = document.getElementById(previewImgId);
+      if(inp) inp.value = j.url;
+      if(img){ img.src = j.url; img.style.display = 'block'; }
+    }catch(e){
+      alert('Upload failed: ' + (e?.message || e));
+    }
+  }
+
+  function copyText(text){
+    navigator.clipboard.writeText(text).then(()=>{ alert('Copied!'); });
+  }
+  function copyStore(){
+    const s = document.getElementById('storeLink').textContent.trim();
+    copyText(s);
+  }
+
+  // Bind previews on load (works for setup & appearance sections)
+  bindPreview('logo_url','logoPrev');
+  bindPreview('banner_url','bannerPrev');
+  bindPreview('new_image_url','newImagePrev');
+</script>
 </body>
 </html>
