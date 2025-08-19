@@ -1,0 +1,182 @@
+/* ========= IZZA PAY Theme System =========
+   Works across: home.html, explore.html, merchant_items.html, store.html
+   Uses CSS variables for colorways + light/dark neutrals.
+   Each merchant page can set data-color="[blue|green|purple|amber]".
+*/
+
+/* Base neutrals (dark fintech) */
+:root{
+  --bg:#0b0f17;
+  --card:#0f1728;
+  --line:#1f2a44;
+  --txt:#e8f0ff;
+  --muted:#bcd0ff;
+  --brand:#6e9fff;
+}
+
+/* Colorways (override --brand) */
+[data-color="blue"]{ --brand:#6e9fff; }
+[data-color="green"]{ --brand:#58d18d; }
+[data-color="purple"]{ --brand:#9d8cff; }
+[data-color="amber"]{ --brand:#ffb155; }
+
+/* Light mode utility (optional) */
+.light, body.light-mode{
+  --bg:#ffffff;
+  --card:#f8faff;
+  --line:#e3e8f8;
+  --txt:#0b0f17;
+  --muted:#4b5c7c;
+}
+
+/* Global primitives */
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);
+  color:var(--txt);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol";
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+}
+a{color:inherit}
+
+/* Buttons, inputs, cards */
+.btn{
+  background:var(--brand);
+  color:#0b0f17;
+  border:0;
+  border-radius:12px;
+  padding:10px 14px;
+  font-weight:900;
+  cursor:pointer;
+  text-decoration:none;
+  display:inline-block;
+}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.ghost{
+  background:transparent;
+  border:1px solid var(--line);
+  color:var(--txt);
+}
+input,textarea,select{
+  width:100%;
+  background:#0b1222;
+  border:1px solid var(--line);
+  border-radius:12px;
+  color:var(--txt);
+  padding:10px;
+  outline:none;
+}
+input::placeholder,textarea::placeholder{ color:#7c8db5 }
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:16px;
+}
+.subtle{ color:var(--muted) }
+.small{ font-size:.92rem }
+.wrap{ max-width:1080px; margin:0 auto; padding:16px }
+
+/* Grids & media */
+.grid{
+  display:grid;
+  grid-template-columns: repeat(auto-fill,minmax(260px,1fr));
+  gap:12px;
+}
+.row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+
+/* Store/product cards */
+.store{
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#0b1222;
+  padding:12px;
+}
+.logo{
+  height:40px; width:40px; border-radius:10px;
+  overflow:hidden; border:1px solid var(--line);
+  background:#0b1222; display:flex; align-items:center; justify-content:center;
+}
+.logo img{ max-width:100%; max-height:100% }
+
+.product{
+  background:#0b1222;
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+.product img{
+  width:100%;
+  height:180px;
+  object-fit:cover;
+  display:block;
+}
+.pdx{ padding:12px }
+
+/* Storefront specific */
+.store-banner{
+  width:100%;
+  max-height:240px;
+  object-fit:cover;
+  border-bottom:1px solid var(--line);
+}
+.store-header{
+  text-align:center;
+  margin:16px 0 10px;
+}
+.store-description{
+  color:var(--muted);
+  max-width:760px;
+  margin:8px auto 0;
+  line-height:1.5;
+}
+
+/* Search form */
+.search{ display:flex; gap:8px }
+.search input{ flex:1 }
+
+/* Alerts */
+.alert{
+  border:1px solid #ff9aa2;
+  background:#310f15;
+  color:#ffb4bb;
+  padding:10px; border-radius:10px; margin:10px 0;
+}
+.ok{
+  border:1px solid #7de37a;
+  background:#0e2a14;
+  color:#b7f0b5;
+  padding:10px; border-radius:10px; margin:10px 0;
+}
+
+/* Code block look */
+.code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background:#0b1222;
+  border:1px dashed var(--line);
+  border-radius:10px;
+  padding:10px;
+  overflow:auto;
+}
+
+/* Theme layout helpers (for future layout variants) */
+.theme-a .hero{ display:flex; gap:18px; align-items:center; justify-content:space-between; flex-wrap:wrap }
+.theme-b .banner-wide{ width:100%; border:1px solid var(--line); border-radius:16px; overflow:hidden }
+.theme-c .intro{ max-width:760px; margin:0 auto 12px; text-align:center }
+.theme-d .sticky{ position:sticky; top:0; background:var(--bg); padding:8px 0; z-index:20; border-bottom:1px solid var(--line) }
+
+/* Two-up product grid for store pages on >=600px */
+@media (min-width:600px){
+  .product-grid-2{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:20px;
+  }
+}
+
+/* Utility */
+.hidden{ display:none }
+.right{ margin-left:auto }
+.price{ font-weight:900 }
