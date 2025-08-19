@@ -4,368 +4,384 @@
   <meta charset="utf-8">
   <title>{{ 'Create your IZZA PAY Store' if setup_mode else (m.business_name ~ ' — Dashboard') }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
+    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff;--ok:#73e2a7;--bad:#ff9aa2}
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:1040px;margin:0 auto;padding:20px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
-    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    .btn.secondary{background:transparent;border:1px solid var(--line);color:var(--txt)}
-    .btn.small{padding:6px 10px;font-weight:700;border-radius:8px}
+    .wrap{max-width:1024px;margin:0 auto;padding:16px}
+    .row{display:flex;gap:16px;align-items:center}
+    .col{display:flex;flex-direction:column;gap:10px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+    h1{margin:0 0 8px}
+    h2{margin:8px 0}
+    label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px}
+    input[type="text"], input[type="number"], input[type="email"], textarea, select{
+      width:100%;border:1px solid var(--line);background:var(--bg);color:var(--txt);
+      border-radius:10px;padding:10px
+    }
+    textarea{min-height:80px}
+    .btn{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}
+    .btn.out{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+    .btn.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
     .muted{color:var(--muted)}
-    input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b1322;color:var(--txt)}
-    label{font-size:13px;color:var(--muted);display:block;margin:8px 0 4px}
-    .grid{display:grid;gap:12px}
-    @media(min-width:840px){ .grid.cols-2{grid-template-columns:1fr 1fr} .grid.cols-3{grid-template-columns:1fr 1fr 1fr} }
-    .err{color:#ff9aa2;white-space:pre-wrap;margin-top:8px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .thumb{width:100%;aspect-ratio:3/1;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#101826;display:flex;align-items:center;justify-content:center}
+    .thumb img{width:100%;height:100%;object-fit:cover}
+    .logo{width:140px;height:48px;border:1px solid var(--line);border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .logo img{max-height:100%;max-width:100%;object-fit:contain}
+    .stack{display:flex;flex-direction:column;gap:8px}
+    .themes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    .themeOpt{border:1px solid var(--line);border-radius:10px;padding:8px;cursor:pointer;background:#0c1424}
+    .themeOpt.sel{outline:2px solid var(--brand)}
+    .cways{display:flex;flex-wrap:wrap;gap:8px}
+    .swatch{width:30px;height:30px;border-radius:999px;border:2px solid var(--line);cursor:pointer;display:inline-block}
+    .swatch.sel{outline:2px solid var(--brand)}
+    .fonts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .fopt{border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer;background:#0c1424}
+    .fopt.sel{outline:2px solid var(--brand)}
+    .items{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .item{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px}
+    .itthumb{width:100%;aspect-ratio:1/1;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;margin-bottom:8px}
+    .itthumb img{width:100%;height:100%;object-fit:cover}
+    .rowsp{display:flex;gap:8px;align-items:center;justify-content:space-between}
+    .err{color:var(--bad);white-space:pre-wrap}
+    .good{color:var(--ok)}
+    .copy{display:flex;gap:6px;align-items:center}
+    .right{margin-left:auto}
     .note{font-size:12px;color:var(--muted)}
-    .thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#0b1322}
-    .banner-prev{width:100%;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:#0b1322}
-    .logo-prev{width:auto;height:48px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#0b1322;padding:6px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;font-size:14px;vertical-align:middle}
-    .split{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    .copy{cursor:pointer}
+    @media(max-width:840px){ .grid,.items{grid-template-columns:1fr} }
   </style>
+  <script>
+    // little helper to copy text
+    function copyText(txt){
+      navigator.clipboard.writeText(txt).then(()=>alert("Copied!")).catch(()=>{});
+    }
+    async function uploadTo(path){
+      const inp = document.getElementById(path);
+      const file = inp?.files?.[0];
+      if(!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/upload', { method:'POST', body: fd });
+      const json = await res.json();
+      if(json && json.ok && json.url){
+        const target = document.querySelector('[data-bind="'+path+'"]');
+        if(target){ target.value = json.url; target.dispatchEvent(new Event('input')); }
+      }else{
+        alert('Upload failed');
+      }
+    }
+    // pickers
+    function pickTheme(val){
+      document.getElementById('theme').value = val;
+      document.querySelectorAll('.themeOpt').forEach(n=>n.classList.toggle('sel', n.dataset.v===val));
+    }
+    function pickColor(v){
+      document.getElementById('colorway').value = v;
+      document.querySelectorAll('.swatch').forEach(n=>n.classList.toggle('sel', n.dataset.v===v));
+    }
+    function pickFont(f,url){
+      document.getElementById('font_family').value = f;
+      document.getElementById('font_url').value = url||'';
+      document.querySelectorAll('.fopt').forEach(n=>n.classList.toggle('sel', n.dataset.v===f));
+    }
+  </script>
 </head>
 <body>
-<div class="wrap">
-
-  {% if setup_mode %}
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div>
-          <h2 style="margin:0 0 6px">Create your IZZA PAY Store</h2>
-          <div class="muted">Signed in as <strong>@{{ username }}</strong></div>
-        </div>
-        <img src="/static/izzapay-word.svg" alt="IZZA PAY" style="height:28px;opacity:.9">
+  <div class="wrap">
+    {% if setup_mode %}
+      <div class="card">
+        <h1>Create your IZZA PAY Store</h1>
+        <p class="muted">Signed in as <strong>@{{ username }}</strong></p>
       </div>
-
-      {% if error %}<div class="err" style="margin-top:10px">{{ error }}</div>{% endif %}
-
-      <form method="post" action="/merchant/setup{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2" style="margin-top:12px" enctype="application/x-www-form-urlencoded">
-
+    {% else %}
+      <div class="card row" style="justify-content:space-between">
         <div>
-          <label>Store slug</label>
-          <input name="slug" placeholder="e.g. cavestore" required>
-          <div class="note">Your store link will be: {{ app_base }}/store/&lt;slug&gt;</div>
+          <h1>{{ m.business_name }} — Dashboard</h1>
+          <div class="muted">Storefront: <a href="/store/{{ m.slug }}{% if t %}?t={{ t }}{% endif %}" target="_blank">/store/{{ m.slug }}</a></div>
         </div>
-        <div>
-          <label>Business name</label>
-          <input name="business_name" placeholder="{{ username }}'s Shop">
+        <div class="copy">
+          <button class="btn out" onclick="copyText('{{ app_base }}/store/{{ m.slug }}')">Copy Store Link</button>
         </div>
-
-        <div>
-          <label>Logo URL</label>
-          <input id="logo_url" name="logo_url" placeholder="https://.../logo.png">
-          <div class="split">
-            <input id="logo_file" type="file" accept="image/*" style="width:auto">
-            <button class="btn small secondary" type="button" onclick="uploadImage('logo_file','logo_url','logoPrev')">Upload from device</button>
-          </div>
-          <div style="margin-top:8px"><img id="logoPrev" class="logo-prev" alt="" style="display:none"></div>
-        </div>
-
-        <div>
-          <label>Banner URL</label>
-          <input id="banner_url" name="banner_url" placeholder="https://.../banner.jpg">
-          <div class="split">
-            <input id="banner_file" type="file" accept="image/*" style="width:auto">
-            <button class="btn small secondary" type="button" onclick="uploadImage('banner_file','banner_url','bannerPrev')">Upload from device</button>
-          </div>
-          <div style="margin-top:8px"><img id="bannerPrev" class="banner-prev" alt="" style="display:none"></div>
-        </div>
-
-        <div>
-          <label>Theme</label>
-          <select name="theme">
-            <option value="theme-a">Theme A</option>
-            <option value="theme-b">Theme B</option>
-            <option value="theme-c">Theme C</option>
-            <option value="theme-d">Theme D</option>
-          </select>
-        </div>
-        <div>
-          <label>Colorway</label>
-          <select name="colorway">
-            <option value="blue">Blue</option>
-            <option value="purple">Purple</option>
-            <option value="green">Green</option>
-            <option value="orange">Orange</option>
-          </select>
-        </div>
-
-        <div>
-          <label>Font Family</label>
-          <input name="font_family" placeholder="system-ui">
-        </div>
-        <div>
-          <label>Font CSS URL (optional)</label>
-          <input name="font_url" placeholder="https://fonts.googleapis.com/css2?...">
-        </div>
-
-        <div class="grid" style="grid-column:1/-1">
-          <label>Store description</label>
-          <textarea name="description" rows="3" placeholder="Tell shoppers about your store…"></textarea>
-        </div>
-
-        <div>
-          <label>Merchant email (order notifications)</label>
-          <input type="email" name="reply_to_email" placeholder="you@store.com">
-        </div>
-        <div>
-          <label>Pi wallet public key (starts with G… 56 chars)</label>
-          <input name="pi_wallet_address" placeholder="G..." required>
-        </div>
-
-        <div>
-          <label>Pi handle (optional)</label>
-          <input name="pi_handle" placeholder="@{{ username }}">
-        </div>
-        <div>
-          <label>Theme mode (legacy)</label>
-          <select name="theme_mode">
-            <option value="dark" selected>Dark</option>
-            <option value="light">Light</option>
-          </select>
-        </div>
-
-        <div style="grid-column:1/-1;margin-top:8px">
-          <button class="btn" type="submit">Create Store</button>
-          <a class="btn secondary" href="/logout">Sign out</a>
-        </div>
-      </form>
-    </div>
-
-  {% else %}
-    <!-- Store header + link -->
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div class="row">
-          {% if m.logo_url %}
-            <img src="{{ m.logo_url }}" alt="" class="logo-prev">
-          {% endif %}
-          <div>
-            <h2 style="margin:0">{{ m.business_name }}</h2>
-            <div class="muted">Owner: <strong>@{{ username }}</strong></div>
-          </div>
-        </div>
-        <img src="/static/izzapay-word.svg" alt="IZZA PAY" style="height:28px;opacity:.9">
       </div>
+    {% endif %}
 
-      {% if m.banner_url %}
-        <div style="margin-top:10px">
-          <img src="{{ m.banner_url }}" alt="" class="banner-prev">
-        </div>
-      {% endif %}
+    {% if error %}
+      <div class="card err">{{ error }}</div>
+    {% endif %}
 
-      <div class="row" style="margin-top:10px">
-        <div class="muted">Store link:</div>
-        <code id="storeLink">{{ app_base }}/store/{{ m.slug }}</code>
-        <button class="btn small secondary copy" type="button" onclick="copyStore()">Copy</button>
-        <a class="btn small" href="/store/{{ m.slug }}">Open storefront</a>
-      </div>
-    </div>
+    <!-- Store profile / appearance -->
+    <div class="grid">
+      <div class="card">
+        <h2>Store Profile</h2>
+        <form method="post" action="{{ '/merchant/setup' if setup_mode else ('/merchant/' ~ m.slug ~ '/appearance') }}{% if t %}?t={{ t }}{% endif %}">
+          <div class="stack">
+            <div>
+              <label>Store slug (URL)</label>
+              {% if setup_mode %}
+                <input type="text" name="slug" placeholder="your-shop" required>
+              {% else %}
+                <div class="muted">/store/{{ m.slug }}</div>
+              {% endif %}
+            </div>
 
-    <!-- Appearance editor -->
-    <div class="card">
-      <h3 style="margin:0 0 10px">Appearance</h3>
-      <form method="post" action="/merchant/{{ m.slug }}/appearance{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2">
-        <div>
-          <label>Business name</label>
-          <input name="business_name" value="{{ m.business_name }}">
-        </div>
+            <div>
+              <label>Business name</label>
+              <input type="text" name="business_name" value="{{ m.business_name if m else '' }}" placeholder="Your shop name">
+            </div>
 
-        <div>
-          <label>Logo URL</label>
-          <input id="logo_url" name="logo_url" value="{{ m.logo_url or '' }}">
-          <div class="split">
-            <input id="logo_file" type="file" accept="image/*" style="width:auto">
-            <button class="btn small secondary" type="button" onclick="uploadImage('logo_file','logo_url','logoPrev')">Upload from device</button>
-          </div>
-          <div style="margin-top:8px"><img id="logoPrev" class="logo-prev" src="{{ m.logo_url or '' }}" style="display:{{ 'block' if m.logo_url else 'none' }}"></div>
-        </div>
+            <div>
+              <label>Reply-to email (order notifications)</label>
+              <input type="email" name="reply_to_email" value="{{ m.reply_to_email if m else '' }}" placeholder="you@example.com">
+            </div>
 
-        <div style="grid-column:1/-1">
-          <label>Store description</label>
-          <textarea name="description" rows="3">{{ m.description or '' }}</textarea>
-        </div>
-
-        <div>
-          <label>Banner URL</label>
-          <input id="banner_url" name="banner_url" value="{{ m.banner_url or '' }}">
-          <div class="split">
-            <input id="banner_file" type="file" accept="image/*" style="width:auto">
-            <button class="btn small secondary" type="button" onclick="uploadImage('banner_file','banner_url','bannerPrev')">Upload from device</button>
-          </div>
-          <div style="margin-top:8px"><img id="bannerPrev" class="banner-prev" src="{{ m.banner_url or '' }}" style="display:{{ 'block' if m.banner_url else 'none' }}"></div>
-        </div>
-
-        <div>
-          <label>Theme</label>
-          <select name="theme">
-            <option value="theme-a" {{ 'selected' if m.theme=='theme-a' else '' }}>Theme A</option>
-            <option value="theme-b" {{ 'selected' if m.theme=='theme-b' else '' }}>Theme B</option>
-            <option value="theme-c" {{ 'selected' if m.theme=='theme-c' else '' }}>Theme C</option>
-            <option value="theme-d" {{ 'selected' if m.theme=='theme-d' else '' }}>Theme D</option>
-          </select>
-        </div>
-        <div>
-          <label>Colorway</label>
-          <select name="colorway">
-            {% for cw in ['blue','purple','green','orange'] %}
-              <option value="{{ cw }}" {{ 'selected' if m.colorway==cw else '' }}>{{ cw|capitalize }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div>
-          <label>Font Family</label>
-          <input name="font_family" value="{{ m.font_family or 'system-ui' }}">
-        </div>
-        <div>
-          <label>Font CSS URL (optional)</label>
-          <input name="font_url" value="{{ m.font_url or '' }}">
-        </div>
-
-        <div style="grid-column:1/-1">
-          <button class="btn" type="submit">Save appearance</button>
-        </div>
-      </form>
-    </div>
-
-    <!-- Add product -->
-    <div class="card">
-      <h3 style="margin:0 0 10px">Add a product</h3>
-      <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-3">
-        <div>
-          <label>Title</label>
-          <input name="title" required>
-        </div>
-        <div>
-          <label>SKU</label>
-          <input name="sku">
-        </div>
-        <div>
-          <label>Price (Pi)</label>
-          <input name="pi_price" type="number" step="0.0000001" required>
-        </div>
-        <div>
-          <label>Image URL</label>
-          <input id="new_image_url" name="image_url" placeholder="https://...">
-          <div class="split" style="margin-top:6px">
-            <input id="new_image_file" type="file" accept="image/*" style="width:auto">
-            <button class="btn small secondary" type="button" onclick="uploadImage('new_image_file','new_image_url','newImagePrev')">Upload from device</button>
-          </div>
-        </div>
-        <div>
-          <label>Stock qty</label>
-          <input name="stock_qty" type="number" value="0">
-        </div>
-        <div>
-          <label>Backorder allowed</label>
-          <select name="allow_backorder">
-            <option value="">No</option>
-            <option value="1">Yes</option>
-          </select>
-        </div>
-        <div class="grid" style="grid-column:1/-1">
-          <label>Description</label>
-          <textarea name="description" rows="3" placeholder="Details about this item…"></textarea>
-        </div>
-        <div style="grid-column:1/-1">
-          <img id="newImagePrev" class="thumb" alt="" style="display:none">
-        </div>
-        <div style="grid-column:1/-1">
-          <button class="btn" type="submit">Create product</button>
-        </div>
-      </form>
-    </div>
-
-    <!-- Products list -->
-    <div class="card">
-      <h3 style="margin:0 0 10px">Your products</h3>
-      <table>
-        <thead><tr><th>Item</th><th>Price (Pi)</th><th>Stock</th><th>Active</th><th>Actions</th></tr></thead>
-        <tbody>
-          {% for it in items %}
-          <tr>
-            <td class="row" style="gap:10px">
-              {% if it.image_url %}<img src="{{ it.image_url }}" class="thumb" alt="">{% else %}<div class="thumb"></div>{% endif %}
-              <div>
-                <div style="font-weight:700">{{ it.title }}</div>
-                <div class="muted" style="font-size:12px">SKU: {{ it.sku or '—' }}</div>
+            <div class="row">
+              <div class="col" style="flex:1">
+                <label>Logo URL</label>
+                <input data-bind="logo_url" id="logo_url" type="text" name="logo_url" value="{{ m.logo_url if m else '' }}" placeholder="https://…">
+                <div class="row">
+                  <input id="logo_file" type="file" accept="image/*" style="flex:1">
+                  <button class="btn out" type="button" onclick="document.getElementById('logo_file').click()">Choose</button>
+                  <button class="btn" type="button" onclick="(function(){const fi=document.getElementById('logo_file');fi.onchange=()=>uploadTo('logo_url');fi.click();})()">Upload</button>
+                </div>
+                <div class="logo" style="margin-top:8px">
+                  {% if m and m.logo_url %}<img id="logo_prev" src="{{ m.logo_url }}">{% else %}<span class="muted">Logo preview</span>{% endif %}
+                </div>
               </div>
-            </td>
-            <td>{{ '%.7f'|format(it.pi_price) }}</td>
-            <td>{{ it.stock_qty }}</td>
-            <td>{{ 'Yes' if it.active else 'No' }}</td>
-            <td class="row">
-              <a class="btn small secondary" href="/merchant/{{ m.slug }}/items/{{ it.id }}/edit{% if t %}?t={{ t|e }}{% endif %}">Edit</a>
-              <form method="post" action="/merchant/{{ m.slug }}/items/{{ it.id }}/delete{% if t %}?t={{ t|e }}{% endif %}" style="display:inline" onsubmit="return confirm('Delete this item?')">
-                <button class="btn small secondary">Delete</button>
-              </form>
-              <a class="btn small" href="/checkout/{{ it.link_id }}">Buy link</a>
-              <button class="btn small secondary copy" type="button" onclick="copyText('{{ app_base }}/checkout/{{ it.link_id }}')">Copy buy link</button>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="5" class="muted">No products yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+
+              <div class="col" style="flex:2">
+                <label>Banner URL</label>
+                <input data-bind="banner_url" id="banner_url" type="text" name="banner_url" value="{{ m.banner_url if m else '' }}" placeholder="https://…">
+                <div class="row">
+                  <input id="banner_file" type="file" accept="image/*" style="flex:1">
+                  <button class="btn out" type="button" onclick="document.getElementById('banner_file').click()">Choose</button>
+                  <button class="btn" type="button" onclick="(function(){const fi=document.getElementById('banner_file');fi.onchange=()=>uploadTo('banner_url');fi.click();})()">Upload</button>
+                </div>
+                <div class="thumb" style="margin-top:8px">
+                  {% if m and m.banner_url %}<img id="banner_prev" src="{{ m.banner_url }}">{% else %}<span class="muted">Banner preview</span>{% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label>Store description</label>
+              <textarea name="description" placeholder="Tell shoppers about your store…">{{ m.description if m else '' }}</textarea>
+            </div>
+
+            <div>
+              <label>Pi wallet public key (starts with G, 56 chars)</label>
+              <input type="text" name="pi_wallet_address" value="{{ m.pi_wallet_address if m else '' }}" placeholder="G…">
+            </div>
+
+            <div class="row">
+              <div class="col">
+                <label>Pi handle (optional)</label>
+                <input type="text" name="pi_handle" value="{{ m.pi_handle if m else '' }}" placeholder="@yourhandle">
+              </div>
+              <div class="col">
+                <label>Theme mode (legacy)</label>
+                <select name="theme_mode">
+                  <option value="dark" {% if m and m.theme_mode=='dark' %}selected{% endif %}>Dark</option>
+                  <option value="light" {% if m and m.theme_mode=='light' %}selected{% endif %}>Light</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="stack">
+              <label>Select a layout theme</label>
+              <input type="hidden" id="theme" name="theme" value="{{ m.theme if m else 'theme-a' }}">
+              <div class="themes">
+                {% set chosen = m.theme if m else 'theme-a' %}
+                {% for code, title in [('theme-a','Grid basic'),('theme-b','Cards w/ badge'),('theme-c','Masonry'),('theme-d','Compact rows')] %}
+                  <div class="themeOpt {% if chosen==code %}sel{% endif %}" data-v="{{ code }}" onclick="pickTheme('{{ code }}')">
+                    <div class="muted">{{ title }}</div>
+                    <div style="margin-top:6px;border:1px dashed var(--line);border-radius:8px;height:64px;display:flex;align-items:center;justify-content:center;color:var(--muted)">Preview {{ code[-1:]|upper }}</div>
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="stack">
+              <label>Colorway</label>
+              <input type="hidden" id="colorway" name="colorway" value="{{ m.colorway if m else 'blue' }}">
+              <div class="cways">
+                {% set cw = m.colorway if m else 'blue' %}
+                {% for code,color in [('blue','#2b5cff'),('purple','#6f42c1'),('teal','#1abc9c'),('rose','#e91e63'),('amber','#ffb300')] %}
+                  <span class="swatch {% if cw==code %}sel{% endif %}" data-v="{{ code }}" title="{{ code }}" style="background:{{ color }}" onclick="pickColor('{{ code }}')"></span>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="stack">
+              <label>Font</label>
+              <input type="hidden" id="font_family" name="font_family" value="{{ m.font_family if m else 'system-ui' }}">
+              <input type="hidden" id="font_url" name="font_url" value="{{ m.font_url if m else '' }}">
+              {% set ff = m.font_family if m else 'system-ui' %}
+              <div class="fonts">
+                <div class="fopt {% if ff=='system-ui' %}sel{% endif %}" data-v="system-ui" onclick="pickFont('system-ui','')">System (Default)</div>
+                <div class="fopt {% if ff=='Inter' %}sel{% endif %}" data-v="Inter" onclick="pickFont('Inter','https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap')">Inter</div>
+                <div class="fopt {% if ff=='Poppins' %}sel{% endif %}" data-v="Poppins" onclick="pickFont('Poppins','https://fonts.googleapis.com/css2?family=Poppins:wght@400;700;800&display=swap')">Poppins</div>
+              </div>
+              <div class="note">Fonts will apply on your customer store automatically.</div>
+            </div>
+
+            <div class="row" style="justify-content:flex-end">
+              <button class="btn" type="submit">{{ 'Create store' if setup_mode else 'Save changes' }}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- Live preview -->
+      <div class="card">
+        <h2>Live Preview</h2>
+        <div class="stack">
+          <div class="logo"><img id="lp_logo" src="{{ m.logo_url if m else '' }}" onerror="this.src='';this.parentNode.innerHTML='<span class=&quot;muted&quot;>Logo preview</span>';"></div>
+          <div class="thumb"><img id="lp_banner" src="{{ m.banner_url if m else '' }}" onerror="this.src='';this.parentNode.innerHTML='<span class=&quot;muted&quot;>Banner preview</span>';"></div>
+          <div class="muted">This preview updates when you paste or upload new images.</div>
+        </div>
+      </div>
     </div>
-  {% endif %}
 
-</div>
+    {% if not setup_mode %}
+      <!-- QUICK LINKS -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div>
+            <strong>Customer-facing store link</strong><br>
+            <a href="/store/{{ m.slug }}{% if t %}?t={{ t }}{% endif %}" target="_blank">{{ app_base }}/store/{{ m.slug }}</a>
+          </div>
+          <button class="btn out" onclick="copyText('{{ app_base }}/store/{{ m.slug }}')">Copy</button>
+        </div>
+      </div>
 
-<script>
-  // Live preview when typing URLs
-  function bindPreview(inputId, imgId){
-    const inp = document.getElementById(inputId);
-    const img = document.getElementById(imgId);
-    if(!inp || !img) return;
-    const show = () => {
-      const v = inp.value.trim();
-      if(v){ img.src = v; img.style.display = 'block'; }
-      else { img.removeAttribute('src'); img.style.display = 'none'; }
-    };
-    inp.addEventListener('input', show);
-    show();
-  }
+      <!-- Add product -->
+      <div class="card">
+        <h2>Add a Product</h2>
+        <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
+          <div class="grid">
+            <div class="stack">
+              <label>Title</label>
+              <input type="text" name="title" placeholder="Product title" required>
+              <label>SKU (optional)</label>
+              <input type="text" name="sku" placeholder="SKU-123">
+              <label>Image URL</label>
+              <input data-bind="image_url_new" id="image_url_new" type="text" name="image_url" placeholder="https://…">
+              <div class="row">
+                <input id="img_file_new" type="file" accept="image/*" style="flex:1">
+                <button class="btn out" type="button" onclick="document.getElementById('img_file_new').click()">Choose</button>
+                <button class="btn" type="button" onclick="(function(){const fi=document.getElementById('img_file_new');fi.onchange=()=>uploadTo('image_url_new');fi.click();})()">Upload</button>
+              </div>
+            </div>
 
-  // Upload to /upload and set the URL input + preview
-  async function uploadImage(fileInputId, urlInputId, previewImgId){
-    try{
-      const f = document.getElementById(fileInputId);
-      if(!f || !f.files || !f.files[0]){ alert('Choose a file first'); return; }
-      const fd = new FormData();
-      fd.append('file', f.files[0]);
-      const res = await fetch('/upload', { method: 'POST', body: fd });
-      const j = await res.json();
-      if(!j.ok) throw new Error(j.error || 'upload_failed');
-      const inp = document.getElementById(urlInputId);
-      const img = document.getElementById(previewImgId);
-      if(inp) inp.value = j.url;
-      if(img){ img.src = j.url; img.style.display = 'block'; }
-    }catch(e){
-      alert('Upload failed: ' + (e?.message || e));
-    }
-  }
+            <div class="stack">
+              <label>Description</label>
+              <textarea name="description" placeholder="Describe the item…"></textarea>
+              <div class="row">
+                <div class="col">
+                  <label>Price (Pi)</label>
+                  <input type="number" name="pi_price" step="0.0000001" min="0" required>
+                </div>
+                <div class="col">
+                  <label>Stock qty</label>
+                  <input type="number" name="stock_qty" step="1" min="0" value="10">
+                </div>
+              </div>
+              <div class="row">
+                <label style="display:flex;align-items:center;gap:8px">
+                  <input type="checkbox" name="allow_backorder"> Allow backorder
+                </label>
+              </div>
+              <div class="row" style="justify-content:flex-end">
+                <button class="btn" type="submit">Add product</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
 
-  function copyText(text){
-    navigator.clipboard.writeText(text).then(()=>{ alert('Copied!'); });
-  }
-  function copyStore(){
-    const s = document.getElementById('storeLink').textContent.trim();
-    copyText(s);
-  }
+      <!-- Items list -->
+      <div class="items">
+        {% for it in items %}
+          <div class="item">
+            <div class="itthumb">
+              {% if it.image_url %}
+                <img src="{{ it.image_url }}" alt="{{ it.title }}">
+              {% else %}
+                <span class="muted">No image</span>
+              {% endif %}
+            </div>
+            <div style="font-weight:800">{{ it.title }}</div>
+            {% if it.description %}<div class="muted" style="margin:6px 0">{{ it.description }}</div>{% endif %}
+            <div class="rowsp">
+              <div class="muted">{{ '%.7f'|format(it.pi_price) }} Pi • Stock {{ it.stock_qty }}</div>
+              <a class="btn out" href="/checkout/{{ it.link_id }}{% if t %}?t={{ t }}{% endif %}" target="_blank">Buy Now link</a>
+            </div>
 
-  // Bind previews on load (works for setup & appearance sections)
-  bindPreview('logo_url','logoPrev');
-  bindPreview('banner_url','bannerPrev');
-  bindPreview('new_image_url','newImagePrev');
-</script>
+            <!-- Edit form -->
+            <details style="margin-top:8px">
+              <summary class="muted">Edit</summary>
+              <form method="post" action="/merchant/{{ m.slug }}/items/{{ it.id }}/edit{% if t %}?t={{ t }}{% endif %}" class="stack" style="margin-top:8px">
+                <div class="grid">
+                  <div class="stack">
+                    <label>Title</label>
+                    <input type="text" name="title" value="{{ it.title }}">
+                    <label>SKU</label>
+                    <input type="text" name="sku" value="{{ it.sku or '' }}">
+                    <label>Image URL</label>
+                    <input data-bind="image_url_{{ it.id }}" id="image_url_{{ it.id }}" type="text" name="image_url" value="{{ it.image_url or '' }}">
+                    <div class="row">
+                      <input id="img_file_{{ it.id }}" type="file" accept="image/*" style="flex:1">
+                      <button class="btn out" type="button" onclick="document.getElementById('img_file_{{ it.id }}').click()">Choose</button>
+                      <button class="btn" type="button" onclick="(function(){const fi=document.getElementById('img_file_{{ it.id }}');fi.onchange=()=>uploadTo('image_url_{{ it.id }}');fi.click();})()">Upload</button>
+                    </div>
+                  </div>
+                  <div class="stack">
+                    <label>Description</label>
+                    <textarea name="description">{{ it.description or '' }}</textarea>
+                    <div class="row">
+                      <div class="col">
+                        <label>Price (Pi)</label>
+                        <input type="number" name="pi_price" step="0.0000001" min="0" value="{{ '%.7f'|format(it.pi_price) }}">
+                      </div>
+                      <div class="col">
+                        <label>Stock qty</label>
+                        <input type="number" name="stock_qty" step="1" min="0" value="{{ it.stock_qty }}">
+                      </div>
+                    </div>
+                    <div class="row">
+                      <label style="display:flex;align-items:center;gap:8px">
+                        <input type="checkbox" name="allow_backorder" {% if it.allow_backorder %}checked{% endif %}> Allow backorder
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px">
+                        <input type="checkbox" name="active" {% if it.active %}checked{% endif %}> Active
+                      </label>
+                    </div>
+                    <div class="row" style="justify-content:flex-end;gap:8px">
+                      <button class="btn" type="submit">Save</button>
+                      <form method="post" action="/merchant/{{ m.slug }}/items/{{ it.id }}/delete{% if t %}?t={{ t }}{% endif %}">
+                        <button class="btn danger" type="submit" onclick="return confirm('Delete this item?')">Delete</button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </details>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    // live text previews for logo/banner on change
+    document.querySelector('[data-bind="logo_url"]')?.addEventListener('input', e=>{
+      const v = e.target.value.trim(); const img = document.getElementById('lp_logo');
+      if(img){ img.src=v; img.onerror=()=>{img.removeAttribute('src');}; }
+    });
+    document.querySelector('[data-bind="banner_url"]')?.addEventListener('input', e=>{
+      const v = e.target.value.trim(); const img = document.getElementById('lp_banner');
+      if(img){ img.src=v; img.onerror=()=>{img.removeAttribute('src');}; }
+    });
+  </script>
 </body>
 </html>
