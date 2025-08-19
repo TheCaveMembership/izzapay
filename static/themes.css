@@ -1,6 +1,25 @@
 /* static/themes.css
-   IZZA PAY — themes, colorways, and previews
-   ---------------------------------------------------- */
+   IZZA PAY — mobile tightness, colorways, previews, transitions
+   ------------------------------------------------------------ */
+
+/* ===== Resets & globals for mobile tightness ===== */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;           /* kill horizontal scroll */
+  -webkit-text-size-adjust: 100%;
+}
+
+img, video, canvas, svg { max-width: 100%; height: auto; display: block; }
+
+/* Smooth theme/colorway transitions */
+body, body * {
+  transition: background-color .25s ease, color .25s ease, border-color .25s ease;
+}
 
 /* ===== Base tokens (fallbacks) ===== */
 :root{
@@ -15,13 +34,14 @@
   --accent-ghost: rgba(110,159,255,.12);
 }
 
-/* Body uses CSS variables. Inline styles in templates will pick these up when present. */
+/* Body uses CSS variables */
 body{
   background:var(--bg);
   color:var(--txt);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
 }
 
-/* Shared UI helpers (so templates can stay lean) */
+/* Shared UI helpers */
 .ip-btn{
   background:var(--accent);
   color:#0b0f17;
@@ -30,12 +50,19 @@ body{
   padding:10px 12px;
   font-weight:800;
   cursor:pointer;
+  text-decoration: none;
+  display: inline-block;
 }
 .ip-btn.ghost{
   background:transparent;
   color:var(--accent);
   border:1px solid var(--accent);
 }
+/* On small screens, default to full-width buttons for easier taps */
+@media (max-width: 480px){
+  .ip-btn { width: 100%; }
+}
+
 .ip-card{
   background:var(--card);
   border:1px solid var(--line);
@@ -43,30 +70,74 @@ body{
   padding:12px;
 }
 
-/* ===== Colorways (apply to <body class="cw-blue"> etc.) ===== */
-
-.cw-blue{
-  --accent:#6e9fff;
-  --accent-ghost: rgba(110,159,255,.12);
-  --ok:#73e2a7;
-}
-.cw-mint{
-  --accent:#40d3b7;
-  --accent-ghost: rgba(64,211,183,.12);
-  --ok:#78e08f;
-}
-.cw-purple{
-  --accent:#b892ff;
-  --accent-ghost: rgba(184,146,255,.12);
-  --ok:#8bd8bd;
-}
-.cw-amber{
-  --accent:#ffb457;
-  --accent-ghost: rgba(255,180,87,.14);
-  --ok:#7bed9f;
+/* Simple container helper (optional) */
+.ip-wrap{
+  width: 100%;
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 14px;
 }
 
-/* Subtle tints for chips, pills, etc. */
+/* ===== Form layout utilities (used by merchant dashboard) ===== */
+.ip-row{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;         /* wrap on narrow screens */
+  align-items:flex-start;
+}
+.ip-col{
+  flex:1 1 260px;         /* grows, but won’t shrink below ~260px */
+  min-width: 220px;
+}
+@media (max-width: 520px){
+  .ip-col{ flex: 1 1 100%; min-width: 100%; }
+}
+
+.ip-input, .ip-select, .ip-textarea{
+  width:100%;
+  border:1px solid var(--line);
+  background:#0a1120;
+  color:var(--txt);
+  border-radius:10px;
+  padding:10px;
+}
+.ip-textarea{ min-height: 84px; resize: vertical; }
+.ip-select{
+  appearance:none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+    linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) calc(1em + 2px),
+    calc(100% - 15px) calc(1em + 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat:no-repeat;
+}
+.ip-label{ font-size:12px; color:var(--muted); margin:6px 2px; display:block; }
+
+/* Logo + Banner inputs:
+   - stack vertically on phones
+   - sit side-by-side only on wider screens */
+.logo-banner{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@media (min-width: 640px){
+  .logo-banner{ grid-template-columns: 1fr 1fr; }
+}
+
+/* Preview of current logo/banner frames (never overflow) */
+.logo-frame{
+  height:42px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+  display:flex; align-items:center; justify-content:center;
+  overflow:hidden;
+}
+
+/* ===== Pills / chips ===== */
 .ip-pill{
   font-size:12px;
   border:1px solid var(--line);
@@ -76,7 +147,49 @@ body{
   color:var(--txt);
 }
 
-/* ===== Storefront layout variants (apply to <body class="theme-a"> etc.) ===== */
+/* ===== Colorways (now full palettes, not just accent) ===== */
+.cw-blue{
+  --bg:#0b0f17;
+  --card:#0f1728;
+  --line:#1f2a44;
+  --txt:#e8f0ff;
+  --muted:#bcd0ff;
+  --accent:#6e9fff;
+  --accent-ghost: rgba(110,159,255,.12);
+  --ok:#73e2a7;
+}
+.cw-mint{
+  --bg:#071713;
+  --card:#0d201b;
+  --line:#17342c;
+  --txt:#e8fff8;
+  --muted:#bfeee4;
+  --accent:#40d3b7;
+  --accent-ghost: rgba(64,211,183,.12);
+  --ok:#78e08f;
+}
+.cw-purple{
+  --bg:#110a19;
+  --card:#190f27;
+  --line:#2a1a44;
+  --txt:#efe6ff;
+  --muted:#d7c9ff;
+  --accent:#b892ff;
+  --accent-ghost: rgba(184,146,255,.12);
+  --ok:#8bd8bd;
+}
+.cw-amber{
+  --bg:#1a1305;
+  --card:#221a0a;
+  --line:#3a2b10;
+  --txt:#fff3dd;
+  --muted:#ffe2b3;
+  --accent:#ffb457;
+  --accent-ghost: rgba(255,180,87,.14);
+  --ok:#7bed9f;
+}
+
+/* ===== Storefront layout variants ===== */
 
 /* Theme A — simple grid, edge-to-edge cards */
 .theme-a .ip-grid{
@@ -88,7 +201,7 @@ body{
   .theme-a .ip-grid{ grid-template-columns: 1fr; }
 }
 
-/* Theme B — masonry-like breathing space (bigger gap and softer borders) */
+/* Theme B — masonry-like breathing space */
 .theme-b .ip-grid{
   display:grid;
   grid-template-columns: 1fr 1fr;
@@ -102,7 +215,7 @@ body{
   .theme-b .ip-grid{ grid-template-columns: 1fr; }
 }
 
-/* Theme C — card list with image-left on wide screens */
+/* Theme C — image-left list on wide screens */
 .theme-c .ip-grid{
   display:grid;
   grid-template-columns: 1fr;
@@ -119,15 +232,13 @@ body{
   .theme-c .ip-item{ grid-template-columns: 1fr; }
 }
 
-/* Theme D — compact tiles with centered text */
+/* Theme D — compact tiles centered text */
 .theme-d .ip-grid{
   display:grid;
   grid-template-columns: repeat(2, minmax(0,1fr));
   gap:10px;
 }
-.theme-d .ip-item{
-  text-align:center;
-}
+.theme-d .ip-item{ text-align:center; }
 .theme-d .ip-item .itimg{ aspect-ratio: 1 / 1; }
 @media (max-width:840px){
   .theme-d .ip-grid{ grid-template-columns: 1fr; }
@@ -143,7 +254,7 @@ body{
   flex-direction:column;
   gap:8px;
 }
-.ip-item .itimg{
+.itimg{
   width:100%;
   aspect-ratio: 1 / 1;
   border:1px solid var(--line);
@@ -154,16 +265,16 @@ body{
   align-items:center;
   justify-content:center;
 }
-.ip-item .itimg img{
+.itimg img{
   width:100%;
   height:100%;
   object-fit:cover;
 }
 
 /* ===== Theme preview thumbnails (merchant dashboard) ===== */
-/* Markup expectation:
+/* Markup example:
    <div class="theme-preview theme-a cw-blue">
-     <div class="row"></div> ...
+     <div class="blk"></div> ...
    </div>
 */
 .theme-preview{
@@ -182,7 +293,6 @@ body{
   gap:6px;
   padding:8px;
 }
-/* Generic “blocks” to suggest layout */
 .theme-preview .blk{
   background: var(--accent-ghost);
   border:1px solid var(--line);
@@ -220,33 +330,7 @@ body{
 }
 .theme-preview.theme-d .blk{ width:80%; height:60%; }
 
-/* Colorway tint for previews via body class on the container OR per-tile class */
-.theme-preview.cw-blue{ --accent-ghost: rgba(110,159,255,.12); }
-.theme-preview.cw-mint{ --accent-ghost: rgba(64,211,183,.12); }
-.theme-preview.cw-purple{ --accent-ghost: rgba(184,146,255,.12); }
-.theme-preview.cw-amber{ --accent-ghost: rgba(255,180,87,.14); }
-
-/* ===== Inputs & selects (used on merchant dashboard) ===== */
-.ip-input, .ip-select, .ip-textarea{
-  width:100%;
-  border:1px solid var(--line);
-  background:#0a1120;
-  color:var(--txt);
-  border-radius:10px;
-  padding:10px;
-}
-.ip-select{ appearance:none; background-image: linear-gradient(45deg, transparent 50%, var(--accent) 50%), linear-gradient(135deg, var(--accent) 50%, transparent 50%); background-position: calc(100% - 20px) calc(1em + 2px), calc(100% - 15px) calc(1em + 2px); background-size: 5px 5px, 5px 5px; background-repeat:no-repeat; }
-.ip-label{ font-size:12px; color:var(--muted); margin:6px 2px; display:block; }
-
-/* ===== Misc ===== */
-.ip-topbar{
-  position:sticky; top:0;
-  background:rgba(11,15,23,.85);
-  backdrop-filter: blur(10px);
-  border-bottom:1px solid var(--line);
-  z-index:2;
-}
-.logo-frame{
-  height:42px; border:1px solid var(--line); border-radius:10px; background:#fff;
-  display:flex; align-items:center; justify-content:center; overflow:hidden;
+/* Let groups of previews wrap instead of causing sideways scroll */
+.theme-preview-list{
+  display:flex; flex-wrap: wrap; gap:12px;
 }
