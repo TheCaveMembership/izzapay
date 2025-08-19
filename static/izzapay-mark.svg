@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background ring (subtle) -->
+  <circle cx="256" cy="256" r="248" fill="url(#g1)"/>
+  <!-- Inner hex “chip/card” -->
+  <path d="M256 88l140 80v176l-140 80-140-80V168l140-80z" fill="url(#g2)"/>
+  <!-- Stylized IZ monogram -->
+  <g transform="translate(128,152)">
+    <!-- I bar -->
+    <rect x="40" y="32" width="44" height="176" rx="8" fill="white"/>
+    <!-- Z slash / outline -->
+    <path d="M96 48h176c9 0 16 7 16 16v8c0 6-3 11-7 14L166 196h122c9 0 16 7 16 16v8c0 9-7 16-16 16H110c-9 0-16-7-16-16v-8c0-5 2-10 5-13l120-110H96c-9 0-16-7-16-16v-8c0-9 7-16 16-16z" fill="white"/>
+  </g>
+  <defs>
+    <radialGradient id="g1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 256) rotate(90) scale(248)">
+      <stop stop-color="#0C1224"/>
+      <stop offset="1" stop-color="#0A0F1A"/>
+    </radialGradient>
+    <linearGradient id="g2" x1="116" y1="88" x2="396" y2="424" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6EA8FF"/>
+      <stop offset="1" stop-color="#7CF0FF"/>
+    </linearGradient>
+  </defs>
+</svg>
