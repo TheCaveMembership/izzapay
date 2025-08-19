@@ -1,374 +1,197 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
   <meta charset="utf-8">
-  <title>{{ 'Create your store' if setup_mode else (m.business_name ~ ' — Dashboard') }}</title>
+  <title>{{ 'Create your IZZA PAY Store' if setup_mode else 'Your Products' }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    .wrap{max-width:1080px;margin:0 auto;padding:16px}
-    .hdr{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:6px 0 16px}
-    .left{display:flex;align-items:center;gap:10px}
-    .logo{height:40px;width:40px;border-radius:10px;border:1px solid var(--line);overflow:hidden;background:#0b1222;display:flex;align-items:center;justify-content:center}
-    .logo img{max-width:100%;max-height:100%}
-    .muted{color:var(--muted)}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:12px;padding:10px 14px;font-weight:900;cursor:pointer;text-decoration:none}
-    .ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
-    input,textarea,select{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:12px;color:var(--txt);padding:10px}
-    label{display:block;margin-top:10px;margin-bottom:4px}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-    .product{background:#0b1222;border:1px solid var(--line);border-radius:14px;overflow:hidden}
-    .product img{width:100%;height:180px;object-fit:cover;display:block}
-    .pdx{padding:12px}
-    .right{margin-left:auto}
-    .alert{border:1px solid #ff9aa2;background:#310f15;color:#ffb4bb;padding:10px;border-radius:10px;margin:10px 0}
-    .ok{border:1px solid #7de37a;background:#0e2a14;color:#b7f0b5;padding:10px;border-radius:10px;margin:10px 0}
-    .code{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b1222;border:1px dashed var(--line);border-radius:10px;padding:10px;overflow:auto}
-    .two{display:grid;grid-template-columns:1fr;gap:12px}
-    @media (min-width:900px){ .two{grid-template-columns:1.1fr .9fr} }
-    .small{font-size:.92rem}
-    .hint{margin-top:6px;color:var(--muted);font-size:.9rem}
-    .switch{display:inline-flex;gap:8px;align-items:center}
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
+    .wrap{max-width:980px;margin:0 auto;padding:20px}
+    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:18px;margin-bottom:16px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    .btn.secondary{background:transparent;border:1px solid #1f2a44;color:#e8f0ff}
+    .muted{color:#bcd0ff}
+    input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid #1f2a44;background:#0b1322;color:#e8f0ff}
+    label{font-size:13px;color:#bcd0ff;display:block;margin:8px 0 4px}
+    .grid{display:grid;gap:12px}
+    @media(min-width:760px){ .grid.cols-2{grid-template-columns:1fr 1fr} }
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #1f2a44;padding:10px;text-align:left;font-size:14px}
+    .err{color:#ff9aa2;white-space:pre-wrap;margin-top:8px}
+    .note{font-size:12px;color:#bcd0ff}
   </style>
 </head>
-<body data-color="{{ (m.colorway if m else 'blue') if not setup_mode else 'blue' }}">
-  <div class="wrap">
+<body>
+<div class="wrap">
 
-    <!-- HEADER -->
-    <div class="hdr">
-      <div class="left">
-        <div class="logo">
-          {% if not setup_mode and m.logo_url %}
-            <img src="{{ m.logo_url }}" alt="">
-          {% else %}
-            <img src="/static/izzapay-mark.svg" alt="">
-          {% endif %}
+  {% if setup_mode %}
+    <div class="card">
+      <h2 style="margin:0 0 6px">Create your IZZA PAY Store</h2>
+      <div class="muted">Signed in as <strong>@{{ username }}</strong></div>
+
+      {% if error %}<div class="err" style="margin-top:10px">{{ error }}</div>{% endif %}
+
+      <form method="post" action="/merchant/setup{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2" style="margin-top:12px">
+        <div>
+          <label>Store slug</label>
+          <input name="slug" placeholder="e.g. cavestore" required>
+          <div class="note">Your store link: {{ app_base }}/store/&lt;slug&gt;</div>
         </div>
         <div>
-          <div style="font-weight:900">
-            {{ 'Create your IZZA PAY Store' if setup_mode else m.business_name }}
-          </div>
-          <div class="muted small">
-            {{ '@' ~ (m.slug if m else 'your-handle') }}
-          </div>
+          <label>Business name</label>
+          <input name="business_name" placeholder="{{ username }}'s Shop">
         </div>
-      </div>
 
-      <div class="row">
-        {% if not setup_mode %}
-          <a class="btn ghost" href="/store/{{ m.slug }}" target="_blank">View Storefront</a>
-          <a class="btn ghost" href="/merchant/{{ m.slug }}/orders">Orders</a>
-          <form action="/logout" method="post"><button class="btn ghost" type="submit">Log out</button></form>
-        {% endif %}
+        <div>
+          <label>Logo URL (or use Upload button elsewhere)</label>
+          <input name="logo_url" placeholder="https://.../logo.png">
+        </div>
+        <div>
+          <label>Banner URL</label>
+          <input name="banner_url" placeholder="https://.../banner.jpg">
+        </div>
+
+        <div>
+          <label>Theme</label>
+          <select name="theme">
+            <option value="theme-a">Theme A</option>
+            <option value="theme-b">Theme B</option>
+            <option value="theme-c">Theme C</option>
+            <option value="theme-d">Theme D</option>
+          </select>
+        </div>
+        <div>
+          <label>Colorway</label>
+          <select name="colorway">
+            <option value="blue">Blue</option>
+            <option value="purple">Purple</option>
+            <option value="green">Green</option>
+            <option value="orange">Orange</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Font Family</label>
+          <input name="font_family" placeholder="system-ui">
+        </div>
+        <div>
+          <label>Font CSS URL (optional)</label>
+          <input name="font_url" placeholder="https://fonts.googleapis.com/css2?...">
+        </div>
+
+        <div class="grid" style="grid-column:1/-1">
+          <label>Store description</label>
+          <textarea name="description" rows="3" placeholder="Tell shoppers about your store…"></textarea>
+        </div>
+
+        <div>
+          <label>Merchant email (order notifications)</label>
+          <input type="email" name="reply_to_email" placeholder="you@store.com">
+        </div>
+        <div>
+          <label>Pi wallet public key (starts with G… 56 chars)</label>
+          <input name="pi_wallet_address" placeholder="G..." required>
+        </div>
+
+        <div>
+          <label>Pi handle (optional)</label>
+          <input name="pi_handle" placeholder="@{{ username }}">
+        </div>
+        <div>
+          <label>Theme mode (legacy)</label>
+          <select name="theme_mode">
+            <option value="dark" selected>Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+
+        <div style="grid-column:1/-1;margin-top:8px">
+          <button class="btn" type="submit">Create Store</button>
+          <a class="btn secondary" href="/logout">Sign out</a>
+        </div>
+      </form>
+    </div>
+
+  {% else %}
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">{{ m.business_name }}</h2>
+        <div class="muted">Owner: <strong>@{{ username }}</strong></div>
+      </div>
+      <div class="muted" style="margin-top:6px">Store link:
+        <a href="{{ app_base }}/store/{{ m.slug }}" class="btn secondary" style="padding:6px 10px">{{ app_base }}/store/{{ m.slug }}</a>
       </div>
     </div>
 
-    {% if error %}
-      <div class="alert">{{ error }}</div>
-    {% endif %}
-
-    <!-- SETUP MODE: CREATE MERCHANT -->
-    {% if setup_mode %}
-      <div class="two">
-        <div class="card">
-          <h3>Business details</h3>
-          <form action="/merchant/setup" method="post">
-            <label>Store slug (unique)</label>
-            <input name="slug" placeholder="e.g. cave" required>
-
-            <label>Business name</label>
-            <input name="business_name" placeholder="Your brand name" required>
-
-            <label>Logo URL</label>
-            <input name="logo_url" placeholder="https://… (or upload below)">
-
-            <label>Banner URL</label>
-            <input name="banner_url" placeholder="https://… (or upload below)">
-
-            <div class="row">
-              <div style="flex:1">
-                <label>Theme layout</label>
-                <select name="theme">
-                  <option value="theme-a">Theme A — Hero then grid</option>
-                  <option value="theme-b">Theme B — Logo + banner</option>
-                  <option value="theme-c">Theme C — Description first</option>
-                  <option value="theme-d">Theme D — Minimal w/ sticky header</option>
-                </select>
-              </div>
-              <div style="flex:1">
-                <label>Colorway</label>
-                <select name="colorway">
-                  <option value="blue">Blue</option>
-                  <option value="green">Green</option>
-                  <option value="purple">Purple</option>
-                  <option value="amber">Amber</option>
-                </select>
-              </div>
-            </div>
-
-            <label>Store description</label>
-            <textarea name="description" rows="3" placeholder="Tell shoppers about your store…"></textarea>
-
-            <div class="row">
-              <div style="flex:1">
-                <label>Font family</label>
-                <select name="font_family">
-                  <option value="system-ui">System UI</option>
-                  <option value="Inter, system-ui, sans-serif">Inter</option>
-                  <option value="Roboto, system-ui, sans-serif">Roboto</option>
-                  <option value="'Playfair Display', serif">Playfair Display</option>
-                  <option value="'Space Grotesk', sans-serif">Space Grotesk</option>
-                  <option value="'DM Sans', sans-serif">DM Sans</option>
-                </select>
-              </div>
-              <div style="flex:1">
-                <label>Optional font CSS URL</label>
-                <input name="font_url" placeholder="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap">
-              </div>
-            </div>
-
-            <label>Contact email (order notifications)</label>
-            <input name="reply_to_email" type="email" placeholder="name@brand.com">
-
-            <label>Pi wallet public key (56 chars, starts with G)</label>
-            <input name="pi_wallet_address" placeholder="G… (public address)" required>
-
-            <label>Optional Pi handle (for display)</label>
-            <input name="pi_handle" placeholder="@yourhandle">
-
-            <div class="hint">You can change appearance later under <strong>Customize appearance</strong>.</div>
-
-            <div style="margin-top:12px">
-              <button class="btn" type="submit">Create my store</button>
-            </div>
-          </form>
+    <div class="card">
+      <h3 style="margin:0 0 10px">Add a product</h3>
+      <form method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t|e }}{% endif %}" class="grid cols-2">
+        <div>
+          <label>Title</label>
+          <input name="title" required>
         </div>
-
-        <div class="card">
-          <h3>Quick uploader</h3>
-          <p class="muted small">Upload images from your device (iPhone supported). Copy the returned URL into Logo/Banner fields.</p>
-          <input type="file" id="upfile" accept="image/*">
-          <div id="upout" class="hint"></div>
-          <button class="btn" id="uploadBtn" style="margin-top:10px">Upload</button>
-          <div class="hint">Uploaded files are served from <code>/static/uploads/…</code></div>
+        <div>
+          <label>SKU</label>
+          <input name="sku">
         </div>
-      </div>
-
-    {% else %}
-      <!-- EXISTING MERCHANT DASHBOARD -->
-      <div class="card">
-        <div class="row">
-          <div>
-            <div style="font-weight:900">{{ m.business_name }}</div>
-            <div class="muted small">@{{ m.slug }}</div>
-          </div>
-          <a class="btn right" href="/store/{{ m.slug }}" target="_blank">Open storefront</a>
+        <div>
+          <label>Image URL</label>
+          <input name="image_url" placeholder="https://...">
         </div>
-
-        <div class="row" style="margin-top:10px">
-          <a class="btn ghost" href="/merchant/{{ m.slug }}/orders">View orders</a>
-          <a class="btn ghost" href="/merchant/{{ m.slug }}/items?t={{ t }}#appearance">Customize appearance</a>
-          <button class="btn ghost" id="copyStore">Copy store link</button>
+        <div>
+          <label>Price (Pi)</label>
+          <input name="pi_price" type="number" step="0.0000001" required>
         </div>
-        <div class="hint">Store link your customers can visit: <span id="storeUrl">{{ app_base }}/store/{{ m.slug }}</span></div>
-      </div>
-
-      <!-- CREATE / EDIT PRODUCT -->
-      <div class="two" id="appearance">
-        <div class="card">
-          <h3>{{ 'Edit product' if edit_item else 'Add a product' }}</h3>
-
-          {% if edit_item %}
-          <form action="/merchant/{{ m.slug }}/items/{{ edit_item.id }}/edit" method="post">
-          {% else %}
-          <form action="/merchant/{{ m.slug }}/items/new" method="post">
-          {% endif %}
-
-            <label>Title</label>
-            <input name="title" value="{{ edit_item.title if edit_item else '' }}" required>
-
-            <label>SKU (optional)</label>
-            <input name="sku" value="{{ edit_item.sku if edit_item else '' }}">
-
-            <label>Image URL</label>
-            <input id="img_url" name="image_url" value="{{ edit_item.image_url if edit_item else '' }}" placeholder="https://… (or upload below)">
-
-            <label>Description</label>
-            <textarea name="description" rows="3" placeholder="Short description…">{{ edit_item.description if edit_item else '' }}</textarea>
-
-            <div class="row">
-              <div style="flex:1">
-                <label>Price (Pi)</label>
-                <input name="pi_price" inputmode="decimal" value="{{ '%.7f'|format(edit_item.pi_price) if edit_item else '' }}" required>
-              </div>
-              <div style="flex:1">
-                <label>Stock qty</label>
-                <input name="stock_qty" inputmode="numeric" value="{{ edit_item.stock_qty if edit_item else 0 }}">
-              </div>
-            </div>
-
-            <div class="row" style="margin-top:8px">
-              <label class="switch"><input type="checkbox" name="allow_backorder" {% if edit_item and edit_item.allow_backorder %}checked{% endif %}> Allow backorder</label>
-              <label class="switch"><input type="checkbox" name="active" {% if not edit_item or edit_item.active %}checked{% endif %}> Active</label>
-            </div>
-
-            <div class="row" style="margin-top:12px">
-              <button class="btn" type="submit">{{ 'Save changes' if edit_item else 'Add product' }}</button>
-              {% if edit_item %}
-              <form action="/merchant/{{ m.slug }}/items/{{ edit_item.id }}/delete" method="post" onsubmit="return confirm('Delete this product?');">
-                <button class="btn ghost" type="submit">Delete</button>
-              </form>
-              {% endif %}
-            </div>
-          </form>
-
-          <div class="card" style="margin-top:12px">
-            <h4>Quick image upload</h4>
-            <input type="file" id="upfile2" accept="image/*">
-            <div id="upout2" class="hint"></div>
-            <button class="btn" id="uploadBtn2" style="margin-top:10px">Upload image</button>
-          </div>
+        <div>
+          <label>Stock qty</label>
+          <input name="stock_qty" type="number" value="0">
         </div>
-
-        <div class="card">
-          <h3>Customize appearance</h3>
-          <form action="/merchant/{{ m.slug }}/appearance" method="post">
-            <label>Business name</label>
-            <input name="business_name" value="{{ m.business_name }}">
-
-            <label>Logo URL</label>
-            <input name="logo_url" value="{{ m.logo_url or '' }}">
-
-            <label>Banner URL</label>
-            <input name="banner_url" value="{{ m.banner_url or '' }}">
-
-            <label>Store description</label>
-            <textarea name="description" rows="3">{{ m.description or '' }}</textarea>
-
-            <div class="row">
-              <div style="flex:1">
-                <label>Theme layout</label>
-                <select name="theme">
-                  <option value="theme-a" {% if m.theme=='theme-a' %}selected{% endif %}>Theme A</option>
-                  <option value="theme-b" {% if m.theme=='theme-b' %}selected{% endif %}>Theme B</option>
-                  <option value="theme-c" {% if m.theme=='theme-c' %}selected{% endif %}>Theme C</option>
-                  <option value="theme-d" {% if m.theme=='theme-d' %}selected{% endif %}>Theme D</option>
-                </select>
-              </div>
-              <div style="flex:1">
-                <label>Colorway</label>
-                <select name="colorway">
-                  <option value="blue"   {% if m.colorway=='blue' %}selected{% endif %}>Blue</option>
-                  <option value="green"  {% if m.colorway=='green' %}selected{% endif %}>Green</option>
-                  <option value="purple" {% if m.colorway=='purple' %}selected{% endif %}>Purple</option>
-                  <option value="amber"  {% if m.colorway=='amber' %}selected{% endif %}>Amber</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="row">
-              <div style="flex:1">
-                <label>Font family</label>
-                <select name="font_family">
-                  <option value="system-ui" {% if m.font_family=='system-ui' %}selected{% endif %}>System UI</option>
-                  <option value="Inter, system-ui, sans-serif" {% if m.font_family=='Inter, system-ui, sans-serif' %}selected{% endif %}>Inter</option>
-                  <option value="Roboto, system-ui, sans-serif" {% if m.font_family=='Roboto, system-ui, sans-serif' %}selected{% endif %}>Roboto</option>
-                  <option value="'Playfair Display', serif" {% if m.font_family=="'Playfair Display', serif" %}selected{% endif %}>Playfair Display</option>
-                  <option value="'Space Grotesk', sans-serif" {% if m.font_family=="'Space Grotesk', sans-serif" %}selected{% endif %}>Space Grotesk</option>
-                  <option value="'DM Sans', sans-serif" {% if m.font_family=="'DM Sans', sans-serif" %}selected{% endif %}>DM Sans</option>
-                </select>
-              </div>
-              <div style="flex:1">
-                <label>Optional font CSS URL</label>
-                <input name="font_url" value="{{ m.font_url or '' }}">
-              </div>
-            </div>
-
-            <div style="margin-top:12px">
-              <button class="btn" type="submit">Save appearance</button>
-            </div>
-          </form>
+        <div>
+          <label>Backorder allowed</label>
+          <select name="allow_backorder">
+            <option value="">No</option>
+            <option value="1">Yes</option>
+          </select>
         </div>
-      </div>
-
-      <!-- PRODUCT LIST -->
-      <div class="card">
-        <div class="row" style="justify-content:space-between;align-items:center">
-          <strong>Your products</strong>
-          <div class="muted small">Click “Edit” to change details or “Copy link” to share a direct checkout.</div>
+        <div class="grid" style="grid-column:1/-1">
+          <label>Description</label>
+          <textarea name="description" rows="3" placeholder="Details about this item…"></textarea>
         </div>
+        <div style="grid-column:1/-1">
+          <button class="btn" type="submit">Create product</button>
+        </div>
+      </form>
+    </div>
 
-        {% if items and items|length > 0 %}
-        <div class="grid">
+    <div class="card">
+      <h3 style="margin:0 0 10px">Your products</h3>
+      <table>
+        <thead><tr><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Active</th><th></th></tr></thead>
+        <tbody>
           {% for it in items %}
-          <div class="product">
-            {% if it.image_url %}<img src="{{ it.image_url }}" alt="{{ it.title }}">{% endif %}
-            <div class="pdx">
-              <div style="font-weight:900">{{ it.title }}</div>
-              <div class="muted small">{{ it.sku or '' }}</div>
-              {% if it.description %}<div class="muted small" style="margin-top:6px">{{ it.description }}</div>{% endif %}
-              <div style="margin-top:8px"><strong>{{ '%.7f'|format(it.pi_price) }} Pi</strong></div>
-              <div class="row" style="margin-top:10px">
-                <a class="btn ghost" href="/merchant/{{ m.slug }}/items/{{ it.id }}/edit">Edit</a>
-                <form action="/merchant/{{ m.slug }}/items/{{ it.id }}/delete" method="post" onsubmit="return confirm('Delete this product?');">
-                  <button class="btn ghost" type="submit">Delete</button>
-                </form>
-                <button class="btn right" data-copy="{{ app_base }}/checkout/{{ it.link_id }}">Copy link</button>
-              </div>
-            </div>
-          </div>
+          <tr>
+            <td>{{ it.title }}</td>
+            <td>{{ '%.7f'|format(it.pi_price) }}</td>
+            <td>{{ it.stock_qty }}</td>
+            <td>{{ 'Yes' if it.active else 'No' }}</td>
+            <td>
+              <a class="btn secondary" href="/merchant/{{ m.slug }}/items/{{ it.id }}/edit{% if t %}?t={{ t|e }}{% endif %}">Edit</a>
+              <form method="post" action="/merchant/{{ m.slug }}/items/{{ it.id }}/delete{% if t %}?t={{ t|e }}{% endif %}" style="display:inline">
+                <button class="btn secondary" onclick="return confirm('Delete this item?')">Delete</button>
+              </form>
+              <a class="btn" href="/checkout/{{ it.link_id }}">Buy link</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="muted">No products yet.</td></tr>
           {% endfor %}
-        </div>
-        {% else %}
-          <p class="muted">No products yet. Add your first one above.</p>
-        {% endif %}
-      </div>
-    {% endif %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
 
-  </div>
-
-  <script>
-    // Copy buttons
-    document.addEventListener('click', (e) => {
-      if(e.target.matches('button[data-copy]')){
-        navigator.clipboard.writeText(e.target.getAttribute('data-copy'));
-        e.target.textContent = 'Copied!';
-        setTimeout(()=>{ e.target.textContent = 'Copy link'; }, 1200);
-      }
-    });
-
-    const storeBtn = document.getElementById('copyStore');
-    storeBtn?.addEventListener('click', ()=>{
-      const txt = document.getElementById('storeUrl')?.textContent || '';
-      navigator.clipboard.writeText(txt);
-      storeBtn.textContent = 'Copied!';
-      setTimeout(()=>{ storeBtn.textContent = 'Copy store link'; }, 1200);
-    });
-
-    // Uploaders
-    function bindUpload(fileId, outId, onDone){
-      const inp = document.getElementById(fileId);
-      const out = document.getElementById(outId);
-      const btn = document.getElementById(fileId === 'upfile' ? 'uploadBtn' : 'uploadBtn2');
-      btn?.addEventListener('click', async ()=>{
-        if(!inp?.files?.length){ out.textContent = 'Choose a file first.'; return; }
-        const fd = new FormData(); fd.append('file', inp.files[0]);
-        out.textContent = 'Uploading…';
-        try{
-          const r = await fetch('/upload', { method:'POST', body: fd });
-          const j = await r.json();
-          if(!j.ok){ out.textContent = 'Upload failed: ' + (j.error||''); return; }
-          out.innerHTML = 'Uploaded: <a href="'+j.url+'" target="_blank">'+j.url+'</a>';
-          if(onDone) onDone(j.url);
-        }catch(err){
-          out.textContent = 'Upload error: ' + err;
-        }
-      });
-    }
-    bindUpload('upfile','upout', (url)=>{/* store setup form fields you can paste URL into */});
-    bindUpload('upfile2','upout2', (url)=>{ const f = document.getElementById('img_url'); if(f) f.value = url; });
-  </script>
+</div>
 </body>
 </html>
