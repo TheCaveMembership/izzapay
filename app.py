@@ -240,7 +240,6 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        # tuple fix
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -282,22 +281,6 @@ def merchant_setup():
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
-# ---- robust number parsing helpers ----
-def _to_float(val, default=0.0):
-    try:
-        s = (val if val is not None else "").strip()
-        return float(s) if s != "" else float(default)
-    except Exception:
-        return float(default)
-
-def _to_int(val, default=0):
-    try:
-        s = (val if val is not None else "").strip()
-        return int(s) if s != "" else int(default)
-    except Exception:
-        return int(default)
-# --------------------------------------
-
 @app.get("/merchant/<slug>/items")
 def merchant_items(slug):
     u, m = require_merchant_owner(slug)
@@ -315,21 +298,13 @@ def merchant_new_item(slug):
     if isinstance(u, Response): return u
     data = request.form
     link_id = uuid.uuid4().hex[:8]
-
-    # HARDEN parsing so empty strings or bad input don't 500
-    price = _to_float(data.get("pi_price"), 0.0)
-    stock = _to_int(data.get("stock_qty"), 0)
-    allow_backorder = 1 if (data.get("allow_backorder") in ("1", "true", "on")) else 0
-
     with conn() as cx:
         cx.execute("""INSERT INTO items(merchant_id, link_id, title, sku, image_url, pi_price,
                       stock_qty, allow_backorder, active)
                       VALUES(?,?,?,?,?,?,?,?,1)""",
-                   (m["id"], link_id,
-                    (data.get("title") or "").strip(),
-                    (data.get("sku") or "").strip(),
-                    (data.get("image_url") or "").strip(),
-                    float(price), int(stock), int(allow_backorder)))
+                   (m["id"], link_id, data.get("title"), data.get("sku"),
+                    data.get("image_url"), float(data.get("pi_price", "0")),
+                    int(data.get("stock_qty", "0")), int(bool(data.get("allow_backorder")))))
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
@@ -613,7 +588,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
               SELECT cart_items.qty, items.*
               FROM cart_items JOIN items ON items.id=cart_items.item_id
               WHERE cart_items.cart_id=?
-            """, (cart["id"]),).fetchall()
+            """, (cart["id"],)).fetchall()
         with conn() as cx:
             for r in rows:
                 line_gross = float(r["pi_price"]) * r["qty"]
@@ -729,8 +704,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
