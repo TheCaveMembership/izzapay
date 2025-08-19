@@ -47,7 +47,6 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        # NEW: store chosen colorway for storefront theming
         if "colorway" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
@@ -243,12 +242,11 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     tok = get_bearer_token_from_request()
-    # Pass username so template shows "Signed in as @username"
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                            app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
                            username=u["pi_username"])
@@ -262,7 +260,6 @@ def merchant_setup():
     business_name = data.get("business_name") or f"{u['pi_username']}'s Shop"
     logo_url = (data.get("logo_url") or "").strip()
     theme_mode = data.get("theme_mode", "dark")
-    # NEW: colorway from setup form (hidden field), default cw-blue
     colorway = (data.get("colorway") or "cw-blue").strip() or "cw-blue"
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
@@ -306,17 +303,12 @@ def merchant_new_item(slug):
     data = request.form
     link_id = uuid.uuid4().hex[:8]
 
-    # Robust parsing to avoid 500s on bad input
     def _to_float(v, default=0.0):
-        try:
-            return float(str(v).strip())
-        except Exception:
-            return default
+        try: return float(str(v).strip())
+        except Exception: return default
     def _to_int(v, default=0):
-        try:
-            return int(str(v).strip())
-        except Exception:
-            return default
+        try: return int(str(v).strip())
+        except Exception: return default
 
     price = _to_float(data.get("pi_price"), 0.0)
     stock = _to_int(data.get("stock_qty"), 0)
@@ -469,7 +461,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -497,7 +489,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -611,7 +603,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
               SELECT cart_items.qty, items.*
               FROM cart_items JOIN items ON items.id=cart_items.item_id
               WHERE cart_items.cart_id=?
-            """, (cart["id"]),).fetchall()
+            """, (cart["id"],)).fetchall()
         with conn() as cx:
             for r in rows:
                 line_gross = float(r["pi_price"]) * r["qty"]
@@ -648,7 +640,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
-    # Best-effort emails
     try:
         if m["reply_to_email"]:
             send_email(
@@ -668,7 +659,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception as e:
         print("buyer email fail:", repr(e))
 
-    # Redirect back to storefront with success flag
     u = current_user_row()
     tok = ""
     if u:
@@ -679,7 +669,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     return {"ok": True, "redirect_url": redirect_url}
 
 # ----------------- IMAGE PROXY (resilient) -----------------
-# 1x1 transparent PNG
 _TRANSPARENT_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
     "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
@@ -727,8 +716,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
