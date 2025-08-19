@@ -5,72 +5,82 @@
   <title>{{ store.name }} - IZZA PAY</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
   <style>
-    body.light-mode { background: #fff; color: #000; }
-    body.dark-mode { background: #121212; color: #f2f2f2; }
-
-    .store-banner { width: 100%; max-height: 250px; object-fit: cover; margin-bottom: 20px; }
-    .store-header { text-align: center; margin-bottom: 30px; }
-    .store-description { font-size: 1.1em; margin: 10px auto; max-width: 700px; }
-
-    .products-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-      gap: 20px;
-    }
-    .product-card {
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      padding: 15px;
-      text-align: center;
-      background: #fafafa;
-    }
-    .product-card img { max-width: 100%; height: auto; border-radius: 4px; }
-    .product-card h3 { margin: 10px 0; }
-    .toggle-mode-btn {
-      margin: 10px;
-      padding: 8px 15px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
+    body.light { background: #ffffff; color: #000; }
+    body.dark { background: #121212; color: #eee; }
+    .banner { width: 100%; height: 200px; object-fit: cover; }
+    .store-description { margin: 20px; font-size: 1.2em; }
+    .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin: 20px; }
+    .product { border: 1px solid #ccc; border-radius: 8px; padding: 10px; text-align: center; background: #fafafa; }
+    .product img { width: 100%; height: 150px; object-fit: cover; }
+    .theme-toggle { margin: 10px; cursor: pointer; padding: 6px 12px; border-radius: 5px; border: 1px solid #333; }
+    .search-bar { margin: 20px; text-align: center; }
+    .search-bar input { width: 70%; padding: 8px; }
+    .search-bar button { padding: 8px 12px; cursor: pointer; }
+    .font-selector { margin: 20px; }
   </style>
 </head>
-<body class="light-mode" style="font-family: {{ store.font or 'Arial, sans-serif' }};">
+<body class="light">
 
-  {% if store.banner_url %}
-  <img src="{{ store.banner_url }}" class="store-banner" alt="Store Banner">
+  <!-- Store Banner -->
+  {% if store.banner %}
+    <img src="{{ url_for('static', filename='uploads/' + store.banner) }}" alt="Store Banner" class="banner">
   {% endif %}
 
-  <div class="store-header">
-    <h1>{{ store.name }}</h1>
-    <p class="store-description">{{ store.description }}</p>
-    <button class="toggle-mode-btn" onclick="toggleMode()">Toggle Dark/Light Mode</button>
-    <form method="get" action="{{ url_for('search_store_products', store_id=store.id) }}">
-      <input type="text" name="q" placeholder="Search this store's products">
+  <!-- Store Name & Description -->
+  <h1 style="text-align:center;">{{ store.name }}</h1>
+  <div class="store-description">
+    <p>{{ store.description }}</p>
+  </div>
+
+  <!-- Search Bar -->
+  <div class="search-bar">
+    <form method="GET" action="{{ url_for('store_page', store_id=store.id) }}">
+      <input type="text" name="q" placeholder="Search products in {{ store.name }}">
       <button type="submit">Search</button>
     </form>
   </div>
 
-  <div class="products-grid">
+  <!-- Toggle Light/Dark -->
+  <div style="text-align:center;">
+    <button class="theme-toggle" onclick="toggleTheme()">Toggle Light/Dark Mode</button>
+  </div>
+
+  <!-- Font Selector -->
+  <div class="font-selector" style="text-align:center;">
+    <label for="fontChoice">Select Font: </label>
+    <select id="fontChoice" onchange="changeFont(this.value)">
+      <option value="Arial, sans-serif">Arial</option>
+      <option value="'Times New Roman', serif">Times New Roman</option>
+      <option value="Verdana, sans-serif">Verdana</option>
+      <option value="'Courier New', monospace">Courier</option>
+      <option value="'Comic Sans MS', cursive">Comic Sans</option>
+    </select>
+  </div>
+
+  <!-- Product Grid -->
+  <div class="product-grid">
     {% for product in products %}
-    <div class="product-card">
-      {% if product.image_url %}
-      <img src="{{ product.image_url }}" alt="{{ product.name }}">
-      {% endif %}
-      <h3>{{ product.name }}</h3>
-      <p>{{ product.description }}</p>
-      <p><strong>{{ product.price_pi }} π</strong></p>
-      <a href="{{ url_for('checkout', product_id=product.id) }}">
-        <button>Buy with Pi</button>
-      </a>
-    </div>
+      <div class="product">
+        {% if product.image %}
+          <img src="{{ url_for('static', filename='uploads/' + product.image) }}" alt="{{ product.name }}">
+        {% endif %}
+        <h3>{{ product.name }}</h3>
+        <p>{{ product.description }}</p>
+        <p><strong>{{ product.price }} π</strong></p>
+        <button onclick="window.location.href='{{ url_for('checkout', product_id=product.id) }}'">Buy with Pi</button>
+      </div>
     {% endfor %}
   </div>
 
   <script>
-    function toggleMode() {
-      document.body.classList.toggle('dark-mode');
-      document.body.classList.toggle('light-mode');
+    function toggleTheme() {
+      const body = document.body;
+      body.classList.toggle('dark');
+      body.classList.toggle('light');
+    }
+
+    function changeFont(font) {
+      document.body.style.fontFamily = font;
     }
   </script>
 </body>
