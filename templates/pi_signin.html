@@ -2,64 +2,181 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Sign in with Pi — IZZA PAY</title>
+  <title>IZZA PAY — Sign in with Pi</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
-    .wrap{max-width:640px;margin:0 auto;padding:24px}
-    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:20px}
-    h1{margin:0 0 8px}
-    p{color:#bcd0ff}
-    button{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800}
-    .muted{color:#bcd0ff;opacity:.9}
+    :root{
+      --bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff;--brand2:#9fd1ff;
+    }
+    *{box-sizing:border-box}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:980px;margin:0 auto;padding:20px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+    .logo{display:flex;gap:10px;align-items:center}
+    .logo img{display:block;height:36px}
+    .cta a, .cta button{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}
+    .cta a.secondary{background:transparent;border:1px solid var(--line);color:var(--txt)}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    @media (min-width:760px){ .grid{grid-template-columns: 3fr 2fr;} }
+
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+    .hero{display:flex;flex-direction:column;gap:10px}
+    .hero h1{margin:0;font-size:28px;line-height:1.15}
+    .hero p{margin:0;color:var(--muted)}
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800;cursor:pointer}
+    .btn.secondary{background:transparent;border:1px solid var(--line);color:var(--txt)}
+    .muted{color:var(--muted)}
     .err{color:#ff9aa2;margin-top:10px;white-space:pre-wrap}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .pill{display:inline-block;padding:8px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:13px}
+    .list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media (max-width:520px){ .list{grid-template-columns:1fr;} }
+
+    .how{display:grid;gap:10px}
+    .how .step{display:flex;gap:10px;align-items:flex-start}
+    .how .num{background:var(--brand2);color:#0b0f17;border-radius:8px;min-width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;font-weight:800}
+    footer{margin:20px auto 0;max-width:980px;padding:0 20px;color:var(--muted);font-size:13px;text-align:center}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <h1>Sign in with Pi</h1>
-    <p class="muted">Access your IZZA PAY merchant dashboard.</p>
-    <button id="piSignInBtn">Authorize with Pi</button>
-    <p id="msg" class="muted" style="margin-top:12px;"></p>
-    <div id="err" class="err"></div>
+  <div class="wrap">
+    <header>
+      <div class="logo">
+        <!-- Use your static logo assets -->
+        <img src="/static/izzapay-mark.svg" alt="IZZA PAY">
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY" style="height:28px">
+      </div>
+      <div class="cta">
+        <a href="/explore" class="secondary">Browse Stores</a>
+        <a href="/privacy" class="secondary">Privacy</a>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- LEFT: Sign in + value prop -->
+      <div class="card">
+        <div class="hero">
+          <h1>Sign in with Pi</h1>
+          <p>Create your merchant store, add products, and accept Pi in minutes.</p>
+          <div class="row" style="margin-top:6px">
+            <span class="pill">1% app fee</span>
+            <span class="pill">99% to merchant</span>
+            <span class="pill">Pi SDK v2</span>
+          </div>
+        </div>
+
+        <div style="margin-top:14px">
+          <button id="piSignInBtn" class="btn">Authorize with Pi</button>
+          <a href="/explore" class="btn secondary" style="margin-left:10px">See Stores</a>
+          <p id="msg" class="muted" style="margin-top:10px;"></p>
+          <div id="err" class="err"></div>
+        </div>
+
+        <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+          <div class="how">
+            <div class="step">
+              <div class="num">1</div>
+              <div>
+                <strong>Authorize with Pi.</strong>
+                <div class="muted">We use Pi’s SDK so you stay in the Pi Browser.</div>
+              </div>
+            </div>
+            <div class="step">
+              <div class="num">2</div>
+              <div>
+                <strong>Create your store & add products.</strong>
+                <div class="muted">Upload images, set prices, and pick a theme and fonts.</div>
+              </div>
+            </div>
+            <div class="step">
+              <div class="num">3</div>
+              <div>
+                <strong>Share your store link.</strong>
+                <div class="muted">Customers authenticate with Pi and pay—instantly.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Quick discover + search handoff -->
+      <div class="card">
+        <h3 style="margin:0 0 10px">Explore IZZA PAY Stores</h3>
+        <p class="muted" style="margin-top:0">See what other merchants are selling, or search by name/product.</p>
+        <div class="row" style="margin-bottom:10px">
+          <a class="btn secondary" href="/explore">Browse Stores</a>
+          <a class="btn secondary" href="/explore?q=shirt">Popular: “shirt”</a>
+        </div>
+        <form action="/explore" method="get" class="row" onsubmit="return true;">
+          <input name="q" placeholder="Search stores & products…" style="flex:1;min-width:180px;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b1322;color:var(--txt)">
+          <button class="btn" type="submit">Search</button>
+        </form>
+        <div class="muted" style="margin-top:12px">New here? You can browse first, then create your store when you’re ready.</div>
+      </div>
+    </div>
   </div>
-</div>
+
+  <footer>© <span id="yr"></span> IZZA PAY • Payments powered by Pi</footer>
 
 <script>
 (function(){
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
   const btn = document.getElementById('piSignInBtn');
   const msg = document.getElementById('msg');
   const err = document.getElementById('err');
   const postUrl = "/auth/exchange";
-  const sandbox = {{ 'true' if sandbox else 'false' }};
+
+  // values provided by Flask
+  const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
+  const appId   = "{{ PI_APP_ID }}";
 
   function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
   function setErr(t){ if(err){ err.textContent = t || ''; } }
 
   function initPi(){
     if (!window.Pi || !Pi.init) return false;
-    try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
-    catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+    try {
+      // Use your appId & sandbox flag
+      Pi.init({ version: "2.0", sandbox: sandbox, appId: appId });
+      return true;
+    } catch(e){
+      console.error("Pi.init failed", e);
+      setErr("Pi.init failed: " + (e?.message || e));
+      return false;
+    }
   }
   if (!initPi()) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
 
   btn?.addEventListener('click', function(){
     setErr('');
-    if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
+    if (!window.Pi || !Pi.authenticate) {
+      setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
+      return;
+    }
     setMsg("Requesting authorization…");
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){ console.log("Incomplete payment:", payment); }
+    function onIncompletePaymentFound(payment){ /* optionally auto-complete */ }
     Pi.authenticate(scopes, onIncompletePaymentFound)
       .then(function(auth){
+        // post the payload back (unchanged from your working flow)
         const form = document.createElement('form');
         form.method = 'POST'; form.action = postUrl;
         const inp = document.createElement('input');
-        inp.type='hidden'; inp.name='payload'; inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
-        form.appendChild(inp); document.body.appendChild(form); form.submit();
+        inp.type='hidden';
+        inp.name='payload';
+        inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+        form.appendChild(inp);
+        document.body.appendChild(form);
+        form.submit();
       })
-      .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message || String(e)); });
+      .catch(function(e){
+        console.error(e);
+        setMsg("Authorization failed. Please try again.");
+        setErr(e?.message || String(e));
+      });
   });
 })();
 </script>
