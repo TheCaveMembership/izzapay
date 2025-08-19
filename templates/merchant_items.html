@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    /* Mobile-safe: kill horizontal scroll everywhere */
     html,body{max-width:100%;overflow-x:hidden;}
     body{font-family:Arial,Helvetica,sans-serif;margin:0}
 
@@ -23,14 +22,8 @@
     .actions{display:flex;gap:8px;flex-wrap:wrap}
     .actions a{white-space:nowrap}
 
-    .grid{
-      display:grid; gap:12px;
-      grid-template-columns: 1fr;
-    }
-    @media (min-width:900px){
-      /* Two columns on wide screens; single column on phones */
-      .grid{ grid-template-columns: 380px 1fr; align-items:start; }
-    }
+    .grid{display:grid; gap:12px; grid-template-columns: 1fr;}
+    @media (min-width:900px){ .grid{ grid-template-columns: 380px 1fr; align-items:start; } }
 
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
     .h1{font-size:24px;font-weight:800;margin:2px 0 10px}
@@ -41,18 +34,11 @@
 
     .field{display:flex;flex-direction:column;gap:6px}
     .field-inline{display:grid;gap:10px;grid-template-columns:1fr}
-    @media (min-width:600px){
-      .field-inline{grid-template-columns:1fr 1fr}
-    }
+    @media (min-width:600px){ .field-inline{grid-template-columns:1fr 1fr} }
     .ip-input,.ip-select,.ip-textarea{width:100%}
 
-    /* Image pickers: stack on mobile (logo above banner) */
-    .pickers{
-      display:grid; gap:12px; grid-template-columns:1fr;
-    }
-    @media (min-width:700px){
-      .pickers{ grid-template-columns:1fr 1fr; }
-    }
+    .pickers{ display:grid; gap:12px; grid-template-columns:1fr; }
+    @media (min-width:700px){ .pickers{ grid-template-columns:1fr 1fr; } }
     .picker .thumb{
       width:100%; height:120px; border:1px solid var(--line); border-radius:10px;
       background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden;
@@ -78,7 +64,6 @@
 <body class="cw-blue theme-a">
   <div class="wrap">
 
-    <!-- Top bar -->
     <div class="topbar">
       <div class="brand">
         <img src="/static/izzapay-mark.svg" alt="IZZA mark">
@@ -102,8 +87,10 @@
         </div>
       {% endif %}
 
+      <!-- IMPORTANT: carry token t so auth persists -->
       <form class="grid" method="post" action="/merchant/setup">
-        <!-- Left column: store profile -->
+        <input type="hidden" name="t" value="{{ t or '' }}">
+
         <div class="card stack">
           <div class="field">
             <label class="ip-label">Store name</label>
@@ -139,12 +126,9 @@
             </select>
           </div>
 
-          <!-- Logo & Banner: simple device upload OR URL, stacked on phones -->
           <div class="field">
             <label class="ip-label">Images</label>
             <div class="pickers">
-
-              <!-- Logo -->
               <div class="picker card">
                 <div class="muted" style="font-weight:600;margin-bottom:6px">Logo</div>
                 <div class="thumb" id="logoThumb"><span class="muted">Preview</span></div>
@@ -157,7 +141,6 @@
                 </div>
               </div>
 
-              <!-- Banner (optional) -->
               <div class="picker card">
                 <div class="muted" style="font-weight:600;margin-bottom:6px">Banner (optional)</div>
                 <div class="thumb" id="bannerThumb"><span class="muted">Preview</span></div>
@@ -169,7 +152,6 @@
                   <input class="ip-input" id="bannerUrl" name="banner_url" placeholder="https://… (or paste a banner URL)">
                 </div>
               </div>
-
             </div>
           </div>
 
@@ -178,37 +160,30 @@
           </div>
         </div>
 
-        <!-- Right column: quick theme & color hints (purely visual – no DB change needed) -->
         <div class="card stack">
           <div class="muted" style="font-weight:600">Look &amp; Feel</div>
-
           <div class="theme-swatches">
             <div class="swatch" data-cw="cw-blue">
               <div class="preview theme-preview cw-blue theme-a">
                 <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div>
-              <small>Blue</small>
+              </div><small>Blue</small>
             </div>
             <div class="swatch" data-cw="cw-mint">
               <div class="preview theme-preview cw-mint theme-a">
                 <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div>
-              <small>Mint</small>
+              </div><small>Mint</small>
             </div>
             <div class="swatch" data-cw="cw-purple">
               <div class="preview theme-preview cw-purple theme-a">
                 <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div>
-              <small>Purple</small>
+              </div><small>Purple</small>
             </div>
             <div class="swatch" data-cw="cw-amber">
               <div class="preview theme-preview cw-amber theme-a">
                 <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div>
-              <small>Amber</small>
+              </div><small>Amber</small>
             </div>
           </div>
-
           <p class="muted" style="margin-top:8px">
             These previews help you choose a vibe. Actual storefront layout can be switched later.
           </p>
@@ -216,11 +191,12 @@
       </form>
 
     {% else %}
-      <!-- Items dashboard -->
       <div class="h1">{{ m.business_name }}</div>
 
       <div class="card">
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new">
+          <!-- carry token on item creation, too -->
+          <input type="hidden" name="t" value="{{ t or '' }}">
           <div class="field-inline">
             <div class="field">
               <label class="ip-label">Title</label>
@@ -232,7 +208,6 @@
             </div>
           </div>
 
-          <!-- Item image: device upload OR URL -->
           <div class="field">
             <label class="ip-label">Image</label>
             <div class="row" style="gap:8px;align-items:center">
@@ -256,21 +231,17 @@
 
           <div class="row" style="justify-content:space-between;align-items:center">
             <label class="ip-label" style="display:flex;gap:6px;align-items:center">
-              <input type="checkbox" name="allow_backorder" value="1">
-              Allow backorder
+              <input type="checkbox" name="allow_backorder" value="1"> Allow backorder
             </label>
             <button class="ip-btn" type="submit">Add Item</button>
           </div>
         </form>
       </div>
 
-      <!-- Items table -->
       <div class="card" style="margin-top:12px;overflow:auto">
         <table>
           <thead>
-            <tr>
-              <th>Image</th><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Link</th>
-            </tr>
+            <tr><th>Image</th><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Link</th></tr>
           </thead>
           <tbody>
           {% for it in items %}
@@ -297,26 +268,18 @@
   </div>
 
   <script>
-  // ---------- Helpers ----------
   function setThumb(id, url){
     const el = document.getElementById(id);
-    if(!el) return;
-    el.innerHTML = '';
-    const img = document.createElement('img');
-    img.src = url; el.appendChild(img);
+    if(!el) return; el.innerHTML = '';
+    const img = document.createElement('img'); img.src = url; el.appendChild(img);
   }
   async function uploadTo(path, file){
-    // Works with /upload if your server has it; otherwise this will fail gracefully.
-    const fd = new FormData();
-    fd.append('file', file);
+    const fd = new FormData(); fd.append('file', file);
     const r = await fetch('/upload', {method:'POST', body:fd});
-    if(!r.ok) throw new Error('upload failed');
-    const j = await r.json();
-    if(!j.ok || !j.url) throw new Error('bad response');
-    return j.url;
+    if(!r.ok) throw new Error('upload failed'); const j = await r.json();
+    if(!j.ok || !j.url) throw new Error('bad response'); return j.url;
   }
 
-  // ---------- Logo upload ----------
   (function(){
     const file = document.getElementById('logoFile');
     const btn  = document.getElementById('logoUploadBtn');
@@ -325,18 +288,13 @@
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
-      try{
-        const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url; setThumb('logoThumb', url);
-      }catch(e){ alert('Upload failed. You can paste a URL instead.'); }
+      try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('logoThumb', url); }
+      catch(e){ alert('Upload failed. You can paste a URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
-    inp.addEventListener('input', () => {
-      const v = inp.value.trim(); if(v) setThumb('logoThumb', v);
-    });
+    inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('logoThumb', v); });
   })();
 
-  // ---------- Banner upload ----------
   (function(){
     const file = document.getElementById('bannerFile');
     const btn  = document.getElementById('bannerUploadBtn');
@@ -345,18 +303,13 @@
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
-      try{
-        const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url; setThumb('bannerThumb', url);
-      }catch(e){ alert('Upload failed. You can paste a URL instead.'); }
+      try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('bannerThumb', url); }
+      catch(e){ alert('Upload failed. You can paste a URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
-    inp.addEventListener('input', () => {
-      const v = inp.value.trim(); if(v) setThumb('bannerThumb', v);
-    });
+    inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('bannerThumb', v); });
   })();
 
-  // ---------- Item image upload ----------
   (function(){
     const file = document.getElementById('itFile');
     const btn  = document.getElementById('itUploadBtn');
@@ -365,25 +318,19 @@
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
-      try{
-        const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url; setThumb('itThumb', url);
-      }catch(e){ alert('Upload failed. You can paste a URL instead.'); }
+      try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('itThumb', url); }
+      catch(e){ alert('Upload failed. You can paste a URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
-    inp.addEventListener('input', () => {
-      const v = inp.value.trim(); if(v) setThumb('itThumb', v);
-    });
+    inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('itThumb', v); });
   })();
 
-  // ---------- Colorway previews (visual only) ----------
   (function(){
     const swatches = document.querySelectorAll('.swatch');
     swatches.forEach(sw => {
       sw.addEventListener('click', () => {
         document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
-        const cw = sw.getAttribute('data-cw');
-        if(cw) document.body.classList.add(cw);
+        const cw = sw.getAttribute('data-cw'); if(cw) document.body.classList.add(cw);
       });
     });
   })();
