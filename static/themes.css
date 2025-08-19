@@ -1,252 +1,175 @@
-/* static/themes.css
-   IZZA PAY — themes, colorways, and previews
-   ---------------------------------------------------- */
+/* ===== IZZA PAY — THEMES & COLORWAYS =====
+   This file controls storefront look + the tiny theme previews.
+   Safe to cache; all values scoped by classes on <body> or a wrapper.
+*/
 
-/* ===== Base tokens (fallbacks) ===== */
+/* ---------- Base tokens ---------- */
 :root{
-  --bg:#0b0f17;
-  --card:#0f1728;
-  --line:#1f2a44;
-  --txt:#e8f0ff;
-  --muted:#bcd0ff;
-  --brand:#6e9fff;
-  --ok:#73e2a7;
-  --accent:#6e9fff;
-  --accent-ghost: rgba(110,159,255,.12);
+  --font: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
+  --radius: 14px;
+  --gap: 14px;
+
+  /* defaults (overridden by colorway) */
+  --bg: #0b0f17;
+  --card: #0f1728;
+  --line: #1f2a44;
+  --txt: #e8f0ff;
+  --muted: #bcd0ff;
+  --brand: #6e9fff;
+  --accent: #7ee787;
+
+  --shadow: 0 10px 30px rgba(0,0,0,.3);
+
+  /* transition helper */
+  --t: 220ms cubic-bezier(.2,.8,.2,1);
 }
 
-/* Body uses CSS variables. Inline styles in templates will pick these up when present. */
+/* Smooth transitions when switching themes/colorways in-page */
+.themable, .themable *{
+  transition:
+    color var(--t),
+    background-color var(--t),
+    border-color var(--t),
+    box-shadow var(--t), filter var(--t);
+}
+
+/* ---------- Colorways ---------- */
+/* Blue (default) */
+.colorway-blue{
+  --bg:#0b0f17; --card:#0f1728; --line:#1f2a44;
+  --txt:#e8f0ff; --muted:#bcd0ff;
+  --brand:#6e9fff; --accent:#7ee787;
+}
+
+/* Purple */
+.colorway-purple{
+  --bg:#110a19; --card:#190f27; --line:#2a1a44;
+  --txt:#efe6ff; --muted:#cbb8ff;
+  --brand:#9b72ff; --accent:#ffce6e;
+}
+
+/* Emerald */
+.colorway-emerald{
+  --bg:#061412; --card:#0a1c19; --line:#14312b;
+  --txt:#e7fffa; --muted:#b7eee3;
+  --brand:#2bd7a5; --accent:#8ad8ff;
+}
+
+/* Amber */
+.colorway-amber{
+  --bg:#141004; --card:#1d1808; --line:#3c2e11;
+  --txt:#fff6df; --muted:#e7d7ad;
+  --brand:#f3b43a; --accent:#7fd7a9;
+}
+
+/* ---------- Theme structures ---------- */
+/* Theme A: Cards + grid */
+.theme-a{
+  --card-pad: 14px;
+  --grid-min: 160px;
+}
+.theme-a .store-grid{
+  display:grid; gap:var(--gap);
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min), 1fr));
+}
+.theme-a .card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:var(--card-pad);
+  box-shadow:var(--shadow);
+}
+
+/* Theme B: Outlined tiles, no shadow, tighter look */
+.theme-b{
+  --card-pad: 12px;
+  --grid-min: 150px;
+}
+.theme-b .store-grid{
+  display:grid; gap:calc(var(--gap) * .9);
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min), 1fr));
+}
+.theme-b .card{
+  background:transparent;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:var(--card-pad);
+}
+
+/* Theme C: Soft glass */
+.theme-c{
+  --card-pad: 16px;
+  --grid-min: 170px;
+}
+.theme-c .store-grid{
+  display:grid; gap:var(--gap);
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min), 1fr));
+}
+.theme-c .card{
+  background:color-mix(in oklab, var(--card), transparent 25%);
+  border:1px solid color-mix(in oklab, var(--line), transparent 45%);
+  border-radius:18px;
+  padding:var(--card-pad);
+  backdrop-filter: blur(8px) saturate(120%);
+}
+
+/* ---------- Global storefront bits ---------- */
 body{
+  font-family:var(--font);
   background:var(--bg);
   color:var(--txt);
+  margin:0;
 }
+.wrap{ max-width:960px; margin:0 auto; padding:16px; }
+h1,h2,h3{ margin:0 0 10px }
+.muted{ color:var(--muted) }
+.btn{
+  background:var(--brand); color: #0b0f17;
+  border:0; border-radius:10px; padding:10px 14px;
+  font-weight:800; cursor:pointer; text-decoration:none;
+  display:inline-block;
+}
+.line{ border-color:var(--line) }
 
-/* Shared UI helpers (so templates can stay lean) */
-.ip-btn{
-  background:var(--accent);
-  color:#0b0f17;
-  border:0;
-  border-radius:10px;
-  padding:10px 12px;
-  font-weight:800;
-  cursor:pointer;
+/* Product tile common */
+.item{
+  display:flex; flex-direction:column; gap:10px;
 }
-.ip-btn.ghost{
-  background:transparent;
-  color:var(--accent);
-  border:1px solid var(--accent);
-}
-.ip-card{
-  background:var(--card);
+.item .img{
+  position:relative; overflow:hidden;
   border:1px solid var(--line);
-  border-radius:14px;
-  padding:12px;
+  border-radius:12px; aspect-ratio:1/1;
+  background:#0b1222;
 }
+.item .img img{
+  width:100%; height:100%; object-fit:cover; display:block;
+}
+/* price & controls row */
+.item .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
 
-/* ===== Colorways (apply to <body class="cw-blue"> etc.) ===== */
-
-.cw-blue{
-  --accent:#6e9fff;
-  --accent-ghost: rgba(110,159,255,.12);
-  --ok:#73e2a7;
-}
-.cw-mint{
-  --accent:#40d3b7;
-  --accent-ghost: rgba(64,211,183,.12);
-  --ok:#78e08f;
-}
-.cw-purple{
-  --accent:#b892ff;
-  --accent-ghost: rgba(184,146,255,.12);
-  --ok:#8bd8bd;
-}
-.cw-amber{
-  --accent:#ffb457;
-  --accent-ghost: rgba(255,180,87,.14);
-  --ok:#7bed9f;
-}
-
-/* Subtle tints for chips, pills, etc. */
-.ip-pill{
-  font-size:12px;
-  border:1px solid var(--line);
-  border-radius:999px;
-  padding:6px 8px;
-  background:var(--accent-ghost);
-  color:var(--txt);
-}
-
-/* ===== Storefront layout variants (apply to <body class="theme-a"> etc.) ===== */
-
-/* Theme A — simple grid, edge-to-edge cards */
-.theme-a .ip-grid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:12px;
-}
-@media (max-width:840px){
-  .theme-a .ip-grid{ grid-template-columns: 1fr; }
-}
-
-/* Theme B — masonry-like breathing space (bigger gap and softer borders) */
-.theme-b .ip-grid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:18px;
-}
-.theme-b .ip-card{
-  border-radius:16px;
-  border-color: rgba(255,255,255,.06);
-}
-@media (max-width:840px){
-  .theme-b .ip-grid{ grid-template-columns: 1fr; }
-}
-
-/* Theme C — card list with image-left on wide screens */
-.theme-c .ip-grid{
-  display:grid;
-  grid-template-columns: 1fr;
-  gap:12px;
-}
-.theme-c .ip-item{
-  display:grid;
-  grid-template-columns: 200px 1fr;
-  gap:12px;
-  align-items:center;
-}
-.theme-c .ip-item .itimg{ aspect-ratio: 1 / 1; }
-@media (max-width:840px){
-  .theme-c .ip-item{ grid-template-columns: 1fr; }
-}
-
-/* Theme D — compact tiles with centered text */
-.theme-d .ip-grid{
-  display:grid;
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap:10px;
-}
-.theme-d .ip-item{
-  text-align:center;
-}
-.theme-d .ip-item .itimg{ aspect-ratio: 1 / 1; }
-@media (max-width:840px){
-  .theme-d .ip-grid{ grid-template-columns: 1fr; }
-}
-
-/* ===== Product tile common bits ===== */
-.ip-item{
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:14px;
-  padding:10px;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-.ip-item .itimg{
-  width:100%;
-  aspect-ratio: 1 / 1;
-  border:1px solid var(--line);
-  border-radius:10px;
-  overflow:hidden;
-  background:#fff;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-.ip-item .itimg img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-}
-
-/* ===== Theme preview thumbnails (merchant dashboard) ===== */
-/* Markup expectation:
-   <div class="theme-preview theme-a cw-blue">
-     <div class="row"></div> ...
-   </div>
-*/
+/* ---------- Preview thumbnails (used in setup page) ---------- */
+/* Small fake storefront card to demonstrate each theme */
 .theme-preview{
-  width:100%;
-  max-width:220px;
-  height:140px;
-  border-radius:12px;
-  border:1px solid var(--line);
-  background:
-    linear-gradient(0deg, rgba(255,255,255,.02), rgba(255,255,255,.02)),
-    var(--card);
-  position:relative;
-  overflow:hidden;
-  display:grid;
-  place-items:center;
-  gap:6px;
-  padding:8px;
+  width:110px; border-radius:12px; border:1px solid var(--line);
+  overflow:hidden; display:block; text-decoration:none;
 }
-/* Generic “blocks” to suggest layout */
-.theme-preview .blk{
-  background: var(--accent-ghost);
-  border:1px solid var(--line);
-  border-radius:8px;
-}
+.theme-preview .tp-top{ height:36px; background:var(--card); border-bottom:1px solid var(--line); }
+.theme-preview .tp-grid{ padding:8px; display:grid; gap:8px; grid-template-columns:repeat(2,1fr); }
+.theme-preview .tp-card{ height:28px; border:1px solid var(--line); border-radius:8px; background:var(--card); }
+.theme-preview-label{ font-size:.78rem; color:var(--muted); margin-top:6px; text-align:center; }
 
-/* Preview: Theme A — two equal blocks */
-.theme-preview.theme-a{
-  grid-template-columns: 1fr 1fr;
-  grid-auto-rows: 1fr;
-}
-.theme-preview.theme-a .blk{ width:90%; height:36%; }
-
-/* Preview: Theme B — staggered */
-.theme-preview.theme-b{
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 40% 50%;
-}
-.theme-preview.theme-b .blk:nth-child(1){ grid-column: 1 / span 2; width:92%; height:80%; }
-.theme-preview.theme-b .blk:nth-child(2){ width:85%; height:80%; }
-.theme-preview.theme-b .blk:nth-child(3){ width:85%; height:80%; }
-
-/* Preview: Theme C — image left, text right */
-.theme-preview.theme-c{
-  grid-template-columns: 40% 1fr;
-  grid-template-rows: 1fr;
-}
-.theme-preview.theme-c .blk:nth-child(1){ width:90%; height:80%; }
-.theme-preview.theme-c .blk:nth-child(2){ width:90%; height:30%; }
-
-/* Preview: Theme D — compact tiles */
-.theme-preview.theme-d{
-  grid-template-columns: repeat(3, 1fr);
-  grid-auto-rows: 1fr;
-}
-.theme-preview.theme-d .blk{ width:80%; height:60%; }
-
-/* Colorway tint for previews via body class on the container OR per-tile class */
-.theme-preview.cw-blue{ --accent-ghost: rgba(110,159,255,.12); }
-.theme-preview.cw-mint{ --accent-ghost: rgba(64,211,183,.12); }
-.theme-preview.cw-purple{ --accent-ghost: rgba(184,146,255,.12); }
-.theme-preview.cw-amber{ --accent-ghost: rgba(255,180,87,.14); }
-
-/* ===== Inputs & selects (used on merchant dashboard) ===== */
-.ip-input, .ip-select, .ip-textarea{
-  width:100%;
-  border:1px solid var(--line);
-  background:#0a1120;
-  color:var(--txt);
-  border-radius:10px;
-  padding:10px;
-}
-.ip-select{ appearance:none; background-image: linear-gradient(45deg, transparent 50%, var(--accent) 50%), linear-gradient(135deg, var(--accent) 50%, transparent 50%); background-position: calc(100% - 20px) calc(1em + 2px), calc(100% - 15px) calc(1em + 2px); background-size: 5px 5px, 5px 5px; background-repeat:no-repeat; }
-.ip-label{ font-size:12px; color:var(--muted); margin:6px 2px; display:block; }
-
-/* ===== Misc ===== */
-.ip-topbar{
-  position:sticky; top:0;
-  background:rgba(11,15,23,.85);
-  backdrop-filter: blur(10px);
-  border-bottom:1px solid var(--line);
-  z-index:2;
-}
-.logo-frame{
-  height:42px; border:1px solid var(--line); border-radius:10px; background:#fff;
-  display:flex; align-items:center; justify-content:center; overflow:hidden;
+/* ---------- Responsive tweaks ---------- */
+@media (max-width: 540px){
+  .wrap{ padding:12px }
+  .theme-a .store-grid,
+  .theme-b .store-grid,
+  .theme-c .store-grid{
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+  /* fall back to 1-col on very small screens */
+  @media (max-width: 360px){
+    .theme-a .store-grid,
+    .theme-b .store-grid,
+    .theme-c .store-grid{ grid-template-columns:1fr; }
+  }
 }
