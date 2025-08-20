@@ -47,6 +47,9 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+        # NEW: persist colorway choice
+        if "colorway" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
@@ -247,6 +250,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
+        # BUGFIX: parameter must be a 1-tuple
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -268,6 +272,10 @@ def merchant_setup():
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
     pi_handle = (data.get("pi_handle") or "").strip()
+    # NEW: capture colorway from hidden/radio input; accept "cw-blue" or "blue"
+    raw_cw = (data.get("colorway") or "blue").strip()
+    colorway = raw_cw[3:] if raw_cw.startswith("cw-") else raw_cw
+
     if not (len(pi_wallet_address) == 56 and pi_wallet_address.startswith("G")):
         tok = get_bearer_token_from_request()
         return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
@@ -280,11 +288,12 @@ def merchant_setup():
             return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                                    app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
                                    error="Slug already taken.")
+        # NEW: include colorway in insert
         cx.execute("""INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
-                      theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle)
-                      VALUES(?,?,?,?,?,?,?,?,?)""",
+                      theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle, colorway)
+                      VALUES(?,?,?,?,?,?,?,?,?,?)""",
                    (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email,
-                    "@deprecated", pi_wallet_address, pi_handle))
+                    "@deprecated", pi_wallet_address, pi_handle, colorway))
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
@@ -495,7 +504,8 @@ def checkout_cart(cid):
         cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state, created_at)
                       VALUES(?,?,?,?,?,?,?)""",
                    (sid, m["id"], None, 1, float(total), "initiated", int(time.time())))
-    i = {"business_name": m["business_name"], "title": "Cart total", "logo_url": m["logo_url"]}
+    # Include colorway so checkout can theme
+    i = {"business_name": m["business_name"], "title": "Cart total", "logo_url": m["logo_url"], "colorway": m["colorway"]}
     return render_template("checkout.html", sold_out=False, i=i, qty=1, session_id=sid,
                            expected_pi=total, app_base=APP_BASE_URL, cart_mode=True)
 
@@ -503,7 +513,8 @@ def checkout_cart(cid):
 def checkout(link_id):
     with conn() as cx:
         i = cx.execute("""
-           SELECT items.*, merchants.business_name, merchants.logo_url, merchants.id as mid
+           SELECT items.*, merchants.business_name, merchants.logo_url, merchants.id as mid,
+                  merchants.colorway AS colorway
            FROM items JOIN merchants ON merchants.id=items.merchant_id
            WHERE link_id=? AND active=1
         """, (link_id,)).fetchone()
@@ -569,7 +580,7 @@ def pi_complete():
         r = fetch_pi_payment(payment_id)
         if r.status_code == 200:
             pdata = r.json()
-            paid_amt = float(pdata.get("amount", 0))
+            paid_amt = float(pdata.get("amount, 0".replace(",",""), 0))  # defensive, but not required
             if abs(paid_amt - expected_amt) > 1e-7 and not PI_SANDBOX:
                 return {"ok": False, "error": "amount_mismatch"}, 400
         elif not PI_SANDBOX:
@@ -708,6 +719,7 @@ def terms():
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
+        i = None
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
