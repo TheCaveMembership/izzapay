@@ -158,9 +158,25 @@ def whoami():
 def explore():
     with conn() as cx:
         merchants = cx.execute(
-            "SELECT slug, business_name, logo_url FROM merchants ORDER BY id DESC"
+            "SELECT slug, business_name, logo_url, theme_mode, COALESCE(colorway,'cw-blue') AS colorway "
+            "FROM merchants ORDER BY id DESC"
         ).fetchall()
-    return render_template("explore.html", merchants=merchants, app_base=APP_BASE_URL)
+        products = cx.execute("""
+            SELECT
+              items.id, items.title, items.image_url, items.pi_price, items.link_id, items.active,
+              merchants.slug AS m_slug, merchants.business_name AS m_name,
+              COALESCE(merchants.colorway,'cw-blue') AS m_colorway,
+              merchants.theme_mode AS m_theme
+            FROM items
+            JOIN merchants ON merchants.id = items.merchant_id
+            WHERE items.active = 1
+            ORDER BY items.id DESC
+            LIMIT 24
+        """).fetchall()
+    return render_template("explore.html",
+                           merchants=merchants,
+                           products=products,
+                           app_base=APP_BASE_URL)
 # ----------------- GENERAL SIGN-IN -----------------
 @app.get("/")
 def home():
