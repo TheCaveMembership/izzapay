@@ -412,6 +412,59 @@ def merchant_new_item(slug):
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
+# ---- NEW: update & delete item endpoints (used by inline editor/buttons) ----
+@app.post("/merchant/<slug>/items/update")
+def merchant_update_item(slug):
+    u, m = require_merchant_owner(slug)
+    if isinstance(u, Response): return u
+    data = request.form
+    try:
+        item_id = int(data.get("item_id"))
+    except (TypeError, ValueError):
+        abort(400)
+    title = (data.get("title") or "").strip()
+    sku = (data.get("sku") or "").strip()
+    image_url = (data.get("image_url") or "").strip()
+    # Be tolerant with numeric inputs
+    try:
+        pi_price = float(data.get("pi_price", "0").strip() or "0")
+    except ValueError:
+        pi_price = 0.0
+    try:
+        stock_qty = int(data.get("stock_qty", "0").strip() or "0")
+    except ValueError:
+        stock_qty = 0
+
+    with conn() as cx:
+        it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=?", (item_id, m["id"])).fetchone()
+        if not it: abort(404)
+        cx.execute("""UPDATE items
+                      SET title=?, sku=?, image_url=?, pi_price=?, stock_qty=?
+                      WHERE id=? AND merchant_id=?""",
+                   (title or it["title"], sku or it["sku"], image_url or it["image_url"],
+                    pi_price if pi_price > 0 else it["pi_price"],
+                    stock_qty if stock_qty >= 0 else it["stock_qty"],
+                    item_id, m["id"]))
+    tok = get_bearer_token_from_request()
+    return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
+
+@app.post("/merchant/<slug>/items/delete")
+def merchant_delete_item(slug):
+    u, m = require_merchant_owner(slug)
+    if isinstance(u, Response): return u
+    try:
+        item_id = int(request.form.get("item_id"))
+    except (TypeError, ValueError):
+        abort(400)
+    with conn() as cx:
+        it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=?", (item_id, m["id"])).fetchone()
+        if not it: abort(404)
+        # soft delete keeps history; storefront already filters active=1
+        cx.execute("UPDATE items SET active=0 WHERE id=? AND merchant_id=?", (item_id, m["id"]))
+    tok = get_bearer_token_from_request()
+    return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
+# ---- END: update & delete item endpoints ----
+
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
     u, m = require_merchant_owner(slug)
