@@ -75,6 +75,10 @@
     /* inline product editor row */
     .edit-row{background:rgba(255,255,255,.02)}
     .sep{height:1px;background:var(--line);margin:10px 0}
+
+    /* stack action buttons vertically to avoid horizontal scroll */
+    .actions-col{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+    .danger{background:#7a2c2c;color:#fff}
   </style>
 </head>
 {% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
@@ -210,7 +214,7 @@
     {% else %}
       <div class="h1">{{ m.business_name }}</div>
 
-      <!-- EDIT STORE SETTINGS (incl. colorway) -->
+      <!-- EDIT STORE SETTINGS (incl. colorway + banner) -->
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Store Settings</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/update{% if t %}?t={{ t }}{% endif %}">
@@ -244,12 +248,17 @@
               <input class="ip-input" name="logo_url" value="{{ m.logo_url or '' }}">
             </div>
             <div class="field">
-              <label class="ip-label">Theme mode</label>
-              <select class="ip-select" name="theme_mode">
-                <option value="dark" {% if m.theme_mode=='dark' %}selected{% endif %}>Dark</option>
-                <option value="light" {% if m.theme_mode=='light' %}selected{% endif %}>Light</option>
-              </select>
+              <label class="ip-label">Banner URL</label>
+              <input class="ip-input" name="banner_url" value="{{ m.banner_url or '' }}">
             </div>
+          </div>
+
+          <div class="field" style="max-width:260px">
+            <label class="ip-label">Theme mode</label>
+            <select class="ip-select" name="theme_mode">
+              <option value="dark" {% if m.theme_mode=='dark' %}selected{% endif %}>Dark</option>
+              <option value="light" {% if m.theme_mode=='light' %}selected{% endif %}>Light</option>
+            </select>
           </div>
 
           <div class="sep"></div>
@@ -369,8 +378,13 @@
                   </div>
                 </td>
                 <td>
-                  <div class="btn-row">
+                  <div class="actions-col">
                     <button class="ip-btn tiny" type="button" data-edit-toggle="{{ it.id }}">Edit</button>
+                    <form method="post" action="/merchant/{{ m.slug }}/items/delete{% if t %}?t={{ t }}{% endif %}" onsubmit="return confirm('Delete this product?');">
+                      <input type="hidden" name="t" value="{{ t or '' }}">
+                      <input type="hidden" name="item_id" value="{{ it.id }}">
+                      <button class="ip-btn tiny danger" type="submit">Delete</button>
+                    </form>
                   </div>
                 </td>
               </tr>
