@@ -156,27 +156,73 @@ def whoami():
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
 def explore():
+    q = (request.args.get("q") or "").strip()
+    # simple product paging so the bottom of the page lists "some" items
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    PAGE_SIZE = 12
+    offset = (page - 1) * PAGE_SIZE
+
     with conn() as cx:
-        merchants = cx.execute(
-            "SELECT slug, business_name, logo_url, theme_mode, COALESCE(colorway,'cw-blue') AS colorway "
-            "FROM merchants ORDER BY id DESC"
-        ).fetchall()
-        products = cx.execute("""
-            SELECT
-              items.id, items.title, items.image_url, items.pi_price, items.link_id, items.active,
-              merchants.slug AS m_slug, merchants.business_name AS m_name,
-              COALESCE(merchants.colorway,'cw-blue') AS m_colorway,
-              merchants.theme_mode AS m_theme
-            FROM items
-            JOIN merchants ON merchants.id = items.merchant_id
-            WHERE items.active = 1
-            ORDER BY items.id DESC
-            LIMIT 24
-        """).fetchall()
-    return render_template("explore.html",
-                           merchants=merchants,
-                           products=products,
-                           app_base=APP_BASE_URL)
+        if q:
+            like = f"%{q}%"
+            merchants = cx.execute(
+                """SELECT slug, business_name, logo_url, theme_mode, colorway
+                   FROM merchants
+                   WHERE business_name LIKE ? OR slug LIKE ?
+                   ORDER BY id DESC
+                   LIMIT 50""",
+                (like, like)
+            ).fetchall()
+
+            products = cx.execute(
+                """SELECT items.*, 
+                          merchants.slug         AS m_slug,
+                          merchants.business_name AS m_name,
+                          merchants.colorway     AS m_colorway,
+                          merchants.theme_mode   AS m_theme
+                   FROM items 
+                   JOIN merchants ON merchants.id = items.merchant_id
+                   WHERE items.active=1
+                     AND (items.title LIKE ? OR merchants.business_name LIKE ?)
+                   ORDER BY items.id DESC
+                   LIMIT ? OFFSET ?""",
+                (like, like, PAGE_SIZE, offset)
+            ).fetchall()
+        else:
+            merchants = cx.execute(
+                """SELECT slug, business_name, logo_url, theme_mode, colorway
+                   FROM merchants
+                   ORDER BY id DESC
+                   LIMIT 50"""
+            ).fetchall()
+
+            products = cx.execute(
+                """SELECT items.*, 
+                          merchants.slug         AS m_slug,
+                          merchants.business_name AS m_name,
+                          merchants.colorway     AS m_colorway,
+                          merchants.theme_mode   AS m_theme
+                   FROM items 
+                   JOIN merchants ON merchants.id = items.merchant_id
+                   WHERE items.active=1
+                   ORDER BY items.id DESC
+                   LIMIT ? OFFSET ?""",
+                (PAGE_SIZE, offset)
+            ).fetchall()
+
+    has_more_products = len(products) == PAGE_SIZE
+    return render_template(
+        "explore.html",
+        merchants=merchants,
+        products=products,
+        q=q,
+        page=page,
+        has_more_products=has_more_products,
+        app_base=APP_BASE_URL,
+    )
 # ----------------- GENERAL SIGN-IN -----------------
 @app.get("/")
 def home():
