@@ -295,16 +295,9 @@ def merchant_items(slug):
     with conn() as cx:
         items = cx.execute("SELECT * FROM items WHERE merchant_id=? ORDER BY id DESC",
                            (m["id"],)).fetchall()
-    return render_template(
-    "merchant_items.html",
-    setup_mode=True,
-    m=None,
-    items=[],
-    app_base=APP_BASE_URL,
-    t=tok,
-    share_base=BASE_ORIGIN,
-    username=u["pi_username"]   # <-- add this line
-)
+    return render_template("merchant_items.html", setup_mode=False, m=m, items=items,
+                           app_base=APP_BASE_URL, t=get_bearer_token_from_request(),
+                           share_base=BASE_ORIGIN)
 
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
