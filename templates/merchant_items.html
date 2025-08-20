@@ -162,18 +162,6 @@
                   <input class="ip-input" id="logoUrl" name="logo_url" placeholder="https://… (or paste a logo URL)">
                 </div>
               </div>
-
-              <div class="picker card">
-                <div class="muted" style="font-weight:600;margin-bottom:6px">Banner (optional)</div>
-                <div class="thumb" id="bannerThumb"><span class="muted">Preview</span></div>
-                <div class="row">
-                  <input type="file" id="bannerFile" accept="image/*" style="flex:1" />
-                  <button class="ip-btn" type="button" id="bannerUploadBtn">Upload</button>
-                </div>
-                <div class="field" style="margin-top:6px">
-                  <input class="ip-input" id="bannerUrl" name="banner_url" placeholder="https://… (or paste a banner URL)">
-                </div>
-              </div>
             </div>
           </div>
 
@@ -478,22 +466,6 @@
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
     inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('logoThumb', v); });
-  })();
-
-  // Banner upload + preview
-  (function(){
-    const file = document.getElementById('bannerFile');
-    const btn  = document.getElementById('bannerUploadBtn');
-    const inp  = document.getElementById('bannerUrl');
-    if(!file || !btn || !inp) return;
-    btn.addEventListener('click', async () => {
-      if(!file.files || !file.files[0]){ inp.focus(); return; }
-      btn.disabled = true; btn.textContent = 'Uploading…';
-      try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('bannerThumb', url); }
-      catch(e){ alert('Upload failed. You can paste a URL instead.'); }
-      finally{ btn.disabled = false; btn.textContent = 'Upload'; }
-    });
-    inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('bannerThumb', v); });
   })();
 
   // Item upload + preview
