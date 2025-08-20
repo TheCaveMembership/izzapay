@@ -47,7 +47,7 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        # NEW: persist colorway choice
+        # NEW: persist colorway selection
         if "colorway" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
@@ -256,8 +256,10 @@ def merchant_setup_form():
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     tok = get_bearer_token_from_request()
+    # NEW: pass username so "Signed in as @..." renders
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                           app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN)
+                           app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
+                           username=u["pi_username"])
 
 @app.post("/merchant/setup")
 def merchant_setup():
@@ -272,14 +274,14 @@ def merchant_setup():
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
     pi_handle = (data.get("pi_handle") or "").strip()
-    # NEW: capture colorway from hidden/radio input; accept "cw-blue" or "blue"
-    raw_cw = (data.get("colorway") or "blue").strip()
-    colorway = raw_cw[3:] if raw_cw.startswith("cw-") else raw_cw
+    # NEW: capture colorway exactly as submitted (e.g. "cw-mint"), default "cw-blue"
+    colorway = (data.get("colorway") or "cw-blue").strip()
 
     if not (len(pi_wallet_address) == 56 and pi_wallet_address.startswith("G")):
         tok = get_bearer_token_from_request()
         return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                                app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
+                               username=u["pi_username"],
                                error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').")
     with conn() as cx:
         exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
@@ -287,6 +289,7 @@ def merchant_setup():
             tok = get_bearer_token_from_request()
             return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                                    app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
+                                   username=u["pi_username"],
                                    error="Slug already taken.")
         # NEW: include colorway in insert
         cx.execute("""INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
@@ -462,7 +465,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -490,7 +493,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -580,7 +583,7 @@ def pi_complete():
         r = fetch_pi_payment(payment_id)
         if r.status_code == 200:
             pdata = r.json()
-            paid_amt = float(pdata.get("amount, 0".replace(",",""), 0))  # defensive, but not required
+            paid_amt = float(pdata.get("amount", 0))
             if abs(paid_amt - expected_amt) > 1e-7 and not PI_SANDBOX:
                 return {"ok": False, "error": "amount_mismatch"}, 400
         elif not PI_SANDBOX:
@@ -628,7 +631,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -719,12 +722,11 @@ def terms():
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
-        i = None
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
