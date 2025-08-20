@@ -47,11 +47,7 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in cols:
-        cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-    cx.commit()
-    cx.close()
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
@@ -256,17 +252,8 @@ def merchant_setup_form():
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     tok = get_bearer_token_from_request()
-        tok = get_bearer_token_from_request()
-    return render_template(
-        "merchant_items.html",
-        setup_mode=True,
-        m=None,
-        items=[],
-        app_base=APP_BASE_URL,
-        t=tok,
-        share_base=BASE_ORIGIN,
-        username=u["pi_username"]           # <— add this
-    )
+    return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
+                           app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN)
 
 @app.post("/merchant/setup")
 def merchant_setup():
