@@ -150,7 +150,14 @@ def fetch_pi_payment(payment_id: str):
 def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
-
+# ----------------- Explore (Browse stores) -----------------
+@app.get("/explore")
+def explore():
+    with conn() as cx:
+        merchants = cx.execute(
+            "SELECT slug, business_name, logo_url FROM merchants ORDER BY id DESC"
+        ).fetchall()
+    return render_template("explore.html", merchants=merchants, app_base=APP_BASE_URL)
 # ----------------- GENERAL SIGN-IN -----------------
 @app.get("/")
 def home():
