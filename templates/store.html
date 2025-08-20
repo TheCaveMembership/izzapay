@@ -9,13 +9,13 @@
       --bg:#0b0f17; --card:#0f1728; --line:#1f2a44; --txt:#e8f0ff; --muted:#bcd0ff; --brand:#6e9fff;
       --btn-txt:#0b0f17;
     }
-    /* simple colorways */
-    .cw-blue { --brand:#6e9fff; }
-    .cw-green{ --brand:#5ad49e; }
+    /* colorways used across the app */
+    .cw-blue  { --brand:#6e9fff; }
+    .cw-mint  { --brand:#5ad49e; }
     .cw-purple{ --brand:#a88cff; }
-    .cw-orange{ --brand:#ffb86b; }
+    .cw-amber { --brand:#ffb86b; }
 
-    /* light/dark by theme_mode if you use it */
+    /* optional light variant */
     .light { --bg:#f6f7fb; --card:#ffffff; --line:#e6e8f0; --txt:#0b0f17; --muted:#4b587c; --btn-txt:#ffffff; }
 
     body{font-family:{{ m.font_family or 'Arial,Helvetica,sans-serif' }}; background:var(--bg); color:var(--txt); margin:0}
@@ -43,16 +43,17 @@
     }
   </style>
 </head>
-<body class="cw-{{ m.colorway or 'blue' }} {% if m.theme_mode=='light' %}light{% endif %}">
+{% set cw = m.colorway if m and m.colorway else 'cw-blue' %}
+<body class="{{ cw }} {% if m.theme_mode=='light' %}light{% endif %}">
 <div class="wrap">
 
   {% if m.banner_url %}
-    <img class="banner" src="{{ m.banner_url }}" alt="">
+    <img class="banner" src="/uimg?src={{ m.banner_url | urlencode }}" alt="">
   {% endif %}
 
   <div class="top">
     {% if m.logo_url %}
-      <img class="logo" src="{{ m.logo_url }}" alt="">
+      <img class="logo" src="/uimg?src={{ m.logo_url | urlencode }}" alt="">
     {% endif %}
     <div class="grow">
       <div class="header">
@@ -86,7 +87,7 @@
     {% for it in items %}
       <div class="card">
         {% if it.image_url %}
-          <img src="{{ it.image_url }}" alt="">
+          <img src="/uimg?src={{ it.image_url | urlencode }}" alt="">
         {% endif %}
         <div style="margin-top:8px;font-weight:800">{{ it.title }}</div>
         {% if it.description %}
