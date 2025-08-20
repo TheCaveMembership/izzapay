@@ -5,8 +5,22 @@
   <title>Checkout — {{ i.title if i else 'Cart' }}</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--txt:#e8f0ff;--muted:#bcd0ff;--brand:#6e9fff}
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    :root{
+      --bg:#0b0f17; --card:#0f1728; --line:#1f2a44; --txt:#e8f0ff; --muted:#bcd0ff; --brand:#6e9fff;
+    }
+    /* colorways (match store/cart/merchant pages) */
+    .cw-blue   { --brand:#6e9fff; }
+    .cw-mint   { --brand:#5ad49e; }
+    .cw-purple { --brand:#a88cff; }
+    .cw-amber  { --brand:#ffb86b; }
+
+    /* optional light mode */
+    .light { --bg:#f6f7fb; --card:#ffffff; --line:#e6e8f0; --txt:#0b0f17; --muted:#4b587c; }
+
+    body{
+      font-family: {{ (m.font_family if m is defined and m and m.font_family else (i.font_family if i and i.font_family else 'Arial,Helvetica,sans-serif')) }};
+      background:var(--bg); color:var(--txt); margin:0
+    }
     .wrap{max-width:620px;margin:0 auto;padding:20px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
     .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
@@ -15,10 +29,15 @@
     .label{display:block;color:var(--muted);font-size:.9rem;margin:6px 0 4px}
     input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
+    /* adjust input bg for light mode */
+    .light input{ background:#ffffff; }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
-<body>
+{# Prefer i.colorway/theme_mode if provided; fall back to m; default cw-blue #}
+{% set cw = (i.colorway if i and i.colorway else (m.colorway if m is defined and m and m.colorway else 'cw-blue')) %}
+{% set is_light = (i.theme_mode=='light') if i and (i.theme_mode is defined) else ((m.theme_mode=='light') if (m is defined and m and (m.theme_mode is defined)) else False) %}
+<body class="{{ cw }} {% if is_light %}light{% endif %}">
 <div class="wrap">
   {% if sold_out %}
     <div class="card">
@@ -28,7 +47,9 @@
   {% else %}
     <div class="card">
       <div class="row" style="align-items:center">
-        {% if i and i.logo_url %}<img src="{{ i.logo_url }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">{% endif %}
+        {% if i and i.logo_url %}
+          <img src="/uimg?src={{ i.logo_url | urlencode }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">
+        {% endif %}
         <div>
           <div style="font-weight:800">{{ i.business_name if i else 'Cart' }}</div>
           <div class="muted">{{ i.title if i else 'Cart total' }}</div>
