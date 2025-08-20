@@ -1,146 +1,118 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
   <meta charset="utf-8">
-  <title>Explore stores & products — IZZA PAY</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <link rel="stylesheet" href="/static/themes.css">
+  <title>Explore Stores & Products — IZZA PAY</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    html,body{max-width:100%;overflow-x:hidden;}
-    body{font-family:Arial,Helvetica,sans-serif;margin:0}
+    :root{ --bg:#0b0f17; --card:#0f1728; --line:#1f2a44; --txt:#e8f0ff; --muted:#bcd0ff; --brand:#6e9fff; }
+    /* colorways applied per-card */
+    .cw-blue   { --brand:#6e9fff; }
+    .cw-mint   { --brand:#5ad49e; }
+    .cw-purple { --brand:#a88cff; }
+    .cw-amber  { --brand:#ffb86b; }
+    .light { --bg:#f6f7fb; --card:#ffffff; --line:#e6e8f0; --txt:#0b0f17; --muted:#4b587c; }
 
-    .wrap{max-width:1080px;margin:0 auto;padding:16px}
-    @media (min-width:640px){ .wrap{padding:24px} }
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:1060px;margin:0 auto;padding:18px}
+    .h1{font-weight:800;font-size:22px;margin:6px 0 12px}
+    .muted{color:var(--muted)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
-    .hdr{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:6px 0 16px}
-    .brand{display:flex;align-items:center;gap:10px}
-    .brand img{height:36px}
-    .lead{color:var(--muted)}
+    /* search */
+    .searchbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+    .searchbar input[type="text"]{
+      flex:1; min-width:220px; padding:10px; border-radius:10px;
+      border:1px solid var(--line); background:transparent; color:var(--txt)
+    }
+    .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 12px;font-weight:800;text-decoration:none;display:inline-block;cursor:pointer}
+    .pill{border:1px solid var(--line);border-radius:999px;padding:6px 10px;text-decoration:none;color:var(--txt)}
 
-    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
-    .search{display:flex;gap:8px}
-    .search input{flex:1;background:#0b1222;border:1px solid var(--line);border-radius:12px;color:var(--txt);padding:12px}
+    .grid{display:grid;gap:12px}
+    .g-stores{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+    .g-products{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
 
-    .btn{background:var(--accent);color:#0b0f17;border:0;border-radius:12px;padding:12px 16px;
-         font-weight:900;cursor:pointer;text-decoration:none;display:inline-block}
-    .ghost{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+    .logo{width:40px;height:40px;border-radius:8px;border:1px solid var(--line);object-fit:cover;background:#0001}
+    .thumb{width:100%;height:160px;border-radius:10px;border:1px solid var(--line);object-fit:cover;background:#0001}
+    .title{font-weight:800}
+    .price{font-weight:800}
+    .clamp{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px}
-
-    .store{border:1px solid var(--line);border-radius:14px;background:#0b1222;padding:12px}
-    .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-    .logo{height:40px;width:40px;border-radius:10px;overflow:hidden;border:1px solid var(--line);
-          background:#fff;display:flex;align-items:center;justify-content:center}
-    .logo img{width:100%;height:100%;object-fit:cover}
-    .small{font-size:.92rem}
-    .subtle{color:var(--muted)}
-
-    .product{background:#0b1222;border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
-    .product img{width:100%;height:180px;object-fit:cover;display:block}
-    .pdx{padding:12px}
-    .price{font-weight:900}
-
-    .copy{white-space:nowrap}
+    .load-more{display:flex;justify-content:center;margin-top:12px}
   </style>
 </head>
-<body class="cw-blue theme-a">
+<body>
   <div class="wrap">
-    <div class="hdr">
-      <div class="brand">
-        <img src="/static/izzapay-mark.svg" alt="IZZA PAY">
-        <div>
-          <div style="font-weight:900">Explore IZZA PAY</div>
-          <div class="lead small">Search stores and products across the network</div>
-        </div>
-      </div>
-      <a class="btn ghost" href="/">Home</a>
-    </div>
 
-    <div class="card">
-      <form class="search" action="/explore" method="get">
-        <input type="search" name="q" placeholder="Try a store or product name…" value="{{ q or '' }}">
-        <button class="btn" type="submit">Search</button>
-      </form>
+    <!-- Search -->
+    <form class="searchbar" method="get" action="/explore">
+      <input type="text" name="q" value="{{ q or '' }}" placeholder="Search stores or products…">
+      <button class="btn" type="submit">Search</button>
       {% if q %}
-        <p class="subtle small" style="margin-top:8px">Results for: <strong>{{ q }}</strong></p>
+        <a class="pill" href="/explore">Clear</a>
+        <div class="muted">Showing results for “{{ q }}”</div>
       {% endif %}
-    </div>
+    </form>
 
-    {# accept either `stores` (old) or `merchants` (from /explore route) #}
-    {% set list = stores if stores is defined else (merchants if merchants is defined else []) %}
-
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:center">
-        <strong>Stores</strong>
-        <a class="small subtle" href="/signin">Become a merchant →</a>
-      </div>
-
-      {% if list and list|length > 0 %}
-        <div class="grid">
-          {% for m in list %}
-            <div class="store">
-              <div class="row">
-                <div class="logo">
-                  {% if (m.logo_url or m['logo_url'] if m is mapping else None) %}
-                    <img src="/uimg?src={{ (m.logo_url if m.logo_url is defined else m['logo_url']) | urlencode }}" alt="{{ (m.business_name if m.business_name is defined else m['business_name']) }}">
-                  {% else %}
-                    <img src="/static/izzapay-mark.svg" alt="Logo">
-                  {% endif %}
-                </div>
-                <div style="min-width:0">
-                  <div style="font-weight:800">{{ m.business_name if m.business_name is defined else m['business_name'] }}</div>
-                  <div class="subtle small">@{{ m.slug if m.slug is defined else m['slug'] }}</div>
-                </div>
-                <a class="btn" style="margin-left:auto" href="/store/{{ m.slug if m.slug is defined else m['slug'] }}">Visit</a>
-                <button class="btn ghost copy"
-                        onclick="navigator.clipboard.writeText(location.origin + '/store/{{ m.slug if m.slug is defined else m['slug'] }}')">
-                  Copy link
-                </button>
-              </div>
-              {% if (m.description if m.description is defined else m['description'] if (m is mapping and 'description' in m) else None) %}
-                {% set desc = m.description if m.description is defined else m['description'] %}
-                <p class="subtle small" style="margin:10px 0 0">
-                  {{ desc[:160] }}{% if desc|length > 160 %}…{% endif %}
-                </p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p class="subtle">No stores found.</p>
-      {% endif %}
-    </div>
-
-    {% if items is not none %}
-      <div class="card">
-        <strong>Products</strong>
-        {% if items and items|length > 0 %}
-          <div class="grid">
-            {% for it in items %}
-              <div class="product">
-                {% if it.image_url %}
-                  <img src="/uimg?src={{ it.image_url | urlencode }}" alt="{{ it.title }}">
-                {% endif %}
-                <div class="pdx">
-                  <div style="font-weight:900">{{ it.title }}</div>
-                  <div class="subtle small">by <a href="/store/{{ it.mslug }}">@{{ it.mslug }}</a></div>
-                  {% if it.description %}
-                    <div class="subtle small" style="margin-top:6px">
-                      {{ it.description[:140] }}{% if it.description|length>140 %}…{% endif %}
-                    </div>
-                  {% endif %}
-                  <div class="row" style="margin-top:8px">
-                    <div class="price">{{ '%.7f'|format(it.pi_price) }} Pi</div>
-                    <a class="btn" style="margin-left:auto" href="/checkout/{{ it.link_id }}">Buy</a>
+    <!-- Stores -->
+    <div class="h1">Stores</div>
+    {% if merchants and merchants|length > 0 %}
+      <div class="grid g-stores">
+        {% for s in merchants %}
+          <div class="card {{ s.colorway or 'cw-blue' }} {% if s.theme_mode=='light' %}light{% endif %}">
+            <div class="row" style="justify-content:space-between">
+              <div class="row" style="min-width:0">
+                {% if s.logo_url %}
+                  <img class="logo" src="/uimg?src={{ s.logo_url | urlencode }}" alt="{{ s.business_name }} logo">
+                {% else %}
+                  <div class="logo" style="display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--muted)">
+                    {{ (s.business_name or 'S')[:1] }}
                   </div>
-                </div>
+                {% endif %}
+                <div class="title clamp">{{ s.business_name }}</div>
               </div>
-            {% endfor %}
+              <a class="pill" href="/store/{{ s.slug }}">Open</a>
+            </div>
+            <div class="muted" style="margin-top:6px">/store/{{ s.slug }}</div>
           </div>
-        {% else %}
-          <p class="subtle">No products found.</p>
-        {% endif %}
+        {% endfor %}
       </div>
+    {% else %}
+      <p class="muted">No stores found.</p>
+    {% endif %}
+
+    <!-- Products -->
+    <div class="h1" style="margin-top:18px">Products</div>
+    {% if products and products|length > 0 %}
+      <div class="grid g-products">
+        {% for p in products %}
+          <div class="card {{ p.m_colorway or 'cw-blue' }} {% if p.m_theme=='light' %}light{% endif %}">
+            {% if p.image_url %}
+              <img class="thumb" src="/uimg?src={{ p.image_url | urlencode }}" alt="{{ p.title }}">
+            {% endif %}
+            <div style="margin-top:8px" class="title clamp">{{ p.title }}</div>
+            <div class="muted clamp" style="margin-top:2px">{{ p.m_name }}</div>
+            <div class="row" style="justify-content:space-between;margin-top:8px">
+              <div class="price">{{ '%.7f'|format(p.pi_price) }} Pi</div>
+              <div class="row">
+                <a class="pill" href="/store/{{ p.m_slug }}">Store</a>
+                <a class="btn" href="/checkout/{{ p.link_id }}">Buy</a>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      {% if has_more_products %}
+        <div class="load-more">
+          <a class="btn" href="/explore?page={{ (page or 1) + 1 }}{% if q %}&q={{ q | urlencode }}{% endif %}">
+            Load more products
+          </a>
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="muted">No products found.</p>
     {% endif %}
   </div>
 </body>
