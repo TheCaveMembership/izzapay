@@ -47,6 +47,9 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+        # NEW: persist colorway choice
+        if "colorway" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
@@ -150,14 +153,7 @@ def fetch_pi_payment(payment_id: str):
 def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
-# ----------------- Explore (Browse stores) -----------------
-@app.get("/explore")
-def explore():
-    with conn() as cx:
-        merchants = cx.execute(
-            "SELECT slug, business_name, logo_url FROM merchants ORDER BY id DESC"
-        ).fetchall()
-    return render_template("explore.html", merchants=merchants, app_base=APP_BASE_URL)
+
 # ----------------- GENERAL SIGN-IN -----------------
 @app.get("/")
 def home():
@@ -252,8 +248,10 @@ def merchant_setup_form():
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
     tok = get_bearer_token_from_request()
+    # Pass username so "Signed in as @…" renders
     return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                           app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN)
+                           app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
+                           username=u["pi_username"])
 
 @app.post("/merchant/setup")
 def merchant_setup():
@@ -262,16 +260,19 @@ def merchant_setup():
     data = request.form
     slug = (data.get("slug") or uuid.uuid4().hex[:6]).lower()
     business_name = data.get("business_name") or f"{u['pi_username']}'s Shop"
-    # Default to no logo (avoid external placeholder that may fail DNS on host)
     logo_url = (data.get("logo_url") or "").strip()
     theme_mode = data.get("theme_mode", "dark")
     reply_to_email = (data.get("reply_to_email") or "").strip()
     pi_wallet_address = (data.get("pi_wallet_address") or "").strip()
     pi_handle = (data.get("pi_handle") or "").strip()
+    # NEW: capture colorway from hidden input; default cw-blue
+    colorway = (data.get("colorway") or "cw-blue").strip()
+
     if not (len(pi_wallet_address) == 56 and pi_wallet_address.startswith("G")):
         tok = get_bearer_token_from_request()
         return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                                app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
+                               username=u["pi_username"],
                                error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').")
     with conn() as cx:
         exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
@@ -279,12 +280,14 @@ def merchant_setup():
             tok = get_bearer_token_from_request()
             return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
                                    app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
+                                   username=u["pi_username"],
                                    error="Slug already taken.")
+        # NEW: insert colorway column
         cx.execute("""INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
-                      theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle)
-                      VALUES(?,?,?,?,?,?,?,?,?)""",
+                      theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle, colorway)
+                      VALUES(?,?,?,?,?,?,?,?,?,?)""",
                    (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email,
-                    "@deprecated", pi_wallet_address, pi_handle))
+                    "@deprecated", pi_wallet_address, pi_handle, colorway))
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
@@ -453,7 +456,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -617,7 +620,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -711,8 +714,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m)
 
 @app.get("/success")
