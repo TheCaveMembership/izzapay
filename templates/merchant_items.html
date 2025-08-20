@@ -51,7 +51,7 @@
 
     /* Responsive table */
     .table-wrap{width:100%; overflow-x:auto}
-    table{width:100%;border-collapse:collapse; min-width:640px}
+    table{width:100%;border-collapse:collapse; min-width:780px}
     th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
     th{color:var(--muted);font-weight:600}
 
@@ -62,6 +62,7 @@
     }
     .swatch .preview{ width:100%; height:60px; border-radius:8px; border:1px solid var(--line); }
     .swatch small{color:var(--muted)}
+    .swatch.selected{outline:2px solid var(--accent);}
 
     .link-chip{
       display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;
@@ -70,9 +71,14 @@
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
     .btn-row{display:flex; gap:8px; flex-wrap:wrap}
     .tiny{font-size:.9rem; padding:8px 10px}
+
+    /* inline product editor row */
+    .edit-row{background:rgba(255,255,255,.02)}
+    .sep{height:1px;background:var(--line);margin:10px 0}
   </style>
 </head>
-<body class="cw-blue theme-a">
+{% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
+<body class="{{ cw }} theme-a">
   <div class="wrap">
 
     <div class="topbar">
@@ -101,7 +107,7 @@
       <!-- carry token -->
       <form class="grid" method="post" action="/merchant/setup">
         <input type="hidden" name="t" value="{{ t or '' }}">
-        <input type="hidden" name="colorway" id="colorway" value="cw-blue">
+        <input type="hidden" name="colorway" id="colorway" value="{{ cw }}">
 
         <div class="card stack">
           <div class="field">
@@ -205,6 +211,67 @@
     {% else %}
       <div class="h1">{{ m.business_name }}</div>
 
+      <!-- EDIT STORE SETTINGS (incl. colorway) -->
+      <div class="card" style="margin-bottom:12px">
+        <div class="h2">Store Settings</div>
+        <form class="stack" method="post" action="/merchant/{{ m.slug }}/update{% if t %}?t={{ t }}{% endif %}">
+          <input type="hidden" name="t" value="{{ t or '' }}">
+          <input type="hidden" name="colorway" id="edit-colorway" value="{{ cw }}">
+          <div class="field-inline">
+            <div class="field">
+              <label class="ip-label">Store name</label>
+              <input class="ip-input" name="business_name" value="{{ m.business_name or '' }}">
+            </div>
+            <div class="field">
+              <label class="ip-label">Order notifications email</label>
+              <input class="ip-input" name="reply_to_email" value="{{ m.reply_to_email or '' }}">
+            </div>
+          </div>
+
+          <div class="field-inline">
+            <div class="field">
+              <label class="ip-label">Pi wallet public key</label>
+              <input class="ip-input" name="pi_wallet_address" value="{{ m.pi_wallet_address or '' }}">
+            </div>
+            <div class="field">
+              <label class="ip-label">Pi handle</label>
+              <input class="ip-input" name="pi_handle" value="{{ m.pi_handle or '' }}">
+            </div>
+          </div>
+
+          <div class="field-inline">
+            <div class="field">
+              <label class="ip-label">Logo URL</label>
+              <input class="ip-input" name="logo_url" value="{{ m.logo_url or '' }}">
+            </div>
+            <div class="field">
+              <label class="ip-label">Theme mode</label>
+              <select class="ip-select" name="theme_mode">
+                <option value="dark" {% if m.theme_mode=='dark' %}selected{% endif %}>Dark</option>
+                <option value="light" {% if m.theme_mode=='light' %}selected{% endif %}>Light</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="sep"></div>
+          <div class="muted" style="font-weight:600">Colorway</div>
+          <div class="theme-swatches" id="edit-swatches">
+            {% set choices = ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
+            {% for c in choices %}
+              <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}">
+                <div class="preview theme-preview {{ c }} theme-a">
+                  <div class="blk"></div><div class="blk"></div><div class="blk"></div>
+                </div><small>{{ c.split('-')[1] | capitalize }}</small>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="row" style="justify-content:flex-end;margin-top:4px">
+            <button class="ip-btn" type="submit">Save Changes</button>
+          </div>
+        </form>
+      </div>
+
       <!-- STOREFRONT LINK -->
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Your Storefront</div>
@@ -274,7 +341,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Image</th><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Buy Now Link</th></tr>
+              <tr><th>Image</th><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Buy Now Link</th><th>Actions</th></tr>
             </thead>
             <tbody>
             {% for it in items %}
@@ -301,6 +368,48 @@
                       <button class="ip-btn ghost tiny" type="button" data-copy="#lnk-{{ it.link_id }}">Copy</button>
                     </div>
                   </div>
+                </td>
+                <td>
+                  <div class="btn-row">
+                    <button class="ip-btn tiny" type="button" data-edit-toggle="{{ it.id }}">Edit</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- inline editor row -->
+              <tr class="edit-row" id="edit-row-{{ it.id }}" style="display:none">
+                <td colspan="6">
+                  <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/update{% if t %}?t={{ t }}{% endif %}">
+                    <input type="hidden" name="t" value="{{ t or '' }}">
+                    <input type="hidden" name="item_id" value="{{ it.id }}">
+                    <div class="field-inline">
+                      <div class="field">
+                        <label class="ip-label">Title</label>
+                        <input class="ip-input" name="title" value="{{ it.title }}">
+                      </div>
+                      <div class="field">
+                        <label class="ip-label">SKU</label>
+                        <input class="ip-input" name="sku" value="{{ it.sku }}">
+                      </div>
+                    </div>
+                    <div class="field-inline">
+                      <div class="field">
+                        <label class="ip-label">Price (Pi)</label>
+                        <input class="ip-input" name="pi_price" inputmode="decimal" value="{{ '%.7f'|format(it.pi_price) }}">
+                      </div>
+                      <div class="field">
+                        <label class="ip-label">Stock Qty</label>
+                        <input class="ip-input" name="stock_qty" inputmode="numeric" value="{{ it.stock_qty }}">
+                      </div>
+                    </div>
+                    <div class="field">
+                      <label class="ip-label">Image URL</label>
+                      <input class="ip-input" name="image_url" value="{{ it.image_url or '' }}">
+                    </div>
+                    <div class="row" style="justify-content:flex-end">
+                      <button class="ip-btn ghost tiny" type="button" data-edit-toggle="{{ it.id }}">Cancel</button>
+                      <button class="ip-btn tiny" type="submit">Save</button>
+                    </div>
+                  </form>
                 </td>
               </tr>
             {% endfor %}
@@ -329,7 +438,7 @@
     const el = document.querySelector(sel);
     if(!el) return;
     const text = el.textContent.trim();
-    if(!navigator.clipboard){ // fallback
+    if(!navigator.clipboard){
       const ta = document.createElement('textarea');
       ta.value = text; document.body.appendChild(ta); ta.select();
       try{ document.execCommand('copy'); }catch(e){}
@@ -388,7 +497,7 @@
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('itThumb', url); }
-      catch(e){ alert('Upload failed. You can paste a URL instead.'); }
+      catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
     inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('itThumb', v); });
@@ -398,13 +507,37 @@
   (function(){
     const swatches = document.querySelectorAll('.swatch');
     const hidden = document.getElementById('colorway');
+    const body = document.body;
+    // mark selected on load (for setup)
+    swatches.forEach(sw => {
+      if(hidden && sw.getAttribute('data-cw') === hidden.value){ sw.classList.add('selected'); }
+    });
     swatches.forEach(sw => {
       sw.addEventListener('click', () => {
-        document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
+        body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
+        swatches.forEach(s=>s.classList.remove('selected'));
         const cw = sw.getAttribute('data-cw'); if(cw) {
-          document.body.classList.add(cw);
+          body.classList.add(cw);
           if(hidden) hidden.value = cw;
+          sw.classList.add('selected');
         }
+      });
+    });
+  })();
+
+  // Colorway picker (edit store section)
+  (function(){
+    const wrap = document.getElementById('edit-swatches');
+    if(!wrap) return;
+    const hidden = document.getElementById('edit-colorway');
+    const body = document.body;
+    const swatches = wrap.querySelectorAll('.swatch');
+    swatches.forEach(sw=>{
+      sw.addEventListener('click', ()=>{
+        body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
+        swatches.forEach(s=>s.classList.remove('selected'));
+        const cw = sw.getAttribute('data-cw');
+        if(cw){ body.classList.add(cw); hidden.value = cw; sw.classList.add('selected'); }
       });
     });
   })();
@@ -427,6 +560,16 @@
       return true;
     });
   })();
+
+  // Toggle inline product editor
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-edit-toggle]');
+    if(!btn) return;
+    const id = btn.getAttribute('data-edit-toggle');
+    const row = document.getElementById('edit-row-' + id);
+    if(!row) return;
+    row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
+  });
   </script>
 </body>
 </html>
