@@ -302,7 +302,7 @@ def dashboard():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     tok = get_bearer_token_from_request()
     if not m: return redirect(f"/merchant/setup{('?t='+tok) if tok else ''}")
     return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
@@ -312,7 +312,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
@@ -497,8 +497,7 @@ def merchant_orders_update(slug):
         if not o: abort(404)
         cx.execute("""UPDATE orders SET status=?, tracking_carrier=?, tracking_number=?,
                       tracking_url=? WHERE id=?""",
-                   (status or o["status"]), (tracking_carrier), (tracking_number),
-                   (tracking_url), (order_id))
+                   (status or o["status"], tracking_carrier, tracking_number, tracking_url, order_id))
     if (status or o["status"]) == "shipped" and o["buyer_email"]:
         body = f"<p>Your {m['business_name']} order has shipped.</p>"
         if tracking_number:
