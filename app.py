@@ -501,7 +501,9 @@ def merchant_orders_update(slug):
             link = tracking_url or "#"
             body += f"<p><strong>Tracking:</strong> {tracking_carrier} {tracking_number} — " \
                     f"<a href='{link}'>track package</a></p>"
-        send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body)
+        # NEW: ensure replies go to the merchant
+        reply_to = (m["reply_to_email"] or "").strip() if m else None
+        send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
 
@@ -748,15 +750,18 @@ def send_order_emails(order_id: int):
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
 
-    # Buyer email
+    merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
+    merchant_name = m["business_name"] if m else "Your Merchant"
+
+    # Buyer email — Reply-To to merchant so buyer replies go to them
     if o["buyer_email"]:
         try:
             send_email(
-                to=o["buyer_email"],
-                subject=f"Your order at {m['business_name']} is confirmed",
-                html=f"""
+                o["buyer_email"],
+                f"Your order at {merchant_name} is confirmed",
+                f"""
                     <h2>Thanks for your order!</h2>
-                    <p><strong>Store:</strong> {m['business_name']}</p>
+                    <p><strong>Store:</strong> {merchant_name}</p>
                     <p><strong>Product:</strong> {(i['title'] if i else 'N/A')}</p>
                     <p><strong>Quantity:</strong> {o['qty']}</p>
                     <p><strong>Total Paid:</strong> {o['pi_amount']:.7f} π</p>
@@ -764,17 +769,18 @@ def send_order_emails(order_id: int):
                       <a href="{BASE_ORIGIN}/o/{o['buyer_token']}">{BASE_ORIGIN}/o/{o['buyer_token']}</a>
                     </p>
                 """,
+                reply_to=merchant_email
             )
         except Exception as e:
             print("buyer email fail (order_id=", order_id, "):", repr(e))
 
-    # Merchant email
-    if m and m["reply_to_email"]:
+    # Merchant email — only if merchant supplied an email
+    if merchant_email:
         try:
             send_email(
-                to=m["reply_to_email"],
-                subject=f"New Pi order at {m['business_name']} ({o['pi_amount']:.7f} π)",
-                html=f"""
+                merchant_email,
+                f"New Pi order at {merchant_name} ({o['pi_amount']:.7f} π)",
+                f"""
                     <h2>You received a new order</h2>
                     <p><strong>Product:</strong> {(i['title'] if i else 'N/A')}</p>
                     <p><strong>Qty:</strong> {o['qty']}</p>
@@ -783,7 +789,7 @@ def send_order_emails(order_id: int):
                     </p>
                     <p><strong>Buyer:</strong> {(o['buyer_name'] or '—')} ({o['buyer_email'] or '—'})</p>
                     <p>TX: {o['pi_tx_hash'] or '—'}</p>
-                """,
+                """
             )
         except Exception as e:
             print("merchant email fail (order_id=", order_id, "):", repr(e))
