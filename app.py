@@ -302,7 +302,7 @@ def dashboard():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     tok = get_bearer_token_from_request()
     if not m: return redirect(f"/merchant/setup{('?t='+tok) if tok else ''}")
     return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
@@ -634,7 +634,7 @@ def checkout_cart(cid):
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
         # tuple comma fixed
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -781,8 +781,8 @@ def send_order_emails(order_id: int):
                     <p><strong>Total:</strong> {o['pi_amount']:.7f} π
                        <small>(fee: {o['pi_fee']:.7f} π, net: {o['pi_merchant_net']:.7f} π)</small>
                     </p>
-                    <p><strong>Buyer:</strong> {o.get('buyer_name') or '—'} ({o.get('buyer_email') or '—'})</p>
-                    <p>TX: {o.get('pi_tx_hash') or '—'}</p>
+                    <p><strong>Buyer:</strong> {(o['buyer_name'] or '—')} ({o['buyer_email'] or '—'})</p>
+                    <p>TX: {o['pi_tx_hash'] or '—'}</p>
                 """,
             )
         except Exception as e:
@@ -830,7 +830,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -909,8 +909,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
