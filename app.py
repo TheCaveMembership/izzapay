@@ -641,7 +641,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -751,8 +751,8 @@ def send_order_emails(order_id: int):
         o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not o:
             return
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
 
     merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
     merchant_name = m["business_name"] if m else "Your Merchant"
@@ -807,7 +807,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
     amt = float(s["expected_pi"])
+    # FIX: avoid Decimal * float by casting split_amounts results to float
     gross, fee, net = split_amounts(amt)
+    gross = float(gross)
+    fee = float(fee)
+    net = float(net)
 
     # Helper: pick buyer email from buyer or shipping payloads
     buyer_email = (buyer.get("email") or shipping.get("email") or None)
