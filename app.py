@@ -922,8 +922,20 @@ def buyer_status(token):
 @app.get("/success")
 def success():
     return render_template("success.html")
+# --- TEMPORARY EMAIL TEST ROUTE ---
+@app.get("/test-email")
+def test_email():
+    from emailer import send_email
 
+    to = request.args.get("to", "info@izzapay.shop")  # default to your own
+    ok = send_email(
+        to=to,
+        subject="IZZAPAY Test Email",
+        html="<p>This is a test email from IzzaPay deployment.</p>"
+    )
+    return {"ok": ok, "to": to}
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=True)
+    
