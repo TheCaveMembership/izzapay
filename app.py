@@ -47,7 +47,6 @@ def ensure_schema():
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        # NEW: persist colorway selection
         if "colorway" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
@@ -153,11 +152,11 @@ def fetch_pi_payment(payment_id: str):
 def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
+
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
 def explore():
     q = (request.args.get("q") or "").strip()
-    # simple product paging so the bottom of the page lists "some" items
     try:
         page = max(1, int(request.args.get("page", "1")))
     except ValueError:
@@ -179,10 +178,10 @@ def explore():
 
             products = cx.execute(
                 """SELECT items.*, 
-                          merchants.slug         AS m_slug,
+                          merchants.slug          AS m_slug,
                           merchants.business_name AS m_name,
-                          merchants.colorway     AS m_colorway,
-                          merchants.theme_mode   AS m_theme
+                          merchants.colorway      AS m_colorway,
+                          merchants.theme_mode    AS m_theme
                    FROM items 
                    JOIN merchants ON merchants.id = items.merchant_id
                    WHERE items.active=1
@@ -201,10 +200,10 @@ def explore():
 
             products = cx.execute(
                 """SELECT items.*, 
-                          merchants.slug         AS m_slug,
+                          merchants.slug          AS m_slug,
                           merchants.business_name AS m_name,
-                          merchants.colorway     AS m_colorway,
-                          merchants.theme_mode   AS m_theme
+                          merchants.colorway      AS m_colorway,
+                          merchants.theme_mode    AS m_theme
                    FROM items 
                    JOIN merchants ON merchants.id = items.merchant_id
                    WHERE items.active=1
@@ -223,6 +222,7 @@ def explore():
         has_more_products=has_more_products,
         app_base=APP_BASE_URL,
     )
+
 # ----------------- GENERAL SIGN-IN -----------------
 @app.get("/")
 def home():
@@ -302,7 +302,6 @@ def dashboard():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        # FIX: one-element tuple needs trailing comma
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     tok = get_bearer_token_from_request()
     if not m: return redirect(f"/merchant/setup{('?t='+tok) if tok else ''}")
@@ -313,7 +312,6 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        # FIX: trailing comma
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -337,7 +335,6 @@ def merchant_setup():
     pi_handle = (data.get("pi_handle") or "").strip()
     colorway = (data.get("colorway") or "cw-blue").strip()
 
-    # REQUIRED: merchant email (simple check) and Pi wallet
     if not reply_to_email or "@" not in reply_to_email:
         tok = get_bearer_token_from_request()
         return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
@@ -396,8 +393,7 @@ def merchant_items(slug):
     u, m = require_merchant_owner(slug)
     if isinstance(u, Response): return u
     with conn() as cx:
-        items = cx.execute("SELECT * FROM items WHERE merchant_id=? ORDER BY id DESC",
-                           (m["id"],)).fetchall()
+        items = cx.execute("SELECT * FROM items WHERE merchant_id=?", (m["id"],)).fetchall()
     return render_template("merchant_items.html", setup_mode=False, m=m, items=items,
                            app_base=APP_BASE_URL, t=get_bearer_token_from_request(),
                            share_base=BASE_ORIGIN, colorway=m["colorway"])
@@ -418,7 +414,7 @@ def merchant_new_item(slug):
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
-# ---- NEW: update & delete item endpoints (used by inline editor/buttons) ----
+# ---- update & delete item endpoints ----
 @app.post("/merchant/<slug>/items/update")
 def merchant_update_item(slug):
     u, m = require_merchant_owner(slug)
@@ -431,7 +427,6 @@ def merchant_update_item(slug):
     title = (data.get("title") or "").strip()
     sku = (data.get("sku") or "").strip()
     image_url = (data.get("image_url") or "").strip()
-    # Be tolerant with numeric inputs
     try:
         pi_price = float(data.get("pi_price", "0").strip() or "0")
     except ValueError:
@@ -465,11 +460,9 @@ def merchant_delete_item(slug):
     with conn() as cx:
         it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=?", (item_id, m["id"])).fetchone()
         if not it: abort(404)
-        # soft delete keeps history; storefront already filters active=1
         cx.execute("UPDATE items SET active=0 WHERE id=? AND merchant_id=?", (item_id, m["id"]))
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
-# ---- END: update & delete item endpoints ----
 
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
@@ -494,10 +487,8 @@ def merchant_orders_update(slug):
     tracking_number = request.form.get("tracking_number")
     tracking_url = request.form.get("tracking_url")
     with conn() as cx:
-        o = cx.execute("SELECT * FROM orders WHERE id=? AND merchant_id=?",
-                       (order_id, m["id"])).fetchone()
+        o = cx.execute("SELECT * FROM orders WHERE id=? AND merchant_id=?", (order_id, m["id"])).fetchone()
         if not o: abort(404)
-        # FIX: pass all params in a single tuple
         cx.execute("""UPDATE orders SET status=?, tracking_carrier=?, tracking_number=?,
                       tracking_url=? WHERE id=?""",
                    (status or o["status"], tracking_carrier, tracking_number, tracking_url, order_id))
@@ -507,7 +498,6 @@ def merchant_orders_update(slug):
             link = tracking_url or "#"
             body += f"<p><strong>Tracking:</strong> {tracking_carrier} {tracking_number} — " \
                     f"<a href='{link}'>track package</a></p>"
-        # ensure replies go to the merchant
         reply_to = (m["reply_to_email"] or "").strip() if m else None
         print(f"[mail] shipping update -> to={o['buyer_email']} reply_to={reply_to} order_id={order_id}")
         send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
@@ -641,7 +631,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -757,7 +747,6 @@ def send_order_emails(order_id: int):
     merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
     merchant_name = m["business_name"] if m else "Your Merchant"
 
-    # Buyer email — Reply-To to merchant so buyer replies go to them
     if o["buyer_email"]:
         try:
             print(f"[mail] buyer order confirmation -> to={o['buyer_email']} reply_to={merchant_email} order_id={order_id}")
@@ -780,7 +769,6 @@ def send_order_emails(order_id: int):
         except Exception as e:
             print("buyer email fail (order_id=", order_id, "):", repr(e))
 
-    # Merchant email — only if merchant supplied an email
     if merchant_email:
         try:
             print(f"[mail] merchant new order notice -> to={merchant_email} order_id={order_id}")
@@ -807,13 +795,9 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
     amt = float(s["expected_pi"])
-    # FIX: avoid Decimal * float by casting split_amounts results to float
     gross, fee, net = split_amounts(amt)
-    gross = float(gross)
-    fee = float(fee)
-    net = float(net)
+    gross = float(gross); fee = float(fee); net = float(net)
 
-    # Helper: pick buyer email from buyer or shipping payloads
     buyer_email = (buyer.get("email") or shipping.get("email") or None)
     buyer_name  = buyer.get("name") or shipping.get("name") or None
 
@@ -842,7 +826,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                            (s["merchant_id"], r["id"], r["qty"], buyer_email,
                             buyer_name, json.dumps(shipping), float(line_gross), float(line_fee),
                             float(line_net), tx_hash, buyer_token))
-                # send emails for this order
                 try:
                     print("fulfill_session -> send_order_emails (cart) id:", cur.lastrowid)
                     send_order_emails(cur.lastrowid)
@@ -865,7 +848,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                        (s["merchant_id"], s["item_id"], s["qty"], buyer_email,
                         buyer_name, json.dumps(shipping), float(gross), float(fee),
                         float(net), tx_hash, buyer_token))
-            # send emails for this order
             try:
                 print("fulfill_session -> send_order_emails (single) id:", cur.lastrowid)
                 send_order_emails(cur.lastrowid)
@@ -874,7 +856,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
-    # Redirect back to storefront with success flag
     u = current_user_row()
     tok = ""
     if u:
@@ -885,7 +866,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     return {"ok": True, "redirect_url": redirect_url}
 
 # ----------------- IMAGE PROXY (resilient) -----------------
-# 1x1 transparent PNG
 _TRANSPARENT_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
     "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
@@ -930,17 +910,16 @@ def terms():
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
-        o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,),).fetchone()
+        o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
 def success():
     return render_template("success.html")
-
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
