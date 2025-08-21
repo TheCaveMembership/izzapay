@@ -509,6 +509,7 @@ def merchant_orders_update(slug):
                     f"<a href='{link}'>track package</a></p>"
         # ensure replies go to the merchant
         reply_to = (m["reply_to_email"] or "").strip() if m else None
+        print(f"[mail] shipping update -> to={o['buyer_email']} reply_to={reply_to} order_id={order_id}")
         send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
@@ -750,8 +751,8 @@ def send_order_emails(order_id: int):
         o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not o:
             return
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
 
     merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
     merchant_name = m["business_name"] if m else "Your Merchant"
@@ -759,6 +760,7 @@ def send_order_emails(order_id: int):
     # Buyer email — Reply-To to merchant so buyer replies go to them
     if o["buyer_email"]:
         try:
+            print(f"[mail] buyer order confirmation -> to={o['buyer_email']} reply_to={merchant_email} order_id={order_id}")
             ok = send_email(
                 o["buyer_email"],
                 f"Your order at {merchant_name} is confirmed",
@@ -781,6 +783,7 @@ def send_order_emails(order_id: int):
     # Merchant email — only if merchant supplied an email
     if merchant_email:
         try:
+            print(f"[mail] merchant new order notice -> to={merchant_email} order_id={order_id}")
             ok2 = send_email(
                 merchant_email,
                 f"New Pi order at {merchant_name} ({o['pi_amount']:.7f} π)",
@@ -923,16 +926,17 @@ def terms():
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
-        o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
+        o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,),).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
 def success():
     return render_template("success.html")
+
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
