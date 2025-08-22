@@ -2,7 +2,7 @@ import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 from urllib.parse import urlparse
-from flask import Flask, request, render_template, redirect, session, abort, Response
+from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
 
@@ -220,33 +220,12 @@ def debug_send_order_emails_get(order_id: int):
         print(f"[debug] manual email trigger error (GET) -> order_id={order_id} err={repr(e)}")
         return {"ok": False, "error": repr(e)}, 500
 
-from flask import render_template_string
-
-# -------- DEBUG: cancel incomplete Pi payment (server-side) --------
-@app.get("/debug/cancel-payment")
-def debug_cancel_payment():
-    _require_debug_token()
-    payment_id = (request.args.get("payment_id") or "").strip()
-    if not payment_id:
-        return {"ok": False, "error": "missing_payment_id"}, 400
-    try:
-        r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/cancel",
-                          headers=pi_headers(), json={})
-        if r.status_code == 200:
-            return {"ok": True, "payment_id": payment_id}, 200
-        return {"ok": False, "status": r.status_code, "body": r.text}, 502
-    except Exception as e:
-        return {"ok": False, "error": repr(e)}, 500
-
-# -------- DEBUG: show & cancel incomplete Pi payment (PROD-SAFE) --------
+# (Optional) Pi incomplete payment finder page — JS is fully inside a quoted string
 @app.get("/debug/incomplete")
 def debug_incomplete_page():
     _require_debug_token()
-    # A minimal page that must be opened in Pi Browser.
-    # It authenticates and shows the stuck payment_id, with a Cancel button.
     token = (request.args.get("token") or "").strip()
-    html = f"""
-<!doctype html>
+    html = f"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pi Incomplete Payment Debug</title>
 <style>
@@ -257,10 +236,9 @@ def debug_incomplete_page():
   .muted{{color:#bcd0ff}} .row{{display:flex;gap:10px;flex-wrap:wrap;align-items:center}}
 </style>
 <div class="card">
-  <h2>Find & Cancel Incomplete Payment</h2>
+  <h2>Find Incomplete Payment</h2>
   <p class="muted">Open this page <strong>in Pi Browser</strong>. We’ll detect any stuck payment for this app.</p>
   <p class="muted">Token ends with: <code>{token[-6:] if len(token)>6 else token}</code></p>
-
   <div id="status" class="muted">Loading Pi SDK…</div>
   <div id="found" style="display:none;margin-top:12px">
     <div class="row" style="align-items:flex-end">
@@ -268,17 +246,12 @@ def debug_incomplete_page():
         <label class="muted">Payment ID</label>
         <input id="pid" readonly>
       </div>
-      <div>
-        <button id="cancelBtn">Cancel payment</button>
-      </div>
     </div>
-    <p class="muted" style="margin-top:8px">If cancel succeeds, you can retry checkout immediately.</p>
   </div>
   <div id="none" style="display:none;margin-top:12px">
     <p>No incomplete payment was reported by the Pi SDK.</p>
   </div>
 </div>
-
 <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 <script>
 (async function(){
@@ -286,12 +259,8 @@ def debug_incomplete_page():
   const found  = document.getElementById('found');
   const none   = document.getElementById('none');
   const pidEl  = document.getElementById('pid');
-  const btn    = document.getElementById('cancelBtn');
 
-  function qs(k){ return new URL(location.href).searchParams.get(k) || ''; }
-  const token = qs('token');
-
-  function set(t){ if(status) status.textContent = t; }
+  function set(t){ status.textContent = t; }
 
   try{
     if(!window.Pi || !Pi.init){ set("Pi SDK not available. Open in Pi Browser."); return; }
@@ -301,7 +270,7 @@ def debug_incomplete_page():
     const scopes = ['payments','username'];
     function onIncompletePaymentFound(payment){
       try{
-        stuckId = payment && payment.identifier || payment && payment.paymentId || null;
+        stuckId = (payment && (payment.identifier || payment.paymentId)) || null;
       }catch(_){}
     }
 
@@ -312,23 +281,6 @@ def debug_incomplete_page():
       set("Incomplete payment detected.");
       pidEl.value = stuckId;
       found.style.display = '';
-      btn.onclick = async () => {
-        btn.disabled = true; btn.textContent = "Cancelling…";
-        try{
-          const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(stuckId)}`;
-          const r = await fetch(url);
-          const j = await r.json();
-          if(j && j.ok){
-            set("Cancelled. You can retry checkout now.");
-          }else{
-            set("Cancel failed. See server logs."); console.log(j);
-          }
-        }catch(e){
-          set("Cancel request errored. See logs."); console.error(e);
-        }finally{
-          btn.disabled = false; btn.textContent = "Cancel payment";
-        }
-      };
     }else{
       set("No incomplete payment detected.");
       none.style.display = '';
@@ -338,11 +290,8 @@ def debug_incomplete_page():
     console.error(e);
   }
 })();
-</script>
-"""
+</script>"""
     return render_template_string(html)
-# -------- END DEBUG page --------
-# ----------------- END DEBUG -----------------
 
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
@@ -503,7 +452,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
@@ -794,7 +743,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -818,7 +767,7 @@ def cart_remove(cid):
 def checkout_cart(cid):
     u = current_user_row()
     if not u: return redirect("/signin?fresh=1")
-    tok = get_bearer_token_from_request()  # <-- fixed line
+    tok = get_bearer_token_from_request()
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
@@ -985,7 +934,7 @@ def send_order_emails(order_id: int):
 
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
     amt = float(s["expected_pi"])
     gross, fee, net = split_amounts(amt)
     gross = float(gross); fee = float(fee); net = float(net)
@@ -1026,7 +975,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 except Exception as e:
                     log("send_order_emails (cart) error:", repr(e))
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
-            cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"]),)
+            cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
         # SINGLE item checkout
         with conn() as cx:
@@ -1107,7 +1056,7 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
