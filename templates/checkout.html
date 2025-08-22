@@ -8,13 +8,10 @@
     :root{
       --bg:#0b0f17; --card:#0f1728; --line:#1f2a44; --txt:#e8f0ff; --muted:#bcd0ff; --brand:#6e9fff;
     }
-    /* colorways (match store/cart/merchant pages) */
     .cw-blue   { --brand:#6e9fff; }
     .cw-mint   { --brand:#5ad49e; }
     .cw-purple { --brand:#a88cff; }
     .cw-amber  { --brand:#ffb86b; }
-
-    /* optional light mode */
     .light { --bg:#f6f7fb; --card:#ffffff; --line:#e6e8f0; --txt:#0b0f17; --muted:#4b587c; }
 
     body{
@@ -29,12 +26,10 @@
     .label{display:block;color:var(--muted);font-size:.9rem;margin:6px 0 4px}
     input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
-    /* adjust input bg for light mode */
     .light input{ background:#ffffff; }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
-{# Prefer i.colorway/theme_mode if provided; fall back to m; default cw-blue #}
 {% set cw = (i.colorway if i and i.colorway else (m.colorway if m is defined and m and m.colorway else 'cw-blue')) %}
 {% set is_light = (i.theme_mode=='light') if i and (i.theme_mode is defined) else ((m.theme_mode=='light') if (m is defined and m and (m.theme_mode is defined)) else False) %}
 <body class="{{ cw }} {% if is_light %}light{% endif %}">
@@ -62,7 +57,7 @@
       </div>
     </div>
 
-    <!-- Buyer & Shipping details (email required) -->
+    <!-- Buyer & Shipping details -->
     <div class="card">
       <div class="row">
         <div class="col">
@@ -77,12 +72,8 @@
 
       <div class="row">
         <div class="col" style="flex:2">
-          <label class="label" for="ship_address1">Address line 1</label>
-          <input id="ship_address1" placeholder="Street address" autocomplete="address-line1">
-        </div>
-        <div class="col">
-          <label class="label" for="ship_address2">Address line 2</label>
-          <input id="ship_address2" placeholder="Unit / Apt (optional)" autocomplete="address-line2">
+          <label class="label" for="ship_address">Full Address</label>
+          <input id="ship_address" placeholder="Street, Apt, etc." autocomplete="street-address">
         </div>
       </div>
 
@@ -117,21 +108,19 @@
 
 <script>
 (function(){
-  // Template vars from server
   const sessionId   = "{{ session_id|e }}";
   const amount      = {{ expected_pi if expected_pi else 0 }};
   const cartMode    = {{ 'true' if cart_mode else 'false' }};
   const sandbox     = {{ 'true' if PI_SANDBOX else 'false' }};
   const appId       = "{{ PI_APP_ID }}";
-  const redirectSlug= "{{ slug if slug else '' }}"; // storefront slug for return
+  const redirectSlug= "{{ slug if slug else '' }}";
 
   const btn = document.getElementById('payBtn');
   const msg = document.getElementById('msg');
 
   const emailEl = document.getElementById('buyer_email');
   const nameEl  = document.getElementById('buyer_name');
-  const a1El    = document.getElementById('ship_address1');
-  const a2El    = document.getElementById('ship_address2');
+  const addrEl  = document.getElementById('ship_address');
   const cityEl  = document.getElementById('ship_city');
   const regEl   = document.getElementById('ship_region');
   const postEl  = document.getElementById('ship_postal');
@@ -149,8 +138,7 @@
 
   function ensureAuth(){
     const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){ /* optional resume */ }
-    return Pi.authenticate(scopes, onIncompletePaymentFound);
+    return Pi.authenticate(scopes, function(){}); 
   }
 
   function buyerPayload(){
@@ -162,20 +150,18 @@
 
   function shippingPayload(){
     return {
-      address1: (a1El?.value || '').trim(),
-      address2: (a2El?.value || '').trim(),
-      city:     (cityEl?.value || '').trim(),
-      region:   (regEl?.value || '').trim(),
-      postal:   (postEl?.value || '').trim(),
-      country:  (ctryEl?.value || '').trim(),
-      name:     (nameEl?.value || '').trim()
+      address: (addrEl?.value || '').trim(),
+      city:    (cityEl?.value || '').trim(),
+      region:  (regEl?.value || '').trim(),
+      postal:  (postEl?.value || '').trim(),
+      country: (ctryEl?.value || '').trim(),
+      name:    (nameEl?.value || '').trim()
     };
   }
 
   initPi();
 
   btn?.addEventListener('click', function(){
-    // Require email before triggering Pi
     const emailVal = (emailEl?.value || '').trim();
     if (!emailVal){
       setMsg('Please enter your email before continuing.');
