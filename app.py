@@ -186,6 +186,12 @@ def debug_cancel_payment():
                       headers=pi_headers(), json={})
     return ({"ok": True} if r.status_code == 200
             else {"ok": False, "status": r.status_code, "body": r.text}), (200 if r.status_code == 200 else 502)
+    # --- DEBUG: show incomplete payment finder page (no inline JS) ---
+@app.get("/debug/incomplete")
+def debug_incomplete():
+    _require_debug_token()
+    return render_template("debug_incomplete.html",
+                           token=(request.args.get("token") or "").strip())
     
 # List most recent orders (avoid created_at; not all schemas have it)
 @app.get("/debug/orders")
@@ -812,6 +818,23 @@ def pi_complete():
             return {"ok": False, "error": "payment_verify_error"}, 500
 
     return fulfill_session(s, txid, buyer, shipping)
+
+# --- DEBUG: cancel a stuck Pi payment (server-side) ---
+@app.get("/debug/cancel-payment")
+def debug_cancel_payment():
+    _require_debug_token()
+    payment_id = (request.args.get("payment_id") or "").strip()
+    if not payment_id:
+        return {"ok": False, "error": "missing_payment_id"}, 400
+    try:
+        url = f"{PI_API_BASE}/v2/payments/{payment_id}/cancel"
+        r = requests.post(url, headers=pi_headers(), json={})
+        if r.status_code != 200:
+            return {"ok": False, "status": r.status_code, "body": r.text}, 502
+        return {"ok": True, "payment_id": payment_id}, 200
+    except Exception as e:
+        log("debug_cancel_payment error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
 
 # ---- Email notifications per order -----------------------------------------
 def send_order_emails(order_id: int):
