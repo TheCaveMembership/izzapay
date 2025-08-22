@@ -53,100 +53,79 @@ init_db()
 
 def ensure_schema():
     with conn() as cx:
-        # merchants patches
-        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-        if "pi_handle" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+        # --- merchants patches ---
+        mcols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+        if "pi_wallet_address" not in mcols:
+            try:
+                cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+                log("[schema] added merchants.pi_wallet_address")
+            except Exception as e:
+                log("[schema] add merchants.pi_wallet_address failed:", repr(e))
+        if "pi_handle" not in mcols:
+            try:
+                cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+                log("[schema] added merchants.pi_handle")
+            except Exception as e:
+                log("[schema] add merchants.pi_handle failed:", repr(e))
+        if "colorway" not in mcols:
+            try:
+                cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+                log("[schema] added merchants.colorway")
+            except Exception as e:
+                log("[schema] add merchants.colorway failed:", repr(e))
 
-        # carts
+        # --- carts & cart_items (create if missing) ---
         cx.execute("""
-        CREATE TABLE IF NOT EXISTS carts(
-          id TEXT PRIMARY KEY,
-          merchant_id INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        )""")
-        # cart_items
+            CREATE TABLE IF NOT EXISTS carts(
+              id TEXT PRIMARY KEY,
+              merchant_id INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+        """)
         cx.execute("""
-        CREATE TABLE IF NOT EXISTS cart_items(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          cart_id TEXT NOT NULL,
-          item_id INTEGER NOT NULL,
-          qty INTEGER NOT NULL
-        )""")
+            CREATE TABLE IF NOT EXISTS cart_items(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              cart_id TEXT NOT NULL,
+              item_id INTEGER NOT NULL,
+              qty INTEGER NOT NULL
+            )
+        """)
 
-        # sessions table must exist (created elsewhere in your setup)
+        # --- sessions patches ---
         scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
         if "pi_payment_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
+                log("[schema] added sessions.pi_payment_id")
             except Exception as e:
-                log("[schema] add pi_payment_id failed (might already exist):", repr(e))
+                log("[schema] add sessions.pi_payment_id failed:", repr(e))
         if "cart_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
+                log("[schema] added sessions.cart_id")
             except Exception as e:
-                log("[schema] add cart_id failed (might already exist):", repr(e))
-        # snapshot of items at checkout time (works for single or multi)
+                log("[schema] add sessions.cart_id failed:", repr(e))
         if "line_items_json" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
+                log("[schema] added sessions.line_items_json")
             except Exception as e:
-                log("[schema] add line_items_json failed (might already exist):", repr(e))
-        # NEW: who created the checkout session (so we can show "my purchases")
+                log("[schema] add sessions.line_items_json failed:", repr(e))
         if "user_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+                log("[schema] added sessions.user_id")
             except Exception as e:
-                log("[schema] add user_id failed (might already exist):", repr(e))
+                log("[schema] add sessions.user_id failed:", repr(e))
 
-with conn() as cx:
-    # ----- sessions.user_id (links session to the signed-in user at checkout time)
-    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-    if "user_id" not in scols:
-        try:
-            cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-        except Exception as e:
-            log("[schema] add sessions.user_id failed:", repr(e))
-            
-  # ----- orders.buyer_user_id (links the final order to the user)
-    ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-    if "buyer_user_id" not in ocols:
-        try:
-            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-        except Exception as e:
-            log("[schema] add orders.buyer_user_id failed:", repr(e))
-
-# sessions: persist the user who created the session (so we can attribute purchases)
-with conn() as cx:
-    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-
-if "user_id" not in scols:
-    with conn() as cx:
-        cx.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
-    try:
-        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-    except Exception as e:
-        log("[schema] add sessions.user_id failed (might already exist):", repr(e))
-
-# orders: store buyer_user_id for quick lookups in “My Orders”
-ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-if "buyer_user_id" not in ocols:
-    try:
-        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-    except Exception as e:
-        log("[schema] add orders.buyer_user_id failed (might already exist):", repr(e))
-        
-        # orders should know the buyer user (so we can list purchases)
+        # --- orders patches ---
         ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
         if "buyer_user_id" not in ocols:
             try:
                 cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+                log("[schema] added orders.buyer_user_id")
             except Exception as e:
-                log("[schema] add buyer_user_id failed (might already exist):", repr(e))
+                log("[schema] add orders.buyer_user_id failed:", repr(e))
 
 ensure_schema()
 
