@@ -1180,6 +1180,36 @@ def pi_complete():
     return fulfill_session(s, txid, buyer, shipping)
 
 # ---- Email notifications per order -----------------------------------------
+def _format_shipping_html(sh):
+    """Return nice HTML for shipping/contact info dict."""
+    try:
+        if not sh:
+            return "<p><em>No shipping details provided.</em></p>"
+        lines = []
+        name   = (sh.get("name")   or "").strip()
+        email  = (sh.get("email")  or "").strip()
+        phone  = (sh.get("phone")  or "").strip()
+        a1     = (sh.get("address1") or sh.get("line1") or "").strip()
+        a2     = (sh.get("address2") or sh.get("line2") or "").strip()
+        city   = (sh.get("city")   or "").strip()
+        state  = (sh.get("state")  or sh.get("region") or "").strip()
+        postal = (sh.get("postal") or sh.get("zip")    or "").strip()
+        country= (sh.get("country") or "").strip()
+
+        if name:   lines.append(f"<div><strong>Name:</strong> {name}</div>")
+        if email:  lines.append(f"<div><strong>Email:</strong> {email}</div>")
+        if phone:  lines.append(f"<div><strong>Phone:</strong> {phone}</div>")
+
+        addr_bits = [a1, a2, f"{city} {state} {postal}".strip(), country]
+        addr_bits = [b for b in addr_bits if b]
+        if addr_bits:
+            lines.append("<div><strong>Ship to:</strong><br>" + "<br>".join(addr_bits) + "</div>")
+
+        return "<div>" + "\n".join(lines) + "</div>" if lines else "<p><em>No shipping details provided.</em></p>"
+    except Exception:
+        return "<p><em>Shipping details unavailable.</em></p>"
+
+
 def send_order_emails(order_id: int):
     with conn() as cx:
         o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
@@ -1191,6 +1221,7 @@ def send_order_emails(order_id: int):
 
     merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
     merchant_name = m["business_name"] if m else "Your Merchant"
+    ship_html = _format_shipping_html(json.loads(o["shipping_json"] or "{}"))
 
     if o["buyer_email"]:
         try:
@@ -1204,7 +1235,9 @@ def send_order_emails(order_id: int):
                     <p><strong>Product:</strong> {(i['title'] if i else 'N/A')}</p>
                     <p><strong>Quantity:</strong> {o['qty']}</p>
                     <p><strong>Total Paid:</strong> {o['pi_amount']:.7f} π</p>
-                    <p>You can check status later here:
+                    <h3 style="margin-top:14px">Shipping Details</h3>
+                    {ship_html}
+                    <p style="margin-top:14px">You can check status later here:
                       <a href="{BASE_ORIGIN}/o/{o['buyer_token']}">{BASE_ORIGIN}/o/{o['buyer_token']}</a>
                     </p>
                 """,
@@ -1228,12 +1261,101 @@ def send_order_emails(order_id: int):
                        <small>(fee: {o['pi_fee']:.7f} π, net: {o['pi_merchant_net']:.7f} π)</small>
                     </p>
                     <p><strong>Buyer:</strong> {(o['buyer_name'] or '—')} ({o['buyer_email'] or '—'})</p>
-                    <p>TX: {o['pi_tx_hash'] or '—'}</p>
+                    <p><strong>TX:</strong> {o['pi_tx_hash'] or '—'}</p>
+                    <h3 style="margin-top:14px">Shipping Details</h3>
+                    {ship_html}
                 """
             )
             log("send_order_emails merchant ok?", ok2)
         except Exception as e:
             log("merchant email fail (order_id=", order_id, "):", repr(e))
+
+def send_cart_emails(order_ids: list[int]):
+    """Send one combined email to buyer and one to merchant covering all orders in a cart checkout."""
+    if not order_ids:
+        return
+    with conn() as cx:
+        orders = cx.execute(
+            f"SELECT * FROM orders WHERE id IN ({','.join(['?']*len(order_ids))}) ORDER BY id",
+            order_ids
+        ).fetchall()
+
+        if not orders:
+            return
+
+        merchant_id = orders[0]["merchant_id"]
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (merchant_id,)).fetchone()
+        merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
+        merchant_name = m["business_name"] if m else "Your Merchant"
+
+        lines_html = []
+        ship_json = None
+        buyer_email = None
+        buyer_name  = None
+        total_amt = 0.0
+        total_fee = 0.0
+        total_net = 0.0
+        tx_hash   = None
+
+        for o in orders:
+            i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+            title = i["title"] if i else f"Item #{o['item_id']}"
+            lines_html.append(f"<li>{title} × {o['qty']} — {o['pi_amount']:.7f} π</li>")
+            total_amt += float(o["pi_amount"] or 0.0)
+            total_fee += float(o["pi_fee"] or 0.0)
+            total_net += float(o["pi_merchant_net"] or 0.0)
+            tx_hash   = tx_hash or o["pi_tx_hash"]
+            buyer_email = buyer_email or o["buyer_email"]
+            buyer_name  = buyer_name or o["buyer_name"]
+            ship_json = ship_json or o["shipping_json"]
+
+        ship_html = _format_shipping_html(json.loads(ship_json or "{}"))
+        items_html = "<ul>" + "\n".join(lines_html) + "</ul>"
+
+    if buyer_email:
+        try:
+            log(f"[mail] buyer cart confirmation -> to={buyer_email} reply_to={(merchant_email or '—')} orders={order_ids}")
+            send_email(
+                buyer_email,
+                f"Your order at {merchant_name} is confirmed",
+                f"""
+                    <h2>Thanks for your order!</h2>
+                    <p><strong>Store:</strong> {merchant_name}</p>
+                    <h3 style="margin-top:12px">Items</h3>
+                    {items_html}
+                    <p><strong>Total Paid:</strong> {total_amt:.7f} π</p>
+                    <h3 style="margin-top:12px">Shipping Details</h3>
+                    {ship_html}
+                    <p style="margin-top:14px">
+                      You can check status for each item later via your order links.
+                    </p>
+                """,
+                reply_to=merchant_email
+            )
+        except Exception as e:
+            log("buyer cart email fail:", repr(e))
+
+    if merchant_email:
+        try:
+            log(f"[mail] merchant cart notice -> to={merchant_email} orders={order_ids}")
+            send_email(
+                merchant_email,
+                f"New Pi order at {merchant_name} ({total_amt:.7f} π)",
+                f"""
+                    <h2>You received a new order (cart)</h2>
+                    <h3 style="margin-top:12px">Items</h3>
+                    {items_html}
+                    <p><strong>Total:</strong> {total_amt:.7f} π
+                       <small>(fee: {total_fee:.7f} π, net: {total_net:.7f} π)</small>
+                    </p>
+                    <p><strong>Buyer:</strong> {(buyer_name or '—')} ({buyer_email or '—'})</p>
+                    <p><strong>TX:</strong> {tx_hash or '—'}</p>
+                    <h3 style="margin-top:12px">Shipping Details</h3>
+                    {ship_html}
+                """
+            )
+        except Exception as e:
+            log("merchant cart email fail:", repr(e))
 
 # ---- fulfillment -----------------------------------------
 def fulfill_session(s, tx_hash, buyer, shipping):
@@ -1293,17 +1415,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
 
         # <-- transaction COMMITTED on exiting with-block
-        for oid in created_order_ids:
-            try:
-                log("fulfill_session -> send_order_emails (cart) id:", oid)
-                send_order_emails(oid)
-            except Exception as e:
-                log("send_order_emails (cart) error:", repr(e))
+        try:
+            send_cart_emails(created_order_ids)
+        except Exception as e:
+            log("send_cart_emails error:", repr(e))
 
     else:
         # SINGLE item checkout
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute(
                     "UPDATE items SET stock_qty=? WHERE id=?",
@@ -1392,8 +1512,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
