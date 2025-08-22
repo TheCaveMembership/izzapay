@@ -1891,20 +1891,30 @@ def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash
         log("[mail] send_cart_emails error:", repr(e))
 
 def fulfill_session(s, tx_hash, buyer, shipping):
-    # Merchant (read-only)
+    """
+    Finalize a paid checkout session:
+      - Load merchant and snapshot line items
+      - Create 1+ order rows (single or multi)
+      - Update stock (when not backorder)
+      - Mark session as paid and attach tx
+      - Email buyer (if email provided) and merchant (always),
+        including a Shipping section in the merchant email when available.
+      - Redirect buyer back to storefront success view
+    """
+    # 1) Merchant (read-only)
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
-    # Money split on the session total
+    # 2) Money split on the session total
     amt = float(s["expected_pi"])
     gross_total, fee_total, net_total = split_amounts(amt)
     gross_total = float(gross_total); fee_total = float(fee_total); net_total = float(net_total)
 
-    # Buyer info
+    # 3) Buyer info (prefer explicit buyer, fall back to shipping form)
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
-    buyer_name  = buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
+    buyer_name  =  buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
 
-    # Always read the snapshot (single or multi)
+    # 4) Snapshot lines (single or multi)
     try:
         lines = json.loads(s["line_items_json"] or "[]")
     except Exception:
@@ -1924,7 +1934,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             log("[fulfill_session] notify merchant failed:", repr(e))
         return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
-    # Fetch item records for titles/stock using IDs from the snapshot
+    # 5) Fetch item records for titles/stock using IDs from the snapshot
     item_ids = [int(li["item_id"]) for li in lines]
     with conn() as cx:
         placeholders = ",".join("?" for _ in item_ids)
@@ -1932,11 +1942,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         by_id = {int(r["id"]): r for r in items}
 
     created_order_ids = []
+
     # Proportionally allocate fee across lines by their gross share
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
 
-    buyer_user_id = s["user_id"]  # may be None for older sessions
+    buyer_user_id = s.get("user_id") if isinstance(s, dict) else s["user_id"]  # may be None for older sessions
 
+    # 6) Create orders + stock updates
     with conn() as cx:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1994,8 +2006,9 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         # Mark session paid + attach tx
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # Build & send consolidated email
+    # 7) Build & send consolidated email (buyer + merchant)
     try:
+        # table rows for all lines
         display_rows = []
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -2025,11 +2038,22 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             "</table>"
         )
 
+        # NEW: Shipping block for merchant email (only if present)
+        ship_parts = []
+        if isinstance(shipping, dict):
+            for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
+                v = (shipping.get(k) or "").strip()
+                if v:
+                    label = k.replace("_"," ").title()
+                    ship_parts.append(f"<div><strong>{label}:</strong> {v}</div>")
+        shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
+
         merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
         subj_suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
         subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}"
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){subj_suffix}"
 
+        # Buyer email (optional)
         if buyer_email:
             send_email(
                 buyer_email,
@@ -2048,6 +2072,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         else:
             log("[mail][unified] buyer email skipped (no buyer_email)")
 
+        # Merchant email (always). Includes Shipping if buyer provided anything.
         send_email(
             merchant_mail,
             subj_merchant,
@@ -2059,6 +2084,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 </p>
                 <h3 style="margin:16px 0 6px">Buyer</h3>
                 <div>{buyer_name or '—'} ({buyer_email or '—'})</div>
+                {shipping_html}
                 <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
             """
         )
@@ -2067,12 +2093,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception as e:
         log("[fulfill_session] email build/send failed:", repr(e))
 
-    # Redirect
+    # 8) Redirect back to the storefront with success flag
     u = current_user_row()
     tok = ""
     if u:
-        try: tok = mint_login_token(u["id"])
-        except Exception: tok = ""
+        try:
+            tok = mint_login_token(u["id"])
+        except Exception:
+            tok = ""
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
