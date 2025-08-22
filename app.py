@@ -20,6 +20,7 @@ PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
+DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "")  # <— for the debug endpoints
 
 # ----------------- APP -----------------
 app = Flask(__name__)
@@ -32,6 +33,17 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
+
+def log(*args):
+    """Flush logs so they show up immediately on Render."""
+    try:
+        print(*args, flush=True)
+    except Exception:
+        pass
+    try:
+        app.logger.info(" ".join(str(a) for a in args))
+    except Exception:
+        pass
 
 @app.context_processor
 def inject_globals():
@@ -153,6 +165,31 @@ def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
 
+# NEW: list most recent orders so you can pick an ID quickly
+@app.get("/debug/orders")
+def debug_orders():
+    if not DEBUG_EMAIL_TOKEN or (request.args.get("token") != DEBUG_EMAIL_TOKEN and request.headers.get("X-Debug-Token") != DEBUG_EMAIL_TOKEN):
+        abort(403)
+    with conn() as cx:
+        rows = cx.execute(
+            "SELECT id, merchant_id, item_id, qty, buyer_email, status, pi_amount, created_at FROM orders ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+    return {"ok": True, "orders": [dict(r) for r in rows]}
+
+# NEW: manual email trigger for a specific order_id
+@app.post("/debug/send-order-emails/<int:order_id>")
+def debug_send_order_emails(order_id: int):
+    if not DEBUG_EMAIL_TOKEN or (request.args.get("token") != DEBUG_EMAIL_TOKEN and request.headers.get("X-Debug-Token") != DEBUG_EMAIL_TOKEN):
+        abort(403)
+    log(f"[debug] manual email trigger -> order_id={order_id}")
+    try:
+        send_order_emails(order_id)
+        log(f"[debug] manual email trigger complete -> order_id={order_id}")
+        return {"ok": True, "order_id": order_id}
+    except Exception as e:
+        log(f"[debug] manual email trigger error -> order_id={order_id} err={repr(e)}")
+        return {"ok": False, "error": "send_failed"}, 500
+
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
 def explore():
@@ -253,7 +290,7 @@ def pi_me():
             return {"ok": False, "error": "token_invalid", "status": r.status_code}, 401
         return {"ok": True, "me": r.json()}
     except Exception as e:
-        print("pi_me error:", repr(e))
+        log("pi_me error:", repr(e))
         return {"ok": False, "error": "server_error"}, 500
 
 @app.post("/auth/exchange")
@@ -292,7 +329,7 @@ def auth_exchange():
         if not request.is_json: return redirect(target)
         return {"ok": True, "redirect": target}
     except Exception as e:
-        print("auth_exchange error:", repr(e))
+        log("auth_exchange error:", repr(e))
         if not request.is_json: return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
 
@@ -499,7 +536,7 @@ def merchant_orders_update(slug):
             body += f"<p><strong>Tracking:</strong> {tracking_carrier} {tracking_number} — " \
                     f"<a href='{link}'>track package</a></p>"
         reply_to = (m["reply_to_email"] or "").strip() if m else None
-        print(f"[mail] shipping update -> to={o['buyer_email']} reply_to={reply_to} order_id={order_id}")
+        log(f"[mail] shipping update -> to={o['buyer_email']} reply_to={reply_to} order_id={order_id}")
         send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
@@ -547,7 +584,7 @@ def auth_exchange_store():
         join = "&" if ("?" in next_url) else "?"
         return redirect(f"{next_url}{join}t={tok}")
     except Exception as e:
-        print("auth_exchange_store error:", repr(e))
+        log("auth_exchange_store error:", repr(e))
         return redirect("/signin?fresh=1")
 
 # ----------------- STOREFRONT + CART + CHECKOUT -----------------
@@ -692,7 +729,7 @@ def pi_approve():
             return {"ok": False, "error": "approve_failed", "status": r.status_code, "body": r.text}, 502
         return {"ok": True}
     except Exception as e:
-        print("pi_approve error:", repr(e))
+        log("pi_approve error:", repr(e))
         return {"ok": False, "error": "server_error"}, 500
 
 @app.post("/api/pi/complete")
@@ -711,7 +748,7 @@ def pi_complete():
         if r.status_code != 200:
             return {"ok": False, "error": "complete_failed", "status": r.status_code, "body": r.text}, 502
     except Exception as e:
-        print("pi_complete call error:", repr(e))
+        log("pi_complete call error:", repr(e))
         return {"ok": False, "error": "server_error"}, 500
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
@@ -728,7 +765,7 @@ def pi_complete():
         elif not PI_SANDBOX:
             return {"ok": False, "error": "fetch_payment_failed"}, 502
     except Exception as e:
-        print("fetch_pi_payment error:", repr(e))
+        log("fetch_pi_payment error:", repr(e))
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
 
@@ -740,6 +777,7 @@ def send_order_emails(order_id: int):
     with conn() as cx:
         o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not o:
+            log("[mail] order not found -> id=", order_id)
             return
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
@@ -749,7 +787,7 @@ def send_order_emails(order_id: int):
 
     if o["buyer_email"]:
         try:
-            print(f"[mail] buyer order confirmation -> to={o['buyer_email']} reply_to={merchant_email} order_id={order_id}")
+            log(f"[mail] buyer order confirmation -> to={o['buyer_email']} reply_to={merchant_email} order_id={order_id}")
             ok = send_email(
                 o["buyer_email"],
                 f"Your order at {merchant_name} is confirmed",
@@ -765,13 +803,13 @@ def send_order_emails(order_id: int):
                 """,
                 reply_to=merchant_email
             )
-            print("send_order_emails buyer ok?", ok)
+            log("send_order_emails buyer ok?", ok)
         except Exception as e:
-            print("buyer email fail (order_id=", order_id, "):", repr(e))
+            log("buyer email fail (order_id=", order_id, "):", repr(e))
 
     if merchant_email:
         try:
-            print(f"[mail] merchant new order notice -> to={merchant_email} order_id={order_id}")
+            log(f"[mail] merchant new order notice -> to={merchant_email} order_id={order_id}")
             ok2 = send_email(
                 merchant_email,
                 f"New Pi order at {merchant_name} ({o['pi_amount']:.7f} π)",
@@ -786,9 +824,9 @@ def send_order_emails(order_id: int):
                     <p>TX: {o['pi_tx_hash'] or '—'}</p>
                 """
             )
-            print("send_order_emails merchant ok?", ok2)
+            log("send_order_emails merchant ok?", ok2)
         except Exception as e:
-            print("merchant email fail (order_id=", order_id, "):", repr(e))
+            log("merchant email fail (order_id=", order_id, "):", repr(e))
 # ---- End email notifications helper -----------------------------------------
 
 def fulfill_session(s, tx_hash, buyer, shipping):
@@ -827,16 +865,16 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                             buyer_name, json.dumps(shipping), float(line_gross), float(line_fee),
                             float(line_net), tx_hash, buyer_token))
                 try:
-                    print("fulfill_session -> send_order_emails (cart) id:", cur.lastrowid)
+                    log("fulfill_session -> send_order_emails (cart) id:", cur.lastrowid)
                     send_order_emails(cur.lastrowid)
                 except Exception as e:
-                    print("send_order_emails (cart) error:", repr(e))
+                    log("send_order_emails (cart) error:", repr(e))
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -849,10 +887,10 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                         buyer_name, json.dumps(shipping), float(gross), float(fee),
                         float(net), tx_hash, buyer_token))
             try:
-                print("fulfill_session -> send_order_emails (single) id:", cur.lastrowid)
+                log("fulfill_session -> send_order_emails (single) id:", cur.lastrowid)
                 send_order_emails(cur.lastrowid)
             except Exception as e:
-                print("send_order_emails (single) error:", repr(e))
+                log("send_order_emails (single) error:", repr(e))
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
@@ -890,7 +928,7 @@ def uimg():
         data = r.content
         return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
     except Exception as e:
-        print("uimg error:", repr(e))
+        log("uimg error:", repr(e))
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
 # ----------------- POLICIES / VALIDATION -----------------
@@ -914,7 +952,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
