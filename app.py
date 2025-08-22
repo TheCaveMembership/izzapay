@@ -750,7 +750,8 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"])).fetchone()
+        # FIX: single-element tuple requires trailing comma
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
@@ -976,7 +977,7 @@ def auth_exchange_store():
         username = user.get("username")
         token = data.get("accessToken")
         if not uid or not username or not token:
-            return redirect(f"/signin?fresh=1")
+            return redirect("/signin?fresh=1")
         r = requests.get(f"{PI_API_BASE}/v2/me",
                          headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if r.status_code != 200:
@@ -990,7 +991,8 @@ def auth_exchange_store():
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
         try:
             session["user_id"] = row["id"]; session.permanent = True
-        except Exception: pass
+        except Exception:
+            pass
         tok = mint_login_token(row["id"])
         join = "&" if ("?" in next_url) else "?"
         return redirect(f"{next_url}{join}t={tok}")
@@ -1079,7 +1081,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -1138,7 +1140,6 @@ def pi_approve():
                           headers=pi_headers(), json={})
         if r.status_code != 200:
             return {"ok": False, "error": "approve_failed", "status": r.status_code, "body": r.text}, 502
-        # persist payment_id so /debug/pending can find/cancel it later
         with conn() as cx:
             cx.execute("UPDATE sessions SET pi_payment_id=?, state=? WHERE id=?",
                        (payment_id, "approved", session_id))
@@ -1150,7 +1151,7 @@ def pi_approve():
 @app.post("/api/pi/complete")
 def pi_complete():
     data = request.get_json(force=True)
-    log("[pi_complete] payload:", data)  # <-- added to verify cart flow hits this endpoint
+    log("[pi_complete] payload:", data)  # debug to confirm cart flow hits this endpoint
     payment_id = data.get("paymentId")
     session_id = data.get("session_id")
     txid       = data.get("txid") or ""
@@ -1188,23 +1189,18 @@ def pi_complete():
     return fulfill_session(s, txid, buyer, shipping)
 
 # ---- ONE unified emailer for 1+ orders (single OR cart) --------------------
-# Put this near your other ENV reads, or keep here if you prefer
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 
 def send_order_emails_unified(order_ids):
     """
-    Sends the same style of email for single or multi-item orders:
-      - Accepts a single order_id or a list of order_ids
-      - Consolidates items into one table with totals
-      - Sends to buyer (if present) and to merchant
-      - Uses merchant reply_to for buyer email
+    Consolidated email for multi-item carts (also works for single).
+    Sends one email to the buyer (if present) and one to the merchant,
+    listing all items & totals.
     """
     try:
         if not order_ids:
             log("[mail] unified: no order_ids")
             return
-
-        # normalize to list of ints
         ids = order_ids if isinstance(order_ids, (list, tuple)) else [order_ids]
         ids = [int(x) for x in ids]
 
@@ -1231,21 +1227,17 @@ def send_order_emails_unified(order_ids):
 
         multi = len(rows) > 1
 
-        # recipients and meta
         m_name        = rows[0]["m_name"]
         merchant_mail = (rows[0]["m_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
         buyer_email   = (rows[0]["buyer_email"] or "").strip()
         buyer_name    = (rows[0]["buyer_name"] or "").strip()
 
-        # shipping (stored once per line, same for a cart)
         try:
-            # rows are sqlite Row objects, subscripting is fine
             shipping_raw = rows[0]["shipping_json"]
             shipping = json.loads(shipping_raw) if shipping_raw else {}
         except Exception:
             shipping = {}
 
-        # lines and totals
         total_gross = 0.0
         total_fee   = 0.0
         total_net   = 0.0
@@ -1287,7 +1279,6 @@ def send_order_emails_unified(order_ids):
             "</table>"
         )
 
-        # shipping block for merchant email
         ship_parts = []
         if isinstance(shipping, dict):
             for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
@@ -1296,15 +1287,12 @@ def send_order_emails_unified(order_ids):
                     ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
         shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
 
-        # subjects
         item_count_suffix = f" [{len(rows)} items]" if multi else ""
         subj_buyer    = f"Your order at {m_name} is confirmed{item_count_suffix}"
         subj_merchant = f"New Pi order at {m_name} ({total_gross:.7f} π){item_count_suffix}"
 
-        # debug visibility
         log("[mail] unified -> ids:", ids, " buyer_email:", buyer_email or "(none)", " merchant_mail:", merchant_mail)
 
-        # send buyer email
         if buyer_email:
             try:
                 send_email(
@@ -1326,7 +1314,6 @@ def send_order_emails_unified(order_ids):
         else:
             log("[mail] unified buyer email SKIPPED (no buyer_email).")
 
-        # send merchant email
         try:
             send_email(
                 merchant_mail,
@@ -1350,8 +1337,7 @@ def send_order_emails_unified(order_ids):
     except Exception as e:
         log("[mail] send_order_emails_unified error:", repr(e))
 
-
-# ======================== FULFILLMENT (replicate single-item emails) ========================
+# ======================== FULFILLMENT ========================
 def fulfill_session(s, tx_hash, buyer, shipping):
     # Resolve merchant first (read-only)
     with conn() as cx:
@@ -1361,8 +1347,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     gross, fee, net = split_amounts(amt)
     gross = float(gross); fee = float(fee); net = float(net)
 
-    buyer_email = (buyer.get("email") or shipping.get("email") or None)
-    buyer_name  = buyer.get("name") or shipping.get("name") or None
+    buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
+    buyer_name  = buyer.get("name") or (shipping.get("name") if isinstance(shipping, dict) else None) or None
 
     created_order_ids = []
 
@@ -1419,13 +1405,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         log("[fulfill_session] cart created_order_ids:", created_order_ids,
             "buyer_email:", buyer_email, "shipping_email:", (shipping.get("email") if isinstance(shipping, dict) else None))
 
-        # <-- transaction COMMITTED here -> replicate single-item behavior PER LINE
-        for oid in created_order_ids:
-            try:
-                log("fulfill_session -> send_order_emails (cart-line) id:", oid)
-                send_order_emails(oid)
-            except Exception as e:
-                log("send_order_emails (cart-line) error:", repr(e))
+        # Send ONE consolidated email for the whole cart
+        try:
+            send_order_emails_unified(created_order_ids)
+        except Exception as e:
+            log("send_order_emails_unified (cart) error:", repr(e))
 
     else:
         # ===================== SINGLE item checkout =====================
@@ -1451,7 +1435,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
-        # <-- transaction COMMITTED here -> existing single-item emails
+        # Keep single-item behavior (one email for the line)
         for oid in created_order_ids:
             try:
                 log("fulfill_session -> send_order_emails (single) id:", oid)
@@ -1459,7 +1443,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             except Exception as e:
                 log("send_order_emails (single) error:", repr(e))
 
-    # Build redirect as before
+    # Build redirect
     u = current_user_row()
     tok = ""
     if u:
@@ -1519,8 +1503,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
