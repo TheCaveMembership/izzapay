@@ -1186,31 +1186,26 @@ def pi_complete():
 
     return fulfill_session(s, txid, buyer, shipping)
 
-# ---- Email notifications per # =========================== CART EMAILS (FIXED) ===========================
-# ---- Email notifications for multi-item carts (consolidated) ---------------
-def send_cart_emails(order_ids):
-    """
-    Send ONE consolidated email for a multi-item cart:
-      • to buyer (order summary)
-      • to merchant (summary + shipping)
-    If anything fails or no email addresses are available,
-    it will fallback to sending per-line-item emails using send_order_emails.
-    """
-    def _fallback_per_line():
-        try:
-            for oid in order_ids or []:
-                log("[mail] cart -> fallback send_order_emails for oid:", oid)
-                send_order_emails(oid)
-        except Exception as e:
-            log("[mail] cart fallback error:", repr(e))
+# ---- ONE unified emailer for 1+ orders (single OR cart) --------------------
+# Put this near your other ENV reads, or keep here if you prefer
+DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 
+def send_order_emails_unified(order_ids):
+    """
+    Sends the same style of email for single or multi-item orders:
+      - Accepts a single order_id or a list of order_ids
+      - Consolidates items into one table with totals
+      - Sends to buyer (if present) and to merchant
+      - Uses merchant reply_to for buyer email
+    """
     try:
         if not order_ids:
-            log("[mail] cart: no order_ids passed")
+            log("[mail] unified: no order_ids")
             return
 
-        # Ensure IDs are a list of ints/strings for SQL placeholders
-        ids = [int(x) if isinstance(x, (int, float,)) or str(x).isdigit() else x for x in order_ids]
+        # normalize to list of ints
+        ids = order_ids if isinstance(order_ids, (list, tuple)) else [order_ids]
+        ids = [int(x) for x in ids]
 
         with conn() as cx:
             placeholders = ",".join("?" for _ in ids)
@@ -1218,6 +1213,7 @@ def send_cart_emails(order_ids):
                 SELECT
                     o.*,
                     i.title          AS item_title,
+                    i.sku            AS item_sku,
                     m.business_name  AS m_name,
                     m.reply_to_email AS m_email
                 FROM orders o
@@ -1229,24 +1225,26 @@ def send_cart_emails(order_ids):
             rows = cx.execute(q, ids).fetchall()
 
         if not rows:
-            log("[mail] cart: query returned 0 rows for ids:", ids)
-            _fallback_per_line()
+            log("[mail] unified: query returned 0 rows for ids:", ids)
             return
 
-        log(f"[mail] cart: loaded {len(rows)} rows for consolidated email")
+        multi = len(rows) > 1
 
-        # Assume single merchant/buyer across a cart (how your orders are created)
+        # recipients and meta
         m_name        = rows[0]["m_name"]
-        merchant_mail = (rows[0]["m_email"] or "").strip() or None
-        buyer_email   = (rows[0]["buyer_email"] or "").strip() or None
+        merchant_mail = (rows[0]["m_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+        buyer_email   = (rows[0]["buyer_email"] or "").strip()
+        buyer_name    = (rows[0]["buyer_name"] or "").strip()
 
-        # Shipping (same across the cart)
+        # shipping (stored once per line, same for a cart)
         try:
-            shipping = json.loads(rows[0]["shipping_json"] or "{}")
+            # rows are sqlite Row objects, subscripting is fine
+            shipping_raw = rows[0]["shipping_json"]
+            shipping = json.loads(shipping_raw) if shipping_raw else {}
         except Exception:
             shipping = {}
 
-        # Build line items + totals
+        # lines and totals
         total_gross = 0.0
         total_fee   = 0.0
         total_net   = 0.0
@@ -1280,9 +1278,7 @@ def send_cart_emails(order_ids):
             "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
             "</tr>"
             "</thead>"
-            "<tbody>"
-            + "".join(line_html) +
-            "</tbody>"
+            "<tbody>" + "".join(line_html) + "</tbody>"
             "<tfoot>"
             f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
             f"<td style='padding:6px 8px; text-align:right'><strong>{total_gross:.7f} π</strong></td></tr>"
@@ -1290,26 +1286,32 @@ def send_cart_emails(order_ids):
             "</table>"
         )
 
-        # Shipping block (for merchant email)
+        # shipping block for merchant email
         ship_parts = []
-        for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
-            v = (shipping.get(k) or "").strip() if isinstance(shipping, dict) else ""
-            if v:
-                ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
+        if isinstance(shipping, dict):
+            for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
+                v = (shipping.get(k) or "").strip()
+                if v:
+                    ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
         shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
 
-        sent_any = False
+        # subjects
+        item_count_suffix = f" [{len(rows)} items]" if multi else ""
+        subj_buyer    = f"Your order at {m_name} is confirmed{item_count_suffix}"
+        subj_merchant = f"New Pi order at {m_name} ({total_gross:.7f} π){item_count_suffix}"
 
-        # ---- Buyer email (consolidated) ----
+        # debug visibility
+        log("[mail] unified -> ids:", ids, " buyer_email:", buyer_email or "(none)", " merchant_mail:", merchant_mail)
+
+        # send buyer email
         if buyer_email:
             try:
                 send_email(
                     buyer_email,
-                    f"Your order at {m_name} is confirmed",
+                    subj_buyer,
                     f"""
                         <h2>Thanks for your order!</h2>
                         <p><strong>Store:</strong> {m_name}</p>
-                        <p>Here’s a summary of your cart:</p>
                         {items_table}
                         <p style="margin-top:12px">
                           You’ll receive updates from the merchant if anything changes.
@@ -1317,44 +1319,38 @@ def send_cart_emails(order_ids):
                     """,
                     reply_to=merchant_mail
                 )
-                sent_any = True
-                log("[mail] cart buyer email SENT ->", buyer_email)
+                log("[mail] unified buyer email SENT ->", buyer_email)
             except Exception as e:
-                log("[mail] cart buyer email FAILED:", repr(e))
+                log("[mail] unified buyer email FAILED:", repr(e))
+        else:
+            log("[mail] unified buyer email SKIPPED (no buyer_email).")
 
-        # ---- Merchant email (consolidated) ----
-        if merchant_mail:
-            try:
-                send_email(
-                    merchant_mail,
-                    f"New Pi order at {m_name} ({total_gross:.7f} π)",
-                    f"""
-                        <h2>You received a new multi-item order</h2>
-                        {items_table}
-                        <p style="margin:10px 0 0">
-                          <small>Fees total: {total_fee:.7f} π • Net total: {total_net:.7f} π</small>
-                        </p>
-                        <h3 style="margin:16px 0 6px">Buyer</h3>
-                        <div>{rows[0]['buyer_name'] or '—'} ({buyer_email or '—'})</div>
-                        {shipping_html}
-                        <p style="margin-top:10px"><small>TX: {rows[0]['pi_tx_hash'] or '—'}</small></p>
-                    """
-                )
-                sent_any = True
-                log("[mail] cart merchant email SENT ->", merchant_mail)
-            except Exception as e:
-                log("[mail] cart merchant email FAILED:", repr(e))
-
-        if not sent_any:
-            log("[mail] cart: no consolidated emails sent (missing emails or failures) — falling back per-line")
-            _fallback_per_line()
+        # send merchant email
+        try:
+            send_email(
+                merchant_mail,
+                subj_merchant,
+                f"""
+                    <h2>You received a new {"multi-item" if multi else "single-item"} order</h2>
+                    {items_table}
+                    <p style="margin:10px 0 0">
+                      <small>Fees total: {total_fee:.7f} π • Net total: {total_net:.7f} π</small>
+                    </p>
+                    <h3 style="margin:16px 0 6px">Buyer</h3>
+                    <div>{buyer_name or '—'} ({buyer_email or '—'})</div>
+                    {shipping_html}
+                    <p style="margin-top:10px"><small>TX: {rows[0]['pi_tx_hash'] or '—'}</small></p>
+                """
+            )
+            log("[mail] unified merchant email SENT ->", merchant_mail)
+        except Exception as e:
+            log("[mail] unified merchant email FAILED:", repr(e))
 
     except Exception as e:
-        log("[mail] send_cart_emails error (outer):", repr(e))
-        _fallback_per_line()
+        log("[mail] send_order_emails_unified error:", repr(e))
 
 
-# ======================== FULFILLMENT (REPLACE THIS) ========================
+# ======================== FULFILLMENT (UNIFIED EMAIL LOGIC) ========================
 def fulfill_session(s, tx_hash, buyer, shipping):
     # Resolve merchant first (read-only)
     with conn() as cx:
@@ -1372,7 +1368,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     if s["item_id"] is None:
         # ========================= CART checkout =========================
         with conn() as cx:
-            # use the exact cart from session if present; otherwise fallback
+            # use exact cart from session if present; otherwise fallback to latest cart for merchant
             cart = None
             if s["cart_id"]:
                 cart = cx.execute(
@@ -1391,6 +1387,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
               WHERE cart_items.cart_id=?
             """, (cart["id"],)).fetchall()
 
+            # create one order per cart line
             for r in rows:
                 line_gross = float(r["pi_price"]) * r["qty"]
                 line_fee   = fee * (line_gross / amt) if amt > 0 else 0.0
@@ -1418,12 +1415,12 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
 
-        # <-- transaction COMMITTED here -> send ONE consolidated cart email
+        # transaction committed -> unified email for all cart lines
         try:
-            log("fulfill_session -> send_cart_emails order_ids:", created_order_ids)
-            send_cart_emails(created_order_ids)
+            log("fulfill_session -> unified email ids:", created_order_ids)
+            send_order_emails_unified(created_order_ids)
         except Exception as e:
-            log("send_cart_emails error:", repr(e))
+            log("unified email error:", repr(e))
 
     else:
         # ===================== SINGLE item checkout =====================
@@ -1449,13 +1446,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
-        # <-- transaction COMMITTED here -> existing single-item emails
-        for oid in created_order_ids:
-            try:
-                log("fulfill_session -> send_order_emails (single) id:", oid)
-                send_order_emails(oid)
-            except Exception as e:
-                log("send_order_emails (single) error:", repr(e))
+        # transaction committed -> unified email (single id is fine)
+        try:
+            send_order_emails_unified(created_order_ids[0])
+        except Exception as e:
+            log("unified email (single) error:", repr(e))
 
     # Build redirect as before
     u = current_user_row()
@@ -1468,6 +1463,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
+
 
 # ----------------- IMAGE PROXY (resilient) -----------------
 _TRANSPARENT_PNG = base64.b64decode(
