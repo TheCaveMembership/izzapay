@@ -792,14 +792,12 @@ def auth_exchange():
         uid = user.get("uid") or user.get("id")
         username = user.get("username")
         token = data.get("accessToken")
-
-        # Basic payload checks
         if not uid or not username or not token:
             if not request.is_json:
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
-        # Verify the access token with Pi
+        # Verify with Pi
         r = requests.get(f"{PI_API_BASE}/v2/me",
                          headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if r.status_code != 200:
@@ -807,18 +805,16 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
 
-        # Upsert user by Pi UID
+        # Upsert user
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
-                cx.execute(
-                    """INSERT INTO users(pi_uid, pi_username, role, created_at)
-                       VALUES(?, ?, 'buyer', ?)""",
-                    (uid, username, int(time.time()))
-                )
+                cx.execute("""INSERT INTO users(pi_uid, pi_username, role, created_at)
+                              VALUES(?, ?, 'buyer', ?)""",
+                           (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
 
-        # Establish server session and mint short-lived bearer token
+        # Session + short-lived bearer
         try:
             session["user_id"] = row["id"]
             session.permanent = True
@@ -826,7 +822,12 @@ def auth_exchange():
             pass
 
         tok = mint_login_token(row["id"])
-        target = f"/dashboard?t={tok}"
+
+        # NEW: allow custom landing (e.g. /orders)
+        next_path = request.args.get("next") or "/dashboard"
+        if not next_path.startswith("/"):
+            next_path = "/dashboard"
+        target = f"{next_path}?t={tok}"
 
         # Form-post flow -> redirect
         if not request.is_json:
