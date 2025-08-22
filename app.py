@@ -185,6 +185,78 @@ def _require_debug_token():
 def debug_ping():
     _require_debug_token()
     return {"ok": True, "message": "pong", "time": int(time.time())}, 200
+@app.get("/debug/complete-payment")
+def debug_complete_payment():
+    _require_debug_token()
+    payment_id = (request.args.get("payment_id") or "").strip()
+    if not payment_id:
+        return {"ok": False, "error": "missing_payment_id"}, 400
+
+    try:
+        # 1) Fetch payment to get txid + metadata
+        r = requests.get(f"{PI_API_BASE}/v2/payments/{payment_id}", headers=pi_headers(), timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": "fetch_failed", "status": r.status_code, "body": r.text}, 502
+        p = r.json() or {}
+
+        direction = p.get("direction")
+        status = p.get("status") or {}
+        tx = (p.get("transaction") or {})
+        txid = tx.get("txid")
+        metadata = p.get("metadata") or {}
+        session_id = metadata.get("session_id")
+
+        # Sanity checks
+        if direction != "user_to_app":
+            return {"ok": False, "error": "not_user_to_app", "detail": {"direction": direction}}, 400
+        if not txid or not (status.get("transaction_verified") or tx.get("verified")):
+            return {"ok": False, "error": "tx_not_verified", "detail": {"txid": txid, "status": status}}, 400
+        if status.get("developer_completed"):
+            return {"ok": True, "note": "already_completed"}, 200
+
+        # 2) Complete it on Pi
+        rc = requests.post(
+            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
+            headers=pi_headers(),
+            json={"txid": txid},
+            timeout=15
+        )
+        if rc.status_code != 200:
+            return {"ok": False, "error": "complete_failed", "status": rc.status_code, "body": rc.text}, 502
+
+        # 3) Try to fulfill locally if we can match the session
+        if session_id:
+            with conn() as cx:
+                s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if s and s["state"] == "initiated":
+                try:
+                    result = fulfill_session(s, txid, buyer={}, shipping={})
+                except Exception as e:
+                    return {
+                        "ok": True,
+                        "note": "completed_on_pi_but_local_fulfillment_failed",
+                        "error": repr(e),
+                        "payment_id": payment_id,
+                        "session_id": session_id,
+                    }, 200
+                return {"ok": True, "note": "completed_and_fulfilled", "result": result}, 200
+            else:
+                return {
+                    "ok": True,
+                    "note": "completed_on_pi_but_session_missing_or_not_initiated",
+                    "payment_id": payment_id,
+                    "session_id": session_id,
+                }, 200
+        else:
+            return {
+                "ok": True,
+                "note": "completed_on_pi_no_session_id_in_metadata",
+                "payment_id": payment_id
+            }, 200
+
+    except Exception as e:
+        log("debug_complete_payment error:", repr(e))
+        return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
 
 # Cancel a stuck Pi payment (server-side)
 @app.get("/debug/cancel-payment")
