@@ -22,7 +22,7 @@
     h2{margin:0 0 8px;font-size:20px}
     .muted{color:var(--muted)}
     .ip-table{width:100%;border-collapse:collapse}
-    .ip-table th,.ip-table td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
+    .ip-table th,.ip-table td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left} /* tighter */
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   </style>
@@ -99,6 +99,7 @@
       <div class="card">
         <h2>Purchases</h2>
         {% if purchases and purchases|length %}
+          <p class="muted" style="margin:6px 0">Store shown per order below</p>
           <table class="ip-table">
             <thead>
               <tr><th>#</th><th>Store</th><th>Item</th><th>Qty</th><th>Status</th><th>Amount (π)</th></tr>
