@@ -284,72 +284,6 @@ def debug_complete_payment():
         log("debug_complete_payment error:", repr(e))
         return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
 
-@app.post("/auth/exchange")
-def auth_exchange():
-    try:
-        # Accept either JSON (XHR) or form post (classic redirect flow)
-        if request.is_json:
-            data = request.get_json(silent=True) or {}
-        else:
-            payload = request.form.get("payload", "")
-            try:
-                data = json.loads(payload) if payload else {}
-            except Exception:
-                data = {}
-
-        user = (data.get("user") or {})
-        uid = user.get("uid") or user.get("id")
-        username = user.get("username")
-        token = data.get("accessToken")
-
-        # Basic payload checks
-        if not uid or not username or not token:
-            if not request.is_json:
-                return redirect("/signin?fresh=1")
-            return {"ok": False, "error": "invalid_payload"}, 400
-
-        # Verify the access token with Pi
-        r = requests.get(f"{PI_API_BASE}/v2/me",
-                         headers={"Authorization": f"Bearer {token}"}, timeout=10)
-        if r.status_code != 200:
-            if not request.is_json:
-                return redirect("/signin?fresh=1")
-            return {"ok": False, "error": "token_invalid"}, 401
-
-        # Upsert user by Pi UID
-        with conn() as cx:
-            row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-            if not row:
-                cx.execute(
-                    """INSERT INTO users(pi_uid, pi_username, role, created_at)
-                       VALUES(?, ?, 'buyer', ?)""",
-                    (uid, username, int(time.time()))
-                )
-                row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-
-        # Establish server session and mint short-lived bearer token
-        try:
-            session["user_id"] = row["id"]
-            session.permanent = True
-        except Exception:
-            pass
-
-        tok = mint_login_token(row["id"])
-        target = f"/dashboard?t={tok}"
-
-        # Form-post flow -> redirect
-        if not request.is_json:
-            return redirect(target)
-
-        # JSON/XHR flow -> return token so caller can hit APIs
-        return {"ok": True, "redirect": target, "token": tok}, 200
-
-    except Exception as e:
-        log("auth_exchange error:", repr(e))
-        if not request.is_json:
-            return redirect("/signin?fresh=1")
-        return {"ok": False, "error": "server_error"}, 500
-
 @app.get("/api/my-orders", endpoint="api_my_orders_v2")
 def api_my_orders_v2():
     u = current_user_row()
@@ -844,41 +778,67 @@ def pi_me():
 @app.post("/auth/exchange")
 def auth_exchange():
     try:
+        # Accept either JSON (XHR) or form post (classic redirect flow)
         if request.is_json:
             data = request.get_json(silent=True) or {}
         else:
             payload = request.form.get("payload", "")
-            try: data = json.loads(payload) if payload else {}
-            except Exception: data = {}
+            try:
+                data = json.loads(payload) if payload else {}
+            except Exception:
+                data = {}
+
         user = (data.get("user") or {})
         uid = user.get("uid") or user.get("id")
         username = user.get("username")
         token = data.get("accessToken")
+
+        # Basic payload checks
         if not uid or not username or not token:
-            if not request.is_json: return redirect("/signin?fresh=1")
+            if not request.is_json:
+                return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
+
+        # Verify the access token with Pi
         r = requests.get(f"{PI_API_BASE}/v2/me",
                          headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if r.status_code != 200:
-            if not request.is_json: return redirect("/signin?fresh=1")
+            if not request.is_json:
+                return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
+
+        # Upsert user by Pi UID
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
-                cx.execute("""INSERT INTO users(pi_uid, pi_username, role, created_at)
-                              VALUES(?, ?, 'buyer', ?)""",
-                           (uid, username, int(time.time())))
+                cx.execute(
+                    """INSERT INTO users(pi_uid, pi_username, role, created_at)
+                       VALUES(?, ?, 'buyer', ?)""",
+                    (uid, username, int(time.time()))
+                )
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
+
+        # Establish server session and mint short-lived bearer token
         try:
-            session["user_id"] = row["id"]; session.permanent = True
-        except Exception: pass
+            session["user_id"] = row["id"]
+            session.permanent = True
+        except Exception:
+            pass
+
         tok = mint_login_token(row["id"])
         target = f"/dashboard?t={tok}"
-        if not request.is_json: return redirect(target)
-        return {"ok": True, "redirect": target}
+
+        # Form-post flow -> redirect
+        if not request.is_json:
+            return redirect(target)
+
+        # JSON/XHR flow -> return token so caller can hit APIs
+        return {"ok": True, "redirect": target, "token": tok}, 200
+
     except Exception as e:
         log("auth_exchange error:", repr(e))
-        if not request.is_json: return redirect("/signin?fresh=1")
+        if not request.is_json:
+            return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
 
 # ----------------- MERCHANT DASHBOARD -----------------
