@@ -423,11 +423,38 @@
     if(!el) return; el.innerHTML = '';
     const img = document.createElement('img'); img.src = url; el.appendChild(img);
   }
+
+  // NEW: token-aware uploader that includes bearer + cookies
+  function getToken() {
+    // Prefer hidden input (carried in forms), fall back to URL ?t=
+    const inp = document.querySelector('input[name="t"]');
+    return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
+  }
+
   async function uploadTo(path, file){
     const fd = new FormData(); fd.append('file', file);
-    const r = await fetch('/upload', {method:'POST', body:fd});
-    if(!r.ok) throw new Error('upload failed'); const j = await r.json();
-    if(!j.ok || !j.url) throw new Error('bad response'); return j.url;
+
+    const t = getToken();
+    const url = path + (t ? (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(t) : '');
+
+    const headers = {};
+    if (t) headers['Authorization'] = 'Bearer ' + t;
+
+    const r = await fetch(url, {
+      method: 'POST',
+      body: fd,
+      headers,
+      credentials: 'include' // include session cookie if present
+    });
+
+    if(!r.ok){
+      let msg = 'upload failed';
+      try { const j = await r.json(); if (j && j.error) msg += ` (${j.error})`; } catch(_) {}
+      throw new Error(msg);
+    }
+    const j = await r.json();
+    if(!j.ok || !j.url) throw new Error('bad response');
+    return j.url;
   }
 
   // Copy helpers (storefront + per-item)
