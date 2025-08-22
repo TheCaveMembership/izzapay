@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pi Incomplete Payment Debug</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:#0b0f17;color:#e8f0ff}
+    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:720px;margin:0 auto}
+    button{padding:10px 14px;border:0;border-radius:10px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
+    input{width:100%;padding:10px;border:1px solid #1f2a44;border-radius:10px;background:#0b1222;color:#e8f0ff}
+    .muted{color:#bcd0ff}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    .ok{color:#8ef49a} .err{color:#ff9ba3}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Find & Cancel Incomplete Payment</h2>
+    <p class="muted">Open this page <strong>in Pi Browser</strong>. We’ll detect any stuck payment for this app and cancel it.</p>
+
+    <p class="muted">Debug token: <span class="mono">{{ debug_token[-6:] if debug_token and debug_token|length>6 else debug_token }}</span></p>
+    {% if sandbox %}
+      <p class="muted">Environment: <strong>Sandbox</strong></p>
+    {% else %}
+      <p class="muted">Environment: <strong>Production</strong></p>
+    {% endif %}
+
+    <div id="status" class="muted">Loading Pi SDK…</div>
+
+    <div id="found" style="display:none;margin-top:12px">
+      <label class="muted">Payment ID</label>
+      <input id="pid" class="mono" readonly>
+      <div style="margin-top:12px">
+        <button id="cancelBtn">Cancel payment</button>
+      </div>
+      <p id="result" class="muted" style="margin-top:10px"></p>
+    </div>
+
+    <div id="none" style="display:none;margin-top:12px">
+      <p>No incomplete payment was reported by the Pi SDK.</p>
+    </div>
+  </div>
+
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <script>
+  (async function(){
+    const status  = document.getElementById('status');
+    const found   = document.getElementById('found');
+    const none    = document.getElementById('none');
+    const pidEl   = document.getElementById('pid');
+    const btn     = document.getElementById('cancelBtn');
+    const result  = document.getElementById('result');
+
+    function setStatus(t){ status.textContent = t; }
+    function qs(k){ return new URL(location.href).searchParams.get(k) || ''; }
+
+    const debugToken = "{{ debug_token|e }}";
+
+    try{
+      if(!window.Pi || !Pi.init){
+        setStatus("Pi SDK not available. Please open this page in Pi Browser.");
+        return;
+      }
+
+      // Initialize the SDK (no app id needed when loaded inside Pi Browser context)
+      Pi.init({ version: "2.0" });
+
+      let stuckId = null;
+      const scopes = ['payments','username'];
+
+      function onIncompletePaymentFound(payment){
+        try{
+          // SDK may return different shapes; try both
+          stuckId = (payment && (payment.identifier || payment.paymentId)) || null;
+        }catch(_){}
+      }
+
+      setStatus("Authenticating with Pi…");
+      await Pi.authenticate(scopes, onIncompletePaymentFound);
+
+      if(stuckId){
+        pidEl.value = stuckId;
+        found.style.display = '';
+        setStatus("Incomplete payment detected.");
+
+        // Wire the cancel button
+        btn.onclick = async () => {
+          btn.disabled = true;
+          result.textContent = "Cancelling…";
+          try{
+            // POST to your Flask endpoint with the debug token
+            const url = `/debug/cancel-payment?token=${encodeURIComponent(debugToken)}&payment_id=${encodeURIComponent(stuckId)}`;
+            const r = await fetch(url, { method: "POST" });
+            const j = await r.json().catch(()=> ({}));
+            if(r.ok && j && j.ok){
+              result.innerHTML = "<span class='ok'>Cancelled. You can retry checkout now.</span>";
+              setStatus("Done.");
+            }else{
+              result.innerHTML = "<span class='err'>Cancel failed. Check server logs.</span>";
+              console.log("Cancel error:", j);
+              setStatus("Cancel failed.");
+            }
+          }catch(e){
+            console.error(e);
+            result.innerHTML = "<span class='err'>Request error. Check server logs.</span>";
+            setStatus("Cancel request errored.");
+          }finally{
+            btn.disabled = false;
+          }
+        };
+      }else{
+        setStatus("No incomplete payment detected by SDK.");
+        none.style.display = '';
+      }
+    }catch(e){
+      console.error(e);
+      setStatus("Error: " + (e && e.message || e));
+    }
+  })();
+  </script>
+</body>
+</html>
