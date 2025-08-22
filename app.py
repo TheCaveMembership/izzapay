@@ -104,8 +104,12 @@ def ensure_schema():
                 log("[schema] add user_id failed (might already exist):", repr(e))
 
 # sessions: persist the user who created the session (so we can attribute purchases)
-scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+with conn() as cx:
+    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+
 if "user_id" not in scols:
+    with conn() as cx:
+        cx.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
     try:
         cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
     except Exception as e:
