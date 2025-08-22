@@ -824,10 +824,20 @@ def merchant_items(slug):
     u, m = require_merchant_owner(slug)
     if isinstance(u, Response): return u
     with conn() as cx:
-        items = cx.execute("SELECT * FROM items WHERE merchant_id=?", (m["id"],)).fetchall()
-    return render_template("merchant_items.html", setup_mode=False, m=m, items=items,
-                           app_base=APP_BASE_URL, t=get_bearer_token_from_request(),
-                           share_base=BASE_ORIGIN, colorway=m["colorway"])
+        items = cx.execute(
+            "SELECT * FROM items WHERE merchant_id=? AND active=1 ORDER BY id DESC",
+            (m["id"],)
+        ).fetchall()
+    return render_template(
+        "merchant_items.html",
+        setup_mode=False,
+        m=m,
+        items=items,
+        app_base=APP_BASE_URL,
+        t=get_bearer_token_from_request(),
+        share_base=BASE_ORIGIN,
+        colorway=m["colorway"]
+    )
 
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
