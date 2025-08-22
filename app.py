@@ -1892,29 +1892,24 @@ def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash
 
 def fulfill_session(s, tx_hash, buyer, shipping):
     """
-    Finalize a paid checkout session:
-      - Load merchant and snapshot line items
-      - Create 1+ order rows (single or multi)
-      - Update stock (when not backorder)
-      - Mark session as paid and attach tx
-      - Email buyer (if email provided) and merchant (always),
-        including a Shipping section in the merchant email when available.
-      - Redirect buyer back to storefront success view
+    Finalize a paid checkout session and email receipts.
+    Adds a nicely formatted Shipping block (street + unit + city/state/postal + country)
+    to the merchant email when data is present.
     """
-    # 1) Merchant (read-only)
+    # Merchant (read-only)
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
-    # 2) Money split on the session total
+    # Money split on the session total
     amt = float(s["expected_pi"])
     gross_total, fee_total, net_total = split_amounts(amt)
     gross_total = float(gross_total); fee_total = float(fee_total); net_total = float(net_total)
 
-    # 3) Buyer info (prefer explicit buyer, fall back to shipping form)
+    # Buyer info (prefer explicit buyer, fall back to shipping form)
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
     buyer_name  =  buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
 
-    # 4) Snapshot lines (single or multi)
+    # Snapshot lines (single or multi)
     try:
         lines = json.loads(s["line_items_json"] or "[]")
     except Exception:
@@ -1934,7 +1929,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             log("[fulfill_session] notify merchant failed:", repr(e))
         return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
-    # 5) Fetch item records for titles/stock using IDs from the snapshot
+    # Fetch item records for titles/stock using IDs from the snapshot
     item_ids = [int(li["item_id"]) for li in lines]
     with conn() as cx:
         placeholders = ",".join("?" for _ in item_ids)
@@ -1942,25 +1937,20 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         by_id = {int(r["id"]): r for r in items}
 
     created_order_ids = []
-
-    # Proportionally allocate fee across lines by their gross share
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
+    buyer_user_id = s["user_id"]  # may be None for older sessions
 
-    buyer_user_id = s.get("user_id") if isinstance(s, dict) else s["user_id"]  # may be None for older sessions
-
-    # 6) Create orders + stock updates
+    # Create orders + stock updates
     with conn() as cx:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
             qty = int(li["qty"])
             snap_price = float(li["price"])
 
-            # compute from snapshot so emails and totals match exactly what user saw
             line_gross = snap_price * qty
             line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
             line_net   = line_gross - line_fee
 
-            # stock update (only if the item still exists and doesn't allow backorder)
             if it and not it["allow_backorder"]:
                 cx.execute(
                     "UPDATE items SET stock_qty=? WHERE id=?",
@@ -2003,12 +1993,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             )
             created_order_ids.append(cur.lastrowid)
 
-        # Mark session paid + attach tx
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # 7) Build & send consolidated email (buyer + merchant)
+    # Build & send consolidated email
     try:
-        # table rows for all lines
+        # Items table
         display_rows = []
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -2038,17 +2027,52 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             "</table>"
         )
 
-        # NEW: Shipping block for merchant email (only if present)
-        ship_parts = []
-        if isinstance(shipping, dict):
-            for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
-                v = (shipping.get(k) or "").strip()
-                if v:
-                    label = k.replace("_"," ").title()
-                    ship_parts.append(f"<div><strong>{label}:</strong> {v}</div>")
-        shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
-
+        # -------- NEW: nicer Shipping formatting for merchant email --------
         merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+
+        # Build a clean, multi-line address if any component exists
+        shipping_html = ""
+        if isinstance(shipping, dict):
+            name   = (shipping.get("name") or "").strip()
+            email  = (shipping.get("email") or "").strip()
+            phone  = (shipping.get("phone") or "").strip()
+            addr1  = (shipping.get("address") or "").strip()       # street
+            addr2  = (shipping.get("address2") or "").strip()      # unit/apt
+            city   = (shipping.get("city") or "").strip()
+            state  = (shipping.get("state") or "").strip()
+            postal = (shipping.get("postal_code") or "").strip()
+            country= (shipping.get("country") or "").strip()
+
+            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
+            if any_shipping:
+                # Street line: combine addr1 + addr2 if both exist
+                if addr1 and addr2:
+                    street_line = f"{addr1} #{addr2}"
+                elif addr1:
+                    street_line = addr1
+                elif addr2:
+                    # If only unit provided, still show it clearly
+                    street_line = f"Unit #{addr2}"
+                else:
+                    street_line = ""
+
+                # City/state/postal on one line, with smart commas/spaces
+                locality_parts = [p for p in [city, state] if p]
+                locality_line = ", ".join(locality_parts)
+                if postal:
+                    locality_line = (locality_line + " " if locality_line else "") + postal
+
+                # Build HTML
+                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
+                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
+                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
+                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
+                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
+                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
+                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
+                shipping_html = "".join(block)
+        # -------------------------------------------------------------------
+
         subj_suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
         subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}"
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){subj_suffix}"
@@ -2072,7 +2096,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         else:
             log("[mail][unified] buyer email skipped (no buyer_email)")
 
-        # Merchant email (always). Includes Shipping if buyer provided anything.
+        # Merchant email (always) with Shipping block (if any)
         send_email(
             merchant_mail,
             subj_merchant,
@@ -2093,14 +2117,12 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception as e:
         log("[fulfill_session] email build/send failed:", repr(e))
 
-    # 8) Redirect back to the storefront with success flag
+    # Redirect
     u = current_user_row()
     tok = ""
     if u:
-        try:
-            tok = mint_login_token(u["id"])
-        except Exception:
-            tok = ""
+        try: tok = mint_login_token(u["id"])
+        except Exception: tok = ""
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
