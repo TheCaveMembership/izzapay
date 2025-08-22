@@ -1350,6 +1350,21 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
+    # --- NEW: normalize item_id to robustly detect carts ---
+    raw_item_id = s["item_id"]
+    try:
+        item_id_int = int(raw_item_id) if raw_item_id is not None else None
+    except Exception:
+        item_id_int = None  # e.g. '', 'NULL', etc.
+
+    is_cart = (s["cart_id"] is not None) and (raw_item_id is None or item_id_int == 0)
+
+    log("[fulfill_session] session_id=", s["id"],
+        " cart_id=", s["cart_id"],
+        " raw_item_id=", raw_item_id,
+        " item_id_int=", item_id_int,
+        " is_cart=", is_cart)
+
     amt = float(s["expected_pi"])
     gross, fee, net = split_amounts(amt)
     gross = float(gross); fee = float(fee); net = float(net)
@@ -1359,7 +1374,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     created_order_ids = []
 
-    if s["item_id"] is None:
+    if is_cart:
         # ========================= CART checkout =========================
         with conn() as cx:
             # use exact cart from session if present; otherwise fallback to latest cart for merchant
