@@ -103,43 +103,6 @@ def ensure_schema():
             except Exception as e:
                 log("[schema] add user_id failed (might already exist):", repr(e))
 
-with conn() as cx:
-    # ----- sessions.user_id (links session to the signed-in user at checkout time)
-    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-    if "user_id" not in scols:
-        try:
-            cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-        except Exception as e:
-            log("[schema] add sessions.user_id failed:", repr(e))
-            
-  # ----- orders.buyer_user_id (links the final order to the user)
-    ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-    if "buyer_user_id" not in ocols:
-        try:
-            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-        except Exception as e:
-            log("[schema] add orders.buyer_user_id failed:", repr(e))
-
-# sessions: persist the user who created the session (so we can attribute purchases)
-with conn() as cx:
-    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-
-if "user_id" not in scols:
-    with conn() as cx:
-        cx.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
-    try:
-        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-    except Exception as e:
-        log("[schema] add sessions.user_id failed (might already exist):", repr(e))
-
-# orders: store buyer_user_id for quick lookups in “My Orders”
-ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-if "buyer_user_id" not in ocols:
-    try:
-        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-    except Exception as e:
-        log("[schema] add orders.buyer_user_id failed (might already exist):", repr(e))
-        
         # orders should know the buyer user (so we can list purchases)
         ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
         if "buyer_user_id" not in ocols:
@@ -320,206 +283,68 @@ def debug_complete_payment():
     except Exception as e:
         log("debug_complete_payment error:", repr(e))
         return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
-        
-@app.get("/orders")
-def orders_page():
-    """
-    Render "My Orders" with:
-      - Purchases: orders tied to the signed-in user
-          * primary: orders.buyer_user_id = uid
-          * legacy:  sessions.user_id = uid via o.pi_tx_hash (for older orders)
-      - Sales: orders from merchant(s) owned by the user
-    If not signed in, render the Pi auth prompt (mode="auth").
-    """
-    u = current_user_row()
-    if not u:
-        # Not signed in -> show the single "Authorize with Pi" button that returns here.
-        return render_template("my_orders.html", mode="auth", sandbox=PI_SANDBOX)
 
-    uid = int(u["id"])
-
-    try:
-        with conn() as cx:
-            # ---- Purchases (new path: direct link by buyer_user_id)
-            purchases_new = cx.execute(
-                """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
-                       i.title AS item_title,
-                       m.business_name AS m_name
-                FROM orders o
-                JOIN items i     ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                WHERE o.buyer_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 200
-                """,
-                (uid,),
-            ).fetchall()
-
-            # ---- Purchases (legacy path: match via sessions.user_id and pi_tx_hash)
-            purchases_legacy = cx.execute(
-                """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
-                       i.title AS item_title,
-                       m.business_name AS m_name
-                FROM orders o
-                JOIN items i     ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                JOIN sessions s  ON s.pi_tx_hash = o.pi_tx_hash
-                WHERE s.user_id = ?
-                  AND (o.buyer_user_id IS NULL OR o.buyer_user_id = 0)
-                ORDER BY o.id DESC
-                LIMIT 200
-                """,
-                (uid,),
-            ).fetchall()
-
-            # De-dupe purchases by order id, keep newest first
-            seen = set()
-            purchases = []
-            for r in list(purchases_new) + list(purchases_legacy):
-                oid = r["id"]
-                if oid in seen:
-                    continue
-                seen.add(oid)
-                purchases.append(dict(r))
-
-            # ---- Sales: any order whose merchant is owned by this user
-            sales = cx.execute(
-                """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_merchant_net, o.pi_tx_hash,
-                       i.title AS item_title,
-                       m.business_name AS m_name, m.id AS m_id
-                FROM orders o
-                JOIN items i     ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                WHERE m.owner_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 200
-                """,
-                (uid,),
-            ).fetchall()
-
-            # We'll show the first merchant (if any) in the header "Store: ..."
-            merchant = None
-            if sales:
-                merchant = {"id": sales[0]["m_id"], "business_name": sales[0]["m_name"]}
-            else:
-                # Try to load a merchant row anyway so the page can say whether they have a store
-                merchant = cx.execute(
-                    "SELECT id, business_name FROM merchants WHERE owner_user_id=? LIMIT 1",
-                    (uid,),
-                ).fetchone()
-                if merchant:
-                    merchant = dict(merchant)
-
-        return render_template(
-            "my_orders.html",
-            mode="list",
-            user=u,
-            purchases=purchases,
-            sales=[dict(r) for r in sales],
-            merchant=merchant,
-            sandbox=PI_SANDBOX,
-        )
-
-    except Exception as e:
-        log("/orders render error:", repr(e))
-        # Fail safely with empty lists; still render the page
-        return render_template(
-            "my_orders.html",
-            mode="list",
-            user=u,
-            purchases=[],
-            sales=[],
-            merchant=None,
-            sandbox=PI_SANDBOX,
-            error="server_error",
-        )
-        
-@app.get("/api/my-orders")
-def api_my_orders():
-    """
-    Returns the signed-in user's purchases and sales.
-    Purchases:
-      - Prefer orders where orders.buyer_user_id = uid
-      - Also include orders whose pi_tx_hash matches a session whose user_id = uid (legacy)
-    Sales:
-      - Orders where the merchant's owner_user_id = uid
-    """
+@app.get("/api/my-orders", endpoint="api_my_orders_v2")
+def api_my_orders_v2():
     u = current_user_row()
     if not u:
         return {"ok": False, "error": "auth_required"}, 401
-    uid = int(u["id"])
-
     try:
         with conn() as cx:
-            # ---- Purchases (two sources unioned)
-            purchases = cx.execute(
-                """
-                SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                       i.title, m.business_name AS store
+            # Purchases: orders where this user was the buyer
+            purchases = cx.execute("""
+                SELECT
+                  o.id, o.item_id, o.qty, o.status,
+                  o.pi_amount, o.pi_tx_hash,
+                  i.title AS item_title,
+                  m.business_name AS m_name,
+                  m.slug AS m_slug
                 FROM orders o
-                JOIN items i      ON i.id = o.item_id
-                JOIN merchants m  ON m.id = o.merchant_id
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
                 WHERE o.buyer_user_id = ?
                 ORDER BY o.id DESC
-                LIMIT 100
-                """,
-                (uid,),
-            ).fetchall()
+                LIMIT 50
+            """, (u["id"],)).fetchall()
 
-            # legacy/backup: orders linked by tx -> sessions.user_id
-            legacy = cx.execute(
-                """
-                SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                       i.title, m.business_name AS store
-                FROM orders o
-                JOIN items i      ON i.id = o.item_id
-                JOIN merchants m  ON m.id = o.merchant_id
-                JOIN sessions s   ON s.pi_tx_hash = o.pi_tx_hash
-                WHERE s.user_id = ?
-                  AND (o.buyer_user_id IS NULL OR o.buyer_user_id = 0)
-                ORDER BY o.id DESC
-                LIMIT 100
-                """,
-                (uid,),
+            # Sales: orders for any merchant this user owns
+            mids = cx.execute(
+                "SELECT id, slug, business_name FROM merchants WHERE owner_user_id=?",
+                (u["id"],)
             ).fetchall()
+            sales = []
+            if mids:
+                ids = [r["id"] for r in mids]
+                placeholders = ",".join("?" for _ in ids)
+                sales = cx.execute(f"""
+                    SELECT
+                      o.id, o.item_id, o.qty, o.status,
+                      o.pi_amount, o.pi_tx_hash,
+                      i.title AS item_title,
+                      u2.pi_username AS buyer_username
+                    FROM orders o
+                    JOIN items i ON i.id = o.item_id
+                    LEFT JOIN users u2 ON u2.id = o.buyer_user_id
+                    WHERE o.merchant_id IN ({placeholders})
+                    ORDER BY o.id DESC
+                    LIMIT 50
+                """, ids).fetchall()
 
-            # de-dup: if any overlap, keep unique by id
-            seen = set()
-            purchases_rows = []
-            for r in list(purchases) + list(legacy):
-                if r["id"] in seen:
-                    continue
-                seen.add(r["id"])
-                purchases_rows.append(dict(r))
-
-            # ---- Sales (orders where I own the merchant)
-            sales = cx.execute(
-                """
-                SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                       i.title, m.business_name AS store
-                FROM orders o
-                JOIN items i      ON i.id = o.item_id
-                JOIN merchants m  ON m.id = o.merchant_id
-                WHERE m.owner_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 100
-                """,
-                (uid,),
-            ).fetchall()
+        def rowify(r):
+            d = dict(r)
+            d["title"] = d.get("item_title")
+            d["merchant_name"] = d.get("m_name")
+            d["amount"] = d.get("pi_amount")
+            return d
 
         return {
             "ok": True,
-            "user": {"id": uid, "username": u["pi_username"]},
-            "purchases": purchases_rows,
-            "sales": [dict(r) for r in sales],
+            "purchases": [rowify(r) for r in purchases],
+            "sales": [rowify(r) for r in sales],
         }, 200
-
     except Exception as e:
         log("/api/my-orders error:", repr(e))
-        return {"ok": False, "error": "server_error"}, 500500
+        return {"ok": False, "error": "server_error"}, 500
 
 # Cancel a stuck Pi payment (server-side)
 @app.get("/debug/cancel-payment")
@@ -1017,6 +842,51 @@ def auth_exchange():
             return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
 
+@app.get("/orders")
+def orders_page():
+    u = current_user_row()
+    if not u:
+        # Not authenticated: simple page with a Pi auth button that sends you back here
+        return render_template("orders.html",
+                               mode="auth",
+                               sandbox=PI_SANDBOX,
+                               app_base=APP_BASE_URL)
+
+    # Authenticated: gather purchases and, if applicable, sales
+    with conn() as cx:
+        # Purchases by this user (requires fulfill_session to store buyer_user_id)
+        purchases = cx.execute("""
+            SELECT o.*, i.title AS item_title, m.business_name AS m_name
+            FROM orders o
+            JOIN items i     ON i.id = o.item_id
+            JOIN merchants m ON m.id = o.merchant_id
+            WHERE o.buyer_user_id = ?
+            ORDER BY o.id DESC
+            LIMIT 100
+        """, (u["id"],)).fetchall()
+
+        # Merchant (if the user has a store)
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
+        sales = []
+        if m:
+            sales = cx.execute("""
+                SELECT o.*, i.title AS item_title
+                FROM orders o
+                JOIN items i ON i.id = o.item_id
+                WHERE o.merchant_id = ?
+                ORDER BY o.id DESC
+                LIMIT 100
+            """, (m["id"],)).fetchall()
+
+    # Render the lists
+    return render_template("orders.html",
+                           mode="list",
+                           user=u,
+                           purchases=purchases,
+                           sales=sales,
+                           merchant=m,
+                           app_base=APP_BASE_URL)
+
 # ----------------- MERCHANT DASHBOARD -----------------
 @app.get("/dashboard")
 def dashboard():
@@ -1359,90 +1229,58 @@ def cart_remove(cid):
 @app.get("/checkout/cart/<cid>")
 def checkout_cart(cid):
     u = current_user_row()
-    if not u:
-        return redirect("/signin?fresh=1")
+    if not u: return redirect("/signin?fresh=1")
     tok = get_bearer_token_from_request()
 
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
-        if not cart:
-            abort(404)
+        if not cart: abort(404)
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
-            SELECT cart_items.qty, items.*
-            FROM cart_items
-            JOIN items ON items.id = cart_items.item_id
-            WHERE cart_items.cart_id=?
+          SELECT cart_items.qty, items.*
+          FROM cart_items JOIN items ON items.id=cart_items.item_id
+          WHERE cart_items.cart_id=?
         """, (cid,)).fetchall()
 
     if not rows:
         return redirect(f"/store/{m['slug']}{('?t='+tok) if tok else ''}?cid={cid}")
 
-    # Calculate total and snapshot line items
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
     sid = uuid.uuid4().hex
+
+    # Snapshot all lines now so fulfillment/email are deterministic
     line_items = json.dumps([
         {"item_id": int(r["id"]), "qty": int(r["qty"]), "price": float(r["pi_price"])}
         for r in rows
     ])
 
-    # Save checkout session with attached user_id
     with conn() as cx:
-        cx.execute(
-            """INSERT INTO sessions(
-                   id, merchant_id, item_id, qty, expected_pi, state,
-                   created_at, cart_id, line_items_json, user_id
-               )
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (
-                sid, m["id"], None, 1, float(total), "initiated",
-                int(time.time()), cid, line_items, u["id"]
-            )
-        )
+        cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state, created_at, cart_id, line_items_json, user_id)
+                      VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                   (sid, m["id"], None, 1, float(total), "initiated", int(time.time()), cid, line_items, u["id"]))
 
-    # Minimal product-like object for checkout page
-    i = {
-        "business_name": m["business_name"],
-        "title": "Cart total",
-        "logo_url": m["logo_url"],
-        "colorway": m["colorway"]
-    }
-
-    return render_template(
-        "checkout.html",
-        sold_out=False,
-        i=i,
-        qty=1,
-        session_id=sid,
-        expected_pi=total,
-        app_base=APP_BASE_URL,
-        cart_mode=True,
-        colorway=m["colorway"],
-    )
+    # Minimal product-shaped object so your template renders nicely
+    i = {"business_name": m["business_name"], "title": "Cart total", "logo_url": m["logo_url"], "colorway": m["colorway"]}
+    return render_template("checkout.html",
+                           sold_out=False, i=i, qty=1, session_id=sid,
+                           expected_pi=total, app_base=APP_BASE_URL, cart_mode=True,
+                           colorway=m["colorway"])
 
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
-    # Load item + merchant
     with conn() as cx:
         i = cx.execute("""
-           SELECT items.*, 
-                  merchants.business_name, 
-                  merchants.logo_url, 
-                  merchants.id          AS mid,
-                  merchants.colorway    AS colorway
-           FROM items 
-           JOIN merchants ON merchants.id = items.merchant_id
+           SELECT items.*, merchants.business_name, merchants.logo_url, merchants.id as mid,
+                  merchants.colorway AS colorway
+           FROM items JOIN merchants ON merchants.id=items.merchant_id
            WHERE link_id=? AND active=1
         """, (link_id,)).fetchone()
-    if not i:
-        abort(404)
+    if not i: abort(404)
 
-    # Quantity & availability checks
     qty = max(1, int(request.args.get("qty", "1")))
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
-    # Build a new session for this checkout
     sid = uuid.uuid4().hex
     expected = float(i["pi_price"]) * qty
 
@@ -1453,35 +1291,193 @@ def checkout(link_id):
         "price": float(i["pi_price"]),
     }])
 
-    # NEW: attach the currently signed-in user to this session (for "My Orders")
+    # capture who is buying
     u = current_user_row()
-    uid = (u["id"] if u else None)
 
     with conn() as cx:
-        cx.execute(
-            """INSERT INTO sessions(
-                   id, merchant_id, item_id, qty, expected_pi, state,
-                   created_at, line_items_json, user_id
-               )
-               VALUES(?,?,?,?,?,?,?, ?, ?)""",
-            (
-                sid, i["mid"], i["id"], qty, expected, "initiated",
-                int(time.time()), line_items, uid
-            )
-        )
+        cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state,
+                   created_at, line_items_json, user_id)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                   (sid, i["mid"], i["id"], qty, expected, "initiated", int(time.time()), line_items, (u["id"] if u else None)))
 
-    # Render the Pi checkout page
     return render_template(
         "checkout.html",
-        sold_out=False,
-        i=i,
-        qty=qty,
-        session_id=sid,
-        expected_pi=expected,
-        app_base=APP_BASE_URL,
+        sold_out=False, i=i, qty=qty, session_id=sid, expected_pi=expected, app_base=APP_BASE_URL,
         colorway=i["colorway"]
     )
 
+@app.get("/api/my-orders")
+def api_my_orders():
+    u = current_user_row()
+    if not u:
+        return {"ok": False, "error": "not_authenticated"}, 401
+
+    me = u["id"]
+    with conn() as cx:
+        # Buyer orders (most recent first)
+        buyer_orders = cx.execute("""
+            SELECT o.id, o.item_id, o.qty, o.status, o.pi_amount, o.pi_tx_hash, 
+                   o.created_at, i.title AS item_title, m.business_name AS store
+            FROM orders o
+            LEFT JOIN items i ON i.id = o.item_id
+            LEFT JOIN merchants m ON m.id = o.merchant_id
+            WHERE o.buyer_user_id=?
+            ORDER BY o.id DESC
+            LIMIT 200
+        """, (me,)).fetchall()
+
+        # Sales (merchant) orders where I own the merchant
+        merchant_orders = cx.execute("""
+            SELECT o.id, o.item_id, o.qty, o.status, o.pi_amount, o.pi_tx_hash, 
+                   o.created_at, i.title AS item_title, m.business_name AS store
+            FROM orders o
+            JOIN merchants m ON m.id = o.merchant_id
+            LEFT JOIN items i ON i.id = o.item_id
+            WHERE m.owner_user_id=?
+            ORDER BY o.id DESC
+            LIMIT 200
+        """, (me,)).fetchall()
+
+    def rowify(rs):
+        return [dict(r) for r in rs]
+
+    return {
+        "ok": True,
+        "buyer_orders": rowify(buyer_orders),
+        "merchant_orders": rowify(merchant_orders),
+        "pi_username": u["pi_username"],
+    }
+
+@app.get("/my-orders")
+def my_orders_page():
+    # Use a self-contained template string so you don’t have to touch your files
+    html = """
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Orders — IZZA PAY</title>
+<style>
+  :root{--bg:#0b0f17;--card:#0f1728;--ink:#e8f0ff;--muted:#bcd0ff;--line:#1f2a44;--brand:#6e9fff}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0}
+  .wrap{max-width:820px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0}
+  .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}
+  details{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0c1424;margin:10px 0}
+  summary{cursor:pointer;font-weight:800}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{padding:6px;border-bottom:1px solid var(--line);text-align:left}
+  .muted{color:var(--muted)}
+</style>
+<div class="wrap">
+  <h2 style="margin:0 0 6px">My Orders</h2>
+  <p class="muted" id="hello"></p>
+
+  <div class="card" id="authBox">
+    <button id="signinBtn" class="btn">Sign in with Pi</button>
+    <p class="muted" style="margin-top:6px">This will authenticate and show your purchases and sales.</p>
+  </div>
+
+  <div class="card" id="ordersBox" style="display:none">
+    <details open>
+      <summary>Purchases (as Buyer)</summary>
+      <div id="buyerTblWrap" class="muted" style="margin-top:8px">Loading…</div>
+    </details>
+
+    <details>
+      <summary>Sales (as Merchant)</summary>
+      <div id="merchantTblWrap" class="muted" style="margin-top:8px">Loading…</div>
+    </details>
+  </div>
+</div>
+
+<script src="https://sdk.minepi.com/pi-sdk.js"></script>
+<script>
+(async function(){
+  function byId(id){ return document.getElementById(id); }
+  const authBox = byId('authBox');
+  const ordersBox = byId('ordersBox');
+  const hello = byId('hello');
+  const signinBtn = byId('signinBtn');
+  const buyerWrap = byId('buyerTblWrap');
+  const merchWrap = byId('merchantTblWrap');
+
+  function tableFor(rows){
+    if(!rows || !rows.length){ return '<p class="muted">No orders yet.</p>'; }
+    const head = '<thead><tr><th>ID</th><th>Store</th><th>Item</th><th>Qty</th><th>Status</th><th>Total (π)</th><th>TX</th></tr></thead>';
+    const body = rows.map(r => 
+      '<tr>' +
+        '<td>'+ r.id +'</td>'+
+        '<td>'+ (r.store || '') +'</td>'+
+        '<td>'+ (r.item_title || '') +'</td>'+
+        '<td>'+ (r.qty || 1) +'</td>'+
+        '<td>'+ (r.status || '') +'</td>'+
+        '<td>'+ (Number(r.pi_amount||0).toFixed(7)) +'</td>'+
+        '<td><small>'+(r.pi_tx_hash || '—')+'</small></td>'+
+      '</tr>'
+    ).join('');
+    return '<table>'+ head +'<tbody>'+ body +'</tbody></table>';
+  }
+
+  async function fetchMine(){
+    try{
+      const r = await fetch('/api/my-orders');
+      if(r.status === 401){
+        authBox.style.display = '';
+        ordersBox.style.display = 'none';
+        return null;
+      }
+      const j = await r.json();
+      return j;
+    }catch(_){ return null; }
+  }
+
+  async function render(){
+    const data = await fetchMine();
+    if(!data || !data.ok){
+      authBox.style.display = '';
+      ordersBox.style.display = 'none';
+      return;
+    }
+    authBox.style.display = 'none';
+    ordersBox.style.display = '';
+    hello.textContent = 'Signed in as @' + (data.pi_username || '');
+
+    buyerWrap.innerHTML = tableFor(data.buyer_orders);
+    merchWrap.innerHTML = tableFor(data.merchant_orders);
+  }
+
+  if(window.Pi && Pi.init){
+    Pi.init({ version: "2.0" });
+  }
+
+  signinBtn.onclick = async () => {
+    try{
+      if(!window.Pi || !Pi.authenticate){
+        alert("Open in Pi Browser to sign in.");
+        return;
+      }
+      const scopes = ['payments','username'];
+      const auth = await Pi.authenticate(scopes, function(){});
+      // Post to your existing auth_exchange to set the server session, then reload here
+      const res = await fetch('/auth/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(auth || {})
+      });
+      // Regardless of body, try render after this call (session should be set)
+      await render();
+    }catch(e){
+      console.log(e);
+      alert("Sign-in failed.");
+    }
+  };
+
+  // Initial attempt (if already signed in)
+  render();
+})();
+</script>
+"""
+    return render_template_string(html)
+    
 # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
 def pi_approve():
@@ -1801,6 +1797,7 @@ def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash
     except Exception as e:
         log("[mail] send_cart_emails error:", repr(e))
 
+# ======================== FULFILLMENT ========================
 def fulfill_session(s, tx_hash, buyer, shipping):
     # Merchant (read-only)
     with conn() as cx:
@@ -1846,8 +1843,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     # Proportionally allocate fee across lines by their gross share
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
 
-    buyer_user_id = s["user_id"]  # may be None for older sessions
-
     with conn() as cx:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1866,7 +1861,10 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            buyer_token = uuid.uuid4().hex
+            buyer_token   = uuid.uuid4().hex
+            buyer_user_id = s["user_id"]  # may be None on very old sessions
+
+            # INSERT each line as an order (now including buyer_user_id)
             cur = cx.execute(
                 """INSERT INTO orders(
                      merchant_id,
@@ -1902,11 +1900,12 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             )
             created_order_ids.append(cur.lastrowid)
 
-        # Mark session paid + attach tx
+        # Mark session paid
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # Build & send consolidated email
+    # Build & send a single consolidated email from the snapshot
     try:
+        # Build display rows using snapshot + titles
         display_rows = []
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1915,6 +1914,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             gross = float(li["price"]) * qty
             display_rows.append({"title": title, "qty": qty, "gross": gross})
 
+        # HTML table
         line_html = "".join(
             f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
             f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
@@ -1941,6 +1941,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}"
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){subj_suffix}"
 
+        # Buyer (optional)
         if buyer_email:
             send_email(
                 buyer_email,
@@ -1959,6 +1960,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         else:
             log("[mail][unified] buyer email skipped (no buyer_email)")
 
+        # Merchant (always)
         send_email(
             merchant_mail,
             subj_merchant,
@@ -1978,7 +1980,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception as e:
         log("[fulfill_session] email build/send failed:", repr(e))
 
-    # Redirect
+    # Redirect back to store
     u = current_user_row()
     tok = ""
     if u:
