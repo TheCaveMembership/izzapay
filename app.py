@@ -103,6 +103,22 @@ def ensure_schema():
             except Exception as e:
                 log("[schema] add user_id failed (might already exist):", repr(e))
 
+# sessions: persist the user who created the session (so we can attribute purchases)
+scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+if "user_id" not in scols:
+    try:
+        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+    except Exception as e:
+        log("[schema] add sessions.user_id failed (might already exist):", repr(e))
+
+# orders: store buyer_user_id for quick lookups in “My Orders”
+ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+if "buyer_user_id" not in ocols:
+    try:
+        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+    except Exception as e:
+        log("[schema] add orders.buyer_user_id failed (might already exist):", repr(e))
+        
         # orders should know the buyer user (so we can list purchases)
         ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
         if "buyer_user_id" not in ocols:
