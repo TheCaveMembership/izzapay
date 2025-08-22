@@ -334,48 +334,49 @@ def debug_complete_payment():
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.post("/upload-image")
-def upload_image():
+@app.post("/upload")
+def upload():
     """
     Accepts multipart/form-data with a 'file' field.
-    Saves to static/uploads/ and returns a JSON {ok, url}.
+    Saves to static/uploads/ and returns JSON: { ok: true, url: "/static/uploads/<name>" }.
     Requires the user to be signed in.
     """
+    # Require login (mirrors how the dashboard works)
     u = current_user_row()
     if not u:
         return {"ok": False, "error": "auth_required"}, 401
 
+    # Validate presence
     if "file" not in request.files:
         return {"ok": False, "error": "missing_file_field"}, 400
-
     f = request.files["file"]
     if not f or not f.filename:
         return {"ok": False, "error": "empty_file"}, 400
 
+    # Check extension
     if not _allowed_ext(f.filename):
         return {"ok": False, "error": "unsupported_extension"}, 400
 
-    # Read the bytes to validate actual image type
+    # Read bytes to validate actual image type
     data = f.read()
     kind = imghdr.what(None, h=data)  # "png", "jpeg", "gif", "webp", or None
     if not kind or kind not in ALLOWED_IMGHDR:
         return {"ok": False, "error": "invalid_image_type"}, 400
 
-    # Pick extension based on detected kind (normalize jpeg -> jpg)
+    # Normalize extension (jpeg -> jpg), generate unique name
     ext = "jpg" if kind == "jpeg" else kind
-    fname = secure_filename(f.filename)
-    # Ensure unique filename while keeping extension
     unique_name = f"{uuid.uuid4().hex}.{ext}"
-    path = os.path.join(UPLOAD_DIR, unique_name)
 
+    # Save
     try:
+        path = os.path.join(UPLOAD_DIR, secure_filename(unique_name))
         with open(path, "wb") as out:
             out.write(data)
     except Exception as e:
-        log("upload_image save error:", repr(e))
+        log("upload save error:", repr(e))
         return {"ok": False, "error": "save_failed"}, 500
 
-    # Public URL (Flask serves /static/* automatically)
+    # Public URL (Flask serves /static/*)
     url = f"/static/uploads/{unique_name}"
     return {"ok": True, "url": url}, 200
 
