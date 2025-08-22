@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Orders — IZZA PAY</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    html,body{max-width:100%;overflow-x:hidden;}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:980px;margin:0 auto;padding:16px}
+    @media (min-width:640px){ .wrap{padding:24px} }
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
+      padding:8px 0; position:sticky; top:0; z-index:10;
+      background:rgba(11,15,23,.9); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);}
+    .brand{display:flex;align-items:center;gap:10px;min-width:0}
+    .brand img{height:24px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .actions a{white-space:nowrap}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:12px}
+    h1{margin:0 0 8px;font-size:26px;line-height:1.2}
+    h2{margin:0 0 8px;font-size:20px}
+    .muted{color:var(--muted)}
+    .ip-table{width:100%;border-collapse:collapse}
+    .ip-table th,.ip-table td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+</head>
+<body class="cw-blue theme-a">
+  <div class="wrap">
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="brand">
+        <img src="/static/izzapay-mark.svg" alt="IZZA mark">
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY">
+      </div>
+      <div class="actions">
+        <a class="ip-btn ghost" href="/explore">Browse Stores</a>
+        <a class="ip-btn ghost" href="/privacy">Privacy</a>
+      </div>
+    </div>
+
+    {% if mode == "auth" %}
+      <!-- Not signed in: show a single Pi auth button that brings you back here -->
+      <div class="card">
+        <h1>View My Orders</h1>
+        <p class="muted">Authorize with Pi to see your recent purchases and, if you have a store, your sales.</p>
+        <div class="row" style="margin-top:8px">
+          <button id="piOrdersAuthBtn" class="ip-btn">Authorize with Pi</button>
+          <a class="ip-btn ghost" href="/signin">Back</a>
+        </div>
+        <p id="msg" class="muted" style="margin-top:8px"></p>
+        <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
+      </div>
+
+      <script>
+      (function(){
+        const btn = document.getElementById('piOrdersAuthBtn');
+        const msg = document.getElementById('msg');
+        const err = document.getElementById('err');
+        const sandbox = {{ 'true' if sandbox else 'false' }};
+        function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
+        function setErr(t){ if(err){ err.textContent = t || ''; } }
+        function initPi(){
+          if (!window.Pi || !Pi.init) return false;
+          try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+          catch(e){ setErr("Pi.init failed: " + (e?.message || e)); return false; }
+        }
+        if (!initPi()) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+        btn?.addEventListener('click', function(){
+          setErr('');
+          if (!window.Pi || !Pi.authenticate) { setMsg("Open in Pi Browser or refresh."); return; }
+          setMsg("Authorizing…");
+          const scopes = ['payments','username'];
+          function onIncompletePaymentFound(payment){ /* optional resume */ }
+          Pi.authenticate(scopes, onIncompletePaymentFound)
+            .then(function(auth){
+              const form = document.createElement('form');
+              form.method = 'POST';
+              form.action = "/auth/exchange?next=/orders"; // <-- come back here
+              const inp = document.createElement('input');
+              inp.type='hidden'; inp.name='payload';
+              inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+              form.appendChild(inp); document.body.appendChild(form); form.submit();
+            })
+            .catch(function(e){ setMsg("Authorization failed. Please try again."); setErr(e?.message || String(e)); });
+        });
+      })();
+      </script>
+    {% else %}
+      <!-- Signed in: show lists -->
+      <div class="card">
+        <h1>My Orders</h1>
+        <p class="muted">Signed in as <strong>{{ user.pi_username }}</strong>.</p>
+      </div>
+
+      <div class="card">
+        <h2>Purchases</h2>
+        {% if purchases and purchases|length %}
+          <table class="ip-table">
+            <thead>
+              <tr><th>#</th><th>Store</th><th>Item</th><th>Qty</th><th>Status</th><th>Amount (π)</th></tr>
+            </thead>
+            <tbody>
+              {% for o in purchases %}
+              <tr>
+                <td>{{ o.id }}</td>
+                <td>{{ o.m_name }}</td>
+                <td>{{ o.item_title }}</td>
+                <td>{{ o.qty }}</td>
+                <td><span class="badge">{{ o.status }}</span></td>
+                <td>{{ '%.7f'|format(o.pi_amount or 0) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">No purchases yet.</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Sales</h2>
+        {% if merchant %}
+          <p class="muted" style="margin:6px 0">Store: <strong>{{ merchant.business_name }}</strong></p>
+          {% if sales and sales|length %}
+            <table class="ip-table">
+              <thead>
+                <tr><th>#</th><th>Item</th><th>Qty</th><th>Status</th><th>Gross (π)</th><th>Net (π)</th></tr>
+              </thead>
+              <tbody>
+                {% for o in sales %}
+                <tr>
+                  <td>{{ o.id }}</td>
+                  <td>{{ o.item_title }}</td>
+                  <td>{{ o.qty }}</td>
+                  <td><span class="badge">{{ o.status }}</span></td>
+                  <td>{{ '%.7f'|format(o.pi_amount or 0) }}</td>
+                  <td>{{ '%.7f'|format(o.pi_merchant_net or 0) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="muted">No sales yet.</p>
+          {% endif %}
+        {% else %}
+          <p class="muted">You don’t have a merchant store yet.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</body>
+</html>
