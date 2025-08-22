@@ -208,107 +208,182 @@ def debug_cancel_payment():
 def debug_incomplete():
     _require_debug_token()
     token = (request.args.get("token") or "").strip()
+    from flask import render_template_string
     html = """
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Find & Cancel Incomplete Pi Payment</title>
 <style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:#0b0f17;color:#e8f0ff}
-  .card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:640px;margin:0 auto}
+  :root{--bg:#0b0f17;--card:#0f1728;--ink:#e8f0ff;--muted:#bcd0ff;--line:#1f2a44;}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:var(--bg);color:var(--ink)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:760px;margin:0 auto}
   button{padding:10px 14px;border:0;border-radius:10px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
-  input{width:100%;padding:10px;border:1px solid #1f2a44;border-radius:10px;background:#0b1222;color:#e8f0ff}
-  .muted{color:#bcd0ff}
+  button[disabled]{opacity:.6;cursor:wait}
+  input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#0b1222;color:var(--ink)}
+  textarea{min-height:160px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .muted{color:var(--muted)}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  .note{font-size:13px}
+  .k{font-weight:600}
 </style>
-<div class="card">
-  <h2>Find & Cancel Incomplete Payment</h2>
-  <p class="muted">Open this page <strong>in Pi Browser</strong>.</p>
-  <p class="muted">Token ends with: <code id="tok"></code></p>
+
+<div class="card grid">
+  <div>
+    <h2 style="margin:0 0 4px">Find & Cancel Incomplete Payment</h2>
+    <p class="muted" style="margin:6px 0">Open this page <strong>in Pi Browser</strong>.</p>
+    <p class="muted note" style="margin:0">Token ends with: <code id="tok"></code></p>
+  </div>
 
   <div id="status" class="muted">Loading Pi SDK…</div>
 
-  <div id="found" style="display:none;margin-top:12px">
-    <div class="row" style="align-items:flex-end">
-      <div style="flex:1">
-        <label class="muted">Payment ID</label>
-        <input id="pid" readonly>
-      </div>
-      <div>
-        <button id="cancelBtn">Cancel payment</button>
-      </div>
-    </div>
-    <p class="muted" style="margin-top:8px">If cancel succeeds, you can retry checkout immediately.</p>
+  <div id="controls" style="display:none" class="row">
+    <button id="retryBtn">Re-check</button>
+    <button id="cancelBtn" disabled>Cancel payment</button>
   </div>
 
-  <div id="none" style="display:none;margin-top:12px">
-    <p>No incomplete payment was reported by the Pi SDK.</p>
+  <div id="foundBox" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:1">
+        <label class="muted">Payment ID (from SDK)</label>
+        <input id="pid" readonly>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <label class="muted">Raw object from <span class="k">onIncompletePaymentFound(payment)</span></label>
+    <textarea id="raw" readonly placeholder="(nothing received yet)"></textarea>
+  </div>
+
+  <div>
+    <label class="muted">Errors / logs</label>
+    <textarea id="logs" readonly placeholder="(no errors)"></textarea>
+  </div>
+
+  <div class="note muted">
+    <div style="margin-top:8px"><span class="k">Tip:</span> If Pi Browser shows “You already have a pending payment…”, but the raw box stays empty, the lock lives on the Pi side and the SDK isn’t surfacing it to your app session. Hit <em>Re-check</em> after re-opening this page inside Pi Browser.</div>
   </div>
 </div>
 
 <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 <script>
 (function(){
-  const status = document.getElementById('status');
-  const found  = document.getElementById('found');
-  const none   = document.getElementById('none');
-  const pidEl  = document.getElementById('pid');
-  const btn    = document.getElementById('cancelBtn');
-  const tokEl  = document.getElementById('tok');
+  const statusEl = document.getElementById('status');
+  const rawEl    = document.getElementById('raw');
+  const logsEl   = document.getElementById('logs');
+  const pidEl    = document.getElementById('pid');
+  const foundBox = document.getElementById('foundBox');
+  const controls = document.getElementById('controls');
+  const retryBtn = document.getElementById('retryBtn');
+  const cancelBtn= document.getElementById('cancelBtn');
+  const tokEl    = document.getElementById('tok');
 
-  function set(t){ status.textContent = t; }
   function qs(k){ return new URL(location.href).searchParams.get(k) || ''; }
-  const token = qs('token');
+  const token = qs('token') || '';
   tokEl.textContent = token ? token.slice(-6) : '';
 
-  async function init(){
+  function setStatus(txt){ statusEl.textContent = txt; }
+  function logLine(msg){
     try{
-      if(!window.Pi || !Pi.init){ set("Pi SDK not available. Open in Pi Browser."); return; }
-      Pi.init({ version: "2.0" });
-
-      let stuckId = null;
-      const scopes = ['payments','username'];
-      function onIncompletePaymentFound(payment){
-        try{
-          stuckId = (payment && (payment.identifier || payment.paymentId)) || null;
-          console.log("onIncompletePaymentFound:", payment);
-        }catch(_){}
-      }
-
-      set("Authenticating…");
-      await Pi.authenticate(scopes, onIncompletePaymentFound);
-
-      if(stuckId){
-        set("Incomplete payment detected.");
-        pidEl.value = stuckId;
-        found.style.display = '';
-
-        btn.onclick = async () => {
-          btn.disabled = true; btn.textContent = "Cancelling…";
-          try{
-            const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(stuckId)}`;
-            const r = await fetch(url);
-            const j = await r.json();
-            if(j && j.ok){
-              set("Cancelled. You can retry checkout now.");
-            }else{
-              set("Cancel failed. See server logs."); console.log(j);
-            }
-          }catch(e){
-            set("Cancel request errored. See logs."); console.error(e);
-          }finally{
-            btn.disabled = false; btn.textContent = "Cancel payment";
-          }
-        };
-      }else{
-        set("No incomplete payment detected.");
-        none.style.display = '';
-      }
+      const t = new Date().toISOString().replace('T',' ').replace('Z','');
+      logsEl.value += "[" + t + "] " + msg + "\\n";
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }catch(_){}
+  }
+  function showRaw(obj){
+    try{
+      rawEl.value = obj ? JSON.stringify(obj, null, 2) : '';
+      rawEl.scrollTop = 0;
     }catch(e){
-      set("Error: " + (e && e.message || e));
-      console.error(e);
+      rawEl.value = "(failed to stringify: " + (e && e.message || e) + ")";
     }
   }
-  init();
+
+  let stuck = null; // object received from onIncompletePaymentFound
+  let stuckId = null;
+
+  async function checkOnce(){
+    controls.style.display = 'none';
+    cancelBtn.disabled = true;
+    foundBox.style.display = 'none';
+    showRaw(null);
+
+    if(!window.Pi || !Pi.init){
+      setStatus("Pi SDK not available. Open this page in Pi Browser.");
+      logLine("Pi SDK missing");
+      return;
+    }
+
+    try{
+      setStatus("Initializing Pi SDK…");
+      Pi.init({ version: "2.0" });
+
+      const scopes = ['payments','username'];
+
+      function onIncompletePaymentFound(payment){
+        try{
+          logLine("onIncompletePaymentFound fired.");
+          stuck = payment || null;
+          showRaw(stuck);
+          // Try both common keys:
+          stuckId = (stuck && (stuck.identifier || stuck.paymentId || stuck.transaction && stuck.transaction.paymentId)) || null;
+          if(stuckId){
+            setStatus("Incomplete payment detected by SDK.");
+            pidEl.value = stuckId;
+            foundBox.style.display = '';
+            cancelBtn.disabled = false;
+          }else{
+            setStatus("SDK callback fired, but it did not include a recognizable payment id.");
+            cancelBtn.disabled = true;
+          }
+        }catch(e){
+          logLine("Error handling onIncompletePaymentFound: " + (e && e.message || e));
+        }
+      }
+
+      setStatus("Authenticating…");
+      const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
+      logLine("authenticate result received.");
+      // Even if no callback fired, show we tried
+      controls.style.display = '';
+
+      if(!stuck){
+        setStatus("No incomplete payment detected by SDK.");
+        showRaw(null);
+      }
+    }catch(e){
+      setStatus("Auth / SDK error.");
+      logLine("SDK error: " + (e && e.message || e));
+    }
+  }
+
+  retryBtn.onclick = () => { checkOnce(); };
+
+  cancelBtn.onclick = async () => {
+    if(!stuckId){ return; }
+    cancelBtn.disabled = true;
+    const url = "/debug/cancel-payment?token=" + encodeURIComponent(token) + "&payment_id=" + encodeURIComponent(stuckId);
+    try{
+      setStatus("Cancelling on server…");
+      const r = await fetch(url);
+      const j = await r.json().catch(()=>({}));
+      logLine("Cancel response: " + JSON.stringify(j));
+      if(j && j.ok){
+        setStatus("Cancelled successfully. You can retry checkout now.");
+      }else{
+        setStatus("Cancel failed. See logs below.");
+      }
+    }catch(e){
+      logLine("Cancel fetch error: " + (e && e.message || e));
+      setStatus("Cancel request errored.");
+    }finally{
+      cancelBtn.disabled = false;
+    }
+  };
+
+  // kick it off
+  checkOnce();
 })();
 </script>
 """
