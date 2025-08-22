@@ -2,7 +2,7 @@ import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 from urllib.parse import urlparse
-from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
+from flask import Flask, request, render_template, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
 
@@ -219,79 +219,7 @@ def debug_send_order_emails_get(order_id: int):
     except Exception as e:
         print(f"[debug] manual email trigger error (GET) -> order_id={order_id} err={repr(e)}")
         return {"ok": False, "error": repr(e)}, 500
-
-# (Optional) Pi incomplete payment finder page — JS is fully inside a quoted string
-@app.get("/debug/incomplete")
-def debug_incomplete_page():
-    _require_debug_token()
-    token = (request.args.get("token") or "").strip()
-    html = f"""<!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pi Incomplete Payment Debug</title>
-<style>
-  body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:#0b0f17;color:#e8f0ff}}
-  .card{{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px}}
-  button{{padding:10px 14px;border:0;border-radius:10px;background:#6e9fff;color:#0b0f17;font-weight:800}}
-  input{{width:100%;padding:10px;border:1px solid #1f2a44;border-radius:10px;background:#0b1222;color:#e8f0ff}}
-  .muted{{color:#bcd0ff}} .row{{display:flex;gap:10px;flex-wrap:wrap;align-items:center}}
-</style>
-<div class="card">
-  <h2>Find Incomplete Payment</h2>
-  <p class="muted">Open this page <strong>in Pi Browser</strong>. We’ll detect any stuck payment for this app.</p>
-  <p class="muted">Token ends with: <code>{token[-6:] if len(token)>6 else token}</code></p>
-  <div id="status" class="muted">Loading Pi SDK…</div>
-  <div id="found" style="display:none;margin-top:12px">
-    <div class="row" style="align-items:flex-end">
-      <div style="flex:1">
-        <label class="muted">Payment ID</label>
-        <input id="pid" readonly>
-      </div>
-    </div>
-  </div>
-  <div id="none" style="display:none;margin-top:12px">
-    <p>No incomplete payment was reported by the Pi SDK.</p>
-  </div>
-</div>
-<script src="https://sdk.minepi.com/pi-sdk.js"></script>
-<script>
-(async function(){
-  const status = document.getElementById('status');
-  const found  = document.getElementById('found');
-  const none   = document.getElementById('none');
-  const pidEl  = document.getElementById('pid');
-
-  function set(t){ status.textContent = t; }
-
-  try{
-    if(!window.Pi || !Pi.init){ set("Pi SDK not available. Open in Pi Browser."); return; }
-    Pi.init({ version: "2.0" });
-
-    let stuckId = null;
-    const scopes = ['payments','username'];
-    function onIncompletePaymentFound(payment){
-      try{
-        stuckId = (payment && (payment.identifier || payment.paymentId)) || null;
-      }catch(_){}
-    }
-
-    set("Authenticating…");
-    await Pi.authenticate(scopes, onIncompletePaymentFound);
-
-    if(stuckId){
-      set("Incomplete payment detected.");
-      pidEl.value = stuckId;
-      found.style.display = '';
-    }else{
-      set("No incomplete payment detected.");
-      none.style.display = '';
-    }
-  }catch(e){
-    set("Error: " + (e && e.message || e));
-    console.error(e);
-  }
-})();
-</script>"""
-    return render_template_string(html)
+# ----------------- END DEBUG -----------------
 
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
@@ -771,7 +699,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -883,7 +811,7 @@ def send_order_emails(order_id: int):
             log("[mail] order not found -> id=", order_id)
             return
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
 
     merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
     merchant_name = m["business_name"] if m else "Your Merchant"
@@ -943,7 +871,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     buyer_name  = buyer.get("name") or shipping.get("name") or None
 
     if s["item_id"] is None:
-        # CART checkout
         with conn() as cx:
             cart = cx.execute("SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
                               (m["id"],)).fetchone()
@@ -959,7 +886,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 line_net   = line_gross - line_fee
                 buyer_token = uuid.uuid4().hex
                 if not r["allow_backorder"]:
-                    cx.execute("UPDATE items SET stock_qty=? WHERE id=?", (max(0, r["stock_qty"] - r["qty"]), r["id"]))
+                    cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                               (max(0, r["stock_qty"] - r["qty"]), r["id"]))
                 cur = cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                              shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
                              status,buyer_token)
@@ -967,21 +895,20 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                            (s["merchant_id"], r["id"], r["qty"], buyer_email,
                             buyer_name, json.dumps(shipping), float(line_gross), float(line_fee),
                             float(line_net), tx_hash, buyer_token))
-                new_oid = cur.lastrowid
-                log("fulfill_session -> created order (cart) id:", new_oid)
                 try:
-                    log("fulfill_session -> send_order_emails (cart) id:", new_oid)
-                    send_order_emails(new_oid)
+                    log("fulfill_session -> send_order_emails (cart) id:", cur.lastrowid)
+                    send_order_emails(cur.lastrowid)
                 except Exception as e:
                     log("send_order_emails (cart) error:", repr(e))
-            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                       (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
-        # SINGLE item checkout
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
             if i and not i["allow_backorder"]:
-                cx.execute("UPDATE items SET stock_qty=? WHERE id=?", (max(0, i["stock_qty"] - s["qty"]), i["id"]))
+                cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                           (max(0, i["stock_qty"] - s["qty"]), i["id"]))
             buyer_token = uuid.uuid4().hex
             cur = cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                          shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
@@ -990,14 +917,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                        (s["merchant_id"], s["item_id"], s["qty"], buyer_email,
                         buyer_name, json.dumps(shipping), float(gross), float(fee),
                         float(net), tx_hash, buyer_token))
-            new_oid = cur.lastrowid
-            log("fulfill_session -> created order (single) id:", new_oid)
             try:
-                log("fulfill_session -> send_order_emails (single) id:", new_oid)
-                send_order_emails(new_oid)
+                log("fulfill_session -> send_order_emails (single) id:", cur.lastrowid)
+                send_order_emails(cur.lastrowid)
             except Exception as e:
                 log("send_order_emails (single) error:", repr(e))
-            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                       (tx_hash, s["id"]))
 
     u = current_user_row()
     tok = ""
@@ -1057,7 +983,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
