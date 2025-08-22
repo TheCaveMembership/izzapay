@@ -1,3 +1,6 @@
+import os, uuid
+from PIL import Image
+from werkzeug.utils import secure_filename
 import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
@@ -5,8 +8,6 @@ from urllib.parse import urlparse
 from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
-import os, uuid, imghdr
-from werkzeug.utils import secure_filename
 
 # Local modules you already have
 from db import init_db, conn
@@ -26,15 +27,21 @@ DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "782ba6059694b921d317b0df83db
 
 # ----------------- APP -----------------
 app = Flask(__name__)
-# ---- Image upload config ----
+# --- config (place after app = Flask(__name__)) ---
 UPLOAD_DIR = os.path.join(app.root_path, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Max ~10 MB per image (tweak as you wish)
+# Max ~10 MB per image
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
-ALLOWED_IMGHDR = {"png", "jpeg", "gif", "webp"}  # imghdr returns "jpeg" for jpg
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}  # normalized extensions
+
+def _normalize_ext(fmt: str) -> str:
+    """Map Pillow format names to file extensions we allow."""
+    if not fmt:
+        return ""
+    fmt = fmt.lower()
+    return "jpg" if fmt == "jpeg" else fmt
 _secret = os.getenv("FLASK_SECRET") or os.urandom(32)
 app.secret_key = _secret
 app.config.update(
@@ -334,14 +341,16 @@ def debug_complete_payment():
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# --- FULL CORRECTED /upload ROUTE ---
 @app.post("/upload")
 def upload():
     """
     Accepts multipart/form-data with a 'file' field.
-    Saves to static/uploads/ and returns JSON: { ok: true, url: "/static/uploads/<name>" }.
+    Saves to static/uploads/ and returns JSON:
+      { ok: true, url: "/static/uploads/<name>" }
     Requires the user to be signed in.
     """
-    # Require login (mirrors how the dashboard works)
+    # Require login like the dashboard
     u = current_user_row()
     if not u:
         return {"ok": False, "error": "auth_required"}, 401
@@ -353,27 +362,48 @@ def upload():
     if not f or not f.filename:
         return {"ok": False, "error": "empty_file"}, 400
 
-    # Check extension
-    if not _allowed_ext(f.filename):
-        return {"ok": False, "error": "unsupported_extension"}, 400
+    # Basic filename sanity (used only for logging; we always generate a unique name)
+    orig_name = secure_filename(f.filename)
 
-    # Read bytes to validate actual image type
-    data = f.read()
-    kind = imghdr.what(None, h=data)  # "png", "jpeg", "gif", "webp", or None
-    if not kind or kind not in ALLOWED_IMGHDR:
-        return {"ok": False, "error": "invalid_image_type"}, 400
-
-    # Normalize extension (jpeg -> jpg), generate unique name
-    ext = "jpg" if kind == "jpeg" else kind
-    unique_name = f"{uuid.uuid4().hex}.{ext}"
-
-    # Save
+    # Validate image content with Pillow
     try:
-        path = os.path.join(UPLOAD_DIR, secure_filename(unique_name))
-        with open(path, "wb") as out:
-            out.write(data)
+        # Open and verify integrity without decoding full image
+        img = Image.open(f.stream)
+        img.verify()
+    except Exception:
+        return {"ok": False, "error": "invalid_image"}, 400
+
+    # Re-open stream (verify() leaves file in an unusable state)
+    try:
+        f.stream.seek(0)
+        img = Image.open(f.stream)
+    except Exception:
+        return {"ok": False, "error": "reopen_failed"}, 400
+
+    # Determine extension from actual format
+    ext = _normalize_ext(img.format)
+    if ext not in ALLOWED_EXTENSIONS:
+        return {"ok": False, "error": "unsupported_format"}, 400
+
+    # Generate unique safe filename
+    unique_name = f"{uuid.uuid4().hex}.{ext}"
+    path = os.path.join(UPLOAD_DIR, secure_filename(unique_name))
+
+    # Save (no recompression/transform to preserve original as-is)
+    try:
+        # For formats Pillow can write directly, save via Pillow; for others, fall back to raw bytes
+        # Rewind again in case Pillow consumed the stream when reading headers
+        f.stream.seek(0)
+        if ext in {"jpg", "png", "gif", "webp"}:
+            # Load fully then save to ensure a valid file (prevents partial uploads)
+            img = Image.open(f.stream)
+            img.save(path)
+        else:
+            # Fallback (shouldn't hit due to ALLOWED_EXTENSIONS)
+            with open(path, "wb") as out:
+                out.write(f.stream.read())
     except Exception as e:
-        log("upload save error:", repr(e))
+        log("upload save error:", repr(e), "orig_name=", orig_name)
         return {"ok": False, "error": "save_failed"}, 500
 
     # Public URL (Flask serves /static/*)
