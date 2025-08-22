@@ -1227,8 +1227,10 @@ def send_order_emails(order_id: int):
 
 # ---- fulfillment -----------------------------------------
 def fulfill_session(s, tx_hash, buyer, shipping):
+    # Resolve merchant first (read-only)
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+
     amt = float(s["expected_pi"])
     gross, fee, net = split_amounts(amt)
     gross = float(gross); fee = float(fee); net = float(net)
@@ -1236,66 +1238,98 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     buyer_email = (buyer.get("email") or shipping.get("email") or None)
     buyer_name  = buyer.get("name") or shipping.get("name") or None
 
+    # We'll collect order IDs and send emails AFTER commit.
+    created_order_ids = []
+
     if s["item_id"] is None:
+        # CART checkout
         with conn() as cx:
-            cart = cx.execute("SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
-                              (m["id"],)).fetchone()
+            # pick the most recent cart for this merchant (as before)
+            cart = cx.execute(
+                "SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
+                (m["id"],)
+            ).fetchone()
             rows = cx.execute("""
               SELECT cart_items.qty, items.*
               FROM cart_items JOIN items ON items.id=cart_items.item_id
               WHERE cart_items.cart_id=?
             """, (cart["id"],)).fetchall()
-        with conn() as cx:
+
             for r in rows:
                 line_gross = float(r["pi_price"]) * r["qty"]
                 line_fee   = fee * (line_gross / amt) if amt > 0 else 0.0
                 line_net   = line_gross - line_fee
                 buyer_token = uuid.uuid4().hex
+
                 if not r["allow_backorder"]:
-                    cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
-                               (max(0, r["stock_qty"] - r["qty"]), r["id"]))
-                cur = cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
+                    cx.execute(
+                        "UPDATE items SET stock_qty=? WHERE id=?",
+                        (max(0, r["stock_qty"] - r["qty"]), r["id"])
+                    )
+
+                cur = cx.execute(
+                    """INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                              shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
                              status,buyer_token)
-                             VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
-                           (s["merchant_id"], r["id"], r["qty"], buyer_email,
-                            buyer_name, json.dumps(shipping), float(line_gross), float(line_fee),
-                            float(line_net), tx_hash, buyer_token))
-                try:
-                    log("fulfill_session -> send_order_emails (cart) id:", cur.lastrowid)
-                    send_order_emails(cur.lastrowid)
-                except Exception as e:
-                    log("send_order_emails (cart) error:", repr(e))
-            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-                       (tx_hash, s["id"]))
+                       VALUES(?,?,?,?,?,?, ?,?,?,?, 'pending','paid',?)""",
+                    (s["merchant_id"], r["id"], r["qty"], buyer_email, buyer_name,
+                     json.dumps(shipping), float(line_gross), float(line_fee), float(line_net),
+                     tx_hash, buyer_token)
+                )
+                created_order_ids.append(cur.lastrowid)
+
+            # mark session paid and clear cart
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
+
+        # <-- transaction COMMITTED on exiting with-block
+        for oid in created_order_ids:
+            try:
+                log("fulfill_session -> send_order_emails (cart) id:", oid)
+                send_order_emails(oid)
+            except Exception as e:
+                log("send_order_emails (cart) error:", repr(e))
+
     else:
+        # SINGLE item checkout
         with conn() as cx:
             i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
-                cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
-                           (max(0, i["stock_qty"] - s["qty"]), i["id"]))
+                cx.execute(
+                    "UPDATE items SET stock_qty=? WHERE id=?",
+                    (max(0, i["stock_qty"] - s["qty"]), i["id"])
+                )
+
             buyer_token = uuid.uuid4().hex
-            cur = cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
+            cur = cx.execute(
+                """INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                          shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
                          status,buyer_token)
-                         VALUES(?,?,?,?,?,?,?,?,?,?, 'pending','paid',?)""",
-                       (s["merchant_id"], s["item_id"], s["qty"], buyer_email,
-                        buyer_name, json.dumps(shipping), float(gross), float(fee),
-                        float(net), tx_hash, buyer_token))
-            try:
-                log("fulfill_session -> send_order_emails (single) id:", cur.lastrowid)
-                send_order_emails(cur.lastrowid)
-            except Exception as e:
-                log("send_order_emails (single) error:", repr(e))
+                   VALUES(?,?,?,?,?,?, ?,?,?,?, 'pending','paid',?)""",
+                (s["merchant_id"], s["item_id"], s["qty"], buyer_email, buyer_name,
+                 json.dumps(shipping), float(gross), float(fee), float(net), tx_hash, buyer_token)
+            )
+            created_order_ids.append(cur.lastrowid)
+
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
+        # <-- transaction COMMITTED here
+        for oid in created_order_ids:
+            try:
+                log("fulfill_session -> send_order_emails (single) id:", oid)
+                send_order_emails(oid)
+            except Exception as e:
+                log("send_order_emails (single) error:", repr(e))
+
+    # Build redirect as before
     u = current_user_row()
     tok = ""
     if u:
-        try: tok = mint_login_token(u["id"])
-        except Exception: tok = ""
+        try:
+            tok = mint_login_token(u["id"])
+        except Exception:
+            tok = ""
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
