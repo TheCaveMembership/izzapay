@@ -326,7 +326,7 @@ def orders_page():
         ).fetchone()
 
         # PURCHASES:
-        # 1) Normal path: orders that already have buyer_user_id = current user
+        # 1) Normal path: orders where orders.buyer_user_id = current user
         # 2) Fallback path: join to sessions on matching tx hash where sessions.user_id = current user
         purchases = cx.execute(
             """
@@ -334,7 +334,7 @@ def orders_page():
                    i.title AS item_title,
                    m.business_name AS m_name
             FROM orders o
-            JOIN items     i ON i.id = o.item_id
+            LEFT JOIN items     i ON i.id = o.item_id
             JOIN merchants m ON m.id = o.merchant_id
             LEFT JOIN sessions s ON s.pi_tx_hash = o.pi_tx_hash
             WHERE (o.buyer_user_id = ?)
@@ -394,7 +394,7 @@ def api_my_orders():
                 SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
                        i.title, m.business_name AS store
                 FROM orders o
-                JOIN items i      ON i.id = o.item_id
+                LEFT JOIN items i      ON i.id = o.item_id
                 JOIN merchants m  ON m.id = o.merchant_id
                 WHERE o.buyer_user_id = ?
                 ORDER BY o.id DESC
@@ -409,7 +409,7 @@ def api_my_orders():
                 SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
                        i.title, m.business_name AS store
                 FROM orders o
-                JOIN items i      ON i.id = o.item_id
+                LEFT JOIN items i      ON i.id = o.item_id
                 JOIN merchants m  ON m.id = o.merchant_id
                 JOIN sessions s   ON s.pi_tx_hash = o.pi_tx_hash
                 WHERE s.user_id = ?
@@ -772,11 +772,6 @@ def debug_send_order_emails_post(order_id: int):
 def debug_send_order_emails_get(order_id: int):
     _require_debug_token()
     try:
-        print(f"[debug] manual email trigger (GET) -> order_id={order_id}")
-        send_order_emails(order_id)
-        print(f"[debug] manual email trigger complete -> order_id={order_id}")
-        return {"ok": True, "order_id": order_id, "note": "Triggered via GET"}, 200
-    except Exception as e:
         print(f"[debug] manual email trigger error (GET) -> order_id={order_id} err={repr(e)}")
         return {"ok": False, "error": repr(e)}, 500
 # ----------------- END DEBUG -----------------
@@ -1270,7 +1265,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -1732,9 +1727,6 @@ def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash
         except Exception as e:
             log("[mail] cart merchant email FAILED:", repr(e))
 
-    except Exception as e:
-        log("[mail] send_cart_emails error:", repr(e))
-
 def fulfill_session(s, tx_hash, buyer, shipping):
     # Merchant (read-only)
     with conn() as cx:
@@ -1798,8 +1790,16 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            buyer_token   = uuid.uuid4().hex
-            buyer_user_id = s["user_id"]  # may be None for very old sessions
+            buyer_token = uuid.uuid4().hex
+
+            # --- CHANGE: fallback buyer_user_id if session doesn't have one
+            try:
+                buyer_user_id = s["user_id"]
+            except Exception:
+                buyer_user_id = None
+            if not buyer_user_id:
+                u_now = current_user_row()
+                buyer_user_id = (u_now["id"] if u_now else None)
 
             cur = cx.execute(
                 """INSERT INTO orders(
@@ -1975,7 +1975,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
