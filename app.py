@@ -2135,25 +2135,71 @@ _TRANSPARENT_PNG = base64.b64decode(
 
 @app.get("/uimg")
 def uimg():
-    src = request.args.get("src", "").strip()
+    """
+    Smart image loader:
+      - https:// remote: proxy via requests (as before)
+      - same-origin absolute (https://your-host/...) : proxy OK
+      - same-origin relative (/static/uploads/...)    : serve directly from disk
+    Anything else -> transparent 1x1 PNG
+    """
+    src = (request.args.get("src") or "").strip()
     if not src:
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+
     try:
         u = urlparse(src)
     except Exception:
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-    if u.scheme != "https":
-        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-    try:
-        r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-image-proxy"})
-        if r.status_code != 200:
+
+    # Case A: relative path to our static (e.g. /static/uploads/...)
+    if not u.scheme and src.startswith("/"):
+        # Only allow serving from /static/
+        if not src.startswith("/static/"):
             return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-        ctype = r.headers.get("Content-Type", "image/png")
-        data = r.content
+        # Map to filesystem safely
+        static_root = app.static_folder or os.path.join(os.path.dirname(__file__), "static")
+        # Prevent path traversal
+        rel_path = src[len("/static/"):]  # after /static/
+        safe_path = os.path.normpath(os.path.join(static_root, rel_path))
+        if not safe_path.startswith(os.path.abspath(static_root)):
+            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        if not os.path.exists(safe_path):
+            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        # Guess content type (fallback png)
+        ctype = "image/png"
+        try:
+            import mimetypes
+            ctype = mimetypes.guess_type(safe_path)[0] or "image/png"
+        except Exception:
+            pass
+        with open(safe_path, "rb") as f:
+            data = f.read()
         return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
-    except Exception as e:
-        log("uimg error:", repr(e))
-        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+
+    # Case B: absolute URL – allow https anywhere, and same-origin http(s) if matches our host
+    if u.scheme in ("http", "https"):
+        # If not https, only allow if it’s our own origin (defensive; most will be https anyway)
+        if u.scheme != "https":
+            try:
+                app_host = urlparse(APP_BASE_URL).netloc
+            except Exception:
+                app_host = request.host
+            if u.netloc != app_host:
+                return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+
+        try:
+            r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-image-proxy"})
+            if r.status_code != 200:
+                return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+            ctype = r.headers.get("Content-Type", "image/png")
+            data = r.content
+            return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
+        except Exception as e:
+            log("uimg proxy error:", repr(e))
+            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+
+    # Everything else -> transparent
+    return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
 # ----------------- POLICIES / VALIDATION -----------------
 @app.get("/validation-key.txt")
