@@ -185,7 +185,6 @@ def _require_debug_token():
 def debug_ping():
     _require_debug_token()
     return {"ok": True, "message": "pong", "time": int(time.time())}, 200
-    
 @app.get("/debug/complete-payment")
 def debug_complete_payment():
     _require_debug_token()
@@ -217,14 +216,13 @@ def debug_complete_payment():
 
         # 2) Complete it on Pi
         rc = requests.post(
-    f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
-    headers=pi_headers(),
-    json={"txid": txid},
-    timeout=15
-)
-# Pi can return 409 if the payment is already completed; treat as success.
-if rc.status_code not in (200, 409):
-    return {"ok": False, "error": "complete_failed", "status": rc.status_code, "body": rc.text}, 502
+            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
+            headers=pi_headers(),
+            json={"txid": txid},
+            timeout=15
+        )
+        if rc.status_code != 200:
+            return {"ok": False, "error": "complete_failed", "status": rc.status_code, "body": rc.text}, 502
 
         # 3) Try to fulfill locally if we can match the session
         if session_id:
