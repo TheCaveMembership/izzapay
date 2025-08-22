@@ -284,8 +284,8 @@ def debug_complete_payment():
         log("debug_complete_payment error:", repr(e))
         return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
 
-@app.get("/api/my-orders")
-def api_my_orders():
+@app.get("/api/my-orders", endpoint="api_my_orders_v2")
+def api_my_orders_v2():
     u = current_user_row()
     if not u:
         return {"ok": False, "error": "auth_required"}, 401
@@ -308,7 +308,10 @@ def api_my_orders():
             """, (u["id"],)).fetchall()
 
             # Sales: orders for any merchant this user owns
-            mids = cx.execute("SELECT id, slug, business_name FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchall()
+            mids = cx.execute(
+                "SELECT id, slug, business_name FROM merchants WHERE owner_user_id=?",
+                (u["id"],)
+            ).fetchall()
             sales = []
             if mids:
                 ids = [r["id"] for r in mids]
@@ -329,7 +332,6 @@ def api_my_orders():
 
         def rowify(r):
             d = dict(r)
-            # normalize some keys for the front-end renderer
             d["title"] = d.get("item_title")
             d["merchant_name"] = d.get("m_name")
             d["amount"] = d.get("pi_amount")
