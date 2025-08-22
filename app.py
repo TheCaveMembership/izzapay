@@ -284,6 +284,66 @@ def debug_complete_payment():
         log("debug_complete_payment error:", repr(e))
         return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
 
+@app.get("/api/my-orders")
+def api_my_orders():
+    u = current_user_row()
+    if not u:
+        return {"ok": False, "error": "auth_required"}, 401
+    try:
+        with conn() as cx:
+            # Purchases: orders where this user was the buyer
+            purchases = cx.execute("""
+                SELECT
+                  o.id, o.item_id, o.qty, o.status,
+                  o.pi_amount, o.pi_tx_hash,
+                  i.title AS item_title,
+                  m.business_name AS m_name,
+                  m.slug AS m_slug
+                FROM orders o
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                WHERE o.buyer_user_id = ?
+                ORDER BY o.id DESC
+                LIMIT 50
+            """, (u["id"],)).fetchall()
+
+            # Sales: orders for any merchant this user owns
+            mids = cx.execute("SELECT id, slug, business_name FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchall()
+            sales = []
+            if mids:
+                ids = [r["id"] for r in mids]
+                placeholders = ",".join("?" for _ in ids)
+                sales = cx.execute(f"""
+                    SELECT
+                      o.id, o.item_id, o.qty, o.status,
+                      o.pi_amount, o.pi_tx_hash,
+                      i.title AS item_title,
+                      u2.pi_username AS buyer_username
+                    FROM orders o
+                    JOIN items i ON i.id = o.item_id
+                    LEFT JOIN users u2 ON u2.id = o.buyer_user_id
+                    WHERE o.merchant_id IN ({placeholders})
+                    ORDER BY o.id DESC
+                    LIMIT 50
+                """, ids).fetchall()
+
+        def rowify(r):
+            d = dict(r)
+            # normalize some keys for the front-end renderer
+            d["title"] = d.get("item_title")
+            d["merchant_name"] = d.get("m_name")
+            d["amount"] = d.get("pi_amount")
+            return d
+
+        return {
+            "ok": True,
+            "purchases": [rowify(r) for r in purchases],
+            "sales": [rowify(r) for r in sales],
+        }, 200
+    except Exception as e:
+        log("/api/my-orders error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
+
 # Cancel a stuck Pi payment (server-side)
 @app.get("/debug/cancel-payment")
 def debug_cancel_payment():
