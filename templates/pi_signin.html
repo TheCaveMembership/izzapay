@@ -26,14 +26,29 @@
     p{color:var(--muted);margin:6px 0}
     .muted{color:var(--muted)}
     .hero-actions{display:flex;gap:10px;flex-wrap:wrap}
-    details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
-    summary{cursor:pointer;font-weight:800}
-    .list{margin-top:8px;border-top:1px solid var(--line)}
-    .row{display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0}
-    .row small{color:var(--muted)}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .right{text-align:right}
-    .empty{color:var(--muted);font-style:italic;padding:6px 2px}
+
+    /* Dropdown panel */
+    .dropdown{
+      position:relative;
+      display:inline-block;
+    }
+    .menu{
+      display:none;
+      position:absolute;
+      top:40px; left:0; min-width:320px; max-width:90vw;
+      background:var(--card); border:1px solid var(--line); border-radius:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      padding:12px; z-index:20;
+    }
+    .menu.show{ display:block; }
+    .section{ margin:6px 0 10px; }
+    .section h3{ margin:4px 0 6px; font-size:14px; color:var(--muted) }
+    .row{ display:flex; gap:8px; justify-content:space-between; align-items:center; border-top:1px solid var(--line); padding:8px 0 }
+    .small{ font-size:12px; color:var(--muted) }
+    .mono{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .tight{ margin-top:4px }
+    .right{ text-align:right }
+    .link{ color:var(--txt); text-decoration:underline }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -64,22 +79,22 @@
 
       <div class="hero-actions">
         <button id="piSignInBtn" class="ip-btn">Authorize with Pi</button>
-        <button id="viewOrdersBtn" class="ip-btn ghost">View my orders</button>
+
+        <!-- New: View my orders dropdown -->
+        <div class="dropdown">
+          <button id="viewOrdersBtn" class="ip-btn ghost">View my orders</button>
+          <div id="ordersMenu" class="menu">
+            <div id="menuContent">
+              <div class="small">Sign in with Pi to load your orders…</div>
+            </div>
+          </div>
+        </div>
+
         <a class="ip-btn ghost" href="/explore">See Stores</a>
       </div>
 
       <p id="msg" class="muted"></p>
       <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
-    </div>
-
-    <!-- Orders (appears after auth) -->
-    <div id="ordersCard" class="card" style="margin-top:12px; display:none">
-      <h2 style="margin:0 0 8px">Your orders</h2>
-      <p class="muted" style="margin:0 0 10px">Shown for your Pi username.</p>
-
-      <div id="ordersContent">
-        <!-- Filled by JS -->
-      </div>
     </div>
 
     <!-- How it works -->
@@ -104,12 +119,11 @@
   <script>
   (function(){
     const btn = document.getElementById('piSignInBtn');
-    const viewBtn = document.getElementById('viewOrdersBtn');
+    const ordersBtn = document.getElementById('viewOrdersBtn');
+    const menu = document.getElementById('ordersMenu');
+    const menuContent = document.getElementById('menuContent');
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
-    const ordersCard = document.getElementById('ordersCard');
-    const ordersContent = document.getElementById('ordersContent');
-    const postUrl = "/auth/exchange";
     const sandbox = {{ 'true' if sandbox else 'false' }};
 
     function setMsg(t){ if(msg){ msg.textContent = t || ''; } }
@@ -122,7 +136,7 @@
     }
     if (!initPi()) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
 
-    // --- Normal sign-in -> server redirect to dashboard ---
+    // --- Existing "Authorize with Pi" -> sets server session (dashboard flow)
     btn?.addEventListener('click', function(){
       setErr('');
       if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
@@ -131,8 +145,9 @@
       function onIncompletePaymentFound(payment){ /* optional resume */ }
       Pi.authenticate(scopes, onIncompletePaymentFound)
         .then(function(auth){
+          // Post to /auth/exchange (form) to establish session & redirect to dashboard
           const form = document.createElement('form');
-          form.method = 'POST'; form.action = postUrl;
+          form.method = 'POST'; form.action = "/auth/exchange";
           const inp = document.createElement('input');
           inp.type='hidden'; inp.name='payload';
           inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
@@ -141,79 +156,99 @@
         .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message || String(e)); });
     });
 
-    // --- Inline "View my orders" flow (no navigation) ---
-    async function authThenLoadOrders(){
-      setErr(''); setMsg('Authorizing…');
-      if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
-      const scopes = ['payments','username'];
-      function onIncompletePaymentFound(){}
-
-      try{
-        const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
-
-        // Exchange token via JSON (keeps you on this page, sets session cookie)
-        const ex = await fetch('/auth/exchange', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ accessToken: auth.accessToken, user: auth.user }),
-          credentials: 'same-origin'
-        }).then(r=>r.json());
-
-        if (!ex || !ex.ok){
-          setMsg("Could not complete sign-in."); setErr((ex && ex.error) || 'Unknown error'); return;
-        }
-
-        // Now session is set, fetch orders
-        setMsg('Loading your orders…');
-        const j = await fetch('/api/my-orders', { credentials: 'same-origin' }).then(r=>r.json());
-        if (!j || !j.ok){ setMsg(''); setErr((j && j.error) || 'Failed to load orders'); return; }
-
-        // Render
-        ordersCard.style.display = '';
-        renderOrders(j);
-        setMsg('');
-      }catch(e){
-        console.error(e);
-        setMsg('Authorization failed.'); setErr(e?.message || String(e));
+    // --- NEW: Orders dropdown flow
+    function toggleMenu(show){
+      if (show === undefined){
+        menu.classList.toggle('show');
+      } else {
+        if (show) menu.classList.add('show'); else menu.classList.remove('show');
       }
     }
+    document.addEventListener('click', (ev)=>{
+      if (!menu.contains(ev.target) && ev.target !== ordersBtn){
+        toggleMenu(false);
+      }
+    });
 
-    viewBtn?.addEventListener('click', authThenLoadOrders);
+    ordersBtn?.addEventListener('click', async function(){
+      setErr('');
+      toggleMenu(true);
+      menuContent.innerHTML = '<div class="small">Authorizing with Pi…</div>';
 
-    function fmtPi(x){
-      try{ return Number(x).toFixed(7) + ' π'; }catch(_){ return x + ' π'; }
-    }
-    function esc(s){ return String(s||'').replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+      if (!window.Pi || !Pi.authenticate){
+        menuContent.innerHTML = '<div class="small">Pi SDK not available. Open this in Pi Browser.</div>';
+        return;
+      }
 
-    function renderOrders(data){
-      const purchases = Array.isArray(data.purchases) ? data.purchases : [];
-      const sales     = Array.isArray(data.sales) ? data.sales : [];
+      try{
+        const scopes = ['payments','username'];
+        function onIncompletePaymentFound(payment){}
+        const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
 
-      const section = (title, rows, kind) => {
-        if (!rows.length){
-          return `<details open><summary>${esc(title)}</summary><div class="empty">No ${kind} yet.</div></details>`;
+        // Exchange for server token (JSON) — we added "token" in the response.
+        const j = await fetch("/auth/exchange", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken: auth.accessToken, user: auth.user })
+        }).then(r => r.json());
+
+        const token = j && (j.token || ((j.redirect||'').split('t=').pop())) || '';
+        if(!token){
+          menuContent.innerHTML = '<div class="small">Could not obtain token. Please try again.</div>';
+          return;
         }
-        const list = rows.map(r => `
-          <div class="row">
-            <div>
-              <div><strong>${esc(r.title || r.item_title || 'Item')}</strong></div>
-              <small>${kind==='purchases'
-                ? `from ${esc(r.merchant_name || r.m_name || '')}`
-                : `qty ${esc(r.qty)} • buyer ${esc(r.buyer_username || r.buyer_email || '—')}`}</small>
-            </div>
-            <div class="right">
-              <div>${fmtPi(r.pi_amount || r.amount || r.total || 0)}</div>
-              <small class="mono">#${esc(r.id)}</small>
-            </div>
-          </div>
-        `).join('');
-        return `<details open><summary>${esc(title)}</summary><div class="list">${list}</div></details>`;
-      };
 
-      ordersContent.innerHTML =
-        section('Purchases', purchases, 'purchases') +
-        section('Sales', sales, 'sales');
-    }
+        // Fetch orders with bearer token (as query)
+        const orders = await fetch("/api/my-orders?t=" + encodeURIComponent(token)).then(r => r.json());
+        if(!orders || !orders.ok){
+          menuContent.innerHTML = '<div class="small">No orders or not authorized.</div>';
+          return;
+        }
+
+        // Build dropdown content
+        const purchases = Array.isArray(orders.purchases) ? orders.purchases : [];
+        const sales     = Array.isArray(orders.sales) ? orders.sales : [];
+
+        function row(r){
+          const amt = (Number(r.amount)||0).toFixed(7) + ' π';
+          const tx  = r.pi_tx_hash ? String(r.pi_tx_hash).slice(0,8) + '…' : '—';
+          return `
+            <div class="row">
+              <div>
+                <div><strong>${r.title || 'Item'}</strong></div>
+                <div class="small tight mono">#${r.id} • qty ${r.qty} • ${r.status || 'paid'}</div>
+              </div>
+              <div class="right">
+                <div>${amt}</div>
+                <div class="small mono tight">${tx}</div>
+              </div>
+            </div>
+          `;
+        }
+
+        let html = '';
+        html += `<div class="section"><h3>Purchases (${purchases.length})</h3>`
+             +  (purchases.length ? purchases.slice(0,8).map(row).join('') : `<div class="small">No purchases yet.</div>`)
+             +  `</div>`;
+
+        if (sales.length){
+          html += `<div class="section"><h3>Sales (${sales.length})</h3>`
+               +   sales.slice(0,8).map(row).join('')
+               +  `</div>`;
+        }else{
+          html += `<div class="section"><h3>Sales</h3><div class="small">Create a store to receive sales.</div></div>`;
+        }
+
+        // Link to dashboard if merchant
+        html += `<div class="section"><a class="link small" href="/dashboard">Open dashboard</a></div>`;
+
+        menuContent.innerHTML = html;
+
+      }catch(e){
+        console.error(e);
+        menuContent.innerHTML = '<div class="small">Authorization failed. Please try again.</div>';
+      }
+    });
   })();
   </script>
 </body>
