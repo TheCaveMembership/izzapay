@@ -24,32 +24,38 @@
     h2{margin:0 0 6px;font-size:16px}
     .muted{color:var(--muted)}
 
-    /* compact, scrollable tables */
+    /* compact, scrollable tables with wrapping item names */
     .ip-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
-    .ip-table{width:100%;min-width:760px;border-collapse:collapse;table-layout:fixed}
+    .ip-table{
+      width:100%;
+      min-width:760px;                 /* allow horizontal scroll on small screens */
+      border-collapse:collapse;
+      table-layout:fixed;              /* fixed column widths so Qty never gets pushed into */
+      font-size:12px;                  /* smaller font */
+      line-height:1.25;
+    }
     .ip-table th,.ip-table td{
       padding:4px 6px;
       border-bottom:1px solid var(--line);
       text-align:left;
-      font-size:12px;
-      line-height:1.2;
-      white-space:nowrap;           /* keep on one line; scroll to see all */
+      vertical-align:top;
     }
-    .ip-table thead th{font-size:12px;font-weight:700}
-    .ip-table th:nth-child(1){width:56px}        /* # */
-    .ip-table th:nth-child(2){width:200px}       /* Store */
-    .ip-table th:nth-child(3){width:auto}        /* Item */
-    .ip-table th:nth-child(4){width:64px;text-align:right}
-    .ip-table th:nth-child(5){width:80px}
-    .ip-table th:nth-child(6){width:120px;text-align:right}
-    .ip-table td:nth-child(4), .ip-table td:nth-child(6){text-align:right}
+    .ip-table thead th{font-weight:700}
+
+    /* column sizing */
+    .col-num{width:56px;white-space:nowrap}
+    .col-store{width:200px;white-space:normal;overflow:hidden;text-overflow:ellipsis}
+    .col-item{width:auto;white-space:normal;word-break:break-word;hyphens:auto} /* WRAPS to next line */
+    .col-qty{width:64px;text-align:right;white-space:nowrap}                    /* fixed, protected */
+    .col-status{width:86px;white-space:nowrap}
+    .col-amt{width:120px;text-align:right;white-space:nowrap}
 
     .badge{display:inline-block;padding:1px 6px;border-radius:999px;border:1px solid var(--line);font-size:11px}
 
     /* even tighter on very small screens and force scrolling sooner */
     @media (max-width:420px){
-      .ip-table{min-width:680px}
-      .ip-table th,.ip-table td{padding:3px 5px;font-size:11px}
+      .ip-table{min-width:680px;font-size:11px}
+      .ip-table th,.ip-table td{padding:3px 5px}
       h1{font-size:20px} h2{font-size:15px}
     }
   </style>
@@ -70,7 +76,7 @@
     </div>
 
     {% if mode == "auth" %}
-      <!-- Not signed in: show a single Pi auth button that brings you back here -->
+      <!-- Not signed in -->
       <div class="card">
         <h1>My Orders</h1>
         <p class="muted">Authorize with Pi to see your recent purchases and, if you have a store, your sales.</p>
@@ -106,7 +112,7 @@
             .then(function(auth){
               const form = document.createElement('form');
               form.method = 'POST';
-              form.action = "/auth/exchange?next=/orders"; // <-- come back here
+              form.action = "/auth/exchange?next=/orders";
               const inp = document.createElement('input');
               inp.type='hidden'; inp.name='payload';
               inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
@@ -117,28 +123,25 @@
       })();
       </script>
     {% else %}
-      <!-- Signed in: show lists -->
+      <!-- Signed in -->
       <div class="card">
         <h1>My Orders</h1>
         <p class="muted">Signed in as <strong>{{ user.pi_username }}</strong>.</p>
+        <p class="muted" style="margin:4px 0 0;font-size:12px;letter-spacing:.2px">
+          SCROLL RIGHT IN TABLES FOR MORE DETAILS
+        </p>
       </div>
-<p style="font-size: 14px; color: #555; margin-top: 5px;">
-  SCROLL RIGHT IN TABLES FOR MORE DETAILS
-</p>
+
       <!-- Purchases -->
       <div class="card">
         <h2>Purchases</h2>
         {% if purchases and purchases|length %}
-          {# determine if all purchases are from the same store #}
+          {# if all purchases share one store, show it once like Sales #}
           {% set ns = namespace(first=None, same=True) %}
           {% for o in purchases %}
-            {% if ns.first is none %}
-              {% set ns.first = o.m_name %}
-            {% elif o.m_name != ns.first %}
-              {% set ns.same = False %}
-            {% endif %}
+            {% if ns.first is none %}{% set ns.first = o.m_name %}
+            {% elif o.m_name != ns.first %}{% set ns.same = False %}{% endif %}
           {% endfor %}
-
           {% if ns.same %}
             <p class="muted" style="margin:6px 0">Store: <strong>{{ ns.first }}</strong></p>
           {% else %}
@@ -148,17 +151,24 @@
           <div class="ip-table-wrap">
             <table class="ip-table">
               <thead>
-                <tr><th>#</th><th>Store</th><th>Item</th><th>Qty</th><th>Status</th><th>Amount (π)</th></tr>
+                <tr>
+                  <th class="col-num">#</th>
+                  <th class="col-store">Store</th>
+                  <th class="col-item">Item</th>
+                  <th class="col-qty">Qty</th>
+                  <th class="col-status">Status</th>
+                  <th class="col-amt">Amount (π)</th>
+                </tr>
               </thead>
               <tbody>
                 {% for o in purchases %}
                 <tr>
-                  <td>{{ o.id }}</td>
-                  <td>{{ o.m_name }}</td>
-                  <td>{{ o.item_title }}</td>
-                  <td>{{ o.qty }}</td>
-                  <td><span class="badge">{{ o.status }}</span></td>
-                  <td>{{ '%.7f'|format(o.pi_amount or 0) }}</td>
+                  <td class="col-num">{{ o.id }}</td>
+                  <td class="col-store">{{ o.m_name }}</td>
+                  <td class="col-item">{{ o.item_title }}</td>
+                  <td class="col-qty">{{ o.qty }}</td>
+                  <td class="col-status"><span class="badge">{{ o.status }}</span></td>
+                  <td class="col-amt">{{ '%.7f'|format(o.pi_amount or 0) }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -178,17 +188,24 @@
             <div class="ip-table-wrap">
               <table class="ip-table">
                 <thead>
-                  <tr><th>#</th><th>Item</th><th>Qty</th><th>Status</th><th>Gross (π)</th><th>Net (π)</th></tr>
+                  <tr>
+                    <th class="col-num">#</th>
+                    <th class="col-item">Item</th>
+                    <th class="col-qty">Qty</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-amt">Gross (π)</th>
+                    <th class="col-amt">Net (π)</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {% for o in sales %}
                   <tr>
-                    <td>{{ o.id }}</td>
-                    <td>{{ o.item_title }}</td>
-                    <td>{{ o.qty }}</td>
-                    <td><span class="badge">{{ o.status }}</span></td>
-                    <td>{{ '%.7f'|format(o.pi_amount or 0) }}</td>
-                    <td>{{ '%.7f'|format(o.pi_merchant_net or 0) }}</td>
+                    <td class="col-num">{{ o.id }}</td>
+                    <td class="col-item">{{ o.item_title }}</td>
+                    <td class="col-qty">{{ o.qty }}</td>
+                    <td class="col-status"><span class="badge">{{ o.status }}</span></td>
+                    <td class="col-amt">{{ '%.7f'|format(o.pi_amount or 0) }}</td>
+                    <td class="col-amt">{{ '%.7f'|format(o.pi_merchant_net or 0) }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
