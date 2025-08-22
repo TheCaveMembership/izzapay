@@ -55,14 +55,16 @@ init_db()
 
 def ensure_schema():
     with conn() as cx:
-        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in cols:
+        # merchants extras
+        cols_m = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+        if "pi_wallet_address" not in cols_m:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-        if "pi_handle" not in cols:
+        if "pi_handle" not in cols_m:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in cols:
+        if "colorway" not in cols_m:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
+        # carts & cart_items
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
@@ -76,6 +78,14 @@ def ensure_schema():
           item_id INTEGER NOT NULL,
           qty INTEGER NOT NULL
         )""")
+
+        # sessions: add pi_payment_id for tracking pending payments
+        cols_s = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+        if "pi_payment_id" not in cols_s:
+            try:
+                cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
+            except Exception:
+                pass
 ensure_schema()
 
 # ----------------- URL TOKEN -----------------
@@ -176,7 +186,7 @@ def debug_ping():
     _require_debug_token()
     return {"ok": True, "message": "pong", "time": int(time.time())}, 200
 
-# Cancel a stuck Pi payment (server-side)
+# Cancel a stuck Pi payment (server-side) by explicit id
 @app.get("/debug/cancel-payment")
 def debug_cancel_payment():
     _require_debug_token()
@@ -192,6 +202,83 @@ def debug_cancel_payment():
     except Exception as e:
         log("debug_cancel_payment error:", repr(e))
         return {"ok": False, "error": "server_error"}, 500
+
+# NEW: list recent sessions that captured a payment id but are still initiated, with cancel buttons
+@app.get("/debug/pending")
+def debug_pending():
+    _require_debug_token()
+    with conn() as cx:
+        # last 100 sessions where we have a payment id and still not marked paid
+        rows = cx.execute("""
+            SELECT s.id as session_id, s.created_at, s.expected_pi, s.pi_payment_id,
+                   s.state, s.merchant_id, m.slug as m_slug, m.business_name as m_name
+            FROM sessions s
+            LEFT JOIN merchants m ON m.id = s.merchant_id
+            WHERE s.pi_payment_id IS NOT NULL
+              AND (s.state IS NULL OR s.state='initiated')
+            ORDER BY s.created_at DESC
+            LIMIT 100
+        """).fetchall()
+    html = """
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pending Pi Payments (Server View)</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0f17;color:#e8f0ff;padding:16px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:8px;border-bottom:1px solid #1f2a44}
+small{color:#bcd0ff}
+button{padding:6px 10px;border:0;border-radius:8px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
+code{background:#0f1728;padding:2px 6px;border-radius:6px}
+.card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:1000px;margin:0 auto}
+</style>
+<div class="card">
+  <h2>Pending (initiated) sessions with stored <code>payment_id</code></h2>
+  <p><small>Use this when the Pi SDK doesn't surface the incomplete payment. Click cancel to clear the platform-side block.</small></p>
+  <table>
+    <thead><tr><th>When</th><th>Store</th><th>Session</th><th>Expected π</th><th>payment_id</th><th>Action</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+const data = %s;
+const token = new URL(location.href).searchParams.get('token') || '';
+const tbody = document.getElementById('rows');
+function fmt(ts){ try{return new Date(ts*1000).toLocaleString()}catch(e){return ts} }
+function tr(r){
+  const id = r.session_id, pay = r.pi_payment_id || '';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><small>${fmt(r.created_at)}</small></td>
+    <td>${r.m_name || ''} <small>(${r.m_slug||''})</small></td>
+    <td><code>${id}</code> <small>${r.state||''}</small></td>
+    <td>${(r.expected_pi||0).toFixed ? r.expected_pi.toFixed(7) : r.expected_pi}</td>
+    <td><code>${pay}</code></td>
+    <td><button data-pay="${pay}">Cancel</button></td>
+  `;
+  tr.querySelector('button').onclick = async (ev)=>{
+    const pid = ev.target.getAttribute('data-pay');
+    if(!pid) return;
+    ev.target.disabled = true; ev.target.textContent = 'Cancelling…';
+    try{
+      const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(pid)}`;
+      const res = await fetch(url); const j = await res.json();
+      if(j && j.ok){ ev.target.textContent = 'Cancelled ✓'; }
+      else { ev.target.textContent = 'Failed'; console.log(j); }
+    }catch(e){ ev.target.textContent = 'Error'; console.error(e); }
+  };
+  return tr;
+}
+if(Array.isArray(data) && data.length){
+  data.forEach(r => tbody.appendChild(tr(r)));
+}else{
+  const tr0 = document.createElement('tr');
+  tr0.innerHTML = '<td colspan="6"><small>No candidate sessions found.</small></td>';
+  tbody.appendChild(tr0);
+}
+</script>
+""" % (json.dumps([dict(r) for r in rows]))
+    return html
 
 # Tiny page that finds an incomplete payment via the Pi SDK and lets you cancel it
 @app.get("/debug/incomplete")
@@ -885,6 +972,12 @@ def pi_approve():
                           headers=pi_headers(), json={})
         if r.status_code != 200:
             return {"ok": False, "error": "approve_failed", "status": r.status_code, "body": r.text}, 502
+        # Store the payment id so we can later cancel it if it gets stuck
+        try:
+            with conn() as cx:
+                cx.execute("UPDATE sessions SET pi_payment_id=? WHERE id=?", (payment_id, session_id))
+        except Exception as e:
+            log("pi_approve: could not store pi_payment_id:", repr(e))
         return {"ok": True}
     except Exception as e:
         log("pi_approve error:", repr(e))
@@ -900,6 +993,12 @@ def pi_complete():
     shipping   = data.get("shipping") or {}
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
+    # (Re)store payment id for traceability
+    try:
+        with conn() as cx:
+            cx.execute("UPDATE sessions SET pi_payment_id=? WHERE id=?", (payment_id, session_id))
+    except Exception as e:
+        log("pi_complete: store pi_payment_id failed:", repr(e))
     try:
         r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
                           headers=pi_headers(), json={"txid": txid})
