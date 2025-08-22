@@ -20,7 +20,8 @@ PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
-DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "")  # <— for the debug endpoints
+# Debug token for manual email tests (put this in your .env in production)
+DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "782ba6059694b921d317b0df83db4772")
 
 # ----------------- APP -----------------
 app = Flask(__name__)
@@ -165,30 +166,60 @@ def whoami():
     row = current_user_row()
     return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
 
-# NEW: list most recent orders so you can pick an ID quickly
+def _require_debug_token():
+    tok = (request.args.get("token") or request.headers.get("X-Debug-Token") or "").strip()
+    if not DEBUG_EMAIL_TOKEN or tok != DEBUG_EMAIL_TOKEN:
+        abort(403)
+
+@app.get("/debug/ping")
+def debug_ping():
+    _require_debug_token()
+    return {"ok": True, "message": "pong", "time": int(time.time())}, 200
+
+# List most recent orders (avoid created_at; not all schemas have it)
 @app.get("/debug/orders")
 def debug_orders():
-    if not DEBUG_EMAIL_TOKEN or (request.args.get("token") != DEBUG_EMAIL_TOKEN and request.headers.get("X-Debug-Token") != DEBUG_EMAIL_TOKEN):
-        abort(403)
-    with conn() as cx:
-        rows = cx.execute(
-            "SELECT id, merchant_id, item_id, qty, buyer_email, status, pi_amount, created_at FROM orders ORDER BY id DESC LIMIT 10"
-        ).fetchall()
-    return {"ok": True, "orders": [dict(r) for r in rows]}
-
-# NEW: manual email trigger for a specific order_id
-@app.post("/debug/send-order-emails/<int:order_id>")
-def debug_send_order_emails(order_id: int):
-    if not DEBUG_EMAIL_TOKEN or (request.args.get("token") != DEBUG_EMAIL_TOKEN and request.headers.get("X-Debug-Token") != DEBUG_EMAIL_TOKEN):
-        abort(403)
-    log(f"[debug] manual email trigger -> order_id={order_id}")
+    _require_debug_token()
     try:
-        send_order_emails(order_id)
-        log(f"[debug] manual email trigger complete -> order_id={order_id}")
-        return {"ok": True, "order_id": order_id}
+        with conn() as cx:
+            rows = cx.execute(
+                """SELECT id, merchant_id, item_id, qty, buyer_email, status,
+                          pi_amount, pi_fee, pi_merchant_net, pi_tx_hash, buyer_token
+                   FROM orders
+                   ORDER BY id DESC
+                   LIMIT 10"""
+            ).fetchall()
+        return {"ok": True, "orders": [dict(r) for r in rows]}, 200
     except Exception as e:
-        log(f"[debug] manual email trigger error -> order_id={order_id} err={repr(e)}")
-        return {"ok": False, "error": "send_failed"}, 500
+        print("[debug/orders] ERROR:", repr(e))
+        return {"ok": False, "error": repr(e)}, 500
+
+# Manual email trigger (POST)
+@app.post("/debug/send-order-emails/<int:order_id>")
+def debug_send_order_emails_post(order_id: int):
+    _require_debug_token()
+    try:
+        print(f"[debug] manual email trigger (POST) -> order_id={order_id}")
+        send_order_emails(order_id)
+        print(f"[debug] manual email trigger complete -> order_id={order_id}")
+        return {"ok": True, "order_id": order_id}, 200
+    except Exception as e:
+        print(f"[debug] manual email trigger error -> order_id={order_id} err={repr(e)}")
+        return {"ok": False, "error": repr(e)}, 500
+
+# Manual email trigger (GET) — easy from Pi Browser/Safari
+@app.get("/debug/send-order-emails/<int:order_id>")
+def debug_send_order_emails_get(order_id: int):
+    _require_debug_token()
+    try:
+        print(f"[debug] manual email trigger (GET) -> order_id={order_id}")
+        send_order_emails(order_id)
+        print(f"[debug] manual email trigger complete -> order_id={order_id}")
+        return {"ok": True, "order_id": order_id, "note": "Triggered via GET"}, 200
+    except Exception as e:
+        print(f"[debug] manual email trigger error (GET) -> order_id={order_id} err={repr(e)}")
+        return {"ok": False, "error": repr(e)}, 500
+# ----------------- END DEBUG -----------------
 
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
