@@ -1415,12 +1415,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
 
-        # transaction committed -> unified email for all cart lines
-        try:
-            log("fulfill_session -> unified email ids:", created_order_ids)
-            send_order_emails_unified(created_order_ids)
-        except Exception as e:
-            log("unified email error:", repr(e))
+       # transaction COMMITTED here -> replicate single-item behavior PER LINE
+for oid in created_order_ids:
+    try:
+        log("fulfill_session -> send_order_emails (cart-line) id:", oid)
+        send_order_emails(oid)
+    except Exception as e:
+        log("send_order_emails (cart-line) error:", repr(e))
 
     else:
         # ===================== SINGLE item checkout =====================
