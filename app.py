@@ -20,7 +20,6 @@ PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
-# Debug token for manual email tests (put this in your .env in production)
 DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "782ba6059694b921d317b0df83db4772")
 
 # ----------------- APP -----------------
@@ -36,7 +35,6 @@ app.config.update(
 )
 
 def log(*args):
-    """Flush logs so they show up immediately on Render."""
     try:
         print(*args, flush=True)
     except Exception:
@@ -55,22 +53,23 @@ init_db()
 
 def ensure_schema():
     with conn() as cx:
-        # merchants extras
-        cols_m = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in cols_m:
+        # merchants patches
+        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+        if "pi_wallet_address" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-        if "pi_handle" not in cols_m:
+        if "pi_handle" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in cols_m:
+        if "colorway" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-        # carts & cart_items
+        # carts
         cx.execute("""
         CREATE TABLE IF NOT EXISTS carts(
           id TEXT PRIMARY KEY,
           merchant_id INTEGER NOT NULL,
           created_at INTEGER NOT NULL
         )""")
+        # cart_items
         cx.execute("""
         CREATE TABLE IF NOT EXISTS cart_items(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,13 +78,14 @@ def ensure_schema():
           qty INTEGER NOT NULL
         )""")
 
-        # sessions: add pi_payment_id for tracking pending payments
-        cols_s = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-        if "pi_payment_id" not in cols_s:
+        # sessions table must exist (created elsewhere in your setup). Ensure we have pi_payment_id column.
+        scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+        if "pi_payment_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
-            except Exception:
-                pass
+            except Exception as e:
+                log("[schema] add pi_payment_id failed (might already exist):", repr(e))
+
 ensure_schema()
 
 # ----------------- URL TOKEN -----------------
@@ -186,7 +186,7 @@ def debug_ping():
     _require_debug_token()
     return {"ok": True, "message": "pong", "time": int(time.time())}, 200
 
-# Cancel a stuck Pi payment (server-side) by explicit id
+# Cancel a stuck Pi payment (server-side)
 @app.get("/debug/cancel-payment")
 def debug_cancel_payment():
     _require_debug_token()
@@ -203,88 +203,7 @@ def debug_cancel_payment():
         log("debug_cancel_payment error:", repr(e))
         return {"ok": False, "error": "server_error"}, 500
 
-# NEW: list recent sessions that captured a payment id but are still initiated, with cancel buttons
-@app.get("/debug/pending")
-def debug_pending():
-    _require_debug_token()
-    with conn() as cx:
-        rows = cx.execute("""
-            SELECT s.id as session_id, s.created_at, s.expected_pi, s.pi_payment_id,
-                   s.state, s.merchant_id, m.slug as m_slug, m.business_name as m_name
-            FROM sessions s
-            LEFT JOIN merchants m ON m.id = s.merchant_id
-            WHERE s.pi_payment_id IS NOT NULL
-              AND (s.state IS NULL OR s.state='initiated')
-            ORDER BY s.created_at DESC
-            LIMIT 100
-        """).fetchall()
-
-    # Convert to plain dicts for JSON serialization
-    data = [dict(r) for r in rows]
-
-    html = """
-<!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pending Pi Payments (Server View)</title>
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0f17;color:#e8f0ff;padding:16px}
-table{width:100%;border-collapse:collapse}
-td,th{padding:8px;border-bottom:1px solid #1f2a44}
-small{color:#bcd0ff}
-button{padding:6px 10px;border:0;border-radius:8px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
-code{background:#0f1728;padding:2px 6px;border-radius:6px}
-.card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:1000px;margin:0 auto}
-</style>
-<div class="card">
-  <h2>Pending (initiated) sessions with stored <code>payment_id</code></h2>
-  <p><small>Use this when the Pi SDK doesn't surface the incomplete payment. Click cancel to clear the platform-side block.</small></p>
-  <table>
-    <thead><tr><th>When</th><th>Store</th><th>Session</th><th>Expected π</th><th>payment_id</th><th>Action</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-</div>
-<script>
-const data  = {{ data|tojson }};
-const token = new URL(location.href).searchParams.get('token') || '';
-const tbody = document.getElementById('rows');
-function fmt(ts){ try{return new Date(ts*1000).toLocaleString()}catch(e){return ts} }
-function tr(r){
-  const id = r.session_id, pay = r.pi_payment_id || '';
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td><small>${fmt(r.created_at)}</small></td>
-    <td>${r.m_name || ''} <small>(${r.m_slug||''})</small></td>
-    <td><code>${id}</code> <small>${r.state||''}</small></td>
-    <td>${(r.expected_pi||0).toFixed ? Number(r.expected_pi).toFixed(7) : r.expected_pi}</td>
-    <td><code>${pay}</code></td>
-    <td><button data-pay="${pay}">Cancel</button></td>
-  `;
-  tr.querySelector('button').onclick = async (ev)=>{
-    const pid = ev.target.getAttribute('data-pay');
-    if(!pid) return;
-    ev.target.disabled = true; ev.target.textContent = 'Cancelling…';
-    try{
-      const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(pid)}`;
-      const res = await fetch(url);
-      const j = await res.json();
-      if(j && j.ok){ ev.target.textContent = 'Cancelled ✓'; }
-      else { ev.target.textContent = 'Failed'; console.log(j); }
-    }catch(e){ ev.target.textContent = 'Error'; console.error(e); }
-  };
-  return tr;
-}
-if(Array.isArray(data) && data.length){
-  data.forEach(r => tbody.appendChild(tr(r)));
-}else{
-  const tr0 = document.createElement('tr');
-  tr0.innerHTML = '<td colspan="6"><small>No candidate sessions found.</small></td>';
-  tbody.appendChild(tr0);
-}
-</script>
-"""
-    return render_template_string(html, data=data)
-
-# Tiny page that finds an incomplete payment via the Pi SDK and lets you cancel it
+# SDK-based finder/canceller (client calls our cancel endpoint)
 @app.get("/debug/incomplete")
 def debug_incomplete():
     _require_debug_token()
@@ -351,6 +270,7 @@ def debug_incomplete():
       function onIncompletePaymentFound(payment){
         try{
           stuckId = (payment && (payment.identifier || payment.paymentId)) || null;
+          console.log("onIncompletePaymentFound:", payment);
         }catch(_){}
       }
 
@@ -393,6 +313,84 @@ def debug_incomplete():
 </script>
 """
     return render_template_string(html)
+
+# Server view of pending sessions with stored payment_id
+@app.get("/debug/pending")
+def debug_pending():
+    _require_debug_token()
+    with conn() as cx:
+        rows = cx.execute("""
+            SELECT s.id as session_id, s.created_at, s.expected_pi, s.pi_payment_id,
+                   s.state, s.merchant_id, m.slug as m_slug, m.business_name as m_name
+            FROM sessions s
+            LEFT JOIN merchants m ON m.id = s.merchant_id
+            WHERE s.pi_payment_id IS NOT NULL
+              AND (s.state IS NULL OR s.state='initiated' OR s.state='approved')
+            ORDER BY s.created_at DESC
+            LIMIT 100
+        """).fetchall()
+    data = [dict(r) for r in rows]
+    html = """
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pending Pi Payments (Server View)</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0f17;color:#e8f0ff;padding:16px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:8px;border-bottom:1px solid #1f2a44}
+small{color:#bcd0ff}
+button{padding:6px 10px;border:0;border-radius:8px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
+code{background:#0f1728;padding:2px 6px;border-radius:6px}
+.card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:1000px;margin:0 auto}
+</style>
+<div class="card">
+  <h2>Pending (initiated/approved) sessions with <code>payment_id</code></h2>
+  <p><small>Use this if the SDK page didn’t surface the incomplete payment. Click cancel to clear the block.</small></p>
+  <table>
+    <thead><tr><th>When</th><th>Store</th><th>Session</th><th>Expected π</th><th>payment_id</th><th>Action</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+const data  = {{ data|tojson }};
+const token = new URL(location.href).searchParams.get('token') || '';
+const tbody = document.getElementById('rows');
+function fmt(ts){ try{return new Date(ts*1000).toLocaleString()}catch(e){return ts} }
+function tr(r){
+  const id = r.session_id, pay = r.pi_payment_id || '';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><small>${fmt(r.created_at)}</small></td>
+    <td>${r.m_name || ''} <small>(${r.m_slug||''})</small></td>
+    <td><code>${id}</code> <small>${r.state||''}</small></td>
+    <td>${(r.expected_pi||0).toFixed ? Number(r.expected_pi).toFixed(7) : r.expected_pi}</td>
+    <td><code>${pay}</code></td>
+    <td><button data-pay="${pay}">Cancel</button></td>
+  `;
+  tr.querySelector('button').onclick = async (ev)=>{
+    const pid = ev.target.getAttribute('data-pay');
+    if(!pid) return;
+    ev.target.disabled = true; ev.target.textContent = 'Cancelling…';
+    try{
+      const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(pid)}`;
+      const res = await fetch(url);
+      const j = await res.json();
+      if(j && j.ok){ ev.target.textContent = 'Cancelled ✓'; }
+      else { ev.target.textContent = 'Failed'; console.log(j); }
+    }catch(e){ ev.target.textContent = 'Error'; console.error(e); }
+  };
+  return tr;
+}
+if(Array.isArray(data) && data.length){
+  data.forEach(r => tbody.appendChild(tr(r)));
+}else{
+  const tr0 = document.createElement('tr');
+  tr0.innerHTML = '<td colspan="6"><small>No candidate sessions found.</small></td>';
+  tbody.appendChild(tr0);
+}
+</script>
+"""
+    return render_template_string(html, data=data)
 
 # List most recent orders (avoid created_at; not all schemas have it)
 @app.get("/debug/orders")
@@ -976,12 +974,10 @@ def pi_approve():
                           headers=pi_headers(), json={})
         if r.status_code != 200:
             return {"ok": False, "error": "approve_failed", "status": r.status_code, "body": r.text}, 502
-        # Store the payment id so we can later cancel it if it gets stuck
-        try:
-            with conn() as cx:
-                cx.execute("UPDATE sessions SET pi_payment_id=? WHERE id=?", (payment_id, session_id))
-        except Exception as e:
-            log("pi_approve: could not store pi_payment_id:", repr(e))
+        # persist payment_id so /debug/pending can find/cancel it later
+        with conn() as cx:
+            cx.execute("UPDATE sessions SET pi_payment_id=?, state=? WHERE id=?",
+                       (payment_id, "approved", session_id))
         return {"ok": True}
     except Exception as e:
         log("pi_approve error:", repr(e))
@@ -997,12 +993,6 @@ def pi_complete():
     shipping   = data.get("shipping") or {}
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
-    # (Re)store payment id for traceability
-    try:
-        with conn() as cx:
-            cx.execute("UPDATE sessions SET pi_payment_id=? WHERE id=?", (payment_id, session_id))
-    except Exception as e:
-        log("pi_complete: store pi_payment_id failed:", repr(e))
     try:
         r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
                           headers=pi_headers(), json={"txid": txid})
@@ -1013,7 +1003,7 @@ def pi_complete():
         return {"ok": False, "error": "server_error"}, 500
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
-    if not s or s["state"] != "initiated":
+    if not s or s["state"] not in ("initiated", "approved"):
         return {"ok": False, "error": "bad_session"}, 400
     expected_amt = float(Decimal(str(s["expected_pi"])).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP))
     try:
@@ -1034,7 +1024,6 @@ def pi_complete():
 
 # ---- Email notifications per order -----------------------------------------
 def send_order_emails(order_id: int):
-    """Send confirmation to buyer and notification to merchant for one order."""
     with conn() as cx:
         o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not o:
@@ -1088,8 +1077,8 @@ def send_order_emails(order_id: int):
             log("send_order_emails merchant ok?", ok2)
         except Exception as e:
             log("merchant email fail (order_id=", order_id, "):", repr(e))
-# ---- End email notifications helper -----------------------------------------
 
+# ---- fulfillment -----------------------------------------
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
@@ -1101,7 +1090,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     buyer_name  = buyer.get("name") or shipping.get("name") or None
 
     if s["item_id"] is None:
-        # CART checkout
         with conn() as cx:
             cart = cx.execute("SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
                               (m["id"],)).fetchone()
@@ -1117,7 +1105,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 line_net   = line_gross - line_fee
                 buyer_token = uuid.uuid4().hex
                 if not r["allow_backorder"]:
-                    cx.execute("UPDATE items SET stock_qty=? WHERE id=?", (max(0, r["stock_qty"] - r["qty"]), r["id"]))
+                    cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                               (max(0, r["stock_qty"] - r["qty"]), r["id"]))
                 cur = cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                              shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
                              status,buyer_token)
@@ -1130,14 +1119,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     send_order_emails(cur.lastrowid)
                 except Exception as e:
                     log("send_order_emails (cart) error:", repr(e))
-            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                       (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
-        # SINGLE item checkout
         with conn() as cx:
             i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
-                cx.execute("UPDATE items SET stock_qty=? WHERE id=?", (max(0, i["stock_qty"] - s["qty"]), i["id"]))
+                cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
+                           (max(0, i["stock_qty"] - s["qty"]), i["id"]))
             buyer_token = uuid.uuid4().hex
             cur = cx.execute("""INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
                          shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
@@ -1151,7 +1141,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 send_order_emails(cur.lastrowid)
             except Exception as e:
                 log("send_order_emails (single) error:", repr(e))
-            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
+            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+                       (tx_hash, s["id"]))
 
     u = current_user_row()
     tok = ""
