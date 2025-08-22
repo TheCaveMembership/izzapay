@@ -418,6 +418,20 @@
   </div>
 
   <script>
+  // Use the same proxy the storefront uses, so pasted URLs render reliably
+  function proxied(url){
+    const v = (url || '').trim();
+    if (!v) return '';
+    if (v.startsWith('/static/')) return v; // our own uploads
+    try {
+      const u = new URL(v, location.origin);
+      if (u.protocol === 'http:' || u.protocol === 'https:') {
+        return '/uimg?src=' + encodeURIComponent(u.href);
+      }
+    } catch(_) { /* passthrough for non-URLs */ }
+    return v;
+  }
+
   function setThumb(id, url){
     const el = document.getElementById(id);
     if(!el) return; el.innerHTML = '';
@@ -488,11 +502,20 @@
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
-      try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('logoThumb', url); }
+      try{
+        const url = await uploadTo('/upload', file.files[0]);
+        inp.value = url;
+        setThumb('logoThumb', proxied(url));
+      }
       catch(e){ alert('Upload failed. You can paste a URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
-    inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('logoThumb', v); });
+    inp.addEventListener('input', () => {
+      const v = proxied(inp.value);
+      if(v) setThumb('logoThumb', v);
+    });
+    // If template pre-fills a URL, show preview on load
+    if (inp.value) { const v = proxied(inp.value); if (v) setThumb('logoThumb', v); }
   })();
 
   // Item upload + preview
@@ -504,11 +527,18 @@
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
-      try{ const url = await uploadTo('/upload', file.files[0]); inp.value = url; setThumb('itThumb', url); }
+      try{
+        const url = await uploadTo('/upload', file.files[0]);
+        inp.value = url;
+        setThumb('itThumb', proxied(url));
+      }
       catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
-    inp.addEventListener('input', () => { const v = inp.value.trim(); if(v) setThumb('itThumb', v); });
+    inp.addEventListener('input', () => {
+      const v = proxied(inp.value);
+      if(v) setThumb('itThumb', v);
+    });
   })();
 
   // Colorway picker (setup page) — live preview + hidden field
