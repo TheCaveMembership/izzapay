@@ -1449,21 +1449,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
-    # --- NEW: normalize item_id to robustly detect carts ---
-    raw_item_id = s["item_id"]
-    try:
-        item_id_int = int(raw_item_id) if raw_item_id is not None else None
-    except Exception:
-        item_id_int = None  # e.g. '', 'NULL', etc.
-
-    is_cart = (s["cart_id"] is not None) and (raw_item_id is None or item_id_int == 0)
-
-    log("[fulfill_session] session_id=", s["id"],
-        " cart_id=", s["cart_id"],
-        " raw_item_id=", raw_item_id,
-        " item_id_int=", item_id_int,
-        " is_cart=", is_cart)
-
     amt = float(s["expected_pi"])
     gross, fee, net = split_amounts(amt)
     gross = float(gross); fee = float(fee); net = float(net)
@@ -1473,82 +1458,10 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     created_order_ids = []
 
+    # -------------- CART CHECKOUT --------------
     if s["item_id"] is None:
-    # ===== CART checkout =====
-    with conn() as cx:
-        cart = None
-        if s["cart_id"]:
-            cart = cx.execute(
-                "SELECT * FROM carts WHERE id=? AND merchant_id=?",
-                (s["cart_id"], m["id"])
-            ).fetchone()
-        if not cart:
-            cart = cx.execute(
-                "SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
-                (m["id"],)
-            ).fetchone()
-
-        rows = cx.execute("""
-          SELECT cart_items.qty, items.*
-          FROM cart_items JOIN items ON items.id=cart_items.item_id
-          WHERE cart_items.cart_id=?
-        """, (cart["id"],)).fetchall()
-
-        created_order_ids = []
-
-        for r in rows:
-            line_gross = float(r["pi_price"]) * r["qty"]
-            line_fee   = fee * (line_gross / amt) if amt > 0 else 0.0
-            line_net   = line_gross - line_fee
-            buyer_token = uuid.uuid4().hex
-
-            if not r["allow_backorder"]:
-                cx.execute(
-                    "UPDATE items SET stock_qty=? WHERE id=?",
-                    (max(0, r["stock_qty"] - r["qty"]), r["id"])
-                )
-
-            cur = cx.execute(
-                """INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
-                         shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
-                         status,buyer_token)
-                   VALUES(?,?,?,?,?,?, ?,?,?,?, 'pending','paid',?)""",
-                (s["merchant_id"], r["id"], r["qty"], buyer_email, buyer_name,
-                 json.dumps(shipping), float(line_gross), float(line_fee), float(line_net),
-                 tx_hash, buyer_token)
-            )
-            created_order_ids.append(cur.lastrowid)
-
-        # Mark session as paid & clear cart rows
-        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
-        cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
-
-    log("[fulfill_session] cart created_order_ids:", created_order_ids,
-        "buyer_email:", buyer_email)
-
-    # ----- NEW: send a single cart email, built from the cart rows -----
-    try:
-        send_cart_emails(
-            m=m,
-            rows=rows,
-            totals={"gross": amt, "fee": fee, "net": net},
-            buyer_email=buyer_email,
-            buyer_name=buyer_name,
-            shipping=shipping if isinstance(shipping, dict) else {},
-            tx_hash=tx_hash
-        )
-    except Exception as e:
-        log("send_cart_emails error:", repr(e))
-
-    # (optional: if you still want the old unified-by-orders fallback)
-    # try:
-    #     if len(created_order_ids) > 1:
-    #         send_order_emails_unified(created_order_ids)
-    # except Exception as e:
-    #     log("send_order_emails_unified (cart) error:", repr(e))
-        # ========================= CART checkout =========================
         with conn() as cx:
-            # use exact cart from session if present; otherwise fallback to latest cart for merchant
+            # Prefer the exact cart_id stored on the session
             cart = None
             if s["cart_id"]:
                 cart = cx.execute(
@@ -1560,6 +1473,10 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     "SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
                     (m["id"],)
                 ).fetchone()
+            if not cart:
+                # Nothing to fulfill; mark paid and bail with success redirect anyway
+                cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
+                return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
             rows = cx.execute("""
               SELECT cart_items.qty, items.*
@@ -1595,17 +1512,24 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
 
-        log("[fulfill_session] cart created_order_ids:", created_order_ids,
-            "buyer_email:", buyer_email, "shipping_email:", (shipping.get("email") if isinstance(shipping, dict) else None))
+        log("[fulfill_session] cart created_order_ids:", created_order_ids, "buyer_email:", buyer_email)
 
         # Send ONE consolidated email for the whole cart
         try:
-            send_order_emails_unified(created_order_ids)
+            send_cart_emails(
+                m=m,
+                rows=rows,
+                totals={"gross": amt, "fee": fee, "net": net},
+                buyer_email=buyer_email,
+                buyer_name=buyer_name,
+                shipping=shipping if isinstance(shipping, dict) else {},
+                tx_hash=tx_hash
+            )
         except Exception as e:
-            log("send_order_emails_unified (cart) error:", repr(e))
+            log("send_cart_emails error:", repr(e))
 
+    # -------------- SINGLE-ITEM CHECKOUT --------------
     else:
-        # ===================== SINGLE item checkout =====================
         with conn() as cx:
             i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
@@ -1628,7 +1552,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
-        # Keep single-item behavior (one email for the line)
+        # Keep single-item behavior (one email per order)
         for oid in created_order_ids:
             try:
                 log("fulfill_session -> send_order_emails (single) id:", oid)
