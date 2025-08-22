@@ -1350,7 +1350,7 @@ def send_order_emails_unified(order_ids):
         log("[mail] send_order_emails_unified error:", repr(e))
 
 
-# ======================== FULFILLMENT (UNIFIED EMAIL LOGIC) ========================
+# ======================== FULFILLMENT (replicate single-item emails) ========================
 def fulfill_session(s, tx_hash, buyer, shipping):
     # Resolve merchant first (read-only)
     with conn() as cx:
@@ -1415,13 +1415,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
 
-       # transaction COMMITTED here -> replicate single-item behavior PER LINE
-for oid in created_order_ids:
-    try:
-        log("fulfill_session -> send_order_emails (cart-line) id:", oid)
-        send_order_emails(oid)
-    except Exception as e:
-        log("send_order_emails (cart-line) error:", repr(e))
+        # <-- transaction COMMITTED here -> replicate single-item behavior PER LINE
+        for oid in created_order_ids:
+            try:
+                log("fulfill_session -> send_order_emails (cart-line) id:", oid)
+                send_order_emails(oid)
+            except Exception as e:
+                log("send_order_emails (cart-line) error:", repr(e))
 
     else:
         # ===================== SINGLE item checkout =====================
@@ -1447,11 +1447,13 @@ for oid in created_order_ids:
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
 
-        # transaction committed -> unified email (single id is fine)
-        try:
-            send_order_emails_unified(created_order_ids[0])
-        except Exception as e:
-            log("unified email (single) error:", repr(e))
+        # <-- transaction COMMITTED here -> existing single-item emails
+        for oid in created_order_ids:
+            try:
+                log("fulfill_session -> send_order_emails (single) id:", oid)
+                send_order_emails(oid)
+            except Exception as e:
+                log("send_order_emails (single) error:", repr(e))
 
     # Build redirect as before
     u = current_user_row()
