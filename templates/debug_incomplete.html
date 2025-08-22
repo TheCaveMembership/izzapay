@@ -1,237 +1,140 @@
+html = """
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Find & Resolve Incomplete Pi Payment</title>
+<title>Find & Fix Incomplete Pi Payment</title>
 <style>
-  :root{--bg:#0b0f17;--card:#0f1728;--line:#1f2a44;--text:#e8f0ff;--muted:#bcd0ff;--accent:#6e9fff}
-  *{box-sizing:border-box}
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:16px;background:var(--bg);color:var(--text)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:760px;margin:0 auto}
-  h2{margin:0 0 8px}
-  .muted{color:var(--muted)}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:#0b0f17;color:#e8f0ff}
+  .card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:760px;margin:0 auto}
+  button{padding:10px 14px;border:0;border-radius:10px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
+  button[disabled]{opacity:.6;cursor:wait}
+  input,textarea{width:100%;padding:10px;border:1px solid #1f2a44;border-radius:10px;background:#0b1222;color:#e8f0ff}
+  textarea{min-height:140px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .muted{color:#bcd0ff}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .field{flex:1;min-width:220px}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-  input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#0b1222;color:var(--text);font-family:inherit}
-  textarea{min-height:120px;resize:vertical}
-  button{padding:10px 14px;border:0;border-radius:10px;background:var(--accent);color:var(--bg);font-weight:800;cursor:pointer}
-  button.secondary{background:transparent;color:var(--text);border:1px solid var(--line)}
-  .controls{display:flex;gap:8px;flex-wrap:wrap}
-  .spacer{height:8px}
-  code.badge{background:#0b1222;border:1px solid var(--line);padding:2px 6px;border-radius:6px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  @media (max-width:680px){.grid{grid-template-columns:1fr}}
+  .btns{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+  .ok{color:#7fe39b}
+  .err{color:#ff8a8a}
+  pre{white-space:pre-wrap;word-break:break-word;background:#0b1222;border:1px solid #1f2a44;border-radius:8px;padding:10px;max-height:220px;overflow:auto}
 </style>
-
 <div class="card">
-  <h2>Find & Resolve Incomplete Payment</h2>
+  <h2>Find & Fix Incomplete Payment</h2>
   <p class="muted">Open this page <strong>in Pi Browser</strong>.</p>
-  <p class="muted">Token ends with: <code class="badge">{{ (token[-6:] if token|length > 6 else token) }}</code></p>
+  <p class="muted">Token ends with: <code id="tok"></code></p>
 
-  <div class="spacer"></div>
   <div id="status" class="muted">Loading Pi SDK…</div>
-  <div class="spacer"></div>
 
-  <!-- Found -->
-  <div id="found" style="display:none">
-    <div class="grid">
-      <div class="field">
-        <label>Payment ID</label>
+  <div id="found" style="display:none;margin-top:12px">
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:1">
+        <label class="muted">Payment ID</label>
         <input id="pid" readonly>
       </div>
-      <div class="field">
-        <label>Direction</label>
-        <input id="direction" readonly>
-      </div>
-      <div class="field">
-        <label>Tx Verified</label>
-        <input id="txver" readonly>
-      </div>
-      <div class="field">
-        <label>Developer Completed</label>
-        <input id="devc" readonly>
-      </div>
-      <div class="field">
-        <label>TxID (if any)</label>
-        <input id="txid" readonly>
-      </div>
-      <div class="field">
-        <label>Session ID (metadata)</label>
-        <input id="sid" readonly>
-      </div>
     </div>
 
-    <div class="spacer"></div>
-    <div class="controls" id="controls">
-      <button id="cancelBtn" class="secondary" title="Allowed only for app→user payments">Cancel payment</button>
-      <!-- Complete button will be injected only when valid -->
+    <div class="btns">
+      <button id="cancelBtn">Cancel (app→user)</button>
+      <button id="completeBtn">Complete (user→app)</button>
+      <button id="retryBtn" type="button">Re-check</button>
     </div>
 
-    <div class="spacer"></div>
-    <div class="row">
-      <div class="field" style="flex:1">
-        <label>SDK Raw Payment (read-only)</label>
-        <textarea id="raw" readonly></textarea>
-      </div>
-    </div>
+    <div style="margin-top:10px" id="out"></div>
   </div>
 
-  <!-- None -->
-  <div id="none" style="display:none">
+  <div id="none" style="display:none;margin-top:12px">
     <p>No incomplete payment was reported by the Pi SDK.</p>
-    <div class="controls">
-      <button id="retryBtn" class="secondary">Retry check</button>
-    </div>
+    <div class="btns"><button id="retryBtn2" type="button">Re-check</button></div>
+  </div>
+
+  <div style="margin-top:12px">
+    <label class="muted">Raw object from onIncompletePaymentFound</label>
+    <textarea id="raw" readonly placeholder="(nothing yet)"></textarea>
   </div>
 </div>
 
 <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 <script>
-(function(){
-  const qs  = k => new URL(location.href).searchParams.get(k) || "";
-  const set = t => status.textContent = t;
+(async function(){
+  const status = document.getElementById('status');
+  const found  = document.getElementById('found');
+  const none   = document.getElementById('none');
+  const pidEl  = document.getElementById('pid');
+  const cancelBtn   = document.getElementById('cancelBtn');
+  const completeBtn = document.getElementById('completeBtn');
+  const retryBtn    = document.getElementById('retryBtn');
+  const retryBtn2   = document.getElementById('retryBtn2');
+  const out    = document.getElementById('out');
+  const rawEl  = document.getElementById('raw');
+  const tokEl  = document.getElementById('tok');
 
-  // Elements
-  const status   = document.getElementById('status');
-  const foundBox = document.getElementById('found');
-  const noneBox  = document.getElementById('none');
-  const retryBtn = document.getElementById('retryBtn');
-
-  const pidEl = document.getElementById('pid');
-  const dirEl = document.getElementById('direction');
-  const txvEl = document.getElementById('txver');
-  const devEl = document.getElementById('devc');
-  const txidEl= document.getElementById('txid');
-  const sidEl = document.getElementById('sid');
-  const rawEl = document.getElementById('raw');
-
-  const cancelBtn = document.getElementById('cancelBtn');
-  const controls  = document.getElementById('controls');
-
-  const token = qs('token');
-
+  function set(t){ status.textContent = t; }
+  function qs(k){ return new URL(location.href).searchParams.get(k) || ''; }
+  function show(ok, title, payload){
+    out.innerHTML = '';
+    const h = document.createElement('div');
+    h.className = ok ? 'ok' : 'err';
+    h.textContent = title;
+    const pre = document.createElement('pre');
+    try{ pre.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2); }
+    catch(e){ pre.textContent = String(payload); }
+    out.appendChild(h); out.appendChild(pre);
+  }
   function showRaw(obj){
-    try{ rawEl.value = JSON.stringify(obj, null, 2); }
-    catch(_){ rawEl.value = String(obj || ""); }
+    try{ rawEl.value = obj ? JSON.stringify(obj, null, 2) : ''; }catch(_){}
   }
 
-  function canComplete(payment){
-    if(!payment) return false;
-    const st = payment.status || {};
-    const tx = payment.transaction || {};
-    return payment.direction === 'user_to_app'
-      && (st.developer_completed === false)
-      && (st.transaction_verified === true || tx.verified === true)
-      && !!tx.txid;
-  }
+  const token = qs('token'); tokEl.textContent = token ? token.slice(-6) : '';
 
-  async function handleCancel(stuck){
-    const id = stuck && (stuck.identifier || stuck.paymentId);
-    if(!id){ set("Missing payment id."); return; }
-    cancelBtn.disabled = true; cancelBtn.textContent = "Cancelling…";
+  let stuck = null, stuckId = null;
+
+  async function run(){
+    found.style.display = 'none'; none.style.display = 'none'; out.innerHTML = ''; showRaw(null);
     try{
-      const url = "/debug/cancel-payment?token=" + encodeURIComponent(token) + "&payment_id=" + encodeURIComponent(id);
-      const r = await fetch(url);
-      const j = await r.json().catch(()=>({}));
-      if(j && j.ok){
-        set("Cancelled. You can retry checkout now.");
-      }else{
-        set("Cancel failed. Check logs."); console.log(j);
-      }
-    }catch(e){
-      console.error(e); set("Cancel request errored. Check logs.");
-    }finally{
-      cancelBtn.disabled = false; cancelBtn.textContent = "Cancel payment";
-    }
-  }
-
-  function mountCompleteButton(stuck){
-    let btn = document.getElementById('completeBtn');
-    if(btn) return; // already mounted
-    btn = document.createElement('button');
-    btn.id = 'completeBtn';
-    btn.textContent = 'Complete payment';
-    controls.appendChild(btn);
-
-    btn.onclick = async () => {
-      if(!canComplete(stuck)){ set("Not completable (needs verified tx with txid)."); return; }
-      btn.disabled = true; btn.textContent = "Completing…";
-      try{
-        const id = stuck.identifier || stuck.paymentId;
-        const url = "/debug/complete-payment?token=" + encodeURIComponent(token) + "&payment_id=" + encodeURIComponent(id);
-        const r = await fetch(url);
-        const j = await r.json().catch(()=>({}));
-        console.log("Complete response:", j);
-        if(j && j.ok){
-          set("Completed successfully. You can retry checkout now.");
-        }else{
-          set("Complete failed. See server logs.");
-        }
-      }catch(e){
-        console.error(e); set("Complete request errored.");
-      }finally{
-        btn.disabled = false; btn.textContent = "Complete payment";
-      }
-    };
-  }
-
-  async function runCheck(){
-    try{
-      noneBox.style.display = 'none';
-      foundBox.style.display = 'none';
-      set("Initializing Pi SDK…");
-
       if(!window.Pi || !Pi.init){ set("Pi SDK not available. Open in Pi Browser."); return; }
       Pi.init({ version: "2.0" });
 
-      let stuck = null;
-      const scopes = ['payments','username'];
-
       function onIncompletePaymentFound(payment){
         stuck = payment || null;
+        showRaw(stuck);
+        stuckId = (stuck && (stuck.identifier || stuck.paymentId)) || null;
       }
 
       set("Authenticating…");
-      await Pi.authenticate(scopes, onIncompletePaymentFound);
-
-      if(stuck){
-        const id  = stuck.identifier || stuck.paymentId || (stuck.transaction && stuck.transaction.paymentId) || "";
-        const dir = stuck.direction || "";
-        const st  = stuck.status || {};
-        const tx  = stuck.transaction || {};
-        const meta= stuck.metadata || {};
-        const session_id = meta.session_id || meta.sessionId || "";
-
-        pidEl.value = id;
-        dirEl.value = dir || "—";
-        txvEl.value = (st.transaction_verified === true || tx.verified === true) ? "true" : "false";
-        devEl.value = String(!!st.developer_completed);
-        txidEl.value= tx.txid || "";
-        sidEl.value = session_id;
-
-        showRaw(stuck);
-
-        // Buttons rules
-        cancelBtn.disabled = (dir !== 'app_to_user'); // Only app->user can be cancelled
-        cancelBtn.onclick  = () => handleCancel(stuck);
-
-        if(canComplete(stuck)){
-          mountCompleteButton(stuck);
-        }
-
-        foundBox.style.display = '';
-        set("Incomplete payment detected by SDK.");
+      await Pi.authenticate(['payments','username'], onIncompletePaymentFound);
+      if(stuckId){
+        set("Incomplete payment detected.");
+        pidEl.value = stuckId; found.style.display = '';
       }else{
-        noneBox.style.display = '';
-        set("No incomplete payment detected.");
+        set("No incomplete payment detected."); none.style.display = '';
       }
     }catch(e){
-      console.error(e);
       set("Error: " + (e && e.message || e));
-      noneBox.style.display = '';
+      console.error(e);
     }
   }
 
-  retryBtn && (retryBtn.onclick = runCheck);
-  runCheck();
+  retryBtn.onclick = run; if(retryBtn2) retryBtn2.onclick = run;
+
+  cancelBtn.onclick = async ()=>{
+    if(!stuckId) return;
+    cancelBtn.disabled = true; cancelBtn.textContent = "Cancelling…";
+    try{
+      const r = await fetch(`/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(stuckId)}`);
+      const j = await r.json(); show(!!j.ok, "Cancel response", j);
+    }catch(e){ show(false, "Cancel error", String(e)); }
+    finally{ cancelBtn.disabled = false; cancelBtn.textContent = "Cancel (app→user)"; }
+  };
+
+  completeBtn.onclick = async ()=>{
+    if(!stuckId) return;
+    completeBtn.disabled = true; completeBtn.textContent = "Completing…";
+    try{
+      const r = await fetch(`/debug/complete-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(stuckId)}`);
+      const j = await r.json(); show(!!j.ok, "Complete response", j);
+    }catch(e){ show(false, "Complete error", String(e)); }
+    finally{ completeBtn.disabled = false; completeBtn.textContent = "Complete (user→app)"; }
+  };
+
+  run();
 })();
 </script>
+"""
