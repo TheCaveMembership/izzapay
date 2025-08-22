@@ -78,19 +78,24 @@ def ensure_schema():
           qty INTEGER NOT NULL
         )""")
 
-        # sessions table must exist (created elsewhere in your setup). Ensure we have pi_payment_id column.
+        # sessions table must exist (created elsewhere in your setup)
         scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
         if "pi_payment_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
             except Exception as e:
                 log("[schema] add pi_payment_id failed (might already exist):", repr(e))
-        # remember exact cart for checkout sessions
         if "cart_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
             except Exception as e:
                 log("[schema] add cart_id failed (might already exist):", repr(e))
+        # NEW: snapshot of items at checkout time (works for single or multi)
+        if "line_items_json" not in scols:
+            try:
+                cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
+            except Exception as e:
+                log("[schema] add line_items_json failed (might already exist):", repr(e))
 
 ensure_schema()
 
@@ -1078,6 +1083,7 @@ def checkout_cart(cid):
     u = current_user_row()
     if not u: return redirect("/signin?fresh=1")
     tok = get_bearer_token_from_request()
+
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
@@ -1087,16 +1093,28 @@ def checkout_cart(cid):
           FROM cart_items JOIN items ON items.id=cart_items.item_id
           WHERE cart_items.cart_id=?
         """, (cid,)).fetchall()
+
     if not rows:
         return redirect(f"/store/{m['slug']}{('?t='+tok) if tok else ''}?cid={cid}")
+
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
     sid = uuid.uuid4().hex
+
+    # Snapshot all lines now so fulfillment/email are deterministic
+    line_items = json.dumps([
+        {"item_id": int(r["id"]), "qty": int(r["qty"]), "price": float(r["pi_price"])}
+        for r in rows
+    ])
+
     with conn() as cx:
-        cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state, created_at, cart_id)
-                      VALUES(?,?,?,?,?,?,?,?)""",
-                   (sid, m["id"], None, 1, float(total), "initiated", int(time.time()), cid))
+        cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state, created_at, cart_id, line_items_json)
+                      VALUES(?,?,?,?,?,?,?,?,?)""",
+                   (sid, m["id"], None, 1, float(total), "initiated", int(time.time()), cid, line_items))
+
+    # Minimal product-shaped object so your template renders nicely
     i = {"business_name": m["business_name"], "title": "Cart total", "logo_url": m["logo_url"], "colorway": m["colorway"]}
-    return render_template("checkout.html", sold_out=False, i=i, qty=1, session_id=sid,
+    return render_template("checkout.html",
+                           sold_out=False, i=i, qty=1, session_id=sid,
                            expected_pi=total, app_base=APP_BASE_URL, cart_mode=True,
                            colorway=m["colorway"])
 
@@ -1110,16 +1128,29 @@ def checkout(link_id):
            WHERE link_id=? AND active=1
         """, (link_id,)).fetchone()
     if not i: abort(404)
+
     qty = max(1, int(request.args.get("qty", "1")))
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
+
     sid = uuid.uuid4().hex
     expected = float(i["pi_price"]) * qty
+
+    # Snapshot the one line so fulfillment/emails use the same unified path
+    line_items = json.dumps([{
+        "item_id": int(i["id"]),
+        "qty": int(qty),
+        "price": float(i["pi_price"]),
+    }])
+
     with conn() as cx:
         cx.execute("""INSERT INTO sessions(id, merchant_id, item_id, qty, expected_pi, state,
-                   created_at) VALUES(?,?,?,?,?,?,?)""",
-                   (sid, i["mid"], i["id"], qty, expected, "initiated", int(time.time())))
-    return render_template("checkout.html",
+                   created_at, line_items_json)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                   (sid, i["mid"], i["id"], qty, expected, "initiated", int(time.time()), line_items))
+
+    return render_template(
+        "checkout.html",
         sold_out=False, i=i, qty=qty, session_id=sid, expected_pi=expected, app_base=APP_BASE_URL,
         colorway=i["colorway"]
     )
@@ -1444,98 +1475,70 @@ def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash
         log("[mail] send_cart_emails error:", repr(e))
 
 # ======================== FULFILLMENT ========================
+# Make sure this exists near the top of your file once:
+# DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
+
 def fulfill_session(s, tx_hash, buyer, shipping):
-    # Resolve merchant first (read-only)
+    # Merchant (read-only)
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
+    # Money split on the session total
     amt = float(s["expected_pi"])
-    gross, fee, net = split_amounts(amt)
-    gross = float(gross); fee = float(fee); net = float(net)
+    gross_total, fee_total, net_total = split_amounts(amt)
+    gross_total = float(gross_total); fee_total = float(fee_total); net_total = float(net_total)
 
+    # Buyer info
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
-    buyer_name  = buyer.get("name") or (shipping.get("name") if isinstance(shipping, dict) else None) or None
+    buyer_name  = buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
 
-    created_order_ids = []
+    # Always read the snapshot (single or multi)
+    try:
+        lines = json.loads(s["line_items_json"] or "[]")
+    except Exception:
+        lines = []
 
-    # -------------- CART CHECKOUT --------------
-    if s["item_id"] is None:
+    if not lines:
+        log("[fulfill_session] ERROR: no line_items_json for session", s["id"])
         with conn() as cx:
-            # Prefer the exact cart_id stored on the session
-            cart = None
-            if s["cart_id"]:
-                cart = cx.execute(
-                    "SELECT * FROM carts WHERE id=? AND merchant_id=?",
-                    (s["cart_id"], m["id"])
-                ).fetchone()
-            if not cart:
-                cart = cx.execute(
-                    "SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
-                    (m["id"],)
-                ).fetchone()
-            if not cart:
-                # Nothing to fulfill; mark paid and bail with success redirect anyway
-                cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
-                return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
-
-            rows = cx.execute("""
-              SELECT cart_items.qty, items.*
-              FROM cart_items JOIN items ON items.id=cart_items.item_id
-              WHERE cart_items.cart_id=?
-            """, (cart["id"],)).fetchall()
-
-            # create one order per cart line
-            for r in rows:
-                line_gross = float(r["pi_price"]) * r["qty"]
-                line_fee   = fee * (line_gross / amt) if amt > 0 else 0.0
-                line_net   = line_gross - line_fee
-                buyer_token = uuid.uuid4().hex
-
-                if not r["allow_backorder"]:
-                    cx.execute(
-                        "UPDATE items SET stock_qty=? WHERE id=?",
-                        (max(0, r["stock_qty"] - r["qty"]), r["id"])
-                    )
-
-                cur = cx.execute(
-                    """INSERT INTO orders(merchant_id,item_id,qty,buyer_email,buyer_name,
-                             shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
-                             status,buyer_token)
-                       VALUES(?,?,?,?,?,?, ?,?,?,?, 'pending','paid',?)""",
-                    (s["merchant_id"], r["id"], r["qty"], buyer_email, buyer_name,
-                     json.dumps(shipping), float(line_gross), float(line_fee), float(line_net),
-                     tx_hash, buyer_token)
-                )
-                created_order_ids.append(cur.lastrowid)
-
-            # mark session paid and clear cart
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
-            cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
-
-        log("[fulfill_session] cart created_order_ids:", created_order_ids, "buyer_email:", buyer_email)
-
-        # Send ONE consolidated email for the whole cart
         try:
-            send_cart_emails(
-                m=m,
-                rows=rows,
-                totals={"gross": amt, "fee": fee, "net": net},
-                buyer_email=buyer_email,
-                buyer_name=buyer_name,
-                shipping=shipping if isinstance(shipping, dict) else {},
-                tx_hash=tx_hash
+            send_email(
+                (m["reply_to_email"] or DEFAULT_ADMIN_EMAIL),
+                f"Order paid but no lines captured (session {s['id']})",
+                "<p>The session was paid, but no line items snapshot was present.</p>"
             )
         except Exception as e:
-            log("send_cart_emails error:", repr(e))
+            log("[fulfill_session] notify merchant failed:", repr(e))
+        return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
-    # -------------- SINGLE-ITEM CHECKOUT --------------
-    else:
-        with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
-            if i and not i["allow_backorder"]:
+    # Fetch item records for titles/stock using IDs from the snapshot
+    item_ids = [int(li["item_id"]) for li in lines]
+    with conn() as cx:
+        placeholders = ",".join("?" for _ in item_ids)
+        items = cx.execute(f"SELECT * FROM items WHERE id IN ({placeholders})", item_ids).fetchall()
+        by_id = {int(r["id"]): r for r in items}
+
+    created_order_ids = []
+    # Proportionally allocate fee across lines by their gross share
+    total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
+
+    with conn() as cx:
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            qty = int(li["qty"])
+            snap_price = float(li["price"])
+
+            # compute from snapshot so emails and totals match exactly what user saw
+            line_gross = snap_price * qty
+            line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
+            line_net   = line_gross - line_fee
+
+            # stock update (only if the item still exists and doesn't allow backorder)
+            if it and not it["allow_backorder"]:
                 cx.execute(
                     "UPDATE items SET stock_qty=? WHERE id=?",
-                    (max(0, i["stock_qty"] - s["qty"]), i["id"])
+                    (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
             buyer_token = uuid.uuid4().hex
@@ -1544,30 +1547,106 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                          shipping_json,pi_amount,pi_fee,pi_merchant_net,pi_tx_hash,payout_status,
                          status,buyer_token)
                    VALUES(?,?,?,?,?,?, ?,?,?,?, 'pending','paid',?)""",
-                (s["merchant_id"], s["item_id"], s["qty"], buyer_email, buyer_name,
-                 json.dumps(shipping), float(gross), float(fee), float(net), tx_hash, buyer_token)
+                (s["merchant_id"],
+                 (it["id"] if it else None),
+                 qty,
+                 buyer_email,
+                 buyer_name,
+                 json.dumps(shipping),
+                 float(line_gross),
+                 float(line_fee),
+                 float(line_net),
+                 tx_hash,
+                 buyer_token)
             )
             created_order_ids.append(cur.lastrowid)
 
-            cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-                       (tx_hash, s["id"]))
+        # Mark session paid
+        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-        # Keep single-item behavior (one email per order)
-        for oid in created_order_ids:
-            try:
-                log("fulfill_session -> send_order_emails (single) id:", oid)
-                send_order_emails(oid)
-            except Exception as e:
-                log("send_order_emails (single) error:", repr(e))
+    # Build & send a single consolidated email from the snapshot
+    try:
+        # Build display rows using snapshot + titles
+        display_rows = []
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            title = (it["title"] if it else f"Item {li['item_id']}")
+            qty = int(li["qty"])
+            gross = float(li["price"]) * qty
+            display_rows.append({"title": title, "qty": qty, "gross": gross})
 
-    # Build redirect
+        # HTML table
+        line_html = "".join(
+            f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
+            for dr in display_rows
+        )
+        items_table = (
+            "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
+            "<thead><tr>"
+            "<th style='text-align:left; padding:6px 8px'>Item</th>"
+            "<th style='text-align:right; padding:6px 8px'>Qty</th>"
+            "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
+            "</tr></thead>"
+            f"<tbody>{line_html}</tbody>"
+            "<tfoot>"
+            f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
+            f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
+            "</tfoot>"
+            "</table>"
+        )
+
+        merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+        subj_suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+        subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}"
+        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){subj_suffix}"
+
+        # Buyer (optional)
+        if buyer_email:
+            send_email(
+                buyer_email,
+                subj_buyer,
+                f"""
+                    <h2>Thanks for your order!</h2>
+                    <p><strong>Store:</strong> {m['business_name']}</p>
+                    {items_table}
+                    <p style="margin-top:12px">
+                      You’ll receive updates from the merchant if anything changes.
+                    </p>
+                """,
+                reply_to=merchant_mail
+            )
+            log("[mail][unified] buyer email SENT ->", buyer_email)
+        else:
+            log("[mail][unified] buyer email skipped (no buyer_email)")
+
+        # Merchant (always)
+        send_email(
+            merchant_mail,
+            subj_merchant,
+            f"""
+                <h2>You received a new order</h2>
+                {items_table}
+                <p style="margin:10px 0 0">
+                  <small>Fees total: {fee_total:.7f} π • Net total: {net_total:.7f} π</small>
+                </p>
+                <h3 style="margin:16px 0 6px">Buyer</h3>
+                <div>{buyer_name or '—'} ({buyer_email or '—'})</div>
+                <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
+            """
+        )
+        log("[mail][unified] merchant email SENT ->", merchant_mail)
+
+    except Exception as e:
+        log("[fulfill_session] email build/send failed:", repr(e))
+
+    # Redirect back to store
     u = current_user_row()
     tok = ""
     if u:
-        try:
-            tok = mint_login_token(u["id"])
-        except Exception:
-            tok = ""
+        try: tok = mint_login_token(u["id"])
+        except Exception: tok = ""
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
