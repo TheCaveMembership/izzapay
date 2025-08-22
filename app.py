@@ -671,7 +671,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -699,7 +699,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -811,7 +811,7 @@ def send_order_emails(order_id: int):
             log("[mail] order not found -> id=", order_id)
             return
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
 
     merchant_email = (m["reply_to_email"] or "").strip() if m and m["reply_to_email"] else None
     merchant_name = m["business_name"] if m else "Your Merchant"
@@ -862,7 +862,7 @@ def send_order_emails(order_id: int):
 
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"]),).fetchone()
     amt = float(s["expected_pi"])
     gross, fee, net = split_amounts(amt)
     gross = float(gross); fee = float(fee); net = float(net)
@@ -871,6 +871,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     buyer_name  = buyer.get("name") or shipping.get("name") or None
 
     if s["item_id"] is None:
+        # CART checkout
         with conn() as cx:
             cart = cx.execute("SELECT c.* FROM carts c WHERE c.merchant_id=? ORDER BY created_at DESC LIMIT 1",
                               (m["id"],)).fetchone()
@@ -895,17 +896,21 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                            (s["merchant_id"], r["id"], r["qty"], buyer_email,
                             buyer_name, json.dumps(shipping), float(line_gross), float(line_fee),
                             float(line_net), tx_hash, buyer_token))
+                new_oid = cur.lastrowid
+                log("fulfill_session -> created order (cart) id:", new_oid)
                 try:
-                    log("fulfill_session -> send_order_emails (cart) id:", cur.lastrowid)
-                    send_order_emails(cur.lastrowid)
+                    log("fulfill_session -> send_order_emails (cart) id:", new_oid)
+                    send_order_emails(new_oid)
                 except Exception as e:
                     log("send_order_emails (cart) error:", repr(e))
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
                        (tx_hash, s["id"]))
             cx.execute("DELETE FROM cart_items WHERE cart_id=?", (cart["id"],))
     else:
+        # SINGLE item checkout
         with conn() as cx:
-            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"]),).fetchone()
+            # BUGFIX: pass a 1-tuple (note trailing comma)
+            i = cx.execute("SELECT * FROM items WHERE id=?", (s["item_id"],)).fetchone()
             if i and not i["allow_backorder"]:
                 cx.execute("UPDATE items SET stock_qty=? WHERE id=?",
                            (max(0, i["stock_qty"] - s["qty"]), i["id"]))
@@ -917,9 +922,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                        (s["merchant_id"], s["item_id"], s["qty"], buyer_email,
                         buyer_name, json.dumps(shipping), float(gross), float(fee),
                         float(net), tx_hash, buyer_token))
+            new_oid = cur.lastrowid
+            log("fulfill_session -> created order (single) id:", new_oid)
             try:
-                log("fulfill_session -> send_order_emails (single) id:", cur.lastrowid)
-                send_order_emails(cur.lastrowid)
+                log("fulfill_session -> send_order_emails (single) id:", new_oid)
+                send_order_emails(new_oid)
             except Exception as e:
                 log("send_order_emails (single) error:", repr(e))
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
@@ -982,8 +989,8 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
