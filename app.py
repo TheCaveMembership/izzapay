@@ -1187,20 +1187,34 @@ def pi_complete():
     return fulfill_session(s, txid, buyer, shipping)
 
 # ---- Email notifications per # =========================== CART EMAILS (FIXED) ===========================
+# ---- Email notifications for multi-item carts (consolidated) ---------------
 def send_cart_emails(order_ids):
     """
-    Send ONE consolidated email for a cart checkout:
-      • buyer (order summary)
-      • merchant (summary + shipping)
-    Robust to missing shipping/buyer fields.
+    Send ONE consolidated email for a multi-item cart:
+      • to buyer (order summary)
+      • to merchant (summary + shipping)
+    If anything fails or no email addresses are available,
+    it will fallback to sending per-line-item emails using send_order_emails.
     """
-    if not order_ids:
-        return
+    def _fallback_per_line():
+        try:
+            for oid in order_ids or []:
+                log("[mail] cart -> fallback send_order_emails for oid:", oid)
+                send_order_emails(oid)
+        except Exception as e:
+            log("[mail] cart fallback error:", repr(e))
 
     try:
-        placeholders = ",".join("?" for _ in order_ids)
+        if not order_ids:
+            log("[mail] cart: no order_ids passed")
+            return
+
+        # Ensure IDs are a list of ints/strings for SQL placeholders
+        ids = [int(x) if isinstance(x, (int, float,)) or str(x).isdigit() else x for x in order_ids]
+
         with conn() as cx:
-            rows = cx.execute(f"""
+            placeholders = ",".join("?" for _ in ids)
+            q = f"""
                 SELECT
                     o.*,
                     i.title          AS item_title,
@@ -1211,152 +1225,133 @@ def send_cart_emails(order_ids):
                 JOIN merchants m ON m.id = o.merchant_id
                 WHERE o.id IN ({placeholders})
                 ORDER BY o.id ASC
-            """, order_ids).fetchall()
+            """
+            rows = cx.execute(q, ids).fetchall()
 
         if not rows:
-            log("[mail] send_cart_emails: no rows for", order_ids)
+            log("[mail] cart: query returned 0 rows for ids:", ids)
+            _fallback_per_line()
             return
 
-        # Merchant info (common across the cart)
+        log(f"[mail] cart: loaded {len(rows)} rows for consolidated email")
+
+        # Assume single merchant/buyer across a cart (how your orders are created)
         m_name        = rows[0]["m_name"]
         merchant_mail = (rows[0]["m_email"] or "").strip() or None
+        buyer_email   = (rows[0]["buyer_email"] or "").strip() or None
 
-        # Buyer email fallback priority: any line.buyer_email -> shipping_json.email
-        buyer_email = None
-        shipping = {}
-        for r in rows:
-            if not buyer_email:
-                be = (r["buyer_email"] or "").strip()
-                if be:
-                    buyer_email = be
-            if not shipping:
-                try:
-                    shipping = json.loads(r["shipping_json"] or "{}") or {}
-                except Exception:
-                    shipping = {}
-        if not buyer_email and isinstance(shipping, dict):
-            be = (shipping.get("email") or "").strip()
-            buyer_email = be or None
+        # Shipping (same across the cart)
+        try:
+            shipping = json.loads(rows[0]["shipping_json"] or "{}")
+        except Exception:
+            shipping = {}
 
-        # Totals + table
-        def _f7(x): return f"{float(x):.7f}"
-        total_gross = sum(float(r["pi_amount"] or 0)       for r in rows)
-        total_fee   = sum(float(r["pi_fee"] or 0)          for r in rows)
-        total_net   = sum(float(r["pi_merchant_net"] or 0) for r in rows)
+        # Build line items + totals
+        total_gross = 0.0
+        total_fee   = 0.0
+        total_net   = 0.0
+        line_html   = []
 
-        item_count = sum(int(r["qty"] or 0) for r in rows)  # total quantity
-        line_html = []
         for r in rows:
             title = r["item_title"] or "Item"
             qty   = int(r["qty"] or 1)
             gross = float(r["pi_amount"] or 0.0)
+            fee   = float(r["pi_fee"] or 0.0)
+            net   = float(r["pi_merchant_net"] or 0.0)
+
+            total_gross += gross
+            total_fee   += fee
+            total_net   += net
+
             line_html.append(
                 f"<tr>"
                 f"<td style='padding:6px 8px'>{title}</td>"
                 f"<td style='padding:6px 8px; text-align:right'>{qty}</td>"
-                f"<td style='padding:6px 8px; text-align:right'>{_f7(gross)} π</td>"
+                f"<td style='padding:6px 8px; text-align:right'>{gross:.7f} π</td>"
                 f"</tr>"
             )
 
         items_table = (
             "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
-            "<thead><tr>"
+            "<thead>"
+            "<tr>"
             "<th style='text-align:left; padding:6px 8px'>Item</th>"
             "<th style='text-align:right; padding:6px 8px'>Qty</th>"
             "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
-            "</tr></thead>"
-            "<tbody>" + "".join(line_html) + "</tbody>"
+            "</tr>"
+            "</thead>"
+            "<tbody>"
+            + "".join(line_html) +
+            "</tbody>"
             "<tfoot>"
             f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-            f"<td style='padding:6px 8px; text-align:right'><strong>{_f7(total_gross)} π</strong></td></tr>"
+            f"<td style='padding:6px 8px; text-align:right'><strong>{total_gross:.7f} π</strong></td></tr>"
             "</tfoot>"
             "</table>"
         )
 
-        # Buyer status links (one per line, if present)
-        def _token_for(row):
-            return row["buyer_token"] if "buyer_token" in row.keys() and row["buyer_token"] else None
-
-        tokens_html = "".join(
-            f"<div style='margin:4px 0'><a href='{BASE_ORIGIN}/o/{_token_for(r)}'>"
-            f"{BASE_ORIGIN}/o/{_token_for(r)}</a> — {r['item_title']}</div>"
-            for r in rows if _token_for(r)
-        )
-
-        # Shipping block for merchant email
+        # Shipping block (for merchant email)
         ship_parts = []
-        if isinstance(shipping, dict):
-            for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
-                v = (shipping.get(k) or "").strip()
-                if v:
-                    ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
-        shipping_html = ""
-        if ship_parts:
-            shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts)
+        for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
+            v = (shipping.get(k) or "").strip() if isinstance(shipping, dict) else ""
+            if v:
+                ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
+        shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
 
-        # ----- Subjects (singular/plural aware) -----
-        line_count = len(rows)  # distinct lines
-        merchant_subject = (
-            f"New Pi order at {m_name} ({_f7(total_gross)} π)"
-            if line_count == 1 else
-            f"New Pi cart order at {m_name} ({_f7(total_gross)} π)"
-        )
-        buyer_subject = (
-            f"Your order at {m_name} is confirmed"
-            if line_count == 1 else
-            f"Your {m_name} cart is confirmed"
-        )
+        sent_any = False
 
-        # ----- Buyer consolidated email -----
+        # ---- Buyer email (consolidated) ----
         if buyer_email:
             try:
                 send_email(
                     buyer_email,
-                    buyer_subject,
+                    f"Your order at {m_name} is confirmed",
                     f"""
                         <h2>Thanks for your order!</h2>
                         <p><strong>Store:</strong> {m_name}</p>
+                        <p>Here’s a summary of your cart:</p>
                         {items_table}
-                        <p style="margin-top:12px"><strong>Check status:</strong><br>
-                          {tokens_html or 'You will receive shipping updates by email.'}
+                        <p style="margin-top:12px">
+                          You’ll receive updates from the merchant if anything changes.
                         </p>
                     """,
                     reply_to=merchant_mail
                 )
-                log(f"[mail] cart buyer email sent -> to={buyer_email} orders={order_ids}")
+                sent_any = True
+                log("[mail] cart buyer email SENT ->", buyer_email)
             except Exception as e:
-                log("[mail] cart buyer email error:", repr(e))
-        else:
-            log("[mail] cart buyer email skipped (no buyer_email) -> orders=", order_ids)
+                log("[mail] cart buyer email FAILED:", repr(e))
 
-        # ----- Merchant consolidated email -----
+        # ---- Merchant email (consolidated) ----
         if merchant_mail:
             try:
-                buyer_name = rows[0]["buyer_name"] or "—"
-                txhash     = rows[0]["pi_tx_hash"] or "—"
                 send_email(
                     merchant_mail,
-                    merchant_subject,
+                    f"New Pi order at {m_name} ({total_gross:.7f} π)",
                     f"""
-                        <h2>You received a new {'order' if line_count == 1 else 'multi-item order'}</h2>
+                        <h2>You received a new multi-item order</h2>
                         {items_table}
                         <p style="margin:10px 0 0">
-                          <small>Fees total: {_f7(total_fee)} π • Net total: {_f7(total_net)} π</small>
+                          <small>Fees total: {total_fee:.7f} π • Net total: {total_net:.7f} π</small>
                         </p>
                         <h3 style="margin:16px 0 6px">Buyer</h3>
-                        <div>{buyer_name} ({buyer_email or '—'})</div>
+                        <div>{rows[0]['buyer_name'] or '—'} ({buyer_email or '—'})</div>
                         {shipping_html}
-                        <p style="margin-top:10px"><small>TX: {txhash}</small></p>
+                        <p style="margin-top:10px"><small>TX: {rows[0]['pi_tx_hash'] or '—'}</small></p>
                     """
                 )
-                log(f"[mail] cart merchant email sent -> to={merchant_mail} orders={order_ids}")
+                sent_any = True
+                log("[mail] cart merchant email SENT ->", merchant_mail)
             except Exception as e:
-                log("[mail] cart merchant email error:", repr(e))
-        else:
-            log("[mail] cart merchant email skipped (no merchant_email) -> orders=", order_ids)
+                log("[mail] cart merchant email FAILED:", repr(e))
+
+        if not sent_any:
+            log("[mail] cart: no consolidated emails sent (missing emails or failures) — falling back per-line")
+            _fallback_per_line()
 
     except Exception as e:
-        log("[mail] send_cart_emails error:", repr(e))
+        log("[mail] send_cart_emails error (outer):", repr(e))
+        _fallback_per_line()
 
 
 # ======================== FULFILLMENT (REPLACE THIS) ========================
