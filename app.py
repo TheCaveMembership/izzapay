@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
+import os, uuid, imghdr
+from werkzeug.utils import secure_filename
 
 # Local modules you already have
 from db import init_db, conn
@@ -24,6 +26,15 @@ DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "782ba6059694b921d317b0df83db
 
 # ----------------- APP -----------------
 app = Flask(__name__)
+# ---- Image upload config ----
+UPLOAD_DIR = os.path.join(app.root_path, "static", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Max ~10 MB per image (tweak as you wish)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+ALLOWED_IMGHDR = {"png", "jpeg", "gif", "webp"}  # imghdr returns "jpeg" for jpg
 _secret = os.getenv("FLASK_SECRET") or os.urandom(32)
 app.secret_key = _secret
 app.config.update(
@@ -320,7 +331,54 @@ def debug_complete_payment():
     except Exception as e:
         log("debug_complete_payment error:", repr(e))
         return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
-        
+def _allowed_ext(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.post("/upload-image")
+def upload_image():
+    """
+    Accepts multipart/form-data with a 'file' field.
+    Saves to static/uploads/ and returns a JSON {ok, url}.
+    Requires the user to be signed in.
+    """
+    u = current_user_row()
+    if not u:
+        return {"ok": False, "error": "auth_required"}, 401
+
+    if "file" not in request.files:
+        return {"ok": False, "error": "missing_file_field"}, 400
+
+    f = request.files["file"]
+    if not f or not f.filename:
+        return {"ok": False, "error": "empty_file"}, 400
+
+    if not _allowed_ext(f.filename):
+        return {"ok": False, "error": "unsupported_extension"}, 400
+
+    # Read the bytes to validate actual image type
+    data = f.read()
+    kind = imghdr.what(None, h=data)  # "png", "jpeg", "gif", "webp", or None
+    if not kind or kind not in ALLOWED_IMGHDR:
+        return {"ok": False, "error": "invalid_image_type"}, 400
+
+    # Pick extension based on detected kind (normalize jpeg -> jpg)
+    ext = "jpg" if kind == "jpeg" else kind
+    fname = secure_filename(f.filename)
+    # Ensure unique filename while keeping extension
+    unique_name = f"{uuid.uuid4().hex}.{ext}"
+    path = os.path.join(UPLOAD_DIR, unique_name)
+
+    try:
+        with open(path, "wb") as out:
+            out.write(data)
+    except Exception as e:
+        log("upload_image save error:", repr(e))
+        return {"ok": False, "error": "save_failed"}, 500
+
+    # Public URL (Flask serves /static/* automatically)
+    url = f"/static/uploads/{unique_name}"
+    return {"ok": True, "url": url}, 200
+
 @app.get("/orders")
 def orders_page():
     """
