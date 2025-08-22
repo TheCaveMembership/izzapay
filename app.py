@@ -2,7 +2,7 @@ import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 from urllib.parse import urlparse
-from flask import Flask, request, render_template, redirect, session, abort, Response
+from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
 
@@ -20,6 +20,7 @@ PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
+DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "782ba6059694b921d317b0df83db4772")
 
 # ----------------- APP -----------------
 app = Flask(__name__)
@@ -52,79 +53,100 @@ init_db()
 
 def ensure_schema():
     with conn() as cx:
-        # --- merchants patches ---
-        mcols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in mcols:
-            try:
-                cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-                log("[schema] added merchants.pi_wallet_address")
-            except Exception as e:
-                log("[schema] add merchants.pi_wallet_address failed:", repr(e))
-        if "pi_handle" not in mcols:
-            try:
-                cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-                log("[schema] added merchants.pi_handle")
-            except Exception as e:
-                log("[schema] add merchants.pi_handle failed:", repr(e))
-        if "colorway" not in mcols:
-            try:
-                cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
-                log("[schema] added merchants.colorway")
-            except Exception as e:
-                log("[schema] add merchants.colorway failed:", repr(e))
+        # merchants patches
+        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+        if "pi_wallet_address" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+        if "pi_handle" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+        if "colorway" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-        # --- carts & cart_items (create if missing) ---
+        # carts
         cx.execute("""
-            CREATE TABLE IF NOT EXISTS carts(
-              id TEXT PRIMARY KEY,
-              merchant_id INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-        """)
+        CREATE TABLE IF NOT EXISTS carts(
+          id TEXT PRIMARY KEY,
+          merchant_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        )""")
+        # cart_items
         cx.execute("""
-            CREATE TABLE IF NOT EXISTS cart_items(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              cart_id TEXT NOT NULL,
-              item_id INTEGER NOT NULL,
-              qty INTEGER NOT NULL
-            )
-        """)
+        CREATE TABLE IF NOT EXISTS cart_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cart_id TEXT NOT NULL,
+          item_id INTEGER NOT NULL,
+          qty INTEGER NOT NULL
+        )""")
 
-        # --- sessions patches ---
+        # sessions table must exist (created elsewhere in your setup)
         scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
         if "pi_payment_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
-                log("[schema] added sessions.pi_payment_id")
             except Exception as e:
-                log("[schema] add sessions.pi_payment_id failed:", repr(e))
+                log("[schema] add pi_payment_id failed (might already exist):", repr(e))
         if "cart_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
-                log("[schema] added sessions.cart_id")
             except Exception as e:
-                log("[schema] add sessions.cart_id failed:", repr(e))
+                log("[schema] add cart_id failed (might already exist):", repr(e))
+        # snapshot of items at checkout time (works for single or multi)
         if "line_items_json" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
-                log("[schema] added sessions.line_items_json")
             except Exception as e:
-                log("[schema] add sessions.line_items_json failed:", repr(e))
+                log("[schema] add line_items_json failed (might already exist):", repr(e))
+        # NEW: who created the checkout session (so we can show "my purchases")
         if "user_id" not in scols:
             try:
                 cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-                log("[schema] added sessions.user_id")
             except Exception as e:
-                log("[schema] add sessions.user_id failed:", repr(e))
+                log("[schema] add user_id failed (might already exist):", repr(e))
 
-        # --- orders patches ---
+with conn() as cx:
+    # ----- sessions.user_id (links session to the signed-in user at checkout time)
+    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+    if "user_id" not in scols:
+        try:
+            cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+        except Exception as e:
+            log("[schema] add sessions.user_id failed:", repr(e))
+            
+  # ----- orders.buyer_user_id (links the final order to the user)
+    ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+    if "buyer_user_id" not in ocols:
+        try:
+            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+        except Exception as e:
+            log("[schema] add orders.buyer_user_id failed:", repr(e))
+
+# sessions: persist the user who created the session (so we can attribute purchases)
+with conn() as cx:
+    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+
+if "user_id" not in scols:
+    with conn() as cx:
+        cx.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+    try:
+        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+    except Exception as e:
+        log("[schema] add sessions.user_id failed (might already exist):", repr(e))
+
+# orders: store buyer_user_id for quick lookups in “My Orders”
+ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+if "buyer_user_id" not in ocols:
+    try:
+        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+    except Exception as e:
+        log("[schema] add orders.buyer_user_id failed (might already exist):", repr(e))
+        
+        # orders should know the buyer user (so we can list purchases)
         ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
         if "buyer_user_id" not in ocols:
             try:
                 cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-                log("[schema] added orders.buyer_user_id")
             except Exception as e:
-                log("[schema] add orders.buyer_user_id failed:", repr(e))
+                log("[schema] add buyer_user_id failed (might already exist):", repr(e))
 
 ensure_schema()
 
@@ -210,78 +232,211 @@ def fetch_pi_payment(payment_id: str):
     url = f"{PI_API_BASE}/v2/payments/{payment_id}"
     return requests.get(url, headers=pi_headers(), timeout=15)
 
-# ----------------- ORDERS PAGE -----------------
+# ----------------- DEBUG -----------------
+@app.get("/whoami")
+def whoami():
+    row = current_user_row()
+    return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
+
+def _require_debug_token():
+    tok = (request.args.get("token") or request.headers.get("X-Debug-Token") or "").strip()
+    if not DEBUG_EMAIL_TOKEN or tok != DEBUG_EMAIL_TOKEN:
+        abort(403)
+
+@app.get("/debug/ping")
+def debug_ping():
+    _require_debug_token()
+    return {"ok": True, "message": "pong", "time": int(time.time())}, 200
+
+@app.get("/debug/complete-payment")
+def debug_complete_payment():
+    _require_debug_token()
+    payment_id = (request.args.get("payment_id") or "").strip()
+    if not payment_id:
+        return {"ok": False, "error": "missing_payment_id"}, 400
+
+    try:
+        # 1) Fetch payment to get txid + metadata
+        r = requests.get(f"{PI_API_BASE}/v2/payments/{payment_id}", headers=pi_headers(), timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": "fetch_failed", "status": r.status_code, "body": r.text}, 502
+        p = r.json() or {}
+
+        direction = p.get("direction")
+        status = p.get("status") or {}
+        tx = (p.get("transaction") or {})
+        txid = tx.get("txid")
+        metadata = p.get("metadata") or {}
+        session_id = metadata.get("session_id")
+
+        # Sanity checks
+        if direction != "user_to_app":
+            return {"ok": False, "error": "not_user_to_app", "detail": {"direction": direction}}, 400
+        if not txid or not (status.get("transaction_verified") or tx.get("verified")):
+            return {"ok": False, "error": "tx_not_verified", "detail": {"txid": txid, "status": status}}, 400
+        if status.get("developer_completed"):
+            return {"ok": True, "note": "already_completed"}, 200
+
+        # 2) Complete it on Pi
+        rc = requests.post(
+            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
+            headers=pi_headers(),
+            json={"txid": txid},
+            timeout=15
+        )
+        if rc.status_code != 200:
+            return {"ok": False, "error": "complete_failed", "status": rc.status_code, "body": rc.text}, 502
+
+        # 3) Try to fulfill locally if we can match the session
+        if session_id:
+            with conn() as cx:
+                s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if s and s["state"] == "initiated":
+                try:
+                    result = fulfill_session(s, txid, buyer={}, shipping={})
+                except Exception as e:
+                    return {
+                        "ok": True,
+                        "note": "completed_on_pi_but_local_fulfillment_failed",
+                        "error": repr(e),
+                        "payment_id": payment_id,
+                        "session_id": session_id,
+                    }, 200
+                return {"ok": True, "note": "completed_and_fulfilled", "result": result}, 200
+            else:
+                return {
+                    "ok": True,
+                    "note": "completed_on_pi_but_session_missing_or_not_initiated",
+                    "payment_id": payment_id,
+                    "session_id": session_id,
+                }, 200
+        else:
+            return {
+                "ok": True,
+                "note": "completed_on_pi_no_session_id_in_metadata",
+                "payment_id": payment_id
+            }, 200
+
+    except Exception as e:
+        log("debug_complete_payment error:", repr(e))
+        return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
+        
 @app.get("/orders")
 def orders_page():
-    # If there is a t= token, accept it
-    tok = get_bearer_token_from_request()
-    if tok:
-        uid = verify_login_token(tok)
-        if uid:
-            try:
-                session["user_id"] = uid
-                session.permanent = True
-            except Exception:
-                pass
-
+    """
+    Render "My Orders" with:
+      - Purchases: orders tied to the signed-in user
+          * primary: orders.buyer_user_id = uid
+          * legacy:  sessions.user_id = uid via o.pi_tx_hash (for older orders)
+      - Sales: orders from merchant(s) owned by the user
+    If not signed in, render the Pi auth prompt (mode="auth").
+    """
     u = current_user_row()
     if not u:
-        # Not signed in -> show the one-button Pi auth page
+        # Not signed in -> show the single "Authorize with Pi" button that returns here.
         return render_template("my_orders.html", mode="auth", sandbox=PI_SANDBOX)
 
-    # Signed in -> build the lists
-    with conn() as cx:
-        # If they own a store, fetch it once
-        merchant = cx.execute(
-            "SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)
-        ).fetchone()
+    uid = int(u["id"])
 
-        # PURCHASES:
-        # 1) Normal path: orders that already have buyer_user_id = current user
-        # 2) Fallback path: join to sessions on matching tx hash where sessions.user_id = current user
-        purchases = cx.execute(
-            """
-            SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
-                   i.title AS item_title,
-                   m.business_name AS m_name
-            FROM orders o
-            LEFT JOIN items     i ON i.id = o.item_id
-            JOIN merchants m ON m.id = o.merchant_id
-            LEFT JOIN sessions s ON s.pi_tx_hash = o.pi_tx_hash
-            WHERE (o.buyer_user_id = ?)
-               OR (s.user_id = ?)
-            ORDER BY o.id DESC
-            LIMIT 200
-            """,
-            (u["id"], u["id"])
-        ).fetchall()
-
-        # SALES (only if they have a merchant)
-        if merchant:
-            sales = cx.execute(
+    try:
+        with conn() as cx:
+            # ---- Purchases (new path: direct link by buyer_user_id)
+            purchases_new = cx.execute(
                 """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_merchant_net,
-                       i.title AS item_title
+                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
+                       i.title AS item_title,
+                       m.business_name AS m_name
                 FROM orders o
-                JOIN items i ON i.id = o.item_id
-                WHERE o.merchant_id = ?
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                WHERE o.buyer_user_id = ?
                 ORDER BY o.id DESC
                 LIMIT 200
                 """,
-                (merchant["id"],)
+                (uid,),
             ).fetchall()
-        else:
-            sales = []
 
-    return render_template(
-        "my_orders.html",
-        mode="list",
-        user=u,
-        purchases=purchases,
-        merchant=merchant,
-        sales=sales,
-    )
+            # ---- Purchases (legacy path: match via sessions.user_id and pi_tx_hash)
+            purchases_legacy = cx.execute(
+                """
+                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
+                       i.title AS item_title,
+                       m.business_name AS m_name
+                FROM orders o
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                JOIN sessions s  ON s.pi_tx_hash = o.pi_tx_hash
+                WHERE s.user_id = ?
+                  AND (o.buyer_user_id IS NULL OR o.buyer_user_id = 0)
+                ORDER BY o.id DESC
+                LIMIT 200
+                """,
+                (uid,),
+            ).fetchall()
 
+            # De-dupe purchases by order id, keep newest first
+            seen = set()
+            purchases = []
+            for r in list(purchases_new) + list(purchases_legacy):
+                oid = r["id"]
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                purchases.append(dict(r))
+
+            # ---- Sales: any order whose merchant is owned by this user
+            sales = cx.execute(
+                """
+                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_merchant_net, o.pi_tx_hash,
+                       i.title AS item_title,
+                       m.business_name AS m_name, m.id AS m_id
+                FROM orders o
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                WHERE m.owner_user_id = ?
+                ORDER BY o.id DESC
+                LIMIT 200
+                """,
+                (uid,),
+            ).fetchall()
+
+            # We'll show the first merchant (if any) in the header "Store: ..."
+            merchant = None
+            if sales:
+                merchant = {"id": sales[0]["m_id"], "business_name": sales[0]["m_name"]}
+            else:
+                # Try to load a merchant row anyway so the page can say whether they have a store
+                merchant = cx.execute(
+                    "SELECT id, business_name FROM merchants WHERE owner_user_id=? LIMIT 1",
+                    (uid,),
+                ).fetchone()
+                if merchant:
+                    merchant = dict(merchant)
+
+        return render_template(
+            "my_orders.html",
+            mode="list",
+            user=u,
+            purchases=purchases,
+            sales=[dict(r) for r in sales],
+            merchant=merchant,
+            sandbox=PI_SANDBOX,
+        )
+
+    except Exception as e:
+        log("/orders render error:", repr(e))
+        # Fail safely with empty lists; still render the page
+        return render_template(
+            "my_orders.html",
+            mode="list",
+            user=u,
+            purchases=[],
+            sales=[],
+            merchant=None,
+            sandbox=PI_SANDBOX,
+            error="server_error",
+        )
+        
 @app.get("/api/my-orders")
 def api_my_orders():
     """
@@ -305,7 +460,7 @@ def api_my_orders():
                 SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
                        i.title, m.business_name AS store
                 FROM orders o
-                LEFT JOIN items i      ON i.id = o.item_id
+                JOIN items i      ON i.id = o.item_id
                 JOIN merchants m  ON m.id = o.merchant_id
                 WHERE o.buyer_user_id = ?
                 ORDER BY o.id DESC
@@ -320,7 +475,7 @@ def api_my_orders():
                 SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
                        i.title, m.business_name AS store
                 FROM orders o
-                LEFT JOIN items i      ON i.id = o.item_id
+                JOIN items i      ON i.id = o.item_id
                 JOIN merchants m  ON m.id = o.merchant_id
                 JOIN sessions s   ON s.pi_tx_hash = o.pi_tx_hash
                 WHERE s.user_id = ?
@@ -364,7 +519,333 @@ def api_my_orders():
 
     except Exception as e:
         log("/api/my-orders error:", repr(e))
-        return {"ok": False, "error": "server_error"}, 500500  # (kept as-is)
+        return {"ok": False, "error": "server_error"}, 500500
+
+# Cancel a stuck Pi payment (server-side)
+@app.get("/debug/cancel-payment")
+def debug_cancel_payment():
+    _require_debug_token()
+    payment_id = (request.args.get("payment_id") or "").strip()
+    if not payment_id:
+        return {"ok": False, "error": "missing_payment_id"}, 400
+    try:
+        url = f"{PI_API_BASE}/v2/payments/{payment_id}/cancel"
+        r = requests.post(url, headers=pi_headers(), json={})
+        if r.status_code != 200:
+            return {"ok": False, "status": r.status_code, "body": r.text}, 502
+        return {"ok": True, "payment_id": payment_id}, 200
+    except Exception as e:
+        log("debug_cancel_payment error:", repr(e))
+        return {"ok": False, "error": "server_error"}, 500
+
+# SDK-based finder/canceller (client calls our cancel endpoint)
+@app.get("/debug/incomplete")
+def debug_incomplete():
+    _require_debug_token()
+    token = (request.args.get("token") or "").strip()
+    from flask import render_template_string
+    html = """
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Find & Cancel Incomplete Pi Payment</title>
+<style>
+  :root{--bg:#0b0f17;--card:#0f1728;--ink:#e8f0ff;--muted:#bcd0ff;--line:#1f2a44;}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:var(--bg);color:var(--ink)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:760px;margin:0 auto}
+  button{padding:10px 14px;border:0;border-radius:10px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
+  button[disabled]{opacity:.6;cursor:wait}
+  input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#0b1222;color:var(--ink)}
+  textarea{min-height:160px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  .note{font-size:13px}
+  .k{font-weight:600}
+</style>
+
+<div class="card grid">
+  <div>
+    <h2 style="margin:0 0 4px">Find & Cancel Incomplete Payment</h2>
+    <p class="muted" style="margin:6px 0">Open this page <strong>in Pi Browser</strong>.</p>
+    <p class="muted note" style="margin:0">Token ends with: <code id="tok"></code></p>
+  </div>
+
+  <div id="status" class="muted">Loading Pi SDK…</div>
+
+  <div id="controls" style="display:none" class="row">
+    <button id="retryBtn">Re-check</button>
+    <button id="cancelBtn" disabled>Cancel payment</button>
+  </div>
+
+  <div id="foundBox" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:1">
+        <label class="muted">Payment ID (from SDK)</label>
+        <input id="pid" readonly>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <label class="muted">Raw object from <span class="k">onIncompletePaymentFound(payment)</span></label>
+    <textarea id="raw" readonly placeholder="(nothing received yet)"></textarea>
+  </div>
+
+  <div>
+    <label class="muted">Errors / logs</label>
+    <textarea id="logs" readonly placeholder="(no errors)"></textarea>
+  </div>
+
+  <div class="note muted">
+    <div style="margin-top:8px"><span class="k">Tip:</span> If Pi Browser shows “You already have a pending payment…”, but the raw box stays empty, the lock lives on the Pi side and the SDK isn’t surfacing it to your app session. Hit <em>Re-check</em> after re-opening this page inside Pi Browser.</div>
+  </div>
+</div>
+
+<script src="https://sdk.minepi.com/pi-sdk.js"></script>
+<script>
+(function(){
+  const statusEl = document.getElementById('status');
+  const rawEl    = document.getElementById('raw');
+  const logsEl   = document.getElementById('logs');
+  const pidEl    = document.getElementById('pid');
+  const foundBox = document.getElementById('foundBox');
+  const controls = document.getElementById('controls');
+  const retryBtn = document.getElementById('retryBtn');
+  const cancelBtn= document.getElementById('cancelBtn');
+  const tokEl    = document.getElementById('tok');
+
+  function qs(k){ return new URL(location.href).searchParams.get(k) || ''; }
+  const token = qs('token') || '';
+  tokEl.textContent = token ? token.slice(-6) : '';
+
+  function setStatus(txt){ statusEl.textContent = txt; }
+  function logLine(msg){
+    try{
+      const t = new Date().toISOString().replace('T',' ').replace('Z','');
+      logsEl.value += "[" + t + "] " + msg + "\\n";
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }catch(_){}
+  }
+  function showRaw(obj){
+    try{
+      rawEl.value = obj ? JSON.stringify(obj, null, 2) : '';
+      rawEl.scrollTop = 0;
+    }catch(e){
+      rawEl.value = "(failed to stringify: " + (e && e.message || e) + ")";
+    }
+  }
+
+  let stuck = null; // object received from onIncompletePaymentFound
+  let stuckId = null;
+
+  async function checkOnce(){
+    controls.style.display = 'none';
+    cancelBtn.disabled = true;
+    foundBox.style.display = 'none';
+    showRaw(null);
+
+    if(!window.Pi || !Pi.init){
+      setStatus("Pi SDK not available. Open this page in Pi Browser.");
+      logLine("Pi SDK missing");
+      return;
+    }
+
+    try{
+      setStatus("Initializing Pi SDK…");
+      Pi.init({ version: "2.0" });
+
+      const scopes = ['payments','username'];
+
+      function onIncompletePaymentFound(payment){
+        try{
+          logLine("onIncompletePaymentFound fired.");
+          stuck = payment || null;
+          showRaw(stuck);
+          // Try both common keys:
+          stuckId = (stuck && (stuck.identifier || stuck.paymentId || stuck.transaction && stuck.transaction.paymentId)) || null;
+          if(stuckId){
+            setStatus("Incomplete payment detected by SDK.");
+            pidEl.value = stuckId;
+            foundBox.style.display = '';
+            cancelBtn.disabled = false;
+          }else{
+            setStatus("SDK callback fired, but it did not include a recognizable payment id.");
+            cancelBtn.disabled = true;
+          }
+        }catch(e){
+          logLine("Error handling onIncompletePaymentFound: " + (e && e.message || e));
+        }
+      }
+
+      setStatus("Authenticating…");
+      const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
+      logLine("authenticate result received.");
+      // Even if no callback fired, show we tried
+      controls.style.display = '';
+
+      if(!stuck){
+        setStatus("No incomplete payment detected by SDK.");
+        showRaw(null);
+      }
+    }catch(e){
+      setStatus("Auth / SDK error.");
+      logLine("SDK error: " + (e && e.message || e));
+    }
+  }
+
+  retryBtn.onclick = () => { checkOnce(); };
+
+  cancelBtn.onclick = async () => {
+    if(!stuckId){ return; }
+    cancelBtn.disabled = true;
+    const url = "/debug/cancel-payment?token=" + encodeURIComponent(token) + "&payment_id=" + encodeURIComponent(stuckId);
+    try{
+      setStatus("Cancelling on server…");
+      const r = await fetch(url);
+      const j = await r.json().catch(()=>({}));
+      logLine("Cancel response: " + JSON.stringify(j));
+      if(j && j.ok){
+        setStatus("Cancelled successfully. You can retry checkout now.");
+      }else{
+        setStatus("Cancel failed. See logs below.");
+      }
+    }catch(e){
+      logLine("Cancel fetch error: " + (e && e.message || e));
+      setStatus("Cancel request errored.");
+    }finally{
+      cancelBtn.disabled = false;
+    }
+  };
+
+  // kick it off
+  checkOnce();
+})();
+</script>
+"""
+    return render_template_string(html)
+
+# Server view of pending sessions with stored payment_id
+@app.get("/debug/pending")
+def debug_pending():
+    _require_debug_token()
+    with conn() as cx:
+        rows = cx.execute("""
+            SELECT s.id as session_id, s.created_at, s.expected_pi, s.pi_payment_id,
+                   s.state, s.merchant_id, m.slug as m_slug, m.business_name as m_name
+            FROM sessions s
+            LEFT JOIN merchants m ON m.id = s.merchant_id
+            WHERE s.pi_payment_id IS NOT NULL
+              AND (s.state IS NULL OR s.state='initiated' OR s.state='approved')
+            ORDER BY s.created_at DESC
+            LIMIT 100
+        """).fetchall()
+    data = [dict(r) for r in rows]
+    html = """
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pending Pi Payments (Server View)</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0f17;color:#e8f0ff;padding:16px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:8px;border-bottom:1px solid #1f2a44}
+small{color:#bcd0ff}
+button{padding:6px 10px;border:0;border-radius:8px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
+code{background:#0f1728;padding:2px 6px;border-radius:6px}
+.card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:1000px;margin:0 auto}
+</style>
+<div class="card">
+  <h2>Pending (initiated/approved) sessions with <code>payment_id</code></h2>
+  <p><small>Use this if the SDK page didn’t surface the incomplete payment. Click cancel to clear the block.</small></p>
+  <table>
+    <thead><tr><th>When</th><th>Store</th><th>Session</th><th>Expected π</th><th>payment_id</th><th>Action</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+const data  = {{ data|tojson }};
+const token = new URL(location.href).searchParams.get('token') || '';
+const tbody = document.getElementById('rows');
+function fmt(ts){ try{return new Date(ts*1000).toLocaleString()}catch(e){return ts} }
+function tr(r){
+  const id = r.session_id, pay = r.pi_payment_id || '';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><small>${fmt(r.created_at)}</small></td>
+    <td>${r.m_name || ''} <small>(${r.m_slug||''})</small></td>
+    <td><code>${id}</code> <small>${r.state||''}</small></td>
+    <td>${(r.expected_pi||0).toFixed ? Number(r.expected_pi).toFixed(7) : r.expected_pi}</td>
+    <td><code>${pay}</code></td>
+    <td><button data-pay="${pay}">Cancel</button></td>
+  `;
+  tr.querySelector('button').onclick = async (ev)=>{
+    const pid = ev.target.getAttribute('data-pay');
+    if(!pid) return;
+    ev.target.disabled = true; ev.target.textContent = 'Cancelling…';
+    try{
+      const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(pid)}`;
+      const res = await fetch(url);
+      const j = await res.json();
+      if(j && j.ok){ ev.target.textContent = 'Cancelled ✓'; }
+      else { ev.target.textContent = 'Failed'; console.log(j); }
+    }catch(e){ ev.target.textContent = 'Error'; console.error(e); }
+  };
+  return tr;
+}
+if(Array.isArray(data) && data.length){
+  data.forEach(r => tbody.appendChild(tr(r)));
+}else{
+  const tr0 = document.createElement('tr');
+  tr0.innerHTML = '<td colspan="6"><small>No candidate sessions found.</small></td>';
+  tbody.appendChild(tr0);
+}
+</script>
+"""
+    return render_template_string(html, data=data)
+
+# List most recent orders (avoid created_at; not all schemas have it)
+@app.get("/debug/orders")
+def debug_orders():
+    _require_debug_token()
+    try:
+        with conn() as cx:
+            rows = cx.execute(
+                """SELECT id, merchant_id, item_id, qty, buyer_email, status,
+                          pi_amount, pi_fee, pi_merchant_net, pi_tx_hash, buyer_token
+                   FROM orders
+                   ORDER BY id DESC
+                   LIMIT 10"""
+            ).fetchall()
+        return {"ok": True, "orders": [dict(r) for r in rows]}, 200
+    except Exception as e:
+        print("[debug/orders] ERROR:", repr(e))
+        return {"ok": False, "error": repr(e)}, 500
+
+# Manual email trigger (POST)
+@app.post("/debug/send-order-emails/<int:order_id>")
+def debug_send_order_emails_post(order_id: int):
+    _require_debug_token()
+    try:
+        print(f"[debug] manual email trigger (POST) -> order_id={order_id}")
+        send_order_emails(order_id)
+        print(f"[debug] manual email trigger complete -> order_id={order_id}")
+        return {"ok": True, "order_id": order_id}, 200
+    except Exception as e:
+        print(f"[debug] manual email trigger error -> order_id={order_id} err={repr(e)}")
+        return {"ok": False, "error": repr(e)}, 500
+
+# Manual email trigger (GET) — easy from Pi Browser/Safari
+@app.get("/debug/send-order-emails/<int:order_id>")
+def debug_send_order_emails_get(order_id: int):
+    _require_debug_token()
+    try:
+        print(f"[debug] manual email trigger (GET) -> order_id={order_id}")
+        send_order_emails(order_id)
+        print(f"[debug] manual email trigger complete -> order_id={order_id}")
+        return {"ok": True, "order_id": order_id, "note": "Triggered via GET"}, 200
+    except Exception as e:
+        print(f"[debug] manual email trigger error (GET) -> order_id={order_id} err={repr(e)}")
+        return {"ok": False, "error": repr(e)}, 500
+# ----------------- END DEBUG -----------------
 
 # ----------------- Explore (Browse stores) -----------------
 @app.get("/explore")
@@ -552,6 +1033,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
+        # FIX: single-element tuple requires trailing comma
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -854,7 +1336,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()  # fixed tuple
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -1027,7 +1509,7 @@ def pi_approve():
 @app.post("/api/pi/complete")
 def pi_complete():
     data = request.get_json(force=True)
-    log("[pi_complete] payload:", data)  # debug log
+    log("[pi_complete] payload:", data)  # debug to confirm cart flow hits this endpoint
     payment_id = data.get("paymentId")
     session_id = data.get("session_id")
     txid       = data.get("txid") or ""
@@ -1316,6 +1798,9 @@ def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash
         except Exception as e:
             log("[mail] cart merchant email FAILED:", repr(e))
 
+    except Exception as e:
+        log("[mail] send_cart_emails error:", repr(e))
+
 def fulfill_session(s, tx_hash, buyer, shipping):
     # Merchant (read-only)
     with conn() as cx:
@@ -1361,6 +1846,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     # Proportionally allocate fee across lines by their gross share
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
 
+    buyer_user_id = s["user_id"]  # may be None for older sessions
+
     with conn() as cx:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1379,17 +1866,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            buyer_token   = uuid.uuid4().hex
-
-            # Fallback: if old session lacks user_id, try current session
-            try:
-                buyer_user_id = s["user_id"]
-            except Exception:
-                buyer_user_id = None
-            if not buyer_user_id:
-                u_now = current_user_row()
-                buyer_user_id = (u_now["id"] if u_now else None)
-
+            buyer_token = uuid.uuid4().hex
             cur = cx.execute(
                 """INSERT INTO orders(
                      merchant_id,
@@ -1423,15 +1900,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     buyer_user_id,
                 ),
             )
-
             created_order_ids.append(cur.lastrowid)
 
-        # Mark session paid
+        # Mark session paid + attach tx
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # Build & send a single consolidated email from the snapshot
+    # Build & send consolidated email
     try:
-        # Fetch items again for titles (already in by_id, but ensure presence)
         display_rows = []
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1440,7 +1915,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             gross = float(li["price"]) * qty
             display_rows.append({"title": title, "qty": qty, "gross": gross})
 
-        # HTML table
         line_html = "".join(
             f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
             f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
@@ -1467,7 +1941,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}"
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){subj_suffix}"
 
-        # Buyer (optional)
         if buyer_email:
             send_email(
                 buyer_email,
@@ -1486,7 +1959,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         else:
             log("[mail][unified] buyer email skipped (no buyer_email)")
 
-        # Merchant (always)
         send_email(
             merchant_mail,
             subj_merchant,
@@ -1506,7 +1978,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception as e:
         log("[fulfill_session] email build/send failed:", repr(e))
 
-    # Redirect back to store
+    # Redirect
     u = current_user_row()
     tok = ""
     if u:
@@ -1565,7 +2037,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()  # fixed tuple
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
