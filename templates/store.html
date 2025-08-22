@@ -35,8 +35,6 @@
     .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .price{font-weight:800}
     .header{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}
-    .cart{position:relative}
-    .cart .count{position:absolute;top:-6px;right:-8px;background:var(--brand);color:var(--btn-txt);font-weight:800;border-radius:12px;padding:2px 6px;font-size:.8rem;border:1px solid var(--line)}
     .desc{margin-top:6px;color:var(--muted);font-size:.95rem}
     @media (max-width:540px){
       .card{min-width:calc(50% - 12px)}
@@ -62,15 +60,9 @@
           {% if m.description %}<div class="muted" style="margin-top:3px">{{ m.description }}</div>{% endif %}
         </div>
 
-        {# Cart + Explore buttons keep token 't' #}
+        <!-- Only Explore button left -->
         <div class="row">
           <a class="pill" href="/explore{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">Explore stores</a>
-          <a class="btn cart" href="/cart/{{ cid }}{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">
-            Cart
-            {% if cart_count and cart_count|int>0 %}
-              <span class="count">{{ cart_count }}</span>
-            {% endif %}
-          </a>
         </div>
       </div>
     </div>
@@ -98,15 +90,6 @@
           <div class="row">
             <!-- BUY NOW goes straight to single-item checkout -->
             <a class="pill" href="/checkout/{{ it.link_id }}{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">Buy now</a>
-
-            <!-- ADD TO CART posts; we preserve cart id & token -->
-            <form method="post" action="/store/{{ m.slug }}/add{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">
-              <input type="hidden" name="cid" value="{{ cid }}">
-              <input type="hidden" name="item_id" value="{{ it.id }}">
-              <input type="hidden" name="qty" value="1">
-              {% if request.args.get('t') %}<input type="hidden" name="t" value="{{ request.args.get('t') }}">{% endif %}
-              <button class="btn" type="submit">Add to cart</button>
-            </form>
           </div>
         </div>
       </div>
