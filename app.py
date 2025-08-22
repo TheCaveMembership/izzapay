@@ -208,7 +208,6 @@ def debug_cancel_payment():
 def debug_pending():
     _require_debug_token()
     with conn() as cx:
-        # last 100 sessions where we have a payment id and still not marked paid
         rows = cx.execute("""
             SELECT s.id as session_id, s.created_at, s.expected_pi, s.pi_payment_id,
                    s.state, s.merchant_id, m.slug as m_slug, m.business_name as m_name
@@ -219,6 +218,10 @@ def debug_pending():
             ORDER BY s.created_at DESC
             LIMIT 100
         """).fetchall()
+
+    # Convert to plain dicts for JSON serialization
+    data = [dict(r) for r in rows]
+
     html = """
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -241,7 +244,7 @@ code{background:#0f1728;padding:2px 6px;border-radius:6px}
   </table>
 </div>
 <script>
-const data = %s;
+const data  = {{ data|tojson }};
 const token = new URL(location.href).searchParams.get('token') || '';
 const tbody = document.getElementById('rows');
 function fmt(ts){ try{return new Date(ts*1000).toLocaleString()}catch(e){return ts} }
@@ -252,7 +255,7 @@ function tr(r){
     <td><small>${fmt(r.created_at)}</small></td>
     <td>${r.m_name || ''} <small>(${r.m_slug||''})</small></td>
     <td><code>${id}</code> <small>${r.state||''}</small></td>
-    <td>${(r.expected_pi||0).toFixed ? r.expected_pi.toFixed(7) : r.expected_pi}</td>
+    <td>${(r.expected_pi||0).toFixed ? Number(r.expected_pi).toFixed(7) : r.expected_pi}</td>
     <td><code>${pay}</code></td>
     <td><button data-pay="${pay}">Cancel</button></td>
   `;
@@ -262,7 +265,8 @@ function tr(r){
     ev.target.disabled = true; ev.target.textContent = 'Cancelling…';
     try{
       const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(pid)}`;
-      const res = await fetch(url); const j = await res.json();
+      const res = await fetch(url);
+      const j = await res.json();
       if(j && j.ok){ ev.target.textContent = 'Cancelled ✓'; }
       else { ev.target.textContent = 'Failed'; console.log(j); }
     }catch(e){ ev.target.textContent = 'Error'; console.error(e); }
@@ -277,8 +281,8 @@ if(Array.isArray(data) && data.length){
   tbody.appendChild(tr0);
 }
 </script>
-""" % (json.dumps([dict(r) for r in rows]))
-    return html
+"""
+    return render_template_string(html, data=data)
 
 # Tiny page that finds an incomplete payment via the Pi SDK and lets you cancel it
 @app.get("/debug/incomplete")
