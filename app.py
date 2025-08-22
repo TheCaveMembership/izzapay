@@ -320,7 +320,123 @@ def debug_complete_payment():
     except Exception as e:
         log("debug_complete_payment error:", repr(e))
         return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
+        
+@app.get("/orders")
+def orders_page():
+    """
+    Render "My Orders" with:
+      - Purchases: orders tied to the signed-in user
+          * primary: orders.buyer_user_id = uid
+          * legacy:  sessions.user_id = uid via o.pi_tx_hash (for older orders)
+      - Sales: orders from merchant(s) owned by the user
+    If not signed in, render the Pi auth prompt (mode="auth").
+    """
+    u = current_user_row()
+    if not u:
+        # Not signed in -> show the single "Authorize with Pi" button that returns here.
+        return render_template("my_orders.html", mode="auth", sandbox=PI_SANDBOX)
 
+    uid = int(u["id"])
+
+    try:
+        with conn() as cx:
+            # ---- Purchases (new path: direct link by buyer_user_id)
+            purchases_new = cx.execute(
+                """
+                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
+                       i.title AS item_title,
+                       m.business_name AS m_name
+                FROM orders o
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                WHERE o.buyer_user_id = ?
+                ORDER BY o.id DESC
+                LIMIT 200
+                """,
+                (uid,),
+            ).fetchall()
+
+            # ---- Purchases (legacy path: match via sessions.user_id and pi_tx_hash)
+            purchases_legacy = cx.execute(
+                """
+                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
+                       i.title AS item_title,
+                       m.business_name AS m_name
+                FROM orders o
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                JOIN sessions s  ON s.pi_tx_hash = o.pi_tx_hash
+                WHERE s.user_id = ?
+                  AND (o.buyer_user_id IS NULL OR o.buyer_user_id = 0)
+                ORDER BY o.id DESC
+                LIMIT 200
+                """,
+                (uid,),
+            ).fetchall()
+
+            # De-dupe purchases by order id, keep newest first
+            seen = set()
+            purchases = []
+            for r in list(purchases_new) + list(purchases_legacy):
+                oid = r["id"]
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                purchases.append(dict(r))
+
+            # ---- Sales: any order whose merchant is owned by this user
+            sales = cx.execute(
+                """
+                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_merchant_net, o.pi_tx_hash,
+                       i.title AS item_title,
+                       m.business_name AS m_name, m.id AS m_id
+                FROM orders o
+                JOIN items i     ON i.id = o.item_id
+                JOIN merchants m ON m.id = o.merchant_id
+                WHERE m.owner_user_id = ?
+                ORDER BY o.id DESC
+                LIMIT 200
+                """,
+                (uid,),
+            ).fetchall()
+
+            # We'll show the first merchant (if any) in the header "Store: ..."
+            merchant = None
+            if sales:
+                merchant = {"id": sales[0]["m_id"], "business_name": sales[0]["m_name"]}
+            else:
+                # Try to load a merchant row anyway so the page can say whether they have a store
+                merchant = cx.execute(
+                    "SELECT id, business_name FROM merchants WHERE owner_user_id=? LIMIT 1",
+                    (uid,),
+                ).fetchone()
+                if merchant:
+                    merchant = dict(merchant)
+
+        return render_template(
+            "my_orders.html",
+            mode="list",
+            user=u,
+            purchases=purchases,
+            sales=[dict(r) for r in sales],
+            merchant=merchant,
+            sandbox=PI_SANDBOX,
+        )
+
+    except Exception as e:
+        log("/orders render error:", repr(e))
+        # Fail safely with empty lists; still render the page
+        return render_template(
+            "my_orders.html",
+            mode="list",
+            user=u,
+            purchases=[],
+            sales=[],
+            merchant=None,
+            sandbox=PI_SANDBOX,
+            error="server_error",
+        )
+        
 @app.get("/api/my-orders")
 def api_my_orders():
     """
