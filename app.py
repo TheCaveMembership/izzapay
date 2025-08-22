@@ -1194,13 +1194,13 @@ DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 def send_order_emails_unified(order_ids):
     """
     Consolidated email for multi-item carts (also works for single).
-    Sends one email to the buyer (if present) and one to the merchant,
-    listing all items & totals.
+    Returns True if at least one email was attempted (buyer or merchant), else False.
     """
+    attempted_any = False
     try:
         if not order_ids:
-            log("[mail] unified: no order_ids")
-            return
+            log("[mail][unified] no order_ids")
+            return False
         ids = order_ids if isinstance(order_ids, (list, tuple)) else [order_ids]
         ids = [int(x) for x in ids]
 
@@ -1222,8 +1222,8 @@ def send_order_emails_unified(order_ids):
             rows = cx.execute(q, ids).fetchall()
 
         if not rows:
-            log("[mail] unified: query returned 0 rows for ids:", ids)
-            return
+            log("[mail][unified] query returned 0 rows for ids:", ids)
+            return False
 
         multi = len(rows) > 1
 
@@ -1291,8 +1291,9 @@ def send_order_emails_unified(order_ids):
         subj_buyer    = f"Your order at {m_name} is confirmed{item_count_suffix}"
         subj_merchant = f"New Pi order at {m_name} ({total_gross:.7f} π){item_count_suffix}"
 
-        log("[mail] unified -> ids:", ids, " buyer_email:", buyer_email or "(none)", " merchant_mail:", merchant_mail)
+        log(f"[mail][unified] rows={len(rows)} gross={total_gross:.7f} buyer={buyer_email or '—'} merchant={merchant_mail or '—'}")
 
+        # Buyer email (optional)
         if buyer_email:
             try:
                 send_email(
@@ -1308,12 +1309,14 @@ def send_order_emails_unified(order_ids):
                     """,
                     reply_to=merchant_mail
                 )
-                log("[mail] unified buyer email SENT ->", buyer_email)
+                attempted_any = True
+                log("[mail][unified] buyer email SENT ->", buyer_email)
             except Exception as e:
-                log("[mail] unified buyer email FAILED:", repr(e))
+                log("[mail][unified] buyer email FAILED:", repr(e))
         else:
-            log("[mail] unified buyer email SKIPPED (no buyer_email).")
+            log("[mail][unified] buyer email SKIPPED (no buyer_email)")
 
+        # Merchant email (always attempt)
         try:
             send_email(
                 merchant_mail,
@@ -1330,12 +1333,16 @@ def send_order_emails_unified(order_ids):
                     <p style="margin-top:10px"><small>TX: {rows[0]['pi_tx_hash'] or '—'}</small></p>
                 """
             )
-            log("[mail] unified merchant email SENT ->", merchant_mail)
+            attempted_any = True
+            log("[mail][unified] merchant email SENT ->", merchant_mail)
         except Exception as e:
-            log("[mail] unified merchant email FAILED:", repr(e))
+            log("[mail][unified] merchant email FAILED:", repr(e))
 
     except Exception as e:
-        log("[mail] send_order_emails_unified error:", repr(e))
+        log("[mail][unified] send_order_emails_unified error:", repr(e))
+        return attempted_any
+
+    return attempted_any
 
 # ======================== FULFILLMENT ========================
 def fulfill_session(s, tx_hash, buyer, shipping):
