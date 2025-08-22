@@ -1017,51 +1017,6 @@ def auth_exchange():
             return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
 
-@app.get("/orders")
-def orders_page():
-    u = current_user_row()
-    if not u:
-        # Not authenticated: simple page with a Pi auth button that sends you back here
-        return render_template("orders.html",
-                               mode="auth",
-                               sandbox=PI_SANDBOX,
-                               app_base=APP_BASE_URL)
-
-    # Authenticated: gather purchases and, if applicable, sales
-    with conn() as cx:
-        # Purchases by this user (requires fulfill_session to store buyer_user_id)
-        purchases = cx.execute("""
-            SELECT o.*, i.title AS item_title, m.business_name AS m_name
-            FROM orders o
-            JOIN items i     ON i.id = o.item_id
-            JOIN merchants m ON m.id = o.merchant_id
-            WHERE o.buyer_user_id = ?
-            ORDER BY o.id DESC
-            LIMIT 100
-        """, (u["id"],)).fetchall()
-
-        # Merchant (if the user has a store)
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
-        sales = []
-        if m:
-            sales = cx.execute("""
-                SELECT o.*, i.title AS item_title
-                FROM orders o
-                JOIN items i ON i.id = o.item_id
-                WHERE o.merchant_id = ?
-                ORDER BY o.id DESC
-                LIMIT 100
-            """, (m["id"],)).fetchall()
-
-    # Render the lists
-    return render_template("orders.html",
-                           mode="list",
-                           user=u,
-                           purchases=purchases,
-                           sales=sales,
-                           merchant=m,
-                           app_base=APP_BASE_URL)
-
 # ----------------- MERCHANT DASHBOARD -----------------
 @app.get("/dashboard")
 def dashboard():
