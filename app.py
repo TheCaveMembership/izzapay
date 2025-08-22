@@ -175,7 +175,18 @@ def _require_debug_token():
 def debug_ping():
     _require_debug_token()
     return {"ok": True, "message": "pong", "time": int(time.time())}, 200
-
+    
+@app.get("/debug/cancel-payment")
+def debug_cancel_payment():
+    _require_debug_token()
+    payment_id = (request.args.get("payment_id") or "").strip()
+    if not payment_id:
+        abort(400)
+    r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/cancel",
+                      headers=pi_headers(), json={})
+    return ({"ok": True} if r.status_code == 200
+            else {"ok": False, "status": r.status_code, "body": r.text}), (200 if r.status_code == 200 else 502)
+    
 # List most recent orders (avoid created_at; not all schemas have it)
 @app.get("/debug/orders")
 def debug_orders():
