@@ -1,10 +1,10 @@
-import os, uuid
-from PIL import Image
-from werkzeug.utils import secure_filename
+# ----------------- IMPORTS -----------------
 import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 from urllib.parse import urlparse
+from PIL import Image
+from werkzeug.utils import secure_filename
 from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
@@ -23,25 +23,23 @@ PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
 APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN  = APP_BASE_URL
-DEBUG_EMAIL_TOKEN = os.getenv("DEBUG_EMAIL_TOKEN", "782ba6059694b921d317b0df83db4772")
 
 # ----------------- APP -----------------
 app = Flask(__name__)
-# --- config (place after app = Flask(__name__)) ---
+
+# Uploads
 UPLOAD_DIR = os.path.join(app.root_path, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Max ~10 MB per image
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
-
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}  # normalized extensions
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 def _normalize_ext(fmt: str) -> str:
-    """Map Pillow format names to file extensions we allow."""
     if not fmt:
         return ""
     fmt = fmt.lower()
     return "jpg" if fmt == "jpeg" else fmt
+
+# Sessions / cookies
 _secret = os.getenv("FLASK_SECRET") or os.urandom(32)
 app.secret_key = _secret
 app.config.update(
@@ -51,16 +49,6 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
-
-def log(*args):
-    try:
-        print(*args, flush=True)
-    except Exception:
-        pass
-    try:
-        app.logger.info(" ".join(str(a) for a in args))
-    except Exception:
-        pass
 
 @app.context_processor
 def inject_globals():
@@ -80,95 +68,40 @@ def ensure_schema():
         if "colorway" not in cols:
             cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-        # carts
+        # carts & cart_items
         cx.execute("""
-        CREATE TABLE IF NOT EXISTS carts(
-          id TEXT PRIMARY KEY,
-          merchant_id INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        )""")
-        # cart_items
+            CREATE TABLE IF NOT EXISTS carts(
+              id TEXT PRIMARY KEY,
+              merchant_id INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )""")
         cx.execute("""
-        CREATE TABLE IF NOT EXISTS cart_items(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          cart_id TEXT NOT NULL,
-          item_id INTEGER NOT NULL,
-          qty INTEGER NOT NULL
-        )""")
+            CREATE TABLE IF NOT EXISTS cart_items(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              cart_id TEXT NOT NULL,
+              item_id INTEGER NOT NULL,
+              qty INTEGER NOT NULL
+            )""")
 
-        # sessions table must exist (created elsewhere in your setup)
+        # sessions table patches
         scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
         if "pi_payment_id" not in scols:
-            try:
-                cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
-            except Exception as e:
-                log("[schema] add pi_payment_id failed (might already exist):", repr(e))
+            cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
         if "cart_id" not in scols:
-            try:
-                cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
-            except Exception as e:
-                log("[schema] add cart_id failed (might already exist):", repr(e))
-        # snapshot of items at checkout time (works for single or multi)
+            cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
         if "line_items_json" not in scols:
-            try:
-                cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
-            except Exception as e:
-                log("[schema] add line_items_json failed (might already exist):", repr(e))
-        # NEW: who created the checkout session (so we can show "my purchases")
+            cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
         if "user_id" not in scols:
-            try:
-                cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-            except Exception as e:
-                log("[schema] add user_id failed (might already exist):", repr(e))
-
-with conn() as cx:
-    # ----- sessions.user_id (links session to the signed-in user at checkout time)
-    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-    if "user_id" not in scols:
-        try:
             cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-        except Exception as e:
-            log("[schema] add sessions.user_id failed:", repr(e))
-            
-  # ----- orders.buyer_user_id (links the final order to the user)
-    ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-    if "buyer_user_id" not in ocols:
-        try:
-            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-        except Exception as e:
-            log("[schema] add orders.buyer_user_id failed:", repr(e))
 
-# sessions: persist the user who created the session (so we can attribute purchases)
-with conn() as cx:
-    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-
-if "user_id" not in scols:
-    with conn() as cx:
-        cx.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
-    try:
-        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-    except Exception as e:
-        log("[schema] add sessions.user_id failed (might already exist):", repr(e))
-
-# orders: store buyer_user_id for quick lookups in “My Orders”
-ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-if "buyer_user_id" not in ocols:
-    try:
-        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-    except Exception as e:
-        log("[schema] add orders.buyer_user_id failed (might already exist):", repr(e))
-        
-        # orders should know the buyer user (so we can list purchases)
+        # orders table patches
         ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
         if "buyer_user_id" not in ocols:
-            try:
-                cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-            except Exception as e:
-                log("[schema] add buyer_user_id failed (might already exist):", repr(e))
+            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
 
 ensure_schema()
 
-# ----------------- URL TOKEN -----------------
+# ----------------- SHORT-LIVED BEARER TOKENS -----------------
 TOKEN_TTL = 60 * 10
 def _b64url(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
@@ -249,694 +182,7 @@ def pi_headers():
 def fetch_pi_payment(payment_id: str):
     url = f"{PI_API_BASE}/v2/payments/{payment_id}"
     return requests.get(url, headers=pi_headers(), timeout=15)
-
-# ----------------- DEBUG -----------------
-@app.get("/whoami")
-def whoami():
-    row = current_user_row()
-    return {"logged_in": bool(row), "user_id": (row["id"] if row else None)}, 200
-
-def _require_debug_token():
-    tok = (request.args.get("token") or request.headers.get("X-Debug-Token") or "").strip()
-    if not DEBUG_EMAIL_TOKEN or tok != DEBUG_EMAIL_TOKEN:
-        abort(403)
-
-@app.get("/debug/ping")
-def debug_ping():
-    _require_debug_token()
-    return {"ok": True, "message": "pong", "time": int(time.time())}, 200
-
-@app.get("/debug/complete-payment")
-def debug_complete_payment():
-    _require_debug_token()
-    payment_id = (request.args.get("payment_id") or "").strip()
-    if not payment_id:
-        return {"ok": False, "error": "missing_payment_id"}, 400
-
-    try:
-        # 1) Fetch payment to get txid + metadata
-        r = requests.get(f"{PI_API_BASE}/v2/payments/{payment_id}", headers=pi_headers(), timeout=15)
-        if r.status_code != 200:
-            return {"ok": False, "error": "fetch_failed", "status": r.status_code, "body": r.text}, 502
-        p = r.json() or {}
-
-        direction = p.get("direction")
-        status = p.get("status") or {}
-        tx = (p.get("transaction") or {})
-        txid = tx.get("txid")
-        metadata = p.get("metadata") or {}
-        session_id = metadata.get("session_id")
-
-        # Sanity checks
-        if direction != "user_to_app":
-            return {"ok": False, "error": "not_user_to_app", "detail": {"direction": direction}}, 400
-        if not txid or not (status.get("transaction_verified") or tx.get("verified")):
-            return {"ok": False, "error": "tx_not_verified", "detail": {"txid": txid, "status": status}}, 400
-        if status.get("developer_completed"):
-            return {"ok": True, "note": "already_completed"}, 200
-
-        # 2) Complete it on Pi
-        rc = requests.post(
-            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
-            headers=pi_headers(),
-            json={"txid": txid},
-            timeout=15
-        )
-        if rc.status_code != 200:
-            return {"ok": False, "error": "complete_failed", "status": rc.status_code, "body": rc.text}, 502
-
-        # 3) Try to fulfill locally if we can match the session
-        if session_id:
-            with conn() as cx:
-                s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
-            if s and s["state"] == "initiated":
-                try:
-                    result = fulfill_session(s, txid, buyer={}, shipping={})
-                except Exception as e:
-                    return {
-                        "ok": True,
-                        "note": "completed_on_pi_but_local_fulfillment_failed",
-                        "error": repr(e),
-                        "payment_id": payment_id,
-                        "session_id": session_id,
-                    }, 200
-                return {"ok": True, "note": "completed_and_fulfilled", "result": result}, 200
-            else:
-                return {
-                    "ok": True,
-                    "note": "completed_on_pi_but_session_missing_or_not_initiated",
-                    "payment_id": payment_id,
-                    "session_id": session_id,
-                }, 200
-        else:
-            return {
-                "ok": True,
-                "note": "completed_on_pi_no_session_id_in_metadata",
-                "payment_id": payment_id
-            }, 200
-
-    except Exception as e:
-        log("debug_complete_payment error:", repr(e))
-        return {"ok": False, "error": "server_error", "detail": repr(e)}, 500
-def _allowed_ext(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# --- FULL CORRECTED /upload ROUTE ---
-@app.post("/upload")
-def upload():
-    """
-    Accepts multipart/form-data with a 'file' field.
-    Saves to static/uploads/ and returns JSON:
-      { ok: true, url: "/static/uploads/<name>" }
-    Requires the user to be signed in.
-    """
-    # Require login like the dashboard
-    u = current_user_row()
-    if not u:
-        return {"ok": False, "error": "auth_required"}, 401
-
-    # Validate presence
-    if "file" not in request.files:
-        return {"ok": False, "error": "missing_file_field"}, 400
-    f = request.files["file"]
-    if not f or not f.filename:
-        return {"ok": False, "error": "empty_file"}, 400
-
-    # Basic filename sanity (used only for logging; we always generate a unique name)
-    orig_name = secure_filename(f.filename)
-
-    # Validate image content with Pillow
-    try:
-        # Open and verify integrity without decoding full image
-        img = Image.open(f.stream)
-        img.verify()
-    except Exception:
-        return {"ok": False, "error": "invalid_image"}, 400
-
-    # Re-open stream (verify() leaves file in an unusable state)
-    try:
-        f.stream.seek(0)
-        img = Image.open(f.stream)
-    except Exception:
-        return {"ok": False, "error": "reopen_failed"}, 400
-
-    # Determine extension from actual format
-    ext = _normalize_ext(img.format)
-    if ext not in ALLOWED_EXTENSIONS:
-        return {"ok": False, "error": "unsupported_format"}, 400
-
-    # Generate unique safe filename
-    unique_name = f"{uuid.uuid4().hex}.{ext}"
-    path = os.path.join(UPLOAD_DIR, secure_filename(unique_name))
-
-    # Save (no recompression/transform to preserve original as-is)
-    try:
-        # For formats Pillow can write directly, save via Pillow; for others, fall back to raw bytes
-        # Rewind again in case Pillow consumed the stream when reading headers
-        f.stream.seek(0)
-        if ext in {"jpg", "png", "gif", "webp"}:
-            # Load fully then save to ensure a valid file (prevents partial uploads)
-            img = Image.open(f.stream)
-            img.save(path)
-        else:
-            # Fallback (shouldn't hit due to ALLOWED_EXTENSIONS)
-            with open(path, "wb") as out:
-                out.write(f.stream.read())
-    except Exception as e:
-        log("upload save error:", repr(e), "orig_name=", orig_name)
-        return {"ok": False, "error": "save_failed"}, 500
-
-    # Public URL (Flask serves /static/*)
-    url = f"/static/uploads/{unique_name}"
-    return {"ok": True, "url": url}, 200
-
-@app.get("/orders")
-def orders_page():
-    """
-    Render "My Orders" with:
-      - Purchases: orders tied to the signed-in user
-          * primary: orders.buyer_user_id = uid
-          * legacy:  sessions.user_id = uid via o.pi_tx_hash (for older orders)
-      - Sales: orders from merchant(s) owned by the user
-    If not signed in, render the Pi auth prompt (mode="auth").
-    """
-    u = current_user_row()
-    if not u:
-        # Not signed in -> show the single "Authorize with Pi" button that returns here.
-        return render_template("my_orders.html", mode="auth", sandbox=PI_SANDBOX)
-
-    uid = int(u["id"])
-
-    try:
-        with conn() as cx:
-            # ---- Purchases (new path: direct link by buyer_user_id)
-            purchases_new = cx.execute(
-                """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
-                       i.title AS item_title,
-                       m.business_name AS m_name
-                FROM orders o
-                JOIN items i     ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                WHERE o.buyer_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 200
-                """,
-                (uid,),
-            ).fetchall()
-
-            # ---- Purchases (legacy path: match via sessions.user_id and pi_tx_hash)
-            purchases_legacy = cx.execute(
-                """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_tx_hash,
-                       i.title AS item_title,
-                       m.business_name AS m_name
-                FROM orders o
-                JOIN items i     ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                JOIN sessions s  ON s.pi_tx_hash = o.pi_tx_hash
-                WHERE s.user_id = ?
-                  AND (o.buyer_user_id IS NULL OR o.buyer_user_id = 0)
-                ORDER BY o.id DESC
-                LIMIT 200
-                """,
-                (uid,),
-            ).fetchall()
-
-            # De-dupe purchases by order id, keep newest first
-            seen = set()
-            purchases = []
-            for r in list(purchases_new) + list(purchases_legacy):
-                oid = r["id"]
-                if oid in seen:
-                    continue
-                seen.add(oid)
-                purchases.append(dict(r))
-
-            # ---- Sales: any order whose merchant is owned by this user
-            sales = cx.execute(
-                """
-                SELECT o.id, o.qty, o.status, o.pi_amount, o.pi_merchant_net, o.pi_tx_hash,
-                       i.title AS item_title,
-                       m.business_name AS m_name, m.id AS m_id
-                FROM orders o
-                JOIN items i     ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                WHERE m.owner_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 200
-                """,
-                (uid,),
-            ).fetchall()
-
-            # We'll show the first merchant (if any) in the header "Store: ..."
-            merchant = None
-            if sales:
-                merchant = {"id": sales[0]["m_id"], "business_name": sales[0]["m_name"]}
-            else:
-                # Try to load a merchant row anyway so the page can say whether they have a store
-                merchant = cx.execute(
-                    "SELECT id, business_name FROM merchants WHERE owner_user_id=? LIMIT 1",
-                    (uid,),
-                ).fetchone()
-                if merchant:
-                    merchant = dict(merchant)
-
-        return render_template(
-            "my_orders.html",
-            mode="list",
-            user=u,
-            purchases=purchases,
-            sales=[dict(r) for r in sales],
-            merchant=merchant,
-            sandbox=PI_SANDBOX,
-        )
-
-    except Exception as e:
-        log("/orders render error:", repr(e))
-        # Fail safely with empty lists; still render the page
-        return render_template(
-            "my_orders.html",
-            mode="list",
-            user=u,
-            purchases=[],
-            sales=[],
-            merchant=None,
-            sandbox=PI_SANDBOX,
-            error="server_error",
-        )
-        
-@app.get("/api/my-orders")
-def api_my_orders():
-    """
-    Returns the signed-in user's purchases and sales.
-    Purchases:
-      - Prefer orders where orders.buyer_user_id = uid
-      - Also include orders whose pi_tx_hash matches a session whose user_id = uid (legacy)
-    Sales:
-      - Orders where the merchant's owner_user_id = uid
-    """
-    u = current_user_row()
-    if not u:
-        return {"ok": False, "error": "auth_required"}, 401
-    uid = int(u["id"])
-
-    try:
-        with conn() as cx:
-            # ---- Purchases (two sources unioned)
-            purchases = cx.execute(
-                """
-                SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                       i.title, m.business_name AS store
-                FROM orders o
-                JOIN items i      ON i.id = o.item_id
-                JOIN merchants m  ON m.id = o.merchant_id
-                WHERE o.buyer_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 100
-                """,
-                (uid,),
-            ).fetchall()
-
-            # legacy/backup: orders linked by tx -> sessions.user_id
-            legacy = cx.execute(
-                """
-                SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                       i.title, m.business_name AS store
-                FROM orders o
-                JOIN items i      ON i.id = o.item_id
-                JOIN merchants m  ON m.id = o.merchant_id
-                JOIN sessions s   ON s.pi_tx_hash = o.pi_tx_hash
-                WHERE s.user_id = ?
-                  AND (o.buyer_user_id IS NULL OR o.buyer_user_id = 0)
-                ORDER BY o.id DESC
-                LIMIT 100
-                """,
-                (uid,),
-            ).fetchall()
-
-            # de-dup: if any overlap, keep unique by id
-            seen = set()
-            purchases_rows = []
-            for r in list(purchases) + list(legacy):
-                if r["id"] in seen:
-                    continue
-                seen.add(r["id"])
-                purchases_rows.append(dict(r))
-
-            # ---- Sales (orders where I own the merchant)
-            sales = cx.execute(
-                """
-                SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                       i.title, m.business_name AS store
-                FROM orders o
-                JOIN items i      ON i.id = o.item_id
-                JOIN merchants m  ON m.id = o.merchant_id
-                WHERE m.owner_user_id = ?
-                ORDER BY o.id DESC
-                LIMIT 100
-                """,
-                (uid,),
-            ).fetchall()
-
-        return {
-            "ok": True,
-            "user": {"id": uid, "username": u["pi_username"]},
-            "purchases": purchases_rows,
-            "sales": [dict(r) for r in sales],
-        }, 200
-
-    except Exception as e:
-        log("/api/my-orders error:", repr(e))
-        return {"ok": False, "error": "server_error"}, 500500
-
-# Cancel a stuck Pi payment (server-side)
-@app.get("/debug/cancel-payment")
-def debug_cancel_payment():
-    _require_debug_token()
-    payment_id = (request.args.get("payment_id") or "").strip()
-    if not payment_id:
-        return {"ok": False, "error": "missing_payment_id"}, 400
-    try:
-        url = f"{PI_API_BASE}/v2/payments/{payment_id}/cancel"
-        r = requests.post(url, headers=pi_headers(), json={})
-        if r.status_code != 200:
-            return {"ok": False, "status": r.status_code, "body": r.text}, 502
-        return {"ok": True, "payment_id": payment_id}, 200
-    except Exception as e:
-        log("debug_cancel_payment error:", repr(e))
-        return {"ok": False, "error": "server_error"}, 500
-
-# SDK-based finder/canceller (client calls our cancel endpoint)
-@app.get("/debug/incomplete")
-def debug_incomplete():
-    _require_debug_token()
-    token = (request.args.get("token") or "").strip()
-    from flask import render_template_string
-    html = """
-<!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Find & Cancel Incomplete Pi Payment</title>
-<style>
-  :root{--bg:#0b0f17;--card:#0f1728;--ink:#e8f0ff;--muted:#bcd0ff;--line:#1f2a44;}
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;background:var(--bg);color:var(--ink)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:760px;margin:0 auto}
-  button{padding:10px 14px;border:0;border-radius:10px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
-  button[disabled]{opacity:.6;cursor:wait}
-  input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#0b1222;color:var(--ink)}
-  textarea{min-height:160px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
-  .muted{color:var(--muted)}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .grid{display:grid;grid-template-columns:1fr;gap:12px}
-  .note{font-size:13px}
-  .k{font-weight:600}
-</style>
-
-<div class="card grid">
-  <div>
-    <h2 style="margin:0 0 4px">Find & Cancel Incomplete Payment</h2>
-    <p class="muted" style="margin:6px 0">Open this page <strong>in Pi Browser</strong>.</p>
-    <p class="muted note" style="margin:0">Token ends with: <code id="tok"></code></p>
-  </div>
-
-  <div id="status" class="muted">Loading Pi SDK…</div>
-
-  <div id="controls" style="display:none" class="row">
-    <button id="retryBtn">Re-check</button>
-    <button id="cancelBtn" disabled>Cancel payment</button>
-  </div>
-
-  <div id="foundBox" style="display:none">
-    <div class="row" style="align-items:flex-end">
-      <div style="flex:1">
-        <label class="muted">Payment ID (from SDK)</label>
-        <input id="pid" readonly>
-      </div>
-    </div>
-  </div>
-
-  <div>
-    <label class="muted">Raw object from <span class="k">onIncompletePaymentFound(payment)</span></label>
-    <textarea id="raw" readonly placeholder="(nothing received yet)"></textarea>
-  </div>
-
-  <div>
-    <label class="muted">Errors / logs</label>
-    <textarea id="logs" readonly placeholder="(no errors)"></textarea>
-  </div>
-
-  <div class="note muted">
-    <div style="margin-top:8px"><span class="k">Tip:</span> If Pi Browser shows “You already have a pending payment…”, but the raw box stays empty, the lock lives on the Pi side and the SDK isn’t surfacing it to your app session. Hit <em>Re-check</em> after re-opening this page inside Pi Browser.</div>
-  </div>
-</div>
-
-<script src="https://sdk.minepi.com/pi-sdk.js"></script>
-<script>
-(function(){
-  const statusEl = document.getElementById('status');
-  const rawEl    = document.getElementById('raw');
-  const logsEl   = document.getElementById('logs');
-  const pidEl    = document.getElementById('pid');
-  const foundBox = document.getElementById('foundBox');
-  const controls = document.getElementById('controls');
-  const retryBtn = document.getElementById('retryBtn');
-  const cancelBtn= document.getElementById('cancelBtn');
-  const tokEl    = document.getElementById('tok');
-
-  function qs(k){ return new URL(location.href).searchParams.get(k) || ''; }
-  const token = qs('token') || '';
-  tokEl.textContent = token ? token.slice(-6) : '';
-
-  function setStatus(txt){ statusEl.textContent = txt; }
-  function logLine(msg){
-    try{
-      const t = new Date().toISOString().replace('T',' ').replace('Z','');
-      logsEl.value += "[" + t + "] " + msg + "\\n";
-      logsEl.scrollTop = logsEl.scrollHeight;
-    }catch(_){}
-  }
-  function showRaw(obj){
-    try{
-      rawEl.value = obj ? JSON.stringify(obj, null, 2) : '';
-      rawEl.scrollTop = 0;
-    }catch(e){
-      rawEl.value = "(failed to stringify: " + (e && e.message || e) + ")";
-    }
-  }
-
-  let stuck = null; // object received from onIncompletePaymentFound
-  let stuckId = null;
-
-  async function checkOnce(){
-    controls.style.display = 'none';
-    cancelBtn.disabled = true;
-    foundBox.style.display = 'none';
-    showRaw(null);
-
-    if(!window.Pi || !Pi.init){
-      setStatus("Pi SDK not available. Open this page in Pi Browser.");
-      logLine("Pi SDK missing");
-      return;
-    }
-
-    try{
-      setStatus("Initializing Pi SDK…");
-      Pi.init({ version: "2.0" });
-
-      const scopes = ['payments','username'];
-
-      function onIncompletePaymentFound(payment){
-        try{
-          logLine("onIncompletePaymentFound fired.");
-          stuck = payment || null;
-          showRaw(stuck);
-          // Try both common keys:
-          stuckId = (stuck && (stuck.identifier || stuck.paymentId || stuck.transaction && stuck.transaction.paymentId)) || null;
-          if(stuckId){
-            setStatus("Incomplete payment detected by SDK.");
-            pidEl.value = stuckId;
-            foundBox.style.display = '';
-            cancelBtn.disabled = false;
-          }else{
-            setStatus("SDK callback fired, but it did not include a recognizable payment id.");
-            cancelBtn.disabled = true;
-          }
-        }catch(e){
-          logLine("Error handling onIncompletePaymentFound: " + (e && e.message || e));
-        }
-      }
-
-      setStatus("Authenticating…");
-      const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
-      logLine("authenticate result received.");
-      // Even if no callback fired, show we tried
-      controls.style.display = '';
-
-      if(!stuck){
-        setStatus("No incomplete payment detected by SDK.");
-        showRaw(null);
-      }
-    }catch(e){
-      setStatus("Auth / SDK error.");
-      logLine("SDK error: " + (e && e.message || e));
-    }
-  }
-
-  retryBtn.onclick = () => { checkOnce(); };
-
-  cancelBtn.onclick = async () => {
-    if(!stuckId){ return; }
-    cancelBtn.disabled = true;
-    const url = "/debug/cancel-payment?token=" + encodeURIComponent(token) + "&payment_id=" + encodeURIComponent(stuckId);
-    try{
-      setStatus("Cancelling on server…");
-      const r = await fetch(url);
-      const j = await r.json().catch(()=>({}));
-      logLine("Cancel response: " + JSON.stringify(j));
-      if(j && j.ok){
-        setStatus("Cancelled successfully. You can retry checkout now.");
-      }else{
-        setStatus("Cancel failed. See logs below.");
-      }
-    }catch(e){
-      logLine("Cancel fetch error: " + (e && e.message || e));
-      setStatus("Cancel request errored.");
-    }finally{
-      cancelBtn.disabled = false;
-    }
-  };
-
-  // kick it off
-  checkOnce();
-})();
-</script>
-"""
-    return render_template_string(html)
-
-# Server view of pending sessions with stored payment_id
-@app.get("/debug/pending")
-def debug_pending():
-    _require_debug_token()
-    with conn() as cx:
-        rows = cx.execute("""
-            SELECT s.id as session_id, s.created_at, s.expected_pi, s.pi_payment_id,
-                   s.state, s.merchant_id, m.slug as m_slug, m.business_name as m_name
-            FROM sessions s
-            LEFT JOIN merchants m ON m.id = s.merchant_id
-            WHERE s.pi_payment_id IS NOT NULL
-              AND (s.state IS NULL OR s.state='initiated' OR s.state='approved')
-            ORDER BY s.created_at DESC
-            LIMIT 100
-        """).fetchall()
-    data = [dict(r) for r in rows]
-    html = """
-<!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pending Pi Payments (Server View)</title>
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0f17;color:#e8f0ff;padding:16px}
-table{width:100%;border-collapse:collapse}
-td,th{padding:8px;border-bottom:1px solid #1f2a44}
-small{color:#bcd0ff}
-button{padding:6px 10px;border:0;border-radius:8px;background:#6e9fff;color:#0b0f17;font-weight:800;cursor:pointer}
-code{background:#0f1728;padding:2px 6px;border-radius:6px}
-.card{background:#0f1728;border:1px solid #1f2a44;border-radius:12px;padding:16px;max-width:1000px;margin:0 auto}
-</style>
-<div class="card">
-  <h2>Pending (initiated/approved) sessions with <code>payment_id</code></h2>
-  <p><small>Use this if the SDK page didn’t surface the incomplete payment. Click cancel to clear the block.</small></p>
-  <table>
-    <thead><tr><th>When</th><th>Store</th><th>Session</th><th>Expected π</th><th>payment_id</th><th>Action</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-</div>
-<script>
-const data  = {{ data|tojson }};
-const token = new URL(location.href).searchParams.get('token') || '';
-const tbody = document.getElementById('rows');
-function fmt(ts){ try{return new Date(ts*1000).toLocaleString()}catch(e){return ts} }
-function tr(r){
-  const id = r.session_id, pay = r.pi_payment_id || '';
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td><small>${fmt(r.created_at)}</small></td>
-    <td>${r.m_name || ''} <small>(${r.m_slug||''})</small></td>
-    <td><code>${id}</code> <small>${r.state||''}</small></td>
-    <td>${(r.expected_pi||0).toFixed ? Number(r.expected_pi).toFixed(7) : r.expected_pi}</td>
-    <td><code>${pay}</code></td>
-    <td><button data-pay="${pay}">Cancel</button></td>
-  `;
-  tr.querySelector('button').onclick = async (ev)=>{
-    const pid = ev.target.getAttribute('data-pay');
-    if(!pid) return;
-    ev.target.disabled = true; ev.target.textContent = 'Cancelling…';
-    try{
-      const url = `/debug/cancel-payment?token=${encodeURIComponent(token)}&payment_id=${encodeURIComponent(pid)}`;
-      const res = await fetch(url);
-      const j = await res.json();
-      if(j && j.ok){ ev.target.textContent = 'Cancelled ✓'; }
-      else { ev.target.textContent = 'Failed'; console.log(j); }
-    }catch(e){ ev.target.textContent = 'Error'; console.error(e); }
-  };
-  return tr;
-}
-if(Array.isArray(data) && data.length){
-  data.forEach(r => tbody.appendChild(tr(r)));
-}else{
-  const tr0 = document.createElement('tr');
-  tr0.innerHTML = '<td colspan="6"><small>No candidate sessions found.</small></td>';
-  tbody.appendChild(tr0);
-}
-</script>
-"""
-    return render_template_string(html, data=data)
-
-# List most recent orders (avoid created_at; not all schemas have it)
-@app.get("/debug/orders")
-def debug_orders():
-    _require_debug_token()
-    try:
-        with conn() as cx:
-            rows = cx.execute(
-                """SELECT id, merchant_id, item_id, qty, buyer_email, status,
-                          pi_amount, pi_fee, pi_merchant_net, pi_tx_hash, buyer_token
-                   FROM orders
-                   ORDER BY id DESC
-                   LIMIT 10"""
-            ).fetchall()
-        return {"ok": True, "orders": [dict(r) for r in rows]}, 200
-    except Exception as e:
-        print("[debug/orders] ERROR:", repr(e))
-        return {"ok": False, "error": repr(e)}, 500
-
-# Manual email trigger (POST)
-@app.post("/debug/send-order-emails/<int:order_id>")
-def debug_send_order_emails_post(order_id: int):
-    _require_debug_token()
-    try:
-        print(f"[debug] manual email trigger (POST) -> order_id={order_id}")
-        send_order_emails(order_id)
-        print(f"[debug] manual email trigger complete -> order_id={order_id}")
-        return {"ok": True, "order_id": order_id}, 200
-    except Exception as e:
-        print(f"[debug] manual email trigger error -> order_id={order_id} err={repr(e)}")
-        return {"ok": False, "error": repr(e)}, 500
-
-# Manual email trigger (GET) — easy from Pi Browser/Safari
-@app.get("/debug/send-order-emails/<int:order_id>")
-def debug_send_order_emails_get(order_id: int):
-    _require_debug_token()
-    try:
-        print(f"[debug] manual email trigger (GET) -> order_id={order_id}")
-        send_order_emails(order_id)
-        print(f"[debug] manual email trigger complete -> order_id={order_id}")
-        return {"ok": True, "order_id": order_id, "note": "Triggered via GET"}, 200
-    except Exception as e:
-        print(f"[debug] manual email trigger error (GET) -> order_id={order_id} err={repr(e)}")
-        return {"ok": False, "error": repr(e)}, 500
-# ----------------- END DEBUG -----------------
-
-# ----------------- Explore (Browse stores) -----------------
+    # ----------------- EXPLORE -----------------
 @app.get("/explore")
 def explore():
     q = (request.args.get("q") or "").strip()
@@ -1035,14 +281,12 @@ def pi_me():
         if r.status_code != 200:
             return {"ok": False, "error": "token_invalid", "status": r.status_code}, 401
         return {"ok": True, "me": r.json()}
-    except Exception as e:
-        log("pi_me error:", repr(e))
+    except Exception:
         return {"ok": False, "error": "server_error"}, 500
 
 @app.post("/auth/exchange")
 def auth_exchange():
     try:
-        # Accept either JSON (XHR) or form post (classic redirect flow)
         if request.is_json:
             data = request.get_json(silent=True) or {}
         else:
@@ -1056,12 +300,13 @@ def auth_exchange():
         uid = user.get("uid") or user.get("id")
         username = user.get("username")
         token = data.get("accessToken")
-        if not uid or not username or not token:
+
+        # FIXED: comma typo -> proper boolean ors
+        if (not uid) or (not username) or (not token):
             if not request.is_json:
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
-        # Verify with Pi
         r = requests.get(f"{PI_API_BASE}/v2/me",
                          headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if r.status_code != 200:
@@ -1069,7 +314,6 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
 
-        # Upsert user
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
@@ -1078,7 +322,6 @@ def auth_exchange():
                            (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
 
-        # Session + short-lived bearer
         try:
             session["user_id"] = row["id"]
             session.permanent = True
@@ -1086,27 +329,21 @@ def auth_exchange():
             pass
 
         tok = mint_login_token(row["id"])
-
-        # NEW: allow custom landing (e.g. /orders)
         next_path = request.args.get("next") or "/dashboard"
         if not next_path.startswith("/"):
             next_path = "/dashboard"
         target = f"{next_path}?t={tok}"
 
-        # Form-post flow -> redirect
         if not request.is_json:
             return redirect(target)
 
-        # JSON/XHR flow -> return token so caller can hit APIs
         return {"ok": True, "redirect": target, "token": tok}, 200
 
-    except Exception as e:
-        log("auth_exchange error:", repr(e))
+    except Exception:
         if not request.is_json:
             return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
-
-# ----------------- MERCHANT DASHBOARD -----------------
+        # ----------------- MERCHANT DASHBOARD -----------------
 @app.get("/dashboard")
 def dashboard():
     u = require_user()
@@ -1122,7 +359,6 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        # FIX: single-element tuple requires trailing comma
         m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
     if m:
         tok = get_bearer_token_from_request()
@@ -1175,7 +411,6 @@ def merchant_setup():
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
-# NEW: allow merchant to edit settings (incl. colorway) after creation
 @app.post("/merchant/<slug>/update")
 def merchant_update(slug):
     u, m = require_merchant_owner(slug)
@@ -1235,7 +470,6 @@ def merchant_new_item(slug):
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
-# ---- update & delete item endpoints ----
 @app.post("/merchant/<slug>/items/update")
 def merchant_update_item(slug):
     u, m = require_merchant_owner(slug)
@@ -1320,12 +554,10 @@ def merchant_orders_update(slug):
             body += f"<p><strong>Tracking:</strong> {tracking_carrier} {tracking_number} — " \
                     f"<a href='{link}'>track package</a></p>"
         reply_to = (m["reply_to_email"] or "").strip() if m else None
-        log(f"[mail] shipping update -> to={o['buyer_email']} reply_to={reply_to} order_id={order_id}")
         send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
-
-# ----------------- STOREFRONT AUTH -----------------
+    # ----------------- STOREFRONT AUTH -----------------
 @app.get("/store/<slug>/signin")
 def store_signin(slug):
     m = resolve_merchant_by_slug(slug)
@@ -1368,8 +600,7 @@ def auth_exchange_store():
         tok = mint_login_token(row["id"])
         join = "&" if ("?" in next_url) else "?"
         return redirect(f"{next_url}{join}t={tok}")
-    except Exception as e:
-        log("auth_exchange_store error:", repr(e))
+    except Exception:
         return redirect("/signin?fresh=1")
 
 # ----------------- STOREFRONT + CART + CHECKOUT -----------------
@@ -1454,8 +685,7 @@ def checkout_cart(cid):
 
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
-        if not cart:
-            abort(404)
+        if not cart: abort(404)
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
             SELECT cart_items.qty, items.*
@@ -1467,7 +697,6 @@ def checkout_cart(cid):
     if not rows:
         return redirect(f"/store/{m['slug']}{('?t='+tok) if tok else ''}?cid={cid}")
 
-    # Calculate total and snapshot line items
     total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
     sid = uuid.uuid4().hex
     line_items = json.dumps([
@@ -1475,7 +704,6 @@ def checkout_cart(cid):
         for r in rows
     ])
 
-    # Save checkout session with attached user_id
     with conn() as cx:
         cx.execute(
             """INSERT INTO sessions(
@@ -1483,13 +711,10 @@ def checkout_cart(cid):
                    created_at, cart_id, line_items_json, user_id
                )
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (
-                sid, m["id"], None, 1, float(total), "initiated",
-                int(time.time()), cid, line_items, u["id"]
-            )
+            (sid, m["id"], None, 1, float(total), "initiated",
+             int(time.time()), cid, line_items, u["id"])
         )
 
-    # Minimal product-like object for checkout page
     i = {
         "business_name": m["business_name"],
         "title": "Cart total",
@@ -1511,7 +736,6 @@ def checkout_cart(cid):
 
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
-    # Load item + merchant
     with conn() as cx:
         i = cx.execute("""
            SELECT items.*, 
@@ -1526,23 +750,19 @@ def checkout(link_id):
     if not i:
         abort(404)
 
-    # Quantity & availability checks
     qty = max(1, int(request.args.get("qty", "1")))
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
-    # Build a new session for this checkout
     sid = uuid.uuid4().hex
     expected = float(i["pi_price"]) * qty
 
-    # Snapshot the one line so fulfillment/emails use the same unified path
     line_items = json.dumps([{
         "item_id": int(i["id"]),
         "qty": int(qty),
         "price": float(i["pi_price"]),
     }])
 
-    # NEW: attach the currently signed-in user to this session (for "My Orders")
     u = current_user_row()
     uid = (u["id"] if u else None)
 
@@ -1553,13 +773,10 @@ def checkout(link_id):
                    created_at, line_items_json, user_id
                )
                VALUES(?,?,?,?,?,?,?, ?, ?)""",
-            (
-                sid, i["mid"], i["id"], qty, expected, "initiated",
-                int(time.time()), line_items, uid
-            )
+            (sid, i["mid"], i["id"], qty, expected, "initiated",
+             int(time.time()), line_items, uid)
         )
 
-    # Render the Pi checkout page
     return render_template(
         "checkout.html",
         sold_out=False,
@@ -1570,8 +787,7 @@ def checkout(link_id):
         app_base=APP_BASE_URL,
         colorway=i["colorway"]
     )
-
-# ----------------- PI PAYMENTS (approve/complete) -----------------
+    # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
 def pi_approve():
     data = request.get_json(force=True)
@@ -1586,19 +802,17 @@ def pi_approve():
         r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
                           headers=pi_headers(), json={})
         if r.status_code != 200:
-            return {"ok": False, "error": "approve_failed", "status": r.status_code, "body": r.text}, 502
+            return {"ok": False, "error": "approve_failed", "status": r.status_code}, 502
         with conn() as cx:
             cx.execute("UPDATE sessions SET pi_payment_id=?, state=? WHERE id=?",
                        (payment_id, "approved", session_id))
         return {"ok": True}
-    except Exception as e:
-        log("pi_approve error:", repr(e))
+    except Exception:
         return {"ok": False, "error": "server_error"}, 500
 
 @app.post("/api/pi/complete")
 def pi_complete():
     data = request.get_json(force=True)
-    log("[pi_complete] payload:", data)  # debug to confirm cart flow hits this endpoint
     payment_id = data.get("paymentId")
     session_id = data.get("session_id")
     txid       = data.get("txid") or ""
@@ -1610,14 +824,15 @@ def pi_complete():
         r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
                           headers=pi_headers(), json={"txid": txid})
         if r.status_code != 200:
-            return {"ok": False, "error": "complete_failed", "status": r.status_code, "body": r.text}, 502
-    except Exception as e:
-        log("pi_complete call error:", repr(e))
+            return {"ok": False, "error": "complete_failed", "status": r.status_code}, 502
+    except Exception:
         return {"ok": False, "error": "server_error"}, 500
+
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
     if not s or s["state"] not in ("initiated", "approved"):
         return {"ok": False, "error": "bad_session"}, 400
+
     expected_amt = float(Decimal(str(s["expected_pi"])).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP))
     try:
         r = fetch_pi_payment(payment_id)
@@ -1628,295 +843,32 @@ def pi_complete():
                 return {"ok": False, "error": "amount_mismatch"}, 400
         elif not PI_SANDBOX:
             return {"ok": False, "error": "fetch_payment_failed"}, 502
-    except Exception as e:
-        log("fetch_pi_payment error:", repr(e))
+    except Exception:
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
 
     return fulfill_session(s, txid, buyer, shipping)
 
-# ---- ONE unified emailer for 1+ orders (single OR cart) --------------------
+# ----------------- FULFILLMENT + EMAIL -----------------
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 
-def send_order_emails_unified(order_ids):
-    """
-    Consolidated email for multi-item carts (also works for single).
-    Returns True if at least one email was attempted (buyer or merchant), else False.
-    """
-    attempted_any = False
-    try:
-        if not order_ids:
-            log("[mail][unified] no order_ids")
-            return False
-        ids = order_ids if isinstance(order_ids, (list, tuple)) else [order_ids]
-        ids = [int(x) for x in ids]
-
-        with conn() as cx:
-            placeholders = ",".join("?" for _ in ids)
-            q = f"""
-                SELECT
-                    o.*,
-                    i.title          AS item_title,
-                    i.sku            AS item_sku,
-                    m.business_name  AS m_name,
-                    m.reply_to_email AS m_email
-                FROM orders o
-                JOIN items     i ON i.id = o.item_id
-                JOIN merchants m ON m.id = o.merchant_id
-                WHERE o.id IN ({placeholders})
-                ORDER BY o.id ASC
-            """
-            rows = cx.execute(q, ids).fetchall()
-
-        if not rows:
-            log("[mail][unified] query returned 0 rows for ids:", ids)
-            return False
-
-        multi = len(rows) > 1
-
-        m_name        = rows[0]["m_name"]
-        merchant_mail = (rows[0]["m_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
-        buyer_email   = (rows[0]["buyer_email"] or "").strip()
-        buyer_name    = (rows[0]["buyer_name"] or "").strip()
-
-        try:
-            shipping_raw = rows[0]["shipping_json"]
-            shipping = json.loads(shipping_raw) if shipping_raw else {}
-        except Exception:
-            shipping = {}
-
-        total_gross = 0.0
-        total_fee   = 0.0
-        total_net   = 0.0
-        line_html   = []
-
-        for r in rows:
-            title = r["item_title"] or "Item"
-            qty   = int(r["qty"] or 1)
-            gross = float(r["pi_amount"] or 0.0)
-            fee   = float(r["pi_fee"] or 0.0)
-            net   = float(r["pi_merchant_net"] or 0.0)
-
-            total_gross += gross
-            total_fee   += fee
-            total_net   += net
-
-            line_html.append(
-                f"<tr>"
-                f"<td style='padding:6px 8px'>{title}</td>"
-                f"<td style='padding:6px 8px; text-align:right'>{qty}</td>"
-                f"<td style='padding:6px 8px; text-align:right'>{gross:.7f} π</td>"
-                f"</tr>"
-            )
-
-        items_table = (
-            "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
-            "<thead>"
-            "<tr>"
-            "<th style='text-align:left; padding:6px 8px'>Item</th>"
-            "<th style='text-align:right; padding:6px 8px'>Qty</th>"
-            "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
-            "</tr>"
-            "</thead>"
-            "<tbody>" + "".join(line_html) + "</tbody>"
-            "<tfoot>"
-            f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-            f"<td style='padding:6px 8px; text-align:right'><strong>{total_gross:.7f} π</strong></td></tr>"
-            "</tfoot>"
-            "</table>"
-        )
-
-        ship_parts = []
-        if isinstance(shipping, dict):
-            for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
-                v = (shipping.get(k) or "").strip()
-                if v:
-                    ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
-        shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
-
-        item_count_suffix = f" [{len(rows)} items]" if multi else ""
-        subj_buyer    = f"Your order at {m_name} is confirmed{item_count_suffix}"
-        subj_merchant = f"New Pi order at {m_name} ({total_gross:.7f} π){item_count_suffix}"
-
-        log(f"[mail][unified] rows={len(rows)} gross={total_gross:.7f} buyer={buyer_email or '—'} merchant={merchant_mail or '—'}")
-
-        # Buyer email (optional)
-        if buyer_email:
-            try:
-                send_email(
-                    buyer_email,
-                    subj_buyer,
-                    f"""
-                        <h2>Thanks for your order!</h2>
-                        <p><strong>Store:</strong> {m_name}</p>
-                        {items_table}
-                        <p style="margin-top:12px">
-                          You’ll receive updates from the merchant if anything changes.
-                        </p>
-                    """,
-                    reply_to=merchant_mail
-                )
-                attempted_any = True
-                log("[mail][unified] buyer email SENT ->", buyer_email)
-            except Exception as e:
-                log("[mail][unified] buyer email FAILED:", repr(e))
-        else:
-            log("[mail][unified] buyer email SKIPPED (no buyer_email)")
-
-        # Merchant email (always attempt)
-        try:
-            send_email(
-                merchant_mail,
-                subj_merchant,
-                f"""
-                    <h2>You received a new {"multi-item" if multi else "single-item"} order</h2>
-                    {items_table}
-                    <p style="margin:10px 0 0">
-                      <small>Fees total: {total_fee:.7f} π • Net total: {total_net:.7f} π</small>
-                    </p>
-                    <h3 style="margin:16px 0 6px">Buyer</h3>
-                    <div>{buyer_name or '—'} ({buyer_email or '—'})</div>
-                    {shipping_html}
-                    <p style="margin-top:10px"><small>TX: {rows[0]['pi_tx_hash'] or '—'}</small></p>
-                """
-            )
-            attempted_any = True
-            log("[mail][unified] merchant email SENT ->", merchant_mail)
-        except Exception as e:
-            log("[mail][unified] merchant email FAILED:", repr(e))
-
-    except Exception as e:
-        log("[mail][unified] send_order_emails_unified error:", repr(e))
-        return attempted_any
-
-    return attempted_any
-
-def send_cart_emails(m, rows, totals, buyer_email, buyer_name, shipping, tx_hash):
-    """
-    Send ONE consolidated email to buyer (if provided) and ONE to merchant
-    for a cart checkout, listing all products and totals.
-    """
-    try:
-        m_name        = m["business_name"]
-        merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
-
-        # Build items table
-        line_html = []
-        for r in rows:
-            title = r["title"] or "Item"
-            qty   = int(r["qty"] or 1)
-            gross = float(r["pi_price"] or 0.0) * qty
-            line_html.append(
-                f"<tr>"
-                f"<td style='padding:6px 8px'>{title}</td>"
-                f"<td style='padding:6px 8px; text-align:right'>{qty}</td>"
-                f"<td style='padding:6px 8px; text-align:right'>{gross:.7f} π</td>"
-                f"</tr>"
-            )
-
-        items_table = (
-            "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
-            "<thead>"
-            "<tr>"
-            "<th style='text-align:left; padding:6px 8px'>Item</th>"
-            "<th style='text-align:right; padding:6px 8px'>Qty</th>"
-            "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
-            "</tr>"
-            "</thead>"
-            "<tbody>" + "".join(line_html) + "</tbody>"
-            "<tfoot>"
-            f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-            f"<td style='padding:6px 8px; text-align:right'><strong>{totals['gross']:.7f} π</strong></td></tr>"
-            "</tfoot>"
-            "</table>"
-        )
-
-        # Shipping block
-        ship_parts = []
-        if isinstance(shipping, dict):
-            for k in ["name","email","phone","address","address2","city","state","postal_code","country"]:
-                v = (shipping.get(k) or "").strip()
-                if v:
-                    ship_parts.append(f"<div><strong>{k.replace('_',' ').title()}:</strong> {v}</div>")
-        shipping_html = "<h3 style='margin:16px 0 6px'>Shipping</h3>" + "".join(ship_parts) if ship_parts else ""
-
-        # Subjects
-        subj_buyer    = f"Your order at {m_name} is confirmed [{len(rows)} items]"
-        subj_merchant = f"New Pi order at {m_name} ({totals['gross']:.7f} π) [{len(rows)} items]"
-
-        # Send buyer email (optional)
-        if buyer_email:
-            try:
-                send_email(
-                    buyer_email,
-                    subj_buyer,
-                    f"""
-                        <h2>Thanks for your order!</h2>
-                        <p><strong>Store:</strong> {m_name}</p>
-                        {items_table}
-                        <p style="margin-top:12px">
-                          You’ll receive updates from the merchant if anything changes.
-                        </p>
-                    """,
-                    reply_to=merchant_mail
-                )
-                log("[mail] cart buyer email SENT ->", buyer_email)
-            except Exception as e:
-                log("[mail] cart buyer email FAILED:", repr(e))
-        else:
-            log("[mail] cart buyer email SKIPPED (no buyer_email).")
-
-        # Send merchant email (always)
-        try:
-            send_email(
-                merchant_mail,
-                subj_merchant,
-                f"""
-                    <h2>You received a new multi-item order (cart)</h2>
-                    {items_table}
-                    <p style="margin:10px 0 0">
-                      <small>Estimated fee: {totals['fee']:.7f} π • Net total: {totals['net']:.7f} π</small>
-                    </p>
-                    <h3 style="margin:16px 0 6px">Buyer</h3>
-                    <div>{buyer_name or '—'} ({buyer_email or '—'})</div>
-                    {shipping_html}
-                    <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
-                """
-            )
-            log("[mail] cart merchant email SENT ->", merchant_mail)
-        except Exception as e:
-            log("[mail] cart merchant email FAILED:", repr(e))
-
-    except Exception as e:
-        log("[mail] send_cart_emails error:", repr(e))
-
 def fulfill_session(s, tx_hash, buyer, shipping):
-    """
-    Finalize a paid checkout session and email receipts.
-    Adds a nicely formatted Shipping block (street + unit + city/state/postal + country)
-    to the merchant email when data is present.
-    """
-    # Merchant (read-only)
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
-    # Money split on the session total
     amt = float(s["expected_pi"])
     gross_total, fee_total, net_total = split_amounts(amt)
     gross_total = float(gross_total); fee_total = float(fee_total); net_total = float(net_total)
 
-    # Buyer info (prefer explicit buyer, fall back to shipping form)
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
     buyer_name  =  buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
 
-    # Snapshot lines (single or multi)
     try:
         lines = json.loads(s["line_items_json"] or "[]")
     except Exception:
         lines = []
 
     if not lines:
-        log("[fulfill_session] ERROR: no line_items_json for session", s["id"])
         with conn() as cx:
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
         try:
@@ -1925,11 +877,10 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 f"Order paid but no lines captured (session {s['id']})",
                 "<p>The session was paid, but no line items snapshot was present.</p>"
             )
-        except Exception as e:
-            log("[fulfill_session] notify merchant failed:", repr(e))
+        except Exception:
+            pass
         return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
-    # Fetch item records for titles/stock using IDs from the snapshot
     item_ids = [int(li["item_id"]) for li in lines]
     with conn() as cx:
         placeholders = ",".join("?" for _ in item_ids)
@@ -1938,9 +889,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     created_order_ids = []
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
-    buyer_user_id = s["user_id"]  # may be None for older sessions
+    buyer_user_id = s["user_id"]
 
-    # Create orders + stock updates
     with conn() as cx:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1995,9 +945,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # Build & send consolidated email
     try:
-        # Items table
+        # build items table
         display_rows = []
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -2027,42 +976,26 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             "</table>"
         )
 
-        # -------- NEW: nicer Shipping formatting for merchant email --------
         merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
 
-        # Build a clean, multi-line address if any component exists
         shipping_html = ""
         if isinstance(shipping, dict):
             name   = (shipping.get("name") or "").strip()
             email  = (shipping.get("email") or "").strip()
             phone  = (shipping.get("phone") or "").strip()
-            addr1  = (shipping.get("address") or "").strip()       # street
-            addr2  = (shipping.get("address2") or "").strip()      # unit/apt
+            addr1  = (shipping.get("address") or "").strip()
+            addr2  = (shipping.get("address2") or "").strip()
             city   = (shipping.get("city") or "").strip()
             state  = (shipping.get("state") or "").strip()
             postal = (shipping.get("postal_code") or "").strip()
             country= (shipping.get("country") or "").strip()
-
             any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
             if any_shipping:
-                # Street line: combine addr1 + addr2 if both exist
-                if addr1 and addr2:
-                    street_line = f"{addr1} #{addr2}"
-                elif addr1:
-                    street_line = addr1
-                elif addr2:
-                    # If only unit provided, still show it clearly
-                    street_line = f"Unit #{addr2}"
-                else:
-                    street_line = ""
-
-                # City/state/postal on one line, with smart commas/spaces
+                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
                 locality_parts = [p for p in [city, state] if p]
                 locality_line = ", ".join(locality_parts)
                 if postal:
                     locality_line = (locality_line + " " if locality_line else "") + postal
-
-                # Build HTML
                 block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
                 if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
                 if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
@@ -2071,13 +1004,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
                 if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
                 shipping_html = "".join(block)
-        # -------------------------------------------------------------------
 
-        subj_suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}"
-        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){subj_suffix}"
+        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+        subj_buyer    = f"Your order at {m['business_name']} is confirmed{suffix}"
+        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
 
-        # Buyer email (optional)
         if buyer_email:
             send_email(
                 buyer_email,
@@ -2092,11 +1023,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 """,
                 reply_to=merchant_mail
             )
-            log("[mail][unified] buyer email SENT ->", buyer_email)
-        else:
-            log("[mail][unified] buyer email skipped (no buyer_email)")
 
-        # Merchant email (always) with Shipping block (if any)
         send_email(
             merchant_mail,
             subj_merchant,
@@ -2112,12 +1039,10 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
             """
         )
-        log("[mail][unified] merchant email SENT ->", merchant_mail)
 
-    except Exception as e:
-        log("[fulfill_session] email build/send failed:", repr(e))
+    except Exception:
+        pass
 
-    # Redirect
     u = current_user_row()
     tok = ""
     if u:
@@ -2126,8 +1051,54 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
+    # ----------------- UPLOADS -----------------
+def _allowed_ext(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# ----------------- IMAGE PROXY (resilient) -----------------
+@app.post("/upload")
+def upload():
+    u = current_user_row()
+    if not u:
+        return {"ok": False, "error": "auth_required"}, 401
+    if "file" not in request.files:
+        return {"ok": False, "error": "missing_file_field"}, 400
+    f = request.files["file"]
+    if not f or not f.filename:
+        return {"ok": False, "error": "empty_file"}, 400
+
+    try:
+        img = Image.open(f.stream)
+        img.verify()
+    except Exception:
+        return {"ok": False, "error": "invalid_image"}, 400
+
+    try:
+        f.stream.seek(0)
+        img = Image.open(f.stream)
+    except Exception:
+        return {"ok": False, "error": "reopen_failed"}, 400
+
+    ext = _normalize_ext(img.format)
+    if ext not in ALLOWED_EXTENSIONS:
+        return {"ok": False, "error": "unsupported_format"}, 400
+
+    unique_name = f"{uuid.uuid4().hex}.{ext}"
+    path = os.path.join(UPLOAD_DIR, secure_filename(unique_name))
+    try:
+        f.stream.seek(0)
+        if ext in {"jpg", "png", "gif", "webp"}:
+            img = Image.open(f.stream)
+            img.save(path)
+        else:
+            with open(path, "wb") as out:
+                out.write(f.stream.read())
+    except Exception:
+        return {"ok": False, "error": "save_failed"}, 500
+
+    url = f"/static/uploads/{unique_name}"
+    return {"ok": True, "url": url}, 200
+
+# ----------------- IMAGE PROXY -----------------
 _TRANSPARENT_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
     "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
@@ -2135,50 +1106,32 @@ _TRANSPARENT_PNG = base64.b64decode(
 
 @app.get("/uimg")
 def uimg():
-    """
-    Smart image loader:
-      - https:// remote: proxy via requests (as before)
-      - same-origin absolute (https://your-host/...) : proxy OK
-      - same-origin relative (/static/uploads/...)    : serve directly from disk
-    Anything else -> transparent 1x1 PNG
-    """
     src = (request.args.get("src") or "").strip()
     if not src:
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-
     try:
         u = urlparse(src)
     except Exception:
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
-    # Case A: relative path to our static (e.g. /static/uploads/...)
     if not u.scheme and src.startswith("/"):
-        # Only allow serving from /static/
         if not src.startswith("/static/"):
             return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-        # Map to filesystem safely
         static_root = app.static_folder or os.path.join(os.path.dirname(__file__), "static")
-        # Prevent path traversal
-        rel_path = src[len("/static/"):]  # after /static/
+        rel_path = src[len("/static/"):]
         safe_path = os.path.normpath(os.path.join(static_root, rel_path))
-        if not safe_path.startswith(os.path.abspath(static_root)):
+        if not safe_path.startswith(os.path.abspath(static_root)) or not os.path.exists(safe_path):
             return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-        if not os.path.exists(safe_path):
-            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-        # Guess content type (fallback png)
-        ctype = "image/png"
         try:
             import mimetypes
             ctype = mimetypes.guess_type(safe_path)[0] or "image/png"
         except Exception:
-            pass
+            ctype = "image/png"
         with open(safe_path, "rb") as f:
             data = f.read()
         return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
 
-    # Case B: absolute URL – allow https anywhere, and same-origin http(s) if matches our host
     if u.scheme in ("http", "https"):
-        # If not https, only allow if it’s our own origin (defensive; most will be https anyway)
         if u.scheme != "https":
             try:
                 app_host = urlparse(APP_BASE_URL).netloc
@@ -2186,7 +1139,6 @@ def uimg():
                 app_host = request.host
             if u.netloc != app_host:
                 return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-
         try:
             r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-image-proxy"})
             if r.status_code != 200:
@@ -2194,14 +1146,11 @@ def uimg():
             ctype = r.headers.get("Content-Type", "image/png")
             data = r.content
             return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
-        except Exception as e:
-            log("uimg proxy error:", repr(e))
+        except Exception:
             return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
-    # Everything else -> transparent
     return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-
-# ----------------- POLICIES / VALIDATION -----------------
+    # ----------------- POLICIES / STATIC PAGES -----------------
 @app.get("/validation-key.txt")
 def validation_key():
     return app.send_static_file("validation-key.txt")
@@ -2214,7 +1163,7 @@ def privacy():
 def terms():
     return render_template("terms.html")
 
-# ----------------- OPTIONAL BUYER STATUS -----------------
+# ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
@@ -2222,7 +1171,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
@@ -2232,4 +1181,4 @@ def success():
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)
