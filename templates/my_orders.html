@@ -24,7 +24,6 @@
     h2{margin:0 0 6px;font-size:16px}
     .muted{color:var(--muted)}
 
-    /* compact, scrollable tables with wrapping item names */
     .ip-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
     .ip-table{
       width:100%;
@@ -190,7 +189,7 @@
           </p>
           <p class="muted" style="margin:6px 0">
             Manage orders and payouts here:
-            <a class="ip-btn" href="/merchant/{{ merchant.slug }}/orders">View My Sales</a>
+            <a class="ip-btn" href="/merchant/{{ merchant.slug }}/orders{{ t and ('?t=' ~ t) or '' }}">View My Sales</a>
           </p>
         {% else %}
           <p class="muted">You don’t have a merchant store yet.</p>
