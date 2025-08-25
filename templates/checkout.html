@@ -46,7 +46,7 @@
           <img src="/uimg?src={{ i.logo_url | urlencode }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">
         {% endif %}
         <div>
-          <div style="font-weight:800">{{ i.business_name if i else 'Cart' }}</div>
+          <div style="font-weight:800">{{ (i.business_name if i else (m.business_name if m is defined and m else '')) or 'Store' }}</div>
           <div class="muted">{{ i.title if i else 'Cart total' }}</div>
         </div>
       </div>
@@ -61,7 +61,7 @@
     <div class="card">
       <div class="row">
         <div class="col">
-          <label class="label" for="buyer_email">Email (required for receipt/tracking)</label>
+          <label class="label" for="buyer_email">Email (for receipt/tracking)</label>
           <input id="buyer_email" type="email" placeholder="you@example.com" autocomplete="email" required>
         </div>
         <div class="col">
@@ -72,8 +72,12 @@
 
       <div class="row">
         <div class="col" style="flex:2">
-          <label class="label" for="ship_address">Full Address</label>
-          <input id="ship_address" placeholder="Street, Apt, etc." autocomplete="street-address">
+          <label class="label" for="ship_address">Address</label>
+          <input id="ship_address" placeholder="Street" autocomplete="address-line1">
+        </div>
+        <div class="col">
+          <label class="label" for="ship_address2">Apartment / Unit</label>
+          <input id="ship_address2" placeholder="Apt, Unit, Suite" autocomplete="address-line2">
         </div>
       </div>
 
@@ -83,8 +87,8 @@
           <input id="ship_city" placeholder="City" autocomplete="address-level2">
         </div>
         <div class="col">
-          <label class="label" for="ship_region">State/Region</label>
-          <input id="ship_region" placeholder="State/Region" autocomplete="address-level1">
+          <label class="label" for="ship_state">State/Region</label>
+          <input id="ship_state" placeholder="State/Region" autocomplete="address-level1">
         </div>
         <div class="col">
           <label class="label" for="ship_postal">Postal</label>
@@ -93,6 +97,13 @@
         <div class="col">
           <label class="label" for="ship_country">Country</label>
           <input id="ship_country" placeholder="Country" autocomplete="country-name">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label class="label" for="buyer_phone">Phone (optional)</label>
+          <input id="buyer_phone" placeholder="Phone" autocomplete="tel">
         </div>
       </div>
 
@@ -112,7 +123,8 @@
   const amount      = {{ expected_pi if expected_pi else 0 }};
   const cartMode    = {{ 'true' if cart_mode else 'false' }};
   const sandbox     = {{ 'true' if PI_SANDBOX else 'false' }};
-  const appId       = "{{ PI_APP_ID }}";
+  const appId       = "{{ PI_APP_ID or '' }}";
+  const storeName   = "{{ (i.business_name if i else (m.business_name if m is defined and m else 'IZZA PAY')) | e }}";
   const redirectSlug= "{{ slug if slug else '' }}";
 
   const btn = document.getElementById('payBtn');
@@ -120,9 +132,12 @@
 
   const emailEl = document.getElementById('buyer_email');
   const nameEl  = document.getElementById('buyer_name');
+  const phoneEl = document.getElementById('buyer_phone');
+
   const addrEl  = document.getElementById('ship_address');
+  const addr2El = document.getElementById('ship_address2');
   const cityEl  = document.getElementById('ship_city');
-  const regEl   = document.getElementById('ship_region');
+  const stateEl = document.getElementById('ship_state');
   const postEl  = document.getElementById('ship_postal');
   const ctryEl  = document.getElementById('ship_country');
 
@@ -131,7 +146,9 @@
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
-      Pi.init({ version: "2.0", sandbox: sandbox, appId: appId });
+      // Only pass appId if present (SDK tolerates missing, but be clean)
+      if (appId) { Pi.init({ version: "2.0", sandbox: sandbox, appId: appId }); }
+      else       { Pi.init({ version: "2.0", sandbox: sandbox }); }
       return true;
     }catch(e){ return false; }
   }
@@ -144,18 +161,23 @@
   function buyerPayload(){
     return {
       email: (emailEl?.value || '').trim(),
-      name:  (nameEl?.value || '').trim()
+      name:  (nameEl?.value || '').trim(),
+      phone: (phoneEl?.value || '').trim()
     };
   }
 
+  // IMPORTANT: keys match backend expectation in fulfill_session()
   function shippingPayload(){
     return {
-      address: (addrEl?.value || '').trim(),
-      city:    (cityEl?.value || '').trim(),
-      region:  (regEl?.value || '').trim(),
-      postal:  (postEl?.value || '').trim(),
-      country: (ctryEl?.value || '').trim(),
-      name:    (nameEl?.value || '').trim()
+      address:      (addrEl?.value || '').trim(),
+      address2:     (addr2El?.value || '').trim(),
+      city:         (cityEl?.value || '').trim(),
+      state:        (stateEl?.value || '').trim(),
+      postal_code:  (postEl?.value || '').trim(),
+      country:      (ctryEl?.value || '').trim(),
+      name:         (nameEl?.value || '').trim(),
+      email:        (emailEl?.value || '').trim(),
+      phone:        (phoneEl?.value || '').trim()
     };
   }
 
@@ -177,9 +199,12 @@
     setMsg('Opening Pi payment…');
 
     ensureAuth().then(() => {
+      const memo = (storeName ? (storeName + ' — ') : '') +
+                   (cartMode ? 'Cart' : 'Order') + ' ' + sessionId.slice(0, 8);
+
       const paymentData = {
         amount: amount,
-        memo: cartMode ? ("Cart order " + sessionId) : ("Order " + sessionId),
+        memo: memo,
         metadata: { session_id: sessionId }
       };
 
