@@ -63,6 +63,15 @@ body{
   .ip-btn { width: 100%; }
 }
 
+/* Disabled/blocked interactions (works for buttons or links that are aria-disabled) */
+.ip-btn[disabled],
+.ip-btn.disabled,
+[aria-disabled="true"]{
+  opacity:.55;
+  cursor:not-allowed;
+  pointer-events:none;
+}
+
 .ip-card{
   background:var(--card);
   border:1px solid var(--line);
@@ -264,11 +273,35 @@ body{
   display:flex;
   align-items:center;
   justify-content:center;
+
+  /* Needed for the SOLD OUT overlay positioning */
+  position: relative; /* NEW */
 }
 .itimg img{
   width:100%;
   height:100%;
   object-fit:cover;
+}
+
+/* ===== SOLD OUT overlay (global) ===== */
+.is-soldout .itimg img{
+  filter: grayscale(100%) brightness(.6);
+}
+.itimg .soldout-banner{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform: translate(-50%, -50%) rotate(-18deg);
+  background: rgba(220,0,0,.9);
+  color:#fff;
+  padding:6px 14px;
+  font-weight:900;
+  font-size:18px;
+  border-radius:6px;
+  pointer-events:none;
+  text-transform:uppercase;
+  letter-spacing:1px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.35);
 }
 
 /* ===== Theme preview thumbnails (merchant dashboard) ===== */
