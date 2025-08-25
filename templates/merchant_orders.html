@@ -1,77 +1,131 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Orders</title>
+<title>Orders — {{ m['business_name'] }}</title>
 <style>
-body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f6f7fb}
+body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f6f7fb;color:#0b0f17}
 .wrap{max-width:1100px;margin:0 auto;padding:24px}
+.card{background:#fff;border:1px solid #e6e8f0;border-radius:12px;padding:16px;margin-bottom:16px}
+h2{margin:0 0 8px}
+.muted{color:#4b587c}
+
 table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden}
 th,td{padding:10px;border-bottom:1px solid #eee;font-size:14px;text-align:left;vertical-align:top}
 th{background:#fafbff;color:#333}
 form.inline{display:flex;gap:6px;flex-wrap:wrap}
-input,select,button{padding:6px;border-radius:6px;border:1px solid #ccd;font-size:13px}
-button{background:#1f6fff;color:#fff;border:none;cursor:pointer}
+input,select,button{padding:6px;border-radius:6px;border:1px solid #ccd}
+button{background:#1f6fff;color:#fff;border:none}
 button:hover{background:#155de0}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
-.badge-paid{background:#d1fae5;color:#065f46}
-.badge-processing{background:#e0f2fe;color:#075985}
-.badge-shipped{background:#ede9fe;color:#4c1d95}
-.badge-delivered{background:#ecfdf5;color:#065f46}
-.badge-cancelled{background:#fee2e2;color:#991b1b}
-.badge-refunded{background:#fef3c7;color:#92400e}
+
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{border:1px solid #e6e8f0;border-radius:10px;padding:10px;background:#fff}
+.stat .k{font-size:12px;color:#4b587c;letter-spacing:.2px}
+.stat .v{font-size:16px;font-weight:700;margin-top:2px}
+.notice{padding:10px 12px;border-radius:10px;border:1px solid #e6e8f0;background:#f1f7ff;margin-bottom:10px}
+.warn{background:#fff7ea}
+.foot{font-size:12px;color:#4b587c;margin-top:6px}
 </style>
 </head><body>
 <div class="wrap">
-<h2>Orders for {{ m['business_name'] }}</h2>
-<table>
-<thead><tr>
-  <th>ID</th><th>Item</th><th>Qty</th><th>Buyer</th><th>Status</th>
-  <th>Pi (Gross/Fee/Net)</th><th>Payout</th><th>Tracking</th><th>Update</th>
-</tr></thead>
-<tbody>
-{% for o in orders %}
-<tr>
-<td>{{ o['id'] }}</td>
-<td>{{ o['item_title'] }}</td>
-<td>{{ o['qty'] }}</td>
-<td>{{ o['buyer_email'] or '' }}</td>
-<td>
-  <span class="badge badge-{{ o['status']|lower }}">{{ o['status'] }}</span>
-</td>
-<td>
-  {{ '%.7f'|format(o['pi_amount'] or 0) }} / 
-  {{ '%.7f'|format(o['pi_fee'] or 0) }} / 
-  {{ '%.7f'|format(o['pi_merchant_net'] or 0) }}
-</td>
-<td>{{ o['payout_status'] or 'pending' }}</td>
-<td>
-{% if o['tracking_number'] %}
-  {{ o['tracking_carrier'] }} {{ o['tracking_number'] }}
-  {% if o['tracking_url'] %}<br><a href="{{ o['tracking_url'] }}">track</a>{% endif %}
-{% else %}
-  —
-{% endif %}
-</td>
-<td>
-<form class="inline" method="post" action="/merchant/{{ m['slug'] }}/orders/update">
-  <input type="hidden" name="order_id" value="{{ o['id'] }}">
-  <select name="status">
-    <option value="">—</option>
-    {% for st in ["paid","processing","shipped","delivered","cancelled","refunded"] %}
-      <option value="{{ st }}" {% if o['status']==st %}selected{% endif %}>{{ st }}</option>
-    {% endfor %}
-  </select>
-  <input name="tracking_carrier" placeholder="Carrier" value="{{ o['tracking_carrier'] or '' }}">
-  <input name="tracking_number" placeholder="Number" value="{{ o['tracking_number'] or '' }}">
-  <input name="tracking_url" placeholder="URL" value="{{ o['tracking_url'] or '' }}">
-  <button>Save</button>
-</form>
-</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-<p style="margin-top:12px">
-  <a href="/merchant/{{ m['slug'] }}/items{% if t %}?t={{ t }}{% endif %}">← Back to Items</a>
-</p>
+
+  <div class="card">
+    <h2>Orders — {{ m['business_name'] }}</h2>
+    {% if payout_sent %}
+      <div class="notice"><strong>Payout request sent.</strong> You’ll receive your Pi within 24 hours.</div>
+    {% endif %}
+
+    {% if stats %}
+      <div class="stats" style="margin-top:8px">
+        <div class="stat">
+          <div class="k">Gross (30d)</div>
+          <div class="v">{{ '%.7f'|format(stats.gross_30 or 0) }} π</div>
+        </div>
+        <div class="stat">
+          <div class="k">Pi Fee (30d)</div>
+          <div class="v">{{ '%.7f'|format(stats.fee_30 or 0) }} π</div>
+        </div>
+        <div class="stat">
+          <div class="k">App Fee 1% (30d)</div>
+          <div class="v">{{ '%.7f'|format(stats.app_fee_30 or 0) }} π</div>
+        </div>
+        <div class="stat">
+          <div class="k">Net to Merchant (30d)</div>
+          <div class="v">{{ '%.7f'|format(stats.net_30 or 0) }} π</div>
+        </div>
+        <div class="stat">
+          <div class="k">Sessions (30d)</div>
+          <div class="v">{{ stats.sessions_30 or 0 }}</div>
+        </div>
+        <div class="stat">
+          <div class="k">USD Rate</div>
+          <div class="v">{% if stats.usd_rate %}${{ '%.2f'|format(stats.usd_rate) }}/π{% else %}—{% endif %}</div>
+        </div>
+        <div class="stat">
+          <div class="k">Net (30d) in USD</div>
+          <div class="v">{% if stats.usd_estimate is not none %}${{ '%.2f'|format(stats.usd_estimate) }}{% else %}—{% endif %}</div>
+        </div>
+        <div class="stat">
+          <div class="k">Wallet on File</div>
+          <div class="v" style="font-size:12px;word-break:break-all">{{ m['pi_wallet_address'] or '—' }}</div>
+        </div>
+      </div>
+
+      <form method="POST" action="/merchant/{{ m['slug'] }}/payout" style="margin-top:10px">
+        <button>Request Payout</button>
+        <span class="foot" style="margin-left:8px">Payout may take up to 24 hours.</span>
+      </form>
+      <div class="foot warn" style="margin-top:8px">
+        Note: when the payout is deposited into your Pi wallet, the Pi network may charge a separate transaction fee.
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Item</th><th>Qty</th><th>Buyer</th><th>Status</th>
+          <th>Pi (Gross/Fee/Net)</th><th>Payout</th><th>Tracking</th><th>Update</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o['id'] }}</td>
+        <td>{{ o['item_title'] }}</td>
+        <td>{{ o['qty'] }}</td>
+        <td>{{ o['buyer_email'] or '' }}</td>
+        <td>{{ o['status'] }}</td>
+        <td>{{ '%.7f'|format(o['pi_amount'] or 0) }} / {{ '%.7f'|format(o['pi_fee'] or 0) }} / {{ '%.7f'|format(o['pi_merchant_net'] or 0) }}</td>
+        <td>{{ o['payout_status'] }}</td>
+        <td>
+          {% if o['tracking_number'] %}
+            {{ o['tracking_carrier'] }} {{ o['tracking_number'] }}
+            {% if o['tracking_url'] %}<br><a href="{{ o['tracking_url'] }}">track</a>{% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          <form class="inline" method="post" action="/merchant/{{ m['slug'] }}/orders/update">
+            <input type="hidden" name="order_id" value="{{ o['id'] }}">
+            <select name="status">
+              <option value="">—</option>
+              {% for st in ["paid","processing","shipped","delivered","cancelled","refunded"] %}
+                <option value="{{ st }}">{{ st }}</option>
+              {% endfor %}
+            </select>
+            <input name="tracking_carrier" placeholder="Carrier">
+            <input name="tracking_number" placeholder="Number">
+            <input name="tracking_url" placeholder="URL">
+            <button>Save</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="foot" style="margin-top:10px"><a href="/merchant/{{ m['slug'] }}/items">Back to Items</a></p>
+  </div>
+
 </div>
 </body></html>
