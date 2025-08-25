@@ -1,13 +1,54 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Payment Received</title>
-<style>
-body{font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;min-height:100vh;background:#0b0f17;color:#e8f0ff;margin:0}
-.card{background:#111a2b;border:1px solid #1f2a44;padding:24px;border-radius:12px}
-</style>
-</head><body>
-<div class="card">
-  <h2>Payment Received</h2>
-  <p>Your order is paid in full with Pi.</p>
-</div>
-</body></html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Payment Received</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      background: #0b0f17;
+      color: #e8f0ff;
+      margin: 0;
+    }
+    .card {
+      background: #111a2b;
+      border: 1px solid #1f2a44;
+      padding: 24px;
+      border-radius: 12px;
+      text-align: center;
+      max-width: 420px;
+    }
+    .note {
+      font-size: 13px;
+      color: #bcd0ff;
+      margin-top: 12px;
+    }
+    .btn {
+      margin-top: 18px;
+      display: inline-block;
+      background: #6e9fff;
+      color: #0b0f17;
+      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Payment Received</h2>
+    <p>Your order is paid in full with Pi.</p>
+    <p class="note">Please check your email inbox for confirmation — and don’t forget to check your spam folder just in case.</p>
+    {% if m and m.slug %}
+      <a class="btn" href="/store/{{ m.slug }}">Return to Store</a>
+    {% else %}
+      <a class="btn" href="/explore">Return to Stores</a>
+    {% endif %}
+  </div>
+</body>
+</html>
