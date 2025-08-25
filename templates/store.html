@@ -28,18 +28,7 @@
     input, .btn, .pill{border-radius:10px}
     input{width:100%;background:transparent;border:1px solid var(--line);padding:10px;color:var(--txt)}
     .btn{background:var(--brand);color:var(--btn-txt);border:0;padding:10px 12px;font-weight:800;text-decoration:none;display:inline-block;cursor:pointer}
-    .pill{border:1px solid var(--line);padding:8px 10px;text-decoration:none;color:var(--txt);background:transparent;cursor:pointer}
-
-    /* Cart badge */
-    .cart-link{position:relative; display:inline-block}
-    .badge{
-      position:absolute; top:-6px; right:-6px;
-      min-width:18px; height:18px; padding:0 5px;
-      border-radius:999px; background:var(--brand); color:var(--btn-txt);
-      font-size:12px; line-height:18px; text-align:center; font-weight:800;
-      border:1px solid var(--line);
-    }
-
+    .pill{border:1px solid var(--line);padding:8px 10px;text-decoration:none;color:var(--txt)}
     .grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;flex:1 1 calc(50% - 12px);min-width:260px;box-sizing:border-box}
     .card img{width:100%;height:180px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:#0001}
@@ -71,14 +60,9 @@
           {% if m.description %}<div class="muted" style="margin-top:3px">{{ m.description }}</div>{% endif %}
         </div>
 
-        <!-- Explore + Cart (badge shows when > 0) -->
+        <!-- Only Explore button left -->
         <div class="row">
           <a class="pill" href="/explore{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">Explore stores</a>
-          <a class="pill cart-link" href="/cart">
-            Cart
-            {% set cc = (cart_count or 0) %}
-            {% if cc > 0 %}<span class="badge">{{ cc }}</span>{% endif %}
-          </a>
         </div>
       </div>
     </div>
@@ -104,11 +88,6 @@
         <div class="row" style="justify-content:space-between;margin-top:8px">
           <div class="price">{{ '%.7f'|format(it.pi_price) }} Pi</div>
           <div class="row">
-            <!-- Add to Cart (POST) -->
-            <form method="post" action="/cart/add" style="margin:0">
-              <input type="hidden" name="item_id" value="{{ it.id }}">
-              <button class="pill" type="submit">Add to Cart</button>
-            </form>
             <!-- BUY NOW goes straight to single-item checkout -->
             <a class="pill" href="/checkout/{{ it.link_id }}{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">Buy now</a>
           </div>
