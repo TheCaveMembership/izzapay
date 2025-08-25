@@ -1080,40 +1080,128 @@ def upload():
         return {"ok": False, "error": "auth_required"}, 401
     if "file" not in request.files:
         return {"ok": False, "error": "missing_file_field"}, 400
+
     f = request.files["file"]
     if not f or not f.filename:
         return {"ok": False, "error": "empty_file"}, 400
 
+    # Read file bytes once
     try:
-        img = Image.open(f.stream)
-        img.verify()
+        raw = f.read()
+        if not raw:
+            return {"ok": False, "error": "empty_file"}, 400
+    except Exception:
+        return {"ok": False, "error": "read_failed"}, 400
+
+    from io import BytesIO
+    bio = BytesIO(raw)
+
+    # Validate & open image
+    try:
+        img = Image.open(bio)
+        img.verify()  # quick integrity check
     except Exception:
         return {"ok": False, "error": "invalid_image"}, 400
 
+    # Reopen for actual processing (verify() invalidates parser state)
+    bio.seek(0)
     try:
-        f.stream.seek(0)
-        img = Image.open(f.stream)
+        img = Image.open(bio)
     except Exception:
         return {"ok": False, "error": "reopen_failed"}, 400
 
-    ext = _normalize_ext(img.format)
+    # Normalize format -> extension
+    fmt = (img.format or "").upper()
+    if fmt == "JPEG":
+        ext = "jpg"
+    else:
+        ext = fmt.lower()
+
     if ext not in ALLOWED_EXTENSIONS:
         return {"ok": False, "error": "unsupported_format"}, 400
 
-    unique_name = f"{uuid.uuid4().hex}.{ext}"
-    path = os.path.join(UPLOAD_DIR, secure_filename(unique_name))
+    # Correct orientation & strip EXIF by recreating the image
     try:
-        f.stream.seek(0)
-        if ext in {"jpg", "png", "gif", "webp"}:
-            img = Image.open(f.stream)
-            img.save(path)
-        else:
-            with open(path, "wb") as out:
-                out.write(f.stream.read())
+        from PIL import ImageOps
+        img = ImageOps.exif_transpose(img)
     except Exception:
-        return {"ok": False, "error": "save_failed"}, 500
+        # if exif transpose fails, continue without it
+        pass
 
-    url = f"/static/uploads/{unique_name}"
+    # Downscale if too large (keeps aspect)
+    MAX_DIM = 2048
+    try:
+        if max(img.size) > MAX_DIM:
+            img.thumbnail((MAX_DIM, MAX_DIM))
+    except Exception:
+        pass
+
+    # Animated GIFs: keep original bytes to preserve animation
+    is_animated_gif = (fmt == "GIF" and getattr(img, "is_animated", False))
+    out_bytes = None
+
+    if is_animated_gif:
+        # Just use original bytes; also cap size already via MAX_CONTENT_LENGTH
+        out_bytes = raw
+        ext = "gif"
+    else:
+        # Re-encode to strip EXIF and compress
+        mode = img.mode
+        has_alpha = ("A" in mode) or (mode in ("RGBA", "LA", "P"))
+
+        buf = BytesIO()
+        save_kwargs = {}
+
+        if ext == "jpg":
+            # Ensure RGB (no alpha in JPEG)
+            if has_alpha:
+                img = img.convert("RGB")
+            elif mode not in ("RGB",):
+                img = img.convert("RGB")
+            save_kwargs.update(dict(quality=85, optimize=True, progressive=True))
+            img.save(buf, format="JPEG", **save_kwargs)
+
+        elif ext == "png":
+            # Preserve alpha; optimize losslessly
+            if mode == "P":
+                # Convert palette PNGs to RGBA/RGB to avoid weird palette issues
+                img = img.convert("RGBA" if has_alpha else "RGB")
+            save_kwargs.update(dict(optimize=True))
+            img.save(buf, format="PNG", **save_kwargs)
+
+        elif ext == "webp":
+            # WebP supports alpha; use reasonable quality; lossless if no alpha? (keep it simple)
+            if mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA" if has_alpha else "RGB")
+            save_kwargs.update(dict(quality=85, method=4))
+            img.save(buf, format="WEBP", **save_kwargs)
+
+        else:
+            # Fallback: just write original bytes as last resort
+            buf = BytesIO(raw)
+
+        out_bytes = buf.getvalue()
+
+    # Deterministic filename by content-hash (prevents duplicates)
+    try:
+        digest = hashlib.sha256(out_bytes).hexdigest()
+    except Exception:
+        # fallback: random
+        digest = uuid.uuid4().hex
+
+    unique_name = f"{digest[:32]}.{ext}"
+    safe_name = secure_filename(unique_name)
+    path = os.path.join(UPLOAD_DIR, safe_name)
+
+    # If file already exists with same hash, just return its URL
+    if not os.path.exists(path):
+        try:
+            with open(path, "wb") as out:
+                out.write(out_bytes)
+        except Exception:
+            return {"ok": False, "error": "save_failed"}, 500
+
+    url = f"/static/uploads/{safe_name}"
     return {"ok": True, "url": url}, 200
 
 # ----------------- IMAGE PROXY -----------------
