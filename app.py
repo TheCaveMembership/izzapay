@@ -613,10 +613,10 @@ def admin_home():
     with conn() as cx:
         totals_row = cx.execute("""
           SELECT
-            (SELECT COUNT(*) FROM users)                           AS users,
-            (SELECT COUNT(*) FROM merchants)                       AS merchants,
-            (SELECT COUNT(*) FROM items WHERE active=1)            AS items_count,
-            (SELECT COUNT(*) FROM orders)                          AS orders
+            (SELECT COUNT(*) FROM users)                    AS users,
+            (SELECT COUNT(*) FROM merchants)                AS merchants,
+            (SELECT COUNT(*) FROM items WHERE active=1)     AS items_count,
+            (SELECT COUNT(*) FROM orders)                   AS orders
         """).fetchone()
 
         recent_rows = cx.execute("""
@@ -639,7 +639,7 @@ def admin_home():
         admin_wallet=ADMIN_PI_WALLET,
         admin_username=ADMIN_PI_USERNAME
     )
-
+    
 @app.get("/merchant/setup")
 def merchant_setup_form():
     u = require_user()
