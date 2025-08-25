@@ -1466,14 +1466,6 @@ def _merchant_30d_stats(merchant_id: int):
 
 @app.get("/orders")
 def orders_page():
-    """
-    Shows:
-      - Purchases for the signed-in user
-      - Sales for their store
-      - Merchant 30-day earnings (gross, Pi fee, 1% app fee, net),
-        session count, and optional USD estimate
-      - Provides a payout button that POSTs to /merchant/<slug>/payout
-    """
     u = current_user_row()
     if not u:
         return render_template("my_orders.html", mode="auth", sandbox=PI_SANDBOX)
@@ -1481,7 +1473,6 @@ def orders_page():
     uid = int(u["id"])
 
     with conn() as cx:
-        # Purchases (simple, newest first)
         purchases = cx.execute(
             """
             SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
@@ -1496,7 +1487,6 @@ def orders_page():
             (uid,),
         ).fetchall()
 
-        # Sales for merchants they own
         sales = cx.execute(
             """
             SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
@@ -1526,6 +1516,12 @@ def orders_page():
                 merchant = dict(mrow)
                 stats = _merchant_30d_stats(merchant["id"])
 
+    # NEW: mint a short-lived token so links work even if cookies are blocked
+    try:
+        tok = mint_login_token(uid)
+    except Exception:
+        tok = None
+
     return render_template(
         "my_orders.html",
         mode="list",
@@ -1536,6 +1532,7 @@ def orders_page():
         stats=stats,
         sandbox=PI_SANDBOX,
         payout_sent=(request.args.get("payout") == "sent"),
+        t=tok,   # <-- pass token
     )
 
 # Trigger payout email (manual payout by app owner)
