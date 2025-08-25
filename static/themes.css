@@ -330,25 +330,47 @@ body{
   display:flex; flex-wrap: wrap; gap:12px;
 }
 
-/* ===== IZZA PAY header brand strip tweaks ===== */
-.brand{
+/* ===== IZZA PAY header brand strip (signin) ===== */
+.brand {
   display:flex;
   align-items:center;
-  gap:6px;               /* tighten space between mark, word, and gif */
+  gap:8px;
 }
 
-.brand-mark{
-  width:46px;            /* bigger than before */
-  height:46px;
+/* make left group (word + gif) and right mark align like your red boxes */
+.brand--signin{
+  justify-content:space-between; /* left group and right mark on edges */
 }
 
+/* left cluster */
+.brand-left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;       /* prevent layout push on small screens */
+}
+
+/* bigger, longer word mark */
 .brand-word{
-  height:26px;           /* bump this up/down as needed */
-  filter: brightness(1.1) contrast(1.05); /* reduce heavy glow */
+  height:32px;                 
+  filter: brightness(1.06) contrast(1.02); /* a touch crisper */
 }
 
+/* bigger gem gif and snug spacing */
 .brand-gif{
-  width:22px;
-  height:22px;
-  margin-left:2px;       /* pulls it snug against the word */
+  width:28px; height:28px;     
+  margin-left:2px;
+}
+
+/* right square mark larger */
+.brand-right .brand-mark{
+  width:64px; height:64px;     
+  object-fit:contain;
+}
+
+/* Slightly scale down on very small phones so it never wraps */
+@media (max-width: 380px){
+  .brand-word{ height:28px; }
+  .brand-gif { width:24px; height:24px; }
+  .brand-right .brand-mark{ width:56px; height:56px; }
 }
