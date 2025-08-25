@@ -546,7 +546,18 @@ def merchant_orders(slug):
           WHERE orders.merchant_id=?
           ORDER BY orders.id DESC
         """, (m["id"],)).fetchall()
-    return render_template("merchant_orders.html", m=m, orders=orders, colorway=m["colorway"])
+
+    # NEW: compute 30-day stats for this store
+    stats = _merchant_30d_stats(m["id"])
+
+    return render_template(
+        "merchant_orders.html",
+        m=m,
+        orders=orders,
+        stats=stats,                # <-- pass to template
+        colorway=m["colorway"],
+        payout_sent=(request.args.get("payout") == "sent"),
+    )
 
 @app.post("/merchant/<slug>/orders/update")
 def merchant_orders_update(slug):
