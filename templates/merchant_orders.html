@@ -8,13 +8,20 @@ table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;ove
 th,td{padding:10px;border-bottom:1px solid #eee;font-size:14px;text-align:left;vertical-align:top}
 th{background:#fafbff;color:#333}
 form.inline{display:flex;gap:6px;flex-wrap:wrap}
-input,select,button{padding:6px;border-radius:6px;border:1px solid #ccd}
-button{background:#1f6fff;color:#fff;border:none}
+input,select,button{padding:6px;border-radius:6px;border:1px solid #ccd;font-size:13px}
+button{background:#1f6fff;color:#fff;border:none;cursor:pointer}
 button:hover{background:#155de0}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.badge-paid{background:#d1fae5;color:#065f46}
+.badge-processing{background:#e0f2fe;color:#075985}
+.badge-shipped{background:#ede9fe;color:#4c1d95}
+.badge-delivered{background:#ecfdf5;color:#065f46}
+.badge-cancelled{background:#fee2e2;color:#991b1b}
+.badge-refunded{background:#fef3c7;color:#92400e}
 </style>
 </head><body>
 <div class="wrap">
-<h2>Orders</h2>
+<h2>Orders for {{ m['business_name'] }}</h2>
 <table>
 <thead><tr>
   <th>ID</th><th>Item</th><th>Qty</th><th>Buyer</th><th>Status</th>
@@ -27,13 +34,21 @@ button:hover{background:#155de0}
 <td>{{ o['item_title'] }}</td>
 <td>{{ o['qty'] }}</td>
 <td>{{ o['buyer_email'] or '' }}</td>
-<td>{{ o['status'] }}</td>
-<td>{{ o['pi_amount'] }} / {{ o['pi_fee'] }} / {{ o['pi_merchant_net'] }}</td>
-<td>{{ o['payout_status'] }}</td>
+<td>
+  <span class="badge badge-{{ o['status']|lower }}">{{ o['status'] }}</span>
+</td>
+<td>
+  {{ '%.7f'|format(o['pi_amount'] or 0) }} / 
+  {{ '%.7f'|format(o['pi_fee'] or 0) }} / 
+  {{ '%.7f'|format(o['pi_merchant_net'] or 0) }}
+</td>
+<td>{{ o['payout_status'] or 'pending' }}</td>
 <td>
 {% if o['tracking_number'] %}
   {{ o['tracking_carrier'] }} {{ o['tracking_number'] }}
   {% if o['tracking_url'] %}<br><a href="{{ o['tracking_url'] }}">track</a>{% endif %}
+{% else %}
+  —
 {% endif %}
 </td>
 <td>
@@ -42,12 +57,12 @@ button:hover{background:#155de0}
   <select name="status">
     <option value="">—</option>
     {% for st in ["paid","processing","shipped","delivered","cancelled","refunded"] %}
-      <option value="{{ st }}">{{ st }}</option>
+      <option value="{{ st }}" {% if o['status']==st %}selected{% endif %}>{{ st }}</option>
     {% endfor %}
   </select>
-  <input name="tracking_carrier" placeholder="Carrier">
-  <input name="tracking_number" placeholder="Number">
-  <input name="tracking_url" placeholder="URL">
+  <input name="tracking_carrier" placeholder="Carrier" value="{{ o['tracking_carrier'] or '' }}">
+  <input name="tracking_number" placeholder="Number" value="{{ o['tracking_number'] or '' }}">
+  <input name="tracking_url" placeholder="URL" value="{{ o['tracking_url'] or '' }}">
   <button>Save</button>
 </form>
 </td>
@@ -55,6 +70,8 @@ button:hover{background:#155de0}
 {% endfor %}
 </tbody>
 </table>
-<p><a href="/merchant/{{ m['slug'] }}/items">Back to Items</a></p>
+<p style="margin-top:12px">
+  <a href="/merchant/{{ m['slug'] }}/items{% if t %}?t={{ t }}{% endif %}">← Back to Items</a>
+</p>
 </div>
 </body></html>
