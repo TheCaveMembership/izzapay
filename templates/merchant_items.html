@@ -75,6 +75,11 @@
     .sep{height:1px;background:var(--line);margin:10px 0}
     .actions-col{min-width:180px}
     .danger{background:#7a2c2c;color:#fff}
+
+    .hint{font-size:12px;color:var(--muted)}
+    .note{font-size:12px;color:var(--muted);margin-top:4px}
+    .warn{color:#ffb86b}
+    .success{color:#5ad49e}
   </style>
 </head>
 {% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
@@ -87,9 +92,11 @@
         <img src="/static/izzapay-word.svg" alt="IZZA PAY">
       </div>
       <div class="actions">
-  <a class="ip-btn ghost" href="/explore">View Stores</a>
-  <a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">Orders</a>
-</div>
+        <a class="ip-btn ghost" href="/explore">View Stores</a>
+        {% if not setup_mode and m %}
+          <a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">Orders</a>
+        {% endif %}
+      </div>
     </div>
 
     {% if setup_mode %}
@@ -115,10 +122,20 @@
             <input class="ip-input" name="business_name" placeholder="Your store name" required>
           </div>
 
+          <!-- Store slug (short URL name) -->
           <div class="field">
-            <label class="ip-label">Store slug (optional)</label>
-            <input class="ip-input" name="slug" placeholder="your-handle">
-            <small class="muted">Your storefront URL will be <code>/store/&lt;slug&gt;</code>.</small>
+            <label class="ip-label">Store slug <span class="muted">(short URL name)</span> <span class="muted">(optional)</span></label>
+            <input class="ip-input" id="slugInput" name="slug"
+                   placeholder="your-handle"
+                   inputmode="latin"
+                   autocapitalize="none"
+                   spellcheck="false"
+                   pattern="[a-z0-9-]+"
+                   maxlength="40">
+            <small class="muted">
+              A “slug” is the short name in your URL (letters, numbers, and hyphens only).
+              Your storefront URL will be <code>/store/&lt;slug&gt;</code>.
+            </small>
           </div>
 
           <div class="field">
@@ -201,6 +218,9 @@
       <div class="h1">{{ m.business_name }}</div>
 
       <!-- EDIT STORE SETTINGS -->
+      {% set can_edit_slug = slug_edit_allowed if slug_edit_allowed is defined else False %}
+      {% set next_edit = slug_next_edit_at if slug_next_edit_at is defined else None %}
+
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Store Settings</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/update{% if t %}?t={{ t }}{% endif %}">
@@ -226,6 +246,38 @@
               <label class="ip-label">Pi handle</label>
               <input class="ip-input" name="pi_handle" value="{{ m.pi_handle or '' }}">
             </div>
+          </div>
+
+          <!-- Editable slug with 15-day rule -->
+          <div class="field">
+            <label class="ip-label">
+              Store slug <span class="muted">(short URL name)</span>
+            </label>
+            <div class="row" style="align-items:flex-start">
+              <input class="ip-input" id="editSlugInput" name="slug"
+                     value="{{ m.slug }}"
+                     inputmode="latin"
+                     autocapitalize="none"
+                     spellcheck="false"
+                     pattern="[a-z0-9-]+"
+                     maxlength="40"
+                     {% if not can_edit_slug %}disabled{% endif %}>
+              <button class="ip-btn ghost" type="button" id="enableSlugBtn"
+                      data-allowed="{{ '1' if can_edit_slug else '0' }}">
+                {% if can_edit_slug %}Edit slug{% else %}Locked{% endif %}
+              </button>
+            </div>
+            <small id="slugEditHint" class="hint">
+              {% if can_edit_slug %}
+                You can only edit your slug every 15 days. Choose carefully.
+              {% else %}
+                You can only edit your slug every 15 days.
+                {% if next_edit %}
+                  Next edit available: <strong>{{ next_edit }}</strong>.
+                {% endif %}
+              {% endif %}
+              Allowed characters: a–z, 0–9, hyphen. No spaces.
+            </small>
           </div>
 
           <div class="field-inline">
@@ -543,6 +595,71 @@
         const cw = sw.getAttribute('data-cw');
         if(cw){ body.classList.add(cw); hidden.value = cw; sw.classList.add('selected'); }
       });
+    });
+  })();
+
+  // Slug normalizer (setup + edit)
+  function normalizeSlug(raw){
+    let v = (raw || '').toLowerCase();
+    v = v.trim();
+    v = v.replace(/[\s_]+/g, '-');       // spaces/underscores -> hyphen
+    v = v.replace(/[^a-z0-9-]/g, '');    // only a-z0-9-
+    v = v.replace(/-+/g, '-');           // collapse ---
+    v = v.replace(/^-+/, '').replace(/-+$/, ''); // trim hyphens
+    return v;
+  }
+  (function(){
+    const setupEl = document.getElementById('slugInput');
+    if (setupEl){
+      setupEl.addEventListener('input', ()=> {
+        const n = normalizeSlug(setupEl.value);
+        if (setupEl.value !== n) setupEl.value = n;
+      });
+      const form = setupEl.closest('form');
+      if (form){
+        form.addEventListener('submit', ()=> {
+          setupEl.value = normalizeSlug(setupEl.value);
+        });
+      }
+    }
+
+    const editEl = document.getElementById('editSlugInput');
+    if (editEl){
+      editEl.addEventListener('input', ()=> {
+        const n = normalizeSlug(editEl.value);
+        if (editEl.value !== n) editEl.value = n;
+      });
+      const form = editEl.closest('form');
+      if (form){
+        form.addEventListener('submit', ()=> {
+          editEl.value = normalizeSlug(editEl.value);
+        });
+      }
+    }
+  })();
+
+  // Enable/guard slug editing (15-day rule UX)
+  (function(){
+    const btn = document.getElementById('enableSlugBtn');
+    const input = document.getElementById('editSlugInput');
+    const hint = document.getElementById('slugEditHint');
+    if (!btn || !input || !hint) return;
+
+    const allowed = btn.getAttribute('data-allowed') === '1';
+
+    btn.addEventListener('click', ()=>{
+      if (!allowed){
+        // Locked: just bounce with a subtle message
+        hint.classList.add('warn');
+        hint.textContent = hint.textContent || 'You can only edit your slug every 15 days.';
+        return;
+      }
+      if (!input.disabled) return;
+      input.disabled = false;
+      input.focus();
+      btn.textContent = 'Slug unlocked';
+      hint.classList.add('warn');
+      hint.textContent = 'You can only edit your slug every 15 days. Choose carefully.';
     });
   })();
 
