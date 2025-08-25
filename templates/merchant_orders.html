@@ -186,7 +186,7 @@
     {% endif %}
 
     <p class="foot" style="margin-top:10px">
-      <a href="/merchant/{{ m['slug'] }}/items">Back to Items</a>
+      <a href="/merchant/{{ m['slug'] }}/items{% if t %}?t={{ t }}{% endif %}">Back to Items</a>
     </p>
   </div>
 
