@@ -98,7 +98,7 @@
         {% endif %}
         {# Admin button (ghost) only when username matches ADMIN_PI_USERNAME #}
         {% if username and ADMIN_PI_USERNAME and (username|lower == ADMIN_PI_USERNAME|lower) %}
-          <a class="ip-btn ghost" href="/admin">Admin</a>
+          <a class="ip-btn ghost" href="/admin{{ t and ('?t=' ~ t) or '' }}">Admin</a>
         {% endif %}
       </div>
     </div>
