@@ -41,7 +41,7 @@
       <div class="stats">
         <div class="stat"><div class="k">Users</div><div class="v">{{ totals.users or 0 }}</div></div>
         <div class="stat"><div class="k">Merchants</div><div class="v">{{ totals.merchants or 0 }}</div></div>
-        <div class="stat"><div class="k">Active Items</div><div class="v">{{ totals.items or 0 }}</div></div>
+        <div class="stat"><div class="k">Active Items</div><div class="v">{{ totals['items'] or 0 }}</div></div>
         <div class="stat"><div class="k">Orders</div><div class="v">{{ totals.orders or 0 }}</div></div>
       </div>
     </div>
