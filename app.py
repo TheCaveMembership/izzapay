@@ -615,7 +615,7 @@ def admin_home():
           SELECT
             (SELECT COUNT(*) FROM users)                           AS users,
             (SELECT COUNT(*) FROM merchants)                       AS merchants,
-            (SELECT COUNT(*) FROM items WHERE active=1)            AS items,
+            (SELECT COUNT(*) FROM items WHERE active=1)            AS items_count,
             (SELECT COUNT(*) FROM orders)                          AS orders
         """).fetchone()
 
