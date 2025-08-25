@@ -54,8 +54,51 @@ def _normalize_ext(fmt: str) -> str:
         return ""
     fmt = fmt.lower()
     return "jpg" if fmt == "jpeg" else fmt
+# ---- Simple SQLite snapshot backups on boot ----
+import shutil
+from datetime import datetime
 
+def _detect_db_file() -> str | None:
+    try:
+        with conn() as cx:
+            info = cx.execute("PRAGMA database_list").fetchone()
+            # row has columns: seq, name, file
+            path = info["file"] if info and "file" in info.keys() else None
+            # Some environments can return '' for in-memory; treat as missing
+            return path or None
+    except Exception:
+        return None
+
+def _backup_now(db_path: str, backups_dir: str) -> str | None:
+    try:
+        os.makedirs(backups_dir, exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(backups_dir, f"app-{ts}.sqlite")
+        shutil.copy2(db_path, dest)
+        return dest
+    except Exception:
+        return None
+
+def _prune_old_backups(backups_dir: str, keep: int = 10):
+    try:
+        files = [f for f in os.listdir(backups_dir) if f.endswith(".sqlite")]
+        files.sort(reverse=True)  # newest first by name with timestamp
+        for f in files[keep:]:
+            try:
+                os.remove(os.path.join(backups_dir, f))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+def setup_backups():
+    backups_dir = os.path.join(os.getenv("DATA_ROOT", "/var/data/izzapay"), "backups")
+    db_path = _detect_db_file()
+    if db_path and os.path.exists(db_path):
+        _backup_now(db_path, backups_dir)
+        _prune_old_backups(backups_dir, keep=10)
 # Serve uploaded files safely from the persistent disk
+
 @app.get(f"{MEDIA_PREFIX}/<path:filename>")
 def media(filename):
     """
@@ -135,6 +178,7 @@ def require_admin():
     
 # ----------------- DB & SCHEMA -----------------
 init_db()
+setup_backups()
 
 def ensure_schema():
     with conn() as cx:
@@ -266,6 +310,59 @@ def pi_headers():
 def fetch_pi_payment(payment_id: str):
     url = f"{PI_API_BASE}/v2/payments/{payment_id}"
     return requests.get(url, headers=pi_headers(), timeout=15)
+
+from flask import jsonify, send_file
+
+@app.get("/admin/export.json")
+def admin_export_json():
+    u = require_admin()
+    if isinstance(u, Response): return u
+    with conn() as cx:
+        users     = [dict(r) for r in cx.execute("SELECT * FROM users").fetchall()]
+        merchants = [dict(r) for r in cx.execute("SELECT * FROM merchants").fetchall()]
+        items     = [dict(r) for r in cx.execute("SELECT * FROM items").fetchall()]
+        orders    = [dict(r) for r in cx.execute("SELECT * FROM orders").fetchall()]
+    payload = {
+        "exported_at": int(time.time()),
+        "users": users,
+        "merchants": merchants,
+        "items": items,
+        "orders": orders,
+        "version": 1
+    }
+    # Force download
+    return Response(
+        json.dumps(payload, separators=(",", ":")),
+        headers={
+            "Content-Type": "application/json",
+            "Content-Disposition": "attachment; filename=izzapay-export.json"
+        }
+    )
+
+@app.post("/admin/backup/db")
+def admin_backup_now():
+    u = require_admin()
+    if isinstance(u, Response): return u
+    backups_dir = os.path.join(os.getenv("DATA_ROOT", "/var/data/izzapay"), "backups")
+    db_path = _detect_db_file()
+    if not (db_path and os.path.exists(db_path)):
+        return {"ok": False, "error": "db_not_found"}, 404
+    snap = _backup_now(db_path, backups_dir)
+    if not snap:
+        return {"ok": False, "error": "backup_failed"}, 500
+    _prune_old_backups(backups_dir, keep=10)
+    # Return a link to fetch raw file (local file send)
+    return {"ok": True, "snapshot": os.path.basename(snap)}
+    
+@app.get("/admin/backup/download/<name>")
+def admin_backup_download(name):
+    u = require_admin()
+    if isinstance(u, Response): return u
+    backups_dir = os.path.join(os.getenv("DATA_ROOT", "/var/data/izzapay"), "backups")
+    safe = os.path.abspath(os.path.join(backups_dir, name))
+    if not safe.startswith(os.path.abspath(backups_dir)) or not os.path.exists(safe):
+        abort(404)
+    return send_file(safe, as_attachment=True, download_name=name, mimetype="application/octet-stream")
 
 # ----------------- EXPLORE -----------------
 @app.get("/explore")
