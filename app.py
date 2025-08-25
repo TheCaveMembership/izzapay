@@ -64,7 +64,24 @@ def inject_globals():
         "PI_SANDBOX": PI_SANDBOX,
         "PI_USD_RATE": PI_USD_RATE,
     }
+    
+# --- Admin ENV ---
+ADMIN_PI_USERNAME = (os.getenv("ADMIN_PI_USERNAME") or "").lstrip("@").strip()
+ADMIN_PI_WALLET   = (os.getenv("ADMIN_PI_WALLET") or "").strip()
 
+def is_admin_name(username: str) -> bool:
+    if not username: return False
+    return username.lstrip("@").strip().lower() == ADMIN_PI_USERNAME.lower()
+
+def require_admin():
+    u = current_user_row()
+    if not u: 
+        return redirect("/signin?fresh=1")
+    # if user already marked as admin OR username matches configured admin
+    if (u.get("role") in ("admin","owner")) or is_admin_name(u.get("pi_username")):
+        return u
+    return redirect("/admin/enter")
+    
 # ----------------- DB & SCHEMA -----------------
 init_db()
 
@@ -369,6 +386,94 @@ def dashboard():
     tok = get_bearer_token_from_request()
     if not m: return redirect(f"/merchant/setup{('?t='+tok) if tok else ''}")
     return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
+    
+@app.get("/admin/enter")
+def admin_enter():
+    # Render a tiny page with a button that authenticates via Pi
+    # and posts to /admin/exchange
+    return render_template("admin_gate.html", sandbox=PI_SANDBOX)
+    
+@app.post("/admin/exchange")
+def admin_exchange():
+    """
+    Accepts { payload: JSON.stringify({ accessToken, user }) } like your other flows.
+    Verifies the returned Pi username equals ADMIN_PI_USERNAME; if yes, marks user admin.
+    """
+    try:
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+        else:
+            payload = request.form.get("payload", "")
+            try: data = json.loads(payload) if payload else {}
+            except Exception: data = {}
+
+        user = (data.get("user") or {})
+        username = user.get("username") or ""
+        token = data.get("accessToken")
+        if not username or not token:
+            return redirect("/signin?fresh=1")
+
+        # Verify token with Pi
+        r = requests.get(f"{PI_API_BASE}/v2/me",
+                         headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        if r.status_code != 200:
+            return redirect("/admin/enter")
+
+        # Must match env ADMIN_PI_USERNAME
+        if not is_admin_name(username):
+            return redirect("/admin/enter")
+
+        # Ensure user exists; promote to admin
+        with conn() as cx:
+            row = cx.execute("SELECT * FROM users WHERE pi_username=?", (username,)).fetchone()
+            if not row:
+                # make one if somehow not present yet
+                cx.execute("""INSERT INTO users(pi_uid, pi_username, role, created_at)
+                              VALUES(?, ?, 'admin', ?)""",
+                           (user.get("uid") or user.get("id"), username, int(time.time())))
+                row = cx.execute("SELECT * FROM users WHERE pi_username=?", (username,)).fetchone()
+            else:
+                cx.execute("UPDATE users SET role='admin' WHERE id=?", (row["id"],))
+
+        # log them in if not already
+        try:
+            session["user_id"] = row["id"]; session.permanent = True
+        except Exception:
+            pass
+
+        return redirect("/admin")
+    except Exception:
+        return redirect("/admin/enter")    
+
+@app.get("/admin")
+def admin_home():
+    u = require_admin()
+    if isinstance(u, Response): return u
+
+    # quick high-level stats
+    with conn() as cx:
+        totals = cx.execute("""
+          SELECT
+            (SELECT COUNT(*) FROM users)      AS users,
+            (SELECT COUNT(*) FROM merchants)  AS merchants,
+            (SELECT COUNT(*) FROM items WHERE active=1) AS items,
+            (SELECT COUNT(*) FROM orders)     AS orders
+        """).fetchone()
+
+        recent = cx.execute("""
+          SELECT o.id, o.pi_amount, o.pi_fee, o.status, m.business_name AS store, i.title AS item
+          FROM orders o
+          JOIN merchants m ON m.id=o.merchant_id
+          JOIN items i ON i.id=o.item_id
+          ORDER BY o.id DESC
+          LIMIT 20
+        """).fetchall()
+
+    return render_template("admin.html",
+                           totals=totals,
+                           recent=recent,
+                           admin_wallet=ADMIN_PI_WALLET,
+                           admin_username=ADMIN_PI_USERNAME)
 
 @app.get("/merchant/setup")
 def merchant_setup_form():
