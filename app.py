@@ -977,6 +977,13 @@ def cart_remove(cid):
     tok = get_bearer_token_from_request()
     return redirect(f"/cart/{cid}{('?t='+tok) if tok else ''}")
 
+# ---- Pi amount rounding helpers (7 dp) ----
+PI_QUANT = Decimal("0.0000001")
+def qpi(x) -> float:
+    """Quantize/round to 7 decimal places using Decimal; return float for storage/JSON."""
+    return float(Decimal(str(x)).quantize(PI_QUANT, rounding=ROUND_HALF_UP))
+
+
 @app.get("/checkout/cart/<cid>")
 def checkout_cart(cid):
     u = current_user_row()
@@ -1000,7 +1007,10 @@ def checkout_cart(cid):
     if not rows:
         return redirect(f"/store/{m['slug']}{('?t='+tok) if tok else ''}?cid={cid}")
 
-    total = sum(float(r["pi_price"]) * r["qty"] for r in rows)
+    # Use Decimal math and quantize to 7dp for cart totals
+    total_dec = sum(Decimal(str(r["pi_price"])) * Decimal(str(r["qty"])) for r in rows)
+    total = qpi(total_dec)
+
     sid = uuid.uuid4().hex
     line_items = json.dumps([
         {"item_id": int(r["id"]), "qty": int(r["qty"]), "price": float(r["pi_price"])}
@@ -1015,7 +1025,7 @@ def checkout_cart(cid):
                )
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (
-                sid, m["id"], None, 1, float(total), "initiated",
+                sid, m["id"], None, 1, total, "initiated",
                 int(time.time()), cid, line_items, u["id"]
             )
         )
@@ -1063,7 +1073,8 @@ def checkout(link_id):
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
     sid = uuid.uuid4().hex
-    expected = float(i["pi_price"]) * qty
+    # Quantize single-item expected amount too
+    expected = qpi(Decimal(str(i["pi_price"])) * Decimal(str(qty)))
 
     line_items = json.dumps([{
         "item_id": int(i["id"]),
@@ -1142,13 +1153,14 @@ def pi_complete():
     if not s or s["state"] not in ("initiated", "approved"):
         return {"ok": False, "error": "bad_session"}, 400
 
-    expected_amt = float(Decimal(str(s["expected_pi"])).quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP))
+    # Compare exact-at-7dp using Decimal, not float epsilon
+    expected_amt = Decimal(str(s["expected_pi"])).quantize(PI_QUANT, rounding=ROUND_HALF_UP)
     try:
         r = fetch_pi_payment(payment_id)
         if r.status_code == 200:
             pdata = r.json()
-            paid_amt = float(pdata.get("amount", 0))
-            if abs(paid_amt - expected_amt) > 1e-7 and not PI_SANDBOX:
+            paid_amt = Decimal(str(pdata.get("amount", 0))).quantize(PI_QUANT, rounding=ROUND_HALF_UP)
+            if (paid_amt != expected_amt) and not PI_SANDBOX:
                 return {"ok": False, "error": "amount_mismatch"}, 400
         elif not PI_SANDBOX:
             return {"ok": False, "error": "fetch_payment_failed"}, 502
@@ -1777,7 +1789,7 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
