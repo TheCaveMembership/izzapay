@@ -1,4 +1,82 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <image href="https://cdn.shopify.com/s/files/1/0549/2273/9936/files/IMG_5974.png?v=1756103353"
-         width="100" height="100" preserveAspectRatio="xMidYMid meet"/>
+<!-- izzapay-glow.svg -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="IZZA PAY glow">
+  <defs>
+    <!-- Core rainbow-ish gradient used for both glow & text -->
+    <linearGradient id="izzagrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FFD24A"/>   <!-- warm gold -->
+      <stop offset="45%"  stop-color="#FF5EA1"/>   <!-- magenta -->
+      <stop offset="100%" stop-color="#5A4BFF"/>   <!-- indigo/violet -->
+    </linearGradient>
+
+    <!-- Two radial glows (top-left warm, bottom-right cool) -->
+    <radialGradient id="glowWarm" cx="32%" cy="28%" r="55%">
+      <stop offset="0%"   stop-color="#FFD24A" stop-opacity="1"/>
+      <stop offset="70%"  stop-color="#FF5EA1" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowCool" cx="66%" cy="70%" r="55%">
+      <stop offset="0%"   stop-color="#5A4BFF" stop-opacity="1"/>
+      <stop offset="70%"  stop-color="#7A4DFF" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Big soft blur for the glow blobs -->
+    <filter id="softBlur">
+      <feGaussianBlur stdDeviation="60" edgeMode="none"/>
+    </filter>
+
+    <!-- Slight halo around the text -->
+    <filter id="textGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle embossed/inner look via stroke overlay -->
+    <linearGradient id="strokeGrad" x1="0%" y1="20%" x2="0%" y2="80%">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="40%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="#000000"/>
+
+  <!-- Soft color bloom behind text (two overlapping blobs) -->
+  <g filter="url(#softBlur)" opacity="0.9">
+    <circle cx="340" cy="300" r="360" fill="url(#glowWarm)"/>
+    <circle cx="700" cy="720" r="360" fill="url(#glowCool)"/>
+  </g>
+
+  <!-- Text group -->
+  <g filter="url(#textGlow)">
+    <!-- “IZZA” -->
+    <text x="128" y="420"
+          font-family="Montserrat Black, Montserrat, Poppins, 'Arial Black', Arial, sans-serif"
+          font-size="260" font-weight="900" letter-spacing="6"
+          fill="url(#izzagrad)" >
+      IZZA
+    </text>
+
+    <!-- “PAY” -->
+    <text x="128" y="740"
+          font-family="Montserrat Black, Montserrat, Poppins, 'Arial Black', Arial, sans-serif"
+          font-size="260" font-weight="900" letter-spacing="6"
+          fill="url(#izzagrad)">
+      PAY
+    </text>
+
+    <!-- Subtle glossy outline to hint that beveled look -->
+    <g fill="none" stroke="url(#strokeGrad)" stroke-width="10">
+      <text x="128" y="420"
+            font-family="Montserrat Black, Montserrat, Poppins, 'Arial Black', Arial, sans-serif"
+            font-size="260" font-weight="900" letter-spacing="6">IZZA</text>
+      <text x="128" y="740"
+            font-family="Montserrat Black, Montserrat, Poppins, 'Arial Black', Arial, sans-serif"
+            font-size="260" font-weight="900" letter-spacing="6">PAY</text>
+    </g>
+  </g>
 </svg>
