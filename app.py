@@ -818,9 +818,10 @@ def merchant_orders(slug):
         "merchant_orders.html",
         m=m,
         orders=orders,
-        stats=stats,                # <-- pass to template
+        stats=stats,
         colorway=m["colorway"],
         payout_sent=(request.args.get("payout") == "sent"),
+        t=get_bearer_token_from_request(),   # <-- add this line
     )
 
 @app.post("/merchant/<slug>/orders/update")
