@@ -24,14 +24,17 @@
     h2{margin:0 0 6px;font-size:16px}
     .muted{color:var(--muted)}
 
+    .notice{padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:rgba(80,200,120,.08)}
+    .warn{background:rgba(255,180,80,.08)}
+
     /* compact, scrollable tables with wrapping item names */
     .ip-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
     .ip-table{
       width:100%;
-      min-width:760px;                 /* allow horizontal scroll on small screens */
+      min-width:760px;
       border-collapse:collapse;
-      table-layout:fixed;              /* fixed column widths so Qty never gets pushed into */
-      font-size:12px;                  /* smaller font */
+      table-layout:fixed;
+      font-size:12px;
       line-height:1.25;
     }
     .ip-table th,.ip-table td{
@@ -45,14 +48,21 @@
     /* column sizing */
     .col-num{width:56px;white-space:nowrap}
     .col-store{width:200px;white-space:normal;overflow:hidden;text-overflow:ellipsis}
-    .col-item{width:auto;white-space:normal;word-break:break-word;hyphens:auto} /* WRAPS to next line */
-    .col-qty{width:64px;text-align:right;white-space:nowrap}                    /* fixed, protected */
+    .col-item{width:auto;white-space:normal;word-break:break-word;hyphens:auto}
+    .col-qty{width:64px;text-align:right;white-space:nowrap}
     .col-status{width:86px;white-space:nowrap}
     .col-amt{width:120px;text-align:right;white-space:nowrap}
 
     .badge{display:inline-block;padding:1px 6px;border-radius:999px;border:1px solid var(--line);font-size:11px}
 
-    /* even tighter on very small screens and force scrolling sooner */
+    /* stats grid */
+    .stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+    @media (min-width:720px){ .stats{grid-template-columns:repeat(4,minmax(0,1fr));} }
+    .stat{border:1px solid var(--line);border-radius:10px;padding:10px}
+    .stat .k{font-size:11px;color:var(--muted);letter-spacing:.2px}
+    .stat .v{font-size:16px;font-weight:700;margin-top:2px}
+    .footnote{color:var(--muted);font-size:12px;margin-top:8px}
+
     @media (max-width:420px){
       .ip-table{min-width:680px;font-size:11px}
       .ip-table th,.ip-table td{padding:3px 5px}
@@ -130,17 +140,22 @@
         <p class="muted" style="margin:4px 0 0;font-size:12px;letter-spacing:.2px">
           SCROLL RIGHT IN TABLES FOR MORE DETAILS
         </p>
+        {% if payout_sent %}
+          <div class="notice" style="margin-top:10px">
+            <strong>Payout request sent.</strong> You’ll receive your Pi within 24 hours.
+          </div>
+        {% endif %}
       </div>
 
       <!-- Purchases -->
       <div class="card">
         <h2>Purchases</h2>
         {% if purchases and purchases|length %}
-          {# if all purchases share one store, show it once like Sales #}
+          {# If all purchases share one store, show it once #}
           {% set ns = namespace(first=None, same=True) %}
           {% for o in purchases %}
-            {% if ns.first is none %}{% set ns.first = o.m_name %}
-            {% elif o.m_name != ns.first %}{% set ns.same = False %}{% endif %}
+            {% if ns.first is none %}{% set ns.first = o.store %}
+            {% elif o.store != ns.first %}{% set ns.same = False %}{% endif %}
           {% endfor %}
           {% if ns.same %}
             <p class="muted" style="margin:6px 0">Store: <strong>{{ ns.first }}</strong></p>
@@ -164,11 +179,11 @@
                 {% for o in purchases %}
                 <tr>
                   <td class="col-num">{{ o.id }}</td>
-                  <td class="col-store">{{ o.m_name }}</td>
-                  <td class="col-item">{{ o.item_title }}</td>
+                  <td class="col-store">{{ o.store }}</td>
+                  <td class="col-item">{{ o.title }}</td>
                   <td class="col-qty">{{ o.qty }}</td>
                   <td class="col-status"><span class="badge">{{ o.status }}</span></td>
-                  <td class="col-amt">{{ '%.7f'|format(o.pi_amount or 0) }}</td>
+                  <td class="col-amt">{{ '%.7f'|format(o.amount or 0) }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -184,8 +199,64 @@
         <h2>Sales</h2>
         {% if merchant %}
           <p class="muted" style="margin:6px 0">Store: <strong>{{ merchant.business_name }}</strong></p>
+
+          <!-- 30-day summary + payout -->
+          {% if stats %}
+            <div class="stats">
+              <div class="stat">
+                <div class="k">Gross (30d)</div>
+                <div class="v">{{ '%.7f'|format(stats.gross_30 or 0) }} π</div>
+              </div>
+              <div class="stat">
+                <div class="k">Pi Fee (30d)</div>
+                <div class="v">{{ '%.7f'|format(stats.fee_30 or 0) }} π</div>
+              </div>
+              <div class="stat">
+                <div class="k">App Fee 1% (30d)</div>
+                <div class="v">{{ '%.7f'|format(stats.app_fee_30 or 0) }} π</div>
+              </div>
+              <div class="stat">
+                <div class="k">Net to Merchant (30d)</div>
+                <div class="v">{{ '%.7f'|format(stats.net_30 or 0) }} π</div>
+              </div>
+
+              <div class="stat">
+                <div class="k">Sessions (30d)</div>
+                <div class="v">{{ stats.sessions_30 or 0 }}</div>
+              </div>
+              <div class="stat">
+                <div class="k">USD Rate</div>
+                <div class="v">
+                  {% if stats.usd_rate %}${{ '%.2f'|format(stats.usd_rate) }}/π{% else %}—{% endif %}
+                </div>
+              </div>
+              <div class="stat">
+                <div class="k">Net (30d) in USD</div>
+                <div class="v">
+                  {% if stats.usd_estimate is not none %}${{ '%.2f'|format(stats.usd_estimate) }}{% else %}—{% endif %}
+                </div>
+              </div>
+              <div class="stat">
+                <div class="k">Wallet on File</div>
+                <div class="v" style="font-size:12px;word-break:break-all">
+                  {{ merchant.wallet or '—' }}
+                </div>
+              </div>
+            </div>
+
+            <form method="POST" action="/merchant/{{ merchant.slug }}/payout" style="margin-top:10px">
+              <button class="ip-btn">Request Payout</button>
+              <span class="muted" style="margin-left:8px;font-size:12px">
+                Payout may take up to 24 hours.
+              </span>
+            </form>
+            <p class="footnote warn">
+              Note: when the payout is deposited into your Pi wallet, the Pi network may charge a separate transaction fee.
+            </p>
+          {% endif %}
+
           {% if sales and sales|length %}
-            <div class="ip-table-wrap">
+            <div class="ip-table-wrap" style="margin-top:10px">
               <table class="ip-table">
                 <thead>
                   <tr>
@@ -201,11 +272,18 @@
                   {% for o in sales %}
                   <tr>
                     <td class="col-num">{{ o.id }}</td>
-                    <td class="col-item">{{ o.item_title }}</td>
+                    <td class="col-item">{{ o.title }}</td>
                     <td class="col-qty">{{ o.qty }}</td>
                     <td class="col-status"><span class="badge">{{ o.status }}</span></td>
-                    <td class="col-amt">{{ '%.7f'|format(o.pi_amount or 0) }}</td>
-                    <td class="col-amt">{{ '%.7f'|format(o.pi_merchant_net or 0) }}</td>
+                    <td class="col-amt">{{ '%.7f'|format(o.amount or 0) }}</td>
+                    <td class="col-amt">
+                      {# If app.py includes net per order, show it; otherwise estimate from table if available #}
+                      {% if o.net is defined and o.net is not none %}
+                        {{ '%.7f'|format(o.net) }}
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
                   </tr>
                   {% endfor %}
                 </tbody>
