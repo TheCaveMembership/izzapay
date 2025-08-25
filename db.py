@@ -1,17 +1,33 @@
-import sqlite3, os, threading
-DB_PATH = os.path.join(os.path.dirname(__file__), "app.sqlite3")
+import os, sqlite3, threading
+
+# --- Persistent locations (works on Render or locally) ---
+DATA_ROOT = os.getenv("DATA_ROOT", "/var/data/izzapay")
+DB_PATH   = os.getenv("SQLITE_DB_PATH", os.path.join(DATA_ROOT, "app.sqlite"))
+
 _lock = threading.Lock()
 
+def _ensure_dirs():
+    # Make sure /var/data/izzapay exists (or whatever you set)
+    try:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    except Exception:
+        pass
+
 def conn():
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+    _ensure_dirs()
+    cx = sqlite3.connect(DB_PATH)
+    cx.row_factory = sqlite3.Row
+    # sensible defaults
+    cx.execute("PRAGMA foreign_keys=ON;")
+    cx.execute("PRAGMA journal_mode=WAL;")
+    cx.execute("PRAGMA synchronous=NORMAL;")
+    return cx
 
 def init_db():
+    _ensure_dirs()
     with _lock, conn() as cx:
         cx.executescript("""
-        PRAGMA journal_mode=WAL;
-
+        -- Core tables
         CREATE TABLE IF NOT EXISTS users(
           id INTEGER PRIMARY KEY,
           pi_uid TEXT UNIQUE,
@@ -29,6 +45,8 @@ def init_db():
           theme_mode TEXT DEFAULT 'dark',
           reply_to_email TEXT,
           pi_wallet TEXT NOT NULL,
+          -- Newer columns are added by ensure_schema() in app.py if missing:
+          -- pi_wallet_address TEXT, pi_handle TEXT, colorway TEXT
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
         );
 
@@ -54,7 +72,10 @@ def init_db():
           expected_pi REAL,
           state TEXT,
           created_at INTEGER,
-          pi_tx_hash TEXT
+          pi_tx_hash TEXT,
+          -- Newer columns are added by ensure_schema() in app.py if missing:
+          -- pi_payment_id TEXT, cart_id TEXT, line_items_json TEXT, user_id INTEGER
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id)
         );
 
         CREATE TABLE IF NOT EXISTS orders(
@@ -75,6 +96,8 @@ def init_db():
           tracking_number TEXT,
           tracking_url TEXT,
           buyer_token TEXT
+          -- Newer columns are added by ensure_schema() in app.py if missing:
+          -- buyer_user_id INTEGER, created_at INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS fee_ledger(
