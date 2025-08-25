@@ -87,8 +87,9 @@
         <img src="/static/izzapay-word.svg" alt="IZZA PAY">
       </div>
       <div class="actions">
-        <a class="ip-btn ghost" href="/explore">View Stores</a>
-      </div>
+  <a class="ip-btn ghost" href="/explore">View Stores</a>
+  <a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">Orders</a>
+</div>
     </div>
 
     {% if setup_mode %}
