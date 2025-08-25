@@ -73,14 +73,26 @@ def is_admin_name(username: str) -> bool:
     if not username: return False
     return username.lstrip("@").strip().lower() == ADMIN_PI_USERNAME.lower()
 
+from flask import abort  # keep this at top if not already imported
+
 def require_admin():
-    u = current_user_row()
-    if not u: 
+    urow = current_user_row()
+    if not urow:
         return redirect("/signin?fresh=1")
-    # if user already marked as admin OR username matches configured admin
-    if (u.get("role") in ("admin","owner")) or is_admin_name(u.get("pi_username")):
-        return u
-    return redirect("/admin/enter")
+
+    # sqlite3.Row must be accessed like a dict (no .get)
+    try:
+        role = urow["role"]
+    except Exception:
+        role = None
+    try:
+        uname = urow["pi_username"]
+    except Exception:
+        uname = None
+
+    if (role in ("admin", "owner")) or is_admin_name(uname):
+        return urow  # return the original Row for downstream code
+    abort(403)      # don’t bounce to /admin/enter if you don't need the extra gate
     
 # ----------------- DB & SCHEMA -----------------
 init_db()
@@ -448,32 +460,38 @@ def admin_exchange():
 @app.get("/admin")
 def admin_home():
     u = require_admin()
-    if isinstance(u, Response): return u
+    if isinstance(u, Response):
+        return u
 
-    # quick high-level stats
     with conn() as cx:
-        totals = cx.execute("""
+        totals_row = cx.execute("""
           SELECT
-            (SELECT COUNT(*) FROM users)      AS users,
-            (SELECT COUNT(*) FROM merchants)  AS merchants,
-            (SELECT COUNT(*) FROM items WHERE active=1) AS items,
-            (SELECT COUNT(*) FROM orders)     AS orders
+            (SELECT COUNT(*) FROM users)                           AS users,
+            (SELECT COUNT(*) FROM merchants)                       AS merchants,
+            (SELECT COUNT(*) FROM items WHERE active=1)            AS items,
+            (SELECT COUNT(*) FROM orders)                          AS orders
         """).fetchone()
 
-        recent = cx.execute("""
-          SELECT o.id, o.pi_amount, o.pi_fee, o.status, m.business_name AS store, i.title AS item
+        recent_rows = cx.execute("""
+          SELECT o.id, o.pi_amount, o.pi_fee, o.status,
+                 m.business_name AS store, i.title AS item
           FROM orders o
-          JOIN merchants m ON m.id=o.merchant_id
-          JOIN items i ON i.id=o.item_id
+          JOIN merchants m ON m.id = o.merchant_id
+          JOIN items i     ON i.id = o.item_id
           ORDER BY o.id DESC
           LIMIT 20
         """).fetchall()
 
-    return render_template("admin.html",
-                           totals=totals,
-                           recent=recent,
-                           admin_wallet=ADMIN_PI_WALLET,
-                           admin_username=ADMIN_PI_USERNAME)
+    totals = dict(totals_row or {})
+    recent = [dict(r) for r in (recent_rows or [])]
+
+    return render_template(
+        "admin.html",
+        totals=totals,
+        recent=recent,
+        admin_wallet=ADMIN_PI_WALLET,
+        admin_username=ADMIN_PI_USERNAME
+    )
 
 @app.get("/merchant/setup")
 def merchant_setup_form():
