@@ -272,11 +272,6 @@ body{
 }
 
 /* ===== Theme preview thumbnails (merchant dashboard) ===== */
-/* Markup example:
-   <div class="theme-preview theme-a cw-blue">
-     <div class="blk"></div> ...
-   </div>
-*/
 .theme-preview{
   width:100%;
   max-width:220px;
@@ -333,4 +328,27 @@ body{
 /* Let groups of previews wrap instead of causing sideways scroll */
 .theme-preview-list{
   display:flex; flex-wrap: wrap; gap:12px;
+}
+
+/* ===== IZZA PAY header brand strip tweaks ===== */
+.brand{
+  display:flex;
+  align-items:center;
+  gap:6px;               /* tighten space between mark, word, and gif */
+}
+
+.brand-mark{
+  width:46px;            /* bigger than before */
+  height:46px;
+}
+
+.brand-word{
+  height:26px;           /* bump this up/down as needed */
+  filter: brightness(1.1) contrast(1.05); /* reduce heavy glow */
+}
+
+.brand-gif{
+  width:22px;
+  height:22px;
+  margin-left:2px;       /* pulls it snug against the word */
 }
