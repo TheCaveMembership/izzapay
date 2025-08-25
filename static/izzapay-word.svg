@@ -1,28 +1,88 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="1600" height="400" viewBox="0 0 1600 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="1600" height="400" viewBox="0 0 1600 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IZZA PAY wordmark">
   <defs>
-    <linearGradient id="gw" x1="0" y1="0" x2="1600" y2="0" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6EA8FF"/>
-      <stop offset="1" stop-color="#7CF0FF"/>
+    <!-- Letter gradient (yellow → magenta → violet) -->
+    <linearGradient id="letterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FFD24A"/>
+      <stop offset="45%"  stop-color="#FF7A73"/>
+      <stop offset="100%" stop-color="#6B63FF"/>
     </linearGradient>
+
+    <!-- Soft background glows -->
+    <radialGradient id="glowYellow" cx="22%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#FFD24A" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#FFD24A" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowMagenta" cx="58%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#FF5AA5" stop-opacity="0.85"/>
+      <stop offset="60%" stop-color="#FF5AA5" stop-opacity="0.26"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowViolet" cx="76%" cy="70%" r="55%">
+      <stop offset="0%" stop-color="#5C54FF" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#5C54FF" stop-opacity="0.26"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Outer glow on letters -->
+    <filter id="outerGlow" x="-40%" y="-80%" width="180%" height="260%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle beveled highlight -->
+    <filter id="innerBevel" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.25" result="s"/>
+      <feSpecularLighting in="s" surfaceScale="3" specularConstant="1.2" specularExponent="22" lighting-color="#fff">
+        <fePointLight x="-300" y="-120" z="220"/>
+      </feSpecularLighting>
+      <feComposite operator="in" in2="SourceAlpha"/>
+      <feBlend in2="SourceGraphic" mode="screen"/>
+    </filter>
   </defs>
-  <!-- Word: IZZA PAY -->
-  <g transform="translate(80,65)">
+
+  <!-- Background -->
+  <rect width="1600" height="400" fill="#000"/>
+
+  <!-- Radiant field -->
+  <rect width="1600" height="400" fill="url(#glowYellow)"/>
+  <rect width="1600" height="400" fill="url(#glowMagenta)"/>
+  <rect width="1600" height="400" fill="url(#glowViolet)"/>
+
+  <!-- Word: IZZA PAY (same shapes as your original), now with gradient fill + glow -->
+  <g transform="translate(80,65)"
+     fill="url(#letterGrad)"
+     stroke="#ffffff" stroke-opacity="0.18" stroke-width="4"
+     style="paint-order: stroke fill">
     <!-- I -->
-    <rect x="0" y="0" width="40" height="270" rx="10" fill="url(#gw)"/>
+    <rect x="0" y="0" width="40" height="270" rx="10" filter="url(#outerGlow)"/>
     <!-- Z -->
-    <path d="M80 0h300c12 0 20 8 20 20v18c0 6-3 12-8 16L210 206h190c12 0 20 8 20 20v18c0 12-8 20-20 20H70c-12 0-20-8-20-20v-18c0-7 3-13 8-17L270 54H80c-12 0-20-8-20-20V20C60 8 68 0 80 0z" fill="url(#gw)"/>
+    <path d="M80 0h300c12 0 20 8 20 20v18c0 6-3 12-8 16L210 206h190c12 0 20 8 20 20v18c0 12-8 20-20 20H70c-12 0-20-8-20-20v-18c0-7 3-13 8-17L270 54H80c-12 0-20-8-20-20V20C60 8 68 0 80 0z"
+          filter="url(#outerGlow)"/>
     <!-- Z (second) -->
-    <use href="#z2"/>
-    <path id="z2" d="M430 0h300c12 0 20 8 20 20v18c0 6-3 12-8 16L560 206h190c12 0 20 8 20 20v18c0 12-8 20-20 20H420c-12 0-20-8-20-20v-18c0-7 3-13 8-17L620 54H430c-12 0-20-8-20-20V20c0-12 8-20 20-20z" fill="url(#gw)"/>
+    <path id="z2" d="M430 0h300c12 0 20 8 20 20v18c0 6-3 12-8 16L560 206h190c12 0 20 8 20 20v18c0 12-8 20-20 20H420c-12 0-20-8-20-20v-18c0-7 3-13 8-17L620 54H430c-12 0-20-8-20-20V20c0-12 8-20 20-20z"
+          filter="url(#outerGlow)"/>
     <!-- A -->
-    <path d="M820 270h-44a16 16 0 0 1-15-10l-88-238a16 16 0 0 1 15-22h46a16 16 0 0 1 15 11l23 66h122l23-66a16 16 0 0 1 15-11h46a16 16 0 0 1 15 22l-88 238a16 16 0 0 1-15 10h-44zm-18-96h80l-40-116-40 116z" fill="url(#gw)"/>
+    <path d="M820 270h-44a16 16 0 0 1-15-10l-88-238a16 16 0 0 1 15-22h46a16 16 0 0 1 15 11l23 66h122l23-66a16 16 0 0 1 15-11h46a16 16 0 0 1 15 22l-88 238a16 16 0 0 1-15 10h-44zm-18-96h80l-40-116-40 116z"
+          filter="url(#outerGlow)"/>
     <!-- SPACE -->
     <!-- P -->
-    <path d="M1050 0h84c88 0 142 44 142 118s-54 118-142 118h-40v34c0 12-8 20-20 20h-24c-12 0-20-8-20-20V20c0-12 8-20 20-20zm64 60h-40v96h40c44 0 72-18 72-48s-28-48-72-48z" fill="url(#gw)"/>
+    <path d="M1050 0h84c88 0 142 44 142 118s-54 118-142 118h-40v34c0 12-8 20-20 20h-24c-12 0-20-8-20-20V20c0-12 8-20 20-20zm64 60h-40v96h40c44 0 72-18 72-48s-28-48-72-48z"
+          filter="url(#outerGlow)"/>
     <!-- A (again) -->
-    <path d="M1290 270h-44a16 16 0 0 1-15-10l-88-238a16 16 0 0 1 15-22h46a16 16 0 0 1 15 11l23 66h122l23-66a16 16 0 0 1 15-11h46a16 16 0 0 1 15 22l-88 238a16 16 0 0 1-15 10h-44zm-18-96h80l-40-116-40 116z" fill="url(#gw)"/>
+    <path d="M1290 270h-44a16 16 0 0 1-15-10l-88-238a16 16 0 0 1 15-22h46a16 16 0 0 1 15 11l23 66h122l23-66a16 16 0 0 1 15-11h46a16 16 0 0 1 15 22l-88 238a16 16 0 0 1-15 10h-44zm-18-96h80l-40-116-40 116z"
+          filter="url(#outerGlow)"/>
     <!-- Y -->
-    <path d="M1510 0h36c12 0 20 8 20 20v84l78 130c7 11-1 26-14 26h-30a16 16 0 0 1-14-8l-57-96-57 96a16 16 0 0 1-14 8h-30c-13 0-21-15-14-26l78-130V20c0-12 8-20 18-20z" fill="url(#gw)"/>
+    <path d="M1510 0h36c12 0 20 8 20 20v84l78 130c7 11-1 26-14 26h-30a16 16 0 0 1-14-8l-57-96-57 96a16 16 0 0 1-14 8h-30c-13 0-21-15-14-26l78-130V20c0-12 8-20 18-20z"
+          filter="url(#outerGlow)"/>
+  </g>
+
+  <!-- Very subtle inner highlight over the whole word -->
+  <g transform="translate(80,65)" filter="url(#innerBevel)" opacity="0.9">
+    <rect x="0" y="0" width="1520" height="270" fill="transparent"/>
   </g>
 </svg>
