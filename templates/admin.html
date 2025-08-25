@@ -9,21 +9,22 @@
     .wrap{max-width:1100px;margin:0 auto;padding:20px}
     .card{background:#fff;border:1px solid #e6e8f0;border-radius:12px;padding:16px;margin-top:12px}
     h1{margin:0 0 6px}
-    table{width:100%;border-collapse:collapse}
+
+    /* Table */
+    .table-wrap{width:100%;overflow-x:auto} /* prevents leaking on narrow screens */
+    table{width:100%;border-collapse:collapse;min-width:680px} /* give columns breathing room */
     th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
     th{background:#fafbff}
+    td.num, th.num{white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right}
+
     .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
     .stat{border:1px solid #e6e8f0;border-radius:10px;padding:10px;background:#fff}
     .k{font-size:12px;color:#4b587c}
     .v{font-weight:800}
     .muted{color:#4b587c}
-    /* NEW: allow wallet address to wrap */
-    .wallet { 
-      word-break: break-all; 
-      overflow-wrap: anywhere; 
-      display:block;
-      margin-top:4px;
-    }
+
+    /* Wallet wraps nicely */
+    .wallet{word-break:break-all;overflow-wrap:anywhere;display:block;margin-top:4px}
   </style>
 </head>
 <body>
@@ -41,32 +42,41 @@
       <div class="stats">
         <div class="stat"><div class="k">Users</div><div class="v">{{ totals.users or 0 }}</div></div>
         <div class="stat"><div class="k">Merchants</div><div class="v">{{ totals.merchants or 0 }}</div></div>
-        <div class="stat"><div class="k">Active Items</div><div class="v">{{ totals['items'] or 0 }}</div></div>
+        <div class="stat"><div class="k">Active Items</div><div class="v">{{ totals.items_count or 0 }}</div></div>
         <div class="stat"><div class="k">Orders</div><div class="v">{{ totals.orders or 0 }}</div></div>
       </div>
     </div>
 
     <div class="card">
       <h2>Recent Orders</h2>
-      <table>
-        <thead><tr>
-          <th>#</th><th>Store</th><th>Item</th><th>Status</th><th>Amount (π)</th><th>Fee (π)</th>
-        </tr></thead>
-        <tbody>
-          {% for r in recent %}
-          <tr>
-            <td>{{ r.id }}</td>
-            <td>{{ r.store }}</td>
-            <td>{{ r.item }}</td>
-            <td>{{ r.status }}</td>
-            <td>{{ '%.7f'|format((r.pi_amount or 0)|float) }}</td>
-            <td>{{ '%.7f'|format((r.pi_fee or 0)|float) }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="6" class="muted">No orders yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Store</th>
+              <th>Item</th>
+              <th>Status</th>
+              <th class="num">Amount (π)</th>
+              <th class="num">Fee (π)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in recent %}
+            <tr>
+              <td>{{ r.id }}</td>
+              <td>{{ r.store }}</td>
+              <td>{{ r.item }}</td>
+              <td>{{ r.status }}</td>
+              <td class="num">{{ '%.7f'|format((r.pi_amount or 0)|float) }}</td>
+              <td class="num">{{ '%.7f'|format((r.pi_fee or 0)|float) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="muted">No orders yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </body>
