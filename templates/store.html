@@ -74,16 +74,11 @@
         <!-- Explore + Cart (badge shows when > 0) -->
         <div class="row">
           <a class="pill" href="/explore{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">Explore stores</a>
-          <a class="pill cart-link" href="/cart/{{ cid }}{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">
+          <a class="pill cart-link" href="/cart">
             Cart
             {% set cc = (cart_count or 0) %}
             {% if cc > 0 %}<span class="badge">{{ cc }}</span>{% endif %}
           </a>
-          {% if (cart_count or 0) > 0 %}
-            <a class="pill" href="/checkout/cart/{{ cid }}{% if request.args.get('t') %}?t={{ request.args.get('t') }}{% endif %}">
-              Checkout ({{ cart_count }})
-            </a>
-          {% endif %}
         </div>
       </div>
     </div>
@@ -109,11 +104,9 @@
         <div class="row" style="justify-content:space-between;margin-top:8px">
           <div class="price">{{ '%.7f'|format(it.pi_price) }} Pi</div>
           <div class="row">
-            <!-- Add to Cart (posts to /store/<slug>/add and carries cid) -->
-            <form method="post" action="/store/{{ m.slug }}/add" style="margin:0">
-              <input type="hidden" name="cid" value="{{ cid }}">
+            <!-- Add to Cart (POST) -->
+            <form method="post" action="/cart/add" style="margin:0">
               <input type="hidden" name="item_id" value="{{ it.id }}">
-              {% if request.args.get('t') %}<input type="hidden" name="t" value="{{ request.args.get('t') }}">{% endif %}
               <button class="pill" type="submit">Add to Cart</button>
             </form>
             <!-- BUY NOW goes straight to single-item checkout -->
