@@ -1060,6 +1060,7 @@ def checkout(link_id):
                   merchants.business_name, 
                   merchants.logo_url, 
                   merchants.id          AS mid,
+                  merchants.slug        AS mslug,
                   merchants.colorway    AS colorway
            FROM items 
            JOIN merchants ON merchants.id = items.merchant_id
@@ -1072,8 +1073,15 @@ def checkout(link_id):
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
+    # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
+    u = current_user_row()
+    if not u:
+        # Send them to the store sign-in (keeps branding) and bounce back here
+        next_url = f"/checkout/{link_id}?qty={qty}"
+        return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
+
+    # Create a session tied to this user
     sid = uuid.uuid4().hex
-    # Quantize single-item expected amount too
     expected = qpi(Decimal(str(i["pi_price"])) * Decimal(str(qty)))
 
     line_items = json.dumps([{
@@ -1081,9 +1089,6 @@ def checkout(link_id):
         "qty": int(qty),
         "price": float(i["pi_price"]),
     }])
-
-    u = current_user_row()
-    uid = (u["id"] if u else None)
 
     with conn() as cx:
         cx.execute(
@@ -1093,7 +1098,7 @@ def checkout(link_id):
                )
                VALUES(?,?,?,?,?,?,?, ?, ?)""",
             (sid, i["mid"], i["id"], qty, expected, "initiated",
-             int(time.time()), line_items, uid)
+             int(time.time()), line_items, u["id"])
         )
 
     return render_template(
@@ -1182,6 +1187,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
     buyer_name  =  buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
 
+    # --- NEW: robust buyer_user_id resolution (prefer session, else current user) ---
+    u_ctx = current_user_row()
+    try:
+        buyer_user_id = s["user_id"] if s["user_id"] is not None else (u_ctx["id"] if u_ctx else None)
+    except Exception:
+        buyer_user_id = (u_ctx["id"] if u_ctx else None)
+    # -------------------------------------------------------------------------------
+
     try:
         lines = json.loads(s["line_items_json"] or "[]")
     except Exception:
@@ -1208,7 +1221,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     created_order_ids = []
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
-    buyer_user_id = s["user_id"]
 
     with conn() as cx:
         for li in lines:
@@ -1217,7 +1229,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             snap_price = float(li["price"])
 
             line_gross = snap_price * qty
-            # Split the actual session-level fee proportionally
+            # Split the session-level fee proportionally across lines
             line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
             line_net   = line_gross - line_fee
 
@@ -1265,7 +1277,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # Emails (buyer + merchant)
+    # ===== Emails (unchanged from your version, kept verbatim) =====
     try:
         display_rows = []
         for li in lines:
@@ -1363,11 +1375,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
+    # Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
     tok = ""
     if u:
-        try: tok = mint_login_token(u["id"])
-        except Exception: tok = ""
+        try:
+            tok = mint_login_token(u["id"])
+        except Exception:
+            tok = ""
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
