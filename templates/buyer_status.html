@@ -1,21 +1,62 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Order Status</title>
-<style>
-body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0;padding:22px}
-.card{max-width:560px;margin:0 auto;background:#111a2b;border:1px solid #1f2a44;padding:18px;border-radius:12px}
-a{color:#89aaff}
-</style>
-</head><body>
-<div class="card">
-  <h2>{{ m['business_name'] }}</h2>
-  <p><strong>{{ i['title'] }}</strong> × {{ o['qty'] }}</p>
-  <p>Status: <strong>{{ o['status'] }}</strong></p>
-  {% if o['tracking_number'] %}
-    <p>Tracking: <a href="{{ o['tracking_url'] or '#' }}">{{ o['tracking_carrier'] }} {{ o['tracking_number'] }}</a></p>
-  {% endif %}
-  <hr>
-  <p>Paid: {{ o['pi_amount'] }} Pi (Fee {{ o['pi_fee'] }} Pi)</p>
-  <p>Thanks for using Pi.</p>
-</div>
-</body></html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Order Status</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #0b0f17;
+      color: #e8f0ff;
+      margin: 0;
+      padding: 22px;
+    }
+    .card {
+      max-width: 560px;
+      margin: 0 auto;
+      background: #111a2b;
+      border: 1px solid #1f2a44;
+      padding: 18px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    a { color: #89aaff; }
+    .note {
+      font-size: 13px;
+      color: #bcd0ff;
+      margin-top: 12px;
+    }
+    .btn {
+      margin-top: 18px;
+      display: inline-block;
+      background: #6e9fff;
+      color: #0b0f17;
+      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>{{ m['business_name'] }}</h2>
+    <p><strong>{{ i['title'] }}</strong> × {{ o['qty'] }}</p>
+    <p>Status: <strong>{{ o['status'] }}</strong></p>
+
+    {% if o['tracking_number'] %}
+      <p>Tracking: <a href="{{ o['tracking_url'] or '#' }}">{{ o['tracking_carrier'] }} {{ o['tracking_number'] }}</a></p>
+    {% endif %}
+
+    <hr>
+    <p>Paid: {{ '%.7f'|format(o['pi_amount'] or 0) }} π  
+       <br><small class="muted">(Fee {{ '%.7f'|format(o['pi_fee'] or 0) }} π)</small></p>
+
+    <p class="note">Check your email inbox for order confirmation and updates.  
+    Don’t forget to check your spam folder just in case.</p>
+
+    <a class="btn" href="/store/{{ m['slug'] }}">Return to Store</a>
+  </div>
+</body>
+</html>
