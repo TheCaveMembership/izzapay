@@ -1,24 +1,72 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background ring (subtle) -->
-  <circle cx="256" cy="256" r="248" fill="url(#g1)"/>
-  <!-- Inner hex “chip/card” -->
-  <path d="M256 88l140 80v176l-140 80-140-80V168l140-80z" fill="url(#g2)"/>
-  <!-- Stylized IZ monogram -->
-  <g transform="translate(128,152)">
-    <!-- I bar -->
-    <rect x="40" y="32" width="44" height="176" rx="8" fill="white"/>
-    <!-- Z slash / outline -->
-    <path d="M96 48h176c9 0 16 7 16 16v8c0 6-3 11-7 14L166 196h122c9 0 16 7 16 16v8c0 9-7 16-16 16H110c-9 0-16-7-16-16v-8c0-5 2-10 5-13l120-110H96c-9 0-16-7-16-16v-8c0-9 7-16 16-16z" fill="white"/>
-  </g>
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IZZA PAY">
   <defs>
-    <radialGradient id="g1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 256) rotate(90) scale(248)">
-      <stop stop-color="#0C1224"/>
-      <stop offset="1" stop-color="#0A0F1A"/>
-    </radialGradient>
-    <linearGradient id="g2" x1="116" y1="88" x2="396" y2="424" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6EA8FF"/>
-      <stop offset="1" stop-color="#7CF0FF"/>
+    <!-- Core gradient for the letters -->
+    <linearGradient id="letterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"  stop-color="#FFD24A"/>
+      <stop offset="45%" stop-color="#FF7A73"/>
+      <stop offset="100%" stop-color="#6B63FF"/>
     </linearGradient>
+
+    <!-- Three soft background glows (yellow, magenta, violet) -->
+    <radialGradient id="glowYellow" cx="35%" cy="30%" r="45%">
+      <stop offset="0%" stop-color="#FFD24A" stop-opacity="0.95"/>
+      <stop offset="60%" stop-color="#FFD24A" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowMagenta" cx="72%" cy="44%" r="42%">
+      <stop offset="0%" stop-color="#FF5AA5" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#FF5AA5" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowViolet" cx="50%" cy="72%" r="45%">
+      <stop offset="0%" stop-color="#5C54FF" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#5C54FF" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Outer soft blur to make letters glow -->
+    <filter id="outerGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle inner highlight / bevel look -->
+    <filter id="innerBevel" x="-20%" y="-20%" width="140%" height="140%">
+      <feComposite in="SourceGraphic" in2="SourceAlpha" operator="arithmetic" k2="1" k3="0" />
+      <feGaussianBlur stdDeviation="1.5" result="soft"/>
+      <feSpecularLighting in="soft" surfaceScale="3" specularConstant="1.2" specularExponent="25" lighting-color="#ffffff">
+        <fePointLight x="-200" y="-120" z="200"/>
+      </feSpecularLighting>
+      <feComposite in2="SourceGraphic" operator="in"/>
+      <feBlend in2="SourceGraphic" mode="screen"/>
+    </filter>
   </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="#000000"/>
+
+  <!-- Big soft glows behind the letters -->
+  <rect width="1024" height="1024" fill="url(#glowYellow)"/>
+  <rect width="1024" height="1024" fill="url(#glowMagenta)"/>
+  <rect width="1024" height="1024" fill="url(#glowViolet)"/>
+
+  <!-- Letter group: gradient fill, light stroke, glow + subtle bevel -->
+  <g fill="url(#letterGrad)" stroke="#ffffff" stroke-opacity="0.18" stroke-width="6"
+     style="paint-order: stroke fill" filter="url(#outerGlow)">
+    <!-- Top line: IZZA -->
+    <text x="512" y="410"
+          font-family="Verdana, 'Arial Black', Impact, sans-serif"
+          font-size="240" font-weight="800" text-anchor="middle"
+          letter-spacing="10" filter="url(#innerBevel)">IZZA</text>
+
+    <!-- Bottom line: PAY -->
+    <text x="512" y="720"
+          font-family="Verdana, 'Arial Black', Impact, sans-serif"
+          font-size="260" font-weight="800" text-anchor="middle"
+          letter-spacing="18" filter="url(#innerBevel)">PAY</text>
+  </g>
 </svg>
