@@ -986,7 +986,9 @@ def checkout_cart(cid):
 
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
-        if not cart: abort(404)
+        if not cart:
+            abort(404)
+
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
         rows = cx.execute("""
             SELECT cart_items.qty, items.*
@@ -1012,8 +1014,10 @@ def checkout_cart(cid):
                    created_at, cart_id, line_items_json, user_id
                )
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (sid, m["id"], None, 1, float(total), "initiated",
-             int(time.time()), cid, line_items, u["id"])
+            (
+                sid, m["id"], None, 1, float(total), "initiated",
+                int(time.time()), cid, line_items, u["id"]
+            )
         )
 
     i = {
@@ -1033,6 +1037,9 @@ def checkout_cart(cid):
         app_base=APP_BASE_URL,
         cart_mode=True,
         colorway=m["colorway"],
+        m=m,            # merchant row for font/logo/color
+        rows=rows,      # full cart rows so order summary dropdown works
+        slug=m["slug"], # for redirect after payment
     )
 
 @app.get("/checkout/<link_id>")
