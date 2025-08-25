@@ -222,6 +222,17 @@ def ensure_schema():
         if "buyer_user_id" not in ocols:
             cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
 
+        # payout_requests throttle log (one row per request)
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS payout_requests(
+              id INTEGER PRIMARY KEY,
+              merchant_id INTEGER NOT NULL,
+              requested_at INTEGER NOT NULL,
+              FOREIGN KEY(merchant_id) REFERENCES merchants(id)
+            )
+        """)
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time ON payout_requests(merchant_id, requested_at)")
+
 ensure_schema()
 
 # Detect if orders.created_at exists (for 30-day filters)
@@ -802,7 +813,9 @@ def merchant_delete_item(slug):
 @app.get("/merchant/<slug>/orders")
 def merchant_orders(slug):
     u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
+    if isinstance(u, Response):
+        return u
+
     with conn() as cx:
         orders = cx.execute("""
           SELECT orders.*, items.title as item_title
@@ -811,8 +824,19 @@ def merchant_orders(slug):
           ORDER BY orders.id DESC
         """, (m["id"],)).fetchall()
 
-    # NEW: compute 30-day stats for this store
+    # 30-day stats
     stats = _merchant_30d_stats(m["id"])
+
+    # Payout request messaging (supports ?payout=sent|throttled|error&wait=<seconds>)
+    payout_param = (request.args.get("payout") or "").strip().lower()
+    payout_sent = (payout_param == "sent")
+    payout_throttled = (payout_param == "throttled")
+    payout_error = (payout_param == "error")
+    try:
+        wait_secs = int(request.args.get("wait", "0"))
+    except ValueError:
+        wait_secs = 0
+    throttle_minutes = max(1, (wait_secs + 59) // 60) if payout_throttled and wait_secs > 0 else None
 
     return render_template(
         "merchant_orders.html",
@@ -820,35 +844,12 @@ def merchant_orders(slug):
         orders=orders,
         stats=stats,
         colorway=m["colorway"],
-        payout_sent=(request.args.get("payout") == "sent"),
-        t=get_bearer_token_from_request(),   # <-- add this line
+        payout_sent=payout_sent,
+        payout_throttled=payout_throttled,
+        payout_error=payout_error,
+        throttle_minutes=throttle_minutes,
+        t=get_bearer_token_from_request(),  # keeps links working if cookies blocked
     )
-
-@app.post("/merchant/<slug>/orders/update")
-def merchant_orders_update(slug):
-    u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
-    order_id = int(request.form.get("order_id"))
-    status = request.form.get("status")
-    tracking_carrier = request.form.get("tracking_carrier")
-    tracking_number = request.form.get("tracking_number")
-    tracking_url = request.form.get("tracking_url")
-    with conn() as cx:
-        o = cx.execute("SELECT * FROM orders WHERE id=? AND merchant_id=?", (order_id, m["id"])).fetchone()
-        if not o: abort(404)
-        cx.execute("""UPDATE orders SET status=?, tracking_carrier=?, tracking_number=?,
-                      tracking_url=? WHERE id=?""",
-                   (status or o["status"], tracking_carrier, tracking_number, tracking_url, order_id))
-    if (status or o["status"]) == "shipped" and o["buyer_email"]:
-        body = f"<p>Your {m['business_name']} order has shipped.</p>"
-        if tracking_number:
-            link = tracking_url or "#"
-            body += f"<p><strong>Tracking:</strong> {tracking_carrier} {tracking_number} — " \
-                    f"<a href='{link}'>track package</a></p>"
-        reply_to = (m["reply_to_email"] or "").strip() if m else None
-        send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
-    tok = get_bearer_token_from_request()
-    return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
 
 # ----------------- STOREFRONT AUTH -----------------
 @app.get("/store/<slug>/signin")
