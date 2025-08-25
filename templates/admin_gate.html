@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Admin Sign-in — IZZA PAY</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b0f17;color:#e8f0ff;margin:0}
+    .wrap{max-width:620px;margin:0 auto;padding:24px}
+    .card{background:#0f1728;border:1px solid #1f2a44;border-radius:14px;padding:20px}
+    button{background:#6e9fff;color:#0b0f17;border:0;border-radius:10px;padding:12px 16px;font-weight:800}
+    .muted{color:#bcd0ff}
+    .err{color:#ff9aa2;margin-top:8px;white-space:pre-wrap}
+  </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Admin access</h1>
+      <p class="muted">Click below to verify admin permissions with Pi.</p>
+      <button id="adminBtn">Authorize with Pi</button>
+      <p id="msg" class="muted" style="margin-top:10px"></p>
+      <div id="err" class="err"></div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    const btn = document.getElementById('adminBtn');
+    const msg = document.getElementById('msg');
+    const err = document.getElementById('err');
+    const sandbox = {{ 'true' if sandbox else 'false' }};
+
+    function setMsg(t){ msg.textContent = t || ''; }
+    function setErr(t){ err.textContent = t || ''; }
+
+    try { if (window.Pi && Pi.init) { Pi.init({ version:"2.0", sandbox: sandbox }); } }
+    catch(e){ setErr("Pi.init failed: " + (e?.message || e)); }
+
+    btn?.addEventListener('click', function(){
+      setErr(''); setMsg('Authorizing…');
+      if (!window.Pi || !Pi.authenticate){ setMsg("Open in Pi Browser"); return; }
+      const scopes = ['payments','username'];
+      function onIncompletePaymentFound(_){} 
+      Pi.authenticate(scopes, onIncompletePaymentFound)
+        .then(function(auth){
+          const form = document.createElement('form');
+          form.method='POST'; form.action='/admin/exchange';
+          const inp = document.createElement('input');
+          inp.type='hidden'; inp.name='payload';
+          inp.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+          form.appendChild(inp); document.body.appendChild(form); form.submit();
+        })
+        .catch(function(e){ setMsg("Authorization failed."); setErr(e?.message || String(e)); });
+    });
+  })();
+  </script>
+</body>
+</html>
