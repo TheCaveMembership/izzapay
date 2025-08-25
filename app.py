@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
 from dotenv import load_dotenv
 import requests
+import mimetypes
 
 # Local modules you already have
 from db import init_db, conn
@@ -33,9 +34,18 @@ except Exception:
 # ----------------- APP -----------------
 app = Flask(__name__)
 
-# Uploads
-UPLOAD_DIR = os.path.join(app.root_path, "static", "uploads")
+# ----------------- PERSISTENT DATA ROOT -----------------
+# All user uploads will live on your Render Disk (survives deploys).
+DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
+os.makedirs(DATA_ROOT, exist_ok=True)
+
+# Uploads folder on the persistent disk
+UPLOAD_DIR  = os.path.join(DATA_ROOT, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Public URL prefix to serve files from the disk
+MEDIA_PREFIX = "/media"
+
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
@@ -44,6 +54,36 @@ def _normalize_ext(fmt: str) -> str:
         return ""
     fmt = fmt.lower()
     return "jpg" if fmt == "jpeg" else fmt
+
+# Serve uploaded files safely from the persistent disk
+@app.get(f"{MEDIA_PREFIX}/<path:filename>")
+def media(filename):
+    """
+    Read-only serving of files saved in UPLOAD_DIR.
+    Uses long cache because filenames are content-hashed.
+    """
+    # Tiny transparent 1x1 PNG for fallbacks
+    _tiny = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
+        "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
+    )
+    try:
+        safe_base = os.path.abspath(UPLOAD_DIR)
+        safe_path = os.path.abspath(os.path.normpath(os.path.join(safe_base, filename)))
+        if not safe_path.startswith(safe_base) or not os.path.exists(safe_path):
+            return Response(_tiny, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        ctype = mimetypes.guess_type(safe_path)[0] or "application/octet-stream"
+        with open(safe_path, "rb") as f:
+            data = f.read()
+        return Response(
+            data,
+            headers={
+                "Content-Type": ctype,
+                "Cache-Control": "public, max-age=31536000, immutable"
+            }
+        )
+    except Exception:
+        return Response(_tiny, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
 # Sessions / cookies
 _secret = os.getenv("FLASK_SECRET") or os.urandom(32)
@@ -63,8 +103,9 @@ def inject_globals():
         "BASE_ORIGIN": BASE_ORIGIN,
         "PI_SANDBOX": PI_SANDBOX,
         "PI_USD_RATE": PI_USD_RATE,
+        "MEDIA_PREFIX": MEDIA_PREFIX,  # handy in templates if you ever need it
     }
-    
+
 # --- Admin ENV ---
 ADMIN_PI_USERNAME = (os.getenv("ADMIN_PI_USERNAME") or "").lstrip("@").strip()
 ADMIN_PI_WALLET   = (os.getenv("ADMIN_PI_WALLET") or "").strip()
@@ -72,8 +113,6 @@ ADMIN_PI_WALLET   = (os.getenv("ADMIN_PI_WALLET") or "").strip()
 def is_admin_name(username: str) -> bool:
     if not username: return False
     return username.lstrip("@").strip().lower() == ADMIN_PI_USERNAME.lower()
-
-from flask import abort  # keep this at top if not already imported
 
 def require_admin():
     urow = current_user_row()
@@ -92,7 +131,7 @@ def require_admin():
 
     if (role in ("admin", "owner")) or is_admin_name(uname):
         return urow  # return the original Row for downstream code
-    abort(403)      # don’t bounce to /admin/enter if you don't need the extra gate
+    abort(403)      # Block non-admins
     
 # ----------------- DB & SCHEMA -----------------
 init_db()
@@ -1261,11 +1300,7 @@ def upload():
 
     # Normalize format -> extension
     fmt = (img.format or "").upper()
-    if fmt == "JPEG":
-        ext = "jpg"
-    else:
-        ext = fmt.lower()
-
+    ext = "jpg" if fmt == "JPEG" else fmt.lower()
     if ext not in ALLOWED_EXTENSIONS:
         return {"ok": False, "error": "unsupported_format"}, 400
 
@@ -1274,7 +1309,6 @@ def upload():
         from PIL import ImageOps
         img = ImageOps.exif_transpose(img)
     except Exception:
-        # if exif transpose fails, continue without it
         pass
 
     # Downscale if too large (keeps aspect)
@@ -1290,43 +1324,30 @@ def upload():
     out_bytes = None
 
     if is_animated_gif:
-        # Just use original bytes; also cap size already via MAX_CONTENT_LENGTH
         out_bytes = raw
         ext = "gif"
     else:
-        # Re-encode to strip EXIF and compress
         mode = img.mode
         has_alpha = ("A" in mode) or (mode in ("RGBA", "LA", "P"))
-
         buf = BytesIO()
         save_kwargs = {}
 
         if ext == "jpg":
-            # Ensure RGB (no alpha in JPEG)
-            if has_alpha:
-                img = img.convert("RGB")
-            elif mode not in ("RGB",):
+            if has_alpha or mode not in ("RGB",):
                 img = img.convert("RGB")
             save_kwargs.update(dict(quality=85, optimize=True, progressive=True))
             img.save(buf, format="JPEG", **save_kwargs)
-
         elif ext == "png":
-            # Preserve alpha; optimize losslessly
             if mode == "P":
-                # Convert palette PNGs to RGBA/RGB to avoid weird palette issues
                 img = img.convert("RGBA" if has_alpha else "RGB")
             save_kwargs.update(dict(optimize=True))
             img.save(buf, format="PNG", **save_kwargs)
-
         elif ext == "webp":
-            # WebP supports alpha; use reasonable quality; lossless if no alpha? (keep it simple)
             if mode not in ("RGB", "RGBA"):
                 img = img.convert("RGBA" if has_alpha else "RGB")
             save_kwargs.update(dict(quality=85, method=4))
             img.save(buf, format="WEBP", **save_kwargs)
-
         else:
-            # Fallback: just write original bytes as last resort
             buf = BytesIO(raw)
 
         out_bytes = buf.getvalue()
@@ -1335,14 +1356,12 @@ def upload():
     try:
         digest = hashlib.sha256(out_bytes).hexdigest()
     except Exception:
-        # fallback: random
         digest = uuid.uuid4().hex
 
     unique_name = f"{digest[:32]}.{ext}"
     safe_name = secure_filename(unique_name)
     path = os.path.join(UPLOAD_DIR, safe_name)
 
-    # If file already exists with same hash, just return its URL
     if not os.path.exists(path):
         try:
             with open(path, "wb") as out:
@@ -1350,7 +1369,8 @@ def upload():
         except Exception:
             return {"ok": False, "error": "save_failed"}, 500
 
-    url = f"/static/uploads/{safe_name}"
+    # IMPORTANT: return a /media URL (not /static), so files persist across deploys
+    url = f"{MEDIA_PREFIX}/{safe_name}"
     return {"ok": True, "url": url}, 200
 
 # ----------------- IMAGE PROXY -----------------
@@ -1369,16 +1389,20 @@ def uimg():
     except Exception:
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
-    if not u.scheme and src.startswith("/"):
-        if not src.startswith("/static/"):
-            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-        static_root = app.static_folder or os.path.join(os.path.dirname(__file__), "static")
-        rel_path = src[len("/static/"):]
-        safe_path = os.path.normpath(os.path.join(static_root, rel_path))
-        if not safe_path.startswith(os.path.abspath(static_root)) or not os.path.exists(safe_path):
+    # Local file paths: allow /static and /media
+    if not u.scheme and src.startswith(("/static/", "/media/")):
+        # Map /static to the app's static folder; /media to UPLOAD_DIR
+        if src.startswith("/static/"):
+            base_root = app.static_folder or os.path.join(os.path.dirname(__file__), "static")
+            rel_path = src[len("/static/"):]
+        else:
+            base_root = UPLOAD_DIR
+            rel_path = src[len("/media/"):]
+        safe_base = os.path.abspath(base_root)
+        safe_path = os.path.abspath(os.path.normpath(os.path.join(safe_base, rel_path)))
+        if not safe_path.startswith(safe_base) or not os.path.exists(safe_path):
             return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
         try:
-            import mimetypes
             ctype = mimetypes.guess_type(safe_path)[0] or "image/png"
         except Exception:
             ctype = "image/png"
@@ -1386,8 +1410,10 @@ def uimg():
             data = f.read()
         return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
 
+    # HTTPS only for external
     if u.scheme in ("http", "https"):
         if u.scheme != "https":
+            # Only allow cleartext if it is our own host (defensive)
             try:
                 app_host = urlparse(APP_BASE_URL).netloc
             except Exception:
