@@ -824,19 +824,16 @@ def merchant_orders(slug):
           ORDER BY orders.id DESC
         """, (m["id"],)).fetchall()
 
-    # 30-day stats
     stats = _merchant_30d_stats(m["id"])
 
-    # Payout request messaging (supports ?payout=sent|throttled|error&wait=<seconds>)
-    payout_param = (request.args.get("payout") or "").strip().lower()
-    payout_sent = (payout_param == "sent")
-    payout_throttled = (payout_param == "throttled")
-    payout_error = (payout_param == "error")
+    # Read flags from query string
+    payout_sent       = (request.args.get("payout") == "sent")
+    payout_throttled  = (request.args.get("payout_throttled") == "1")
+    payout_error      = (request.args.get("payout_error") == "1")
     try:
-        wait_secs = int(request.args.get("wait", "0"))
+        throttle_minutes = int(request.args.get("throttle_minutes", "0") or 0)
     except ValueError:
-        wait_secs = 0
-    throttle_minutes = max(1, (wait_secs + 59) // 60) if payout_throttled and wait_secs > 0 else None
+        throttle_minutes = 0
 
     return render_template(
         "merchant_orders.html",
@@ -848,7 +845,7 @@ def merchant_orders(slug):
         payout_throttled=payout_throttled,
         payout_error=payout_error,
         throttle_minutes=throttle_minutes,
-        t=get_bearer_token_from_request(),  # keeps links working if cookies blocked
+        t=get_bearer_token_from_request(),
     )
 
 # ----------------- STOREFRONT AUTH -----------------
@@ -1681,20 +1678,44 @@ def orders_page():
 # Trigger payout email (manual payout by app owner)
 @app.post("/merchant/<slug>/payout")
 def merchant_payout(slug):
+    # Must be the owner of this merchant
     u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
+    if isinstance(u, Response):
+        return u
 
-    # Compute 30-day net for email (after Pi fee + 1% app fee)
+    # Keep bearer token across redirects (cookie-less flows)
+    tok = request.form.get("t") or get_bearer_token_from_request()
+
+    # --- 48h throttle check ---
+    now = int(time.time())
+    THROTTLE_SEC = 48 * 3600
+    try:
+        with conn() as cx:
+            last = cx.execute(
+                "SELECT requested_at FROM payout_requests "
+                "WHERE merchant_id=? ORDER BY requested_at DESC LIMIT 1",
+                (m["id"],)
+            ).fetchone()
+    except Exception:
+        last = None
+
+    if last:
+        since = now - int(last["requested_at"])
+        if since < THROTTLE_SEC:
+            remain = THROTTLE_SEC - since
+            mins = max(1, remain // 60)
+            # Redirect back to Sales with throttle banner
+            q = f"?payout_throttled=1&throttle_minutes={mins}"
+            if tok: q += f"&t={tok}"
+            return redirect(f"/merchant/{m['slug']}/orders{q}")
+
+    # --- Compute last-30d stats and email details ---
     stats = _merchant_30d_stats(m["id"])
-    net_30 = stats["net_30"]
-    gross_30 = stats["gross_30"]
-    fee_30 = stats["fee_30"]
-    app_fee_30 = stats["app_fee_30"]
-
-    wallet = (m["pi_wallet_address"] or "").strip()
-    if not wallet:
-        # Still send, but note missing wallet
-        wallet = "(no wallet on file)"
+    gross_30    = float(stats["gross_30"] or 0)
+    fee_30      = float(stats["fee_30"] or 0)
+    app_fee_30  = float(stats["app_fee_30"] or 0)
+    net_30      = float(stats["net_30"] or 0)
+    wallet      = (m["pi_wallet_address"] or "").strip() or "(no wallet on file)"
 
     body = f"""
         <h2>Payout Request</h2>
@@ -1709,20 +1730,38 @@ def merchant_payout(slug):
         </ul>
         <p>Requested by @{u['pi_username']} (user_id {u['id']}).</p>
         <p><em>Note: Merchant UI informs payout may take up to 24 hours.</em></p>
-    """
+    """.strip()
 
+    ok = False
     try:
-        send_email(
+        ok = send_email(
             DEFAULT_ADMIN_EMAIL,
             f"[Payout] {m['business_name']} — {net_30:.7f} π",
             body,
-            reply_to=(m["reply_to_email"] or None)
+            reply_to=(m["reply_to_email"] or None),
         )
     except Exception:
-        # swallow errors; still redirect back (template can show a generic status)
-        pass
+        ok = False
 
-    return redirect(f"/orders?payout=sent")
+    # Log the request only if we actually sent the email
+    if ok:
+        try:
+            with conn() as cx:
+                cx.execute(
+                    "INSERT INTO payout_requests(merchant_id, requested_at) VALUES(?,?)",
+                    (m["id"], now),
+                )
+        except Exception:
+            pass
+
+    # Redirect back to Sales with success or error flag (and preserve token)
+    if ok:
+        q = "?payout=sent"
+    else:
+        q = "?payout_error=1"
+    if tok:
+        q += f"&t={tok}"
+    return redirect(f"/merchant/{m['slug']}/orders{q}")
 
 # ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
