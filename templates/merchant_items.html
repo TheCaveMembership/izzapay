@@ -49,7 +49,6 @@
     .itimg{ width:80px;height:80px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center }
     .itimg img{width:100%;height:100%;object-fit:cover}
 
-    /* Responsive table */
     .table-wrap{width:100%; overflow-x:auto}
     table{width:100%;border-collapse:collapse; min-width:780px}
     th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
@@ -72,14 +71,10 @@
     .btn-row{display:flex; gap:8px; flex-wrap:wrap}
     .tiny{font-size:.9rem; padding:8px 10px}
 
-    /* inline product editor row */
     .edit-row{background:rgba(255,255,255,.02)}
     .sep{height:1px;background:var(--line);margin:10px 0}
-
-    /* keep edit/delete controls visible without horizontal scroll */
     .actions-col{min-width:180px}
     .danger{background:#7a2c2c;color:#fff}
-    .ghost-danger{border:1px solid #7a2c2c;color:#fff;background:transparent}
   </style>
 </head>
 {% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
@@ -108,7 +103,7 @@
         </div>
       {% endif %}
 
-      <!-- carry token -->
+      <!-- SETUP FORM -->
       <form class="grid" method="post" action="/merchant/setup">
         <input type="hidden" name="t" value="{{ t or '' }}">
         <input type="hidden" name="colorway" id="colorway" value="{{ cw }}">
@@ -116,7 +111,7 @@
         <div class="card stack">
           <div class="field">
             <label class="ip-label">Store name</label>
-            <input class="ip-input" name="business_name" placeholder="Your store name">
+            <input class="ip-input" name="business_name" placeholder="Your store name" required>
           </div>
 
           <div class="field">
@@ -127,12 +122,13 @@
 
           <div class="field">
             <label class="ip-label">Order notifications email</label>
-            <input class="ip-input" name="reply_to_email" placeholder="you@example.com">
+            <input class="ip-input" name="reply_to_email" type="email" placeholder="you@example.com" required>
           </div>
 
           <div class="field">
             <label class="ip-label">Pi wallet public key</label>
-            <input class="ip-input" name="pi_wallet_address" placeholder="G… (56 characters)">
+            <input class="ip-input" name="pi_wallet_address" placeholder="G… (56 characters)" maxlength="56" required>
+            <small class="muted">Must start with <strong>G</strong> and be exactly 56 characters.</small>
           </div>
 
           <div class="field">
@@ -203,7 +199,7 @@
     {% else %}
       <div class="h1">{{ m.business_name }}</div>
 
-      <!-- EDIT STORE SETTINGS (incl. colorway) -->
+      <!-- EDIT STORE SETTINGS -->
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Store Settings</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/update{% if t %}?t={{ t }}{% endif %}">
@@ -212,18 +208,18 @@
           <div class="field-inline">
             <div class="field">
               <label class="ip-label">Store name</label>
-              <input class="ip-input" name="business_name" value="{{ m.business_name or '' }}">
+              <input class="ip-input" name="business_name" value="{{ m.business_name or '' }}" required>
             </div>
             <div class="field">
               <label class="ip-label">Order notifications email</label>
-              <input class="ip-input" name="reply_to_email" value="{{ m.reply_to_email or '' }}">
+              <input class="ip-input" name="reply_to_email" type="email" value="{{ m.reply_to_email or '' }}" required>
             </div>
           </div>
 
           <div class="field-inline">
             <div class="field">
               <label class="ip-label">Pi wallet public key</label>
-              <input class="ip-input" name="pi_wallet_address" value="{{ m.pi_wallet_address or '' }}">
+              <input class="ip-input" name="pi_wallet_address" value="{{ m.pi_wallet_address or '' }}" maxlength="56" required>
             </div>
             <div class="field">
               <label class="ip-label">Pi handle</label>
@@ -283,7 +279,6 @@
       <div class="card" id="create-product">
         <div class="h2">Create Product</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
-          <!-- also carry token in body -->
           <input type="hidden" name="t" value="{{ t or '' }}">
           <div class="field-inline">
             <div class="field">
@@ -418,70 +413,51 @@
   </div>
 
   <script>
-  // Use the same proxy the storefront uses, so pasted URLs render reliably
+  // Proxy external images so they always render (and allow local uploads too)
   function proxied(url){
     const v = (url || '').trim();
     if (!v) return '';
-    if (v.startsWith('/static/')) return v; // our own uploads
+    if (v.startsWith('/static/')) return v;
     try {
       const u = new URL(v, location.origin);
       if (u.protocol === 'http:' || u.protocol === 'https:') {
         return '/uimg?src=' + encodeURIComponent(u.href);
       }
-    } catch(_) { /* passthrough for non-URLs */ }
+    } catch(_) {}
     return v;
   }
-
   function setThumb(id, url){
     const el = document.getElementById(id);
     if(!el) return; el.innerHTML = '';
     const img = document.createElement('img'); img.src = url; el.appendChild(img);
   }
 
-  // NEW: token-aware uploader that includes bearer + cookies
+  // Carry/derive short-lived bearer for uploads
   function getToken() {
-    // Prefer hidden input (carried in forms), fall back to URL ?t=
     const inp = document.querySelector('input[name="t"]');
     return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
   }
-
   async function uploadTo(path, file){
     const fd = new FormData(); fd.append('file', file);
-
     const t = getToken();
     const url = path + (t ? (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(t) : '');
-
-    const headers = {};
-    if (t) headers['Authorization'] = 'Bearer ' + t;
-
-    const r = await fetch(url, {
-      method: 'POST',
-      body: fd,
-      headers,
-      credentials: 'include' // include session cookie if present
-    });
-
+    const headers = {}; if (t) headers['Authorization'] = 'Bearer ' + t;
+    const r = await fetch(url, { method: 'POST', body: fd, headers, credentials: 'include' });
     if(!r.ok){
-      let msg = 'upload failed';
-      try { const j = await r.json(); if (j && j.error) msg += ` (${j.error})`; } catch(_) {}
+      let msg = 'upload failed'; try { const j = await r.json(); if (j?.error) msg += ` (${j.error})`; } catch(_){}
       throw new Error(msg);
     }
-    const j = await r.json();
-    if(!j.ok || !j.url) throw new Error('bad response');
+    const j = await r.json(); if(!j.ok || !j.url) throw new Error('bad response');
     return j.url;
   }
 
-  // Copy helpers (storefront + per-item)
+  // Copy helper
   function copyFromSelector(sel){
-    const el = document.querySelector(sel);
-    if(!el) return;
+    const el = document.querySelector(sel); if(!el) return;
     const text = el.textContent.trim();
     if(!navigator.clipboard){
-      const ta = document.createElement('textarea');
-      ta.value = text; document.body.appendChild(ta); ta.select();
-      try{ document.execCommand('copy'); }catch(e){}
-      document.body.removeChild(ta);
-      return;
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+      ta.select(); try{ document.execCommand('copy'); }catch(e){} document.body.removeChild(ta); return;
     }
     navigator.clipboard.writeText(text);
   }
@@ -504,17 +480,13 @@
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{
         const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url;
-        setThumb('logoThumb', proxied(url));
-      }
-      catch(e){ alert('Upload failed. You can paste a URL instead.'); }
+        inp.value = url; setThumb('logoThumb', proxied(url));
+      }catch(e){ alert('Upload failed. You can paste a URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
     inp.addEventListener('input', () => {
-      const v = proxied(inp.value);
-      if(v) setThumb('logoThumb', v);
+      const v = proxied(inp.value); if(v) setThumb('logoThumb', v);
     });
-    // If template pre-fills a URL, show preview on load
     if (inp.value) { const v = proxied(inp.value); if (v) setThumb('logoThumb', v); }
   })();
 
@@ -529,24 +501,20 @@
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{
         const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url;
-        setThumb('itThumb', proxied(url));
-      }
-      catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
+        inp.value = url; setThumb('itThumb', proxied(url));
+      }catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
     inp.addEventListener('input', () => {
-      const v = proxied(inp.value);
-      if(v) setThumb('itThumb', v);
+      const v = proxied(inp.value); if(v) setThumb('itThumb', v);
     });
   })();
 
-  // Colorway picker (setup page) — live preview + hidden field
+  // Colorway picker (setup)
   (function(){
     const swatches = document.querySelectorAll('.swatch');
     const hidden = document.getElementById('colorway');
     const body = document.body;
-    // mark selected on load (for setup)
     swatches.forEach(sw => {
       if(hidden && sw.getAttribute('data-cw') === hidden.value){ sw.classList.add('selected'); }
     });
@@ -555,18 +523,15 @@
         body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
         swatches.forEach(s=>s.classList.remove('selected'));
         const cw = sw.getAttribute('data-cw'); if(cw) {
-          body.classList.add(cw);
-          if(hidden) hidden.value = cw;
-          sw.classList.add('selected');
+          body.classList.add(cw); if(hidden) hidden.value = cw; sw.classList.add('selected');
         }
       });
     });
   })();
 
-  // Colorway picker (edit store section)
+  // Colorway picker (edit)
   (function(){
-    const wrap = document.getElementById('edit-swatches');
-    if(!wrap) return;
+    const wrap = document.getElementById('edit-swatches'); if(!wrap) return;
     const hidden = document.getElementById('edit-colorway');
     const body = document.body;
     const swatches = wrap.querySelectorAll('.swatch');
@@ -582,8 +547,7 @@
 
   // Guard: simple client validation for price before "Add Item"
   (function(){
-    const form = document.querySelector('#create-product form');
-    if(!form) return;
+    const form = document.querySelector('#create-product form'); if(!form) return;
     form.addEventListener('submit', (e) => {
       const priceEl = form.querySelector('input[name="pi_price"]');
       const titleEl = form.querySelector('input[name="title"]');
@@ -601,11 +565,9 @@
 
   // Toggle inline product editor
   document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('[data-edit-toggle]');
-    if(!btn) return;
+    const btn = e.target.closest('[data-edit-toggle]'); if(!btn) return;
     const id = btn.getAttribute('data-edit-toggle');
-    const row = document.getElementById('edit-row-' + id);
-    if(!row) return;
+    const row = document.getElementById('edit-row-' + id); if(!row) return;
     row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
   });
   </script>
