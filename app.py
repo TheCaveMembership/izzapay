@@ -817,12 +817,35 @@ def merchant_orders(slug):
         return u
 
     with conn() as cx:
-        orders = cx.execute("""
-          SELECT orders.*, items.title as item_title
-          FROM orders JOIN items ON items.id=orders.item_id
-          WHERE orders.merchant_id=?
-          ORDER BY orders.id DESC
-        """, (m["id"],)).fetchall()
+        orders = cx.execute(
+            """
+            SELECT
+              o.id,
+              o.merchant_id,
+              o.item_id,
+              o.qty,
+              o.buyer_email,
+              o.buyer_name,
+              o.shipping_json,
+              o.pi_amount,
+              o.pi_fee,
+              o.pi_merchant_net,
+              o.pi_tx_hash,
+              o.payout_status,
+              o.status,
+              o.buyer_token,
+              o.buyer_user_id,
+              o.tracking_carrier,
+              o.tracking_number,
+              o.tracking_url,
+              COALESCE(i.title, 'Item ' || o.item_id) AS item_title
+            FROM orders o
+            LEFT JOIN items i ON i.id = o.item_id
+            WHERE o.merchant_id = ?
+            ORDER BY o.id DESC
+            """,
+            (m["id"],)
+        ).fetchall()
 
     stats = _merchant_30d_stats(m["id"])
 
@@ -838,7 +861,7 @@ def merchant_orders(slug):
     return render_template(
         "merchant_orders.html",
         m=m,
-        orders=orders,
+        orders=orders,                 # sqlite3.Row works fine with your template’s dict-style access
         stats=stats,
         colorway=m["colorway"],
         payout_sent=payout_sent,
