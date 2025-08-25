@@ -17,8 +17,16 @@
       padding:8px 0; position:sticky; top:0; z-index:10;
       background:rgba(11,15,23,.9); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
     }
+
+    /* ===== Brand strip (dashboard & setup) ===== */
     .brand{display:flex;align-items:center;gap:10px;min-width:0}
-    .brand img{height:24px}
+    .brand-mark{width:48px;height:48px;object-fit:contain}
+    .brand-word{height:36px;filter:brightness(1.06) contrast(1.02)}
+    @media (max-width:380px){
+      .brand-mark{width:40px;height:40px}
+      .brand-word{height:30px}
+    }
+
     .actions{display:flex;gap:8px;flex-wrap:wrap}
     .actions a{white-space:nowrap}
 
@@ -88,8 +96,8 @@
 
     <div class="topbar">
       <div class="brand">
-        <img src="/static/izzapay-mark.svg" alt="IZZA mark">
-        <img src="/static/izzapay-word.svg" alt="IZZA PAY">
+        <img src="/static/izzapay-mark.svg" class="brand-mark" alt="IZZA mark">
+        <img src="/static/izzapay-word.svg" class="brand-word" alt="IZZA PAY">
       </div>
       <div class="actions">
         <a class="ip-btn ghost" href="/explore">View Stores</a>
