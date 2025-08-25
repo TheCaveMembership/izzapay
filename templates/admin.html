@@ -17,13 +17,23 @@
     .k{font-size:12px;color:#4b587c}
     .v{font-weight:800}
     .muted{color:#4b587c}
+    /* NEW: allow wallet address to wrap */
+    .wallet { 
+      word-break: break-all; 
+      overflow-wrap: anywhere; 
+      display:block;
+      margin-top:4px;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>Admin Dashboard</h1>
-      <p class="muted">Admin: @{{ admin_username }} • Wallet: {{ admin_wallet or '—' }}</p>
+      <p class="muted">
+        Admin: @{{ admin_username }}<br>
+        Wallet: <span class="wallet">{{ admin_wallet or '—' }}</span>
+      </p>
     </div>
 
     <div class="card">
