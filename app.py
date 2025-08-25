@@ -817,35 +817,12 @@ def merchant_orders(slug):
         return u
 
     with conn() as cx:
-        orders = cx.execute(
-            """
-            SELECT
-              o.id,
-              o.merchant_id,
-              o.item_id,
-              o.qty,
-              o.buyer_email,
-              o.buyer_name,
-              o.shipping_json,
-              o.pi_amount,
-              o.pi_fee,
-              o.pi_merchant_net,
-              o.pi_tx_hash,
-              o.payout_status,
-              o.status,
-              o.buyer_token,
-              o.buyer_user_id,
-              o.tracking_carrier,
-              o.tracking_number,
-              o.tracking_url,
-              COALESCE(i.title, 'Item ' || o.item_id) AS item_title
-            FROM orders o
-            LEFT JOIN items i ON i.id = o.item_id
-            WHERE o.merchant_id = ?
-            ORDER BY o.id DESC
-            """,
-            (m["id"],)
-        ).fetchall()
+        orders = cx.execute("""
+          SELECT orders.*, items.title as item_title
+          FROM orders JOIN items ON items.id=orders.item_id
+          WHERE orders.merchant_id=?
+          ORDER BY orders.id DESC
+        """, (m["id"],)).fetchall()
 
     stats = _merchant_30d_stats(m["id"])
 
@@ -861,7 +838,7 @@ def merchant_orders(slug):
     return render_template(
         "merchant_orders.html",
         m=m,
-        orders=orders,                 # sqlite3.Row works fine with your template’s dict-style access
+        orders=orders,
         stats=stats,
         colorway=m["colorway"],
         payout_sent=payout_sent,
@@ -1032,8 +1009,7 @@ def checkout_cart(cid):
 
     # Use Decimal math and quantize to 7dp for cart totals
     total_dec = sum(Decimal(str(r["pi_price"])) * Decimal(str(r["qty"])) for r in rows)
-    PI_QUANT = Decimal("0.0000001")
-    total = float(total_dec.quantize(PI_QUANT, rounding=ROUND_HALF_UP))
+    total = qpi(total_dec)
 
     sid = uuid.uuid4().hex
     line_items = json.dumps([
@@ -1049,7 +1025,7 @@ def checkout_cart(cid):
                )
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (
-                sid, m["id"], None, 1, float(total), "initiated",
+                sid, m["id"], None, 1, total, "initiated",
                 int(time.time()), cid, line_items, u["id"]
             )
         )
@@ -1097,8 +1073,8 @@ def checkout(link_id):
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
     sid = uuid.uuid4().hex
-    PI_QUANT = Decimal("0.0000001")
-    expected = float((Decimal(str(i["pi_price"])) * Decimal(str(qty))).quantize(PI_QUANT, rounding=ROUND_HALF_UP))
+    # Quantize single-item expected amount too
+    expected = qpi(Decimal(str(i["pi_price"])) * Decimal(str(qty)))
 
     line_items = json.dumps([{
         "item_id": int(i["id"]),
@@ -1177,7 +1153,7 @@ def pi_complete():
     if not s or s["state"] not in ("initiated", "approved"):
         return {"ok": False, "error": "bad_session"}, 400
 
-    PI_QUANT = Decimal("0.0000001")
+    # Compare exact-at-7dp using Decimal, not float epsilon
     expected_amt = Decimal(str(s["expected_pi"])).quantize(PI_QUANT, rounding=ROUND_HALF_UP)
     try:
         r = fetch_pi_payment(payment_id)
@@ -1233,7 +1209,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     created_order_ids = []
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
     buyer_user_id = s["user_id"]
-    now_ts = int(time.time())
 
     with conn() as cx:
         for li in lines:
@@ -1242,6 +1217,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             snap_price = float(li["price"])
 
             line_gross = snap_price * qty
+            # Split the actual session-level fee proportionally
             line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
             line_net   = line_gross - line_fee
 
@@ -1252,79 +1228,39 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 )
 
             buyer_token = uuid.uuid4().hex
-
-            # Insert with created_at if that column exists in this DB
-            if HAS_ORDER_CREATED_AT:
-                cur = cx.execute(
-                    """INSERT INTO orders(
-                         merchant_id,
-                         item_id,
-                         qty,
-                         buyer_email,
-                         buyer_name,
-                         shipping_json,
-                         pi_amount,
-                         pi_fee,
-                         pi_merchant_net,
-                         pi_tx_hash,
-                         payout_status,
-                         status,
-                         buyer_token,
-                         buyer_user_id,
-                         created_at
-                       )
-                       VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?,?)""",
-                    (
-                        s["merchant_id"],
-                        (it["id"] if it else None),
-                        qty,
-                        buyer_email,
-                        buyer_name,
-                        json.dumps(shipping),
-                        float(line_gross),
-                        float(line_fee),
-                        float(line_net),
-                        tx_hash,
-                        buyer_token,
-                        buyer_user_id,
-                        now_ts,
-                    ),
-                )
-            else:
-                cur = cx.execute(
-                    """INSERT INTO orders(
-                         merchant_id,
-                         item_id,
-                         qty,
-                         buyer_email,
-                         buyer_name,
-                         shipping_json,
-                         pi_amount,
-                         pi_fee,
-                         pi_merchant_net,
-                         pi_tx_hash,
-                         payout_status,
-                         status,
-                         buyer_token,
-                         buyer_user_id
-                       )
-                       VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
-                    (
-                        s["merchant_id"],
-                        (it["id"] if it else None),
-                        qty,
-                        buyer_email,
-                        buyer_name,
-                        json.dumps(shipping),
-                        float(line_gross),
-                        float(line_fee),
-                        float(line_net),
-                        tx_hash,
-                        buyer_token,
-                        buyer_user_id,
-                    ),
-                )
-
+            cur = cx.execute(
+                """INSERT INTO orders(
+                     merchant_id,
+                     item_id,
+                     qty,
+                     buyer_email,
+                     buyer_name,
+                     shipping_json,
+                     pi_amount,
+                     pi_fee,
+                     pi_merchant_net,
+                     pi_tx_hash,
+                     payout_status,
+                     status,
+                     buyer_token,
+                     buyer_user_id
+                   )
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
+                (
+                    s["merchant_id"],
+                    (it["id"] if it else None),
+                    qty,
+                    buyer_email,
+                    buyer_name,
+                    json.dumps(shipping),
+                    float(line_gross),
+                    float(line_fee),
+                    float(line_net),
+                    tx_hash,
+                    buyer_token,
+                    buyer_user_id,
+                ),
+            )
             created_order_ids.append(cur.lastrowid)
 
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
@@ -1390,7 +1326,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 shipping_html = "".join(block)
 
         suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        subj_buyer    = f"Your order at {m['business_name']} is confirmed{suffix}"
+        subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}" if (subj_suffix := suffix) else f"Your order at {m['business_name']} is confirmed"
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
 
         if buyer_email:
@@ -1425,7 +1361,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         )
 
     except Exception:
-        # swallow email errors, but the order is already saved
         pass
 
     u = current_user_row()
@@ -1697,15 +1632,13 @@ def orders_page():
     uid = int(u["id"])
 
     with conn() as cx:
-        # IMPORTANT: LEFT JOIN so orders still appear if the item was deleted or missing
         purchases = cx.execute(
             """
             SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                   COALESCE(i.title, 'Item ' || o.item_id) AS title,
-                   m.business_name AS store
+                   i.title, m.business_name AS store
             FROM orders o
-            LEFT JOIN items i     ON i.id = o.item_id
-            JOIN merchants m      ON m.id = o.merchant_id
+            JOIN items i      ON i.id = o.item_id
+            JOIN merchants m  ON m.id = o.merchant_id
             WHERE o.buyer_user_id = ?
             ORDER BY o.id DESC
             LIMIT 100
@@ -1713,16 +1646,14 @@ def orders_page():
             (uid,),
         ).fetchall()
 
-        # Same LEFT JOIN logic for safety here too
         sales = cx.execute(
             """
             SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
-                   COALESCE(i.title, 'Item ' || o.item_id) AS title,
-                   m.business_name AS store, m.slug AS slug, m.id AS m_id,
+                   i.title, m.business_name AS store, m.slug AS slug, m.id AS m_id,
                    m.pi_wallet_address AS wallet
             FROM orders o
-            LEFT JOIN items i     ON i.id = o.item_id
-            JOIN merchants m      ON m.id = o.merchant_id
+            JOIN items i      ON i.id = o.item_id
+            JOIN merchants m  ON m.id = o.merchant_id
             WHERE m.owner_user_id = ?
             ORDER BY o.id DESC
             LIMIT 200
@@ -1859,7 +1790,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
