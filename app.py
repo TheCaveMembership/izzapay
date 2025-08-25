@@ -591,8 +591,18 @@ def store_signin(slug):
     m = resolve_merchant_by_slug(slug)
     if not m: abort(404)
     next_url = request.args.get("next") or f"/store/{slug}"
-    return render_template("store_signin.html", app_base=APP_BASE_URL,
-                           next_url=next_url, slug=slug, sandbox=PI_SANDBOX)
+    # Pass store name (and optional branding bits)
+    return render_template(
+        "store_signin.html",
+        app_base=APP_BASE_URL,
+        next_url=next_url,
+        slug=slug,
+        store_name=m["business_name"],
+        logo_url=(m["logo_url"] or ""),
+        colorway=(m["colorway"] or "cw-blue"),
+        theme_mode=(m["theme_mode"] or "dark"),
+        sandbox=PI_SANDBOX,
+    )
 
 @app.post("/auth/exchange/store")
 def auth_exchange_store():
