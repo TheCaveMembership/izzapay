@@ -8,13 +8,10 @@
     :root{
       --bg:#0b0f17; --card:#0f1728; --line:#1f2a44; --txt:#e8f0ff; --muted:#bcd0ff; --brand:#6e9fff;
     }
-    /* colorways (match merchant_items & store) */
     .cw-blue  { --brand:#6e9fff; }
     .cw-mint  { --brand:#5ad49e; }
     .cw-purple{ --brand:#a88cff; }
     .cw-amber { --brand:#ffb86b; }
-
-    /* optional light mode */
     .light { --bg:#f6f7fb; --card:#ffffff; --line:#e6e8f0; --txt:#0b0f17; --muted:#4b587c; }
 
     body{
@@ -41,7 +38,7 @@
     <div class="row" style="justify-content:space-between">
       <div style="font-weight:800">{{ m.business_name }} — Cart</div>
       <div>
-        <a class="btn" href="/store/{{ m.slug }}?{% if request.args.get('t') %}t={{ request.args.get('t') }}&{% endif %}cid={{ cid }}">Continue shopping</a>
+        <a class="btn" href="/store/{{ m.slug }}?{% if t %}t={{ t }}&{% endif %}cid={{ cid }}">Continue shopping</a>
       </div>
     </div>
     {% if rows|length == 0 %}
@@ -56,9 +53,14 @@
           {% endif %}
           <div style="flex:1">
             <div style="font-weight:700">{{ r.title }}</div>
-            <div class="muted">{{ '%.7f'|format(r.pi_price) }} Pi × {{ r.qty }}</div>
+            <div class="muted">
+              {{ '%.7f'|format(r.pi_price) }} Pi × {{ r.qty }}
+              {# Optional: show line subtotal #}
+              <!-- • {{ '%.7f'|format((r.pi_price or 0.0) * (r.qty or 1)) }} Pi -->
+            </div>
           </div>
-          <form method="post" action="/cart/{{ cid }}/remove?{% if request.args.get('t') %}t={{ request.args.get('t') }}&{% endif %}">
+          <form method="post" action="/cart/{{ cid }}/remove">
+            {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
             <input type="hidden" name="row_id" value="{{ r.cid }}">
             <button class="btn" type="submit">Remove</button>
           </form>
@@ -68,7 +70,7 @@
         <div style="font-size:18px;font-weight:800">Total: {{ '%.7f'|format(total) }} Pi</div>
       </div>
       <div class="row" style="justify-content:flex-end;margin-top:10px">
-        <a class="btn" href="/checkout/cart/{{ cid }}?{% if request.args.get('t') %}t={{ request.args.get('t') }}{% endif %}">Proceed to Checkout</a>
+        <a class="btn" href="/checkout/cart/{{ cid }}?{% if t %}t={{ t }}{% endif %}">Proceed to Checkout</a>
       </div>
     {% endif %}
   </div>
