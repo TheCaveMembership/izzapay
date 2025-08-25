@@ -558,12 +558,15 @@ def merchant_update(slug):
 @app.get("/merchant/<slug>/items")
 def merchant_items(slug):
     u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
+    if isinstance(u, Response):
+        return u
+
     with conn() as cx:
         items = cx.execute(
             "SELECT * FROM items WHERE merchant_id=? AND active=1 ORDER BY id DESC",
             (m["id"],)
         ).fetchall()
+
     return render_template(
         "merchant_items.html",
         setup_mode=False,
@@ -572,7 +575,9 @@ def merchant_items(slug):
         app_base=APP_BASE_URL,
         t=get_bearer_token_from_request(),
         share_base=BASE_ORIGIN,
-        colorway=m["colorway"]
+        colorway=m["colorway"],
+        username=(u["pi_username"] if u else None),
+        ADMIN_PI_USERNAME=os.getenv("ADMIN_PI_USERNAME"),
     )
 
 @app.post("/merchant/<slug>/items/new")
