@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>My Orders — IZZA PAY</title>
+  <title>My Purchases — IZZA PAY</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
@@ -76,7 +76,7 @@
     {% if mode == "auth" %}
       <!-- Not signed in -->
       <div class="card">
-        <h1>My Orders</h1>
+        <h1>My Purchases</h1>
         <p class="muted">Authorize with Pi to see your recent purchases and, if you have a store, your sales.</p>
         <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
           <button id="piOrdersAuthBtn" class="ip-btn">Authorize with Pi</button>
@@ -123,7 +123,7 @@
     {% else %}
       <!-- Signed in -->
       <div class="card">
-        <h1>My Orders</h1>
+        <h1>My Purchases</h1>
         <p class="muted">Signed in as <strong>{{ user.pi_username }}</strong>.</p>
         <p class="muted" style="margin:4px 0 0;font-size:12px;letter-spacing:.2px">
           SCROLL RIGHT IN TABLES FOR MORE DETAILS
@@ -181,16 +181,16 @@
         {% endif %}
       </div>
 
-      <!-- Sales (light) -->
+      <!-- Sales -->
       <div class="card">
-        <h2>Your Store</h2>
+        <h2>My Sales</h2>
         {% if merchant %}
           <p class="muted" style="margin:6px 0">
             Store: <strong>{{ merchant.business_name }}</strong>
           </p>
           <p class="muted" style="margin:6px 0">
             Manage orders and payouts here:
-            <a class="ip-btn" href="/merchant/{{ merchant.slug }}/orders">Open Merchant Orders</a>
+            <a class="ip-btn" href="/merchant/{{ merchant.slug }}/orders">View My Sales</a>
           </p>
         {% else %}
           <p class="muted">You don’t have a merchant store yet.</p>
