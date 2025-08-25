@@ -1,40 +1,23 @@
 <!-- static/izzapay-mark.svg -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"
-     width="512" height="512"
-     shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640"
+     width="640" height="640" shape-rendering="geometricPrecision" text-rendering="optimizeLegibility">
   <defs>
-    <!-- Gradient for the fill -->
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%"  stop-color="#ffbe3b"/>
       <stop offset="55%" stop-color="#ff3ea5"/>
       <stop offset="100%" stop-color="#5e6bff"/>
     </linearGradient>
-
-    <!-- Super light soft edge (much smaller blur than before) -->
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="4" result="b"/>
-      <feMerge>
-        <feMergeNode in="b"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
   </defs>
 
-  <!-- No background rectangle -> fully transparent background -->
-  <!-- Group the two lines; keep them vector-sharp -->
-  <g filter="url(#soft)">
-    <g fill="url(#g)" stroke="#ffffff" stroke-opacity=".10" stroke-width="8"
-       paint-order="stroke fill markers">
-      <!-- Using paths keeps letter shapes consistent across devices -->
-      <!-- Line 1: IZZA -->
-      <path d="M66 104 h117 v38 l-71 86 h73 v42 H62 v-37 l71-87 H66z"/>
-      <path d="M213 104 h120 v44 h-76 v22 h69 v40 h-69 v22 h76 v44 H213z"/>
-      <path d="M355 104 h120 v44 h-76 v22 h69 v40 h-69 v22 h76 v44 H355z"/>
-      <path d="M499 104 h-54 l-54 172 h50 l10-36 h41 l10 36 h50l-53-172zm-22 46 13 48h-26l13-48z"/>
-      <!-- Line 2: PAY -->
-      <path d="M66 290 h109 c46 0 74 26 74 65 0 42-30 67-77 67H66V290zm54 43v46h53c15 0 26-9 26-24 0-15-11-22-26-22h-53z"/>
-      <path d="M276 290h53l62 173h-54l-9-29h-51l-9 29h-52l60-173zm31 45-16 55h31l-15-55z"/>
-      <path d="M418 290h56l31 57 31-57h56l-58 93 60 80h-58l-31-43-31 43h-58l60-80-58-93z"/>
-    </g>
+  <!-- Transparent background (no rect) -->
+  <g fill="url(#g)" stroke="#ffffff" stroke-opacity=".10" stroke-width="10" paint-order="stroke fill markers">
+    <!-- Line 1: IZZA -->
+    <text x="50%" y="42%" text-anchor="middle"
+          font-family="Montserrat, Arial Black, Impact, system-ui, sans-serif"
+          font-size="220" font-weight="900" letter-spacing="10">IZZA</text>
+    <!-- Line 2: PAY -->
+    <text x="50%" y="78%" text-anchor="middle"
+          font-family="Montserrat, Arial Black, Impact, system-ui, sans-serif"
+          font-size="220" font-weight="900" letter-spacing="10">PAY</text>
   </g>
 </svg>
