@@ -68,6 +68,7 @@
       If you’d like to receive your funds sooner, you can request a payout to be completed
       within the next 24 hours.
       <form method="POST" action="/merchant/{{ m['slug'] }}/payout" style="display:inline" class="payoutForm">
+        {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
         <button type="submit" class="payoutBtn">Request payout within 24 hours</button>
       </form>
       <div class="foot">We’ll deduct the standard 1% app fee; Pi network fees may also apply.</div>
@@ -99,6 +100,7 @@
 
       <!-- Classic payout button retained, also uses confirmation -->
       <form method="POST" action="/merchant/{{ m['slug'] }}/payout" style="margin-top:10px" class="payoutForm">
+        {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
         <button type="submit" class="payoutBtn">Request Payout</button>
         <span class="foot" style="margin-left:8px">Payout may take up to 24 hours.</span>
       </form>
@@ -145,6 +147,7 @@
 
         <div class="rowbox" style="margin-bottom:16px">
           <form class="inline" method="post" action="/merchant/{{ m['slug'] }}/orders/update">
+            {% if t %}<input type="hidden" name="t" value="{{ t }}">{% endif %}
             <input type="hidden" name="order_id" value="{{ o['id'] }}">
             <select name="status">
               <option value="">—</option>
