@@ -27,6 +27,22 @@
     input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
     .light input{ background:#ffffff; }
+
+    /* Order summary dropdown */
+    details.order-summary{border:1px solid var(--line);border-radius:10px;padding:10px;background:rgba(255,255,255,.02)}
+    details.order-summary > summary{
+      cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between;
+      gap:10px; font-weight:800; user-select:none;
+    }
+    details.order-summary > summary::-webkit-details-marker{display:none}
+    .chev{transition:transform .2s ease}
+    details[open] .chev{transform:rotate(180deg)}
+    .summary-list{margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px}
+    .summary-item{display:flex; align-items:center; gap:10px}
+    .thumb{width:40px; height:40px; border-radius:8px; border:1px solid var(--line); overflow:hidden; background:#0001; flex:0 0 40px}
+    .thumb img{width:100%; height:100%; object-fit:cover}
+    .title{font-weight:700}
+    .qty{color:var(--muted); font-size:.9rem}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -50,6 +66,45 @@
           <div class="muted">{{ i.title if i else 'Cart total' }}</div>
         </div>
       </div>
+
+      {# ===== ORDER SUMMARY (dropdown) ===== #}
+      {% set item_count = (qty if not cart_mode else (
+           (rows|sum(attribute='qty') if (rows is defined) else 1)
+         )) %}
+      <details class="order-summary" style="margin-top:12px">
+        <summary>
+          <span>Order summary • {{ item_count }} {{ 'item' if item_count==1 else 'items' }}</span>
+          <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </summary>
+
+        <ul class="summary-list">
+          {% if cart_mode and (rows is defined) and rows %}
+            {% for r in rows %}
+              <li class="summary-item">
+                <div class="thumb">
+                  {% if r.image_url %}<img src="/uimg?src={{ r.image_url | urlencode }}" alt="">{% endif %}
+                </div>
+                <div style="flex:1">
+                  <div class="title">{{ r.title }}</div>
+                  <div class="qty">{{ '%.7f'|format(r.pi_price) }} Pi × {{ r.qty }}</div>
+                </div>
+              </li>
+            {% endfor %}
+          {% else %}
+            <li class="summary-item">
+              <div class="thumb">
+                {% if i and i.image_url %}<img src="/uimg?src={{ i.image_url | urlencode }}" alt="">{% endif %}
+              </div>
+              <div style="flex:1">
+                <div class="title">{{ i.title if i else 'Item' }}</div>
+                <div class="qty">{{ '%.7f'|format(expected_pi / (qty or 1)) }} Pi × {{ qty }}</div>
+              </div>
+            </li>
+          {% endif %}
+        </ul>
+      </details>
 
       <div style="margin-top:12px">
         <div>Quantity: <strong>{{ qty }}</strong></div>
@@ -146,7 +201,6 @@
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
-      // Only pass appId if present (SDK tolerates missing, but be clean)
       if (appId) { Pi.init({ version: "2.0", sandbox: sandbox, appId: appId }); }
       else       { Pi.init({ version: "2.0", sandbox: sandbox }); }
       return true;
@@ -155,7 +209,7 @@
 
   function ensureAuth(){
     const scopes = ['payments','username'];
-    return Pi.authenticate(scopes, function(){}); 
+    return Pi.authenticate(scopes, function(){});
   }
 
   function buyerPayload(){
@@ -166,7 +220,6 @@
     };
   }
 
-  // IMPORTANT: keys match backend expectation in fulfill_session()
   function shippingPayload(){
     return {
       address:      (addrEl?.value || '').trim(),
