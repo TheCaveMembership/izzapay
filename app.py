@@ -1,4 +1,3 @@
-# ----------------- IMPORTS -----------------
 import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
@@ -17,12 +16,19 @@ from payments import split_amounts
 # ----------------- ENV -----------------
 load_dotenv()
 
-PI_SANDBOX   = os.getenv("PI_SANDBOX", "false").lower() == "true"
-PI_API_BASE  = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
-PI_API_KEY   = os.getenv("PI_PLATFORM_API_KEY", "")
-APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
-APP_BASE_URL = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
-BASE_ORIGIN  = APP_BASE_URL
+PI_SANDBOX    = os.getenv("PI_SANDBOX", "false").lower() == "true"
+PI_API_BASE   = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
+PI_API_KEY    = os.getenv("PI_PLATFORM_API_KEY", "")
+APP_NAME      = os.getenv("APP_NAME", "IZZA PAY")
+APP_BASE_URL  = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
+BASE_ORIGIN   = APP_BASE_URL
+DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
+
+# Optional: estimated USD per π to display conversion on /orders (0 disables)
+try:
+    PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
+except Exception:
+    PI_USD_RATE = 0.0
 
 # ----------------- APP -----------------
 app = Flask(__name__)
@@ -52,7 +58,12 @@ app.config.update(
 
 @app.context_processor
 def inject_globals():
-    return {"APP_BASE_URL": APP_BASE_URL, "BASE_ORIGIN": BASE_ORIGIN, "PI_SANDBOX": PI_SANDBOX}
+    return {
+        "APP_BASE_URL": APP_BASE_URL,
+        "BASE_ORIGIN": BASE_ORIGIN,
+        "PI_SANDBOX": PI_SANDBOX,
+        "PI_USD_RATE": PI_USD_RATE,
+    }
 
 # ----------------- DB & SCHEMA -----------------
 init_db()
@@ -100,6 +111,11 @@ def ensure_schema():
             cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
 
 ensure_schema()
+
+# Detect if orders.created_at exists (for 30-day filters)
+with conn() as cx:
+    _ORDERS_COLS = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+HAS_ORDER_CREATED_AT = ("created_at" in _ORDERS_COLS)
 
 # ----------------- SHORT-LIVED BEARER TOKENS -----------------
 TOKEN_TTL = 60 * 10
@@ -182,7 +198,8 @@ def pi_headers():
 def fetch_pi_payment(payment_id: str):
     url = f"{PI_API_BASE}/v2/payments/{payment_id}"
     return requests.get(url, headers=pi_headers(), timeout=15)
-    # ----------------- EXPLORE -----------------
+
+# ----------------- EXPLORE -----------------
 @app.get("/explore")
 def explore():
     q = (request.args.get("q") or "").strip()
@@ -300,8 +317,6 @@ def auth_exchange():
         uid = user.get("uid") or user.get("id")
         username = user.get("username")
         token = data.get("accessToken")
-
-        # FIXED: comma typo -> proper boolean ors
         if (not uid) or (not username) or (not token):
             if not request.is_json:
                 return redirect("/signin?fresh=1")
@@ -343,7 +358,8 @@ def auth_exchange():
         if not request.is_json:
             return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
-        # ----------------- MERCHANT DASHBOARD -----------------
+
+# ----------------- MERCHANT DASHBOARD -----------------
 @app.get("/dashboard")
 def dashboard():
     u = require_user()
@@ -557,7 +573,8 @@ def merchant_orders_update(slug):
         send_email(o["buyer_email"], f"Your {m['business_name']} order is on the way", body, reply_to=reply_to)
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/orders{('?t='+tok) if tok else ''}")
-    # ----------------- STOREFRONT AUTH -----------------
+
+# ----------------- STOREFRONT AUTH -----------------
 @app.get("/store/<slug>/signin")
 def store_signin(slug):
     m = resolve_merchant_by_slug(slug)
@@ -686,7 +703,7 @@ def checkout_cart(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
             SELECT cart_items.qty, items.*
             FROM cart_items
@@ -787,7 +804,8 @@ def checkout(link_id):
         app_base=APP_BASE_URL,
         colorway=i["colorway"]
     )
-    # ----------------- PI PAYMENTS (approve/complete) -----------------
+
+# ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
 def pi_approve():
     data = request.get_json(force=True)
@@ -850,8 +868,6 @@ def pi_complete():
     return fulfill_session(s, txid, buyer, shipping)
 
 # ----------------- FULFILLMENT + EMAIL -----------------
-DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
-
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
@@ -898,6 +914,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             snap_price = float(li["price"])
 
             line_gross = snap_price * qty
+            # Split the actual session-level fee proportionally
             line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
             line_net   = line_gross - line_fee
 
@@ -945,8 +962,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
+    # Emails (buyer + merchant)
     try:
-        # build items table
         display_rows = []
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -1006,7 +1023,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 shipping_html = "".join(block)
 
         suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        subj_buyer    = f"Your order at {m['business_name']} is confirmed{suffix}"
+        subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}" if (subj_suffix := suffix) else f"Your order at {m['business_name']} is confirmed"
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
 
         if buyer_email:
@@ -1034,7 +1051,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                   <small>Fees total: {fee_total:.7f} π • Net total: {net_total:.7f} π</small>
                 </p>
                 <h3 style="margin:16px 0 6px">Buyer</h3>
-                <div>{buyer_name or '—'} ({buyer_email or '—'})</div>
+                <div>{(buyer_name or '—')} ({(buyer_email or '—')})</div>
                 {shipping_html}
                 <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
             """
@@ -1051,7 +1068,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     join = "&" if tok else ""
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
-    # ----------------- UPLOADS -----------------
+
+# ----------------- UPLOADS -----------------
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -1150,7 +1168,8 @@ def uimg():
             return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
     return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-    # ----------------- POLICIES / STATIC PAGES -----------------
+
+# ----------------- POLICIES / STATIC PAGES -----------------
 @app.get("/validation-key.txt")
 def validation_key():
     return app.send_static_file("validation-key.txt")
@@ -1163,6 +1182,189 @@ def privacy():
 def terms():
     return render_template("terms.html")
 
+# ----------------- ORDERS PAGE (Purchases + Merchant stats) -----------------
+def _merchant_30d_stats(merchant_id: int):
+    """
+    Returns dict with:
+      gross_30, fee_30, app_fee_30 (1% of gross), net_30 (gross - fee - app_fee),
+      sessions_30, usd_rate, usd_estimate (net_30 * usd_rate or None)
+    Time window uses orders.created_at if available; otherwise sessions.created_at via join.
+    """
+    now = int(time.time())
+    since = now - 30 * 24 * 3600
+    gross = 0.0
+    fee   = 0.0
+
+    with conn() as cx:
+        if HAS_ORDER_CREATED_AT:
+            row = cx.execute(
+                """
+                SELECT COALESCE(SUM(pi_amount),0) AS gross,
+                       COALESCE(SUM(pi_fee),0)    AS fee
+                FROM orders
+                WHERE merchant_id=? AND status='paid' AND created_at>=?
+                """,
+                (merchant_id, since)
+            ).fetchone()
+        else:
+            # Fallback: derive time from session timestamp
+            row = cx.execute(
+                """
+                SELECT COALESCE(SUM(o.pi_amount),0) AS gross,
+                       COALESCE(SUM(o.pi_fee),0)    AS fee
+                FROM orders o
+                JOIN sessions s ON s.pi_tx_hash = o.pi_tx_hash
+                WHERE o.merchant_id=? AND o.status='paid' AND s.created_at>=?
+                """,
+                (merchant_id, since)
+            ).fetchone()
+
+        gross = float(row["gross"] or 0.0)
+        fee   = float(row["fee"] or 0.0)
+
+        sess = cx.execute(
+            "SELECT COUNT(*) AS n FROM sessions WHERE merchant_id=? AND created_at>=?",
+            (merchant_id, since)
+        ).fetchone()
+        sessions_30 = int(sess["n"] or 0)
+
+    app_fee_30 = 0.01 * gross
+    net_30 = max(0.0, gross - fee - app_fee_30)
+
+    usd_rate = PI_USD_RATE if PI_USD_RATE > 0 else None
+    usd_estimate = (net_30 * usd_rate) if usd_rate else None
+
+    return {
+        "since_ts": since,
+        "gross_30": gross,
+        "fee_30": fee,
+        "app_fee_30": app_fee_30,
+        "net_30": net_30,
+        "sessions_30": sessions_30,
+        "usd_rate": usd_rate,
+        "usd_estimate": usd_estimate,
+    }
+
+@app.get("/orders")
+def orders_page():
+    """
+    Shows:
+      - Purchases for the signed-in user
+      - Sales for their store
+      - Merchant 30-day earnings (gross, Pi fee, 1% app fee, net),
+        session count, and optional USD estimate
+      - Provides a payout button that POSTs to /merchant/<slug>/payout
+    """
+    u = current_user_row()
+    if not u:
+        return render_template("my_orders.html", mode="auth", sandbox=PI_SANDBOX)
+
+    uid = int(u["id"])
+
+    with conn() as cx:
+        # Purchases (simple, newest first)
+        purchases = cx.execute(
+            """
+            SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
+                   i.title, m.business_name AS store
+            FROM orders o
+            JOIN items i      ON i.id = o.item_id
+            JOIN merchants m  ON m.id = o.merchant_id
+            WHERE o.buyer_user_id = ?
+            ORDER BY o.id DESC
+            LIMIT 100
+            """,
+            (uid,),
+        ).fetchall()
+
+        # Sales for merchants they own
+        sales = cx.execute(
+            """
+            SELECT o.id, o.item_id, o.qty, o.pi_amount AS amount, o.status, o.pi_tx_hash,
+                   i.title, m.business_name AS store, m.slug AS slug, m.id AS m_id,
+                   m.pi_wallet_address AS wallet
+            FROM orders o
+            JOIN items i      ON i.id = o.item_id
+            JOIN merchants m  ON m.id = o.merchant_id
+            WHERE m.owner_user_id = ?
+            ORDER BY o.id DESC
+            LIMIT 200
+            """,
+            (uid,),
+        ).fetchall()
+
+        merchant = None
+        stats = None
+        if sales:
+            merchant = {"id": sales[0]["m_id"], "business_name": sales[0]["store"], "slug": sales[0]["slug"], "wallet": sales[0]["wallet"]}
+            stats = _merchant_30d_stats(merchant["id"])
+        else:
+            mrow = cx.execute(
+                "SELECT id, business_name, slug, pi_wallet_address AS wallet FROM merchants WHERE owner_user_id=? LIMIT 1",
+                (uid,),
+            ).fetchone()
+            if mrow:
+                merchant = dict(mrow)
+                stats = _merchant_30d_stats(merchant["id"])
+
+    return render_template(
+        "my_orders.html",
+        mode="list",
+        user=u,
+        purchases=[dict(r) for r in purchases],
+        sales=[dict(r) for r in sales],
+        merchant=merchant,
+        stats=stats,
+        sandbox=PI_SANDBOX,
+        payout_sent=(request.args.get("payout") == "sent"),
+    )
+
+# Trigger payout email (manual payout by app owner)
+@app.post("/merchant/<slug>/payout")
+def merchant_payout(slug):
+    u, m = require_merchant_owner(slug)
+    if isinstance(u, Response): return u
+
+    # Compute 30-day net for email (after Pi fee + 1% app fee)
+    stats = _merchant_30d_stats(m["id"])
+    net_30 = stats["net_30"]
+    gross_30 = stats["gross_30"]
+    fee_30 = stats["fee_30"]
+    app_fee_30 = stats["app_fee_30"]
+
+    wallet = (m["pi_wallet_address"] or "").strip()
+    if not wallet:
+        # Still send, but note missing wallet
+        wallet = "(no wallet on file)"
+
+    body = f"""
+        <h2>Payout Request</h2>
+        <p><strong>Store:</strong> {m['business_name']} (slug: {m['slug']})</p>
+        <p><strong>Merchant Wallet:</strong> {wallet}</p>
+        <h3>Last 30 Days</h3>
+        <ul>
+          <li>Gross: {gross_30:.7f} π</li>
+          <li>Pi Fee: {fee_30:.7f} π</li>
+          <li>App Fee (1%): {app_fee_30:.7f} π</li>
+          <li><strong>Net to pay:</strong> {net_30:.7f} π</li>
+        </ul>
+        <p>Requested by @{u['pi_username']} (user_id {u['id']}).</p>
+        <p><em>Note: Merchant UI informs payout may take up to 24 hours.</em></p>
+    """
+
+    try:
+        send_email(
+            DEFAULT_ADMIN_EMAIL,
+            f"[Payout] {m['business_name']} — {net_30:.7f} π",
+            body,
+            reply_to=(m["reply_to_email"] or None)
+        )
+    except Exception:
+        # swallow errors; still redirect back (template can show a generic status)
+        pass
+
+    return redirect(f"/orders?payout=sent")
+
 # ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
 def buyer_status(token):
@@ -1170,7 +1372,7 @@ def buyer_status(token):
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
     if not o: abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
