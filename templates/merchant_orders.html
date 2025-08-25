@@ -14,6 +14,7 @@
 
     .notice{padding:10px 12px;border-radius:10px;border:1px solid #e6e8f0;background:#f1f7ff;margin-bottom:10px}
     .notice.warn{background:#fff7ea}
+    .notice.err{background:#fff1f1;border-color:#ffd0d0}
     .foot{font-size:12px;color:#4b587c;margin-top:6px}
 
     table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden}
@@ -61,6 +62,24 @@
 
     {% if payout_sent %}
       <div class="notice"><strong>Payout request sent.</strong> You’ll receive your Pi within 24 hours.</div>
+    {% endif %}
+
+    {% if payout_throttled %}
+      <div class="notice warn">
+        <strong>Heads up:</strong> You requested a payout recently. Please wait
+        {% if throttle_minutes and throttle_minutes >= 60 %}
+          ~{{ (throttle_minutes // 60)|int }} hour{% if (throttle_minutes // 60)|int != 1 %}s{% endif %}
+        {% else %}
+          ~{{ throttle_minutes or 60 }} minute{% if (throttle_minutes or 60) != 1 %}s{% endif %}
+        {% endif %}
+        before requesting another payout.
+      </div>
+    {% endif %}
+
+    {% if payout_error %}
+      <div class="notice err">
+        <strong>Something went wrong.</strong> Please try again, or contact support if this continues.
+      </div>
     {% endif %}
 
     <div class="notice">
@@ -163,7 +182,7 @@
         </div>
       {% endfor %}
     {% else %}
-      <p class="muted">No orders yet.</p>
+      <p class="muted">No sales yet.</p>
     {% endif %}
 
     <p class="foot" style="margin-top:10px">
