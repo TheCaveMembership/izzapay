@@ -23,16 +23,16 @@
   <div class="wrap">
     <div class="card">
       <h1>Admin Dashboard</h1>
-      <p class="muted">Admin: @{{ admin_username }} • Wallet: {{ admin_wallet }}</p>
+      <p class="muted">Admin: @{{ admin_username }} • Wallet: {{ admin_wallet or '—' }}</p>
     </div>
 
     <div class="card">
       <h2>Overview</h2>
       <div class="stats">
-        <div class="stat"><div class="k">Users</div><div class="v">{{ totals['users'] }}</div></div>
-        <div class="stat"><div class="k">Merchants</div><div class="v">{{ totals['merchants'] }}</div></div>
-        <div class="stat"><div class="k">Active Items</div><div class="v">{{ totals['items'] }}</div></div>
-        <div class="stat"><div class="k">Orders</div><div class="v">{{ totals['orders'] }}</div></div>
+        <div class="stat"><div class="k">Users</div><div class="v">{{ totals.users or 0 }}</div></div>
+        <div class="stat"><div class="k">Merchants</div><div class="v">{{ totals.merchants or 0 }}</div></div>
+        <div class="stat"><div class="k">Active Items</div><div class="v">{{ totals.items or 0 }}</div></div>
+        <div class="stat"><div class="k">Orders</div><div class="v">{{ totals.orders or 0 }}</div></div>
       </div>
     </div>
 
@@ -45,13 +45,15 @@
         <tbody>
           {% for r in recent %}
           <tr>
-            <td>{{ r['id'] }}</td>
-            <td>{{ r['store'] }}</td>
-            <td>{{ r['item'] }}</td>
-            <td>{{ r['status'] }}</td>
-            <td>{{ '%.7f'|format(r['pi_amount'] or 0) }}</td>
-            <td>{{ '%.7f'|format(r['pi_fee'] or 0) }}</td>
+            <td>{{ r.id }}</td>
+            <td>{{ r.store }}</td>
+            <td>{{ r.item }}</td>
+            <td>{{ r.status }}</td>
+            <td>{{ '%.7f'|format((r.pi_amount or 0)|float) }}</td>
+            <td>{{ '%.7f'|format((r.pi_fee or 0)|float) }}</td>
           </tr>
+          {% else %}
+          <tr><td colspan="6" class="muted">No orders yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
