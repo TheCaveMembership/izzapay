@@ -104,7 +104,6 @@
         {% if not setup_mode and m %}
           <a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">View My Sales</a>
         {% endif %}
-        {# Admin button (ghost) only when username matches ADMIN_PI_USERNAME #}
         {% if username and ADMIN_PI_USERNAME and (username|lower == ADMIN_PI_USERNAME|lower) %}
           <a class="ip-btn ghost" href="/admin{{ t and ('?t=' ~ t) or '' }}">Admin</a>
         {% endif %}
@@ -482,7 +481,8 @@
   function proxied(url){
     const v = (url || '').trim();
     if (!v) return '';
-    if (v.startsWith('/static/')) return v;
+    // NEW: treat site-relative & data/blob URLs as local (do NOT proxy)
+    if (v.startsWith('/') || v.startsWith('data:') || v.startsWith('blob:')) return v;
     try {
       const u = new URL(v, location.origin);
       if (u.protocol === 'http:' || u.protocol === 'https:') {
@@ -494,7 +494,13 @@
   function setThumb(id, url){
     const el = document.getElementById(id);
     if(!el) return; el.innerHTML = '';
-    const img = document.createElement('img'); img.src = url; el.appendChild(img);
+    const img = document.createElement('img');
+    img.src = url;
+    img.onload = () => {
+      // if we used a temporary blob, free it
+      if (url.startsWith('blob:')) try { URL.revokeObjectURL(url); } catch(_){}
+    };
+    el.appendChild(img);
   }
 
   // Carry/derive short-lived bearer for uploads
@@ -534,12 +540,18 @@
     }
   });
 
-  // Logo upload + preview
+  // Logo upload + preview (instant preview on file select)
   (function(){
     const file = document.getElementById('logoFile');
     const btn  = document.getElementById('logoUploadBtn');
     const inp  = document.getElementById('logoUrl');
     if(!file || !btn || !inp) return;
+
+    file.addEventListener('change', ()=>{
+      const f = file.files && file.files[0];
+      if (f){ setThumb('logoThumb', URL.createObjectURL(f)); }
+    });
+
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
@@ -555,23 +567,31 @@
     if (inp.value) { const v = proxied(inp.value); if (v) setThumb('logoThumb', v); }
   })();
 
-  // Item upload + preview
+  // Item upload + preview (instant preview on file select)
   (function(){
     const file = document.getElementById('itFile');
     const btn  = document.getElementById('itUploadBtn');
     const inp  = document.getElementById('itUrl');
+    const thumbId = 'itThumb';
     if(!file || !btn || !inp) return;
+
+    file.addEventListener('change', ()=>{
+      const f = file.files && file.files[0];
+      if (f){ setThumb(thumbId, URL.createObjectURL(f)); }
+    });
+
     btn.addEventListener('click', async () => {
       if(!file.files || !file.files[0]){ inp.focus(); return; }
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{
         const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url; setThumb('itThumb', proxied(url));
+        inp.value = url;                       // e.g., /uploads/abc.jpg
+        setThumb(thumbId, proxied(url));       // now shows the on-disk file
       }catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
     inp.addEventListener('input', () => {
-      const v = proxied(inp.value); if(v) setThumb('itThumb', v);
+      const v = proxied(inp.value); if(v) setThumb(thumbId, v);
     });
   })();
 
@@ -610,14 +630,16 @@
     });
   })();
 
+  // Slug helpers, guards, etc. (unchanged) ...
+
   // Slug normalizer (setup + edit)
   function normalizeSlug(raw){
     let v = (raw || '').toLowerCase();
     v = v.trim();
-    v = v.replace(/[\s_]+/g, '-');       // spaces/underscores -> hyphen
-    v = v.replace(/[^a-z0-9-]/g, '');    // only a-z0-9-
-    v = v.replace(/-+/g, '-');           // collapse ---
-    v = v.replace(/^-+/, '').replace(/-+$/, ''); // trim hyphens
+    v = v.replace(/[\s_]+/g, '-');
+    v = v.replace(/[^a-z0-9-]/g, '');
+    v = v.replace(/-+/g, '-');
+    v = v.replace(/^-+/, '').replace(/-+$/, '');
     return v;
   }
   (function(){
@@ -661,7 +683,6 @@
 
     btn.addEventListener('click', ()=>{
       if (!allowed){
-        // Locked: just bounce with a subtle message
         hint.classList.add('warn');
         hint.textContent = hint.textContent || 'You can only edit your slug every 15 days.';
         return;
