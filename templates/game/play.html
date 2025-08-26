@@ -10,7 +10,7 @@
     html,body{height:100%; margin:0; background:#0b0f17; color:#e8eef7; font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:8px}
     .hud{
-      position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
+      position:sticky; top:0; z-index:6; display:flex; align-items:center; justify-content:space-between;
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line)
     }
     .hud .left{display:flex;gap:12px;align-items:center}
@@ -20,49 +20,34 @@
     .star.on{background:#ffd23f; border-color:#c59b00}
     #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px}
     canvas{display:block; width:100%; height:auto; border-radius:12px; background:#000}
-
-    /* Mini-map */
-    .mapDock{
-      position:fixed; right:14px; bottom:118px; width:260px; height:170px;
-      background:rgba(20,26,35,.6); border:1px solid #2a3550; border-radius:14px; padding:10px;
-      z-index:6;
-    }
-    #mini{ width:100%; height:100%; display:block; background:#0c1018; border-radius:10px; }
-
-    /* Full map modal */
-    .modal{
-      position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.55); z-index:10;
-    }
-    .modal.on{ display:grid; }
-    .sheet{
-      width:min(960px,94vw); height:min(640px,72vh);
-      background:#0e1420; border:1px solid #2a3550; border-radius:16px; padding:12px; box-shadow:0 10px 40px rgba(0,0,0,.35);
-    }
-    .sheet .bar{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px}
-    .legend{display:flex; gap:14px; align-items:center; font-size:12px; color:#cbd6ea; margin-top:6px}
-    .chip{display:inline-flex; align-items:center; gap:6px}
-    .swatch{width:16px;height:10px;border-radius:4px;border:1px solid #445}
-    .sw-unlocked{background:#5b6b7c}
-    .sw-preview{background:rgba(120,130,160,.35); border-color:#7f8aa2}
-    .sw-locked{background:#0b0f17}
-
     .controls{
-      position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center
+      position:fixed; right:12px; bottom:14px; z-index:7; display:flex; gap:8px; align-items:center
     }
     .btn{
       background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:10px; padding:10px 12px;
       font-size:14px; user-select:none; -webkit-user-select:none;
     }
-    .stick { position:fixed; left:12px; bottom:12px; width:140px; height:140px; z-index:6; touch-action:none }
+    .stick{ position:fixed; left:12px; bottom:12px; width:120px; height:120px; z-index:7; touch-action:none }
     .stick .base{
-      position:absolute; left:0; top:0; width:100%; height:100%; border-radius:70px; background:rgba(255,255,255,.07); border:1px solid #2a3550
+      position:absolute; left:0; top:0; width:100%; height:100%; border-radius:60px; background:rgba(255,255,255,.07); border:1px solid #2a3550
     }
     .stick .nub{
-      position:absolute; left:50px; top:50px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550
+      position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550
     }
-    @media (min-width:820px){
-      .stick{ display:none; } /* hide joystick on larger screens */
+    @media (min-width:820px){ .stick{ display:none; } }
+
+    /* Simple modal for “enter building” */
+    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:10; }
+    .modal.on{ display:flex; }
+    .modal .scrim{ position:absolute; inset:0; background:rgba(0,0,0,.5); backdrop-filter:blur(2px); }
+    .modal .sheet{
+      position:relative; background:#141a23; border:1px solid var(--line); border-radius:14px; padding:16px; width:min(560px,92vw);
+      color:#e8eef7; box-shadow:0 6px 30px rgba(0,0,0,.45);
     }
+    .modal .title{font-weight:700; margin:0 0 8px;}
+    .modal .row{margin:8px 0;}
+    .modal .actions{display:flex; gap:8px; justify-content:flex-end; margin-top:12px}
+    .modal .btn{padding:8px 12px}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -82,27 +67,6 @@
     </div>
   </div>
 
-  <!-- Mini-map -->
-  <div class="mapDock" id="mapDock" title="Tap to open map">
-    <canvas id="mini" width="240" height="150"></canvas>
-  </div>
-
-  <!-- Full map -->
-  <div class="modal" id="mapModal">
-    <div class="sheet">
-      <div class="bar">
-        <div style="font-weight:700">IZZA City — World Map</div>
-        <button class="btn" id="closeMap">Close</button>
-      </div>
-      <canvas id="bigmap" width="928" height="540" style="width:100%;height:calc(100% - 58px);background:#0b0f17;border-radius:10px"></canvas>
-      <div class="legend">
-        <span class="chip"><span class="swatch sw-unlocked"></span>Unlocked</span>
-        <span class="chip"><span class="swatch sw-preview"></span>Preview (semi-transparent)</span>
-        <span class="chip"><span class="swatch sw-locked"></span>Locked</span>
-      </div>
-    </div>
-  </div>
-
   <!-- Virtual joystick + quick buttons for mobile -->
   <div class="stick" id="stick">
     <div class="base"></div>
@@ -111,6 +75,19 @@
   <div class="controls">
     <button class="btn" id="btnA">A</button>
     <button class="btn" id="btnB">B</button>
+  </div>
+
+  <!-- Enter-building modal -->
+  <div class="modal" id="enterModal" aria-hidden="true">
+    <div class="scrim"></div>
+    <div class="sheet">
+      <h3 class="title">Welcome to IZZA HQ</h3>
+      <p class="row">NPC: “CamMac, we’ve been expecting you. Do the first job, and we’ll unlock more of IZZA City. You’ll get enough Pi to buy your first ride.”</p>
+      <div class="actions">
+        <button class="btn" id="mClose">Close</button>
+        <button class="btn" id="mAccept">Accept Mission</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -124,21 +101,10 @@
     const cvs = document.getElementById('game');
     const ctx = cvs.getContext('2d');
 
-    // Base tile size
+    // Base tile is still 32×32; render scale slightly zoomed out from before
     const TILE = 32;
-    // Camera: slightly zoomed out from 4x → 3.5x
-    const SCALE = 3.5;
+    const SCALE = 3.25;              // was 4; shows more world
     const DRAW  = TILE * SCALE;
-
-    // Mini & Big map canvases
-    const mini = document.getElementById('mini');
-    const mctx = mini.getContext('2d');
-    const big  = document.getElementById('bigmap');
-    const bctx = big.getContext('2d');
-    const mapDock  = document.getElementById('mapDock');
-    const mapModal = document.getElementById('mapModal');
-    document.getElementById('closeMap').onclick = ()=> mapModal.classList.remove('on');
-    mapDock.onclick = ()=> mapModal.classList.add('on');
 
     // --------- Asset Loader ----------
     function loadImg(src){
@@ -156,179 +122,189 @@
       outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
     };
 
-    // --------- World generation (less grid-y) ----------
-    // 0 grass, 1 road, 2 sidewalk, 3 building, 4 park, 5 water
-    const W = 100, H = 80;
-    const map = new Array(H).fill(0).map(()=>new Array(W).fill(0));
+    // --------- World layout ----------
+    // Types:
+    // 0 = grass (walkable)
+    // 1 = road_v (vertical)  — walkable
+    // 2 = road_h (horizontal) — walkable
+    // 3 = sidewalk            — walkable
+    // 4 = building            — solid
+    // 5 = door                — walkable + “B” to enter
+    const W = 120, H = 90;
+    const world = new Array(H).fill(0).map(()=>new Array(W).fill(0));
 
-    function fillRect(x0,y0,x1,y1,val){
-      for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
-        if (x>=0&&x<W&&y>=0&&y<H) map[y][x]=val;
+    // Fill grass
+    for (let y=0;y<H;y++) for(let x=0;x<W;x++) world[y][x] = 0;
+
+    // Main roads (clean, oriented)
+    const centerX = Math.floor(W/2), centerY = Math.floor(H/2);
+    // Vertical boulevard strip: sidewalks + asphalt with yellow dashes
+    for (let y=0;y<H;y++){
+      world[y][centerX-2] = 3; // sidewalk
+      world[y][centerX-1] = 1; // v road
+      world[y][centerX]   = 1; // v road
+      world[y][centerX+1] = 1; // v road
+      world[y][centerX+2] = 3; // sidewalk
+    }
+    // Horizontal avenue
+    for (let x=0;x<W;x++){
+      world[centerY-2][x] = 3;
+      world[centerY-1][x] = 2;
+      world[centerY][x]   = 2;
+      world[centerY+1][x] = 2;
+      world[centerY+2][x] = 3;
+    }
+
+    // Start district (unlocked rectangle) — bigger than before
+    const district = { x: centerX-22, y: centerY-16, w: 44, h: 32 };
+
+    // Everything outside the district is “locked” for gameplay (hard black + collision),
+    // but we’ll still show fog/preview on the minimap (not handled here).
+    function inDistrict(px,py){
+      return (px>=district.x && px<district.x+district.w &&
+              py>=district.y && py<district.y+district.h);
+    }
+
+    // First building block: IZZA HQ near the center, with a front door on the sidewalk
+    const bW=8, bH=6;
+    const bx = centerX-12, by = centerY-8; // top-left of building
+    for (let y=0;y<bH;y++){
+      for (let x=0;x<bW;x++){
+        world[by+y][bx+x] = 4; // building (solid)
       }
     }
-    // Main vertical avenue
-    fillRect(48,0,52,H,1);
-    // Main horizontal avenue
-    fillRect(0,38,W,42,1);
-    // Sidewalk buffers
-    fillRect(47,0,48,H,2); fillRect(52,0,53,H,2);
-    fillRect(0,37,W,38,2); fillRect(0,42,W,43,2);
-
-    // Diagonal boulevard (stair-step)
-    for (let k=-20;k<80;k++){
-      const x = Math.floor(20 + k);
-      const y = Math.floor(15 + k*0.6);
-      if (x>=0&&x<W&&y>=0&&y<H){ map[y][x]=1; if (x+1<W) map[y][x+1]=1; if (x-1>=0) map[y][x-1]=2; }
-    }
-
-    // Parks
-    fillRect(10,10,20,18,4);
-    fillRect(72,12,90,22,4);
-
-    // Water (little river chunk)
-    fillRect(5,55,25,58,5);
-
-    // Irregular building blocks around roads
-    function sprinkleBuildings(x0,y0,x1,y1,density=0.6){
-      for(let y=y0;y<y1;y++){
-        for(let x=x0;x<x1;x++){
-          if (map[y][x]===0 && Math.random()<density){
-            map[y][x]=3;
-          }
-        }
-      }
-    }
-    // Four districts
-    sprinkleBuildings(0,0,46,36,0.55);     // NW
-    sprinkleBuildings(54,0,W,36,0.52);     // NE
-    sprinkleBuildings(0,44,46,H,0.58);     // SW
-    sprinkleBuildings(54,44,W,H,0.56);     // SE
-    // Keep parks and water clear (already set)
-
-    // Doors (a few example store entrances at road edges)
-    const doors = [
-      {x:46, y:30}, // west of main vertical
-      {x:54, y:46}, // east of main vertical
-      {x:28, y:38}, // north of main horizontal
-      {x:72, y:41}, // south of main horizontal
-    ];
-
-    // --------- Region unlocks (sectors) ----------
-    // Divide world into 5×4 sectors; center unlocked, ring = preview, outer = locked
-    const SX=5, SY=4;
-    const sectorW = Math.ceil(W/SX), sectorH = Math.ceil(H/SY);
-    const sectors = []; // 0=locked,1=preview,2=unlocked
-    for(let j=0;j<SY;j++){
-      sectors[j]=[];
-      for(let i=0;i<SX;i++){
-        sectors[j][i]=0;
-      }
-    }
-    const cx=Math.floor(SX/2), cy=Math.floor(SY/2);
-    // center unlocked
-    sectors[cy][cx]=2;
-    // adjacent ring preview
-    const ring = [[cx-1,cy],[cx+1,cy],[cx,cy-1],[cx,cy+1],[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
-    ring.forEach(([ix,iy])=>{
-      if(ix>=0&&ix<SX&&iy>=0&&iy<SY) sectors[iy][ix]=1;
-    });
-    function sectorStateForTile(tx,ty){
-      const i=Math.floor(tx/sectorW), j=Math.floor(ty/sectorH);
-      if(j<0||j>=SY||i<0||i>=SX) return 0;
-      return sectors[j][i];
-    }
+    // Clear a doorway spot on south face and mark as door
+    const doorX = bx + Math.floor(bW/2);
+    const doorY = by + bH; // just below the south wall
+    world[doorY][doorX] = 5;
 
     // --------- Player ----------
     const player = {
-      x: (W/2)*TILE, y: (H/2)*TILE,
-      vx:0, vy:0, speed: 2.0*(TILE/16),
-      facing:'down', wanted:0
+      x: (centerX)*TILE + 2,
+      y: (centerY-5)*TILE + 2, // spawn a bit north of the cross
+      vx: 0, vy: 0,
+      speed: 2.0 * (TILE/16),
+      facing: 'down',
+      wanted: 0
     };
 
     // --------- Input ----------
     const keys = {};
-    window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; });
+    window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; if(e.key==='b' || e.key==='B'){handleB();} });
     window.addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()] = false; });
 
+    // Mobile joystick
     const stick = document.getElementById('stick');
     const nub   = document.getElementById('nub');
-    let dragging=false, baseRect=null, vec={x:0,y:0};
+    let dragging = false, baseRect=null, vec = {x:0,y:0};
     function setNub(dx,dy){
-      const r=50; const mag=Math.hypot(dx,dy)||1;
-      const clamped=Math.min(mag,r); const ux=dx/mag, uy=dy/mag;
-      nub.style.left=(50+ux*clamped)+'px'; nub.style.top=(50+uy*clamped)+'px';
-      vec.x=(clamped/r)*ux; vec.y=(clamped/r)*uy;
+      const r = 40, mag = Math.hypot(dx,dy) || 1, clamped = Math.min(mag, r);
+      const ux = dx / mag, uy = dy / mag;
+      nub.style.left = (40 + ux*clamped) + 'px';
+      nub.style.top  = (40 + uy*clamped) + 'px';
+      vec.x = (clamped/r)*ux; vec.y = (clamped/r)*uy;
     }
-    function resetNub(){ nub.style.left='50px'; nub.style.top='50px'; vec.x=0; vec.y=0; }
-    stick.addEventListener('touchstart', e=>{dragging=true;baseRect=stick.getBoundingClientRect();},{passive:true});
-    stick.addEventListener('touchmove', e=>{ if(!dragging) return; const t=e.touches[0];
-      const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(t.clientX-cx,t.clientY-cy);
-    },{passive:true});
-    stick.addEventListener('touchend', ()=>{dragging=false;resetNub();},{passive:true});
-    stick.addEventListener('mousedown', e=>{dragging=true;baseRect=stick.getBoundingClientRect();});
-    window.addEventListener('mousemove', e=>{ if(!dragging) return;
-      const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(e.clientX-cx,e.clientY-cy);
-    });
-    window.addEventListener('mouseup', ()=>{dragging=false;resetNub();});
+    function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
+    function startDrag(){ dragging = true; baseRect = stick.getBoundingClientRect(); }
+    function moveDrag(e){
+      if(!dragging) return;
+      const t = e.touches ? e.touches[0] : e;
+      const cx = baseRect.left + baseRect.width/2;
+      const cy = baseRect.top  + baseRect.height/2;
+      setNub(t.clientX - cx, t.clientY - cy);
+    }
+    function endDrag(){ dragging=false; resetNub(); }
+    stick.addEventListener('touchstart', startDrag, {passive:true});
+    stick.addEventListener('touchmove',  moveDrag,  {passive:true});
+    stick.addEventListener('touchend',   endDrag,   {passive:true});
+    stick.addEventListener('mousedown',  startDrag);
+    window.addEventListener('mousemove', moveDrag);
+    window.addEventListener('mouseup',   endDrag);
 
-    // --------- Wanted HUD ----------
+    // Buttons
+    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
+    document.getElementById('btnB').addEventListener('click', handleB);
+
+    // Wanted HUD
     function setWanted(n){
       player.wanted = Math.max(0, Math.min(5, n|0));
-      document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star'+(i<player.wanted?' on':''));
+      const stars = document.querySelectorAll('#stars .star');
+      stars.forEach((s,i)=> s.className = 'star' + (i<player.wanted?' on':'' ));
     }
 
     // --------- Camera ----------
-    const camera = {x:0,y:0};
+    const camera = { x:0, y:0 };
     function centerCamera(){
       camera.x = player.x - cvs.width/2;
       camera.y = player.y - cvs.height/2;
+      // clamp to whole world bounds (not district; district edges render black)
       camera.x = Math.max(0, Math.min(camera.x, W*TILE - cvs.width));
       camera.y = Math.max(0, Math.min(camera.y, H*TILE - cvs.height));
     }
 
     // --------- Collision helpers ----------
-    function isSolidTile(tx,ty){
-      if(tx<0||ty<0||tx>=W||ty>=H) return true;
-      const t=map[ty][tx];
-      return (t===3 || t===5); // buildings and water solid
+    function sampleTile(px,py){
+      const gx = Math.floor(px / TILE), gy = Math.floor(py / TILE);
+      if (gx<0||gy<0||gx>=W||gy>=H) return {type:4, gx, gy}; // treat outside as solid
+      return {type: world[gy][gx], gx, gy};
     }
-    function canStandAt(px,py){
-      const tx=Math.floor(px/TILE), ty=Math.floor(py/TILE);
-      // Sector gate: only allow in unlocked sectors
-      if (sectorStateForTile(tx,ty) < 2) return false;
-      return !isSolidTile(tx,ty);
+    function isSolid(type, gx, gy){
+      if (!inDistrict(gx,gy)) return true;      // hard wall outside district (black)
+      return type === 4;                         // building blocks
     }
 
-    // --------- Drawing world ----------
-    function drawTile(gx,gy,screenX,screenY){
-      const t = map[gy][gx];
-      const S = DRAW;
-      switch(t){
-        case 0: // grass
-          ctx.fillStyle = '#0b381d'; ctx.fillRect(screenX, screenY, S, S);
-          ctx.fillStyle = 'rgba(255,255,255,.03)'; ctx.fillRect(screenX, screenY, S, 3);
-          break;
-        case 1: // road
-          ctx.fillStyle = '#2b2b2b'; ctx.fillRect(screenX, screenY, S, S);
-          ctx.fillStyle = '#cfcf00'; ctx.fillRect(screenX + S/2 - 2, screenY, 4, S);
-          break;
-        case 2: // sidewalk
-          ctx.fillStyle = '#5c6672'; ctx.fillRect(screenX, screenY, S, S);
-          ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX, screenY, S, S);
-          break;
-        case 3: // building
-          ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX, screenY, S, S);
-          ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX, screenY, S, 6);
-          break;
-        case 4: // park
-          ctx.fillStyle = '#13522c'; ctx.fillRect(screenX, screenY, S, S);
-          ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(screenX, screenY, S, 3);
-          break;
-        case 5: // water
-          ctx.fillStyle = '#0a2e5c'; ctx.fillRect(screenX, screenY, S, S);
-          ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(screenX, screenY+S-4, S, 4);
-          break;
-      }
+    // --------- Drawing ----------
+    function drawGrass(x,y,S){
+      ctx.fillStyle = '#0b381d';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = 'rgba(255,255,255,.03)';  // faint grid
+      ctx.fillRect(x, y, S, 1);
+      ctx.fillRect(x, y, 1, S);
+    }
+    function drawSidewalk(x,y,S){
+      ctx.fillStyle = '#757d86';
+      ctx.fillRect(x, y, S, S);
+      ctx.strokeStyle = 'rgba(0,0,0,.25)';
+      ctx.strokeRect(x, y, S, S);
+    }
+    function drawRoadV(x,y,S){
+      ctx.fillStyle = '#2b2b2b';
+      ctx.fillRect(x, y, S, S);
+      // yellow dashed center line (vertical)
+      ctx.strokeStyle = '#ffd23f';
+      ctx.lineWidth = Math.max(2, S/16);
+      ctx.setLineDash([S/6, S/6]);
+      ctx.beginPath();
+      ctx.moveTo(x + S/2, y);
+      ctx.lineTo(x + S/2, y + S);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    function drawRoadH(x,y,S){
+      ctx.fillStyle = '#2b2b2b';
+      ctx.fillRect(x, y, S, S);
+      // yellow dashed center line (horizontal)
+      ctx.strokeStyle = '#ffd23f';
+      ctx.lineWidth = Math.max(2, S/16);
+      ctx.setLineDash([S/6, S/6]);
+      ctx.beginPath();
+      ctx.moveTo(x, y + S/2);
+      ctx.lineTo(x + S, y + S/2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    function drawBuilding(x,y,S){
+      ctx.fillStyle = '#3c2931'; // deep brick
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = 'rgba(0,0,0,.2)';
+      ctx.fillRect(x, y, S, 6);
+    }
+    function drawDoor(x,y,S){
+      // Small doorway plate
+      ctx.fillStyle = '#2c394a';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#9bd1ff';
+      ctx.fillRect(x+S*0.35, y+S*0.2, S*0.3, S*0.6);
     }
 
     function drawPlayer(images){
@@ -341,179 +317,127 @@
       ctx.drawImage(images.hair,   0,0,TILE,TILE, sx, sy, S, S);
     }
 
-    // --------- Update loop ----------
+    // --------- Update ----------
     function update(dt){
-      let dx=0, dy=0;
+      // movement vector
+      let dx = 0, dy = 0;
       if (keys['arrowup']||keys['w']) dy -= 1;
       if (keys['arrowdown']||keys['s']) dy += 1;
       if (keys['arrowleft']||keys['a']) dx -= 1;
       if (keys['arrowright']||keys['d']) dx += 1;
       dx += vec.x; dy += vec.y;
 
-      // normalize
-      const mag=Math.hypot(dx,dy);
-      const sp = player.speed;
-      let nx=player.x, ny=player.y;
-      if (mag>0){
-        dx/=mag; dy/=mag;
-        nx = player.x + (dx*sp*dt);
-        ny = player.y + (dy*sp*dt);
+      const mag = Math.hypot(dx,dy);
+      if (mag > 0){
+        dx /= mag; dy /= mag;
+        player.vx = dx * player.speed;
+        player.vy = dy * player.speed;
+      } else {
+        player.vx = 0; player.vy = 0;
       }
 
-      // try step X then Y with collision & sector lock
-      if (canStandAt(nx, player.y)) player.x = nx;
-      if (canStandAt(player.x, ny)) player.y = ny;
+      // Attempted new position
+      let nx = player.x + player.vx * dt;
+      let ny = player.y + player.vy * dt;
 
-      // clamp to unlocked world bounds too
-      player.x = Math.max(0, Math.min(player.x, W*TILE - TILE));
-      player.y = Math.max(0, Math.min(player.y, H*TILE - TILE));
+      // Collide X
+      let probe = sampleTile(nx + TILE*0.5, player.y + TILE*0.5);
+      if (isSolid(probe.type, probe.gx, probe.gy)) nx = player.x;
 
+      // Collide Y
+      probe = sampleTile(player.x + TILE*0.5, ny + TILE*0.5);
+      if (isSolid(probe.type, probe.gx, probe.gy)) ny = player.y;
+
+      player.x = nx; player.y = ny;
       centerCamera();
     }
 
     function render(images){
-      ctx.fillStyle='#000'; ctx.fillRect(0,0,cvs.width,cvs.height);
-
       const S = DRAW;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,cvs.width,cvs.height);
+
+      // visible tile range
       const tilesX = Math.ceil(cvs.width / S) + 2;
       const tilesY = Math.ceil(cvs.height / S) + 2;
       const startX = Math.max(0, Math.floor(camera.x / TILE));
       const startY = Math.max(0, Math.floor(camera.y / TILE));
 
-      for (let y=0;y<tilesY;y++){
-        for (let x=0;x<tilesX;x++){
-          const gx = startX + x, gy = startY + y;
-          if (gx>=0 && gx<W && gy>=0 && gy<H){
-            const screenX = (gx*TILE - camera.x) * (S/TILE);
-            const screenY = (gy*TILE - camera.y) * (S/TILE);
-            drawTile(gx, gy, screenX, screenY);
-          }
+      for (let y=0; y<tilesY; y++){
+        for (let x=0; x<tilesX; x++){
+          const gx = startX + x;
+          const gy = startY + y;
+          const sx = (gx*TILE - camera.x) * (S/TILE);
+          const sy = (gy*TILE - camera.y) * (S/TILE);
+
+          if (gx<0||gy<0||gx>=W||gy>=H){ continue; }
+
+          // If not in district, draw pure black (hard wall effect in gameplay)
+          if (!inDistrict(gx,gy)){ continue; }
+
+          const t = world[gy][gx];
+          if (t===0) drawGrass(sx,sy,S);
+          else if (t===1) drawRoadV(sx,sy,S);
+          else if (t===2) drawRoadH(sx,sy,S);
+          else if (t===3) drawSidewalk(sx,sy,S);
+          else if (t===4) drawBuilding(sx,sy,S);
+          else if (t===5) drawDoor(sx,sy,S);
         }
       }
+
       drawPlayer(images);
-      drawMiniMap(images);  // refresh mini each frame
+
+      // Optional: subtle highlight when standing on a door
+      const foot = sampleTile(player.x + TILE*0.5, player.y + TILE*0.9);
+      if (foot.type === 5){
+        ctx.strokeStyle = 'rgba(155,209,255,.9)';
+        ctx.lineWidth = 2;
+        const hx = (foot.gx*TILE - camera.x) * (S/TILE);
+        const hy = (foot.gy*TILE - camera.y) * (S/TILE);
+        ctx.strokeRect(hx+2, hy+2, S-4, S-4);
+      }
     }
 
-    // --------- Doors (B to enter) ----------
-    function nearDoor(){
-      for (const d of doors){
-        const dx = (d.x*TILE + TILE/2) - (player.x + TILE/2);
-        const dy = (d.y*TILE + TILE/2) - (player.y + TILE/2);
-        if (Math.hypot(dx,dy) < 24) return d;
-      }
-      return null;
-    }
-    document.getElementById('btnB').addEventListener('click', tryEnter);
-    window.addEventListener('keydown', e=>{
-      if (e.key.toLowerCase()==='b') tryEnter();
+    // --------- Interact: B near door ----------
+    const modal = document.getElementById('enterModal');
+    const mClose = document.getElementById('mClose');
+    const mAccept = document.getElementById('mAccept');
+    function openModal(){ modal.classList.add('on'); modal.setAttribute('aria-hidden','false'); }
+    function closeModal(){ modal.classList.remove('on'); modal.setAttribute('aria-hidden','true'); }
+    mClose.addEventListener('click', closeModal);
+    mAccept.addEventListener('click', ()=>{
+      closeModal();
+      // TODO: mark mission-1 accepted; later we’ll unlock a new region.
+      setWanted(1);
     });
-    function tryEnter(){
-      const d = nearDoor();
-      if (!d) return; // not close enough
-      alert("Entering shop… (wire to merchant/shop scene next)");
-      // later: window.location = "/izza-game/shop?at="+d.x+","+d.y or switch scene
-    }
 
-    // --------- Mini-map + Full map (fog only here) ----------
-    function drawMiniMap(){
-      mctx.clearRect(0,0,mini.width, mini.height);
-      const sx = mini.width / W;
-      const sy = mini.height / H;
-      // base map
-      for(let y=0;y<H;y++){
-        for(let x=0;x<W;x++){
-          const t=map[y][x];
-          switch(t){
-            case 0: mctx.fillStyle='#294f37'; break;
-            case 1: mctx.fillStyle='#4a4a4a'; break;
-            case 2: mctx.fillStyle='#7c899a'; break;
-            case 3: mctx.fillStyle='#6b4444'; break;
-            case 4: mctx.fillStyle='#2e6a3c'; break;
-            case 5: mctx.fillStyle='#1a436f'; break;
-          }
-          mctx.fillRect(x*sx, y*sy, sx, sy);
-        }
+    function handleB(){
+      const foot = sampleTile(player.x + TILE*0.5, player.y + TILE*0.9);
+      if (foot.type === 5 && inDistrict(foot.gx, foot.gy)){
+        openModal(); // “enter building”
       }
-      // fog layers (sector overlay)
-      for(let j=0;j<SY;j++){
-        for(let i=0;i<SX;i++){
-          const st=sectors[j][i];
-          const x=i*sectorW, y=j*sectorH;
-          const w=sectorW, h=sectorH;
-          if (st===1){ // preview = semi transparent
-            mctx.fillStyle='rgba(120,130,160,.35)';
-            mctx.fillRect(x*sx, y*sy, w*sx, h*sy);
-          } else if (st===0){ // locked = opaque
-            mctx.fillStyle='#0b0f17';
-            mctx.fillRect(x*sx, y*sy, w*sx, h*sy);
-          }
-        }
-      }
-      // player dot
-      mctx.fillStyle='#22e6d1';
-      mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 3, 3);
     }
-
-    function drawBigMap(){
-      bctx.clearRect(0,0,big.width,big.height);
-      const sx = big.width / W;
-      const sy = big.height / H;
-      for(let y=0;y<H;y++){
-        for(let x=0;x<W;x++){
-          const t=map[y][x];
-          switch(t){
-            case 0: bctx.fillStyle='#294f37'; break;
-            case 1: bctx.fillStyle='#4a4a4a'; break;
-            case 2: bctx.fillStyle='#7c899a'; break;
-            case 3: bctx.fillStyle='#6b4444'; break;
-            case 4: bctx.fillStyle='#2e6a3c'; break;
-            case 5: bctx.fillStyle='#1a436f'; break;
-          }
-          bctx.fillRect(x*sx, y*sy, sx, sy);
-        }
-      }
-      // fog
-      for(let j=0;j<SY;j++){
-        for(let i=0;i<SX;i++){
-          const st=sectors[j][i];
-          const x=i*sectorW, y=j*sectorH, w=sectorW, h=sectorH;
-          if (st===1){
-            bctx.fillStyle='rgba(120,130,160,.35)';
-            bctx.fillRect(x*sx, y*sy, w*sx, h*sy);
-          } else if (st===0){
-            bctx.fillStyle='#0b0f17';
-            bctx.fillRect(x*sx, y*sy, w*sx, h*sy);
-          }
-        }
-      }
-      // player marker
-      bctx.fillStyle='#22e6d1';
-      bctx.fillRect((player.x/TILE)*sx-2, (player.y/TILE)*sy-2, 4, 4);
-    }
-    const mapObs = new MutationObserver(drawBigMap);
-    mapObs.observe(mapModal, { attributes:true, attributeFilter:['class'] });
 
     // --------- Main Loop ---------
-    Promise.all([loadImg(assets.body), loadImg(assets.outfit), loadImg(assets.hair)])
-      .then(([body, outfit, hair])=>{
-        const imgs = { body, outfit, hair };
-        let last = performance.now();
-        function loop(now){
-          const dt = Math.min(32, now - last);
-          last = now;
-          update(dt/16.6667);
-          render(imgs);
-          requestAnimationFrame(loop);
-        }
-        centerCamera(); drawMiniMap();
+    Promise.all([
+      loadImg(assets.body),
+      loadImg(assets.outfit),
+      loadImg(assets.hair),
+    ]).then(([body, outfit, hair])=>{
+      const imgs = { body, outfit, hair };
+      let last = performance.now();
+      function loop(now){
+        const dt = Math.min(32, now - last);
+        last = now;
+        update(dt/16.6667);
+        render(imgs);
         requestAnimationFrame(loop);
-      })
-      .catch(err=> console.error("Sprite load failed", err));
-
-    // Quick test buttons
-    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
-    document.getElementById('btnB').addEventListener('click', ()=> {/* enter handled elsewhere */});
-
+      }
+      centerCamera();
+      requestAnimationFrame(loop);
+    }).catch(err=>{
+      console.error("Sprite load failed", err);
+    });
   })();
   </script>
 </body>
