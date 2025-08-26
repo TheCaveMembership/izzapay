@@ -8,6 +8,7 @@
   <style>
     :root{ --ui:rgba(255,255,255,.9); --bg0:#0b0f17; --card:#141a23; --line:#263042; }
     html,body{height:100%; margin:0; background:#0b0f17; color:#e8eef7; font-family:Arial,Helvetica,sans-serif}
+    /* stop text selection / caret on iOS */
     *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
     canvas{ touch-action:none; }
 
@@ -24,11 +25,16 @@
 
     #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px; position:relative}
     #game{display:block; width:100%; height:auto; border-radius:12px; background:#000}
-    #prompt { position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
-      background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none }
+    #prompt{
+      position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
+      background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none;
+    }
 
-    .mini{ position:fixed; right:12px; bottom:118px; z-index:6;
-      background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px }
+    /* Mini-map card */
+    .mini{
+      position:fixed; right:12px; bottom:118px; z-index:6;
+      background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px
+    }
     #minimap{ width:240px; height:auto; display:block; border-radius:10px; background:#0b0f17 }
 
     .controls{ position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center }
@@ -39,6 +45,7 @@
     .stick .nub{ position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550 }
     @media (min-width:820px){ .stick{ display:none; } }
 
+    /* Simple modal */
     .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
     .modal .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); }
     .modal .card{ position:relative; background:#121827; border:1px solid #2a3550; border-radius:14px; padding:16px; width:min(520px,92vw); color:#e8eef7 }
@@ -65,10 +72,12 @@
     </div>
   </div>
 
+  <!-- Mini-map -->
   <div class="mini" id="miniWrap" title="Tap to open world map">
     <canvas id="minimap" width="260" height="170"></canvas>
   </div>
 
+  <!-- Virtual joystick + buttons -->
   <div class="stick" id="stick">
     <div class="base"></div>
     <div class="nub" id="nub"></div>
@@ -78,6 +87,7 @@
     <button class="btn" id="btnB" type="button">B</button>
   </div>
 
+  <!-- World Map overlay -->
   <div class="modal" id="mapModal">
     <div class="backdrop"></div>
     <div class="card">
@@ -92,6 +102,7 @@
     </div>
   </div>
 
+  <!-- Enter building modal -->
   <div class="modal" id="enterModal">
     <div class="backdrop"></div>
     <div class="card">
@@ -101,9 +112,8 @@
     </div>
   </div>
 
-  <!-- Pass profile to JS and load the engine -->
+  <!-- Pass profile + load engine (cache-busted) -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <!-- cache-bust + defer so you definitely load the latest build -->
   <script src="/static/game/js/izza_play_v1.js?v=7" defer></script>
 </body>
 </html>
