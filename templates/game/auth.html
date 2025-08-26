@@ -80,16 +80,17 @@
           const form = document.createElement('form');
           form.method = 'POST';
           form.action = '/auth/exchange'; // existing main-app endpoint
+
           // payload same structure your main page sends
           const payload = document.createElement('input');
           payload.type='hidden'; payload.name='payload';
           payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
           form.appendChild(payload);
 
-          // After session set, go to play page. Your server can honor this `next` param.
+          // After session set, go to character creation page first
           const next = document.createElement('input');
           next.type='hidden'; next.name='next';
-          next.value = '/izza-game/play';
+          next.value = '/izza-game/create';
           form.appendChild(next);
 
           document.body.appendChild(form);
