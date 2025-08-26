@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Create Your Character — IZZA GAME</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:680px;margin:0 auto;padding:16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
+    label{display:block;margin:8px 0 4px}
+    select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:var(--txt)}
+  </style>
+</head>
+<body class="cw-blue theme-a">
+  <div class="wrap">
+    <div class="card">
+      <h1>Create Your Character</h1>
+      <form method="post">
+        <label>Sprite Skin</label>
+        <select name="sprite_skin">
+          <option value="default">Default</option>
+          <option value="street_a">Street A</option>
+          <option value="street_b">Street B</option>
+        </select>
+
+        <label>Hair</label>
+        <select name="hair">
+          <option value="short">Short</option>
+          <option value="buzz">Buzz</option>
+          <option value="long">Long</option>
+        </select>
+
+        <label>Outfit</label>
+        <select name="outfit">
+          <option value="street">Street</option>
+          <option value="athletic">Athletic</option>
+          <option value="luxury">Luxury</option>
+        </select>
+
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+          <button class="ip-btn" type="submit">Save and Enter IZZA</button>
+          <a class="ip-btn ghost" href="/">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
