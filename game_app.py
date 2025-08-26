@@ -34,16 +34,19 @@ app.config.update(
 # ----------------- ENV FLAGS -----------------
 PI_SANDBOX = os.getenv("PI_SANDBOX", "false").lower() == "true"
 
-# ----------------- TOKEN VERIFY (reuse main app) -----------------
+# ----------------- TOKEN VERIFY / ADMIN CHECK (reuse main app) -----------------
 try:
-    from app import verify_login_token  # same signature as in app.py
+    from app import verify_login_token, is_admin_name  # same fns as in app.py
 except Exception:
     verify_login_token = None  # guarded below
+    def is_admin_name(_):  # fallback if import fails
+        return False
 
 def _get_bearer_token_from_request() -> str | None:
     """Query ?t= or form t= or Authorization: Bearer <token>."""
     t = request.args.get("t") or request.form.get("t")
-    if t: return t.strip()
+    if t:
+        return t.strip()
     auth = request.headers.get("Authorization", "")
     if auth and auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
@@ -52,7 +55,8 @@ def _get_bearer_token_from_request() -> str | None:
 # -------------------- helpers --------------------
 def current_user_row():
     """
-    Return the users table row for the logged-in user_id, or resolve from short-lived token.
+    Return the users table row for the logged-in user_id,
+    or resolve from short-lived token (same flow as main app).
     """
     uid = session.get("user_id")
     if not uid:
@@ -64,6 +68,25 @@ def current_user_row():
     with conn() as cx:
         row = cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
         return row
+
+def _is_admin(urow) -> bool:
+    """True if user row reflects admin/owner role or admin username (e.g., CamMac)."""
+    if not urow:
+        return False
+    try:
+        role = urow["role"]
+    except Exception:
+        role = None
+    try:
+        uname = urow["pi_username"]
+    except Exception:
+        uname = None
+    if str(role).lower() in ("admin", "owner"):
+        return True
+    try:
+        return bool(is_admin_name(uname))
+    except Exception:
+        return False
 
 def require_login_redirect():
     """Redirect to /signin if not logged in (cookie) AND no valid token."""
@@ -89,8 +112,8 @@ def game_auth():
 @app.route("/create", methods=["GET", "POST"])
 def game_create():
     """
-    First-time character creation. If a profile already exists for this Pi user,
-    skip straight to /play.
+    Character creation. Admins (e.g., CamMac) always see this screen to test art/choices.
+    Normal users: if a profile exists, skip straight to /play.
     """
     need = require_login_redirect()
     if need:
@@ -106,6 +129,7 @@ def game_create():
 
     pi_uid = urow["pi_uid"]
     pi_username = urow["pi_username"]
+    admin = _is_admin(urow)
 
     # Bootstrap the game_profiles table
     with conn() as cx:
@@ -141,15 +165,22 @@ def game_create():
             return redirect(f"{url_for('game_play')}?t={t}")
         return redirect(url_for("game_play"))
 
-    # If profile already exists, skip to play (preserve token)
+    # If profile already exists:
     with conn() as cx:
         row = cx.execute("SELECT 1 FROM game_profiles WHERE pi_uid=?", (pi_uid,)).fetchone()
+
+    # Admins always re-create unless they explicitly add ?skip=1
+    if row and admin and request.args.get("skip") != "1":
+        # Fall-through: render create screen for admin testing
+        return render_template("game/create_character.html", t=t)
+
+    # Normal users: skip to play if they already have a profile
     if row:
         if t:
             return redirect(f"{url_for('game_play')}?t={t}")
         return redirect(url_for("game_play"))
 
-    # Render creation form (pass token into template so the form includes it on POST)
+    # New user: render creation form
     return render_template("game/create_character.html", t=t)
 
 
