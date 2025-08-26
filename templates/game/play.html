@@ -20,6 +20,8 @@
     .star.on{background:#ffd23f; border-color:#c59b00}
     #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px}
     canvas{display:block; width:100%; height:auto; border-radius:12px; background:#000}
+
+    /* Mobile controls */
     .controls{
       position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center
     }
@@ -34,9 +36,45 @@
     .stick .nub{
       position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550
     }
-    @media (min-width:820px){
-      .stick{ display:none; } /* hide joystick on larger screens */
+    @media (min-width:820px){ .stick{ display:none; } }
+
+    /* Minimap */
+    .minimap-wrap{
+      position:fixed; right:12px; bottom:92px; z-index:6;
+      background:rgba(20,26,35,.9); border:1px solid #2a3550; padding:6px; border-radius:10px;
     }
+    .minimap-wrap canvas{ display:block; width:140px; height:94px; image-rendering:pixelated; }
+
+    /* Map modal */
+    .modal{
+      position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.75); z-index:20;
+    }
+    .modal .panel{
+      background:#0f1520; border:1px solid #2a3550; border-radius:12px; padding:10px;
+      max-width:min(96vw,1100px);
+    }
+    .modal .top{
+      display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px;
+    }
+    .modal .title{font-weight:bold}
+    .modal .close{background:#182238; border:1px solid #2a3550; color:#cfe0ff; border-radius:8px; padding:6px 10px}
+    .legend{display:flex; gap:8px; font-size:12px; color:#c9d3e7; margin-top:6px}
+    .legend .sw{display:inline-block; width:16px; height:10px; border:1px solid #2a3550; vertical-align:middle; margin-right:4px}
+    .sw.open{background:#2b2b2b}
+    .sw.preview{background:rgba(180,190,205,.25)}
+    .sw.locked{background:rgba(150,160,175,.65)}
+
+    /* Shop modal */
+    .shop{
+      position:fixed; inset:0; display:none; z-index:30; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.65);
+    }
+    .shop .panel{
+      width:min(92vw,520px); background:#0f1520; border:1px solid #2a3550; border-radius:12px; padding:14px;
+    }
+    .shop h3{margin:0 0 6px}
+    .shop p{margin:0 0 10px; color:#c9d3e7}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -56,7 +94,40 @@
     </div>
   </div>
 
-  <!-- Virtual joystick + quick buttons for mobile -->
+  <!-- Minimap -->
+  <div class="minimap-wrap" title="Open map (M)">
+    <canvas id="minimap" width="140" height="94"></canvas>
+  </div>
+
+  <!-- Large map modal -->
+  <div class="modal" id="mapModal" aria-hidden="true">
+    <div class="panel">
+      <div class="top">
+        <div class="title">IZZA City — World Map</div>
+        <button class="close" id="mapClose">Close</button>
+      </div>
+      <canvas id="bigmap" width="900" height="600"></canvas>
+      <div class="legend">
+        <span><span class="sw open"></span>Unlocked</span>
+        <span><span class="sw preview"></span>Preview (semi-transparent)</span>
+        <span><span class="sw locked"></span>Locked</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shop modal -->
+  <div class="shop" id="shopModal" aria-hidden="true">
+    <div class="panel">
+      <h3>Welcome to an IZZA Shop</h3>
+      <p>Hotspot demo. Wire this to a merchant or in-game catalog next.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <a class="ip-btn" href="/explore">Browse Stores</a>
+        <button class="ip-btn ghost" id="shopClose">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Virtual joystick + quick buttons -->
   <div class="stick" id="stick">
     <div class="base"></div>
     <div class="nub" id="nub"></div>
@@ -69,77 +140,108 @@
   <script>
   (function(){
     const profile = {{ profile|tojson|safe }};
-    // sprite choices saved at creation
     const BODY   = profile.sprite_skin || "default";
     const HAIR   = profile.hair || "short";
     const OUTFIT = profile.outfit || "street";
 
-    // --------- Canvas & Viewport ----------
+    // --------- Canvas ----------
     const cvs = document.getElementById('game');
     const ctx = cvs.getContext('2d');
-
-    // Scale factor: pixels per world unit (our sprites are 32x32)
     const TILE = 32;
-    // >>> ZOOMED IN: fixed scale 4x (32px -> 128px on screen)
-    const SCALE = 4;
-    const DRAW = TILE * SCALE;
+    const SCALE = 4;     // 32px -> 128px on screen
+    const DRAW  = TILE * SCALE;
 
     // --------- Asset Loader ----------
-    function loadImg(src){
-      return new Promise((res, rej)=>{
-        const i = new Image();
-        i.onload = ()=>res(i);
-        i.onerror = rej;
-        i.src = src;
-      });
-    }
+    function loadImg(src){ return new Promise((res, rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
     const assetRoot = "/static/game/sprites";
     const assets = {
-      body:   `${assetRoot}/body/${BODY}.png`
-      ,hair:  `${assetRoot}/hair/${HAIR}.png`
-      ,outfit:`${assetRoot}/outfit/${OUTFIT}.png`,
+      body:   `${assetRoot}/body/${BODY}.png`,
+      hair:   `${assetRoot}/hair/${HAIR}.png`,
+      outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
     };
 
-    // --------- Simple Map (prototype) ----------
-    // 0 = grass, 1 = road, 2 = sidewalk, 3 = building block
+    // --------- World / Regions ----------
+    // World: 90x60 tiles (like before)
     const W = 90, H = 60;
+
+    // Region grid (5 x 3 macro-chunks). Each region has a state:
+    // 0 = locked (solid grey), 1 = preview (semi-transparent grey), 2 = unlocked
+    const REG_CX = 5, REG_CY = 3;
+    const REG_W  = Math.floor(W / REG_CX);
+    const REG_H  = Math.floor(H / REG_CY);
+
+    // Start center unlocked, ring preview, others locked
+    const regions = [];
+    for(let ry=0; ry<REG_CY; ry++){
+      for(let rx=0; rx<REG_CX; rx++){
+        let state = 0; // locked
+        if (rx===Math.floor(REG_CX/2) && ry===Math.floor(REG_CY/2)) state = 2; // center
+        else if (Math.abs(rx-Math.floor(REG_CX/2)) + Math.abs(ry-Math.floor(REG_CY/2)) === 1) state = 1; // cross preview
+        regions.push({rx, ry, state});
+      }
+    }
+    function regionAtTile(tx,ty){
+      const rx = Math.min(REG_CX-1, Math.max(0, Math.floor(tx/REG_W)));
+      const ry = Math.min(REG_CY-1, Math.max(0, Math.floor(ty/REG_H)));
+      return regions[ry*REG_CX + rx];
+    }
+
+    // Base tile map: 0 grass, 1 road, 2 sidewalk, 3 building, 4 shop doorway
     const map = new Array(H).fill(0).map(()=>new Array(W).fill(0));
     for (let y=0; y<H; y++){
       for (let x=0; x<W; x++){
-        map[y][x] = 0; // grass
+        map[y][x] = 0;
         if (y%10===5) map[y][x] = 1;
         if (x%12===6) map[y][x] = 1;
-        if (map[y][x]===1 && (y%10===4 || y%10===6 || x%12===5 || x%12===7)) {
-          if (map[y][x]!==1) map[y][x]=2; else map[y][x]=1;
+      }
+    }
+    // Sidewalk next to roads (simple pass)
+    for (let y=0; y<H; y++){
+      for (let x=0; x<W; x++){
+        if (map[y][x]===0 && (map[y][x-1]===1 || map[y][x+1]===1 || (map[y-1]||[])[x]===1 || (map[y+1]||[])[x]===1)){
+          map[y][x] = 2;
         }
       }
     }
+    // Building block cluster with a couple shop doors
     for (let by=20; by<27; by++){
       for (let bx=20; bx<28; bx++){
-        if (map[by][bx]===0) map[by][bx]=3;
+        if (map[by][bx]!==1) map[by][bx]=3; // building solid
       }
     }
+    // Cut two doorways (tile=4) on building edge (overwriting building)
+    map[23][20] = 4;  // west entrance
+    map[23][27] = 4;  // east entrance
+    // Make sure sidewalk in front of doors
+    map[23][19] = 2; map[23][28] = 2;
+
+    // Hotspots for shops (match doorway tiles)
+    const shops = [
+      {tx:20, ty:23, name:"Block A — West Shop"},
+      {tx:27, ty:23, name:"Block A — East Shop"},
+    ];
 
     // --------- Player ----------
     const player = {
-      x: (W/2)*TILE + 2,
-      y: (H/2)*TILE + 2,
+      x: (Math.floor(W/2))*TILE + 2,
+      y: (Math.floor(H/2))*TILE + 2,
       vx: 0, vy: 0,
-      speed: 2.0 * (TILE/16), // scale-independent speed
-      facing: 'down',
+      speed: 2.0 * (TILE/16),
       wanted: 0
     };
 
-    // --------- Input (keyboard) ----------
+    // --------- Input ----------
     const keys = {};
-    window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; });
+    window.addEventListener('keydown', e=>{
+      keys[e.key.toLowerCase()] = true;
+      if (e.key.toLowerCase()==='m'){ toggleMap(true); }
+    });
     window.addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()] = false; });
 
-    // --------- Input (mobile joystick) ----------
+    // Mobile joystick
     const stick = document.getElementById('stick');
     const nub   = document.getElementById('nub');
     let dragging = false, baseRect=null, vec = {x:0,y:0};
-
     function setNub(dx,dy){
       const r = 40;
       const mag = Math.hypot(dx,dy) || 1;
@@ -147,12 +249,10 @@
       const ux = dx / mag, uy = dy / mag;
       nub.style.left = (40 + ux*clamped) + 'px';
       nub.style.top  = (40 + uy*clamped) + 'px';
-      vec.x = (clamped/r)*ux;
-      vec.y = (clamped/r)*uy;
+      vec.x = (clamped/r)*ux; vec.y = (clamped/r)*uy;
     }
     function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
-
-    function startDrag(e){ dragging = true; baseRect = stick.getBoundingClientRect(); }
+    function startDrag(){ dragging = true; baseRect = stick.getBoundingClientRect(); }
     function moveDrag(e){
       if(!dragging) return;
       const t = e.touches ? e.touches[0] : e;
@@ -161,7 +261,6 @@
       setNub(t.clientX - cx, t.clientY - cy);
     }
     function endDrag(){ dragging=false; resetNub(); }
-
     stick.addEventListener('touchstart', startDrag, {passive:true});
     stick.addEventListener('touchmove',  moveDrag,  {passive:true});
     stick.addEventListener('touchend',   endDrag,   {passive:true});
@@ -169,7 +268,7 @@
     window.addEventListener('mousemove', moveDrag);
     window.addEventListener('mouseup',   endDrag);
 
-    // --------- Wanted Stars HUD (placeholder) ----------
+    // --------- Wanted Stars ----------
     function setWanted(n){
       player.wanted = Math.max(0, Math.min(5, n|0));
       const stars = document.querySelectorAll('#stars .star');
@@ -185,30 +284,77 @@
       camera.y = Math.max(0, Math.min(camera.y, H*TILE - cvs.height));
     }
 
+    // --------- Collisions ----------
+    function isSolidTile(tx,ty){
+      if (tx<0||ty<0||tx>=W||ty>=H) return true;
+      const t = map[ty][tx];
+      return t===3; // buildings are solid
+    }
+    function tryMove(nx,ny){
+      // AABB vs tiles (simple: test feet center tile)
+      const tx = Math.floor(nx / TILE);
+      const ty = Math.floor(ny / TILE);
+      if (isSolidTile(tx,ty)) return false;
+      // Also forbid walking into fully locked regions
+      const reg = regionAtTile(tx,ty);
+      if (reg.state===0) return false;
+      player.x = nx; player.y = ny;
+      return true;
+    }
+
+    // --------- Shops / hotspots ----------
+    function nearShop(){
+      const tx = Math.floor(player.x / TILE);
+      const ty = Math.floor(player.y / TILE);
+      return shops.find(s => Math.abs(s.tx - tx)<=0 && Math.abs(s.ty - ty)<=0);
+    }
+    const shopModal = document.getElementById('shopModal');
+    document.getElementById('shopClose').onclick = ()=> shopModal.style.display='none';
+
     // --------- Drawing ----------
     function drawTile(gx,gy,screenX,screenY){
       const t = map[gy][gx];
       const S = DRAW;
-      if (t===0){
-        ctx.fillStyle = '#0b381d';
-        ctx.fillRect(screenX, screenY, S, S);
-        ctx.fillStyle = 'rgba(255,255,255,.03)';
-        ctx.fillRect(screenX, screenY, S, 3);
-      } else if (t===1){
-        ctx.fillStyle = '#2b2b2b';
-        ctx.fillRect(screenX, screenY, S, S);
+
+      // Base color per tile
+      if (t===0){ ctx.fillStyle = '#0b381d'; }
+      else if (t===1){ ctx.fillStyle = '#2b2b2b'; }
+      else if (t===2){ ctx.fillStyle = '#555d66'; }
+      else if (t===3){ ctx.fillStyle = '#4a2d2d'; }
+      else if (t===4){ ctx.fillStyle = '#6a3'; } // shop doorway
+      ctx.fillRect(screenX, screenY, S, S);
+
+      if (t===1){ // road center line
         ctx.fillStyle = '#cfcf00';
         ctx.fillRect(screenX + S/2 - 2, screenY, 4, S);
-      } else if (t===2){
-        ctx.fillStyle = '#555d66';
-        ctx.fillRect(screenX, screenY, S, S);
-        ctx.strokeStyle = 'rgba(0,0,0,.25)';
-        ctx.strokeRect(screenX, screenY, S, S);
-      } else if (t===3){
-        ctx.fillStyle = '#4a2d2d';
-        ctx.fillRect(screenX, screenY, S, S);
-        ctx.fillStyle = 'rgba(0,0,0,.15)';
-        ctx.fillRect(screenX, screenY, S, 6);
+      }
+    }
+
+    function drawRegionFog(){
+      // Overlay fog per region
+      const S = DRAW;
+      const startX = Math.max(0, Math.floor(camera.x / TILE));
+      const startY = Math.max(0, Math.floor(camera.y / TILE));
+      const tilesX = Math.ceil(cvs.width / S) + 2;
+      const tilesY = Math.ceil(cvs.height / S) + 2;
+
+      for (let y=0; y<tilesY; y++){
+        for (let x=0; x<tilesX; x++){
+          const gx = startX + x, gy = startY + y;
+          if (gx<0||gy<0||gx>=W||gy>=H) continue;
+          const reg = regionAtTile(gx,gy);
+          const screenX = (gx*TILE - camera.x) * (S/TILE);
+          const screenY = (gy*TILE - camera.y) * (S/TILE);
+          if (reg.state===0){
+            // locked: solid grey
+            ctx.fillStyle = 'rgba(150,160,175,.65)';
+            ctx.fillRect(screenX, screenY, S, S);
+          }else if (reg.state===1){
+            // preview: let some of the underlay show through
+            ctx.fillStyle = 'rgba(180,190,205,.25)';
+            ctx.fillRect(screenX, screenY, S, S);
+          }
+        }
       }
     }
 
@@ -222,28 +368,34 @@
       ctx.drawImage(images.hair,   0,0,TILE,TILE, sx, sy, S, S);
     }
 
-    // --------- Update ----------
+    // --------- Update / Render ---------
     function update(dt){
+      // aggregate input
       let dx = 0, dy = 0;
       if (keys['arrowup']||keys['w']) dy -= 1;
       if (keys['arrowdown']||keys['s']) dy += 1;
       if (keys['arrowleft']||keys['a']) dx -= 1;
       if (keys['arrowright']||keys['d']) dx += 1;
-
       dx += vec.x; dy += vec.y;
 
       const mag = Math.hypot(dx,dy);
+      let nx = player.x, ny = player.y;
       if (mag > 0){
-        dx /= mag; dy /= mag;
-        player.vx = dx * player.speed;
-        player.vy = dy * player.speed;
-      } else {
-        player.vx = 0; player.vy = 0;
+        dx/=mag; dy/=mag;
+        const sp = player.speed * dt;
+        // Try x then y to slide along walls
+        if (dx !== 0){
+          const tx = player.x + dx * sp;
+          tryMove(tx, player.y) && (nx = player.x);
+        }
+        if (dy !== 0){
+          const ty = player.y + dy * sp;
+          tryMove(player.x, ty) && (ny = player.y);
+        }
       }
+      player.x = nx; player.y = ny;
 
-      player.x += player.vx * dt;
-      player.y += player.vy * dt;
-
+      // Clamp to bounds (also redundant with tryMove edges)
       player.x = Math.max(0, Math.min(player.x, W*TILE - TILE));
       player.y = Math.max(0, Math.min(player.y, H*TILE - TILE));
 
@@ -262,8 +414,7 @@
 
       for (let y=0; y<tilesY; y++){
         for (let x=0; x<tilesX; x++){
-          const gx = startX + x;
-          const gy = startY + y;
+          const gx = startX + x, gy = startY + y;
           if (gx>=0 && gx<W && gy>=0 && gy<H){
             const screenX = (gx*TILE - camera.x) * (S/TILE);
             const screenY = (gy*TILE - camera.y) * (S/TILE);
@@ -272,33 +423,94 @@
         }
       }
 
+      // Region fog (locked/preview)
+      drawRegionFog();
+
+      // Player last (on top)
       drawPlayer(images);
     }
 
-    // --------- Main Loop ---------
-    Promise.all([
-      loadImg(assets.body),
-      loadImg(assets.outfit),
-      loadImg(assets.hair),
-    ]).then(([body, outfit, hair])=>{
-      const imgs = { body, outfit, hair };
-      let last = performance.now();
-      function loop(now){
-        const dt = Math.min(32, now - last);
-        last = now;
-        update(dt/16.6667);
-        render(imgs);
-        requestAnimationFrame(loop);
+    // --------- Minimap + Big Map ---------
+    const mini = document.getElementById('minimap');
+    const mctx = mini.getContext('2d');
+    const big = document.getElementById('bigmap');
+    const bctx = big.getContext('2d');
+    const mapModal = document.getElementById('mapModal');
+    document.getElementById('mapClose').onclick = ()=> toggleMap(false);
+    mini.addEventListener('click', ()=> toggleMap(true));
+
+    function drawAnyMap(ctx2, width, height){
+      ctx2.imageSmoothingEnabled = false;
+      ctx2.clearRect(0,0,width,height);
+      // scale whole world to given canvas
+      for (let y=0; y<H; y++){
+        for (let x=0; x<W; x++){
+          const t = map[y][x];
+          let c = '#0b381d';
+          if (t===1) c='#2b2b2b'; else if (t===2) c='#555d66'; else if (t===3) c='#4a2d2d'; else if (t===4) c='#6a3';
+          ctx2.fillStyle = c;
+          const sx = Math.floor(x * (width/W));
+          const sy = Math.floor(y * (height/H));
+          const sw = Math.ceil((x+1) * (width/W)) - sx;
+          const sh = Math.ceil((y+1) * (height/H)) - sy;
+          ctx2.fillRect(sx, sy, sw, sh);
+        }
       }
-      centerCamera();
-      requestAnimationFrame(loop);
-    }).catch(err=>{
-      console.error("Sprite load failed", err);
+      // region overlays
+      for (const r of regions){
+        const rx0 = Math.floor((r.rx*REG_W) * (width/W));
+        const ry0 = Math.floor((r.ry*REG_H) * (height/H));
+        const rw  = Math.ceil(((r.rx+1)*REG_W) * (width/W)) - rx0;
+        const rh  = Math.ceil(((r.ry+1)*REG_H) * (height/H)) - ry0;
+        if (r.state===0){ ctx2.fillStyle = 'rgba(150,160,175,.65)'; ctx2.fillRect(rx0,ry0,rw,rh); }
+        else if (r.state===1){ ctx2.fillStyle = 'rgba(180,190,205,.25)'; ctx2.fillRect(rx0,ry0,rw,rh); }
+        ctx2.strokeStyle = 'rgba(255,255,255,.06)'; ctx2.strokeRect(rx0+.5, ry0+.5, rw-1, rh-1);
+      }
+      // player dot
+      ctx2.fillStyle = '#3df';
+      const px = Math.floor((player.x/TILE) * (width/W));
+      const py = Math.floor((player.y/TILE) * (height/H));
+      ctx2.fillRect(px-1, py-1, 3, 3);
+    }
+    function drawMinimap(){ drawAnyMap(mctx, mini.width, mini.height); }
+    function drawBigmap(){ drawAnyMap(bctx, big.width, big.height); }
+    function toggleMap(show){
+      mapModal.style.display = show ? 'flex' : 'none';
+      if (show){ drawBigmap(); }
+    }
+
+    // --------- Main Loop ---------
+    Promise.all([ loadImg(assets.body), loadImg(assets.outfit), loadImg(assets.hair) ])
+      .then(([body, outfit, hair])=>{
+        const imgs = { body, outfit, hair };
+        let last = performance.now();
+        function loop(now){
+          const dt = Math.min(32, now - last); last = now;
+          update(dt/16.6667);
+          render(imgs);
+          drawMinimap();
+          requestAnimationFrame(loop);
+        }
+        centerCamera();
+        requestAnimationFrame(loop);
+      })
+      .catch(err=> console.error("Sprite load failed", err));
+
+    // --------- Buttons wiring ---------
+    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
+    document.getElementById('btnB').addEventListener('click', tryEnterShop);
+    window.addEventListener('keydown', e=>{
+      if (e.key.toLowerCase()==='b') tryEnterShop();
     });
 
-    // Quick test buttons (wire later)
-    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
-    document.getElementById('btnB').addEventListener('click', ()=> setWanted(0));
+    function tryEnterShop(){
+      const s = nearShop();
+      if (!s) return;
+      // If doorway's region is preview, "unlock" it to full on first entry (example progression)
+      const reg = regionAtTile(s.tx, s.ty);
+      if (reg.state===1) reg.state = 2;
+      shopModal.style.display='flex';
+    }
   })();
   </script>
 </body>
