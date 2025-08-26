@@ -1,4 +1,8 @@
 (function(){
+  // --- Build stamp so you can verify in DevTools console ---
+  const BUILD = 'v9';
+  console.log('[IZZA PLAY]', BUILD);
+
   const profile = window.__IZZA_PROFILE__ || {};
   const BODY   = profile.sprite_skin || "default";
   const HAIR   = profile.hair || "short";
@@ -7,30 +11,43 @@
   // ---------- Canvas & constants ----------
   const cvs = document.getElementById('game');
   const ctx = cvs.getContext('2d');
-  const TILE = 32;                    // world tile size (px in world space)
-  const SCALE = 3;                    // zoom: each tile is drawn at TILE*SCALE
-  const DRAW  = TILE * SCALE;         // tile size on screen
-  ctx.imageSmoothingEnabled = false;
+
+  const TILE  = 32;          // world tile = 32 world-pixels
+  const SCALE = 3;           // camera zoom (screen pixels per world-pixel is SCALE)
+  const DRAW  = TILE * SCALE;
+  const SCALE_FACTOR = DRAW / TILE;       // = SCALE
+
+  // Helpers to convert world->screen consistently
+  const w2sX = wx => (wx - camera.x) * SCALE_FACTOR;
+  const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
 
   // ---------- World grid ----------
-  const W = 90, H = 60;               // tiles
+  const W = 90, H = 60;
 
-  // Regions (tiles)
-  const unlocked = { x0: 18, y0: 18, x1: 72, y1: 42 };   // playable
-  const preview  = { x0: 10, y0: 12, x1: 80, y1: 50 };   // map-only, not playable
-  const inRect = (gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
+  // Regions
+  const unlocked = { x0: 18, y0: 18, x1: 72, y1: 42 };      // playable
+  const preview  = { x0: 10, y0: 12, x1: 80, y1: 50 };      // map-only preview
+  const inRect   = (gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
   const inUnlocked = (gx,gy)=> inRect(gx,gy, unlocked);
 
-  // ---------- City layout (tiles) ----------
+  // Hub building (10×6) near top-middle of unlocked area
   const bW=10, bH=6;
   const bX = Math.floor((unlocked.x0 + unlocked.x1)/2) - Math.floor(bW/2);
   const bY = unlocked.y0 + 5;
-  const sidewalkY = bY + bH;          // row under the building
-  const roadY     = sidewalkY + 1;    // row under the sidewalk
-  const door      = { gx: bX + Math.floor(bW/2), gy: sidewalkY };
+
+  // Sidewalk & road rows
+  const sidewalkY = bY + bH;          // directly under building
+  const roadY     = sidewalkY + 1;    // below sidewalk
+
+  // Door centered on sidewalk
+  const door = { gx: bX + Math.floor(bW/2), gy: sidewalkY };
 
   // ---------- Assets ----------
-  function loadImg(src){ return new Promise((res, rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
+  function loadImg(src){
+    return new Promise((res, rej)=>{
+      const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src;
+    });
+  }
   const assetRoot = "/static/game/sprites";
   const assets = {
     body:   `${assetRoot}/body/${BODY}.png`,
@@ -38,11 +55,10 @@
     outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
   };
 
-  // ---------- Player (exact tile alignment) ----------
-  // IMPORTANT: keep x,y exactly at tile top-left so maps and world agree 1:1.
+  // ---------- Player (spawn on sidewalk at door) ----------
   const player = {
-    x: door.gx * TILE,         // top-left of door tile
-    y: door.gy * TILE,         // sidewalk row
+    x: door.gx*TILE + (TILE/2 - 8),   // slight offset so sprite visually centers
+    y: door.gy*TILE,
     vx: 0, vy: 0,
     speed: 2.0 * (TILE/16),
     wanted: 0
@@ -61,8 +77,9 @@
   window.addEventListener('keydown', e=>{
     const k = e.key.toLowerCase();
     keys[k] = true;
-    if(k==='b'){ e.preventDefault(); handleB(); }
+    if (k === 'b') { e.preventDefault(); handleB(); }
   }, {passive:false});
+
   window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
 
   btnA.addEventListener('click', ()=> setWanted(player.wanted+1));
@@ -102,13 +119,19 @@
     document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star' + (i<player.wanted?' on':'') );
   }
 
-  // ---------- Camera (world pixels, clamped to unlocked) ----------
+  // ---------- Camera (now correctly scaled) ----------
   const camera={x:0,y:0};
   function centerCamera(){
-    camera.x = Math.round(player.x - cvs.width/2);
-    camera.y = Math.round(player.y - cvs.height/2);
-    const maxX = (unlocked.x1+1)*TILE - cvs.width;
-    const maxY = (unlocked.y1+1)*TILE - cvs.height;
+    // screen width/height in *world* pixels = canvas / SCALE
+    const visW = cvs.width  / SCALE_FACTOR;
+    const visH = cvs.height / SCALE_FACTOR;
+
+    camera.x = player.x - visW/2;
+    camera.y = player.y - visH/2;
+
+    const maxX = (unlocked.x1+1)*TILE - visW;
+    const maxY = (unlocked.y1+1)*TILE - visH;
+
     camera.x = Math.max(unlocked.x0*TILE, Math.min(camera.x, maxX));
     camera.y = Math.max(unlocked.y0*TILE, Math.min(camera.y, maxY));
   }
@@ -116,73 +139,80 @@
   // ---------- Collision ----------
   const isBuilding = (gx,gy)=> gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH;
   function isSolid(gx,gy){
-    if(!inUnlocked(gx,gy)) return true;  // outside playable area
-    if(isBuilding(gx,gy))  return true;  // walls/inside are solid for now
+    if(!inUnlocked(gx,gy)) return true;   // outside unlocked = hard wall
+    if(isBuilding(gx,gy))  return true;   // building tiles are solid
     return false;
   }
+
   function tryMove(nx,ny){
     // X axis
     const cx = [
       {x:nx, y:player.y}, {x:nx+TILE-1, y:player.y},
       {x:nx, y:player.y+TILE-1}, {x:nx+TILE-1, y:player.y+TILE-1}
     ];
-    if(!cx.some(c=>isSolid((c.x/TILE)|0, (c.y/TILE)|0))) player.x = nx;
+    if(!cx.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.x = nx;
 
     // Y axis
     const cy = [
       {x:player.x, y:ny}, {x:player.x+TILE-1, y:ny},
       {x:player.x, y:ny+TILE-1}, {x:player.x+TILE-1, y:ny+TILE-1}
     ];
-    if(!cy.some(c=>isSolid((c.x/TILE)|0, (c.y/TILE)|0))) player.y = ny;
+    if(!cy.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.y = ny;
   }
 
   // ---------- Door UX ----------
   const promptEl = document.getElementById('prompt');
   function doorInRange(){
-    // player tile index (centered)
-    const px = ((player.x + TILE/2)/TILE)|0;
-    const py = ((player.y + TILE/2)/TILE)|0;
-    // Must be on (or immediately adjacent to) the door tile
-    return (Math.abs(px-door.gx)+Math.abs(py-door.gy)) <= 1;
+    const px = Math.floor((player.x + TILE/2)/TILE);
+    const py = Math.floor((player.y + TILE/2)/TILE);
+    return (Math.abs(px-door.gx)+Math.abs(py-door.gy))<=2; // generous for touch
   }
   function openEnter(){ document.getElementById('enterModal').style.display='flex'; }
   document.getElementById('closeEnter').addEventListener('click', ()=> document.getElementById('enterModal').style.display='none');
   document.getElementById('enterModal').addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) e.currentTarget.style.display='none'; });
 
   // ---------- Maps ----------
-  const mini = document.getElementById('minimap'),   mctx = mini.getContext('2d');
+  const mini = document.getElementById('minimap');
+  const mctx = mini.getContext('2d');
   const mapModal = document.getElementById('mapModal');
-  const bigmap   = document.getElementById('bigmap'), bctx = bigmap.getContext('2d');
+  const bigmap   = document.getElementById('bigmap');
+  const bctx     = bigmap.getContext('2d');
 
   function drawCity(ctx2d, sx, sy){
-    // Locked base (black)
-    ctx2d.fillStyle = '#000'; ctx2d.fillRect(0,0,ctx2d.canvas.width,ctx2d.canvas.height);
-    // Preview (semi transparent)
+    // Locked base is implied by clearing to black in callers
+
+    // Preview (semi-transparent)
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
-    // Unlocked
+
+    // Unlocked area (clear dark)
     ctx2d.fillStyle = '#1c293e';
     ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
-    // Roads continue through preview
+
+    // Roads (extend through preview)
     ctx2d.fillStyle = '#788292';
-    ctx2d.fillRect(preview.x0*sx, roadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);          // horizontal
-    ctx2d.fillRect(door.gx*sx,      preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);  // vertical
-    // Buildings
+    ctx2d.fillRect(preview.x0*sx, roadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy); // horizontal
+    ctx2d.fillRect(door.gx*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy); // vertical
+
+    // Hub building
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
   }
 
   function drawMini(){
     const sx = mini.width / W, sy = mini.height / H;
+    mctx.fillStyle = '#000'; mctx.fillRect(0,0,mini.width,mini.height);
     drawCity(mctx, sx, sy);
-    // Player dot (world px -> tiles -> map px)
+    // Player
     mctx.fillStyle = '#35f1ff';
     mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 2, 2);
   }
 
   function drawBig(){
     const sx = bigmap.width / W, sy = bigmap.height / H;
+    bctx.fillStyle = '#000'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
     drawCity(bctx, sx, sy);
+    // Player
     bctx.fillStyle = '#35f1ff';
     bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
   }
@@ -192,30 +222,32 @@
   mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) mapModal.style.display='none'; });
 
   // ---------- Drawing ----------
-  function drawTile(gx,gy,screenX,screenY){
+  function drawTile(gx,gy){
     const S = DRAW;
+    const screenX = w2sX(gx*TILE);
+    const screenY = w2sY(gy*TILE);
 
-    // Outside unlocked → black wall tile
+    // Outside unlocked → black wall
     if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
 
-    // Base ground (grass)
+    // Base ground
     ctx.fillStyle = '#09371c';
     ctx.fillRect(screenX,screenY,S,S);
 
     // Building footprint
-    if(gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){
+    if (gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){
       ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
     }
 
     // Sidewalk
-    if(gy===sidewalkY){
+    if (gy===sidewalkY){
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
 
     // Road with dashed center
-    if(gy===roadY){
+    if (gy===roadY){
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
       for(let i=0;i<4;i++){
@@ -223,13 +255,15 @@
       }
     }
 
-    // Door (on sidewalk)
-    if(gx===door.gx && gy===door.gy){
+    // Door
+    if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
       const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
       ctx.fillRect(screenX + (S-w)/2, screenY + (S-h), w, h);
+
       if(near){
+        // place prompt above the door (already screen coords)
         promptEl.style.left = (screenX + S/2) + 'px';
         promptEl.style.top  = (screenY - 8) + 'px';
         promptEl.style.display = 'block';
@@ -238,9 +272,10 @@
   }
 
   function drawPlayer(images){
-    const S = DRAW;
-    const sx = Math.floor((player.x - camera.x) * (S/TILE));
-    const sy = Math.floor((player.y - camera.y) * (S/TILE));
+    const S  = DRAW;
+    const sx = w2sX(player.x);
+    const sy = w2sY(player.y);
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(images.body,   0,0,TILE,TILE, sx, sy, S, S);
     ctx.drawImage(images.outfit, 0,0,TILE,TILE, sx, sy, S, S);
     ctx.drawImage(images.hair,   0,0,TILE,TILE, sx, sy, S, S);
@@ -248,7 +283,7 @@
 
   // ---------- Update & render ----------
   function update(dt){
-    promptEl.style.display='none';  // hidden unless door shows it this frame
+    promptEl.style.display='none'; // hidden unless door re-shows it
 
     let dx=0, dy=0;
     if(keys['arrowup']||keys['w']) dy-=1;
@@ -268,31 +303,28 @@
   function render(images){
     ctx.fillStyle='#000'; ctx.fillRect(0,0,cvs.width,cvs.height);
 
-    const S = DRAW;
-    const tilesX = Math.ceil(cvs.width  / S) + 2;
-    const tilesY = Math.ceil(cvs.height / S) + 2;
-    const startX = Math.max(0, (camera.x / TILE)|0);
-    const startY = Math.max(0, (camera.y / TILE)|0);
+    const tilesX = Math.ceil(cvs.width  / DRAW) + 2;
+    const tilesY = Math.ceil(cvs.height / DRAW) + 2;
+    const startX = Math.max(0, Math.floor(camera.x / TILE));
+    const startY = Math.max(0, Math.floor(camera.y / TILE));
 
     for(let y=0;y<tilesY;y++){
       for(let x=0;x<tilesX;x++){
         const gx = startX + x, gy = startY + y;
-        if(gx>=0 && gx<W && gy>=0 && gy<H){
-          const screenX = (gx*TILE - camera.x) * (S/TILE);
-          const screenY = (gy*TILE - camera.y) * (S/TILE);
-          drawTile(gx,gy,screenX,screenY);
-        }
+        if(gx>=0 && gx<W && gy>=0 && gy<H) drawTile(gx,gy);
       }
     }
     drawPlayer(images);
-    drawMini(); // repaint mini-map each frame
+
+    // repaint mini-map
+    drawMini();
   }
 
   // ---------- Boot ----------
   Promise.all([loadImg(assets.body), loadImg(assets.outfit), loadImg(assets.hair)])
     .then(([body,outfit,hair])=>{
       const imgs = { body, outfit, hair };
-      centerCamera(); // make sure first frame centers exactly on the door tile
+      centerCamera(); // center on spawn correctly with scaling
       let last = performance.now();
       function loop(now){
         const dt = Math.min(32, now-last); last=now;
