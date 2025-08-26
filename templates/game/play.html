@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IZZA GAME — Play</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    body{margin:0;background:#0b0b0b;color:#e8e8e8;font-family:Arial,Helvetica,sans-serif}
+    #game-root{display:flex;justify-content:center;padding:12px}
+    canvas{image-rendering:pixelated}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+</head>
+<body class="cw-blue theme-a">
+  <div id="game-root"></div>
+  <script>
+    // Boot data for your JS client if needed later
+    window.IZZA_BOOT = {
+      user: {{ user|tojson }},
+      profile: {{ profile|tojson }}
+    };
+  </script>
+  <script>
+  // Tiny placeholder so you can see something immediately
+  const config = {
+    type: Phaser.AUTO,
+    width: 960, height: 540, parent: 'game-root',
+    pixelArt: true,
+    physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
+    scene: { preload, create, update }
+  };
+  const game = new Phaser.Game(config);
+
+  function preload(){
+    this.load.image('player','https://dummyimage.com/16x16/50c878/ffffff.png&text=+');
+  }
+  function create(){
+    const p = window.IZZA_BOOT?.profile;
+    const u = window.IZZA_BOOT?.user;
+    this.add.text(16,16,`IZZA GAME`,{fontFamily:'monospace',fontSize:18});
+    this.add.text(16,40,`Player: ${p?.username || u?.username || 'anon'}`,{fontFamily:'monospace',fontSize:14});
+    this.player = this.physics.add.sprite(200,200,'player');
+    this.cursors = this.input.keyboard.createCursorKeys();
+  }
+  function update(){
+    const s = 150, p = this.player; p.setVelocity(0,0);
+    if(this.cursors.left.isDown)  p.setVelocityX(-s);
+    if(this.cursors.right.isDown) p.setVelocityX(s);
+    if(this.cursors.up.isDown)    p.setVelocityY(-s);
+    if(this.cursors.down.isDown)  p.setVelocityY(s);
+  }
+  </script>
+</body>
+</html>
