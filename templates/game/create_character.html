@@ -7,44 +7,204 @@
   <link rel="stylesheet" href="/static/themes.css">
   <style>
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:680px;margin:0 auto;padding:16px}
+    .wrap{max-width:980px;margin:0 auto;padding:16px}
+    .grid{display:grid;grid-template-columns:360px 1fr;gap:16px}
+    @media (max-width:860px){ .grid{grid-template-columns:1fr} }
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
     label{display:block;margin:8px 0 4px}
     select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:var(--txt)}
+    .muted{color:var(--muted)}
+    .preview-wrap{display:flex;flex-direction:column;gap:10px}
+    .stage{
+      width:320px;height:320px;border-radius:12px;border:1px solid var(--line);
+      background:
+        linear-gradient(0deg, rgba(0,0,0,.08) 1px, transparent 1px) 0 0/20px 20px,
+        linear-gradient(90deg, rgba(0,0,0,.08) 1px, transparent 1px) 0 0/20px 20px,
+        #10202b;
+      display:flex;align-items:center;justify-content:center;margin:0 auto;
+    }
+    canvas{image-rendering:pixelated;image-rendering:crisp-edges}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:12px;background:var(--chip-bg)}
+    .note{font-size:13px}
+    .danger{color:#ff9aa2}
+    .btns{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
   </style>
 </head>
 <body class="cw-blue theme-a">
   <div class="wrap">
     <div class="card">
-      <h1>Create Your Character</h1>
-      <form method="post">
-        <label>Sprite Skin</label>
-        <select name="sprite_skin">
-          <option value="default">Default</option>
-          <option value="street_a">Street A</option>
-          <option value="street_b">Street B</option>
-        </select>
-
-        <label>Hair</label>
-        <select name="hair">
-          <option value="short">Short</option>
-          <option value="buzz">Buzz</option>
-          <option value="long">Long</option>
-        </select>
-
-        <label>Outfit</label>
-        <select name="outfit">
-          <option value="street">Street</option>
-          <option value="athletic">Athletic</option>
-          <option value="luxury">Luxury</option>
-        </select>
-
-        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
-          <button class="ip-btn" type="submit">Save and Enter IZZA</button>
-          <a class="ip-btn ghost" href="/">Cancel</a>
+      <div class="grid">
+        <!-- Left: Live Preview -->
+        <div class="preview-wrap">
+          <h1 style="margin:0 0 6px">Create Your Character</h1>
+          <div class="row">
+            <span class="pill">8-bit retro • top-down</span>
+            <span class="pill">IZZA City starter look</span>
+          </div>
+          <div class="stage">
+            <canvas id="avatar" width="160" height="160" aria-label="Live character preview"></canvas>
+          </div>
+          <p class="muted note" id="presetLabel"></p>
         </div>
-      </form>
+
+        <!-- Right: Form -->
+        <div>
+          <form id="charForm" method="post">
+            {# Preserve short-lived token across POST if present #}
+            {% if t %}
+              <input type="hidden" name="t" value="{{ t }}">
+            {% endif %}
+
+            <label>Sprite Skin</label>
+            <select name="sprite_skin" id="sprite_skin">
+              <option value="default">Default</option>
+              <option value="street_a">Street A</option>
+              <option value="street_b">Street B</option>
+            </select>
+
+            <label>Hair</label>
+            <select name="hair" id="hair">
+              <option value="short">Short</option>
+              <option value="buzz">Buzz</option>
+              <option value="long">Long</option>
+            </select>
+
+            <label>Outfit</label>
+            <select name="outfit" id="outfit">
+              <option value="street">Street</option>
+              <option value="athletic">Athletic</option>
+              <option value="luxury">Luxury</option>
+            </select>
+
+            <div class="btns">
+              <button class="ip-btn" type="submit">Save and Enter IZZA</button>
+              <a class="ip-btn ghost" href="/">Cancel</a>
+            </div>
+
+            <p class="muted note" style="margin-top:8px">
+              Once saved, your base appearance is <strong>locked</strong>. You can still change style
+              and flair later via in-game merch (barbers, outfitters, mods).
+            </p>
+          </form>
+        </div>
+      </div>
     </div>
   </div>
+
+  <script>
+  (function(){
+    // ---------- CONFIG: replace these URLs when you have real sprites ----------
+    // Each layer is a tiny 16x16 (or 32x32) pixel-art PNG to be scaled up.
+    // Fallbacks draw color blocks if an image fails to load.
+    const SPRITES = {
+      body: {
+        default:  "/static/game/sprites/body/default.png",
+        street_a: "/static/game/sprites/body/street_a.png",
+        street_b: "/static/game/sprites/body/street_b.png"
+      },
+      hair: {
+        short: "/static/game/sprites/hair/short.png",
+        buzz:  "/static/game/sprites/hair/buzz.png",
+        long:  "/static/game/sprites/hair/long.png"
+      },
+      outfit: {
+        street:   "/static/game/sprites/outfit/street.png",
+        athletic: "/static/game/sprites/outfit/athletic.png",
+        luxury:   "/static/game/sprites/outfit/luxury.png"
+      }
+    };
+
+    // Friendly label map for the live preset text
+    const LABELS = {
+      sprite_skin: { default:"Default", street_a:"Street A", street_b:"Street B" },
+      hair:        { short:"Short", buzz:"Buzz", long:"Long" },
+      outfit:      { street:"Street", athletic:"Athletic", luxury:"Luxury" }
+    };
+
+    // ---------- DOM ----------
+    const selSkin = document.getElementById('sprite_skin');
+    const selHair = document.getElementById('hair');
+    const selOut  = document.getElementById('outfit');
+    const cvs     = document.getElementById('avatar');
+    const ctx     = cvs.getContext('2d');
+    const preset  = document.getElementById('presetLabel');
+    const form    = document.getElementById('charForm');
+
+    // Scale up pixels nicely
+    ctx.imageSmoothingEnabled = false;
+
+    // Utility: load an image, but allow failure (we'll paint a placeholder)
+    function loadImg(src){
+      return new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = src;
+      });
+    }
+
+    // Paint a placeholder colored tile when asset missing
+    function paintPlaceholder(x,y,w,h,color){
+      ctx.fillStyle = color;
+      ctx.fillRect(x,y,w,h);
+      // Simple pixel outline for retro vibe
+      ctx.strokeStyle = "rgba(0,0,0,.35)";
+      ctx.strokeRect(x+0.5,y+0.5,w-1,h-1);
+    }
+
+    async function draw(){
+      // Clear
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+
+      // Background vignette
+      const g = ctx.createRadialGradient(80,80,10, 80,80,90);
+      g.addColorStop(0, "rgba(255,255,255,0.08)");
+      g.addColorStop(1, "rgba(0,0,0,0.0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,cvs.width,cvs.height);
+
+      // Resolve asset URLs based on selects
+      const bodyUrl = (SPRITES.body[selSkin.value] || SPRITES.body.default);
+      const hairUrl = (SPRITES.hair[selHair.value]  || SPRITES.hair.short);
+      const outfitUrl = (SPRITES.outfit[selOut.value] || SPRITES.outfit.street);
+
+      // Load images (could be null if missing)
+      const [body, hair, outfit] = await Promise.all([loadImg(bodyUrl), loadImg(hairUrl), loadImg(outfitUrl)]);
+
+      // We'll draw each at 96x96 positioned center; original art can be 16x16 or 32x32
+      const DW = 96, DH = 96, X = (cvs.width - DW)/2, Y = (cvs.height - DH)/2;
+
+      if (body) ctx.drawImage(body, X, Y, DW, DH);
+      else paintPlaceholder(X, Y, DW, DH, "#41d1a7");
+
+      if (outfit) ctx.drawImage(outfit, X, Y, DW, DH);
+      else paintPlaceholder(X+2, Y+38, DW-4, DH-40, "#5aa6ff");
+
+      if (hair) ctx.drawImage(hair, X, Y, DW, DH);
+      else paintPlaceholder(X+28, Y+6, 40, 22, "#f2d16b");
+
+      // Update text label
+      preset.textContent = `Preset • Skin: ${LABELS.sprite_skin[selSkin.value]}  • Hair: ${LABELS.hair[selHair.value]}  • Outfit: ${LABELS.outfit[selOut.value]}`;
+    }
+
+    // Wire live updates
+    selSkin.addEventListener('change', draw);
+    selHair.addEventListener('change', draw);
+    selOut.addEventListener('change', draw);
+
+    // Confirm lock-in on submit
+    form.addEventListener('submit', function(ev){
+      const ok = confirm(
+        "Save character?\n\nBase appearance will be LOCKED.\nYou can still change style via in-game shops (barber, outfitters, mods)."
+      );
+      if (!ok) { ev.preventDefault(); return false; }
+    });
+
+    // Initial render
+    draw();
+  })();
+  </script>
 </body>
 </html>
