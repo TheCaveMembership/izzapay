@@ -1,6 +1,6 @@
 (function(){
   // --- Build stamp so you can verify in DevTools console ---
-  const BUILD = 'v2-anim-4dir';
+  const BUILD = 'v2-anim-4dir-sheets2';
   console.log('[IZZA PLAY]', BUILD);
 
   const profile = window.__IZZA_PROFILE__ || {};
@@ -18,6 +18,7 @@
   const SCALE_FACTOR = DRAW / TILE; // == SCALE
 
   // Helpers world->screen
+  const camera={x:0,y:0};
   const w2sX = wx => (wx - camera.x) * SCALE_FACTOR;
   const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
 
@@ -45,15 +46,20 @@
   // ---------- Assets ----------
   function loadImg(src){
     return new Promise((res, rej)=>{
-      const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src;
+      const i=new Image();
+      i.onload=()=>res(i);
+      i.onerror=()=>rej(new Error('load-failed:'+src));
+      i.src=src;
     });
   }
   const assetRoot = "/static/game/sprites";
-  const assets = {
-    body:   `${assetRoot}/body/${BODY}.png`,
-    hair:   `${assetRoot}/hair/${HAIR}.png`,
-    outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
-  };
+
+  // Prefer "name 2.png" (animated sheet); fallback to "name.png"
+  function loadLayer(kind, name){
+    const with2 = `${assetRoot}/${kind}/${name} 2.png`;
+    const base  = `${assetRoot}/${kind}/${name}.png`;
+    return loadImg(with2).catch(()=>loadImg(base));
+  }
 
   // ---------- Player (spawn on sidewalk at door) ----------
   const player = {
@@ -83,10 +89,8 @@
   // Compute frame index given anim time + move state
   function currentFrame(cols, moving, animTime){
     if (cols <= 1) return 0;
-    if (!moving)   return 1 % cols;   // idle pose = middle frame if exists, else 0
-    // Loop 0..cols-1 at WALK_FPS
-    const idx = Math.floor(animTime / WALK_FRAME_MS) % cols;
-    return idx;
+    if (!moving)   return 1 % cols;   // idle pose = middle-ish frame if exists
+    return Math.floor(animTime / WALK_FRAME_MS) % cols;
   }
 
   // ---------- Input ----------
@@ -145,7 +149,6 @@
   }
 
   // ---------- Camera ----------
-  const camera={x:0,y:0};
   function centerCamera(){
     const visW = cvs.width  / SCALE_FACTOR;
     const visH = cvs.height / SCALE_FACTOR;
@@ -203,8 +206,6 @@
   const bctx     = bigmap.getContext('2d');
 
   function drawCity(ctx2d, sx, sy){
-    // Locked base is implied by clearing to black in callers
-
     // Preview (semi-transparent)
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
@@ -365,7 +366,11 @@
   }
 
   // ---------- Boot ----------
-  Promise.all([loadImg(assets.body), loadImg(assets.outfit), loadImg(assets.hair)])
+  Promise.all([
+      loadLayer('body',   BODY),
+      loadLayer('outfit', OUTFIT),
+      loadLayer('hair',   HAIR),
+    ])
     .then(([body,outfit,hair])=>{
       // Detect columns from body sheet (assume all layers match)
       const cols = getFrameCols(body);
