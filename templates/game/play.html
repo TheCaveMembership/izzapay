@@ -8,6 +8,10 @@
   <style>
     :root{ --ui:rgba(255,255,255,.9); --bg0:#0b0f17; --card:#141a23; --line:#263042; }
     html,body{height:100%; margin:0; background:#0b0f17; color:#e8eef7; font-family:Arial,Helvetica,sans-serif}
+    /* prevent long-press selection/cursor on iOS */
+    *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+    canvas{ touch-action:none; }
+
     .wrap{max-width:1100px;margin:0 auto;padding:8px}
     .hud{
       position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
@@ -18,24 +22,31 @@
     .hud .stars{display:flex; gap:4px}
     .star{width:16px; height:16px; border:1px solid #445; border-radius:3px; background:#111}
     .star.on{background:#ffd23f; border-color:#c59b00}
-    #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px}
-    canvas{display:block; width:100%; height:auto; border-radius:12px; background:#000}
 
-    .controls{ position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center }
-    .btn{ background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:10px; padding:10px 12px;
-      font-size:14px; user-select:none; -webkit-user-select:none; }
-    .stick { position:fixed; left:12px; bottom:12px; width:120px; height:120px; z-index:6; touch-action:none }
-    .stick .base{ position:absolute; inset:0; border-radius:60px; background:rgba(255,255,255,.07); border:1px solid #2a3550 }
-    .stick .nub{ position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550 }
-    @media (min-width:820px){ .stick{ display:none; } }
-
-    /* Enter door tooltip */
+    #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px; position:relative}
+    #game{display:block; width:100%; height:auto; border-radius:12px; background:#000}
     #prompt {
       position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
       background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none
     }
 
-    /* Simple modal for “entered building” */
+    /* Mini-map card */
+    .mini{
+      position:fixed; right:12px; bottom:118px; z-index:6;
+      background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px
+    }
+    #minimap{ width:240px; height:auto; display:block; border-radius:10px; background:#0b0f17 }
+
+    .controls{ position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center }
+    .btn{ background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:10px; padding:10px 12px;
+      font-size:14px; }
+
+    .stick { position:fixed; left:12px; bottom:12px; width:120px; height:120px; z-index:6; touch-action:none }
+    .stick .base{ position:absolute; inset:0; border-radius:60px; background:rgba(255,255,255,.07); border:1px solid #2a3550 }
+    .stick .nub{ position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550 }
+    @media (min-width:820px){ .stick{ display:none; } }
+
+    /* Simple modal */
     .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
     .modal .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); }
     .modal .card{ position:relative; background:#121827; border:1px solid #2a3550; border-radius:14px; padding:16px; width:min(520px,92vw); color:#e8eef7 }
@@ -56,10 +67,15 @@
       </div>
     </div>
 
-    <div id="gameCard" style="position:relative">
+    <div id="gameCard">
       <canvas id="game" width="960" height="540" aria-label="IZZA City"></canvas>
       <div id="prompt">Press B to enter</div>
     </div>
+  </div>
+
+  <!-- Mini-map -->
+  <div class="mini" id="miniWrap" title="Tap to open world map">
+    <canvas id="minimap" width="260" height="170"></canvas>
   </div>
 
   <!-- Virtual joystick + quick buttons for mobile -->
@@ -72,7 +88,7 @@
     <button class="btn" id="btnB">B</button>
   </div>
 
-  <!-- World Map overlay (click mini-map to open) -->
+  <!-- World Map overlay -->
   <div class="modal" id="mapModal">
     <div class="backdrop"></div>
     <div class="card">
@@ -93,9 +109,7 @@
     <div class="card">
       <h3>Welcome to The Hub</h3>
       <p>Talk to the NPC inside to get your first mission and start earning!</p>
-      <div class="row">
-        <button class="ghost" id="closeEnter">Close</button>
-      </div>
+      <div class="row"><button class="ghost" id="closeEnter">Close</button></div>
     </div>
   </div>
 
@@ -106,48 +120,32 @@
     const HAIR   = profile.hair || "short";
     const OUTFIT = profile.outfit || "street";
 
-    // --------- Canvas & Viewport ----------
+    // ---------- Canvas & constants ----------
     const cvs = document.getElementById('game');
     const ctx = cvs.getContext('2d');
     const TILE = 32;
-    const SCALE = 3;              // a touch more zoomed out than 4x
+    const SCALE = 3;           // slightly more zoomed out than 4
     const DRAW  = TILE * SCALE;
 
-    // --------- Unlocked rectangle (playable area) ----------
-    // World size (tiles)
+    // ---------- World + unlocked region ----------
     const W = 90, H = 60;
+    const unlocked = { x0: 18, y0: 18, x1: 72, y1: 42 }; // playable rectangle (inclusive)
+    function inUnlocked(gx,gy){ return gx>=unlocked.x0 && gx<=unlocked.x1 && gy>=unlocked.y0 && gy<=unlocked.y1; }
 
-    // Start region: a generous downtown rectangle; the rest renders black and is solid.
-    const unlocked = { x0: 18, y0: 18, x1: 72, y1: 42 }; // inclusive bounds
-
-    // --------- Building block + door ----------
-    // One starter building centered-ish in the unlocked area, 10x6 tiles.
+    // Building: 10×6 tiles
     const bW=10, bH=6;
     const bX = Math.floor((unlocked.x0 + unlocked.x1)/2) - Math.floor(bW/2);
     const bY = unlocked.y0 + 4;
 
-    // Door centered on building bottom edge, on the sidewalk tile in front of wall.
-    const door = {
-      gx: bX + Math.floor(bW/2),
-      gy: bY + bH,           // sidewalk tile directly in front
-      width: 1,
-      height: 1,
-      inRange: false
-    };
+    // Sidewalk & road rows relative to building
+    const sidewalkY = bY + bH;       // directly under the building
+    const roadY     = sidewalkY + 1; // below sidewalk
 
-    // Player spawns on the sidewalk just **below** the door (not on the building).
-    const spawnGX = door.gx;
-    const spawnGY = door.gy + 1;
+    // Door centered on sidewalk under building
+    const door = { gx: bX + Math.floor(bW/2), gy: sidewalkY, inRange:false };
 
-    // --------- Asset Loader ----------
-    function loadImg(src){
-      return new Promise((res, rej)=>{
-        const i = new Image();
-        i.onload = ()=>res(i);
-        i.onerror = rej;
-        i.src = src;
-      });
-    }
+    // --------- Asset loader ----------
+    function loadImg(src){ return new Promise((res, rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
     const assetRoot = "/static/game/sprites";
     const assets = {
       body:   `${assetRoot}/body/${BODY}.png`,
@@ -155,10 +153,10 @@
       outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
     };
 
-    // --------- Player ----------
+    // --------- Player (spawn on sidewalk at door) ----------
     const player = {
-      x: spawnGX * TILE + 2,
-      y: spawnGY * TILE + 2,
+      x: door.gx * TILE + 2,
+      y: door.gy * TILE + 2,
       vx: 0, vy: 0,
       speed: 2.0 * (TILE/16),
       wanted: 0
@@ -166,47 +164,46 @@
 
     // --------- Input ----------
     const keys = {};
-    window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; if(e.key==='b' || e.key==='B'){ tryEnter(); }});
-    window.addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()] = false; });
+    function handleB(){
+      if(doorInRange()){ openEnter(); }
+      else { setWanted(0); }
+    }
+    window.addEventListener('keydown', e=>{
+      const k = e.key.toLowerCase();
+      keys[k] = true;
+      if(k==='b') handleB();
+    });
+    window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
 
-    // Mobile joystick
+    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
+    document.getElementById('btnB').addEventListener('click', handleB);
+
+    // Joystick
     const stick = document.getElementById('stick');
     const nub   = document.getElementById('nub');
-    let dragging = false, baseRect=null, vec = {x:0,y:0};
-    function setNub(dx,dy){
-      const r = 40, mag = Math.hypot(dx,dy) || 1, clamped = Math.min(mag, r);
-      const ux = dx / mag, uy = dy / mag;
-      nub.style.left = (40 + ux*clamped) + 'px';
-      nub.style.top  = (40 + uy*clamped) + 'px';
-      vec.x = (clamped/r)*ux; vec.y = (clamped/r)*uy;
-    }
-    function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
-    function startDrag(){ dragging = true; baseRect = stick.getBoundingClientRect(); }
-    function moveDrag(e){ if(!dragging) return; const t = e.touches ? e.touches[0] : e;
-      const cx = baseRect.left + baseRect.width/2, cy = baseRect.top + baseRect.height/2;
-      setNub(t.clientX - cx, t.clientY - cy);
-    }
-    function endDrag(){ dragging=false; resetNub(); }
-    stick.addEventListener('touchstart', startDrag, {passive:true});
-    stick.addEventListener('touchmove',  moveDrag,  {passive:true});
-    stick.addEventListener('touchend',   endDrag,   {passive:true});
-    stick.addEventListener('mousedown',  startDrag);
-    window.addEventListener('mousemove', moveDrag);
-    window.addEventListener('mouseup',   endDrag);
-
-    // B / A buttons (mobile)
-    document.getElementById('btnB').addEventListener('click', ()=> tryEnter());
-    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
+    let dragging=false, baseRect=null, vec={x:0,y:0};
+    const setNub=(dx,dy)=>{ const r=40, m=Math.hypot(dx,dy)||1, c=Math.min(m,r), ux=dx/m, uy=dy/m;
+      nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px'; vec.x=(c/r)*ux; vec.y=(c/r)*uy; };
+    const resetNub=()=>{ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; };
+    const startDrag=()=>{ dragging=true; baseRect=stick.getBoundingClientRect(); };
+    const moveDrag=(e)=>{ if(!dragging) return; const t=e.touches?e.touches[0]:e;
+      const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(t.clientX-cx,t.clientY-cy); };
+    const endDrag=()=>{ dragging=false; resetNub(); };
+    stick.addEventListener('touchstart',startDrag,{passive:true});
+    stick.addEventListener('touchmove', moveDrag, {passive:true});
+    stick.addEventListener('touchend',  endDrag,  {passive:true});
+    stick.addEventListener('mousedown', startDrag);
+    window.addEventListener('mousemove',moveDrag);
+    window.addEventListener('mouseup',  endDrag);
 
     // --------- Wanted HUD ----------
     function setWanted(n){
       player.wanted = Math.max(0, Math.min(5, n|0));
-      document.querySelectorAll('#stars .star').forEach((s,i)=> s.className = 'star' + (i<player.wanted?' on':'' ));
+      document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star' + (i<player.wanted?' on':'') );
     }
-    document.getElementById('btnA').addEventListener('dblclick', ()=> setWanted(0));
 
     // --------- Camera ----------
-    const camera = { x:0, y:0 };
+    const camera={x:0,y:0};
     function centerCamera(){
       camera.x = player.x - cvs.width/2;
       camera.y = player.y - cvs.height/2;
@@ -216,253 +213,193 @@
       camera.y = Math.max(unlocked.y0*TILE, Math.min(camera.y, maxY));
     }
 
-    // --------- Solids / Collisions ----------
-    function inUnlocked(gx,gy){
-      return gx>=unlocked.x0 && gx<=unlocked.x1 && gy>=unlocked.y0 && gy<=unlocked.y1;
-    }
-    function isBuilding(gx,gy){
-      return gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH;
-    }
+    // --------- Collisions ----------
+    function isBuilding(gx,gy){ return gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH; }
     function isSolid(gx,gy){
-      if(!inUnlocked(gx,gy)) return true;          // outside region = solid (and renders black)
-      if(isBuilding(gx,gy)) return true;           // walls/roof solid
+      if(!inUnlocked(gx,gy)) return true;
+      if(isBuilding(gx,gy))  return true;
       return false;
     }
+    function tryMove(nx,ny){
+      // check X axis
+      const cornersX = [
+        {x:nx, y:player.y}, {x:nx+TILE-1, y:player.y},
+        {x:nx, y:player.y+TILE-1}, {x:nx+TILE-1, y:player.y+TILE-1}
+      ];
+      if(!cornersX.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.x = nx;
 
-    // --------- Door helpers ----------
-    const prompt = document.getElementById('prompt');
+      // check Y axis
+      const cornersY = [
+        {x:player.x, y:ny}, {x:player.x+TILE-1, y:ny},
+        {x:player.x, y:ny+TILE-1}, {x:player.x+TILE-1, y:ny+TILE-1}
+      ];
+      if(!cornersY.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.y = ny;
+    }
+
+    // --------- Door UX ----------
+    const promptEl = document.getElementById('prompt');
     function doorInRange(){
       const px = Math.floor(player.x / TILE);
       const py = Math.floor(player.y / TILE);
-      // directly on the door tile or 4-neighbour
-      return (Math.abs(px - door.gx) + Math.abs(py - door.gy)) <= 1;
+      return (Math.abs(px-door.gx)+Math.abs(py-door.gy))<=1;
     }
-    function tryEnter(){
-      if(doorInRange()){
-        // open modal
-        document.getElementById('enterModal').style.display='flex';
-      }
-    }
-    document.getElementById('enterModal').addEventListener('click', (e)=>{
-      if(e.target.classList.contains('backdrop')) e.currentTarget.style.display='none';
-    });
-    document.getElementById('closeEnter').addEventListener('click', ()=> {
-      document.getElementById('enterModal').style.display='none';
-    });
+    function openEnter(){ document.getElementById('enterModal').style.display='flex'; }
+    document.getElementById('closeEnter').addEventListener('click', ()=> document.getElementById('enterModal').style.display='none');
+    document.getElementById('enterModal').addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) e.currentTarget.style.display='none'; });
 
-    // --------- Map overlay ----------
+    // --------- Map (mini + big) ----------
+    const mini = document.getElementById('minimap');
+    const mctx = mini.getContext('2d');
     const mapModal = document.getElementById('mapModal');
     const bigmap   = document.getElementById('bigmap');
     const bctx     = bigmap.getContext('2d');
-    function openMap(){ drawBigMap(); mapModal.style.display='flex'; }
-    function closeMap(){ mapModal.style.display='none'; }
-    document.getElementById('closeMap').addEventListener('click', closeMap);
-    mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeMap(); });
 
-    // Tiny “click to open map” area: bottom-right of game canvas
-    cvs.addEventListener('click', (e)=>{
-      const r = cvs.getBoundingClientRect();
-      const x = e.clientX - r.left, y = e.clientY - r.top;
-      if(x > r.width - 220 && y > r.height - 160){ openMap(); }
-    });
-
-    function drawBigMap(){
-      // background (locked)
+    function drawMini(){
+      const sx = mini.width / W, sy = mini.height / H;
+      // locked background
+      mctx.fillStyle = '#1b1f2a'; mctx.fillRect(0,0,mini.width,mini.height);
+      // preview
+      mctx.fillStyle = 'rgba(163,176,197,.25)'; mctx.fillRect(0,0,mini.width,mini.height);
+      // unlocked
+      mctx.fillStyle = '#1c293e';
+      mctx.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
+      // building
+      mctx.fillStyle = '#7a3a3a'; mctx.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
+      // roads
+      mctx.fillStyle = '#788292';
+      mctx.fillRect(unlocked.x0*sx, roadY*sy, (unlocked.x1-unlocked.x0+1)*sx, 1.2*sy);
+      mctx.fillRect((door.gx)*sx, unlocked.y0*sy, 1.2*sx, (unlocked.y1-unlocked.y0+1)*sy);
+      // player
+      mctx.fillStyle = '#35f1ff'; mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 2, 2);
+    }
+    function drawBig(){
+      const sx = bigmap.width / W, sy = bigmap.height / H;
       bctx.fillStyle = '#1b1f2a'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
-
-      // scale world to canvas
-      const sx = bigmap.width  / W;
-      const sy = bigmap.height / H;
-
-      // preview (semi-transparent) outside unlocked but within a larger preview box
-      bctx.fillStyle = 'rgba(163,176,197,.25)';
-      bctx.fillRect(0, 0, bigmap.width, bigmap.height);
-
-      // unlocked block
+      bctx.fillStyle = 'rgba(163,176,197,.25)'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
       bctx.fillStyle = '#1c293e';
       bctx.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
-
-      // building
-      bctx.fillStyle = '#7a3a3a';
-      bctx.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
-
-      // roads (simple cross)
+      bctx.fillStyle = '#7a3a3a'; bctx.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
       bctx.fillStyle = '#788292';
-      bctx.fillRect(unlocked.x0*sx, (bY+bH+2)*sy, (unlocked.x1-unlocked.x0+1)*sx, 1.5*sy); // horizontal
-      bctx.fillRect(((bX+Math.floor(bW/2)))*sx, unlocked.y0*sy, 1.5*sx, (unlocked.y1-unlocked.y0+1)*sy); // vertical
-
-      // player dot
-      bctx.fillStyle = '#35f1ff';
-      bctx.fillRect((player.x/TILE)*sx - 1.5, (player.y/TILE)*sy - 1.5, 3, 3);
+      bctx.fillRect(unlocked.x0*sx, roadY*sy, (unlocked.x1-unlocked.x0+1)*sx, 1.5*sy);
+      bctx.fillRect((door.gx)*sx, unlocked.y0*sy, 1.5*sx, (unlocked.y1-unlocked.y0+1)*sy);
+      bctx.fillStyle = '#35f1ff'; bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
     }
+    function openMap(){ drawBig(); mapModal.style.display='flex'; }
+    function closeMap(){ mapModal.style.display='none'; }
+    document.getElementById('miniWrap').addEventListener('click', openMap);
+    document.getElementById('closeMap').addEventListener('click', closeMap);
+    mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeMap(); });
 
     // --------- Drawing ----------
     function drawTile(gx,gy,screenX,screenY){
       const S = DRAW;
 
-      // Outside unlocked: draw black (so it doesn't look like an invisible wall)
-      if(!inUnlocked(gx,gy)){
-        ctx.fillStyle = '#000'; ctx.fillRect(screenX, screenY, S, S);
-        return;
+      // Outside unlocked → black & solid
+      if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
+
+      // Base: grass
+      ctx.fillStyle = '#09371c';
+      ctx.fillRect(screenX,screenY,S,S);
+
+      // Building area
+      if(gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){
+        ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
+        ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,6);
       }
 
-      // Sidewalk / grass / road baseline
-      const roadY = bY + bH + 2; // a road below the building
-      const grassRowTop = unlocked.y0;
-      if (gy === roadY){
-        // asphalt
-        ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX, screenY, S, S);
-        // dashed center line
+      // Sidewalk
+      if(gy===sidewalkY){
+        ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
+        ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
+      }
+
+      // Road with dashed center
+      if(gy===roadY){
+        ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
         ctx.fillStyle = '#ffd23f';
         ctx.fillRect(screenX + S*0.10, screenY + S*0.48, S*0.18, S*0.04);
-      } else if (gy === roadY - 1){
-        // sidewalk
-        ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX, screenY, S, S);
-        ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX, screenY, S, S);
-      } else if (gy < roadY - 1 && gy >= grassRowTop){
-        // building area above sidewalk
-        ctx.fillStyle = '#09371c'; ctx.fillRect(screenX, screenY, S, S); // park-like grass
-      } else {
-        // below road or elsewhere inside unlocked
-        ctx.fillStyle = '#09371c'; ctx.fillRect(screenX, screenY, S, S);
       }
 
-      // Building block
-      if (isBuilding(gx,gy)){
-        ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX, screenY, S, S);
-        ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX, screenY, S, 6);
-      }
-
-      // Door tile (on sidewalk row, not solid; turns green when in range)
-      if (gx === door.gx && gy === door.gy){
+      // Door (on sidewalk)
+      if(gx===door.gx && gy===door.gy){
         const near = doorInRange();
         ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
         const w = Math.floor(S*0.30), h = Math.floor(S*0.70);
         ctx.fillRect(screenX + (S-w)/2, screenY + (S-h), w, h);
-        // Show floating prompt above player when near
-        if (near){
-          door.inRange = true;
-          const r = cvs.getBoundingClientRect();
-          const px = Math.floor(player.x - camera.x);
-          const py = Math.floor(player.y - camera.y);
-          const prompt = document.getElementById('prompt');
-          prompt.style.left = (px + r.left + S/2) + 'px';
-          prompt.style.top  = (py + r.top  - 10) + 'px';
-          prompt.style.display = 'block';
+        if(near){
+          // place prompt above the door
+          promptEl.style.left = (screenX + S/2) + 'px';
+          promptEl.style.top  = (screenY - 8) + 'px';
+          promptEl.style.display = 'block';
         }
       }
     }
 
     function drawPlayer(images){
-      const S = DRAW;
-      const sx = Math.floor(player.x - camera.x);
-      const sy = Math.floor(player.y - camera.y);
+      const S = DRAW, sx = Math.floor(player.x - camera.x), sy = Math.floor(player.y - camera.y);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(images.body,   0,0,TILE,TILE, sx, sy, S, S);
       ctx.drawImage(images.outfit, 0,0,TILE,TILE, sx, sy, S, S);
       ctx.drawImage(images.hair,   0,0,TILE,TILE, sx, sy, S, S);
     }
 
-    // --------- Update with collisions ----------
-    function tryMove(nx, ny){
-      // four corners of the player’s 32×32 footprint
-      const corners = [
-        {x:nx,           y:ny},
-        {x:nx+TILE-1,    y:ny},
-        {x:nx,           y:ny+TILE-1},
-        {x:nx+TILE-1,    y:ny+TILE-1},
-      ];
-      // check per-axis to allow sliding along walls
-      // X first
-      let testX = nx, testY = player.y;
-      let blockedX = corners.some(c=>{
-        const gx = Math.floor((c.x) / TILE);
-        const gy = Math.floor((c.y) / TILE);
-        return isSolid(gx,gy);
-      });
-      if(!blockedX) player.x = nx;
-
-      // Then Y
-      testX = player.x; testY = ny;
-      const cornersY = [
-        {x:testX,        y:testY},
-        {x:testX+TILE-1, y:testY},
-        {x:testX,        y:testY+TILE-1},
-        {x:testX+TILE-1, y:testY+TILE-1},
-      ];
-      let blockedY = cornersY.some(c=>{
-        const gx = Math.floor((c.x) / TILE);
-        const gy = Math.floor((c.y) / TILE);
-        return isSolid(gx,gy);
-      });
-      if(!blockedY) player.y = ny;
-    }
-
+    // --------- Update loop ----------
     function update(dt){
-      // hide door prompt by default; show again if near while drawing
-      door.inRange = false;
-      document.getElementById('prompt').style.display='none';
+      promptEl.style.display='none'; // hidden unless door marks it visible this frame
 
-      // input vector
-      let dx = 0, dy = 0;
-      if (keys['arrowup']||keys['w']) dy -= 1;
-      if (keys['arrowdown']||keys['s']) dy += 1;
-      if (keys['arrowleft']||keys['a']) dx -= 1;
-      if (keys['arrowright']||keys['d']) dx += 1;
-      dx += vec.x; dy += vec.y;
+      let dx=0, dy=0;
+      if(keys['arrowup']||keys['w']) dy-=1;
+      if(keys['arrowdown']||keys['s']) dy+=1;
+      if(keys['arrowleft']||keys['a']) dx-=1;
+      if(keys['arrowright']||keys['d']) dx+=1;
+      dx+=vec.x; dy+=vec.y;
 
-      const mag = Math.hypot(dx,dy);
-      let vx=0, vy=0;
-      if (mag > 0){ dx/=mag; dy/=mag; vx = dx * player.speed; vy = dy * player.speed; }
+      const mag=Math.hypot(dx,dy);
+      const vx = mag? (dx/mag)*player.speed : 0;
+      const vy = mag? (dy/mag)*player.speed : 0;
 
-      const nx = player.x + vx * dt;
-      const ny = player.y + vy * dt;
-
-      tryMove(nx, ny);
+      tryMove(player.x + vx*dt, player.y + vy*dt);
       centerCamera();
     }
 
     function render(images){
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0,0,cvs.width,cvs.height);
+      ctx.fillStyle='#000'; ctx.fillRect(0,0,cvs.width,cvs.height);
 
-      // visible tile range
       const S = DRAW;
       const tilesX = Math.ceil(cvs.width / S) + 2;
       const tilesY = Math.ceil(cvs.height / S) + 2;
       const startX = Math.max(0, Math.floor(camera.x / TILE));
       const startY = Math.max(0, Math.floor(camera.y / TILE));
 
-      for (let y=0; y<tilesY; y++){
-        for (let x=0; x<tilesX; x++){
-          const gx = startX + x;
-          const gy = startY + y;
-          if (gx>=0 && gx<W && gy>=0 && gy<H){
+      for(let y=0;y<tilesY;y++){
+        for(let x=0;x<tilesX;x++){
+          const gx = startX + x, gy = startY + y;
+          if(gx>=0 && gx<W && gy>=0 && gy<H){
             const screenX = (gx*TILE - camera.x) * (S/TILE);
             const screenY = (gy*TILE - camera.y) * (S/TILE);
-            drawTile(gx, gy, screenX, screenY);
+            drawTile(gx,gy,screenX,screenY);
           }
         }
       }
-
       drawPlayer(images);
+
+      // mini-map repaint
+      drawMini();
     }
 
-    // --------- Main Loop ---------
-    Promise.all([ loadImg(assets.body), loadImg(assets.outfit), loadImg(assets.hair) ])
-    .then(([body, outfit, hair])=>{
+    // --------- Main ---------
+    Promise.all([loadImg(assets.body), loadImg(assets.outfit), loadImg(assets.hair)]).then(([body,outfit,hair])=>{
       const imgs = { body, outfit, hair };
       let last = performance.now();
       function loop(now){
-        const dt = Math.min(32, now - last);
-        last = now;
+        const dt = Math.min(32, now-last); last=now;
         update(dt/16.6667);
         render(imgs);
         requestAnimationFrame(loop);
       }
       centerCamera();
       requestAnimationFrame(loop);
-    }).catch(err=> console.error("Sprite load failed", err));
+    }).catch(err=>console.error("Sprite load failed", err));
 
   })();
   </script>
