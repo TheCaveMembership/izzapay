@@ -17,7 +17,6 @@
   // Regions
   const unlocked = { x0: 18, y0: 18, x1: 72, y1: 42 };          // playable
   const preview  = { x0: 10, y0: 12, x1: 80, y1: 50 };          // shown on map only
-  const locked   = { x0: 0,  y0: 0,  x1: W-1, y1: H-1 };        // everything else = black
   const inRect   = (gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
   const inUnlocked = (gx,gy)=> inRect(gx,gy, unlocked);
 
@@ -46,11 +45,11 @@
     outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
   };
 
-  // ---------- Player (spawn on sidewalk at door) ----------
-  // Center sprite visually by offsetting a bit to the left so the body lines up with the tile center.
+  // ---------- Player (spawn EXACTLY on the sidewalk door tile) ----------
+  const SPAWN = { gx: door.gx, gy: door.gy };
   const player = {
-    x: door.gx * TILE + (TILE/2 - 8),
-    y: door.gy * TILE,  // sidewalk row
+    x: SPAWN.gx * TILE,     // no pixel nudge — same tile origin as maps
+    y: SPAWN.gy * TILE,
     vx: 0, vy: 0,
     speed: 2.0 * (TILE/16),
     wanted: 0
@@ -66,18 +65,18 @@
     else setWanted(0);
   }
 
-  // prevent iOS “text caret” / selection feelings (we already disabled user-select in CSS)
   window.addEventListener('keydown', e=>{
     const k = e.key.toLowerCase();
     keys[k] = true;
     if (k === 'b'){ e.preventDefault(); handleB(); }
-  });
-  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+    if (k.startsWith('arrow')) e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; }, {passive:true});
 
   btnA.addEventListener('click', ()=> setWanted(player.wanted+1));
   btnB.addEventListener('click', handleB);
 
-  // Virtual joystick (no selection/caret, no scroll)
+  // ---------- Virtual joystick ----------
   const stick = document.getElementById('stick');
   const nub   = document.getElementById('nub');
   let dragging=false, baseRect=null, vec={x:0,y:0};
@@ -125,8 +124,8 @@
   // ---------- Collision ----------
   const isBuilding = (gx,gy)=> gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH;
   function isSolid(gx,gy){
-    if(!inUnlocked(gx,gy)) return true; // outside unlocked = hard wall
-    if(isBuilding(gx,gy))  return true; // building solid
+    if(!inUnlocked(gx,gy)) return true;             // outside unlocked = hard wall
+    if(isBuilding(gx,gy))  return true;             // building tiles are solid
     return false;
   }
   function tryMove(nx,ny){
@@ -147,11 +146,16 @@
 
   // ---------- Door UX ----------
   const promptEl = document.getElementById('prompt');
+
+  // Must be on the door tile or one tile below it (nice for touch)
   function doorInRange(){
-    const px = Math.floor((player.x + TILE/2)/TILE);
-    const py = Math.floor((player.y + TILE/2)/TILE);
-    return (Math.abs(px-door.gx)+Math.abs(py-door.gy))<=2; // generous diamond for touch
+    const px = Math.floor(player.x / TILE);
+    const py = Math.floor(player.y / TILE);
+    const sameTile = (px === door.gx && py === door.gy);
+    const oneBelow = (px === door.gx && py === door.gy + 1);
+    return sameTile || oneBelow;
   }
+
   function openEnter(){ document.getElementById('enterModal').style.display='flex'; }
   document.getElementById('closeEnter').addEventListener('click', ()=> document.getElementById('enterModal').style.display='none');
   document.getElementById('enterModal').addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) e.currentTarget.style.display='none'; });
@@ -163,14 +167,16 @@
   const bigmap   = document.getElementById('bigmap');
   const bctx     = bigmap.getContext('2d');
 
-  // helper draws plus-roads & building into a target context with a given scale
-  function drawCity(ctx2d, sx, sy, showUnlockedBox){
-    // Unlocked base
-    ctx2d.fillStyle = '#1c293e';
-    ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
-    // Preview layer (semi-transparent)
+  function drawCity(ctx2d, sx, sy){
+    // Locked base (black) is already painted by caller
+
+    // Preview layer (semi-transparent) — shows what’s coming
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
+
+    // Unlocked area on top (darker blue)
+    ctx2d.fillStyle = '#1c293e';
+    ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
 
     // Roads continue through preview
     ctx2d.fillStyle = '#788292';
@@ -179,7 +185,7 @@
     // vertical at door.gx
     ctx2d.fillRect(door.gx*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
 
-    // Building(s)
+    // Building
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
   }
@@ -189,11 +195,12 @@
     // Locked base = black
     mctx.fillStyle = '#000'; mctx.fillRect(0,0,mini.width,mini.height);
 
-    drawCity(mctx, sx, sy, false);
+    drawCity(mctx, sx, sy);
 
-    // Player dot
+    // Player dot from tile origin (matches main view)
+    const ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
     mctx.fillStyle = '#35f1ff';
-    mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 2, 2);
+    mctx.fillRect(ptx*sx - 1, pty*sy - 1, 2, 2);
   }
 
   function drawBig(){
@@ -201,11 +208,12 @@
     // Locked base
     bctx.fillStyle = '#000'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
 
-    drawCity(bctx, sx, sy, true);
+    drawCity(bctx, sx, sy);
 
-    // Player dot
+    // Player dot from tile origin
+    const ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
     bctx.fillStyle = '#35f1ff';
-    bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
+    bctx.fillRect(ptx*sx - 1.5, pty*sy - 1.5, 3, 3);
   }
 
   document.getElementById('miniWrap').addEventListener('click', ()=>{ drawBig(); mapModal.style.display='flex'; });
@@ -219,7 +227,7 @@
     // Outside unlocked → black wall
     if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
 
-    // Base ground
+    // Base ground (grass)
     ctx.fillStyle = '#09371c';
     ctx.fillRect(screenX,screenY,S,S);
 
@@ -244,7 +252,7 @@
       }
     }
 
-    // Door
+    // Door (on sidewalk)
     if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
