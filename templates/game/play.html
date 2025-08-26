@@ -80,8 +80,9 @@
 
     // Scale factor: pixels per world unit (our sprites are 32x32)
     const TILE = 32;
-    const SCALE = Math.max(2, Math.floor((cvs.width/30)/ (TILE/2))); // adaptive-ish
-    const DRAW = TILE * SCALE / 2; // how big we render each tile (upscaled)
+    // >>> ZOOMED IN: fixed scale 4x (32px -> 128px on screen)
+    const SCALE = 4;
+    const DRAW = TILE * SCALE;
 
     // --------- Asset Loader ----------
     function loadImg(src){
@@ -94,27 +95,25 @@
     }
     const assetRoot = "/static/game/sprites";
     const assets = {
-      body:   `${assetRoot}/body/${BODY}.png`,
-      hair:   `${assetRoot}/hair/${HAIR}.png`,
-      outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
+      body:   `${assetRoot}/body/${BODY}.png`
+      ,hair:  `${assetRoot}/hair/${HAIR}.png`
+      ,outfit:`${assetRoot}/outfit/${OUTFIT}.png`,
     };
 
     // --------- Simple Map (prototype) ----------
     // 0 = grass, 1 = road, 2 = sidewalk, 3 = building block
     const W = 90, H = 60;
     const map = new Array(H).fill(0).map(()=>new Array(W).fill(0));
-    // lay roads horizontally & vertically to make a simple grid city
     for (let y=0; y<H; y++){
       for (let x=0; x<W; x++){
         map[y][x] = 0; // grass
-        if (y%10===5) map[y][x] = 1;           // horizontal road
-        if (x%12===6) map[y][x] = 1;           // vertical road
+        if (y%10===5) map[y][x] = 1;
+        if (x%12===6) map[y][x] = 1;
         if (map[y][x]===1 && (y%10===4 || y%10===6 || x%12===5 || x%12===7)) {
-          if (map[y][x]!==1) map[y][x]=2; else map[y][x]=1; // keep road dominant
+          if (map[y][x]!==1) map[y][x]=2; else map[y][x]=1;
         }
       }
     }
-    // add a building block cluster
     for (let by=20; by<27; by++){
       for (let bx=20; bx<28; bx++){
         if (map[by][bx]===0) map[by][bx]=3;
@@ -123,10 +122,10 @@
 
     // --------- Player ----------
     const player = {
-      x: (W/2)*TILE + 2, // world px
+      x: (W/2)*TILE + 2,
       y: (H/2)*TILE + 2,
       vx: 0, vy: 0,
-      speed: 2.0 * (TILE/16), // tuned to tile size
+      speed: 2.0 * (TILE/16), // scale-independent speed
       facing: 'down',
       wanted: 0
     };
@@ -142,7 +141,7 @@
     let dragging = false, baseRect=null, vec = {x:0,y:0};
 
     function setNub(dx,dy){
-      const r = 40; // radius from center
+      const r = 40;
       const mag = Math.hypot(dx,dy) || 1;
       const clamped = Math.min(mag, r);
       const ux = dx / mag, uy = dy / mag;
@@ -153,10 +152,7 @@
     }
     function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
 
-    function startDrag(e){
-      dragging = true;
-      baseRect = stick.getBoundingClientRect();
-    }
+    function startDrag(e){ dragging = true; baseRect = stick.getBoundingClientRect(); }
     function moveDrag(e){
       if(!dragging) return;
       const t = e.touches ? e.touches[0] : e;
@@ -185,7 +181,6 @@
     function centerCamera(){
       camera.x = player.x - cvs.width/2;
       camera.y = player.y - cvs.height/2;
-      // clamp to world bounds
       camera.x = Math.max(0, Math.min(camera.x, W*TILE - cvs.width));
       camera.y = Math.max(0, Math.min(camera.y, H*TILE - cvs.height));
     }
@@ -194,22 +189,22 @@
     function drawTile(gx,gy,screenX,screenY){
       const t = map[gy][gx];
       const S = DRAW;
-      if (t===0){ // grass
+      if (t===0){
         ctx.fillStyle = '#0b381d';
         ctx.fillRect(screenX, screenY, S, S);
         ctx.fillStyle = 'rgba(255,255,255,.03)';
         ctx.fillRect(screenX, screenY, S, 3);
-      } else if (t===1){ // road
+      } else if (t===1){
         ctx.fillStyle = '#2b2b2b';
         ctx.fillRect(screenX, screenY, S, S);
         ctx.fillStyle = '#cfcf00';
         ctx.fillRect(screenX + S/2 - 2, screenY, 4, S);
-      } else if (t===2){ // sidewalk
+      } else if (t===2){
         ctx.fillStyle = '#555d66';
         ctx.fillRect(screenX, screenY, S, S);
         ctx.strokeStyle = 'rgba(0,0,0,.25)';
         ctx.strokeRect(screenX, screenY, S, S);
-      } else if (t===3){ // building block
+      } else if (t===3){
         ctx.fillStyle = '#4a2d2d';
         ctx.fillRect(screenX, screenY, S, S);
         ctx.fillStyle = 'rgba(0,0,0,.15)';
@@ -221,7 +216,6 @@
       const S = DRAW;
       const sx = Math.floor(player.x - camera.x);
       const sy = Math.floor(player.y - camera.y);
-      // layer order: body -> outfit -> hair
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(images.body,   0,0,TILE,TILE, sx, sy, S, S);
       ctx.drawImage(images.outfit, 0,0,TILE,TILE, sx, sy, S, S);
@@ -230,18 +224,14 @@
 
     // --------- Update ----------
     function update(dt){
-      // keyboard vector
       let dx = 0, dy = 0;
       if (keys['arrowup']||keys['w']) dy -= 1;
       if (keys['arrowdown']||keys['s']) dy += 1;
       if (keys['arrowleft']||keys['a']) dx -= 1;
       if (keys['arrowright']||keys['d']) dx += 1;
 
-      // joystick vector (mobile)
-      dx += vec.x;
-      dy += vec.y;
+      dx += vec.x; dy += vec.y;
 
-      // normalize
       const mag = Math.hypot(dx,dy);
       if (mag > 0){
         dx /= mag; dy /= mag;
@@ -254,7 +244,6 @@
       player.x += player.vx * dt;
       player.y += player.vy * dt;
 
-      // clamp to world bounds
       player.x = Math.max(0, Math.min(player.x, W*TILE - TILE));
       player.y = Math.max(0, Math.min(player.y, H*TILE - TILE));
 
@@ -265,7 +254,6 @@
       ctx.fillStyle = '#000';
       ctx.fillRect(0,0,cvs.width,cvs.height);
 
-      // find visible tile range
       const S = DRAW;
       const tilesX = Math.ceil(cvs.width / S) + 2;
       const tilesY = Math.ceil(cvs.height / S) + 2;
@@ -296,9 +284,9 @@
       const imgs = { body, outfit, hair };
       let last = performance.now();
       function loop(now){
-        const dt = Math.min(32, now - last); // clamp delta
+        const dt = Math.min(32, now - last);
         last = now;
-        update(dt/16.6667);   // ~60fps normalized
+        update(dt/16.6667);
         render(imgs);
         requestAnimationFrame(loop);
       }
@@ -308,7 +296,7 @@
       console.error("Sprite load failed", err);
     });
 
-    // Quick test buttons (wire later for actions)
+    // Quick test buttons (wire later)
     document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
     document.getElementById('btnB').addEventListener('click', ()=> setWanted(0));
   })();
