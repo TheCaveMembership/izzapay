@@ -477,9 +477,42 @@ def pi_me():
     except Exception:
         return {"ok": False, "error": "server_error"}, 500
 
+from urllib.parse import urlparse
+
+def _safe_next_path(raw):
+    """
+    Only allow same-site relative paths, like /izza-game/create or /dashboard?tab=1.
+    Disallow absolute URLs and paths without a leading slash.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    if not raw.startswith("/"):
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme or parsed.netloc:
+        return None
+    return raw
+
+from urllib.parse import urlparse
+
+def _safe_next_path(raw):
+    """
+    Only allow same-site relative paths, like /izza-game/create or /dashboard?tab=1.
+    Disallow absolute URLs and paths without a leading slash.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    if not raw.startswith("/"):
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme or parsed.netloc:
+        return None
+    return raw
+
 @app.post("/auth/exchange")
 def auth_exchange():
     try:
+        # Parse payload and, if present, a JSON 'next'
         if request.is_json:
             data = request.get_json(silent=True) or {}
         else:
@@ -489,6 +522,15 @@ def auth_exchange():
             except Exception:
                 data = {}
 
+        # Read 'next' from any source, prefer form > query > json
+        next_candidate = (
+            (request.form.get("next") if not request.is_json else None)
+            or request.args.get("next")
+            or data.get("next")
+        )
+        next_path = _safe_next_path(next_candidate) or "/dashboard"
+
+        # Validate required auth fields
         user = (data.get("user") or {})
         uid = user.get("uid") or user.get("id")
         username = user.get("username")
@@ -498,6 +540,7 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
+        # Verify token with Pi
         r = requests.get(f"{PI_API_BASE}/v2/me",
                          headers={"Authorization": f"Bearer {token}"}, timeout=10)
         if r.status_code != 200:
@@ -505,6 +548,7 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
 
+        # Upsert user
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
@@ -513,17 +557,17 @@ def auth_exchange():
                            (uid, username, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
 
+        # Create session
         try:
             session["user_id"] = row["id"]
             session.permanent = True
         except Exception:
             pass
 
+        # Mint app token and build redirect
         tok = mint_login_token(row["id"])
-        next_path = request.args.get("next") or "/dashboard"
-        if not next_path.startswith("/"):
-            next_path = "/dashboard"
-        target = f"{next_path}?t={tok}"
+        separator = "&" if "?" in next_path else "?"
+        target = f"{next_path}{separator}t={tok}"
 
         if not request.is_json:
             return redirect(target)
