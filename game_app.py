@@ -35,19 +35,15 @@ app.config.update(
 PI_SANDBOX = os.getenv("PI_SANDBOX", "false").lower() == "true"
 
 # ----------------- TOKEN VERIFY (reuse main app) -----------------
-# Import the token verifier from your main app so signatures match.
 try:
-    from app import verify_login_token  # same function your main app uses
+    from app import verify_login_token  # same signature as in app.py
 except Exception:
-    verify_login_token = None  # we'll guard usages below
+    verify_login_token = None  # guarded below
 
 def _get_bearer_token_from_request() -> str | None:
-    """
-    Mirror of app.py get_bearer_token_from_request (query ?t= or Authorization: Bearer).
-    """
+    """Query ?t= or form t= or Authorization: Bearer <token>."""
     t = request.args.get("t") or request.form.get("t")
-    if t:
-        return t.strip()
+    if t: return t.strip()
     auth = request.headers.get("Authorization", "")
     if auth and auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
@@ -57,7 +53,6 @@ def _get_bearer_token_from_request() -> str | None:
 def current_user_row():
     """
     Return the users table row for the logged-in user_id, or resolve from short-lived token.
-    This matches app.py behavior so the game works even if the cookie isn't sent by Pi Browser.
     """
     uid = session.get("user_id")
     if not uid:
@@ -74,7 +69,6 @@ def require_login_redirect():
     """Redirect to /signin if not logged in (cookie) AND no valid token."""
     if "user_id" in session:
         return None
-    # Try token fallback before redirecting
     tok = _get_bearer_token_from_request()
     if tok and verify_login_token and verify_login_token(tok):
         return None
@@ -102,12 +96,14 @@ def game_create():
     if need:
         return need
 
+    # Grab token (if any) so we can preserve it on POST and redirects
+    t = _get_bearer_token_from_request()
+
     # Look up the IZZA PAY user record to get pi_uid + username
     urow = current_user_row()
     if not urow:
         return redirect("/signin")
 
-    # Your users table uses columns: pi_uid, pi_username (from your /auth/exchange)
     pi_uid = urow["pi_uid"]
     pi_username = urow["pi_username"]
 
@@ -139,16 +135,22 @@ def game_create():
                 hair=excluded.hair,
                 outfit=excluded.outfit
             """, (pi_uid, pi_username, sprite, hair, outfit))
+
+        # After save -> go play (preserve token if present)
+        if t:
+            return redirect(f"{url_for('game_play')}?t={t}")
         return redirect(url_for("game_play"))
 
-    # If profile already exists, skip to play
+    # If profile already exists, skip to play (preserve token)
     with conn() as cx:
         row = cx.execute("SELECT 1 FROM game_profiles WHERE pi_uid=?", (pi_uid,)).fetchone()
     if row:
+        if t:
+            return redirect(f"{url_for('game_play')}?t={t}")
         return redirect(url_for("game_play"))
 
-    # Render creation form
-    return render_template("game/create_character.html")
+    # Render creation form (pass token into template so the form includes it on POST)
+    return render_template("game/create_character.html", t=t)
 
 
 @app.route("/play")
@@ -159,6 +161,9 @@ def game_play():
     need = require_login_redirect()
     if need:
         return need
+
+    # Keep the token for any client-side calls if you want (optional)
+    t = _get_bearer_token_from_request()
 
     urow = current_user_row()
     if not urow:
@@ -172,6 +177,9 @@ def game_play():
         ).fetchone()
 
     if not profile:
+        # No profile yet → back to create (preserve token)
+        if t:
+            return redirect(f"{url_for('game_create')}?t={t}")
         return redirect(url_for("game_create"))
 
     profile_dict = dict(
@@ -182,7 +190,6 @@ def game_play():
         outfit=profile[4],
     )
 
-    # Minimal user context
     user_ctx = {"username": urow["pi_username"], "id": urow["id"]}
 
-    return render_template("game/play.html", profile=profile_dict, user=user_ctx)
+    return render_template("game/play.html", profile=profile_dict, user=user_ctx, t=t)
