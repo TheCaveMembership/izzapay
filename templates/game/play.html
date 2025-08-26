@@ -3,53 +3,315 @@
 <head>
   <meta charset="utf-8">
   <title>IZZA GAME — Play</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    body{margin:0;background:#0b0b0b;color:#e8e8e8;font-family:Arial,Helvetica,sans-serif}
-    #game-root{display:flex;justify-content:center;padding:12px}
-    canvas{image-rendering:pixelated}
+    :root{ --ui:rgba(255,255,255,.9); --bg0:#0b0f17; --card:#141a23; --line:#263042; }
+    html,body{height:100%; margin:0; background:#0b0f17; color:#e8eef7; font-family:Arial,Helvetica,sans-serif}
+    .wrap{max-width:1100px;margin:0 auto;padding:8px}
+    .hud{
+      position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
+      background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line)
+    }
+    .hud .left{display:flex;gap:12px;align-items:center}
+    .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
+    .hud .stars{display:flex; gap:4px}
+    .star{width:16px; height:16px; border:1px solid #445; border-radius:3px; background:#111}
+    .star.on{background:#ffd23f; border-color:#c59b00}
+    #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px}
+    canvas{display:block; width:100%; height:auto; border-radius:12px; background:#000}
+    .controls{
+      position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center
+    }
+    .btn{
+      background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:10px; padding:10px 12px;
+      font-size:14px; user-select:none; -webkit-user-select:none;
+    }
+    .stick { position:fixed; left:12px; bottom:12px; width:120px; height:120px; z-index:6; touch-action:none }
+    .stick .base{
+      position:absolute; left:0; top:0; width:100%; height:100%; border-radius:60px; background:rgba(255,255,255,.07); border:1px solid #2a3550
+    }
+    .stick .nub{
+      position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550
+    }
+    @media (min-width:820px){
+      .stick{ display:none; } /* hide joystick on larger screens */
+    }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
 </head>
 <body class="cw-blue theme-a">
-  <div id="game-root"></div>
-  <script>
-    // Boot data for your JS client if needed later
-    window.IZZA_BOOT = {
-      user: {{ user|tojson }},
-      profile: {{ profile|tojson }}
-    };
-  </script>
-  <script>
-  // Tiny placeholder so you can see something immediately
-  const config = {
-    type: Phaser.AUTO,
-    width: 960, height: 540, parent: 'game-root',
-    pixelArt: true,
-    physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
-    scene: { preload, create, update }
-  };
-  const game = new Phaser.Game(config);
+  <div class="wrap">
+    <div class="hud">
+      <div class="left">
+        <div class="pill">IZZA GAME</div>
+        <div class="pill">Player: {{ user.username }}</div>
+      </div>
+      <div class="stars" id="stars">
+        <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
+      </div>
+    </div>
 
-  function preload(){
-    this.load.image('player','https://dummyimage.com/16x16/50c878/ffffff.png&text=+');
-  }
-  function create(){
-    const p = window.IZZA_BOOT?.profile;
-    const u = window.IZZA_BOOT?.user;
-    this.add.text(16,16,`IZZA GAME`,{fontFamily:'monospace',fontSize:18});
-    this.add.text(16,40,`Player: ${p?.username || u?.username || 'anon'}`,{fontFamily:'monospace',fontSize:14});
-    this.player = this.physics.add.sprite(200,200,'player');
-    this.cursors = this.input.keyboard.createCursorKeys();
-  }
-  function update(){
-    const s = 150, p = this.player; p.setVelocity(0,0);
-    if(this.cursors.left.isDown)  p.setVelocityX(-s);
-    if(this.cursors.right.isDown) p.setVelocityX(s);
-    if(this.cursors.up.isDown)    p.setVelocityY(-s);
-    if(this.cursors.down.isDown)  p.setVelocityY(s);
-  }
+    <div id="gameCard">
+      <canvas id="game" width="960" height="540" aria-label="IZZA City"></canvas>
+    </div>
+  </div>
+
+  <!-- Virtual joystick + quick buttons for mobile -->
+  <div class="stick" id="stick">
+    <div class="base"></div>
+    <div class="nub" id="nub"></div>
+  </div>
+  <div class="controls">
+    <button class="btn" id="btnA">A</button>
+    <button class="btn" id="btnB">B</button>
+  </div>
+
+  <script>
+  (function(){
+    const profile = {{ profile|tojson|safe }};
+    // sprite choices saved at creation
+    const BODY   = profile.sprite_skin || "default";
+    const HAIR   = profile.hair || "short";
+    const OUTFIT = profile.outfit || "street";
+
+    // --------- Canvas & Viewport ----------
+    const cvs = document.getElementById('game');
+    const ctx = cvs.getContext('2d');
+
+    // Scale factor: pixels per world unit (our sprites are 32x32)
+    const TILE = 32;
+    const SCALE = Math.max(2, Math.floor((cvs.width/30)/ (TILE/2))); // adaptive-ish
+    const DRAW = TILE * SCALE / 2; // how big we render each tile (upscaled)
+
+    // --------- Asset Loader ----------
+    function loadImg(src){
+      return new Promise((res, rej)=>{
+        const i = new Image();
+        i.onload = ()=>res(i);
+        i.onerror = rej;
+        i.src = src;
+      });
+    }
+    const assetRoot = "/static/game/sprites";
+    const assets = {
+      body:   `${assetRoot}/body/${BODY}.png`,
+      hair:   `${assetRoot}/hair/${HAIR}.png`,
+      outfit: `${assetRoot}/outfit/${OUTFIT}.png`,
+    };
+
+    // --------- Simple Map (prototype) ----------
+    // 0 = grass, 1 = road, 2 = sidewalk, 3 = building block
+    const W = 90, H = 60;
+    const map = new Array(H).fill(0).map(()=>new Array(W).fill(0));
+    // lay roads horizontally & vertically to make a simple grid city
+    for (let y=0; y<H; y++){
+      for (let x=0; x<W; x++){
+        map[y][x] = 0; // grass
+        if (y%10===5) map[y][x] = 1;           // horizontal road
+        if (x%12===6) map[y][x] = 1;           // vertical road
+        if (map[y][x]===1 && (y%10===4 || y%10===6 || x%12===5 || x%12===7)) {
+          if (map[y][x]!==1) map[y][x]=2; else map[y][x]=1; // keep road dominant
+        }
+      }
+    }
+    // add a building block cluster
+    for (let by=20; by<27; by++){
+      for (let bx=20; bx<28; bx++){
+        if (map[by][bx]===0) map[by][bx]=3;
+      }
+    }
+
+    // --------- Player ----------
+    const player = {
+      x: (W/2)*TILE + 2, // world px
+      y: (H/2)*TILE + 2,
+      vx: 0, vy: 0,
+      speed: 2.0 * (TILE/16), // tuned to tile size
+      facing: 'down',
+      wanted: 0
+    };
+
+    // --------- Input (keyboard) ----------
+    const keys = {};
+    window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; });
+    window.addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()] = false; });
+
+    // --------- Input (mobile joystick) ----------
+    const stick = document.getElementById('stick');
+    const nub   = document.getElementById('nub');
+    let dragging = false, baseRect=null, vec = {x:0,y:0};
+
+    function setNub(dx,dy){
+      const r = 40; // radius from center
+      const mag = Math.hypot(dx,dy) || 1;
+      const clamped = Math.min(mag, r);
+      const ux = dx / mag, uy = dy / mag;
+      nub.style.left = (40 + ux*clamped) + 'px';
+      nub.style.top  = (40 + uy*clamped) + 'px';
+      vec.x = (clamped/r)*ux;
+      vec.y = (clamped/r)*uy;
+    }
+    function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
+
+    function startDrag(e){
+      dragging = true;
+      baseRect = stick.getBoundingClientRect();
+    }
+    function moveDrag(e){
+      if(!dragging) return;
+      const t = e.touches ? e.touches[0] : e;
+      const cx = baseRect.left + baseRect.width/2;
+      const cy = baseRect.top  + baseRect.height/2;
+      setNub(t.clientX - cx, t.clientY - cy);
+    }
+    function endDrag(){ dragging=false; resetNub(); }
+
+    stick.addEventListener('touchstart', startDrag, {passive:true});
+    stick.addEventListener('touchmove',  moveDrag,  {passive:true});
+    stick.addEventListener('touchend',   endDrag,   {passive:true});
+    stick.addEventListener('mousedown',  startDrag);
+    window.addEventListener('mousemove', moveDrag);
+    window.addEventListener('mouseup',   endDrag);
+
+    // --------- Wanted Stars HUD (placeholder) ----------
+    function setWanted(n){
+      player.wanted = Math.max(0, Math.min(5, n|0));
+      const stars = document.querySelectorAll('#stars .star');
+      stars.forEach((s,i)=> s.className = 'star' + (i<player.wanted?' on':'' ));
+    }
+
+    // --------- Camera ----------
+    const camera = { x:0, y:0 };
+    function centerCamera(){
+      camera.x = player.x - cvs.width/2;
+      camera.y = player.y - cvs.height/2;
+      // clamp to world bounds
+      camera.x = Math.max(0, Math.min(camera.x, W*TILE - cvs.width));
+      camera.y = Math.max(0, Math.min(camera.y, H*TILE - cvs.height));
+    }
+
+    // --------- Drawing ----------
+    function drawTile(gx,gy,screenX,screenY){
+      const t = map[gy][gx];
+      const S = DRAW;
+      if (t===0){ // grass
+        ctx.fillStyle = '#0b381d';
+        ctx.fillRect(screenX, screenY, S, S);
+        ctx.fillStyle = 'rgba(255,255,255,.03)';
+        ctx.fillRect(screenX, screenY, S, 3);
+      } else if (t===1){ // road
+        ctx.fillStyle = '#2b2b2b';
+        ctx.fillRect(screenX, screenY, S, S);
+        ctx.fillStyle = '#cfcf00';
+        ctx.fillRect(screenX + S/2 - 2, screenY, 4, S);
+      } else if (t===2){ // sidewalk
+        ctx.fillStyle = '#555d66';
+        ctx.fillRect(screenX, screenY, S, S);
+        ctx.strokeStyle = 'rgba(0,0,0,.25)';
+        ctx.strokeRect(screenX, screenY, S, S);
+      } else if (t===3){ // building block
+        ctx.fillStyle = '#4a2d2d';
+        ctx.fillRect(screenX, screenY, S, S);
+        ctx.fillStyle = 'rgba(0,0,0,.15)';
+        ctx.fillRect(screenX, screenY, S, 6);
+      }
+    }
+
+    function drawPlayer(images){
+      const S = DRAW;
+      const sx = Math.floor(player.x - camera.x);
+      const sy = Math.floor(player.y - camera.y);
+      // layer order: body -> outfit -> hair
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(images.body,   0,0,TILE,TILE, sx, sy, S, S);
+      ctx.drawImage(images.outfit, 0,0,TILE,TILE, sx, sy, S, S);
+      ctx.drawImage(images.hair,   0,0,TILE,TILE, sx, sy, S, S);
+    }
+
+    // --------- Update ----------
+    function update(dt){
+      // keyboard vector
+      let dx = 0, dy = 0;
+      if (keys['arrowup']||keys['w']) dy -= 1;
+      if (keys['arrowdown']||keys['s']) dy += 1;
+      if (keys['arrowleft']||keys['a']) dx -= 1;
+      if (keys['arrowright']||keys['d']) dx += 1;
+
+      // joystick vector (mobile)
+      dx += vec.x;
+      dy += vec.y;
+
+      // normalize
+      const mag = Math.hypot(dx,dy);
+      if (mag > 0){
+        dx /= mag; dy /= mag;
+        player.vx = dx * player.speed;
+        player.vy = dy * player.speed;
+      } else {
+        player.vx = 0; player.vy = 0;
+      }
+
+      player.x += player.vx * dt;
+      player.y += player.vy * dt;
+
+      // clamp to world bounds
+      player.x = Math.max(0, Math.min(player.x, W*TILE - TILE));
+      player.y = Math.max(0, Math.min(player.y, H*TILE - TILE));
+
+      centerCamera();
+    }
+
+    function render(images){
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,cvs.width,cvs.height);
+
+      // find visible tile range
+      const S = DRAW;
+      const tilesX = Math.ceil(cvs.width / S) + 2;
+      const tilesY = Math.ceil(cvs.height / S) + 2;
+      const startX = Math.max(0, Math.floor(camera.x / TILE));
+      const startY = Math.max(0, Math.floor(camera.y / TILE));
+
+      for (let y=0; y<tilesY; y++){
+        for (let x=0; x<tilesX; x++){
+          const gx = startX + x;
+          const gy = startY + y;
+          if (gx>=0 && gx<W && gy>=0 && gy<H){
+            const screenX = (gx*TILE - camera.x) * (S/TILE);
+            const screenY = (gy*TILE - camera.y) * (S/TILE);
+            drawTile(gx, gy, screenX, screenY);
+          }
+        }
+      }
+
+      drawPlayer(images);
+    }
+
+    // --------- Main Loop ---------
+    Promise.all([
+      loadImg(assets.body),
+      loadImg(assets.outfit),
+      loadImg(assets.hair),
+    ]).then(([body, outfit, hair])=>{
+      const imgs = { body, outfit, hair };
+      let last = performance.now();
+      function loop(now){
+        const dt = Math.min(32, now - last); // clamp delta
+        last = now;
+        update(dt/16.6667);   // ~60fps normalized
+        render(imgs);
+        requestAnimationFrame(loop);
+      }
+      centerCamera();
+      requestAnimationFrame(loop);
+    }).catch(err=>{
+      console.error("Sprite load failed", err);
+    });
+
+    // Quick test buttons (wire later for actions)
+    document.getElementById('btnA').addEventListener('click', ()=> setWanted(player.wanted+1));
+    document.getElementById('btnB').addEventListener('click', ()=> setWanted(0));
+  })();
   </script>
 </body>
 </html>
