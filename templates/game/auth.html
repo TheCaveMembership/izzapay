@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Authenticate — IZZA GAME</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    html,body{max-width:100%;overflow-x:hidden;}
+    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    .wrap{max-width:680px;margin:0 auto;padding:16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
+    .muted{color:var(--muted)}
+    h1{margin:0 0 8px;font-size:28px;line-height:1.15}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand-word{height:32px;filter:brightness(1.06) contrast(1.02)}
+    .err{color:#ff9aa2;white-space:pre-wrap}
+  </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+</head>
+<body class="cw-blue theme-a">
+  <div class="wrap">
+    <div class="brand" style="margin-top:8px">
+      <img src="/static/izzapay-word.svg" class="brand-word" alt="IZZA PAY wordmark">
+      <span class="muted">IZZA GAME</span>
+    </div>
+
+    <div class="card">
+      <h1>Authenticate to Play</h1>
+      <p class="muted">
+        You’re about to enter <strong>IZZA GAME</strong>. We use Pi sign-in to link your progress,
+        character, and inventory to your account.
+      </p>
+
+      <div class="actions">
+        <button id="piGameAuthBtn" class="ip-btn">🎮 Authenticate with Pi</button>
+        <a class="ip-btn ghost" href="/">Back to Home</a>
+      </div>
+
+      <p id="msg" class="muted" style="margin-top:10px"></p>
+      <div id="err" class="err"></div>
+
+      <p class="muted" style="margin-top:10px;font-size:13px">
+        Tip: Make sure you’re opening this in the Pi Browser so the Pi SDK can run.
+      </p>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    const sandbox = {{ 'true' if sandbox else 'false' }};
+    const btn = document.getElementById('piGameAuthBtn');
+    const msg = document.getElementById('msg');
+    const err = document.getElementById('err');
+
+    function setMsg(t){ msg.textContent = t || ''; }
+    function setErr(t){ err.textContent = t || ''; }
+
+    function initPi(){
+      if (!window.Pi || !Pi.init) return false;
+      try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+      catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+    }
+    if (!initPi()) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+
+    btn?.addEventListener('click', function(){
+      setErr('');
+      if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
+      setMsg("Requesting authorization…");
+
+      // Minimal scopes for identity. Add 'payments' if you also want payment capabilities here.
+      const scopes = ['username'];
+
+      function onIncompletePaymentFound(payment){ /* not used here */ }
+
+      Pi.authenticate(scopes, onIncompletePaymentFound)
+        .then(function(auth){
+          // Reuse your existing /auth/exchange to set session, then jump to the game.
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = '/auth/exchange'; // existing main-app endpoint
+          // payload same structure your main page sends
+          const payload = document.createElement('input');
+          payload.type='hidden'; payload.name='payload';
+          payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+          form.appendChild(payload);
+
+          // After session set, go to play page. Your server can honor this `next` param.
+          const next = document.createElement('input');
+          next.type='hidden'; next.name='next';
+          next.value = '/izza-game/play';
+          form.appendChild(next);
+
+          document.body.appendChild(form);
+          form.submit();
+        })
+        .catch(function(e){
+          console.error(e);
+          setMsg("Authorization failed. Please try again.");
+          setErr(e?.message || String(e));
+        });
+    });
+  })();
+  </script>
+</body>
+</html>
