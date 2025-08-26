@@ -103,6 +103,7 @@
 
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <script src="/static/game/js/izza_play_v1.js"></script>
+  <!-- cache-bust + defer so you definitely load the latest build -->
+  <script src="/static/game/js/izza_play_v1.js?v=7" defer></script>
 </body>
 </html>
