@@ -1,14 +1,40 @@
 # game_app.py
 import os
+from datetime import timedelta
 from flask import Flask, render_template, session, request, redirect, url_for
 from dotenv import load_dotenv
 from db import conn
 
 load_dotenv()
 
+# ----------------- CREATE APP -----------------
 # Standalone Flask app for the game (mounted at /izza-game via wsgi.py)
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.secret_key = os.getenv("SECRET_KEY", "dev-secret")  # must match main app
+
+# ---- IMPORTANT: share the EXACT same secret & cookie settings as main app ----
+# 1) Try to import the main app's secret_key (best: guarantees same value).
+_shared_secret = None
+try:
+    from app import app as main_app  # wsgi.py should import app.py before game_app.py
+    _shared_secret = main_app.secret_key
+except Exception:
+    # 2) Fallback: use FLASK_SECRET env var (must match what app.py uses)
+    _shared_secret = os.getenv("FLASK_SECRET")
+
+if not _shared_secret:
+    # Avoid silent mismatches. Set FLASK_SECRET in your environment.
+    raise RuntimeError("Shared session secret missing. Set FLASK_SECRET so app.py and game_app.py match.")
+
+app.secret_key = _shared_secret
+app.config.update(
+    SESSION_COOKIE_NAME="izzapay_session",
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+)
+
+# ----------------- ENV FLAGS -----------------
 PI_SANDBOX = os.getenv("PI_SANDBOX", "false").lower() == "true"
 
 
