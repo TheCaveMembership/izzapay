@@ -12,17 +12,14 @@ load_dotenv()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # ---- IMPORTANT: share the EXACT same secret & cookie settings as main app ----
-# 1) Try to import the main app's secret_key (best: guarantees same value).
 _shared_secret = None
 try:
-    from app import app as main_app  # wsgi.py should import app.py before game_app.py
+    from app import app as main_app  # ensure wsgi.py imports app.py first
     _shared_secret = main_app.secret_key
 except Exception:
-    # 2) Fallback: use FLASK_SECRET env var (must match what app.py uses)
     _shared_secret = os.getenv("FLASK_SECRET")
 
 if not _shared_secret:
-    # Avoid silent mismatches. Set FLASK_SECRET in your environment.
     raise RuntimeError("Shared session secret missing. Set FLASK_SECRET so app.py and game_app.py match.")
 
 app.secret_key = _shared_secret
@@ -37,11 +34,36 @@ app.config.update(
 # ----------------- ENV FLAGS -----------------
 PI_SANDBOX = os.getenv("PI_SANDBOX", "false").lower() == "true"
 
+# ----------------- TOKEN VERIFY (reuse main app) -----------------
+# Import the token verifier from your main app so signatures match.
+try:
+    from app import verify_login_token  # same function your main app uses
+except Exception:
+    verify_login_token = None  # we'll guard usages below
+
+def _get_bearer_token_from_request() -> str | None:
+    """
+    Mirror of app.py get_bearer_token_from_request (query ?t= or Authorization: Bearer).
+    """
+    t = request.args.get("t") or request.form.get("t")
+    if t:
+        return t.strip()
+    auth = request.headers.get("Authorization", "")
+    if auth and auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return None
 
 # -------------------- helpers --------------------
 def current_user_row():
-    """Return the users table row for the logged-in user_id, or None."""
+    """
+    Return the users table row for the logged-in user_id, or resolve from short-lived token.
+    This matches app.py behavior so the game works even if the cookie isn't sent by Pi Browser.
+    """
     uid = session.get("user_id")
+    if not uid:
+        tok = _get_bearer_token_from_request()
+        if tok and verify_login_token:
+            uid = verify_login_token(tok)
     if not uid:
         return None
     with conn() as cx:
@@ -49,11 +71,14 @@ def current_user_row():
         return row
 
 def require_login_redirect():
-    """Redirect to /signin if not logged in via IZZA PAY."""
-    if "user_id" not in session:
-        # Optional: preserve a next param back to this page
-        return redirect("/signin")
-    return None
+    """Redirect to /signin if not logged in (cookie) AND no valid token."""
+    if "user_id" in session:
+        return None
+    # Try token fallback before redirecting
+    tok = _get_bearer_token_from_request()
+    if tok and verify_login_token and verify_login_token(tok):
+        return None
+    return redirect("/signin")
 
 
 # -------------------- routes --------------------
@@ -157,7 +182,7 @@ def game_play():
         outfit=profile[4],
     )
 
-    # You can also pass a minimal user context (e.g., username) to the template if useful
+    # Minimal user context
     user_ctx = {"username": urow["pi_username"], "id": urow["id"]}
 
     return render_template("game/play.html", profile=profile_dict, user=user_ctx)
