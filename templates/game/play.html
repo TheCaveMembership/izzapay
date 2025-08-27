@@ -41,9 +41,9 @@
     #prompt { position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
       background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none; z-index:2 }
 
-    /* Minimap */
+    /* Minimap (hidden by default; toggled by Map button) */
     .mini{ position:fixed; right:12px; bottom:118px; z-index:6;
-      background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px }
+      background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px; display:none }
     #minimap{ width:240px; height:auto; display:block; border-radius:10px; background:#0b0f17 }
 
     /* Touch controls */
@@ -97,10 +97,12 @@
     <div id="invPanel"></div>
   </div>
 
+  <!-- Minimap (click to open big map) -->
   <div class="mini" id="miniWrap" title="Tap to open world map">
     <canvas id="minimap" width="260" height="170"></canvas>
   </div>
 
+  <!-- Touch controls -->
   <div class="stick" id="stick">
     <div class="base"></div>
     <div class="nub" id="nub"></div>
@@ -109,8 +111,10 @@
     <button class="btn" id="btnA" type="button">A</button>
     <button class="btn" id="btnB" type="button">B</button>
     <button class="btn" id="btnI" type="button" title="Inventory">I</button>
+    <button class="btn" id="btnMap" type="button" title="Toggle Minimap">Map</button>
   </div>
 
+  <!-- Big Map -->
   <div class="modal" id="mapModal">
     <div class="backdrop"></div>
     <div class="card">
@@ -157,7 +161,7 @@
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
 
   <!-- LOAD ORDER MATTERS: core FIRST, then plugins -->
-  <script src="/static/game/js/izza_core_v3.js?v=9"></script>
+  <script src="/static/game/js/izza_core_v3.js?v=12"></script>
   <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
   <script src="/static/game/js/plugins/v5_loot.js?v=6"></script>
 </body>
