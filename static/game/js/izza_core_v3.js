@@ -45,6 +45,19 @@
   const w2sX = wx => (wx - camera.x) * SCALE_FACTOR;
   const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
 
+  // --- NEW: loot drop behavior knobs ---
+  const DROP_GRACE_MS = 1000;       // cannot be picked up for 1s
+  const DROP_OFFSET   = 18;         // nudge away from player center (in world px)
+
+  // helper: position a drop away from the player so it’s not immediately overlapped
+  function makeDropPos(victimCenterX, victimCenterY){
+    const dx = victimCenterX - player.x;
+    const dy = victimCenterY - player.y;
+    const m  = Math.hypot(dx, dy) || 1;
+    const ux = dx / m, uy = dy / m;
+    return { x: victimCenterX + ux * DROP_OFFSET, y: victimCenterY + uy * DROP_OFFSET };
+  }
+
   // ===== World =====
   const W=90,H=60;
   const unlocked={x0:18,y0:18,x1:72,y1:42};
@@ -436,7 +449,18 @@
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
         setCoins(player.coins + 25);
-        IZZA.emit('ped-killed', { coins: 25, x: p.x + TILE/2, y: p.y + TILE/2 });
+
+        // --- DROP COINS with grace + offset ---
+        const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
+        const pos = makeDropPos(centerX, centerY);
+        const tnow = performance.now();
+        IZZA.emit('ped-killed', {
+          coins: 25,
+          x: pos.x, y: pos.y,
+          droppedAt: tnow,
+          noPickupUntil: tnow + DROP_GRACE_MS
+        });
+
         if(tutorial.active && tutorial.step==='hitPed'){
           tutorial.step='hitCop';
           showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
@@ -494,7 +518,18 @@
       setWanted(player.wanted - 1);
       maintainCops();
       setCoins(player.coins + 50);
-      IZZA.emit('cop-killed', { cop: c, x: c.x + TILE/2, y: c.y + TILE/2 });
+
+      // --- DROP WEAPON with grace + offset ---
+      const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
+      const pos = makeDropPos(centerX, centerY);
+      const tnow = performance.now();
+      IZZA.emit('cop-killed', {
+        cop: c,
+        x: pos.x, y: pos.y,
+        droppedAt: tnow,
+        noPickupUntil: tnow + DROP_GRACE_MS
+      });
+
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
         setMission1Done();
