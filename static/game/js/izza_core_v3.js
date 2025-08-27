@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.12-core+hooks+npc-sheets+allSettled';
+  const BUILD = 'v3.13-core+inventory+equip+loot-hooks';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus ---
@@ -45,7 +45,7 @@
   const w2sX = wx => (wx - camera.x) * SCALE_FACTOR;
   const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
 
-  // --- NEW: loot drop behavior knobs ---
+  // --- loot drop behavior knobs ---
   const DROP_GRACE_MS = 1000;       // cannot be picked up for 1s
   const DROP_OFFSET   = 18;         // nudge away from player center (in world px)
 
@@ -147,6 +147,7 @@
     missions:   'izzaMissions',
     inventory:  'izzaInventory'
   };
+
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
     const n = raw==null ? 300 : (parseInt(raw,10)||0);
@@ -159,6 +160,7 @@
     if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
+
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
   function setMission1Done(){
     localStorage.setItem(LS.mission1,'done');
@@ -166,8 +168,28 @@
     if(cur<1) localStorage.setItem(LS.missions,'1');
   }
   function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
-  function getInventory(){ try{ return JSON.parse(localStorage.getItem(LS.inventory)||'[]'); }catch{ return []; } }
-  function setInventory(arr){ localStorage.setItem(LS.inventory, JSON.stringify(arr||[])); }
+
+  // ---- Inventory (object w/ counts, ammo, durability, equipped flags)
+  // Migration: if an old array is found, convert it.
+  function _migrateInventory(v){
+    if (Array.isArray(v)) {
+      const inv = {};
+      v.forEach(k => { inv[k] = (k==='pistol' ? {owned:true, ammo:0, equipped:false} : {count:1, equipped:false}); });
+      return inv;
+    }
+    return v && typeof v==='object' ? v : {};
+  }
+  function getInventory(){
+    try{
+      const parsed = JSON.parse(localStorage.getItem(LS.inventory) || '{}');
+      return _migrateInventory(parsed);
+    }catch{
+      return {};
+    }
+  }
+  function setInventory(obj){
+    localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
+  }
 
   // ===== Player / anim =====
   const player = {
@@ -180,6 +202,22 @@
     hp: 5,
     coins: 0
   };
+
+  // ===== Equip & weapon rules =====
+  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' (placeholder for future shooting)
+  const WEAPON_RULES = {
+    fists:     { damage: 1, breaks: false },
+    bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
+    knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
+    pistol:    { damage: 3, breaks: false } // shooting logic handled later
+  };
+  function missionsOKToUse(id){
+    // Usage locks (can still buy earlier)
+    if (id==='pistol') return getMissionCount() >= 3; // keep consistent with loot plugin gates
+    if (id==='bat')    return true;
+    if (id==='knuckles') return true;
+    return true;
+  }
 
   const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
@@ -208,6 +246,7 @@
     h.textContent=text; h.style.display='block';
     tutorial.hintT = seconds;
   }
+  function toast(msg, seconds=2.2){ showHint(msg, seconds); }
 
   function handleB(){
     if (doorInRange()) openEnter();
@@ -219,6 +258,7 @@
     const k=e.key.toLowerCase(); keys[k]=true;
     if(k==='b'){ e.preventDefault(); handleB(); }
     if(k==='a'){ e.preventDefault(); doAttack(); }
+    if(k==='i'){ e.preventDefault(); toggleInventoryPanel(); }
   },{passive:false});
   window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
 
@@ -304,6 +344,15 @@
   // ===== Modals & Tutorial hook =====
   function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
+
+  // Tiny inline icons for shop/inventory
+  function svgIcon(id, w=24, h=24){
+    if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
+    if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
+    if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
+    return '';
+  }
+
   function openShop(){
     const m=document.getElementById('shopModal'); if(!m) return;
     const list=document.getElementById('shopList');
@@ -321,23 +370,56 @@
         {id:'knuckles',  name:'Brass Knuckles',   price:150, desc:'+1 damage'},
         {id:'pistol',    name:'Pistol',           price:300, desc:'Basic firearm', reqMissions:2},
       ];
-      const inv = new Set(getInventory());
       if(list){
         stock.forEach(it=>{
           if(it.reqMissions && missions < it.reqMissions) return;
+
           const row = document.createElement('div'); row.className='shop-item';
           const meta = document.createElement('div'); meta.className='meta';
-          meta.innerHTML = `<div class="name">${it.name}</div><div class="sub">${it.price} IC</div>`;
-          const btn = document.createElement('button'); btn.className='buy'; btn.textContent = inv.has(it.id)? 'Owned' : 'Buy';
-          btn.disabled = inv.has(it.id);
+          meta.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px">
+              <div>${svgIcon(it.id)}</div>
+              <div>
+                <div class="name">${it.name}</div>
+                <div class="sub">${it.price} IC</div>
+              </div>
+            </div>`;
+
+          const btn = document.createElement('button'); btn.className='buy'; btn.textContent = 'Buy';
           btn.addEventListener('click', ()=>{
-            if(inv.has(it.id)) return;
             if(player.coins < it.price){ alert('Not enough coins'); return; }
             setCoins(player.coins - it.price);
-            inv.add(it.id);
-            setInventory([...inv]);
-            btn.textContent='Owned'; btn.disabled=true;
+
+            // Add to inventory (stackables + durability init)
+            const inv = getInventory();
+            if(it.id==='bat'){
+              const cur = inv.bat || { count:0, hitsLeftOnCurrent:0, equipped:false };
+              cur.count += 1;
+              if(cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = WEAPON_RULES.bat.hitsPerItem;
+              inv.bat = cur;
+              setInventory(inv);
+              toast('Purchased Baseball Bat');
+            }else if(it.id==='knuckles'){
+              const cur = inv.knuckles || { count:0, hitsLeftOnCurrent:0, equipped:false };
+              cur.count += 1;
+              if(cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = WEAPON_RULES.knuckles.hitsPerItem;
+              inv.knuckles = cur;
+              setInventory(inv);
+              toast('Purchased Brass Knuckles');
+            }else if(it.id==='pistol'){
+              const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
+              cur.owned = true;
+              cur.ammo = (cur.ammo|0) + 17; // full mag per buy
+              inv.pistol = cur;
+              setInventory(inv);
+              toast('Purchased Pistol (+17 ammo)');
+            }
+
+            // If inventory panel is open, refresh it
+            const p = document.getElementById('invPanel');
+            if(p && p.style.display!=='none') renderInventoryPanel();
           });
+
           row.appendChild(meta); row.appendChild(btn);
           list.appendChild(row);
         });
@@ -364,6 +446,93 @@
       tutorial.active = true;
       tutorial.step   = 'hitPed';
       showHint('Tutorial: Press A to hit a pedestrian.');
+    });
+  }
+
+  // ===== Inventory UI (auto-injected; toggle with I) =====
+  function ensureInvHost(){
+    let host = document.getElementById('invPanel');
+    if(!host){
+      const card = document.getElementById('gameCard');
+      host = document.createElement('div');
+      host.id = 'invPanel';
+      host.style.cssText = 'max-width:1100px;margin:8px auto 0;display:none';
+      // insert after #gameCard
+      if(card && card.parentNode){
+        card.parentNode.insertBefore(host, card.nextSibling);
+      }else{
+        document.body.appendChild(host);
+      }
+    }
+    return host;
+  }
+  function toggleInventoryPanel(){
+    const host = ensureInvHost();
+    const on = host.style.display!=='none';
+    host.style.display = on ? 'none' : 'block';
+    if(!on) renderInventoryPanel();
+  }
+  function renderInventoryPanel(){
+    const host = ensureInvHost();
+    const inv  = getInventory();
+    const ms   = getMissionCount();
+
+    function itemRow(id, label, metaHTML){
+      const canUse = missionsOKToUse(id);
+      const isEquipped = (equipped.weapon===id);
+      const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'?3:''}</span>`;
+      const equipBtn = canUse
+        ? `<button data-equip="${id}" style="margin-left:auto" ${isEquipped?'disabled':''}>${isEquipped?'Equipped':'Equip'}</button>`
+        : '';
+      return `
+        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+          <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
+          <div style="font-weight:600">${label}</div>
+          ${lockHTML}
+          <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
+          ${equipBtn}
+        </div>`;
+    }
+
+    const rows = [];
+
+    // Pistol
+    if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
+      rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
+    }
+    // Bats
+    if(inv.bat && inv.bat.count>0){
+      const cur = inv.bat.hitsLeftOnCurrent|0;
+      rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
+    }
+    // Knuckles
+    if(inv.knuckles && inv.knuckles.count>0){
+      const cur = inv.knuckles.hitsLeftOnCurrent|0;
+      rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
+    }
+
+    host.innerHTML = `
+      <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+          <div style="font-weight:700">Inventory</div>
+          <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
+          <div style="margin-left:auto; opacity:.8; font-size:12px">Press I to close</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px">
+          ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
+        </div>
+      </div>
+    `;
+
+    // Wire equip buttons
+    host.querySelectorAll('[data-equip]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.getAttribute('data-equip');
+        if(!missionsOKToUse(id)) return;
+        equipped.weapon = id;
+        toast(`Equipped ${id}`);
+        renderInventoryPanel();
+      });
     });
   }
 
@@ -448,9 +617,8 @@
       if(p.blinkT<=0){
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
-        setCoins(player.coins + 25);
 
-        // --- DROP COINS with grace + offset ---
+        // --- DROP COINS with grace + offset (no instant coin award) ---
         const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
         const pos = makeDropPos(centerX, centerY);
         const tnow = performance.now();
@@ -517,9 +685,8 @@
       if(i>=0) cops.splice(i,1);
       setWanted(player.wanted - 1);
       maintainCops();
-      setCoins(player.coins + 50);
 
-      // --- DROP WEAPON with grace + offset ---
+      // --- DROP WEAPON with grace + offset (no instant coin award here) ---
       const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
       const pos = makeDropPos(centerX, centerY);
       const tnow = performance.now();
@@ -540,15 +707,62 @@
 
   // ===== Combat =====
   function hitTest(ax,ay, bx,by, radius=20){ return Math.hypot(ax-bx, ay-by) <= radius; }
+
+  function weaponDamage(){
+    const rules = WEAPON_RULES[equipped.weapon] || WEAPON_RULES.fists;
+    return rules.damage||1;
+  }
+  function consumeDurabilityIfNeeded(){
+    const inv = getInventory();
+    if (equipped.weapon==='bat' && inv.bat && inv.bat.count>0){
+      inv.bat.hitsLeftOnCurrent = Math.max(0,(inv.bat.hitsLeftOnCurrent|0)-1);
+      if(inv.bat.hitsLeftOnCurrent<=0){
+        inv.bat.count -= 1;
+        if(inv.bat.count>0){
+          inv.bat.hitsLeftOnCurrent = WEAPON_RULES.bat.hitsPerItem;
+        }else{
+          equipped.weapon = 'fists';
+          toast('Your bat broke!');
+        }
+      }
+      setInventory(inv);
+    }else if (equipped.weapon==='knuckles' && inv.knuckles && inv.knuckles.count>0){
+      inv.knuckles.hitsLeftOnCurrent = Math.max(0,(inv.knuckles.hitsLeftOnCurrent|0)-1);
+      if(inv.knuckles.hitsLeftOnCurrent<=0){
+        inv.knuckles.count -= 1;
+        if(inv.knuckles.count>0){
+          inv.knuckles.hitsLeftOnCurrent = WEAPON_RULES.knuckles.hitsPerItem;
+        }else{
+          equipped.weapon = 'fists';
+          toast('Your knuckles broke!');
+        }
+      }
+      setInventory(inv);
+    }
+  }
+
   function doAttack(){
+    const dmg = weaponDamage();
     let didHit=false;
+
+    // Hit pedestrians
     for(const p of pedestrians){
       if(hitTest(player.x,player.y, p.x,p.y, 22)){
         didHit=true;
         if(p.state==='walk'){
           if(player.wanted===0){ setWanted(1); maintainCops(); }
-          p.hp -= 1;
-          if(p.hp<=1){ p.state='downed'; }
+          p.hp -= dmg;
+
+          // If using bat/knuckles and hit is lethal, skip "downed" and finish immediately (2 hits total)
+          if((equipped.weapon==='bat' || equipped.weapon==='knuckles') && p.hp<=0){
+            p.state='blink'; p.blinkT=0.6;
+            if(player.wanted < 5){
+              setWanted(player.wanted + 1);
+              maintainCops();
+            }
+          }else{
+            if(p.hp<=1){ p.state='downed'; }
+          }
         }else if(p.state==='downed'){
           p.state='blink'; p.blinkT=0.6;
           if(player.wanted < 5){
@@ -556,13 +770,17 @@
             maintainCops();
           }
         }
+        consumeDurabilityIfNeeded();
         break;
       }
     }
+
+    // Hit cops
     if(!didHit){
       for(const c of cops){
         if(hitTest(player.x,player.y, c.x,c.y, 24)){
-          damageCop(c, 1);
+          damageCop(c, dmg);
+          consumeDurabilityIfNeeded();
           didHit=true; break;
         }
       }
@@ -809,7 +1027,7 @@
         const dtSec = dtMs/1000;
         update(dtSec, dtMs);
         render(imgs);
-        IZZA.emit('render-post', { now: performance.now() }); // NEW: overlay phase
+        IZZA.emit('render-post', { now: performance.now() }); // overlay phase for plugins (e.g., loot)
       }catch(err){
         console.error('Game loop error:', err);
         bootMsg('Game loop error: '+err.message, '#ff6b6b');
