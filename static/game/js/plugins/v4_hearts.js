@@ -1,23 +1,24 @@
 // /static/game/js/plugins/v4_hearts.js
 (function () {
-  const BUILD = "v4-hearts-plugin@svgHUD";
-  console.log("[IZZA PLAY]", BUILD);
+  const BUILD = 'v4-hearts-plugin+hud-under-stars';
+  console.log('[IZZA PLAY]', BUILD);
 
-  // --- persistence keys (share izza namespace) ---
+  // --- persistence keys (reuse core namespace) ---
   const LS = {
-    maxHearts: "izzaMaxHearts",
-    curSegs: "izzaCurHeartSegments",
-    inventory: "izzaInventory",
+    maxHearts:  'izzaMaxHearts',
+    curSegs:    'izzaCurHeartSegments',
+    inventory:  'izzaInventory'
   };
 
-  // local mirrors set after core 'ready'
+  // mirrors to core
   let api = null, player = null, cops = null;
 
   // ---------- persistence helpers ----------
   const getMaxHearts = () =>
-    Math.max(1, parseInt(localStorage.getItem(LS.maxHearts) || "3", 10));
+    Math.max(1, parseInt(localStorage.getItem(LS.maxHearts) || '3', 10));
   const setMaxHearts = (n) =>
     localStorage.setItem(LS.maxHearts, String(Math.max(1, n | 0)));
+
   const getCurSegs = (maxH) => {
     const def = maxH * 3;
     const raw = parseInt(localStorage.getItem(LS.curSegs) || String(def), 10);
@@ -29,54 +30,50 @@
       String(Math.max(0, Math.min((maxH || getMaxHearts()) * 3, seg | 0)))
     );
   };
-  const loseAllItems = () => localStorage.setItem(LS.inventory, "[]");
+  const loseAllItems = () => localStorage.setItem(LS.inventory, '[]');
 
   // ---------- hearts model ----------
   function initHearts() {
-    player.maxHearts = getMaxHearts();        // number of ❤️ containers
-    player.heartSegs = getCurSegs(player.maxHearts); // each heart has 3 segments
+    player.maxHearts = getMaxHearts();
+    player.heartSegs = getCurSegs(player.maxHearts);
     if (player.heartSegs <= 0) {
       player.heartSegs = player.maxHearts * 3;
       setCurSegs(player.heartSegs, player.maxHearts);
     }
-    ensureHUD();
-    renderHeartsDOM();
+    drawDOMHearts(); // first render
+    placeHeartsHud(); // first position
   }
   function healFull() {
     player.heartSegs = player.maxHearts * 3;
     setCurSegs(player.heartSegs, player.maxHearts);
-    renderHeartsDOM();
+    drawDOMHearts();
   }
   function takeDamageSegs(n = 1) {
     player.heartSegs = Math.max(0, player.heartSegs - n);
     setCurSegs(player.heartSegs, player.maxHearts);
-    renderHeartsDOM();
+    drawDOMHearts();
     if (player.heartSegs <= 0) onDeath();
   }
 
   // ---------- death / respawn ----------
   function onDeath() {
-    const keep = Math.floor(api.getCoins() / 3); // keep 1/3rd
+    const keep = Math.floor(api.getCoins() / 3); // keep 1/3
     api.setCoins(keep);
     loseAllItems();
-
     api.setWanted(0);
     cops.length = 0;
 
     const door = findHQDoor();
-    player.x = door.x;
-    player.y = door.y;
-    player.facing = "down";
-    player.moving = false;
-    player.animTime = 0;
+    player.x = door.x; player.y = door.y;
+    player.facing = 'down'; player.moving = false; player.animTime = 0;
 
     healFull();
-    toast("You were taken out! Lost items and 2/3 of your coins.", 4);
+    toast('You were taken out! Lost items and 2/3 of your coins.', 4);
   }
 
-  // stable spawn: use core if exposed; otherwise snap to tile near current
   function findHQDoor() {
     if (api && api.doorSpawn) return { x: api.doorSpawn.x, y: api.doorSpawn.y };
+    // fallback: snap to current tile center
     const TILE = api ? api.TILE : 32;
     try {
       const gx = Math.round(player.x / TILE);
@@ -87,153 +84,156 @@
     }
   }
 
-  // ---------- small toast ----------
+  // ---------- tiny toast ----------
   function toast(text, seconds = 3) {
-    let h = document.getElementById("tutHint");
+    let h = document.getElementById('tutHint');
     if (!h) {
-      h = document.createElement("div");
-      h.id = "tutHint";
+      h = document.createElement('div');
+      h.id = 'tutHint';
       Object.assign(h.style, {
-        position: "fixed",
-        left: "12px",
-        top: "64px",
-        zIndex: 7,
-        background: "rgba(10,12,18,.85)",
-        border: "1px solid #394769",
-        color: "#cfe0ff",
-        padding: "8px 10px",
-        borderRadius: "10px",
-        fontSize: "14px",
+        position: 'fixed', left: '12px', top: '64px', zIndex: 7,
+        background: 'rgba(10,12,18,.85)', border: '1px solid #394769',
+        color: '#cfe0ff', padding: '8px 10px', borderRadius: '10px', fontSize: '14px'
       });
       document.body.appendChild(h);
     }
-    h.textContent = text;
-    h.style.display = "block";
-    setTimeout(() => {
-      h.style.display = "none";
-    }, seconds * 1000);
+    h.textContent = text; h.style.display = 'block';
+    setTimeout(() => { h.style.display = 'none'; }, seconds * 1000);
   }
 
-  // ======================================================================
-  //                          HUD HEARTS (DOM)
-  // ======================================================================
-  let hudWrap = null; // absolute container inside sticky .hud
-  function ensureHUD() {
-    if (hudWrap) return;
-    const hud = document.querySelector(".hud");
-    if (!hud) return;
+  // ===================================================================
+  //                        DOM HEARTS (under stars)
+  // ===================================================================
 
-    hud.style.position = hud.style.position || "sticky"; // already sticky in CSS
-    // Create an absolute box inside the HUD, aligned under the stars on the right
-    hudWrap = document.createElement("div");
-    hudWrap.id = "izzaHearts";
-    Object.assign(hudWrap.style, {
-      position: "absolute",
-      right: "12px",
-      top: "calc(100% + 2px)", // small gap *below* the HUD bar
-      zIndex: "6",
-      display: "flex",
-      gap: "6px",
-      padding: "8px 10px",
-      background: "rgba(10,12,18,.8)",
-      border: "1px solid #2a3550",
-      borderRadius: "12px",
-      boxShadow: "0 2px 10px rgba(0,0,0,.25)",
+  // Ensure the container exists
+  function ensureHeartsHud() {
+    let hud = document.getElementById('heartsHud');
+    if (hud) return hud;
+
+    hud = document.createElement('div');
+    hud.id = 'heartsHud';
+    Object.assign(hud.style, {
+      position: 'absolute',
+      zIndex: 6,
+      display: 'flex',
+      gap: '8px',
+      alignItems: 'center',
+      pointerEvents: 'none',   // purely visual
+      // left/top are set by placeHeartsHud()
     });
-    // ensure the HUD itself is relatively positioned so our absolute
-    // child measures from it (not the page)
-    if (getComputedStyle(hud).position === "static") {
-      hud.style.position = "relative";
-    }
-    hud.appendChild(hudWrap);
 
-    // keep pinned under stars on orientation/resize
-    window.addEventListener("resize", () => positionHUD());
-    positionHUD();
+    // subtle label shadow to stand out a bit
+    hud.style.filter = 'drop-shadow(0 1px 0 rgba(0,0,0,.3))';
+    document.body.appendChild(hud);
+    return hud;
   }
 
-  function positionHUD() {
-    // Because we attach inside .hud and use top: calc(100% + 2px),
-    // it will naturally sit right under the bar, so nothing else needed.
-  }
+  // Build the hearts based on current segments
+  function drawDOMHearts() {
+    const hud = ensureHeartsHud();
+    if (!player) return;
 
-  // draw one SVG heart with fractional fill (0..1)
-  function heartSVG(fillRatio) {
-    const id = "clip_" + Math.random().toString(36).slice(2);
-    const w = 22, h = 20; // compact but crisp
-    const rectW = Math.max(0, Math.min(1, fillRatio)) * 24; // based on viewBox width
-
-    return `
-<svg width="${w}" height="${h}" viewBox="0 0 24 24" aria-hidden="true">
-  <defs>
-    <clipPath id="${id}">
-      <rect x="0" y="0" width="${rectW}" height="24"></rect>
-    </clipPath>
-  </defs>
-  <!-- empty heart (outline + grey fill) -->
-  <path d="M12 21.35l-1.45-1.32C5.4 16.36 2 13.28 2 9.5 2 7 3.99 5 6.5 5c1.24 0 2.42.54 3.3 1.44L12 8.67l2.2-2.23C15.08 5.54 16.26 5 17.5 5 20.01 5 22 7 22 9.5c0 3.78-3.4 6.86-8.55 10.54L12 21.35z"
-        fill="#3a3f4a" stroke="#d14a4a" stroke-width="1.5" />
-  <!-- red filled portion, clipped -->
-  <g clip-path="url(#${id})">
-    <path d="M12 21.35l-1.45-1.32C5.4 16.36 2 13.28 2 9.5 2 7 3.99 5 6.5 5c1.24 0 2.42.54 3.3 1.44L12 8.67l2.2-2.23C15.08 5.54 16.26 5 17.5 5 20.01 5 22 7 22 9.5c0 3.78-3.4 6.86-8.55 10.54L12 21.35z"
-          fill="#ff5555"/>
-  </g>
-</svg>`;
-  }
-
-  function renderHeartsDOM() {
-    if (!hudWrap || !player) return;
     const maxH = player.maxHearts || 3;
-    const seg = player.heartSegs ?? maxH * 3;
+    const seg  = player.heartSegs ?? maxH * 3;
 
-    let html = "";
+    // clear
+    hud.innerHTML = '';
+
     for (let i = 0; i < maxH; i++) {
       const segForHeart = Math.max(0, Math.min(3, seg - i * 3)); // 0..3
-      const ratio = segForHeart / 3;
-      html += heartSVG(ratio);
+
+      const wrap = document.createElement('div');
+      Object.assign(wrap.style, {
+        position: 'relative',
+        width: '22px',
+        height: '20px'
+      });
+
+      // the heart itself (emoji)
+      const heart = document.createElement('span');
+      heart.textContent = '❤️';
+      Object.assign(heart.style, {
+        position: 'absolute',
+        left: '0', top: '-2px',
+        fontSize: '20px',
+        lineHeight: '20px',
+        filter: 'drop-shadow(0 1px 0 rgba(0,0,0,.25))'
+      });
+      wrap.appendChild(heart);
+
+      // grey mask from the RIGHT to simulate partial drain
+      if (segForHeart < 3) {
+        const pctGrey = (3 - segForHeart) / 3; // 0..1
+        const mask = document.createElement('div');
+        Object.assign(mask.style, {
+          position: 'absolute',
+          top: '0px',
+          right: '0px',
+          width: Math.round(22 * pctGrey) + 'px',
+          height: '20px',
+          background: 'rgba(58,63,74,.85)',
+          borderTopRightRadius: '8px',
+          borderBottomRightRadius: '8px'
+        });
+        wrap.appendChild(mask);
+      }
+
+      hud.appendChild(wrap);
     }
-    hudWrap.innerHTML = html;
+
+    placeHeartsHud(); // ensure positioning after rebuild
   }
 
-  // ======================================================================
-  //                   COP MELEE (damage every 2s in range)
-  // ======================================================================
+  // Position the hearts directly under the cop stars, responsive
+  function placeHeartsHud() {
+    const hud = ensureHeartsHud();
+    const stars = document.getElementById('stars');
+    if (!stars) return;
+
+    const r = stars.getBoundingClientRect();
+    // place just below, with a small gap; align left edges
+    hud.style.left = Math.round(r.left) + 'px';
+    hud.style.top  = Math.round(r.bottom + 6) + 'px';
+  }
+
+  // Reposition on resize / orientation change
+  window.addEventListener('resize', placeHeartsHud, { passive: true });
+  window.addEventListener('orientationchange', placeHeartsHud, { passive: true });
+
+  // ===================================================================
+  //                 Cop melee: 1 hit (1/3 heart) per 2s
+  // ===================================================================
   function attachCopMelee() {
-    IZZA.on("update-post", ({ now }) => {
+    IZZA.on('update-post', ({ now }) => {
       if (!api) return;
       const atkRange = 26;
-      const cd = 2000; // ms between hits per-cop
+      const cd = 2000; // ms
       for (const c of cops) {
         c._nextAtk ??= now;
         const dist = Math.hypot(player.x - c.x, player.y - c.y);
         if (dist <= atkRange && now >= c._nextAtk) {
-          takeDamageSegs(1); // 1/3 heart
-          c._nextAtk = now + cd;
+          takeDamageSegs(1);      // 1/3 of a heart
+          c._nextAtk = now + cd;  // cooldown
         }
       }
     });
   }
 
-  // ---------- hook into core ----------
+  // ---------- plugin boot ----------
   if (window.IZZA && IZZA.on) {
-    IZZA.on("ready", (coreApi) => {
+    IZZA.on('ready', (coreApi) => {
       api = coreApi;
       player = api.player;
-      cops = api.cops;
+      cops   = api.cops;
 
       initHearts();
       attachCopMelee();
 
-      // re-render when wanted level changes (not strictly needed, but handy)
-      IZZA.on("wanted-changed", () => renderHeartsDOM());
-
-      // also re-render when coins are changed etc., in case future perks grant hearts
-      IZZA.on("ped-killed", () => renderHeartsDOM());
-      IZZA.on("cop-killed", () => renderHeartsDOM());
+      // if wanted level changes we don't alter hearts yet,
+      // but we may want to reposition after HUD changes.
+      IZZA.on('wanted-changed', placeHeartsHud);
     });
   } else {
-    console.warn(
-      "v4_hearts: core hook bus not found. Include izza_core_v3.js before this file."
-    );
+    console.warn('v4_hearts: core hook bus not found. Include izza_core_v3.js first.');
   }
 })();
