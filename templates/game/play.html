@@ -15,17 +15,15 @@
     .hud{ position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line) }
     .hud .left{display:flex;gap:12px;align-items:center}
-    .hud .right{display:flex;gap:8px;align-items:center}
     .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
 
     /* ⭐ Wanted meter = real stars */
     .hud .stars{display:flex; gap:6px; margin-left:16px;}
     .star{
       width:18px; height:18px;
-      background:#161a22;               /* off fill */
-      border:1px solid #2a3550;         /* subtle frame (fallback) */
-      border-radius:4px;                 /* fallback if mask fails */
-      /* star silhouette via mask (works on iOS + modern browsers) */
+      background:#161a22;
+      border:1px solid #2a3550;
+      border-radius:4px;
       -webkit-mask: url('data:image/svg+xml;utf8,\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
 <path d="M12 2.5l2.77 5.61 6.19.9-4.48 4.36 1.06 6.18L12 16.9 6.46 19.55l1.06-6.18L3.04 9.01l6.19-.9L12 2.5z"/>\
@@ -34,11 +32,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
 <path d="M12 2.5l2.77 5.61 6.19.9-4.48 4.36 1.06 6.18L12 16.9 6.46 19.55l1.06-6.18L3.04 9.01l6.19-.9L12 2.5z"/>\
 </svg>') center / contain no-repeat;
-      border:none;                       /* mask gives the shape */
+      border:none;
     }
-    .star.on{
-      background:#ffd23f;                /* gold when “wanted” */
-    }
+    .star.on{ background:#ffd23f; }
 
     #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px; position:relative}
     #game{display:block; width:100%; height:auto; border-radius:12px; background:#000}
@@ -75,7 +71,7 @@
     .shop-item .buy{ background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
 
-    /* Inventory host (core fills it; keeping styles light here) */
+    /* Inventory host (core fills it) */
     #invPanel{ max-width:1100px; margin:8px auto 0; display:none; }
   </style>
 </head>
@@ -85,14 +81,10 @@
       <div class="left">
         <div class="pill">IZZA GAME</div>
         <div class="pill">Player: {{ user.username }}</div>
-        <!-- core will update this element’s text -->
         <div class="pill" id="coinPill">Coins: 0 IC</div>
       </div>
-      <div class="right">
-        <div class="pill">Press <strong>I</strong> for Inventory</div>
-        <div class="stars" id="stars">
-          <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
-        </div>
+      <div class="stars" id="stars">
+        <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
       </div>
     </div>
 
@@ -116,6 +108,7 @@
   <div class="controls">
     <button class="btn" id="btnA" type="button">A</button>
     <button class="btn" id="btnB" type="button">B</button>
+    <button class="btn" id="btnI" type="button" title="Inventory">I</button>
   </div>
 
   <div class="modal" id="mapModal">
@@ -164,8 +157,8 @@
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
 
   <!-- LOAD ORDER MATTERS: core FIRST, then plugins -->
-  <script src="/static/game/js/izza_core_v3.js?v=8"></script>
+  <script src="/static/game/js/izza_core_v3.js?v=9"></script>
   <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
-  <script src="/static/game/js/plugins/v5_loot.js?v=3"></script>
+  <script src="/static/game/js/plugins/v5_loot.js?v=6"></script>
 </body>
 </html>
