@@ -16,7 +16,7 @@
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line) }
     .hud .left{display:flex;gap:12px;align-items:center}
     .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
-    .hud .stars{display:flex; gap:4px; margin-left:16px;} /* space away from coins */
+    .hud .stars{display:flex; gap:4px; margin-left:16px;}
     .star{width:16px; height:16px; border:1px solid #445; border-radius:3px; background:#111}
     .star.on{background:#ffd23f; border-color:#c59b00}
 
@@ -44,7 +44,6 @@
     .modal .row{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
     .ghost{ background:transparent; color:#cfe0ff; border:1px solid #394769; border-radius:10px; padding:8px 10px }
 
-    /* Shop UI */
     .shop-list{ display:flex; flex-direction:column; gap:8px; }
     .shop-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; }
     .shop-item .meta .name{ font-weight:600 }
@@ -59,8 +58,8 @@
       <div class="left">
         <div class="pill">IZZA GAME</div>
         <div class="pill">Player: {{ user.username }}</div>
-        <!-- v3 expects to set the whole text of this element -->
-        <div class="pill" id="coinPill">Coins: 0 IC</div>
+        <!-- CHANGED: add class "coins" so v3 core updates it -->
+        <div class="pill coins" id="coinPill">Coins: 0 IC</div> <!-- ← add class -->
       </div>
       <div class="stars" id="stars">
         <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
@@ -130,7 +129,11 @@
 
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <!-- v3 build (cache-busted) -->
-  <script src="/static/game/js/izza_play_v3.js?v=6"></script>
+
+  <!-- v3 core (must be the hooks build, cache-bust if needed) -->
+  <script src="/static/game/js/izza_play_v3.js?v=39"></script> <!-- ← ensure this is the v3.9 core+hooks -->
+
+  <!-- ADD THIS: hearts plugin AFTER the core -->
+  <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script> <!-- ← new line -->
 </body>
 </html>
