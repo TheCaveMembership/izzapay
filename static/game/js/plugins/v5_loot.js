@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v5_loot.js
 (function(){
-  const BUILD = 'v5.2-loot-drops+grace+render-post+logs';
+  const BUILD = 'v5.4-loot-drops+grace+render-post+ammo+pistol17+reserveCoins';
   console.log('[IZZA PLAY]', BUILD);
 
   // ==== tuning ====
@@ -9,12 +9,16 @@
   const WARN_COOLDOWN_MS = 800; // don’t spam locked-toasts
   const LOOT_DEBUG = true;
 
-  // If core already grants coins on ped kill (it does), keep the coin-bag purely visual
-  // to avoid double-paying. Set to false if you WANT the bag to add coins again on pickup.
-  const COIN_BAG_VISUAL_ONLY = true;
+  // Coins should ONLY go up when the bag is picked.
+  // Since core currently grants coins on ped kill, we "reserve" them here:
+  // immediately subtract the kill amount, and then pay on pickup.
+  const RESERVE_KILL_COINS = true;
 
   // unlock gates (by total missions completed)
   const UNLOCKS = { pistol:3, grenade:6, uzi:8 };
+
+  // ammo bookkeeping (localStorage key)
+  const LS_AMMO = 'izzaAmmo';
 
   let api=null, player=null, TILE=32, camera=null;
 
@@ -29,6 +33,19 @@
   function getCtx(){ const c=document.getElementById('game'); return c? c.getContext('2d') : null; }
   function w2s(wx){ return (wx - camera.x) * (api.DRAW/api.TILE); }
   function w2sY(wy){ return (wy - camera.y) * (api.DRAW/api.TILE); }
+
+  function getAmmo(){
+    try{ return JSON.parse(localStorage.getItem(LS_AMMO) || '{}') || {}; }
+    catch{ return {}; }
+  }
+  function setAmmo(obj){
+    localStorage.setItem(LS_AMMO, JSON.stringify(obj||{}));
+    // also broadcast alongside inventory for any UI
+    try{
+      const inv = api && api.getInventory ? api.getInventory() : [];
+      IZZA.emit('inventory-changed', { inventory: inv, ammo: obj||{} });
+    }catch(e){ /* no-op */ }
+  }
 
   // tiny pixel icons
   function drawCoinBag(ctx, sx, sy, S){
@@ -75,7 +92,7 @@
       ctx.fillRect(sx+S*0.33, sy+S*0.70, S*0.34, S*0.10);
       ctx.restore();
 
-      if(it.kind==='coins')      drawCoinBag(ctx, sx, sy, S);
+      if(it.kind==='coins')        drawCoinBag(ctx, sx, sy, S);
       else if(it.kind==='pistol')  drawPistol(ctx, sx, sy, S);
       else if(it.kind==='uzi')     drawUzi(ctx, sx, sy, S);
       else if(it.kind==='grenade') drawGrenade(ctx, sx, sy, S);
@@ -122,16 +139,26 @@
     window._izza_loot = loot;
   });
 
-  // ped loot (coin bag)
+  // ped loot (coin bag) — reserve kill coins so we only pay on pickup
   IZZA.on('ped-killed', (e)=>{
     const t = now();
     const x = (e && e.x) || (player && player.x) || 0;
     const y = (e && e.y) || (player && player.y) || 0;
+    const amount = ((e && e.coins)|0) || 25;
+
     addLoot('coins', x, y, {
-      amount: ((e && e.coins)|0) || 25,
+      amount,
       droppedAt: (e && e.droppedAt) || t,
       noPickupUntil: (e && e.noPickupUntil) || t + 1000
     });
+
+    if(RESERVE_KILL_COINS && api && api.getCoins && api.setCoins){
+      // Try to revert the immediate kill reward so the bag is the *real* source.
+      const current = api.getCoins();
+      const reserved = Math.max(0, current - amount);
+      api.setCoins(reserved);
+      log('reserved kill coins:', { amount, before: current, after: reserved });
+    }
   });
 
   // cop loot (weapon)
@@ -164,16 +191,14 @@
       if(Math.hypot(dx,dy) > PICK_RADIUS) continue;
 
       if(it.kind === 'coins'){
-        if (COIN_BAG_VISUAL_ONLY){
-          // just a visual bag—core already paid the coins on kill
-          loot.splice(i,1);
-          log('coin bag removed (visual only)');
-        }else{
-          api.setCoins( api.getCoins() + (it.amount||0) );
+        // pay on pickup (true single-source of coins)
+        if(api && api.getCoins && api.setCoins){
+          const after = api.getCoins() + (it.amount||0);
+          api.setCoins(after);
           if((it.amount||0) > 0) toast(`+${it.amount} IC`);
-          loot.splice(i,1);
-          log('picked coins +', it.amount||0);
+          log('picked coins +', it.amount||0, '=>', after);
         }
+        loot.splice(i,1);
       }else{
         // weapon unlock gate
         const req = UNLOCKS[it.kind] || 0;
@@ -186,15 +211,43 @@
           }
           continue; // leave on ground
         }
-        // unlocked → add to inventory
+
+        // unlocked → update inventory and ammo
         let inv = api.getInventory ? new Set(api.getInventory()) : new Set();
-        if(!inv.has(it.kind)){
-          inv.add(it.kind);
+        const ammo = getAmmo();
+
+        if(it.kind === 'pistol'){
+          // first pistol grants the item + 17 rounds; subsequent pistols add +17 rounds
+          const had = inv.has('pistol');
+          if(!had) inv.add('pistol');
+          ammo.pistol = (ammo.pistol||0) + 17;
+          setAmmo(ammo);
           if(api.setInventory) api.setInventory([...inv]);
+          toast(had ? `Pistol ammo +17` : `Picked up pistol (+17 rounds)`);
+          IZZA.emit('inventory-changed', { inventory: [...inv], ammo });
+          log('picked pistol; ammo:', ammo.pistol, 'ownedBefore?', had);
+        }else if(it.kind === 'uzi'){
+          // placeholder: if/when uzi ammo policy is defined, wire here
+          const had = inv.has('uzi');
+          if(!had) inv.add('uzi');
+          // ammo.uzi = (ammo.uzi||0) + SOME_NUMBER; // future
+          setAmmo(ammo);
+          if(api.setInventory) api.setInventory([...inv]);
+          toast(had ? `Picked uzi` : `Picked up uzi`);
+          IZZA.emit('inventory-changed', { inventory: [...inv], ammo });
+          log('picked uzi; ownedBefore?', had);
+        }else if(it.kind === 'grenade'){
+          const had = inv.has('grenade');
+          if(!had) inv.add('grenade');
+          // ammo.grenade = (ammo.grenade||0) + 1; // optional future rule
+          setAmmo(ammo);
+          if(api.setInventory) api.setInventory([...inv]);
+          toast(had ? `Picked grenade` : `Picked up grenade`);
+          IZZA.emit('inventory-changed', { inventory: [...inv], ammo });
+          log('picked grenade; ownedBefore?', had);
         }
-        toast(`Picked up ${it.kind}.`);
+
         loot.splice(i,1);
-        log('picked', it.kind);
       }
     }
   });
