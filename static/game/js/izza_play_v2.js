@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v2-anim-4dir-sheets2.2';
+  const BUILD = 'v2-police+shop-1';
   console.log('[IZZA PLAY]', BUILD);
 
   const profile = window.__IZZA_PROFILE__ || {};
@@ -27,13 +27,22 @@
   const inRect   = (gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
   const inUnlocked = (gx,gy)=> inRect(gx,gy, unlocked);
 
-  // Hub
+  // ---------- Hub (existing) ----------
   const bW=10, bH=6;
   const bX = Math.floor((unlocked.x0 + unlocked.x1)/2) - Math.floor(bW/2);
   const bY = unlocked.y0 + 5;
   const sidewalkY = bY + bH;
   const roadY     = sidewalkY + 1;
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkY };
+
+  // ---------- Simple Shop building (roof says SHOP) ----------
+  const sbW=8, sbH=5;
+  const sbX = bX + 16;                 // to the right of the hub
+  const sbY = bY + 2;
+  const sSidewalkY = sbY + sbH;
+  const shopDoor = { gx: sbX + Math.floor(sbW/2), gy: sSidewalkY };
+  // "Register" interaction tile = sidewalk center (placeholder)
+  const register = { gx: shopDoor.gx, gy: sSidewalkY };
 
   // ---------- Assets ----------
   function loadImg(src){
@@ -47,7 +56,6 @@
   const assetRoot = "/static/game/sprites";
 
   // Prefer "name 2.png" (animated), fallback to "name.png".
-  // We URL-encode the filename segment so spaces are safe on the server.
   function loadLayer(kind, name){
     const fname2 = encodeURIComponent(name + ' 2');
     const with2  = `${assetRoot}/${kind}/${fname2}.png`;
@@ -72,8 +80,17 @@
     wanted: 0,
     facing: 'down',  // down,left,right,up
     moving: false,
-    animTime: 0
+    animTime: 0,
+    coins: 300,                   // IZZA Coin (placeholder)
+    missionsCompleted: 0,         // gate unlocks
+    inventory: []
   };
+
+  // HUD coin pill updater
+  function updateCoinUI(){
+    const el = document.getElementById('coins');
+    if (el) el.textContent = `${player.coins} IC`;
+  }
 
   // ---------- Animation ----------
   // Your sheets are ordered: down, RIGHT, LEFT, up
@@ -84,10 +101,9 @@
   const layerCols = { body:1, outfit:1, hair:1 }; // filled after load
 
   function getFrameCols(img){ return Math.max(1, Math.floor(img.width / FRAME_W)); }
-
   function currentFrame(cols, moving, animTime){
     if (cols <= 1) return 0;
-    if (!moving)   return 1 % cols; // idle = middle-ish
+    if (!moving)   return 1 % cols; // idle = middle-ish if possible
     return Math.floor(animTime / WALK_FRAME_MS) % cols;
   }
 
@@ -97,7 +113,8 @@
   const btnB = document.getElementById('btnB');
 
   function handleB(){
-    if (doorInRange()) openEnter();
+    if (registerInRange()) openShop();
+    else if (doorInRange()) openEnter();
     else setWanted(0);
   }
 
@@ -156,7 +173,11 @@
   }
 
   // ---------- Collision ----------
-  const isBuilding = (gx,gy)=> gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH;
+  const isBuilding = (gx,gy)=> {
+    const hub = gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH;
+    const shop= gx>=sbX && gx<sbX+sbW && gy>=sbY && gy<sbY+sbH;
+    return hub || shop;
+  };
   function isSolid(gx,gy){
     if(!inUnlocked(gx,gy)) return true;
     if(isBuilding(gx,gy))  return true;
@@ -176,16 +197,85 @@
     if(!cy.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.y = ny;
   }
 
-  // ---------- Door ----------
+  // ---------- Door / Register ----------
   const promptEl = document.getElementById('prompt');
-  function doorInRange(){
+  function nearTile(tx,ty, radius=2){
     const px = Math.floor((player.x + TILE/2)/TILE);
     const py = Math.floor((player.y + TILE/2)/TILE);
-    return (Math.abs(px-door.gx)+Math.abs(py-door.gy))<=2;
+    return (Math.abs(px-tx)+Math.abs(py-ty))<=radius;
   }
+  function doorInRange(){ return nearTile(door.gx, door.gy, 2); }
+  function registerInRange(){ return nearTile(register.gx, register.gy, 2); }
+
   function openEnter(){ document.getElementById('enterModal').style.display='flex'; }
-  document.getElementById('closeEnter').addEventListener('click', ()=> document.getElementById('enterModal').style.display='none');
-  document.getElementById('enterModal').addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) e.currentTarget.style.display='none'; });
+
+  // ---------- SHOP: inventory + modal ----------
+  const SHOP_ITEMS = [
+    { id:'bat',       name:'Baseball Bat',     price:50,   minMissions:0,  type:'weapon' },
+    { id:'knuckles',  name:'Brass Knuckles',   price:75,   minMissions:0,  type:'weapon' },
+    { id:'pistol',    name:'Pistol',           price:200,  minMissions:2,  type:'weapon' },
+    { id:'ak',        name:'AK-47',            price:1000, minMissions:5,  type:'weapon' },
+    { id:'bazooka',   name:'Bazooka',          price:2500, minMissions:8,  type:'weapon' },
+    { id:'luxfit',    name:'Luxury Outfit',    price:500,  minMissions:3,  type:'outfit' },
+  ];
+
+  function openShop(){
+    const modal = document.getElementById('shopModal');
+    const list  = document.getElementById('shopList');
+    const note  = document.getElementById('shopNote');
+    list.innerHTML = '';
+
+    SHOP_ITEMS.forEach(item=>{
+      const locked = player.missionsCompleted < item.minMissions;
+      const li = document.createElement('div');
+      li.className = 'shop-item';
+      li.innerHTML = `
+        <div class="meta">
+          <div class="name">${item.name}</div>
+          <div class="sub">${item.price} IC ${locked ? `&middot; unlocks after ${item.minMissions} missions` : ''}</div>
+        </div>
+        <button class="buy" ${locked?'disabled':''} data-id="${item.id}">Buy</button>
+      `;
+      list.appendChild(li);
+    });
+
+    note.textContent = `Missions completed: ${player.missionsCompleted}`;
+    updateCoinUI();
+    modal.style.display='flex';
+  }
+
+  // Buy handling (event delegation)
+  document.addEventListener('click', (e)=>{
+    if (!e.target.classList.contains('buy')) return;
+    const id = e.target.getAttribute('data-id');
+    const item = SHOP_ITEMS.find(i=>i.id===id);
+    if (!item) return;
+
+    if (player.missionsCompleted < item.minMissions){
+      alert(`Locked. Complete ${item.minMissions} missions to unlock.`);
+      return;
+    }
+    if (player.coins < item.price){
+      alert('Not enough IZZA Coin.');
+      return;
+    }
+    player.coins -= item.price;
+    player.inventory.push(item.id);
+    updateCoinUI();
+    e.target.textContent = 'Owned';
+    e.target.disabled = true;
+  });
+
+  // Close shop
+  const closeShopBtn = document.getElementById('closeShop');
+  if (closeShopBtn){
+    closeShopBtn.addEventListener('click', ()=>{
+      document.getElementById('shopModal').style.display='none';
+    });
+    document.getElementById('shopModal').addEventListener('click', (e)=>{
+      if(e.target.classList.contains('backdrop')) e.currentTarget.style.display='none';
+    });
+  }
 
   // ---------- Maps ----------
   const mini = document.getElementById('minimap');
@@ -195,24 +285,33 @@
   const bctx     = bigmap.getContext('2d');
 
   function drawCity(ctx2d, sx, sy){
+    // preview
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
 
+    // unlocked
     ctx2d.fillStyle = '#1c293e';
     ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
 
+    // roads (across preview)
     ctx2d.fillStyle = '#788292';
     ctx2d.fillRect(preview.x0*sx, roadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
     ctx2d.fillRect(door.gx*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
 
+    // hub
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
+
+    // shop
+    ctx2d.fillStyle = '#3a6d7a';
+    ctx2d.fillRect(sbX*sx, sbY*sy, sbW*sx, sbH*sy);
   }
 
   function drawMini(){
     const sx = mini.width / W, sy = mini.height / H;
     mctx.fillStyle = '#000'; mctx.fillRect(0,0,mini.width,mini.height);
     drawCity(mctx, sx, sy);
+    // Player
     mctx.fillStyle = '#35f1ff';
     mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 2, 2);
   }
@@ -221,6 +320,7 @@
     const sx = bigmap.width / W, sy = bigmap.height / H;
     bctx.fillStyle = '#000'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
     drawCity(bctx, sx, sy);
+    // Player
     bctx.fillStyle = '#35f1ff';
     bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
   }
@@ -237,19 +337,38 @@
 
     if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
 
+    // base ground
     ctx.fillStyle = '#09371c';
     ctx.fillRect(screenX,screenY,S,S);
 
+    // HUB
     if (gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){
       ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
     }
+    // SHOP
+    if (gx>=sbX && gx<sbX+sbW && gy>=sbY && gy<sbY+sbH){
+      ctx.fillStyle = '#2b4850'; ctx.fillRect(screenX,screenY,S,S);
+      ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
+      // draw "SHOP" label on the top row of the roof
+      if (gy === sbY){
+        ctx.fillStyle = '#cfe9f7';
+        ctx.font = `${Math.floor(S*0.35)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        if (gx === Math.floor(sbX + sbW/2)){
+          ctx.fillText('SHOP', screenX + S/2, screenY + 2);
+        }
+      }
+    }
 
-    if (gy===sidewalkY){
+    // sidewalks
+    if (gy===sidewalkY || gy===sSidewalkY){
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
 
+    // road with dashed center
     if (gy===roadY){
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
@@ -258,17 +377,32 @@
       }
     }
 
+    // HUB door
     if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
       const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
       ctx.fillRect(screenX + (S-w)/2, screenY + (S-h), w, h);
-
       if(near){
-        const prompt = document.getElementById('prompt');
-        prompt.style.left = (screenX + S/2) + 'px';
-        prompt.style.top  = (screenY - 8) + 'px';
-        prompt.style.display = 'block';
+        promptEl.style.left = (screenX + S/2) + 'px';
+        promptEl.style.top  = (screenY - 8) + 'px';
+        promptEl.style.display = 'block';
+      }
+    }
+
+    // SHOP register mark (put a small blue rectangle)
+    if (gx===register.gx && gy===register.gy){
+      const near = registerInRange();
+      ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
+      ctx.fillRect(screenX + S*0.40, screenY + S*0.15, S*0.20, S*0.70);
+      if(near){
+        promptEl.style.left = (screenX + S/2) + 'px';
+        promptEl.style.top  = (screenY - 8) + 'px';
+        promptEl.textContent = 'Press B to shop';
+        promptEl.style.display = 'block';
+      } else {
+        // reset text in case door was next
+        promptEl.textContent = 'Press B to enter';
       }
     }
   }
@@ -277,7 +411,6 @@
   function drawPlayer(images){
     const dirRow = DIR_INDEX[player.facing] || 0;
 
-    // Frame from BODY; clamp outfit/hair if they are 1-col
     const bodyCols   = layerCols.body;
     const outfitCols = layerCols.outfit;
     const hairCols   = layerCols.hair;
@@ -287,7 +420,7 @@
     const frameHair   = hairCols > 1   ? currentFrame(hairCols,   player.moving, player.animTime) : 0;
 
     const sxBody   = frameBody   * FRAME_W;
-    const sxOutfit = frameOutfit * FRAME_W; // 0 if 1-col
+    const sxOutfit = frameOutfit * FRAME_W;
     const sxHair   = frameHair   * FRAME_W;
 
     const sy = dirRow * FRAME_H;
@@ -298,6 +431,69 @@
     ctx.drawImage(images.body,   sxBody,   sy, FRAME_W, FRAME_H, dx, dy, S, S);
     ctx.drawImage(images.outfit, sxOutfit, sy, FRAME_W, FRAME_H, dx, dy, S, S);
     ctx.drawImage(images.hair,   sxHair,   sy, FRAME_W, FRAME_H, dx, dy, S, S);
+  }
+
+  // ---------- POLICE placeholders ----------
+  const cops = [];
+  const spawnPoints = [
+    {gx: unlocked.x0+1, gy: sidewalkY},                 // left edge by road
+    {gx: unlocked.x1-1, gy: sidewalkY},                 // right edge by road
+    {gx: door.gx,       gy: unlocked.y0+1},             // top edge
+    {gx: door.gx,       gy: unlocked.y1-1},             // bottom edge
+  ];
+
+  function desiredCopCount(){
+    if (player.wanted <= 0) return 0;
+    return Math.min(8, 1 + player.wanted * 2); // scale with stars
+  }
+
+  function spawnCopAt(sp){
+    cops.push({
+      x: sp.gx*TILE, y: sp.gy*TILE,
+      speed: 1.6 * (TILE/16),
+      color: '#5ab0ff'
+    });
+  }
+
+  function maintainCops(){
+    const need = desiredCopCount();
+    if (cops.length < need){
+      const toAdd = need - cops.length;
+      for(let i=0;i<toAdd;i++){
+        spawnCopAt(spawnPoints[(Math.random()*spawnPoints.length)|0]);
+      }
+    } else if (cops.length > need){
+      cops.length = need;
+    }
+    if (player.wanted<=0) cops.length = 0;
+  }
+
+  function updateCops(dt){
+    maintainCops();
+    const ptx = player.x + TILE/2, pty = player.y + TILE/2;
+    cops.forEach(c=>{
+      const dx = ptx - c.x, dy = pty - c.y;
+      const m  = Math.hypot(dx,dy) || 1;
+      const vx = dx/m * c.speed * dt;
+      const vy = dy/m * c.speed * dt;
+
+      // very simple collision (don’t enter buildings/outside)
+      let nx = c.x + vx, ny = c.y + vy;
+      const gx = Math.floor(nx/TILE), gy = Math.floor(ny/TILE);
+      if (!isSolid(gx,gy)) { c.x = nx; c.y = ny; }
+    });
+  }
+
+  function drawCops(){
+    cops.forEach(c=>{
+      const dx = w2sX(c.x), dy = w2sY(c.y);
+      const S  = DRAW;
+      ctx.fillStyle = c.color;
+      ctx.fillRect(dx, dy, S, S);
+      // simple visor stripe
+      ctx.fillStyle = '#001a33';
+      ctx.fillRect(dx, dy + S*0.25, S, S*0.15);
+    });
   }
 
   // ---------- Update & render ----------
@@ -324,8 +520,11 @@
     tryMove(player.x + vx*dt, player.y + vy*dt);
     centerCamera();
 
-    // Advance anim time based on *current* movement this frame
-    if (player.moving) player.animTime += (dt * 16.6667); // dt is in 60fps ticks
+    // anim time
+    if (player.moving) player.animTime += (dt * 16.6667);
+
+    // cops
+    updateCops(dt);
   }
 
   function render(images){
@@ -342,6 +541,7 @@
         if(gx>=0 && gx<W && gy>=0 && gy<H) drawTile(gx,gy);
       }
     }
+    drawCops();
     drawPlayer(images);
     drawMini();
   }
@@ -363,11 +563,11 @@
 
     const imgs = { body, outfit, hair };
     centerCamera();
-    let last = performance.now();
+    updateCoinUI();
 
+    let last = performance.now();
     function loop(now){
       const dtMs = Math.min(32, now-last); last=now;
-      // we convert ms to "60 fps ticks" for update(dt)
       update(dtMs/16.6667);
       render(imgs);
       requestAnimationFrame(loop);
