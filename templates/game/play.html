@@ -23,7 +23,7 @@
     #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px; position:relative}
     #game{display:block; width:100%; height:auto; border-radius:12px; background:#000}
     #prompt { position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
-      background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none }
+      background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none; z-index:2 }
 
     .mini{ position:fixed; right:12px; bottom:118px; z-index:6;
       background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px }
@@ -39,12 +39,12 @@
 
     .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
     .modal .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); }
-    .modal .card{ position:relative; background:#121827; border:1px solid #2a3550; border-radius:14px; padding:16px; width:min(520px,92vw); color:#e8eef7 }
+    .modal .card{ position:relative; background:#121827; border:1px solid #2a3550; border-radius:14px; padding:16px; width:min(520px,92vw); color:#e8eef7; pointer-events:auto }
     .modal .card h3{ margin:0 0 8px }
     .modal .row{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
     .ghost{ background:transparent; color:#cfe0ff; border:1px solid #394769; border-radius:10px; padding:8px 10px }
 
-    /* Shop UI bits */
+    /* Shop UI */
     .shop-list{ display:flex; flex-direction:column; gap:8px; }
     .shop-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; }
     .shop-item .meta .name{ font-weight:600 }
@@ -94,18 +94,22 @@
       <div class="row"><button class="ghost" id="closeMap">Close</button></div>
       <div style="margin-top:8px; font-size:12px; opacity:.85">
         <span style="display:inline-block;width:12px;height:12px;background:#1c293e;border:1px solid #31415d;margin-right:6px;border-radius:3px"></span>Unlocked
-        <span style="display:inline-block;width:12px;height:12px;background:rgba(163,176,197,.25);border:1px solid #485771;margin-right:6px;border-radius:3px;margin-left:12px"></span>Preview (semi-transparent)
+        <span style="display:inline-block;width:12px;height:12px;background:rgba(163,176,197,.25);border:1px solid #485771;margin-right:6px;border-radius:3px;margin-left:12px"></span>Preview
         <span style="display:inline-block;width:12px;height:12px;background:#000;border:1px solid #2a3140;margin-right:6px;border-radius:3px;margin-left:12px"></span>Locked
       </div>
     </div>
   </div>
 
+  <!-- HQ / Tutorial modal -->
   <div class="modal" id="enterModal">
     <div class="backdrop"></div>
     <div class="card">
-      <h3>Welcome to The Hub</h3>
-      <p>Talk to the NPC inside to get your first mission and start earning!</p>
-      <div class="row"><button class="ghost" id="closeEnter">Close</button></div>
+      <h3>IZZA HQ</h3>
+      <p>Welcome! Start the tutorial to learn how to attack (A) and earn coins.</p>
+      <div class="row">
+        <button class="ghost" id="startTutorial">Start Tutorial</button>
+        <button class="ghost" id="closeEnter">Close</button>
+      </div>
     </div>
   </div>
 
@@ -122,7 +126,6 @@
 
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <!-- cache-busted v2 include -->
-  <script src="/static/game/js/izza_play_v2.js?v=3"></script>
+  <script src="/static/game/js/izza_play_v2.js?v=4"></script>
 </body>
 </html>
