@@ -2,14 +2,14 @@
   const BUILD = 'v3.12-core+hooks+npc-sheets+allSettled';
   console.log('[IZZA PLAY]', BUILD);
 
-  // --- lightweight hook bus (for plugins like v4 hearts) ---
+  // --- lightweight hook bus ---
   const IZZA = window.IZZA = window.IZZA || {};
   IZZA._hooks = IZZA._hooks || {};
   IZZA.on   = (ev, fn)=>{ (IZZA._hooks[ev] ||= []).push(fn); };
   IZZA.emit = (ev, payload)=>{ (IZZA._hooks[ev]||[]).forEach(fn=>{ try{ fn(payload); }catch(e){ console.error(e); } }); };
-  IZZA.api = {}; // will be filled just before the main loop starts
+  IZZA.api = {};
 
-  // ===== tiny on-screen boot status (so iPhone can see errors) =====
+  // ===== tiny on-screen boot status =====
   function bootMsg(txt, color='#ffd23f'){
     let el = document.getElementById('bootMsg');
     if(!el){
@@ -70,7 +70,7 @@
   // HQ Door centered on top sidewalk
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
-  // ===== SHOP: to the RIGHT of the right vertical sidewalk =====
+  // ===== SHOP: right of the right vertical sidewalk =====
   const shop = {
     w: 8, h: 5,
     x: vSidewalkRightX + 1,
@@ -106,27 +106,23 @@
     swat:        '/static/game/sprites/izza_swat_sheet.png',
     military:    '/static/game/sprites/izza_military_sheet.png'
   };
-  let NPC_SHEETS = {}; // filled during boot
+  let NPC_SHEETS = {};
 
   function loadNPCSheets(){
     const entries = Object.entries(NPC_SRC);
-    // tolerant load: never reject, report misses with a toast
     return Promise.allSettled(entries.map(([,src])=> loadImg(src)))
       .then(results=>{
-        const map = {};
-        const misses=[];
+        const map = {}, misses=[];
         results.forEach((r,i)=>{
           const [key] = entries[i];
           if(r.status==='fulfilled'){
             const img=r.value;
             map[key] = { img, cols: Math.max(1, Math.floor(img.width/32)) };
           }else{
-            misses.push(entries[i][0]);
+            misses.push(key);
           }
         });
-        if(misses.length){
-          bootMsg('Missing NPC sprites: '+misses.join(', '), '#ff6b6b');
-        }
+        if(misses.length) bootMsg('Missing NPC sprites: '+misses.join(', '), '#ff6b6b');
         return map;
       });
   }
@@ -138,7 +134,6 @@
     missions:   'izzaMissions',
     inventory:  'izzaInventory'
   };
-
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
     const n = raw==null ? 300 : (parseInt(raw,10)||0);
@@ -265,7 +260,6 @@
   function isSolid(gx,gy){
     if(!inUnlocked(gx,gy)) return true;
     if(isHQ(gx,gy)) return true;
-    // Shop is solid, but NEVER the vertical sidewalk columns
     if(isShop(gx,gy) && gx!==vSidewalkLeftX && gx!==vSidewalkRightX) return true;
     return false;
   }
@@ -380,15 +374,13 @@
     const yRow = sideTop ? sidewalkTopY : sidewalkBotY;
     const gx = left ? unlocked.x0 : unlocked.x1;
     const dir = left ? 1 : -1;
-
-    // random skin variant (matches your uploaded sheets)
     const skins = ['ped_m','ped_f','ped_m_dark','ped_f_dark'];
     const skin  = skins[(Math.random()*skins.length)|0];
 
     pedestrians.push({
       x: gx*TILE, y: yRow*TILE,
       mode:'horiz', dir, spd: 40,
-      hp: 4,                 // 3 hits to down, 4th eliminates (blink)
+      hp: 4,
       state: 'walk',
       crossSide: sideTop?'top':'bot',
       vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
@@ -550,24 +542,15 @@
   const bctx     = bigmap ? bigmap.getContext('2d') : null;
 
   function drawCity(ctx2d, sx, sy){
-    // preview
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
-
-    // unlocked
     ctx2d.fillStyle = '#1c293e';
     ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
-
-    // roads
     ctx2d.fillStyle = '#788292';
     ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
     ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
-
-    // HQ
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
-
-    // Shop
     ctx2d.fillStyle = '#405a85';
     ctx2d.fillRect(shop.x*sx, shop.y*sy, shop.w*sx, shop.h*sy);
   }
@@ -597,45 +580,38 @@
     const S=DRAW, screenX=w2sX(gx*TILE), screenY=w2sY(gy*TILE);
     if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
 
-    // grass
-    ctx.fillStyle = '#09371c';
-    ctx.fillRect(screenX,screenY,S,S);
+    ctx.fillStyle = '#09371c'; ctx.fillRect(screenX,screenY,S,S); // grass
 
-    // HQ building
-    if (gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){
+    if (gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){ // HQ
       ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
     }
-    // Shop
-    if (gx>=shop.x && gx<shop.x+shop.w && gy>=shop.y && gy<shop.y+shop.h){
+    if (gx>=shop.x && gx<shop.x+shop.w && gy>=shop.y && gy<shop.y+shop.h){ // Shop
       ctx.fillStyle = '#203a60'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25);
     }
 
-    // sidewalks (horizontal)
-    if (gy===sidewalkTopY || gy===sidewalkBotY){
+    if (gy===sidewalkTopY || gy===sidewalkBotY){ // sidewalks
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
-    // sidewalks (vertical, both sides)
     if (gx===vSidewalkLeftX || gx===vSidewalkRightX){
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
 
-    // horizontal road
-    if (gy===hRoadY){
+    if (gy===hRoadY){ // horizontal road
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
       for(let i=0;i<4;i++){
         ctx.fillRect(screenX + i*(S/4) + S*0.05, screenY + S*0.48, S*0.10, S*0.04);
       }
     }
-    // vertical road
-    if (gx===vRoadX){ ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S); }
+    if (gx===vRoadX){ // vertical road
+      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
+    }
 
-    // HQ door on the top sidewalk
-    if (gx===door.gx && gy===door.gy){
+    if (gx===door.gx && gy===door.gy){ // HQ door
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
       const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
@@ -647,8 +623,7 @@
       }
     }
 
-    // Shop register indicator (on sidewalk)
-    if(gx===shop.registerGX && gy===shop.sidewalkY){
+    if(gx===shop.registerGX && gy===shop.sidewalkY){ // register marker
       const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
       const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
       ctx.fillStyle = near ? 'rgba(136,168,255,0.6)' : 'rgba(136,168,255,0.3)';
@@ -724,14 +699,14 @@
       }
     }
 
-    // cars (simple boxes for now)
+    // cars
     for(const c of cars){
       const sx=w2sX(c.x), sy=w2sY(c.y);
       ctx.fillStyle='#c0c8d8';
       ctx.fillRect(sx+DRAW*0.1,sy+DRAW*0.25, DRAW*0.8, DRAW*0.5);
     }
 
-    // pedestrians (sprite sheets)
+    // pedestrians
     for(const p of pedestrians){
       const imgPack = NPC_SHEETS[p.skin];
       if(imgPack){
@@ -748,7 +723,7 @@
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
 
-    // cops (sprite sheets by kind)
+    // cops
     for(const c of cops){
       const pack = c.kind==='army' ? NPC_SHEETS.military
                  : c.kind==='swat' ? NPC_SHEETS.swat
@@ -775,27 +750,21 @@
     NPC_SHEETS = npcs;
     const imgs={body,outfit,hair};
 
+    // Build API ONCE (with helpers) then emit
     const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
     IZZA.api = {
       player, cops, pedestrians,
       setCoins, getCoins, setWanted,
       TILE, DRAW, camera,
       doorSpawn,
+      // expose for plugins:
+      getMissionCount,
+      getInventory, setInventory,
       ready: true
     };
     IZZA.emit('ready', IZZA.api);
-    IZZA.api = {
-  player, cops, pedestrians,
-  setCoins, getCoins, setWanted,
-  TILE, DRAW, camera,
-  doorSpawn,
-  // expose for plugins:
-  getMissionCount,
-  getInventory, setInventory,
-  ready: true
-};
 
-    setCoins(getCoins()); // init HUD + value
+    setCoins(getCoins());
     centerCamera();
 
     let last=performance.now();
