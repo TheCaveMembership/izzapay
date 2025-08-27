@@ -15,6 +15,7 @@
     .hud{ position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between;
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line) }
     .hud .left{display:flex;gap:12px;align-items:center}
+    .hud .right{display:flex;gap:8px;align-items:center}
     .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
 
     /* ⭐ Wanted meter = real stars */
@@ -44,10 +45,12 @@
     #prompt { position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
       background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none; z-index:2 }
 
+    /* Minimap */
     .mini{ position:fixed; right:12px; bottom:118px; z-index:6;
       background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px }
     #minimap{ width:240px; height:auto; display:block; border-radius:10px; background:#0b0f17 }
 
+    /* Touch controls */
     .controls{ position:fixed; right:12px; bottom:14px; z-index:6; display:flex; gap:8px; align-items:center }
     .btn{ background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:10px; padding:10px 12px; font-size:14px; }
 
@@ -56,6 +59,7 @@
     .stick .nub{ position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:20px; background:#1f2a3f; border:1px solid #2a3550 }
     @media (min-width:820px){ .stick{ display:none; } }
 
+    /* Modals */
     .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
     .modal .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); }
     .modal .card{ position:relative; background:#121827; border:1px solid #2a3550; border-radius:14px; padding:16px; width:min(520px,92vw); color:#e8eef7; pointer-events:auto }
@@ -63,12 +67,16 @@
     .modal .row{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
     .ghost{ background:transparent; color:#cfe0ff; border:1px solid #394769; border-radius:10px; padding:8px 10px }
 
+    /* Shop */
     .shop-list{ display:flex; flex-direction:column; gap:8px; }
     .shop-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; }
     .shop-item .meta .name{ font-weight:600 }
     .shop-item .meta .sub{ opacity:.8; font-size:12px }
     .shop-item .buy{ background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
+
+    /* Inventory host (core fills it; keeping styles light here) */
+    #invPanel{ max-width:1100px; margin:8px auto 0; display:none; }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -80,8 +88,11 @@
         <!-- core will update this element’s text -->
         <div class="pill" id="coinPill">Coins: 0 IC</div>
       </div>
-      <div class="stars" id="stars">
-        <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
+      <div class="right">
+        <div class="pill">Press <strong>I</strong> for Inventory</div>
+        <div class="stars" id="stars">
+          <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
+        </div>
       </div>
     </div>
 
@@ -89,6 +100,9 @@
       <canvas id="game" width="960" height="540" aria-label="IZZA City"></canvas>
       <div id="prompt">Press B to enter</div>
     </div>
+
+    <!-- Inventory panel appears under the game; core controls its content/visibility -->
+    <div id="invPanel"></div>
   </div>
 
   <div class="mini" id="miniWrap" title="Tap to open world map">
@@ -150,7 +164,7 @@
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
 
   <!-- LOAD ORDER MATTERS: core FIRST, then plugins -->
-  <script src="/static/game/js/izza_core_v3.js?v=7"></script>
+  <script src="/static/game/js/izza_core_v3.js?v=8"></script>
   <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
   <script src="/static/game/js/plugins/v5_loot.js?v=3"></script>
 </body>
