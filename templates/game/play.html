@@ -43,6 +43,15 @@
     .modal .card h3{ margin:0 0 8px }
     .modal .row{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
     .ghost{ background:transparent; color:#cfe0ff; border:1px solid #394769; border-radius:10px; padding:8px 10px }
+
+    /* Shop UI bits */
+    .shop-list{ display:flex; flex-direction:column; gap:8px; }
+    .shop-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; }
+    .shop-item .meta .name{ font-weight:600 }
+    .shop-item .meta .sub{ opacity:.8; font-size:12px }
+    .shop-item .buy{ background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
+    .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
+    .pill.coins{ background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -51,6 +60,7 @@
       <div class="left">
         <div class="pill">IZZA GAME</div>
         <div class="pill">Player: {{ user.username }}</div>
+        <div class="pill coins">Coins: <span id="coins">0 IC</span></div>
       </div>
       <div class="stars" id="stars">
         <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
@@ -99,9 +109,20 @@
     </div>
   </div>
 
+  <!-- SHOP MODAL -->
+  <div class="modal" id="shopModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>Shop — Cashier</h3>
+      <div class="shop-list" id="shopList"></div>
+      <div class="shop-note" id="shopNote"></div>
+      <div class="row"><button class="ghost" id="closeShop">Close</button></div>
+    </div>
+  </div>
+
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <!-- v2 ANIMATION BUILD -->
-  <script src="/static/game/js/izza_play_v2.js?v=2"></script>
+  <!-- cache-busted v2 include -->
+  <script src="/static/game/js/izza_play_v2.js?v=3"></script>
 </body>
 </html>
