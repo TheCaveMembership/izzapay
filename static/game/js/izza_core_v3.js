@@ -100,7 +100,7 @@
   const NPC_SRC = {
     ped_m:       '/static/game/sprites/pedestrian_sheet.png',
     ped_f:       '/static/game/sprites/pedestrian_female_sheet.png',
-    ped_m_dark:  '/static/game/sprites/pedestrian_male_dark_yellow_final.png',
+    ped_m_dark:  '/static/game/sprites/pedestrian_male_dark_sheet.png',
     ped_f_dark:  '/static/game/sprites/pedestrian_female_dark_sheet.png',
     police:      '/static/game/sprites/izza_police_sheet.png',
     swat:        '/static/game/sprites/izza_swat_sheet.png',
