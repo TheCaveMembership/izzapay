@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.3-road-shift+slower-cars+slower-joystick';
+  const BUILD = 'v3.4-coins+peds+roads';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Profile / assets =====
@@ -28,16 +28,26 @@
   const bW=10,bH=6;
   const bX = Math.floor((unlocked.x0+unlocked.x1)/2) - Math.floor(bW/2);
   const bY = unlocked.y0 + 5;
-  const sidewalkY = bY + bH;
-  const roadY     = sidewalkY + 1;
-  const door = { gx: bX + Math.floor(bW/2), gy: sidewalkY };
 
-  // Roads (cross) — move the vertical road to the RIGHT of HQ so it doesn’t pass through
-  const vRoadX = Math.min(unlocked.x1-2, bX + bW + 4);  // safely inside unlocked
-  const hRoadY = roadY;
+  // Roads/sidewalks: horizontal road below HQ, sidewalks on both sides
+  const hRoadY       = bY + bH + 1;            // road row
+  const sidewalkTopY = hRoadY - 1;             // sidewalk above road (HQ front)
+  const sidewalkBotY = hRoadY + 1;             // sidewalk below road
 
-  // Simple shop stub (roof & register highlight)
-  const shop = { x: bX+16, y: bY+2, w:8, h:5, sidewalkY: bY+2+5, registerGX: bX+16+Math.floor(8/2) };
+  // Vertical road moved to the right of HQ
+  const vRoadX = Math.min(unlocked.x1-2, bX + bW + 5);
+
+  // HQ Door centered on top sidewalk
+  const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
+
+  // A simple shop block sitting above the top sidewalk
+  const shop = {
+    w: 8, h: 5,
+    x: bX + 16,
+    y: sidewalkTopY - 5,               // building body sits above top sidewalk
+    sidewalkY: sidewalkTopY,
+    registerGX: bX + 16 + 4            // near the middle of its frontage
+  };
 
   // ===== Loading =====
   function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('load:'+src)); i.src=src; }); }
@@ -49,16 +59,34 @@
                       .catch(()=>loadImg(p1).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))})));
   }
 
+  // ===== Coins (persist) =====
+  function coinEl(){
+    // Prefer explicit id if you add it; otherwise fallback to the third HUD pill
+    return document.getElementById('coinPill') || document.querySelectorAll('.hud .pill')[2];
+  }
+  function getCoins(){
+    const raw = localStorage.getItem('izzaCoins');
+    const n = raw==null ? 300 : (parseInt(raw,10)||0); // default 300 first run
+    return n<0 ? 0 : n;
+  }
+  function setCoins(n){
+    const v = Math.max(0, n|0);
+    localStorage.setItem('izzaCoins', String(v));
+    const el = coinEl();
+    if(el) el.textContent = `Coins: ${v} IC`;
+    player.coins = v;
+  }
+
   // ===== Player / anim =====
   const player = {
     x: door.gx*TILE + (TILE/2 - 8),
     y: door.gy*TILE,
-    speed: 90,            // px/sec (slower joystick feel)
+    speed: 90,            // px/sec (comfortable joystick speed)
     wanted: 0,
     facing: 'down', moving:false,
     animTime: 0,          // ms
     hp: 5,
-    coins: (window.__IZZA_COINS__|0) || 0
+    coins: 0
   };
 
   // Your sheet row order: down, RIGHT, LEFT, up
@@ -112,11 +140,6 @@
   function setWanted(n){
     player.wanted = Math.max(0, Math.min(5, n|0));
     document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star' + (i<player.wanted?' on':'') );
-  }
-  function setCoins(n){
-    player.coins = Math.max(0, n|0);
-    const pill = document.getElementById('coinPill');
-    if(pill) pill.textContent = `Coins: ${player.coins} IC`;
   }
 
   // ===== Camera =====
@@ -175,16 +198,19 @@
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
   // ===== NPCs =====
-  const pedestrians=[]; // {x,y,dir,spd,hp,state,crossing,blinkT}
+  const pedestrians=[]; // {x,y,side:'top'|'bot',dir,spd,hp,state,crossing,blinkT}
   const cars=[];        // {x,y,dir,spd}
 
   function spawnPed(){
     const left = Math.random()<0.5;
+    const side = Math.random()<0.5 ? 'top' : 'bot';
+    const yRow = side==='top'? sidewalkTopY : sidewalkBotY;
     const gx = left ? unlocked.x0 : unlocked.x1;
     const dir = left ? 1 : -1;
     pedestrians.push({
-      x: gx*TILE, y: sidewalkY*TILE,
-      dir, spd: 40, hp: 4, // px/sec; 3 hits to down, 4th eliminates
+      x: gx*TILE, y: yRow*TILE,
+      side, dir, spd: 40,
+      hp: 4,                 // 3 hits to down, 4th eliminates (blink)
       state: 'walk',
       crossing: false, blinkT:0
     });
@@ -195,27 +221,29 @@
     const dir = left ? 1 : -1;
     cars.push({
       x: gx*TILE, y: hRoadY*TILE,
-      dir, spd: 120 // px/sec (was way too fast before)
+      dir, spd: 120 // px/sec
     });
   }
 
   function updatePed(p, dtSec){
     if(p.state==='walk'){
+      // approaching intersection column?
       const gx = Math.floor(p.x/TILE);
-      const atColumn = (gx === vRoadX);
-      if(atColumn && !p.crossing){
+      if(gx === vRoadX && !p.crossing){
         p.crossing = true;
       }
       if(p.crossing){
-        const targetY = (p.y < hRoadY*TILE) ? (hRoadY*TILE + TILE) : (sidewalkY*TILE);
+        const targetSide = (p.side==='top') ? sidewalkBotY : sidewalkTopY;
+        const targetY = targetSide*TILE;
         const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
         p.y += vy * p.spd * dtSec;
         if(Math.abs(p.y - targetY) < 0.5){
           p.crossing = false;
+          p.side = (p.side==='top') ? 'bot' : 'top';
         }
       } else {
-        p.y = sidewalkY*TILE;
         p.x += p.dir * p.spd * dtSec;
+        // wrap at edges
         if(p.x < unlocked.x0*TILE) { p.x = unlocked.x1*TILE; }
         if(p.x > unlocked.x1*TILE) { p.x = unlocked.x0*TILE; }
       }
@@ -224,7 +252,7 @@
       if(p.blinkT<=0){
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
-        setCoins(player.coins + 25);
+        setCoins(player.coins + 25);   // reward when eliminated
       }
     }
   }
@@ -300,11 +328,16 @@
       if(hitTest(player.x,player.y, p.x,p.y, 22)){
         didHit=true;
         if(p.state==='walk'){
-          p.hp -= 1;
           if(player.wanted===0){ setWanted(1); maintainCops(); }
+          p.hp -= 1;
           if(p.hp<=1){ p.state='downed'; }
         }else if(p.state==='downed'){
+          // finishing blow -> elimination & star escalation
           p.state='blink'; p.blinkT=0.6; // seconds
+          if(player.wanted < 5){
+            setWanted(player.wanted + 1);
+            maintainCops();
+          }
         }
         break;
       }
@@ -317,9 +350,6 @@
         }
       }
     }
-    if(didHit && player.wanted>0 && cops.length<player.wanted){
-      maintainCops();
-    }
   }
 
   // ===== Maps & drawing =====
@@ -330,18 +360,19 @@
   const bctx     = bigmap.getContext('2d');
 
   function drawCity(ctx2d, sx, sy){
+    // preview
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
-
+    // unlocked
     ctx2d.fillStyle = '#1c293e';
     ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
 
-    // Roads: horizontal + shifted vertical
+    // roads
     ctx2d.fillStyle = '#788292';
-    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
-    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
+    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy); // horizontal
+    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy); // vertical
 
-    // Hub
+    // HQ
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
 
@@ -373,26 +404,28 @@
     const S=DRAW, screenX=w2sX(gx*TILE), screenY=w2sY(gy*TILE);
     if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
 
+    // grass
     ctx.fillStyle = '#09371c';
     ctx.fillRect(screenX,screenY,S,S);
 
-    // Buildings
+    // HQ building
     if (gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){
       ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
     }
+    // Shop building
     if (gx>=shop.x && gx<shop.x+shop.w && gy>=shop.y && gy<shop.y+shop.h){
       ctx.fillStyle = '#203a60'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25);
+      ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25); // "SHOP" marquee
     }
 
-    // Sidewalks
-    if (gy===sidewalkY || gy===shop.sidewalkY){
+    // sidewalks (both sides of horizontal road)
+    if (gy===sidewalkTopY || gy===sidewalkBotY){
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
 
-    // Roads
+    // roads
     if (gy===hRoadY){
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
@@ -404,7 +437,7 @@
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
     }
 
-    // HQ Door
+    // HQ door on the top sidewalk
     if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
@@ -417,7 +450,7 @@
       }
     }
 
-    // Shop register highlight
+    // Shop register highlight (on sidewalkTopY)
     if(gx===shop.registerGX && gy===shop.sidewalkY){
       const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
       const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
@@ -460,7 +493,7 @@
 
     if(player.moving) player.animTime += dtMs;
 
-    // NPCs & cars
+    // Spawn & update NPCs
     if(pedestrians.length<6 && Math.random()<0.02) spawnPed();
     if(cars.length<3 && Math.random()<0.02) spawnCar();
     pedestrians.forEach(p=>updatePed(p, dtSec));
@@ -499,12 +532,12 @@
       ctx.fillRect(sx+DRAW*0.2, sy+DRAW*0.2, DRAW*0.6, DRAW*0.6);
     }
 
-    // player sprite layers
+    // player (layers)
     drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
 
-    // cops (colored blocks placeholder)
+    // cops (placeholder)
     for(const c of cops){
       const sx=w2sX(c.x), sy=w2sY(c.y);
       ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#000' : '#0a2455';
@@ -521,7 +554,7 @@
     loadLayer('hair',   HAIR),
   ]).then(([body,outfit,hair])=>{
     const imgs={body,outfit,hair};
-    setCoins(player.coins);
+    setCoins(getCoins()); // init HUD + local value
     centerCamera();
     let last=performance.now();
     (function loop(now){
