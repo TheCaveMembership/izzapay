@@ -16,7 +16,7 @@
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line) }
     .hud .left{display:flex;gap:12px;align-items:center}
     .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
-    .hud .stars{display:flex; gap:4px; margin-left:16px;} /* <-- give breathing room from coins */
+    .hud .stars{display:flex; gap:4px; margin-left:16px;} /* space away from coins */
     .star{width:16px; height:16px; border:1px solid #445; border-radius:3px; background:#111}
     .star.on{background:#ffd23f; border-color:#c59b00}
 
@@ -51,7 +51,6 @@
     .shop-item .meta .sub{ opacity:.8; font-size:12px }
     .shop-item .buy{ background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
-    .pill.coins{ background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -60,7 +59,8 @@
       <div class="left">
         <div class="pill">IZZA GAME</div>
         <div class="pill">Player: {{ user.username }}</div>
-        <div class="pill coins">Coins: <span id="coins">0 IC</span></div>
+        <!-- v3 expects to set the whole text of this element -->
+        <div class="pill" id="coinPill">Coins: 0 IC</div>
       </div>
       <div class="stars" id="stars">
         <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
@@ -130,7 +130,7 @@
 
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <!-- v3 build -->
-  <script src="/static/game/js/izza_play_v3.js?v=1"></script>
+  <!-- v3 build (cache-busted) -->
+  <script src="/static/game/js/izza_play_v3.js?v=6"></script>
 </body>
 </html>
