@@ -444,7 +444,7 @@
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
         setCoins(player.coins + 25);
-        IZZA.emit('ped-killed', { coins: 25 });
+        IZZA.emit('ped-killed', { coins: 25, x: p.x, y: p.y });
         if(tutorial.active && tutorial.step==='hitPed'){
           tutorial.step='hitCop';
           showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
@@ -502,7 +502,7 @@
       setWanted(player.wanted - 1);
       maintainCops();
       setCoins(player.coins + 50);
-      IZZA.emit('cop-killed', { cop: c });
+      IZZA.emit('cop-killed', { cop: c, x: c.x, y: c.y });
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
         setMission1Done();
@@ -784,6 +784,16 @@
       ready: true
     };
     IZZA.emit('ready', IZZA.api);
+    IZZA.api = {
+  player, cops, pedestrians,
+  setCoins, getCoins, setWanted,
+  TILE, DRAW, camera,
+  doorSpawn,
+  // expose for plugins:
+  getMissionCount,
+  getInventory, setInventory,
+  ready: true
+};
 
     setCoins(getCoins()); // init HUD + value
     centerCamera();
