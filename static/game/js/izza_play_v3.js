@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.7-shop-gate+store-offset';
+  const BUILD = 'v3.8-fix-black-screen';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Profile / assets =====
@@ -43,13 +43,12 @@
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
   // ===== SHOP: placed to the RIGHT of the right vertical sidewalk =====
-  // Register hotspot is on the sidewalk column in front of the shop.
   const shop = {
     w: 8, h: 5,
-    x: vSidewalkRightX + 1,        // <-- moved so it no longer covers the sidewalk
+    x: vSidewalkRightX + 1,        // sit to the right of the sidewalk
     y: sidewalkTopY - 5,
     sidewalkY: sidewalkTopY,
-    registerGX: vSidewalkRightX    // <-- the actual sidewalk tile you stand on to press B
+    registerGX: vSidewalkRightX    // hotspot is on the sidewalk itself
   };
 
   // ===== Loading =====
@@ -147,8 +146,8 @@
   },{passive:false});
   window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
 
-  btnA.addEventListener('click', doAttack);
-  btnB.addEventListener('click', handleB);
+  if(btnA) btnA.addEventListener('click', doAttack);
+  if(btnB) btnB.addEventListener('click', handleB);
 
   // Virtual joystick
   const stick = document.getElementById('stick');
@@ -156,19 +155,21 @@
   let dragging=false, baseRect=null, vec={x:0,y:0};
   function setNub(dx,dy){
     const r=40, m=Math.hypot(dx,dy)||1, c=Math.min(m,r), ux=dx/m, uy=dy/m;
-    nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px';
+    if(nub){ nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px'; }
     vec.x=(c/r)*ux; vec.y=(c/r)*uy;
   }
-  function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
+  function resetNub(){ if(nub){ nub.style.left='40px'; nub.style.top='40px'; } vec.x=0; vec.y=0; }
   function startDrag(e){ dragging=true; baseRect=stick.getBoundingClientRect(); e.preventDefault(); }
   function moveDrag(e){ if(!dragging) return; const t=e.touches?e.touches[0]:e; const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(t.clientX-cx,t.clientY-cy); e.preventDefault(); }
   function endDrag(e){ dragging=false; resetNub(); if(e) e.preventDefault(); }
-  stick.addEventListener('touchstart',startDrag,{passive:false});
-  stick.addEventListener('touchmove', moveDrag, {passive:false});
-  stick.addEventListener('touchend',  endDrag,  {passive:false});
-  stick.addEventListener('mousedown', startDrag);
-  window.addEventListener('mousemove',moveDrag);
-  window.addEventListener('mouseup',  endDrag);
+  if(stick){
+    stick.addEventListener('touchstart',startDrag,{passive:false});
+    stick.addEventListener('touchmove', moveDrag, {passive:false});
+    stick.addEventListener('touchend',  endDrag,  {passive:false});
+    stick.addEventListener('mousedown', startDrag);
+    window.addEventListener('mousemove',moveDrag);
+    window.addEventListener('mouseup',  endDrag);
+  }
 
   // ===== HUD =====
   function setWanted(n){
@@ -194,7 +195,7 @@
   function isSolid(gx,gy){
     if(!inUnlocked(gx,gy)) return true;
     if(isHQ(gx,gy)) return true;
-    // Shop is solid, but NEVER the vertical sidewalks columns
+    // Shop is solid, but NEVER the vertical sidewalk columns
     if(isShop(gx,gy) && gx!==vSidewalkLeftX && gx!==vSidewalkRightX) return true;
     return false;
   }
@@ -230,13 +231,13 @@
     const m=document.getElementById('shopModal'); if(!m) return;
     const list=document.getElementById('shopList');
     const note=document.getElementById('shopNote');
-    list.innerHTML='';
+    if(list) list.innerHTML='';
 
     const done = getMission1Done();
     if(!done){
-      note.textContent = "Go see IZZA GAME HQ to learn about your first mission from the boss!";
+      if(note) note.textContent = "Go see IZZA GAME HQ to learn about your first mission from the boss!";
     }else{
-      note.textContent = "";
+      if(note) note.textContent = "";
       const missions = getMissionCount();
       const stock = [
         {id:'bat',       name:'Baseball Bat',     price:100, desc:'Starter melee'},
@@ -244,26 +245,28 @@
         {id:'pistol',    name:'Pistol',           price:300, desc:'Basic firearm', reqMissions:2},
       ];
       const inv = new Set(getInventory());
-      stock.forEach(it=>{
-        if(it.reqMissions && missions < it.reqMissions) return;
-        const row = document.createElement('div'); row.className='shop-item';
-        const meta = document.createElement('div'); meta.className='meta';
-        meta.innerHTML = `<div class="name">${it.name}</div><div class="sub">${it.price} IC</div>`;
-        const btn = document.createElement('button'); btn.className='buy'; btn.textContent = inv.has(it.id)? 'Owned' : 'Buy';
-        btn.disabled = inv.has(it.id);
-        btn.addEventListener('click', ()=>{
-          if(inv.has(it.id)) return;
-          if(player.coins < it.price){ alert('Not enough coins'); return; }
-          setCoins(player.coins - it.price);
-          inv.add(it.id);
-          setInventory([...inv]);
-          btn.textContent='Owned'; btn.disabled=true;
+      if(list){
+        stock.forEach(it=>{
+          if(it.reqMissions && missions < it.reqMissions) return;
+          const row = document.createElement('div'); row.className='shop-item';
+          const meta = document.createElement('div'); meta.className='meta';
+          meta.innerHTML = `<div class="name">${it.name}</div><div class="sub">${it.price} IC</div>`;
+          const btn = document.createElement('button'); btn.className='buy'; btn.textContent = inv.has(it.id)? 'Owned' : 'Buy';
+          btn.disabled = inv.has(it.id);
+          btn.addEventListener('click', ()=>{
+            if(inv.has(it.id)) return;
+            if(player.coins < it.price){ alert('Not enough coins'); return; }
+            setCoins(player.coins - it.price);
+            inv.add(it.id);
+            setInventory([...inv]);
+            btn.textContent='Owned'; btn.disabled=true;
+          });
+          row.appendChild(meta); row.appendChild(btn);
+          list.appendChild(row);
         });
-        row.appendChild(meta); row.appendChild(btn);
-        list.appendChild(row);
-      });
-      if(!list.children.length){
-        note.textContent = "No items available yet. Complete more missions!";
+        if(!list.children.length && note){
+          note.textContent = "No items available yet. Complete more missions!";
+        }
       }
     }
     m.style.display='flex';
@@ -287,7 +290,7 @@
     });
   }
 
-  // ===== NPCs (same as your last build) =====
+  // ===== NPCs =====
   const pedestrians=[]; // {x,y,mode:'horiz'|'vert'|'crossing',dir,spd,hp,state,crossSide,vertX,blinkT}
   const cars=[];        // {x,y,dir,spd}
 
@@ -417,7 +420,7 @@
       setCoins(player.coins + 50);
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
-        setMission1Done();                    // <-- persist tutorial completion
+        setMission1Done();                    // persist tutorial completion
         showHint('Tutorial complete! Shops now carry starter items.', 4);
       }
     }
@@ -456,10 +459,10 @@
 
   // ===== Maps & drawing =====
   const mini = document.getElementById('minimap');
-  const mctx = mini.getContext('2d');
+  const mctx = mini ? mini.getContext('2d') : null;
   const mapModal = document.getElementById('mapModal');
   const bigmap   = document.getElementById('bigmap');
-  const bctx     = bigmap.getContext('2d');
+  const bctx     = bigmap ? bigmap.getContext('2d') : null;
 
   function drawCity(ctx2d, sx, sy){
     // preview
@@ -484,6 +487,7 @@
     ctx2d.fillRect(shop.x*sx, shop.y*sy, shop.w*sx, shop.h*sy);
   }
   function drawMini(){
+    if(!mini||!mctx) return;
     const sx = mini.width / W, sy = mini.height / H;
     mctx.fillStyle = '#000'; mctx.fillRect(0,0,mini.width,mini.height);
     drawCity(mctx, sx, sy);
@@ -491,6 +495,7 @@
     mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 2, 2);
   }
   function drawBig(){
+    if(!bigmap||!bctx) return;
     const sx = bigmap.width / W, sy = bigmap.height / H;
     bctx.fillStyle = '#000'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
     drawCity(bctx, sx, sy);
@@ -498,9 +503,9 @@
     bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
   }
   const miniWrap=document.getElementById('miniWrap');
-  if(miniWrap) miniWrap.addEventListener('click', ()=>{ drawBig(); mapModal.style.display='flex'; });
+  if(miniWrap) miniWrap.addEventListener('click', ()=>{ drawBig(); if(mapModal) mapModal.style.display='flex'; });
   const closeMapBtn=document.getElementById('closeMap');
-  if(closeMapBtn) closeMapBtn.addEventListener('click', ()=> mapModal.style.display='none');
+  if(closeMapBtn) closeMapBtn.addEventListener('click', ()=> { if(mapModal) mapModal.style.display='none'; });
   if(mapModal) mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) mapModal.style.display='none'; });
 
   function drawTile(gx,gy){
@@ -550,7 +555,7 @@
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
       const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
       ctx.fillRect(screenX + (S-w)/2, screenY + (S-h), w, h);
-      if(near){
+      if(near && promptEl){
         promptEl.style.left = (screenX + S/2) + 'px';
         promptEl.style.top  = (screenY - 8) + 'px';
         promptEl.style.display = 'block';
@@ -574,9 +579,8 @@
   }
 
   // ===== Update & render =====
-  const pedestrians=[]; const cars=[];
   function update(dtSec, dtMs){
-    promptEl.style.display='none';
+    if(promptEl) promptEl.style.display='none';
 
     // fade tutorial hint
     if(tutorial.hintT>0){
@@ -672,10 +676,14 @@
     centerCamera();
     let last=performance.now();
     (function loop(now){
-      const dtMs=Math.min(32, now-last); last=now;
-      const dtSec = dtMs/1000;
-      update(dtSec, dtMs);
-      render(imgs);
+      try{
+        const dtMs=Math.min(32, now-last); last=now;
+        const dtSec = dtMs/1000;
+        update(dtSec, dtMs);
+        render(imgs);
+      }catch(err){
+        console.error('Game loop error:', err);
+      }
       requestAnimationFrame(loop);
     })(last+16);
   }).catch(err=>console.error('Sprite load failed', err));
