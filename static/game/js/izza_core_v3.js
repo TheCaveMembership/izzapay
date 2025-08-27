@@ -1,11 +1,11 @@
 (function(){
-  const BUILD = 'v3.9-core+hooks';
+  const BUILD = 'v3.10-core+hooks+coinfix';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus (for plugins like v4 hearts) ---
   const IZZA = window.IZZA = window.IZZA || {};
   IZZA._hooks = IZZA._hooks || {};
-  IZZA.on = (ev, fn)=>{ (IZZA._hooks[ev] ||= []).push(fn); };
+  IZZA.on   = (ev, fn)=>{ (IZZA._hooks[ev] ||= []).push(fn); };
   IZZA.emit = (ev, payload)=>{ (IZZA._hooks[ev]||[]).forEach(fn=>{ try{ fn(payload); }catch(e){ console.error(e); } }); };
   IZZA.api = {}; // will be filled just before the main loop starts
 
@@ -37,9 +37,9 @@
   const bY = unlocked.y0 + 5;
 
   // Roads/sidewalks
-  const hRoadY       = bY + bH + 1;            // horizontal road row
-  const sidewalkTopY = hRoadY - 1;             // sidewalk above road (HQ front)
-  const sidewalkBotY = hRoadY + 1;             // sidewalk below road
+  const hRoadY       = bY + bH + 1;
+  const sidewalkTopY = hRoadY - 1;
+  const sidewalkBotY = hRoadY + 1;
 
   // Vertical road to the right of HQ + sidewalks on both sides
   const vRoadX         = Math.min(unlocked.x1-3, bX + bW + 6);
@@ -49,17 +49,24 @@
   // HQ Door centered on top sidewalk
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
-  // ===== SHOP: placed to the RIGHT of the right vertical sidewalk =====
+  // ===== SHOP: to the RIGHT of the right vertical sidewalk =====
   const shop = {
     w: 8, h: 5,
-    x: vSidewalkRightX + 1,        // sit to the right of the sidewalk
+    x: vSidewalkRightX + 1,
     y: sidewalkTopY - 5,
     sidewalkY: sidewalkTopY,
-    registerGX: vSidewalkRightX    // hotspot is on the sidewalk itself
+    registerGX: vSidewalkRightX
   };
 
   // ===== Loading =====
-  function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('load:'+src)); i.src=src; }); }
+  function loadImg(src){
+    return new Promise((res,rej)=>{
+      const i=new Image();
+      i.onload=()=>res(i);
+      i.onerror=()=>rej(new Error('load:'+src));
+      i.src=src;
+    });
+  }
   const assetRoot="/static/game/sprites";
   function loadLayer(kind,name){
     const p2=`${assetRoot}/${kind}/${encodeURIComponent(name+' 2')}.png`;
@@ -71,9 +78,9 @@
   // ===== Coins & Progress (persist) =====
   const LS = {
     coins:      'izzaCoins',
-    mission1:   'izzaMission1',   // 'done' when tutorial completed
-    missions:   'izzaMissions',   // integer mission count
-    inventory:  'izzaInventory'   // JSON array of item ids
+    mission1:   'izzaMission1',
+    missions:   'izzaMissions',
+    inventory:  'izzaInventory'
   };
 
   function getCoins(){
@@ -84,7 +91,9 @@
   function setCoins(n){
     const v = Math.max(0, n|0);
     localStorage.setItem(LS.coins, String(v));
-    const el = document.querySelector('.pill.coins'); if(el) el.textContent = `Coins: ${v} IC`;
+    // works with either #coinPill (current HTML) or .pill.coins (older)
+    const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
+    if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
@@ -94,16 +103,14 @@
     if(cur<1) localStorage.setItem(LS.missions,'1');
   }
   function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
-  function getInventory(){
-    try{ return JSON.parse(localStorage.getItem(LS.inventory)||'[]'); }catch{ return []; }
-  }
+  function getInventory(){ try{ return JSON.parse(localStorage.getItem(LS.inventory)||'[]'); }catch{ return []; } }
   function setInventory(arr){ localStorage.setItem(LS.inventory, JSON.stringify(arr||[])); }
 
   // ===== Player / anim =====
   const player = {
     x: door.gx*TILE + (TILE/2 - 8),
     y: door.gy*TILE,
-    speed: 90,            // px/sec
+    speed: 90,
     wanted: 0,
     facing: 'down', moving:false,
     animTime: 0,
@@ -111,7 +118,6 @@
     coins: 0
   };
 
-  // Animation (row order: down, RIGHT, LEFT, up)
   const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
   function currentFrame(cols, moving, t){ if(cols<=1) return 0; if(!moving) return 1%cols; return Math.floor(t/WALK_MS)%cols; }
@@ -431,7 +437,7 @@
       IZZA.emit('cop-killed', { cop: c });
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
-        setMission1Done();                    // persist tutorial completion
+        setMission1Done();
         showHint('Tutorial complete! Shops now carry starter items.', 4);
       }
     }
@@ -479,15 +485,15 @@
     // preview
     ctx2d.fillStyle = 'rgba(163,176,197,.25)';
     ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
+
     // unlocked
     ctx2d.fillStyle = '#1c293e';
     ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
 
-    // horizontal road
+    // roads
     ctx2d.fillStyle = '#788292';
-    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
-    // vertical road
-    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
+    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);              // horizontal
+    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);              // vertical
 
     // HQ
     ctx2d.fillStyle = '#7a3a3a';
@@ -690,17 +696,20 @@
   ]).then(([body,outfit,hair])=>{
     const imgs={body,outfit,hair};
 
-    // expose core API for plugins
+    // expose core API for plugins (include spawn/door for respawns)
+    const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
     IZZA.api = {
       player, cops, pedestrians,
       setCoins, getCoins, setWanted,
       TILE, DRAW, camera,
+      doorSpawn,
       ready: true
     };
     IZZA.emit('ready', IZZA.api);
 
     setCoins(getCoins()); // init HUD + value
     centerCamera();
+
     let last=performance.now();
     (function loop(now){
       try{
