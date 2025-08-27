@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.13-core+inventory+equip+loot-hooks';
+  const BUILD = 'v3.15-core+mapToggle+heldWeapons+invScroll3rows';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus ---
@@ -46,10 +46,8 @@
   const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
 
   // --- loot drop behavior knobs ---
-  const DROP_GRACE_MS = 1000;       // cannot be picked up for 1s
-  const DROP_OFFSET   = 18;         // nudge away from player center (in world px)
-
-  // helper: position a drop away from the player so it’s not immediately overlapped
+  const DROP_GRACE_MS = 1000;
+  const DROP_OFFSET   = 18;
   function makeDropPos(victimCenterX, victimCenterY){
     const dx = victimCenterX - player.x;
     const dy = victimCenterY - player.y;
@@ -147,7 +145,6 @@
     missions:   'izzaMissions',
     inventory:  'izzaInventory'
   };
-
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
     const n = raw==null ? 300 : (parseInt(raw,10)||0);
@@ -160,7 +157,6 @@
     if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
-
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
   function setMission1Done(){
     localStorage.setItem(LS.mission1,'done');
@@ -170,7 +166,6 @@
   function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
 
   // ---- Inventory (object w/ counts, ammo, durability, equipped flags)
-  // Migration: if an old array is found, convert it.
   function _migrateInventory(v){
     if (Array.isArray(v)) {
       const inv = {};
@@ -204,18 +199,15 @@
   };
 
   // ===== Equip & weapon rules =====
-  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' (placeholder for future shooting)
+  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol'
   const WEAPON_RULES = {
     fists:     { damage: 1, breaks: false },
     bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
     knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
-    pistol:    { damage: 3, breaks: false } // shooting logic handled later
+    pistol:    { damage: 3, breaks: false }
   };
   function missionsOKToUse(id){
-    // Usage locks (can still buy earlier)
-    if (id==='pistol') return getMissionCount() >= 3; // keep consistent with loot plugin gates
-    if (id==='bat')    return true;
-    if (id==='knuckles') return true;
+    if (id==='pistol') return getMissionCount() >= 3;
     return true;
   }
 
@@ -228,6 +220,7 @@
   const btnA = document.getElementById('btnA');
   const btnB = document.getElementById('btnB');
   const btnI = document.getElementById('btnI');
+  const btnMap = document.getElementById('btnMap');
   const promptEl = document.getElementById('prompt');
 
   // Tutorial hint (toast)
@@ -266,6 +259,13 @@
   if(btnA) btnA.addEventListener('click', doAttack);
   if(btnB) btnB.addEventListener('click', handleB);
   if(btnI) btnI.addEventListener('click', toggleInventoryPanel);
+  if(btnMap){
+    const miniWrap=document.getElementById('miniWrap');
+    btnMap.addEventListener('click', ()=>{
+      if(!miniWrap) return;
+      miniWrap.style.display = (miniWrap.style.display==='none' || !miniWrap.style.display) ? 'block' : 'none';
+    });
+  }
 
   // Virtual joystick
   const stick = document.getElementById('stick');
@@ -417,7 +417,6 @@
               toast('Purchased Pistol (+17 ammo)');
             }
 
-            // If inventory panel is open, refresh it
             const p = document.getElementById('invPanel');
             if(p && p.style.display!=='none') renderInventoryPanel();
           });
@@ -439,19 +438,7 @@
   const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
-  // Start Tutorial button
-  const startBtn = document.getElementById('startTutorial');
-  if(startBtn){
-    startBtn.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      closeEnter();
-      tutorial.active = true;
-      tutorial.step   = 'hitPed';
-      showHint('Tutorial: Press A to hit a pedestrian.');
-    });
-  }
-
-  // ===== Inventory UI (auto-injected; toggle with I) =====
+  // ===== Inventory UI (toggle with I or the I button) =====
   function ensureInvHost(){
     let host = document.getElementById('invPanel');
     if(!host){
@@ -459,12 +446,8 @@
       host = document.createElement('div');
       host.id = 'invPanel';
       host.style.cssText = 'max-width:1100px;margin:8px auto 0;display:none';
-      // insert after #gameCard
-      if(card && card.parentNode){
-        card.parentNode.insertBefore(host, card.nextSibling);
-      }else{
-        document.body.appendChild(host);
-      }
+      if(card && card.parentNode){ card.parentNode.insertBefore(host, card.nextSibling); }
+      else{ document.body.appendChild(host); }
     }
     return host;
   }
@@ -487,7 +470,7 @@
         ? `<button data-equip="${id}" style="margin-left:auto" ${isEquipped?'disabled':''}>${isEquipped?'Equipped':'Equip'}</button>`
         : '';
       return `
-        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
           <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
           <div style="font-weight:600">${label}</div>
           ${lockHTML}
@@ -498,21 +481,19 @@
 
     const rows = [];
 
-    // Pistol
     if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
       rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
     }
-    // Bats
     if(inv.bat && inv.bat.count>0){
       const cur = inv.bat.hitsLeftOnCurrent|0;
       rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
     }
-    // Knuckles
     if(inv.knuckles && inv.knuckles.count>0){
       const cur = inv.knuckles.hitsLeftOnCurrent|0;
       rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
     }
 
+    // 3-row scroll area (~84px per row + gaps)
     host.innerHTML = `
       <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
@@ -520,13 +501,12 @@
           <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
           <div style="margin-left:auto; opacity:.8; font-size:12px">Press I to close</div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:8px">
+        <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
           ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
         </div>
       </div>
     `;
 
-    // Wire equip buttons
     host.querySelectorAll('[data-equip]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const id = btn.getAttribute('data-equip');
@@ -620,7 +600,7 @@
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
 
-        // --- DROP COINS with grace + offset (no instant coin award) ---
+        // drop coins; award happens on pickup via loot plugin
         const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
         const pos = makeDropPos(centerX, centerY);
         const tnow = performance.now();
@@ -688,7 +668,6 @@
       setWanted(player.wanted - 1);
       maintainCops();
 
-      // --- DROP WEAPON with grace + offset (no instant coin award here) ---
       const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
       const pos = makeDropPos(centerX, centerY);
       const tnow = performance.now();
@@ -747,37 +726,27 @@
     const dmg = weaponDamage();
     let didHit=false;
 
-    // Hit pedestrians
     for(const p of pedestrians){
       if(hitTest(player.x,player.y, p.x,p.y, 22)){
         didHit=true;
         if(p.state==='walk'){
           if(player.wanted===0){ setWanted(1); maintainCops(); }
           p.hp -= dmg;
-
-          // If using bat/knuckles and hit is lethal, skip "downed" and finish immediately (2 hits total)
           if((equipped.weapon==='bat' || equipped.weapon==='knuckles') && p.hp<=0){
             p.state='blink'; p.blinkT=0.6;
-            if(player.wanted < 5){
-              setWanted(player.wanted + 1);
-              maintainCops();
-            }
+            if(player.wanted < 5){ setWanted(player.wanted + 1); maintainCops(); }
           }else{
             if(p.hp<=1){ p.state='downed'; }
           }
         }else if(p.state==='downed'){
           p.state='blink'; p.blinkT=0.6;
-          if(player.wanted < 5){
-            setWanted(player.wanted + 1);
-            maintainCops();
-          }
+          if(player.wanted < 5){ setWanted(player.wanted + 1); maintainCops(); }
         }
         consumeDurabilityIfNeeded();
         break;
       }
     }
 
-    // Hit cops
     if(!didHit){
       for(const c of cops){
         if(hitTest(player.x,player.y, c.x,c.y, 24)){
@@ -846,7 +815,7 @@
       ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25);
     }
 
-    if (gy===sidewalkTopY || gy===sidewalkBotY){ // sidewalks
+    if (gy===sidewalkTopY || gy===sidewalkBotY){
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
@@ -855,18 +824,18 @@
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
 
-    if (gy===hRoadY){ // horizontal road
+    if (gy===hRoadY){
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
       for(let i=0;i<4;i++){
         ctx.fillRect(screenX + i*(S/4) + S*0.05, screenY + S*0.48, S*0.10, S*0.04);
       }
     }
-    if (gx===vRoadX){ // vertical road
+    if (gx===vRoadX){
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
     }
 
-    if (gx===door.gx && gy===door.gy){ // HQ door
+    if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
       const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
@@ -878,7 +847,7 @@
       }
     }
 
-    if(gx===shop.registerGX && gy===shop.sidewalkY){ // register marker
+    if(gx===shop.registerGX && gy===shop.sidewalkY){
       const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
       const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
       ctx.fillStyle = near ? 'rgba(136,168,255,0.6)' : 'rgba(136,168,255,0.3)';
@@ -891,6 +860,34 @@
     const frame = currentFrame(cols, moving, t);
     ctx.imageSmoothingEnabled=false;
     ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, DRAW,DRAW);
+  }
+
+  // simple held-weapon overlay (pixel art)
+  function drawHeldWeapon(){
+    const sx = w2sX(player.x), sy = w2sY(player.y);
+    const S  = DRAW;
+    const w  = Math.floor(S*0.30), h = Math.floor(S*0.12);
+
+    if(equipped.weapon==='bat'){
+      ctx.fillStyle = '#8b5a2b';
+    }else if(equipped.weapon==='knuckles'){
+      ctx.fillStyle = '#cfcfcf';
+    }else if(equipped.weapon==='pistol'){
+      ctx.fillStyle = '#202833';
+    }else{
+      return; // fists: nothing to draw
+    }
+
+    // offsets relative to player depending on facing
+    if(player.facing==='down'){
+      ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
+    }else if(player.facing==='up'){
+      ctx.fillRect(sx + S*0.10, sy + S*0.25, w, h);
+    }else if(player.facing==='left'){
+      ctx.fillRect(sx + S*0.10, sy + S*0.55, w, h);
+    }else{ // right
+      ctx.fillRect(sx + S*0.60, sy + S*0.55, w, h);
+    }
   }
 
   // ===== Update & render =====
@@ -927,7 +924,7 @@
 
     if(player.moving) player.animTime += dtMs;
 
-    // Spawn & update NPCs
+    // Spawns/updates
     if(pedestrians.length<6 && Math.random()<0.02) spawnPed();
     if(cars.length<3 && Math.random()<0.02) spawnCar();
     pedestrians.forEach(p=>updatePed(p, dtSec));
@@ -973,10 +970,13 @@
       }
     }
 
-    // player (layers)
+    // player layers
     drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
+
+    // held weapon overlay
+    drawHeldWeapon();
 
     // cops
     for(const c of cops){
@@ -1005,7 +1005,6 @@
     NPC_SHEETS = npcs;
     const imgs={body,outfit,hair};
 
-    // Build API ONCE (with helpers) then emit
     const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
     IZZA.api = {
       player, cops, pedestrians,
@@ -1029,7 +1028,7 @@
         const dtSec = dtMs/1000;
         update(dtSec, dtMs);
         render(imgs);
-        IZZA.emit('render-post', { now: performance.now() }); // overlay phase for plugins (e.g., loot)
+        IZZA.emit('render-post', { now: performance.now() });
       }catch(err){
         console.error('Game loop error:', err);
         bootMsg('Game loop error: '+err.message, '#ff6b6b');
