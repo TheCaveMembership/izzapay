@@ -104,8 +104,11 @@
     <div class="backdrop"></div>
     <div class="card">
       <h3>Welcome to The Hub</h3>
-      <p>Talk to the NPC inside to get your first mission and start earning!</p>
-      <div class="row"><button class="ghost" id="closeEnter">Close</button></div>
+      <p>Start the tutorial to learn how to attack. Beat the dummy to complete the mission.</p>
+      <div class="row" style="justify-content:space-between">
+        <button class="ghost" id="startTutorial">Start Tutorial</button>
+        <button class="ghost" id="closeEnter">Close</button>
+      </div>
     </div>
   </div>
 
@@ -122,7 +125,6 @@
 
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <!-- cache-busted v2 include -->
-  <script src="/static/game/js/izza_play_v2.js?v=3"></script>
+  <script src="/static/game/js/izza_play_v2.js?v=4"></script>
 </body>
 </html>
