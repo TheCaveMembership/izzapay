@@ -58,8 +58,8 @@
       <div class="left">
         <div class="pill">IZZA GAME</div>
         <div class="pill">Player: {{ user.username }}</div>
-        <!-- CHANGED: add class "coins" so v3 core updates it -->
-        <div class="pill coins" id="coinPill">Coins: 0 IC</div> <!-- ← add class -->
+        <!-- core will update this element’s text -->
+        <div class="pill" id="coinPill">Coins: 0 IC</div>
       </div>
       <div class="stars" id="stars">
         <div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div>
@@ -127,13 +127,11 @@
     </div>
   </div>
 
-  <!-- Pass profile to JS and load the engine -->
+  <!-- Pass profile to JS -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
 
-  <!-- v3 core (must be the hooks build, cache-bust if needed) -->
-  <script src="/static/game/js/izza_play_v3.js?v=39"></script> <!-- ← ensure this is the v3.9 core+hooks -->
-
-  <!-- ADD THIS: hearts plugin AFTER the core -->
-  <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script> <!-- ← new line -->
+  <!-- LOAD ORDER MATTERS: core FIRST, then plugins -->
+  <script src="/static/game/js/izza_core_v3.js?v=7"></script>
+  <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
 </body>
 </html>
