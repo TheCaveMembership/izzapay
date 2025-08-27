@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.7-shop-gate+mission-persist';
+  const BUILD = 'v3.7-shop-gate+store-offset';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Profile / assets =====
@@ -30,25 +30,26 @@
   const bY = unlocked.y0 + 5;
 
   // Roads/sidewalks
-  const hRoadY       = bY + bH + 1;        // horizontal road
-  const sidewalkTopY = hRoadY - 1;         // sidewalk above road (HQ front)
-  const sidewalkBotY = hRoadY + 1;         // sidewalk below road
+  const hRoadY       = bY + bH + 1;            // horizontal road row
+  const sidewalkTopY = hRoadY - 1;             // sidewalk above road (HQ front)
+  const sidewalkBotY = hRoadY + 1;             // sidewalk below road
 
-  // Vertical road to the right of HQ + sidewalks
+  // Vertical road to the right of HQ + sidewalks on both sides
   const vRoadX         = Math.min(unlocked.x1-3, bX + bW + 6);
   const vSidewalkLeftX = vRoadX - 1;
   const vSidewalkRightX= vRoadX + 1;
 
-  // HQ Door (on the top sidewalk)
+  // HQ Door centered on top sidewalk
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
-  // Shop block above the top sidewalk (walkable sidewalk in front)
+  // ===== SHOP: placed to the RIGHT of the right vertical sidewalk =====
+  // Register hotspot is on the sidewalk column in front of the shop.
   const shop = {
     w: 8, h: 5,
-    x: bX + 16,
-    y: sidewalkTopY - 5,       // entirely above the sidewalk row
-    sidewalkY: sidewalkTopY,   // walkable
-    registerGX: bX + 16 + 4    // where you stand/press B
+    x: vSidewalkRightX + 1,        // <-- moved so it no longer covers the sidewalk
+    y: sidewalkTopY - 5,
+    sidewalkY: sidewalkTopY,
+    registerGX: vSidewalkRightX    // <-- the actual sidewalk tile you stand on to press B
   };
 
   // ===== Loading =====
@@ -61,22 +62,36 @@
                       .catch(()=>loadImg(p1).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))})));
   }
 
-  // ===== Persist: coins & mission =====
-  function coinEl(){ return document.getElementById('coinPill') || document.querySelectorAll('.hud .pill')[2]; }
+  // ===== Coins & Progress (persist) =====
+  const LS = {
+    coins:      'izzaCoins',
+    mission1:   'izzaMission1',   // 'done' when tutorial completed
+    missions:   'izzaMissions',   // integer mission count
+    inventory:  'izzaInventory'   // JSON array of item ids
+  };
+
   function getCoins(){
-    const raw = localStorage.getItem('izzaCoins');
+    const raw = localStorage.getItem(LS.coins);
     const n = raw==null ? 300 : (parseInt(raw,10)||0);
-    return n<0?0:n;
+    return Math.max(0,n);
   }
   function setCoins(n){
     const v = Math.max(0, n|0);
-    localStorage.setItem('izzaCoins', String(v));
-    const el = coinEl(); if(el) el.textContent = `Coins: ${v} IC`;
+    localStorage.setItem(LS.coins, String(v));
+    const el = document.querySelector('.pill.coins'); if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
-
-  function getMissionStage(){ return parseInt(localStorage.getItem('izzaMissionStage')||'0',10) || 0; }
-  function setMissionStage(n){ localStorage.setItem('izzaMissionStage', String(n|0)); }
+  function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
+  function setMission1Done(){
+    localStorage.setItem(LS.mission1,'done');
+    const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
+    if(cur<1) localStorage.setItem(LS.missions,'1');
+  }
+  function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
+  function getInventory(){
+    try{ return JSON.parse(localStorage.getItem(LS.inventory)||'[]'); }catch{ return []; }
+  }
+  function setInventory(arr){ localStorage.setItem(LS.inventory, JSON.stringify(arr||[])); }
 
   // ===== Player / anim =====
   const player = {
@@ -101,7 +116,7 @@
   const btnB = document.getElementById('btnB');
   const promptEl = document.getElementById('prompt');
 
-  // Tutorial hint (lightweight toast)
+  // Tutorial hint (toast)
   let tutorial = { active:false, step:'', hintT:0 };
   function showHint(text, seconds=3){
     let h = document.getElementById('tutHint');
@@ -174,11 +189,13 @@
   }
 
   // ===== Collision =====
-  const isBuilding = (gx,gy)=> (gx>=bX&&gx<bX+bW&&gy>=bY&&gy<bY+bH) ||
-                               (gx>=shop.x&&gx<shop.x+shop.w&&gy>=shop.y&&gy<shop.y+shop.h);
+  const isHQ = (gx,gy)=> gx>=bX&&gx<bX+bW&&gy>=bY&&gy<bY+bH;
+  const isShop = (gx,gy)=> gx>=shop.x&&gx<shop.x+shop.w&&gy>=shop.y&&gy<shop.y+shop.h;
   function isSolid(gx,gy){
     if(!inUnlocked(gx,gy)) return true;
-    if(isBuilding(gx,gy))  return true;
+    if(isHQ(gx,gy)) return true;
+    // Shop is solid, but NEVER the vertical sidewalks columns
+    if(isShop(gx,gy) && gx!==vSidewalkLeftX && gx!==vSidewalkRightX) return true;
     return false;
   }
   function tryMove(nx,ny){
@@ -206,10 +223,51 @@
     return (Math.abs(px-shop.registerGX)+Math.abs(py-shop.sidewalkY))<=1;
   }
 
-  // ===== Modals =====
+  // ===== Modals & Tutorial hook =====
   function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
-  function openShop(){ populateShopUI(); const m=document.getElementById('shopModal'); if(m) m.style.display='flex'; }
+  function openShop(){
+    const m=document.getElementById('shopModal'); if(!m) return;
+    const list=document.getElementById('shopList');
+    const note=document.getElementById('shopNote');
+    list.innerHTML='';
+
+    const done = getMission1Done();
+    if(!done){
+      note.textContent = "Go see IZZA GAME HQ to learn about your first mission from the boss!";
+    }else{
+      note.textContent = "";
+      const missions = getMissionCount();
+      const stock = [
+        {id:'bat',       name:'Baseball Bat',     price:100, desc:'Starter melee'},
+        {id:'knuckles',  name:'Brass Knuckles',   price:150, desc:'+1 damage'},
+        {id:'pistol',    name:'Pistol',           price:300, desc:'Basic firearm', reqMissions:2},
+      ];
+      const inv = new Set(getInventory());
+      stock.forEach(it=>{
+        if(it.reqMissions && missions < it.reqMissions) return;
+        const row = document.createElement('div'); row.className='shop-item';
+        const meta = document.createElement('div'); meta.className='meta';
+        meta.innerHTML = `<div class="name">${it.name}</div><div class="sub">${it.price} IC</div>`;
+        const btn = document.createElement('button'); btn.className='buy'; btn.textContent = inv.has(it.id)? 'Owned' : 'Buy';
+        btn.disabled = inv.has(it.id);
+        btn.addEventListener('click', ()=>{
+          if(inv.has(it.id)) return;
+          if(player.coins < it.price){ alert('Not enough coins'); return; }
+          setCoins(player.coins - it.price);
+          inv.add(it.id);
+          setInventory([...inv]);
+          btn.textContent='Owned'; btn.disabled=true;
+        });
+        row.appendChild(meta); row.appendChild(btn);
+        list.appendChild(row);
+      });
+      if(!list.children.length){
+        note.textContent = "No items available yet. Complete more missions!";
+      }
+    }
+    m.style.display='flex';
+  }
   function closeShop(){ const m=document.getElementById('shopModal'); if(m) m.style.display='none'; }
 
   const ce=document.getElementById('closeEnter'); if(ce) ce.addEventListener('click', (e)=>{ e.stopPropagation(); closeEnter(); });
@@ -217,7 +275,7 @@
   const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
-  // Tutorial button
+  // Start Tutorial button
   const startBtn = document.getElementById('startTutorial');
   if(startBtn){
     startBtn.addEventListener('click', (e)=>{
@@ -229,67 +287,18 @@
     });
   }
 
-  // ===== Shop data/UI =====
-  const SHOP_ITEMS = [
-    { id:'bat',      name:'Baseball Bat',  price:100, reqStage:1, note:'Starter melee' },
-    { id:'knucks',   name:'Brass Knuckles',price:150, reqStage:1, note:'+1 damage' },
-    { id:'pistol',   name:'Pistol',        price:400, reqStage:2, note:'Unlocks after 2 missions' },
-    { id:'hoodie',   name:'Street Hoodie', price:120, reqStage:1, note:'Cosmetic' },
-  ];
-
-  function populateShopUI(){
-    const list = document.getElementById('shopList');
-    const note = document.getElementById('shopNote');
-    if(!list || !note) return;
-
-    list.innerHTML = '';
-    const stage = getMissionStage();
-
-    // Pre-tutorial gate
-    if(stage < 1){
-      note.textContent = "Go see IZZA GAME HQ to learn about your first mission from the boss!";
-      return; // no items yet
-    }
-
-    note.textContent = '';
-    for(const it of SHOP_ITEMS){
-      if(stage < it.reqStage) continue;
-      const row = document.createElement('div');
-      row.className = 'shop-item';
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.innerHTML = `<div class="name">${it.name}</div><div class="sub">${it.price} IC</div>`;
-
-      const btn = document.createElement('button');
-      btn.className = 'buy';
-      btn.textContent = 'Buy';
-      btn.addEventListener('click', ()=>{
-        if(player.coins < it.price){
-          note.textContent = "Not enough coins.";
-          return;
-        }
-        setCoins(player.coins - it.price);
-        // persist simple inventory flag
-        const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
-        inv[it.id] = (inv[it.id]||0) + 1;
-        localStorage.setItem('izzaInventory', JSON.stringify(inv));
-        note.textContent = `Purchased ${it.name}!`;
-      });
-
-      row.appendChild(meta);
-      row.appendChild(btn);
-      list.appendChild(row);
-    }
-
-    if(!list.children.length){
-      note.textContent = "No items available yet. Complete more missions to unlock gear.";
-    }
-  }
-
-  // ===== NPCs =====
-  const pedestrians=[]; // {x,y,mode:'horiz'|'vert',dir,spd,hp,state,crossSide,vertX,blinkT}
+  // ===== NPCs (same as your last build) =====
+  const pedestrians=[]; // {x,y,mode:'horiz'|'vert'|'crossing',dir,spd,hp,state,crossSide,vertX,blinkT}
   const cars=[];        // {x,y,dir,spd}
+
+  function clampToUnlockedX(px){
+    const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
+    return Math.max(min, Math.min(max, px));
+  }
+  function clampToUnlockedY(py){
+    const min=unlocked.y0*TILE, max=unlocked.y1*TILE;
+    return Math.max(min, Math.min(max, py));
+  }
 
   function spawnPed(){
     const left = Math.random()<0.5;
@@ -300,7 +309,7 @@
     pedestrians.push({
       x: gx*TILE, y: yRow*TILE,
       mode:'horiz', dir, spd: 40,
-      hp: 4,                 // 3 hits to down, 4th eliminates
+      hp: 4,                 // 3 hits to down, 4th eliminates (blink)
       state: 'walk',
       crossSide: sideTop?'top':'bot',
       vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
@@ -314,37 +323,34 @@
     cars.push({ x: gx*TILE, y: hRoadY*TILE, dir, spd: 120 });
   }
 
-  function clampToUnlockedX(px){
-    const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
-    return Math.max(min, Math.min(max, px));
-  }
-  function clampToUnlockedY(py){
-    const min=unlocked.y0*TILE, max=unlocked.y1*TILE;
-    return Math.max(min, Math.min(max, py));
-  }
-
   function updatePed(p, dtSec){
     if(p.state==='walk'){
       if(p.mode==='horiz'){
         p.x += p.dir * p.spd * dtSec;
         const gx = Math.floor(p.x/TILE);
-        if(gx===vRoadX){ p.mode='crossing'; }
-        else if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
-          p.dir *= -1; p.x = clampToUnlockedX(p.x);
+        if(gx===vRoadX){
+          p.mode='crossing';
+        }else{
+          if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
+            p.dir *= -1;
+            p.x = clampToUnlockedX(p.x);
+          }
         }
       } else if(p.mode==='crossing'){
         const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
         const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
         p.y += vy * p.spd * dtSec;
         if(Math.abs(p.y - targetY) < 0.5){
-          p.y = targetY; p.mode = 'vert';
-          p.dir  = (Math.random()<0.5 ? -1 : 1); // up/down
+          p.y = targetY;
+          p.mode = 'vert';
+          p.dir  = (Math.random()<0.5 ? -1 : 1);
           p.x = p.vertX*TILE;
         }
       } else if(p.mode==='vert'){
         p.y += p.dir * p.spd * dtSec;
         if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
-          p.dir *= -1; p.y = clampToUnlockedY(p.y);
+          p.dir *= -1;
+          p.y = clampToUnlockedY(p.y);
         }
       }
     } else if(p.state==='blink'){
@@ -360,7 +366,6 @@
       }
     }
   }
-
   function updateCar(c, dtSec){
     c.x += c.dir * c.spd * dtSec;
     if(c.x < unlocked.x0*TILE) c.x = unlocked.x1*TILE;
@@ -371,7 +376,6 @@
   const cops=[]; // {x,y,spd,reinforceAt,kind,hp}
   function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
-
   function spawnCop(kind){
     const left = Math.random()<0.5;
     const top  = Math.random()<0.5;
@@ -413,8 +417,7 @@
       setCoins(player.coins + 50);
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
-        // Mark mission complete and unlock the shop.
-        if(getMissionStage() < 1) setMissionStage(1);
+        setMission1Done();                    // <-- persist tutorial completion
         showHint('Tutorial complete! Shops now carry starter items.', 4);
       }
     }
@@ -476,7 +479,7 @@
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
 
-    // Shop
+    // Shop (to the right of vertical sidewalk)
     ctx2d.fillStyle = '#405a85';
     ctx2d.fillRect(shop.x*sx, shop.y*sy, shop.w*sx, shop.h*sy);
   }
@@ -541,7 +544,7 @@
     // vertical road
     if (gx===vRoadX){ ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S); }
 
-    // HQ door
+    // HQ door on the top sidewalk
     if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
@@ -554,7 +557,7 @@
       }
     }
 
-    // Shop register indicator
+    // Shop register indicator (on sidewalk)
     if(gx===shop.registerGX && gy===shop.sidewalkY){
       const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
       const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
@@ -571,6 +574,7 @@
   }
 
   // ===== Update & render =====
+  const pedestrians=[]; const cars=[];
   function update(dtSec, dtMs){
     promptEl.style.display='none';
 
