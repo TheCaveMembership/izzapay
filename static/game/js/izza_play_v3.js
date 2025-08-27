@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.6-vert-sidewalks+tutorial';
+  const BUILD = 'v3.7-shop-gate+mission-persist';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Profile / assets =====
@@ -30,25 +30,25 @@
   const bY = unlocked.y0 + 5;
 
   // Roads/sidewalks
-  const hRoadY       = bY + bH + 1;            // horizontal road row
-  const sidewalkTopY = hRoadY - 1;             // sidewalk above road (HQ front)
-  const sidewalkBotY = hRoadY + 1;             // sidewalk below road
+  const hRoadY       = bY + bH + 1;        // horizontal road
+  const sidewalkTopY = hRoadY - 1;         // sidewalk above road (HQ front)
+  const sidewalkBotY = hRoadY + 1;         // sidewalk below road
 
-  // Vertical road to the right of HQ + sidewalks on both sides
+  // Vertical road to the right of HQ + sidewalks
   const vRoadX         = Math.min(unlocked.x1-3, bX + bW + 6);
   const vSidewalkLeftX = vRoadX - 1;
   const vSidewalkRightX= vRoadX + 1;
 
-  // HQ Door centered on top sidewalk
+  // HQ Door (on the top sidewalk)
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
-  // Simple shop block above top sidewalk
+  // Shop block above the top sidewalk (walkable sidewalk in front)
   const shop = {
     w: 8, h: 5,
     x: bX + 16,
-    y: sidewalkTopY - 5,
-    sidewalkY: sidewalkTopY,
-    registerGX: bX + 16 + 4
+    y: sidewalkTopY - 5,       // entirely above the sidewalk row
+    sidewalkY: sidewalkTopY,   // walkable
+    registerGX: bX + 16 + 4    // where you stand/press B
   };
 
   // ===== Loading =====
@@ -61,7 +61,7 @@
                       .catch(()=>loadImg(p1).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))})));
   }
 
-  // ===== Coins (persist) =====
+  // ===== Persist: coins & mission =====
   function coinEl(){ return document.getElementById('coinPill') || document.querySelectorAll('.hud .pill')[2]; }
   function getCoins(){
     const raw = localStorage.getItem('izzaCoins');
@@ -74,6 +74,9 @@
     const el = coinEl(); if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
+
+  function getMissionStage(){ return parseInt(localStorage.getItem('izzaMissionStage')||'0',10) || 0; }
+  function setMissionStage(n){ localStorage.setItem('izzaMissionStage', String(n|0)); }
 
   // ===== Player / anim =====
   const player = {
@@ -203,10 +206,10 @@
     return (Math.abs(px-shop.registerGX)+Math.abs(py-shop.sidewalkY))<=1;
   }
 
-  // ===== Modals & Tutorial hook =====
+  // ===== Modals =====
   function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
-  function openShop(){ const m=document.getElementById('shopModal'); if(m) m.style.display='flex'; }
+  function openShop(){ populateShopUI(); const m=document.getElementById('shopModal'); if(m) m.style.display='flex'; }
   function closeShop(){ const m=document.getElementById('shopModal'); if(m) m.style.display='none'; }
 
   const ce=document.getElementById('closeEnter'); if(ce) ce.addEventListener('click', (e)=>{ e.stopPropagation(); closeEnter(); });
@@ -214,7 +217,7 @@
   const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
-  // Start Tutorial button (add this button in your play.html – see note below)
+  // Tutorial button
   const startBtn = document.getElementById('startTutorial');
   if(startBtn){
     startBtn.addEventListener('click', (e)=>{
@@ -224,6 +227,64 @@
       tutorial.step   = 'hitPed';
       showHint('Tutorial: Press A to hit a pedestrian.');
     });
+  }
+
+  // ===== Shop data/UI =====
+  const SHOP_ITEMS = [
+    { id:'bat',      name:'Baseball Bat',  price:100, reqStage:1, note:'Starter melee' },
+    { id:'knucks',   name:'Brass Knuckles',price:150, reqStage:1, note:'+1 damage' },
+    { id:'pistol',   name:'Pistol',        price:400, reqStage:2, note:'Unlocks after 2 missions' },
+    { id:'hoodie',   name:'Street Hoodie', price:120, reqStage:1, note:'Cosmetic' },
+  ];
+
+  function populateShopUI(){
+    const list = document.getElementById('shopList');
+    const note = document.getElementById('shopNote');
+    if(!list || !note) return;
+
+    list.innerHTML = '';
+    const stage = getMissionStage();
+
+    // Pre-tutorial gate
+    if(stage < 1){
+      note.textContent = "Go see IZZA GAME HQ to learn about your first mission from the boss!";
+      return; // no items yet
+    }
+
+    note.textContent = '';
+    for(const it of SHOP_ITEMS){
+      if(stage < it.reqStage) continue;
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.innerHTML = `<div class="name">${it.name}</div><div class="sub">${it.price} IC</div>`;
+
+      const btn = document.createElement('button');
+      btn.className = 'buy';
+      btn.textContent = 'Buy';
+      btn.addEventListener('click', ()=>{
+        if(player.coins < it.price){
+          note.textContent = "Not enough coins.";
+          return;
+        }
+        setCoins(player.coins - it.price);
+        // persist simple inventory flag
+        const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+        inv[it.id] = (inv[it.id]||0) + 1;
+        localStorage.setItem('izzaInventory', JSON.stringify(inv));
+        note.textContent = `Purchased ${it.name}!`;
+      });
+
+      row.appendChild(meta);
+      row.appendChild(btn);
+      list.appendChild(row);
+    }
+
+    if(!list.children.length){
+      note.textContent = "No items available yet. Complete more missions to unlock gear.";
+    }
   }
 
   // ===== NPCs =====
@@ -239,10 +300,10 @@
     pedestrians.push({
       x: gx*TILE, y: yRow*TILE,
       mode:'horiz', dir, spd: 40,
-      hp: 4,                 // 3 hits to down, 4th eliminates (blink)
+      hp: 4,                 // 3 hits to down, 4th eliminates
       state: 'walk',
       crossSide: sideTop?'top':'bot',
-      vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX), // which vertical sidewalk to use
+      vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
       blinkT:0
     });
   }
@@ -265,40 +326,25 @@
   function updatePed(p, dtSec){
     if(p.state==='walk'){
       if(p.mode==='horiz'){
-        // move left/right along top/bottom sidewalks
         p.x += p.dir * p.spd * dtSec;
-
-        // at intersection column -> start crossing to vertical sidewalk
         const gx = Math.floor(p.x/TILE);
-        if(gx===vRoadX){
-          p.mode='crossing';
-        }else{
-          // bounce at unlocked bounds so they don't vanish into black
-          if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
-            p.dir *= -1;
-            p.x = clampToUnlockedX(p.x);
-          }
+        if(gx===vRoadX){ p.mode='crossing'; }
+        else if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
+          p.dir *= -1; p.x = clampToUnlockedX(p.x);
         }
       } else if(p.mode==='crossing'){
-        // move vertically to the opposite sidewalk row first
         const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
         const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
         p.y += vy * p.spd * dtSec;
-
         if(Math.abs(p.y - targetY) < 0.5){
-          // snap onto chosen vertical sidewalk & switch to vertical mode
-          p.y = targetY;
-          p.mode = 'vert';
-          p.dir  = (Math.random()<0.5 ? -1 : 1); // up or down
+          p.y = targetY; p.mode = 'vert';
+          p.dir  = (Math.random()<0.5 ? -1 : 1); // up/down
           p.x = p.vertX*TILE;
         }
       } else if(p.mode==='vert'){
-        // walk up/down along vertical sidewalks
         p.y += p.dir * p.spd * dtSec;
-        // turn around at unlocked bounds (so they don't go into black)
         if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
-          p.dir *= -1;
-          p.y = clampToUnlockedY(p.y);
+          p.dir *= -1; p.y = clampToUnlockedY(p.y);
         }
       }
     } else if(p.state==='blink'){
@@ -367,6 +413,8 @@
       setCoins(player.coins + 50);
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
+        // Mark mission complete and unlock the shop.
+        if(getMissionStage() < 1) setMissionStage(1);
         showHint('Tutorial complete! Shops now carry starter items.', 4);
       }
     }
@@ -493,7 +541,7 @@
     // vertical road
     if (gx===vRoadX){ ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S); }
 
-    // HQ door on the top sidewalk
+    // HQ door
     if (gx===door.gx && gy===door.gy){
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
