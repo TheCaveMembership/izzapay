@@ -227,6 +227,7 @@
   const keys = Object.create(null);
   const btnA = document.getElementById('btnA');
   const btnB = document.getElementById('btnB');
+  const btnI = document.getElementById('btnI');
   const promptEl = document.getElementById('prompt');
 
   // Tutorial hint (toast)
@@ -264,6 +265,7 @@
 
   if(btnA) btnA.addEventListener('click', doAttack);
   if(btnB) btnB.addEventListener('click', handleB);
+  if(btnI) btnI.addEventListener('click', toggleInventoryPanel);
 
   // Virtual joystick
   const stick = document.getElementById('stick');
