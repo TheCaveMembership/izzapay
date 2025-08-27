@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.4-coins+peds+roads';
+  const BUILD = 'v3.6-vert-sidewalks+tutorial';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Profile / assets =====
@@ -29,24 +29,26 @@
   const bX = Math.floor((unlocked.x0+unlocked.x1)/2) - Math.floor(bW/2);
   const bY = unlocked.y0 + 5;
 
-  // Roads/sidewalks: horizontal road below HQ, sidewalks on both sides
-  const hRoadY       = bY + bH + 1;            // road row
+  // Roads/sidewalks
+  const hRoadY       = bY + bH + 1;            // horizontal road row
   const sidewalkTopY = hRoadY - 1;             // sidewalk above road (HQ front)
   const sidewalkBotY = hRoadY + 1;             // sidewalk below road
 
-  // Vertical road moved to the right of HQ
-  const vRoadX = Math.min(unlocked.x1-2, bX + bW + 5);
+  // Vertical road to the right of HQ + sidewalks on both sides
+  const vRoadX         = Math.min(unlocked.x1-3, bX + bW + 6);
+  const vSidewalkLeftX = vRoadX - 1;
+  const vSidewalkRightX= vRoadX + 1;
 
   // HQ Door centered on top sidewalk
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
-  // A simple shop block sitting above the top sidewalk
+  // Simple shop block above top sidewalk
   const shop = {
     w: 8, h: 5,
     x: bX + 16,
-    y: sidewalkTopY - 5,               // building body sits above top sidewalk
+    y: sidewalkTopY - 5,
     sidewalkY: sidewalkTopY,
-    registerGX: bX + 16 + 4            // near the middle of its frontage
+    registerGX: bX + 16 + 4
   };
 
   // ===== Loading =====
@@ -60,20 +62,16 @@
   }
 
   // ===== Coins (persist) =====
-  function coinEl(){
-    // Prefer explicit id if you add it; otherwise fallback to the third HUD pill
-    return document.getElementById('coinPill') || document.querySelectorAll('.hud .pill')[2];
-  }
+  function coinEl(){ return document.getElementById('coinPill') || document.querySelectorAll('.hud .pill')[2]; }
   function getCoins(){
     const raw = localStorage.getItem('izzaCoins');
-    const n = raw==null ? 300 : (parseInt(raw,10)||0); // default 300 first run
-    return n<0 ? 0 : n;
+    const n = raw==null ? 300 : (parseInt(raw,10)||0);
+    return n<0?0:n;
   }
   function setCoins(n){
     const v = Math.max(0, n|0);
     localStorage.setItem('izzaCoins', String(v));
-    const el = coinEl();
-    if(el) el.textContent = `Coins: ${v} IC`;
+    const el = coinEl(); if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
 
@@ -81,15 +79,15 @@
   const player = {
     x: door.gx*TILE + (TILE/2 - 8),
     y: door.gy*TILE,
-    speed: 90,            // px/sec (comfortable joystick speed)
+    speed: 90,            // px/sec
     wanted: 0,
     facing: 'down', moving:false,
-    animTime: 0,          // ms
+    animTime: 0,
     hp: 5,
     coins: 0
   };
 
-  // Your sheet row order: down, RIGHT, LEFT, up
+  // Animation (row order: down, RIGHT, LEFT, up)
   const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
   function currentFrame(cols, moving, t){ if(cols<=1) return 0; if(!moving) return 1%cols; return Math.floor(t/WALK_MS)%cols; }
@@ -99,6 +97,24 @@
   const btnA = document.getElementById('btnA');
   const btnB = document.getElementById('btnB');
   const promptEl = document.getElementById('prompt');
+
+  // Tutorial hint (lightweight toast)
+  let tutorial = { active:false, step:'', hintT:0 };
+  function showHint(text, seconds=3){
+    let h = document.getElementById('tutHint');
+    if(!h){
+      h = document.createElement('div');
+      h.id='tutHint';
+      Object.assign(h.style,{
+        position:'fixed', left:'12px', top:'64px', zIndex:7,
+        background:'rgba(10,12,18,.85)', border:'1px solid #394769',
+        color:'#cfe0ff', padding:'8px 10px', borderRadius:'10px', fontSize:'14px'
+      });
+      document.body.appendChild(h);
+    }
+    h.textContent=text; h.style.display='block';
+    tutorial.hintT = seconds;
+  }
 
   function handleB(){
     if (doorInRange()) openEnter();
@@ -123,7 +139,7 @@
   function setNub(dx,dy){
     const r=40, m=Math.hypot(dx,dy)||1, c=Math.min(m,r), ux=dx/m, uy=dy/m;
     nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px';
-    vec.x=(c/r)*ux; vec.y=(c/r)*uy; // -1..1 magnitude
+    vec.x=(c/r)*ux; vec.y=(c/r)*uy;
   }
   function resetNub(){ nub.style.left='40px'; nub.style.top='40px'; vec.x=0; vec.y=0; }
   function startDrag(e){ dragging=true; baseRect=stick.getBoundingClientRect(); e.preventDefault(); }
@@ -187,72 +203,114 @@
     return (Math.abs(px-shop.registerGX)+Math.abs(py-shop.sidewalkY))<=1;
   }
 
-  // ===== Modals =====
-  function openEnter(){ const m=document.getElementById('enterModal'); if(!m) return; m.style.display='flex'; }
-  function closeEnter(){ const m=document.getElementById('enterModal'); if(!m) return; m.style.display='none'; }
-  function openShop(){ const m=document.getElementById('shopModal'); if(!m) return; m.style.display='flex'; }
-  function closeShop(){ const m=document.getElementById('shopModal'); if(!m) return; m.style.display='none'; }
+  // ===== Modals & Tutorial hook =====
+  function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
+  function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
+  function openShop(){ const m=document.getElementById('shopModal'); if(m) m.style.display='flex'; }
+  function closeShop(){ const m=document.getElementById('shopModal'); if(m) m.style.display='none'; }
+
   const ce=document.getElementById('closeEnter'); if(ce) ce.addEventListener('click', (e)=>{ e.stopPropagation(); closeEnter(); });
   const em=document.getElementById('enterModal'); if(em) em.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeEnter(); });
   const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
+  // Start Tutorial button (add this button in your play.html – see note below)
+  const startBtn = document.getElementById('startTutorial');
+  if(startBtn){
+    startBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      closeEnter();
+      tutorial.active = true;
+      tutorial.step   = 'hitPed';
+      showHint('Tutorial: Press A to hit a pedestrian.');
+    });
+  }
+
   // ===== NPCs =====
-  const pedestrians=[]; // {x,y,side:'top'|'bot',dir,spd,hp,state,crossing,blinkT}
+  const pedestrians=[]; // {x,y,mode:'horiz'|'vert',dir,spd,hp,state,crossSide,vertX,blinkT}
   const cars=[];        // {x,y,dir,spd}
 
   function spawnPed(){
     const left = Math.random()<0.5;
-    const side = Math.random()<0.5 ? 'top' : 'bot';
-    const yRow = side==='top'? sidewalkTopY : sidewalkBotY;
+    const sideTop = Math.random()<0.5;
+    const yRow = sideTop ? sidewalkTopY : sidewalkBotY;
     const gx = left ? unlocked.x0 : unlocked.x1;
     const dir = left ? 1 : -1;
     pedestrians.push({
       x: gx*TILE, y: yRow*TILE,
-      side, dir, spd: 40,
+      mode:'horiz', dir, spd: 40,
       hp: 4,                 // 3 hits to down, 4th eliminates (blink)
       state: 'walk',
-      crossing: false, blinkT:0
+      crossSide: sideTop?'top':'bot',
+      vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX), // which vertical sidewalk to use
+      blinkT:0
     });
   }
   function spawnCar(){
     const left = Math.random()<0.5;
     const gx = left ? unlocked.x0 : unlocked.x1;
     const dir = left ? 1 : -1;
-    cars.push({
-      x: gx*TILE, y: hRoadY*TILE,
-      dir, spd: 120 // px/sec
-    });
+    cars.push({ x: gx*TILE, y: hRoadY*TILE, dir, spd: 120 });
+  }
+
+  function clampToUnlockedX(px){
+    const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
+    return Math.max(min, Math.min(max, px));
+  }
+  function clampToUnlockedY(py){
+    const min=unlocked.y0*TILE, max=unlocked.y1*TILE;
+    return Math.max(min, Math.min(max, py));
   }
 
   function updatePed(p, dtSec){
     if(p.state==='walk'){
-      // approaching intersection column?
-      const gx = Math.floor(p.x/TILE);
-      if(gx === vRoadX && !p.crossing){
-        p.crossing = true;
-      }
-      if(p.crossing){
-        const targetSide = (p.side==='top') ? sidewalkBotY : sidewalkTopY;
-        const targetY = targetSide*TILE;
+      if(p.mode==='horiz'){
+        // move left/right along top/bottom sidewalks
+        p.x += p.dir * p.spd * dtSec;
+
+        // at intersection column -> start crossing to vertical sidewalk
+        const gx = Math.floor(p.x/TILE);
+        if(gx===vRoadX){
+          p.mode='crossing';
+        }else{
+          // bounce at unlocked bounds so they don't vanish into black
+          if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
+            p.dir *= -1;
+            p.x = clampToUnlockedX(p.x);
+          }
+        }
+      } else if(p.mode==='crossing'){
+        // move vertically to the opposite sidewalk row first
+        const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
         const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
         p.y += vy * p.spd * dtSec;
+
         if(Math.abs(p.y - targetY) < 0.5){
-          p.crossing = false;
-          p.side = (p.side==='top') ? 'bot' : 'top';
+          // snap onto chosen vertical sidewalk & switch to vertical mode
+          p.y = targetY;
+          p.mode = 'vert';
+          p.dir  = (Math.random()<0.5 ? -1 : 1); // up or down
+          p.x = p.vertX*TILE;
         }
-      } else {
-        p.x += p.dir * p.spd * dtSec;
-        // wrap at edges
-        if(p.x < unlocked.x0*TILE) { p.x = unlocked.x1*TILE; }
-        if(p.x > unlocked.x1*TILE) { p.x = unlocked.x0*TILE; }
+      } else if(p.mode==='vert'){
+        // walk up/down along vertical sidewalks
+        p.y += p.dir * p.spd * dtSec;
+        // turn around at unlocked bounds (so they don't go into black)
+        if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
+          p.dir *= -1;
+          p.y = clampToUnlockedY(p.y);
+        }
       }
     } else if(p.state==='blink'){
       p.blinkT -= dtSec;
       if(p.blinkT<=0){
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
-        setCoins(player.coins + 25);   // reward when eliminated
+        setCoins(player.coins + 25);
+        if(tutorial.active && tutorial.step==='hitPed'){
+          tutorial.step='hitCop';
+          showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
+        }
       }
     }
   }
@@ -265,7 +323,7 @@
 
   // ===== Cops & wanted =====
   const cops=[]; // {x,y,spd,reinforceAt,kind,hp}
-  function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; } // px/sec
+  function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
 
   function spawnCop(kind){
@@ -274,12 +332,7 @@
     const gx = left ? unlocked.x0 : unlocked.x1;
     const gy = top  ? unlocked.y0 : unlocked.y1;
     const now = performance.now();
-    cops.push({
-      x: gx*TILE, y: gy*TILE,
-      spd: copSpeed(kind), hp: copHP(kind),
-      kind,
-      reinforceAt: now + 30000 // 30s
-    });
+    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000 });
   }
   function maintainCops(){
     const needed = player.wanted;
@@ -288,12 +341,9 @@
       let kind='police';
       if(needed>=5) kind='army';
       else if(needed>=4) kind='swat';
-      spawnCop(kind);
-      cur++;
+      spawnCop(kind); cur++;
     }
-    while(cur > needed){
-      cops.pop(); cur--;
-    }
+    while(cur > needed){ cops.pop(); cur--; }
   }
   function updateCops(dtSec, nowMs){
     for(const c of cops){
@@ -315,13 +365,15 @@
       setWanted(player.wanted - 1);
       maintainCops();
       setCoins(player.coins + 50);
+      if(tutorial.active && tutorial.step==='hitCop'){
+        tutorial.active=false; tutorial.step='';
+        showHint('Tutorial complete! Shops now carry starter items.', 4);
+      }
     }
   }
 
   // ===== Combat =====
-  function hitTest(ax,ay, bx,by, radius=20){
-    return Math.hypot(ax-bx, ay-by) <= radius;
-  }
+  function hitTest(ax,ay, bx,by, radius=20){ return Math.hypot(ax-bx, ay-by) <= radius; }
   function doAttack(){
     let didHit=false;
     for(const p of pedestrians){
@@ -332,8 +384,7 @@
           p.hp -= 1;
           if(p.hp<=1){ p.state='downed'; }
         }else if(p.state==='downed'){
-          // finishing blow -> elimination & star escalation
-          p.state='blink'; p.blinkT=0.6; // seconds
+          p.state='blink'; p.blinkT=0.6;
           if(player.wanted < 5){
             setWanted(player.wanted + 1);
             maintainCops();
@@ -367,10 +418,11 @@
     ctx2d.fillStyle = '#1c293e';
     ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
 
-    // roads
+    // horizontal road
     ctx2d.fillStyle = '#788292';
-    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy); // horizontal
-    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy); // vertical
+    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
+    // vertical road
+    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
 
     // HQ
     ctx2d.fillStyle = '#7a3a3a';
@@ -413,19 +465,24 @@
       ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
     }
-    // Shop building
+    // Shop
     if (gx>=shop.x && gx<shop.x+shop.w && gy>=shop.y && gy<shop.y+shop.h){
       ctx.fillStyle = '#203a60'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25); // "SHOP" marquee
+      ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25);
     }
 
-    // sidewalks (both sides of horizontal road)
+    // sidewalks (horizontal)
     if (gy===sidewalkTopY || gy===sidewalkBotY){
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
+    // sidewalks (vertical, both sides)
+    if (gx===vSidewalkLeftX || gx===vSidewalkRightX){
+      ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
+      ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
+    }
 
-    // roads
+    // horizontal road
     if (gy===hRoadY){
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
@@ -433,9 +490,8 @@
         ctx.fillRect(screenX + i*(S/4) + S*0.05, screenY + S*0.48, S*0.10, S*0.04);
       }
     }
-    if (gx===vRoadX){
-      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
-    }
+    // vertical road
+    if (gx===vRoadX){ ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S); }
 
     // HQ door on the top sidewalk
     if (gx===door.gx && gy===door.gy){
@@ -450,7 +506,7 @@
       }
     }
 
-    // Shop register highlight (on sidewalkTopY)
+    // Shop register indicator
     if(gx===shop.registerGX && gy===shop.sidewalkY){
       const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
       const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
@@ -469,6 +525,12 @@
   // ===== Update & render =====
   function update(dtSec, dtMs){
     promptEl.style.display='none';
+
+    // fade tutorial hint
+    if(tutorial.hintT>0){
+      tutorial.hintT -= dtSec;
+      if(tutorial.hintT<=0){ const h=document.getElementById('tutHint'); if(h) h.style.display='none'; }
+    }
 
     // Movement (keys + joystick)
     let dx=0, dy=0;
@@ -537,7 +599,7 @@
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
 
-    // cops (placeholder)
+    // cops (placeholder visuals)
     for(const c of cops){
       const sx=w2sX(c.x), sy=w2sY(c.y);
       ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#000' : '#0a2455';
@@ -554,7 +616,7 @@
     loadLayer('hair',   HAIR),
   ]).then(([body,outfit,hair])=>{
     const imgs={body,outfit,hair};
-    setCoins(getCoins()); // init HUD + local value
+    setCoins(getCoins()); // init HUD + value
     centerCamera();
     let last=performance.now();
     (function loop(now){
