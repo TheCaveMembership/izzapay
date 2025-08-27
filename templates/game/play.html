@@ -16,9 +16,28 @@
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line) }
     .hud .left{display:flex;gap:12px;align-items:center}
     .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
-    .hud .stars{display:flex; gap:4px; margin-left:16px;}
-    .star{width:16px; height:16px; border:1px solid #445; border-radius:3px; background:#111}
-    .star.on{background:#ffd23f; border-color:#c59b00}
+
+    /* ⭐ Wanted meter = real stars */
+    .hud .stars{display:flex; gap:6px; margin-left:16px;}
+    .star{
+      width:18px; height:18px;
+      background:#161a22;               /* off fill */
+      border:1px solid #2a3550;         /* subtle frame (fallback) */
+      border-radius:4px;                 /* fallback if mask fails */
+      /* star silhouette via mask (works on iOS + modern browsers) */
+      -webkit-mask: url('data:image/svg+xml;utf8,\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
+<path d="M12 2.5l2.77 5.61 6.19.9-4.48 4.36 1.06 6.18L12 16.9 6.46 19.55l1.06-6.18L3.04 9.01l6.19-.9L12 2.5z"/>\
+</svg>') center / contain no-repeat;
+      mask: url('data:image/svg+xml;utf8,\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
+<path d="M12 2.5l2.77 5.61 6.19.9-4.48 4.36 1.06 6.18L12 16.9 6.46 19.55l1.06-6.18L3.04 9.01l6.19-.9L12 2.5z"/>\
+</svg>') center / contain no-repeat;
+      border:none;                       /* mask gives the shape */
+    }
+    .star.on{
+      background:#ffd23f;                /* gold when “wanted” */
+    }
 
     #gameCard{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px; margin-top:10px; position:relative}
     #game{display:block; width:100%; height:auto; border-radius:12px; background:#000}
