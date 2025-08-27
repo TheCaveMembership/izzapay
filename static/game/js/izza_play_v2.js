@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v2-anim-4dir-sheets2.1';
+  const BUILD = 'v2-anim-4dir-sheets2.2';
   console.log('[IZZA PLAY]', BUILD);
 
   const profile = window.__IZZA_PROFILE__ || {};
@@ -76,7 +76,8 @@
   };
 
   // ---------- Animation ----------
-  const DIR_INDEX = { down:0, left:1, right:2, up:3 };
+  // Your sheets are ordered: down, RIGHT, LEFT, up
+  const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W = 32, FRAME_H = 32;
   const WALK_FPS = 8, WALK_FRAME_MS = 1000 / WALK_FPS;
 
