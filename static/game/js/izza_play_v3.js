@@ -1,6 +1,13 @@
 (function(){
-  const BUILD = 'v3.8-fix-black-screen';
+  const BUILD = 'v3.9-core+hooks';
   console.log('[IZZA PLAY]', BUILD);
+
+  // --- lightweight hook bus (for plugins like v4 hearts) ---
+  const IZZA = window.IZZA = window.IZZA || {};
+  IZZA._hooks = IZZA._hooks || {};
+  IZZA.on = (ev, fn)=>{ (IZZA._hooks[ev] ||= []).push(fn); };
+  IZZA.emit = (ev, payload)=>{ (IZZA._hooks[ev]||[]).forEach(fn=>{ try{ fn(payload); }catch(e){ console.error(e); } }); };
+  IZZA.api = {}; // will be filled just before the main loop starts
 
   // ===== Profile / assets =====
   const profile = window.__IZZA_PROFILE__ || {};
@@ -173,8 +180,10 @@
 
   // ===== HUD =====
   function setWanted(n){
+    const prev = player.wanted;
     player.wanted = Math.max(0, Math.min(5, n|0));
     document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star' + (i<player.wanted?' on':'') );
+    if (player.wanted !== prev) IZZA.emit('wanted-changed', { from: prev, to: player.wanted });
   }
 
   // ===== Camera =====
@@ -362,6 +371,7 @@
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
         setCoins(player.coins + 25);
+        IZZA.emit('ped-killed', { coins: 25 });
         if(tutorial.active && tutorial.step==='hitPed'){
           tutorial.step='hitCop';
           showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
@@ -418,6 +428,7 @@
       setWanted(player.wanted - 1);
       maintainCops();
       setCoins(player.coins + 50);
+      IZZA.emit('cop-killed', { cop: c });
       if(tutorial.active && tutorial.step==='hitCop'){
         tutorial.active=false; tutorial.step='';
         setMission1Done();                    // persist tutorial completion
@@ -582,6 +593,9 @@
   function update(dtSec, dtMs){
     if(promptEl) promptEl.style.display='none';
 
+    // let plugins run before movement & systems
+    IZZA.emit('update-pre', { dtSec, now: performance.now() });
+
     // fade tutorial hint
     if(tutorial.hintT>0){
       tutorial.hintT -= dtSec;
@@ -619,6 +633,9 @@
 
     // Cops
     updateCops(dtSec, performance.now());
+
+    // let plugins run after movement/systems
+    IZZA.emit('update-post', { dtSec, now: performance.now() });
   }
 
   function render(images){
@@ -672,6 +689,16 @@
     loadLayer('hair',   HAIR),
   ]).then(([body,outfit,hair])=>{
     const imgs={body,outfit,hair};
+
+    // expose core API for plugins
+    IZZA.api = {
+      player, cops, pedestrians,
+      setCoins, getCoins, setWanted,
+      TILE, DRAW, camera,
+      ready: true
+    };
+    IZZA.emit('ready', IZZA.api);
+
     setCoins(getCoins()); // init HUD + value
     centerCamera();
     let last=performance.now();
