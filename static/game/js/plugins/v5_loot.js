@@ -149,42 +149,44 @@
     addLoot(kind, c.x, c.y);
   });
 
-  // update tick (after core movement) – process pickups & despawns, then draw
-  IZZA.on('update-post', ({dtSec})=>{
-    if(!api) return;
+  // update tick – process pickups & despawns ONLY (no drawing here)
+IZZA.on('update-post', ({dtSec})=>{
+  if(!api) return;
 
-    // check for pickup
-    for(let i=loot.length-1;i>=0;i--){
-      const it = loot[i];
-      // lifetime
-      if(now() - it.spawnedAt > LOOT_TTL){ loot.splice(i,1); continue; }
+  for(let i=loot.length-1;i>=0;i--){
+    const it = loot[i];
 
-      // proximity (use center of player tile for hit test)
-      const dx = (player.x) - (it.x);
-      const dy = (player.y) - (it.y);
-      if(Math.hypot(dx,dy) <= PICK_RADIUS){
-        if(it.kind==='coins'){
-          api.setCoins( api.getCoins() + (it.amount||0) );
-          toast(`+${it.amount||0} IC`);
-          loot.splice(i,1);
+    // lifetime
+    if(now() - it.spawnedAt > LOOT_TTL){ loot.splice(i,1); continue; }
+
+    // 1s grace period support (if provided by core)
+    if (now() < (it.noPickupUntil || 0)) continue;
+
+    // proximity
+    const dx = (player.x) - (it.x);
+    const dy = (player.y) - (it.y);
+    if(Math.hypot(dx,dy) <= PICK_RADIUS){
+      if(it.kind==='coins'){
+        api.setCoins( api.getCoins() + (it.amount||0) );
+        toast(`+${it.amount||0} IC`);
+        loot.splice(i,1);
+      }else{
+        const req = UNLOCKS[it.kind] || 0;
+        if(((api.getMissionCount && api.getMissionCount())||0) < req){
+          toast(`Locked until mission ${req}.`);
         }else{
-          const req = UNLOCKS[it.kind] || 0;
-          if(missionCount() < req){
-            toast(`Locked until mission ${req}.`);
-          }else{
-            // add to inventory storage
-            let inv = api.getInventory ? new Set(api.getInventory()) : new Set();
-            inv.add(it.kind);
-            if(api.setInventory) api.setInventory([...inv]);
-            toast(`Picked up ${it.kind}.`);
-            loot.splice(i,1);
-          }
+          let inv = api.getInventory ? new Set(api.getInventory()) : new Set();
+          inv.add(it.kind);
+          if(api.setInventory) api.setInventory([...inv]);
+          toast(`Picked up ${it.kind}.`);
+          loot.splice(i,1);
         }
       }
     }
+  }
+});
 
-    // draw last so items appear on top of tiles/NPCs but under any HUD overlays
-    drawLoot();
-  });
-
-})();
+// draw AFTER core render so it doesn't get wiped
+IZZA.on('render-post', ()=>{
+  drawLoot();
+});
