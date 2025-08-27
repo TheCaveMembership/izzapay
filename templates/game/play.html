@@ -16,7 +16,7 @@
       background:rgba(10,12,18,.75); backdrop-filter:blur(8px); padding:8px 10px; border-bottom:1px solid var(--line) }
     .hud .left{display:flex;gap:12px;align-items:center}
     .hud .pill{background:#1b2433; border:1px solid var(--line); padding:6px 10px; border-radius:10px; font-size:13px}
-    .hud .stars{display:flex; gap:4px}
+    .hud .stars{display:flex; gap:4px; margin-left:16px;} /* <-- give breathing room from coins */
     .star{width:16px; height:16px; border:1px solid #445; border-radius:3px; background:#111}
     .star.on{background:#ffd23f; border-color:#c59b00}
 
@@ -105,7 +105,11 @@
     <div class="backdrop"></div>
     <div class="card">
       <h3>IZZA HQ</h3>
-      <p>Welcome! Start the tutorial to learn how to attack (A) and earn coins.</p>
+      <p>Welcome! Tutorial:</p>
+      <ol style="margin:0 0 8px 18px; padding:0">
+        <li>Press <strong>A</strong> to hit the pedestrian (3 hits to knock down, then 1 to finish).</li>
+        <li>Oh no! Then eliminate the cop within <strong>30 seconds</strong> or more will arrive.</li>
+      </ol>
       <div class="row">
         <button class="ghost" id="startTutorial">Start Tutorial</button>
         <button class="ghost" id="closeEnter">Close</button>
@@ -126,6 +130,7 @@
 
   <!-- Pass profile to JS and load the engine -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <script src="/static/game/js/izza_play_v2.js?v=4"></script>
+  <!-- v3 build -->
+  <script src="/static/game/js/izza_play_v3.js?v=1"></script>
 </body>
 </html>
