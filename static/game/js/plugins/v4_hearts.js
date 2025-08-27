@@ -98,7 +98,7 @@
     const hud = document.querySelector('.hud');
     const rect = hud ? hud.getBoundingClientRect() : {bottom:0};
     // place our hearts box ~8px under the sticky .hud
-    const topPx = Math.max(0, rect.bottom + 8);
+    const topPx = Math.max(0, rect.bottom + 4);
     if(hudWrap) hudWrap.style.top = `${topPx}px`;
   }
   function renderHeartsHUD(){
