@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.11-core+hooks+npc-sheets';
+  const BUILD = 'v3.12-core+hooks+npc-sheets+allSettled';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus (for plugins like v4 hearts) ---
@@ -8,6 +8,27 @@
   IZZA.on   = (ev, fn)=>{ (IZZA._hooks[ev] ||= []).push(fn); };
   IZZA.emit = (ev, payload)=>{ (IZZA._hooks[ev]||[]).forEach(fn=>{ try{ fn(payload); }catch(e){ console.error(e); } }); };
   IZZA.api = {}; // will be filled just before the main loop starts
+
+  // ===== tiny on-screen boot status (so iPhone can see errors) =====
+  function bootMsg(txt, color='#ffd23f'){
+    let el = document.getElementById('bootMsg');
+    if(!el){
+      el = document.createElement('div');
+      el.id='bootMsg';
+      Object.assign(el.style,{
+        position:'fixed', left:'12px', top:'48px', zIndex:9999,
+        background:'rgba(10,12,18,.92)', border:'1px solid #394769',
+        color:'#cfe0ff', padding:'6px 8px', borderRadius:'8px',
+        fontSize:'12px', maxWidth:'74vw', pointerEvents:'none'
+      });
+      document.body.appendChild(el);
+    }
+    el.style.display='block';
+    el.style.borderColor = color;
+    el.textContent = txt;
+    clearTimeout(el._t);
+    el._t = setTimeout(()=>{ el.style.display='none'; }, 4500);
+  }
 
   // ===== Profile / assets =====
   const profile = window.__IZZA_PROFILE__ || {};
@@ -77,22 +98,37 @@
 
   // === NPC sprite sheets (32x32 frames) ===
   const NPC_SRC = {
-    ped_m:       'pedestrian_sheet.png',
-    ped_f:       'pedestrian_female_sheet.png',
-    ped_m_dark:  'pedestrian_male_dark_yellow_final.png',
-    ped_f_dark:  'pedestrian_female_dark_sheet.png',
-    police:      'izza_police_sheet.png',
-    swat:        'izza_swat_sheet.png',
-    military:    'izza_military_sheet.png'
+    ped_m:       '/static/game/sprites/pedestrian_sheet.png',
+    ped_f:       '/static/game/sprites/pedestrian_female_sheet.png',
+    ped_m_dark:  '/static/game/sprites/pedestrian_male_dark_yellow_final.png',
+    ped_f_dark:  '/static/game/sprites/pedestrian_female_dark_sheet.png',
+    police:      '/static/game/sprites/izza_police_sheet.png',
+    swat:        '/static/game/sprites/izza_swat_sheet.png',
+    military:    '/static/game/sprites/izza_military_sheet.png'
   };
   let NPC_SHEETS = {}; // filled during boot
 
   function loadNPCSheets(){
-    const tasks = Object.entries(NPC_SRC).map(([key,file]) =>
-      loadImg(`/static/game/sprites/${file}`)
-        .then(img => [key, { img, cols: Math.max(1, Math.floor(img.width/32)) }])
-    );
-    return Promise.all(tasks).then(pairs => Object.fromEntries(pairs));
+    const entries = Object.entries(NPC_SRC);
+    // tolerant load: never reject, report misses with a toast
+    return Promise.allSettled(entries.map(([,src])=> loadImg(src)))
+      .then(results=>{
+        const map = {};
+        const misses=[];
+        results.forEach((r,i)=>{
+          const [key] = entries[i];
+          if(r.status==='fulfilled'){
+            const img=r.value;
+            map[key] = { img, cols: Math.max(1, Math.floor(img.width/32)) };
+          }else{
+            misses.push(entries[i][0]);
+          }
+        });
+        if(misses.length){
+          bootMsg('Missing NPC sprites: '+misses.join(', '), '#ff6b6b');
+        }
+        return map;
+      });
   }
 
   // ===== Coins & Progress (persist) =====
@@ -111,7 +147,6 @@
   function setCoins(n){
     const v = Math.max(0, n|0);
     localStorage.setItem(LS.coins, String(v));
-    // works with either #coinPill (current HTML) or .pill.coins (older)
     const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
     if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
@@ -450,7 +485,6 @@
       const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
       c.x += (dx/m) * c.spd * dtSec;
       c.y += (dy/m) * c.spd * dtSec;
-      // set facing for sprite rows
       if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
       else                              c.facing = dx < 0 ? 'left' : 'right';
       if(nowMs >= c.reinforceAt && player.wanted < 5){
@@ -526,14 +560,14 @@
 
     // roads
     ctx2d.fillStyle = '#788292';
-    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);              // horizontal
-    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);              // vertical
+    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
+    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
 
     // HQ
     ctx2d.fillStyle = '#7a3a3a';
     ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
 
-    // Shop (to the right of vertical sidewalk)
+    // Shop
     ctx2d.fillStyle = '#405a85';
     ctx2d.fillRect(shop.x*sx, shop.y*sy, shop.w*sx, shop.h*sy);
   }
@@ -633,10 +667,8 @@
   function update(dtSec, dtMs){
     if(promptEl) promptEl.style.display='none';
 
-    // let plugins run before movement & systems
     IZZA.emit('update-pre', { dtSec, now: performance.now() });
 
-    // fade tutorial hint
     if(tutorial.hintT>0){
       tutorial.hintT -= dtSec;
       if(tutorial.hintT<=0){ const h=document.getElementById('tutHint'); if(h) h.style.display='none'; }
@@ -674,7 +706,6 @@
     // Cops
     updateCops(dtSec, performance.now());
 
-    // let plugins run after movement/systems
     IZZA.emit('update-post', { dtSec, now: performance.now() });
   }
 
@@ -706,7 +737,6 @@
       if(imgPack){
         drawSprite(imgPack.img, imgPack.cols, p.facing||'down', p.state==='walk', player.animTime, w2sX(p.x), w2sY(p.y));
       }else{
-        // fallback box
         const sx=w2sX(p.x), sy=w2sY(p.y);
         ctx.fillStyle = p.state==='downed' ? '#555' : '#9de7b1';
         ctx.fillRect(sx+DRAW*0.2, sy+DRAW*0.2, DRAW*0.6, DRAW*0.6);
@@ -726,7 +756,6 @@
       if(pack){
         drawSprite(pack.img, pack.cols, c.facing||'down', true, player.animTime, w2sX(c.x), w2sY(c.y));
       }else{
-        // fallback color blocks
         const sx=w2sX(c.x), sy=w2sY(c.y);
         ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#000' : '#0a2455';
         ctx.fillRect(sx+DRAW*0.15, sy+DRAW*0.15, DRAW*0.7, DRAW*0.7);
@@ -746,7 +775,6 @@
     NPC_SHEETS = npcs;
     const imgs={body,outfit,hair};
 
-    // expose core API for plugins (include spawn/door for respawns)
     const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
     IZZA.api = {
       player, cops, pedestrians,
@@ -769,8 +797,12 @@
         render(imgs);
       }catch(err){
         console.error('Game loop error:', err);
+        bootMsg('Game loop error: '+err.message, '#ff6b6b');
       }
       requestAnimationFrame(loop);
     })(last+16);
-  }).catch(err=>console.error('Sprite load failed', err));
+  }).catch(err=>{
+    console.error('Sprite load failed', err);
+    bootMsg('Sprite load failed: '+(err && err.message ? err.message : err), '#ff6b6b');
+  });
 })();
