@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.10-core+hooks+coinfix';
+  const BUILD = 'v3.11-core+hooks+npc-sheets';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus (for plugins like v4 hearts) ---
@@ -73,6 +73,26 @@
     const p1=`${assetRoot}/${kind}/${encodeURIComponent(name)}.png`;
     return loadImg(p2).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))}))
                       .catch(()=>loadImg(p1).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))})));
+  }
+
+  // === NPC sprite sheets (32x32 frames) ===
+  const NPC_SRC = {
+    ped_m:       'pedestrian_sheet.png',
+    ped_f:       'pedestrian_female_sheet.png',
+    ped_m_dark:  'pedestrian_male_dark_yellow_final.png',
+    ped_f_dark:  'pedestrian_female_dark_sheet.png',
+    police:      'izza_police_sheet.png',
+    swat:        'izza_swat_sheet.png',
+    military:    'izza_military_sheet.png'
+  };
+  let NPC_SHEETS = {}; // filled during boot
+
+  function loadNPCSheets(){
+    const tasks = Object.entries(NPC_SRC).map(([key,file]) =>
+      loadImg(`/static/game/sprites/${file}`)
+        .then(img => [key, { img, cols: Math.max(1, Math.floor(img.width/32)) }])
+    );
+    return Promise.all(tasks).then(pairs => Object.fromEntries(pairs));
   }
 
   // ===== Coins & Progress (persist) =====
@@ -306,8 +326,9 @@
   }
 
   // ===== NPCs =====
-  const pedestrians=[]; // {x,y,mode:'horiz'|'vert'|'crossing',dir,spd,hp,state,crossSide,vertX,blinkT}
+  const pedestrians=[]; // {x,y,mode,dir,spd,hp,state,crossSide,vertX,blinkT,skin,facing,moving}
   const cars=[];        // {x,y,dir,spd}
+  const cops=[];        // {x,y,spd,reinforceAt,kind,hp,facing}
 
   function clampToUnlockedX(px){
     const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
@@ -324,6 +345,11 @@
     const yRow = sideTop ? sidewalkTopY : sidewalkBotY;
     const gx = left ? unlocked.x0 : unlocked.x1;
     const dir = left ? 1 : -1;
+
+    // random skin variant (matches your uploaded sheets)
+    const skins = ['ped_m','ped_f','ped_m_dark','ped_f_dark'];
+    const skin  = skins[(Math.random()*skins.length)|0];
+
     pedestrians.push({
       x: gx*TILE, y: yRow*TILE,
       mode:'horiz', dir, spd: 40,
@@ -331,7 +357,10 @@
       state: 'walk',
       crossSide: sideTop?'top':'bot',
       vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
-      blinkT:0
+      blinkT:0,
+      skin,
+      facing: dir>0?'right':'left',
+      moving: true
     });
   }
   function spawnCar(){
@@ -345,6 +374,7 @@
     if(p.state==='walk'){
       if(p.mode==='horiz'){
         p.x += p.dir * p.spd * dtSec;
+        p.facing = p.dir>0 ? 'right' : 'left';
         const gx = Math.floor(p.x/TILE);
         if(gx===vRoadX){
           p.mode='crossing';
@@ -358,6 +388,7 @@
         const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
         const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
         p.y += vy * p.spd * dtSec;
+        p.facing = vy<0 ? 'up' : vy>0 ? 'down' : p.facing;
         if(Math.abs(p.y - targetY) < 0.5){
           p.y = targetY;
           p.mode = 'vert';
@@ -366,6 +397,7 @@
         }
       } else if(p.mode==='vert'){
         p.y += p.dir * p.spd * dtSec;
+        p.facing = p.dir>0 ? 'down' : 'up';
         if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
           p.dir *= -1;
           p.y = clampToUnlockedY(p.y);
@@ -392,7 +424,6 @@
   }
 
   // ===== Cops & wanted =====
-  const cops=[]; // {x,y,spd,reinforceAt,kind,hp}
   function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
   function spawnCop(kind){
@@ -401,7 +432,7 @@
     const gx = left ? unlocked.x0 : unlocked.x1;
     const gy = top  ? unlocked.y0 : unlocked.y1;
     const now = performance.now();
-    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000 });
+    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000, facing:'down' });
   }
   function maintainCops(){
     const needed = player.wanted;
@@ -419,6 +450,9 @@
       const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
       c.x += (dx/m) * c.spd * dtSec;
       c.y += (dy/m) * c.spd * dtSec;
+      // set facing for sprite rows
+      if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
+      else                              c.facing = dx < 0 ? 'left' : 'right';
       if(nowMs >= c.reinforceAt && player.wanted < 5){
         setWanted(player.wanted + 1);
         maintainCops();
@@ -659,18 +693,24 @@
       }
     }
 
-    // cars
+    // cars (simple boxes for now)
     for(const c of cars){
       const sx=w2sX(c.x), sy=w2sY(c.y);
       ctx.fillStyle='#c0c8d8';
       ctx.fillRect(sx+DRAW*0.1,sy+DRAW*0.25, DRAW*0.8, DRAW*0.5);
     }
 
-    // pedestrians
+    // pedestrians (sprite sheets)
     for(const p of pedestrians){
-      const sx=w2sX(p.x), sy=w2sY(p.y);
-      ctx.fillStyle = p.state==='downed' ? '#555' : '#9de7b1';
-      ctx.fillRect(sx+DRAW*0.2, sy+DRAW*0.2, DRAW*0.6, DRAW*0.6);
+      const imgPack = NPC_SHEETS[p.skin];
+      if(imgPack){
+        drawSprite(imgPack.img, imgPack.cols, p.facing||'down', p.state==='walk', player.animTime, w2sX(p.x), w2sY(p.y));
+      }else{
+        // fallback box
+        const sx=w2sX(p.x), sy=w2sY(p.y);
+        ctx.fillStyle = p.state==='downed' ? '#555' : '#9de7b1';
+        ctx.fillRect(sx+DRAW*0.2, sy+DRAW*0.2, DRAW*0.6, DRAW*0.6);
+      }
     }
 
     // player (layers)
@@ -678,11 +718,19 @@
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
 
-    // cops (placeholder visuals)
+    // cops (sprite sheets by kind)
     for(const c of cops){
-      const sx=w2sX(c.x), sy=w2sY(c.y);
-      ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#000' : '#0a2455';
-      ctx.fillRect(sx+DRAW*0.15, sy+DRAW*0.15, DRAW*0.7, DRAW*0.7);
+      const pack = c.kind==='army' ? NPC_SHEETS.military
+                 : c.kind==='swat' ? NPC_SHEETS.swat
+                 :                    NPC_SHEETS.police;
+      if(pack){
+        drawSprite(pack.img, pack.cols, c.facing||'down', true, player.animTime, w2sX(c.x), w2sY(c.y));
+      }else{
+        // fallback color blocks
+        const sx=w2sX(c.x), sy=w2sY(c.y);
+        ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#000' : '#0a2455';
+        ctx.fillRect(sx+DRAW*0.15, sy+DRAW*0.15, DRAW*0.7, DRAW*0.7);
+      }
     }
 
     drawMini();
@@ -693,7 +741,9 @@
     loadLayer('body',   BODY),
     loadLayer('outfit', OUTFIT),
     loadLayer('hair',   HAIR),
-  ]).then(([body,outfit,hair])=>{
+    loadNPCSheets()
+  ]).then(([body,outfit,hair,npcs])=>{
+    NPC_SHEETS = npcs;
     const imgs={body,outfit,hair};
 
     // expose core API for plugins (include spawn/door for respawns)
