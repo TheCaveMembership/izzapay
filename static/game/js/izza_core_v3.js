@@ -809,6 +809,7 @@
         const dtSec = dtMs/1000;
         update(dtSec, dtMs);
         render(imgs);
+        IZZA.emit('render-post', { now: performance.now() }); // NEW: overlay phase
       }catch(err){
         console.error('Game loop error:', err);
         bootMsg('Game loop error: '+err.message, '#ff6b6b');
