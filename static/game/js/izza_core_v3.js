@@ -57,11 +57,39 @@
   }
 
   // ===== World =====
-  const W=90,H=60;
-  const unlocked={x0:18,y0:18,x1:72,y1:42};
-  const preview ={x0:10,y0:12,x1:80,y1:50};
-  const inRect=(gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
-  const inUnlocked=(gx,gy)=> inRect(gx,gy,unlocked);
+const W=90,H=60;
+
+// Map tiers: tier "1" = current size, tier "2" = expanded after Mission 3
+function computeUnlockedRect(tier){
+  // tier 1 matches your current area
+  if(tier!=='2') return { x0:18, y0:18, x1:72, y1:42 };
+  // tier 2 opens the map outward (tweak freely)
+  return { x0:10, y0:12, x1:80, y1:50 };
+}
+function computePreviewRect(tier){
+  if(tier!=='2') return { x0:10, y0:12, x1:80, y1:50 };
+  // a bit wider preview so the minimap shows more context
+  return { x0:6, y0:8, x1:84, y1:54 };
+}
+
+let __mapTier = localStorage.getItem('izzaMapTier') || '1';
+let unlocked  = computeUnlockedRect(__mapTier);
+let preview   = computePreviewRect(__mapTier);
+
+const inRect = (gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
+const inUnlocked = (gx,gy)=> inRect(gx,gy,unlocked);
+
+// Poll for tier changes (Mission 3 plugin sets izzaMapTier to "2")
+function maybeRefreshMapTier(){
+  const t = localStorage.getItem('izzaMapTier') || '1';
+  if(t !== __mapTier){
+    __mapTier = t;
+    unlocked  = computeUnlockedRect(t);
+    preview   = computePreviewRect(t);
+    centerCamera();
+    bootMsg(t==='2' ? 'New district unlocked!' : 'Map size updated');
+  }
+}
 
   // Hub
   const bW=10,bH=6;
@@ -1063,6 +1091,8 @@ IZZA.on('loot-picked', (payload)=>{
   function update(dtSec, dtMs){
     if(promptEl) promptEl.style.display='none';
 
+    maybeRefreshMapTier();
+    
     IZZA.emit('update-pre', { dtSec, now: performance.now() });
 
     if(tutorial.hintT>0){
@@ -1176,15 +1206,15 @@ IZZA.on('loot-picked', (payload)=>{
 
     const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
     IZZA.api = {
-      player, cops, pedestrians,
-      setCoins, getCoins, setWanted,
-      TILE, DRAW, camera,
-      doorSpawn,
-      // expose for plugins:
-      getMissionCount,
-      getInventory, setInventory,
-      ready: true
-    };
+  player, cops, pedestrians, cars,
+  setCoins, getCoins, setWanted,
+  TILE, DRAW, camera,
+  doorSpawn,
+  // expose for plugins:
+  getMissionCount,
+  getInventory, setInventory,
+  ready: true
+};
     IZZA.emit('ready', IZZA.api);
 
     setCoins(getCoins());
