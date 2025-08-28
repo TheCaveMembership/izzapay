@@ -185,6 +185,23 @@
   function setInventory(obj){
     localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
   }
+  // --- Equip helpers ---
+function setEquippedWeapon(id){
+  // update in-memory
+  equipped.weapon = id;
+
+  // mirror to inventory object's equipped flags (optional but tidy)
+  const inv = getInventory();
+  if(inv.bat)      inv.bat.equipped      = (id === 'bat');
+  if(inv.knuckles) inv.knuckles.equipped = (id === 'knuckles');
+  if(inv.pistol)   inv.pistol.equipped   = (id === 'pistol');
+  setInventory(inv);
+}
+  
+function unequipWeapon(){
+  setEquippedWeapon('fists');
+  toast('Hands ready');
+}
 
   // ===== Player / anim =====
   const player = {
@@ -470,65 +487,93 @@
     if(!on) renderInventoryPanel();
   }
   function renderInventoryPanel(){
-    const host = ensureInvHost();
-    const inv  = getInventory();
-    const ms   = getMissionCount();
+  const host = ensureInvHost();
+  const inv  = getInventory();
+  const ms   = getMissionCount();
 
-    function itemRow(id, label, metaHTML){
-      const canUse = missionsOKToUse(id);
-      const isEquipped = (equipped.weapon===id);
-      const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'?3:''}</span>`;
-      const equipBtn = canUse
-        ? `<button data-equip="${id}" style="margin-left:auto" ${isEquipped?'disabled':''}>${isEquipped?'Equipped':'Equip'}</button>`
-        : '';
-      return `
-        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
-          <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
-          <div style="font-weight:600">${label}</div>
-          ${lockHTML}
-          <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
-          ${equipBtn}
-        </div>`;
-    }
+  function itemRow(id, label, metaHTML){
+    const canUse = missionsOKToUse(id);
+    const isEquipped = (equipped.weapon===id);
 
-    const rows = [];
+    const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'?3:''}</span>`;
 
-    if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
-      rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
-    }
-    if(inv.bat && inv.bat.count>0){
-      const cur = inv.bat.hitsLeftOnCurrent|0;
-      rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
-    }
-    if(inv.knuckles && inv.knuckles.count>0){
-      const cur = inv.knuckles.hitsLeftOnCurrent|0;
-      rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
-    }
+    // Toggle button: Equip when not equipped, Unequip when equipped
+    const btnHTML = canUse
+      ? (isEquipped
+          ? `<button data-unequip="${id}" style="margin-left:auto">Unequip</button>`
+          : `<button data-equip="${id}" style="margin-left:auto">Equip</button>`
+        )
+      : '';
 
-    // 3-row scroll area (~84px per row + gaps)
-    host.innerHTML = `
-      <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
-          <div style="font-weight:700">Inventory</div>
-          <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
-          <div style="margin-left:auto; opacity:.8; font-size:12px">Press I to close</div>
-        </div>
-        <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
-          ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
+    return `
+      <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+        <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
+        <div style="font-weight:600">${label}</div>
+        ${lockHTML}
+        <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
+        ${btnHTML}
+      </div>`;
+  }
+
+  const rows = [];
+
+  if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
+    rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
+  }
+  if(inv.bat && inv.bat.count>0){
+    const cur = inv.bat.hitsLeftOnCurrent|0;
+    rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
+  }
+  if(inv.knuckles && inv.knuckles.count>0){
+    const cur = inv.knuckles.hitsLeftOnCurrent|0;
+    rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
+  }
+
+  host.innerHTML = `
+    <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+        <div style="font-weight:700">Inventory</div>
+        <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
+        <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+          <div style="opacity:.8; font-size:12px">Equipped: ${equipped.weapon}</div>
+          <button class="ghost" id="unequipHands" type="button" title="Switch to hand combat">Use Hands</button>
+          <div style="opacity:.8; font-size:12px">Press I to close</div>
         </div>
       </div>
-    `;
+      <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
+        ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
+      </div>
+    </div>
+  `;
 
-    host.querySelectorAll('[data-equip]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.getAttribute('data-equip');
-        if(!missionsOKToUse(id)) return;
-        equipped.weapon = id;
-        toast(`Equipped ${id}`);
-        renderInventoryPanel();
-      });
+  // Equip
+  host.querySelectorAll('[data-equip]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.getAttribute('data-equip');
+      if(!missionsOKToUse(id)) return; // just in case
+      setEquippedWeapon(id);
+      toast(`Equipped ${id}`);
+      renderInventoryPanel();
+    });
+  });
+
+  // Unequip (toggle from item)
+  host.querySelectorAll('[data-unequip]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      unequipWeapon();
+      renderInventoryPanel();
+    });
+  });
+
+  // Header quick-action to hands
+  const hands = document.getElementById('unequipHands');
+  if(hands){
+    hands.addEventListener('click', ()=>{
+      unequipWeapon();
+      renderInventoryPanel();
     });
   }
+}
 
   // ===== NPCs =====
   const pedestrians=[]; // {x,y,mode,dir,spd,hp,state,crossSide,vertX,blinkT,skin,facing,moving}
