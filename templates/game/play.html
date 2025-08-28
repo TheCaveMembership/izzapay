@@ -21,7 +21,9 @@
     .hud .stars{display:flex; gap:6px; margin-left:16px;}
     .star{
       width:18px; height:18px;
-      background:#161a22; border:1px solid #2a3550; border-radius:4px;
+      background:#161a22;
+      border:1px solid #2a3550;
+      border-radius:4px;
       -webkit-mask: url('data:image/svg+xml;utf8,\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
 <path d="M12 2.5l2.77 5.61 6.19.9-4.48 4.36 1.06 6.18L12 16.9 6.46 19.55l1.06-6.18L3.04 9.01l6.19-.9L12 2.5z"/>\
@@ -39,7 +41,7 @@
     #prompt { position:absolute; transform:translate(-50%,-120%); padding:4px 8px; font-size:12px;
       background:#0b0f17; border:1px solid #263042; border-radius:8px; display:none; pointer-events:none; z-index:2 }
 
-    /* Mini map (collapsible via button) */
+    /* Minimap (hidden by default; toggled by Map button) */
     .mini{ position:fixed; right:12px; bottom:118px; z-index:6;
       background:rgba(10,12,18,.75); border:1px solid var(--line); border-radius:14px; padding:8px; display:none }
     #minimap{ width:240px; height:auto; display:block; border-radius:10px; background:#0b0f17 }
@@ -69,7 +71,7 @@
     .shop-item .buy{ background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
 
-    /* Inventory host */
+    /* Inventory host (core fills it) */
     #invPanel{ max-width:1100px; margin:8px auto 0; display:none; }
   </style>
 </head>
@@ -91,16 +93,16 @@
       <div id="prompt">Press B to enter</div>
     </div>
 
-    <!-- Inventory panel appears under the game; core controls content/visibility -->
+    <!-- Inventory panel appears under the game; core controls its content/visibility -->
     <div id="invPanel"></div>
   </div>
 
-  <!-- Mini map (collapsed by default) -->
+  <!-- Minimap (click to open big map) -->
   <div class="mini" id="miniWrap" title="Tap to open world map">
     <canvas id="minimap" width="260" height="170"></canvas>
   </div>
 
-  <!-- Touch stick + bottom buttons -->
+  <!-- Touch controls -->
   <div class="stick" id="stick">
     <div class="base"></div>
     <div class="nub" id="nub"></div>
@@ -108,11 +110,11 @@
   <div class="controls">
     <button class="btn" id="btnA" type="button">A</button>
     <button class="btn" id="btnB" type="button">B</button>
-    <button class="btn" id="btnI" type="button">I</button>
-    <button class="btn" id="btnMap" type="button">Map</button>
+    <button class="btn" id="btnI" type="button" title="Inventory">I</button>
+    <button class="btn" id="btnMap" type="button" title="Toggle Minimap">Map</button>
   </div>
 
-  <!-- World map modal -->
+  <!-- Big Map -->
   <div class="modal" id="mapModal">
     <div class="backdrop"></div>
     <div class="card">
@@ -159,23 +161,8 @@
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
 
   <!-- LOAD ORDER MATTERS: core FIRST, then plugins -->
-  <script src="/static/game/js/izza_core_v3.js?v=10"></script>
+  <script src="/static/game/js/izza_core_v3.js?v=12"></script>
   <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
   <script src="/static/game/js/plugins/v5_loot.js?v=6"></script>
-
-  <!-- Cleaner to remove dev pills -->
-  <script>
-    (function removeDevPills(){
-      function kill() {
-        document.querySelectorAll('.pill').forEach(el=>{
-          if ((el.textContent||'').trim().startsWith('Dev:')) el.remove();
-        });
-      }
-      kill();
-      setTimeout(kill, 0);
-      setTimeout(kill, 500);
-      (window.IZZA && IZZA.on) ? IZZA.on('ready', kill) : document.addEventListener('readystatechange', kill);
-    })();
-  </script>
 </body>
 </html>
