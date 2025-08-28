@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.15-core+mapToggle+heldWeapons+invScroll3rows';
+  const BUILD = 'v3.16-core+mapInvMutex+heldWeaponUzi+grenades';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus ---
@@ -185,43 +185,44 @@
   function setInventory(obj){
     localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
   }
-  // --- Equip helpers ---
-function setEquippedWeapon(id){
-  // update in-memory
-  equipped.weapon = id;
 
-  // mirror to inventory object's equipped flags (optional but tidy)
-  const inv = getInventory();
-  if(inv.bat)      inv.bat.equipped      = (id === 'bat');
-  if(inv.knuckles) inv.knuckles.equipped = (id === 'knuckles');
-  if(inv.pistol)   inv.pistol.equipped   = (id === 'pistol');
-  if(inv.uzi)      inv.uzi.equipped      = (id === 'uzi');
-  // grenades are consumables; no "equipped" needed
-  setInventory(inv);
-}
+  // ===== Player / anim =====
+  const player = {
+    x: door.gx*TILE + (TILE/2 - 8),
+    y: door.gy*TILE,
+    speed: 90,
+    wanted: 0,
+    facing: 'down', moving:false,
+    animTime: 0,
+    hp: 5,
+    coins: 0
+  };
 
-function unequipWeapon(){
-  setEquippedWeapon('fists');
-  toast('Hands ready');
-}
-
-// ===== Equip & weapon rules =====
-let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' | 'uzi'
-
-const WEAPON_RULES = {
-  fists:     { damage: 1, breaks: false },
-  bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
-  knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
-  pistol:    { damage: 3, breaks: false },
-  uzi:       { damage: 3, breaks: false } // same damage model as pistol for now
-  // grenades are stored as consumables: { count }, not equipped here
-};
-
-function missionsOKToUse(id){
-  // Match pistol’s rule: can always be picked up, but cannot be EQUIPPED until mission 3
-  if (id==='pistol' || id==='uzi') return getMissionCount() >= 3;
-  return true;
-}
+  // --- Equip helpers + rules ---
+  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' | 'uzi'
+  const WEAPON_RULES = {
+    fists:     { damage: 1, breaks: false },
+    bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
+    knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
+    pistol:    { damage: 3, breaks: false },
+    uzi:       { damage: 3, breaks: false } // same as pistol for now
+    // grenades are consumables with {count}, not equipped here
+  };
+  function missionsOKToUse(id){
+    // firearms (pistol + uzi) unlock to EQUIP at >= mission 3
+    if (id==='pistol' || id==='uzi') return getMissionCount() >= 3;
+    return true;
+  }
+  function setEquippedWeapon(id){
+    equipped.weapon = id;
+    const inv = getInventory();
+    if(inv.bat)      inv.bat.equipped      = (id === 'bat');
+    if(inv.knuckles) inv.knuckles.equipped = (id === 'knuckles');
+    if(inv.pistol)   inv.pistol.equipped   = (id === 'pistol');
+    if(inv.uzi)      inv.uzi.equipped      = (id === 'uzi');
+    setInventory(inv);
+  }
+  function unequipWeapon(){ setEquippedWeapon('fists'); toast('Hands ready'); }
 
   const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
@@ -270,12 +271,26 @@ function missionsOKToUse(id){
 
   if(btnA) btnA.addEventListener('click', doAttack);
   if(btnB) btnB.addEventListener('click', handleB);
-  if(btnI) btnI.addEventListener('click', toggleInventoryPanel);
+
+  // ===== Inventory ↔ Map mutual exclusion helpers =====
+  const miniWrap = document.getElementById('miniWrap');
+  const mapModal = document.getElementById('mapModal');
+  function invOpen(){ const p=document.getElementById('invPanel'); return p && p.style.display!=='none'; }
+  function closeInventory(){ const p=document.getElementById('invPanel'); if(p) p.style.display='none'; }
+  function closeMapUI(){ if(mapModal) mapModal.style.display='none'; if(miniWrap) miniWrap.style.display='none'; }
+
+  const btnIHandler = ()=> toggleInventoryPanel();
+  if(btnI) btnI.addEventListener('click', btnIHandler);
+
   if(btnMap){
-    const miniWrap=document.getElementById('miniWrap');
     btnMap.addEventListener('click', ()=>{
+      // if inventory is open, close it first
+      closeInventory();
       if(!miniWrap) return;
-      miniWrap.style.display = (miniWrap.style.display==='none' || !miniWrap.style.display) ? 'block' : 'none';
+      // toggle minimap visibility
+      const next = (miniWrap.style.display==='none' || !miniWrap.style.display) ? 'block' : 'none';
+      miniWrap.style.display = next;
+      if(next==='block'){ if(mapModal) mapModal.style.display='none'; }
     });
   }
 
@@ -360,14 +375,14 @@ function missionsOKToUse(id){
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
 
   // Tiny inline icons for shop/inventory
-function svgIcon(id, w=24, h=24){
-  if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
-  if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
-  if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
-  if(id==='uzi') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
-  if(id==='grenade') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
-  return '';
-}
+  function svgIcon(id, w=24, h=24){
+    if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
+    if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
+    if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
+    if(id==='uzi') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
+    if(id==='grenade') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
+    return '';
+  }
 
   function openShop(){
     const m=document.getElementById('shopModal'); if(!m) return;
@@ -463,7 +478,7 @@ function svgIcon(id, w=24, h=24){
       showHint('Tutorial: Press A to hit a pedestrian.');
     });
   }
-  
+
   // ===== Inventory UI (toggle with I or the I button) =====
   function ensureInvHost(){
     let host = document.getElementById('invPanel');
@@ -480,118 +495,117 @@ function svgIcon(id, w=24, h=24){
   function toggleInventoryPanel(){
     const host = ensureInvHost();
     const on = host.style.display!=='none';
-    host.style.display = on ? 'none' : 'block';
-    if(!on) renderInventoryPanel();
+    if(on){
+      host.style.display = 'none';
+    }else{
+      // open inventory ⇒ close map UI
+      closeMapUI();
+      host.style.display = 'block';
+      renderInventoryPanel();
+    }
   }
   function renderInventoryPanel(){
-  const host = ensureInvHost();
-  const inv  = getInventory();
-  const ms   = getMissionCount();
+    const host = ensureInvHost();
+    const inv  = getInventory();
+    const ms   = getMissionCount();
 
-  function itemRow(id, label, metaHTML){
-    const canUse     = missionsOKToUse(id);
-    const isEquipped = (equipped.weapon===id);
+    function itemRow(id, label, metaHTML){
+      const canUse     = missionsOKToUse(id);
+      const isEquipped = (equipped.weapon===id);
+      const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'||id==='uzi'?3:''}</span>`;
+      const btnHTML = canUse
+        ? (isEquipped
+            ? `<button data-unequip="${id}" style="margin-left:auto">Unequip</button>`
+            : `<button data-equip="${id}" style="margin-left:auto">Equip</button>`
+          )
+        : '';
+      return `
+        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+          <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
+          <div style="font-weight:600">${label}</div>
+          ${lockHTML}
+          <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
+          ${btnHTML}
+        </div>`;
+    }
 
-    const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'||id==='uzi'?3:''}</span>`;
+    function readOnlyRow(id, label, metaHTML){
+      return `
+        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+          <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
+          <div style="font-weight:600">${label}</div>
+          <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
+        </div>`;
+    }
 
-    // Toggle button: Equip when not equipped, Unequip when equipped
-    const btnHTML = canUse
-      ? (isEquipped
-          ? `<button data-unequip="${id}" style="margin-left:auto">Unequip</button>`
-          : `<button data-equip="${id}" style="margin-left:auto">Equip</button>`
-        )
-      : '';
+    const rows = [];
 
-    return `
-      <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
-        <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
-        <div style="font-weight:600">${label}</div>
-        ${lockHTML}
-        <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
-        ${btnHTML}
-      </div>`;
-  }
+    // Firearms
+    if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
+      rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
+    }
+    if(inv.uzi && (inv.uzi.owned || (inv.uzi.ammo|0)>0)){
+      rows.push(itemRow('uzi','Uzi', `Ammo: ${inv.uzi.ammo|0}`));
+    }
 
-  // Non-equip row (for consumables like grenades)
-  function readOnlyRow(id, label, metaHTML){
-    return `
-      <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
-        <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
-        <div style="font-weight:600">${label}</div>
-        <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
-      </div>`;
-  }
+    // Melee
+    if(inv.bat && inv.bat.count>0){
+      const cur = inv.bat.hitsLeftOnCurrent|0;
+      rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
+    }
+    if(inv.knuckles && inv.knuckles.count>0){
+      const cur = inv.knuckles.hitsLeftOnCurrent|0;
+      rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
+    }
 
-  const rows = [];
+    // Consumables
+    if(inv.grenade && (inv.grenade.count|0) > 0){
+      rows.push(readOnlyRow('grenade','Grenades', `Count: ${inv.grenade.count|0}`));
+    }
 
-  // Firearms
-  if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
-    rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
-  }
-  if(inv.uzi && (inv.uzi.owned || (inv.uzi.ammo|0)>0)){
-    rows.push(itemRow('uzi','Uzi', `Ammo: ${inv.uzi.ammo|0}`));
-  }
-
-  // Melee
-  if(inv.bat && inv.bat.count>0){
-    const cur = inv.bat.hitsLeftOnCurrent|0;
-    rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
-  }
-  if(inv.knuckles && inv.knuckles.count>0){
-    const cur = inv.knuckles.hitsLeftOnCurrent|0;
-    rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
-  }
-
-  // Consumables
-  if(inv.grenade && (inv.grenade.count|0) > 0){
-    rows.push(readOnlyRow('grenade','Grenades', `Count: ${inv.grenade.count|0}`));
-  }
-
-  host.innerHTML = `
-    <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
-        <div style="font-weight:700">Inventory</div>
-        <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
-        <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
-          <div style="opacity:.8; font-size:12px">Equipped: ${equipped.weapon}</div>
-          <button class="ghost" id="unequipHands" type="button" title="Switch to hand combat">Use Hands</button>
-          <div style="opacity:.8; font-size:12px">Press I to close</div>
+    host.innerHTML = `
+      <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+          <div style="font-weight:700">Inventory</div>
+          <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
+          <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+            <div style="opacity:.8; font-size:12px">Equipped: ${equipped.weapon}</div>
+            <button class="ghost" id="unequipHands" type="button" title="Switch to hand combat">Use Hands</button>
+            <div style="opacity:.8; font-size:12px">Press I to close</div>
+          </div>
+        </div>
+        <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
+          ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
         </div>
       </div>
-      <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
-        ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
-      </div>
-    </div>
-  `;
+    `;
 
-  // Equip
-  host.querySelectorAll('[data-equip]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const id = btn.getAttribute('data-equip');
-      if(!missionsOKToUse(id)) return; // just in case
-      setEquippedWeapon(id);
-      toast(`Equipped ${id}`);
-      renderInventoryPanel();
+    // Equip / Unequip actions
+    host.querySelectorAll('[data-equip]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.getAttribute('data-equip');
+        if(!missionsOKToUse(id)) return;
+        setEquippedWeapon(id);
+        toast(`Equipped ${id}`);
+        renderInventoryPanel();
+      });
     });
-  });
+    host.querySelectorAll('[data-unequip]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        unequipWeapon();
+        renderInventoryPanel();
+      });
+    });
 
-  // Unequip (toggle from item)
-  host.querySelectorAll('[data-unequip]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      unequipWeapon();
-      renderInventoryPanel();
-    });
-  });
-
-  // Header quick-action to hands
-  const hands = document.getElementById('unequipHands');
-  if(hands){
-    hands.addEventListener('click', ()=>{
-      unequipWeapon();
-      renderInventoryPanel();
-    });
+    const hands = document.getElementById('unequipHands');
+    if(hands){
+      hands.addEventListener('click', ()=>{
+        unequipWeapon();
+        renderInventoryPanel();
+      });
+    }
   }
-}
+
   // ===== NPCs =====
   const pedestrians=[]; // {x,y,mode,dir,spd,hp,state,crossSide,vertX,blinkT,skin,facing,moving}
   const cars=[];        // {x,y,dir,spd}
@@ -762,7 +776,6 @@ function svgIcon(id, w=24, h=24){
 
   // ===== Combat =====
   function hitTest(ax,ay, bx,by, radius=20){ return Math.hypot(ax-bx, ay-by) <= radius; }
-
   function weaponDamage(){
     const rules = WEAPON_RULES[equipped.weapon] || WEAPON_RULES.fists;
     return rules.damage||1;
@@ -795,7 +808,6 @@ function svgIcon(id, w=24, h=24){
       setInventory(inv);
     }
   }
-
   function doAttack(){
     const dmg = weaponDamage();
     let didHit=false;
@@ -835,7 +847,6 @@ function svgIcon(id, w=24, h=24){
   // ===== Maps & drawing =====
   const mini = document.getElementById('minimap');
   const mctx = mini ? mini.getContext('2d') : null;
-  const mapModal = document.getElementById('mapModal');
   const bigmap   = document.getElementById('bigmap');
   const bctx     = bigmap ? bigmap.getContext('2d') : null;
 
@@ -868,8 +879,13 @@ function svgIcon(id, w=24, h=24){
     bctx.fillStyle = '#35f1ff';
     bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
   }
-  const miniWrap=document.getElementById('miniWrap');
-  if(miniWrap) miniWrap.addEventListener('click', ()=>{ drawBig(); if(mapModal) mapModal.style.display='flex'; });
+
+  if(miniWrap) miniWrap.addEventListener('click', ()=>{
+    // opening big map ⇒ close inventory
+    closeInventory();
+    drawBig();
+    if(mapModal) mapModal.style.display='flex';
+  });
   const closeMapBtn=document.getElementById('closeMap');
   if(closeMapBtn) closeMapBtn.addEventListener('click', ()=> { if(mapModal) mapModal.style.display='none'; });
   if(mapModal) mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) mapModal.style.display='none'; });
@@ -936,7 +952,7 @@ function svgIcon(id, w=24, h=24){
     ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, DRAW,DRAW);
   }
 
-  // simple held-weapon overlay (pixel art)
+  // ===== Held-weapon overlay (pixel art) =====
   function drawHeldWeapon(){
     const sx = w2sX(player.x), sy = w2sY(player.y);
     const S  = DRAW;
@@ -948,11 +964,12 @@ function svgIcon(id, w=24, h=24){
       ctx.fillStyle = '#cfcfcf';
     }else if(equipped.weapon==='pistol'){
       ctx.fillStyle = '#202833';
+    }else if(equipped.weapon==='uzi'){
+      ctx.fillStyle = '#0b0e14';
     }else{
       return; // fists: nothing to draw
     }
 
-    // offsets relative to player depending on facing
     if(player.facing==='down'){
       ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
     }else if(player.facing==='up'){
@@ -1049,36 +1066,9 @@ function svgIcon(id, w=24, h=24){
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
 
-    // simple held-weapon overlay (pixel art)
-function drawHeldWeapon(){
-  const sx = w2sX(player.x), sy = w2sY(player.y);
-  const S  = DRAW;
-  const w  = Math.floor(S*0.30), h = Math.floor(S*0.12);
+    // held weapon overlay
+    drawHeldWeapon();
 
-  if(equipped.weapon==='bat'){
-    ctx.fillStyle = '#8b5a2b';
-  }else if(equipped.weapon==='knuckles'){
-    ctx.fillStyle = '#cfcfcf';
-  }else if(equipped.weapon==='pistol'){
-    ctx.fillStyle = '#202833';
-  }else if(equipped.weapon==='uzi'){
-    ctx.fillStyle = '#0b0e14';
-  }else{
-    return; // fists: nothing to draw
-  }
-
-  // offsets relative to player depending on facing
-  if(player.facing==='down'){
-    ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
-  }else if(player.facing==='up'){
-    ctx.fillRect(sx + S*0.10, sy + S*0.25, w, h);
-  }else if(player.facing==='left'){
-    ctx.fillRect(sx + S*0.10, sy + S*0.55, w, h);
-  }else{ // right
-    ctx.fillRect(sx + S*0.60, sy + S*0.55, w, h);
-  }
-}
-  
     // cops
     for(const c of cops){
       const pack = c.kind==='army' ? NPC_SHEETS.military
