@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v7_mission2_delivery.js
 (function(){
-  const BUILD = 'v7.3-mission2-delivery+shop-inject+carry-visual';
+  const BUILD = 'v7.4-mission2-delivery+shop-inject+carry-visual+tester-reset';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Config ----------
@@ -8,14 +8,11 @@
   const START_KEY   = 'izzaMission2';         // 'ready' | 'active' | 'done'
   const POS_KEY     = 'izzaMission2Pos';      // JSON: {gx,gy}
   const POS_VER_KEY = 'izzaMission2PosVer';   // bump to force new default to apply
-  const POS_VERSION = '2';
+  const POS_VERSION = '3';                    // ← bumped
   const BUBBLE_ID   = 'm2TimerBubble';
 
-  // Default goal position: relative to the outside spawn (doorSpawn).
-  // ✅ Your request: +7 tiles right AND +10 tiles down from spawn.
-  // You can still override at runtime with:
-  //   window.__IZZA_M2_POS__ = { gx: 31, gy: 24 };
-  const DEFAULT_OFFSET_TILES = { dx: +7, dy: +10 };
+  // ✅ New default: 12 tiles LEFT and 12 tiles UP from outdoor spawn
+  const DEFAULT_OFFSET_TILES = { dx: -12, dy: -12 };
 
   // ---------- Locals ----------
   let api = null;
@@ -62,10 +59,10 @@
 
   // ---------- Timer bubble ----------
   function ensureTimerBubble(){
-    let b = document.getElementById('m2TimerBubble');
+    let b = document.getElementById(BUBBLE_ID);
     if(!b){
       b = document.createElement('div');
-      b.id='m2TimerBubble';
+      b.id=BUBBLE_ID;
       Object.assign(b.style,{
         position:'fixed', right:'18px', top:'98px', zIndex:8,
         background:'rgba(7,12,22,.85)', color:'#cfe0ff',
@@ -83,7 +80,7 @@
     el.style.display='block';
   }
   function hideTimer(){
-    const el = document.getElementById('m2TimerBubble');
+    const el = document.getElementById(BUBBLE_ID);
     if(el) el.style.display='none';
   }
 
@@ -122,7 +119,6 @@
   }
 
   // ---------- Shop injection ----------
-  // Adds "Package (FREE)" when mission is active and the player doesn't carry it yet
   function svgPackage(w=24,h=24){
     return `<svg viewBox="0 0 64 64" width="${w}" height="${h}">
       <rect x="16" y="20" width="32" height="28" rx="3" ry="3" fill="#6b7da5"/>
@@ -136,7 +132,6 @@
     const list = document.getElementById('shopList');
     if(!list) return;
 
-    // Prevent duplicates
     if(list.querySelector('[data-m2-package]')) return;
 
     const row = document.createElement('div');
@@ -157,16 +152,13 @@
     row.querySelector('.buy').addEventListener('click', ()=>{
       mission.carrying = true;
       toast('Picked up Package');
-      // close shop if present
       const sm = document.getElementById('shopModal');
       if(sm) sm.style.display='none';
     });
 
-    // Insert at the top
     list.insertBefore(row, list.firstChild || null);
   }
 
-  // Observe when the shop opens and add our item
   const shopObs = new MutationObserver(()=>{
     const sm = document.getElementById('shopModal');
     if(!sm) return;
@@ -180,18 +172,16 @@
 
   function drawGoal(){
     if(mission.state==='done') return;
-    // show when ready OR active
     const gx = mission.goalGX, gy = mission.goalGY, t=api.TILE;
     const sx = w2sX(gx*t), sy = w2sY(gy*t);
     const S  = api.DRAW;
     const ctx = document.getElementById('game').getContext('2d');
     ctx.save();
-    ctx.fillStyle = 'rgba(70,140,255,.75)';      // blue square
+    ctx.fillStyle = 'rgba(70,140,255,.75)';
     ctx.fillRect(sx + S*0.15, sy + S*0.15, S*0.70, S*0.70);
     ctx.restore();
   }
 
-  // Draw package in hand when carrying
   function drawCarry(){
     if(!mission.carrying) return;
     const S = api.DRAW;
@@ -205,7 +195,7 @@
       ctx.fillRect(px + S*0.22, py + S*0.24, S*0.24, S*0.20);
     }else if(api.player.facing==='left'){
       ctx.fillRect(px + S*0.16, py + S*0.56, S*0.24, S*0.20);
-    }else{ // right
+    }else{
       ctx.fillRect(px + S*0.60, py + S*0.56, S*0.24, S*0.20);
     }
     ctx.restore();
@@ -235,18 +225,15 @@
     }
     // 3) default relative to door spawn
     const t = api.TILE;
-    const doorGX = Math.floor((api.doorSpawn.x + 8)/t); // compensate for sprite anchor
+    const doorGX = Math.floor((api.doorSpawn.x + 8)/t);
     const doorGY = Math.floor(api.doorSpawn.y/t);
     mission.goalGX = doorGX + DEFAULT_OFFSET_TILES.dx;
     mission.goalGY = doorGY + DEFAULT_OFFSET_TILES.dy;
-    // persist default once computed with current version
     localStorage.setItem(POS_KEY, JSON.stringify({gx:mission.goalGX, gy:mission.goalGY}));
     localStorage.setItem(POS_VER_KEY, POS_VERSION);
   }
 
-  // Helpers to tweak via console:
-  //   _izza_m2_setAtPlayer()   -> set goal to current player tile and persist
-  //   _izza_m2_resetPos()      -> drop saved pos so default applies next reload
+  // Console helpers
   window._izza_m2_setAtPlayer = function(){
     const {gx,gy} = playerGrid();
     mission.goalGX = gx; mission.goalGY = gy;
@@ -257,7 +244,8 @@
   window._izza_m2_resetPos = function(){
     localStorage.removeItem(POS_KEY);
     localStorage.setItem(POS_VER_KEY, POS_VERSION);
-    toast('Mission 2 anchor reset; reload to use default.');
+    loadGoalPosition();
+    toast('Mission 2 anchor reset to default.');
   };
 
   // ---------- Mission state helpers ----------
@@ -265,7 +253,6 @@
   function setMission2Done(){
     localStorage.setItem(START_KEY, 'done');
     mission.state = 'done';
-    // bump overall mission count to >=2
     try{
       const cur = getMissionCount();
       const next = Math.max(cur, 2);
@@ -308,16 +295,13 @@
   function onB(){
     if(mission.state==='done') return;
 
-    // If we’re at the goal:
     if(nearGoal()){
       if(mission.state==='ready'){
-        // only unlock after Tutorial (Mission 1)
         if(getMissionCount() < 1){ toast('Finish the tutorial first.'); return; }
         missionModal(startMission);
         return;
       }
       if(mission.state==='active' && mission.carrying){
-        // deliver
         if(now() <= mission.endAt) completeMission();
         else failMission();
         return;
@@ -326,32 +310,55 @@
   }
 
   function bindB(){
-    // Keyboard
     window.addEventListener('keydown', (e)=>{
       if(e.key && e.key.toLowerCase()==='b'){ onB(); }
     });
-    // UI button (mobile)
     const btnB = document.getElementById('btnB');
-    if(btnB){
-      btnB.addEventListener('click', onB);
-    }
+    if(btnB){ btnB.addEventListener('click', onB); }
+  }
+
+  // ---------- Testing button (temporary) ----------
+  function ensureResetButton(){
+    let btn = document.getElementById('m2ResetBtn');
+    if(btn) return btn;
+    btn = document.createElement('button');
+    btn.id = 'm2ResetBtn';
+    btn.textContent = 'M2 Reset';
+    Object.assign(btn.style,{
+      position:'fixed', right:'18px', top:'138px', zIndex:9,
+      background:'#1a2336', color:'#cfe0ff', border:'1px solid #33415f',
+      borderRadius:'10px', padding:'6px 10px', fontSize:'12px'
+    });
+    btn.addEventListener('click', ()=>{
+      // reset to default position & mission state ready
+      localStorage.removeItem(POS_KEY);
+      localStorage.setItem(POS_VER_KEY, POS_VERSION);
+      loadGoalPosition();
+      mission.state='ready';
+      mission.carrying=false;
+      mission.endAt=0;
+      localStorage.setItem(START_KEY,'ready');
+      hideTimer();
+      toast(`Mission 2 reset. Goal: ${mission.goalGX},${mission.goalGY}`);
+    });
+    document.body.appendChild(btn);
+    return btn;
   }
 
   // ---------- Hook into game ----------
   IZZA.on('ready', (a)=>{
     api = a;
 
-    // place the goal once we know TILE/doorSpawn
     loadGoalPosition();
 
-    // Observe shop to inject Package item
     const root = document.body || document.documentElement;
     shopObs.observe(root, { attributes:true, childList:true, subtree:true });
 
-    // Bind B
     bindB();
 
-    // If Mission 2 is done already, hide timer if any
+    // Testing reset button (remove later if desired)
+    ensureResetButton();
+
     if(mission.state==='done'){ hideTimer(); }
 
     console.log('[M2] ready', {
@@ -367,7 +374,7 @@
     showTimer(left);
   });
 
-  // Draw the goal and carry overlay after core renders
+  // Draw overlays after core renders
   IZZA.on('render-post', ()=>{
     if(mission.state!=='done') drawGoal();
     drawCarry();
