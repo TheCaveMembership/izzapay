@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v7_mission2_delivery.js
 (function(){
-  const BUILD = 'v7.4-mission2-delivery+shop-inject+carry-visual+tester-reset';
+  const BUILD = 'v7.4-mission2-delivery+shop-inject+carry-visual+testbtn';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Config ----------
@@ -8,10 +8,11 @@
   const START_KEY   = 'izzaMission2';         // 'ready' | 'active' | 'done'
   const POS_KEY     = 'izzaMission2Pos';      // JSON: {gx,gy}
   const POS_VER_KEY = 'izzaMission2PosVer';   // bump to force new default to apply
-  const POS_VERSION = '3';                    // ← bumped
+  const POS_VERSION = '3';                    // ← bumped so new default is used
   const BUBBLE_ID   = 'm2TimerBubble';
 
-  // ✅ New default: 12 tiles LEFT and 12 tiles UP from outdoor spawn
+  // Default goal position: relative to the outside spawn (doorSpawn).
+  // ✅ Your request: 12 tiles LEFT and 12 tiles UP from spawn.
   const DEFAULT_OFFSET_TILES = { dx: -12, dy: -12 };
 
   // ---------- Locals ----------
@@ -131,7 +132,6 @@
     if(mission.state!=='active' || mission.carrying) return;
     const list = document.getElementById('shopList');
     if(!list) return;
-
     if(list.querySelector('[data-m2-package]')) return;
 
     const row = document.createElement('div');
@@ -203,7 +203,7 @@
 
   // ---------- Positioning ----------
   function loadGoalPosition(){
-    // 1) explicit override (wins)
+    // 1) explicit override
     if(window.__IZZA_M2_POS__ && Number.isFinite(window.__IZZA_M2_POS__.gx)){
       mission.goalGX = window.__IZZA_M2_POS__.gx|0;
       mission.goalGY = window.__IZZA_M2_POS__.gy|0;
@@ -211,7 +211,7 @@
       localStorage.setItem(POS_VER_KEY, POS_VERSION);
       return;
     }
-    // 2) saved AND matches this file's version
+    // 2) saved & version matches
     const savedVer = localStorage.getItem(POS_VER_KEY);
     const saved = localStorage.getItem(POS_KEY);
     if(saved && savedVer === POS_VERSION){
@@ -225,7 +225,7 @@
     }
     // 3) default relative to door spawn
     const t = api.TILE;
-    const doorGX = Math.floor((api.doorSpawn.x + 8)/t);
+    const doorGX = Math.floor((api.doorSpawn.x + 8)/t); // compensate for sprite anchor
     const doorGY = Math.floor(api.doorSpawn.y/t);
     mission.goalGX = doorGX + DEFAULT_OFFSET_TILES.dx;
     mission.goalGY = doorGY + DEFAULT_OFFSET_TILES.dy;
@@ -244,8 +244,7 @@
   window._izza_m2_resetPos = function(){
     localStorage.removeItem(POS_KEY);
     localStorage.setItem(POS_VER_KEY, POS_VERSION);
-    loadGoalPosition();
-    toast('Mission 2 anchor reset to default.');
+    toast('Mission 2 anchor reset; reload to use default.');
   };
 
   // ---------- Mission state helpers ----------
@@ -294,7 +293,6 @@
 
   function onB(){
     if(mission.state==='done') return;
-
     if(nearGoal()){
       if(mission.state==='ready'){
         if(getMissionCount() < 1){ toast('Finish the tutorial first.'); return; }
@@ -317,32 +315,26 @@
     if(btnB){ btnB.addEventListener('click', onB); }
   }
 
-  // ---------- Testing button (temporary) ----------
-  function ensureResetButton(){
-    let btn = document.getElementById('m2ResetBtn');
-    if(btn) return btn;
-    btn = document.createElement('button');
-    btn.id = 'm2ResetBtn';
-    btn.textContent = 'M2 Reset';
-    Object.assign(btn.style,{
-      position:'fixed', right:'18px', top:'138px', zIndex:9,
-      background:'#1a2336', color:'#cfe0ff', border:'1px solid #33415f',
-      borderRadius:'10px', padding:'6px 10px', fontSize:'12px'
+  // ---------- Tiny test button (for quick positioning while tuning) ----------
+  function ensureTestButton(){
+    if(document.getElementById('m2TestBtn')) return;
+    const b = document.createElement('button');
+    b.id = 'm2TestBtn';
+    b.textContent = 'M2 Here';
+    Object.assign(b.style,{
+      position:'fixed', right:'18px', bottom:'120px', zIndex:11,
+      fontSize:'12px', padding:'6px 10px',
+      opacity:.9
     });
-    btn.addEventListener('click', ()=>{
-      // reset to default position & mission state ready
-      localStorage.removeItem(POS_KEY);
+    b.title = 'Move Mission 2 square to your current tile';
+    b.addEventListener('click', ()=>{
+      const {gx,gy} = playerGrid();
+      mission.goalGX = gx; mission.goalGY = gy;
+      localStorage.setItem(POS_KEY, JSON.stringify({gx,gy}));
       localStorage.setItem(POS_VER_KEY, POS_VERSION);
-      loadGoalPosition();
-      mission.state='ready';
-      mission.carrying=false;
-      mission.endAt=0;
-      localStorage.setItem(START_KEY,'ready');
-      hideTimer();
-      toast(`Mission 2 reset. Goal: ${mission.goalGX},${mission.goalGY}`);
+      toast(`Mission 2 anchor set to ${gx},${gy}`);
     });
-    document.body.appendChild(btn);
-    return btn;
+    document.body.appendChild(b);
   }
 
   // ---------- Hook into game ----------
@@ -356,8 +348,8 @@
 
     bindB();
 
-    // Testing reset button (remove later if desired)
-    ensureResetButton();
+    // Show the temporary test button (remove later when happy)
+    ensureTestButton();
 
     if(mission.state==='done'){ hideTimer(); }
 
@@ -374,7 +366,7 @@
     showTimer(left);
   });
 
-  // Draw overlays after core renders
+  // Draw overlays
   IZZA.on('render-post', ()=>{
     if(mission.state!=='done') drawGoal();
     drawCarry();
