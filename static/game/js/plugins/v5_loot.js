@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v5_loot.js
 (function(){
-  const BUILD = 'v5.7-loot:coins+pistol17+uzi50+grenade1+always-pickable';
+  const BUILD = 'v5.8-loot:coins+pistol17+uzi50+grenade1+no-escrow';
   console.log('[IZZA PLAY]', BUILD);
 
   // ==== tuning ====
@@ -9,8 +9,7 @@
   const LOOT_DEBUG  = true;
 
   // Coins should ONLY go up when the bag is picked.
-  // Reserve the kill reward, then pay on pickup.
-  const RESERVE_KILL_COINS = true;
+  // We REMOVED the old "reserve on spawn" behavior to prevent balance dips.
 
   let api=null, player=null, TILE=32, camera=null;
 
@@ -114,7 +113,7 @@
     window._izza_loot = loot;
   });
 
-  // ped loot (coin bag) — reserve kill coins so we only pay on pickup
+  // ped loot (coin bag) — spawn a coin drop; DO NOT touch balance here
   IZZA.on('ped-killed', (e)=>{
     const t = now();
     const x = (e && e.x) || (player && player.x) || 0;
@@ -126,13 +125,6 @@
       droppedAt: (e && e.droppedAt) || t,
       noPickupUntil: (e && e.noPickupUntil) || t + 1000
     });
-
-    if(RESERVE_KILL_COINS && api && api.getCoins && api.setCoins){
-      const current = api.getCoins();
-      const reserved = Math.max(0, current - amount);
-      api.setCoins(reserved);
-      log('reserved kill coins:', { amount, before: current, after: reserved });
-    }
   });
 
   // cop loot (weapon) — police → pistol, swat → uzi, military → grenade
@@ -182,6 +174,7 @@
         const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
         const had = !!inv.pistol && !!inv.pistol.owned;
         cur.owned = true;
+        // +17 ammo per pickup (same as shop)
         cur.ammo  = (cur.ammo|0) + 17;
         inv.pistol = cur;
         if(api.setInventory) api.setInventory(inv);
