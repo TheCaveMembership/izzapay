@@ -1,5 +1,6 @@
+// /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.0-mission3-car-theft+drive+edge-complete';
+  const BUILD = 'v8.1-mission3-car-theft+joystick+solid-buildings+edge-indicator';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Keys / storage ----------
@@ -7,18 +8,26 @@
   const M3_KEY         = 'izzaMission3';           // 'ready' | 'active' | 'done'
   const POS_KEY        = 'izzaMission3Pos';        // {gx,gy}
   const POS_VER_KEY    = 'izzaMission3PosVer';
-  const POS_VERSION    = '1';                      // bump if default pos changes
-  const MAP_TIER_KEY   = 'izzaMapTier';            // '1' | '2' (hook for core to expand map)
-  const TIMER_ID       = 'm3HudHint';
+  const POS_VERSION    = '1';
+  const MAP_TIER_KEY   = 'izzaMapTier';            // '1' | '2' (core expands map when set to '2')
 
   // Start location: 8 tiles LEFT of outside spawn (HQ door)
   const DEFAULT_OFFSET_TILES = { dx: -8, dy: 0 };
 
+  // ---- “Exit” indicator (where you drive off the map to finish)
+  // Default is the **east edge** mid-height. Override with:
+  //   window.__IZZA_M3_EXIT__ = { side:'east'|'west'|'north'|'south', gyOffset:0 }  // for N/S
+  //   or { side:'east', gy: 30 }  // absolute grid row on east/west
+  //   or localStorage.setItem('izzaMission3Exit', JSON.stringify(...))
+  const EXIT_LS_KEY = 'izzaMission3Exit';
+  const DEFAULT_EXIT = { side:'east' };
+
   // Gameplay knobs
-  const HIJACK_RADIUS = 22;      // px (world) distance to a car to allow B hijack
-  const CAR_SPEED     = 160;     // px/s while you drive
+  const HIJACK_RADIUS = 22;      // px world distance to a car to allow B hijack
+  const CAR_SPEED     = 120;     // px/s while you drive (match NPC cars)
   const TURN_RATE     = 3.3;     // radians/s (steering)
-  const EDGE_PAD_TILES= 1;       // how far past unlocked before we count success
+  const EDGE_PAD_TILES= 1;       // how far beyond bounds counts as "off map"
+  const EXIT_WIDTH_TILES = 6;    // width of the glowing corridor on the chosen edge
 
   // Locals populated on ready
   let api=null;
@@ -26,9 +35,8 @@
     state: localStorage.getItem(M3_KEY) || 'ready',   // 'ready' | 'active' | 'done'
     gx:0, gy:0,                 // start square grid
     driving:false,
-    // our controlled car entity (separate from core cars[] once hijacked)
+    // our controlled car entity
     car: null,                  // {x,y,dirRad,spd}
-    steer: {left:false, right:false, fwd:false, back:false}
   };
 
   // ---------- Utilities ----------
@@ -106,14 +114,14 @@
           <div style="font-weight:700; font-size:16px; margin-bottom:6px">Mission 3</div>
           <div style="opacity:.9; line-height:1.45">
             Steal a <b>car</b>: walk up to a passing car and press <b>B</b>.<br>
-            Then <b>drive to the edge of the map</b> (into the black area).
+            Then <b>drive to the glowing edge</b> to escape the district.
           </div>
           <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px">
             <button id="m3Cancel" class="ghost">Cancel</button>
             <button id="m3Start">Start</button>
           </div>
           <div style="opacity:.7; font-size:12px; margin-top:6px">
-            Controls while driving: Arrows / WASD to steer & move.
+            Controls: Joystick or Arrows / WASD to steer & move.
           </div>
         </div>`;
       document.body.appendChild(host);
@@ -157,6 +165,52 @@
     ctx.restore();
   }
 
+  // ---- Edge indicator (glowing portal stripe)
+  let exitCfg = null;
+  function loadExitCfg(){
+    try{
+      exitCfg = window.__IZZA_M3_EXIT__ || JSON.parse(localStorage.getItem(EXIT_LS_KEY)||'null') || DEFAULT_EXIT;
+    }catch{ exitCfg = DEFAULT_EXIT; }
+  }
+  function currentBounds(){
+    // Matches core tier-1 defaults; good enough for the “escape” logic.
+    // (Core expands to tier-2 after completion.)
+    return { x0:18, y0:18, x1:72, y1:42 };
+  }
+  function drawExitGlow(){
+    if(m3.state==='done') return;
+    const b = currentBounds();
+    const S = api.DRAW, t = api.TILE;
+    const ctx=document.getElementById('game').getContext('2d');
+    const pulse = (Math.sin(performance.now()/300)+1)/2; // 0..1
+    ctx.save();
+    ctx.globalAlpha = 0.35 + 0.35*pulse;
+    ctx.fillStyle = '#49a4ff';
+
+    if(exitCfg.side==='east'){
+      const gy = Number.isFinite(exitCfg.gy) ? exitCfg.gy : Math.floor((b.y0+b.y1)/2);
+      const sx = w2sX((b.x1+1)*t);
+      const sy = w2sY((gy-Math.floor(EXIT_WIDTH_TILES/2))*t);
+      ctx.fillRect(sx, sy, S*0.6, EXIT_WIDTH_TILES*t*(S/t));
+    }else if(exitCfg.side==='west'){
+      const gy = Number.isFinite(exitCfg.gy) ? exitCfg.gy : Math.floor((b.y0+b.y1)/2);
+      const sx = w2sX((b.x0-1)*t) - S*0.6;
+      const sy = w2sY((gy-Math.floor(EXIT_WIDTH_TILES/2))*t);
+      ctx.fillRect(sx, sy, S*0.6, EXIT_WIDTH_TILES*t*(S/t));
+    }else if(exitCfg.side==='north'){
+      const gxMid = Math.floor((b.x0+b.x1)/2);
+      const sy = w2sY((b.y0-1)*t) - S*0.6;
+      const sx = w2sX((gxMid-Math.floor(EXIT_WIDTH_TILES/2))*t);
+      ctx.fillRect(sx, sy, EXIT_WIDTH_TILES*t*(S/t), S*0.6);
+    }else{ // south
+      const gxMid = Math.floor((b.x0+b.x1)/2);
+      const sy = w2sY((b.y1+1)*t);
+      const sx = w2sX((gxMid-Math.floor(EXIT_WIDTH_TILES/2))*t);
+      ctx.fillRect(sx, sy, EXIT_WIDTH_TILES*t*(S/t), S*0.6);
+    }
+    ctx.restore();
+  }
+
   // ---------- Mission helpers ----------
   function setM3State(s){ m3.state=s; localStorage.setItem(M3_KEY, s); }
   function completeM3(){
@@ -172,8 +226,37 @@
     toast('Mission 3 complete! Map expanded & pistols unlocked.');
   }
 
-  // ---------- Input handling ----------
+  // ---------- Input handling (keys + joystick) ----------
   const key = Object.create(null);
+
+  // Joystick sampler → maps the same mobile stick to car controls while driving
+  let joy = {x:0,y:0};
+  function bindJoystick(){
+    const stick = document.getElementById('stick');
+    if(!stick) return;
+
+    const r=40; // matches core
+    function sample(e){
+      const t=e.touches?e.touches[0]:e;
+      const rect=stick.getBoundingClientRect();
+      const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
+      const dx=t.clientX-cx, dy=t.clientY-cy;
+      const m=Math.hypot(dx,dy)||1;
+      const c=Math.min(m,r);
+      joy.x=(c/r)*(dx/m);
+      joy.y=(c/r)*(dy/m);
+    }
+    function clear(){ joy.x=0; joy.y=0; }
+
+    stick.addEventListener('touchstart', e=>{ if(m3.driving){ sample(e); e.preventDefault(); } }, {passive:false});
+    stick.addEventListener('touchmove',  e=>{ if(m3.driving){ sample(e); e.preventDefault(); } }, {passive:false});
+    stick.addEventListener('touchend',   e=>{ if(m3.driving){ clear(); e.preventDefault(); } }, {passive:false});
+    // mouse (for desktop testing)
+    stick.addEventListener('mousedown',  e=>{ if(m3.driving){ sample(e); }});
+    window.addEventListener('mousemove', e=>{ if(m3.driving && e.buttons&1){ sample(e); }});
+    window.addEventListener('mouseup',   e=>{ if(m3.driving){ clear(); }});
+  }
+
   function bindKeys(){
     window.addEventListener('keydown', e=>{
       const k=(e.key||'').toLowerCase();
@@ -192,6 +275,8 @@
     });
     const btnB=document.getElementById('btnB');
     if(btnB) btnB.addEventListener('click', onB);
+
+    bindJoystick();
   }
 
   function nearStart(){
@@ -232,7 +317,7 @@
     };
     m3.driving = true;
     setM3State('active');
-    toast('You hijacked a car! Drive to the map edge.');
+    toast('You hijacked a car! Drive to the glowing edge.');
   }
 
   function stopDriving(){
@@ -263,66 +348,111 @@
     }
   }
 
+  // ---------- Solid building collisions ----------
+  // Reconstruct the **HQ** & **Shop** rectangles from known layout.
+  // This matches the core’s constants (bW=10,bH=6, shop w=8,h=5).
+  function buildingRects(){
+    const t = api.TILE;
+    const doorGX = Math.floor((api.doorSpawn.x + 8)/t);
+    const doorGY = Math.floor(api.doorSpawn.y/t);
+    const bW=10, bH=6;
+
+    const bX = doorGX - Math.floor(bW/2);
+    const bY = doorGY - bH; // top of HQ
+
+    // Sidewalk row at doorGY, vertical road at about bX+bW+6
+    const vRoadX = bX + bW + 6;
+    const vSidewalkRightX = vRoadX + 1;
+
+    const shop = { x: vSidewalkRightX + 1, y: doorGY - 5, w: 8, h: 5 };
+
+    return [
+      { x:bX, y:bY, w:bW, h:bH }, // HQ
+      shop
+    ];
+  }
+
+  function collidesBuildings(nx, ny){
+    // treat the car as a point near its center for simple blocking
+    const t = api.TILE;
+    const gx = Math.floor((nx + t/2)/t);
+    const gy = Math.floor((ny + t/2)/t);
+    for(const r of buildingRects()){
+      if(gx>=r.x && gx<r.x+r.w && gy>=r.y && gy<r.y+r.h) return true;
+    }
+    return false;
+  }
+
   // ---------- Update driving ----------
   function updateDriving(dt){
     if(!m3.driving || !m3.car) return;
 
-    // steering from keys
-    const turn = (key.left?-1:0) + (key.right?1:0);
-    const thrust = (key.up?1:0) + (key.down?-0.6:0); // light reverse
+    // steering from keys + joystick
+    const turnAxis = ((key.left?-1:0) + (key.right?1:0)) + (joy.x||0); // joystick x adds to steering
+    const thrustAxis = ((key.up?1:0) + (key.down?-0.6:0)) + (-(joy.y||0)); // up is negative y on stick
 
-    m3.car.dirRad += turn * TURN_RATE * dt;
+    m3.car.dirRad += clamp(turnAxis, -1, 1) * TURN_RATE * dt;
 
-    const v = m3.car.spd * thrust;
+    const v = m3.car.spd * clamp(thrustAxis, -1, 1);
     const vx = Math.cos(m3.car.dirRad) * v * dt;
     const vy = Math.sin(m3.car.dirRad) * v * dt;
 
-    // Move car freely (ignore collisions/unlocked while driving)
-    m3.car.x += vx;
-    m3.car.y += vy;
+    const nx = m3.car.x + vx;
+    const ny = m3.car.y + vy;
+
+    // BLOCK buildings; allow everything else (including black area)
+    if(!collidesBuildings(nx, ny)){
+      m3.car.x = nx;
+      m3.car.y = ny;
+    }
 
     // Snap player to car so camera follows, etc.
     api.player.x = m3.car.x;
     api.player.y = m3.car.y;
 
-    // Check if we've crossed beyond unlocked rect to “black”
-    // We can infer the current unlocked bounds from camera and map constants
-    // but the core keeps the real rect internally. Approximate using door spawn + known area:
-    // Instead, detect using the in-bounds test visible from tiles:
+    // Escape detection: crossing the chosen edge **within** the glowing corridor
+    const b = currentBounds();
     const t = api.TILE;
-    const gx = Math.floor(m3.car.x/t), gy=Math.floor(m3.car.y/t);
+    const gx = Math.floor(m3.car.x/t);
+    const gy = Math.floor(m3.car.y/t);
 
-    // We approximate the current play area by looking at where grass is drawn (camera clamp),
-    // but since we can't read it directly, use a heuristic: if camera clamped near its min/max,
-    // stepping farther by EDGE_PAD_TILES tiles counts as off-map.
-    // Better: re-use the "unlocked" you used when placing m2/m3. We'll store it once:
-    if(!updateDriving.bounds){
-      // save bounds from the core’s clamp result via camera behavior:
-      // doorSpawn is definitely inside; sample outward
-      updateDriving.bounds = { x0: 18, y0: 18, x1: 72, y1: 42 }; // matches current core defaults
+    let inCorridor=false, off=false;
+
+    if(exitCfg.side==='east'){
+      const gyMid = Number.isFinite(exitCfg.gy) ? exitCfg.gy : Math.floor((b.y0+b.y1)/2);
+      inCorridor = gy>=gyMid-Math.floor(EXIT_WIDTH_TILES/2) && gy<=gyMid+Math.floor(EXIT_WIDTH_TILES/2);
+      off = gx > b.x1 + EDGE_PAD_TILES;
+    }else if(exitCfg.side==='west'){
+      const gyMid = Number.isFinite(exitCfg.gy) ? exitCfg.gy : Math.floor((b.y0+b.y1)/2);
+      inCorridor = gy>=gyMid-Math.floor(EXIT_WIDTH_TILES/2) && gy<=gyMid+Math.floor(EXIT_WIDTH_TILES/2);
+      off = gx < b.x0 - EDGE_PAD_TILES;
+    }else if(exitCfg.side==='north'){
+      const gxMid = Number.isFinite(exitCfg.gx) ? exitCfg.gx : Math.floor((b.x0+b.x1)/2);
+      inCorridor = gx>=gxMid-Math.floor(EXIT_WIDTH_TILES/2) && gx<=gxMid+Math.floor(EXIT_WIDTH_TILES/2);
+      off = gy < b.y0 - EDGE_PAD_TILES;
+    }else{ // south
+      const gxMid = Number.isFinite(exitCfg.gx) ? exitCfg.gx : Math.floor((b.x0+b.x1)/2);
+      inCorridor = gx>=gxMid-Math.floor(EXIT_WIDTH_TILES/2) && gx<=gxMid+Math.floor(EXIT_WIDTH_TILES/2);
+      off = gy > b.y1 + EDGE_PAD_TILES;
     }
-    const b=updateDriving.bounds;
-    const off = (gx < b.x0-EDGE_PAD_TILES) || (gx > b.x1+EDGE_PAD_TILES) ||
-                (gy < b.y0-EDGE_PAD_TILES) || (gy > b.y1+EDGE_PAD_TILES);
-    if(off){
+
+    if(inCorridor && off){
       completeM3();
       stopDriving();
     }
   }
 
+  // helpers
+  function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+
   // ---------- Hooks ----------
   IZZA.on('ready', (a)=>{
     api=a;
     loadPos();
+    loadExitCfg();
     bindKeys();
 
-    // If M2 just finished and M3 is still untouched, mark as ready.
-    if(localStorage.getItem(M2_KEY)==='done' && m3.state==='ready'){
-      // ensure visible square appears
-      // (position already computed)
-    }
-
-    console.log('[M3] ready', { state:m3.state, start:{gx:m3.gx, gy:m3.gy} });
+    console.log('[M3] ready', { state:m3.state, start:{gx:m3.gx, gy:m3.gy}, exit:exitCfg });
   });
 
   IZZA.on('update-post', ({dtSec})=>{
@@ -332,6 +462,8 @@
   IZZA.on('render-post', ()=>{
     // Show start square only after M2 done
     drawStartSquare();
+    // Show the glowing exit while M3 is available (ready/active)
+    if(localStorage.getItem(M2_KEY)==='done' && m3.state!=='done') drawExitGlow();
     // Draw the car you’re driving (so it renders above sprites)
     drawCarOverlay();
   });
