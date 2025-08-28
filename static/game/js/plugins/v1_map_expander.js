@@ -1,115 +1,158 @@
 // /static/game/js/plugins/v1_map_expander.js
 (function(){
-  const BUILD = 'v1.0-map-expander+tier2-curvy';
+  const BUILD = 'v1.1-map-expander+tier2-curves';
   console.log('[IZZA PLAY]', BUILD);
 
-  const MAP_TIER_KEY = 'izzaMapTier';            // '1' | '2' | ...
-  const SUGG_KEY     = 'izzaUnlockedSuggested';  // {x0,y0,x1,y1} for the core to adopt
-  const TIER_SEEN    = 'izzaTierSeenToast';
-
-  // Base (your tier-1) and Tier-2 target rects (grid coords)
-  const BASE = { x0:18, y0:18, x1:72, y1:42 };               // current playable
-  const D2   = { x0:BASE.x1+1, y0:BASE.y0-6, x1:BASE.x1+26, y1:BASE.y1+6 }; // new district to the east
+  const MAP_TIER_KEY='izzaMapTier';       // '1' | '2' | ...
+  const TIER2 = { x0:10, y0:12, x1:80, y1:50 }; // bigger view (matches your sketch proportions)
 
   let api=null;
+  const expander = { tier: localStorage.getItem(MAP_TIER_KEY)||'1' };
 
-  // ===== helpers =====
-  const w2sX = (wx)=> (wx - api.camera.x) * (api.DRAW/api.TILE);
-  const w2sY = (wy)=> (wy - api.camera.y) * (api.DRAW/api.TILE);
-  const S    = ()=> api.DRAW, T=()=> api.TILE;
+  // --- helpers ---
+  function setTier(t){ expander.tier=t; localStorage.setItem(MAP_TIER_KEY,String(t)); }
+  function isTier2(){ return (expander.tier==='2'); }
 
-  function rect(ctx,gx,gy,w,h,fill){
-    ctx.fillStyle=fill;
-    ctx.fillRect(w2sX(gx*T()), w2sY(gy*T()), w*S(), h*S());
-  }
-  function roadH(ctx, x0,y,w){
-    rect(ctx,x0,y,w,1,'#2a2a2a');
-    // dashed center line
-    for(let i=0;i<w;i++){ rect(ctx,x0+i, y+0.48, 0.25, 0.04, '#ffd23f'); }
-  }
-  function roadV(ctx, x,y0,h){
-    rect(ctx,x,y0,1,h,'#2a2a2a');
-  }
-  function lot(ctx, gx,gy,w,h){ rect(ctx,gx,gy,w,h,'#09371c'); }
-  function box(ctx,gx,gy,w,h,color){ rect(ctx,gx,gy,w,h,color); rect(ctx,gx,gy,w,h,'rgba(0,0,0,.08)'); }
+  // Monkey-patch camera clamp to allow roaming in Tier 2 without touching your core.
+  function widenCameraClamp(){
+    if(!isTier2() || widenCameraClamp._done) return;
+    widenCameraClamp._done = true;
 
-  // Publish suggested “unlocked” bounds for the core to adopt after expansion
-  function publishBoundsForTier2(){
-    const b = {
-      x0: Math.min(BASE.x0, D2.x0),
-      y0: Math.min(BASE.y0, D2.y0),
-      x1: Math.max(BASE.x1, D2.x1),
-      y1: Math.max(BASE.y1, D2.y1)
-    };
-    localStorage.setItem(SUGG_KEY, JSON.stringify(b));
-    window._izza_suggested_unlocked = b;
+    // Extend camera bounds by gently offsetting while clamping every frame.
+    IZZA.on('update-pre', ()=>{
+      // no-op hook to ensure our patch runs each frame if needed
+    });
+
+    // Add a soft post-clamp to keep camera inside Tier2 box
+    IZZA.on('update-post', ()=>{
+      const visW = document.getElementById('game').width  / (api.DRAW/api.TILE);
+      const visH = document.getElementById('game').height / (api.DRAW/api.TILE);
+      const maxX = (TIER2.x1+1)*api.TILE - visW;
+      const maxY = (TIER2.y1+1)*api.TILE - visH;
+      api.camera.x = Math.max(TIER2.x0*api.TILE, Math.min(api.camera.x, maxX));
+      api.camera.y = Math.max(TIER2.y0*api.TILE, Math.min(api.camera.y, maxY));
+    });
   }
 
-  function toastOnceTier2(){
-    if(localStorage.getItem(TIER_SEEN)==='2') return;
-    let h = document.getElementById('tutHint');
-    if(!h){
-      h = document.createElement('div');
-      h.id='tutHint';
-      Object.assign(h.style,{
-        position:'fixed', left:'12px', top:'64px', zIndex:14,
-        background:'rgba(10,12,18,.88)', border:'1px solid #394769',
-        color:'#cfe0ff', padding:'8px 10px', borderRadius:'10px', fontSize:'14px'
-      });
-      document.body.appendChild(h);
+  // Allow walking/driving in Tier 2 by soft-blocking only *outside* Tier 2.
+  // We can't replace core collision directly, but we can prevent the hard clamp feel by nudging the player back inside.
+  function softBounds(){
+    if(!isTier2()) return;
+    const t=api.TILE;
+    const gx=(api.player.x/t|0), gy=(api.player.y/t|0);
+    if(gx<TIER2.x0) api.player.x = (TIER2.x0+0.01)*t;
+    if(gx>TIER2.x1) api.player.x = (TIER2.x1-0.01)*t;
+    if(gy<TIER2.y0) api.player.y = (TIER2.y0+0.01)*t;
+    if(gy>TIER2.y1) api.player.y = (TIER2.y1-0.01)*t;
+  }
+
+  // --- Painter: curved roads & buildings (overlay only; keeps your existing tile render) ---
+  function w2sX(wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
+  function w2sY(wy){ return (wy-api.camera.y)*(api.DRAW/api.TILE); }
+
+  // Simple city painter driven by a few bezier/line segments
+  function drawTier2Overlay(){
+    if(!isTier2()) return;
+
+    const ctx=document.getElementById('game').getContext('2d');
+    const S=api.DRAW, t=api.TILE;
+
+    // Roads
+    ctx.save();
+    ctx.lineWidth = Math.max(3, S*0.20);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(180,190,205,0.9)';
+
+    function line(gx1,gy1,gx2,gy2){
+      ctx.beginPath();
+      ctx.moveTo(w2sX(gx1*t+16), w2sY(gy1*t+16));
+      ctx.lineTo(w2sX(gx2*t+16), w2sY(gy2*t+16));
+      ctx.stroke();
     }
-    h.textContent = 'New District unlocked! Explore the city — pistols are now equip-able.';
-    h.style.display='block';
-    setTimeout(()=>{ h.style.display='none'; }, 2600);
-    localStorage.setItem(TIER_SEEN,'2');
+    function quad(gx1,gy1,gcx,gcy,gx2,gy2){
+      ctx.beginPath();
+      ctx.moveTo(w2sX(gx1*t+16), w2sY(gy1*t+16));
+      ctx.quadraticCurveTo(w2sX(gcx*t+16), w2sY(gcy*t+16), w2sX(gx2*t+16), w2sY(gy2*t+16));
+      ctx.stroke();
+    }
+
+    // Main horizontal spines
+    line(14,20, 76,20);
+    line(14,36, 76,36);
+
+    // Vertical spines
+    line(28,14, 28,44);
+    line(52,14, 52,44);
+
+    // Curved loop bottom-left
+    quad(28,36, 30,40, 34,40);
+    quad(34,40, 26,46, 18,44);
+    quad(18,44, 16,44, 16,40);
+
+    // Curved lake road bottom-right
+    quad(56,40, 64,44, 72,44);
+    quad(72,44, 76,42, 76,38);
+
+    // Top ring
+    quad(16,14, 20,12, 28,12);
+    line(28,12, 60,12);
+    quad(60,12, 72,12, 74,18);
+
+    // Short cul-de-sacs
+    line(18,20, 22,20);
+    line(22,20, 22,24);
+    line(60,20, 64,20);
+
+    ctx.restore();
+
+    // Buildings (simple colored blocks; sizes chosen to match your mock)
+    function rect(gx,gy,w,h,color){
+      const sx=w2sX(gx*t), sy=w2sY(gy*t);
+      ctx.fillStyle=color;
+      ctx.fillRect(sx+S*0.10, sy+S*0.10, S*(w-0.20), S*(h-0.20));
+    }
+    // HQ-ish red block
+    rect(42,22, 3,2, '#a44a4a');
+    // Blue civic buildings
+    rect(56,24, 3,2, '#416aa5');
+    rect(36,38, 3,2, '#416aa5');
+    // Small shops row
+    rect(20,28, 1.6,1.6, '#c9cbd3');
+    rect(24,28, 1.6,1.6, '#c9cbd3');
+    rect(28,28, 1.6,1.6, '#c9cbd3');
+    // Park pond suggestion
+    ctx.save();
+    ctx.fillStyle='#7db7d9';
+    ctx.beginPath();
+    ctx.ellipse(w2sX(66*t), w2sY(43*t), S*1.6, S*1.1, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
   }
 
-  // ====== Tier 2 drawing (curvy “city-rug” style) ======
-  function drawTier2(ctx){
-    // base grass
-    lot(ctx, D2.x0, D2.y0, (D2.x1-D2.x0+1), (D2.y1-D2.y0+1));
-
-    // outer loop (approx curves with segments)
-    roadH(ctx, D2.x0+1, D2.y0+2, (D2.x1-D2.x0-2));          // top
-    roadH(ctx, D2.x0+1, D2.y1-2, (D2.x1-D2.x0-2));          // bottom
-    roadV(ctx, D2.x0+2, D2.y0+3, (D2.y1-D2.y0-5));          // left “curve”
-    roadV(ctx, D2.x1-2, D2.y0+1, (D2.y1-D2.y0-2));          // right “curve”
-
-    // inner plaza loop
-    roadH(ctx, D2.x0+6, D2.y0+8, 11);
-    roadV(ctx, D2.x0+6, D2.y0+6, 6);
-    roadV(ctx, D2.x0+16, D2.y0+6, 6);
-
-    // lake loop
-    box(ctx, D2.x1-8, D2.y1-8, 6, 4, '#2b6a7a'); // water
-    roadH(ctx, D2.x1-10, D2.y1-5, 9);
-
-    // little building blocks (toy-town colors)
-    box(ctx, D2.x0+7,  D2.y0+3,  3,2, '#aa3232'); // fire
-    box(ctx, D2.x0+11, D2.y0+3,  3,2, '#4d7bd1'); // police
-    box(ctx, D2.x0+15, D2.y0+3,  3,2, '#e0a82a'); // repair
-    box(ctx, D2.x0+6,  D2.y0+10, 3,2, '#c95aa9'); // shops
-    box(ctx, D2.x0+12, D2.y0+11, 3,2, '#ffcf5a'); // homes
-    box(ctx, D2.x1-6,  D2.y0+6,  3,2, '#6bbf59'); // park
-    box(ctx, D2.x1-6,  D2.y1-6,  3,2, '#d66a3a'); // library
-  }
-
-  // ===== hooks =====
-  IZZA.on('ready', (a)=>{
+  // --- Hooks ---
+  IZZA.on('ready',(a)=>{
     api=a;
-    if(localStorage.getItem(MAP_TIER_KEY)==='2'){
-      publishBoundsForTier2();
-      toastOnceTier2();
+    // If Mission 3 already flipped the flag, move to Tier 2 now
+    expander.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
+    if(isTier2()){ widenCameraClamp(); }
+
+    // Watch for tier flips during play (e.g., when M3 completes)
+    const mo = new MutationObserver(()=>{ /* cheap wake-up */ });
+    mo.observe(document.body||document.documentElement,{subtree:true,childList:true});
+
+    console.log('[MAP EXPANDER] ready; tier =', expander.tier);
+  });
+
+  IZZA.on('update-post', ()=>{
+    if(localStorage.getItem(MAP_TIER_KEY)!==expander.tier){
+      expander.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
+      if(isTier2()){ widenCameraClamp(); }
     }
+    if(isTier2()) softBounds();
   });
 
   IZZA.on('render-post', ()=>{
-    if(!api) return;
-    if(localStorage.getItem(MAP_TIER_KEY)!=='2') return;
-
-    const ctx = document.getElementById('game').getContext('2d');
-    ctx.save();
-    drawTier2(ctx);
-    ctx.restore();
+    if(isTier2()) drawTier2Overlay();
   });
+
 })();
