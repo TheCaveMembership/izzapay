@@ -128,62 +128,118 @@
   }
 
   function addAdminButtons(api){
-    if(!isAdmin()) return;
-
-    const wrap = document.createElement('div');
-    Object.assign(wrap.style,{
-      position:'fixed', right:'8px', top:'48px', zIndex:9999, display:'flex', gap:'6px'
-    });
-
-    function mkBtn(label, onclick){
-      const b=document.createElement('button');
-      b.textContent=label;
-      Object.assign(b.style,{
-        background:'#1b2437', color:'#cfe0ff', border:'1px solid #394769',
-        padding:'6px 10px', borderRadius:'8px', opacity:.9
-      });
-      b.onclick = onclick;
-      return b;
-    }
-
-    // Reset to Mission 1 (keep tutorial done)
-    const bM1 = mkBtn('Dev: Reset → M1', ()=>{
-      try{
-        localStorage.setItem('izzaMission1','done'); // keep tutorial unlocked
-        localStorage.setItem('izzaMissions','1');     // missions completed = 1
-        localStorage.removeItem('izzaMission2');      // if any legacy flag existed
-        toast('Dev: Missions set to 1 (tutorial done).');
-      }catch(_e){}
-    });
-
-    // Full reset (everything fresh)
-    const bFresh = mkBtn('Dev: Full Reset', ()=>{
-      try{
-        localStorage.removeItem('izzaMission1');
-        localStorage.removeItem('izzaMissions');
-        localStorage.removeItem('izzaMission2');
-        localStorage.removeItem('izzaInventory');
-        // (Optional) coins back to 0
-        localStorage.setItem('izzaCoins','0');
-        toast('Dev: Full reset complete.');
-      }catch(_e){}
-    });
-
-    // Coins helper (quick buy testing)
-    const bCoins = mkBtn('+300 IC', ()=>{
-      try{
-        const n = parseInt(localStorage.getItem('izzaCoins')||'0',10);
-        localStorage.setItem('izzaCoins', String(n+300));
-        if(api && api.setCoins && api.getCoins) api.setCoins(api.getCoins()+300);
-        toast('Dev: +300 coins.');
-      }catch(_e){}
-    });
-
-    wrap.appendChild(bM1);
-    wrap.appendChild(bFresh);
-    wrap.appendChild(bCoins);
-    document.body.appendChild(wrap);
+  // show if CamMac, ?admin=1, or localStorage izzaAdmin=1
+  function isAdmin(){
+    try{
+      const byQuery = /[?&]admin=1(?:&|$)/i.test(location.search);
+      const prof = (window.__IZZA_PROFILE__ || {});
+      const byName = !!(prof && typeof prof.username==='string' && /^cammac$/i.test(prof.username));
+      const byLS = localStorage.getItem('izzaAdmin') === '1';
+      if(byQuery) localStorage.setItem('izzaAdmin','1');
+      return byQuery || byName || byLS;
+    }catch(_e){ return false; }
   }
+  if(!isAdmin()) return;
+
+  const wrap = document.createElement('div');
+  Object.assign(wrap.style,{ position:'fixed', right:'8px', top:'48px', zIndex:9999, display:'flex', gap:'6px' });
+
+  const mkBtn = (label, onclick)=>{
+    const b=document.createElement('button');
+    b.textContent=label;
+    Object.assign(b.style,{
+      background:'#1b2437', color:'#cfe0ff', border:'1px solid #394769',
+      padding:'6px 10px', borderRadius:'8px', opacity:.9
+    });
+    b.onclick = onclick;
+    return b;
+  };
+
+  function resetToM1({reload=true}={}){
+    try{
+      // remove every izzaMission* except mission1
+      const toRemove=[];
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if(/^izzaMission/i.test(k) && k !== 'izzaMission1') toRemove.push(k);
+      }
+      toRemove.forEach(k=> localStorage.removeItem(k));
+
+      localStorage.setItem('izzaMission1','done'); // keep tutorial unlocked
+      localStorage.setItem('izzaMissions','1');    // missions completed = 1
+
+      // in-memory resets so current session reflects it
+      try{
+        if(api && api.setWanted) api.setWanted(0);
+        if(api && api.cops) api.cops.length = 0;
+        if(api && api.player && api.doorSpawn){
+          api.player.x = api.doorSpawn.x;
+          api.player.y = api.doorSpawn.y;
+        }
+        // refresh coin pill from storage (non-destructive)
+        if(api && api.setCoins && api.getCoins) api.setCoins(api.getCoins());
+      }catch(_e){}
+
+      // let other plugins know
+      try{ if(window.IZZA && IZZA.emit) IZZA.emit('admin-reset', {to:'M1'}); }catch(_e){}
+
+      // UI feedback
+      (function toast(msg, seconds=2.2){
+        let h = document.getElementById('tutHint');
+        if(!h){
+          h=document.createElement('div'); h.id='tutHint';
+          Object.assign(h.style,{
+            position:'fixed', left:'12px', top:'64px', zIndex:9999,
+            background:'rgba(10,12,18,.85)', border:'1px solid #394769',
+            color:'#cfe0ff', padding:'8px 10px', borderRadius:'8px', fontSize:'14px'
+          });
+          document.body.appendChild(h);
+        }
+        h.textContent=msg; h.style.display='block';
+        clearTimeout(h._t); h._t=setTimeout(()=>{h.style.display='none';}, seconds*1000);
+      })('Dev: Missions set to 1 (tutorial done).');
+
+      // hard reload so any mission-flow plugins re-read storage keys
+      if(reload) setTimeout(()=>location.reload(), 350);
+    }catch(_e){}
+  }
+
+  const bM1 = mkBtn('Dev: Reset → M1', ()=> resetToM1());
+  const bFresh = mkBtn('Dev: Full Reset', ()=>{
+    try{
+      // nuke all izza* mission/inventory progress
+      const toRemove=[];
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if(/^izzaMission/i.test(k) || /^izzaInventory$/.test(k)) toRemove.push(k);
+      }
+      toRemove.forEach(k=> localStorage.removeItem(k));
+      localStorage.setItem('izzaCoins','0');
+      if(api && api.setCoins) api.setCoins(0);
+      if(api && api.setWanted) api.setWanted(0);
+      if(api && api.cops) api.cops.length=0;
+      if(api && api.player && api.doorSpawn){
+        api.player.x = api.doorSpawn.x;
+        api.player.y = api.doorSpawn.y;
+      }
+      // notify + reload
+      try{ if(window.IZZA && IZZA.emit) IZZA.emit('admin-reset', {to:'fresh'}); }catch(_e){}
+      setTimeout(()=>location.reload(), 350);
+    }catch(_e){}
+  });
+  const bCoins = mkBtn('+300 IC', ()=>{
+    try{
+      const n = parseInt(localStorage.getItem('izzaCoins')||'0',10);
+      localStorage.setItem('izzaCoins', String(n+300));
+      if(api && api.setCoins && api.getCoins) api.setCoins(api.getCoins()+300);
+    }catch(_e){}
+  });
+
+  wrap.appendChild(bM1);
+  wrap.appendChild(bFresh);
+  wrap.appendChild(bCoins);
+  document.body.appendChild(wrap);
+}
 
   // ---------- boot ----------
   (async function boot(){
