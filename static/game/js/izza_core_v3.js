@@ -1026,7 +1026,7 @@
       // expose for plugins:
       getMissionCount,
       getInventory, setInventory,
-      ready: true
+      ready: true,
         
       getEquipped: ()=> equipped.weapon,
       setEquipped: (id)=>{ equipped.weapon = id; }
