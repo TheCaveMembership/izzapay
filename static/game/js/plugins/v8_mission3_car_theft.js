@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.3-mission3-car-theft+joystick-drive+edge-goal+tier2';
+  const BUILD = 'v8.4-mission3-car-theft+instant-finish+tier2-flag';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Keys / storage ----------
@@ -9,17 +9,16 @@
   const POS_KEY      = 'izzaMission3Pos';        // {gx,gy}
   const POS_VER_KEY  = 'izzaMission3PosVer';
   const POS_VERSION  = '1';
-  const MAP_TIER_KEY = 'izzaMapTier';            // '1' | '2' (core watches this)
+  const MAP_TIER_KEY = 'izzaMapTier';            // '1' | '2' (core/map-expander will react)
 
   // Start location: 8 tiles LEFT of outside spawn (HQ door)
   const DEFAULT_OFFSET_TILES = { dx: -8, dy: 0 };
 
   // Gameplay knobs
   const HIJACK_RADIUS   = 22;     // px to a car to allow hijack on B
-  const CAR_SPEED       = 120;    // px/s — matches NPC traffic in core
-  const EXPAND_NUDGE_T  = 2;      // tiles to nudge the player into the new area when expanding
+  const CAR_SPEED       = 120;    // px/s — same as NPC cars
 
-  // Locals populated on ready
+  // Locals
   let api=null;
   const m3 = {
     state: localStorage.getItem(M3_KEY) || 'ready',   // 'ready' | 'active' | 'done'
@@ -29,11 +28,8 @@
     _savedWalkSpeed: null
   };
 
-  // track player delta each frame (so we can know push direction at edge)
-  let _prevPX=0, _prevPY=0, _lastDX=0, _lastDY=0;
-
-  // ---------- Utilities ----------
-  function toast(msg, seconds=2.8){
+  // ---------- Utils ----------
+  function toast(msg, seconds=2.4){
     let h = document.getElementById('tutHint');
     if(!h){
       h = document.createElement('div');
@@ -50,7 +46,6 @@
     clearTimeout(h._t);
     h._t = setTimeout(()=>{ h.style.display='none'; }, seconds*1000);
   }
-
   function playerGrid(){
     const t=api.TILE;
     return {
@@ -69,7 +64,6 @@
         if(Number.isFinite(j.gx) && Number.isFinite(j.gy)){ m3.gx=j.gx|0; m3.gy=j.gy|0; return; }
       }catch{}
     }
-    // default relative to doorSpawn
     const t=api.TILE;
     const doorGX = Math.floor((api.doorSpawn.x + 8)/t);
     const doorGY = Math.floor(api.doorSpawn.y/t);
@@ -78,8 +72,6 @@
     localStorage.setItem(POS_KEY, JSON.stringify({gx:m3.gx, gy:m3.gy}));
     localStorage.setItem(POS_VER_KEY, POS_VERSION);
   }
-
-  // Tiny dev helper
   window._izza_m3_here = function(){
     const {gx,gy}=playerGrid();
     m3.gx=gx; m3.gy=gy;
@@ -104,14 +96,14 @@
           <div style="font-weight:700; font-size:16px; margin-bottom:6px">Mission 3</div>
           <div style="opacity:.9; line-height:1.45">
             Steal a <b>car</b>: walk up to a passing car and press <b>B</b>.<br>
-            Then <b>drive to the glowing edge</b> to open the city.
+            Then drive into the <b>glowing gold edge</b>.
           </div>
           <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px">
             <button id="m3Cancel" class="ghost">Cancel</button>
             <button id="m3Start">Start</button>
           </div>
           <div style="opacity:.7; font-size:12px; margin-top:6px">
-            Drive with your joystick (or WASD/Arrows). Same controls, just faster.
+            Drive with the joystick (or WASD/Arrows). Same controls, just faster.
           </div>
         </div>`;
       document.body.appendChild(host);
@@ -124,26 +116,19 @@
     host.style.display='flex';
   }
 
-  // ---------- World geometry helpers (to place the goal) ----------
-  function currentTier(){ return localStorage.getItem(MAP_TIER_KEY) || '1'; }
-  function unlockedRect(tier){
-    return tier==='2' ? { x0:10, y0:12, x1:80, y1:50 } : { x0:18, y0:18, x1:72, y1:42 };
-  }
-  function roadGyForTier(tier){
-    // reproduce core’s road math to sit the goal on the main horizontal road
-    const u = unlockedRect(tier);
+  // ---------- Geometry (goal placement) ----------
+  function unlockedRectTier1(){ return { x0:18, y0:18, x1:72, y1:42 }; }
+  function roadGyTier1(){
+    const u = unlockedRectTier1();
     const bW=10, bH=6;
     const bX = Math.floor((u.x0+u.x1)/2) - Math.floor(bW/2);
     const bY = u.y0 + 5;
-    const hRoadY = bY + bH + 1;
-    return hRoadY;
+    return bY + bH + 1; // main horizontal road Y
   }
-
-  // Right-edge goal rectangle (2 tiles wide on the main road)
   function goalRectTier1(){
-    const u = unlockedRect('1');
-    const gy = roadGyForTier('1');
-    return { x0: u.x1-1, x1: u.x1, gy };
+    const u = unlockedRectTier1();
+    const gy = roadGyTier1();
+    return { x0: u.x1-1, x1: u.x1, gy }; // 2 gold tiles on right edge
   }
 
   // ---------- Drawing ----------
@@ -152,7 +137,7 @@
 
   function drawStartSquare(){
     if(m3.state==='done') return;
-    if(localStorage.getItem(M2_KEY)!=='done') return; // only after M2
+    if(localStorage.getItem(M2_KEY)!=='done') return;
     const t=api.TILE;
     const sx=w2sX(m3.gx*t), sy=w2sY(m3.gy*t);
     const S=api.DRAW, ctx=document.getElementById('game').getContext('2d');
@@ -161,8 +146,6 @@
     ctx.fillRect(sx+S*0.15, sy+S*0.15, S*0.70, S*0.70);
     ctx.restore();
   }
-
-  // Glowing right-edge indicator (where we want to expand)
   function drawEdgeGoal(){
     if(m3.state==='done') return;
     if(localStorage.getItem(M2_KEY)!=='done') return;
@@ -178,7 +161,6 @@
     }
     ctx.restore();
   }
-
   function drawCarOverlay(){
     if(!m3.driving || !m3.car) return;
     const ctx=document.getElementById('game').getContext('2d');
@@ -195,22 +177,23 @@
   function completeM3(){
     setM3State('done');
     m3.driving=false; m3.car=null;
-    // Unlock pistols (mission count >= 3)
+    if(m3._savedWalkSpeed!=null){ api.player.speed = m3._savedWalkSpeed; m3._savedWalkSpeed=null; }
+    // bump mission count to >=3 (pistols equip unlock)
     try{
       const cur = (api.getMissionCount && api.getMissionCount()) || 0;
       localStorage.setItem('izzaMissions', String(Math.max(cur,3)));
     }catch{}
-    // Ask core to expand the map
+    // tell the map-expander/core we’re on Tier 2 now
     localStorage.setItem(MAP_TIER_KEY, '2');
     toast('Mission 3 complete! New district unlocked & pistols enabled.');
   }
 
   function startDriving(fromCar){
-    // Remove that traffic car
+    // remove hijacked traffic car
     const idx = (api.cars||[]).indexOf(fromCar);
     if(idx>=0) api.cars.splice(idx,1);
 
-    // Spawn “driver” who walks away
+    // eject driver as a pedestrian
     try{
       const skins=['ped_m','ped_f','ped_m_dark','ped_f_dark'];
       const skin=skins[(Math.random()*skins.length)|0];
@@ -223,24 +206,17 @@
       });
     }catch{}
 
-    // Visual car follows the player
+    // visual car follows the (now-fast) player
     m3.car = { x: api.player.x, y: api.player.y };
     m3.driving = true;
     setM3State('active');
 
-    // Make the *player* move at car speed so joystick works & collisions stay correct
+    // use the exact same input/physics as walking by just increasing player speed
     if(m3._savedWalkSpeed==null) m3._savedWalkSpeed = api.player.speed;
     api.player.speed = CAR_SPEED;
 
     toast('You hijacked a car! Drive to the glowing edge.');
   }
-
-  function stopDriving(){
-    m3.driving=false; m3.car=null;
-    if(m3._savedWalkSpeed!=null){ api.player.speed = m3._savedWalkSpeed; m3._savedWalkSpeed=null; }
-  }
-
-  // ---------- Input ----------
   function nearestCar(){
     let best=null, bestD=1e9;
     for(const c of api.cars||[]){
@@ -249,14 +225,11 @@
     }
     return best && bestD<=HIJACK_RADIUS ? best : null;
   }
-
   function nearStart(){
     const {gx,gy}=playerGrid();
     return (Math.abs(gx-m3.gx)+Math.abs(gy-m3.gy))<=1;
   }
-
   function onB(){
-    // Only after M2 done
     if(localStorage.getItem(M2_KEY)!=='done') return;
     if(m3.state==='done') return;
 
@@ -264,39 +237,28 @@
       startModal(()=>{ setM3State('active'); toast('Find a car and press B to hijack it.'); });
       return;
     }
-
     if(m3.state==='active' && !m3.driving){
       const c=nearestCar();
       if(c){ startDriving(c); }
-      else if(nearStart()){
-        setM3State('ready'); toast('Mission 3 cancelled.');
-      }
+      else if(nearStart()){ setM3State('ready'); toast('Mission 3 cancelled.'); }
     }
   }
 
-  // ---------- Driving update (joystick-powered) ----------
-  function updateDriving(dt){
+  // ---------- Driving update ----------
+  function updateDriving(){
     if(!m3.driving || !m3.car) return;
 
-    // Car simply follows the (now-fast) player — this preserves collisions & unlocked checks.
+    // the “car” sprite simply tracks the player position (collision stays with player)
     m3.car.x = api.player.x;
     m3.car.y = api.player.y;
 
-    // If pushing into the glowing edge on the main road, finish + expand.
+    // INSTANT FINISH: as soon as player center is inside any gold tile, complete
     const g = goalRectTier1();
     const t = api.TILE;
     const gx = Math.floor(api.player.x/t);
     const gy = Math.floor(api.player.y/t);
-
-    const inGoalStripe = (gy===g.gy) && (gx>=g.x0 && gx<=g.x1);
-    const pushingOutward = _lastDX > 0; // moving toward the right edge
-
-    if(inGoalStripe && pushingOutward){
-      // Expand and give a tiny nudge into the new district so it "feels" like you drove through
+    if (gy===g.gy && gx>=g.x0 && gx<=g.x1){
       completeM3();
-      // small nudge right; core will widen on the next frame
-      api.player.x += EXPAND_NUDGE_T * t;
-      stopDriving();
     }
   }
 
@@ -304,34 +266,11 @@
   IZZA.on('ready', (a)=>{
     api=a;
     loadPos();
-
-    // Bind B for keyboard + mobile button
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(); });
-    const btnB=document.getElementById('btnB');
-    if(btnB) btnB.addEventListener('click', onB);
-
-    _prevPX = api.player.x;
-    _prevPY = api.player.y;
-
+    const btnB=document.getElementById('btnB'); if(btnB) btnB.addEventListener('click', onB);
     console.log('[M3] ready', { state:m3.state, start:{gx:m3.gx, gy:m3.gy} });
   });
-
-  // capture player delta *after* core movement each tick
-  IZZA.on('update-pre', ()=>{
-    _prevPX = api.player.x;
-    _prevPY = api.player.y;
-  });
-
-  IZZA.on('update-post', ({dtSec})=>{
-    _lastDX = api.player.x - _prevPX;
-    _lastDY = api.player.y - _prevPY;
-    if(m3.driving) updateDriving(dtSec||0);
-  });
-
-  IZZA.on('render-post', ()=>{
-    drawStartSquare();
-    drawEdgeGoal();
-    drawCarOverlay();
-  });
+  IZZA.on('update-post', ()=>{ if(m3.driving) updateDriving(); });
+  IZZA.on('render-post', ()=>{ drawStartSquare(); drawEdgeGoal(); drawCarOverlay(); });
 
 })();
