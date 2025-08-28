@@ -1,28 +1,44 @@
 // /static/game/js/plugins/v8_mission3_car_theft.js
 (function () {
-  const BUILD = 'v8.3-mission3-car-theft+drive-with-joystick+edge-complete';
+  const BUILD = 'v8.4-m3-car-theft+driveable+gold-exit+map-expand';
   console.log('[IZZA PLAY]', BUILD);
 
-  // --- config / LS keys ---
-  const START_KEY  = 'izzaMission3';   // 'ready' | 'active' | 'done'
-  const POS_KEY    = 'izzaMission3Pos';// {gx,gy} anchor of blue square (spawned after M2)
-  const BUBBLE_ID  = 'm3Bubble';
+  // -------- config
+  const M3_KEY        = 'izzaMission3';            // 'ready' | 'active' | 'done'
+  const EXIT_POS_KEY  = 'izzaMission3Exit';        // {gx,gy}
+  const EXIT_GLOW_ID  = 'm3ExitGlow';
+  const CAR_SPEED     = 120;                       // match core NPC car speed
+  const GOAL_TOAST    = 'Drive into the glowing edge to escape!';
+  const UNLOCK_TOAST  = 'Mission 3 complete! Map expanded and pistols unlocked to equip.';
 
-  // appear 8 tiles LEFT of door (your ask)
-  const DEFAULT_OFFSET = { dx: -8, dy: 0 };
+  // Default exit: right edge, on the horizontal road row
+  // You can override via window.__IZZA_M3_EXIT__ = {gx,gy} or LS 'izzaMission3Exit'
+  function defaultExit(api) {
+    const gx = api ? Math.max(api.doorSpawn.x / api.TILE | 0, 0) : 50; // not really used
+    // Better default: right boundary of current unlocked area, on the main road row
+    const right = Math.floor((api.camera.x + (api.DRAW / (api.DRAW / api.TILE)) * 9999) / api.TILE); // dummy
+    // Use world layout from core that’s stable:
+    //   unlocked.x1 is not directly exposed, but the main road gy is derivable from doorSpawn:
+    // doorSpawn is on top sidewalk; core sets horizontal road at (door.gy + 1)
+    const doorGy = Math.floor(api.doorSpawn.y / api.TILE);
+    const hRoadY = doorGy + 1;
+    // We can approximate the right edge with a generous value; collision will clamp correctly.
+    return { gx: 72, gy: hRoadY };
+  }
 
-  // --- locals/state ---
+  // -------- state
   let api = null;
   const m3 = {
-    state: localStorage.getItem(START_KEY) || 'ready', // ready|active|done
-    goal: { gx: 0, gy: 0 },
-    driving: false,
-    car: null,          // {w,h} pseudo-car we render while driving (we detach actual car from traffic)
+    state: localStorage.getItem(M3_KEY) || 'ready',   // ready | active | done
+    inCar: false,
+    exitGX: 0,
+    exitGY: 0
   };
   window._izza_m3 = m3; // handy for debugging
 
-  // ------------ tiny UI helpers ------------
-  function toast(msg, seconds = 2.4) {
+  // -------- utilities
+  const now = () => performance.now();
+  function toast(msg, seconds = 2.8) {
     let h = document.getElementById('tutHint');
     if (!h) {
       h = document.createElement('div');
@@ -30,8 +46,8 @@
       Object.assign(h.style, {
         position: 'fixed', left: '12px', top: '64px', zIndex: 9,
         background: 'rgba(10,12,18,.88)', border: '1px solid #394769',
-        color: '#cfe0ff', padding: '8px 10px', borderRadius: '10px', fontSize: '14px',
-        maxWidth: '70vw'
+        color: '#cfe0ff', padding: '8px 10px', borderRadius: '10px',
+        fontSize: '14px', maxWidth: '70vw'
       });
       document.body.appendChild(h);
     }
@@ -39,25 +55,6 @@
     clearTimeout(h._t);
     h._t = setTimeout(() => { h.style.display = 'none'; }, seconds * 1000);
   }
-  function ensureBubble() {
-    let b = document.getElementById(BUBBLE_ID);
-    if (!b) {
-      b = document.createElement('div');
-      b.id = BUBBLE_ID;
-      Object.assign(b.style, {
-        position: 'fixed', right: '18px', top: '98px', zIndex: 8,
-        background: 'rgba(7,12,22,.85)', color: '#cfe0ff',
-        border: '1px solid #2f3b58', borderRadius: '18px',
-        padding: '6px 10px', fontSize: '12px', pointerEvents: 'none'
-      });
-      document.body.appendChild(b);
-    }
-    return b;
-  }
-  function showHintBubble(txt) { const b = ensureBubble(); b.textContent = txt; b.style.display = 'block'; }
-  function hideHintBubble() { const b = document.getElementById(BUBBLE_ID); if (b) b.style.display = 'none'; }
-
-  // ------------ grid helpers ------------
   function playerGrid() {
     const t = api.TILE;
     return {
@@ -65,213 +62,203 @@
       gy: Math.floor((api.player.y + t / 2) / t)
     };
   }
-  function manhattan(a, b, c, d) { return Math.abs(a - c) + Math.abs(b - d); }
+  function distMan(a, b, c, d) { return Math.abs(a - c) + Math.abs(b - d); }
 
-  // ------------ mission anchor (blue square) ------------
-  function loadGoal() {
-    // saved
-    const saved = localStorage.getItem(POS_KEY);
+  // -------- exit placement
+  function loadExitPos() {
+    // 1) explicit runtime override
+    if (window.__IZZA_M3_EXIT__
+      && Number.isFinite(window.__IZZA_M3_EXIT__.gx)
+      && Number.isFinite(window.__IZZA_M3_EXIT__.gy)) {
+      m3.exitGX = window.__IZZA_M3_EXIT__.gx | 0;
+      m3.exitGY = window.__IZZA_M3_EXIT__.gy | 0;
+      localStorage.setItem(EXIT_POS_KEY, JSON.stringify({ gx: m3.exitGX, gy: m3.exitGY }));
+      return;
+    }
+    // 2) saved
+    const saved = localStorage.getItem(EXIT_POS_KEY);
     if (saved) {
       try {
         const j = JSON.parse(saved);
-        if (Number.isFinite(j.gx) && Number.isFinite(j.gy)) { m3.goal.gx = j.gx | 0; m3.goal.gy = j.gy | 0; return; }
+        if (Number.isFinite(j.gx) && Number.isFinite(j.gy)) {
+          m3.exitGX = j.gx | 0;
+          m3.exitGY = j.gy | 0;
+          return;
+        }
       } catch { }
     }
-    // default from door spawn
-    const t = api.TILE, ds = api.doorSpawn;
-    const doorGX = Math.floor((ds.x + 8) / t);
-    const doorGY = Math.floor(ds.y / t);
-    m3.goal.gx = doorGX + DEFAULT_OFFSET.dx;
-    m3.goal.gy = doorGY + DEFAULT_OFFSET.dy;
-    localStorage.setItem(POS_KEY, JSON.stringify(m3.goal));
+    // 3) default based on core layout
+    const d = defaultExit(api);
+    m3.exitGX = d.gx; m3.exitGY = d.gy;
+    localStorage.setItem(EXIT_POS_KEY, JSON.stringify({ gx: m3.exitGX, gy: m3.exitGY }));
   }
 
-  // allow moving goal quickly via console (like Mission 2 tool you used)
-  window._izza_m3_setAtPlayer = function () {
-    const g = playerGrid();
-    m3.goal = { gx: g.gx, gy: g.gy };
-    localStorage.setItem(POS_KEY, JSON.stringify(m3.goal));
-    toast(`Mission 3 anchor set to ${g.gx},${g.gy}`);
+  // Quick helper if you want to drop the exit where you stand:
+  //   _izza_m3_setExitHere()
+  window._izza_m3_setExitHere = function () {
+    const { gx, gy } = playerGrid();
+    m3.exitGX = gx; m3.exitGY = gy;
+    localStorage.setItem(EXIT_POS_KEY, JSON.stringify({ gx, gy }));
+    toast(`M3 exit set to ${gx},${gy}`);
   };
 
-  // ------------ drawing ------------
+  // -------- gold glow drawing
   function w2sX(wx) { return (wx - api.camera.x) * (api.DRAW / api.TILE); }
   function w2sY(wy) { return (wy - api.camera.y) * (api.DRAW / api.TILE); }
 
-  function drawGoal() {
+  function drawExitGlow() {
     if (m3.state === 'done') return;
-    const S = api.DRAW, t = api.TILE;
-    const sx = w2sX(m3.goal.gx * t), sy = w2sY(m3.goal.gy * t);
+    // Show exit glow only while active & in-car (motivates the objective)
+    if (!(m3.state === 'active' && m3.inCar)) return;
+
+    const t = api.TILE, S = api.DRAW;
+    const sx = w2sX(m3.exitGX * t), sy = w2sY(m3.exitGY * t);
     const ctx = document.getElementById('game').getContext('2d');
+
+    // pulsing gold glow
+    const pulse = 0.65 + 0.35 * Math.sin(now() / 220);
     ctx.save();
-    ctx.fillStyle = 'rgba(70,140,255,.75)';
-    ctx.fillRect(sx + S * 0.15, sy + S * 0.15, S * 0.70, S * 0.70);
+    ctx.fillStyle = `rgba(255, 208, 86, ${0.45 + 0.35 * pulse})`;
+    ctx.fillRect(sx + S * 0.1, sy + S * 0.1, S * 0.8, S * 0.8);
+    ctx.strokeStyle = `rgba(255, 235, 150, ${0.8})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx + S * 0.12, sy + S * 0.12, S * 0.76, S * 0.76);
     ctx.restore();
   }
 
-  // draw the “car” over the player while driving so it looks like you’re inside it
-  function drawDrivenCar() {
-    if (!m3.driving) return;
-    const ctx = document.getElementById('game').getContext('2d');
-    const S = api.DRAW;
-    const sx = w2sX(api.player.x), sy = w2sY(api.player.y);
-    ctx.save();
-    ctx.fillStyle = '#c0c8d8';
-    ctx.fillRect(sx + S * 0.10, sy + S * 0.25, S * 0.80, S * 0.50);
-    // simple windshield hint
-    ctx.fillStyle = 'rgba(255,255,255,.2)';
-    ctx.fillRect(sx + S * 0.55, sy + S * 0.28, S * 0.32, S * 0.20);
-    ctx.restore();
+  // -------- hijack & driving
+  function nearAnyCar() {
+    if (!api.cars || !api.cars.length) return null;
+    const px = api.player.x, py = api.player.y;
+    let best = null, bestD = 9999;
+    for (const c of api.cars) {
+      const d = Math.hypot(px - c.x, py - c.y);
+      if (d < 34 && d < bestD) { best = c; bestD = d; }
+    }
+    return best;
   }
 
-  // ------------ mission state ------------
-  function getMissions() { return (api && api.getMissionCount) ? api.getMissionCount() : 0; }
-  function setMission3Done() {
-    localStorage.setItem(START_KEY, 'done');
+  function startM3IfNeeded() {
+    if (m3.state === 'ready') {
+      m3.state = 'active';
+      localStorage.setItem(M3_KEY, 'active');
+      toast('Mission 3: Steal a car.');
+    }
+  }
+
+  function enterCar() {
+    startM3IfNeeded();
+    m3.inCar = true;
+    api.player.speed = CAR_SPEED;
+    toast(GOAL_TOAST, 3.2);
+  }
+
+  function exitCar() {
+    m3.inCar = false;
+    api.player.speed = 90; // back to on-foot default
+  }
+
+  function completeM3() {
+    // mark done & unlock content
+    localStorage.setItem(M3_KEY, 'done');
     m3.state = 'done';
-    // bump global mission count to >=3
+    // bump overall mission count to >=3
     try {
-      const cur = getMissions();
+      const cur = (api.getMissionCount && api.getMissionCount()) || 0;
       const next = Math.max(cur, 3);
       localStorage.setItem('izzaMissions', String(next));
     } catch { }
-  }
 
-  function startMission() {
-    m3.state = 'active';
-    localStorage.setItem(START_KEY, 'active');
-    showHintBubble('Mission 3: Steal a car (B near a passing car). Drive it to the map edge.');
-    toast('Mission 3 started!');
-  }
-
-  function completeMission() {
-    m3.driving = false; m3.car = null;
-    hideHintBubble();
-    setMission3Done();
-
-    // unlock bigger map & firearms equip
+    // Expand the map immediately so the next player step can go into black area
     localStorage.setItem('izzaMapTier', '2');
-    toast('Mission 3 complete! New district unlocked. Pistols can now be equipped.', 4);
+
+    toast(UNLOCK_TOAST, 4);
   }
 
-  // ------------ interaction ------------
-  function nearGoal() {
-    const g = playerGrid();
-    return manhattan(g.gx, g.gy, m3.goal.gx, m3.goal.gy) <= 1;
+  function atExitTile() {
+    const { gx, gy } = playerGrid();
+    return gx === (m3.exitGX | 0) && gy === (m3.exitGY | 0);
   }
 
-  function takeOverNearestCar() {
-    if (!api || !api.cars || !api.cars.length) return false;
-    // find the closest car on screen
-    let best = null, bestD = 9999;
-    for (const c of api.cars) {
-      const d = Math.hypot(api.player.x - c.x, api.player.y - c.y);
-      if (d < bestD) { bestD = d; best = c; }
-    }
-    if (!best || bestD > 38) return false; // must be pretty close
-    // remove from traffic; we will render a proxy car following the player
-    const idx = api.cars.indexOf(best);
-    if (idx >= 0) api.cars.splice(idx, 1);
-    m3.driving = true;
-    m3.car = { takenFrom: best };
-    showHintBubble('Driving… Reach the black border to complete.');
-    toast('Car hijacked!');
-    return true;
-  }
-
-  // At the unlocked border?
-  function atUnlockedEdge() {
-    // Using the core’s unlocked rect via camera clamps is private, so derive from minimap/position:
-    // Success if any neighbor tile is outside the visible unlocked area (drawn as black).
-    const t = api.TILE;
-    const gx = Math.floor((api.player.x + t / 2) / t);
-    const gy = Math.floor((api.player.y + t / 2) / t);
-
-    // reconstruct unlocked rect from minimap math used by core (export not provided),
-    // but we can infer by testing the camera clamps; however simplest is to probe by
-    // asking core to drawTile? Not available. So approximate by checking clamping to map bounds:
-    // Instead, rely on player camera clamps: when close to edges, going further is blocked by collision
-    // but we can detect “black neighbor” by sampling 1 tile out of bounds using the same building rules
-    // exposed via solids on your current core: outside unlocked is treated solid — so look 1 tile away
-    function isSolid(gx, gy) {
-      // mirror your buildings: HQ + Shop solids + out-of-unlocked (solid); expose minimal from API:
-      // We can’t call core’s isSolid, so treat outside the 90x60 map as solid too.
-      if (gx < 0 || gy < 0 || gx >= 90 || gy >= 60) return true;
-      // A cheap proxy for “outside unlocked”: use camera bounds: when the screen tries to scroll past,
-      // camera clamps to unlocked rect. We can infer unlocked bounds from camera & canvas size,
-      // but that varies with device. Simpler: just treat border as: gx<=api.camera.x/TILE etc. — noisy.
-      // -> NEW plan: mission succeeds when the *screen* shows pure black adjacent tile under the player.
-      // Implemented more simply below in render hook (see _sawBlackUnderFeet flag).
-      return false;
-    }
-    return false;
-  }
-
-  // We’ll detect the black border in render-pass by peeking the tile under a tiny offset;
-  // it’s robust because your core paints the black area first.
-  let _sawBlackUnderFeet = false;
-
-  // ------------ input hook for B ------------
+  // -------- input hook (B to hijack / optionally get out)
   function onB() {
     if (m3.state === 'done') return;
+    if (!api || !api.ready) return;
 
-    if (nearGoal()) {
-      // Only after mission 2 is done
-      if (getMissions() < 2) { toast('Complete Mission 2 first.'); return; }
-      if (m3.state === 'ready') { startMission(); return; }
-    }
+    const car = nearAnyCar();
 
-    if (m3.state === 'active') {
-      if (!m3.driving) {
-        // try hijack
-        takeOverNearestCar();
+    if (!m3.inCar) {
+      // try to hijack a passing car
+      if (car) {
+        // “remove” driver: turn the car into just a visual shell (we draw the shell via core already)
+        // We don’t need to mutate car physics; player movement will do the driving illusion.
+        enterCar();
       }
-      // If already driving and we’re touching black border, finishing will happen in update
+    } else {
+      // optional: allow getting out with B (kept for testing)
+      // exitCar();
     }
   }
 
+  // keyboard + mobile button
   function bindB() {
     window.addEventListener('keydown', (e) => {
       if (e.key && e.key.toLowerCase() === 'b') onB();
     });
-    const btn = document.getElementById('btnB');
-    if (btn) btn.addEventListener('click', onB);
+    const btnB = document.getElementById('btnB');
+    if (btnB) btnB.addEventListener('click', onB);
   }
 
-  // ------------ hooks ------------
+  // -------- glue to core update/render
   IZZA.on('ready', (a) => {
     api = a;
-    loadGoal();
     bindB();
-    console.log('[M3] ready', { state: m3.state, goal: m3.goal });
+    loadExitPos();
+
+    // If player already finished M3 earlier and map isn’t expanded (e.g. new core),
+    // make sure it’s expanded now.
+    if (m3.state === 'done' && localStorage.getItem('izzaMapTier') !== '2') {
+      localStorage.setItem('izzaMapTier', '2');
+    }
+
+    console.log('[M3] ready', { state: m3.state, inCar: m3.inCar, exit: { gx: m3.exitGX, gy: m3.exitGY } });
   });
 
-  // While driving, we let core move the player with the joystick as usual.
-  // We just watch for completion (touching the black area).
+  // Let the player “drive” while in car by simply letting core movement run
+  // We only add mission logic here (detecting exit)
   IZZA.on('update-post', () => {
+    if (!api) return;
     if (m3.state !== 'active') return;
 
-    if (m3.driving) {
-      showHintBubble('Driving… Reach the black border');
-      if (_sawBlackUnderFeet) {
-        completeMission();
+    // When in car: speed is boosted; collision is still enforced by core's tryMove()
+    if (m3.inCar) {
+      api.player.speed = CAR_SPEED;
+
+      // Check for success: touching the glowing border tile
+      if (atExitTile()) {
+        // Expand first, then mark complete so the very next step can move into new area
+        completeM3();
       }
     }
   });
 
-  // Draw goal + the car overlay, and detect black under feet
+  // Draw exit glow + keep the “car overlay” look by drawing a box over player
   IZZA.on('render-post', () => {
-    if (m3.state !== 'done') drawGoal();
+    if (!api) return;
 
-    // peek pixel under player to see if it’s black (map border)
-    const cvs = document.getElementById('game');
-    const ctx = cvs.getContext('2d');
-    const px = Math.floor(w2sX(api.player.x + api.DRAW * 0.5));
-    const py = Math.floor(w2sY(api.player.y + api.DRAW * 0.9)); // bottom of sprite (safer for border)
-    const data = ctx.getImageData(Math.max(0, Math.min(px, cvs.width - 1)), Math.max(0, Math.min(py, cvs.height - 1)), 1, 1).data;
-    _sawBlackUnderFeet = (data[0] < 6 && data[1] < 6 && data[2] < 6); // very dark
+    // Exit glow
+    drawExitGlow();
 
-    drawDrivenCar();
+    // Simple “car shell” overlay above player while driving (keeps your current aesthetic)
+    if (m3.inCar && m3.state !== 'done') {
+      const ctx = document.getElementById('game').getContext('2d');
+      const S = api.DRAW;
+      const sx = w2sX(api.player.x), sy = w2sY(api.player.y);
+      ctx.save();
+      ctx.fillStyle = '#c0c8d8';
+      ctx.fillRect(sx + S * 0.10, sy + S * 0.25, S * 0.80, S * 0.50);
+      ctx.restore();
+    }
   });
 
 })();
