@@ -1,6 +1,5 @@
-// /static/game/js/izza_core_v3.js
 (function(){
-  const BUILD = 'v3.19-core-coins300+mission2+courier+inv-obj+list-bridge+held+mapBtn';
+  const BUILD = 'v3.17-core+mission2+courier+unequipBtn+heldWeapon+mapToggle';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus ---
@@ -47,9 +46,8 @@
   const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
 
   // --- loot drop behavior knobs ---
-  const DROP_GRACE_MS = 1000;       // 1s grace before pickup
-  const DROP_OFFSET   = 18;         // small offset from victim center
-
+  const DROP_GRACE_MS = 1000;
+  const DROP_OFFSET   = 18;
   function makeDropPos(victimCenterX, victimCenterY){
     const dx = victimCenterX - player.x;
     const dy = victimCenterY - player.y;
@@ -83,7 +81,7 @@
   // HQ Door centered on top sidewalk
   const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
 
-  // ===== SHOP =====
+  // ===== SHOP: right of the right vertical sidewalk =====
   const shop = {
     w: 8, h: 5,
     x: vSidewalkRightX + 1,
@@ -149,7 +147,6 @@
     mission2:   'izzaMission2',
     mission2Pos:'izzaM2Pos'
   };
-
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
     const n = raw==null ? 300 : (parseInt(raw,10)||0);
@@ -162,70 +159,38 @@
     if(el) el.textContent = `Coins: ${v} IC`;
     player.coins = v;
   }
-
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
   function setMission1Done(){
-  localStorage.setItem(LS.mission1,'done');
-  const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
-  if(cur<1) localStorage.setItem(LS.missions,'1');
+    localStorage.setItem(LS.mission1,'done');
+    const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
+    if(cur<1) localStorage.setItem(LS.missions,'1');
 
-  // 📍 Freeze mission-2 marker where the player stands *now*
-  const gx = Math.floor((player.x + TILE/2)/TILE);
-  const gy = Math.floor((player.y + TILE/2)/TILE);
-  const pos = {gx,gy};
-  localStorage.setItem(LS.mission2Pos, JSON.stringify(pos));
-
-  // 🔄 also set the in-memory marker so it shows immediately (no reload needed)
-  if (typeof mission2!=='undefined') mission2.marker = pos;
-}
-  function getMissionCount(){
-    return parseInt(localStorage.getItem(LS.missions) || (getMission1Done()? '1':'0'), 10);
+    // 📍 Freeze mission-2 marker where the player stands *now*
+    const gx = Math.floor((player.x + TILE/2)/TILE);
+    const gy = Math.floor((player.y + TILE/2)/TILE);
+    localStorage.setItem(LS.mission2Pos, JSON.stringify({gx,gy}));
   }
+  function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
 
-  // ---- Inventory (core stores an OBJECT; expose list bridge for plugins)
+  // ---- Inventory (object)
   function _migrateInventory(v){
     if (Array.isArray(v)) {
-      // Legacy array → convert to object
       const inv = {};
-      v.forEach(k=>{
-        if(k==='pistol') inv.pistol = { owned:true, ammo:0, equipped:false };
-        else if(k==='uzi') inv.uzi = { owned:true, ammo:0, equipped:false };
-        else if(k==='grenade') inv.grenade = { count:1 };
-        else if(k==='bat') inv.bat = { count:1, hitsLeftOnCurrent:20, equipped:false };
-        else if(k==='knuckles') inv.knuckles = { count:1, hitsLeftOnCurrent:50, equipped:false };
-      });
+      v.forEach(k => { inv[k] = (k==='pistol' ? {owned:true, ammo:0, equipped:false} : {count:1, equipped:false}); });
       return inv;
     }
     return v && typeof v==='object' ? v : {};
   }
-  function getInventoryObj(){
-    try{ return _migrateInventory(JSON.parse(localStorage.getItem(LS.inventory) || '{}')); }
-    catch{ return {}; }
+  function getInventory(){
+    try{
+      const parsed = JSON.parse(localStorage.getItem(LS.inventory) || '{}');
+      return _migrateInventory(parsed);
+    }catch{
+      return {};
+    }
   }
-  function setInventoryObj(obj){
+  function setInventory(obj){
     localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
-  }
-  // Bridge for plugins expecting a simple list
-  function getInventoryList(){
-    const inv = getInventoryObj(), list=[];
-    if(inv.pistol && inv.pistol.owned) list.push('pistol');
-    if(inv.uzi && inv.uzi.owned) list.push('uzi');
-    if(inv.grenade && (inv.grenade.count|0)>0) list.push('grenade');
-    if(inv.bat && inv.bat.count>0) list.push('bat');
-    if(inv.knuckles && inv.knuckles.count>0) list.push('knuckles');
-    return list;
-  }
-  function setInventoryFromList(list){
-    // merge: only set ownership flags
-    const inv = getInventoryObj();
-    (list||[]).forEach(k=>{
-      if(k==='pistol'){ inv.pistol = inv.pistol || {owned:true, ammo:0, equipped:false}; inv.pistol.owned=true; }
-      if(k==='uzi'){ inv.uzi = inv.uzi || {owned:true, ammo:0, equipped:false}; inv.uzi.owned=true; }
-      if(k==='grenade'){ inv.grenade = inv.grenade || {count:1}; if(inv.grenade.count<=0) inv.grenade.count=1; }
-      if(k==='bat'){ inv.bat = inv.bat || {count:1, hitsLeftOnCurrent:20, equipped:false}; if(inv.bat.count<=0) inv.bat.count=1; }
-      if(k==='knuckles'){ inv.knuckles = inv.knuckles || {count:1, hitsLeftOnCurrent:50, equipped:false}; if(inv.knuckles.count<=0) inv.knuckles.count=1; }
-    });
-    setInventoryObj(inv);
   }
 
   // ===== Player / anim =====
@@ -237,12 +202,11 @@
     facing: 'down', moving:false,
     animTime: 0,
     hp: 5,
-    coins: 0,
-    carryingPackage: false
+    coins: 0
   };
 
   // ===== Equip & weapon rules =====
-  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol'
+  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' (future: uzi/grenade)
   const WEAPON_RULES = {
     fists:     { damage: 1, breaks: false },
     bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
@@ -415,11 +379,10 @@
     if(!mission2Available()) return;
     mission2.active = true; mission2.hasPkg=false; mission2.timer = 45;
     mission2.pkgAtShop = true;
-    toast('Mission 2: Courier Run! Open the Shop and press Pick up to take the package; then return to the blue square within 45s.', 5);
+    toast('Mission 2: Courier Run! Grab the package at the shop counter, then return here within 45s.', 4);
   }
   function completeMission2(){
     mission2.active=false; mission2.hasPkg=false; mission2.pkgAtShop=false;
-    player.carryingPackage=false;
     localStorage.setItem(LS.mission2,'done');
     localStorage.setItem(LS.missions,'2');
     toast('Mission 2 complete! Pistol unlocks at mission 3. 🚗', 4);
@@ -434,9 +397,6 @@
     if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
     if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
     if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
-    if(id==='package') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="10" y="16" width="44" height="32" fill="#7a5b2e"/><rect x="10" y="28" width="44" height="4" fill="#b78e52"/></svg>`;
-    if(id==='uzi') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="8" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/></svg>`;
-    if(id==='grenade') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="26" y="22" width="12" height="18" fill="#264a2b"/><rect x="22" y="26" width="20" height="10" fill="#5b7d61"/></svg>`;
     return '';
   }
 
@@ -445,29 +405,6 @@
     const list=document.getElementById('shopList');
     const note=document.getElementById('shopNote');
     if(list) list.innerHTML='';
-
-    // Mission 2 temporary row (at the top)
-    if(mission2.active && mission2.pkgAtShop){
-      const row=document.createElement('div'); row.className='shop-item';
-      const meta=document.createElement('div'); meta.className='meta';
-      meta.innerHTML = `
-        <div style="display:flex; align-items:center; gap:8px">
-          <div>${svgIcon('package')}</div>
-          <div>
-            <div class="name">Courier Package</div>
-            <div class="sub">Mission 2</div>
-          </div>
-        </div>`;
-      const btn=document.createElement('button'); btn.className='buy'; btn.textContent='Pick up';
-      btn.addEventListener('click', ()=>{
-        mission2.pkgAtShop=false;
-        mission2.hasPkg=true;
-        player.carryingPackage=true;
-        toast('Package acquired! Return to the blue square.');
-      });
-      row.appendChild(meta); row.appendChild(btn);
-      list.appendChild(row);
-    }
 
     const done = getMission1Done();
     if(!done){
@@ -500,28 +437,27 @@
             if(player.coins < it.price){ alert('Not enough coins'); return; }
             setCoins(player.coins - it.price);
 
-            // Inventory (OBJECT)
-            const inv = getInventoryObj();
+            const inv = getInventory();
             if(it.id==='bat'){
               const cur = inv.bat || { count:0, hitsLeftOnCurrent:0, equipped:false };
               cur.count += 1;
               if(cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = WEAPON_RULES.bat.hitsPerItem;
               inv.bat = cur;
-              setInventoryObj(inv);
+              setInventory(inv);
               toast('Purchased Baseball Bat');
             }else if(it.id==='knuckles'){
               const cur = inv.knuckles || { count:0, hitsLeftOnCurrent:0, equipped:false };
               cur.count += 1;
               if(cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = WEAPON_RULES.knuckles.hitsPerItem;
               inv.knuckles = cur;
-              setInventoryObj(inv);
+              setInventory(inv);
               toast('Purchased Brass Knuckles');
             }else if(it.id==='pistol'){
               const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
               cur.owned = true;
-              cur.ammo = (cur.ammo|0) + 17; // full mag per buy
+              cur.ammo = (cur.ammo|0) + 17;
               inv.pistol = cur;
-              setInventoryObj(inv);
+              setInventory(inv);
               toast('Purchased Pistol (+17 ammo)');
             }
 
@@ -558,7 +494,7 @@
     });
   }
 
-  // ===== Inventory UI (3 rows max -> scroll) =====
+  // ===== Inventory UI =====
   function ensureInvHost(){
     let host = document.getElementById('invPanel');
     if(!host){
@@ -579,16 +515,14 @@
   }
   function renderInventoryPanel(){
     const host = ensureInvHost();
-    const inv  = getInventoryObj();
+    const inv  = getInventory();
     const ms   = getMissionCount();
 
     function itemRow(id, label, metaHTML){
       const canUse = missionsOKToUse(id);
       const isEquipped = (equipped.weapon===id);
-      const lockHTML = canUse || id==='uzi' || id==='grenade'
-        ? ''
-        : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'?3:''}</span>`;
-      const equipBtn = (id==='bat' || id==='knuckles' || id==='pistol') && canUse
+      const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'?3:''}</span>`;
+      const equipBtn = canUse
         ? `<button data-equip="${id}" style="margin-left:auto" ${isEquipped?'disabled':''}>${isEquipped?'Equipped':'Equip'}</button>`
         : '';
       return `
@@ -604,12 +538,6 @@
     const rows = [];
     if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
       rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
-    }
-    if(inv.uzi && (inv.uzi.owned || (inv.uzi.ammo|0)>0)){
-      rows.push(itemRow('uzi','Uzi', `Ammo: ${inv.uzi.ammo|0} | Unlock: mission 8`));
-    }
-    if(inv.grenade && (inv.grenade.count|0)>0){
-      rows.push(itemRow('grenade','Grenade', `Count: ${inv.grenade.count|0} | Unlock: mission 6`));
     }
     if(inv.bat && inv.bat.count>0){
       const cur = inv.bat.hitsLeftOnCurrent|0;
@@ -805,6 +733,7 @@
       setWanted(player.wanted - 1);
       maintainCops();
 
+      // drop weapon; coins handled by plugin
       const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
       const pos = makeDropPos(centerX, centerY);
       const tnow = performance.now();
@@ -831,7 +760,7 @@
     return rules.damage||1;
   }
   function consumeDurabilityIfNeeded(){
-    const inv = getInventoryObj();
+    const inv = getInventory();
     if (equipped.weapon==='bat' && inv.bat && inv.bat.count>0){
       inv.bat.hitsLeftOnCurrent = Math.max(0,(inv.bat.hitsLeftOnCurrent|0)-1);
       if(inv.bat.hitsLeftOnCurrent<=0){
@@ -843,7 +772,7 @@
           toast('Your bat broke!');
         }
       }
-      setInventoryObj(inv);
+      setInventory(inv);
     }else if (equipped.weapon==='knuckles' && inv.knuckles && inv.knuckles.count>0){
       inv.knuckles.hitsLeftOnCurrent = Math.max(0,(inv.knuckles.hitsLeftOnCurrent|0)-1);
       if(inv.knuckles.hitsLeftOnCurrent<=0){
@@ -855,7 +784,7 @@
           toast('Your knuckles broke!');
         }
       }
-      setInventoryObj(inv);
+      setInventory(inv);
     }
   }
 
@@ -1027,22 +956,16 @@
     ctx.imageSmoothingEnabled=false;
     ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, DRAW,DRAW);
   }
-  // simple held overlay (weapon / package)
-  function drawHeldOverlay(dx,dy){
+  // simple held-weapon overlay
+  function drawHeldWeapon(dx,dy){
     const S = DRAW;
     ctx.save();
-    if(player.carryingPackage){
-      ctx.fillStyle='#7a5b2e';
-      ctx.fillRect(dx+S*0.56, dy+S*0.46, S*0.20, S*0.16);
-    }else if(equipped.weapon==='bat'){
+    if(equipped.weapon==='bat'){
       ctx.fillStyle='#8b5a2b';
       ctx.fillRect(dx+S*0.62, dy+S*0.48, S*0.28, S*0.06);
     }else if(equipped.weapon==='knuckles'){
       ctx.fillStyle='#cfcfcf';
       ctx.fillRect(dx+S*0.60, dy+S*0.52, S*0.12, S*0.06);
-    }else if(equipped.weapon==='pistol'){
-      ctx.fillStyle='#202833';
-      ctx.fillRect(dx+S*0.58, dy+S*0.50, S*0.20, S*0.08);
     }
     ctx.restore();
   }
@@ -1058,10 +981,18 @@
       if(tutorial.hintT<=0){ const h=document.getElementById('tutHint'); if(h) h.style.display='none'; }
     }
 
-    // Mission 2 running -> check delivery
+    // mission 2 timer + interactions
     if(mission2.active){
       mission2.timer -= dtSec;
-      if(mission2.hasPkg && mission2.marker){
+      // pickup package at shop
+      if(mission2.pkgAtShop){
+        const px = Math.floor((player.x + TILE/2)/TILE);
+        const py = Math.floor((player.y + TILE/2)/TILE);
+        if(px===shop.registerGX && py===shop.sidewalkY){
+          mission2.pkgAtShop=false; mission2.hasPkg=true;
+          toast('Package acquired! Return to the blue square.');
+        }
+      }else if(mission2.hasPkg && mission2.marker){
         const px = Math.floor((player.x + TILE/2)/TILE);
         const py = Math.floor((player.y + TILE/2)/TILE);
         if(Math.abs(px-mission2.marker.gx)+Math.abs(py-mission2.marker.gy) <= 1){
@@ -1070,7 +1001,6 @@
       }
       if(mission2.active && mission2.timer<=0){
         mission2.active=false; mission2.hasPkg=false; mission2.pkgAtShop=false;
-        player.carryingPackage=false;
         toast('Mission 2 failed. Try again!');
       }
     }
@@ -1125,6 +1055,10 @@
       }
     }
 
+    // mission 2 markers
+    drawMission2Marker();
+    drawPackageAtShop();
+
     // cars
     for(const c of cars){
       const sx=w2sX(c.x), sy=w2sY(c.y);
@@ -1144,12 +1078,12 @@
       }
     }
 
-    // player (layers)
-    const px=w2sX(player.x), py=w2sY(player.y);
-    drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, px, py);
-    drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, px, py);
-    drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, px, py);
-    drawHeldOverlay(px, py);
+    // player
+    const dx=w2sX(player.x), dy=w2sY(player.y);
+    drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, dx, dy);
+    drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, dx, dy);
+    drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, dx, dy);
+    drawHeldWeapon(dx,dy);
 
     // cops
     for(const c of cops){
@@ -1165,10 +1099,6 @@
       }
     }
 
-    // mission 2 visuals
-    drawMission2Marker();
-    drawPackageAtShop();
-
     drawMini();
   }
 
@@ -1182,9 +1112,7 @@
     NPC_SHEETS = npcs;
     const imgs={body,outfit,hair};
 
-    // Build API ONCE (with helpers) then emit
     const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
-
     IZZA.api = {
       player, cops, pedestrians,
       setCoins, getCoins, setWanted,
@@ -1192,16 +1120,22 @@
       doorSpawn,
       // expose for plugins:
       getMissionCount,
-      // inventory bridge (plugins expect a list)
-      getInventory: getInventoryList,
-      setInventory: setInventoryFromList,
-      // internal helpers also available if needed elsewhere
-      getInventoryObj, setInventoryObj,
+      getInventory: ()=>Object.keys(getInventory()), // for plugins expecting array-style
+      setInventory: (arrLike)=>{
+        // simple bridge: store presence flags if plugin passes an array of ids
+        const cur = getInventory();
+        if(Array.isArray(arrLike)){
+          arrLike.forEach(k=>{ cur[k] = cur[k] || {owned:true}; });
+          setInventory(cur);
+        }else if(arrLike && typeof arrLike==='object'){
+          setInventory(arrLike);
+        }
+      },
       ready: true
     };
     IZZA.emit('ready', IZZA.api);
 
-    setCoins(getCoins()); // ensures 300 starting IC on first load
+    setCoins(getCoins());
     centerCamera();
 
     let last=performance.now();
@@ -1211,7 +1145,7 @@
         const dtSec = dtMs/1000;
         update(dtSec, dtMs);
         render(imgs);
-        IZZA.emit('render-post', { now: performance.now() }); // overlay phase for plugins
+        IZZA.emit('render-post', { now: performance.now() });
       }catch(err){
         console.error('Game loop error:', err);
         bootMsg('Game loop error: '+err.message, '#ff6b6b');
