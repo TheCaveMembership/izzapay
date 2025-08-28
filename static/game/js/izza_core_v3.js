@@ -1027,6 +1027,9 @@
       getMissionCount,
       getInventory, setInventory,
       ready: true
+        
+      getEquipped: ()=> equipped.weapon,
+      setEquipped: (id)=>{ equipped.weapon = id; }
     };
     IZZA.emit('ready', IZZA.api);
 
