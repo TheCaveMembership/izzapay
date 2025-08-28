@@ -186,6 +186,84 @@
     localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
   }
 
+// ===== Loot pickup integration (coins, pistol, uzi, grenades) =====
+// Expect your loot system to call: IZZA.emit('loot-picked', { kind:'coin'|'pistol'|'uzi'|'grenade', amount?, value?, bullets? })
+IZZA.on('loot-picked', (payload)=>{
+  try{
+    const kind   = payload && (payload.kind || payload.type || payload.id);
+    const amount = (payload && (payload.amount|0)) || 0;
+    if(!kind) return;
+
+    // Helper: refresh inventory UI if open
+    const refreshInvPanel = ()=>{
+      const host = document.getElementById('invPanel');
+      if(host && host.style.display!=='none' && typeof renderInventoryPanel==='function'){
+        renderInventoryPanel();
+      }
+    };
+
+    switch(kind){
+      // --- Coins ---
+      case 'coin':
+      case 'coins': {
+        // accept amount OR value from emitter
+        const delta = amount>0 ? amount : ((payload.value|0) || 0);
+        if(delta>0){
+          setCoins(getCoins() + delta);
+          toast(`+${delta} IC`);
+        }
+        break;
+      }
+
+      // --- Uzi: add to inventory + ammo +50 per pickup ---
+      case 'uzi': {
+        const inv = getInventory();
+        const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
+        cur.owned = true;
+        cur.ammo  = (cur.ammo|0) + 50;
+        inv.uzi   = cur;
+        setInventory(inv);
+        toast('Picked up Uzi (+50 bullets)');
+        refreshInvPanel();
+        break;
+      }
+
+      // --- Grenade: stack count +1 per pickup ---
+      case 'grenade': {
+        const inv = getInventory();
+        const cur = inv.grenade || { count:0 };
+        cur.count = (cur.count|0) + 1;
+        inv.grenade = cur;
+        setInventory(inv);
+        toast('Grenade +1');
+        refreshInvPanel();
+        break;
+      }
+
+      // --- Pistol: add to inventory + ammo (defaults to +17) ---
+      case 'pistol': {
+        const inv = getInventory();
+        const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
+        cur.owned = true;
+        // If your emitter sends a custom bullet amount, use it; else default to +17 (same as shop "full mag").
+        const add = (payload && (payload.bullets|0)) || 17;
+        cur.ammo  = (cur.ammo|0) + add;
+        inv.pistol = cur;
+        setInventory(inv);
+        toast(`Picked up Pistol (+${add} ammo)`);
+        refreshInvPanel();
+        break;
+      }
+
+      default:
+        // ignore other kinds safely
+        break;
+    }
+  }catch(err){
+    console.error('[loot-picked] handler error', err);
+  }
+});
+  
   // ===== Player / anim =====
   const player = {
     x: door.gx*TILE + (TILE/2 - 8),
