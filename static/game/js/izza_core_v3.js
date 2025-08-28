@@ -1,5 +1,5 @@
 (function(){
-  const BUILD = 'v3.15-core+mapToggle+heldWeapons+invScroll3rows';
+  const BUILD = 'v3.17-core+mission2+courier+unequipBtn+heldWeapon+mapToggle';
   console.log('[IZZA PLAY]', BUILD);
 
   // --- lightweight hook bus ---
@@ -143,7 +143,9 @@
     coins:      'izzaCoins',
     mission1:   'izzaMission1',
     missions:   'izzaMissions',
-    inventory:  'izzaInventory'
+    inventory:  'izzaInventory',
+    mission2:   'izzaMission2',
+    mission2Pos:'izzaM2Pos'
   };
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
@@ -162,10 +164,15 @@
     localStorage.setItem(LS.mission1,'done');
     const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
     if(cur<1) localStorage.setItem(LS.missions,'1');
+
+    // 📍 Freeze mission-2 marker where the player stands *now*
+    const gx = Math.floor((player.x + TILE/2)/TILE);
+    const gy = Math.floor((player.y + TILE/2)/TILE);
+    localStorage.setItem(LS.mission2Pos, JSON.stringify({gx,gy}));
   }
   function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
 
-  // ---- Inventory (object w/ counts, ammo, durability, equipped flags)
+  // ---- Inventory (object)
   function _migrateInventory(v){
     if (Array.isArray(v)) {
       const inv = {};
@@ -199,7 +206,7 @@
   };
 
   // ===== Equip & weapon rules =====
-  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol'
+  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' (future: uzi/grenade)
   const WEAPON_RULES = {
     fists:     { damage: 1, breaks: false },
     bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
@@ -217,9 +224,9 @@
 
   // ===== Input / UI =====
   const keys = Object.create(null);
-  const btnA = document.getElementById('btnA');
-  const btnB = document.getElementById('btnB');
-  const btnI = document.getElementById('btnI');
+  const btnA   = document.getElementById('btnA');
+  const btnB   = document.getElementById('btnB');
+  const btnI   = document.getElementById('btnI');
   const btnMap = document.getElementById('btnMap');
   const promptEl = document.getElementById('prompt');
 
@@ -245,6 +252,7 @@
   function handleB(){
     if (doorInRange()) openEnter();
     else if (atRegister()) openShop();
+    else if (mission2CanInteract()) startMission2();
     else setWanted(0);
   }
 
@@ -343,6 +351,43 @@
     return (Math.abs(px-shop.registerGX)+Math.abs(py-shop.sidewalkY))<=1;
   }
 
+  // ===== Mission 2: Courier Run =====
+  const mission2 = {
+    active:false, hasPkg:false, timer:0,
+    marker: null, // {gx,gy}
+    pkgAtShop: false
+  };
+  function loadMission2Marker(){
+    try{
+      const raw = localStorage.getItem(LS.mission2Pos);
+      mission2.marker = raw ? JSON.parse(raw) : null;
+    }catch{ mission2.marker = null; }
+  }
+  loadMission2Marker();
+
+  function mission2Available(){
+    return getMissionCount()===1 && !!mission2.marker && localStorage.getItem(LS.mission2)!=='done';
+  }
+  function mission2CanInteract(){
+    if(!mission2Available()) return false;
+    const {gx,gy} = mission2.marker;
+    const px = Math.floor((player.x + TILE/2)/TILE);
+    const py = Math.floor((player.y + TILE/2)/TILE);
+    return (Math.abs(px-gx)+Math.abs(py-gy))<=1 && !mission2.active;
+  }
+  function startMission2(){
+    if(!mission2Available()) return;
+    mission2.active = true; mission2.hasPkg=false; mission2.timer = 45;
+    mission2.pkgAtShop = true;
+    toast('Mission 2: Courier Run! Grab the package at the shop counter, then return here within 45s.', 4);
+  }
+  function completeMission2(){
+    mission2.active=false; mission2.hasPkg=false; mission2.pkgAtShop=false;
+    localStorage.setItem(LS.mission2,'done');
+    localStorage.setItem(LS.missions,'2');
+    toast('Mission 2 complete! Pistol unlocks at mission 3. 🚗', 4);
+  }
+
   // ===== Modals & Tutorial hook =====
   function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
@@ -392,7 +437,6 @@
             if(player.coins < it.price){ alert('Not enough coins'); return; }
             setCoins(player.coins - it.price);
 
-            // Add to inventory (stackables + durability init)
             const inv = getInventory();
             if(it.id==='bat'){
               const cur = inv.bat || { count:0, hitsLeftOnCurrent:0, equipped:false };
@@ -411,7 +455,7 @@
             }else if(it.id==='pistol'){
               const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
               cur.owned = true;
-              cur.ammo = (cur.ammo|0) + 17; // full mag per buy
+              cur.ammo = (cur.ammo|0) + 17;
               inv.pistol = cur;
               setInventory(inv);
               toast('Purchased Pistol (+17 ammo)');
@@ -438,7 +482,7 @@
   const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
-  // ✅ Start Tutorial button (restored)
+  // ✅ Start Tutorial button
   const startBtn = document.getElementById('startTutorial');
   if(startBtn){
     startBtn.addEventListener('click', (e)=>{
@@ -450,7 +494,7 @@
     });
   }
 
-  // ===== Inventory UI (toggle with I or the I button) =====
+  // ===== Inventory UI =====
   function ensureInvHost(){
     let host = document.getElementById('invPanel');
     if(!host){
@@ -492,7 +536,6 @@
     }
 
     const rows = [];
-
     if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
       rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
     }
@@ -505,13 +548,15 @@
       rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
     }
 
-    // 3-row scroll area (~84px per row + gaps)
     host.innerHTML = `
       <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
           <div style="font-weight:700">Inventory</div>
           <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
-          <div style="margin-left:auto; opacity:.8; font-size:12px">Press I to close</div>
+          <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+            <button id="invUnequip" class="ghost">Remove weapon</button>
+            <div style="opacity:.8; font-size:12px">Press I to close</div>
+          </div>
         </div>
         <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
           ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
@@ -528,6 +573,14 @@
         renderInventoryPanel();
       });
     });
+    const un = document.getElementById('invUnequip');
+    if(un){
+      un.addEventListener('click', ()=>{
+        equipped.weapon = 'fists';
+        toast('Unequipped. Back to hand combat.');
+        renderInventoryPanel();
+      });
+    }
   }
 
   // ===== NPCs =====
@@ -612,7 +665,7 @@
         const i=pedestrians.indexOf(p);
         if(i>=0) pedestrians.splice(i,1);
 
-        // drop coins; award happens on pickup via loot plugin
+        // coin drop only (coins awarded on pickup by loot plugin)
         const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
         const pos = makeDropPos(centerX, centerY);
         const tnow = performance.now();
@@ -680,6 +733,7 @@
       setWanted(player.wanted - 1);
       maintainCops();
 
+      // drop weapon; coins handled by plugin
       const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
       const pos = makeDropPos(centerX, centerY);
       const tnow = performance.now();
@@ -738,27 +792,36 @@
     const dmg = weaponDamage();
     let didHit=false;
 
+    // Hit pedestrians
     for(const p of pedestrians){
       if(hitTest(player.x,player.y, p.x,p.y, 22)){
         didHit=true;
         if(p.state==='walk'){
           if(player.wanted===0){ setWanted(1); maintainCops(); }
           p.hp -= dmg;
+
           if((equipped.weapon==='bat' || equipped.weapon==='knuckles') && p.hp<=0){
             p.state='blink'; p.blinkT=0.6;
-            if(player.wanted < 5){ setWanted(player.wanted + 1); maintainCops(); }
+            if(player.wanted < 5){
+              setWanted(player.wanted + 1);
+              maintainCops();
+            }
           }else{
             if(p.hp<=1){ p.state='downed'; }
           }
         }else if(p.state==='downed'){
           p.state='blink'; p.blinkT=0.6;
-          if(player.wanted < 5){ setWanted(player.wanted + 1); maintainCops(); }
+          if(player.wanted < 5){
+            setWanted(player.wanted + 1);
+            maintainCops();
+          }
         }
         consumeDurabilityIfNeeded();
         break;
       }
     }
 
+    // Hit cops
     if(!didHit){
       for(const c of cops){
         if(hitTest(player.x,player.y, c.x,c.y, 24)){
@@ -812,6 +875,25 @@
   if(closeMapBtn) closeMapBtn.addEventListener('click', ()=> { if(mapModal) mapModal.style.display='none'; });
   if(mapModal) mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) mapModal.style.display='none'; });
 
+  function drawMission2Marker(){
+    if(!mission2Available() || !mission2.marker) return;
+    const {gx,gy} = mission2.marker;
+    const S=DRAW, screenX=w2sX(gx*TILE), screenY=w2sY(gy*TILE);
+    ctx.save();
+    ctx.fillStyle = 'rgba(60,140,255,0.35)';
+    ctx.fillRect(screenX+S*0.25, screenY+S*0.25, S*0.5, S*0.5);
+    ctx.restore();
+  }
+  function drawPackageAtShop(){
+    if(!mission2.active || !mission2.pkgAtShop) return;
+    const S=DRAW, gx=shop.registerGX, gy=shop.sidewalkY;
+    const screenX=w2sX(gx*TILE), screenY=w2sY(gy*TILE);
+    ctx.save();
+    ctx.fillStyle = '#2ad4ff';
+    ctx.fillRect(screenX+S*0.35, screenY+S*0.35, S*0.30, S*0.30);
+    ctx.restore();
+  }
+
   function drawTile(gx,gy){
     const S=DRAW, screenX=w2sX(gx*TILE), screenY=w2sY(gy*TILE);
     if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
@@ -827,7 +909,7 @@
       ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25);
     }
 
-    if (gy===sidewalkTopY || gy===sidewalkBotY){
+    if (gy===sidewalkTopY || gy===sidewalkBotY){ // sidewalks
       ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
@@ -836,18 +918,18 @@
       ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
     }
 
-    if (gy===hRoadY){
+    if (gy===hRoadY){ // horizontal road
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
       ctx.fillStyle = '#ffd23f';
       for(let i=0;i<4;i++){
         ctx.fillRect(screenX + i*(S/4) + S*0.05, screenY + S*0.48, S*0.10, S*0.04);
       }
     }
-    if (gx===vRoadX){
+    if (gx===vRoadX){ // vertical road
       ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
     }
 
-    if (gx===door.gx && gy===door.gy){
+    if (gx===door.gx && gy===door.gy){ // HQ door
       const near = doorInRange();
       ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
       const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
@@ -859,7 +941,7 @@
       }
     }
 
-    if(gx===shop.registerGX && gy===shop.sidewalkY){
+    if(gx===shop.registerGX && gy===shop.sidewalkY){ // register marker
       const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
       const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
       ctx.fillStyle = near ? 'rgba(136,168,255,0.6)' : 'rgba(136,168,255,0.3)';
@@ -867,39 +949,25 @@
     }
   }
 
+  // draw player sprite layers
   function drawSprite(img, cols, facing, moving, t, dx,dy){
     const row = DIR_INDEX[facing]||0;
     const frame = currentFrame(cols, moving, t);
     ctx.imageSmoothingEnabled=false;
     ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, DRAW,DRAW);
   }
-
-  // simple held-weapon overlay (pixel art)
-  function drawHeldWeapon(){
-    const sx = w2sX(player.x), sy = w2sY(player.y);
-    const S  = DRAW;
-    const w  = Math.floor(S*0.30), h = Math.floor(S*0.12);
-
+  // simple held-weapon overlay
+  function drawHeldWeapon(dx,dy){
+    const S = DRAW;
+    ctx.save();
     if(equipped.weapon==='bat'){
-      ctx.fillStyle = '#8b5a2b';
+      ctx.fillStyle='#8b5a2b';
+      ctx.fillRect(dx+S*0.62, dy+S*0.48, S*0.28, S*0.06);
     }else if(equipped.weapon==='knuckles'){
-      ctx.fillStyle = '#cfcfcf';
-    }else if(equipped.weapon==='pistol'){
-      ctx.fillStyle = '#202833';
-    }else{
-      return; // fists: nothing to draw
+      ctx.fillStyle='#cfcfcf';
+      ctx.fillRect(dx+S*0.60, dy+S*0.52, S*0.12, S*0.06);
     }
-
-    // offsets relative to player depending on facing
-    if(player.facing==='down'){
-      ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
-    }else if(player.facing==='up'){
-      ctx.fillRect(sx + S*0.10, sy + S*0.25, w, h);
-    }else if(player.facing==='left'){
-      ctx.fillRect(sx + S*0.10, sy + S*0.55, w, h);
-    }else{ // right
-      ctx.fillRect(sx + S*0.60, sy + S*0.55, w, h);
-    }
+    ctx.restore();
   }
 
   // ===== Update & render =====
@@ -911,6 +979,30 @@
     if(tutorial.hintT>0){
       tutorial.hintT -= dtSec;
       if(tutorial.hintT<=0){ const h=document.getElementById('tutHint'); if(h) h.style.display='none'; }
+    }
+
+    // mission 2 timer + interactions
+    if(mission2.active){
+      mission2.timer -= dtSec;
+      // pickup package at shop
+      if(mission2.pkgAtShop){
+        const px = Math.floor((player.x + TILE/2)/TILE);
+        const py = Math.floor((player.y + TILE/2)/TILE);
+        if(px===shop.registerGX && py===shop.sidewalkY){
+          mission2.pkgAtShop=false; mission2.hasPkg=true;
+          toast('Package acquired! Return to the blue square.');
+        }
+      }else if(mission2.hasPkg && mission2.marker){
+        const px = Math.floor((player.x + TILE/2)/TILE);
+        const py = Math.floor((player.y + TILE/2)/TILE);
+        if(Math.abs(px-mission2.marker.gx)+Math.abs(py-mission2.marker.gy) <= 1){
+          completeMission2();
+        }
+      }
+      if(mission2.active && mission2.timer<=0){
+        mission2.active=false; mission2.hasPkg=false; mission2.pkgAtShop=false;
+        toast('Mission 2 failed. Try again!');
+      }
     }
 
     // Movement (keys + joystick)
@@ -936,7 +1028,7 @@
 
     if(player.moving) player.animTime += dtMs;
 
-    // Spawns/updates
+    // Spawn & update NPCs
     if(pedestrians.length<6 && Math.random()<0.02) spawnPed();
     if(cars.length<3 && Math.random()<0.02) spawnCar();
     pedestrians.forEach(p=>updatePed(p, dtSec));
@@ -963,6 +1055,10 @@
       }
     }
 
+    // mission 2 markers
+    drawMission2Marker();
+    drawPackageAtShop();
+
     // cars
     for(const c of cars){
       const sx=w2sX(c.x), sy=w2sY(c.y);
@@ -982,13 +1078,12 @@
       }
     }
 
-    // player layers
-    drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
-    drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
-    drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
-
-    // held weapon overlay
-    drawHeldWeapon();
+    // player
+    const dx=w2sX(player.x), dy=w2sY(player.y);
+    drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, dx, dy);
+    drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, dx, dy);
+    drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, dx, dy);
+    drawHeldWeapon(dx,dy);
 
     // cops
     for(const c of cops){
@@ -1025,7 +1120,17 @@
       doorSpawn,
       // expose for plugins:
       getMissionCount,
-      getInventory, setInventory,
+      getInventory: ()=>Object.keys(getInventory()), // for plugins expecting array-style
+      setInventory: (arrLike)=>{
+        // simple bridge: store presence flags if plugin passes an array of ids
+        const cur = getInventory();
+        if(Array.isArray(arrLike)){
+          arrLike.forEach(k=>{ cur[k] = cur[k] || {owned:true}; });
+          setInventory(cur);
+        }else if(arrLike && typeof arrLike==='object'){
+          setInventory(arrLike);
+        }
+      },
       ready: true
     };
     IZZA.emit('ready', IZZA.api);
