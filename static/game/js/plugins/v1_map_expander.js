@@ -1,158 +1,229 @@
 // /static/game/js/plugins/v1_map_expander.js
 (function(){
-  const BUILD = 'v1.1-map-expander+tier2-curves';
+  const BUILD = 'v1.3-map-expander+tier2-layout+style-match+soft-solids';
   console.log('[IZZA PLAY]', BUILD);
 
-  const MAP_TIER_KEY='izzaMapTier';       // '1' | '2' | ...
-  const TIER2 = { x0:10, y0:12, x1:80, y1:50 }; // bigger view (matches your sketch proportions)
+  // --- Flags / keys ---
+  const MAP_TIER_KEY = 'izzaMapTier';           // '1' | '2' | ...
+  const TIER1 = { x0:18, y0:18, x1:72, y1:42 }; // core default
+  const TIER2 = { x0:10, y0:12, x1:80, y1:50 }; // expanded bounds (your sketch)
 
   let api=null;
-  const expander = { tier: localStorage.getItem(MAP_TIER_KEY)||'1' };
+  let tier = localStorage.getItem(MAP_TIER_KEY) || '1';
 
-  // --- helpers ---
-  function setTier(t){ expander.tier=t; localStorage.setItem(MAP_TIER_KEY,String(t)); }
-  function isTier2(){ return (expander.tier==='2'); }
+  const scale = ()=> api.DRAW / api.TILE;
+  const w2sX  = wx => (wx - api.camera.x) * scale();
+  const w2sY  = wy => (wy - api.camera.y) * scale();
 
-  // Monkey-patch camera clamp to allow roaming in Tier 2 without touching your core.
-  function widenCameraClamp(){
-    if(!isTier2() || widenCameraClamp._done) return;
-    widenCameraClamp._done = true;
-
-    // Extend camera bounds by gently offsetting while clamping every frame.
-    IZZA.on('update-pre', ()=>{
-      // no-op hook to ensure our patch runs each frame if needed
-    });
-
-    // Add a soft post-clamp to keep camera inside Tier2 box
-    IZZA.on('update-post', ()=>{
-      const visW = document.getElementById('game').width  / (api.DRAW/api.TILE);
-      const visH = document.getElementById('game').height / (api.DRAW/api.TILE);
-      const maxX = (TIER2.x1+1)*api.TILE - visW;
-      const maxY = (TIER2.y1+1)*api.TILE - visH;
-      api.camera.x = Math.max(TIER2.x0*api.TILE, Math.min(api.camera.x, maxX));
-      api.camera.y = Math.max(TIER2.y0*api.TILE, Math.min(api.camera.y, maxY));
-    });
+  // ---------- Camera & player bounds (no core edits) ----------
+  function clampCameraTier2(){
+    const visW = document.getElementById('game').width  / scale();
+    const visH = document.getElementById('game').height / scale();
+    const maxX = (TIER2.x1+1)*api.TILE - visW;
+    const maxY = (TIER2.y1+1)*api.TILE - visH;
+    api.camera.x = Math.max(TIER2.x0*api.TILE, Math.min(api.camera.x, maxX));
+    api.camera.y = Math.max(TIER2.y0*api.TILE, Math.min(api.camera.y, maxY));
+  }
+  function softClampPlayerTier2(){
+    const t=api.TILE, gx=(api.player.x/t|0), gy=(api.player.y/t|0);
+    if(gx<TIER2.x0) api.player.x=(TIER2.x0+0.01)*t;
+    if(gx>TIER2.x1) api.player.x=(TIER2.x1-0.01)*t;
+    if(gy<TIER2.y0) api.player.y=(TIER2.y0+0.01)*t;
+    if(gy>TIER2.y1) api.player.y=(TIER2.y1-0.01)*t;
   }
 
-  // Allow walking/driving in Tier 2 by soft-blocking only *outside* Tier 2.
-  // We can't replace core collision directly, but we can prevent the hard clamp feel by nudging the player back inside.
-  function softBounds(){
-    if(!isTier2()) return;
-    const t=api.TILE;
-    const gx=(api.player.x/t|0), gy=(api.player.y/t|0);
-    if(gx<TIER2.x0) api.player.x = (TIER2.x0+0.01)*t;
-    if(gx>TIER2.x1) api.player.x = (TIER2.x1-0.01)*t;
-    if(gy<TIER2.y0) api.player.y = (TIER2.y0+0.01)*t;
-    if(gy>TIER2.y1) api.player.y = (TIER2.y1-0.01)*t;
+  // ---------- Tier 2 layout (style-matched to your core) ----------
+  // NOTE: these are *overlay painters* to extend what the core draws.
+  // Colors taken from your core:
+  const COL_ROAD      = '#2a2a2a';
+  const COL_SIDEWALK  = '#6a727b';
+  const COL_DASH      = '#ffd23f';
+  const COL_BUILD_SHOP= '#203a60'; // shop building
+  const COL_BUILD_POL = '#0a2455'; // police-ish vibe
+  const COL_BUILD_GEN = '#4a2d2d'; // generic block (similar to HQ tone)
+  const COL_PARK      = '#09371c'; // same grass base, path = sidewalks
+
+  // Road segments (all in grid units)
+  // hRoad: {y, x0, x1, dashed:true}, vRoad: {x, y0, y1}
+  const HROADS = [
+    { y: 20, x0: 14, x1: 76, dashed: true }, // top spine
+    { y: 36, x0: 14, x1: 76, dashed: true }, // bottom spine
+    { y: 44, x0: 56, x1: 76, dashed: false } // lake-side road
+  ];
+  const VROADS = [
+    { x: 28, y0: 14, y1: 44 }, // left vertical
+    { x: 52, y0: 14, y1: 44 }, // right vertical
+  ];
+
+  // Sidewalks that line some of the roads (thin single-tile lines)
+  const HSW = [
+    { y: 19, x0: 14, x1: 76 }, // above top spine
+    { y: 21, x0: 14, x1: 76 },
+    { y: 35, x0: 14, x1: 76 }, // above bottom spine
+    { y: 37, x0: 14, x1: 76 }
+  ];
+  const VSW = [
+    { x: 27, y0: 14, y1: 44 },
+    { x: 29, y0: 14, y1: 44 },
+    { x: 51, y0: 14, y1: 44 },
+    { x: 53, y0: 14, y1: 44 }
+  ];
+
+  // Buildings (rectangles in grid coords; we’ll also mark them solid)
+  // b: {x,y,w,h,color}
+  const BUILDINGS = [
+    // Shops row (small blocks)
+    { x: 20, y: 28, w: 2, h: 2, color: COL_BUILD_GEN },
+    { x: 24, y: 28, w: 2, h: 2, color: COL_BUILD_GEN },
+    { x: 28, y: 28, w: 2, h: 2, color: COL_BUILD_GEN },
+
+    // New STORE (bigger blue shop)
+    { x: 56, y: 24, w: 3, h: 2, color: COL_BUILD_SHOP },
+
+    // Police station (deep blue block)
+    { x: 42, y: 22, w: 3, h: 2, color: COL_BUILD_POL },
+
+    // Another civic block bottom-right
+    { x: 36, y: 38, w: 3, h: 2, color: COL_BUILD_SHOP }
+  ];
+
+  // Park “pond” (visual only here; paths are sidewalks via HSW/VSW)
+  const POND = { x: 66, y: 43, rx: 1.6, ry: 1.1 }; // ellipse in tile units
+
+  // Solids: all building tiles are solid (prevent walk/drive through)
+  function isInsideRectGXGY(gx,gy, r){
+    return gx>=r.x && gx<r.x+r.w && gy>=r.y && gy<r.y+r.h;
+  }
+  function tileIsSolidTier2(gx,gy){
+    // Only enforce inside Tier2 bounds
+    if(!(gx>=TIER2.x0 && gx<=TIER2.x1 && gy>=TIER2.y0 && gy<=TIER2.y1)) return false;
+    for(const b of BUILDINGS){ if(isInsideRectGXGY(gx,gy,b)) return true; }
+    return false;
   }
 
-  // --- Painter: curved roads & buildings (overlay only; keeps your existing tile render) ---
-  function w2sX(wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
-  function w2sY(wy){ return (wy-api.camera.y)*(api.DRAW/api.TILE); }
+  // --- painters (overlay) ---
+  function drawRoadH(ctx, y, x0, x1, dashed){
+    const t = api.TILE, S=api.DRAW;
+    for(let gx=x0; gx<=x1; gx++){
+      const sx=w2sX(gx*t), sy=w2sY(y*t);
+      // road tile
+      ctx.fillStyle = COL_ROAD;
+      ctx.fillRect(sx,sy,S,S);
+      // dashed center line to match core look
+      if(dashed){
+        ctx.fillStyle = COL_DASH;
+        for(let i=0;i<4;i++){
+          ctx.fillRect(sx + i*(S/4) + S*0.05, sy + S*0.48, S*0.10, S*0.04);
+        }
+      }
+    }
+  }
+  function drawRoadV(ctx, x, y0, y1){
+    const t = api.TILE, S=api.DRAW;
+    for(let gy=y0; gy<=y1; gy++){
+      const sx=w2sX(x*t), sy=w2sY(gy*t);
+      ctx.fillStyle = COL_ROAD;
+      ctx.fillRect(sx,sy,S,S);
+    }
+  }
+  function drawSidewalkH(ctx, y, x0, x1){
+    const t = api.TILE, S=api.DRAW;
+    for(let gx=x0; gx<=x1; gx++){
+      const sx=w2sX(gx*t), sy=w2sY(y*t);
+      ctx.fillStyle = COL_SIDEWALK;
+      ctx.fillRect(sx,sy,S,S);
+      ctx.strokeStyle = 'rgba(0,0,0,.25)'; // same faint grid stroke
+      ctx.strokeRect(sx,sy,S,S);
+    }
+  }
+  function drawSidewalkV(ctx, x, y0, y1){
+    const t = api.TILE, S=api.DRAW;
+    for(let gy=y0; gy<=y1; gy++){
+      const sx=w2sX(x*t), sy=w2sY(gy*t);
+      ctx.fillStyle = COL_SIDEWALK;
+      ctx.fillRect(sx,sy,S,S);
+      ctx.strokeStyle = 'rgba(0,0,0,.25)';
+      ctx.strokeRect(sx,sy,S,S);
+    }
+  }
+  function drawBuilding(ctx, b){
+    const t=api.TILE, S=api.DRAW;
+    for(let gy=b.y; gy<b.y+b.h; gy++){
+      for(let gx=b.x; gx<b.x+b.w; gx++){
+        const sx=w2sX(gx*t), sy=w2sY(gy*t);
+        ctx.fillStyle = b.color;
+        ctx.fillRect(sx,sy,S,S);
+        // subtle roof line (like HQ/Shop top shading)
+        ctx.fillStyle = 'rgba(0,0,0,.15)';
+        ctx.fillRect(sx,sy,S,Math.floor(S*0.18));
+      }
+    }
+  }
 
-  // Simple city painter driven by a few bezier/line segments
   function drawTier2Overlay(){
-    if(!isTier2()) return;
+    const ctx = document.getElementById('game').getContext('2d');
+    ctx.save();
 
-    const ctx=document.getElementById('game').getContext('2d');
+    // sidewalks first (under roads looks fine in your style)
+    HSW.forEach(s => drawSidewalkH(ctx, s.y, s.x0, s.x1));
+    VSW.forEach(s => drawSidewalkV(ctx, s.x, s.y0, s.y1));
+
+    // roads
+    HROADS.forEach(r => drawRoadH(ctx, r.y, r.x0, r.x1, !!r.dashed));
+    VROADS.forEach(r => drawRoadV(ctx, r.x, r.y0, r.y1));
+
+    // buildings
+    BUILDINGS.forEach(b => drawBuilding(ctx,b));
+
+    // pond (simple ellipse hint)
     const S=api.DRAW, t=api.TILE;
-
-    // Roads
-    ctx.save();
-    ctx.lineWidth = Math.max(3, S*0.20);
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(180,190,205,0.9)';
-
-    function line(gx1,gy1,gx2,gy2){
-      ctx.beginPath();
-      ctx.moveTo(w2sX(gx1*t+16), w2sY(gy1*t+16));
-      ctx.lineTo(w2sX(gx2*t+16), w2sY(gy2*t+16));
-      ctx.stroke();
-    }
-    function quad(gx1,gy1,gcx,gcy,gx2,gy2){
-      ctx.beginPath();
-      ctx.moveTo(w2sX(gx1*t+16), w2sY(gy1*t+16));
-      ctx.quadraticCurveTo(w2sX(gcx*t+16), w2sY(gcy*t+16), w2sX(gx2*t+16), w2sY(gy2*t+16));
-      ctx.stroke();
-    }
-
-    // Main horizontal spines
-    line(14,20, 76,20);
-    line(14,36, 76,36);
-
-    // Vertical spines
-    line(28,14, 28,44);
-    line(52,14, 52,44);
-
-    // Curved loop bottom-left
-    quad(28,36, 30,40, 34,40);
-    quad(34,40, 26,46, 18,44);
-    quad(18,44, 16,44, 16,40);
-
-    // Curved lake road bottom-right
-    quad(56,40, 64,44, 72,44);
-    quad(72,44, 76,42, 76,38);
-
-    // Top ring
-    quad(16,14, 20,12, 28,12);
-    line(28,12, 60,12);
-    quad(60,12, 72,12, 74,18);
-
-    // Short cul-de-sacs
-    line(18,20, 22,20);
-    line(22,20, 22,24);
-    line(60,20, 64,20);
-
-    ctx.restore();
-
-    // Buildings (simple colored blocks; sizes chosen to match your mock)
-    function rect(gx,gy,w,h,color){
-      const sx=w2sX(gx*t), sy=w2sY(gy*t);
-      ctx.fillStyle=color;
-      ctx.fillRect(sx+S*0.10, sy+S*0.10, S*(w-0.20), S*(h-0.20));
-    }
-    // HQ-ish red block
-    rect(42,22, 3,2, '#a44a4a');
-    // Blue civic buildings
-    rect(56,24, 3,2, '#416aa5');
-    rect(36,38, 3,2, '#416aa5');
-    // Small shops row
-    rect(20,28, 1.6,1.6, '#c9cbd3');
-    rect(24,28, 1.6,1.6, '#c9cbd3');
-    rect(28,28, 1.6,1.6, '#c9cbd3');
-    // Park pond suggestion
-    ctx.save();
-    ctx.fillStyle='#7db7d9';
+    ctx.fillStyle = '#7db7d9';
     ctx.beginPath();
-    ctx.ellipse(w2sX(66*t), w2sY(43*t), S*1.6, S*1.1, 0, 0, Math.PI*2);
+    ctx.ellipse(w2sX(POND.x*t), w2sY(POND.y*t), S*POND.rx, S*POND.ry, 0, 0, Math.PI*2);
     ctx.fill();
+
     ctx.restore();
   }
 
-  // --- Hooks ---
-  IZZA.on('ready',(a)=>{
-    api=a;
-    // If Mission 3 already flipped the flag, move to Tier 2 now
-    expander.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
-    if(isTier2()){ widenCameraClamp(); }
+  // ---------- Soft solids: keep player out of Tier2 buildings ----------
+  let _prevSafe = { x:0, y:0 };
+  IZZA.on('update-pre', ()=>{
+    // Remember safe position before movement resolves
+    _prevSafe.x = api ? api.player.x : 0;
+    _prevSafe.y = api ? api.player.y : 0;
+  });
 
-    // Watch for tier flips during play (e.g., when M3 completes)
-    const mo = new MutationObserver(()=>{ /* cheap wake-up */ });
-    mo.observe(document.body||document.documentElement,{subtree:true,childList:true});
+  function enforceTier2Solids(){
+    const t=api.TILE, gx=(api.player.x/t|0), gy=(api.player.y/t|0);
+    if (tileIsSolidTier2(gx,gy)){
+      // push back to last safe location
+      api.player.x = _prevSafe.x;
+      api.player.y = _prevSafe.y;
+    }
+  }
 
-    console.log('[MAP EXPANDER] ready; tier =', expander.tier);
+  // ---------- Hooks ----------
+  IZZA.on('ready', (a)=>{
+    api = a;
+    tier = localStorage.getItem(MAP_TIER_KEY) || '1';
+    console.log('[MAP EXPANDER] ready; tier =', tier);
   });
 
   IZZA.on('update-post', ()=>{
-    if(localStorage.getItem(MAP_TIER_KEY)!==expander.tier){
-      expander.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
-      if(isTier2()){ widenCameraClamp(); }
+    const stored = localStorage.getItem(MAP_TIER_KEY) || '1';
+    if (stored !== tier) tier = stored;
+
+    if (tier === '2'){
+      softClampPlayerTier2();
+      clampCameraTier2();
+      enforceTier2Solids();
     }
-    if(isTier2()) softBounds();
   });
 
   IZZA.on('render-post', ()=>{
-    if(isTier2()) drawTier2Overlay();
+    if (tier === '2'){
+      // Only paint our additions in Tier 2; Tier 1 remains exactly as your core draws it.
+      drawTier2Overlay();
+    }
   });
-
 })();
