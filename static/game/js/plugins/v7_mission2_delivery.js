@@ -1,20 +1,21 @@
 // /static/game/js/plugins/v7_mission2_delivery.js
 (function(){
-  const BUILD = 'v7.2-mission2-delivery+shop-inject+carry-visual';
+  const BUILD = 'v7.3-mission2-delivery+shop-inject+carry-visual';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Config ----------
   const DURATION_MS = 30_000;                 // 30 seconds
   const START_KEY   = 'izzaMission2';         // 'ready' | 'active' | 'done'
   const POS_KEY     = 'izzaMission2Pos';      // JSON: {gx,gy}
+  const POS_VER_KEY = 'izzaMission2PosVer';   // bump to force new default to apply
+  const POS_VERSION = '2';
   const BUBBLE_ID   = 'm2TimerBubble';
 
-  // Default goal position: ~10 tiles to the RIGHT of the HQ door, on the same sidewalk row.
-  // You can override from anywhere (before or after load):
-  //   window.__IZZA_M2_POS__ = { gx: 31, gy: 14 };
-  // or permanently with:
-  //   localStorage.setItem('izzaMission2Pos', JSON.stringify({gx:31,gy:14}))
-  const DEFAULT_OFFSET_TILES = { dx: +10, dy: 0 };
+  // Default goal position: relative to the outside spawn (doorSpawn).
+  // ✅ Your request: +7 tiles right AND +10 tiles down from spawn.
+  // You can still override at runtime with:
+  //   window.__IZZA_M2_POS__ = { gx: 31, gy: 24 };
+  const DEFAULT_OFFSET_TILES = { dx: +7, dy: +10 };
 
   // ---------- Locals ----------
   let api = null;
@@ -30,7 +31,6 @@
 
   // ---------- Small utilities ----------
   const now = ()=> performance.now();
-  const clamp = (n,min,max)=> Math.max(min, Math.min(max, n));
 
   function toast(msg, seconds=2.8){
     let h = document.getElementById('tutHint');
@@ -62,10 +62,10 @@
 
   // ---------- Timer bubble ----------
   function ensureTimerBubble(){
-    let b = document.getElementById(BUBBLE_ID);
+    let b = document.getElementById('m2TimerBubble');
     if(!b){
       b = document.createElement('div');
-      b.id=BUBBLE_ID;
+      b.id='m2TimerBubble';
       Object.assign(b.style,{
         position:'fixed', right:'18px', top:'98px', zIndex:8,
         background:'rgba(7,12,22,.85)', color:'#cfe0ff',
@@ -83,7 +83,7 @@
     el.style.display='block';
   }
   function hideTimer(){
-    const el = document.getElementById(BUBBLE_ID);
+    const el = document.getElementById('m2TimerBubble');
     if(el) el.style.display='none';
   }
 
@@ -213,38 +213,51 @@
 
   // ---------- Positioning ----------
   function loadGoalPosition(){
-    // 1) explicit override
+    // 1) explicit override (wins)
     if(window.__IZZA_M2_POS__ && Number.isFinite(window.__IZZA_M2_POS__.gx)){
       mission.goalGX = window.__IZZA_M2_POS__.gx|0;
       mission.goalGY = window.__IZZA_M2_POS__.gy|0;
       localStorage.setItem(POS_KEY, JSON.stringify({gx:mission.goalGX, gy:mission.goalGY}));
+      localStorage.setItem(POS_VER_KEY, POS_VERSION);
       return;
     }
-    // 2) saved
+    // 2) saved AND matches this file's version
+    const savedVer = localStorage.getItem(POS_VER_KEY);
     const saved = localStorage.getItem(POS_KEY);
-    if(saved){
+    if(saved && savedVer === POS_VERSION){
       try{
         const j = JSON.parse(saved);
-        if(Number.isFinite(j.gx) && Number.isFinite(j.gy)){ mission.goalGX=j.gx|0; mission.goalGY=j.gy|0; return; }
+        if(Number.isFinite(j.gx) && Number.isFinite(j.gy)){
+          mission.goalGX=j.gx|0; mission.goalGY=j.gy|0;
+          return;
+        }
       }catch{}
     }
-    // 3) default relative to door
+    // 3) default relative to door spawn
     const t = api.TILE;
     const doorGX = Math.floor((api.doorSpawn.x + 8)/t); // compensate for sprite anchor
     const doorGY = Math.floor(api.doorSpawn.y/t);
     mission.goalGX = doorGX + DEFAULT_OFFSET_TILES.dx;
     mission.goalGY = doorGY + DEFAULT_OFFSET_TILES.dy;
-    // persist default once computed
+    // persist default once computed with current version
     localStorage.setItem(POS_KEY, JSON.stringify({gx:mission.goalGX, gy:mission.goalGY}));
+    localStorage.setItem(POS_VER_KEY, POS_VERSION);
   }
 
-  // Optional helper you can call once in console to move the square to your current tile:
-  //   _izza_m2_setAtPlayer()
+  // Helpers to tweak via console:
+  //   _izza_m2_setAtPlayer()   -> set goal to current player tile and persist
+  //   _izza_m2_resetPos()      -> drop saved pos so default applies next reload
   window._izza_m2_setAtPlayer = function(){
     const {gx,gy} = playerGrid();
     mission.goalGX = gx; mission.goalGY = gy;
     localStorage.setItem(POS_KEY, JSON.stringify({gx,gy}));
+    localStorage.setItem(POS_VER_KEY, POS_VERSION);
     toast(`Mission 2 anchor set to ${gx},${gy}`);
+  };
+  window._izza_m2_resetPos = function(){
+    localStorage.removeItem(POS_KEY);
+    localStorage.setItem(POS_VER_KEY, POS_VERSION);
+    toast('Mission 2 anchor reset; reload to use default.');
   };
 
   // ---------- Mission state helpers ----------
@@ -256,7 +269,6 @@
     try{
       const cur = getMissionCount();
       const next = Math.max(cur, 2);
-      // api doesn’t expose a setter for missions; mirror the core’s LS key
       localStorage.setItem('izzaMissions', String(next));
     }catch{}
   }
