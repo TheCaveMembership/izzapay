@@ -438,6 +438,18 @@
   const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
   const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
 
+  // ✅ Start Tutorial button (restored)
+  const startBtn = document.getElementById('startTutorial');
+  if(startBtn){
+    startBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      closeEnter();
+      tutorial.active = true;
+      tutorial.step   = 'hitPed';
+      showHint('Tutorial: Press A to hit a pedestrian.');
+    });
+  }
+
   // ===== Inventory UI (toggle with I or the I button) =====
   function ensureInvHost(){
     let host = document.getElementById('invPanel');
