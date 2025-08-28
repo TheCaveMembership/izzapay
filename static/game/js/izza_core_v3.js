@@ -195,38 +195,33 @@ function setEquippedWeapon(id){
   if(inv.bat)      inv.bat.equipped      = (id === 'bat');
   if(inv.knuckles) inv.knuckles.equipped = (id === 'knuckles');
   if(inv.pistol)   inv.pistol.equipped   = (id === 'pistol');
+  if(inv.uzi)      inv.uzi.equipped      = (id === 'uzi');
+  // grenades are consumables; no "equipped" needed
   setInventory(inv);
 }
-  
+
 function unequipWeapon(){
   setEquippedWeapon('fists');
   toast('Hands ready');
 }
 
-  // ===== Player / anim =====
-  const player = {
-    x: door.gx*TILE + (TILE/2 - 8),
-    y: door.gy*TILE,
-    speed: 90,
-    wanted: 0,
-    facing: 'down', moving:false,
-    animTime: 0,
-    hp: 5,
-    coins: 0
-  };
+// ===== Equip & weapon rules =====
+let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' | 'uzi'
 
-  // ===== Equip & weapon rules =====
-  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol'
-  const WEAPON_RULES = {
-    fists:     { damage: 1, breaks: false },
-    bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
-    knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
-    pistol:    { damage: 3, breaks: false }
-  };
-  function missionsOKToUse(id){
-    if (id==='pistol') return getMissionCount() >= 3;
-    return true;
-  }
+const WEAPON_RULES = {
+  fists:     { damage: 1, breaks: false },
+  bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
+  knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
+  pistol:    { damage: 3, breaks: false },
+  uzi:       { damage: 3, breaks: false } // same damage model as pistol for now
+  // grenades are stored as consumables: { count }, not equipped here
+};
+
+function missionsOKToUse(id){
+  // Match pistol’s rule: can always be picked up, but cannot be EQUIPPED until mission 3
+  if (id==='pistol' || id==='uzi') return getMissionCount() >= 3;
+  return true;
+}
 
   const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
@@ -365,12 +360,14 @@ function unequipWeapon(){
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
 
   // Tiny inline icons for shop/inventory
-  function svgIcon(id, w=24, h=24){
-    if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
-    if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
-    if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
-    return '';
-  }
+function svgIcon(id, w=24, h=24){
+  if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
+  if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
+  if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
+  if(id==='uzi') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
+  if(id==='grenade') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
+  return '';
+}
 
   function openShop(){
     const m=document.getElementById('shopModal'); if(!m) return;
@@ -492,10 +489,10 @@ function unequipWeapon(){
   const ms   = getMissionCount();
 
   function itemRow(id, label, metaHTML){
-    const canUse = missionsOKToUse(id);
+    const canUse     = missionsOKToUse(id);
     const isEquipped = (equipped.weapon===id);
 
-    const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'?3:''}</span>`;
+    const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'||id==='uzi'?3:''}</span>`;
 
     // Toggle button: Equip when not equipped, Unequip when equipped
     const btnHTML = canUse
@@ -515,11 +512,27 @@ function unequipWeapon(){
       </div>`;
   }
 
+  // Non-equip row (for consumables like grenades)
+  function readOnlyRow(id, label, metaHTML){
+    return `
+      <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+        <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
+        <div style="font-weight:600">${label}</div>
+        <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
+      </div>`;
+  }
+
   const rows = [];
 
+  // Firearms
   if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
     rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
   }
+  if(inv.uzi && (inv.uzi.owned || (inv.uzi.ammo|0)>0)){
+    rows.push(itemRow('uzi','Uzi', `Ammo: ${inv.uzi.ammo|0}`));
+  }
+
+  // Melee
   if(inv.bat && inv.bat.count>0){
     const cur = inv.bat.hitsLeftOnCurrent|0;
     rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
@@ -527,6 +540,11 @@ function unequipWeapon(){
   if(inv.knuckles && inv.knuckles.count>0){
     const cur = inv.knuckles.hitsLeftOnCurrent|0;
     rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
+  }
+
+  // Consumables
+  if(inv.grenade && (inv.grenade.count|0) > 0){
+    rows.push(readOnlyRow('grenade','Grenades', `Count: ${inv.grenade.count|0}`));
   }
 
   host.innerHTML = `
@@ -574,7 +592,6 @@ function unequipWeapon(){
     });
   }
 }
-
   // ===== NPCs =====
   const pedestrians=[]; // {x,y,mode,dir,spd,hp,state,crossSide,vertX,blinkT,skin,facing,moving}
   const cars=[];        // {x,y,dir,spd}
@@ -1032,9 +1049,36 @@ function unequipWeapon(){
     drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
     drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
 
-    // held weapon overlay
-    drawHeldWeapon();
+    // simple held-weapon overlay (pixel art)
+function drawHeldWeapon(){
+  const sx = w2sX(player.x), sy = w2sY(player.y);
+  const S  = DRAW;
+  const w  = Math.floor(S*0.30), h = Math.floor(S*0.12);
 
+  if(equipped.weapon==='bat'){
+    ctx.fillStyle = '#8b5a2b';
+  }else if(equipped.weapon==='knuckles'){
+    ctx.fillStyle = '#cfcfcf';
+  }else if(equipped.weapon==='pistol'){
+    ctx.fillStyle = '#202833';
+  }else if(equipped.weapon==='uzi'){
+    ctx.fillStyle = '#0b0e14';
+  }else{
+    return; // fists: nothing to draw
+  }
+
+  // offsets relative to player depending on facing
+  if(player.facing==='down'){
+    ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
+  }else if(player.facing==='up'){
+    ctx.fillRect(sx + S*0.10, sy + S*0.25, w, h);
+  }else if(player.facing==='left'){
+    ctx.fillRect(sx + S*0.10, sy + S*0.55, w, h);
+  }else{ // right
+    ctx.fillRect(sx + S*0.60, sy + S*0.55, w, h);
+  }
+}
+  
     // cops
     for(const c of cops){
       const pack = c.kind==='army' ? NPC_SHEETS.military
