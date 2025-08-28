@@ -165,15 +165,19 @@
 
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
   function setMission1Done(){
-    localStorage.setItem(LS.mission1,'done');
-    const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
-    if(cur<1) localStorage.setItem(LS.missions,'1');
+  localStorage.setItem(LS.mission1,'done');
+  const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
+  if(cur<1) localStorage.setItem(LS.missions,'1');
 
-    // 📍 Freeze mission-2 marker where the player stands *now*
-    const gx = Math.floor((player.x + TILE/2)/TILE);
-    const gy = Math.floor((player.y + TILE/2)/TILE);
-    localStorage.setItem(LS.mission2Pos, JSON.stringify({gx,gy}));
-  }
+  // 📍 Freeze mission-2 marker where the player stands *now*
+  const gx = Math.floor((player.x + TILE/2)/TILE);
+  const gy = Math.floor((player.y + TILE/2)/TILE);
+  const pos = {gx,gy};
+  localStorage.setItem(LS.mission2Pos, JSON.stringify(pos));
+
+  // 🔄 also set the in-memory marker so it shows immediately (no reload needed)
+  if (typeof mission2!=='undefined') mission2.marker = pos;
+}
   function getMissionCount(){
     return parseInt(localStorage.getItem(LS.missions) || (getMission1Done()? '1':'0'), 10);
   }
