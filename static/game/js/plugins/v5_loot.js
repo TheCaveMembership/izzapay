@@ -1,27 +1,29 @@
 // /static/game/js/plugins/v5_loot.js
 (function(){
-  const BUILD = 'v5.5-loot-drops+grace+render-post+ammo+pistol17+coinsOnPickup';
+  const BUILD = 'v5.6-loot-drops+grace+render-post+ammo+uzi30+grenade+reserveCoins';
   console.log('[IZZA PLAY]', BUILD);
 
   // ==== tuning ====
   const PICK_RADIUS = 20;       // world px
   const LOOT_TTL    = 25_000;   // ms
-  const WARN_COOLDOWN_MS = 800; // anti-spam
+  const WARN_COOLDOWN_MS = 800; // don’t spam locked-toasts
   const LOOT_DEBUG = true;
 
-  // Coins: pay ONLY when the bag is picked up (no reserve/rollback).
-  const RESERVE_KILL_COINS = false;
+  // Coins should ONLY go up when the bag is picked.
+  // Reserve the kill reward, then pay on pickup.
+  const RESERVE_KILL_COINS = true;
 
-  // Pickup gates — allow pistol pickup at any time (usage is gated in core).
-  const UNLOCKS = { pistol:0, grenade:6, uzi:8 };
+  // unlock gates (by total missions completed)
+  const UNLOCKS = { pistol:3, grenade:6, uzi:8 };
 
   // ammo bookkeeping (localStorage key)
   const LS_AMMO = 'izzaAmmo';
 
   let api=null, player=null, TILE=32, camera=null;
 
-  // Active loot
-  const loot = []; // {kind,x,y,amount,spawnedAt,noPickupUntil,droppedAt,lastWarnAt}
+  // Active loot (world coords)
+  // {kind,x,y,amount,spawnedAt,noPickupUntil,droppedAt,lastWarnAt}
+  const loot = [];
 
   // ----- helpers -----
   const now = ()=> performance.now();
@@ -40,7 +42,7 @@
     try{
       const inv = api && api.getInventory ? api.getInventory() : [];
       IZZA.emit('inventory-changed', { inventory: inv, ammo: obj||{} });
-    }catch(e){}
+    }catch(e){ /* no-op */ }
   }
 
   // tiny pixel icons
@@ -82,6 +84,7 @@
     const S = api.DRAW;
     for(const it of loot){
       const sx = w2s(it.x), sy = w2sY(it.y);
+      // shadow
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,.35)';
       ctx.fillRect(sx+S*0.33, sy+S*0.70, S*0.34, S*0.10);
@@ -133,7 +136,7 @@
     window._izza_loot = loot;
   });
 
-  // ped loot (coin bag)
+  // ped loot (coin bag) — reserve kill coins so we only pay on pickup
   IZZA.on('ped-killed', (e)=>{
     const t = now();
     const x = (e && e.x) || (player && player.x) || 0;
@@ -148,7 +151,9 @@
 
     if(RESERVE_KILL_COINS && api && api.getCoins && api.setCoins){
       const current = api.getCoins();
-      api.setCoins(Math.max(0, current - amount));
+      const reserved = Math.max(0, current - amount);
+      api.setCoins(reserved);
+      log('reserved kill coins:', { amount, before: current, after: reserved });
     }
   });
 
@@ -170,9 +175,13 @@
     for(let i=loot.length-1;i>=0;i--){
       const it = loot[i];
 
+      // TTL
       if(now() - it.spawnedAt > LOOT_TTL){ loot.splice(i,1); log('despawn (ttl)', it); continue; }
+
+      // still in grace
       if(now() < (it.noPickupUntil || 0)) continue;
 
+      // proximity check (player.x/y is world space top-left anchor)
       const dx = (player.x) - (it.x);
       const dy = (player.y) - (it.y);
       if(Math.hypot(dx,dy) > PICK_RADIUS) continue;
@@ -182,47 +191,54 @@
           const after = api.getCoins() + (it.amount||0);
           api.setCoins(after);
           if((it.amount||0) > 0) toast(`+${it.amount} IC`);
+          log('picked coins +', it.amount||0, '=>', after);
         }
         loot.splice(i,1);
       }else{
-        // gate pickup for uzi/grenade; pistol always allowed
+        // weapon unlock gate
         const req = UNLOCKS[it.kind] || 0;
         const mc = missionCount();
         if(mc < req){
           if(now() - (it.lastWarnAt||0) >= WARN_COOLDOWN_MS){
             toast(`Locked until mission ${req}.`);
             it.lastWarnAt = now();
+            log('blocked pickup (locked)', it.kind, 'need', req, 'have', mc);
           }
-          continue;
+          continue; // leave on ground
         }
 
-        // unlocked → update inventory + ammo
-        let inv = api.getInventory ? new Set(api.getInventory()) : new Set();
+        // unlocked → update inventory and ammo/counters
+        let invSet = api.getInventory ? new Set(api.getInventory()) : new Set();
         const ammo = getAmmo();
 
         if(it.kind === 'pistol'){
-          const had = inv.has('pistol');
-          if(!had) inv.add('pistol');
+          const had = invSet.has('pistol');
+          if(!had) invSet.add('pistol');
           ammo.pistol = (ammo.pistol||0) + 17;
           setAmmo(ammo);
-          if(api.setInventory) api.setInventory([...inv]);
+          if(api.setInventory) api.setInventory([...invSet]);
           toast(had ? `Pistol ammo +17` : `Picked up pistol (+17 rounds)`);
-          IZZA.emit('inventory-changed', { inventory: [...inv], ammo });
+          IZZA.emit('inventory-changed', { inventory: [...invSet], ammo });
+          log('picked pistol; ammo:', ammo.pistol, 'ownedBefore?', had);
         }else if(it.kind === 'uzi'){
-          const had = inv.has('uzi');
-          if(!had) inv.add('uzi');
-          // ammo.uzi (future)
+          const had = invSet.has('uzi');
+          if(!had) invSet.add('uzi');
+          ammo.uzi = (ammo.uzi||0) + 30;
           setAmmo(ammo);
-          if(api.setInventory) api.setInventory([...inv]);
-          toast(had ? `Picked uzi` : `Picked up uzi`);
-          IZZA.emit('inventory-changed', { inventory: [...inv], ammo });
+          if(api.setInventory) api.setInventory([...invSet]);
+          toast(had ? `Uzi ammo +30` : `Picked up Uzi (+30 rounds)`);
+          IZZA.emit('inventory-changed', { inventory: [...invSet], ammo });
+          log('picked uzi; ammo:', ammo.uzi, 'ownedBefore?', had);
         }else if(it.kind === 'grenade'){
-          const had = inv.has('grenade');
-          if(!had) inv.add('grenade');
+          // treat grenades as a count
+          const had = invSet.has('grenade');
+          if(!had) invSet.add('grenade');
+          ammo.grenade = (ammo.grenade||0) + 1;
           setAmmo(ammo);
-          if(api.setInventory) api.setInventory([...inv]);
-          toast(had ? `Picked grenade` : `Picked up grenade`);
-          IZZA.emit('inventory-changed', { inventory: [...inv], ammo });
+          if(api.setInventory) api.setInventory([...invSet]);
+          toast(`Grenade +1`);
+          IZZA.emit('inventory-changed', { inventory: [...invSet], ammo });
+          log('picked grenade; count:', ammo.grenade);
         }
 
         loot.splice(i,1);
