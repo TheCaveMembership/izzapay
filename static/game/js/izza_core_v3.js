@@ -1150,6 +1150,8 @@ IZZA.on('loot-picked', (payload)=>{
       }
     }
 
+    IZZA.emit('render-under', { now: performance.now() });
+    
     // cars
     for(const c of cars){
       const sx=w2sX(c.x), sy=w2sY(c.y);
