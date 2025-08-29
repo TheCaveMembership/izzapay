@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v1_map_expander.js
 (function () {
-  const BUILD = 'v2.0-map-expander+tiles+variants+ui+minimap+bigmap+collisions';
+  const BUILD = 'v2.1-map-expander+bgcanvas+variants+ui+minimap+bigmap+collisions';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Flags / storage =====
@@ -35,17 +35,49 @@
   const isTier2 = () => state.tier === '2';
   const activeLayoutId = () => state.liveLayoutId || state.layoutId;
 
+  // ==== BACKGROUND CANVAS (sits behind #game) ====
+  let bg=null, bgctx=null;
+  function ensureBGCanvas(){
+    if(bg && bgctx) return bgctx;
+    const game = document.getElementById('game');
+    if(!game || !game.parentElement) return null;
+
+    bg = document.createElement('canvas');
+    bg.id = 'mapBg';
+    Object.assign(bg.style, {
+      position: 'absolute',
+      inset: '0',
+      pointerEvents: 'none'
+    });
+
+    // Put directly before #game so #game stays on top
+    game.parentElement.insertBefore(bg, game);
+
+    // Keep same pixel size as #game
+    bg.width  = game.width;
+    bg.height = game.height;
+
+    // Ensure stacking order: bg under game
+    // If #game has zIndex, set bg to one less; otherwise just 0 / -1.
+    const gz = parseInt(game.style.zIndex||'0',10);
+    bg.style.zIndex = String((isFinite(gz) ? gz-1 : -1));
+
+    bgctx = bg.getContext('2d');
+    return bgctx;
+  }
+  function syncBGSize(){
+    const game = document.getElementById('game');
+    if(!game || !bg) return;
+    if(bg.width!==game.width || bg.height!==game.height){
+      bg.width  = game.width;
+      bg.height = game.height;
+    }
+  }
+  function clearBG(){ if(bgctx && bg) bgctx.clearRect(0,0,bg.width,bg.height); }
+
   // ======= Layouts (all in grid coords) =======
   // Each layout declares roads as tile ranges and buildings as solid blocks.
-  // Sidewalks are auto-added around every road (like your core: ±1 tile).
-  //
-  // Notation:
-  //  H_ROADS: { y, x0, x1 }  e.g. one row of road tiles from x0..x1 at row y
-  //  V_ROADS: { x, y0, y1 }  e.g. one column of road tiles from y0..y1 at col x
-  //  BUILDINGS: { x, y, w, h, color }
-  //  LAKES: optional array of { x, y, w, h } rectangles (visual only)
-  //
-  // Feel free to tweak numbers — they’re all easy to read.
+  // Sidewalks are auto-added around every road (±1 tile).
   const LAYOUTS = {
     // 1) EAST GRID — clean city grid with a few blocks and a park lake
     east: {
@@ -232,16 +264,19 @@
     }
   }
 
-  // ======= Painting (main canvas) =======
+  // ======= Painting (MAIN via background canvas) =======
   function drawMainOverlay() {
-    if (!isTier2()) return;
+    if (!isTier2()) { clearBG(); return; }
+
     const layout = LAYOUTS[activeLayoutId()];
     if (!layout) return;
-    const ctx = document.getElementById('game').getContext('2d');
 
-    ctx.save();
-    // draw BEHIND core sprites so player/cars/peds are on top
-    ctx.globalCompositeOperation = 'destination-over';
+    const ctx = ensureBGCanvas();
+    if(!ctx) return;
+
+    // sync size and clear previous frame
+    syncBGSize();
+    clearBG();
 
     // base grass for the entire new district (keeps look consistent)
     for (let gy = TIER2.y0; gy <= TIER2.y1; gy++) {
@@ -265,8 +300,6 @@
     // buildings (solid) + lake(s)
     layout.BUILDINGS.forEach(b => drawBuilding(ctx, b));
     (layout.LAKES || []).forEach(l => drawLake(ctx, l));
-
-    ctx.restore();
   }
 
   // ======= Minimap & Bigmap painters =======
@@ -450,8 +483,7 @@
 
   // paint overlays every frame (main + mini); big map is painted when opened
   IZZA.on('render-post', () => {
-    if (!isTier2()) return;
     drawMainOverlay();
-    drawMiniOverlay();
+    if (isTier2()) drawMiniOverlay();
   });
 })();
