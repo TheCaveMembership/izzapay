@@ -13,7 +13,7 @@
 
   // Default goal position: relative to the outside spawn (doorSpawn).
   // ✅ Your request: 12 tiles LEFT and 12 tiles UP from spawn.
-  const DEFAULT_OFFSET_TILES = { dx: -12, dy: -12 };
+  const DEFAULT_OFFSET_TILES = { dx: -12, dy: -10 };
 
   // ---------- Locals ----------
   let api = null;
