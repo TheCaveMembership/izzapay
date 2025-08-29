@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v1_map_expander.js
 (function () {
-  const BUILD = 'v1.4-map-expander+editor-live+minimap-sync+solid-collisions';
+  const BUILD = 'v1.5-map-expander+editor-ios-pointer+left-ui+instant-paint';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Flags / bounds =====
@@ -16,8 +16,9 @@
     tier: localStorage.getItem(MAP_TIER_KEY) || '1',
     roads: loadJSON(LS_ROADS, []),           // [{a:[gx,gy], b:[gx,gy]}]
     bldgs: loadJSON(LS_BLDGS, []),           // [{x,y,w,h,color}]
-    mode: 'none',                            // 'road' | 'bldg' | 'erase' | 'none'
-    liveDirty: true                          // force first repaint
+    mode: 'road',                            // 'road' | 'bldg' | 'erase'
+    liveDirty: true,                         // force first repaint
+    _lastRoad: null
   };
 
   // ===== utils =====
@@ -140,12 +141,12 @@
     bctx.restore();
   }
 
-  // ===== editor UI (appears only in Tier 2) =====
-  function mkBtn(id,label,x,y){
+  // ===== editor UI (left side so it doesn't cover A/B/Map) =====
+  function mkBtn(id,label,leftPx,bottomPx){
     const b=document.createElement('button');
     b.id=id; b.textContent=label;
     Object.assign(b.style,{
-      position:'fixed', right:x+'px', bottom:y+'px', zIndex:15,
+      position:'fixed', left:leftPx+'px', bottom:bottomPx+'px', zIndex:15,
       padding:'6px 10px', fontSize:'12px'
     });
     document.body.appendChild(b);
@@ -157,12 +158,13 @@
     if(ensureEditor._done) return;
     ensureEditor._done = true;
 
-    const roadBtn   = mkBtn('d2Road','Road', 18, 190);
+    // stack above the joystick (bottom-left)
+    const roadBtn   = mkBtn('d2Road','Road',     18, 190);
     const bldgBtn   = mkBtn('d2Bldg','Building', 18, 158);
-    const eraseBtn  = mkBtn('d2Erase','Erase', 18, 126);
-    const saveBtn   = mkBtn('d2Save','Save', 18, 94);
-    const clearBtn  = mkBtn('d2Clear','Clear', 18, 62);
-    const exitBtn   = mkBtn('d2Exit','Hide UI', 18, 30);
+    const eraseBtn  = mkBtn('d2Erase','Erase',   18, 126);
+    const saveBtn   = mkBtn('d2Save','Save',     18,  94);
+    const clearBtn  = mkBtn('d2Clear','Clear',   18,  62);
+    const exitBtn   = mkBtn('d2Exit','Hide UI',  18,  30);
 
     function setMode(m){
       state.mode = m;
@@ -178,50 +180,58 @@
       if(confirm('Clear all Tier-2 roads/buildings?')){
         state.roads.length=0; state.bldgs.length=0;
         saveJSON(LS_ROADS, state.roads); saveJSON(LS_BLDGS, state.bldgs);
-        markDirty();
+        markDirty(true);
       }
     };
     exitBtn.onclick = ()=> {
       [roadBtn,bldgBtn,eraseBtn,saveBtn,clearBtn,exitBtn].forEach(b=> b.remove());
-      ensureEditor._done=false; // allow reopening later if needed
+      ensureEditor._done=false;
     };
 
-    // place by tapping the main canvas
+    // place by tapping the main canvas — use pointer events for iOS
     const cvs=document.getElementById('game');
-    cvs.addEventListener('click', (e)=>{
+
+    // make sure browser doesn't treat touches as scroll/zoom
+    cvs.style.touchAction = 'none';
+
+    const placeHandler = (e)=>{
       if(!isTier2()) return;
+      // support pointer and touch
+      let clientX = e.clientX, clientY = e.clientY;
+      if(e.touches && e.touches[0]){ clientX=e.touches[0].clientX; clientY=e.touches[0].clientY; }
       const rect=cvs.getBoundingClientRect();
-      const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+      const sx=clientX-rect.left, sy=clientY-rect.top;
       const wx = api.camera.x + sx / SCALE();
       const wy = api.camera.y + sy / SCALE();
       const gx = Math.floor(wx / api.TILE);
       const gy = Math.floor(wy / api.TILE);
 
-      if(state.mode==='erase'){
-        eraseAt(gx,gy);
-        return;
-      }
+      if(state.mode==='erase'){ eraseAt(gx,gy); e.preventDefault(); return; }
+
       if(state.mode==='bldg'){
-        // one-tile block by default; long-press not needed
         state.bldgs.push({x:gx, y:gy, w:2, h:2, color:'#203a60'});
         markDirty(true);
+        e.preventDefault();
         return;
       }
-      // road: snap to straight segment from last road anchor if within same row/col,
-      // else create a short 1-tile segment to the right (horizontal default)
+
+      // road mode
       const last = state._lastRoad;
       if(last && (last.gy===gy || last.gx===gx)){
         const a=[last.gx,last.gy], b=[gx,gy];
         state.roads.push({a,b});
         state._lastRoad=null;
-        markDirty(true);
       }else{
         state._lastRoad = {gx,gy};
-        // also drop a tiny default segment so you see “something” instantly
-        state.roads.push({a:[gx,gy], b:[gx+1,gy]});
-        markDirty(true);
+        state.roads.push({a:[gx,gy], b:[gx+1,gy]}); // tiny default segment
       }
-    }, {passive:true});
+      markDirty(true);
+      e.preventDefault();
+    };
+
+    // Pointer-first; fall back to touchstart for older Safari
+    cvs.addEventListener('pointerdown', placeHandler, {passive:false});
+    cvs.addEventListener('touchstart',  placeHandler, {passive:false});
   }
 
   function eraseAt(gx,gy){
@@ -231,8 +241,8 @@
     // remove road whose center passes close to this cell
     const hit = (r)=>{
       const ax=r.a[0], ay=r.a[1], bx=r.b[0], by=r.b[1];
-      if(ay===by && ay===gy && ((gx>=Math.min(ax,bx)&&gx<=Math.max(ax,bx)))) return true;
-      if(ax===bx && ax===gx && ((gy>=Math.min(ay,by)&&gy<=Math.max(ay,by)))) return true;
+      if(ay===by && ay===gy && (gx>=Math.min(ax,bx)&&gx<=Math.max(ax,bx))) return true;
+      if(ax===bx && ax===gx && (gy>=Math.min(ay,by)&&gy<=Math.max(ay,by))) return true;
       return false;
     };
     const ri = state.roads.findIndex(hit);
@@ -251,7 +261,6 @@
 
   function markDirty(repaintNow){
     state.liveDirty = true;
-    // live repaint immediately (so the click “feels” instant)
     if(repaintNow){
       drawMainOverlay();
       drawMiniOverlay();
@@ -262,7 +271,6 @@
   // ===== hooks =====
   IZZA.on('ready', (a)=>{
     api=a;
-    // adopt Tier 2 if M3 already flipped the flag
     state.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
     if(isTier2()){ widenCameraClampIfNeeded(); ensureEditor(); }
 
@@ -284,10 +292,8 @@
     }
   });
 
-  // Paint every frame (overlay) – and also immediately after edits via markDirty().
   IZZA.on('render-post', ()=>{
     if(!isTier2()) return;
-    // only repaint if something changed or once per frame — both are cheap; keep simple:
     if(state.liveDirty){
       state.liveDirty=false;
       drawMiniOverlay();
