@@ -8,7 +8,7 @@
   const START_KEY   = 'izzaMission2';         // 'ready' | 'active' | 'done'
   const POS_KEY     = 'izzaMission2Pos';      // JSON: {gx,gy}
   const POS_VER_KEY = 'izzaMission2PosVer';   // bump to force new default to apply
-  const POS_VERSION = '3';                    // ← bumped so new default is used
+  const POS_VERSION = '4';                    // ← bumped so new default is used
   const BUBBLE_ID   = 'm2TimerBubble';
 
   // Default goal position: relative to the outside spawn (doorSpawn).
