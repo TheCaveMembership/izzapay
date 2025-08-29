@@ -1,10 +1,10 @@
 // /static/game/js/plugins/v1_map_expander.js
 (function () {
-  const BUILD = 'v1.5-map-expander+editor-ios-pointer+left-ui+instant-paint';
+  const BUILD = 'v1.6-map-expander+ios-place-at-player+top-left-ui';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Flags / bounds =====
-  const MAP_TIER_KEY = 'izzaMapTier';  // '1' | '2'
+  const MAP_TIER_KEY = 'izzaMapTier';             // '1' | '2'
   const TIER2 = { x0: 10, y0: 12, x1: 80, y1: 50 };
 
   // persist editor state
@@ -14,23 +14,32 @@
   let api = null;
   const state = {
     tier: localStorage.getItem(MAP_TIER_KEY) || '1',
-    roads: loadJSON(LS_ROADS, []),           // [{a:[gx,gy], b:[gx,gy]}]
-    bldgs: loadJSON(LS_BLDGS, []),           // [{x,y,w,h,color}]
-    mode: 'road',                            // 'road' | 'bldg' | 'erase'
-    liveDirty: true,                         // force first repaint
-    _lastRoad: null
+    roads: json(LS_ROADS, []),                    // [{a:[gx,gy], b:[gx,gy]}]
+    bldgs: json(LS_BLDGS, []),                    // [{x,y,w,h,color}]
+    liveDirty: true,
+    _lastRoad: null,
   };
 
-  // ===== utils =====
-  function loadJSON(k, fallback){ try{ return JSON.parse(localStorage.getItem(k)||'')||fallback; }catch{ return fallback; } }
-  function saveJSON(k, v){ localStorage.setItem(k, JSON.stringify(v)); }
+  // ---------- utils ----------
+  function json(k, d){ try { return JSON.parse(localStorage.getItem(k)||'')||d; } catch { return d; } }
+  function save(k, v){ localStorage.setItem(k, JSON.stringify(v)); }
+
   const isTier2 = () => state.tier === '2';
+  const SCALE = () => api.DRAW / api.TILE;
+  const w2sX = (wx) => (wx - api.camera.x) * SCALE();
+  const w2sY = (wy) => (wy - api.camera.y) * SCALE();
 
-  const SCALE = ()=> api.DRAW / api.TILE;
-  const w2sX = (wx)=> (wx - api.camera.x) * SCALE();
-  const w2sY = (wy)=> (wy - api.camera.y) * SCALE();
+  function flash(msg){
+    let h=document.getElementById('tutHint');
+    if(!h){ h=document.createElement('div'); h.id='tutHint';
+      Object.assign(h.style,{position:'fixed',left:'12px',top:'64px',zIndex:20,
+        background:'rgba(7,12,22,.85)',border:'1px solid #2f3b58',color:'#cfe0ff',
+        borderRadius:'10px',padding:'8px 10px',fontSize:'14px'}); document.body.appendChild(h);
+    }
+    h.textContent=msg; h.style.display='block'; clearTimeout(h._t); h._t=setTimeout(()=>h.style.display='none',1400);
+  }
 
-  // ===== camera widening (non-invasive) =====
+  // ---------- camera widening ----------
   function widenCameraClampIfNeeded(){
     if (!isTier2() || widenCameraClampIfNeeded._done) return;
     widenCameraClampIfNeeded._done = true;
@@ -44,7 +53,7 @@
     });
   }
 
-  // ===== collisions for buildings (immediate) =====
+  // ---------- collisions (solid buildings) ----------
   function pushOutOfSolids(){
     if (!isTier2()) return;
     const t=api.TILE, px=api.player.x, py=api.player.y;
@@ -65,7 +74,7 @@
     }
   }
 
-  // ===== painters =====
+  // ---------- painters ----------
   function drawRoadStroke(ctx, gx1,gy1, gx2,gy2, widthPx){
     const t=api.TILE;
     ctx.beginPath();
@@ -73,7 +82,7 @@
     ctx.lineTo(w2sX(gx2*t + t/2), w2sY(gy2*t + t/2));
     ctx.lineWidth = widthPx;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = '#6a727b';       // matches your street/sidewalk tone
+    ctx.strokeStyle = '#6a727b';                // your street/sidewalk tone
     ctx.stroke();
   }
 
@@ -81,21 +90,16 @@
     if(!isTier2()) return;
     const ctx = document.getElementById('game').getContext('2d');
     ctx.save();
-
-    // roads (slightly wider than 1 tile so they read like yours)
     const w = Math.max(3, api.DRAW * 0.35);
     state.roads.forEach(r => drawRoadStroke(ctx, r.a[0], r.a[1], r.b[0], r.b[1], w));
-
-    // buildings (same block style as HQ/Shop)
     for(const b of state.bldgs){
       const sx=w2sX(b.x*api.TILE), sy=w2sY(b.y*api.TILE);
       const W=b.w*api.DRAW, H=b.h*api.DRAW;
-      ctx.fillStyle = b.color || '#203a60';
+      ctx.fillStyle = b.color || '#203a60';     // same building palette
       ctx.fillRect(sx, sy, W, H);
-      ctx.fillStyle = 'rgba(0,0,0,.08)';
+      ctx.fillStyle = 'rgba(0,0,0,.08)';        // subtle top shade
       ctx.fillRect(sx, sy, W, Math.floor(H*0.18));
     }
-
     ctx.restore();
   }
 
@@ -103,7 +107,6 @@
     const mini=document.getElementById('minimap'); if(!mini) return;
     const mctx=mini.getContext('2d');
     const sx=mini.width/90, sy=mini.height/60;
-    // roads
     mctx.save();
     mctx.strokeStyle='#8a90a0';
     mctx.lineWidth=Math.max(1, sx*0.9);
@@ -113,7 +116,6 @@
       mctx.lineTo(r.b[0]*sx, r.b[1]*sy);
       mctx.stroke();
     }
-    // buildings
     for(const b of state.bldgs){
       mctx.fillStyle=b.color||'#203a60';
       mctx.fillRect(b.x*sx, b.y*sy, b.w*sx, b.h*sy);
@@ -141,12 +143,12 @@
     bctx.restore();
   }
 
-  // ===== editor UI (left side so it doesn't cover A/B/Map) =====
-  function mkBtn(id,label,leftPx,bottomPx){
+  // ---------- editor UI (top-left; away from joystick) ----------
+  function mkBtn(id,label,leftPx,topPx){
     const b=document.createElement('button');
     b.id=id; b.textContent=label;
     Object.assign(b.style,{
-      position:'fixed', left:leftPx+'px', bottom:bottomPx+'px', zIndex:15,
+      position:'fixed', left:leftPx+'px', top:topPx+'px', zIndex:19,
       padding:'6px 10px', fontSize:'12px'
     });
     document.body.appendChild(b);
@@ -158,87 +160,97 @@
     if(ensureEditor._done) return;
     ensureEditor._done = true;
 
-    // stack above the joystick (bottom-left)
-    const roadBtn   = mkBtn('d2Road','Road',     18, 190);
-    const bldgBtn   = mkBtn('d2Bldg','Building', 18, 158);
-    const eraseBtn  = mkBtn('d2Erase','Erase',   18, 126);
-    const saveBtn   = mkBtn('d2Save','Save',     18,  94);
-    const clearBtn  = mkBtn('d2Clear','Clear',   18,  62);
-    const exitBtn   = mkBtn('d2Exit','Hide UI',  18,  30);
+    // Top-left column
+    const roadBtn   = mkBtn('d2Road','Road (@Player)',      14, 110);
+    const bldgBtn   = mkBtn('d2Bldg','Building (@Player)',  14, 142);
+    const eraseBtn  = mkBtn('d2Erase','Erase Mode',         14, 174);
+    const saveBtn   = mkBtn('d2Save','Save',                14, 206);
+    const clearBtn  = mkBtn('d2Clear','Clear',              14, 238);
+    const exitBtn   = mkBtn('d2Exit','Hide UI',             14, 270);
 
-    function setMode(m){
-      state.mode = m;
-      [roadBtn,bldgBtn,eraseBtn].forEach(b=> b.style.opacity= (b.id==='d2'+m[0].toUpperCase()+m.slice(1)?'1':'0.7'));
+    // place helpers using the **player tile** (so you never have to tap the canvas)
+    function playerTile(){
+      const t=api.TILE;
+      return { gx: Math.floor((api.player.x + t/2)/t),
+               gy: Math.floor((api.player.y + t/2)/t) };
     }
-    setMode('road');
 
-    roadBtn.onclick = ()=> setMode('road');
-    bldgBtn.onclick = ()=> setMode('bldg');
-    eraseBtn.onclick= ()=> setMode('erase');
-    saveBtn.onclick = ()=>{ saveJSON(LS_ROADS, state.roads); saveJSON(LS_BLDGS, state.bldgs); flash('Saved'); };
-    clearBtn.onclick= ()=>{
+    roadBtn.onclick = ()=>{
+      const {gx,gy}=playerTile();
+      // create a 3-tile horizontal road centered on player
+      state.roads.push({a:[gx-1,gy], b:[gx+1,gy]});
+      state._lastRoad=null;
+      markDirty(true);
+      flash('Road placed at player');
+    };
+
+    bldgBtn.onclick = ()=>{
+      const {gx,gy}=playerTile();
+      // 2x2 building with default color (you can move later by Erase + re-place)
+      state.bldgs.push({x:gx, y:gy, w:2, h:2, color:'#203a60'});
+      markDirty(true);
+      flash('Building placed at player');
+    };
+
+    let eraseMode=false;
+    eraseBtn.onclick = ()=>{
+      eraseMode=!eraseMode;
+      eraseBtn.style.opacity = eraseMode? '1' : '0.75';
+      flash(eraseMode ? 'Erase: tap a tile' : 'Erase off');
+    };
+
+    saveBtn.onclick = ()=>{
+      save(LS_ROADS, state.roads); save(LS_BLDGS, state.bldgs);
+      flash('Saved');
+    };
+
+    clearBtn.onclick = ()=>{
       if(confirm('Clear all Tier-2 roads/buildings?')){
         state.roads.length=0; state.bldgs.length=0;
-        saveJSON(LS_ROADS, state.roads); saveJSON(LS_BLDGS, state.bldgs);
+        save(LS_ROADS, state.roads); save(LS_BLDGS, state.bldgs);
         markDirty(true);
       }
     };
-    exitBtn.onclick = ()=> {
+
+    exitBtn.onclick = ()=>{
       [roadBtn,bldgBtn,eraseBtn,saveBtn,clearBtn,exitBtn].forEach(b=> b.remove());
       ensureEditor._done=false;
     };
 
-    // place by tapping the main canvas — use pointer events for iOS
+    // Optional: tap the **canvas** to place/erase too (fixed for iOS)
     const cvs=document.getElementById('game');
-
-    // make sure browser doesn't treat touches as scroll/zoom
-    cvs.style.touchAction = 'none';
-
-    const placeHandler = (e)=>{
+    cvs.style.touchAction='none';
+    const place = (e)=>{
       if(!isTier2()) return;
-      // support pointer and touch
-      let clientX = e.clientX, clientY = e.clientY;
-      if(e.touches && e.touches[0]){ clientX=e.touches[0].clientX; clientY=e.touches[0].clientY; }
-      const rect=cvs.getBoundingClientRect();
-      const sx=clientX-rect.left, sy=clientY-rect.top;
+      let x=e.clientX, y=e.clientY;
+      if(e.touches && e.touches[0]){ x=e.touches[0].clientX; y=e.touches[0].clientY; }
+      const r=cvs.getBoundingClientRect();
+      const sx=x-r.left, sy=y-r.top;
       const wx = api.camera.x + sx / SCALE();
       const wy = api.camera.y + sy / SCALE();
-      const gx = Math.floor(wx / api.TILE);
-      const gy = Math.floor(wy / api.TILE);
+      const gx=Math.floor(wx/api.TILE), gy=Math.floor(wy/api.TILE);
 
-      if(state.mode==='erase'){ eraseAt(gx,gy); e.preventDefault(); return; }
+      if(eraseMode){ eraseAt(gx,gy); markDirty(true); e.preventDefault(); return; }
 
-      if(state.mode==='bldg'){
-        state.bldgs.push({x:gx, y:gy, w:2, h:2, color:'#203a60'});
-        markDirty(true);
-        e.preventDefault();
-        return;
-      }
-
-      // road mode
-      const last = state._lastRoad;
+      // add a short segment; second tap on same row/col will extend
+      const last=state._lastRoad;
       if(last && (last.gy===gy || last.gx===gx)){
-        const a=[last.gx,last.gy], b=[gx,gy];
-        state.roads.push({a,b});
+        state.roads.push({a:[last.gx,last.gy], b:[gx,gy]});
         state._lastRoad=null;
       }else{
-        state._lastRoad = {gx,gy};
-        state.roads.push({a:[gx,gy], b:[gx+1,gy]}); // tiny default segment
+        state._lastRoad={gx,gy};
+        state.roads.push({a:[gx,gy], b:[gx+1,gy]});
       }
       markDirty(true);
       e.preventDefault();
     };
-
-    // Pointer-first; fall back to touchstart for older Safari
-    cvs.addEventListener('pointerdown', placeHandler, {passive:false});
-    cvs.addEventListener('touchstart',  placeHandler, {passive:false});
+    cvs.addEventListener('pointerdown', place, {passive:false});
+    cvs.addEventListener('touchstart',  place, {passive:false});
   }
 
   function eraseAt(gx,gy){
-    // remove any building covering this cell
     const bi = state.bldgs.findIndex(b=> gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h);
-    if(bi>=0){ state.bldgs.splice(bi,1); markDirty(true); return; }
-    // remove road whose center passes close to this cell
+    if(bi>=0){ state.bldgs.splice(bi,1); return; }
     const hit = (r)=>{
       const ax=r.a[0], ay=r.a[1], bx=r.b[0], by=r.b[1];
       if(ay===by && ay===gy && (gx>=Math.min(ax,bx)&&gx<=Math.max(ax,bx))) return true;
@@ -246,21 +258,11 @@
       return false;
     };
     const ri = state.roads.findIndex(hit);
-    if(ri>=0){ state.roads.splice(ri,1); markDirty(true); }
-  }
-
-  function flash(msg){
-    let h=document.getElementById('tutHint');
-    if(!h){ h=document.createElement('div'); h.id='tutHint';
-      Object.assign(h.style,{position:'fixed',left:'12px',top:'64px',zIndex:16,
-        background:'rgba(7,12,22,.85)',border:'1px solid #2f3b58',color:'#cfe0ff',
-        borderRadius:'10px',padding:'8px 10px',fontSize:'14px'}); document.body.appendChild(h);
-    }
-    h.textContent=msg; h.style.display='block'; clearTimeout(h._t); h._t=setTimeout(()=>h.style.display='none',1600);
+    if(ri>=0) state.roads.splice(ri,1);
   }
 
   function markDirty(repaintNow){
-    state.liveDirty = true;
+    state.liveDirty=true;
     if(repaintNow){
       drawMainOverlay();
       drawMiniOverlay();
@@ -268,13 +270,13 @@
     }
   }
 
-  // ===== hooks =====
+  // ---------- hooks ----------
   IZZA.on('ready', (a)=>{
     api=a;
     state.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
     if(isTier2()){ widenCameraClampIfNeeded(); ensureEditor(); }
 
-    // Watch for flag flips during play
+    // re-check tier during play
     IZZA.on('update-post', ()=>{
       const cur = localStorage.getItem(MAP_TIER_KEY)||'1';
       if(cur!==state.tier){
@@ -284,7 +286,7 @@
       if(isTier2()) pushOutOfSolids();
     });
 
-    // Redraw big map whenever opened
+    // paint big map whenever modal opens
     const mapModal=document.getElementById('mapModal');
     if(mapModal){
       const obs=new MutationObserver(()=>{ if(mapModal.style.display==='flex') drawBigOverlayIfOpen(); });
@@ -294,10 +296,7 @@
 
   IZZA.on('render-post', ()=>{
     if(!isTier2()) return;
-    if(state.liveDirty){
-      state.liveDirty=false;
-      drawMiniOverlay();
-    }
+    if(state.liveDirty){ state.liveDirty=false; drawMiniOverlay(); }
     drawMainOverlay();
     drawBigOverlayIfOpen();
   });
