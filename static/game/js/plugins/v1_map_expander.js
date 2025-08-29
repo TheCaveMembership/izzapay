@@ -1,13 +1,16 @@
 // /static/game/js/plugins/v1_map_expander.js
 (function () {
-  const BUILD = 'v2.1-map-expander+bg-canvas+minimap+bigmap+collisions';
+  const BUILD = 'v2.2-map-expander+east-only+destination-over+minimap+bigmap+solid';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Flags / storage =====
   const MAP_TIER_KEY = 'izzaMapTier'; // '1' | '2'
 
-  // Tier-2 bounds (expanded eastward)
-  const TIER2 = { x0: 10, y0: 12, x1: 80, y1: 50 };
+  // Your original Tier-1 play box (don’t paint over it)
+  const BASE = { x0: 18, y0: 18, x1: 72, y1: 42 };
+
+  // Tier-2 bounds: expanded EAST (kept inside your 90×60 world used by the maps)
+  const TIER2 = { x0: 10, y0: 12, x1: 90, y1: 50 };
 
   // Palette that matches the core renderer
   const COL = {
@@ -15,9 +18,9 @@
     road:     '#2a2a2a',
     dash:     '#ffd23f',
     sidewalk: '#6a727b',
-    red:      '#7a3a3a',  // large block (HQ-style)
-    shop:     '#203a60',  // small shops
-    civic:    '#405a85',  // civic/blue
+    red:      '#7a3a3a',  // big block
+    shop:     '#203a60',  // small shop
+    civic:    '#405a85',  // blue civic
     police:   '#0a2455',
     library:  '#8a5a2b',
     water:    '#2b6a7a'
@@ -25,66 +28,55 @@
 
   let api = null;
   const state = { tier: localStorage.getItem(MAP_TIER_KEY) || '1' };
+  const isTier2 = () => state.tier === '2';
 
-  // ===== Single Tier-2 layout (inner-city vibe, denser grid) =====
-  // Expressed entirely in grid coords (tiles).
-  const LAYOUT = {
-    // roads
+  // ===== Single EAST district layout (all tiles strictly > BASE.x1) =====
+  // So we never draw over the existing city.
+  const LAYOUT_EAST = {
+    // roads (all pieces sit east of x=72)
     H_ROADS: [
-      { y: 20, x0: 14, x1: 76 }, // main north spine
-      { y: 28, x0: 18, x1: 72 }, // mid top
-      { y: 36, x0: 14, x1: 76 }, // main south spine
-      { y: 44, x0: 16, x1: 72 }  // southern
+      { y: 20, x0: 74, x1: 88 },
+      { y: 28, x0: 74, x1: 88 },
+      { y: 36, x0: 74, x1: 88 },
+      { y: 44, x0: 74, x1: 88 }
     ],
     V_ROADS: [
-      { x: 22, y0: 18, y1: 44 }, // west cross
-      { x: 28, y0: 14, y1: 44 }, // long cross
-      { x: 40, y0: 18, y1: 44 }, // city center
-      { x: 52, y0: 14, y1: 44 }, // to police block
-      { x: 70, y0: 18, y1: 44 }  // far east cross
+      { x: 76, y0: 18, y1: 46 },
+      { x: 82, y0: 18, y1: 46 },
+      { x: 88, y0: 18, y1: 46 }
     ],
 
-    // buildings (solid)
+    // buildings (SOLID). All x > 72 so they never overlap Tier-1.
     BUILDINGS: [
-      // central red block
-      { x: 41, y: 22, w: 4, h: 3, color: COL.red },
-
-      // blue civic pair
-      { x: 55, y: 24, w: 4, h: 3, color: COL.civic },
-      { x: 36, y: 38, w: 3, h: 2, color: COL.civic },
-
-      // shop row along mid strip
-      { x: 20, y: 29, w: 2, h: 2, color: COL.shop },
-      { x: 24, y: 29, w: 2, h: 2, color: COL.shop },
-      { x: 28, y: 29, w: 2, h: 2, color: COL.shop },
-
-      // library in SE
-      { x: 64, y: 45, w: 4, h: 3, color: COL.library },
-
-      // police near NE
-      { x: 48, y: 18, w: 3, h: 2, color: COL.police }
+      { x: 75, y: 22, w: 3, h: 2, color: COL.shop },     // shops NW
+      { x: 79, y: 22, w: 4, h: 3, color: COL.red },      // big red
+      { x: 85, y: 24, w: 4, h: 3, color: COL.civic },    // blue civic
+      { x: 78, y: 32, w: 3, h: 2, color: COL.shop },     // shops mid
+      { x: 84, y: 32, w: 3, h: 2, color: COL.civic },    // blue mid
+      { x: 88, y: 40, w: 2, h: 2, color: COL.library },  // library SE corner
+      { x: 82, y: 18, w: 3, h: 2, color: COL.police }    // police NE
     ],
 
-    // visual lake
-    LAKES: [ { x: 66, y: 43, w: 5, h: 3 } ]
+    // little rectangular “lake/park” (visual only)
+    LAKES: [ { x: 84, y: 45, w: 4, h: 2 } ]
   };
 
-  // ===== Helpers =====
-  const isTier2 = () => state.tier === '2';
+  // ===== helpers =====
   const scl = () => api.DRAW / api.TILE;
   const w2sX = (wx) => (wx - api.camera.x) * scl();
   const w2sY = (wy) => (wy - api.camera.y) * scl();
+  const clampToEast = (gx) => gx > BASE.x1; // only render east of the original city
 
   function fillTile(ctx, gx, gy, color) {
+    if (!clampToEast(gx)) return; // never paint on the old district
     const sx = w2sX(gx * api.TILE), sy = w2sY(gy * api.TILE);
     const S = api.DRAW;
     ctx.fillStyle = color;
     ctx.fillRect(sx, sy, S, S);
   }
 
-  // Roads drawn tile-by-tile to match the base look (with dashes on horizontals)
   function drawHRoad(ctx, y, x0, x1) {
-    for (let x = x0; x <= x1; x++) {
+    for (let x = Math.max(x0, BASE.x1 + 1); x <= x1; x++) {
       fillTile(ctx, x, y, COL.road);
       const sx = w2sX(x * api.TILE), sy = w2sY(y * api.TILE), S = api.DRAW;
       ctx.fillStyle = COL.dash;
@@ -94,56 +86,33 @@
     }
   }
   function drawVRoad(ctx, x, y0, y1) {
+    if (!clampToEast(x)) return;
     for (let y = y0; y <= y1; y++) fillTile(ctx, x, y, COL.road);
   }
   function drawSidewalkRow(ctx, y, x0, x1) {
-    for (let x = x0; x <= x1; x++) fillTile(ctx, x, y, COL.sidewalk);
+    for (let x = Math.max(x0, BASE.x1 + 1); x <= x1; x++) fillTile(ctx, x, y, COL.sidewalk);
   }
   function drawSidewalkCol(ctx, x, y0, y1) {
+    if (!clampToEast(x)) return;
     for (let y = y0; y <= y1; y++) fillTile(ctx, x, y, COL.sidewalk);
   }
   function drawBuilding(ctx, b) {
+    if (!clampToEast(b.x)) return;
     for (let gy = b.y; gy < b.y + b.h; gy++) {
       for (let gx = b.x; gx < b.x + b.w; gx++) fillTile(ctx, gx, gy, b.color);
     }
-    // subtle top shade (same HQ/Shop vibe)
+    // subtle top shade to match HQ/Shop
     const sx = w2sX(b.x * api.TILE), sy = w2sY(b.y * api.TILE);
     ctx.fillStyle = 'rgba(0,0,0,.15)';
     ctx.fillRect(sx, sy, b.w * api.DRAW, Math.floor(b.h * api.DRAW * 0.18));
   }
   function drawLake(ctx, r) {
+    if (!clampToEast(r.x)) return;
     ctx.fillStyle = COL.water;
     ctx.fillRect(w2sX(r.x * api.TILE), w2sY(r.y * api.TILE), r.w * api.DRAW, r.h * api.DRAW);
   }
 
-  // ===== Background canvas (sits behind #game) =====
-  let bg=null, bgctx=null;
-  function ensureBGCanvas(){
-    if(bg && bgctx) return bgctx;
-    const game = document.getElementById('game');
-    if(!game) return null;
-    bg = document.createElement('canvas');
-    bg.id = 'mapBg';
-    Object.assign(bg.style, {
-      position: 'absolute',
-      inset: '0',
-      zIndex: (parseInt(game.style.zIndex||'0',10) - 1) || -1,
-      pointerEvents: 'none'
-    });
-    game.parentElement.insertBefore(bg, game); // directly behind
-    bg.width = game.width; bg.height = game.height;
-    bgctx = bg.getContext('2d');
-    return bgctx;
-  }
-  function syncBGSize(){
-    const game = document.getElementById('game');
-    if(!game || !bg) return;
-    if(bg.width!==game.width || bg.height!==game.height){
-      bg.width = game.width; bg.height = game.height;
-    }
-  }
-
-  // ===== Camera widening (no core changes) =====
+  // Camera widening without touching the core clamp
   function widenCameraClampIfNeeded() {
     if (!isTier2() || widenCameraClampIfNeeded._done) return;
     widenCameraClampIfNeeded._done = true;
@@ -157,14 +126,15 @@
     });
   }
 
-  // ===== Solid collisions for new buildings =====
+  // Push player out of new buildings (roads/sidewalks remain passable)
   function pushOutOfSolids() {
     if (!isTier2()) return;
     const t = api.TILE;
     const px = api.player.x, py = api.player.y;
     const gx = (px / t) | 0, gy = (py / t) | 0;
 
-    for (const b of LAYOUT.BUILDINGS) {
+    for (const b of LAYOUT_EAST.BUILDINGS) {
+      if (!clampToEast(b.x)) continue;
       if (gx >= b.x && gx < b.x + b.w && gy >= b.y && gy < b.y + b.h) {
         const dxL = Math.abs(px - b.x * t);
         const dxR = Math.abs((b.x + b.w) * t - px);
@@ -180,37 +150,42 @@
     }
   }
 
-  // ===== Paint: main (to bg), minimap, bigmap =====
+  // ===== Painting (main canvas *behind* sprites, minimap, big map) =====
   function drawMainOverlay() {
     if (!isTier2()) return;
-    const ctx = ensureBGCanvas();
-    if(!ctx) return;
+    const cvs = document.getElementById('game');
+    const ctx = cvs.getContext('2d');
 
-    syncBGSize();
-    ctx.clearRect(0,0,bg.width,bg.height);
+    ctx.save();
+    // Paint on the main canvas but *behind* the base scene & sprites.
+    ctx.globalCompositeOperation = 'destination-over';
 
-    // base grass for new district
+    // east district grass fill (only east of BASE)
     for (let gy = TIER2.y0; gy <= TIER2.y1; gy++) {
-      for (let gx = TIER2.x0; gx <= TIER2.x1; gx++) fillTile(ctx, gx, gy, COL.grass);
+      for (let gx = Math.max(BASE.x1 + 1, TIER2.x0); gx <= TIER2.x1; gx++) {
+        fillTile(ctx, gx, gy, COL.grass);
+      }
     }
 
-    // sidewalks around roads (±1 tile)
-    LAYOUT.H_ROADS.forEach(r => {
+    // sidewalks around roads
+    LAYOUT_EAST.H_ROADS.forEach(r => {
       drawSidewalkRow(ctx, r.y - 1, r.x0, r.x1);
       drawSidewalkRow(ctx, r.y + 1, r.x0, r.x1);
     });
-    LAYOUT.V_ROADS.forEach(r => {
+    LAYOUT_EAST.V_ROADS.forEach(r => {
       drawSidewalkCol(ctx, r.x - 1, r.y0, r.y1);
       drawSidewalkCol(ctx, r.x + 1, r.y0, r.y1);
     });
 
     // roads
-    LAYOUT.H_ROADS.forEach(r => drawHRoad(ctx, r.y, r.x0, r.x1));
-    LAYOUT.V_ROADS.forEach(r => drawVRoad(ctx, r.x, r.y0, r.y1));
+    LAYOUT_EAST.H_ROADS.forEach(r => drawHRoad(ctx, r.y, r.x0, r.x1));
+    LAYOUT_EAST.V_ROADS.forEach(r => drawVRoad(ctx, r.x, r.y0, r.y1));
 
-    // buildings and lake(s)
-    LAYOUT.BUILDINGS.forEach(b => drawBuilding(ctx, b));
-    LAYOUT.LAKES.forEach(l => drawLake(ctx, l));
+    // buildings & lakes
+    LAYOUT_EAST.BUILDINGS.forEach(b => drawBuilding(ctx, b));
+    LAYOUT_EAST.LAKES.forEach(l => drawLake(ctx, l));
+
+    ctx.restore();
   }
 
   function drawMiniOverlay() {
@@ -221,24 +196,32 @@
 
     const sx = mini.width / 90, sy = mini.height / 60;
 
-    // roads
     ctx.save();
+    // roads
     ctx.fillStyle = '#8a90a0';
-    LAYOUT.H_ROADS.forEach(r => ctx.fillRect(r.x0 * sx, r.y * sy, (r.x1 - r.x0 + 1) * sx, 1 * sy));
-    LAYOUT.V_ROADS.forEach(r => ctx.fillRect(r.x * sx, r.y0 * sy, 1 * sx, (r.y1 - r.y0 + 1) * sy));
-    ctx.restore();
+    LAYOUT_EAST.H_ROADS.forEach(r => {
+      const x0 = Math.max(r.x0, BASE.x1 + 1);
+      ctx.fillRect(x0 * sx, r.y * sy, (r.x1 - x0 + 1) * sx, 1 * sy);
+    });
+    LAYOUT_EAST.V_ROADS.forEach(r => {
+      if (r.x <= BASE.x1) return;
+      ctx.fillRect(r.x * sx, r.y0 * sy, 1 * sx, (r.y1 - r.y0 + 1) * sy);
+    });
 
     // buildings
-    LAYOUT.BUILDINGS.forEach(b => {
+    LAYOUT_EAST.BUILDINGS.forEach(b => {
+      if (b.x <= BASE.x1) return;
       ctx.fillStyle = b.color;
       ctx.fillRect(b.x * sx, b.y * sy, b.w * sx, b.h * sy);
     });
 
-    // lake
-    LAYOUT.LAKES.forEach(l => {
+    // lakes
+    LAYOUT_EAST.LAKES.forEach(l => {
+      if (l.x <= BASE.x1) return;
       ctx.fillStyle = '#7db7d9';
       ctx.fillRect(l.x * sx, l.y * sy, l.w * sx, l.h * sy);
     });
+    ctx.restore();
   }
 
   function drawBigOverlay() {
@@ -251,15 +234,23 @@
 
     ctx.save();
     ctx.fillStyle = '#8a90a0';
-    LAYOUT.H_ROADS.forEach(r => ctx.fillRect(r.x0 * sx, r.y * sy, (r.x1 - r.x0 + 1) * sx, 1.2 * sy));
-    LAYOUT.V_ROADS.forEach(r => ctx.fillRect(r.x * sx, r.y0 * sy, 1.2 * sx, (r.y1 - r.y0 + 1) * sy));
+    LAYOUT_EAST.H_ROADS.forEach(r => {
+      const x0 = Math.max(r.x0, BASE.x1 + 1);
+      ctx.fillRect(x0 * sx, r.y * sy, (r.x1 - x0 + 1) * sx, 1.2 * sy);
+    });
+    LAYOUT_EAST.V_ROADS.forEach(r => {
+      if (r.x <= BASE.x1) return;
+      ctx.fillRect(r.x * sx, r.y0 * sy, 1.2 * sx, (r.y1 - r.y0 + 1) * sy);
+    });
 
-    LAYOUT.BUILDINGS.forEach(b => {
+    LAYOUT_EAST.BUILDINGS.forEach(b => {
+      if (b.x <= BASE.x1) return;
       ctx.fillStyle = b.color;
       ctx.fillRect(b.x * sx, b.y * sy, b.w * sx, b.h * sy);
     });
 
-    LAYOUT.LAKES.forEach(l => {
+    LAYOUT_EAST.LAKES.forEach(l => {
+      if (l.x <= BASE.x1) return;
       ctx.fillStyle = '#7db7d9';
       ctx.fillRect(l.x * sx, l.y * sy, l.w * sx, l.h * sy);
     });
@@ -269,12 +260,10 @@
   // ===== Hooks =====
   IZZA.on('ready', (a) => {
     api = a;
-
-    // adopt tier and widen camera if already unlocked
     state.tier = localStorage.getItem(MAP_TIER_KEY) || '1';
     if (isTier2()) widenCameraClampIfNeeded();
 
-    // draw big map overlay whenever the modal opens
+    // repaint big map whenever modal opens
     const mapModal = document.getElementById('mapModal');
     if (mapModal) {
       const obs = new MutationObserver(() => {
@@ -293,7 +282,7 @@
     if (isTier2()) pushOutOfSolids();
   });
 
-  // paint every frame: background (main) + minimap
+  // paint every frame on main canvas (behind sprites) and minimap
   IZZA.on('render-post', () => {
     if (!isTier2()) return;
     drawMainOverlay();
