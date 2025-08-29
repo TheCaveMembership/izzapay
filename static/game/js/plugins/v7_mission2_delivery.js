@@ -13,9 +13,9 @@
 
   // Default goal position: relative to the outside spawn (doorSpawn).
   // ✅ Your request: 12 tiles LEFT and 12 tiles UP from spawn.
-  const DEFAULT_OFFSET_TILES = { dx: -12, dy: -10 };
+  const DEFAULT_OFFSET_TILES = { dx: -12, dy: -6 };
 
-  // ---------- Locals ----------
+  // ---------- iLocals ----------
   let api = null;
   let mission = {
     state: localStorage.getItem(START_KEY) || 'ready', // ready | active | done
