@@ -1,331 +1,298 @@
-// /static/game/js/plugins/v1_map_expander_editor.js
+// /static/game/js/plugins/v1_map_expander.js
 (function () {
-  const BUILD = 'v1.0-map-expander+tile-editor(roads/buildings)+save+collision+minimap';
+  const BUILD = 'v1.4-map-expander+editor-live+minimap-sync+solid-collisions';
   console.log('[IZZA PLAY]', BUILD);
 
   // ===== Flags / bounds =====
-  const MAP_TIER_KEY = 'izzaMapTier';   // '1' | '2'
-  const TIER2 = { x0: 10, y0: 12, x1: 80, y1: 50 }; // expanded play box (eastward)
+  const MAP_TIER_KEY = 'izzaMapTier';  // '1' | '2'
+  const TIER2 = { x0: 10, y0: 12, x1: 80, y1: 50 };
 
-  // Storage for your handmade tiles
-  const STORE_KEY = 'izzaD2Tiles'; // { roads:[[gx,gy],...], buildings:[[gx,gy],...] }
-
-  // Colors that match your core style
-  const COL = {
-    grass:   '#09371c',
-    road:    '#2a2a2a',
-    dash:    '#ffd23f',
-    walk:    '#6a727b',
-    b_red:   '#7a3a3a',
-    b_blue:  '#203a60',
-    b_dark:  '#0a2455',
-  };
+  // persist editor state
+  const LS_ROADS = 'izzaD2Roads';
+  const LS_BLDGS = 'izzaD2Buildings';
 
   let api = null;
   const state = {
     tier: localStorage.getItem(MAP_TIER_KEY) || '1',
-    tiles: { roads: [], buildings: [] },  // loaded on ready
-    edit: { active: true, mode: 'road', cursorGX: null, cursorGY: null } // dev UI
+    roads: loadJSON(LS_ROADS, []),           // [{a:[gx,gy], b:[gx,gy]}]
+    bldgs: loadJSON(LS_BLDGS, []),           // [{x,y,w,h,color}]
+    mode: 'none',                            // 'road' | 'bldg' | 'erase' | 'none'
+    liveDirty: true                          // force first repaint
   };
 
+  // ===== utils =====
+  function loadJSON(k, fallback){ try{ return JSON.parse(localStorage.getItem(k)||'')||fallback; }catch{ return fallback; } }
+  function saveJSON(k, v){ localStorage.setItem(k, JSON.stringify(v)); }
   const isTier2 = () => state.tier === '2';
-  const scl = () => api.DRAW / api.TILE;
-  const w2sX = (wx) => (wx - api.camera.x) * scl();
-  const w2sY = (wy) => (wy - api.camera.y) * scl();
 
-  // ---------- storage ----------
-  function loadTiles() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-      if (parsed && Array.isArray(parsed.roads) && Array.isArray(parsed.buildings)) {
-        state.tiles.roads = parsed.roads.map(([x,y])=>[x|0,y|0]);
-        state.tiles.buildings = parsed.buildings.map(([x,y])=>[x|0,y|0]);
-      }
-    } catch {}
-  }
-  function saveTiles() {
-    localStorage.setItem(STORE_KEY, JSON.stringify(state.tiles));
-    toast('Layout saved');
-  }
+  const SCALE = ()=> api.DRAW / api.TILE;
+  const w2sX = (wx)=> (wx - api.camera.x) * SCALE();
+  const w2sY = (wy)=> (wy - api.camera.y) * SCALE();
 
-  // ---------- tiny ui toast ----------
-  function toast(msg, seconds=1.8){
-    let h=document.getElementById('tutHint');
-    if(!h){
-      h=document.createElement('div');
-      h.id='tutHint';
-      Object.assign(h.style,{
-        position:'fixed', left:'12px', top:'64px', zIndex:20,
-        background:'rgba(7,12,22,.88)', border:'1px solid #394769',
-        color:'#cfe0ff', padding:'8px 10px', borderRadius:'10px', fontSize:'14px',
-      });
-      document.body.appendChild(h);
-    }
-    h.textContent=msg; h.style.display='block';
-    clearTimeout(h._t); h._t=setTimeout(()=>{ h.style.display='none'; }, seconds*1000);
-  }
-
-  // ---------- editor ui ----------
-  function ensureEditorUI(){
-    if(document.getElementById('d2Editor')) return;
-
-    const wrap=document.createElement('div');
-    wrap.id='d2Editor';
-    Object.assign(wrap.style,{
-      position:'fixed', right:'14px', bottom:'116px', zIndex:19,
-      display:'flex', flexDirection:'column', gap:'6px'
-    });
-
-    const btn = (id, label)=> {
-      const b=document.createElement('button');
-      b.id=id; b.textContent=label;
-      Object.assign(b.style,{ fontSize:'12px', padding:'6px 10px', opacity:.92 });
-      wrap.appendChild(b); return b;
-    };
-
-    const toggle = btn('edToggle', 'Editor: ON');
-    const road   = btn('edRoad',   'Place Road');
-    const bldg   = btn('edBuild',  'Place Building');
-    const erase  = btn('edErase',  'Erase');
-    const save   = btn('edSave',   'Save');
-    const clear  = btn('edClear',  'Clear (dev)');
-
-    toggle.addEventListener('click', ()=>{
-      state.edit.active = !state.edit.active;
-      toggle.textContent = 'Editor: ' + (state.edit.active?'ON':'OFF');
-      toast(state.edit.active ? 'Editor enabled' : 'Editor disabled');
-    });
-    road.addEventListener('click', ()=>{
-      state.edit.mode='road'; doPlace();
-    });
-    bldg.addEventListener('click', ()=>{
-      state.edit.mode='building'; doPlace();
-    });
-    erase.addEventListener('click', doErase);
-    save.addEventListener('click', saveTiles);
-    clear.addEventListener('click', ()=>{
-      if(confirm('Clear all placed tiles?')){
-        state.tiles={roads:[],buildings:[]}; saveTiles();
-      }
-    });
-
-    document.body.appendChild(wrap);
-  }
-
-  // cursor: by default, player tile; update when you tap the canvas
-  function updateCursorFromPlayer(){
-    const t=api.TILE;
-    state.edit.cursorGX = ((api.player.x + t/2)/t)|0;
-    state.edit.cursorGY = ((api.player.y + t/2)/t)|0;
-  }
-  function bindCanvasPick(){
-    const cvs=document.getElementById('game');
-    if(!cvs) return;
-    cvs.addEventListener('click', (e)=>{
-      const rect=cvs.getBoundingClientRect();
-      const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
-      const wx = sx / scl() + api.camera.x;
-      const wy = sy / scl() + api.camera.y;
-      state.edit.cursorGX = (wx/api.TILE)|0;
-      state.edit.cursorGY = (wy/api.TILE)|0;
-      toast(`Target: ${state.edit.cursorGX},${state.edit.cursorGY}`, 1.0);
-    });
-  }
-
-  // place / erase at cursor (or player if unset)
-  function targetGX() { if(state.edit.cursorGX==null) updateCursorFromPlayer(); return state.edit.cursorGX; }
-  function targetGY() { if(state.edit.cursorGY==null) updateCursorFromPlayer(); return state.edit.cursorGY; }
-
-  function withinTier2(gx,gy){
-    return gx>=TIER2.x0 && gx<=TIER2.x1 && gy>=TIER2.y0 && gy<=TIER2.y1;
-  }
-
-  function doPlace(){
-    if(!state.edit.active || !isTier2()) return;
-    const gx = targetGX(), gy=targetGY();
-    if(!withinTier2(gx,gy)){ toast('That tile is outside Tier-2'); return; }
-    if(state.edit.mode==='road'){
-      if(!hasCoord(state.tiles.roads,gx,gy)) state.tiles.roads.push([gx,gy]);
-      // erase building if overlapping
-      removeCoord(state.tiles.buildings, gx, gy);
-      toast('Road placed');
-    }else if(state.edit.mode==='building'){
-      if(!hasCoord(state.tiles.buildings,gx,gy)) state.tiles.buildings.push([gx,gy]);
-      removeCoord(state.tiles.roads, gx, gy);
-      toast('Building placed');
-    }
-  }
-  function doErase(){
-    if(!state.edit.active || !isTier2()) return;
-    const gx = targetGX(), gy=targetGY();
-    const r = removeCoord(state.tiles.roads, gx, gy);
-    const b = removeCoord(state.tiles.buildings, gx, gy);
-    toast((r||b)?'Erased':'Nothing here');
-  }
-
-  function hasCoord(arr,gx,gy){ return arr.some(p=>p[0]===gx && p[1]===gy); }
-  function removeCoord(arr,gx,gy){
-    const i = arr.findIndex(p=>p[0]===gx && p[1]===gy);
-    if(i>=0){ arr.splice(i,1); return true; }
-    return false;
-  }
-
-  // ---------- camera widen ----------
-  function widenCameraClampIfNeeded() {
+  // ===== camera widening (non-invasive) =====
+  function widenCameraClampIfNeeded(){
     if (!isTier2() || widenCameraClampIfNeeded._done) return;
     widenCameraClampIfNeeded._done = true;
-    IZZA.on('update-post', () => {
-      const visW = document.getElementById('game').width / scl();
-      const visH = document.getElementById('game').height / scl();
-      const maxX = (TIER2.x1 + 1) * api.TILE - visW;
-      const maxY = (TIER2.y1 + 1) * api.TILE - visH;
-      api.camera.x = Math.max(TIER2.x0 * api.TILE, Math.min(api.camera.x, maxX));
-      api.camera.y = Math.max(TIER2.y0 * api.TILE, Math.min(api.camera.y, maxY));
+    IZZA.on('update-post', ()=>{
+      const visW = document.getElementById('game').width / SCALE();
+      const visH = document.getElementById('game').height / SCALE();
+      const maxX = (TIER2.x1+1)*api.TILE - visW;
+      const maxY = (TIER2.y1+1)*api.TILE - visH;
+      api.camera.x = Math.max(TIER2.x0*api.TILE, Math.min(api.camera.x, maxX));
+      api.camera.y = Math.max(TIER2.y0*api.TILE, Math.min(api.camera.y, maxY));
     });
   }
 
-  // ---------- collision for custom buildings ----------
-  function pushOutOfBuildingTiles(){
-    if(!isTier2()) return;
-    const t=api.TILE;
-    const gx=(api.player.x/t)|0, gy=(api.player.y/t)|0;
-    if(!hasCoord(state.tiles.buildings, gx, gy)) return;
-
-    // Push the player to the nearest edge of that 1x1 block
-    const px=api.player.x, py=api.player.y;
-    const left   = Math.abs(px - gx*t);
-    const right  = Math.abs((gx+1)*t - px);
-    const top    = Math.abs(py - gy*t);
-    const bottom = Math.abs((gy+1)*t - py);
-    const m = Math.min(left,right,top,bottom);
-    if(m===left)   api.player.x = (gx - 0.01)*t;
-    else if(m===right) api.player.x = (gx + 1.01)*t;
-    else if(m===top)   api.player.y = (gy - 0.01)*t;
-    else               api.player.y = (gy + 1.01)*t;
-  }
-
-  // ---------- painters (same look as today) ----------
-  function fillTile(ctx,gx,gy,color){
-    const sx = w2sX(gx*api.TILE), sy=w2sY(gy*api.TILE);
-    ctx.fillStyle=color; ctx.fillRect(sx,sy, api.DRAW, api.DRAW);
-  }
-  function drawRoadTile(ctx,gx,gy){
-    // sidewalk border feel
-    fillTile(ctx,gx,gy,COL.walk);
-    // street core
-    const sx = w2sX(gx*api.TILE), sy=w2sY(gy*api.TILE);
-    ctx.fillStyle = COL.road;
-    ctx.fillRect(sx+api.DRAW*0.18, sy+api.DRAW*0.18, api.DRAW*0.64, api.DRAW*0.64);
-    // little dashes like core (horizontal vibe)
-    ctx.fillStyle = COL.dash;
-    for(let i=0;i<4;i++){
-      ctx.fillRect(sx + api.DRAW*(0.20 + i*0.20), sy + api.DRAW*0.48, api.DRAW*0.08, api.DRAW*0.04);
+  // ===== collisions for buildings (immediate) =====
+  function pushOutOfSolids(){
+    if (!isTier2()) return;
+    const t=api.TILE, px=api.player.x, py=api.player.y;
+    const gx=(px/t|0), gy=(py/t|0);
+    for(const b of state.bldgs){
+      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+        const dxL = Math.abs(px - b.x*t);
+        const dxR = Math.abs((b.x+b.w)*t - px);
+        const dyT = Math.abs(py - b.y*t);
+        const dyB = Math.abs((b.y+b.h)*t - py);
+        const m = Math.min(dxL,dxR,dyT,dyB);
+        if(m===dxL) api.player.x = (b.x-0.01)*t;
+        else if(m===dxR) api.player.x = (b.x+b.w+0.01)*t;
+        else if(m===dyT) api.player.y = (b.y-0.01)*t;
+        else api.player.y = (b.y+b.h+0.01)*t;
+        break;
+      }
     }
   }
-  function drawBuildingTile(ctx,gx,gy){
-    const sx=w2sX(gx*api.TILE), sy=w2sY(gy*api.TILE);
-    ctx.fillStyle = COL.b_blue;   // default block color (you can recolor later)
-    ctx.fillRect(sx,sy, api.DRAW, api.DRAW);
-    ctx.fillStyle='rgba(0,0,0,.08)';
-    ctx.fillRect(sx,sy, api.DRAW, Math.floor(api.DRAW*0.18));
+
+  // ===== painters =====
+  function drawRoadStroke(ctx, gx1,gy1, gx2,gy2, widthPx){
+    const t=api.TILE;
+    ctx.beginPath();
+    ctx.moveTo(w2sX(gx1*t + t/2), w2sY(gy1*t + t/2));
+    ctx.lineTo(w2sX(gx2*t + t/2), w2sY(gy2*t + t/2));
+    ctx.lineWidth = widthPx;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#6a727b';       // matches your street/sidewalk tone
+    ctx.stroke();
   }
 
   function drawMainOverlay(){
     if(!isTier2()) return;
-    const ctx=document.getElementById('game').getContext('2d');
+    const ctx = document.getElementById('game').getContext('2d');
     ctx.save();
-    // draw BEHIND sprites so player/cars/cops stay visible
-    ctx.globalCompositeOperation = 'destination-over';
 
-    // paint grass for Tier2 region so it doesn't look black
-    for(let gy=TIER2.y0; gy<=TIER2.y1; gy++){
-      for(let gx=TIER2.x0; gx<=TIER2.x1; gx++){
-        fillTile(ctx,gx,gy,COL.grass);
-      }
-    }
-    // custom roads
-    for(const [gx,gy] of state.tiles.roads) drawRoadTile(ctx,gx,gy);
-    // custom buildings (still behind sprites; solidity handled elsewhere)
-    for(const [gx,gy] of state.tiles.buildings) drawBuildingTile(ctx,gx,gy);
+    // roads (slightly wider than 1 tile so they read like yours)
+    const w = Math.max(3, api.DRAW * 0.35);
+    state.roads.forEach(r => drawRoadStroke(ctx, r.a[0], r.a[1], r.b[0], r.b[1], w));
 
-    // show editor cursor
-    if(state.edit.active){
-      updateCursorFromPlayer();
-      const gx=targetGX(), gy=targetGY();
-      const sx=w2sX(gx*api.TILE), sy=w2sY(gy*api.TILE);
-      ctx.strokeStyle='rgba(56,176,255,.85)';
-      ctx.lineWidth=2;
-      ctx.strokeRect(sx+2, sy+2, api.DRAW-4, api.DRAW-4);
+    // buildings (same block style as HQ/Shop)
+    for(const b of state.bldgs){
+      const sx=w2sX(b.x*api.TILE), sy=w2sY(b.y*api.TILE);
+      const W=b.w*api.DRAW, H=b.h*api.DRAW;
+      ctx.fillStyle = b.color || '#203a60';
+      ctx.fillRect(sx, sy, W, H);
+      ctx.fillStyle = 'rgba(0,0,0,.08)';
+      ctx.fillRect(sx, sy, W, Math.floor(H*0.18));
     }
 
     ctx.restore();
   }
 
-  // minimap / bigmap (super light)
   function drawMiniOverlay(){
-    if(!isTier2()) return;
     const mini=document.getElementById('minimap'); if(!mini) return;
-    const mctx=mini.getContext('2d'); const sx=mini.width/90, sy=mini.height/60;
-
+    const mctx=mini.getContext('2d');
+    const sx=mini.width/90, sy=mini.height/60;
     // roads
-    mctx.fillStyle='#8a90a0';
-    for(const [gx,gy] of state.tiles.roads)
-      mctx.fillRect(gx*sx, gy*sy, 1*sx, 1*sy);
-
+    mctx.save();
+    mctx.strokeStyle='#8a90a0';
+    mctx.lineWidth=Math.max(1, sx*0.9);
+    for(const r of state.roads){
+      mctx.beginPath();
+      mctx.moveTo(r.a[0]*sx, r.a[1]*sy);
+      mctx.lineTo(r.b[0]*sx, r.b[1]*sy);
+      mctx.stroke();
+    }
     // buildings
-    mctx.fillStyle='#4c5a7a';
-    for(const [gx,gy] of state.tiles.buildings)
-      mctx.fillRect(gx*sx, gy*sy, 1*sx, 1*sy);
+    for(const b of state.bldgs){
+      mctx.fillStyle=b.color||'#203a60';
+      mctx.fillRect(b.x*sx, b.y*sy, b.w*sx, b.h*sy);
+    }
+    mctx.restore();
   }
-  function drawBigOverlay(){
+
+  function drawBigOverlayIfOpen(){
+    const big=document.getElementById('bigmap'); const modal=document.getElementById('mapModal');
+    if(!big||!modal||modal.style.display!=='flex') return;
+    const bctx=big.getContext('2d');
+    const sx=big.width/90, sy=big.height/60;
+    bctx.save();
+    bctx.strokeStyle='#8a90a0'; bctx.lineWidth=Math.max(2, sx*1.2);
+    for(const r of state.roads){
+      bctx.beginPath();
+      bctx.moveTo(r.a[0]*sx, r.a[1]*sy);
+      bctx.lineTo(r.b[0]*sx, r.b[1]*sy);
+      bctx.stroke();
+    }
+    for(const b of state.bldgs){
+      bctx.fillStyle=b.color||'#203a60';
+      bctx.fillRect(b.x*sx, b.y*sy, b.w*sx, b.h*sy);
+    }
+    bctx.restore();
+  }
+
+  // ===== editor UI (appears only in Tier 2) =====
+  function mkBtn(id,label,x,y){
+    const b=document.createElement('button');
+    b.id=id; b.textContent=label;
+    Object.assign(b.style,{
+      position:'fixed', right:x+'px', bottom:y+'px', zIndex:15,
+      padding:'6px 10px', fontSize:'12px'
+    });
+    document.body.appendChild(b);
+    return b;
+  }
+
+  function ensureEditor(){
     if(!isTier2()) return;
-    const big=document.getElementById('bigmap'); if(!big) return;
-    const bctx=big.getContext('2d'); const sx=big.width/90, sy=big.height/60;
+    if(ensureEditor._done) return;
+    ensureEditor._done = true;
 
-    bctx.fillStyle='#9aa2b5';
-    for(const [gx,gy] of state.tiles.roads)
-      bctx.fillRect(gx*sx, gy*sy, 1*sx, 1*sy);
+    const roadBtn   = mkBtn('d2Road','Road', 18, 190);
+    const bldgBtn   = mkBtn('d2Bldg','Building', 18, 158);
+    const eraseBtn  = mkBtn('d2Erase','Erase', 18, 126);
+    const saveBtn   = mkBtn('d2Save','Save', 18, 94);
+    const clearBtn  = mkBtn('d2Clear','Clear', 18, 62);
+    const exitBtn   = mkBtn('d2Exit','Hide UI', 18, 30);
 
-    bctx.fillStyle='#5c6b8a';
-    for(const [gx,gy] of state.tiles.buildings)
-      bctx.fillRect(gx*sx, gy*sy, 1*sx, 1*sy);
+    function setMode(m){
+      state.mode = m;
+      [roadBtn,bldgBtn,eraseBtn].forEach(b=> b.style.opacity= (b.id==='d2'+m[0].toUpperCase()+m.slice(1)?'1':'0.7'));
+    }
+    setMode('road');
+
+    roadBtn.onclick = ()=> setMode('road');
+    bldgBtn.onclick = ()=> setMode('bldg');
+    eraseBtn.onclick= ()=> setMode('erase');
+    saveBtn.onclick = ()=>{ saveJSON(LS_ROADS, state.roads); saveJSON(LS_BLDGS, state.bldgs); flash('Saved'); };
+    clearBtn.onclick= ()=>{
+      if(confirm('Clear all Tier-2 roads/buildings?')){
+        state.roads.length=0; state.bldgs.length=0;
+        saveJSON(LS_ROADS, state.roads); saveJSON(LS_BLDGS, state.bldgs);
+        markDirty();
+      }
+    };
+    exitBtn.onclick = ()=> {
+      [roadBtn,bldgBtn,eraseBtn,saveBtn,clearBtn,exitBtn].forEach(b=> b.remove());
+      ensureEditor._done=false; // allow reopening later if needed
+    };
+
+    // place by tapping the main canvas
+    const cvs=document.getElementById('game');
+    cvs.addEventListener('click', (e)=>{
+      if(!isTier2()) return;
+      const rect=cvs.getBoundingClientRect();
+      const sx=e.clientX-rect.left, sy=e.clientY-rect.top;
+      const wx = api.camera.x + sx / SCALE();
+      const wy = api.camera.y + sy / SCALE();
+      const gx = Math.floor(wx / api.TILE);
+      const gy = Math.floor(wy / api.TILE);
+
+      if(state.mode==='erase'){
+        eraseAt(gx,gy);
+        return;
+      }
+      if(state.mode==='bldg'){
+        // one-tile block by default; long-press not needed
+        state.bldgs.push({x:gx, y:gy, w:2, h:2, color:'#203a60'});
+        markDirty(true);
+        return;
+      }
+      // road: snap to straight segment from last road anchor if within same row/col,
+      // else create a short 1-tile segment to the right (horizontal default)
+      const last = state._lastRoad;
+      if(last && (last.gy===gy || last.gx===gx)){
+        const a=[last.gx,last.gy], b=[gx,gy];
+        state.roads.push({a,b});
+        state._lastRoad=null;
+        markDirty(true);
+      }else{
+        state._lastRoad = {gx,gy};
+        // also drop a tiny default segment so you see “something” instantly
+        state.roads.push({a:[gx,gy], b:[gx+1,gy]});
+        markDirty(true);
+      }
+    }, {passive:true});
   }
 
-  // ---------- hooks ----------
+  function eraseAt(gx,gy){
+    // remove any building covering this cell
+    const bi = state.bldgs.findIndex(b=> gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h);
+    if(bi>=0){ state.bldgs.splice(bi,1); markDirty(true); return; }
+    // remove road whose center passes close to this cell
+    const hit = (r)=>{
+      const ax=r.a[0], ay=r.a[1], bx=r.b[0], by=r.b[1];
+      if(ay===by && ay===gy && ((gx>=Math.min(ax,bx)&&gx<=Math.max(ax,bx)))) return true;
+      if(ax===bx && ax===gx && ((gy>=Math.min(ay,by)&&gy<=Math.max(ay,by)))) return true;
+      return false;
+    };
+    const ri = state.roads.findIndex(hit);
+    if(ri>=0){ state.roads.splice(ri,1); markDirty(true); }
+  }
+
+  function flash(msg){
+    let h=document.getElementById('tutHint');
+    if(!h){ h=document.createElement('div'); h.id='tutHint';
+      Object.assign(h.style,{position:'fixed',left:'12px',top:'64px',zIndex:16,
+        background:'rgba(7,12,22,.85)',border:'1px solid #2f3b58',color:'#cfe0ff',
+        borderRadius:'10px',padding:'8px 10px',fontSize:'14px'}); document.body.appendChild(h);
+    }
+    h.textContent=msg; h.style.display='block'; clearTimeout(h._t); h._t=setTimeout(()=>h.style.display='none',1600);
+  }
+
+  function markDirty(repaintNow){
+    state.liveDirty = true;
+    // live repaint immediately (so the click “feels” instant)
+    if(repaintNow){
+      drawMainOverlay();
+      drawMiniOverlay();
+      drawBigOverlayIfOpen();
+    }
+  }
+
+  // ===== hooks =====
   IZZA.on('ready', (a)=>{
     api=a;
+    // adopt Tier 2 if M3 already flipped the flag
+    state.tier = localStorage.getItem(MAP_TIER_KEY)||'1';
+    if(isTier2()){ widenCameraClampIfNeeded(); ensureEditor(); }
 
-    // tier: if M3 already completed, widen now
-    state.tier = localStorage.getItem(MAP_TIER_KEY) || '1';
-    if(isTier2()) widenCameraClampIfNeeded();
-
-    loadTiles();
-    ensureEditorUI();
-    bindCanvasPick();
-
-    // watch for tier change during play
+    // Watch for flag flips during play
     IZZA.on('update-post', ()=>{
-      const cur = localStorage.getItem(MAP_TIER_KEY) || '1';
-      if(cur !== state.tier){
-        state.tier = cur;
-        if(isTier2()) widenCameraClampIfNeeded();
+      const cur = localStorage.getItem(MAP_TIER_KEY)||'1';
+      if(cur!==state.tier){
+        state.tier=cur;
+        if(isTier2()){ widenCameraClampIfNeeded(); ensureEditor(); markDirty(true); }
       }
-      if(isTier2()) pushOutOfBuildingTiles();
+      if(isTier2()) pushOutOfSolids();
     });
 
-    // also render custom layers when the big map opens
+    // Redraw big map whenever opened
     const mapModal=document.getElementById('mapModal');
     if(mapModal){
-      const obs=new MutationObserver(()=>{ if(mapModal.style.display==='flex') drawBigOverlay(); });
-      obs.observe(mapModal, {attributes:true, attributeFilter:['style']});
+      const obs=new MutationObserver(()=>{ if(mapModal.style.display==='flex') drawBigOverlayIfOpen(); });
+      obs.observe(mapModal,{attributes:true,attributeFilter:['style']});
     }
   });
 
+  // Paint every frame (overlay) – and also immediately after edits via markDirty().
   IZZA.on('render-post', ()=>{
     if(!isTier2()) return;
+    // only repaint if something changed or once per frame — both are cheap; keep simple:
+    if(state.liveDirty){
+      state.liveDirty=false;
+      drawMiniOverlay();
+    }
     drawMainOverlay();
-    drawMiniOverlay();
-    // big map is painted on open by the observer
+    drawBigOverlayIfOpen();
   });
-
 })();
