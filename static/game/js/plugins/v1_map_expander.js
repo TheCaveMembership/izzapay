@@ -1,218 +1,222 @@
-// /static/game/js/plugins/v2_downtown_district.js
+// /static/game/js/plugins/downtown_full_unlock.js
 (function () {
-  const BUILD = 'v2.1-downtown-only+render-under+collisions+park+police+mall';
-  console.log('[IZZA PLAY]', BUILD);
-
-  // == storage / flags ==
-  const MAP_TIER_KEY = 'izzaMapTier'; // '1' | '2'
-
-  // must match core
-  function computeUnlockedRect(tier){
-    if(tier!=='2') return { x0:18, y0:18, x1:72, y1:42 };
-    return { x0:10, y0:12, x1:80, y1:50 };
-  }
-
-  // colors that match your core palette
   const COL = {
     grass:    '#09371c',
     road:     '#2a2a2a',
     dash:     '#ffd23f',
     sidewalk: '#6a727b',
-    hq:       '#4a2d2d',
-    shop:     '#203a60',
     civic:    '#405a85',
+    shop:     '#203a60',
     police:   '#0a2455',
-    mall:     '#203a60',
-    park:     '#1b5230',
-    water:    '#2b6a7a',
-    plaza:    '#455064'
+    park:     '#2b6a7a'
   };
 
-  // live api from core once ready
-  let api = null;
+  const MAP_TIER_KEY = 'izzaMapTier';
 
-  // recompute the SAME anchor points your core uses so our grid stitches cleanly
-  function anchors(){
+  // --- mirror core’s rectangles so we cover the true playable box
+  function unlockedRect(tier){
+    if(tier!=='2') return { x0:18, y0:18, x1:72, y1:42 };
+    return { x0:10, y0:12, x1:80, y1:50 };
+  }
+
+  // live anchors from core (recomputed so stitches line up)
+  function anchors(api){
     const tier = localStorage.getItem(MAP_TIER_KEY) || '1';
-    const un = computeUnlockedRect(tier);
+    const un = unlockedRect(tier);
 
-    const bW=10, bH=6;
+    const bW=10,bH=6;
     const bX = Math.floor((un.x0+un.x1)/2) - Math.floor(bW/2);
     const bY = un.y0 + 5;
 
-    const hRoadY       = bY + bH + 1;               // existing east-west
+    const hRoadY       = bY + bH + 1;
     const sidewalkTopY = hRoadY - 1;
     const sidewalkBotY = hRoadY + 1;
 
-    const vRoadX         = Math.min(un.x1-3, bX + bW + 6); // existing north-south
+    const vRoadX         = Math.min(un.x1-3, bX + bW + 6);
     const vSidewalkLeftX = vRoadX - 1;
     const vSidewalkRightX= vRoadX + 1;
 
-    return { un, hRoadY, sidewalkTopY, sidewalkBotY, vRoadX, vSidewalkLeftX, vSidewalkRightX, bX, bY, bW, bH };
+    return { tier, un, bX,bY,bW,bH, hRoadY, sidewalkTopY, sidewalkBotY, vRoadX, vSidewalkLeftX, vSidewalkRightX };
   }
 
-  // === Downtown layout ===
-  // Everything is declared in GRID coords and then drawn in render-under.
-  function makeDowntown(){
-    const A = anchors();
-    const { un, hRoadY, vRoadX } = A;
+  // --- downtown grid that fills the whole Tier-2 box
+  function makeDowntown(a){
+    const { un, hRoadY, vRoadX } = a;
 
-    // Streets: stitch into the existing cores:
-    //   - reuse hRoadY as the "Main" east-west
-    //   - reuse vRoadX as "Central" north-south
-    //   - add a clean downtown grid in the SE quadrant
-    const H_ROADS = [
-      { y: hRoadY,     x0: un.x0+1, x1: un.x1-1 },      // extend Main fully
-      { y: hRoadY+4,   x0: vRoadX-18, x1: un.x1-2 },
-      { y: hRoadY+8,   x0: vRoadX-18, x1: un.x1-2 },
-      { y: hRoadY+12,  x0: vRoadX-18, x1: un.x1-2 },
-      { y: hRoadY+16,  x0: vRoadX-18, x1: un.x1-2 }
+    // leave a 1-tile safety margin so we don’t draw outside the clamp
+    const L = un.x0+1, R = un.x1-1, T = un.y0+1, B = un.y1-1;
+
+    // target the **entire** rectangle, but always include the existing main roads
+    const H = [];
+    const V = [];
+
+    // stitch lines (the originals), then add evenly spaced blocks across the box
+    H.push({ y:hRoadY, x0:L, x1:R });
+
+    // place parallel E-W streets every 4 tiles above and below
+    for(let y=hRoadY-8; y>=T; y-=4) H.push({ y, x0:L, x1:R });
+    for(let y=hRoadY+4; y<=B; y+=4) H.push({ y, x0:L, x1:R });
+
+    V.push({ x:vRoadX, y0:T, y1:B });
+
+    // place N-S streets every 6 tiles to the left and right
+    for(let x=vRoadX-12; x>=L; x-=6) V.push({ x, y0:T, y1:B });
+    for(let x=vRoadX+6;  x<=R; x+=6) V.push({ x, y0:T, y1:B });
+
+    // buildings: avoid the HQ/Shop area (north-west of the stitch), fill blocks elsewhere
+    const BLD = [];
+    function addBox(x,y,w,h,color){ BLD.push({x,y,w,h,color}); }
+
+    // civic strip near top
+    addBox(vRoadX+8, hRoadY-9, 5,3, COL.civic);
+    addBox(vRoadX+15, hRoadY-9, 4,3, COL.civic);
+
+    // police + mall in the south/east
+    addBox(vRoadX+13, hRoadY+5,  4,3, COL.police);
+    addBox(vRoadX+4,  hRoadY+13, 8,5, COL.shop); // mall
+
+    // scatter a few mid-rises across remaining blocks (avoid HQ band to the NW)
+    const scatter = [
+      [vRoadX-7, hRoadY+5], [vRoadX-1, hRoadY+5],
+      [vRoadX+6, hRoadY+7], [vRoadX+18, hRoadY+11],
+      [vRoadX-6, hRoadY+13],[vRoadX+20, hRoadY-1]
     ];
+    scatter.forEach(([x,y])=> addBox(x,y,3,2,COL.civic));
 
-    const V_ROADS = [
-      { x: vRoadX,     y0: un.y0+1, y1: un.y1-1 },      // extend Central fully
-      { x: vRoadX+6,   y0: hRoadY+2, y1: hRoadY+18 },
-      { x: vRoadX+12,  y0: hRoadY+2, y1: hRoadY+18 },
-      { x: vRoadX+18,  y0: hRoadY+2, y1: hRoadY+18 },
-      { x: vRoadX+24,  y0: hRoadY+2, y1: hRoadY+18 }
-    ];
+    // park/lake in SE corner
+    const PARK = { x:R-11, y:B-7, w:9, h:5 };
 
-    // Civic places & blocks (SOLID):
-    const BUILDINGS = [
-      // police station (on a block at the corner grid)
-      { x: vRoadX+19, y: hRoadY+3,  w: 4, h: 3, color: COL.police },
-
-      // shopping mall (a big blue rectangle near the south edge)
-      { x: vRoadX+10, y: hRoadY+14, w: 8, h: 5, color: COL.mall },
-
-      // mixed downtown mid-rises
-      { x: vRoadX-7,  y: hRoadY+4,  w: 4, h: 3, color: COL.civic },
-      { x: vRoadX-1,  y: hRoadY+4,  w: 4, h: 3, color: COL.civic },
-      { x: vRoadX+6,  y: hRoadY+6,  w: 3, h: 2, color: COL.civic },
-      { x: vRoadX+12, y: hRoadY+6,  w: 3, h: 2, color: COL.civic },
-
-      // plaza (visual; still solid so NPCs flow around)
-      { x: vRoadX+22, y: hRoadY+10, w: 4, h: 3, color: COL.plaza }
-    ];
-
-    // Park (visual grass/water; SOLID so player skirts it via paths)
-    const PARKS = [
-      // a small park with a pond in the far SE
-      { x: vRoadX+25, y: hRoadY+14, w: 7, h: 5, pond:{ x: vRoadX+27, y: hRoadY+16, w: 3, h: 2 } }
-    ];
-
-    return { A, H_ROADS, V_ROADS, BUILDINGS, PARKS };
+    return { H_ROADS:H, V_ROADS:V, BUILDINGS:BLD, PARK };
   }
 
-  // ====== tiny helpers ======
-  const scl = ()=> api.DRAW / api.TILE;
-  const w2sX = (wx)=> (wx - api.camera.x) * scl();
-  const w2sY = (wy)=> (wy - api.camera.y) * scl();
-  function fillTile(ctx, gx, gy, color){
-    const sx = w2sX(gx*api.TILE), sy = w2sY(gy*api.TILE), S = api.DRAW;
-    ctx.fillStyle = color; ctx.fillRect(sx, sy, S, S);
+  // ==== draw helpers (underlay pass) ====
+  function scl(api){ return api.DRAW / api.TILE; }
+  function w2sX(api,wx){ return (wx - api.camera.x) * scl(api); }
+  function w2sY(api,wy){ return (wy - api.camera.y) * scl(api); }
+  function fillTile(api, ctx, gx, gy, color){
+    const S = api.DRAW, sx = w2sX(api,gx*api.TILE), sy = w2sY(api,gy*api.TILE);
+    ctx.fillStyle = color; ctx.fillRect(sx,sy,S,S);
   }
-  function drawHRoad(ctx, y, x0, x1){
+  function drawHRoad(api, ctx, y, x0, x1){
     for(let x=x0;x<=x1;x++){
-      fillTile(ctx, x, y, COL.road);
-      const sx=w2sX(x*api.TILE), sy=w2sY(y*api.TILE), S=api.DRAW;
+      fillTile(api,ctx,x,y,COL.road);
+      const S=api.DRAW, sx=w2sX(api,x*api.TILE), sy=w2sY(api,y*api.TILE);
       ctx.fillStyle = COL.dash;
       for(let i=0;i<4;i++) ctx.fillRect(sx + i*(S/4) + S*0.05, sy + S*0.48, S*0.10, S*0.04);
     }
   }
-  function drawVRoad(ctx, x, y0, y1){
-    for(let y=y0;y<=y1;y++) fillTile(ctx, x, y, COL.road);
-  }
-  function drawSidewalkRow(ctx, y, x0, x1){ for(let x=x0;x<=x1;x++) fillTile(ctx, x, y, COL.sidewalk); }
-  function drawSidewalkCol(ctx, x, y0, y1){ for(let y=y0;y<=y1;y++) fillTile(ctx, x, y, COL.sidewalk); }
-
-  function drawBuilding(ctx, b){
-    for(let gy=b.y; gy<b.y+b.h; gy++){
-      for(let gx=b.x; gx<b.x+b.w; gx++) fillTile(ctx, gx, gy, b.color);
-    }
-    const sx=w2sX(b.x*api.TILE), sy=w2sY(b.y*api.TILE);
-    ctx.fillStyle='rgba(0,0,0,.15)';
-    ctx.fillRect(sx, sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
+  function drawVRoad(api, ctx, x, y0, y1){
+    for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road);
   }
 
-  function drawPark(ctx, p){
-    for(let gy=p.x?0:0, y=p.y; y<p.y+p.h; y++){
-      for(let x=p.x; x<p.x+p.w; x++) fillTile(ctx, x, y, COL.park);
-    }
-    if(p.pond){
-      const sx=w2sX(p.pond.x*api.TILE), sy=w2sY(p.pond.y*api.TILE);
-      ctx.fillStyle = COL.water;
-      ctx.fillRect(sx, sy, p.pond.w*api.DRAW, p.pond.h*api.DRAW);
-    }
-  }
-
-  // ========= collisions (SOLIDS only for new buildings/parks) =========
-  function pushOutOfSolids(layout){
-    const t = api.TILE;
-    const px = api.player.x, py = api.player.y;
-    const gx = (px/t)|0, gy=(py/t)|0;
-
-    function nudgeFrom(rect){
-      const dxL = Math.abs(px - rect.x*t);
-      const dxR = Math.abs((rect.x+rect.w)*t - px);
-      const dyT = Math.abs(py - rect.y*t);
-      const dyB = Math.abs((rect.y+rect.h)*t - py);
-      const m = Math.min(dxL,dxR,dyT,dyB);
-      if(m===dxL) api.player.x = (rect.x - 0.01)*t;
-      else if(m===dxR) api.player.x = (rect.x+rect.w + 0.01)*t;
-      else if(m===dyT) api.player.y = (rect.y - 0.01)*t;
-      else             api.player.y = (rect.y+rect.h + 0.01)*t;
-    }
+  // === collisions (soft push out) for NEW buildings only ===
+  function pushOutOfNewSolids(api, layout){
+    if(!layout) return;
+    const t = api.TILE, px=api.player.x, py=api.player.y;
+    const gx=(px/t)|0, gy=(py/t)|0;
 
     for(const b of layout.BUILDINGS){
-      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){ nudgeFrom(b); return; }
-    }
-    for(const p of layout.PARKS){
-      const r = { x:p.x, y:p.y, w:p.w, h:p.h };
-      if(gx>=r.x && gx<r.x+r.w && gy>=r.y && gy<r.y+r.h){ nudgeFrom(r); return; }
+      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+        const dxL = Math.abs(px - b.x*t);
+        const dxR = Math.abs((b.x+b.w)*t - px);
+        const dyT = Math.abs(py - b.y*t);
+        const dyB = Math.abs((b.y+b.h)*t - py);
+        const m=Math.min(dxL,dxR,dyT,dyB);
+        if(m===dxL) api.player.x = (b.x-0.01)*t;
+        else if(m===dxR) api.player.x = (b.x+b.w+0.01)*t;
+        else if(m===dyT) api.player.y = (b.y-0.01)*t;
+        else             api.player.y = (b.y+b.h+0.01)*t;
+        break;
+      }
     }
   }
 
-  // ========= painters =========
-  function paintDowntown(layer){
-    const ctx = layer.getContext('2d'); if(!ctx) return;
-    const L = makeDowntown();
+  // ===== render hooks =====
+  IZZA.on('render-under', () => {
+    if(!IZZA.api || !IZZA.api.ready) return;
+    const api = IZZA.api;
+    const tier = localStorage.getItem(MAP_TIER_KEY) || '1';
+    if(tier!=='2') return; // only after mission 3
 
-    // base grass under everything in the expanded district so gaps don’t show
-    for(let gy=L.A.un.y0; gy<=L.A.un.y1; gy++)
-      for(let gx=L.A.un.x0; gx<=L.A.un.x1; gx++) fillTile(ctx, gx, gy, COL.grass);
+    const ctx = document.getElementById('game').getContext('2d');
+    const a = anchors(api);
+    const L = makeDowntown(a);
 
-    // sidewalks first
-    L.H_ROADS.forEach(r=>{ drawSidewalkRow(ctx, r.y-1, r.x0, r.x1); drawSidewalkRow(ctx, r.y+1, r.x0, r.x1); });
-    L.V_ROADS.forEach(r=>{ drawSidewalkCol(ctx, r.x-1, r.y0, r.y1); drawSidewalkCol(ctx, r.x+1, r.y0, r.y1); });
+    // draw everything UNDER sprites
+    // base grass only inside the unlocked rect (no blanket over old tiles outside)
+    for(let gy=a.un.y0; gy<=a.un.y1; gy++){
+      for(let gx=a.un.x0; gx<=a.un.x1; gx++){
+        fillTile(api, ctx, gx, gy, COL.grass);
+      }
+    }
 
-    // then roads
-    L.H_ROADS.forEach(r=> drawHRoad(ctx, r.y, r.x0, r.x1));
-    L.V_ROADS.forEach(r=> drawVRoad(ctx, r.x, r.y0, r.y1));
+    // sidewalks (±1 tile around each road)
+    L.H_ROADS.forEach(r=>{
+      for(let x=r.x0; x<=r.x1; x++){ fillTile(api,ctx,x,r.y-1,COL.sidewalk); fillTile(api,ctx,x,r.y+1,COL.sidewalk); }
+    });
+    L.V_ROADS.forEach(r=>{
+      for(let y=r.y0; y<=r.y1; y++){ fillTile(api,ctx,r.x-1,y,COL.sidewalk); fillTile(api,ctx,r.x+1,y,COL.sidewalk); }
+    });
 
-    // solids
-    L.PARKS.forEach(p=> drawPark(ctx, p));
-    L.BUILDINGS.forEach(b=> drawBuilding(ctx, b));
+    // roads
+    L.H_ROADS.forEach(r=> drawHRoad(api, ctx, r.y, r.x0, r.x1));
+    L.V_ROADS.forEach(r=> drawVRoad(api, ctx, r.x, r.y0, r.y1));
 
-    // keep collisions in sync
-    pushOutOfSolids(L);
+    // buildings
+    L.BUILDINGS.forEach(b=>{
+      for(let gy=b.y; gy<b.y+b.h; gy++)
+        for(let gx=b.x; gx<b.x+b.w; gx++)
+          fillTile(api,ctx,gx,gy,b.color);
+      const sx=w2sX(api,b.x*api.TILE), sy=w2sY(api,b.y*api.TILE);
+      ctx.fillStyle='rgba(0,0,0,.15)';
+      ctx.fillRect(sx,sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
+    });
+
+    // park/lake
+    if(L.PARK){
+      const p=L.PARK, sx=w2sX(api,p.x*api.TILE), sy=w2sY(api,p.y*api.TILE);
+      ctx.fillStyle = COL.park; ctx.fillRect(sx,sy, p.w*api.DRAW, p.h*api.DRAW);
+    }
+
+    // store current layout for collisions + for minimap pass
+    downtown_full_unlock._layout = L;
+    downtown_full_unlock._anchors = a;
+  });
+
+  // soft collisions + minimap/bigmap overlays
+  function paintMapCanvas(id){
+    const c = document.getElementById(id);
+    if(!c || !c.getContext) return;
+    const ctx = c.getContext('2d');
+    const L = downtown_full_unlock._layout;
+    const a = downtown_full_unlock._anchors;
+    if(!L || !a) return;
+
+    const sx = c.width / 90, sy = c.height / 60;
+
+    // roads
+    ctx.save();
+    ctx.fillStyle = '#8a90a0';
+    L.H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
+    L.V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
+    // buildings
+    L.BUILDINGS.forEach(b=>{ ctx.fillStyle=b.color; ctx.fillRect(b.x*sx, b.y*sy, b.w*sx, b.h*sy); });
+    // park
+    if(L.PARK){ const p=L.PARK; ctx.fillStyle='#7db7d9'; ctx.fillRect(p.x*sx, p.y*sy, p.w*sx, p.h*sy); }
+    ctx.restore();
   }
 
-  // ===== hooks =====
-  IZZA.on('ready', (a)=>{
-    api = a;
-  });
-
-  // draw UNDER sprites, OVER tiles
-  IZZA.on('render-under', ()=>{
-    if((localStorage.getItem(MAP_TIER_KEY)||'1')!=='2') return;
-    const canvas = document.getElementById('game');
-    paintDowntown(canvas);
-  });
-
+  const downtown_full_unlock = {};
   IZZA.on('update-post', ()=>{
-    if((localStorage.getItem(MAP_TIER_KEY)||'1')!=='2') return;
-    // also run collision here to be extra safe
-    pushOutOfSolids(makeDowntown());
+    if(!IZZA.api || !IZZA.api.ready) return;
+    const tier = localStorage.getItem(MAP_TIER_KEY) || '1';
+    if(tier!=='2') return;
+    // soft collisions on new solids
+    pushOutOfNewSolids(IZZA.api, downtown_full_unlock._layout);
+
+    // keep minimap/bigmap in sync (paint over core’s base)
+    paintMapCanvas('minimap');
+    paintMapCanvas('bigmap');
   });
+
 })();
