@@ -1215,6 +1215,8 @@ IZZA.on('loot-picked', (payload)=>{
   // expose for plugins:
   getMissionCount,
   getInventory, setInventory,
+  hRoadY,      // main horizontal road row
+  vRoadX,      // main vertical avenue column
   ready: true
 };
     IZZA.emit('ready', IZZA.api);
