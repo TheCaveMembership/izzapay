@@ -1,1245 +1,525 @@
-(function(){
-  const BUILD = 'v3.16-core+mapInvMutex+heldWeaponUzi+grenades';
-  console.log('[IZZA PLAY]', BUILD);
+// downtown_clip_safe_layout.js — Tier-2 expansion with realistic rules
+(function () {
+  const TIER_KEY = 'izzaMapTier';
 
-  // --- lightweight hook bus ---
-  const IZZA = window.IZZA = window.IZZA || {};
-  IZZA._hooks = IZZA._hooks || {};
-  IZZA.on   = (ev, fn)=>{ (IZZA._hooks[ev] ||= []).push(fn); };
-  IZZA.emit = (ev, payload)=>{ (IZZA._hooks[ev]||[]).forEach(fn=>{ try{ fn(payload); }catch(e){ console.error(e); } }); };
-  IZZA.api = {};
-
-  // ===== tiny on-screen boot status =====
-  function bootMsg(txt, color='#ffd23f'){
-    let el = document.getElementById('bootMsg');
-    if(!el){
-      el = document.createElement('div');
-      el.id='bootMsg';
-      Object.assign(el.style,{
-        position:'fixed', left:'12px', top:'48px', zIndex:9999,
-        background:'rgba(10,12,18,.92)', border:'1px solid #394769',
-        color:'#cfe0ff', padding:'6px 8px', borderRadius:'8px',
-        fontSize:'12px', maxWidth:'74vw', pointerEvents:'none'
-      });
-      document.body.appendChild(el);
-    }
-    el.style.display='block';
-    el.style.borderColor = color;
-    el.textContent = txt;
-    clearTimeout(el._t);
-    el._t = setTimeout(()=>{ el.style.display='none'; }, 4500);
-  }
-
-  // ===== Profile / assets =====
-  const profile = window.__IZZA_PROFILE__ || {};
-  const BODY   = profile.sprite_skin || "default";
-  const HAIR   = profile.hair || "short";
-  const OUTFIT = profile.outfit || "street";
-
-  // ===== Canvas / constants =====
-  const cvs = document.getElementById('game');
-  const ctx = cvs.getContext('2d');
-  const TILE=32, SCALE=3, DRAW=TILE*SCALE, SCALE_FACTOR=DRAW/TILE;
-
-  const camera={x:0,y:0};
-  const w2sX = wx => (wx - camera.x) * SCALE_FACTOR;
-  const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
-
-  // --- loot drop behavior knobs ---
-  const DROP_GRACE_MS = 1000;
-  const DROP_OFFSET   = 18;
-  function makeDropPos(victimCenterX, victimCenterY){
-    const dx = victimCenterX - player.x;
-    const dy = victimCenterY - player.y;
-    const m  = Math.hypot(dx, dy) || 1;
-    const ux = dx / m, uy = dy / m;
-    return { x: victimCenterX + ux * DROP_OFFSET, y: victimCenterY + uy * DROP_OFFSET };
-  }
-
-  // ===== World =====
-const W=90,H=60;
-
-// Map tiers: tier "1" = current size, tier "2" = expanded after Mission 3
-function computeUnlockedRect(tier){
-  // tier 1 matches your current area
-  if(tier!=='2') return { x0:18, y0:18, x1:72, y1:42 };
-  // tier 2 opens the map outward (tweak freely)
-  return { x0:10, y0:12, x1:80, y1:50 };
-}
-function computePreviewRect(tier){
-  if(tier!=='2') return { x0:10, y0:12, x1:80, y1:50 };
-  // a bit wider preview so the minimap shows more context
-  return { x0:6, y0:8, x1:84, y1:54 };
-}
-
-let __mapTier = localStorage.getItem('izzaMapTier') || '1';
-let unlocked  = computeUnlockedRect(__mapTier);
-let preview   = computePreviewRect(__mapTier);
-
-const inRect = (gx,gy,r)=> gx>=r.x0 && gx<=r.x1 && gy>=r.y0 && gy<=r.y1;
-const inUnlocked = (gx,gy)=> inRect(gx,gy,unlocked);
-
-// Poll for tier changes (Mission 3 plugin sets izzaMapTier to "2")
-function maybeRefreshMapTier(){
-  const t = localStorage.getItem('izzaMapTier') || '1';
-  if(t !== __mapTier){
-    __mapTier = t;
-    unlocked  = computeUnlockedRect(t);
-    preview   = computePreviewRect(t);
-    centerCamera();
-    bootMsg(t==='2' ? 'New district unlocked!' : 'Map size updated');
-  }
-}
-
-  // Hub
-  const bW=10,bH=6;
-  const bX = Math.floor((unlocked.x0+unlocked.x1)/2) - Math.floor(bW/2);
-  const bY = unlocked.y0 + 5;
-
-  // Roads/sidewalks
-  const hRoadY       = bY + bH + 1;
-  const sidewalkTopY = hRoadY - 1;
-  const sidewalkBotY = hRoadY + 1;
-
-  // Vertical road to the right of HQ + sidewalks on both sides
-  const vRoadX         = Math.min(unlocked.x1-3, bX + bW + 6);
-  const vSidewalkLeftX = vRoadX - 1;
-  const vSidewalkRightX= vRoadX + 1;
-
-  // HQ Door centered on top sidewalk
-  const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
-
-  // ===== SHOP: right of the right vertical sidewalk =====
-  const shop = {
-    w: 8, h: 5,
-    x: vSidewalkRightX + 1,
-    y: sidewalkTopY - 5,
-    sidewalkY: sidewalkTopY,
-    registerGX: vSidewalkRightX
+  // ===== Palette =====
+  const COL = {
+    grass:'#09371c',
+    road:'#2a2a2a', dash:'#ffd23f', sidewalk:'#6a727b',
+    civic:'#405a85', police:'#0a2455', shop:'#203a60', park:'#2b6a7a',
+    water:'#1a4668', sand:'#e0c27b', wood:'#6b4a2f', hotel:'#284b7a',
+    house:'#175d2f', hoodPark:'#135c33'
   };
 
-  // ===== Loading =====
-  function loadImg(src){
-    return new Promise((res,rej)=>{
-      const i=new Image();
-      i.onload=()=>res(i);
-      i.onerror=()=>rej(new Error('load:'+src));
-      i.src=src;
-    });
-  }
-  const assetRoot="/static/game/sprites";
-  function loadLayer(kind,name){
-    const p2=`${assetRoot}/${kind}/${encodeURIComponent(name+' 2')}.png`;
-    const p1=`${assetRoot}/${kind}/${encodeURIComponent(name)}.png`;
-    return loadImg(p2).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))}))
-                      .catch(()=>loadImg(p1).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))})));
-  }
+  const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
-  // === NPC sprite sheets (32x32 frames) ===
-  const NPC_SRC = {
-    ped_m:       '/static/game/sprites/pedestrian_sheet.png',
-    ped_f:       '/static/game/sprites/pedestrian_female_sheet.png',
-    ped_m_dark:  '/static/game/sprites/pedestrian_male_dark_sheet.png',
-    ped_f_dark:  '/static/game/sprites/pedestrian_female_dark_sheet.png',
-    police:      '/static/game/sprites/izza_police_sheet.png',
-    swat:        '/static/game/sprites/izza_swat_sheet.png',
-    military:    '/static/game/sprites/izza_military_sheet.png'
-  };
-  let NPC_SHEETS = {};
+  // ===== Core anchors (match your core’s math) =====
+  function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
+  function anchors(api){
+    const tier = localStorage.getItem(TIER_KEY)||'1';
+    const un = unlockedRect(tier);
 
-  function loadNPCSheets(){
-    const entries = Object.entries(NPC_SRC);
-    return Promise.allSettled(entries.map(([,src])=> loadImg(src)))
-      .then(results=>{
-        const map = {}, misses=[];
-        results.forEach((r,i)=>{
-          const [key] = entries[i];
-          if(r.status==='fulfilled'){
-            const img=r.value;
-            map[key] = { img, cols: Math.max(1, Math.floor(img.width/32)) };
-          }else{
-            misses.push(key);
-          }
-        });
-        if(misses.length) bootMsg('Missing NPC sprites: '+misses.join(', '), '#ff6b6b');
-        return map;
-      });
+    // HQ / shop derived the same way your core does
+    const bW=10,bH=6;
+    const bX = Math.floor((un.x0+un.x1)/2) - Math.floor(bW/2);
+    const bY = un.y0 + 5;
+
+    const hRoadY       = bY + bH + 1;
+    const sidewalkTopY = hRoadY - 1;
+
+    const vRoadX         = Math.min(un.x1-3, bX + bW + 6);
+    const vSidewalkRightX= vRoadX + 1;
+
+    const shop = { w:8, h:5, x:vSidewalkRightX+1, y: sidewalkTopY-5 };
+
+    // “no paint” (with 1-tile buffer)
+    const BUFF=1;
+    const HQ  = {x0:bX-BUFF, y0:bY-BUFF, x1:bX+bW-1+BUFF, y1:bY+bH-1+BUFF};
+    const SH  = {x0:shop.x-BUFF, y0:shop.y-BUFF, x1:shop.x+shop.w-1+BUFF, y1:shop.y+shop.h-1+BUFF};
+
+    // door/register tiles (keep clear)
+    const door      = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
+    const register  = { gx: vSidewalkRightX, gy: sidewalkTopY };
+
+    return {un,bX,bY,bW,bH,hRoadY,vRoadX,shop,HQ,SH,door,register};
   }
 
-  // ===== Coins & Progress (persist) =====
-  const LS = {
-    coins:      'izzaCoins',
-    mission1:   'izzaMission1',
-    missions:   'izzaMissions',
-    inventory:  'izzaInventory'
-  };
-  function getCoins(){
-    const raw = localStorage.getItem(LS.coins);
-    const n = raw==null ? 300 : (parseInt(raw,10)||0);
-    return Math.max(0,n);
-  }
-  function setCoins(n){
-    const v = Math.max(0, n|0);
-    localStorage.setItem(LS.coins, String(v));
-    const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
-    if(el) el.textContent = `Coins: ${v} IC`;
-    player.coins = v;
-  }
-  function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
-  function setMission1Done(){
-    localStorage.setItem(LS.mission1,'done');
-    const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
-    if(cur<1) localStorage.setItem(LS.missions,'1');
-  }
-  function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
+  // ===== Utility =====
+  const inflate=(r,d)=>({x0:r.x0-d,y0:r.y0-d,x1:r.x1+d,y1:r.y1+d});
+  const rectW = r => r.x1-r.x0+1;
+  const rectH = r => r.y1-r.y0+1;
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
-  // ---- Inventory (object w/ counts, ammo, durability, equipped flags)
-  function _migrateInventory(v){
-    if (Array.isArray(v)) {
-      const inv = {};
-      v.forEach(k => { inv[k] = (k==='pistol' ? {owned:true, ammo:0, equipped:false} : {count:1, equipped:false}); });
-      return inv;
-    }
-    return v && typeof v==='object' ? v : {};
-  }
-  function getInventory(){
-    try{
-      const parsed = JSON.parse(localStorage.getItem(LS.inventory) || '{}');
-      return _migrateInventory(parsed);
-    }catch{
-      return {};
-    }
-  }
-  function setInventory(obj){
-    localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
+  // Simple overlap test
+  function overlaps(a,b){
+    return !(a.x1<b.x0 || a.x0>b.x1 || a.y1<b.y0 || a.y0>b.y1);
   }
 
-// ===== Loot pickup integration (coins, pistol, uzi, grenades) =====
-// Expect your loot system to call: IZZA.emit('loot-picked', { kind:'coin'|'pistol'|'uzi'|'grenade', amount?, value?, bullets? })
-IZZA.on('loot-picked', (payload)=>{
-  try{
-    const kind   = payload && (payload.kind || payload.type || payload.id);
-    const amount = (payload && (payload.amount|0)) || 0;
-    if(!kind) return;
-
-    // Helper: refresh inventory UI if open
-    const refreshInvPanel = ()=>{
-      const host = document.getElementById('invPanel');
-      if(host && host.style.display!=='none' && typeof renderInventoryPanel==='function'){
-        renderInventoryPanel();
-      }
-    };
-
-    switch(kind){
-      // --- Coins ---
-      case 'coin':
-      case 'coins': {
-        // accept amount OR value from emitter
-        const delta = amount>0 ? amount : ((payload.value|0) || 0);
-        if(delta>0){
-          setCoins(getCoins() + delta);
-          toast(`+${delta} IC`);
-        }
-        break;
-      }
-
-      // --- Uzi: add to inventory + ammo +50 per pickup ---
-      case 'uzi': {
-        const inv = getInventory();
-        const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
-        cur.owned = true;
-        cur.ammo  = (cur.ammo|0) + 50;
-        inv.uzi   = cur;
-        setInventory(inv);
-        toast('Picked up Uzi (+50 bullets)');
-        refreshInvPanel();
-        break;
-      }
-
-      // --- Grenade: stack count +1 per pickup ---
-      case 'grenade': {
-        const inv = getInventory();
-        const cur = inv.grenade || { count:0 };
-        cur.count = (cur.count|0) + 1;
-        inv.grenade = cur;
-        setInventory(inv);
-        toast('Grenade +1');
-        refreshInvPanel();
-        break;
-      }
-
-      // --- Pistol: add to inventory + ammo (defaults to +17) ---
-      case 'pistol': {
-        const inv = getInventory();
-        const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
-        cur.owned = true;
-        // If your emitter sends a custom bullet amount, use it; else default to +17 (same as shop "full mag").
-        const add = (payload && (payload.bullets|0)) || 17;
-        cur.ammo  = (cur.ammo|0) + add;
-        inv.pistol = cur;
-        setInventory(inv);
-        toast(`Picked up Pistol (+${add} ammo)`);
-        refreshInvPanel();
-        break;
-      }
-
-      default:
-        // ignore other kinds safely
-        break;
-    }
-  }catch(err){
-    console.error('[loot-picked] handler error', err);
-  }
-});
-  
-  // ===== Player / anim =====
-  const player = {
-    x: door.gx*TILE + (TILE/2 - 8),
-    y: door.gy*TILE,
-    speed: 90,
-    wanted: 0,
-    facing: 'down', moving:false,
-    animTime: 0,
-    hp: 5,
-    coins: 0
-  };
-
-  // --- Equip helpers + rules ---
-  let equipped = { weapon: 'fists' }; // 'fists' | 'bat' | 'knuckles' | 'pistol' | 'uzi'
-  const WEAPON_RULES = {
-    fists:     { damage: 1, breaks: false },
-    bat:       { damage: 2, breaks: true,  hitsPerItem: 20 },
-    knuckles:  { damage: 2, breaks: true,  hitsPerItem: 50 },
-    pistol:    { damage: 3, breaks: false },
-    uzi:       { damage: 3, breaks: false } // same as pistol for now
-    // grenades are consumables with {count}, not equipped here
-  };
-  function missionsOKToUse(id){
-    // firearms (pistol + uzi) unlock to EQUIP at >= mission 3
-    if (id==='pistol' || id==='uzi') return getMissionCount() >= 3;
-    return true;
-  }
-  function setEquippedWeapon(id){
-    equipped.weapon = id;
-    const inv = getInventory();
-    if(inv.bat)      inv.bat.equipped      = (id === 'bat');
-    if(inv.knuckles) inv.knuckles.equipped = (id === 'knuckles');
-    if(inv.pistol)   inv.pistol.equipped   = (id === 'pistol');
-    if(inv.uzi)      inv.uzi.equipped      = (id === 'uzi');
-    setInventory(inv);
-  }
-  function unequipWeapon(){ setEquippedWeapon('fists'); toast('Hands ready'); }
-
-  const DIR_INDEX = { down:0, left:2, right:1, up:3 };
-  const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
-  function currentFrame(cols, moving, t){ if(cols<=1) return 0; if(!moving) return 1%cols; return Math.floor(t/WALK_MS)%cols; }
-
-  // ===== Input / UI =====
-  const keys = Object.create(null);
-  const btnA = document.getElementById('btnA');
-  const btnB = document.getElementById('btnB');
-  const btnI = document.getElementById('btnI');
-  const btnMap = document.getElementById('btnMap');
-  const promptEl = document.getElementById('prompt');
-
-  // Tutorial hint (toast)
-  let tutorial = { active:false, step:'', hintT:0 };
-  function showHint(text, seconds=3){
-    let h = document.getElementById('tutHint');
-    if(!h){
-      h = document.createElement('div');
-      h.id='tutHint';
-      Object.assign(h.style,{
-        position:'fixed', left:'12px', top:'64px', zIndex:7,
-        background:'rgba(10,12,18,.85)', border:'1px solid #394769',
-        color:'#cfe0ff', padding:'8px 10px', borderRadius:'10px', fontSize:'14px'
-      });
-      document.body.appendChild(h);
-    }
-    h.textContent=text; h.style.display='block';
-    tutorial.hintT = seconds;
-  }
-  function toast(msg, seconds=2.2){ showHint(msg, seconds); }
-
-  function handleB(){
-    if (doorInRange()) openEnter();
-    else if (atRegister()) openShop();
-    else setWanted(0);
+  // Tile helpers (screen-space)
+  const scl = api => api.DRAW/api.TILE;
+  const w2sX=(api,wx)=>(wx-api.camera.x)*scl(api);
+  const w2sY=(api,wy)=>(wy-api.camera.y)*scl(api);
+  function fillTile(api,ctx,gx,gy,color){
+    const S=api.DRAW, sx=w2sX(api,gx*api.TILE), sy=w2sY(api,gy*api.TILE);
+    ctx.fillStyle=color; ctx.fillRect(sx,sy,S,S);
   }
 
-  window.addEventListener('keydown', e=>{
-    const k=e.key.toLowerCase(); keys[k]=true;
-    if(k==='b'){ e.preventDefault(); handleB(); }
-    if(k==='a'){ e.preventDefault(); doAttack(); }
-    if(k==='i'){ e.preventDefault(); toggleInventoryPanel(); }
-  },{passive:false});
-  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
+  // ===== Fixed lakefront & neighborhood (zones) =====
+  // Keep within Tier-2 bounds
+  const LAKE   = { x0:67, y0:35, x1:81, y1:49 };
+  const BEACH_X= LAKE.x0 - 1;
+  const DOCKS  = [
+    { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },
+    { x0: LAKE.x0, y: LAKE.y0+12, len: 4 },
+  ];
+  const HOTEL  = { x0: LAKE.x0+2, y0: LAKE.y0-5, x1: LAKE.x0+8, y1: LAKE.y0-1 };
 
-  if(btnA) btnA.addEventListener('click', doAttack);
-  if(btnB) btnB.addEventListener('click', handleB);
+  const HOOD   = { x0:12, y0:42, x1:34, y1:50 };
+  const HOOD_H = [ HOOD.y0+2, HOOD.y0+6 ];
+  const HOOD_V = [ HOOD.x0+8, HOOD.x0+16 ];
+  const HOUSES = [
+    {x0:HOOD.x0+2,y0:HOOD.y0+3,x1:HOOD.x0+4,y1:HOOD.y0+4},
+    {x0:HOOD.x0+10,y0:HOOD.y0+3,x1:HOOD.x0+12,y1:HOOD.y0+4},
+    {x0:HOOD.x0+18,y0:HOOD.y0+3,x1:HOOD.x0+20,y1:HOOD.y0+4},
+    {x0:HOOD.x0+4,y0:HOOD.y0+8,x1:HOOD.x0+6,y1:HOOD.y0+9},
+    {x0:HOOD.x0+12,y0:HOOD.y0+8,x1:HOOD.x0+14,y1:HOOD.y0+9}
+  ];
+  const HOOD_PARK = { x0: HOOD.x0+22, y0: HOOD.y0+6, x1: HOOD.x0+26, y1: HOOD.y0+9 };
 
-  // ===== Inventory ↔ Map mutual exclusion helpers =====
-  const miniWrap = document.getElementById('miniWrap');
-  const mapModal = document.getElementById('mapModal');
-  function invOpen(){ const p=document.getElementById('invPanel'); return p && p.style.display!=='none'; }
-  function closeInventory(){ const p=document.getElementById('invPanel'); if(p) p.style.display='none'; }
-  function closeMapUI(){ if(mapModal) mapModal.style.display='none'; if(miniWrap) miniWrap.style.display='none'; }
+  const _inRect=(gx,gy,R)=> gx>=R.x0 && gx<=R.x1 && gy>=R.y0 && gy<=R.y1;
+  const _isDock=(gx,gy)=> DOCKS.some(d=> gy===d.y && gx>=d.x0 && gx<=d.x0+d.len-1);
+  // Important: docks are NOT water, so you can walk on them
+  const _isWater=(gx,gy)=> _inRect(gx,gy,LAKE) && !_isDock(gx,gy);
 
-  const btnIHandler = ()=> toggleInventoryPanel();
-  if(btnI) btnI.addEventListener('click', btnIHandler);
+  // ===== Road proposal with realism rules =====
+  function proposeDowntown(a){
+    const {un,hRoadY,vRoadX} = a;
+    const L=un.x0+1,R=un.x1-1,T=un.y0+1,B=un.y1-1;
 
-  if(btnMap){
-    btnMap.addEventListener('click', ()=>{
-      // if inventory is open, close it first
-      closeInventory();
-      if(!miniWrap) return;
-      // toggle minimap visibility
-      const next = (miniWrap.style.display==='none' || !miniWrap.style.display) ? 'block' : 'none';
-      miniWrap.style.display = next;
-      if(next==='block'){ if(mapModal) mapModal.style.display='none'; }
-    });
-  }
+    // Grid (compact downtown core)
+    const Hcand = [ hRoadY-6, hRoadY, hRoadY+6 ]
+      .map(y=>({y, x0:L, x1:R}));
+    const Vcand = [ vRoadX-9, vRoadX, vRoadX+9 ]
+      .map(x=>({x, y0:T, y1:B}));
 
-  // Virtual joystick
-  const stick = document.getElementById('stick');
-  const nub   = document.getElementById('nub');
-  let dragging=false, baseRect=null, vec={x:0,y:0};
-  function setNub(dx,dy){
-    const r=40, m=Math.hypot(dx,dy)||1, c=Math.min(m,r), ux=dx/m, uy=dy/m;
-    if(nub){ nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px'; }
-    vec.x=(c/r)*ux; vec.y=(c/r)*uy;
-  }
-  function resetNub(){ if(nub){ nub.style.left='40px'; nub.style.top='40px'; } vec.x=0; vec.y=0; }
-  function startDrag(e){ dragging=true; baseRect=stick.getBoundingClientRect(); e.preventDefault(); }
-  function moveDrag(e){ if(!dragging) return; const t=e.touches?e.touches[0]:e; const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(t.clientX-cx,t.clientY-cy); e.preventDefault(); }
-  function endDrag(e){ dragging=false; resetNub(); if(e) e.preventDefault(); }
-  if(stick){
-    stick.addEventListener('touchstart',startDrag,{passive:false});
-    stick.addEventListener('touchmove', moveDrag, {passive:false});
-    stick.addEventListener('touchend',  endDrag,  {passive:false});
-    stick.addEventListener('mousedown', startDrag);
-    window.addEventListener('mousemove',moveDrag);
-    window.addEventListener('mouseup',  endDrag);
-  }
-
-  // ===== HUD =====
-  function setWanted(n){
-    const prev = player.wanted;
-    player.wanted = Math.max(0, Math.min(5, n|0));
-    document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star' + (i<player.wanted?' on':'') );
-    if (player.wanted !== prev) IZZA.emit('wanted-changed', { from: prev, to: player.wanted });
-  }
-
-  // ===== Camera =====
-  function centerCamera(){
-    const visW = cvs.width  / SCALE_FACTOR;
-    const visH = cvs.height / SCALE_FACTOR;
-    camera.x = player.x - visW/2;
-    camera.y = player.y - visH/2;
-    const maxX = (unlocked.x1+1)*TILE - visW;
-    const maxY = (unlocked.y1+1)*TILE - visH;
-    camera.x = Math.max(unlocked.x0*TILE, Math.min(camera.x, maxX));
-    camera.y = Math.max(unlocked.y0*TILE, Math.min(camera.y, maxY));
-  }
-
-  // ===== Collision =====
-  const isHQ = (gx,gy)=> gx>=bX&&gx<bX+bW&&gy>=bY&&gy<bY+bH;
-  const isShop = (gx,gy)=> gx>=shop.x&&gx<shop.x+shop.w&&gy>=shop.y&&gy<shop.y+shop.h;
-  function isSolid(gx,gy){
-    if(!inUnlocked(gx,gy)) return true;
-    if(isHQ(gx,gy)) return true;
-    if(isShop(gx,gy) && gx!==vSidewalkLeftX && gx!==vSidewalkRightX) return true;
-    return false;
-  }
-  function tryMove(nx,ny){
-    const cx = [
-      {x:nx, y:player.y}, {x:nx+TILE-1, y:player.y},
-      {x:nx, y:player.y+TILE-1}, {x:nx+TILE-1, y:player.y+TILE-1}
+    // Buildings inside the blocks (don’t touch roads later; we’ll buffer sidewalks)
+    const BLD = [
+      {x:vRoadX+11, y:hRoadY-9, w:6, h:3, color:COL.civic, kind:'civic'},
+      {x:vRoadX+6,  y:hRoadY+2, w:4, h:3, color:COL.police, kind:'police'},
+      {x:vRoadX+8,  y:hRoadY+9, w:7, h:4, color:COL.shop,   kind:'mall'},
+      {x:vRoadX-14, y:hRoadY+2, w:3, h:2, color:COL.shop,   kind:'shop'},
+      {x:vRoadX-6,  y:hRoadY-2, w:3, h:2, color:COL.shop,   kind:'shop'}
     ];
-    if(!cx.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.x = nx;
 
-    const cy = [
-      {x:player.x, y:ny}, {x:player.x+TILE-1, y:ny},
-      {x:player.x, y:ny+TILE-1}, {x:player.x+TILE-1, y:ny+TILE-1}
-    ];
-    if(!cy.some(c=>isSolid(Math.floor(c.x/TILE), Math.floor(c.y/TILE)))) player.y = ny;
+    // Park in an interior block
+    const PARK = { x:vRoadX-3, y:hRoadY+8, w:6, h:4 };
+
+    return {H:Hcand,V:Vcand,BLD,PARK};
   }
 
-  function doorInRange(){
-    const px = Math.floor((player.x + TILE/2)/TILE);
-    const py = Math.floor((player.y + TILE/2)/TILE);
-    return (Math.abs(px-door.gx)+Math.abs(py-door.gy))<=2;
-  }
-  function atRegister(){
-    const px = Math.floor((player.x + TILE/2)/TILE);
-    const py = Math.floor((player.y + TILE/2)/TILE);
-    return (Math.abs(px-shop.registerGX)+Math.abs(py-shop.sidewalkY))<=1;
-  }
-
-  // ===== Modals & Tutorial hook =====
-  function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
-  function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
-
-  // Tiny inline icons for shop/inventory
-  function svgIcon(id, w=24, h=24){
-    if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
-    if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
-    if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
-    if(id==='uzi') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
-    if(id==='grenade') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
-    return '';
-  }
-
-  function openShop(){
-    const m=document.getElementById('shopModal'); if(!m) return;
-    const list=document.getElementById('shopList');
-    const note=document.getElementById('shopNote');
-    if(list) list.innerHTML='';
-
-    const done = getMission1Done();
-    if(!done){
-      if(note) note.textContent = "Go see IZZA GAME HQ to learn about your first mission from the boss!";
-    }else{
-      if(note) note.textContent = "";
-      const missions = getMissionCount();
-      const stock = [
-        {id:'bat',       name:'Baseball Bat',     price:100, desc:'Starter melee'},
-        {id:'knuckles',  name:'Brass Knuckles',   price:150, desc:'+1 damage'},
-        {id:'pistol',    name:'Pistol',           price:300, desc:'Basic firearm', reqMissions:2},
-      ];
-      if(list){
-        stock.forEach(it=>{
-          if(it.reqMissions && missions < it.reqMissions) return;
-
-          const row = document.createElement('div'); row.className='shop-item';
-          const meta = document.createElement('div'); meta.className='meta';
-          meta.innerHTML = `
-            <div style="display:flex; align-items:center; gap:8px">
-              <div>${svgIcon(it.id)}</div>
-              <div>
-                <div class="name">${it.name}</div>
-                <div class="sub">${it.price} IC</div>
-              </div>
-            </div>`;
-
-          const btn = document.createElement('button'); btn.className='buy'; btn.textContent = 'Buy';
-          btn.addEventListener('click', ()=>{
-            if(player.coins < it.price){ alert('Not enough coins'); return; }
-            setCoins(player.coins - it.price);
-
-            // Add to inventory (stackables + durability init)
-            const inv = getInventory();
-            if(it.id==='bat'){
-              const cur = inv.bat || { count:0, hitsLeftOnCurrent:0, equipped:false };
-              cur.count += 1;
-              if(cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = WEAPON_RULES.bat.hitsPerItem;
-              inv.bat = cur;
-              setInventory(inv);
-              toast('Purchased Baseball Bat');
-            }else if(it.id==='knuckles'){
-              const cur = inv.knuckles || { count:0, hitsLeftOnCurrent:0, equipped:false };
-              cur.count += 1;
-              if(cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = WEAPON_RULES.knuckles.hitsPerItem;
-              inv.knuckles = cur;
-              setInventory(inv);
-              toast('Purchased Brass Knuckles');
-            }else if(it.id==='pistol'){
-              const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
-              cur.owned = true;
-              cur.ammo = (cur.ammo|0) + 17; // full mag per buy
-              inv.pistol = cur;
-              setInventory(inv);
-              toast('Purchased Pistol (+17 ammo)');
-            }
-
-            const p = document.getElementById('invPanel');
-            if(p && p.style.display!=='none') renderInventoryPanel();
-          });
-
-          row.appendChild(meta); row.appendChild(btn);
-          list.appendChild(row);
-        });
-        if(!list.children.length && note){
-          note.textContent = "No items available yet. Complete more missions!";
-        }
-      }
-    }
-    m.style.display='flex';
-  }
-  function closeShop(){ const m=document.getElementById('shopModal'); if(m) m.style.display='none'; }
-
-  const ce=document.getElementById('closeEnter'); if(ce) ce.addEventListener('click', (e)=>{ e.stopPropagation(); closeEnter(); });
-  const em=document.getElementById('enterModal'); if(em) em.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeEnter(); });
-  const cs=document.getElementById('closeShop'); if(cs) cs.addEventListener('click', (e)=>{ e.stopPropagation(); closeShop(); });
-  const sm=document.getElementById('shopModal'); if(sm) sm.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) closeShop(); });
-
-  // ✅ Start Tutorial button (restored)
-  const startBtn = document.getElementById('startTutorial');
-  if(startBtn){
-    startBtn.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      closeEnter();
-      tutorial.active = true;
-      tutorial.step   = 'hitPed';
-      showHint('Tutorial: Press A to hit a pedestrian.');
-    });
-  }
-
-  // ===== Inventory UI (toggle with I or the I button) =====
-  function ensureInvHost(){
-    let host = document.getElementById('invPanel');
-    if(!host){
-      const card = document.getElementById('gameCard');
-      host = document.createElement('div');
-      host.id = 'invPanel';
-      host.style.cssText = 'max-width:1100px;margin:8px auto 0;display:none';
-      if(card && card.parentNode){ card.parentNode.insertBefore(host, card.nextSibling); }
-      else{ document.body.appendChild(host); }
-    }
-    return host;
-  }
-  function toggleInventoryPanel(){
-    const host = ensureInvHost();
-    const on = host.style.display!=='none';
-    if(on){
-      host.style.display = 'none';
-    }else{
-      // open inventory ⇒ close map UI
-      closeMapUI();
-      host.style.display = 'block';
-      renderInventoryPanel();
-    }
-  }
-  function renderInventoryPanel(){
-    const host = ensureInvHost();
-    const inv  = getInventory();
-    const ms   = getMissionCount();
-
-    function itemRow(id, label, metaHTML){
-      const canUse     = missionsOKToUse(id);
-      const isEquipped = (equipped.weapon===id);
-      const lockHTML = canUse ? '' : `<span style="margin-left:8px; font-size:12px; opacity:.8">Locked until mission ${id==='pistol'||id==='uzi'?3:''}</span>`;
-      const btnHTML = canUse
-        ? (isEquipped
-            ? `<button data-unequip="${id}" style="margin-left:auto">Unequip</button>`
-            : `<button data-equip="${id}" style="margin-left:auto">Equip</button>`
-          )
-        : '';
-      return `
-        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
-          <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
-          <div style="font-weight:600">${label}</div>
-          ${lockHTML}
-          <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
-          ${btnHTML}
-        </div>`;
-    }
-
-    function readOnlyRow(id, label, metaHTML){
-      return `
-        <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
-          <div style="width:28px;height:28px">${svgIcon(id, 28, 28)}</div>
-          <div style="font-weight:600">${label}</div>
-          <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
-        </div>`;
-    }
-
-    const rows = [];
-
-    // Firearms
-    if(inv.pistol && (inv.pistol.owned || (inv.pistol.ammo|0)>0)){
-      rows.push(itemRow('pistol','Pistol', `Ammo: ${inv.pistol.ammo|0}`));
-    }
-    if(inv.uzi && (inv.uzi.owned || (inv.uzi.ammo|0)>0)){
-      rows.push(itemRow('uzi','Uzi', `Ammo: ${inv.uzi.ammo|0}`));
-    }
-
-    // Melee
-    if(inv.bat && inv.bat.count>0){
-      const cur = inv.bat.hitsLeftOnCurrent|0;
-      rows.push(itemRow('bat','Baseball Bat', `Count: ${inv.bat.count} | Current: ${cur}/${WEAPON_RULES.bat.hitsPerItem}`));
-    }
-    if(inv.knuckles && inv.knuckles.count>0){
-      const cur = inv.knuckles.hitsLeftOnCurrent|0;
-      rows.push(itemRow('knuckles','Brass Knuckles', `Count: ${inv.knuckles.count} | Current: ${cur}/${WEAPON_RULES.knuckles.hitsPerItem}`));
-    }
-
-    // Consumables
-    if(inv.grenade && (inv.grenade.count|0) > 0){
-      rows.push(readOnlyRow('grenade','Grenades', `Count: ${inv.grenade.count|0}`));
-    }
-
-    host.innerHTML = `
-      <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
-          <div style="font-weight:700">Inventory</div>
-          <div style="opacity:.8; font-size:12px">Missions completed: ${ms}</div>
-          <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
-            <div style="opacity:.8; font-size:12px">Equipped: ${equipped.weapon}</div>
-            <button class="ghost" id="unequipHands" type="button" title="Switch to hand combat">Use Hands</button>
-            <div style="opacity:.8; font-size:12px">Press I to close</div>
-          </div>
-        </div>
-        <div class="inv-body" style="display:flex; flex-direction:column; gap:8px; max-height:268px; overflow:auto; padding-right:4px">
-          ${rows.length ? rows.join('') : '<div style="opacity:.8">No items yet. Defeat enemies or buy from the shop.</div>'}
-        </div>
-      </div>
-    `;
-
-    // Equip / Unequip actions
-    host.querySelectorAll('[data-equip]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.getAttribute('data-equip');
-        if(!missionsOKToUse(id)) return;
-        setEquippedWeapon(id);
-        toast(`Equipped ${id}`);
-        renderInventoryPanel();
+  // Clip a horizontal road against forbidden rectangles
+  function clipH(seg, forbidden){
+    let parts=[{y:seg.y,x0:seg.x0,x1:seg.x1}];
+    forbidden.forEach(R=>{
+      parts=parts.flatMap(p=>{
+        if(p.y<R.y0||p.y>R.y1||p.x1<R.x0||p.x0>R.x1) return [p];
+        const out=[];
+        if(p.x0<R.x0) out.push({y:p.y,x0:p.x0,x1:Math.max(p.x0,R.x0-1)});
+        if(p.x1>R.x1) out.push({y:p.y,x0:Math.min(p.x1,R.x1+1),x1:p.x1});
+        return out;
       });
     });
-    host.querySelectorAll('[data-unequip]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        unequipWeapon();
-        renderInventoryPanel();
+    return parts.filter(p=>p.x1>=p.x0);
+  }
+  // Clip a vertical road against forbidden rectangles
+  function clipV(seg, forbidden){
+    let parts=[{x:seg.x,y0:seg.y0,y1:seg.y1}];
+    forbidden.forEach(R=>{
+      parts=parts.flatMap(p=>{
+        if(p.x<R.x0||p.x>R.x1||p.y1<R.y0||p.y0>R.y1) return [p];
+        const out=[];
+        if(p.y0<R.y0) out.push({x:p.x,y0:p.y0,y1:Math.max(p.y0,R.y0-1)});
+        if(p.y1>R.y1) out.push({x:p.x,y0:Math.min(p.y1,R.y1+1),y1:p.y1});
+        return out;
       });
     });
+    return parts.filter(p=>p.y1>=p.y0);
+  }
 
-    const hands = document.getElementById('unequipHands');
-    if(hands){
-      hands.addEventListener('click', ()=>{
-        unequipWeapon();
-        renderInventoryPanel();
-      });
+  // Determine nearest side of a building to any road (for "front sidewalk")
+  function frontageSide(b, H, V){
+    // distance to nearest horizontal centerline and vertical centerline
+    function distToH(y){ // building bottom outside is y=b.y+b.h (one row below)
+      const cy = y;
+      let best=1e9;
+      H.forEach(r=>{ best=Math.min(best, Math.abs(cy - r.y)); });
+      return best;
     }
-  }
-
-  // ===== NPCs =====
-  const pedestrians=[]; // {x,y,mode,dir,spd,hp,state,crossSide,vertX,blinkT,skin,facing,moving}
-  const cars=[];        // {x,y,dir,spd}
-  const cops=[];        // {x,y,spd,reinforceAt,kind,hp,facing}
-
-  function clampToUnlockedX(px){
-    const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
-    return Math.max(min, Math.min(max, px));
-  }
-  function clampToUnlockedY(py){
-    const min=unlocked.y0*TILE, max=unlocked.y1*TILE;
-    return Math.max(min, Math.min(max, py));
-  }
-
-  function spawnPed(){
-    const left = Math.random()<0.5;
-    const sideTop = Math.random()<0.5;
-    const yRow = sideTop ? sidewalkTopY : sidewalkBotY;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const dir = left ? 1 : -1;
-    const skins = ['ped_m','ped_f','ped_m_dark','ped_f_dark'];
-    const skin  = skins[(Math.random()*skins.length)|0];
-
-    pedestrians.push({
-      x: gx*TILE, y: yRow*TILE,
-      mode:'horiz', dir, spd: 40,
-      hp: 4,
-      state: 'walk',
-      crossSide: sideTop?'top':'bot',
-      vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
-      blinkT:0,
-      skin,
-      facing: dir>0?'right':'left',
-      moving: true
-    });
-  }
-  function spawnCar(){
-    const left = Math.random()<0.5;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const dir = left ? 1 : -1;
-    cars.push({ x: gx*TILE, y: hRoadY*TILE, dir, spd: 120 });
-  }
-
-  function updatePed(p, dtSec){
-    if(p.state==='walk'){
-      if(p.mode==='horiz'){
-        p.x += p.dir * p.spd * dtSec;
-        p.facing = p.dir>0 ? 'right' : 'left';
-        const gx = Math.floor(p.x/TILE);
-        if(gx===vRoadX){
-          p.mode='crossing';
-        }else{
-          if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
-            p.dir *= -1;
-            p.x = clampToUnlockedX(p.x);
-          }
-        }
-      } else if(p.mode==='crossing'){
-        const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
-        const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
-        p.y += vy * p.spd * dtSec;
-        p.facing = vy<0 ? 'up' : vy>0 ? 'down' : p.facing;
-        if(Math.abs(p.y - targetY) < 0.5){
-          p.y = targetY;
-          p.mode = 'vert';
-          p.dir  = (Math.random()<0.5 ? -1 : 1);
-          p.x = p.vertX*TILE;
-        }
-      } else if(p.mode==='vert'){
-        p.y += p.dir * p.spd * dtSec;
-        p.facing = p.dir>0 ? 'down' : 'up';
-        if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
-          p.dir *= -1;
-          p.y = clampToUnlockedY(p.y);
-        }
-      }
-    } else if(p.state==='blink'){
-      p.blinkT -= dtSec;
-      if(p.blinkT<=0){
-        const i=pedestrians.indexOf(p);
-        if(i>=0) pedestrians.splice(i,1);
-
-        // drop coins; award happens on pickup via loot plugin
-        const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
-        const pos = makeDropPos(centerX, centerY);
-        const tnow = performance.now();
-        IZZA.emit('ped-killed', {
-          coins: 25,
-          x: pos.x, y: pos.y,
-          droppedAt: tnow,
-          noPickupUntil: tnow + DROP_GRACE_MS
-        });
-
-        if(tutorial.active && tutorial.step==='hitPed'){
-          tutorial.step='hitCop';
-          showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
-        }
-      }
+    function distToV(x){
+      const cx = x;
+      let best=1e9;
+      V.forEach(c=>{ best=Math.min(best, Math.abs(cx - c.x)); });
+      return best;
     }
-  }
-  function updateCar(c, dtSec){
-    c.x += c.dir * c.spd * dtSec;
-    if(c.x < unlocked.x0*TILE) c.x = unlocked.x1*TILE;
-    if(c.x > unlocked.x1*TILE) c.x = unlocked.x0*TILE;
-  }
+    const dTop    = distToH(b.y-1);
+    const dBottom = distToH(b.y + b.h);
+    const dLeft   = distToV(b.x-1);
+    const dRight  = distToV(b.x + b.w);
 
-  // ===== Cops & wanted =====
-  function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
-  function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
-  function spawnCop(kind){
-    const left = Math.random()<0.5;
-    const top  = Math.random()<0.5;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const gy = top  ? unlocked.y0 : unlocked.y1;
-    const now = performance.now();
-    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000, facing:'down' });
-  }
-  function maintainCops(){
-    const needed = player.wanted;
-    let cur = cops.length;
-    while(cur < needed){
-      let kind='police';
-      if(needed>=5) kind='army';
-      else if(needed>=4) kind='swat';
-      spawnCop(kind); cur++;
-    }
-    while(cur > needed){ cops.pop(); cur--; }
-  }
-  function updateCops(dtSec, nowMs){
-    for(const c of cops){
-      const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
-      c.x += (dx/m) * c.spd * dtSec;
-      c.y += (dy/m) * c.spd * dtSec;
-      if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
-      else                              c.facing = dx < 0 ? 'left' : 'right';
-      if(nowMs >= c.reinforceAt && player.wanted < 5){
-        setWanted(player.wanted + 1);
-        maintainCops();
-        c.reinforceAt = nowMs + 30000;
-      }
-    }
-  }
-  function damageCop(c, amount){
-    c.hp -= amount;
-    if(c.hp <= 0){
-      const i=cops.indexOf(c);
-      if(i>=0) cops.splice(i,1);
-      setWanted(player.wanted - 1);
-      maintainCops();
-
-      const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
-      const pos = makeDropPos(centerX, centerY);
-      const tnow = performance.now();
-      IZZA.emit('cop-killed', {
-        cop: c,
-        x: pos.x, y: pos.y,
-        droppedAt: tnow,
-        noPickupUntil: tnow + DROP_GRACE_MS
-      });
-
-      if(tutorial.active && tutorial.step==='hitCop'){
-        tutorial.active=false; tutorial.step='';
-        setMission1Done();
-        showHint('Tutorial complete! Shops now carry starter items.', 4);
-      }
-    }
+    const entries = [
+      {side:'top',d:dTop},
+      {side:'bottom',d:dBottom},
+      {side:'left',d:dLeft},
+      {side:'right',d:dRight}
+    ].sort((a,b)=>a.d-b.d);
+    return entries[0].side;
   }
 
-  // ===== Combat =====
-  function hitTest(ax,ay, bx,by, radius=20){ return Math.hypot(ax-bx, ay-by) <= radius; }
-  function weaponDamage(){
-    const rules = WEAPON_RULES[equipped.weapon] || WEAPON_RULES.fists;
-    return rules.damage||1;
-  }
-  function consumeDurabilityIfNeeded(){
-    const inv = getInventory();
-    if (equipped.weapon==='bat' && inv.bat && inv.bat.count>0){
-      inv.bat.hitsLeftOnCurrent = Math.max(0,(inv.bat.hitsLeftOnCurrent|0)-1);
-      if(inv.bat.hitsLeftOnCurrent<=0){
-        inv.bat.count -= 1;
-        if(inv.bat.count>0){
-          inv.bat.hitsLeftOnCurrent = WEAPON_RULES.bat.hitsPerItem;
-        }else{
-          equipped.weapon = 'fists';
-          toast('Your bat broke!');
-        }
-      }
-      setInventory(inv);
-    }else if (equipped.weapon==='knuckles' && inv.knuckles && inv.knuckles.count>0){
-      inv.knuckles.hitsLeftOnCurrent = Math.max(0,(inv.knuckles.hitsLeftOnCurrent|0)-1);
-      if(inv.knuckles.hitsLeftOnCurrent<=0){
-        inv.knuckles.count -= 1;
-        if(inv.knuckles.count>0){
-          inv.knuckles.hitsLeftOnCurrent = WEAPON_RULES.knuckles.hitsPerItem;
-        }else{
-          equipped.weapon = 'fists';
-          toast('Your knuckles broke!');
-        }
-      }
-      setInventory(inv);
-    }
-  }
-  function doAttack(){
-    const dmg = weaponDamage();
-    let didHit=false;
+  // Make sidewalks around buildings (ring) and guaranteed 1-row frontage sidewalk
+  function sidewalksForBuildings(b, H, V){
+    const ring=[];
+    // 1-tile ring (buffer) all around
+    for(let x=b.x-1; x<=b.x+b.w; x++){ ring.push({x, y:b.y-1}); ring.push({x, y:b.y+b.h}); }
+    for(let y=b.y-1; y<=b.y+b.h; y++){ ring.push({x:b.x-1, y}); ring.push({x:b.x+b.w, y}); }
 
-    for(const p of pedestrians){
-      if(hitTest(player.x,player.y, p.x,p.y, 22)){
-        didHit=true;
-        if(p.state==='walk'){
-          if(player.wanted===0){ setWanted(1); maintainCops(); }
-          p.hp -= dmg;
-          if((equipped.weapon==='bat' || equipped.weapon==='knuckles') && p.hp<=0){
-            p.state='blink'; p.blinkT=0.6;
-            if(player.wanted < 5){ setWanted(player.wanted + 1); maintainCops(); }
-          }else{
-            if(p.hp<=1){ p.state='downed'; }
-          }
-        }else if(p.state==='downed'){
-          p.state='blink'; p.blinkT=0.6;
-          if(player.wanted < 5){ setWanted(player.wanted + 1); maintainCops(); }
-        }
-        consumeDurabilityIfNeeded();
-        break;
-      }
-    }
-
-    if(!didHit){
-      for(const c of cops){
-        if(hitTest(player.x,player.y, c.x,c.y, 24)){
-          damageCop(c, dmg);
-          consumeDurabilityIfNeeded();
-          didHit=true; break;
-        }
-      }
-    }
-  }
-
-  // ===== Maps & drawing =====
-  const mini = document.getElementById('minimap');
-  const mctx = mini ? mini.getContext('2d') : null;
-  const bigmap   = document.getElementById('bigmap');
-  const bctx     = bigmap ? bigmap.getContext('2d') : null;
-
-  function drawCity(ctx2d, sx, sy){
-    ctx2d.fillStyle = 'rgba(163,176,197,.25)';
-    ctx2d.fillRect(preview.x0*sx, preview.y0*sy, (preview.x1-preview.x0+1)*sx, (preview.y1-preview.y0+1)*sy);
-    ctx2d.fillStyle = '#1c293e';
-    ctx2d.fillRect(unlocked.x0*sx, unlocked.y0*sy, (unlocked.x1-unlocked.x0+1)*sx, (unlocked.y1-unlocked.y0+1)*sy);
-    ctx2d.fillStyle = '#788292';
-    ctx2d.fillRect(preview.x0*sx, hRoadY*sy, (preview.x1-preview.x0+1)*sx, 1.4*sy);
-    ctx2d.fillRect(vRoadX*sx, preview.y0*sy, 1.4*sx, (preview.y1-preview.y0+1)*sy);
-    ctx2d.fillStyle = '#7a3a3a';
-    ctx2d.fillRect(bX*sx, bY*sy, bW*sx, bH*sy);
-    ctx2d.fillStyle = '#405a85';
-    ctx2d.fillRect(shop.x*sx, shop.y*sy, shop.w*sx, shop.h*sy);
-  }
-  function drawMini(){
-    if(!mini||!mctx) return;
-    const sx = mini.width / W, sy = mini.height / H;
-    mctx.fillStyle = '#000'; mctx.fillRect(0,0,mini.width,mini.height);
-    drawCity(mctx, sx, sy);
-    mctx.fillStyle = '#35f1ff';
-    mctx.fillRect((player.x/TILE)*sx-1, (player.y/TILE)*sy-1, 2, 2);
-  }
-  function drawBig(){
-    if(!bigmap||!bctx) return;
-    const sx = bigmap.width / W, sy = bigmap.height / H;
-    bctx.fillStyle = '#000'; bctx.fillRect(0,0,bigmap.width,bigmap.height);
-    drawCity(bctx, sx, sy);
-    bctx.fillStyle = '#35f1ff';
-    bctx.fillRect((player.x/TILE)*sx-1.5,(player.y/TILE)*sy-1.5,3,3);
-  }
-
-  if(miniWrap) miniWrap.addEventListener('click', ()=>{
-    // opening big map ⇒ close inventory
-    closeInventory();
-    drawBig();
-    if(mapModal) mapModal.style.display='flex';
-  });
-  const closeMapBtn=document.getElementById('closeMap');
-  if(closeMapBtn) closeMapBtn.addEventListener('click', ()=> { if(mapModal) mapModal.style.display='none'; });
-  if(mapModal) mapModal.addEventListener('click', (e)=>{ if(e.target.classList.contains('backdrop')) mapModal.style.display='none'; });
-
-  function drawTile(gx,gy){
-    const S=DRAW, screenX=w2sX(gx*TILE), screenY=w2sY(gy*TILE);
-    if(!inUnlocked(gx,gy)){ ctx.fillStyle='#000'; ctx.fillRect(screenX,screenY,S,S); return; }
-
-    ctx.fillStyle = '#09371c'; ctx.fillRect(screenX,screenY,S,S); // grass
-
-    if (gx>=bX && gx<bX+bW && gy>=bY && gy<bY+bH){ // HQ
-      ctx.fillStyle = '#4a2d2d'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(screenX,screenY,S,Math.floor(S*0.18));
-    }
-    if (gx>=shop.x && gx<shop.x+shop.w && gy>=shop.y && gy<shop.y+shop.h){ // Shop
-      ctx.fillStyle = '#203a60'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.fillStyle = '#88a8ff'; ctx.fillRect(screenX+S*0.15, screenY+S*0.15, S*0.7, S*0.25);
-    }
-
-    if (gy===sidewalkTopY || gy===sidewalkBotY){
-      ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
-    }
-    if (gx===vSidewalkLeftX || gx===vSidewalkRightX){
-      ctx.fillStyle = '#6a727b'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.strokeRect(screenX,screenY,S,S);
-    }
-
-    if (gy===hRoadY){
-      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
-      ctx.fillStyle = '#ffd23f';
-      for(let i=0;i<4;i++){
-        ctx.fillRect(screenX + i*(S/4) + S*0.05, screenY + S*0.48, S*0.10, S*0.04);
-      }
-    }
-    if (gx===vRoadX){
-      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(screenX,screenY,S,S);
-    }
-
-    if (gx===door.gx && gy===door.gy){
-      const near = doorInRange();
-      ctx.fillStyle = near ? '#39cc69' : '#49a4ff';
-      const w = Math.floor(S*0.30), h = Math.floor(S*0.72);
-      ctx.fillRect(screenX + (S-w)/2, screenY + (S-h), w, h);
-      if(near && promptEl){
-        promptEl.style.left = (screenX + S/2) + 'px';
-        promptEl.style.top  = (screenY - 8) + 'px';
-        promptEl.style.display = 'block';
-      }
-    }
-
-    if(gx===shop.registerGX && gy===shop.sidewalkY){
-      const px=Math.floor((player.x+TILE/2)/TILE), py=Math.floor((player.y+TILE/2)/TILE);
-      const near = (Math.abs(px-gx)+Math.abs(py-gy))<=1;
-      ctx.fillStyle = near ? 'rgba(136,168,255,0.6)' : 'rgba(136,168,255,0.3)';
-      ctx.fillRect(screenX+S*0.35, screenY+S*0.35, S*0.3, S*0.3);
-    }
-  }
-
-  function drawSprite(img, cols, facing, moving, t, dx,dy){
-    const row = DIR_INDEX[facing]||0;
-    const frame = currentFrame(cols, moving, t);
-    ctx.imageSmoothingEnabled=false;
-    ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, DRAW,DRAW);
-  }
-
-  // ===== Held-weapon overlay (pixel art) =====
-  function drawHeldWeapon(){
-    const sx = w2sX(player.x), sy = w2sY(player.y);
-    const S  = DRAW;
-    const w  = Math.floor(S*0.30), h = Math.floor(S*0.12);
-
-    if(equipped.weapon==='bat'){
-      ctx.fillStyle = '#8b5a2b';
-    }else if(equipped.weapon==='knuckles'){
-      ctx.fillStyle = '#cfcfcf';
-    }else if(equipped.weapon==='pistol'){
-      ctx.fillStyle = '#202833';
-    }else if(equipped.weapon==='uzi'){
-      ctx.fillStyle = '#0b0e14';
-    }else{
-      return; // fists: nothing to draw
-    }
-
-    if(player.facing==='down'){
-      ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
-    }else if(player.facing==='up'){
-      ctx.fillRect(sx + S*0.10, sy + S*0.25, w, h);
-    }else if(player.facing==='left'){
-      ctx.fillRect(sx + S*0.10, sy + S*0.55, w, h);
+    const side = frontageSide(b,H,V);
+    const front=[];
+    if(side==='top'){
+      for(let x=b.x; x<b.x+b.w; x++) front.push({x, y:b.y-1});
+    }else if(side==='bottom'){
+      for(let x=b.x; x<b.x+b.w; x++) front.push({x, y:b.y+b.h});
+    }else if(side==='left'){
+      for(let y=b.y; y<b.y+b.h; y++) front.push({x:b.x-1, y});
     }else{ // right
-      ctx.fillRect(sx + S*0.60, sy + S*0.55, w, h);
+      for(let y=b.y; y<b.y+b.h; y++) front.push({x:b.x+b.w, y});
     }
+    return {ring,front,side};
   }
 
-  // ===== Update & render =====
-  function update(dtSec, dtMs){
-    if(promptEl) promptEl.style.display='none';
+  // ===== Convert proposal → safe layout with realism filters =====
+  function makeSafeLayout(a){
+    const P = proposeDowntown(a);
 
-    maybeRefreshMapTier();
-    
-    IZZA.emit('update-pre', { dtSec, now: performance.now() });
+    // 1) Never run roads through HQ, Shop, their doors, or **Lake area**
+    const NO_ROAD = [
+      inflate(a.HQ,0), inflate(a.SH,0),
+      inflate({x0:a.door.gx,y0:a.door.gy,x1:a.door.gx,y1:a.door.gy},1),
+      inflate({x0:a.register.gx,y0:a.register.gy,x1:a.register.gx,y1:a.register.gy},1),
+      inflate(LAKE,0) // << keep roads out of water
+    ];
 
-    if(tutorial.hintT>0){
-      tutorial.hintT -= dtSec;
-      if(tutorial.hintT<=0){ const h=document.getElementById('tutHint'); if(h) h.style.display='none'; }
-    }
+    // Place buildings first but keep them away from HQ/Shop by 1 tile
+    const keep1=inflate(a.HQ,1), keep2=inflate(a.SH,1);
+    const BUILDINGS = P.BLD.filter(b=>{
+      const R={x0:b.x,y0:b.y,x1:b.x+b.w-1,y1:b.y+b.h-1};
+      if(overlaps(R, keep1) || overlaps(R, keep2)) return false;
+      if(overlaps(R, inflate(LAKE,0))) return false; // no buildings in lake
+      return true;
+    });
 
-    // Movement (keys + joystick)
-    let dx=0, dy=0;
-    if(keys['arrowup']||keys['w']) dy-=1;
-    if(keys['arrowdown']||keys['s']) dy+=1;
-    if(keys['arrowleft']||keys['a']) dx-=1;
-    if(keys['arrowright']||keys['d']) dx+=1;
-    dx += vec.x; dy += vec.y;
+    // 2) Clip roads against NO_ROAD + building boxes (so roads never end in a wall)
+    const forbidForRoads = NO_ROAD.concat(BUILDINGS.map(b=>({x0:b.x,y0:b.y,x1:b.x+b.w-1,y1:b.y+b.h-1})));
+    const H = P.H.flatMap(s=>clipH(s, forbidForRoads));
+    const V = P.V.flatMap(s=>clipV(s, forbidForRoads));
 
-    const mag=Math.hypot(dx,dy);
-    const vx = mag ? (dx/mag)*player.speed : 0;
-    const vy = mag ? (dy/mag)*player.speed : 0;
+    // 3) Generate per-building sidewalk ring + frontage sidewalks (dedup later)
+    const B_SIDES = BUILDINGS.map(b=> sidewalksForBuildings(b,H,V));
 
-    if (mag > 0.01){
-      if (Math.abs(dy) >= Math.abs(dx)) player.facing = dy < 0 ? 'up' : 'down';
-      else                              player.facing = dx < 0 ? 'left' : 'right';
-    }
-    player.moving = (mag > 0.01);
-
-    tryMove(player.x + vx*dtSec, player.y + vy*dtSec);
-    centerCamera();
-
-    if(player.moving) player.animTime += dtMs;
-
-    // Spawns/updates
-    if(pedestrians.length<6 && Math.random()<0.02) spawnPed();
-    if(cars.length<3 && Math.random()<0.02) spawnCar();
-    pedestrians.forEach(p=>updatePed(p, dtSec));
-    cars.forEach(c=>updateCar(c, dtSec));
-
-    // Cops
-    updateCops(dtSec, performance.now());
-
-    IZZA.emit('update-post', { dtSec, now: performance.now() });
+    return {H_ROADS:H, V_ROADS:V, BUILDINGS, PARK:P.PARK, B_SIDES};
   }
 
-  function render(images){
-    ctx.fillStyle='#000'; ctx.fillRect(0,0,cvs.width,cvs.height);
-
-    const tilesX = Math.ceil(cvs.width  / DRAW) + 2;
-    const tilesY = Math.ceil(cvs.height / DRAW) + 2;
-    const startX = Math.max(0, Math.floor(camera.x / TILE));
-    const startY = Math.max(0, Math.floor(camera.y / TILE));
-
-    for(let y=0;y<tilesY;y++){
-      for(let x=0;x<tilesX;x++){
-        const gx=startX+x, gy=startY+y;
-        if(gx>=0&&gx<W&&gy>=0&&gy<H) drawTile(gx,gy);
-      }
+  // ===== Drawing helpers for roads =====
+  function drawHRoad(api,ctx,y,x0,x1){
+    for(let x=x0;x<=x1;x++){
+      fillTile(api,ctx,x,y,COL.road);
+      const S=api.DRAW, sx=w2sX(api,x*api.TILE), sy=w2sY(api,y*api.TILE);
+      ctx.fillStyle=COL.dash;
+      for(let i=0;i<4;i++) ctx.fillRect(sx+i*(S/4)+S*0.05, sy+S*0.48, S*0.10, S*0.04);
     }
-
-    IZZA.emit('render-under', { now: performance.now() });
-    
-    // cars
-    for(const c of cars){
-      const sx=w2sX(c.x), sy=w2sY(c.y);
-      ctx.fillStyle='#c0c8d8';
-      ctx.fillRect(sx+DRAW*0.1,sy+DRAW*0.25, DRAW*0.8, DRAW*0.5);
-    }
-
-    // pedestrians
-    for(const p of pedestrians){
-      const imgPack = NPC_SHEETS[p.skin];
-      if(imgPack){
-        drawSprite(imgPack.img, imgPack.cols, p.facing||'down', p.state==='walk', player.animTime, w2sX(p.x), w2sY(p.y));
-      }else{
-        const sx=w2sX(p.x), sy=w2sY(p.y);
-        ctx.fillStyle = p.state==='downed' ? '#555' : '#9de7b1';
-        ctx.fillRect(sx+DRAW*0.2, sy+DRAW*0.2, DRAW*0.6, DRAW*0.6);
-      }
-    }
-
-    // player layers
-    drawSprite(images.body.img,   images.body.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
-    drawSprite(images.outfit.img, images.outfit.cols, player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
-    drawSprite(images.hair.img,   images.hair.cols,   player.facing, player.moving, player.animTime, w2sX(player.x), w2sY(player.y));
-
-    // held weapon overlay
-    drawHeldWeapon();
-
-    // cops
-    for(const c of cops){
-      const pack = c.kind==='army' ? NPC_SHEETS.military
-                 : c.kind==='swat' ? NPC_SHEETS.swat
-                 :                    NPC_SHEETS.police;
-      if(pack){
-        drawSprite(pack.img, pack.cols, c.facing||'down', true, player.animTime, w2sX(c.x), w2sY(c.y));
-      }else{
-        const sx=w2sX(c.x), sy=w2sY(c.y);
-        ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#000' : '#0a2455';
-        ctx.fillRect(sx+DRAW*0.15, sy+DRAW*0.15, DRAW*0.7, DRAW*0.7);
-      }
-    }
-
-    drawMini();
+  }
+  function drawVRoad(api,ctx,x,y0,y1){
+    for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road);
   }
 
-  // ===== Boot =====
-  Promise.all([
-    loadLayer('body',   BODY),
-    loadLayer('outfit', OUTFIT),
-    loadLayer('hair',   HAIR),
-    loadNPCSheets()
-  ]).then(([body,outfit,hair,npcs])=>{
-    NPC_SHEETS = npcs;
-    const imgs={body,outfit,hair};
+  // ===== RENDER UNDER =====
+  let _layout=null;
 
-    const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
-    IZZA.api = {
-  player, cops, pedestrians, cars,
-  setCoins, getCoins, setWanted,
-  TILE, DRAW, camera,
-  doorSpawn,
-  // expose for plugins:
-  getMissionCount,
-  getInventory, setInventory,
-  hRoadY,      // main horizontal road row
-  vRoadX,      // main vertical avenue column
-  ready: true
-};
-    IZZA.emit('ready', IZZA.api);
+  IZZA.on('render-under', ()=>{
+    if(!IZZA.api?.ready || !isTier2()) return;
+    const api=IZZA.api;
+    const ctx=document.getElementById('game').getContext('2d');
 
-    setCoins(getCoins());
-    centerCamera();
+    // Compute layout each frame (cheap; keeps in sync with camera & hooks)
+    const A=anchors(api);
+    _layout = makeSafeLayout(A);
 
-    let last=performance.now();
-    (function loop(now){
-      try{
-        const dtMs=Math.min(32, now-last); last=now;
-        const dtSec = dtMs/1000;
-        update(dtSec, dtMs);
-        render(imgs);
-        IZZA.emit('render-post', { now: performance.now() });
-      }catch(err){
-        console.error('Game loop error:', err);
-        bootMsg('Game loop error: '+err.message, '#ff6b6b');
+    // 1) Sidewalks flanking every road tile
+    _layout.H_ROADS.forEach(r=>{
+      for(let x=r.x0;x<=r.x1;x++){
+        fillTile(api,ctx,x,r.y-1,COL.sidewalk);
+        fillTile(api,ctx,x,r.y+1,COL.sidewalk);
       }
-      requestAnimationFrame(loop);
-    })(last+16);
-  }).catch(err=>{
-    console.error('Sprite load failed', err);
-    bootMsg('Sprite load failed: '+(err && err.message ? err.message : err), '#ff6b6b');
+    });
+    _layout.V_ROADS.forEach(r=>{
+      for(let y=r.y0;y<=r.y1;y++){
+        fillTile(api,ctx,r.x-1,y,COL.sidewalk);
+        fillTile(api,ctx,r.x+1,y,COL.sidewalk);
+      }
+    });
+
+    // 2) Downtown roads
+    _layout.H_ROADS.forEach(r=> drawHRoad(api,ctx,r.y,r.x0,r.x1));
+    _layout.V_ROADS.forEach(r=> drawVRoad(api,ctx,r.x,r.y0,r.y1));
+
+    // 3) Building sidewalk buffers + frontage
+    const seenSW = new Set();
+    const mark = (gx,gy)=>{
+      const key=gx+'|'+gy; if(seenSW.has(key)) return false; seenSW.add(key); return true;
+    };
+    _layout.B_SIDES.forEach(s=>{
+      s.ring.forEach(p=>{ if(!_isWater(p.x,p.y) && mark(p.x,p.y)) fillTile(api,ctx,p.x,p.y,COL.sidewalk); });
+      s.front.forEach(p=>{ if(!_isWater(p.x,p.y) && mark(p.x,p.y)) fillTile(api,ctx,p.x,p.y,COL.sidewalk); });
+    });
+
+    // 4) Buildings (on grass only, never on roads/sidewalks/water)
+    const onSidewalkOrRoad = (gx,gy)=>{
+      if(_layout.H_ROADS.some(r=> gy===r.y || gy===r.y-1 || gy===r.y+1)) return true;
+      if(_layout.V_ROADS.some(r=> gx===r.x || gx===r.x-1 || gx===r.x+1)) return true;
+      if(seenSW.has(gx+'|'+gy)) return true;
+      return false;
+    };
+    _layout.BUILDINGS.forEach(b=>{
+      for(let gy=b.y; gy<b.y+b.h; gy++)
+        for(let gx=b.x; gx<b.x+b.w; gx++)
+          if(!_isWater(gx,gy) && !onSidewalkOrRoad(gx,gy)) fillTile(api,ctx,gx,gy,b.color);
+      // roof shade
+      const sx=w2sX(api,b.x*api.TILE), sy=w2sY(api,b.y*api.TILE);
+      ctx.fillStyle='rgba(0,0,0,.15)';
+      ctx.fillRect(sx,sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
+    });
+
+    // 5) Park (downtown)
+    if(_layout.PARK){
+      const p=_layout.PARK;
+      for(let gy=p.y; gy<p.y+p.h; gy++)
+        for(let gx=p.x; gx<p.x+p.w; gx++)
+          if(!_isWater(gx,gy)) fillTile(api,ctx,gx,gy,COL.park);
+    }
+
+    // 6) Lake
+    for(let gy=LAKE.y0; gy<=LAKE.y1; gy++)
+      for(let gx=LAKE.x0; gx<=LAKE.x1; gx++)
+        if(!_isDock(gx,gy)) fillTile(api,ctx,gx,gy,COL.water);
+
+    // 7) Beach strip
+    for(let gy=LAKE.y0; gy<=LAKE.y1; gy++) fillTile(api,ctx,BEACH_X,gy,COL.sand);
+
+    // 8) Docks (WALKABLE ground on water edge)
+    ctx.fillStyle=COL.wood;
+    DOCKS.forEach(d=>{
+      const S=api.DRAW, sx=w2sX(api,d.x0*api.TILE), sy=w2sY(api,d.y*api.TILE);
+      ctx.fillRect(sx,sy, d.len*S, S);
+    });
+
+    // 9) Hotel (place above beach; has its own collision later)
+    for(let gy=HOTEL.y0; gy<=HOTEL.y1; gy++)
+      for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++)
+        fillTile(api,ctx,gx,gy,COL.hotel);
+
+    // 10) Neighborhood: roads + sidewalks
+    HOOD_H.forEach(y=>{
+      for(let x=HOOD.x0; x<=HOOD.x1; x++){
+        fillTile(api,ctx,x,y-1,COL.sidewalk);
+        fillTile(api,ctx,x,y+1,COL.sidewalk);
+      }
+    });
+    HOOD_V.forEach(x=>{
+      for(let y=HOOD.y0; y<=HOOD.y1; y++){
+        fillTile(api,ctx,x-1,y,COL.sidewalk);
+        fillTile(api,ctx,x+1,y,COL.sidewalk);
+      }
+    });
+    HOOD_H.forEach(y=> drawHRoad(api,ctx,y,HOOD.x0,HOOD.x1));
+    HOOD_V.forEach(x=> drawVRoad(api,ctx,x,HOOD.y0,HOOD.y1));
+
+    // 11) Hood park
+    for(let gy=HOOD_PARK.y0; gy<=HOOD_PARK.y1; gy++)
+      for(let gx=HOOD_PARK.x0; gx<=HOOD_PARK.x1; gx++)
+        fillTile(api,ctx,gx,gy,COL.hoodPark);
+
+    // 12) Houses
+    HOUSES.forEach(h=>{
+      for(let gy=h.y0; gy<=h.y1; gy++)
+        for(let gx=h.x0; gx<=h.x1; gx++)
+          fillTile(api,ctx,gx,gy,COL.house);
+    });
   });
+
+  // ===== Collision & movement integrations =====
+  function solidRects(layout){
+    const rects = [];
+    // New downtown buildings
+    layout.BUILDINGS.forEach(b=> rects.push({x:b.x,y:b.y,w:b.w,h:b.h}));
+    // Hotel + houses
+    rects.push({x:HOTEL.x0,y:HOTEL.y0,w:rectW(HOTEL),h:rectH(HOTEL)});
+    HOUSES.forEach(h=> rects.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
+    return rects;
+  }
+
+  // Keep cars off new buildings; player collides with solids
+  IZZA.on('update-pre', ({dtSec})=>{
+    if(!IZZA.api?.ready || !isTier2()) return;
+    const api=IZZA.api, p=api.player, t=api.TILE;
+
+    // Water guard: allow walking on docks and beach; block only true water
+    const gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
+    if(!_isWater(gx,gy)) _lastLand = {x:p.x,y:p.y};
+    else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
+
+    // Cars bounce if hitting any building
+    if(_layout){
+      api.cars.forEach(c=>{
+        const cgx=(c.x/t)|0, cgy=(c.y/t)|0;
+        const hit = _layout.BUILDINGS.some(b=> cgx>=b.x && cgx<b.x+b.w && cgy>=b.y && cgy<b.y+b.h);
+        if(hit){ c.dir*=-1; c.x += c.dir*4; }
+      });
+    }
+
+    if(_inBoat && _ride){ _ride.x = p.x/32; _ride.y = p.y/32; }
+  });
+
+  IZZA.on('update-post', ()=>{
+    if(!IZZA.api?.ready || !isTier2() || !_layout) return;
+    const api=IZZA.api, t=api.TILE, p=api.player;
+    const gx=(p.x/t)|0, gy=(p.y/t)|0;
+
+    // Unified solids: all new buildings (downtown + hotel + houses)
+    const solids = solidRects(_layout);
+    for(const b of solids){
+      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+        const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
+        const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
+        const m=Math.min(dxL,dxR,dyT,dyB);
+        if(m===dxL) p.x=(b.x-0.01)*t;
+        else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
+        else if(m===dyT) p.y=(b.y-0.01)*t;
+        else             p.y=(b.y+b.h+0.01)*t;
+        break;
+      }
+    }
+  });
+
+  // ===== Boats (NPC + player boating) =====
+  const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null;
+
+  function spawnBoats(){
+    if(!isTier2() || _boats.length) return;
+    const L={x0:LAKE.x0+2,y0:LAKE.y0+2,x1:LAKE.x1-2,y1:LAKE.y1-2};
+    const loop=(x,y,s,clockwise=true)=>{
+      const path = clockwise
+        ? [{x:L.x0,y:L.y0},{x:L.x1,y:L.y0},{x:L.x1,y:L.y1},{x:L.x0,y:L.y1}]
+        : [{x:L.x1,y:L.y1},{x:L.x0,y:L.y1},{x:L.x0,y:L.y0},{x:L.x1,y:L.y0}];
+      // nudge left-edge waypoints off dock rows
+      const dockYs = new Set(DOCKS.map(d=>d.y));
+      path.forEach(pt=>{ if(pt.x===L.x0 && dockYs.has(pt.y)) pt.y += 1; });
+      return {x,y,s,i:0,path};
+    };
+    _boats.push(loop(L.x0, L.y0, 55, true));
+    _towBoat = loop(L.x0+1, L.y1-1, 52, true); _boats.push(_towBoat);
+    DOCKS.forEach(d=> _dockBoats.push({x:d.x0+Math.floor(d.len/2), y:d.y, s:120, taken:false}));
+  }
+  IZZA.on('ready', spawnBoats);
+
+  IZZA.on('update-pre', ({dtSec})=>{
+    if(!IZZA.api?.ready || !isTier2()) return;
+    // move boats
+    _boats.forEach(b=>{
+      const tgt=b.path[b.i], dx=tgt.x-b.x, dy=tgt.y-b.y, m=Math.hypot(dx,dy)||1, step=b.s*dtSec/32;
+      if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
+      else{ b.x += (dx/m)*step; b.y += (dy/m)*step; }
+    });
+  });
+
+  function _enterBoat(){
+    if(_inBoat || !isTier2()) return;
+    const p=IZZA.api.player, t=IZZA.api.TILE, gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
+    if(!_isDock(gx,gy)) return;
+    let best=null,bd=9e9;
+    _dockBoats.forEach(b=>{ if(b.taken) return; const d=Math.hypot(b.x-gx,b.y-gy); if(d<bd){bd=d; best=b;} });
+    if(best && bd<=2){ best.taken=true; _ride=best; _inBoat=true; IZZA.api.player.speed=120; }
+  }
+  function _leaveBoat(){
+    if(!_inBoat) return;
+    const p=IZZA.api.player, t=IZZA.api.TILE, gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
+    if(_isDock(gx,gy) || gx===BEACH_X){ _ride.taken=false; _ride=null; _inBoat=false; IZZA.api.player.speed=90; }
+  }
+  document.getElementById('btnB')?.addEventListener('click', ()=>{ _inBoat? _leaveBoat() : _enterBoat(); });
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b'){ _inBoat? _leaveBoat() : _enterBoat(); } });
+
+  // draw boats & wakeboarder under sprites
+  IZZA.on('render-under', ()=>{
+    if(!IZZA.api?.ready || !isTier2()) return;
+    const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
+    const S=api.DRAW, t=api.TILE, f=S/t;
+    const sx=gx=> (gx*t - api.camera.x)*f, sy=gy=> (gy*t - api.camera.y)*f;
+    const drawBoat=(gx,gy)=>{ ctx.fillStyle='#7ca7c7'; ctx.fillRect(sx(gx)+S*0.2, sy(gy)+S*0.35, S*0.6, S*0.3); };
+    _boats.forEach(b=> drawBoat(b.x,b.y));
+    _dockBoats.forEach(b=> drawBoat(b.x,b.y));
+    if(_towBoat){
+      const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
+      const wx=_towBoat.x - (vx/m)*2.2, wy=_towBoat.y - (vy/m)*2.2;
+      // rope
+      ctx.strokeStyle = '#dfe9ef'; ctx.lineWidth = Math.max(1, S*0.04);
+      ctx.beginPath(); ctx.moveTo(sx(_towBoat.x)+S*0.5, sy(_towBoat.y)+S*0.5);
+      ctx.lineTo(sx(wx)+S*0.5,       sy(wy)+S*0.5); ctx.stroke();
+      // wakeboarder
+      ctx.fillStyle='#23d3c6'; ctx.fillRect(sx(wx)+S*0.33, sy(wy)+S*0.33, S*0.34, S*0.34);
+    }
+  });
+
+  // ===== Minimap / bigmap overlay after core draws =====
+  function paintOverlay(id){
+    if(!_layout) return;
+    const c=document.getElementById(id); if(!c) return;
+    const ctx=c.getContext('2d');
+    const sx=c.width/90, sy=c.height/60;
+
+    // grid
+    ctx.fillStyle='#8a90a0';
+    _layout.H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
+    _layout.V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
+
+    // buildings
+    ctx.fillStyle='#6f87b3';
+    _layout.BUILDINGS.forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
+
+    // park
+    if(_layout.PARK){
+      const p=_layout.PARK;
+      ctx.fillStyle='#7db7d9'; ctx.fillRect(p.x*sx,p.y*sy,p.w*sx,p.h*sy);
+    }
+
+    // lake / beach / docks / hotel
+    ctx.fillStyle=COL.water;
+    ctx.fillRect(LAKE.x0*sx,LAKE.y0*sy,(LAKE.x1-LAKE.x0+1)*sx,(LAKE.y1-LAKE.y0+1)*sy);
+    ctx.fillStyle=COL.sand; ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
+    ctx.fillStyle=COL.wood; DOCKS.forEach(d=> ctx.fillRect(d.x0*sx, d.y*sy, d.len*sx, 1*sy));
+    ctx.fillStyle=COL.hotel; ctx.fillRect(HOTEL.x0*sx,HOTEL.y0*sy,(HOTEL.x1-HOTEL.x0+1)*sx,(HOTEL.y1-HOTEL.y0+1)*sy);
+
+    // neighborhood
+    ctx.fillStyle='#8a95a3';
+    HOOD_H.forEach(y=> ctx.fillRect(HOOD.x0*sx, y*sy, (HOOD.x1-HOOD.x0+1)*sx, 1.4*sy));
+    HOOD_V.forEach(x=> ctx.fillRect(x*sx, HOOD.y0*sy, 1.4*sx, (HOOD.y1-HOOD.y0+1)*sy));
+    ctx.fillStyle=COL.hoodPark; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
+
+    // houses
+    ctx.fillStyle='#5f91a5'; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
+  }
+
+  IZZA.on('render-post', ()=>{
+    if(!isTier2()) return;
+    paintOverlay('minimap');
+    paintOverlay('bigmap');
+  });
+
 })();
