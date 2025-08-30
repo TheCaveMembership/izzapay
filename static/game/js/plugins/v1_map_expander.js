@@ -42,26 +42,28 @@
   // ---------- SIMPLE grid proposal (no overlap yet) ----------
   function proposeDowntown(a){
     const {un,hRoadY,vRoadX} = a;
-    const L = un.x0+2, R = un.x1-2, T = un.y0+2, B = un.y1-2;
+    const L=un.x0+2, R=un.x1-2, T=un.y0+2, B=un.y1-2;
 
     const H=[], V[];
 
-    // main east–west + two above, three below (spaced 5 tiles)
+    // main east-west + two above, three below (spaced 5 tiles)
     const above = [hRoadY-5, hRoadY-10].filter(y=>y>=T);
     const below = [hRoadY+5, hRoadY+10, hRoadY+15].filter(y=>y<=B);
     [ ...above, hRoadY, ...below ].forEach(y => H.push({ y, x0:L, x1:R }));
 
-    // main north–south + two left, two right (spaced 8 tiles)
+    // main north-south + two left, two right (spaced 8 tiles)
     const left  = [vRoadX-8, vRoadX-16].filter(x=>x>=L);
     const right = [vRoadX+8, vRoadX+16].filter(x=>x<=R);
     [ ...left, vRoadX, ...right ].forEach(x => V.push({ x, y0:T, y1:B }));
 
+    // Buildings/Park will be selected from blocks later for cleanliness
     return {H,V,BLD:[],PARK:null};
   }
 
   // ---------- clipping helpers ----------
   function overlapsRect(x0,y0,x1,y1,R){ return !(x1<R.x0 || x0>R.x1 || y1<R.y0 || y0>R.y1); }
   function clipHSegment(seg, forbiddenRects){
+    // returns array of {y,x0,x1} with the overlaps cut out
     let parts = [{y:seg.y, x0:seg.x0, x1:seg.x1}];
     forbiddenRects.forEach(R=>{
       parts = parts.flatMap(p=>{
@@ -89,70 +91,79 @@
   }
   function inflate(rect, d){ return {x0:rect.x0-d, y0:rect.y0-d, x1:rect.x1+d, y1:rect.y1+d}; }
 
-  // ---------- safe layout (roads clipped, buildings placed only inside blocks) ----------
+  // ---------- safe layout (roads clipped, simple buildings inside blocks) ----------
   function makeSafeLayout(a){
     const P = proposeDowntown(a);
 
     const NO_ROAD = [
-      inflate(a.HQ,0), inflate(a.SH,0),
-      inflate({x0:a.door.gx,y0:a.door.gy,x1:a.door.gx,y1:a.door.gy},1),
-      inflate({x0:a.register.gx,y0:a.register.gy,x1:a.register.gx,y1:a.register.gy},1)
+      inflate(a.HQ,0), inflate(a.SH,0),            // keep away from old blds
+      inflate({x0:a.door.gx,y0:a.door.gy,x1:a.door.gx,y1:a.door.gy},1),        // door + 1 tile
+      inflate({x0:a.register.gx,y0:a.register.gy,x1:a.register.gx,y1:a.register.gy},1) // register + 1
     ];
 
     const H = P.H.flatMap(seg => clipHSegment(seg, NO_ROAD));
     const V = P.V.flatMap(seg => clipVSegment(seg, NO_ROAD));
 
-    // Build block rectangles (between streets, sidewalks clear)
+    // Build blocks from the clean grid (keeps sidewalks free)
     function blocksFromGrid(H,V){
       const ys = [...new Set(H.map(h=>h.y))].sort((a,b)=>a-b);
       const xs = [...new Set(V.map(v=>v.x))].sort((a,b)=>a-b);
       const blocks=[];
       for(let yi=0; yi<ys.length-1; yi++){
-        const top=ys[yi]+1, bot=ys[yi+1]-1; if(bot<top) continue;
+        const top=ys[yi]+1, bot=ys[yi+1]-1; // leave 1 tile for walks
+        if(bot<top) continue;
         for(let xi=0; xi<xs.length-1; xi++){
-          const left=xs[xi]+1, right=xs[xi+1]-1; if(right<left) continue;
+          const left=xs[xi]+1, right=xs[xi+1]-1;
+          if(right<left) continue;
           blocks.push({x:left, y:top, w:right-left+1, h:bot-top+1});
         }
       }
       return blocks;
     }
+
     const blocks = blocksFromGrid(H,V).filter(b=>{
+      // drop any block touching HQ/Shop buffers
       const hitHQ = !(b.x+b.w-1 < a.HQ.x0 || b.x > a.HQ.x1 || b.y+b.h-1 < a.HQ.y0 || b.y > a.HQ.y1);
       const hitSH = !(b.x+b.w-1 < a.SH.x0 || b.x > a.SH.x1 || b.y+b.h-1 < a.SH.y0 || b.y > a.SH.y1);
       return !hitHQ && !hitSH;
     });
 
+    // Center a building inside a block
     function placeInBlock(b, w, h, color){
       const x = Math.round(b.x + (b.w - w)/2);
       const y = Math.round(b.y + (b.h - h)/2);
       return {x, y, w, h, color};
     }
 
-    // choose a small, clean set of buildings
+    // Choose a few blocks → very light footprint
     const BLD=[];
+    let PARK = null;
     if(blocks.length){
       const core = {x:a.vRoadX, y:a.hRoadY};
-      const byCore = [...blocks].sort((b1,b2)=>{
+      const sorted = [...blocks].sort((b1,b2)=>{
         const c1={x:b1.x+b1.w/2, y:b1.y+b1.h/2};
         const c2={x:b2.x+b2.w/2, y:b2.y+b2.h/2};
         return (Math.abs(c1.x-core.x)+Math.abs(c1.y-core.y)) - (Math.abs(c2.x-core.x)+Math.abs(c2.y-core.y));
       });
 
-      const se = byCore.find(b=> (b.x+b.w/2)>=core.x && (b.y+b.h/2)>=core.y ) || byCore[0];
+      // 1) Mall (bigger) SE of core
+      const se = sorted.find(b=> (b.x+b.w/2)>=core.x && (b.y+b.h/2)>=core.y ) || sorted[0];
       BLD.push(placeInBlock(se, Math.max(5, Math.floor(se.w*0.7)), Math.max(3, Math.floor(se.h*0.6)), COL.shop));
 
-      const east = byCore.find(b=> (b.x+b.w/2)>core.x && Math.abs((b.y+b.h/2)-core.y)<=6 ) || byCore[1];
-      if(east) BLD.push(placeInBlock(east, 4, 3, COL.police));
+      // 2) Police near core east
+      const east = sorted.find(b=> (b.x+b.w/2)>core.x && Math.abs((b.y+b.h/2)-core.y)<=6 ) || sorted[1] || se;
+      BLD.push(placeInBlock(east, 4, 3, COL.police));
 
-      const northBlocks = byCore.filter(b=> (b.y+b.h/2)<core.y).slice(0,2);
-      northBlocks.forEach(b=> BLD.push(placeInBlock(b, 5, 3, COL.civic)));
+      // 3) Two civic blocks north of core
+      const north = sorted.filter(b=> (b.y+b.h/2)<core.y).slice(0,2);
+      north.forEach(b=> BLD.push(placeInBlock(b, 5, 3, COL.civic)));
 
-      byCore.slice(3,7).forEach(b=> BLD.push(placeInBlock(b, 3, 2, COL.civic)));
+      // 4) A couple of small fillers
+      sorted.slice(3,5).forEach(b=> BLD.push(placeInBlock(b, 3, 2, COL.civic)));
 
-      const parkBlock = [...byCore].reverse().find(b=> b.w>=6 && b.h>=4) || byCore[0];
-      var PARK = { x:parkBlock.x, y:parkBlock.y, w:Math.min(parkBlock.w, 9), h:Math.min(parkBlock.h, 5) };
-    } else {
-      var PARK = null;
+      // 5) Park in a roomy leftover
+      const roomy = [...sorted].reverse().find(b=> b.w>=6 && b.h>=4) || sorted[0];
+      PARK = { x:roomy.x, y:roomy.y, w:Math.min(roomy.w, 9), h:Math.min(roomy.h, 5) };
     }
 
     return {H_ROADS:H, V_ROADS:V, BUILDINGS:BLD, PARK};
@@ -186,7 +197,7 @@
     const L=makeSafeLayout(a);
     const ctx=document.getElementById('game').getContext('2d');
 
-    // sidewalks first
+    // sidewalks first (clip parallel to roads we actually draw)
     L.H_ROADS.forEach(r=>{
       for(let x=r.x0;x<=r.x1;x++){
         fillTile(api,ctx,x,r.y-1,COL.sidewalk);
@@ -277,17 +288,17 @@ function isTier2(){ return localStorage.getItem('izzaMapTier')==='2'; }
 // ---- layout knobs (tweak safely) ----
 const LAKE = { x0: 66, y0: 35, x1: 82, y1: 51 };     // bigger SE lake
 const BEACH_X = LAKE.x0 - 1;                         // 1-tile sand strip on west shore
-const DOCKS = [
-  { x0: LAKE.x0, y: LAKE.y0+3,  len: 3 },
+const DOCKS = [                                      // piers sticking into lake
+  { x0: LAKE.x0, y: LAKE.y0+3, len: 3 },
   { x0: LAKE.x0, y: LAKE.y0+10, len: 4 },
   { x0: LAKE.x0, y: LAKE.y0+17, len: 3 },
 ];
 const HOTEL = { x0: LAKE.x0+2, y0: LAKE.y0-5, x1: LAKE.x0+8, y1: LAKE.y0-1 };
 
-// Bottom-left neighborhood inside tier-2
+// Bottom-left neighborhood inside tier-2 (kept off arterials/sidewalks)
 const HOOD = { x0: 12, y0: 42, x1: 34, y1: 50 };
-const HOOD_H = [ HOOD.y0+1, HOOD.y0+5, HOOD.y0+9 ];
-const HOOD_V = [ HOOD.x0+6, HOOD.x0+12, HOOD.x0+18 ];
+const HOOD_H = [ HOOD.y0+1, HOOD.y0+5, HOOD.y0+9 ];  // local horizontals
+const HOOD_V = [ HOOD.x0+6, HOOD.x0+12, HOOD.x0+18 ]; // local verticals
 const HOUSES = [
   {x0:HOOD.x0+1,y0:HOOD.y0+2,x1:HOOD.x0+2,y1:HOOD.y0+3},
   {x0:HOOD.x0+8,y0:HOOD.y0+2,x1:HOOD.x0+10,y1:HOOD.y0+3},
@@ -298,14 +309,16 @@ const HOUSES = [
 ];
 const HOOD_PARK = { x0: HOOD.x0+19, y0: HOOD.y0+5, x1: HOOD.x0+24, y1: HOOD.y0+9 };
 
-// ---- helpers already in this file (fillTile/drawHRoad/drawVRoad/w2sX/w2sY/COL)
+// ---- helpers we already have in this file ----
+// fillTile(api,ctx,gx,gy,color); drawHRoad(api,ctx,y,x0,x1); drawVRoad(api,ctx,x,y0,y1);
+// w2sX/w2sY(same file) and COL palette
 
-// ---- water/dock tests ----
+// ---- water test + docks test ----
 const _inRect=(gx,gy,R)=> gx>=R.x0 && gx<=R.x1 && gy>=R.y0 && gy<=R.y1;
 const _isWater=(gx,gy)=> _inRect(gx,gy,LAKE);
 const _isDock=(gx,gy)=> DOCKS.some(d=> gy===d.y && gx>=d.x0 && gx<=d.x0+d.len-1);
 
-// ---- draw new content UNDER sprites ----
+// ---- draw new content UNDER sprites (roads/sidewalks respected) ----
 IZZA.on('render-under', ()=>{
   if(!isTier2() || !IZZA.api?.ready) return;
   const api = IZZA.api;
@@ -319,31 +332,33 @@ IZZA.on('render-under', ()=>{
   // Beach (1-tile wide)
   for(let gy=LAKE.y0; gy<=LAKE.y1; gy++) fillTile(api,ctx,BEACH_X,gy,'#e0c27b');
 
-  // Docks
+  // Docks (wood planks)
   ctx.fillStyle='#6b4a2f';
   DOCKS.forEach(d=>{
     const S=api.DRAW, sx=w2sX(api,d.x0*api.TILE), sy=w2sY(api,d.y*api.TILE);
     ctx.fillRect(sx,sy, d.len*S, S);
   });
 
-  // Hotel
+  // Hotel (kept off sidewalks/roads)
   for(let gy=HOTEL.y0; gy<=HOTEL.y1; gy++)
     for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++)
       fillTile(api,ctx,gx,gy,'#284b7a');
 
-  // Neighborhood sidewalks and roads
+  // Neighborhood local streets (don’t touch your big grid)
+  // Sidewalks
   HOOD_H.forEach(y=>{
     for(let x=HOOD.x0; x<=HOOD.x1; x++){
-      fillTile(api,ctx,x,y-1,'#6a727b');
-      fillTile(api,ctx,x,y+1,'#6a727b');
+      fillTile(api,ctx,x,y-1,'#6a727b');   // top walk
+      fillTile(api,ctx,x,y+1,'#6a727b');   // bottom walk
     }
   });
   HOOD_V.forEach(x=>{
     for(let y=HOOD.y0; y<=HOOD.y1; y++){
-      fillTile(api,ctx,x-1,y,'#6a727b');
-      fillTile(api,ctx,x+1,y,'#6a727b');
+      fillTile(api,ctx,x-1,y,'#6a727b');   // left walk
+      fillTile(api,ctx,x+1,y,'#6a727b');   // right walk
     }
   });
+  // Road lanes
   HOOD_H.forEach(y=> drawHRoad(api,ctx,y,HOOD.x0,HOOD.x1));
   HOOD_V.forEach(x=> drawVRoad(api,ctx,x,HOOD.y0,HOOD.y1));
 
@@ -352,7 +367,7 @@ IZZA.on('render-under', ()=>{
     for(let gx=HOOD_PARK.x0; gx<=HOOD_PARK.x1; gx++)
       fillTile(api,ctx,gx,gy,'#135c33');
 
-  // Houses
+  // Houses (inside blocks; never on sidewalks or roads)
   HOUSES.forEach(h=>{
     for(let gy=h.y0; gy<=h.y1; gy++)
       for(let gx=h.x0; gx<=h.x1; gx++)
@@ -363,11 +378,12 @@ IZZA.on('render-under', ()=>{
 // ================= BOATS =================
 const _boats = [];         // NPC boats
 const _dockBoats = [];     // boats parked at docks (enter/exit)
-let _towBoat=null;         // towing a wakeboarder
+let _towBoat=null;         // the one towing a wakeboarder
 let _inBoat=false, _ride=null, _lastLand=null;
 
 function _spawnBoats(){
   if(!isTier2() || _boats.length) return;
+  // simple rectangular loop around lake edges
   const L={x0:LAKE.x0+2,y0:LAKE.y0+2,x1:LAKE.x1-2,y1:LAKE.y1-2};
   const loop=(x,y,s,clockwise=true)=>{
     const path = clockwise
@@ -390,14 +406,16 @@ IZZA.on('update-pre', ({dtSec})=>{
   const gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
 
   if(!_isWater(gx,gy)) _lastLand = {x:p.x,y:p.y};
-  else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
+  else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; } // bounce back from water
 
+  // NPC boats follow their paths
   _boats.forEach(b=>{
     const tgt=b.path[b.i], dx=tgt.x-b.x, dy=tgt.y-b.y, m=Math.hypot(dx,dy)||1, step=b.s*dtSec/32;
     if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
     else{ b.x += (dx/m)*step; b.y += (dy/m)*step; }
   });
 
+  // if driving a dock boat, its grid follows the player
   if(_inBoat && _ride){ _ride.x = p.x/32; _ride.y = p.y/32; }
 });
 
@@ -432,6 +450,7 @@ IZZA.on('render-under', ()=>{
   _boats.forEach(b=> drawBoat(b.x,b.y));
   _dockBoats.forEach(b=> drawBoat(b.x,b.y));
 
+  // wakeboarder 2 tiles behind towing boat
   if(_towBoat){
     const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
     const wx=_towBoat.x - (vx/m)*2.2, wy=_towBoat.y - (vy/m)*2.2;
@@ -448,7 +467,7 @@ IZZA.on('update-post', ()=>{
   api.cars.forEach(c=>{
     const gx=(c.x/t)|0, gy=(c.y/t)|0;
     const hit = layout.L.BUILDINGS.some(b=> gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h);
-    if(hit){ c.dir*=-1; c.x += c.dir*4; }
+    if(hit){ c.dir*=-1; c.x += c.dir*4; } // reverse out quickly
   });
 });
 
@@ -456,7 +475,7 @@ IZZA.on('update-post', ()=>{
 (function(){
   const oldPaint = paintMapCanvas;
   paintMapCanvas = function(id){
-    oldPaint(id);
+    oldPaint(id);                       // keep what you already draw
     if(!isTier2()) return;
     const c=document.getElementById(id); if(!c) return;
     const ctx=c.getContext('2d'), sx=c.width/90, sy=c.height/60;
