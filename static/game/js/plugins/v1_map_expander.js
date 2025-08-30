@@ -9,10 +9,10 @@
     civic:'#405a85', police:'#0a2455', shop:'#203a60',
     park:'#2b6a7a',
     water:'#1a4668', sand:'#e0c27b', wood:'#6b4a2f',
-    hotel:'#7a4e2f',          // warm brown (no blues)
-    house:'#7b6a42',          // tan-brown (not grass)
+    hotel:'#7a4e2f',
+    house:'#7b6a42',
     hoodPark:'#135c33',
-    lot:'#474747'             // parking lot asphalt
+    lot:'#474747'
   };
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
@@ -30,7 +30,7 @@
     const sidewalkTopY = hRoadY - 1;
     const sidewalkBotY = hRoadY + 1;
 
-    // NOTE: vRoadX is “the” original vertical to the right of HQ; keep it, and add new ones farther right/left.
+    // NOTE: vRoadX is original vertical to the right of HQ; keep it, and add new ones farther right/left.
     const vRoadX         = Math.min(un.x1-3, bX + bW + 6);
     const vSidewalkLeftX = vRoadX - 1;
     const vSidewalkRightX= vRoadX + 1;
@@ -45,31 +45,25 @@
     return {un,bX,bY,bW,bH,hRoadY,sidewalkTopY,sidewalkBotY,vRoadX,vSidewalkLeftX,vSidewalkRightX,shop,HQ,SH,door,register};
   }
 
-  // ---------- Lakefront (made parametric so water/sand hit the right/bottom edges) ----------
-  // These depend on Tier-2 unlocked bounds so they always “reach the edges”.
+  // ---------- Lakefront ----------
   function lakeRects(a){
-    const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 }; // touches right+bottom edges
-    const BEACH_X = LAKE.x0 - 1;                                                // 1-tile beach to the left
-    // Docks enter from the beach line, spaced so boats can run beside them
+    const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
+    const BEACH_X = LAKE.x0 - 1;
     const DOCKS = [
       { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },
       { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
     ];
-    // Hotel sits above the lake, pulled back behind a sidewalk, with a lot between sidewalk and hotel
-    const hotelTopY = LAKE.y0 - 5;          // leaves 1 sidewalk + 3-tile lot + 1-tile buffer
+    const hotelTopY = LAKE.y0 - 5;
     const HOTEL  = { x0: LAKE.x0+3, y0: hotelTopY, x1: LAKE.x0+9, y1: hotelTopY+3 };
     const LOT    = { x0: HOTEL.x0,  y0: HOTEL.y1+1, x1: HOTEL.x1,  y1: HOTEL.y1+3 };
-
     return {LAKE, BEACH_X, DOCKS, HOTEL, LOT};
   }
 
   // ---------- Bottom-left neighborhood (hood) ----------
   function hoodRects(a){
-    const HOOD   = { x0:a.un.x0+2, y0:a.un.y1-8, x1:a.un.x0+26, y1:a.un.y1-0 }; // generous pad from edges
-    // Roads: two horizontals and two verticals; top horizontal now continues all the way to the beach
-    const HOOD_H = [ HOOD.y0+2, HOOD.y0+6 ];
-    const HOOD_V = [ HOOD.x0+8, HOOD.x0+16 ];
-    // Houses pulled back 1 tile from sidewalks
+    const HOOD   = { x0:a.un.x0+2, y0:a.un.y1-8, x1:a.un.x0+26, y1:a.un.y1-0 };
+    const HOOD_H = [ HOOD.y0+2, HOOD.y0+6 ];      // two horizontals (top, lower)
+    const HOOD_V = [ HOOD.x0+8, HOOD.x0+16 ];     // two verticals
     const HOUSES = [
       {x0:HOOD.x0+3, y0:HOOD.y0+4, x1:HOOD.x0+5, y1:HOOD.y0+5},
       {x0:HOOD.x0+11,y0:HOOD.y0+4, x1:HOOD.x0+13,y1:HOOD.y0+5},
@@ -96,29 +90,26 @@
   function isOriginalTile(gx,gy,a){
     if (_inRect(gx,gy,{x0:a.HQ.x0-1,y0:a.HQ.y0-1,x1:a.HQ.x1+1,y1:a.HQ.y1+1})) return true;
     if (_inRect(gx,gy,{x0:a.SH.x0-1,y0:a.SH.y0-1,x1:a.SH.x1+1,y1:a.SH.y1+1})) return true;
-    // Original Tier-1 cross
     if (gy===a.hRoadY || gy===a.sidewalkTopY || gy===a.sidewalkBotY) return true;
     if (gx===a.vRoadX || gx===a.vSidewalkLeftX || gx===a.vSidewalkRightX) return true;
     return false;
   }
 
-  // ---------- Road plan (parametric) ----------
-  // H: keep mid row straight; add a top and lower row. V: add west & east spines; DO NOT redraw the Tier-1 vertical.
+  // ---------- Road plan ----------
   function desiredRoadGrid(a){
     const H = [
       a.hRoadY - 10,     // top long avenue
-      a.hRoadY,          // (draw only where it’s NOT original; stays straight this time)
+      a.hRoadY,          // main (don’t redraw originals)
       a.hRoadY + 6       // lower avenue toward lake
     ];
     const V = [
       a.vRoadX - 12,     // far-west vertical
-      a.vRoadX + 10      // east vertical near lake (keeps a clean column between HQ and shop)
-      // (no a.vRoadX here: we never re-draw the original vertical)
+      a.vRoadX + 10      // east vertical near lake (between HQ and shop)
     ];
     return {H, V};
   }
 
-  // Clip helpers (avoid re-painting forbidden blocks)
+  // Clip helpers
   function clipHRow(y, x0, x1, forbiddenRects){
     let parts=[{y, x0, x1}];
     forbiddenRects.forEach(R=>{
@@ -146,7 +137,6 @@
     return parts.filter(p=>p.y1>=p.y0);
   }
 
-  // Small util so yellow dashes appear on H roads only
   function drawHRoad(api,ctx,y,x0,x1){
     for(let x=x0;x<=x1;x++){
       fillTile(api,ctx,x,y,COL.road);
@@ -157,7 +147,7 @@
   }
   function drawVRoad(api,ctx,x,y0,y1){ for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road); }
 
-  // ---------- Boats (side docking; stay off land; tow path avoids docks) ----------
+  // ---------- Boats ----------
   const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null;
   function spawnBoats(){
     if(!isTier2() || _boats.length) return;
@@ -169,32 +159,26 @@
       const path = clockwise
         ? [{x:r.x0,y:r.y0},{x:r.x1,y:r.y0},{x:r.x1,y:r.y1},{x:r.x0,y:r.y1}]
         : [{x:r.x1,y:r.y1},{x:r.x0,y:r.y1},{x:r.x0,y:r.y0},{x:r.x1,y:r.y0}];
-      // When moving along the beach edge, gently nudge one tile DOWN (away from docks)
       const dockYs = new Set(DOCKS.map(d=>d.y));
       path.forEach(pt=>{ if(pt.x===r.x0 && dockYs.has(pt.y)) pt.y += 1; });
       return {x,y,s,i:0,path};
     };
 
-    // free boat and tow boat
     _boats.push(makeLoop(padRect.x0, padRect.y0, 55, true));
     _towBoat = makeLoop(padRect.x0+1, padRect.y1-1, 52, true); _boats.push(_towBoat);
 
-    // docked boats sit to the RIGHT SIDE of the dock planks, not on top
     DOCKS.forEach(d=> _dockBoats.push({x:d.x0+d.len, y:d.y, s:120, taken:false}));
   }
   IZZA.on('ready', spawnBoats);
 
-  // Boat movement + keep them on water
   IZZA.on('update-pre', ({dtSec})=>{
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, A=anchors(api), {LAKE}=lakeRects(A);
 
-    // Update boats along their rectangle paths
     _boats.forEach(b=>{
       const tgt=b.path[b.i], dx=tgt.x-b.x, dy=tgt.y-b.y, m=Math.hypot(dx,dy)||1, step=b.s*dtSec/32;
       if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
       else{ b.x += (dx/m)*step; b.y += (dy/m)*step; }
-      // clamp to water (in case)
       b.x = Math.max(LAKE.x0+1, Math.min(LAKE.x1-1, b.x));
       b.y = Math.max(LAKE.y0+1, Math.min(LAKE.y1-1, b.y));
     });
@@ -205,12 +189,10 @@
     return _inRect(gx,gy,LAKE);
   }
 
-  // Enter/leave boat from the SIDE of a dock
   function _enterBoat(){
     if(_inBoat || !isTier2()) return;
     const api=IZZA.api, t=api.TILE;
     const gx=((api.player.x+16)/t)|0, gy=((api.player.y+16)/t)|0;
-    // find a side-docked boat within 2 tiles
     let best=null,bd=9e9;
     _dockBoats.forEach(b=>{ if(b.taken) return; const d=Math.hypot(b.x-gx,b.y-gy); if(d<bd){bd=d; best=b;} });
     if(best && bd<=2){ best.taken=true; _ride=best; _inBoat=true; api.player.speed=120; }
@@ -218,7 +200,6 @@
   function _leaveBoat(){
     if(!_inBoat) return;
     const api=IZZA.api, t=api.TILE, gx=((api.player.x+16)/t)|0, gy=((api.player.y+16)/t)|0;
-    // You can step off only if standing on dock side cells or beach line
     const A=anchors(api), {LAKE, BEACH_X}=lakeRects(A);
     const onBeach = (gx===BEACH_X && gy>=LAKE.y0 && gy<=LAKE.y1);
     const onSideDock = _dockBoats.some(b=> Math.abs(b.x-gx)<=1 && Math.abs(b.y-gy)<=0);
@@ -258,20 +239,26 @@
       segs.forEach(s=> V_ROADS.push(s));
     });
 
-    // Sidewalks (skip original tiles)
+    // ROAD CELL SET (used to keep sidewalks out of intersections)
+    const roadKey = (x,y)=>x+'|'+y;
+    const roadSet = new Set();
+    H_ROADS.forEach(r=>{ for(let x=r.x0;x<=r.x1;x++) roadSet.add(roadKey(x,r.y)); });
+    V_ROADS.forEach(r=>{ for(let y=r.y0;y<=r.y1;y++) roadSet.add(roadKey(r.x,y)); });
+
+    // Sidewalks (skip original tiles and any road cells)
     const markSW = new Set();
     const seen = (gx,gy)=>{ const k=gx+'|'+gy; if(markSW.has(k)) return true; markSW.add(k); return false; };
 
     H_ROADS.forEach(r=>{
       for(let x=r.x0;x<=r.x1;x++){
-        if(!isOriginalTile(x, r.y-1, A)) if(!seen(x,r.y-1)) fillTile(api,ctx,x,r.y-1,COL.sidewalk);
-        if(!isOriginalTile(x, r.y+1, A)) if(!seen(x,r.y+1)) fillTile(api,ctx,x,r.y+1,COL.sidewalk);
+        if(!isOriginalTile(x, r.y-1, A) && !roadSet.has(roadKey(x,r.y-1))) if(!seen(x,r.y-1)) fillTile(api,ctx,x,r.y-1,COL.sidewalk);
+        if(!isOriginalTile(x, r.y+1, A) && !roadSet.has(roadKey(x,r.y+1))) if(!seen(x,r.y+1)) fillTile(api,ctx,x,r.y+1,COL.sidewalk);
       }
     });
     V_ROADS.forEach(r=>{
       for(let y=r.y0;y<=r.y1;y++){
-        if(!isOriginalTile(r.x-1, y, A)) if(!seen(r.x-1,y)) fillTile(api,ctx,r.x-1,y,COL.sidewalk);
-        if(!isOriginalTile(r.x+1, y, A)) if(!seen(r.x+1,y)) fillTile(api,ctx,r.x+1,y,COL.sidewalk);
+        if(!isOriginalTile(r.x-1, y, A) && !roadSet.has(roadKey(r.x-1,y))) if(!seen(r.x-1,y)) fillTile(api,ctx,r.x-1,y,COL.sidewalk);
+        if(!isOriginalTile(r.x+1, y, A) && !roadSet.has(roadKey(r.x+1,y))) if(!seen(r.x+1,y)) fillTile(api,ctx,r.x+1,y,COL.sidewalk);
       }
     });
 
@@ -285,19 +272,25 @@
       drawVRoad(api,ctx,r.x,r.y0,r.y1);
     });
 
-    // --- Downtown small buildings: keep away from water / Tier-1
-    const BUILDINGS = [
+    // --- Downtown small buildings
+    let BUILDINGS = [
       {x:A.vRoadX+11, y:A.hRoadY-9, w:6, h:3, color:COL.civic},
       {x:A.vRoadX+6,  y:A.hRoadY+2, w:4, h:3, color:COL.police},
       {x:A.vRoadX+8,  y:A.hRoadY+9, w:7, h:4, color:COL.shop},
       {x:A.vRoadX-14, y:A.hRoadY+2, w:3, h:2, color:COL.shop},
       {x:A.vRoadX-6,  y:A.hRoadY-2, w:3, h:2, color:COL.shop}
-    ].filter(b=>{
+    ];
+    // REMOVE the “blue building in front of HQ” (anything in front of HQ along the avenue strip)
+    BUILDINGS = BUILDINGS.filter(b=>{
+      const frontStrip = {x0:A.vRoadX+1, x1:A.vRoadX+12, y0:A.sidewalkTopY-6, y1:A.sidewalkBotY+6};
+      const overlapsFront = !(b.x+b.w-1 < frontStrip.x0 || b.x > frontStrip.x1 || b.y+b.h-1 < frontStrip.y0 || b.y > frontStrip.y1);
+      if (overlapsFront && (b.color===COL.civic || b.color===COL.police || b.color===COL.shop)) return false;
       for(let gx=b.x; gx<b.x+b.w; gx++)
         for(let gy=b.y; gy<b.y+b.h; gy++)
           if (_inRect(gx,gy,LAKE) || isOriginalTile(gx,gy,A)) return false;
       return true;
     });
+
     BUILDINGS.forEach(b=>{
       for(let gy=b.y; gy<b.y+b.h; gy++)
         for(let gx=b.x; gx<b.x+b.w; gx++)
@@ -306,37 +299,34 @@
       ctx.fillStyle='rgba(0,0,0,.15)'; ctx.fillRect(sx,sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
     });
 
-    // --- Hotel block: sidewalk + parking lot + hotel box (hotel pulled back)
-    // Sidewalk in front of lot
+    // --- Hotel block
     for(let gx=LOT.x0; gx<=LOT.x1; gx++) fillTile(api,ctx,gx,LOT.y0-1,COL.sidewalk);
-    // Lot
     for(let gy=LOT.y0; gy<=LOT.y1; gy++)
       for(let gx=LOT.x0; gx<=LOT.x1; gx++) fillTile(api,ctx,gx,gy,COL.lot);
-    // Hotel
     for(let gy=HOTEL.y0; gy<=HOTEL.y1; gy++)
       for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++) fillTile(api,ctx,gx,gy,COL.hotel);
 
-    // --- Neighborhood roads (reach edges; top horizontal goes to the beach)
+    // --- Neighborhood roads (top goes to beach; LOWER stops at hood edge → no road into park)
     // sidewalks
-    hoodRects(A).HOOD_H.forEach(y=>{
-      for(let x=A.un.x0; x<=A.un.x1; x++){  // stretch across to edges
-        fillTile(api,ctx,x,y-1,COL.sidewalk);
-        fillTile(api,ctx,x,y+1,COL.sidewalk);
-      }
-    });
-    hoodRects(A).HOOD_V.forEach(x=>{
+    const topY = HOOD_H[0], lowY = HOOD_H[1];
+    for(let x=A.un.x0; x<=A.un.x1; x++){ // top across
+      fillTile(api,ctx,x,topY-1,COL.sidewalk);
+      fillTile(api,ctx,x,topY+1,COL.sidewalk);
+    }
+    for(let x=A.un.x0; x<=hoodRects(A).HOOD.x1; x++){ // lower only to hood edge
+      fillTile(api,ctx,x,lowY-1,COL.sidewalk);
+      fillTile(api,ctx,x,lowY+1,COL.sidewalk);
+    }
+    HOOD_V.forEach(x=>{
       for(let y=A.un.y0; y<=A.un.y1; y++){
         fillTile(api,ctx,x-1,y,COL.sidewalk);
         fillTile(api,ctx,x+1,y,COL.sidewalk);
       }
     });
     // roads
-    hoodRects(A).HOOD_H.forEach(y=>{
-      drawHRoad(api,ctx,y, A.un.x0, A.un.x1);  // to edges
-    });
-    hoodRects(A).HOOD_V.forEach(x=>{
-      drawVRoad(api,ctx,x, A.un.y0, A.un.y1);  // to edges
-    });
+    drawHRoad(api,ctx, topY, A.un.x0, A.un.x1);                 // full width
+    drawHRoad(api,ctx, lowY, A.un.x0, hoodRects(A).HOOD.x1);    // capped at hood edge
+    HOOD_V.forEach(x=> drawVRoad(api,ctx,x, A.un.y0, A.un.y1));
 
     // hood park
     for(let gy=HOOD_PARK.y0; gy<=HOOD_PARK.y1; gy++)
@@ -348,7 +338,7 @@
         for(let gx=h.x0; gx<=h.x1; gx++) fillTile(api,ctx,gx,gy,COL.house);
     });
 
-    // --- Lake / beach / docks (water & sand to right/bottom edges)
+    // --- Lake / beach / docks
     for(let gy=LAKE.y0; gy<=LAKE.y1; gy++)
       for(let gx=LAKE.x0; gx<=LAKE.x1; gx++) fillTile(api,ctx,gx,gy,COL.water);
     for(let gy=LAKE.y0; gy<=LAKE.y1; gy++) fillTile(api,ctx,BEACH_X,gy,COL.sand);
@@ -365,7 +355,6 @@
     _boats.forEach(b=> drawBoat(b.x,b.y));
     _dockBoats.forEach(b=> drawBoat(b.x,b.y));
     if(_towBoat){
-      // tow line runs within water; shorten the leash near docks
       const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
       const leash = 2.0;
       const wx=_towBoat.x - (vx/m)*leash, wy=_towBoat.y - (vy/m)*leash;
@@ -376,7 +365,7 @@
       ctx.fillRect(sx(wx)+S*0.33, sy(wy)+S*0.33, S*0.34, S*0.34);
     }
 
-    _layout = { H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES };
+    _layout = { H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_H };
   });
 
   // ---------- Collisions & movement ----------
@@ -386,23 +375,20 @@
   IZZA.on('update-pre', ()=>{
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, p=api.player, t=api.TILE;
-    const gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
 
-    // remember last land using 4-corner water test (prevents walking onto water edges)
+    // remember last land using 4-corner water test (block any water edge)
     const corners = [
-      {x:((p.x+1)/t)|0, y:((p.y+1)/t)|0},
+      {x:((p.x+1)/t)|0,  y:((p.y+1)/t)|0},
       {x:((p.x+31)/t)|0, y:((p.y+1)/t)|0},
-      {x:((p.x+1)/t)|0, y:((p.y+31)/t)|0},
+      {x:((p.x+1)/t)|0,  y:((p.y+31)/t)|0},
       {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
     ];
-    const onWater = corners.every(c=> _tileIsWater(c.x,c.y));
-    if(!onWater) _lastLand = {x:p.x,y:p.y};
+    const anyWater = corners.some(c=> _tileIsWater(c.x,c.y));
+    if(!anyWater) _lastLand = {x:p.x,y:p.y};
     else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
 
-    // keep dock rider icon aligned with player when riding a boat
     if(_inBoat && _ride){ _ride.x = ((p.x/t)|0); _ride.y = ((p.y/t)|0); }
 
-    // cars bounce off new buildings
     if(_layout){
       api.cars.forEach(c=>{
         const cgx=(c.x/t)|0, cgy=(c.y/t)|0;
@@ -444,15 +430,26 @@
     const ctx=c.getContext('2d');
     const sx=c.width/90, sy=c.height/60;
 
+    // Clip roads so they never draw over water
+    const a=anchors(IZZA.api), {LAKE, BEACH_X, HOTEL, LOT}=lakeRects(a);
     ctx.fillStyle='#8a90a0';
-    _layout.H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
-    _layout.V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
+    _layout.H_ROADS.forEach(r=>{
+      // left segment
+      if(r.x0 <= LAKE.x0-1) ctx.fillRect(r.x0*sx, r.y*sy, (Math.min(r.x1, LAKE.x0-1)-r.x0+1)*sx, 1.2*sy);
+      // right segment
+      if(r.x1 >= LAKE.x1+1) ctx.fillRect((Math.max(r.x0, LAKE.x1+1))*sx, r.y*sy, (r.x1-Math.max(r.x0, LAKE.x1+1)+1)*sx, 1.2*sy);
+    });
+    _layout.V_ROADS.forEach(r=>{
+      // top segment
+      if(r.y0 <= LAKE.y0-1) ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (Math.min(r.y1, LAKE.y0-1)-r.y0+1)*sy);
+      // bottom segment
+      if(r.y1 >= LAKE.y1+1) ctx.fillRect(r.x*sx, (Math.max(r.y0, LAKE.y1+1))*sy, 1.2*sx, (r.y1-Math.max(r.y0, LAKE.y1+1)+1)*sy);
+    });
 
     ctx.fillStyle='#6f87b3';
     (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
 
     // lake + beach + hotel + lot
-    const a=anchors(IZZA.api), {LAKE, BEACH_X, HOTEL, LOT}=lakeRects(a);
     ctx.fillStyle=COL.water;
     ctx.fillRect(LAKE.x0*sx,LAKE.y0*sy,(LAKE.x1-LAKE.x0+1)*sx,(LAKE.y1-LAKE.y0+1)*sy);
     ctx.fillStyle=COL.sand; ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
@@ -460,9 +457,12 @@
     ctx.fillStyle=COL.hotel; ctx.fillRect(HOTEL.x0*sx,HOTEL.y0*sy,(HOTEL.x1-HOTEL.x0+1)*sx,(HOTEL.y1-HOTEL.y0+1)*sy);
 
     // hood
-    const {HOOD, HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(a);
+    const {HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(a);
     ctx.fillStyle='#8a95a3';
-    HOOD_H.forEach(y=> ctx.fillRect(a.un.x0*sx, y*sy, (a.un.x1-a.un.x0+1)*sx, 1.4*sy));
+    // top hood road to beach
+    ctx.fillRect(a.un.x0*sx, HOOD_H[0]*sy, (a.un.x1-a.un.x0+1)*sx, 1.4*sy);
+    // lower hood road only to hood edge
+    ctx.fillRect(a.un.x0*sx, HOOD_H[1]*sy, (hoodRects(a).HOOD.x1-a.un.x0+1)*sx, 1.4*sy);
     HOOD_V.forEach(x=> ctx.fillRect(x*sx, a.un.y0*sy, 1.4*sx, (a.un.y1-a.un.y0+1)*sy));
     ctx.fillStyle=COL.hoodPark; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
     ctx.fillStyle=COL.house; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
