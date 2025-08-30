@@ -1,19 +1,24 @@
-// downtown_clip_safe_layout.js — Tier-2 expansion (sidewalks everywhere, never touch Tier-1)
-// Drops in alongside your core.js and mission 3 plugin.
+// downtown_clip_safe_layout.js — Tier-2 expansion (safe clipping, no blue buildings, sidewalks everywhere)
 (function () {
   const TIER_KEY = 'izzaMapTier';
 
-  // ---------- Palette (match core) ----------
+  // ---------- Palette (non-blue buildings; blue only for water and explicit windows) ----------
   const COL = {
     grass:'#09371c',
     road:'#2a2a2a', dash:'#ffd23f', sidewalk:'#6a727b',
-    civic:'#405a85', police:'#0a2455', shop:'#203a60', park:'#2b6a7a',
-    water:'#1a4668', sand:'#e0c27b', wood:'#6b4a2f', hotel:'#284b7a',
-    house:'#175d2f', hoodPark:'#135c33'
+    // Building tones (neutral/brown/brick)
+    civic:'#6a5f4b',     // neutral civic block
+    police:'#5a3b3b',    // brick-ish police
+    shop:'#6b4a2f',      // brown shop body (we’ll draw light windows on top)
+    park:'#1f6a3a',      // green park (not blue)
+    water:'#1a4668', sand:'#e0c27b', wood:'#6b4a2f',
+    hotel:'#7b4f2a',     // terracotta/brown hotel (not blue)
+    house:'#175d2f', hoodPark:'#135c33',
+    window:'#b7c8ff'     // soft light-blue for window strips only
   };
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
-  // ---------- Core anchors (same math as core.js) ----------
+  // ---------- Core anchors (mirror core.js calculations exactly) ----------
   function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
   function anchors(api){
     const tier = localStorage.getItem(TIER_KEY)||'1';
@@ -41,7 +46,7 @@
     return {un,bX,bY,bW,bH,hRoadY,sidewalkTopY,sidewalkBotY,vRoadX,vSidewalkLeftX,vSidewalkRightX,shop,HQ,SH,door,register};
   }
 
-  // ---------- Lakefront (unchanged from your good version) ----------
+  // ---------- Lakefront ----------
   const LAKE   = { x0:67, y0:35, x1:81, y1:49 };
   const BEACH_X= LAKE.x0 - 1;
   const DOCKS  = [
@@ -50,6 +55,7 @@
   ];
   const HOTEL  = { x0: LAKE.x0+2, y0: LAKE.y0-5, x1: LAKE.x0+8, y1: LAKE.y0-1 };
 
+  // ---------- Neighborhood (bottom-left) ----------
   const HOOD   = { x0:12, y0:42, x1:34, y1:50 };
   const HOOD_H = [ HOOD.y0+2, HOOD.y0+6 ];
   const HOOD_V = [ HOOD.x0+8, HOOD.x0+16 ];
@@ -75,38 +81,31 @@
     ctx.fillStyle=color; ctx.fillRect(sx,sy,S,S);
   }
 
-  // ---------- “Protect the original area” mask ----------
+  // ---------- Tier-1 protection ----------
   function isOriginalTile(gx,gy,a){
-    // Original HQ/Shop boxes + their 1-tile frames (don’t paint here)
     if (_inRect(gx,gy,{x0:a.HQ.x0-1,y0:a.HQ.y0-1,x1:a.HQ.x1+1,y1:a.HQ.y1+1})) return true;
     if (_inRect(gx,gy,{x0:a.SH.x0-1,y0:a.SH.y0-1,x1:a.SH.x1+1,y1:a.SH.y1+1})) return true;
-
-    // Original Tier-1 cross: main horizontal + sidewalks; main vertical + sidewalks
     if (gy===a.hRoadY || gy===a.sidewalkTopY || gy===a.sidewalkBotY) return true;
     if (gx===a.vRoadX || gx===a.vSidewalkLeftX || gx===a.vSidewalkRightX) return true;
-
     return false;
   }
 
-  // ---------- Roads you drew (parametric so you can tweak quickly) ----------
-  // All values are expressed as offsets from the Tier-1 cross to match your edit.
+  // ---------- Parametric road grid (easy to tweak) ----------
   function desiredRoadGrid(a){
-    // horizontals (y rows)
     const H = [
-      a.hRoadY - 10,        // top long avenue (your new upper road)
-      a.hRoadY - 0,         // keep alignment across downtown (drawn only in new spaces)
-      a.hRoadY + 6          // mid-lower road across to the lake
+      a.hRoadY - 10,        // upper avenue
+      a.hRoadY,             // aligns with Tier-1 across the new area only
+      a.hRoadY + 6          // mid-lower connector toward the lake
     ];
-    // verticals (x columns)
     const V = [
-      a.vRoadX - 12,        // west vertical (left of center)
-      a.vRoadX,             // central (will only add where empty)
+      a.vRoadX - 12,        // west vertical
+      a.vRoadX,             // central (only added where not Tier-1)
       a.vRoadX + 10         // east vertical near lake edge
     ];
     return {H, V};
   }
 
-  // Clip helpers: remove parts that would overpaint originals / buildings / lake
+  // ---------- Seg clipping ----------
   function clipHRow(y, x0, x1, forbiddenRects){
     let parts=[{y, x0, x1}];
     forbiddenRects.forEach(R=>{
@@ -134,19 +133,20 @@
     return parts.filter(p=>p.y1>=p.y0);
   }
 
-  // ---------- Downtown buildings & park (kept from your last good version) ----------
+  // ---------- Downtown building proposals ----------
   function proposeBuildings(a){
+    // placed off the central cross; sizes kept compact; all neutral/brick/brown
     return [
-      {x:a.vRoadX+11, y:a.hRoadY-9, w:6, h:3, color:COL.civic},
-      {x:a.vRoadX+6,  y:a.hRoadY+2, w:4, h:3, color:COL.police},
-      {x:a.vRoadX+8,  y:a.hRoadY+9, w:7, h:4, color:COL.shop},
-      {x:a.vRoadX-14, y:a.hRoadY+2, w:3, h:2, color:COL.shop},
-      {x:a.vRoadX-6,  y:a.hRoadY-2, w:3, h:2, color:COL.shop}
+      {x:a.vRoadX+11, y:a.hRoadY-9, w:6, h:3, color:COL.civic,   windows:true},
+      {x:a.vRoadX+6,  y:a.hRoadY+2, w:4, h:3, color:COL.police,  windows:true},
+      {x:a.vRoadX+8,  y:a.hRoadY+9, w:7, h:4, color:COL.shop,    windows:true},
+      {x:a.vRoadX-14, y:a.hRoadY+2, w:3, h:2, color:COL.shop,    windows:true},
+      {x:a.vRoadX-6,  y:a.hRoadY-2, w:3, h:2, color:COL.shop,    windows:true}
     ];
   }
   const PARK_DOWNTOWN = (a)=> ({ x:a.vRoadX-3, y:a.hRoadY+8, w:6, h:4 });
 
-  // ---------- Drawing helpers ----------
+  // ---------- Draw helpers ----------
   function drawHRoad(api,ctx,y,x0,x1){
     for(let x=x0;x<=x1;x++){
       fillTile(api,ctx,x,y,COL.road);
@@ -159,7 +159,7 @@
     for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road);
   }
 
-  // ---------- Boats (same behavior you liked) ----------
+  // ---------- Boats ----------
   const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null;
   function spawnBoats(){
     if(!isTier2() || _boats.length) return;
@@ -208,7 +208,7 @@
     const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
     const A = anchors(api);
 
-    // Forbidden areas: lake, all Tier-1 tiles (roads+walks), HQ/Shop boxes (with a 1-tile safety ring)
+    // Forbidden zones for roads
     const FORBID = [
       {x0:LAKE.x0,y0:LAKE.y0,x1:LAKE.x1,y1:LAKE.y1},
       {x0:A.HQ.x0-1,y0:A.HQ.y0-1,x1:A.HQ.x1+1,y1:A.HQ.y1+1},
@@ -217,27 +217,21 @@
 
     const {H,V} = desiredRoadGrid(A);
 
-    // Build road lists, clipped so they never repaint Tier-1 or enter water/buildings later.
-    // (Buildings are placed after, so we’ll clip against them visually by skipping when drawing.)
+    // Build new road lists, clipped so they avoid lake and Tier-1 rings
     const H_ROADS = [];
     const V_ROADS = [];
-
-    // Horizontals across the whole unlocked rect
     H.forEach(y=>{
       const segs = clipHRow(y, A.un.x0+1, A.un.x1-1, FORBID);
       segs.forEach(s=> H_ROADS.push(s));
     });
-
-    // Verticals across the whole unlocked rect
     V.forEach(x=>{
       const segs = clipVCol(x, A.un.y0+1, A.un.y1-1, FORBID);
       segs.forEach(s=> V_ROADS.push(s));
     });
 
-    // Sidewalks for every new road (skip any original tiles)
+    // Sidewalks for every new road (skip Tier-1 tiles)
     const markSW = new Set();
     const seen = (gx,gy)=>{ const k=gx+'|'+gy; if(markSW.has(k)) return true; markSW.add(k); return false; };
-
     H_ROADS.forEach(r=>{
       for(let x=r.x0;x<=r.x1;x++){
         if(!isOriginalTile(x, r.y-1, A)) if(!seen(x,r.y-1)) fillTile(api,ctx,x,r.y-1,COL.sidewalk);
@@ -251,43 +245,61 @@
       }
     });
 
-    // Roads themselves (never draw over original tiles)
+    // Draw the roads themselves
+    H_ROADS.forEach(r=> drawHRoad(api,ctx,r.y,r.x0,r.x1));
+    V_ROADS.forEach(r=> drawVRoad(api,ctx,r.x,r.y0,r.y1));
+
+    // --- Compute a 1-tile buffer around all NEW roads & sidewalks to keep buildings off the curbs ---
+    const roadBuffers = [];
     H_ROADS.forEach(r=>{
-      for(let x=r.x0;x<=r.x1;x++){
-        if(!isOriginalTile(x, r.y, A)) fillTile(api,ctx,x,r.y,COL.road);
-      }
-      drawHRoad(api,ctx,r.y,r.x0,r.x1);
+      roadBuffers.push({x0:r.x0, x1:r.x1, y0:r.y-1, y1:r.y+1}); // row + sidewalks
     });
     V_ROADS.forEach(r=>{
-      for(let y=r.y0;y<=r.y1;y++){
-        if(!isOriginalTile(r.x, y, A)) fillTile(api,ctx,r.x,y,COL.road);
-      }
-      drawVRoad(api,ctx,r.x,r.y0,r.y1);
+      roadBuffers.push({x0:r.x-1, x1:r.x+1, y0:r.y0, y1:r.y1}); // col + sidewalks
     });
 
-    // Downtown buildings (skip roads/sidewalks/water to avoid blue leaks)
+    const overlaps = (rectA, rectB)=> !(rectA.x1 < rectB.x0 || rectA.x0 > rectB.x1 || rectA.y1 < rectB.y0 || rectA.y0 > rectB.y1);
+
+    // Downtown buildings — filter so they never overlap roads, sidewalks, water, or Tier-1
     const BUILDINGS = proposeBuildings(A).filter(b=>{
-      // keep away from lake and the buffered HQ/Shop zones
-      for(let gx=b.x; gx<b.x+b.w; gx++)
-        for(let gy=b.y; gy<b.y+b.h; gy++)
-          if (_isWater(gx,gy) || isOriginalTile(gx,gy,A)) return false;
+      const R={x0:b.x,y0:b.y,x1:b.x+b.w-1,y1:b.y+b.h-1};
+      // keep away from lake, HQ/Shop safety rings
+      if (overlaps(R, {x0:LAKE.x0,y0:LAKE.y0,x1:LAKE.x1,y1:LAKE.y1})) return false;
+      if (overlaps(R, {x0:A.HQ.x0-1,y0:A.HQ.y0-1,x1:A.HQ.x1+1,y1:A.HQ.y1+1})) return false;
+      if (overlaps(R, {x0:A.SH.x0-1,y0:A.SH.y0-1,x1:A.SH.x1+1,y1:A.SH.y1+1})) return false;
+      // keep 1 tile off any new road/sidewalk buffer
+      if (roadBuffers.some(buf=> overlaps(R, buf))) return false;
+      // don’t sit on Tier-1 road/sidewalk tiles either
+      for(let gx=R.x0; gx<=R.x1; gx++)
+        for(let gy=R.y0; gy<=R.y1; gy++)
+          if (isOriginalTile(gx,gy,A)) return false;
       return true;
     });
+
+    // Fill building bodies
     BUILDINGS.forEach(b=>{
       for(let gy=b.y; gy<b.y+b.h; gy++)
         for(let gx=b.x; gx<b.x+b.w; gx++)
           if(!_isWater(gx,gy) && !isOriginalTile(gx,gy,A)) fillTile(api,ctx,gx,gy,b.color);
+      // subtle roof highlight
       const sx=w2sX(api,b.x*api.TILE), sy=w2sY(api,b.y*api.TILE);
       ctx.fillStyle='rgba(0,0,0,.15)';
       ctx.fillRect(sx,sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
+      // optional windows (thin strip) — safe because body isn’t blue
+      if(b.windows){
+        ctx.fillStyle=COL.window;
+        const wx = sx + api.DRAW*0.15, ww = api.DRAW*(b.w - 0.30);
+        const wy = sy + api.DRAW*0.40, wh = api.DRAW*0.20;
+        ctx.fillRect(wx, wy, ww, wh);
+      }
     });
 
-    // Downtown park (clip off roads/sidewalks/water)
+    // Downtown park — clip off new roads/sidewalks/water
     const P=PARK_DOWNTOWN(A);
     for(let gy=P.y; gy<P.y+P.h; gy++)
       for(let gx=P.x; gx<P.x+P.w; gx++){
-        const onNewH = H_ROADS.some(r=> gy===r.y || gy===r.y-1 || gy===r.y+1);
-        const onNewV = V_ROADS.some(r=> gx===r.x || gx===r.x-1 || gx===r.x+1);
+        const onNewH = H_ROADS.some(r=> gy>=r.y-1 && gy<=r.y+1 && gx>=r.x0 && gx<=r.x1);
+        const onNewV = V_ROADS.some(r=> gx>=r.x-1 && gx<=r.x+1 && gy>=r.y0 && gy<=r.y1);
         if(!_isWater(gx,gy) && !onNewH && !onNewV && !isOriginalTile(gx,gy,A))
           fillTile(api,ctx,gx,gy,COL.park);
       }
@@ -297,18 +309,17 @@
       for(let gx=LAKE.x0; gx<=LAKE.x1; gx++)
         if(!_isDock(gx,gy)) fillTile(api,ctx,gx,gy,COL.water);
     for(let gy=LAKE.y0; gy<=LAKE.y1; gy++) fillTile(api,ctx,BEACH_X,gy,COL.sand);
-    ctx.fillStyle=COL.wood;
-    DOCKS.forEach(d=>{
+    ctx.fillStyle=COL.wood; DOCKS.forEach(d=>{
       const S=api.DRAW, sx=w2sX(api,d.x0*api.TILE), sy=w2sY(api,d.y*api.TILE);
       ctx.fillRect(sx,sy, d.len*S, S);
     });
 
-    // Hotel
+    // Hotel (non-blue)
     for(let gy=HOTEL.y0; gy<=HOTEL.y1; gy++)
       for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++)
         fillTile(api,ctx,gx,gy,COL.hotel);
 
-    // Neighborhood
+    // Neighborhood grid
     HOOD_H.forEach(y=>{
       for(let x=HOOD.x0; x<=HOOD.x1; x++){
         fillTile(api,ctx,x,y-1,COL.sidewalk);
@@ -334,7 +345,7 @@
           fillTile(api,ctx,gx,gy,COL.house);
     });
 
-    // Boats vis
+    // Boats visual
     const S=api.DRAW, t=api.TILE, f=S/t;
     const sx=gx=> (gx*t - api.camera.x)*f, sy=gy=> (gy*t - api.camera.y)*f;
     const drawBoat=(gx,gy)=>{ ctx.fillStyle='#7ca7c7'; ctx.fillRect(sx(gx)+S*0.2, sy(gy)+S*0.35, S*0.6, S*0.3); };
@@ -367,6 +378,7 @@
     else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
 
     if(_layout){
+      // make traffic U-turn if it enters a building cell
       api.cars.forEach(c=>{
         const cgx=(c.x/t)|0, cgy=(c.y/t)|0;
         const hit = _layout.BUILDINGS?.some(b=> cgx>=b.x && cgx<b.x+b.w && cgy>=b.y && cgy<b.y+b.h);
@@ -401,7 +413,7 @@
     }
   });
 
-  // ---------- Minimap / Bigmap overlay (unchanged) ----------
+  // ---------- Minimap / Bigmap overlay ----------
   function paintOverlay(id){
     if(!_layout) return;
     const c=document.getElementById(id); if(!c) return;
@@ -412,7 +424,8 @@
     _layout.H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
     _layout.V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
 
-    ctx.fillStyle='#6f87b3';
+    // neutral buildings on the map (not blue)
+    ctx.fillStyle='#a8a29e';
     _layout.BUILDINGS?.forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
 
     // lake + beach + docks + hotel
@@ -427,7 +440,7 @@
     HOOD_H.forEach(y=> ctx.fillRect(HOOD.x0*sx, y*sy, (HOOD.x1-HOOD.x0+1)*sx, 1.4*sy));
     HOOD_V.forEach(x=> ctx.fillRect(x*sx, HOOD.y0*sy, 1.4*sx, (HOOD.y1-HOOD.y0+1)*sy));
     ctx.fillStyle=COL.hoodPark; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
-    ctx.fillStyle='#5f91a5'; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
+    ctx.fillStyle='#5f8266'; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
   }
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
