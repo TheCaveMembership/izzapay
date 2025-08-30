@@ -282,12 +282,24 @@
     });
 
     // 4) Buildings (on grass only, never on roads/sidewalks/water)
-    const onSidewalkOrRoad = (gx,gy)=>{
-      if(_layout.H_ROADS.some(r=> gy===r.y || gy===r.y-1 || gy===r.y+1)) return true;
-      if(_layout.V_ROADS.some(r=> gx===r.x || gx===r.x-1 || gx===r.x+1)) return true;
-      if(seenSW.has(gx+'|'+gy)) return true;
-      return false;
-    };
+    // --- keep these where they already are ---
+const onSidewalkOrRoad = (gx,gy)=>{
+  if(_layout.H_ROADS.some(r=> gy===r.y || gy===r.y-1 || gy===r.y+1)) return true;
+  if(_layout.V_ROADS.some(r=> gx===r.x || gx===r.x-1 || gx===r.x+1)) return true;
+  return false;
+};
+
+// 5) Park (downtown) — CLIPPED so it never paints over roads/sidewalks/water
+if(_layout.PARK){
+  const p=_layout.PARK;
+  for(let gy=p.y; gy<p.y+p.h; gy++){
+    for(let gx=p.x; gx<p.x+p.w; gx++){
+      if(!_isWater(gx,gy) && !onSidewalkOrRoad(gx,gy)){
+        fillTile(api,ctx,gx,gy,COL.park);
+      }
+    }
+  }
+}
     _layout.BUILDINGS.forEach(b=>{
       for(let gy=b.y; gy<b.y+b.h; gy++)
         for(let gx=b.x; gx<b.x+b.w; gx++)
