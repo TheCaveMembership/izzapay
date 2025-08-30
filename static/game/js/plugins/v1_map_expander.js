@@ -1,50 +1,62 @@
-// downtown_full_unlock_fix.js
+// downtown_clip_safe_layout.js
 (function () {
-  const MAP_TIER_KEY = 'izzaMapTier';
+  const TIER_KEY = 'izzaMapTier';
+
+  // colors
   const COL = {
     road:'#2a2a2a', dash:'#ffd23f', sidewalk:'#6a727b',
     civic:'#405a85', police:'#0a2455', shop:'#203a60', park:'#2b6a7a'
   };
 
+  // ---------- core-aligned anchors ----------
   function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
-
   function anchors(api){
-    const tier = localStorage.getItem(MAP_TIER_KEY)||'1';
+    const tier = localStorage.getItem(TIER_KEY)||'1';
     const un = unlockedRect(tier);
 
+    // original HQ/shop from core math
     const bW=10,bH=6;
     const bX = Math.floor((un.x0+un.x1)/2) - Math.floor(bW/2);
     const bY = un.y0 + 5;
 
     const hRoadY       = bY + bH + 1;
     const sidewalkTopY = hRoadY - 1;
-    const sidewalkBotY = hRoadY + 1;
 
     const vRoadX         = Math.min(un.x1-3, bX + bW + 6);
-    const vSidewalkLeftX = vRoadX - 1;
     const vSidewalkRightX= vRoadX + 1;
 
-    // shop (same as core)
     const shop = { w:8, h:5, x:vSidewalkRightX+1, y: sidewalkTopY-5 };
 
-    return {tier,un,bX,bY,bW,bH,hRoadY,sidewalkTopY,sidewalkBotY,vRoadX,vSidewalkLeftX,vSidewalkRightX,shop};
+    // “no paint” (with 1-tile buffer so nothing touches)
+    const BUFF=1;
+    const HQ  = {x0:bX-BUFF, y0:bY-BUFF, x1:bX+bW-1+BUFF, y1:bY+bH-1+BUFF};
+    const SH  = {x0:shop.x-BUFF, y0:shop.y-BUFF, x1:shop.x+shop.w-1+BUFF, y1:shop.y+shop.h-1+BUFF};
+
+    // door/register tiles to keep clear
+    const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY };
+    const register = { gx: vSidewalkRightX, gy: sidewalkTopY };
+
+    return {tier,un,bX,bY,bW,bH,hRoadY,vRoadX,shop,HQ,SH,door,register};
   }
 
-  function makeDowntown(a){
+  // ---------- grid proposal (no overlap yet) ----------
+  function proposeDowntown(a){
     const {un,hRoadY,vRoadX} = a;
     const L=un.x0+1,R=un.x1-1,T=un.y0+1,B=un.y1-1;
 
     const H=[], V=[], BLD=[];
     const addBox=(x,y,w,h,color)=>BLD.push({x,y,w,h,color});
 
-    H.push({y:hRoadY,x0:L,x1:R});
-    for(let y=hRoadY-8; y>=T; y-=4) H.push({y,x0:L,x1:R});
-    for(let y=hRoadY+4; y<=B; y+=4) H.push({y,x0:L,x1:R});
+    // arterials + cross streets (downtown grid)
+    H.push({y:hRoadY, x0:L, x1:R});
+    for(let y=hRoadY-8; y>=T; y-=4) H.push({y, x0:L, x1:R});
+    for(let y=hRoadY+4; y<=B; y+=4) H.push({y, x0:L, x1:R});
 
-    V.push({x:vRoadX,y0:T,y1:B});
-    for(let x=vRoadX-12; x>=L; x-=6) V.push({x,y0:T,y1:B});
-    for(let x=vRoadX+6;  x<=R; x+=6) V.push({x,y0:T,y1:B});
+    V.push({x:vRoadX, y0:T, y1:B});
+    for(let x=vRoadX-12; x>=L; x-=6) V.push({x, y0:T, y1:B});
+    for(let x=vRoadX+6;  x<=R; x+=6) V.push({x, y0:T, y1:B});
 
+    // sample buildings (kept away later)
     addBox(vRoadX+8,  hRoadY-9, 5,3, COL.civic);
     addBox(vRoadX+15, hRoadY-9, 4,3, COL.civic);
     addBox(vRoadX+13, hRoadY+5, 4,3, COL.police);
@@ -52,11 +64,72 @@
     [[vRoadX-7,hRoadY+5],[vRoadX-1,hRoadY+5],[vRoadX+6,hRoadY+7],[vRoadX+18,hRoadY+11],[vRoadX-6,hRoadY+13],[vRoadX+20,hRoadY-1]]
       .forEach(([x,y])=>addBox(x,y,3,2,COL.civic));
 
-    const PARK={x:R-11,y:B-7,w:9,h:5};
-    return {H_ROADS:H, V_ROADS:V, BUILDINGS:BLD, PARK};
+    const PARK={x:R-11, y:B-7, w:9, h:5};
+
+    return {H,V,BLD,PARK};
   }
 
-  // helpers
+  // ---------- clipping helpers ----------
+  function overlapsRect(x0,y0,x1,y1,R){ return !(x1<R.x0 || x0>R.x1 || y1<R.y0 || y0>R.y1); }
+  function clipHSegment(seg, forbiddenRects){
+    // returns array of {y,x0,x1} with the overlaps cut out
+    let parts = [{y:seg.y, x0:seg.x0, x1:seg.x1}];
+    forbiddenRects.forEach(R=>{
+      parts = parts.flatMap(p=>{
+        if(p.y<R.y0 || p.y>R.y1 || p.x1<R.x0 || p.x0>R.x1) return [p];
+        const res=[];
+        if(p.x0 < R.x0) res.push({y:p.y, x0:p.x0, x1:Math.max(p.x0, R.x0-1)});
+        if(p.x1 > R.x1) res.push({y:p.y, x0:Math.min(p.x1, R.x1+1), x1:p.x1});
+        return res;
+      });
+    });
+    return parts.filter(p=>p.x1>=p.x0);
+  }
+  function clipVSegment(seg, forbiddenRects){
+    let parts = [{x:seg.x, y0:seg.y0, y1:seg.y1}];
+    forbiddenRects.forEach(R=>{
+      parts = parts.flatMap(p=>{
+        if(p.x<R.x0 || p.x>R.x1 || p.y1<R.y0 || p.y0>R.y1) return [p];
+        const res=[];
+        if(p.y0 < R.y0) res.push({x:p.x, y0:p.y0, y1:Math.max(p.y0, R.y0-1)});
+        if(p.y1 > R.y1) res.push({x:p.x, y0:Math.min(p.y1, R.y1+1), y1:p.y1});
+        return res;
+      });
+    });
+    return parts.filter(p=>p.y1>=p.y0);
+  }
+  function inflate(rect, d){ return {x0:rect.x0-d, y0:rect.y0-d, x1:rect.x1+d, y1:rect.y1+d}; }
+
+  // ---------- safe layout (roads clipped, buildings shifted if needed) ----------
+  function makeSafeLayout(a){
+    const P = proposeDowntown(a);
+
+    const NO_ROAD = [
+      inflate(a.HQ,0), inflate(a.SH,0),            // keep away from old blds
+      inflate({x0:a.door.gx,y0:a.door.gy,x1:a.door.gx,y1:a.door.gy},1),        // door + 1 tile
+      inflate({x0:a.register.gx,y0:a.register.gy,x1:a.register.gx,y1:a.register.gy},1) // register + 1
+    ];
+
+    const H = P.H.flatMap(seg => clipHSegment(seg, NO_ROAD));
+    const V = P.V.flatMap(seg => clipVSegment(seg, NO_ROAD));
+
+    // Buildings: keep at least 1-tile gap from HQ/Shop; if touching, nudge away
+    const keepAway = inflate(a.HQ,1);
+    const keepAway2= inflate(a.SH,1);
+    const BLD = P.BLD.map(b=>{
+      let bx=b.x, by=b.y;
+      // nudge horizontally if overlapping
+      if(overlapsRect(bx,by,bx+b.w-1,by+b.h-1, keepAway) || overlapsRect(bx,by,bx+b.w-1,by+b.h-1, keepAway2)){
+        if(bx <= a.bX) bx = keepAway.x0 - b.w - 1; else bx = keepAway.x1 + 1;
+        if(by <= a.bY) by = keepAway.y0 - b.h - 1; else by = keepAway.y1 + 1;
+      }
+      return {x:bx,y:by,w:b.w,h:b.h,color:b.color};
+    });
+
+    return {H_ROADS:H, V_ROADS:V, BUILDINGS:BLD, PARK:P.PARK};
+  }
+
+  // ---------- drawing helpers ----------
   const scl = api => api.DRAW/api.TILE;
   const w2sX=(api,wx)=>(wx-api.camera.x)*scl(api);
   const w2sY=(api,wy)=>(wy-api.camera.y)*scl(api);
@@ -74,49 +147,39 @@
   }
   function drawVRoad(api,ctx,x,y0,y1){ for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road); }
 
-  // skip painting over original HQ/shop
-  function makeSkip(a){
-    const HQ = {x0:a.bX, y0:a.bY, x1:a.bX+a.bW-1, y1:a.bY+a.bH-1};
-    const SH = {x0:a.shop.x, y0:a.shop.y, x1:a.shop.x+a.shop.w-1, y1:a.shop.y+a.shop.h-1};
-    return (gx,gy)=> (gx>=HQ.x0&&gx<=HQ.x1&&gy>=HQ.y0&&gy<=HQ.y1) ||
-                     (gx>=SH.x0&&gx<=SH.x1&&gy>=SH.y0&&gy<=SH.y1);
-  }
-
-  // -------- UNDERLAY DRAW (no base fill; respect old area) --------
+  // ---------- paint UNDER player/NPC (but above grass) ----------
   IZZA.on('render-under', ()=>{
     if(!IZZA.api||!IZZA.api.ready) return;
-    const tier=localStorage.getItem(MAP_TIER_KEY)||'1';
-    if(tier!=='2') return;
+    if(localStorage.getItem(TIER_KEY)!=='2') return;
 
     const api=IZZA.api;
     const a=anchors(api);
-    const L=makeDowntown(a);
-    const skip=makeSkip(a);
+    const L=makeSafeLayout(a);
     const ctx=document.getElementById('game').getContext('2d');
 
-    // sidewalks first
+    // sidewalks first (clip parallel to roads we actually draw)
     L.H_ROADS.forEach(r=>{
       for(let x=r.x0;x<=r.x1;x++){
-        if(!skip(x,r.y-1)) fillTile(api,ctx,x,r.y-1,COL.sidewalk);
-        if(!skip(x,r.y+1)) fillTile(api,ctx,x,r.y+1,COL.sidewalk);
+        fillTile(api,ctx,x,r.y-1,COL.sidewalk);
+        fillTile(api,ctx,x,r.y+1,COL.sidewalk);
       }
     });
     L.V_ROADS.forEach(r=>{
       for(let y=r.y0;y<=r.y1;y++){
-        if(!skip(r.x-1,y)) fillTile(api,ctx,r.x-1,y,COL.sidewalk);
-        if(!skip(r.x+1,y)) fillTile(api,ctx,r.x+1,y,COL.sidewalk);
+        fillTile(api,ctx,r.x-1,y,COL.sidewalk);
+        fillTile(api,ctx,r.x+1,y,COL.sidewalk);
       }
     });
 
-    // roads (don’t paint if it would cover HQ/shop)
+    // roads
     L.H_ROADS.forEach(r=> drawHRoad(api,ctx,r.y,r.x0,r.x1));
     L.V_ROADS.forEach(r=> drawVRoad(api,ctx,r.x,r.y0,r.y1));
 
-    // buildings (skip HQ/shop tiles)
+    // buildings
     L.BUILDINGS.forEach(b=>{
       for(let gy=b.y; gy<b.y+b.h; gy++)
         for(let gx=b.x; gx<b.x+b.w; gx++)
-          if(!skip(gx,gy)) fillTile(api,ctx,gx,gy,b.color);
+          fillTile(api,ctx,gx,gy,b.color);
       const sx=w2sX(api,b.x*api.TILE), sy=w2sY(api,b.y*api.TILE);
       ctx.fillStyle='rgba(0,0,0,.15)';
       ctx.fillRect(sx,sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
@@ -127,10 +190,11 @@
       ctx.fillStyle=COL.park; ctx.fillRect(sx,sy, p.w*api.DRAW, p.h*api.DRAW);
     }
 
-    window.__DT_LAYOUT__ = {L,a};
+    // stash for collision + minimap
+    window.__DT_LAYOUT__ = {L};
   });
 
-  // soft-collide against only NEW buildings
+  // ---------- light collision only against NEW buildings ----------
   function softCollide(){
     const api=IZZA.api; const pack=window.__DT_LAYOUT__; if(!api||!pack) return;
     const {L}=pack; const t=api.TILE; const px=api.player.x, py=api.player.y;
@@ -148,9 +212,9 @@
       }
     }
   }
-  IZZA.on('update-post', ()=>{ if(localStorage.getItem(MAP_TIER_KEY)==='2') softCollide(); });
+  IZZA.on('update-post', ()=>{ if(localStorage.getItem(TIER_KEY)==='2') softCollide(); });
 
-  // draw overlay on mini/big map AFTER core
+  // ---------- minimap/bigmap painting AFTER core ----------
   function paintMapCanvas(id){
     const pack=window.__DT_LAYOUT__; if(!pack) return;
     const {L}=pack;
@@ -158,6 +222,7 @@
     const ctx=c.getContext('2d');
     const sx=c.width/90, sy=c.height/60;
 
+    ctx.save();
     // roads
     ctx.fillStyle='#8a90a0';
     L.H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
@@ -166,9 +231,10 @@
     L.BUILDINGS.forEach(b=>{ ctx.fillStyle='#6f87b3'; ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy); });
     // park
     if(L.PARK){ const p=L.PARK; ctx.fillStyle='#7db7d9'; ctx.fillRect(p.x*sx,p.y*sy,p.w*sx,p.h*sy); }
+    ctx.restore();
   }
   IZZA.on('render-post', ()=>{
-    if(localStorage.getItem(MAP_TIER_KEY)!=='2') return;
+    if(localStorage.getItem(TIER_KEY)!=='2') return;
     paintMapCanvas('minimap');
     paintMapCanvas('bigmap');
   });
