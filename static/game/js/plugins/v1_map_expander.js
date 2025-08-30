@@ -239,3 +239,219 @@
     paintMapCanvas('bigmap');
   });
 })();
+// ===== ADD-ONS: lake, boats, beach/hotel, neighborhood =====
+
+// Only do this for tier 2
+function isTier2(){ return localStorage.getItem('izzaMapTier')==='2'; }
+
+// ---- layout knobs (tweak safely) ----
+const LAKE = { x0: 66, y0: 35, x1: 82, y1: 51 };     // bigger SE lake
+const BEACH_X = LAKE.x0 - 1;                         // 1-tile sand strip on west shore
+const DOCKS = [                                      // piers sticking into lake
+  { x0: LAKE.x0, y: LAKE.y0+3, len: 3 },
+  { x0: LAKE.x0, y: LAKE.y0+10, len: 4 },
+  { x0: LAKE.x0, y: LAKE.y0+17, len: 3 },
+];
+const HOTEL = { x0: LAKE.x0+2, y0: LAKE.y0-5, x1: LAKE.x0+8, y1: LAKE.y0-1 };
+
+// Bottom-left neighborhood inside tier-2 (kept off arterials/sidewalks)
+const HOOD = { x0: 12, y0: 42, x1: 34, y1: 50 };
+const HOOD_H = [ HOOD.y0+1, HOOD.y0+5, HOOD.y0+9 ];  // local horizontals
+const HOOD_V = [ HOOD.x0+6, HOOD.x0+12, HOOD.x0+18 ]; // local verticals
+const HOUSES = [
+  {x0:HOOD.x0+1,y0:HOOD.y0+2,x1:HOOD.x0+2,y1:HOOD.y0+3},
+  {x0:HOOD.x0+8,y0:HOOD.y0+2,x1:HOOD.x0+10,y1:HOOD.y0+3},
+  {x0:HOOD.x0+14,y0:HOOD.y0+2,x1:HOOD.x0+16,y1:HOOD.y0+3},
+  {x0:HOOD.x0+2,y0:HOOD.y0+7,x1:HOOD.x0+4,y1:HOOD.y0+8},
+  {x0:HOOD.x0+9,y0:HOOD.y0+7,x1:HOOD.x0+11,y1:HOOD.y0+8},
+  {x0:HOOD.x0+15,y0:HOOD.y0+7,x1:HOOD.x0+17,y1:HOOD.y0+8},
+];
+const HOOD_PARK = { x0: HOOD.x0+19, y0: HOOD.y0+5, x1: HOOD.x0+24, y1: HOOD.y0+9 };
+
+// ---- helpers we already have in this file ----
+// fillTile(api,ctx,gx,gy,color); drawHRoad(api,ctx,y,x0,x1); drawVRoad(api,ctx,x,y0,y1);
+// w2sX/w2sY(same file) and COL palette
+
+// ---- water test + docks test ----
+const _inRect=(gx,gy,R)=> gx>=R.x0 && gx<=R.x1 && gy>=R.y0 && gy<=R.y1;
+const _isWater=(gx,gy)=> _inRect(gx,gy,LAKE);
+const _isDock=(gx,gy)=> DOCKS.some(d=> gy===d.y && gx>=d.x0 && gx<=d.x0+d.len-1);
+
+// ---- draw new content UNDER sprites (roads/sidewalks respected) ----
+IZZA.on('render-under', ()=>{
+  if(!isTier2() || !IZZA.api?.ready) return;
+  const api = IZZA.api;
+  const ctx = document.getElementById('game').getContext('2d');
+
+  // Lake
+  for(let gy=LAKE.y0; gy<=LAKE.y1; gy++)
+    for(let gx=LAKE.x0; gx<=LAKE.x1; gx++)
+      fillTile(api,ctx,gx,gy,'#1a4668');
+
+  // Beach (1-tile wide)
+  for(let gy=LAKE.y0; gy<=LAKE.y1; gy++) fillTile(api,ctx,BEACH_X,gy,'#e0c27b');
+
+  // Docks (wood planks)
+  ctx.fillStyle='#6b4a2f';
+  DOCKS.forEach(d=>{
+    const S=api.DRAW, sx=w2sX(api,d.x0*api.TILE), sy=w2sY(api,d.y*api.TILE);
+    ctx.fillRect(sx,sy, d.len*S, S);
+  });
+
+  // Hotel (kept off sidewalks/roads)
+  for(let gy=HOTEL.y0; gy<=HOTEL.y1; gy++)
+    for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++)
+      fillTile(api,ctx,gx,gy,'#284b7a');
+
+  // Neighborhood local streets (don’t touch your big grid)
+  // Sidewalks
+  HOOD_H.forEach(y=>{
+    for(let x=HOOD.x0; x<=HOOD.x1; x++){
+      fillTile(api,ctx,x,y-1,'#6a727b');   // top walk
+      fillTile(api,ctx,x,y+1,'#6a727b');   // bottom walk
+    }
+  });
+  HOOD_V.forEach(x=>{
+    for(let y=HOOD.y0; y<=HOOD.y1; y++){
+      fillTile(api,ctx,x-1,y,'#6a727b');   // left walk
+      fillTile(api,ctx,x+1,y,'#6a727b');   // right walk
+    }
+  });
+  // Road lanes
+  HOOD_H.forEach(y=> drawHRoad(api,ctx,y,HOOD.x0,HOOD.x1));
+  HOOD_V.forEach(x=> drawVRoad(api,ctx,x,HOOD.y0,HOOD.y1));
+
+  // Park
+  for(let gy=HOOD_PARK.y0; gy<=HOOD_PARK.y1; gy++)
+    for(let gx=HOOD_PARK.x0; gx<=HOOD_PARK.x1; gx++)
+      fillTile(api,ctx,gx,gy,'#135c33');
+
+  // Houses (inside blocks; never on sidewalks or roads)
+  HOUSES.forEach(h=>{
+    for(let gy=h.y0; gy<=h.y1; gy++)
+      for(let gx=h.x0; gx<=h.x1; gx++)
+        fillTile(api,ctx,gx,gy,'#175d2f');
+  });
+});
+
+// ================= BOATS =================
+const _boats = [];         // NPC boats
+const _dockBoats = [];     // boats parked at docks (enter/exit)
+let _towBoat=null;         // the one towing a wakeboarder
+let _inBoat=false, _ride=null, _lastLand=null;
+
+function _spawnBoats(){
+  if(!isTier2() || _boats.length) return;
+  // simple rectangular loop around lake edges
+  const L={x0:LAKE.x0+2,y0:LAKE.y0+2,x1:LAKE.x1-2,y1:LAKE.y1-2};
+  const loop=(x,y,s,clockwise=true)=>{
+    const path = clockwise
+      ? [{x:L.x0,y:L.y0},{x:L.x1,y:L.y0},{x:L.x1,y:L.y1},{x:L.x0,y:L.y1}]
+      : [{x:L.x1,y:L.y1},{x:L.x0,y:L.y1},{x:L.x0,y:L.y0},{x:L.x1,y:L.y0}];
+    return {x,y,s,i:0,path};
+  };
+  _boats.push(loop(L.x0, L.y0, 55, true));
+  _boats.push(loop(L.x1, L.y1, 62, false));
+  _towBoat = loop(L.x0+1, L.y1-1, 52, true);
+  _boats.push(_towBoat);
+  DOCKS.forEach(d=> _dockBoats.push({x:d.x0+Math.floor(d.len/2), y:d.y, s:120, taken:false}));
+}
+IZZA.on('ready', _spawnBoats);
+
+// keep player off water unless in boat + move boats
+IZZA.on('update-pre', ({dtSec})=>{
+  if(!isTier2() || !IZZA.api?.ready) return;
+  const api=IZZA.api, p=api.player, t=api.TILE;
+  const gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
+
+  if(!_isWater(gx,gy)) _lastLand = {x:p.x,y:p.y};
+  else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; } // bounce back from water
+
+  // NPC boats follow their paths
+  _boats.forEach(b=>{
+    const tgt=b.path[b.i], dx=tgt.x-b.x, dy=tgt.y-b.y, m=Math.hypot(dx,dy)||1, step=b.s*dtSec/32;
+    if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
+    else{ b.x += (dx/m)*step; b.y += (dy/m)*step; }
+  });
+
+  // if driving a dock boat, its grid follows the player
+  if(_inBoat && _ride){ _ride.x = p.x/32; _ride.y = p.y/32; }
+});
+
+// enter/exit boat on B while on a dock (or beach to exit)
+function _enterBoat(){
+  if(_inBoat || !isTier2()) return;
+  const p=IZZA.api.player, t=IZZA.api.TILE, gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
+  if(!_isDock(gx,gy)) return;
+  let best=null,bd=9e9;
+  _dockBoats.forEach(b=>{ if(b.taken) return; const d=Math.hypot(b.x-gx,b.y-gy); if(d<bd){bd=d; best=b;} });
+  if(best && bd<=2){ best.taken=true; _ride=best; _inBoat=true; IZZA.api.player.speed=120; }
+}
+function _leaveBoat(){
+  if(!_inBoat) return;
+  const p=IZZA.api.player, t=IZZA.api.TILE, gx=((p.x+16)/t)|0, gy=((p.y+16)/t)|0;
+  if(_isDock(gx,gy) || gx===BEACH_X){ _ride.taken=false; _ride=null; _inBoat=false; IZZA.api.player.speed=90; }
+}
+document.getElementById('btnB')?.addEventListener('click', ()=>{ _inBoat? _leaveBoat() : _enterBoat(); });
+window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b'){ _inBoat? _leaveBoat() : _enterBoat(); } });
+
+// draw boats + wakeboarder under sprites
+IZZA.on('render-under', ()=>{
+  if(!isTier2() || !IZZA.api?.ready) return;
+  const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
+  const S=api.DRAW, t=api.TILE, f=S/t;
+  const sx=gx=> (gx*t - api.camera.x)*f, sy=gy=> (gy*t - api.camera.y)*f;
+
+  const drawBoat=(gx,gy)=>{
+    ctx.fillStyle='#7ca7c7';
+    ctx.fillRect(sx(gx)+S*0.2, sy(gy)+S*0.35, S*0.6, S*0.3);
+  };
+  _boats.forEach(b=> drawBoat(b.x,b.y));
+  _dockBoats.forEach(b=> drawBoat(b.x,b.y));
+
+  // wakeboarder 2 tiles behind towing boat
+  if(_towBoat){
+    const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
+    const wx=_towBoat.x - (vx/m)*2.2, wy=_towBoat.y - (vy/m)*2.2;
+    ctx.fillStyle='#23d3c6';
+    ctx.fillRect(sx(wx)+S*0.33, sy(wy)+S*0.33, S*0.34, S*0.34);
+  }
+});
+
+// ===== cars vs buildings: keep cars out of buildings (simple nudge) =====
+IZZA.on('update-post', ()=>{
+  if(!isTier2() || !IZZA.api?.ready) return;
+  const api=IZZA.api, layout=window.__DT_LAYOUT__; if(!layout) return;
+  const t=api.TILE;
+  api.cars.forEach(c=>{
+    const gx=(c.x/t)|0, gy=(c.y/t)|0;
+    const hit = layout.L.BUILDINGS.some(b=> gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h);
+    if(hit){ c.dir*=-1; c.x += c.dir*4; } // reverse out quickly
+  });
+});
+
+// ===== minimap paint for new features =====
+(function(){
+  const oldPaint = paintMapCanvas;
+  paintMapCanvas = function(id){
+    oldPaint(id);                       // keep what you already draw
+    if(!isTier2()) return;
+    const c=document.getElementById(id); if(!c) return;
+    const ctx=c.getContext('2d'), sx=c.width/90, sy=c.height/60;
+
+    // lake / beach / docks / hotel
+    ctx.fillStyle='#1a4668';
+    ctx.fillRect(LAKE.x0*sx,LAKE.y0*sy,(LAKE.x1-LAKE.x0+1)*sx,(LAKE.y1-LAKE.y0+1)*sy);
+    ctx.fillStyle='#e0c27b';
+    ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
+    ctx.fillStyle='#6b4a2f'; DOCKS.forEach(d=> ctx.fillRect(d.x0*sx, d.y*sy, d.len*sx, 1*sy));
+    ctx.fillStyle='#284b7a'; ctx.fillRect(HOTEL.x0*sx,HOTEL.y0*sy,(HOTEL.x1-HOTEL.x0+1)*sx,(HOTEL.y1-HOTEL.y0+1)*sy);
+
+    // neighborhood
+    ctx.fillStyle='#8a95a3';
+    HOOD_H.forEach(y=> ctx.fillRect(HOOD.x0*sx, y*sy, (HOOD.x1-HOOD.x0+1)*sx, 1.4*sy));
+    HOOD_V.forEach(x=> ctx.fillRect(x*sx, HOOD.y0*sy, 1.4*sx, (HOOD.y1-HOOD.y0+1)*sy));
+    ctx.fillStyle='#135c33'; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
+    ctx.fillStyle='#5f91a5'; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
+  };
+})();
