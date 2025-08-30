@@ -1,8 +1,16 @@
-// downtown_clip_safe_layout.js  — clean Tier-2 layout, same hooks
+// downtown_clip_safe_layout.js — Tier-2 layout with targeted fixes
 (function () {
   const TIER_KEY = 'izzaMapTier';
 
-  // --- palette (unchanged hues) ---
+  // quick feature flags so you can toggle behavior from the top
+  const TWEAKS = {
+    removeVerticalAboveHQ: true,
+    removeVerticalBehindShop: true,
+    boatAvoidsDocks: true,
+    drawTowRope: true,
+    collideHotelAndHouses: true,
+  };
+
   const COL = {
     road:'#2a2a2a', dash:'#ffd23f', sidewalk:'#6a727b',
     civic:'#405a85', police:'#0a2455', shop:'#203a60', park:'#2b6a7a',
@@ -52,15 +60,11 @@
     const H = [ hRoadY-6, hRoadY, hRoadY+6 ].map(y=>({y, x0:L, x1:R}));
     const V = [ vRoadX-9, vRoadX, vRoadX+9 ].map(x=>({x, y0:T, y1:B}));
 
-    // sparse buildings: place inside blocks (no sidewalks/roads)
+    // sparse buildings: place inside blocks
     const BLD = [
-      // city hall block (top-right-ish)
       {x:vRoadX+11, y:hRoadY-9, w:6, h:3, color:COL.civic},
-      // police (mid-right)
       {x:vRoadX+6,  y:hRoadY+2, w:4, h:3, color:COL.police},
-      // mall (bottom-right)
       {x:vRoadX+8,  y:hRoadY+9, w:7, h:4, color:COL.shop},
-      // two small shops
       {x:vRoadX-14, y:hRoadY+2, w:3, h:2, color:COL.shop},
       {x:vRoadX-6,  y:hRoadY-2, w:3, h:2, color:COL.shop}
     ];
@@ -100,6 +104,22 @@
     return parts.filter(p=>p.y1>=p.y0);
   }
 
+  // remove problem verticals near HQ and behind shop
+  function filterVRoads(a, VR){
+    if(!TWEAKS.removeVerticalAboveHQ && !TWEAKS.removeVerticalBehindShop) return VR;
+    const cut = [];
+    if(TWEAKS.removeVerticalAboveHQ){
+      // any vertical whose x is near HQ center and whose y-range sits above the HQ row
+      const xHQ = a.bX + Math.floor(a.bW/2);
+      cut.push(r => Math.abs(r.x - xHQ) <= 1 && r.y1 <= a.bY + a.bH);
+    }
+    if(TWEAKS.removeVerticalBehindShop){
+      // remove the main vRoad that sits just to the right of HQ and passes behind the shop
+      cut.push(r => r.x === a.vRoadX);
+    }
+    return VR.filter(r => !cut.some(fn => fn(r)));
+  }
+
   // ===== convert proposal → safe layout =====
   function makeSafeLayout(a){
     const P = proposeDowntown(a);
@@ -109,7 +129,8 @@
       inflate({x0:a.register.gx,y0:a.register.gy,x1:a.register.gx,y1:a.register.gy},1)
     ];
     const H = P.H.flatMap(s=>clipH(s, NO_ROAD));
-    const V = P.V.flatMap(s=>clipV(s, NO_ROAD));
+    let V = P.V.flatMap(s=>clipV(s, NO_ROAD));
+    V = filterVRoads(a, V);
 
     // keep buildings at least 1 tile from HQ/Shop boxes
     const keep1=inflate(a.HQ,1), keep2=inflate(a.SH,1);
@@ -122,7 +143,7 @@
     return {H_ROADS:H, V_ROADS:V, BUILDINGS, PARK:P.PARK};
   }
 
-  // ===== drawing helpers (screen space) =====
+  // ===== drawing helpers =====
   const scl = api => api.DRAW/api.TILE;
   const w2sX=(api,wx)=>(wx-api.camera.x)*scl(api);
   const w2sY=(api,wy)=>(wy-api.camera.y)*scl(api);
@@ -140,8 +161,9 @@
   }
   function drawVRoad(api,ctx,x,y0,y1){ for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road); }
 
-  // ===== LAKE / BEACH / DOCKS / HOTEL / HOOD (lightweight) =====
-  const LAKE   = { x0:66, y0:35, x1:80, y1:49 }; // kept inside tier-2 bounds
+  // ===== LAKE / BEACH / DOCKS / HOTEL / HOOD =====
+  // shift the lake 1 tile right to avoid that tiny water bit touching a road
+  const LAKE   = { x0:67, y0:35, x1:81, y1:49 };
   const BEACH_X= LAKE.x0 - 1;
   const DOCKS  = [
     { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },
@@ -194,7 +216,7 @@
     _layout.H_ROADS.forEach(r=> drawHRoad(api,ctx,r.y,r.x0,r.x1));
     _layout.V_ROADS.forEach(r=> drawVRoad(api,ctx,r.x,r.y0,r.y1));
 
-    // buildings (never on roads/sidewalks)
+    // buildings
     const onSidewalkOrRoad = (gx,gy)=>{
       if(_layout.H_ROADS.some(r=> gy===r.y || gy===r.y-1 || gy===r.y+1)) return true;
       if(_layout.V_ROADS.some(r=> gx===r.x || gx===r.x-1 || gx===r.x+1)) return true;
@@ -232,12 +254,12 @@
       ctx.fillRect(sx,sy, d.len*S, S);
     });
 
-    // hotel (off sidewalks/roads)
+    // hotel
     for(let gy=HOTEL.y0; gy<=HOTEL.y1; gy++)
       for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++)
         fillTile(api,ctx,gx,gy,COL.hotel);
 
-    // neighborhood: light
+    // neighborhood
     HOOD_H.forEach(y=>{
       for(let x=HOOD.x0; x<=HOOD.x1; x++){
         fillTile(api,ctx,x,y-1,COL.sidewalk);
@@ -264,38 +286,74 @@
         for(let gx=h.x0; gx<=h.x1; gx++)
           fillTile(api,ctx,gx,gy,COL.house);
     });
+
+    // tow rope line
+    if(TWEAKS.drawTowRope && _towBoat){
+      const S=api.DRAW, t=api.TILE, f=S/t;
+      const bx = (_towBoat.x*t - api.camera.x)*f + S*0.5;
+      const by = (_towBoat.y*t - api.camera.y)*f + S*0.5;
+      const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
+      const wx=_towBoat.x - (vx/m)*2.2, wy=_towBoat.y - (vy/m)*2.2;
+      const wxpx = (wx*t - api.camera.x)*f + S*0.5;
+      const wypx = (wy*t - api.camera.y)*f + S*0.5;
+      ctx.strokeStyle = '#dfe9ef';
+      ctx.lineWidth = Math.max(1, S*0.04);
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(wxpx,wypx); ctx.stroke();
+    }
   });
 
-  // ===== light collision vs NEW buildings only =====
+  // ===== collision =====
+  // add solids for hotel and houses so you cannot walk “under” them
+  function extraSolids(){
+    if(!TWEAKS.collideHotelAndHouses) return [];
+    const rects = [];
+    rects.push({x:HOTEL.x0,y:HOTEL.y0,w:HOTEL.x1-HOTEL.x0+1,h:HOTEL.y1-HOTEL.y0+1});
+    HOUSES.forEach(h=> rects.push({x:h.x0,y:h.y0,w:h.x1-h.x0+1,h:h.y1-h.y0+1}));
+    return rects;
+  }
+
   IZZA.on('update-post', ()=>{
     if(!IZZA.api?.ready || !isTier2() || !_layout) return;
     const api=IZZA.api, t=api.TILE, p=api.player;
+    const solids = [..._layout.BUILDINGS, ...extraSolids()];
     const gx=(p.x/t)|0, gy=(p.y/t)|0;
-    for(const b of _layout.BUILDINGS){
-      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
-        const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
-        const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
+    for(const b of solids){
+      const bx=b.x??b.x0, by=b.y??b.y0, bw=b.w??(b.x1-b.x0+1), bh=b.h??(b.y1-b.y0+1);
+      if(gx>=bx && gx<bx+bw && gy>=by && gy<by+bh){
+        const dxL=Math.abs(p.x-bx*t), dxR=Math.abs((bx+bw)*t-p.x);
+        const dyT=Math.abs(p.y-by*t), dyB=Math.abs((by+bh)*t-p.y);
         const m=Math.min(dxL,dxR,dyT,dyB);
-        if(m===dxL) p.x=(b.x-0.01)*t;
-        else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
-        else if(m===dyT) p.y=(b.y-0.01)*t;
-        else             p.y=(b.y+b.h+0.01)*t;
+        if(m===dxL) p.x=(bx-0.01)*t;
+        else if(m===dxR) p.x=(bx+bw+0.01)*t;
+        else if(m===dyT) p.y=(by-0.01)*t;
+        else             p.y=(by+bh+0.01)*t;
         break;
       }
     }
   });
 
-  // ===== NPC boats + player boating (simple) =====
+  // ===== NPC boats + player boating =====
   const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null;
 
   function spawnBoats(){
     if(!isTier2() || _boats.length) return;
     const L={x0:LAKE.x0+2,y0:LAKE.y0+2,x1:LAKE.x1-2,y1:LAKE.y1-2};
     const loop=(x,y,s,clockwise=true)=>{
-      const path = clockwise
+      // default perimeter loop
+      const perimeter = clockwise
         ? [{x:L.x0,y:L.y0},{x:L.x1,y:L.y0},{x:L.x1,y:L.y1},{x:L.x0,y:L.y1}]
         : [{x:L.x1,y:L.y1},{x:L.x0,y:L.y1},{x:L.x0,y:L.y0},{x:L.x1,y:L.y0}];
-      return {x,y,s,i:0,path};
+
+      // if avoiding docks, offset the left edge waypoints away from dock rows
+      if(TWEAKS.boatAvoidsDocks){
+        const dockYs = new Set(DOCKS.map(d=>d.y));
+        for(const pt of perimeter){
+          if(pt.x===L.x0 && dockYs.has(pt.y)){
+            pt.y += 1; // step down a tile so we do not cut through a dock
+          }
+        }
+      }
+      return {x,y,s,i:0,path:perimeter};
     };
     _boats.push(loop(L.x0, L.y0, 55, true));
     _towBoat = loop(L.x0+1, L.y1-1, 52, true); _boats.push(_towBoat);
@@ -312,13 +370,16 @@
     if(!_isWater(gx,gy)) _lastLand = {x:p.x,y:p.y};
     else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
 
+    // boat movement with simple dock avoidance
     _boats.forEach(b=>{
       const tgt=b.path[b.i], dx=tgt.x-b.x, dy=tgt.y-b.y, m=Math.hypot(dx,dy)||1, step=b.s*dtSec/32;
-      if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
+      // if the next waypoint sits on a dock row and we are at the left edge, skip it
+      if(TWEAKS.boatAvoidsDocks && _isDock(tgt.x, tgt.y)) b.i=(b.i+1)%b.path.length;
+      else if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
       else{ b.x += (dx/m)*step; b.y += (dy/m)*step; }
     });
 
-    // cars bounce from new buildings
+    // cars bounce from new buildings only
     if(_layout){
       api.cars.forEach(c=>{
         const cgx=(c.x/t)|0, cgy=(c.y/t)|0;
@@ -346,7 +407,7 @@
   document.getElementById('btnB')?.addEventListener('click', ()=>{ _inBoat? _leaveBoat() : _enterBoat(); });
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b'){ _inBoat? _leaveBoat() : _enterBoat(); } });
 
-  // draw boats & wakeboarder under sprites
+  // draw boats and wakeboarder under sprites
   IZZA.on('render-under', ()=>{
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
@@ -358,11 +419,12 @@
     if(_towBoat){
       const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
       const wx=_towBoat.x - (vx/m)*2.2, wy=_towBoat.y - (vy/m)*2.2;
+      // wakeboarder
       ctx.fillStyle='#23d3c6'; ctx.fillRect(sx(wx)+S*0.33, sy(wy)+S*0.33, S*0.34, S*0.34);
     }
   });
 
-  // ===== minimap / bigmap overlay (after core draws) =====
+  // ===== minimap / bigmap overlay =====
   function paintOverlay(id){
     if(!_layout) return;
     const c=document.getElementById(id); if(!c) return;
