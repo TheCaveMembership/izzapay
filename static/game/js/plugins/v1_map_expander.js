@@ -507,15 +507,20 @@
     (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
     (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
 
-    // Water is solid except the beach column and dock planks
-    const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
-    const waterIsSolid = (x,y)=>{
-      if(!_inRect(x,y,LAKE)) return false;
-      if(x===BEACH_X) return false;
-      if(dockCells().has(x+'|'+y)) return false;
-      return true;
-    };
-    if(waterIsSolid(gx,gy)) solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
+    // Water is solid except beach & planks — BUT skip this while boating
+const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
+const waterIsSolid = (x,y)=>{
+  if(!_inRect(x,y,LAKE)) return false;
+  if(x===BEACH_X) return false;
+  if(dockCells().has(x+'|'+y)) return false;
+  return true;
+};
+
+if (!window._izzaBoatActive) {             // <— add this guard
+  if (waterIsSolid(gx,gy)) {
+    solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
+  }
+}
 
     // Exclude walkable override areas (e.g., sidewalk 69..76,31)
     const overrides = _layout.patches?.walkableOverride || [];
