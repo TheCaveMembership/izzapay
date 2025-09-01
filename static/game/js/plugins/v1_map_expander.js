@@ -215,14 +215,11 @@
   }
 
   // Enter/leave boat:
-  // - Press B on a dock plank (or 1 tile from its water edge) to board; we don’t require a free decorative dock boat.
-  // - While boating, movement is clamped to water. Press B on a dock or the beach column to disembark.
   function canBoardHere(){
     const api=IZZA.api, t=api.TILE;
     const gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
     const onDock = dockCells().has(gx+'|'+gy);
     if(onDock) return true;
-    // Standing on land just LEFT of a dock tile that touches water
     const nearDock = dockCells().has((gx+1)+'|'+gy) || dockCells().has((gx-1)+'|'+gy) ||
                      dockCells().has(gx+'|'+(gy+1)) || dockCells().has(gx+'|'+(gy-1));
     return nearDock;
@@ -232,7 +229,7 @@
     if(!canBoardHere()) return;
     const api=IZZA.api;
     _inBoat = true;
-    _ride = {x:0,y:0}; // visual follower
+    _ride = {x:0,y:0};
     api.player.speed = 120;
     _lastWater = {x:api.player.x,y:api.player.y};
     IZZA.toast?.('Boarded boat');
@@ -251,6 +248,45 @@
 
   // ---------- HOSPITAL ----------
   let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
+
+  // === Hearts/coins helpers wired to your existing plugins ===
+  const HEARTS_LS_KEY = 'izzaCurHeartSegments';
+  function _heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
+  function _getSegs(){
+    const p=IZZA.api?.player||{};
+    if(typeof p.heartSegs==='number') return p.heartSegs|0;
+    const max = _heartsMax()*3;
+    const raw = parseInt(localStorage.getItem(HEARTS_LS_KEY) || String(max), 10);
+    return Math.max(0, Math.min(max, isNaN(raw)? max : raw));
+  }
+  function _setSegs(v){
+    const p=IZZA.api?.player||{};
+    const max = _heartsMax()*3;
+    const seg = Math.max(0, Math.min(max, v|0));
+    p.heartSegs = seg;
+    localStorage.setItem(HEARTS_LS_KEY, String(seg));
+    _redrawHeartsHud();
+  }
+  function _redrawHeartsHud(){
+    const hud = document.getElementById('heartsHud'); if(!hud) return;
+    const maxH=_heartsMax(), seg=_getSegs();
+    const PATH='M12 21c-.5-.5-4.9-3.7-7.2-6C3 13.2 2 11.6 2 9.7 2 7.2 4 5 6.6 5c1.6 0 3 .8 3.8 2.1C11.2 5.8 12.6 5 14.2 5 16.8 5 19 7.2 19 9.7c0 1.9-1 3.5-2.8 5.3-2.3 2.3-6.7 5.5-7.2 6Z';
+    const NS='http://www.w3.org/2000/svg';
+    hud.innerHTML='';
+    for(let i=0;i<maxH;i++){
+      const s=Math.max(0,Math.min(3,seg - i*3)), ratio=s/3;
+      const svg=document.createElementNS(NS,'svg');
+      svg.setAttribute('viewBox','0 0 24 22'); svg.setAttribute('width','24'); svg.setAttribute('height','22');
+      const base=document.createElementNS(NS,'path'); base.setAttribute('d',PATH); base.setAttribute('fill','#3a3f4a'); svg.appendChild(base);
+      const cid='hclip_'+Math.random().toString(36).slice(2);
+      const clip=document.createElementNS(NS,'clipPath'); clip.setAttribute('id',cid);
+      const r=document.createElementNS(NS,'rect'); r.setAttribute('x','0'); r.setAttribute('y','0'); r.setAttribute('width',String(24*Math.max(0,Math.min(1,ratio)))); r.setAttribute('height','22');
+      clip.appendChild(r); svg.appendChild(clip);
+      const red=document.createElementNS(NS,'path'); red.setAttribute('d',PATH); red.setAttribute('fill','#ff5555'); red.setAttribute('clip-path',`url(#${cid})`);
+      svg.appendChild(red);
+      const wrap=document.createElement('div'); wrap.style.width='24px'; wrap.style.height='22px'; wrap.appendChild(svg); hud.appendChild(wrap);
+    }
+  }
 
   // Create a simple popup the first time we need it
   function ensureShopUI(){
@@ -276,7 +312,8 @@
   function hospitalOpen(){
     ensureShopUI();
     const api=IZZA.api; if(!api?.ready) return;
-    document.getElementById('hsCoins').textContent = `Coins: ${api.coins|0} IC`;
+    // show coins via core API
+    document.getElementById('hsCoins').textContent = `Coins: ${api.getCoins()} IC`;
     document.getElementById('hospitalShop').style.display='flex';
     _shopOpen=true;
   }
@@ -286,40 +323,49 @@
   }
   function hospitalBuy(){
     const api=IZZA.api; if(!api?.ready) return;
-    const p=api.player||{};
-    const heartsMax = p.heartsMax ?? p.maxHearts ?? 3;
-    const getHearts = ()=> (('hearts' in p)? p.hearts : ('hp'in p? p.hp : 3));
-    const setHearts = v => { if('hearts' in p) p.hearts=v; else if('hp' in p) p.hp=v; };
-    const coins = api.coins|0;
 
-    if(coins<100){ IZZA.toast?.('Not enough IZZA Coins'); return; }
-    const cur = getHearts();
-    if(cur>=heartsMax){ IZZA.toast?.('Hearts are full'); return; }
+    const coins = api.getCoins();
+    if(coins < 100){ alert('Not enough IZZA Coins'); return; }
 
-    api.coins = coins-100;
-    setHearts(Math.min(heartsMax, cur+1));
-    IZZA.emit?.('coins-change', api.coins);
-    IZZA.toast?.('+1 heart!');
+    const maxSegs = _heartsMax()*3;
+    const curSegs = _getSegs();
+    if(curSegs >= maxSegs){ alert('Hearts are already full'); return; }
 
-    document.getElementById('hsCoins').textContent = `Coins: ${api.coins|0} IC`;
+    // top off current heart first, else add a full heart (3 segs)
+    const remInCurrent = curSegs % 3;                 // 0..2
+    const topOff = remInCurrent===0 ? 0 : (3-remInCurrent); // 0,1,2
+    const gain = topOff>0 ? topOff : Math.min(3, maxSegs - curSegs);
+
+    api.setCoins(coins - 100);
+    _setSegs(curSegs + gain);
+
+    IZZA.toast?.(topOff>0 ? 'Heart topped up!' : '+1 heart!');
+    // refresh display
+    const hc=document.getElementById('hsCoins'); if(hc) hc.textContent=`Coins: ${api.getCoins()} IC`;
   }
 
   // ---------- INPUT: Button B is context-aware (hospital or boat) ----------
-  function onPressB(){
+  function onPressB(e){
     const api=IZZA.api; if(!api?.ready) return;
 
     // If near hospital door, B opens the shop
     if(_hospitalDoor){
       const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
       const near = Math.abs(gx-_hospitalDoor.x)<=1 && Math.abs(gy-_hospitalDoor.y)<=1;
-      if(near){ hospitalOpen(); return; }
+      if(near){
+        // prevent core B handler from taking over (openEnter/openShop/wanted set)
+        if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
+        hospitalOpen(); 
+        return;
+      }
     }
 
     // Otherwise toggle boat
     if(_inBoat) _leaveBoat(); else _enterBoat();
   }
-  document.getElementById('btnB')?.addEventListener('click', onPressB);
-  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(); });
+  // capture-phase listeners so we can preempt core's B handler when needed
+  document.getElementById('btnB')?.addEventListener('click', onPressB, true);
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e); }, true);
 
   // ---------- RENDER UNDER ----------
   IZZA.on('render-under', ()=>{
@@ -598,27 +644,26 @@
     }
   });
 
-  // ---------- Hospital interaction (A still heals if you prefer; B opens shop) ----------
+  // ---------- Hospital interaction (A still heals if you stand on the door)
   function tryHospitalHeal(){
-    // Keep the old A-to-heal single tick (optional convenience)
     const api=IZZA.api; if(!_hospital || !_hospitalDoor || !api?.ready) return;
     const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
     if(gx!==_hospitalDoor.x || gy!==_hospitalDoor.y) return;
 
-    const player = api.player||{};
-    const heartsMax = player.heartsMax ?? player.maxHearts ?? 3;
-    const hearts    = player.hearts    ?? player.hp       ?? 3;
-    const coins     = api.coins|0;
+    const coins = api.getCoins();
+    const maxSegs = _heartsMax()*3;
+    const curSegs = _getSegs();
 
-    if(hearts >= heartsMax) { IZZA.toast?.('Hearts are full!'); return; }
+    if(curSegs >= maxSegs) { IZZA.toast?.('Hearts are full!'); return; }
     if(coins < 100) { IZZA.toast?.('Not enough IZZA Coins'); return; }
 
-    api.coins = coins - 100;
-    if('hearts' in player) player.hearts = Math.min(heartsMax, hearts+1);
-    else if('hp' in player) player.hp = Math.min(heartsMax, hearts+1);
+    const remInCurrent = curSegs % 3;
+    const topOff = remInCurrent===0 ? 0 : (3-remInCurrent);
+    const gain = topOff>0 ? topOff : Math.min(3, maxSegs - curSegs);
 
-    IZZA.emit?.('coins-change', api.coins);
-    IZZA.toast?.('+1 heart for 100 IC');
+    api.setCoins(coins - 100);
+    _setSegs(curSegs + gain);
+    IZZA.toast?.(topOff>0 ? 'Heart topped up!' : '+1 heart for 100 IC');
   }
   const btnA = document.getElementById('btnA');
   btnA?.addEventListener('click', tryHospitalHeal);
