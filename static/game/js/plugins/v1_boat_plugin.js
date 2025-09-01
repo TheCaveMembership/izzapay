@@ -1,24 +1,23 @@
-// v1.9 — full-lake water (right of beach), board-to-water snap,
-//         smooth plank walking, parked boat beside plank (east),
-//         hide boarded boat, player (gx,gy) marker, and a global
-//         boat flag the expansion can read to skip water solids.
+// v1.9 — boats beside dock (east), board-to-water snap, hide boarded boat,
+//         full-lake boating (right of beach), smooth dock walking via 4-corner
+//         tests, and (gx,gy) position marker.
 (function(){
-  const BUILD='v1.9-boat-plugin+full-lake-east+board-snap+pos-marker';
+  const BUILD='v1.9-boat-plugin+east-park+corner-tests';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
-  // small debug label toggle (true by default)
+  // debug label toggle
   window._izzaShowPos = (window._izzaShowPos!==false);
 
-  // expose current boat state so the expansion can ignore water solids
+  // expose current boat state so the layout can skip water solids while boating
   function setBoatFlag(on){ window._izzaBoatActive = !!on; }
 
   // --- local state ---
   let api=null;
   let inBoat=false;
-  let ghostBoat=null;           // visual hull that follows the player while riding
+  let ghostBoat=null;           // visual hull following the player while riding
   let lastLand=null, lastWater=null;
   let claimedDockId=null;       // y (row) of the dock we boarded from (to hide its parked boat)
 
@@ -37,9 +36,9 @@
   }
   function lakeRects(a){
     const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
-    const BEACH_X = LAKE.x0 - 1;
+    const BEACH_X = LAKE.x0 - 1;                // vertical beach column
     const DOCKS = [
-      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },  // planks extend EAST (→)
+      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },   // planks extend EAST (→)
       { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
     ];
     return {LAKE, BEACH_X, DOCKS};
@@ -59,7 +58,8 @@
     return s;
   }
 
-  // Treat ALL tiles with gx > BEACH_X as water (within unlocked Y), except planks.
+  // "Auto cover everything to the right of the beach" as water,
+  // except dock planks themselves.
   function tileIsWater(gx,gy){
     const a=anchors(api);
     const {BEACH_X}=lakeRects(a);
@@ -69,6 +69,18 @@
     return true;
   }
 
+  // 4-corner helpers for stable edge behavior
+  function cornersGrid(){
+    const t=T(), p=api.player;
+    return [
+      {x:((p.x+1)/t)|0,  y:((p.y+1)/t)|0},
+      {x:((p.x+31)/t)|0, y:((p.y+1)/t)|0},
+      {x:((p.x+1)/t)|0,  y:((p.y+31)/t)|0},
+      {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
+    ];
+  }
+  function allCornersWater(){ return cornersGrid().every(c=> tileIsWater(c.x,c.y)); }
+
   // parked boat spot: immediately EAST (right) of the dock’s tip
   function parkedSpotForDock(d){ return { gx: d.x0 + d.len, gy: d.y }; }
   function dockByY(y){
@@ -76,15 +88,18 @@
     return DOCKS.find(d=> d.y===y) || null;
   }
 
-  // Which dock are we on or adjacent to? (returns its row Y as the ID)
+  // Which dock are we on/adjacent to? (returns its row Y as the ID)
   function nearestDockIdToPlayer(){
     const {gx,gy}=playerGrid();
     const {DOCKS}=lakeRects(anchors(api));
     for(const d of DOCKS){
       const tipX = d.x0 + d.len - 1;
-      if(gy===d.y && gx>=d.x0 && gx<=tipX) return d.y;                    // on plank
-      if(gy===d.y && (gx===d.x0-1 || gx===tipX+1)) return d.y;            // left/right
-      if((gy===d.y-1 || gy===d.y+1) && gx>=d.x0 && gx<=tipX) return d.y;  // above/below
+      // on any plank tile
+      if(gy===d.y && gx>=d.x0 && gx<=tipX) return d.y;
+      // adjacent horizontally to plank strip
+      if(gy===d.y && (gx===d.x0-1 || gx===tipX+1)) return d.y;
+      // adjacent vertically above/below the plank strip
+      if((gy===d.y-1 || gy===d.y+1) && gx>=d.x0 && gx<=tipX) return d.y;
     }
     return null;
   }
@@ -99,10 +114,12 @@
     const n=[{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
     for(const p of n) if(docks.has(p.x+'|'+p.y)) return p;
 
-    // right beside beach → snap onto beach column
+    // if right beside beach, snap onto beach column
     if(gx===BEACH_X+1 && gy>=a.un.y0 && gy<=a.un.y1) return {x:BEACH_X, y:gy};
 
-    if(docks.has(gx+'|'+gy)) return {x:gx,y:gy}; // safety
+    // if already on plank somehow
+    if(docks.has(gx+'|'+gy)) return {x:gx,y:gy};
+
     return null;
   }
 
@@ -112,6 +129,7 @@
     const {gx,gy}=playerGrid();
     const docks=dockCells();
     if(docks.has(gx+'|'+gy)) return true; // on plank
+    // adjacent to any plank
     return docks.has((gx+1)+'|'+gy) || docks.has((gx-1)+'|'+gy) ||
            docks.has(gx+'|'+(gy+1)) || docks.has(gx+'|'+(gy-1));
   }
@@ -119,17 +137,17 @@
   function tryBoard(){
     if(inBoat || !isTier2() || !canBoardHere()) return false;
 
-    // snap the player onto the water tile beside the dock tip before boating
+    // snap onto the water tile just EAST of the dock tip before boating
     const dockId = nearestDockIdToPlayer();
     if(dockId!=null){
       const d = dockByY(dockId);
       if(d){
-        const spot = parkedSpotForDock(d); // water just right of the tip
+        const spot = parkedSpotForDock(d);   // water just right of the tip
         api.player.x = (spot.gx*T()) + 1;
         api.player.y = (spot.gy*T()) + 1;
         lastWater = { x: api.player.x, y: api.player.y };
       }
-      claimedDockId = dockId; // hide this dock’s parked boat
+      claimedDockId = dockId;                // hide this dock’s parked boat
     }else{
       claimedDockId = null;
       lastWater = { x: api.player.x, y: api.player.y };
@@ -138,8 +156,8 @@
     inBoat = true;
     setBoatFlag(true);
     ghostBoat = { x: api.player.x, y: api.player.y };
-    api.player.speed = 120; // boating speed
-    toast('Boarded boat');
+    api.player.speed = 120;                  // boating speed
+    IZZA.toast?.('Boarded boat');
     return true;
   }
 
@@ -154,9 +172,9 @@
     inBoat=false;
     setBoatFlag(false);
     ghostBoat=null;
-    api.player.speed = 90; // walk speed
-    claimedDockId=null;    // parked boats visible again
-    toast('Disembarked');
+    api.player.speed = 90;                   // walk speed
+    claimedDockId=null;                      // show parked boats again
+    IZZA.toast?.('Disembarked');
     return true;
   }
 
@@ -172,27 +190,27 @@
     }
   }
 
-  // ====== movement clamps ======
-  // We (1) expose window._izzaBoatActive for expansion to skip water solids, and
-  // (2) also run a post-clamp to reassert water position if needed.
+  // ====== movement clamps (using 4-corner tests) ======
   IZZA.on('update-pre', ()=>{
     if(!api?.ready || !isTier2()) return;
-    const p=api.player, cx=centerGX(), cy=centerGY();
+    const p=api.player;
 
     if(inBoat){
-      if(tileIsWater(cx,cy)){ lastWater={x:p.x,y:p.y}; }
-      else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; } // stay over water only
+      if(allCornersWater()){ lastWater={x:p.x,y:p.y}; }
+      else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; } // keep boat fully on water
       if(ghostBoat){ ghostBoat.x=p.x; ghostBoat.y=p.y; }
     }else{
-      if(!tileIsWater(cx,cy)){ lastLand={x:p.x,y:p.y}; } // land/planks OK
-      else if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; } // keep feet off open water
+      // consider it "on open water" ONLY if all corners are water
+      if(allCornersWater()){ lastLand={x:p.x,y:p.y}; }
+      else if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; }     // allow full dock walking
     }
   });
 
+  // run AFTER other plugins to avoid being pushed back to shore
   function postClamp(){
     if(!api?.ready || !isTier2() || !inBoat) return;
-    const p=api.player, cx=centerGX(), cy=centerGY();
-    if(tileIsWater(cx,cy)){ lastWater={x:p.x,y:p.y}; }
+    const p=api.player;
+    if(allCornersWater()){ lastWater={x:p.x,y:p.y}; }
     else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; }
     if(ghostBoat){ ghostBoat.x=p.x; ghostBoat.y=p.y; }
   }
@@ -252,21 +270,6 @@
   });
 
   // ====== boot ======
-  function toast(msg, seconds=1.6){
-    let h=document.getElementById('tutHint');
-    if(!h){
-      h=document.createElement('div'); h.id='tutHint';
-      Object.assign(h.style,{
-        position:'fixed', left:'12px', top:'64px', zIndex:12,
-        background:'rgba(10,12,18,.88)', border:'1px solid #394769',
-        color:'#cfe0ff', padding:'8px 10px', borderRadius:'10px', fontSize:'14px'
-      });
-      document.body.appendChild(h);
-    }
-    h.textContent=msg; h.style.display='block';
-    clearTimeout(h._t); h._t=setTimeout(()=>{ h.style.display='none'; }, seconds*1000);
-  }
-
   IZZA.on('ready', (a)=>{
     api=a;
     const btnB=document.getElementById('btnB'); btnB?.addEventListener('click', onB, true);
