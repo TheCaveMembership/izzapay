@@ -1,17 +1,16 @@
-// /static/game/js/plugins/v1_boat_plugin.js
-// v1.5 — full-water traversal (post-collision clamp) + hide taken dock boat
+// v1.6 — full-lake traversal, smooth dock walking, hide taken dock boat
 (function(){
-  const BUILD='v1.5-boat-plugin+post-clamp+hide-docked';
+  const BUILD='v1.6-boat-plugin+lake-free+dock-smooth';
   console.log('[IZZA PLAY]', BUILD);
 
-  const TIER_KEY='izzaMapTier';                  // '1' | '2'
+  const TIER_KEY='izzaMapTier';            // '1' | '2'
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
   // --- local state ---
   let api=null;
   let inBoat=false;
   let ghostBoat=null;         // simple visual that follows player
-  let lastLand=null, lastWater=null;
+  let lastWater=null;
   let takenBoat=null;         // {x,y} water cell of the dock boat we took (hidden while riding)
 
   // ====== geometry (mirrors the expansion) ======
@@ -31,7 +30,7 @@
     const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
     const BEACH_X = LAKE.x0 - 1;
     const DOCKS = [
-      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },  // horizontal planks extending rightwards
+      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },  // horizontal planks
       { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
     ];
     return {LAKE, BEACH_X, DOCKS};
@@ -49,7 +48,7 @@
     DOCKS.forEach(d=>{ for(let i=0;i<d.len;i++) set.add((d.x0+i)+'|'+d.y); });
     return set;
   }
-  // parked boats are alongside each plank (prefer south side when in lake)
+  // parked boats sit alongside each dock (prefer the lake side below the plank)
   function parkedBoatCells(){
     const res=[];
     if(!api?.ready) return res;
@@ -84,7 +83,7 @@
     if(!isTier2() || !api?.ready) return false;
     const {gx,gy}=playerGrid();
     const docks=dockCells();
-    if(!docks.has(gx+'|'+gy)) return false; // must stand on a plank
+    if(!docks.has(gx+'|'+gy)) return false; // must be standing on a plank
     const boats = boatCellSet();
     return boats.has((gx+1)+'|'+gy) || boats.has((gx-1)+'|'+gy) ||
            boats.has(gx+'|'+(gy+1)) || boats.has(gx+'|'+(gy-1));
@@ -107,15 +106,16 @@
     api.player.y = target.y * t + 1;
 
     inBoat = true;
+    window.__IZZA_BOAT_ACTIVE = true;          // <-- layout will respect this
     ghostBoat = { x: api.player.x, y: api.player.y };
     lastWater = { x: api.player.x, y: api.player.y };
-    takenBoat = { x: target.x, y: target.y };     // hide this parked boat while riding
-    api.player.speed = 120; // boating speed
+    takenBoat = { x: target.x, y: target.y };  // hide this parked boat while riding
+    api.player.speed = 120;
     toast('Boarded boat');
     return true;
   }
 
-  // nearest snap spot on land for disembark (dock wins; else beach)
+  // nearest land snap (dock preferred, else beach)
   function nearestDisembarkSpot(){
     const A = anchors(api), {LAKE,BEACH_X}=lakeRects(A);
     const {gx,gy}=playerGrid();
@@ -150,30 +150,27 @@
     api.player.x = (spot.x * t) + 1;
     api.player.y = (spot.y * t) + 1;
 
-    // re-place the boat right beside where we got off:
+    // re-park the boat beside where we got off
     if(takenBoat){
       const {LAKE,BEACH_X}=lakeRects(anchors(api));
       const inLake = p => p.x>=LAKE.x0 && p.x<=LAKE.x1 && p.y>=LAKE.y0 && p.y<=LAKE.y1;
 
-      let park=null;
-      // if on a dock, put boat in the adjacent water cell closest to previous boat cell
+      // prefer adjacent water to the snapped land spot
       const neighbors=[{x:spot.x+1,y:spot.y},{x:spot.x-1,y:spot.y},{x:spot.x,y:spot.y+1},{x:spot.x,y:spot.y-1}];
-      park = neighbors
-        .filter(p=> inLake(p) && tileIsWater(p.x,p.y))
-        .sort((a,b)=> (Math.abs(a.x-takenBoat.x)+Math.abs(a.y-takenBoat.y)) - (Math.abs(b.x-takenBoat.x)+Math.abs(b.y-takenBoat.y)))[0] || null;
+      let park = neighbors.find(p=> inLake(p) && tileIsWater(p.x,p.y)) || null;
 
-      // if we got off at the beach, default to the water tile just to the right of the beach column
+      // if we got off at the beach, put it one tile into the lake
       if(!park && spot.x===BEACH_X){
         const candidate={x:BEACH_X+1, y:spot.y};
         if(inLake(candidate)) park=candidate;
       }
-
-      // update the parked boat location
       if(park) takenBoat = {x:park.x, y:park.y};
     }
 
-    inBoat=false; ghostBoat=null;
-    api.player.speed = 90; // default walk speed
+    inBoat=false;
+    window.__IZZA_BOAT_ACTIVE = false;
+    ghostBoat=null;
+    api.player.speed = 90;
     toast('Disembarked');
     return true;
   }
@@ -187,37 +184,14 @@
     }
   }
 
-  // ====== movement / collision integration ======
-  // NOTE: The map layout makes the lake solid in its own update-post. To guarantee
-  // boat travel, we *also* enforce our clamp in update-post (after layout).
-  IZZA.on('update-pre', ()=>{
-    if(!api?.ready || !isTier2()) return;
-
-    const t=api.TILE, p=api.player;
-    const centerGX=((p.x+16)/t)|0, centerGY=((p.y+16)/t)|0;
-    const onDock = dockCells().has(centerGX+'|'+centerGY);
-
-    // record last known safe land/water (no forcing here)
-    const corners = [
-      {x:((p.x+1)/t)|0,  y:((p.y+1)/t)|0},
-      {x:((p.x+31)/t)|0, y:((p.y+1)/t)|0},
-      {x:((p.x+1)/t)|0,  y:((p.y+31)/t)|0},
-      {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
-    ];
-    const onWater = corners.every(c=> tileIsWater(c.x,c.y));
-
-    if(inBoat){
-      if(onWater) lastWater = {x:p.x,y:p.y};
-    }else{
-      if(onDock || !onWater) lastLand = {x:p.x,y:p.y};
-    }
-  });
-
+  // ====== movement integration ======
+  // We *only* clamp the player while in a boat. Walking rules are left to the layout,
+  // which will ignore water collisions while __IZZA_BOAT_ACTIVE is true.
   IZZA.on('update-post', ()=>{
     if(!api?.ready || !isTier2()) return;
+    if(!inBoat) return;
 
     const t=api.TILE, p=api.player;
-    // authoritative check AFTER layout collisions have run
     const corners = [
       {x:((p.x+1)/t)|0,  y:((p.y+1)/t)|0},
       {x:((p.x+31)/t)|0, y:((p.y+1)/t)|0},
@@ -225,28 +199,15 @@
       {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
     ];
     const onWater = corners.every(c=> tileIsWater(c.x,c.y));
-
-    if(inBoat){
-      // if a prior collision pushed us off water, snap back to last water pos
-      if(!onWater && lastWater){
-        p.x=lastWater.x; p.y=lastWater.y;
-      }else if(onWater){
-        lastWater = {x:p.x,y:p.y};
-      }
-    }else{
-      // keep walkers off the lake (but let them stand on docks)
-      const centerGX=((p.x+16)/t)|0, centerGY=((p.y+16)/t)|0;
-      const onDock = dockCells().has(centerGX+'|'+centerGY);
-      if(onWater && !onDock && lastLand){
-        p.x=lastLand.x; p.y=lastLand.y;
-      }
+    if(onWater){
+      lastWater = {x:p.x,y:p.y};
+    }else if(lastWater){
+      // if anything pushed us off water, snap back
+      p.x=lastWater.x; p.y=lastWater.y;
     }
 
     // keep ghost sprite aligned
-    if(inBoat && ghostBoat){
-      ghostBoat.x = p.x;
-      ghostBoat.y = p.y;
-    }
+    if(ghostBoat){ ghostBoat.x = p.x; ghostBoat.y = p.y; }
   });
 
   // ====== visuals ======
@@ -303,6 +264,7 @@
 
   IZZA.on('ready', (a)=>{
     api=a;
+    window.__IZZA_BOAT_ACTIVE = false;          // default
     const btnB=document.getElementById('btnB');
     if(btnB) btnB.addEventListener('click', onB, true);  // capture; we suppress only when we act
     window.addEventListener('keydown', e=>{
