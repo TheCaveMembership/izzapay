@@ -12,7 +12,8 @@
     hotel:'#7a4e2f',
     house:'#7b6a42',
     hoodPark:'#135c33',
-    lot:'#474747'
+    lot:'#474747',
+    hospital:'#b94a48' // red-ish
   };
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
@@ -131,7 +132,7 @@
     return parts.filter(p=>p.y1>=p.y0);
   }
 
-  // Dead-end shavers (prevents roads from “kissing” buildings/HQ/Shop)
+  // Dead-end shavers
   function shaveDeadEndsH(seg, forbidden){
     const near = (x,y)=> forbidden.some(R=> x===R.x0-1 && y>=R.y0 && y<=R.y1 || x===R.x1+1 && y>=R.y0 && y<=R.y1 );
     if(seg.x0<seg.x1){
@@ -161,7 +162,7 @@
   function drawVRoad(api,ctx,x,y0,y1){ for(let y=y0;y<=y1;y++) fillTile(api,ctx,x,y,COL.road); }
 
   // ---------- Boats ----------
-  const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null;
+  const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null, _lastWater=null;
   function spawnBoats(){
     if(!isTier2() || _boats.length) return;
     const api=IZZA.api, A=anchors(api), {LAKE, DOCKS}=lakeRects(A);
@@ -180,7 +181,7 @@
     _boats.push(makeLoop(padRect.x0, padRect.y0, 55, true));
     _towBoat = makeLoop(padRect.x0+1, padRect.y1-1, 52, true); _boats.push(_towBoat);
 
-    // side-docked boats
+    // side-docked boats (to the RIGHT of planks, i.e., beside them)
     DOCKS.forEach(d=> _dockBoats.push({x:d.x0+d.len, y:d.y, s:120, taken:false}));
   }
   IZZA.on('ready', spawnBoats);
@@ -198,7 +199,7 @@
     });
   });
 
-  // Dock cell helper (so docks are walkable while water is solid)
+  // Dock cell helper (walkable)
   function dockCells(){
     const api=IZZA.api, A=anchors(api), {DOCKS}=lakeRects(A);
     const set=new Set();
@@ -218,7 +219,7 @@
     const gx=((api.player.x+16)/t)|0, gy=((api.player.y+16)/t)|0;
     let best=null,bd=9e9;
     _dockBoats.forEach(b=>{ if(b.taken) return; const d=Math.hypot(b.x-gx,b.y-gy); if(d<bd){bd=d; best=b;} });
-    if(best && bd<=2){ best.taken=true; _ride=best; _inBoat=true; api.player.speed=120; }
+    if(best && bd<=2){ best.taken=true; _ride=best; _inBoat=true; api.player.speed=120; _lastWater={x:api.player.x,y:api.player.y}; }
   }
   function _leaveBoat(){
     if(!_inBoat) return;
@@ -232,7 +233,7 @@
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b'){ _inBoat? _leaveBoat() : _enterBoat(); } });
 
   // ---------- RENDER UNDER ----------
-  let _layout=null;
+  let _layout=null, _hospital=null, _hospitalDoor=null;
   IZZA.on('render-under', ()=>{
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
@@ -249,7 +250,7 @@
 
     const {H,V} = desiredRoadGrid(A);
 
-    // Build road lists that reach the unlocked edges (then shave near HQ/Shop)
+    // Build road lists (then shave near HQ/Shop)
     let H_ROADS = [];
     let V_ROADS = [];
     H.forEach(y=>{
@@ -284,7 +285,7 @@
       }
     });
 
-    // V-road sidewalks (skip at every H row and Tier-1 rows)
+    // V-road sidewalks (skip at H rows and Tier-1 rows)
     V_ROADS.forEach(r=>{
       for(let y=r.y0;y<=r.y1;y++){
         if(H_ROWS_ALL.has(y) || isTier1Y(y)) continue;
@@ -303,15 +304,14 @@
       drawVRoad(api,ctx,r.x,r.y0,r.y1);
     });
 
-    // --- Downtown small buildings (blue bldg in front of HQ removed)
-    const REMOVE_RECT_4226 = {x0:42,y0:26,x1:44,y1:27}; // removed area you asked for
+    // --- Downtown small buildings (front-of-HQ removal kept)
+    const REMOVE_RECT_4226 = {x0:42,y0:26,x1:44,y1:27};
     const BUILDINGS = [
       {x:A.vRoadX+11, y:A.hRoadY-9, w:6, h:3, color:COL.civic},
       {x:A.vRoadX+8,  y:A.hRoadY+9, w:7, h:4, color:COL.shop},
       {x:A.vRoadX-14, y:A.hRoadY+2, w:3, h:2, color:COL.shop},
       {x:A.vRoadX-6,  y:A.hRoadY-2, w:3, h:2, color:COL.shop}
     ].filter(b=>{
-      // cull anything that touches lake or Tier-1 or the explicit removal rect
       for(let gx=b.x; gx<b.x+b.w; gx++)
         for(let gy=b.y; gy<b.y+b.h; gy++)
           if (_inRect(gx,gy,LAKE) || isOriginalTile(gx,gy,A) || _inRect(gx,gy,REMOVE_RECT_4226)) return false;
@@ -325,7 +325,7 @@
       ctx.fillStyle='rgba(0,0,0,.15)'; ctx.fillRect(sx,sy, b.w*api.DRAW, Math.floor(b.h*api.DRAW*0.18));
     });
 
-    // --- Hotel block (as before)
+    // --- Hotel block
     for(let gx=LOT.x0; gx<=LOT.x1; gx++) fillTile(api,ctx,gx,LOT.y0-1,COL.sidewalk);
     for(let gy=LOT.y0; gy<=LOT.y1; gy++)
       for(let gx=LOT.x0; gx<=LOT.x1; gx++) fillTile(api,ctx,gx,gy,COL.lot);
@@ -375,63 +375,65 @@
       ctx.fillRect(sx,sy, d.len*S, S);
     });
 
-    // --- Boats (visuals)
-    const S=api.DRAW, t=api.TILE, f=S/t;
-    const sx=gx=> (gx*t - api.camera.x)*f, sy=gy=> (gy*t - api.camera.y)*f;
-    const drawBoat=(gx,gy)=>{ ctx.fillStyle='#7ca7c7'; ctx.fillRect(sx(gx)+S*0.2, sy(gy)+S*0.35, S*0.6, S*0.3); };
-    _boats.forEach(b=> drawBoat(b.x,b.y));
-    _dockBoats.forEach(b=> drawBoat(b.x,b.y));
-    if(_towBoat){
-      const tgt=_towBoat.path[_towBoat.i], vx=tgt.x-_towBoat.x, vy=tgt.y-_towBoat.y, m=Math.hypot(vx,vy)||1;
-      const leash = 2.0;
-      const wx=_towBoat.x - (vx/m)*leash, wy=_towBoat.y - (vy/m)*leash;
-      ctx.strokeStyle = '#dfe9ef'; ctx.lineWidth = Math.max(1, S*0.04);
-      ctx.beginPath(); ctx.moveTo(sx(_towBoat.x)+S*0.5, sy(_towBoat.y)+S*0.5);
-      ctx.lineTo(sx(wx)+S*0.5,       sy(wy)+S*0.5); ctx.stroke();
-      ctx.fillStyle='#23d3c6';
-      ctx.fillRect(sx(wx)+S*0.33, sy(wy)+S*0.33, S*0.34, S*0.34);
-    }
-
-    // ====== MANUAL PATCHES (exact tiles) ======
+    // ====== MANUAL PATCHES ======
     const set = (x,y,color)=> fillTile(api,ctx,x,y,color);
     const lineH = (x0,x1,y,color)=>{ for(let x=x0; x<=x1; x++) set(x,y,color); };
     const rect = (x0,y0,x1,y1,color)=>{ for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) set(x,y,color); };
 
-    // A) Prior items already done earlier (kept)
+    // Previous patches kept
     set(44,15,COL.sidewalk);
     [15,16,17].forEach(x=> set(x,46,COL.house));
     [23,24,25].forEach(x=> set(x,46,COL.house));
     [31,32,33].forEach(x=> set(x,46,COL.house));
-    // 56,49/47/45/43 were grass before; now they are roads per your update
+    // 56,49/47/45/43 -> road
     [49,47,45,43].forEach(y=> set(56,y,COL.road));
-    lineH(69,75,30,COL.road);
-    lineH(69,76,31,COL.sidewalk); // extend to 76 now
+    // Lakefront strip
+    lineH(69,76,31,COL.sidewalk);
+    lineH(69,76,30,COL.road);
+    // sidewalks top-right
     lineH(66,72,15,COL.sidewalk);
     set(67,16,COL.house); set(67,17,COL.house);
-    rect(42,26,44,27,COL.grass); // clear any building first
+    // Clear tiny building
+    rect(42,26,44,27,COL.grass);
+    // local cross tiles near (43..44,26..27)
+    set(43,26,COL.sidewalk); set(43,27,COL.sidewalk);
+    set(44,26,COL.road);     set(44,27,COL.road);
 
-    // B) New explicit tiles:
-    // 1) At the cleared area: sidewalks/roads mix
-    set(43,26,COL.sidewalk);
-    set(43,27,COL.sidewalk);
-    set(44,26,COL.road);
-    set(44,27,COL.road);
+    // New tiles you asked now:
+    set(27,24,COL.road);
+    set(29,24,COL.road);
 
-    // 2) Additional single road tiles
+    set(65,34,COL.sidewalk);
+    set(66,34,COL.road);
+    set(67,34,COL.sidewalk);
+
+    // Spare single road tiles from prior ask
     [ {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
       {x:21,y:24},{x:19,y:24},
       {x:19,y:30},{x:21,y:30},
       {x:27,y:30},{x:29,y:30}
     ].forEach(p=> set(p.x,p.y,COL.road));
 
-    // Store layout + collision overrides
+    // Hospital building near (34,37)
+    _hospital = { x0:32, y0:36, x1:36, y1:39, color:COL.hospital };
+    _hospitalDoor = { x:34, y:35 }; // stand here & press A
+    for(let gy=_hospital.y0; gy<=_hospital.y1; gy++)
+      for(let gx=_hospital.x0; gx<=_hospital.x1; gx++) fillTile(api,ctx,gx,gy,_hospital.color);
+    // a tiny roof shadow
+    const sx=w2sX(api,_hospital.x0*api.TILE), sy=w2sY(api,_hospital.y0*api.TILE);
+    ctx.fillStyle='rgba(0,0,0,.15)';
+    ctx.fillRect(sx,sy, (_hospital.x1-_hospital.x0+1)*api.DRAW, Math.floor(0.18*api.DRAW));
+
+    // sidewalk right in front of the door (at y=35)
+    set(_hospitalDoor.x, _hospitalDoor.y, COL.sidewalk);
+
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
       patches:{
         solidSingles: [{x:67,y:16},{x:67,y:17}],
         solidHouses:  [{x0:15,y0:46,x1:17,y1:46},{x0:23,y0:46,x1:25,y1:46},{x0:31,y0:46,x1:33,y1:46}],
         removedBuilding: {x0:42,y0:26,x1:44,y1:27},
-        walkableOverride: [{x0:69,y0:31,x1:76,y1:31}] // make sure this sidewalk is NOT solid
+        walkableOverride: [{x0:69,y0:31,x1:76,y1:31}]
       }
     };
     // ====== /MANUAL PATCHES ======
@@ -445,7 +447,6 @@
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, p=api.player, t=api.TILE;
 
-    // remember last land using 4-corner water test
     const corners = [
       {x:((p.x+1)/t)|0,  y:((p.y+1)/t)|0},
       {x:((p.x+31)/t)|0, y:((p.y+1)/t)|0},
@@ -453,8 +454,13 @@
       {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
     ];
     const onWater = corners.every(c=> _tileIsWater(c.x,c.y));
-    if(!onWater) _lastLand = {x:p.x,y:p.y};
-    else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
+    if(_inBoat){
+      if(onWater){ _lastWater = {x:p.x,y:p.y}; }
+      else if(_lastWater){ p.x=_lastWater.x; p.y=_lastWater.y; } // keep boat on water only
+    }else{
+      if(!onWater) _lastLand = {x:p.x,y:p.y};
+      else if(_lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; } // walking stays off water
+    }
 
     // keep dock rider icon aligned with player when riding a boat
     if(_inBoat && _ride){ const t=api.TILE; _ride.x = ((p.x/t)|0); _ride.y = ((p.y/t)|0); }
@@ -476,10 +482,13 @@
     const gx=(p.x/t)|0, gy=(p.y/t)|0;
 
     const solids = [];
-    // Buildings & hotel/houses
     _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
     solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
     _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
+
+    // Hospital solid
+    if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
+
     // Manual solid house strips + singles
     (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
     (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
@@ -492,15 +501,15 @@
       if(dockCells().has(x+'|'+y)) return false;
       return true;
     };
-    if(waterIsSolid(gx,gy)) solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
+    if(!_inBoat && waterIsSolid(gx,gy)) solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
 
-    // Exclude any walkable override areas (e.g., sidewalk 69..76,31) from solids
+    // Exclude walkable override areas (e.g., sidewalk 69..76,31)
     const overrides = _layout.patches?.walkableOverride || [];
     const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
 
     // Simple AABB resolve
     for(const b of solids){
-      if(isOverridden(gx,gy)) break; // current tile is in an override zone; skip resolving
+      if(isOverridden(gx,gy)) break;
       if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
         const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
         const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
@@ -513,6 +522,32 @@
       }
     }
   });
+
+  // ---------- Hospital interaction (press A at door to buy +1 heart for 100 IC) ----------
+  function tryHospitalHeal(){
+    const api=IZZA.api; if(!_hospital || !_hospitalDoor || !api?.ready) return;
+    const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+    if(gx!==_hospitalDoor.x || gy!==_hospitalDoor.y) return;
+
+    const player = api.player||{};
+    const heartsMax = player.heartsMax ?? player.maxHearts ?? 3;
+    const hearts    = player.hearts    ?? player.hp       ?? 3;
+    const coins     = api.coins|0;
+
+    if(hearts >= heartsMax) { IZZA.toast?.('Hearts are full!'); return; }
+    if(coins < 100) { IZZA.toast?.('Not enough IZZA Coins'); return; }
+
+    // Spend 100 and add 1 heart (best-effort; uses common property names)
+    api.coins = coins - 100;
+    if('hearts' in player) player.hearts = Math.min(heartsMax, hearts+1);
+    else if('hp' in player) player.hp = Math.min(heartsMax, hearts+1);
+
+    IZZA.emit?.('coins-change', api.coins);
+    IZZA.toast?.('+1 heart for 100 IC');
+  }
+  const btnA = document.getElementById('btnA');
+  btnA?.addEventListener('click', tryHospitalHeal);
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='a') tryHospitalHeal(); });
 
   // ---------- Minimap / Bigmap overlay ----------
   function paintOverlay(id){
@@ -527,6 +562,7 @@
 
     ctx.fillStyle='#6f87b3';
     (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
+    if(_hospital){ ctx.fillStyle=COL.hospital; ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,(rectW(_hospital))*sx,(rectH(_hospital))*sy); }
 
     // lake + beach + hotel + lot
     const a=anchors(IZZA.api), {LAKE, BEACH_X, HOTEL, LOT}=lakeRects(a);
@@ -546,39 +582,36 @@
 
     // minimap manual patches
     ctx.fillStyle='#8a90a0'; // roads
-    ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy); // 69..76,30
-    [ {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
-      {x:21,y:24},{x:19,y:24},
-      {x:19,y:30},{x:21,y:30},
-      {x:27,y:30},{x:29,y:30},
+    ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
+    [
+      {x:27,y:24},{x:29,y:24},
+      {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
+      {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
       {x:44,y:26},{x:44,y:27},
-      {x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43}
+      {x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
+      {x:66,y:34}
     ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
 
     ctx.fillStyle='#a1a6b0'; // sidewalks
     ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
     ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
-    ctx.fillRect(44*sx,15*sy,1*sx,1.2*sy);
-    ctx.fillRect(43*sx,26*sy,1*sx,1.2*sy);
-    ctx.fillRect(43*sx,27*sy,1*sx,1.2*sy);
+    [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
+      .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
   }
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
 })();
 
-// --- izza-inspector.js (non-invasive debug overlay) ---
+// --- izza-inspector.js (tap I to toggle) ---
 (function(){
   let INSPECT=false, SHOW_GRID=false, pick=null, hudMsg='', hudT=0;
-
   const btnI = document.getElementById('btnI') || document.getElementById('btnInspect');
   btnI?.addEventListener('click', ()=>{ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); });
-
   window.addEventListener('keydown', (e)=>{
     const k=e.key.toLowerCase();
     if(k==='i'){ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); }
     if(k==='g'){ SHOW_GRID=!SHOW_GRID; flash(`Grid ${SHOW_GRID?'ON':'OFF'}`); }
   });
-
   function flash(txt){ hudMsg = txt; hudT = performance.now()+1200; }
 
   function tileUnderPointer(ev){
@@ -615,14 +648,13 @@
     const pgx = ((api.player.x+16)/api.TILE|0), pgy=((api.player.y+16)/api.TILE|0);
     ctx.save();
     ctx.font = '12px sans-serif'; ctx.textBaseline='top';
-    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(6,6,170,38);
+    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(6,6,180,40);
     ctx.fillStyle='#e8eef7';
     ctx.fillText(`Inspector: ${INSPECT?'ON':'OFF'}`, 12, 10);
     ctx.fillText(`Player (gx,gy): ${pgx}, ${pgy}`, 12, 26);
     if(hudMsg && performance.now()<hudT){ ctx.fillText(hudMsg, 12, 42); } else { hudMsg=''; }
     ctx.restore();
 
-    // grid
     if(SHOW_GRID){
       ctx.save();
       ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=Math.max(1, S*0.02);
@@ -636,12 +668,11 @@
       }
       for(let j=0;j<rows;j++){
         const gy=topGY+j, y = (gy*api.TILE - api.camera.y)*f;
-        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(game.height,y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(game.width,y); ctx.stroke();
       }
       ctx.restore();
     }
 
-    // picked tile highlight
     if(INSPECT && pick){
       const [sx,sy]=w2s(pick.gx*api.TILE, pick.gy*api.TILE);
       ctx.save();
