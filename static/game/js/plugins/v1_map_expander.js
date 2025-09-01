@@ -511,3 +511,96 @@
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
 })();
+// --- izza-inspector.js (non-invasive debug overlay) ---
+(function(){
+  let INSPECT=false, SHOW_GRID=false, pick=null, hudMsg='', hudT=0;
+
+  // try to reuse your "I" button; fall back to key presses
+  const btnI = document.getElementById('btnI') || document.getElementById('btnInspect');
+  btnI?.addEventListener('click', ()=>{ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); });
+
+  window.addEventListener('keydown', (e)=>{
+    const k=e.key.toLowerCase();
+    if(k==='i'){ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); }
+    if(k==='g'){ SHOW_GRID=!SHOW_GRID; flash(`Grid ${SHOW_GRID?'ON':'OFF'}`); }
+  });
+
+  function flash(txt){ hudMsg = txt; hudT = performance.now()+1200; }
+
+  function tileUnderPointer(ev){
+    const api = IZZA?.api; if(!api?.ready) return null;
+    const rect = game.getBoundingClientRect();
+    const cx = (ev.touches? ev.touches[0].clientX : ev.clientX) - rect.left;
+    const cy = (ev.touches? ev.touches[0].clientY : ev.clientY) - rect.top;
+    // convert canvas px -> world -> grid
+    const sx = cx * (game.width  / rect.width);
+    const sy = cy * (game.height / rect.height);
+    const worldX = sx * (api.TILE/api.DRAW) + api.camera.x;
+    const worldY = sy * (api.TILE/api.DRAW) + api.camera.y;
+    return { gx: Math.floor(worldX/api.TILE), gy: Math.floor(worldY/api.TILE) };
+  }
+
+  // click/tap picks a tile and copies coords
+  const game = document.getElementById('game');
+  const pickHandler = (ev)=>{
+    if(!INSPECT) return;
+    const p = tileUnderPointer(ev); if(!p) return;
+    pick = p;
+    const txt = `${p.gx},${p.gy}`;
+    navigator.clipboard?.writeText(txt).catch(()=>{});
+    flash(`Picked ${txt} (copied)`);
+  };
+  game.addEventListener('click', pickHandler, {passive:true});
+  game.addEventListener('touchend', pickHandler, {passive:true});
+
+  // draw overlay: grid + pick highlight + HUD (runs after the game draws)
+  IZZA.on('render-post', ()=>{
+    const api = IZZA?.api; if(!api?.ready) return;
+    const ctx = game.getContext('2d');
+    const S=api.DRAW, f=S/api.TILE;
+    const w2s=(wx,wy)=>[(wx-api.camera.x)*f,(wy-api.camera.y)*f];
+
+    // HUD with player tile and mode
+    const pgx = ((api.player.x+16)/api.TILE|0), pgy=((api.player.y+16)/api.TILE|0);
+    ctx.save();
+    ctx.font = '12px sans-serif'; ctx.textBaseline='top';
+    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(6,6,170,38);
+    ctx.fillStyle='#e8eef7';
+    ctx.fillText(`Inspector: ${INSPECT?'ON':'OFF'}`, 12, 10);
+    ctx.fillText(`Player (gx,gy): ${pgx}, ${pgy}`, 12, 26);
+    if(hudMsg && performance.now()<hudT){ ctx.fillText(hudMsg, 12, 42); } else { hudMsg=''; }
+    ctx.restore();
+
+    // grid (faint)
+    if(SHOW_GRID){
+      ctx.save();
+      ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=Math.max(1, S*0.02);
+      const leftGX = Math.floor(api.camera.x/api.TILE)-1;
+      const topGY  = Math.floor(api.camera.y/api.TILE)-1;
+      const cols = Math.ceil(game.width / S)+3;
+      const rows = Math.ceil(game.height/ S)+3;
+      for(let i=0;i<cols;i++){
+        const gx=leftGX+i, x = (gx*api.TILE - api.camera.x)*f;
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,game.height); ctx.stroke();
+      }
+      for(let j=0;j<rows;j++){
+        const gy=topGY+j, y = (gy*api.TILE - api.camera.y)*f;
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(game.width,y); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // picked tile highlight
+    if(INSPECT && pick){
+      const [sx,sy]=w2s(pick.gx*api.TILE, pick.gy*api.TILE);
+      ctx.save();
+      ctx.strokeStyle='rgba(0,255,200,0.9)';
+      ctx.lineWidth=Math.max(2, S*0.08);
+      ctx.strokeRect(sx+1, sy+1, S-2, S-2);
+      ctx.fillStyle='rgba(0,255,200,0.10)';
+      ctx.fillRect(sx+1, sy+1, S-2, S-2);
+      ctx.font='12px sans-serif'; ctx.fillStyle='#bff'; ctx.fillText(`${pick.gx},${pick.gy}`, sx+4, sy+4);
+      ctx.restore();
+    }
+  });
+})();
