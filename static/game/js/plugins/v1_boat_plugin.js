@@ -1,7 +1,7 @@
 // /static/game/js/plugins/v1_boat_plugin.js
-// v1.3 — proper dock/beach disembark, parked dock boats, smoother dock walking
+// v1.4 — dock-walking fix, alongside-docked boats, board-from-dock, clean snap-to-dock/beach
 (function(){
-  const BUILD='v1.3-boat-plugin+dock-snap+parked-boats';
+  const BUILD='v1.4-boat-plugin+dock-fix+side-dock+board-from-dock';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';            // '1' | '2'
@@ -30,7 +30,7 @@
     const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
     const BEACH_X = LAKE.x0 - 1;
     const DOCKS = [
-      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },  // horizontal planks
+      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },  // horizontal planks extending rightwards
       { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
     ];
     return {LAKE, BEACH_X, DOCKS};
@@ -48,6 +48,27 @@
     DOCKS.forEach(d=>{ for(let i=0;i<d.len;i++) set.add((d.x0+i)+'|'+d.y); });
     return set;
   }
+  // Parked boat water cells (alongside each plank, not at the tip)
+  function parkedBoatCells(){
+    const res=[];
+    if(!api?.ready) return res;
+    const {LAKE,DOCKS}=lakeRects(anchors(api));
+    DOCKS.forEach(d=>{
+      const mid = d.x0 + Math.floor(d.len/2);   // middle of the plank
+      // Prefer SOUTH side (gy+1). If out of lake bounds, use NORTH (gy-1).
+      const south = {x: mid, y: d.y+1};
+      const north = {x: mid, y: d.y-1};
+      const inLake = (p)=> p.x>=LAKE.x0 && p.x<=LAKE.x1 && p.y>=LAKE.y0 && p.y<=LAKE.y1;
+      const spot = inLake(south) ? south : (inLake(north) ? north : null);
+      if(spot) res.push(spot);
+    });
+    return res;
+  }
+  function boatCellSet(){
+    const s=new Set();
+    parkedBoatCells().forEach(p=> s.add(p.x+'|'+p.y));
+    return s;
+  }
   function tileIsWater(gx,gy){
     if(!api?.ready) return false;
     const {LAKE}=lakeRects(anchors(api));
@@ -58,62 +79,75 @@
     return true;
   }
 
-  // Get the nearest *land* snap target when leaving the boat:
-  // - if next to any dock plank, snap to that plank tile
-  // - else if next to beach edge, snap onto the beach column
+  // ====== boarding / leaving rules ======
+  function canBoardHereFromDock(){
+    if(!isTier2() || !api?.ready) return false;
+    const {gx,gy}=playerGrid();
+    const docks=dockCells();
+    if(!docks.has(gx+'|'+gy)) return false; // must be standing on a dock plank
+    // must be adjacent to a parked boat water cell
+    const boats = boatCellSet();
+    return boats.has((gx+1)+'|'+gy) || boats.has((gx-1)+'|'+gy) ||
+           boats.has(gx+'|'+(gy+1)) || boats.has(gx+'|'+(gy-1));
+  }
+  function tryBoard(){
+    if(inBoat || !isTier2()) return false;
+    if(!canBoardHereFromDock()) return false;
+
+    // Move player into the adjacent boat water cell and start boating
+    const {gx,gy}=playerGrid();
+    const boats = boatCellSet();
+    const candidates = [
+      {x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}
+    ];
+    const target = candidates.find(p=> boats.has(p.x+'|'+p.y));
+    if(!target) return false;
+
+    const t=api.TILE;
+    api.player.x = target.x * t + 1;
+    api.player.y = target.y * t + 1;
+
+    inBoat = true;
+    ghostBoat = { x: api.player.x, y: api.player.y };
+    lastWater = { x: api.player.x, y: api.player.y };
+    api.player.speed = 120; // boating speed
+    toast('Boarded boat');
+    return true;
+  }
+
+  // Find nearest *dock or beach* spot to snap onto when disembarking.
   function nearestDisembarkSpot(){
     const A = anchors(api), {LAKE,BEACH_X}=lakeRects(A);
     const {gx,gy}=playerGrid();
     const docks = dockCells();
 
-    // check 4-neighborhood for a dock plank
-    const neighbors = [
-      {x:gx+1,y:gy}, {x:gx-1,y:gy}, {x:gx,y:gy+1}, {x:gx,y:gy-1}
-    ];
-    for(const n of neighbors){
-      if(docks.has(n.x+'|'+n.y)) return {x:n.x, y:n.y};
+    // Search radius 2 (8-neighborhood plus ring) for dock tiles
+    const ring = [];
+    for(let r=1; r<=2; r++){
+      ring.push({x:gx+r,y:gy},{x:gx-r,y:gy},{x:gx,y:gy+r},{x:gx,y:gy-r});
+      ring.push({x:gx+r,y:gy+r},{x:gx-r,y:gy+r},{x:gx+r,y:gy-r},{x:gx-r,y:gy-r});
     }
+    let best=null, bestD=1e9;
+    for(const n of ring){
+      if(docks.has(n.x+'|'+n.y)){
+        const d = Math.abs(n.x-gx)+Math.abs(n.y-gy);
+        if(d<bestD){ best=n; bestD=d; }
+      }
+    }
+    if(best) return best;
 
-    // beach snap: if water cell directly to the right of the beach, snap onto the beach
-    // (beach is the entire column at BEACH_X spanning lake.y0..y1)
-    const onWaterRightOfBeach = (gx===BEACH_X+1 && gy>=LAKE.y0 && gy<=LAKE.y1);
-    if(onWaterRightOfBeach) return {x:BEACH_X, y:gy};
-
-    // if we are actually *on* a plank (rare while boating, but just in case)
-    if(docks.has(gx+'|'+gy)) return {x:gx,y:gy};
+    // Otherwise beach: snap horizontally onto the beach column aligned with current y
+    if(gy>=LAKE.y0 && gy<=LAKE.y1) return {x:BEACH_X, y:gy};
 
     return null;
-  }
-
-  // ====== boarding / leaving rules ======
-  function canBoardHere(){
-    if(!isTier2() || !api?.ready) return false;
-    const {gx,gy}=playerGrid();
-    const docks = dockCells();
-    if(docks.has(gx+'|'+gy)) return true; // standing on plank
-    // adjacent to a plank also counts (edge)
-    if(docks.has((gx+1)+'|'+gy) || docks.has((gx-1)+'|'+gy) ||
-       docks.has(gx+'|'+(gy+1)) || docks.has(gx+'|'+(gy-1))) return true;
-    return false;
-  }
-  function tryBoard(){
-    if(inBoat || !isTier2()) return false;
-    if(!canBoardHere()) return false;
-    inBoat = true;
-    ghostBoat = { x: api.player.x, y: api.player.y };
-    lastWater = { x: api.player.x, y: api.player.y };
-    api.player.speed = 120; // smooth boating speed
-    toast('Boarded boat');
-    return true;
   }
   function tryDisembark(){
     if(!inBoat) return false;
     const spot = nearestDisembarkSpot();
     if(!spot) return false;
 
-    // snap player *onto* the land spot (plank or beach)
     const t = api.TILE;
-    api.player.x = (spot.x * t) + 1;   // slight bias inside tile
+    api.player.x = (spot.x * t) + 1;   // bias inside tile
     api.player.y = (spot.y * t) + 1;
 
     inBoat=false; ghostBoat=null;
@@ -125,10 +159,8 @@
   // ====== input (B) ======
   function onB(e){
     if(!api?.ready || !isTier2()) return;
-    // Only handle if player is on/near dock or already in boat
-    const shouldHandle = inBoat || canBoardHere();
-    if(!shouldHandle) return; // let other B handlers (shop, car hijack) handle
 
+    // Boarding only from dock next to a parked boat; leaving only near dock/beach
     const acted = inBoat ? tryDisembark() : tryBoard();
     if(acted){
       if(e){ e.preventDefault?.(); e.stopPropagation?.(); e.stopImmediatePropagation?.(); }
@@ -136,7 +168,7 @@
   }
 
   // ====== update hooks ======
-  IZZA.on('update-pre', ({dtSec})=>{
+  IZZA.on('update-pre', ()=>{
     if(!api?.ready || !isTier2()) return;
 
     // water / land clamping that doesn't touch core collision:
@@ -149,12 +181,19 @@
     ];
     const onWater = corners.every(c=> tileIsWater(c.x,c.y));
 
+    // --- Dock smoothing: treat dock tiles as land so walking never jitters
+    const centerGX = ((p.x+16)/t)|0, centerGY = ((p.y+16)/t)|0;
+    const onDock = dockCells().has(centerGX+'|'+centerGY);
+
     if(inBoat){
       if(onWater){ lastWater = {x:p.x,y:p.y}; }
       else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; } // keep boat on water only
     }else{
-      if(!onWater) lastLand = {x:p.x,y:p.y};
-      else if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; } // keep walking off the lake
+      if(!onWater || onDock){ // onDock counts as safe land
+        lastLand = {x:p.x,y:p.y};
+      }else if(lastLand){
+        p.x=lastLand.x; p.y=lastLand.y;   // keep walking off the lake
+      }
     }
 
     // keep ghost sprite aligned
@@ -164,18 +203,18 @@
     }
   });
 
-  // ====== simple visuals: parked boats + player boat ======
+  // ====== visuals: parked boats alongside + player boat ======
   function drawParkedDockBoats(ctx){
-    const {DOCKS}=lakeRects(anchors(api));
     const S=api.DRAW, t=api.TILE;
+    const boats = parkedBoatCells();
+    if(!boats.length) return;
+
     ctx.save();
     ctx.fillStyle='#7ca7c7';
-    // draw a small hull just to the RIGHT of each plank (beside the dock)
-    DOCKS.forEach(d=>{
-      const gx = d.x0 + d.len;       // water tile immediately to the right of plank
-      const gy = d.y;
-      const sx = (gx*t - api.camera.x) * (S/t);
-      const sy = (gy*t - api.camera.y) * (S/t);
+    boats.forEach(b=>{
+      const sx = (b.x*t - api.camera.x) * (S/t);
+      const sy = (b.y*t - api.camera.y) * (S/t);
+      // small neutral hull
       ctx.fillRect(sx+S*0.18, sy+S*0.34, S*0.64, S*0.32);
     });
     ctx.restore();
@@ -185,7 +224,7 @@
     if(!api?.ready || !isTier2()) return;
     const ctx=document.getElementById('game').getContext('2d');
 
-    // always show parked boats by the docks
+    // always show parked boats alongside the docks
     drawParkedDockBoats(ctx);
 
     // show the player's boat while riding
@@ -217,9 +256,8 @@
 
   IZZA.on('ready', (a)=>{
     api=a;
-    // Input wiring (play nice with other B handlers)
     const btnB=document.getElementById('btnB');
-    if(btnB) btnB.addEventListener('click', onB, true);  // capture so we can preempt when handled
+    if(btnB) btnB.addEventListener('click', onB, true);  // capture; we suppress only when we act
     window.addEventListener('keydown', e=>{
       if((e.key||'').toLowerCase()==='b') onB(e);
     }, {passive:false, capture:true});
