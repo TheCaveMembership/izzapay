@@ -304,7 +304,7 @@
     });
 
     // --- Downtown small buildings (blue bldg in front of HQ removed)
-    const REMOVE_RECT_4226 = {x0:42,y0:26,x1:44,y1:27}; // your request
+    const REMOVE_RECT_4226 = {x0:42,y0:26,x1:44,y1:27}; // removed area you asked for
     const BUILDINGS = [
       {x:A.vRoadX+11, y:A.hRoadY-9, w:6, h:3, color:COL.civic},
       {x:A.vRoadX+8,  y:A.hRoadY+9, w:7, h:4, color:COL.shop},
@@ -392,43 +392,46 @@
       ctx.fillRect(sx(wx)+S*0.33, sy(wy)+S*0.33, S*0.34, S*0.34);
     }
 
-    // ====== MANUAL PATCHES (your exact instructions) ======
-    // helper painters
+    // ====== MANUAL PATCHES (exact tiles) ======
     const set = (x,y,color)=> fillTile(api,ctx,x,y,color);
     const lineH = (x0,x1,y,color)=>{ for(let x=x0; x<=x1; x++) set(x,y,color); };
     const rect = (x0,y0,x1,y1,color)=>{ for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) set(x,y,color); };
 
-    // 1) Add a grey sidewalk tile at 44,15
+    // A) Prior items already done earlier (kept)
     set(44,15,COL.sidewalk);
-
-    // 2) Make house blocks solid/visible (three houses along y=46)
     [15,16,17].forEach(x=> set(x,46,COL.house));
     [23,24,25].forEach(x=> set(x,46,COL.house));
     [31,32,33].forEach(x=> set(x,46,COL.house));
-
-    // 3) Remove sidewalk tiles at (56,49), (56,47), (56,45), (56,43) -> grass
-    [49,47,45,43].forEach(y=> set(56,y,COL.grass));
-
-    // 4) Replace hotel tiles 69..75,31 with sidewalk; and 69..75,30 with road
-    lineH(69,75,31,COL.sidewalk);
+    // 56,49/47/45/43 were grass before; now they are roads per your update
+    [49,47,45,43].forEach(y=> set(56,y,COL.road));
     lineH(69,75,30,COL.road);
-
-    // 5) Add sidewalk tiles from 66..72 at y=15
+    lineH(69,76,31,COL.sidewalk); // extend to 76 now
     lineH(66,72,15,COL.sidewalk);
-
-    // 6) Make (67,16) and (67,17) solid building tiles
     set(67,16,COL.house); set(67,17,COL.house);
+    rect(42,26,44,27,COL.grass); // clear any building first
 
-    // 7) Completely remove the small building at ~[42..44]x[26..27]
-    rect(42,26,44,27,COL.grass);
+    // B) New explicit tiles:
+    // 1) At the cleared area: sidewalks/roads mix
+    set(43,26,COL.sidewalk);
+    set(43,27,COL.sidewalk);
+    set(44,26,COL.road);
+    set(44,27,COL.road);
 
-    // Store layout so collisions/minimap know about patches
+    // 2) Additional single road tiles
+    [ {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
+      {x:21,y:24},{x:19,y:24},
+      {x:19,y:30},{x:21,y:30},
+      {x:27,y:30},{x:29,y:30}
+    ].forEach(p=> set(p.x,p.y,COL.road));
+
+    // Store layout + collision overrides
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
       patches:{
         solidSingles: [{x:67,y:16},{x:67,y:17}],
         solidHouses:  [{x0:15,y0:46,x1:17,y1:46},{x0:23,y0:46,x1:25,y1:46},{x0:31,y0:46,x1:33,y1:46}],
-        removedBuilding: {x0:42,y0:26,x1:44,y1:27}
+        removedBuilding: {x0:42,y0:26,x1:44,y1:27},
+        walkableOverride: [{x0:69,y0:31,x1:76,y1:31}] // make sure this sidewalk is NOT solid
       }
     };
     // ====== /MANUAL PATCHES ======
@@ -454,12 +457,12 @@
     else if(!_inBoat && _lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; }
 
     // keep dock rider icon aligned with player when riding a boat
-    if(_inBoat && _ride){ _ride.x = ((p.x/t)|0); _ride.y = ((p.y/t)|0); }
+    if(_inBoat && _ride){ const t=api.TILE; _ride.x = ((p.x/t)|0); _ride.y = ((p.y/t)|0); }
 
     // cars bounce off new buildings
     if(_layout){
       api.cars.forEach(c=>{
-        const cgx=(c.x/t)|0, cgy=(c.y/t)|0;
+        const t=api.TILE, cgx=(c.x/t)|0, cgy=(c.y/t)|0;
         const hitB = _layout.BUILDINGS?.some(b=> cgx>=b.x && cgx<b.x+b.w && cgy>=b.y && cgy<b.y+b.h);
         const hitH = cgx>=_layout.HOTEL.x0 && cgx<=_layout.HOTEL.x1 && cgy>=_layout.HOTEL.y0 && cgy<=_layout.HOTEL.y1;
         if(hitB||hitH){ c.dir*=-1; c.x += c.dir*4; }
@@ -477,7 +480,6 @@
     _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
     solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
     _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
-
     // Manual solid house strips + singles
     (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
     (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
@@ -492,8 +494,13 @@
     };
     if(waterIsSolid(gx,gy)) solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
 
+    // Exclude any walkable override areas (e.g., sidewalk 69..76,31) from solids
+    const overrides = _layout.patches?.walkableOverride || [];
+    const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
+
     // Simple AABB resolve
     for(const b of solids){
+      if(isOverridden(gx,gy)) break; // current tile is in an override zone; skip resolving
       if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
         const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
         const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
@@ -537,23 +544,32 @@
     ctx.fillStyle=COL.hoodPark; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
     ctx.fillStyle=COL.house; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
 
-    // minimap manual patches (only what visibly differs a lot)
-    // road 69..75 at y=30
-    ctx.fillStyle='#8a90a0'; ctx.fillRect(69*sx,30*sy,(75-69+1)*sx,1.2*sy);
-    // sidewalk 69..75 at y=31 and 66..72 at y=15 and 44,15
-    ctx.fillStyle='#a1a6b0';
-    ctx.fillRect(69*sx,31*sy,(75-69+1)*sx,1.2*sy);
+    // minimap manual patches
+    ctx.fillStyle='#8a90a0'; // roads
+    ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy); // 69..76,30
+    [ {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
+      {x:21,y:24},{x:19,y:24},
+      {x:19,y:30},{x:21,y:30},
+      {x:27,y:30},{x:29,y:30},
+      {x:44,y:26},{x:44,y:27},
+      {x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43}
+    ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+
+    ctx.fillStyle='#a1a6b0'; // sidewalks
+    ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
     ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
     ctx.fillRect(44*sx,15*sy,1*sx,1.2*sy);
+    ctx.fillRect(43*sx,26*sy,1*sx,1.2*sy);
+    ctx.fillRect(43*sx,27*sy,1*sx,1.2*sy);
   }
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
 })();
+
 // --- izza-inspector.js (non-invasive debug overlay) ---
 (function(){
   let INSPECT=false, SHOW_GRID=false, pick=null, hudMsg='', hudT=0;
 
-  // try to reuse your "I" button; fall back to key presses
   const btnI = document.getElementById('btnI') || document.getElementById('btnInspect');
   btnI?.addEventListener('click', ()=>{ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); });
 
@@ -570,7 +586,6 @@
     const rect = game.getBoundingClientRect();
     const cx = (ev.touches? ev.touches[0].clientX : ev.clientX) - rect.left;
     const cy = (ev.touches? ev.touches[0].clientY : ev.clientY) - rect.top;
-    // convert canvas px -> world -> grid
     const sx = cx * (game.width  / rect.width);
     const sy = cy * (game.height / rect.height);
     const worldX = sx * (api.TILE/api.DRAW) + api.camera.x;
@@ -578,7 +593,6 @@
     return { gx: Math.floor(worldX/api.TILE), gy: Math.floor(worldY/api.TILE) };
   }
 
-  // click/tap picks a tile and copies coords
   const game = document.getElementById('game');
   const pickHandler = (ev)=>{
     if(!INSPECT) return;
@@ -591,7 +605,6 @@
   game.addEventListener('click', pickHandler, {passive:true});
   game.addEventListener('touchend', pickHandler, {passive:true});
 
-  // draw overlay: grid + pick highlight + HUD (runs after the game draws)
   IZZA.on('render-post', ()=>{
     const api = IZZA?.api; if(!api?.ready) return;
     const ctx = game.getContext('2d');
@@ -609,7 +622,7 @@
     if(hudMsg && performance.now()<hudT){ ctx.fillText(hudMsg, 12, 42); } else { hudMsg=''; }
     ctx.restore();
 
-    // grid (faint)
+    // grid
     if(SHOW_GRID){
       ctx.save();
       ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=Math.max(1, S*0.02);
@@ -623,7 +636,7 @@
       }
       for(let j=0;j<rows;j++){
         const gy=topGY+j, y = (gy*api.TILE - api.camera.y)*f;
-        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(game.width,y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(game.height,y); ctx.stroke();
       }
       ctx.restore();
     }
