@@ -670,55 +670,158 @@
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='a') tryHospitalHeal(); });
 
   // ---------- Minimap / Bigmap overlay ----------
-  function paintOverlay(id){
-    if(!_layout) return;
-    const c=document.getElementById(id); if(!c) return;
-    const ctx=c.getContext('2d');
-    const sx=c.width/90, sy=c.height/60;
+function paintOverlay(id){
+  if(!_layout) return;
+  const c=document.getElementById(id); if(!c) return;
+  const ctx=c.getContext('2d');
+  const sx=c.width/90, sy=c.height/60;
 
-    ctx.fillStyle='#8a90a0';
-    _layout.H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
-    _layout.V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
+  const api = IZZA.api;
+  const A   = anchors(api);
+  const {LAKE, BEACH_X, HOTEL, LOT} = lakeRects(A);
+  const {HOOD, HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(A);
 
-    ctx.fillStyle='#6f87b3';
-    (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
+  // ---- Recompute the same road grid used in render-under so overlays always match ----
+  const FORBID = [
+    {x0:LAKE.x0,y0:LAKE.y0,x1:LAKE.x1,y1:LAKE.y1},
+    {x0:A.HQ.x0-1,y0:A.HQ.y0-1,x1:A.HQ.x1+1,y1:A.HQ.y1+1},
+    {x0:A.SH.x0-1,y0:A.SH.y0-1,x1:A.SH.x1+1,y1:A.SH.y1+1}
+  ];
+  const {H,V} = (function desiredRoadGrid(a){
+    const H = [ a.hRoadY - 10, a.hRoadY, a.hRoadY + 6 ];
+    const V = [ a.vRoadX - 12, a.vRoadX + 10 ];
+    return {H,V};
+  })(A);
 
-    // hospital
-    if(_hospital){ ctx.fillStyle=COL.hospital; ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,(rectW(_hospital))*sx,(rectH(_hospital))*sy); }
+  let H_ROADS = [];
+  let V_ROADS = [];
+  H.forEach(y=>{
+    const segs = clipHRow(y, A.un.x0, A.un.x1, FORBID);
+    segs.forEach(s=>{
+      const shaved = shaveDeadEndsH({y:s.y,x0:s.x0,x1:s.x1}, FORBID);
+      if(shaved) H_ROADS.push(shaved);
+    });
+  });
+  V.forEach(x=>{
+    const segs = clipVCol(x, A.un.y0, A.un.y1, FORBID);
+    segs.forEach(s=>{
+      const shaved = shaveDeadEndsV({x:s.x,y0:s.y0,y1:s.y1}, FORBID);
+      if(shaved) V_ROADS.push(shaved);
+    });
+  });
 
-    // lake + beach + hotel + lot
-    const a=anchors(IZZA.api), {LAKE, BEACH_X, HOTEL, LOT}=lakeRects(a);
-    ctx.fillStyle=COL.water;
-    ctx.fillRect(LAKE.x0*sx,LAKE.y0*sy,(LAKE.x1-LAKE.x0+1)*sx,(LAKE.y1-LAKE.y0+1)*sy);
-    ctx.fillStyle=COL.sand; ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
-    ctx.fillStyle=COL.lot;   ctx.fillRect(LOT.x0*sx,LOT.y0*sy,(LOT.x1-LOT.x0+1)*sx,(LOT.y1-LOT.y0+1)*sy);
-    ctx.fillStyle=COL.hotel; ctx.fillRect(HOTEL.x0*sx,HOTEL.y0*sy,(HOTEL.x1-HOTEL.x0+1)*sx,(HOTEL.y1-HOTEL.y0+1)*sy);
+  const H_ROWS_ALL = new Set([...H_ROADS.map(r=>r.y), ...HOOD_H]);
+  const V_COLS_ALL = new Set([...V_ROADS.map(r=>r.x), ...HOOD_V]);
+  const isTier1Y = y => (y===A.hRoadY || y===A.sidewalkTopY || y===A.sidewalkBotY);
 
-    // hood
-    const {HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(a);
-    ctx.fillStyle='#8a95a3';
-    HOOD_H.forEach(y=> ctx.fillRect(a.un.x0*sx, y*sy, (a.un.x1-a.un.x0+1)*sx, 1.4*sy));
-    HOOD_V.forEach(x=> ctx.fillRect(x*sx, a.un.y0*sy, 1.4*sx, (a.un.y1-a.un.y0+1)*sy));
-    ctx.fillStyle=COL.hoodPark; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
-    ctx.fillStyle=COL.house; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
+  // ---- Draw order: water & blocks → sidewalks → roads → buildings → patches/POIs ----
 
-    // notable manual patches on the minimap
-    ctx.fillStyle='#8a90a0';
-    ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
-    [
-      {x:27,y:24},{x:29,y:24},
-      {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
-      {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
-      {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
-      {x:66,y:34}
-    ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+  // Lake + beach + lot + hotel footprints
+  ctx.fillStyle = COL.water;
+  ctx.fillRect(LAKE.x0*sx, LAKE.y0*sy, (LAKE.x1-LAKE.x0+1)*sx, (LAKE.y1-LAKE.y0+1)*sy);
+  ctx.fillStyle = COL.sand;
+  ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
+  ctx.fillStyle = COL.lot;
+  ctx.fillRect(LOT.x0*sx, LOT.y0*sy, (LOT.x1-LOT.x0+1)*sx, (LOT.y1-LOT.y0+1)*sy);
+  ctx.fillStyle = COL.hotel;
+  ctx.fillRect(HOTEL.x0*sx, HOTEL.y0*sy, (HOTEL.x1-HOTEL.x0+1)*sx, (HOTEL.y1-HOTEL.y0+1)*sy);
 
-    ctx.fillStyle='#a1a6b0';
-    ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
-    ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
-    [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
-      .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+  // Hood park & houses
+  ctx.fillStyle = COL.hoodPark;
+  ctx.fillRect(HOOD_PARK.x0*sx, HOOD_PARK.y0*sy, (HOOD_PARK.x1-HOOD_PARK.x0+1)*sx, (HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
+  ctx.fillStyle = COL.house;
+  HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
+
+  // ---- Sidewalks around the new road grid (matches render-under logic) ----
+  // H-road sidewalks
+  ctx.fillStyle = '#a1a6b0'; // sidewalk tint for overlay
+  H_ROADS.forEach(r=>{
+    for(let x=r.x0;x<=r.x1;x++){
+      if(!V_COLS_ALL.has(x)){
+        // above
+        if(!isOriginalTile(x, r.y-1, A))
+          ctx.fillRect(x*sx, (r.y-1)*sy, 1*sx, 1*sy);
+        // below
+        if(!V_COLS_ALL.has(x) && !isOriginalTile(x, r.y+1, A))
+          ctx.fillRect(x*sx, (r.y+1)*sy, 1*sx, 1*sy);
+      }
+    }
+  });
+
+  // V-road sidewalks (skip where H roads live and Tier-1 rows)
+  V_ROADS.forEach(r=>{
+    for(let y=r.y0;y<=r.y1;y++){
+      if(H_ROWS_ALL.has(y) || isTier1Y(y)) continue;
+      if(!isOriginalTile(r.x-1, y, A)) ctx.fillRect((r.x-1)*sx, y*sy, 1*sx, 1*sy);
+      if(!isOriginalTile(r.x+1, y, A)) ctx.fillRect((r.x+1)*sx, y*sy, 1*sx, 1*sy);
+    }
+  });
+
+  // Hood sidewalks & roads
+  // sidewalks
+  HOOD_H.forEach(y=>{
+    for(let x=A.un.x0; x<=A.un.x1; x++){
+      if(!V_COLS_ALL.has(x)) ctx.fillRect(x*sx, (y-1)*sy, 1*sx, 1*sy);
+      if(!V_COLS_ALL.has(x)) ctx.fillRect(x*sx, (y+1)*sy, 1*sx, 1*sy);
+    }
+  });
+  HOOD_V.forEach(x=>{
+    for(let y=A.un.y0; y<=A.un.y1; y++){
+      if(new Set(HOOD_H).has(y)) continue;
+      ctx.fillRect((x-1)*sx, y*sy, 1*sx, 1*sy);
+      ctx.fillRect((x+1)*sx, y*sy, 1*sx, 1*sy);
+    }
+  });
+
+  // ---- Roads (overlay tint consistent with your previous map overlay)
+  ctx.fillStyle = '#8a90a0'; // road tint
+  H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
+  V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
+  // Hood roads
+  HOOD_H.forEach(y=>{
+    const segs = clipHRow(y, A.un.x0, A.un.x1, [HOOD_PARK]);
+    segs.forEach(s=> ctx.fillRect(s.x0*sx, y*sy, (s.x1-s.x0+1)*sx, 1.2*sy));
+  });
+  HOOD_V.forEach(x=>{
+    const segs = clipVCol(x, A.un.y0, A.un.y1, [HOOD_PARK]);
+    segs.forEach(s=> ctx.fillRect(x*sx, s.y0*sy, 1.2*sx, (s.y1-s.y0+1)*sy));
+  });
+
+  // ---- Buildings (downtown blocks)
+  ctx.fillStyle = '#6f87b3';
+  (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
+
+  // ---- Hospital building
+  if(_hospital){
+    ctx.fillStyle = COL.hospital;
+    ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,( (_hospital.x1-_hospital.x0+1) )*sx,( (_hospital.y1-_hospital.y0+1) )*sy);
   }
-  IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
+
+  // ---- Docks (planks)
+  ctx.fillStyle = COL.wood;
+  lakeRects(A).DOCKS.forEach(d=>{
+    ctx.fillRect(d.x0*sx, d.y*sy, d.len*sx, 1*sy);
+  });
+
+  // ---- Notable manual patches you already had (kept so the overlay 1:1 matches)
+  ctx.fillStyle='#8a90a0'; // roads
+  [
+    {x:27,y:24},{x:29,y:24},
+    {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
+    {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
+    {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
+    {x:66,y:34}
+  ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+  // long strips
+  ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
+
+  // sidewalk-highlight strips (your previous tint)
+  ctx.fillStyle='#a1a6b0';
+  ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
+  ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
+  [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
+    .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+}
+IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
 })();
