@@ -1,11 +1,9 @@
-<!-- /static/game/js/plugins/v1_boat_plugin.js -->
-<script>
-// v1.8 — full-lake water (right of beach), board-to-water snap,
+// v1.9 — full-lake water (right of beach), board-to-water snap,
 //         smooth plank walking, parked boat beside plank (east),
 //         hide boarded boat, player (gx,gy) marker, and a global
-//         boat flag to let layout skip "water is solid" while boating.
+//         boat flag the expansion can read to skip water solids.
 (function(){
-  const BUILD='v1.8-boat-plugin+full-lake-east+board-snap+pos-marker';
+  const BUILD='v1.9-boat-plugin+full-lake-east+board-snap+pos-marker';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
@@ -14,7 +12,7 @@
   // small debug label toggle (true by default)
   window._izzaShowPos = (window._izzaShowPos!==false);
 
-  // expose current boat state so the layout plugin can ignore water solids
+  // expose current boat state so the expansion can ignore water solids
   function setBoatFlag(on){ window._izzaBoatActive = !!on; }
 
   // --- local state ---
@@ -38,8 +36,8 @@
     return {un,bX,bY,bW,bH,hRoadY,sidewalkTopY,vRoadX};
   }
   function lakeRects(a){
-    const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 }; // original paint region
-    const BEACH_X = LAKE.x0 - 1; // vertical beach column
+    const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
+    const BEACH_X = LAKE.x0 - 1;
     const DOCKS = [
       { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },  // planks extend EAST (→)
       { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
@@ -61,9 +59,7 @@
     return s;
   }
 
-  // "Auto cover everything to the right of the beach":
-  // treat ALL tiles with gx > BEACH_X (within unlocked Y range) as water,
-  // except the dock planks themselves.
+  // Treat ALL tiles with gx > BEACH_X as water (within unlocked Y), except planks.
   function tileIsWater(gx,gy){
     const a=anchors(api);
     const {BEACH_X}=lakeRects(a);
@@ -75,7 +71,6 @@
 
   // parked boat spot: immediately EAST (right) of the dock’s tip
   function parkedSpotForDock(d){ return { gx: d.x0 + d.len, gy: d.y }; }
-
   function dockByY(y){
     const {DOCKS}=lakeRects(anchors(api));
     return DOCKS.find(d=> d.y===y) || null;
@@ -87,17 +82,14 @@
     const {DOCKS}=lakeRects(anchors(api));
     for(const d of DOCKS){
       const tipX = d.x0 + d.len - 1;
-      // on any plank tile
-      if(gy===d.y && gx>=d.x0 && gx<=tipX) return d.y;
-      // adjacent horizontally to plank strip
-      if(gy===d.y && (gx===d.x0-1 || gx===tipX+1)) return d.y;
-      // adjacent vertically above/below the plank strip
-      if((gy===d.y-1 || gy===d.y+1) && gx>=d.x0 && gx<=tipX) return d.y;
+      if(gy===d.y && gx>=d.x0 && gx<=tipX) return d.y;                    // on plank
+      if(gy===d.y && (gx===d.x0-1 || gx===tipX+1)) return d.y;            // left/right
+      if((gy===d.y-1 || gy===d.y+1) && gx>=d.x0 && gx<=tipX) return d.y;  // above/below
     }
     return null;
   }
 
-  // Find best land tile to snap to when leaving the boat
+  // Best land tile to snap to when leaving the boat
   function nearestDisembarkSpot(){
     const a=anchors(api), {BEACH_X}=lakeRects(a);
     const gx=centerGX(), gy=centerGY();
@@ -107,12 +99,10 @@
     const n=[{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
     for(const p of n) if(docks.has(p.x+'|'+p.y)) return p;
 
-    // if right beside beach, snap onto beach column
+    // right beside beach → snap onto beach column
     if(gx===BEACH_X+1 && gy>=a.un.y0 && gy<=a.un.y1) return {x:BEACH_X, y:gy};
 
-    // if already on a plank somehow
-    if(docks.has(gx+'|'+gy)) return {x:gx,y:gy};
-
+    if(docks.has(gx+'|'+gy)) return {x:gx,y:gy}; // safety
     return null;
   }
 
@@ -122,7 +112,6 @@
     const {gx,gy}=playerGrid();
     const docks=dockCells();
     if(docks.has(gx+'|'+gy)) return true; // on plank
-    // adjacent to any plank
     return docks.has((gx+1)+'|'+gy) || docks.has((gx-1)+'|'+gy) ||
            docks.has(gx+'|'+(gy+1)) || docks.has(gx+'|'+(gy-1));
   }
@@ -184,8 +173,7 @@
   }
 
   // ====== movement clamps ======
-  // NOTE: downtown layout may still add "water is solid" to collisions.
-  // We (1) expose window._izzaBoatActive for it to skip that, and
+  // We (1) expose window._izzaBoatActive for expansion to skip water solids, and
   // (2) also run a post-clamp to reassert water position if needed.
   IZZA.on('update-pre', ()=>{
     if(!api?.ready || !isTier2()) return;
@@ -201,7 +189,6 @@
     }
   });
 
-  // run AFTER other plugins to avoid being pushed back to shore
   function postClamp(){
     if(!api?.ready || !isTier2() || !inBoat) return;
     const p=api.player, cx=centerGX(), cy=centerGY();
@@ -288,4 +275,3 @@
     console.log('[boat] ready', BUILD);
   });
 })();
-</script>
