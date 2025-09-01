@@ -100,7 +100,7 @@
   function desiredRoadGrid(a){
     const H = [
       a.hRoadY - 10,     // top avenue
-      a.hRoadY,          // middle (Tier-1 row; we won't repaint it, but needed for intersection logic)
+      a.hRoadY,          // middle (Tier-1 row; used for intersection logic only)
       a.hRoadY + 6       // lower avenue toward lake
     ];
     const V = [
@@ -454,7 +454,6 @@
     _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
     solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
     _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
-    // Hood park is not solid.
     // Water is solid except the beach column and dock planks
     const waterIsSolid = (x,y)=>{
       if(!_inRect(x,y,_layout.LAKE)) return false;
