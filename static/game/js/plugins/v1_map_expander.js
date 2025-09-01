@@ -2,6 +2,59 @@
 (function () {
   const TIER_KEY = 'izzaMapTier';
 
+  // --- M3 → Tier-2 unlock shim (compat with your old flow) --------------------
+const M3_UNLOCK_KEYS = ['izzaM3Complete', 'm3_done', 'mission3Complete']; // common flags IZZAGame used earlier
+const isTier2 = () => localStorage.getItem(TIER_KEY) === '2';
+
+// Set Tier-2 once; never downgrade.
+function setTier2Once() {
+  if (localStorage.getItem(TIER_KEY) !== '2') localStorage.setItem(TIER_KEY, '2');
+}
+
+// Heuristics to detect “Mission 3 complete” from game state or localStorage
+function mission3LooksDone() {
+  try {
+    // 1) explicit localStorage flags your game already set
+    if (M3_UNLOCK_KEYS.some(k => localStorage.getItem(k) === '1' || localStorage.getItem(k) === 'true')) return true;
+
+    // 2) common game state shapes seen in IZZA core
+    const s = (window.IZZA && (IZZA.state || IZZA.api?.state || IZZA.save)) || {};
+    // a) numeric mission index (>=3 means finished M3)
+    if (typeof s.mission === 'number' && s.mission >= 3) return true;
+    if (typeof s.currentMission === 'number' && s.currentMission >= 3) return true;
+    // b) per-mission booleans / progress objects
+    const ms = s.missions || s.progress?.missions || s.missionFlags || {};
+    if (ms.M3?.done || ms.M3?.complete || ms['3']?.done || ms['3']?.complete) return true;
+  } catch(_) {}
+  return false;
+}
+
+// Kick once on ready and also whenever missions change.
+// (We also add a tiny polling fallback so this works even if the core doesn’t emit a mission event.)
+function wireM3Unlock() {
+  if (mission3LooksDone()) setTier2Once();
+
+  // Event-based: try a few likely mission events exposed by core
+  ['mission-complete', 'missions-updated', 'progress-changed'].forEach(evt => {
+    try {
+      IZZA.on(evt, (e) => {
+        // accept either “M3” or numeric 3
+        const id = e?.id ?? e?.mission ?? e;
+        if (id === 'M3' || id === 3 || mission3LooksDone()) setTier2Once();
+      });
+    } catch(_) {}
+  });
+
+  // Polling fallback (lightweight, stops after it unlocks)
+  let tries = 0;
+  const iv = setInterval(() => {
+    if (mission3LooksDone()) { setTier2Once(); clearInterval(iv); }
+    if (++tries > 120 || isTier2()) clearInterval(iv); // ~2 minutes safety cap
+  }, 1000);
+}
+
+try { IZZA.on('ready', wireM3Unlock); } catch(_) { /* if IZZA not ready yet, core will attach later */ }
+
   // -------- Palette (match core; tweak house/hotel colors to avoid grass/water confusion) -------
   const COL = {
     grass:'#09371c',
