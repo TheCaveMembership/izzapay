@@ -13,7 +13,9 @@
     house:'#7b6a42',
     hoodPark:'#135c33',
     lot:'#474747',
-    hospital:'#b94a48' // red-ish
+    hospital:'#b94a48',
+    doorBlue:'#5aa0ff',
+    doorGreen:'#35d27a'
   };
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
@@ -163,7 +165,6 @@
 
   // ---------- Boats ----------
   const _boats=[], _dockBoats=[]; let _towBoat=null, _inBoat=false, _ride=null, _lastLand=null, _lastWater=null;
-
   function spawnBoats(){
     if(!isTier2() || _boats.length) return;
     const api=IZZA.api, A=anchors(api), {LAKE, DOCKS}=lakeRects(A);
@@ -187,19 +188,10 @@
   }
   IZZA.on('ready', spawnBoats);
 
-  // helper: is player near any dock cell (<=1 tile)
-  function _nearDock(gx,gy){
-    const set = dockCells();
-    if(set.has(gx+'|'+gy)) return true;
-    // check 4-neighborhood
-    return set.has((gx-1)+'|'+gy) || set.has((gx+1)+'|'+gy) || set.has(gx+'|'+(gy-1)) || set.has(gx+'|'+(gy+1));
-  }
-
   IZZA.on('update-pre', ({dtSec})=>{
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, A=anchors(api), {LAKE}=lakeRects(A);
 
-    // autonomous boats
     _boats.forEach(b=>{
       const tgt=b.path[b.i], dx=tgt.x-b.x, dy=tgt.y-b.y, m=Math.hypot(dx,dy)||1, step=b.s*dtSec/32;
       if(m<=step){ b.x=tgt.x; b.y=tgt.y; b.i=(b.i+1)%b.path.length; }
@@ -222,92 +214,114 @@
     return !dockCells().has(gx+'|'+gy);
   }
 
-  // Enter/leave boat (contextual handler is below; this stays as low-level ops)
-  function _enterBoat(){
-    if(_inBoat || !isTier2()) return false;
+  // Enter/leave boat:
+  // - Press B on a dock plank (or 1 tile from its water edge) to board; we don’t require a free decorative dock boat.
+  // - While boating, movement is clamped to water. Press B on a dock or the beach column to disembark.
+  function canBoardHere(){
     const api=IZZA.api, t=api.TILE;
-    const gx=((api.player.x+16)/t)|0, gy=((api.player.y+16)/t)|0;
-
-    // must be near a dock
-    if(!_nearDock(gx,gy)) return false;
-
-    // pick nearest available side-docked boat on same row or create a temporary one beside dock
-    let best=null, bd=1e9;
-    _dockBoats.forEach(b=>{
-      if(b.taken) return;
-      const d=Math.hypot(b.x-gx,b.y-gy);
-      if(d<bd){ bd=d; best=b; }
-    });
-    if(!best){ // spawn a temp beside the closest dock tile
-      let nearestDock=null, nd=1e9;
-      dockCells().forEach(key=>{
-        const [x,y]=key.split('|').map(Number);
-        const d=Math.hypot(x-gx,y-gy);
-        if(d<nd){ nd=d; nearestDock={x,y}; }
-      });
-      if(nearestDock){ best={x:nearestDock.x+1, y:nearestDock.y, s:120, taken:false}; _dockBoats.push(best); }
-      else return false;
-    }
-
-    best.taken=true; _ride=best; _inBoat=true; api.player.speed=120; _lastWater={x:api.player.x,y:api.player.y};
-    return true;
+    const gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+    const onDock = dockCells().has(gx+'|'+gy);
+    if(onDock) return true;
+    // Standing on land just LEFT of a dock tile that touches water
+    const nearDock = dockCells().has((gx+1)+'|'+gy) || dockCells().has((gx-1)+'|'+gy) ||
+                     dockCells().has(gx+'|'+(gy+1)) || dockCells().has(gx+'|'+(gy-1));
+    return nearDock;
   }
-
+  function _enterBoat(){
+    if(_inBoat || !isTier2()) return;
+    if(!canBoardHere()) return;
+    const api=IZZA.api;
+    _inBoat = true;
+    _ride = {x:0,y:0}; // visual follower
+    api.player.speed = 120;
+    _lastWater = {x:api.player.x,y:api.player.y};
+    IZZA.toast?.('Boarded boat');
+  }
   function _leaveBoat(){
-    if(!_inBoat) return false;
+    if(!_inBoat) return;
     const api=IZZA.api, t=api.TILE, gx=((api.player.x+16)/t)|0, gy=((api.player.y+16)/t)|0;
     const A=anchors(api), {LAKE, BEACH_X}=lakeRects(A);
     const onBeach = (gx===BEACH_X && gy>=LAKE.y0 && gy<=LAKE.y1);
-    const onSideDock = _dockBoats.some(b=> Math.abs(b.x-gx)<=1 && Math.abs(b.y-gy)<=0);
-    if(onBeach || onSideDock){ if(_ride){ _ride.taken=false; } _ride=null; _inBoat=false; api.player.speed=90; return true; }
-    return false;
+    const onDock = dockCells().has(gx+'|'+gy);
+    if(onBeach || onDock){
+      _ride=null; _inBoat=false; api.player.speed=90;
+      IZZA.toast?.('Disembarked');
+    }
   }
 
-  // ---------- Hospital UI ----------
-  let _hospital=null, _hospitalDoor=null, _modal=null;
+  // ---------- HOSPITAL ----------
+  let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
 
-  function ensureModal(){
-    if(_modal) return _modal;
-    const m=document.createElement('div');
-    m.id='hospitalModal';
-    Object.assign(m.style,{
-      position:'fixed', inset:'0', display:'none', alignItems:'center', justifyContent:'center',
-      background:'rgba(0,0,0,0.45)', zIndex:'9999', fontFamily:'system-ui, sans-serif'
-    });
-    m.innerHTML = `
-      <div style="background:#10141c; color:#e8eef7; padding:16px 18px; width:min(92vw,360px); border:1px solid #2d3648; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.4)">
-        <h3 style="margin:0 0 8px 0; font-size:18px;">Hospital</h3>
-        <p style="margin:0 0 12px 0; color:#b9c4d4;">Purchase a heart refill for <strong>100 IZZA Coins</strong>.</p>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button id="btnBuyHeart" style="flex:1; padding:10px 12px; border:1px solid #2f835e; background:#1c684a; color:#eafff5; border-radius:8px; cursor:pointer;">Buy (100 IC)</button>
-          <button id="btnCloseHospital" style="padding:10px 12px; border:1px solid #3a4254; background:#1b2130; color:#cfd8e6; border-radius:8px; cursor:pointer;">Close</button>
-        </div>
-      </div>`;
-    document.body.appendChild(m);
-    m.querySelector('#btnCloseHospital').addEventListener('click', ()=> m.style.display='none');
-    m.querySelector('#btnBuyHeart').addEventListener('click', ()=>{
-      const api=IZZA.api; if(!api?.ready) return;
-      const player=api.player||{};
-      const heartsMax = player.heartsMax ?? player.maxHearts ?? 3;
-      const hearts    = player.hearts    ?? player.hp       ?? 3;
-      const coins     = api.coins|0;
-      if(hearts >= heartsMax){ IZZA.toast?.('Hearts are already full'); return; }
-      if(coins < 100){ IZZA.toast?.('Not enough IZZA Coins'); return; }
-      api.coins = coins - 100;
-      if('hearts' in player) player.hearts = Math.min(heartsMax, hearts+1);
-      else if('hp' in player) player.hp = Math.min(heartsMax, hearts+1);
-      IZZA.emit?.('coins-change', api.coins);
-      IZZA.toast?.('+1 heart purchased');
-      m.style.display='none';
-    });
-    _modal=m;
-    return m;
+  // Create a simple popup the first time we need it
+  function ensureShopUI(){
+    if(document.getElementById('hospitalShop')) return;
+    const d=document.createElement('div');
+    d.id='hospitalShop';
+    d.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:50;';
+    d.innerHTML =
+      `<div style="min-width:260px;background:#111b29;border:1px solid #2b3b57;border-radius:10px;padding:14px;color:#e7eef7;box-shadow:0 10px 30px rgba(0,0,0,.5)">
+         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+           <strong style="font-size:16px">Hospital</strong>
+           <button id="hsClose" style="background:#263447;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
+         </div>
+         <div id="hsCoins" style="opacity:.85;margin-bottom:8px"></div>
+         <button id="hsBuy" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:600;cursor:pointer">
+           ❤️ Heart Refill — 100 IC
+         </button>
+       </div>`;
+    document.body.appendChild(d);
+    d.querySelector('#hsClose').onclick = ()=> hospitalClose();
+    d.querySelector('#hsBuy').onclick   = ()=> hospitalBuy();
+  }
+  function hospitalOpen(){
+    ensureShopUI();
+    const api=IZZA.api; if(!api?.ready) return;
+    document.getElementById('hsCoins').textContent = `Coins: ${api.coins|0} IC`;
+    document.getElementById('hospitalShop').style.display='flex';
+    _shopOpen=true;
+  }
+  function hospitalClose(){
+    const el=document.getElementById('hospitalShop'); if(el) el.style.display='none';
+    _shopOpen=false;
+  }
+  function hospitalBuy(){
+    const api=IZZA.api; if(!api?.ready) return;
+    const p=api.player||{};
+    const heartsMax = p.heartsMax ?? p.maxHearts ?? 3;
+    const getHearts = ()=> (('hearts' in p)? p.hearts : ('hp'in p? p.hp : 3));
+    const setHearts = v => { if('hearts' in p) p.hearts=v; else if('hp' in p) p.hp=v; };
+    const coins = api.coins|0;
+
+    if(coins<100){ IZZA.toast?.('Not enough IZZA Coins'); return; }
+    const cur = getHearts();
+    if(cur>=heartsMax){ IZZA.toast?.('Hearts are full'); return; }
+
+    api.coins = coins-100;
+    setHearts(Math.min(heartsMax, cur+1));
+    IZZA.emit?.('coins-change', api.coins);
+    IZZA.toast?.('+1 heart!');
+
+    document.getElementById('hsCoins').textContent = `Coins: ${api.coins|0} IC`;
   }
 
-  function openHospitalModal(){ ensureModal().style.display='flex'; }
+  // ---------- INPUT: Button B is context-aware (hospital or boat) ----------
+  function onPressB(){
+    const api=IZZA.api; if(!api?.ready) return;
+
+    // If near hospital door, B opens the shop
+    if(_hospitalDoor){
+      const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+      const near = Math.abs(gx-_hospitalDoor.x)<=1 && Math.abs(gy-_hospitalDoor.y)<=1;
+      if(near){ hospitalOpen(); return; }
+    }
+
+    // Otherwise toggle boat
+    if(_inBoat) _leaveBoat(); else _enterBoat();
+  }
+  document.getElementById('btnB')?.addEventListener('click', onPressB);
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(); });
 
   // ---------- RENDER UNDER ----------
-  let _layout=null;
   IZZA.on('render-under', ()=>{
     if(!IZZA.api?.ready || !isTier2()) return;
     const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
@@ -407,7 +421,6 @@
       for(let gx=HOTEL.x0; gx<=HOTEL.x1; gx++) fillTile(api,ctx,gx,gy,COL.hotel);
 
     // --- Neighborhood roads (reach edges; avoid hood park)
-    const H_ROWS_ALL = new Set([...H_ROADS.map(r=>r.y), ...HOOD_H]);
     HOOD_H.forEach(y=>{
       for(let x=A.un.x0; x<=A.un.x1; x++){
         if(!V_COLS_ALL.has(x)){ fillTile(api,ctx,x,y-1,COL.sidewalk); }
@@ -416,14 +429,19 @@
     });
     HOOD_V.forEach(x=>{
       for(let y=A.un.y0; y<=A.un.y1; y++){
-        if(H_ROWS_ALL.has(y)) continue;
+        if(new Set(HOOD_H).has(y)) continue;
         fillTile(api,ctx,x-1,y,COL.sidewalk);
         fillTile(api,ctx,x+1,y,COL.sidewalk);
       }
     });
-    const avoidPark=[HOOD_PARK];
-    HOOD_H.forEach(y=> clipHRow(y, A.un.x0, A.un.x1, avoidPark).forEach(s=> drawHRoad(api,ctx,y, s.x0, s.x1)));
-    HOOD_V.forEach(x=> clipVCol(x, A.un.y0, A.un.y1, avoidPark).forEach(s=> drawVRoad(api,ctx,x, s.y0, s.y1)));
+    HOOD_H.forEach(y=>{
+      const segs = clipHRow(y, A.un.x0, A.un.x1, [HOOD_PARK]);
+      segs.forEach(s=> drawHRoad(api,ctx,y, s.x0, s.x1));
+    });
+    HOOD_V.forEach(x=>{
+      const segs = clipVCol(x, A.un.y0, A.un.y1, [HOOD_PARK]);
+      segs.forEach(s=> drawVRoad(api,ctx,x, s.y0, s.y1));
+    });
 
     // hood park
     for(let gy=HOOD_PARK.y0; gy<=HOOD_PARK.y1; gy++)
@@ -445,38 +463,37 @@
       ctx.fillRect(sx,sy, d.len*S, S);
     });
 
-    // ====== MANUAL PATCHES ======
+    // ====== MANUAL PATCHES & HOSPITAL ======
     const set = (x,y,color)=> fillTile(api,ctx,x,y,color);
     const lineH = (x0,x1,y,color)=>{ for(let x=x0; x<=x1; x++) set(x,y,color); };
     const rect = (x0,y0,x1,y1,color)=>{ for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) set(x,y,color); };
 
-    // prior patches + your edits
+    // Your prior patches (kept)
     set(44,15,COL.sidewalk);
     [15,16,17].forEach(x=> set(x,46,COL.house));
     [23,24,25].forEach(x=> set(x,46,COL.house));
     [31,32,33].forEach(x=> set(x,46,COL.house));
     [49,47,45,43].forEach(y=> set(56,y,COL.road));
-    lineH(69,76,31,COL.sidewalk);
-    lineH(69,76,30,COL.road);
-    lineH(66,72,15,COL.sidewalk);
-    set(67,16,COL.house); set(67,17,COL.house);
+    lineH(69,76,31,COL.sidewalk); lineH(69,76,30,COL.road);
+    lineH(66,72,15,COL.sidewalk); set(67,16,COL.house); set(67,17,COL.house);
     rect(42,26,44,27,COL.grass);
-    set(43,26,COL.sidewalk); set(43,27,COL.sidewalk);
-    set(44,26,COL.road);     set(44,27,COL.road);
+    set(43,26,COL.sidewalk); set(43,27,COL.sidewalk); set(44,26,COL.road); set(44,27,COL.road);
     set(27,24,COL.road); set(29,24,COL.road);
     set(65,34,COL.sidewalk); set(66,34,COL.road); set(67,34,COL.sidewalk);
     [ {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
       {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30}
     ].forEach(p=> set(p.x,p.y,COL.road));
 
-    // Hospital near (34,37)
+    // Hospital building near (34,37)
     _hospital = { x0:32, y0:36, x1:36, y1:39, color:COL.hospital };
-    _hospitalDoor = { x:34, y:35 }; // press B here
+    _hospitalDoor = { x:34, y:35 };
     for(let gy=_hospital.y0; gy<=_hospital.y1; gy++)
       for(let gx=_hospital.x0; gx<=_hospital.x1; gx++) fillTile(api,ctx,gx,gy,_hospital.color);
 
-    // base door color (blue) — will turn green in render-post when in range
-    set(_hospitalDoor.x, _hospitalDoor.y, '#3a7bd5'); // blue
+    // Door tile: blue by default; turns green if player within 1 tile
+    const t=api.TILE, pgx=((api.player.x+16)/t|0), pgy=((api.player.y+16)/t|0);
+    const nearDoor = Math.abs(pgx-_hospitalDoor.x)<=1 && Math.abs(pgy-_hospitalDoor.y)<=1;
+    set(_hospitalDoor.x, _hospitalDoor.y, nearDoor ? COL.doorGreen : COL.doorBlue);
 
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
@@ -487,7 +504,6 @@
         walkableOverride: [{x0:69,y0:31,x1:76,y1:31}]
       }
     };
-    // ====== /MANUAL PATCHES ======
   });
 
   // ---------- Collisions & movement ----------
@@ -513,7 +529,7 @@
       else if(_lastLand){ p.x=_lastLand.x; p.y=_lastLand.y; } // walking stays off water
     }
 
-    // keep dock rider icon aligned with player when riding a boat
+    // keep visual boat aligned with player when riding
     if(_inBoat && _ride){ const t=api.TILE; _ride.x = ((p.x/t)|0); _ride.y = ((p.y/t)|0); }
 
     // cars bounce off new buildings
@@ -544,7 +560,7 @@
     (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
     (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
 
-    // Water is solid except the beach column and dock planks
+    // Water is solid except the beach column and dock planks (unless riding)
     const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
     const waterIsSolid = (x,y)=>{
       if(!_inRect(x,y,LAKE)) return false;
@@ -573,37 +589,40 @@
       }
     }
 
-    // Door highlight (blue → green when in range to interact)
-    const door=_hospitalDoor;
-    if(door){
-      const inRange = (Math.abs(gx-door.x)+Math.abs(gy-door.y))<=0; // on the door tile
-      const ctx = document.getElementById('game').getContext('2d');
-      const S=api.DRAW, f=S/api.TILE;
-      const sx=(door.x*api.TILE - api.camera.x)*f, sy=(door.y*api.TILE - api.camera.y)*f;
-      ctx.fillStyle = inRange ? '#2ecc71' : '#3a7bd5';
-      ctx.fillRect(sx,sy,S,S);
+    // Draw player-boat (visual) on top of scene if boating
+    if(_inBoat && _ride){
+      const ctx=document.getElementById('game').getContext('2d');
+      const S=api.DRAW, tpx=(gx*api.TILE - api.camera.x)*(S/api.TILE), tpy=(gy*api.TILE - api.camera.y)*(S/api.TILE);
+      ctx.fillStyle='#7ca7c7';
+      ctx.fillRect(tpx+S*0.18, tpy+S*0.34, S*0.64, S*0.32);
     }
   });
 
-  // ---------- Contextual B button (boat OR hospital door) ----------
-  function onPressB(){
-    if(!IZZA.api?.ready || !isTier2()) return;
-    const api=IZZA.api, t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+  // ---------- Hospital interaction (A still heals if you prefer; B opens shop) ----------
+  function tryHospitalHeal(){
+    // Keep the old A-to-heal single tick (optional convenience)
+    const api=IZZA.api; if(!_hospital || !_hospitalDoor || !api?.ready) return;
+    const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+    if(gx!==_hospitalDoor.x || gy!==_hospitalDoor.y) return;
 
-    // If standing on the hospital door → open modal
-    if(_hospitalDoor && gx===_hospitalDoor.x && gy===_hospitalDoor.y){
-      openHospitalModal();
-      return;
-    }
-    // Otherwise toggle boat state
-    if(_inBoat){ _leaveBoat(); }
-    else{ 
-      const ok=_enterBoat();
-      if(!ok) IZZA.toast?.('Go to a dock to board.');
-    }
+    const player = api.player||{};
+    const heartsMax = player.heartsMax ?? player.maxHearts ?? 3;
+    const hearts    = player.hearts    ?? player.hp       ?? 3;
+    const coins     = api.coins|0;
+
+    if(hearts >= heartsMax) { IZZA.toast?.('Hearts are full!'); return; }
+    if(coins < 100) { IZZA.toast?.('Not enough IZZA Coins'); return; }
+
+    api.coins = coins - 100;
+    if('hearts' in player) player.hearts = Math.min(heartsMax, hearts+1);
+    else if('hp' in player) player.hp = Math.min(heartsMax, hearts+1);
+
+    IZZA.emit?.('coins-change', api.coins);
+    IZZA.toast?.('+1 heart for 100 IC');
   }
-  document.getElementById('btnB')?.addEventListener('click', onPressB);
-  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(); });
+  const btnA = document.getElementById('btnA');
+  btnA?.addEventListener('click', tryHospitalHeal);
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='a') tryHospitalHeal(); });
 
   // ---------- Minimap / Bigmap overlay ----------
   function paintOverlay(id){
@@ -618,6 +637,8 @@
 
     ctx.fillStyle='#6f87b3';
     (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
+
+    // hospital
     if(_hospital){ ctx.fillStyle=COL.hospital; ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,(rectW(_hospital))*sx,(rectH(_hospital))*sy); }
 
     // lake + beach + hotel + lot
@@ -636,19 +657,18 @@
     ctx.fillStyle=COL.hoodPark; ctx.fillRect(HOOD_PARK.x0*sx,HOOD_PARK.y0*sy,(HOOD_PARK.x1-HOOD_PARK.x0+1)*sx,(HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
     ctx.fillStyle=COL.house; HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
 
-    // minimap manual patches
-    ctx.fillStyle='#8a90a0'; // roads
+    // notable manual patches on the minimap
+    ctx.fillStyle='#8a90a0';
     ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
     [
       {x:27,y:24},{x:29,y:24},
       {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
       {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
-      {x:44,y:26},{x:44,y:27},
-      {x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
+      {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
       {x:66,y:34}
     ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
 
-    ctx.fillStyle='#a1a6b0'; // sidewalks
+    ctx.fillStyle='#a1a6b0';
     ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
     ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
     [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
@@ -656,89 +676,4 @@
   }
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
-})();
-
-// --- izza-inspector.js (tap I to toggle) ---
-(function(){
-  let INSPECT=false, SHOW_GRID=false, pick=null, hudMsg='', hudT=0;
-  const btnI = document.getElementById('btnI') || document.getElementById('btnInspect');
-  btnI?.addEventListener('click', ()=>{ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); });
-  window.addEventListener('keydown', (e)=>{
-    const k=e.key.toLowerCase();
-    if(k==='i'){ INSPECT=!INSPECT; flash(`Inspector ${INSPECT?'ON':'OFF'}`); }
-    if(k==='g'){ SHOW_GRID=!SHOW_GRID; flash(`Grid ${SHOW_GRID?'ON':'OFF'}`); }
-  });
-  function flash(txt){ hudMsg = txt; hudT = performance.now()+1200; }
-
-  function tileUnderPointer(ev){
-    const api = IZZA?.api; if(!api?.ready) return null;
-    const rect = game.getBoundingClientRect();
-    const cx = (ev.touches? ev.touches[0].clientX : ev.clientX) - rect.left;
-    const cy = (ev.touches? ev.touches[0].clientY : ev.clientY) - rect.top;
-    const sx = cx * (game.width  / rect.width);
-    const sy = cy * (game.height / rect.height);
-    const worldX = sx * (api.TILE/api.DRAW) + api.camera.x;
-    const worldY = sy * (api.TILE/api.DRAW) + api.camera.y;
-    return { gx: Math.floor(worldX/api.TILE), gy: Math.floor(worldY/api.TILE) };
-  }
-
-  const game = document.getElementById('game');
-  const pickHandler = (ev)=>{
-    if(!INSPECT) return;
-    const p = tileUnderPointer(ev); if(!p) return;
-    pick = p;
-    const txt = `${p.gx},${p.gy}`;
-    navigator.clipboard?.writeText(txt).catch(()=>{});
-    flash(`Picked ${txt} (copied)`);
-  };
-  game.addEventListener('click', pickHandler, {passive:true});
-  game.addEventListener('touchend', pickHandler, {passive:true});
-
-  IZZA.on('render-post', ()=>{
-    const api = IZZA?.api; if(!api?.ready) return;
-    const ctx = game.getContext('2d');
-    const S=api.DRAW, f=S/api.TILE;
-    const w2s=(wx,wy)=>[(wx-api.camera.x)*f,(wy-api.camera.y)*f];
-
-    // HUD with player tile and mode
-    const pgx = ((api.player.x+16)/api.TILE|0), pgy=((api.player.y+16)/api.TILE|0);
-    ctx.save();
-    ctx.font = '12px sans-serif'; ctx.textBaseline='top';
-    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(6,6,190,44);
-    ctx.fillStyle='#e8eef7';
-    ctx.fillText(`Inspector: ${INSPECT?'ON':'OFF'}`, 12, 10);
-    ctx.fillText(`Player (gx,gy): ${pgx}, ${pgy}`, 12, 26);
-    if(hudMsg && performance.now()<hudT){ ctx.fillText(hudMsg, 12, 42); } else { hudMsg=''; }
-    ctx.restore();
-
-    if(SHOW_GRID){
-      ctx.save();
-      ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=Math.max(1, S*0.02);
-      const leftGX = Math.floor(api.camera.x/api.TILE)-1;
-      const topGY  = Math.floor(api.camera.y/api.TILE)-1;
-      const cols = Math.ceil(game.width / S)+3;
-      const rows = Math.ceil(game.height/ S)+3;
-      for(let i=0;i<cols;i++){
-        const gx=leftGX+i, x = (gx*api.TILE - api.camera.x)*f;
-        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,game.height); ctx.stroke();
-      }
-      for(let j=0;j<rows;j++){
-        const gy=topGY+j, y = (gy*api.TILE - api.camera.y)*f;
-        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(game.height,y); ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    if(INSPECT && pick){
-      const [sx,sy]=w2s(pick.gx*api.TILE, pick.gy*api.TILE);
-      ctx.save();
-      ctx.strokeStyle='rgba(0,255,200,0.9)';
-      ctx.lineWidth=Math.max(2, S*0.08);
-      ctx.strokeRect(sx+1, sy+1, S-2, S-2);
-      ctx.fillStyle='rgba(0,255,200,0.10)';
-      ctx.fillRect(sx+1, sy+1, S-2, S-2);
-      ctx.font='12px sans-serif'; ctx.fillStyle='#bff'; ctx.fillText(`${pick.gx},${pick.gy}`, sx+4, sy+4);
-      ctx.restore();
-    }
-  });
 })();
