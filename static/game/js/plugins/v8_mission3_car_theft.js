@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.5-mission3-car-theft+instant-finish+all-features';
+  const BUILD = 'v8.6-mission3-car-theft+park-on-exit';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Keys / storage ----------
@@ -9,7 +9,7 @@
   const POS_KEY      = 'izzaMission3Pos';  // {gx,gy}
   const POS_VER_KEY  = 'izzaMission3PosVer';
   const POS_VERSION  = '1';
-  const MAP_TIER_KEY = 'izzaMapTier';      // '1' | '2'  (map-expander listens)
+  const MAP_TIER_KEY = 'izzaMapTier';      // '1' | '2'
 
   // Start location: 8 tiles LEFT of outside spawn (HQ door)
   const DEFAULT_OFFSET_TILES = { dx: -8, dy: 0 };
@@ -18,13 +18,17 @@
   const HIJACK_RADIUS = 22;    // px distance to allow hijack on B
   const CAR_SPEED     = 120;   // px/s — matches NPC cars
 
+  // ★ Added: parking constants/registry (only used on “exit” when mission completes)
+  const PARK_MS = 5*60*1000;
+  const _m3Parked = []; // {x,y,timeoutId}
+
   // ---------- Locals ----------
   let api = null;
   const m3 = {
-    state: localStorage.getItem(M3_KEY) || 'ready', // 'ready' | 'active' | 'done'
-    gx: 0, gy: 0,          // start square grid
+    state: localStorage.getItem(M3_KEY) || 'ready',
+    gx: 0, gy: 0,
     driving: false,
-    car: null,             // visual-only car overlay that tracks player
+    car: null,
     _savedWalkSpeed: null
   };
 
@@ -72,7 +76,6 @@
     localStorage.setItem(POS_KEY, JSON.stringify({gx:m3.gx, gy:m3.gy}));
     localStorage.setItem(POS_VER_KEY, POS_VERSION);
   }
-  // Dev helper to place the start square at the player
   window._izza_m3_here = function(){
     const {gx,gy}=playerGrid();
     m3.gx=gx; m3.gy=gy;
@@ -175,8 +178,27 @@
 
   // ---------- Mission helpers ----------
   function setM3State(s){ m3.state=s; localStorage.setItem(M3_KEY, s); }
+
+  // ★ Added: park the current car on exit (mission finish), then despawn after 5 min
+  function _parkCarAt(x,y){
+    const entry = { x, y, timeoutId: null };
+    entry.timeoutId = setTimeout(()=>{
+      // remove parked entry, return a traffic car to circulation
+      const idx = _m3Parked.indexOf(entry);
+      if(idx>=0) _m3Parked.splice(idx,1);
+      (api.cars||[]).push({ x, y, dir:(Math.random()<0.5?-1:1), spd:120 });
+    }, PARK_MS);
+    _m3Parked.push(entry);
+  }
+
   function completeM3(){
     setM3State('done');
+
+    // If the player was in a car, "exit" = park it where they finished.
+    if(m3.driving){
+      _parkCarAt(api.player.x, api.player.y);   // ★ Added
+    }
+
     m3.driving=false; m3.car=null;
     // restore walk speed if we boosted it
     if(m3._savedWalkSpeed!=null){ api.player.speed = m3._savedWalkSpeed; m3._savedWalkSpeed=null; }
@@ -213,7 +235,6 @@
     m3.driving = true;
     setM3State('active');
 
-    // same controls as on foot: just run the player faster
     if(m3._savedWalkSpeed==null) m3._savedWalkSpeed = api.player.speed;
     api.player.speed = CAR_SPEED;
 
@@ -273,6 +294,21 @@
     console.log('[M3] ready', { state:m3.state, start:{gx:m3.gx, gy:m3.gy} });
   });
   IZZA.on('update-post', ()=>{ if(m3.driving) updateDriving(); });
-  IZZA.on('render-post', ()=>{ drawStartSquare(); drawEdgeGoal(); drawCarOverlay(); });
+  IZZA.on('render-post', ()=>{
+    drawStartSquare();
+    drawEdgeGoal();
+    drawCarOverlay();
+
+    // ★ Added: draw any parked car left at mission finish
+    if(_m3Parked.length){
+      const ctx=document.getElementById('game').getContext('2d');
+      const S=api.DRAW, t=api.TILE;
+      _m3Parked.forEach(p=>{
+        const sx=w2sX(p.x), sy=w2sY(p.y);
+        ctx.fillStyle='#b8c2d6';
+        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+      });
+    }
+  });
 
 })();
