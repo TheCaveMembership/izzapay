@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.6-mission3-car-theft+park-on-exit';
+  const BUILD = 'v8.7-mission3-car-theft+vehicular-hits+park-on-exit';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Keys / storage ----------
@@ -17,6 +17,9 @@
   // Gameplay knobs
   const HIJACK_RADIUS = 22;    // px distance to allow hijack on B
   const CAR_SPEED     = 120;   // px/s — matches NPC cars
+  const CAR_HIT_RADIUS= 24;    // px radius for vehicular impacts
+  const DROP_GRACE_MS = 1000;  // match Core’s grace window
+  const DROP_OFFSET   = 18;    // small push so drops don’t sit under player
 
   // ★ Added: parking constants/registry (only used on “exit” when mission completes)
   const PARK_MS = 5*60*1000;
@@ -56,6 +59,12 @@
       gx: Math.floor((api.player.x + t/2)/t),
       gy: Math.floor((api.player.y + t/2)/t)
     };
+  }
+  function _dropPos(vx,vy){
+    const dx = vx - api.player.x;
+    const dy = vy - api.player.y;
+    const m  = Math.hypot(dx,dy) || 1;
+    return { x: vx + (dx/m)*DROP_OFFSET, y: vy + (dy/m)*DROP_OFFSET };
   }
 
   // ---------- Positioning ----------
@@ -191,7 +200,7 @@
     _m3Parked.push(entry);
   }
 
-    function completeM3(){
+  function completeM3(){
     setM3State('done');
 
     if(m3.driving){
@@ -275,6 +284,57 @@
     }
   }
 
+  // ---------- Vehicular impact logic ----------
+  function handleVehicularHits(){
+    if(!m3.driving) return;
+
+    const px = api.player.x, py = api.player.y;
+    const now = performance.now();
+
+    // Pedestrians (instant eliminate + coin drop + wanted +1)
+    for(let i=api.pedestrians.length-1; i>=0; i--){
+      const p = api.pedestrians[i];
+      const d = Math.hypot(px - p.x, py - p.y);
+      if(d <= CAR_HIT_RADIUS){
+        // remove the ped immediately
+        api.pedestrians.splice(i,1);
+
+        // drop coins near victim
+        const pos = _dropPos(p.x + api.TILE/2, p.y + api.TILE/2);
+        IZZA.emit('ped-killed', {
+          coins: 25,
+          x: pos.x, y: pos.y,
+          droppedAt: now,
+          noPickupUntil: now + DROP_GRACE_MS
+        });
+
+        // wanted +1 (cap at 5)
+        const w = Math.min(5, (api.player.wanted|0) + 1);
+        api.setWanted(w);
+      }
+    }
+
+    // Cops (instant eliminate + loot + wanted -1 like melee kill)
+    for(let i=api.cops.length-1; i>=0; i--){
+      const c = api.cops[i];
+      const d = Math.hypot(px - c.x, py - c.y);
+      if(d <= CAR_HIT_RADIUS){
+        api.cops.splice(i,1);
+
+        const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
+        IZZA.emit('cop-killed', {
+          cop: c,
+          x: pos.x, y: pos.y,
+          droppedAt: now,
+          noPickupUntil: now + DROP_GRACE_MS
+        });
+
+        const w = Math.max(0, (api.player.wanted|0) - 1);
+        api.setWanted(w);
+      }
+    }
+  }
+
   // ---------- Driving update (instant finish on touch) ----------
   function updateDriving(){
     if(!m3.driving || !m3.car) return;
@@ -282,6 +342,9 @@
     // the overlay car simply tracks the player position
     m3.car.x = api.player.x;
     m3.car.y = api.player.y;
+
+    // vehicular collisions (peds & cops)
+    handleVehicularHits();
 
     // INSTANT FINISH: as soon as player center is inside any gold tile, complete
     const g = goalRectTier1();
