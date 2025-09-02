@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.7-mission3-car-theft+vehicular-hits+park-on-exit';
+  const BUILD = 'v8.8-mission3-car-theft+vehicular-hits+park-on-exit+capture-B';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---------- Keys / storage ----------
@@ -269,19 +269,30 @@
     const {gx,gy}=playerGrid();
     return (Math.abs(gx-m3.gx)+Math.abs(gy-m3.gy))<=1;
   }
-  function onB(){
-    if(localStorage.getItem(M2_KEY)!=='done') return;
-    if(m3.state==='done') return;
+
+  // return true if we handled B (so we can stop propagation)
+  function onB(e){
+    if(localStorage.getItem(M2_KEY)!=='done') return false;
+    if(m3.state==='done') return false;
 
     if(m3.state==='ready' && nearStart()){
+      if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
       startModal(()=>{ setM3State('active'); toast('Find a car and press B to hijack it.'); });
-      return;
+      return true;
     }
     if(m3.state==='active' && !m3.driving){
       const c=nearestCar();
-      if(c){ startDriving(c); }
-      else if(nearStart()){ setM3State('ready'); toast('Mission 3 cancelled.'); }
+      if(c){
+        if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
+        startDriving(c);
+        return true;
+      }else if(nearStart()){
+        if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
+        setM3State('ready'); toast('Mission 3 cancelled.');
+        return true;
+      }
     }
+    return false;
   }
 
   // ---------- Vehicular impact logic ----------
@@ -360,8 +371,19 @@
   IZZA.on('ready', (a)=>{
     api=a;
     loadPos();
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(); });
-    const btnB=document.getElementById('btnB'); if(btnB) btnB.addEventListener('click', onB);
+
+    // capture-phase so B works even with overlays; stop only when we act
+    window.addEventListener('keydown', (e)=>{
+      if((e.key||'').toLowerCase()==='b'){
+        if(onB(e)) { /* handled; propagation already stopped in onB */ }
+      }
+    }, {passive:false, capture:true});
+
+    const btnB=document.getElementById('btnB');
+    if(btnB){
+      btnB.addEventListener('click', (e)=>{ if(onB(e)) {/* handled */} }, true);
+    }
+
     console.log('[M3] ready', { state:m3.state, start:{gx:m3.gx, gy:m3.gy} });
   });
   IZZA.on('update-post', ()=>{ if(m3.driving) updateDriving(); });
