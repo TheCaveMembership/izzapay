@@ -1,29 +1,29 @@
-// IZZA Guns (fire button, iPhone-safe, late-ready tolerant) — v2.3
+// IZZA Guns (mobile FIRE button) — v3.0
 (function(){
-  // ---- Tunables ----
+  // ---------- Tunables ----------
   const TUNE = {
-    speedFallback: 180,     // px/s if no car present
-    bulletLifeMs: 900,
-    hitRadius: 16,
-    pistolDelayMs: 170,     // tap cadence
-    uziIntervalMs: 90       // hold-to-fire cadence
+    speedFallback: 180,   // px/s if we can't read a car speed
+    lifeMs: 900,          // bullet lifetime
+    radius: 16,           // hit radius (world px)
+    pistolDelayMs: 170,   // pistol tap cadence
+    uziIntervalMs: 90     // uzi auto-fire while held
   };
 
-  // ---- State ----
-  const bullets = [];            // {x,y,vx,vy,born}
-  const copHits = new WeakMap(); // hit counter per cop
+  // ---------- State ----------
+  const bullets = [];              // {x,y,vx,vy,born}
+  const copHits = new WeakMap();   // per-cop hit counter
   let lastPistolAt = 0;
   let uziTimer = null;
   let fireBtn = null;
-  let uiTicker = null;
+  let visTicker = null;
+  let placeTicker = null;
 
-  // ---- Small helpers ----
+  // ---------- Helpers ----------
   const now = ()=>performance.now();
   const closeLE = (ax,ay,bx,by,r)=> Math.hypot(ax-bx, ay-by) <= r;
-  const toast = (m,c)=>{ try{ if(typeof bootMsg==='function') bootMsg(m,c); }catch{} };
   const apiReady = ()=> !!(window.IZZA && IZZA.api && IZZA.api.ready);
+  const toast = (m,c)=>{ try{ if(typeof bootMsg==='function') bootMsg(m,c); }catch{} };
 
-  // Inventory reads (works with/without IZZA.api)
   function readInventory(){
     try{
       if(apiReady()) return IZZA.api.getInventory() || {};
@@ -32,33 +32,28 @@
     }catch{ return {}; }
   }
   function writeInventory(inv){
-    try{ if(apiReady()) IZZA.api.setInventory(inv); else localStorage.setItem('izzaInventory', JSON.stringify(inv)); }catch{}
+    try{
+      if(apiReady()) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+    }catch{}
   }
 
-  function pistolEquipped(){
-    const inv = readInventory();
-    return !!(inv.pistol && inv.pistol.equipped);
-  }
-  function uziEquipped(){
-    const inv = readInventory();
-    return !!(inv.uzi && inv.uzi.equipped);
-  }
+  function pistolEquipped(){ const inv = readInventory(); return !!(inv.pistol && inv.pistol.equipped); }
+  function uziEquipped(){    const inv = readInventory(); return !!(inv.uzi    && inv.uzi.equipped); }
   function anyGunOwned(){
     const inv = readInventory();
     return !!((inv.pistol && inv.pistol.owned) || (inv.uzi && inv.uzi.owned));
   }
+  function equippedKind(){ return uziEquipped() ? 'uzi' : (pistolEquipped() ? 'pistol' : null); }
+
   function takeAmmo(kind){
     const inv = readInventory();
-    const slot = inv[kind];
-    if(!slot) return false;
-    const n = (slot.ammo|0);
-    if(n<=0) return false;
-    slot.ammo = n-1;
-    writeInventory(inv);
-    return true;
+    const slot = inv[kind]; if(!slot) return false;
+    const n = (slot.ammo|0); if(n<=0) return false;
+    slot.ammo = n-1; writeInventory(inv); return true;
   }
 
-  // Aim: stick direction if moved; else player facing
+  // Aim: use joystick vector if displaced; else player facing
   function aimVector(){
     const nub = document.getElementById('nub');
     if(nub){
@@ -76,6 +71,7 @@
     }
     return {x:0,y:1};
   }
+
   function bulletSpeed(){
     if(apiReady()){
       const cars = IZZA.api.cars;
@@ -83,8 +79,9 @@
     }
     return TUNE.speedFallback;
   }
+
   function spawnBullet(){
-    if(!apiReady()) return; // wait until game objects exist
+    if(!apiReady()) return;
     const p = IZZA.api.player;
     const dir = aimVector();
     const spd = bulletSpeed();
@@ -97,14 +94,15 @@
     });
   }
 
-  // ---- Shooting logic ----
+  // ---------- Shooting ----------
   function firePistol(){
     const t = now();
     if(t - lastPistolAt < TUNE.pistolDelayMs) return;
-    if(!pistolEquipped()){ toast('Equip the pistol first', '#49a4ff'); lastPistolAt = t; return; }
-    if(!takeAmmo('pistol')){ toast('Pistol: no ammo', '#ff6b6b'); lastPistolAt = t; return; }
+    if(!pistolEquipped()){ toast('Equip the pistol first', '#49a4ff'); lastPistolAt=t; return; }
+    if(!takeAmmo('pistol')){ toast('Pistol: no ammo', '#ff6b6b'); lastPistolAt=t; return; }
     spawnBullet(); lastPistolAt = t;
   }
+
   function uziStart(){
     if(uziTimer) return;
     if(!uziEquipped()){ toast('Equip the uzi first', '#49a4ff'); return; }
@@ -116,24 +114,25 @@
       spawnBullet();
     }, TUNE.uziIntervalMs);
   }
-  function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer=null; } }
+  function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer = null; } }
 
-  // ---- Fire button UI ----
+  // ---------- FIRE button (always visible, disabled if no gun equipped) ----------
   function placeFireButton(){
     if(!fireBtn) return;
     const stick = document.getElementById('stick');
-    const game  = document.getElementById('game');
-    // default fallback
-    let left = window.innerWidth - 90;
-    let top  = (game ? game.getBoundingClientRect().bottom + 12 : window.innerHeight - 180);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = vw - 88;
+    let top  = vh - 200;
+
     if(stick){
       const r = stick.getBoundingClientRect();
-      left = Math.min(r.right + 10, window.innerWidth - 76);
-      top  = Math.max((game ? game.getBoundingClientRect().bottom + 8 : 0), r.top - 10 - 66);
+      // place to the top-right of the stick, vertically centered on it
+      left = Math.min(vw - 76, r.right + 10);
+      top  = Math.max(10, r.top + (r.height/2 - 33));
     }
     fireBtn.style.left = left + 'px';
     fireBtn.style.top  = top  + 'px';
-    fireBtn.style.bottom = ''; // ensure top positioning
+    fireBtn.style.bottom = ''; // force top positioning
   }
 
   function ensureFireButton(){
@@ -143,21 +142,21 @@
     fireBtn.type = 'button';
     fireBtn.textContent = 'FIRE';
     Object.assign(fireBtn.style, {
-      position:'fixed', zIndex:6,
+      position:'fixed', zIndex: 999,   // on top of other UI
       width:'66px', height:'66px', borderRadius:'50%',
       background:'#1f2a3f', color:'#cfe0ff',
       border:'2px solid #2a3550', fontWeight:'700', letterSpacing:'1px',
       boxShadow:'0 2px 10px rgba(0,0,0,.35)',
-      display:'none',
-      touchAction:'none'
+      display:'block', touchAction:'none', opacity:'0.55'
     });
     document.body.appendChild(fireBtn);
 
-    // Inputs
+    // Inputs (tap = pistol, hold = uzi)
     const down = (ev)=>{
       ev.preventDefault(); ev.stopPropagation();
-      if(uziEquipped()) uziStart();
-      else firePistol();
+      const kind = equippedKind();
+      if(!kind) return;
+      if(kind==='uzi') uziStart(); else firePistol();
     };
     const up = (ev)=>{
       ev.preventDefault(); ev.stopPropagation();
@@ -171,43 +170,38 @@
     fireBtn.addEventListener('mouseup',    up,   {passive:false});
     fireBtn.addEventListener('touchcancel',up,   {passive:false});
 
-    // Keep it placed correctly
     placeFireButton();
     window.addEventListener('resize', placeFireButton);
     window.addEventListener('orientationchange', placeFireButton);
-    if(!uiTicker) uiTicker = setInterval(placeFireButton, 800);
-
+    placeTicker = setInterval(placeFireButton, 800); // nudge occasionally
     return fireBtn;
   }
 
-  function syncFireButton(){
-    const btn = ensureFireButton();
-    const owned = anyGunOwned();
-    const equipped = pistolEquipped() || uziEquipped();
-
-    // Visible if you own a gun; enabled when actually equipped
-    btn.style.display = owned ? 'block' : 'none';
-    btn.disabled = !equipped;
-    btn.style.opacity = equipped ? '1' : '0.55';
+  function syncButtonState(){
+    ensureFireButton();
+    // visible ALWAYS, but enabled only when a gun is equipped
+    const ek = equippedKind();
+    fireBtn.disabled = !ek;
+    fireBtn.style.opacity = ek ? '1' : '0.55';
   }
 
-  // ---- Game hooks (or safe polling fallback) ----
+  // ---------- Hooks ----------
   function attachHooks(){
-    // Update: move bullets + collisions + visibility
+    // Move bullets + collisions + keep button state synced
     IZZA.on('update-post', ({dtSec})=>{
-      syncFireButton();
+      syncButtonState();
 
       for(let i=bullets.length-1; i>=0; i--){
         const b = bullets[i];
         b.x += b.vx*dtSec; b.y += b.vy*dtSec;
-        if(now() - b.born > TUNE.bulletLifeMs){ bullets.splice(i,1); continue; }
+        if(now() - b.born > TUNE.lifeMs){ bullets.splice(i,1); continue; }
 
         let hit = false;
 
-        // Pedestrians: instant
+        // Pedestrians: instant eliminate
         for(const p of IZZA.api.pedestrians){
           if(p.state==='blink') continue;
-          if(closeLE(b.x,b.y, p.x+16,p.y+16, TUNE.hitRadius)){
+          if(closeLE(b.x,b.y, p.x+16,p.y+16, TUNE.radius)){
             p.state='blink'; p.blinkT=0.3;
             if(IZZA.api.player.wanted < 5) IZZA.api.setWanted(IZZA.api.player.wanted + 1);
             hit = true; break;
@@ -217,13 +211,13 @@
 
         // Cops: 2 hits
         for(const c of IZZA.api.cops){
-          if(closeLE(b.x,b.y, c.x+16,c.y+16, TUNE.hitRadius)){
+          if(closeLE(b.x,b.y, c.x+16,c.y+16, TUNE.radius)){
             const n=(copHits.get(c)||0)+1; copHits.set(c,n);
             if(n>=2){
-              const idx=IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
+              const idx = IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
               IZZA.api.setWanted(IZZA.api.player.wanted - 1);
 
-              // Match your core's drop event
+              // mirror core's drop event
               const DROP_GRACE_MS=1000, DROP_OFFSET=18;
               const cx=c.x+16, cy=c.y+16;
               const dx=cx-IZZA.api.player.x, dy=cy-IZZA.api.player.y;
@@ -239,7 +233,7 @@
       }
     });
 
-    // Render bullets as small black squares
+    // Render bullets
     IZZA.on('render-post', ()=>{
       const cvs = document.getElementById('game'); if(!cvs) return;
       const ctx = cvs.getContext('2d');
@@ -253,42 +247,32 @@
     });
   }
 
-  // Boot sequence that works whether we load before or after core
-  function startWhenReady(){
-    ensureFireButton();    // create immediately so you can see it as soon as you own a gun
-    syncFireButton();
+  // ---------- Boot ----------
+  function start(){
+    ensureFireButton();
+    // keep the button responsive even before IZZA is ready
+    if(!visTicker) visTicker = setInterval(syncButtonState, 600);
 
-    const tryStart = ()=>{
-      if(!apiReady()) { syncFireButton(); return; }
+    // attach to core when ready
+    const tryAttach = ()=>{
+      if(!apiReady()) return;
       try{
         attachHooks();
-        toast('Guns (fire button) loaded', '#39cc69');
-        clearInterval(poller);
-        // Also keep visibility in sync just in case
-        uiTicker = uiTicker || setInterval(syncFireButton, 600);
+        toast('Guns ready', '#39cc69');
+        clearInterval(attPoll);
       }catch(e){
-        console.error('[guns] hook attach failed', e);
+        console.error('[guns] attach failed', e);
         toast('Guns failed: '+e.message, '#ff6b6b');
-        clearInterval(poller);
+        clearInterval(attPoll);
       }
     };
-
-    // if core is already ready, we’ll attach in the first tick; otherwise we poll
-    const poller = setInterval(tryStart, 80);
-
-    // subscribe to future ready events too (covers late/early)
-    if(window.IZZA && IZZA.on){
-      IZZA.on('ready', tryStart);
-    }else{
-      document.addEventListener('DOMContentLoaded', ()=>{
-        if(window.IZZA && IZZA.on) IZZA.on('ready', tryStart);
-      }, {once:true});
-    }
+    const attPoll = setInterval(tryAttach, 80);
+    if(window.IZZA && IZZA.on) IZZA.on('ready', tryAttach);
   }
 
   if(document.readyState === 'complete' || document.readyState === 'interactive'){
-    startWhenReady();
+    start();
   }else{
-    document.addEventListener('DOMContentLoaded', startWhenReady, {once:true});
+    document.addEventListener('DOMContentLoaded', start, {once:true});
   }
 })();
