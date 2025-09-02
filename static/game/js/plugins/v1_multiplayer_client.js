@@ -1,146 +1,314 @@
 /**
  * IZZA Multiplayer Client — v1.3
- * - Server-backed friends & search (Pi session) is kept
- * - Adds peer-to-peer matchmaking over WS: queue.enter → deterministic pair → match.start
- * - Adds WS invites: invite.send → invite.accept → match.start
- * - Strong hotkey guard (I/B/A) while typing in the lobby
+ * - Friends: request / accept
+ * - Lobby invites with 30-min notification window
+ * - Clear messages when friend is busy (in game) or session ended
+ * - Offer to "Send a notification to join your lobby now?"
+ * - Hotkey guard while typing (I/B/A won't trigger)
+ * - Fallback search (works even if server search not live yet)
  *
- * Works even if your backend only relays WS messages to all connected clients at /api/mp/ws.
- * If you already have a full matcher, this client-side one is only a fallback—server wins.
+ * Expected backend (adjust paths if yours differ):
+ *   GET  /api/mp/me
+ *   GET  /api/mp/friends/list
+ *   GET  /api/mp/friends/search?q=
+ *   POST /api/mp/friends/request         { username }
+ *   POST /api/mp/friends/accept          { username }
+ *   POST /api/mp/lobby/invite            { toUsername }     -> { ok:true } OR { ok:false, reason:'in_game'|'offline'|'ended' }
+ *   POST /api/mp/lobby/notify            { toUsername, ttlSec }  // enqueue a push/inbox notif (ttl suggested: 1800)
+ *   GET  /api/mp/notifications           -> { invites:[{from,mode,lobbyId,sentAt}], requests:[{from,sentAt}] }
+ *   POST /api/mp/lobby/accept            { from }           // accept a pending lobby invite
+ *   POST /api/mp/queue                   { mode }
+ *   POST /api/mp/dequeue
+ *   GET  /api/mp/ranks
+ *   WS   /api/mp/ws  (optional live pushes)
+ *        messages:
+ *          {type:'presence', user, active}
+ *          {type:'notify.invite', from, mode, lobbyId, sentAt}
+ *          {type:'notify.request', from, sentAt}
+ *          {type:'queue.update', mode, pos, estMs}
+ *          {type:'match.found', mode, matchId, players:[{username},...]}
+ *          {type:'match.result', newRanks:{...}}
  */
 (function(){
-  const BUILD='v1.3-mp-client+p2p-matcher+ws-invites';
+  const BUILD='v1.3-mp-client+friends+invites+notifs';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
-    base: '/api/mp',          // REST base (friends/search/ranks)
-    ws:   '/api/mp/ws',       // WebSocket path (must broadcast to all clients)
+    base: '/api/mp',
+    ws:   '/api/mp/ws',
     searchDebounceMs: 250,
-    queueStaleMs: 6000        // consider queue entries stale after 6s of silence
+    minChars: 2,
+    notifTTLsec: 1800  // 30 minutes
   };
 
-  // ---------- STATE ----------
-  let ws=null, wsReady=false, reconnectT=null;
-  let me=null;                // { username, ranks }
-  let friends=[];             // [{username,active}]
-  let lobby=null, ui={};      // DOM refs
-  let lastQueueMode=null;
+  // -------- STATE --------
+  let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
+  let me=null;                // {username, ranks}
+  let friends=[];             // [{username,active,friend:true}]
+  let lobby=null;             // #mpLobby
+  let ui = {};                // cached nodes
+  let notifHost=null;         // in-app notification area
 
-  // In-memory queues (by mode); entries = {user, ts}
-  const liveQueues = { br10:new Map(), v1:new Map(), v2:new Map(), v3:new Map() };
-
-  // ---------- UTIL ----------
+  // -------- UTIL --------
   const $  = (sel,root=document)=> root.querySelector(sel);
   const $$ = (sel,root=document)=> Array.from(root.querySelectorAll(sel));
   const toast = (t)=> (window.IZZA && IZZA.emit) ? IZZA.emit('toast',{text:t}) : console.log('[TOAST]',t);
-  const now = ()=> Date.now();
 
   async function jget(path){
     const r = await fetch(CFG.base+path, {credentials:'include'});
     if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json();
   }
-  function debounced(fn, ms){
-    let t=null, a=null; return (...args)=>{ a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms); };
+  async function jpost(path, body){
+    const r = await fetch(CFG.base+path, {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body||{})
+    });
+    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
   }
-  function uuid(){ return Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2); }
+  function debounced(fn, ms){
+    let t=null, lastArgs=null;
+    return function(...args){ lastArgs=args; clearTimeout(t); t=setTimeout(()=>fn.apply(this,lastArgs), ms); };
+  }
 
-  // ---------- DATA ----------
+  // -------- DATA --------
   async function loadMe(){ me = await jget('/me'); return me; }
-  async function loadFriends(){ const r = await jget('/friends/list'); friends = r.friends||[]; return friends; }
-  async function searchFriends(q){ const r = await jget('/friends/search?q='+encodeURIComponent(q||'')); return r.users||[]; }
-
-  // ---------- RANKS ----------
+  async function loadFriends(){
+    const res = await jget('/friends/list');
+    friends = (res.friends||[]).map(f=>({username:f.username, active:!!f.active, friend:true}));
+    return friends;
+  }
+  async function searchFriendsServer(q){
+    const res = await jget('/friends/search?q='+encodeURIComponent(q||''));
+    return res.users || [];
+  }
   async function refreshRanks(){
+    try{ const res = await jget('/ranks'); if(res && res.ranks) me.ranks = res.ranks; paintRanks(); }
+    catch(e){ /* ignore */ }
+  }
+
+  // -------- FRIEND ACTIONS --------
+  async function sendFriendRequest(username){
     try{
-      const r = await jget('/ranks'); if(r && r.ranks) me.ranks = r.ranks; paintRanks();
-    }catch{}
+      await jpost('/friends/request', { username });
+      toast('Friend request sent to '+username);
+    }catch(e){ toast('Could not send request: '+e.message); }
+  }
+  async function acceptFriend(username){
+    try{
+      await jpost('/friends/accept', { username });
+      toast('You are now friends with '+username);
+      // refresh list so it shows as friend
+      await loadFriends();
+      repaintFriendsArea();
+    }catch(e){ toast('Could not accept: '+e.message); }
+  }
+
+  // -------- LOBBY INVITES --------
+  async function inviteToLobby(username){
+    try{
+      const res = await jpost('/lobby/invite', { toUsername: username });
+      if(res && res.ok){
+        toast('Lobby invite sent to '+username);
+        return;
+      }
+      // Not OK — reason may be 'in_game' | 'offline' | 'ended'
+      const reason = (res && res.reason) || 'unavailable';
+      let msg = 'Your friend cannot join right now.';
+      if(reason==='in_game')  msg = 'Your friend is currently in a game.';
+      if(reason==='offline')  msg = 'Your friend is offline.';
+      if(reason==='ended')    msg = 'Your friend ended their session.';
+      showConfirm(`${msg}\n\nSend them a notification to join your lobby now?`, async ()=>{
+        try{
+          await jpost('/lobby/notify', { toUsername: username, ttlSec: CFG.notifTTLsec });
+          toast('Notification queued for '+username);
+        }catch(e){ toast('Could not queue notification: '+e.message); }
+      });
+    }catch(e){
+      toast('Invite failed: '+e.message);
+    }
+  }
+
+  // -------- NOTIFICATIONS UI --------
+  function ensureNotifHost(){
+    if(notifHost) return notifHost;
+    notifHost=document.createElement('div');
+    Object.assign(notifHost.style,{
+      position:'fixed', right:'12px', top:'12px', zIndex: 1001,
+      display:'flex', flexDirection:'column', gap:'8px'
+    });
+    document.body.appendChild(notifHost);
+    return notifHost;
+  }
+  function showBanner(html, onAccept, onDismiss){
+    const host=ensureNotifHost();
+    const card=document.createElement('div');
+    card.style.cssText='background:#0f1625;border:1px solid #2a3550;border-radius:12px;color:#cfe0ff;padding:10px 12px;min-width:260px;max-width:80vw;box-shadow:0 4px 16px rgba(0,0,0,.35)';
+    card.innerHTML = `
+      <div style="font-weight:700;margin-bottom:6px">Notification</div>
+      <div style="opacity:.9;line-height:1.35;margin-bottom:10px">${html}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        ${onDismiss?'<button class="mp-small ghost">Dismiss</button>':''}
+        ${onAccept?'<button class="mp-small">Accept</button>':''}
+      </div>`;
+    const btns=card.querySelectorAll('button');
+    if(onDismiss) btns[0].onclick=()=>{ card.remove(); onDismiss(); };
+    if(onAccept)  btns[btns.length-1].onclick=()=>{ card.remove(); onAccept(); };
+    host.appendChild(card);
+  }
+  function showConfirm(text, onYes){
+    showBanner(text.replace(/\n/g,'<br>'), onYes, ()=>{});
+  }
+  async function pullNotifications(){
+    try{
+      const res = await jget('/notifications');
+      const invites  = res.invites  || []; // [{from, mode, lobbyId, sentAt}]
+      const requests = res.requests || []; // [{from, sentAt}]
+      // Friend requests
+      requests.forEach(r=>{
+        showBanner(
+          `Friend request from <b>${r.from}</b>`,
+          ()=> acceptFriend(r.from),
+          ()=>{}
+        );
+      });
+      // Lobby invites (still valid if within 30 min server-side TTL)
+      invites.forEach(inv=>{
+        showBanner(
+          `<b>${inv.from}</b> invited you to their lobby${inv.mode?` (${prettyMode(inv.mode)})`:''}. Join?`,
+          async ()=>{
+            try{
+              await jpost('/lobby/accept', { from: inv.from });
+              toast('Joining lobby…');
+            }catch(e){ toast('Could not join: '+e.message); }
+          },
+          ()=>{}
+        );
+      });
+    }catch(e){ /* non-fatal */ }
+  }
+
+  // -------- RENDER HELPERS --------
+  function prettyMode(mode){
+    return mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
   }
   function paintRanks(){
     if(!lobby || !me || !me.ranks) return;
-    const set=(id,key)=>{ const el=$(id,lobby); if(!el) return; const rk=me.ranks[key]||{w:0,l:0}; const s=$('span',el); if(s) s.textContent=`${rk.w}W / ${rk.l}L`; };
+    const set = (id,key)=>{
+      const el = $(id,lobby); if(!el) return;
+      const r = me.ranks[key] || {w:0,l:0};
+      const span = $('span', el); if(span) span.textContent = `${r.w}W / ${r.l}L`;
+    };
     set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
-  // ---------- FRIENDS UI ----------
+  function makeRow(username, active, friend){
+    const row=document.createElement('div');
+    row.className='friend';
+    row.innerHTML = `
+      <div>
+        <div>${username}</div>
+        <div class="meta ${active?'active':'offline'}">${active?'Active':'Offline'}</div>
+      </div>
+      <div style="display:flex; gap:8px">
+        ${friend
+          ? `<button class="mp-small" data-invite="${username}">Invite to Lobby</button>`
+          : `<button class="mp-small" data-request="${username}">Add Friend</button>`}
+        ${active ? `<button class="mp-small outline" data-lobby="${username}">Invite Now</button>` : ''}
+      </div>
+    `;
+    const reqBtn = row.querySelector('[data-request]');
+    if(reqBtn){ reqBtn.addEventListener('click', ()=> sendFriendRequest(username)); }
+    const invBtn = row.querySelector('[data-invite]');
+    if(invBtn){ invBtn.addEventListener('click', ()=> inviteToLobby(username)); }
+    const lobbyBtn = row.querySelector('[data-lobby]');
+    if(lobbyBtn){ lobbyBtn.addEventListener('click', ()=> inviteToLobby(username)); }
+    return row;
+  }
+
   function paintFriends(list){
     if(!lobby) return;
-    const host=$('#mpFriends',lobby); if(!host) return;
+    const host = $('#mpFriends', lobby);
+    if(!host) return;
     host.innerHTML='';
-    list.forEach(fr=>{
+    if(!list.length){
+      const empty=document.createElement('div');
+      empty.className='meta'; empty.style.opacity='0.8';
+      empty.textContent='No friends yet. Search a Pi username above or share your invite link.';
+      host.appendChild(empty); return;
+    }
+    list.forEach(fr=> host.appendChild(makeRow(fr.username, !!fr.active, !!fr.friend)));
+  }
+
+  function paintSearchResults(q, results, usedFallback=false){
+    const host = $('#mpFriends', lobby);
+    if(!host) return;
+    host.innerHTML='';
+    if(results.length){
+      results.forEach(u=> host.appendChild(makeRow(u.username, !!u.active, !!u.friend)));
+      if(usedFallback){
+        const note=document.createElement('div');
+        note.className='meta'; note.style.opacity='0.8';
+        note.textContent='(Showing local/fallback results. Implement /api/mp/friends/search for global results.)';
+        host.appendChild(note);
+      }
+      return;
+    }
+    const none=document.createElement('div');
+    none.className='meta'; none.style.opacity='0.8';
+    none.style.marginBottom='8px';
+    none.textContent='No results.';
+    host.appendChild(none);
+    if(q && q.length>=CFG.minChars){
       const row=document.createElement('div');
       row.className='friend';
       row.innerHTML = `
         <div>
-          <div>${fr.username}</div>
-          <div class="meta ${fr.active?'active':'offline'}">${fr.active?'Active':'Offline'}</div>
+          <div>${q}</div>
+          <div class="meta">Not found — send a friend request?</div>
         </div>
-        <div style="display:flex; gap:8px">
-          <button class="mp-small" data-invite="${fr.username}">Invite</button>
-          ${fr.active?`<button class="mp-small outline" data-join="${fr.username}">Invite to Lobby</button>`:''}
-        </div>`;
-      $('button[data-invite]',row).addEventListener('click', ()=> sendWS({type:'invite.send', to:fr.username}));
-      const joinBtn=$('button[data-join]',row);
-      if(joinBtn) joinBtn.addEventListener('click', ()=> sendWS({type:'invite.send', to:fr.username, lobby:true}));
+        <button class="mp-small" data-request="${q}">Add Friend</button>
+      `;
+      row.querySelector('button').addEventListener('click', ()=> sendFriendRequest(q));
       host.appendChild(row);
-    });
+    }
   }
 
-  // ---------- QUEUE (client-side P2P fallback) ----------
-  function pruneQueue(mode){
-    const m = liveQueues[mode]; const cutoff = now()-CFG.queueStaleMs;
-    for(const [user,entry] of m){ if(entry.ts<cutoff) m.delete(user); }
+  function repaintFriendsArea(){
+    const search = $('#mpSearch', lobby);
+    if(search && search.value.trim().length >= CFG.minChars){
+      // re-run search to include newly accepted friends
+      search.dispatchEvent(new Event('input'));
+    }else{
+      paintFriends(friends);
+    }
   }
-  function enqueue(mode){
-    lastQueueMode = mode;
-    const nice = modeNice(mode);
-    if(ui.queueMsg) ui.queueMsg.textContent = `Queued for ${nice}… (waiting for match)`;
-    // broadcast our presence every 2s while queued
-    sendWS({type:'queue.enter', mode});
-    // also send immediately again after 500ms to speed handshakes
-    setTimeout(()=> sendWS({type:'queue.enter', mode}), 500);
+
+  // -------- PRESENCE / QUEUE --------
+  function updatePresence(user, active){
+    const f = friends.find(x=>x.username===user);
+    if(f){ f.active = !!active; repaintFriendsArea(); }
   }
-  function dequeue(){
-    if(!lastQueueMode) return;
-    sendWS({type:'queue.leave', mode:lastQueueMode});
+
+  async function enqueue(mode){
+    try{
+      lastQueueMode = mode;
+      if(ui.queueMsg) ui.queueMsg.textContent = `Queued for ${prettyMode(mode)}… (waiting for match)`;
+      await jpost('/queue', { mode });
+    }catch(e){
+      if(ui.queueMsg) ui.queueMsg.textContent = '';
+      toast('Queue error: '+e.message);
+    }
+  }
+  async function dequeue(){
+    try{ await jpost('/dequeue'); }catch(e){ /* ignore */ }
     if(ui.queueMsg) ui.queueMsg.textContent = '';
     lastQueueMode=null;
   }
-  function tryPair(mode){
-    pruneQueue(mode);
-    const m = liveQueues[mode];
-    const users = Array.from(m.keys()).sort(); // deterministic order
-    if(users.length<2) return;
-    const meU = me.username;
-    if(!m.has(meU)) return;
 
-    // choose the first two alphabetically to reduce race
-    const a = users[0], b = users[1];
-    if(a!==meU && b!==meU) return; // not our turn to pair
-
-    // winner of tie-break (lexicographically smallest) proposes the match
-    const captain = a;
-    if(meU !== captain) return;
-
-    const matchId = 'm_'+uuid();
-    sendWS({ type:'match.propose', mode, matchId, players:[a,b] });
-  }
-  function startMatch(mode, matchId, players){
-    if(ui.queueMsg) ui.queueMsg.textContent='';
-    // Hide lobby and notify game to start the duel/battle
-    const host=document.getElementById('mpLobby'); if(host) host.style.display='none';
-    window.IZZA?.emit?.('mp-start', { mode, matchId, players });
-    toast('Match found! Starting…');
-  }
-
-  // ---------- WS ----------
-  function sendWS(msg){
-    if(!wsReady || !ws) return;
-    try{
-      const envelope = Object.assign({ from: me?.username || 'player', t: Date.now() }, msg);
-      ws.send(JSON.stringify(envelope));
-    }catch{}
-  }
+  // -------- SOCKET --------
   function connectWS(){
     try{
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -148,176 +316,131 @@
       ws = new WebSocket(url);
     }catch(e){ console.warn('WS failed', e); return; }
 
-    ws.addEventListener('open', ()=>{ wsReady=true; sendWS({type:'hello', username: me?.username }); });
+    ws.addEventListener('open', ()=>{ wsReady=true; });
     ws.addEventListener('close', ()=>{
       wsReady=false; ws=null;
       if(reconnectT) clearTimeout(reconnectT);
-      reconnectT=setTimeout(connectWS, 1200);
+      reconnectT=setTimeout(connectWS, 1500);
     });
     ws.addEventListener('message', (evt)=>{
       let msg=null; try{ msg=JSON.parse(evt.data); }catch{}
-      if(!msg || msg.from===me?.username) return; // ignore our own echoes
+      if(!msg) return;
 
-      // Presence → update friends activity
-      if(msg.type==='presence'){ updatePresence(msg.user||msg.from, !!msg.active); return; }
+      if(msg.type==='presence'){
+        updatePresence(msg.user, !!msg.active);
 
-      // Queue events (P2P fallback)
-      if(msg.type==='queue.enter' && msg.mode){
-        liveQueues[msg.mode].set(msg.from, {ts:now()});
-        // if we are also queued in this mode, attempt to pair
-        if(lastQueueMode===msg.mode) tryPair(msg.mode);
-        return;
-      }
-      if(msg.type==='queue.leave' && msg.mode){
-        liveQueues[msg.mode].delete(msg.from);
-        return;
-      }
+      }else if(msg.type==='notify.request'){
+        showBanner(`Friend request from <b>${msg.from}</b>`, ()=> acceptFriend(msg.from), ()=>{});
 
-      // Match proposals
-      if(msg.type==='match.propose' && msg.players && msg.players.includes(me?.username)){
-        // Accept and announce start
-        sendWS({ type:'match.accept', matchId: msg.matchId, mode: msg.mode, players: msg.players });
-        startMatch(msg.mode, msg.matchId, msg.players);
-        return;
-      }
-      if(msg.type==='match.accept' && msg.players && msg.players.includes(me?.username)){
-        // The peer accepted — ensure we started too (idempotent)
-        startMatch(msg.mode, msg.matchId, msg.players);
-        return;
-      }
+      }else if(msg.type==='notify.invite'){
+        showBanner(
+          `<b>${msg.from}</b> invited you to their lobby${msg.mode?` (${prettyMode(msg.mode)})`:''}. Join?`,
+          async ()=>{
+            try{ await jpost('/lobby/accept', { from: msg.from }); toast('Joining lobby…'); }
+            catch(e){ toast('Could not join: '+e.message); }
+          },
+          ()=>{}
+        );
 
-      // Invites
-      if(msg.type==='invite.send' && msg.to===me?.username){
-        // lightweight accept UI
-        const who = msg.from;
-        const lobbyEl = document.getElementById('mpLobby');
-        if(lobbyEl) lobbyEl.style.display='flex';
-        const m = $('#mpQueueMsg', lobbyEl);
-        if(m) m.textContent = `${who} invited you ${msg.lobby?'to lobby':'to play'} — press “Accept” to start 1v1`;
-        // Show an inline Accept button
-        showInlineAccept(msg);
-        return;
-      }
-      if(msg.type==='invite.accept' && msg.to===me?.username){
-        // Start a 1v1 immediately
-        const mode='v1', matchId='i_'+uuid(), players=[msg.from, msg.to];
-        startMatch(mode, matchId, players);
-        return;
+      }else if(msg.type==='queue.update' && ui.queueMsg){
+        const eta = msg.estMs!=null ? ` ~${Math.ceil(msg.estMs/1000)}s` : '';
+        ui.queueMsg.textContent = `Queued for ${prettyMode(msg.mode)}… (${msg.pos||1} in line${eta})`;
+
+      }else if(msg.type==='match.found'){
+        if(ui.queueMsg) ui.queueMsg.textContent = '';
+        if(lobby){ lobby.style.display='none'; }
+        window.IZZA?.emit?.('mp-start', { mode: msg.mode, matchId: msg.matchId, players: msg.players });
+        toast('Match found! Starting…');
+
+      }else if(msg.type==='match.result'){
+        if(msg.newRanks){ me = me || {}; me.ranks = msg.newRanks; paintRanks(); }
       }
     });
   }
-  function showInlineAccept(inv){
-    const card = $('#mpCard'); if(!card) return;
-    let bar = document.getElementById('mpInlineInvite');
-    if(!bar){
-      bar = document.createElement('div');
-      bar.id='mpInlineInvite';
-      bar.style.cssText='margin-top:10px;display:flex;gap:8px;align-items:center';
-      bar.innerHTML = `<button id="mpAcceptBtn" class="mp-small">Accept</button>
-                       <button id="mpDeclineBtn" class="mp-small">Decline</button>`;
-      card.appendChild(bar);
-      $('#mpDeclineBtn', bar).onclick = ()=> bar.remove();
-      $('#mpAcceptBtn', bar).onclick  = ()=>{
-        sendWS({type:'invite.accept', to: inv.from, from: me?.username});
-        // Also start locally in case peer is slow
-        const mode='v1', matchId='i_'+uuid(), players=[inv.from, me?.username];
-        startMatch(mode, matchId, players);
-      };
+
+  // -------- HOTKEY GUARD (typing) --------
+  function hotkeyGuard(e){
+    const t=e.target;
+    const insideLobby = !!(t && t.closest && t.closest('#mpLobby'));
+    const isEditor = insideLobby && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable);
+    if(!isEditor) return;
+    const k=(e.key||'').toLowerCase();
+    if(k==='i' || k==='b' || k==='a'){
+      e.stopImmediatePropagation();
+      e.stopPropagation();
     }
   }
 
-  // ---------- UI wiring ----------
-  function modeNice(mode){ return mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3'; }
-
+  // -------- LOBBY WIRING --------
   function mountLobby(host){
-    lobby = host || document.getElementById('mpLobby'); if(!lobby) return;
+    lobby = host || document.getElementById('mpLobby');
+    if(!lobby) return;
 
     ui.queueMsg = $('#mpQueueMsg', lobby);
 
-    // Queue buttons
     $$('.mp-btn', lobby).forEach(btn=>{
-      btn.onclick = ()=>{
-        const mode = btn.getAttribute('data-mode');
-        enqueue(mode);
-        // also schedule a quick pairing attempt
-        setTimeout(()=> tryPair(mode), 500);
-      };
+      btn.onclick = ()=> enqueue(btn.getAttribute('data-mode'));
     });
 
-    // Close button: dequeue if queued
-    $('#mpClose', lobby)?.addEventListener('click', ()=> dequeue());
+    $('#mpClose', lobby)?.addEventListener('click', ()=>{ if(lastQueueMode) dequeue(); });
 
-    // Copy invite link (server-provided if available)
     $('#mpCopyLink', lobby)?.addEventListener('click', async ()=>{
       try{
-        const meRes = await jget('/me');
-        const link = (meRes && meRes.inviteLink) || (location.origin + '/auth.html?src=invite&from=' + encodeURIComponent(meRes.username||'player'));
+        const res = await jget('/me');
+        const link = (res && res.inviteLink) || (location.origin + '/auth.html?src=invite&from=' + encodeURIComponent(res.username||'player'));
         await navigator.clipboard.writeText(link);
         toast('Invite link copied');
       }catch(e){
+        toast('Copy failed; showing link…');
         const link = location.origin + '/auth.html';
         prompt('Copy this invite link:', link);
       }
     });
 
-    // Search friends (only Pi-authed + played users are returned by backend)
     const search = $('#mpSearch', lobby);
     if(search){
       const run = debounced(async ()=>{
         const q = search.value.trim();
-        if(!q){ paintFriends(friends); return; }
+        if(q.length < CFG.minChars){ paintFriends(friends); return; }
+
+        const host = $('#mpFriends', lobby);
+        if(host){ host.innerHTML = `<div class="meta" style="opacity:.8">Searching “${q}”…</div>`; }
+
         try{
-          const list = await searchFriends(q);
-          paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
-        }catch{}
+          const list = await searchFriendsServer(q);
+          if(Array.isArray(list) && list.length){
+            // server may include friend:true if already friends
+            paintSearchResults(q, list.map(u=>({username:u.username, active:!!u.active, friend:!!u.friend})));
+            return;
+          }
+          // fallback: local filter of known friends
+          const local = friends.filter(x=> x.username.toLowerCase().includes(q.toLowerCase()));
+          paintSearchResults(q, local, /*usedFallback*/ true);
+        }catch(e){
+          const local = friends.filter(x=> x.username.toLowerCase().includes(q.toLowerCase()));
+          paintSearchResults(q, local, /*usedFallback*/ true);
+        }
       }, CFG.searchDebounceMs);
       search.oninput = run;
-      // mark focus (optional global flag, if other plugins care)
-      search.addEventListener('focus', ()=>{ window.__IZZA_TYPING_IN_LOBBY = true; });
-      search.addEventListener('blur',  ()=>{ window.__IZZA_TYPING_IN_LOBBY = false; });
     }
 
     paintRanks();
     paintFriends(friends);
   }
 
-  // ---------- Presence & hotkey guard ----------
-  function updatePresence(user, active){
-    const f = friends.find(x=>x.username===user);
-    if(f) f.active = !!active;
-    if(lobby && lobby.style.display!=='none'){
-      const q = $('#mpSearch', lobby)?.value || '';
-      const filtered = q ? friends.filter(x=>x.username.toLowerCase().includes(q.toLowerCase())) : friends;
-      paintFriends(filtered);
-    }
-  }
-
-  // Strong guard: stop I/B/A from reaching game while typing in lobby inputs
-  function isLobbyEditor(el){
-    if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); if(!inLobby) return false;
-    return el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable;
-  }
-  function guardKeyEvent(e){
-    if(!isLobbyEditor(e.target)) return;
-    const k=(e.key||'').toLowerCase();
-    if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); }
-  }
-  window.addEventListener('keydown',  guardKeyEvent, {capture:true, passive:false});
-  window.addEventListener('keypress', guardKeyEvent, {capture:true, passive:false});
-  window.addEventListener('keyup',    guardKeyEvent, {capture:true, passive:false});
-
-  // Observe when #mpLobby is shown to (re)mount wiring
+  // Observe when #mpLobby becomes visible to (re)mount
   const obs = new MutationObserver(()=>{
-    const h=document.getElementById('mpLobby'); if(!h) return;
+    const h = document.getElementById('mpLobby');
+    if(!h) return;
     const visible = h.style.display && h.style.display!=='none';
     if(visible) mountLobby(h);
   });
   function bootObserver(){
-    const root=document.body||document.documentElement;
+    const root = document.body || document.documentElement;
     if(root) obs.observe(root, {subtree:true, attributes:true, childList:true, attributeFilter:['style']});
   }
 
-  // ---------- BOOT ----------
+  // -------- BOOT --------
   async function start(){
     try{
       await loadMe();
@@ -325,13 +448,22 @@
       refreshRanks();
       connectWS();
       bootObserver();
-      const h=document.getElementById('mpLobby'); if(h && h.style.display && h.style.display!=='none') mountLobby(h);
+      window.addEventListener('keydown', hotkeyGuard, {capture:true, passive:false});
+      // Pull any outstanding notifications (friend requests / lobby invites still valid)
+      pullNotifications();
+
+      const h=document.getElementById('mpLobby');
+      if(h && h.style.display && h.style.display!=='none') mountLobby(h);
       console.log('[MP] client ready', {user:me?.username, friends:friends.length});
     }catch(e){
       console.error('MP client start failed', e);
       toast('Multiplayer unavailable: '+e.message);
     }
   }
-  if(document.readyState==='complete' || document.readyState==='interactive') start();
-  else addEventListener('DOMContentLoaded', start, {once:true});
+
+  if(document.readyState==='complete' || document.readyState==='interactive'){
+    start();
+  }else{
+    addEventListener('DOMContentLoaded', start, {once:true});
+  }
 })();
