@@ -57,6 +57,12 @@
     function setMsg(t){ msg.textContent = t || ''; }
     function setErr(t){ err.textContent = t || ''; }
 
+    // NEW: read invite params so backend can auto-link friends on first auth
+    const url = new URL(location.href);
+    const inviteFrom = url.searchParams.get('from') || '';
+    const inviteCode = url.searchParams.get('code') || '';
+    const inviteSrc  = url.searchParams.get('src')  || '';
+
     function initPi(){
       if (!window.Pi || !Pi.init) return false;
       try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
@@ -69,19 +75,19 @@
       if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
       setMsg("Requesting authorization…");
 
-      // Minimal scopes for identity. Add 'payments' if you also want payment capabilities here.
       const scopes = ['username'];
-
       function onIncompletePaymentFound(payment){ /* not used here */ }
 
       Pi.authenticate(scopes, onIncompletePaymentFound)
         .then(function(auth){
+          // NEW: cache minimal identity locally for client UI (invite link, headers, etc.)
+          try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
+
           // Reuse your existing /auth/exchange to set session, then jump to the game.
           const form = document.createElement('form');
           form.method = 'POST';
-          form.action = '/auth/exchange'; // existing main-app endpoint
+          form.action = '/auth/exchange';
 
-          // payload same structure your main page sends
           const payload = document.createElement('input');
           payload.type='hidden'; payload.name='payload';
           payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
@@ -92,6 +98,15 @@
           next.type='hidden'; next.name='next';
           next.value = '/izza-game/create';
           form.appendChild(next);
+
+          // NEW: pass invite metadata so server can add inviter to friend list and record referral
+          if(inviteSrc === 'invite'){
+            const from = document.createElement('input');
+            from.type='hidden'; from.name='inviteFrom'; from.value = inviteFrom;
+            const code = document.createElement('input');
+            code.type='hidden'; code.name='inviteCode'; code.value = inviteCode;
+            form.appendChild(from); form.appendChild(code);
+          }
 
           document.body.appendChild(form);
           form.submit();
