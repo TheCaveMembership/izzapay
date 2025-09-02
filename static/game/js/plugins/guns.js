@@ -1,4 +1,4 @@
-// IZZA Guns — v5.2
+// IZZA Guns — v5.3
 // pistols + uzi + grenades, resilient FIRE button/HUD, inventory patching, cops balance
 (function(){
   // ---- tunables / layout ----
@@ -20,13 +20,16 @@
   };
 
   const POINT_BLANK_R = 24;
-  const bullets = [];               // {x,y,vx,vy,born}
-  const grenades = [];              // {x,y,vx,vy,born}
-  const blasts = [];                // {x,y,born}
-  const copHits = new WeakMap();
+  const DROP_GRACE_MS = 1000;
+  const DROP_OFFSET   = 18;
+
+  const bullets  = []; // {x,y,vx,vy,born}
+  const grenades = []; // {x,y,vx,vy,born}
+  const blasts   = []; // {x,y,born}
+  const copHits  = new WeakMap();
 
   let lastPistolAt = 0, uziTimer = null;
-  let fireBtn=null, ammoPill=null, visInterval=null, placeInterval=null;
+  let fireBtn=null, ammoPill=null, visInterval=null, placeInterval=null, hidePoller=null;
 
   const now = ()=>performance.now();
   const apiReady = ()=> !!(window.IZZA && IZZA.api && IZZA.api.ready);
@@ -166,6 +169,23 @@
     return TUNE.speedFallback;
   }
 
+  // ---------- loot helpers ----------
+  function dropFromCop(c){
+    const cx=c.x+16, cy=c.y+16;
+    const dx=cx-IZZA.api.player.x, dy=cy-IZZA.api.player.y;
+    const m=Math.hypot(dx,dy)||1, ux=dx/m, uy=dy/m;
+    const pos={ x:cx+ux*DROP_OFFSET, y:cy+uy*DROP_OFFSET };
+    const t=now();
+    IZZA.emit('cop-killed',{cop:c,x:pos.x,y:pos.y,droppedAt:t,noPickupUntil:t+DROP_GRACE_MS});
+  }
+  function dropFromPed(px,py){
+    const dx=px-IZZA.api.player.x, dy=py-IZZA.api.player.y;
+    const m=Math.hypot(dx,dy)||1, ux=dx/m, uy=dy/m;
+    const pos={ x:px+ux*DROP_OFFSET, y:py+uy*DROP_OFFSET };
+    const t=now();
+    IZZA.emit('ped-killed',{coins:25,x:pos.x,y:pos.y,droppedAt:t,noPickupUntil:t+DROP_GRACE_MS});
+  }
+
   // ---------- cops helpers ----------
   function spawnCop(kind){
     const cvs=document.getElementById('game'); if(!cvs) return;
@@ -200,15 +220,6 @@
   }
 
   // ---------- impacts ----------
-  function dropFromCop(c){
-    const DROP_GRACE_MS=1000, DROP_OFFSET=18;
-    const cx=c.x+16, cy=c.y+16;
-    const dx=cx-IZZA.api.player.x, dy=cy-IZZA.api.player.y;
-    const m=Math.hypot(dx,dy)||1, ux=dx/m, uy=dy/m;
-    const pos={ x:cx+ux*DROP_OFFSET, y:cy+uy*DROP_OFFSET };
-    const t=now();
-    IZZA.emit('cop-killed',{cop:c,x:pos.x,y:pos.y,droppedAt:t,noPickupUntil:t+DROP_GRACE_MS});
-  }
   function applyImpactAt(x, y){
     for(const c of IZZA.api.cops){
       if(Math.hypot(x-(c.x+16), y-(c.y+16)) <= POINT_BLANK_R){
@@ -358,10 +369,29 @@
     updateAmmoHUD();
   }
 
+  // Hide FIRE when any modal/popup is visible; restore automatically.
+  const POPUP_IDS = ['enterModal','shopModal','hospitalShop','invPanel','mapModal','mpLobby','m3Modal','m2Modal'];
+  function anyPopupOpen(){
+    return POPUP_IDS.some(id=>{
+      const el=document.getElementById(id);
+      return el && el.style && el.style.display && el.style.display!=='none';
+    });
+  }
+  function startHidePoller(){
+    if(hidePoller) clearInterval(hidePoller);
+    hidePoller = setInterval(()=>{
+      if(!fireBtn) return;
+      const show = !anyPopupOpen();
+      fireBtn.style.display = show ? 'block' : 'none';
+      if(ammoPill) ammoPill.style.display = show ? 'block' : 'none';
+    }, 150);
+  }
+
   // ---------- key capture (desktop) ----------
   function attachKeyCapture(){
     const onDownCapture = (e)=>{
       const k=(e.key||'').toLowerCase(); if(k!=='a') return;
+      if(anyPopupOpen()) return; // respect hidden state
       const ek=equippedKind(); if(!ek) return;
       e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
       if(ek==='uzi'){ if(!uziTimer) uziStart(); }
@@ -382,6 +412,8 @@
     // keep button/hud in sync
     if(visInterval) clearInterval(visInterval);
     visInterval=setInterval(()=>{ syncFireBtn(); }, 600);
+
+    startHidePoller();
 
     IZZA.on('wanted-changed', ()=> ensureCops());
 
@@ -424,20 +456,25 @@
         if(now()-g.born >= TUNE.grenadeFuseMs){
           blasts.push({x:g.x,y:g.y,born:now()});
           const R=TUNE.grenadeBlastR;
+
+          // pedestrians — eliminate and DROP LOOT
           for(let j=IZZA.api.pedestrians.length-1;j>=0;j--){
             const p=IZZA.api.pedestrians[j];
             if(p.state==='blink') continue;
             if(distLE(g.x,g.y,p.x+16,p.y+16,R)){
+              dropFromPed(p.x+16, p.y+16);
               IZZA.api.pedestrians.splice(j,1);
               if((IZZA.api.player.wanted|0) < 5){ bumpWanted(); }
             }
           }
+          // cops/swat/army — eliminate and DROP LOOT
           for(let j=IZZA.api.cops.length-1;j>=0;j--){
             const c=IZZA.api.cops[j];
             if(distLE(g.x,g.y,c.x+16,c.y+16,R)){
+              dropFromCop(c);
               IZZA.api.cops.splice(j,1);
               IZZA.api.setWanted((IZZA.api.player.wanted|0)-1);
-              ensureCops(); dropFromCop(c);
+              ensureCops();
             }
           }
           grenades.splice(i,1);
@@ -479,7 +516,6 @@
       new MutationObserver((muts)=>{
         for(const m of muts){
           if(m.attributeName==='style' && host.style.display!=='none'){
-            // panel just opened
             setTimeout(ensureGrenadeEquipButton, 0);
           }
         }
