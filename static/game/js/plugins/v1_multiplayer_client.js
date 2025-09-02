@@ -1,21 +1,11 @@
 /**
- * IZZA Multiplayer Client — v1.1
+ * IZZA Multiplayer Client — v1.2
  * - Server-backed friends & search via Pi-auth session
- * - Prevent game hotkeys (I, B, A) while typing in lobby inputs
+ * - Strong hotkey guard: block I/B/A from reaching game while typing in lobby inputs
  * - Queue + presence + ranks wiring
- *
- * Expected backend:
- *   GET  /api/mp/me
- *   GET  /api/mp/friends/list
- *   GET  /api/mp/friends/search?q=
- *   POST /api/mp/invite               { toUsername }
- *   POST /api/mp/queue                { mode:'br10'|'v1'|'v2'|'v3' }
- *   POST /api/mp/dequeue
- *   GET  /api/mp/ranks
- *   WS   /api/mp/ws
  */
 (function(){
-  const BUILD='v1.1-mp-client+hotkey-guard';
+  const BUILD='v1.2-mp-client+strong-hotkey-guard';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -155,7 +145,7 @@
   function connectWS(){
     try{
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const url = proto + '//' + location.host + CFG.ws;
+    const url = proto + '//' + location.host + CFG.ws;
       ws = new WebSocket(url);
     }catch(e){
       console.warn('WS failed', e);
@@ -192,26 +182,27 @@
     });
   }
 
-  // ---------- HOTKEY GUARD (typing) ----------
-  function hotkeyGuard(e){
-    // Only stop bubbling when typing inside the lobby (inputs/textareas/contentEditable).
-    const target = e.target;
-    const insideLobby = !!(target && target.closest && target.closest('#mpLobby'));
-    const isEditor = insideLobby && (
-      target.tagName==='INPUT' ||
-      target.tagName==='TEXTAREA' ||
-      target.isContentEditable
-    );
-    if(!isEditor) return;
-
+  // ---------- STRONG HOTKEY GUARD (typing) ----------
+  function isLobbyEditor(el){
+    if(!el) return false;
+    const inLobby = !!(el.closest && el.closest('#mpLobby'));
+    if(!inLobby) return false;
+    return el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable;
+  }
+  function guardKeyEvent(e){
+    if(!isLobbyEditor(e.target)) return;
     const k = (e.key||'').toLowerCase();
     if(k==='i' || k==='b' || k==='a'){
-      // Do NOT preventDefault (so the letter still types). Just stop it reaching game hotkeys.
+      // Allow the character to type, but block game listeners at capture.
       e.stopImmediatePropagation();
       e.stopPropagation();
-      // Leave default alone.
+      // do NOT preventDefault()
     }
   }
+  // Capture on all common keyboard phases to beat game listeners
+  window.addEventListener('keydown',  guardKeyEvent, {capture:true, passive:false});
+  window.addEventListener('keypress', guardKeyEvent, {capture:true, passive:false});
+  window.addEventListener('keyup',    guardKeyEvent, {capture:true, passive:false});
 
   // ---------- LOBBY WIRING ----------
   function mountLobby(host){
@@ -246,11 +237,14 @@
         if(!q){ paintFriends(friends); return; }
         try{
           const list = await searchFriends(q);
-          // list entries are {username, active, friend?}; only show those our backend says exist
+          // Server returns only players who have Pi-authed & played before
           paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
         }catch(e){ /* ignore */ }
       }, CFG.searchDebounceMs);
       search.oninput = run;
+      // Also mark focus to help any external UI logic
+      search.addEventListener('focus', ()=>{ window.__IZZA_TYPING_IN_LOBBY = true; });
+      search.addEventListener('blur',  ()=>{ window.__IZZA_TYPING_IN_LOBBY = false; });
     }
 
     paintRanks();
@@ -277,9 +271,6 @@
       refreshRanks();
       connectWS();
       bootObserver();
-
-      // Global capture to guard hotkeys while typing in lobby inputs
-      window.addEventListener('keydown', hotkeyGuard, {capture:true, passive:false});
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
