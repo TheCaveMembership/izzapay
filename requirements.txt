@@ -3,8 +3,6 @@ Pillow>=10.0.0
 python-dotenv==1.0.1
 requests==2.32.3
 gunicorn==22.0.0
-
-# Multiplayer / WebSocket support
 flask-sock==0.7.0
 simple-websocket==1.0.0
 gevent==24.2.1
