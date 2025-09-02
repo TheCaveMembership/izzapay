@@ -1,52 +1,35 @@
-// IZZA Guns Plugin (pistol) — v1.3 with diagnostics
+// IZZA Guns Plugin (pistol, iOS-safe) — v1.4
 (function(){
-  // ---- Tunables ----
-  const TUNE = {
-    speedFallback: 180,     // px/s if no car present
-    lifeMs: 800,
-    radius: 16,             // collision radius in world px
-    pistolDelayMs: 170
-  };
+  const TUNE = { speedFallback: 180, lifeMs: 800, radius: 16, pistolDelayMs: 170 };
 
-  const bullets = [];            // {x,y,vx,vy,born}
-  const copHits = new WeakMap(); // pistol hit counter per cop
+  const bullets = [];
+  const copHits = new WeakMap();
   let lastShotAt = 0;
 
   const nowMs = ()=>performance.now();
-  const hasBootMsg = ()=> typeof bootMsg === 'function';
+  const hit = (ax,ay,bx,by,r)=> Math.hypot(ax-bx, ay-by) <= r;
+  const ping = (m,c)=> { try{ if(typeof bootMsg==='function') bootMsg(m,c); else console.log('[guns]',m);}catch{} };
 
-  function log(...a){ try{ console.log('[guns]', ...a); }catch{} }
-  function ping(msg,color){ if(hasBootMsg()) bootMsg(msg,color); else log(msg); }
-
-  function getInv(IZZA){ try{ return IZZA.api.getInventory(); }catch{return{};} }
-  function pistolEquipped(IZZA){
-    const inv = getInv(IZZA);
-    return !!(inv.pistol && inv.pistol.equipped);
-  }
-  function ammoCount(IZZA){
-    const inv = getInv(IZZA);
-    return (inv.pistol && (inv.pistol.ammo|0)) || 0;
-  }
-  function consumePistolAmmo(IZZA){
-    const inv = getInv(IZZA);
-    const n = (inv.pistol && (inv.pistol.ammo|0)) || 0;
+  function inv(IZZA){ try{ return IZZA.api.getInventory(); }catch{return{};} }
+  function pistolEquipped(IZZA){ const v=inv(IZZA); return !!(v.pistol && v.pistol.equipped); }
+  function ammoCount(IZZA){ const v=inv(IZZA); return (v.pistol && (v.pistol.ammo|0)) || 0; }
+  function consumeAmmo(IZZA){
+    const v = inv(IZZA);
+    const n = (v.pistol && (v.pistol.ammo|0)) || 0;
     if(n<=0) return false;
-    inv.pistol.ammo = n-1;
-    IZZA.api.setInventory(inv);
-    return true;
+    v.pistol.ammo = n-1; IZZA.api.setInventory(v); return true;
   }
 
-  // Read joystick aim; fallback to player.facing
+  // Read joystick aim from the nub; fallback to facing
   function aimVector(IZZA){
     const nub = document.getElementById('nub');
     if(nub){
-      // Try inline styles, else computed styles
-      const leftStr = nub.style.left || window.getComputedStyle(nub).left || '40px';
-      const topStr  = nub.style.top  || window.getComputedStyle(nub).top  || '40px';
-      const left = parseFloat(leftStr); const top = parseFloat(topStr);
+      const cs = window.getComputedStyle(nub);
+      const left = parseFloat(nub.style.left || cs.left || '40');
+      const top  = parseFloat(nub.style.top  || cs.top  || '40');
       const dx = left - 40, dy = top - 40;
       const m = Math.hypot(dx,dy);
-      if(m > 2) return { x: dx/m, y: dy/m };
+      if(m>2) return {x:dx/m, y:dy/m};
     }
     const f = IZZA.api.player.facing;
     if(f==='left')  return {x:-1,y:0};
@@ -57,13 +40,12 @@
 
   function bulletSpeed(IZZA){
     const cars = IZZA.api.cars;
-    if(cars && cars.length) return (cars[0].spd||120) * 1.5;
-    return TUNE.speedFallback;
+    return (cars && cars.length ? (cars[0].spd||120)*1.5 : TUNE.speedFallback);
   }
 
-  function spawnBullet(IZZA, forceDir){
+  function spawnBullet(IZZA){
     const p = IZZA.api.player;
-    const dir = forceDir || aimVector(IZZA);
+    const dir = aimVector(IZZA);
     const spd = bulletSpeed(IZZA);
     const mx = p.x + 16 + dir.x*18;
     const my = p.y + 16 + dir.y*18;
@@ -71,99 +53,53 @@
   }
 
   const canFire = ()=> (nowMs() - lastShotAt) >= TUNE.pistolDelayMs;
-
-  function tryFirePistol(IZZA){
+  function fireOnce(IZZA){
     if(!canFire()) return;
     if(!pistolEquipped(IZZA)) return;
-    if(!consumePistolAmmo(IZZA)){
-      ping('Pistol out of ammo','#ff6b6b');
-      lastShotAt = nowMs();
-      return;
-    }
+    if(!consumeAmmo(IZZA)){ ping('Pistol out of ammo', '#ff6b6b'); lastShotAt = nowMs(); return; }
     spawnBullet(IZZA);
     lastShotAt = nowMs();
   }
 
-  const hit = (ax,ay,bx,by,r)=> Math.hypot(ax-bx,ay-by) <= r;
-
-  function killCop(IZZA, c){
-    const i = IZZA.api.cops.indexOf(c);
-    if(i>=0) IZZA.api.cops.splice(i,1);
-    IZZA.api.setWanted(IZZA.api.player.wanted - 1);
-
-    // Drop (mirror core)
-    const DROP_GRACE_MS=1000, DROP_OFFSET=18;
-    const cx=c.x+16, cy=c.y+16;
-    const dx=cx-IZZA.api.player.x, dy=cy-IZZA.api.player.y;
-    const m=Math.hypot(dx,dy)||1, ux=dx/m, uy=dy/m;
-    const pos={ x:cx+ux*DROP_OFFSET, y:cy+uy*DROP_OFFSET };
-    const t=performance.now();
-    IZZA.emit('cop-killed', { cop:c, x:pos.x, y:pos.y, droppedAt:t, noPickupUntil:t+DROP_GRACE_MS });
-  }
-
   function attachInput(IZZA){
-    // Capture phase FIRST to beat core's keydown handler
-    const onDownCapture = (e)=>{
-      const k = e.key?.toLowerCase?.();
-      if(k!=='a') return;
-      if(!pistolEquipped(IZZA)) return;
-      // block core melee doAttack
-      e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-      tryFirePistol(IZZA);
-      log('A captured (pistol). Ammo:', ammoCount(IZZA));
-    };
-    const onUpCapture = (e)=>{
+    // 1) KEYBOARD (desktop): capture before core
+    const kDown = (e)=>{
       const k = e.key?.toLowerCase?.();
       if(k!=='a') return;
       if(!pistolEquipped(IZZA)) return;
       e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+      fireOnce(IZZA);
     };
+    window.addEventListener('keydown', kDown, {capture:true, passive:false});
+    window.addEventListener('keydown', kDown, {capture:false, passive:false});
 
-    window.addEventListener('keydown', onDownCapture, {capture:true, passive:false});
-    window.addEventListener('keyup',   onUpCapture,   {capture:true, passive:false});
+    // 2) iOS/Touch: document-level CAPTURE on touchstart & click, only when target is #btnA
+    const interceptBtnA = (ev)=>{
+      const t = ev.target;
+      if(!t) return;
+      // tap tolerance: allow children inside the button
+      const btn = t.closest ? t.closest('#btnA') : null;
+      if(!btn) return;
+      if(!pistolEquipped(IZZA)) return;
 
-    // Also in bubble phase as a safety net
-    window.addEventListener('keydown', onDownCapture, {capture:false, passive:false});
-    window.addEventListener('keyup',   onUpCapture,   {capture:false, passive:false});
-
-    // On-screen A button
-    const btnA = document.getElementById('btnA');
-    if(btnA){
-      const down=(ev)=>{
-        if(!pistolEquipped(IZZA)) return;
-        ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
-        tryFirePistol(IZZA);
-        log('btnA captured (pistol). Ammo:', ammoCount(IZZA));
-      };
-      btnA.addEventListener('mousedown', down, {passive:false});
-      btnA.addEventListener('touchstart', down, {passive:false});
-      btnA.addEventListener('click', (ev)=>{
-        if(!pistolEquipped(IZZA)) return;
-        ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
-      }, {capture:true, passive:false});
-    }
-
-    // DEBUG: Shift+P spawns a free bullet to verify rendering/collisions
-    window.addEventListener('keydown', (e)=>{
-      if(e.key==='P' || e.key==='p'){
-        if(e.shiftKey){
-          spawnBullet(IZZA); ping('DEBUG: spawned test bullet','#49a4ff'); log('debug test bullet');
-        }
-      }
-    });
+      // stop the core's btnA.click → doAttack()
+      ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
+      fireOnce(IZZA);
+    };
+    // Important: touchstart MUST be non-passive to be allowed to preventDefault on iOS
+    document.addEventListener('touchstart', interceptBtnA, {capture:true, passive:false});
+    document.addEventListener('click',      interceptBtnA, {capture:true, passive:false});
   }
 
   function attachLoops(IZZA){
-    // Sim
+    // Physics + collisions
     IZZA.on('update-post', ({dtSec})=>{
       for(let i=bullets.length-1; i>=0; i--){
         const b = bullets[i];
-        b.x += b.vx*dtSec;
-        b.y += b.vy*dtSec;
-
+        b.x += b.vx*dtSec; b.y += b.vy*dtSec;
         if(nowMs()-b.born > TUNE.lifeMs){ bullets.splice(i,1); continue; }
 
-        // Peds: instant
+        // Pedestrians: instant elimination
         let hitSomething=false;
         for(const p of IZZA.api.pedestrians){
           if(p.state==='blink') continue;
@@ -175,12 +111,23 @@
         }
         if(hitSomething){ bullets.splice(i,1); continue; }
 
-        // Cops: 2 hits
+        // Cops: two pistol hits
         for(const c of IZZA.api.cops){
           if(hit(b.x,b.y, c.x+16,c.y+16, TUNE.radius)){
-            const n = (copHits.get(c)||0) + 1;
-            copHits.set(c,n);
-            if(n>=2) killCop(IZZA,c);
+            const n = (copHits.get(c)||0)+1; copHits.set(c,n);
+            if(n>=2){
+              const idx = IZZA.api.cops.indexOf(c);
+              if(idx>=0) IZZA.api.cops.splice(idx,1);
+              IZZA.api.setWanted(IZZA.api.player.wanted - 1);
+
+              // drop mirror
+              const DROP_GRACE_MS=1000, DROP_OFFSET=18;
+              const cx=c.x+16, cy=c.y+16, dx=cx-IZZA.api.player.x, dy=cy-IZZA.api.player.y;
+              const m=Math.hypot(dx,dy)||1, ux=dx/m, uy=dy/m;
+              const pos={ x:cx+ux*DROP_OFFSET, y:cy+uy*DROP_OFFSET };
+              const t=performance.now();
+              IZZA.emit('cop-killed', { cop:c, x:pos.x, y:pos.y, droppedAt:t, noPickupUntil:t+DROP_GRACE_MS });
+            }
             hitSomething=true; break;
           }
         }
@@ -188,29 +135,23 @@
       }
     });
 
-    // Render (small black squares)
+    // Render bullets (small black squares)
     IZZA.on('render-post', ()=>{
       const cvs = document.getElementById('game'); if(!cvs) return;
       const ctx = cvs.getContext('2d');
-      const TILE=IZZA.api.TILE, DRAW=IZZA.api.DRAW, camera=IZZA.api.camera;
-      const SCALE = DRAW/TILE;
-      ctx.save();
-      ctx.imageSmoothingEnabled=false;
-      ctx.fillStyle = '#000'; // small black bullet
+      const TILE=IZZA.api.TILE, DRAW=IZZA.api.DRAW, camera=IZZA.api.camera, SCALE = DRAW/TILE;
+      ctx.save(); ctx.imageSmoothingEnabled=false; ctx.fillStyle='#000';
       for(const b of bullets){
-        const sx = (b.x - camera.x) * SCALE;
-        const sy = (b.y - camera.y) * SCALE;
+        const sx=(b.x-camera.x)*SCALE, sy=(b.y-camera.y)*SCALE;
         ctx.fillRect(sx-2, sy-2, 4, 4);
       }
       ctx.restore();
     });
   }
 
-  // Boot
-  function init(){
-    if(!window.IZZA || !window.IZZA.on || !window.IZZA.api){ 
-      // Wait for core
-      document.addEventListener('DOMContentLoaded', init, {once:true});
+  function boot(){
+    if(!window.IZZA || !window.IZZA.on){ 
+      document.addEventListener('DOMContentLoaded', boot, {once:true});
       return;
     }
     window.IZZA.on('ready', ()=>{
@@ -218,12 +159,11 @@
         attachInput(window.IZZA);
         attachLoops(window.IZZA);
         ping('Guns plugin loaded', '#39cc69');
-        log('plugin ready');
       }catch(e){
         console.error('[guns] init failed', e);
         ping('Guns plugin init failed: '+e.message, '#ff6b6b');
       }
     });
   }
-  init();
+  boot();
 })();
