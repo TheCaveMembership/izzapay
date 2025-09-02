@@ -1,41 +1,34 @@
-// /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.8-mission3-car-theft+vehicular-hits+park-on-exit+capture-B';
+  const BUILD = 'v8.9-mission3-car-theft+vehicular-hits+vehicleSprites+capB';
   console.log('[IZZA PLAY]', BUILD);
 
-  // ---------- Keys / storage ----------
-  const M2_KEY       = 'izzaMission2';     // 'ready' | 'active' | 'done'
-  const M3_KEY       = 'izzaMission3';     // 'ready' | 'active' | 'done'
-  const POS_KEY      = 'izzaMission3Pos';  // {gx,gy}
+  const M2_KEY       = 'izzaMission2';
+  const M3_KEY       = 'izzaMission3';
+  const POS_KEY      = 'izzaMission3Pos';
   const POS_VER_KEY  = 'izzaMission3PosVer';
   const POS_VERSION  = '1';
-  const MAP_TIER_KEY = 'izzaMapTier';      // '1' | '2'
+  const MAP_TIER_KEY = 'izzaMapTier';
 
-  // Start location: 8 tiles LEFT of outside spawn (HQ door)
   const DEFAULT_OFFSET_TILES = { dx: -8, dy: 0 };
 
-  // Gameplay knobs
-  const HIJACK_RADIUS = 22;    // px distance to allow hijack on B
-  const CAR_SPEED     = 120;   // px/s — matches NPC cars
-  const CAR_HIT_RADIUS= 24;    // px radius for vehicular impacts
-  const DROP_GRACE_MS = 1000;  // match Core’s grace window
-  const DROP_OFFSET   = 18;    // small push so drops don’t sit under player
+  const HIJACK_RADIUS = 22;
+  const CAR_SPEED     = 120;
+  const CAR_HIT_RADIUS= 24;
+  const DROP_GRACE_MS = 1000;
+  const DROP_OFFSET   = 18;
 
-  // ★ Added: parking constants/registry (only used on “exit” when mission completes)
   const PARK_MS = 5*60*1000;
-  const _m3Parked = []; // {x,y,timeoutId}
+  const _m3Parked = []; // {x,y,kind,timeoutId}
 
-  // ---------- Locals ----------
   let api = null;
   const m3 = {
     state: localStorage.getItem(M3_KEY) || 'ready',
     gx: 0, gy: 0,
     driving: false,
-    car: null,
+    car: null,            // {x,y,kind}
     _savedWalkSpeed: null
   };
 
-  // ---------- Utils ----------
   function toast(msg, seconds=2.4){
     let h = document.getElementById('tutHint');
     if(!h){
@@ -55,14 +48,10 @@
   }
   function playerGrid(){
     const t=api.TILE;
-    return {
-      gx: Math.floor((api.player.x + t/2)/t),
-      gy: Math.floor((api.player.y + t/2)/t)
-    };
+    return { gx: Math.floor((api.player.x + t/2)/t), gy: Math.floor((api.player.y + t/2)/t) };
   }
   function _dropPos(vx,vy){
-    const dx = vx - api.player.x;
-    const dy = vy - api.player.y;
+    const dx = vx - api.player.x, dy = vy - api.player.y;
     const m  = Math.hypot(dx,dy) || 1;
     return { x: vx + (dx/m)*DROP_OFFSET, y: vy + (dy/m)*DROP_OFFSET };
   }
@@ -129,19 +118,19 @@
     host.style.display='flex';
   }
 
-  // ---------- Geometry (goal placement) ----------
+  // ---------- Geometry ----------
   function unlockedRectTier1(){ return { x0:18, y0:18, x1:72, y1:42 }; }
   function roadGyTier1(){
     const u = unlockedRectTier1();
     const bW=10, bH=6;
     const bX = Math.floor((u.x0+u.x1)/2) - Math.floor(bW/2);
     const bY = u.y0 + 5;
-    return bY + bH + 1; // main horizontal road Y
+    return bY + bH + 1;
   }
   function goalRectTier1(){
     const u = unlockedRectTier1();
     const gy = roadGyTier1();
-    return { x0: u.x1-1, x1: u.x1, gy }; // 2 gold tiles on right edge
+    return { x0: u.x1-1, x1: u.x1, gy };
   }
 
   // ---------- Drawing ----------
@@ -176,26 +165,36 @@
   }
   function drawCarOverlay(){
     if(!m3.driving || !m3.car) return;
-    const ctx=document.getElementById('game').getContext('2d');
     const S=api.DRAW;
-    const sx=w2sX(m3.car.x), sy=w2sY(m3.car.y);
-    ctx.save();
-    ctx.fillStyle='#c0c8d8';
-    ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
-    ctx.restore();
+    const kind = m3.car.kind || 'sedan';
+    const dir  = 1; // overlay car always faces player direction of travel horizontally; simple right-facing
+    // use core's vehicle drawer
+    (function drawVehicle(){
+      const imgPack = ((window.IZZA||{}).api && kind) ? kind : 'sedan';
+      // Call the same drawer core uses by re-implementing the few lines
+      const sheets = window.VEHICLE_SHEETS || null; // not globally exported; fallback to simple rect
+      const ctx=document.getElementById('game').getContext('2d');
+      const sx=w2sX(m3.car.x), sy=w2sY(m3.car.y);
+      if(!sheets || !sheets[kind] || !sheets[kind].img){
+        ctx.fillStyle='#c0c8d8';
+        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+        return;
+      }
+      ctx.save();
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(sheets[kind].img, 0,0,32,32, sx, sy, S, S);
+      ctx.restore();
+    })();
   }
 
-  // ---------- Mission helpers ----------
   function setM3State(s){ m3.state=s; localStorage.setItem(M3_KEY, s); }
 
-  // ★ Added: park the current car on exit (mission finish), then despawn after 5 min
-  function _parkCarAt(x,y){
-    const entry = { x, y, timeoutId: null };
+  function _parkCarAt(x,y,kind){
+    const entry = { x, y, kind: kind||'sedan', timeoutId: null };
     entry.timeoutId = setTimeout(()=>{
-      // remove parked entry, return a traffic car to circulation
       const idx = _m3Parked.indexOf(entry);
       if(idx>=0) _m3Parked.splice(idx,1);
-      (api.cars||[]).push({ x, y, dir:(Math.random()<0.5?-1:1), spd:120 });
+      (api.cars||[]).push({ x, y, dir:(Math.random()<0.5?-1:1), spd:120, kind: entry.kind });
     }, PARK_MS);
     _m3Parked.push(entry);
   }
@@ -204,7 +203,7 @@
     setM3State('done');
 
     if(m3.driving){
-      _parkCarAt(api.player.x, api.player.y);
+      _parkCarAt(api.player.x, api.player.y, m3.car && m3.car.kind);
     }
     m3.driving=false; m3.car=null;
     if(m3._savedWalkSpeed!=null){ api.player.speed = m3._savedWalkSpeed; m3._savedWalkSpeed=null; }
@@ -214,13 +213,9 @@
       localStorage.setItem('izzaMissions', String(Math.max(cur,3)));
     }catch{}
 
-    // Flip the map tier
     localStorage.setItem(MAP_TIER_KEY, '2');
-
-    // NEW: set a small build stamp and do a one-time soft reload to drop any old painters
     localStorage.setItem('izzaMapLayoutBuild', 'clip_safe_v2');
     setTimeout(()=> {
-      // small guard so we can disable if ever needed from console
       if(!window.__IZZA_SUPPRESS_TIER2_RELOAD){
         location.reload();
       }
@@ -230,11 +225,10 @@
   }
 
   function startDriving(fromCar){
-    // remove hijacked traffic car
     const idx = (api.cars||[]).indexOf(fromCar);
     if(idx>=0) api.cars.splice(idx,1);
 
-    // eject driver as a pedestrian who walks away
+    // eject driver
     try{
       const skins=['ped_m','ped_f','ped_m_dark','ped_f_dark'];
       const skin=skins[(Math.random()*skins.length)|0];
@@ -247,8 +241,7 @@
       });
     }catch{}
 
-    // visual car follows the (now-fast) player
-    m3.car = { x: api.player.x, y: api.player.y };
+    m3.car  = { x: api.player.x, y: api.player.y, kind: fromCar.kind || 'sedan' };
     m3.driving = true;
     setM3State('active');
 
@@ -269,48 +262,33 @@
     const {gx,gy}=playerGrid();
     return (Math.abs(gx-m3.gx)+Math.abs(gy-m3.gy))<=1;
   }
-
-  // return true if we handled B (so we can stop propagation)
   function onB(e){
-    if(localStorage.getItem(M2_KEY)!=='done') return false;
-    if(m3.state==='done') return false;
+    if(localStorage.getItem(M2_KEY)!=='done') return;
+    if(m3.state==='done') return;
 
     if(m3.state==='ready' && nearStart()){
-      if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
       startModal(()=>{ setM3State('active'); toast('Find a car and press B to hijack it.'); });
-      return true;
+      return;
     }
     if(m3.state==='active' && !m3.driving){
       const c=nearestCar();
-      if(c){
-        if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
-        startDriving(c);
-        return true;
-      }else if(nearStart()){
-        if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
-        setM3State('ready'); toast('Mission 3 cancelled.');
-        return true;
-      }
+      if(c){ startDriving(c); }
+      else if(nearStart()){ setM3State('ready'); toast('Mission 3 cancelled.'); }
     }
-    return false;
   }
 
-  // ---------- Vehicular impact logic ----------
+  // Vehicular impact logic
   function handleVehicularHits(){
     if(!m3.driving) return;
-
     const px = api.player.x, py = api.player.y;
     const now = performance.now();
 
-    // Pedestrians (instant eliminate + coin drop + wanted +1)
+    // pedestrians
     for(let i=api.pedestrians.length-1; i>=0; i--){
       const p = api.pedestrians[i];
       const d = Math.hypot(px - p.x, py - p.y);
       if(d <= CAR_HIT_RADIUS){
-        // remove the ped immediately
         api.pedestrians.splice(i,1);
-
-        // drop coins near victim
         const pos = _dropPos(p.x + api.TILE/2, p.y + api.TILE/2);
         IZZA.emit('ped-killed', {
           coins: 25,
@@ -318,20 +296,15 @@
           droppedAt: now,
           noPickupUntil: now + DROP_GRACE_MS
         });
-
-        // wanted +1 (cap at 5)
-        const w = Math.min(5, (api.player.wanted|0) + 1);
-        api.setWanted(w);
+        api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
       }
     }
-
-    // Cops (instant eliminate + loot + wanted -1 like melee kill)
+    // cops
     for(let i=api.cops.length-1; i>=0; i--){
       const c = api.cops[i];
       const d = Math.hypot(px - c.x, py - c.y);
       if(d <= CAR_HIT_RADIUS){
         api.cops.splice(i,1);
-
         const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
         IZZA.emit('cop-killed', {
           cop: c,
@@ -339,25 +312,18 @@
           droppedAt: now,
           noPickupUntil: now + DROP_GRACE_MS
         });
-
-        const w = Math.max(0, (api.player.wanted|0) - 1);
-        api.setWanted(w);
+        api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
     }
   }
 
-  // ---------- Driving update (instant finish on touch) ----------
   function updateDriving(){
     if(!m3.driving || !m3.car) return;
-
-    // the overlay car simply tracks the player position
     m3.car.x = api.player.x;
     m3.car.y = api.player.y;
 
-    // vehicular collisions (peds & cops)
     handleVehicularHits();
 
-    // INSTANT FINISH: as soon as player center is inside any gold tile, complete
     const g = goalRectTier1();
     const t = api.TILE;
     const gx = Math.floor(api.player.x/t);
@@ -372,17 +338,9 @@
     api=a;
     loadPos();
 
-    // capture-phase so B works even with overlays; stop only when we act
-    window.addEventListener('keydown', (e)=>{
-      if((e.key||'').toLowerCase()==='b'){
-        if(onB(e)) { /* handled; propagation already stopped in onB */ }
-      }
-    }, {passive:false, capture:true});
-
-    const btnB=document.getElementById('btnB');
-    if(btnB){
-      btnB.addEventListener('click', (e)=>{ if(onB(e)) {/* handled */} }, true);
-    }
+    // capture-phase so B works even with inventory/map open
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:true});
+    const btnB=document.getElementById('btnB'); if(btnB) btnB.addEventListener('click', onB, true);
 
     console.log('[M3] ready', { state:m3.state, start:{gx:m3.gx, gy:m3.gy} });
   });
@@ -392,14 +350,21 @@
     drawEdgeGoal();
     drawCarOverlay();
 
-    // ★ Added: draw any parked car left at mission finish
+    // draw any parked car left at mission finish (with sprites)
     if(_m3Parked.length){
-      const ctx=document.getElementById('game').getContext('2d');
       const S=api.DRAW, t=api.TILE;
+      const ctx=document.getElementById('game').getContext('2d');
       _m3Parked.forEach(p=>{
         const sx=w2sX(p.x), sy=w2sY(p.y);
-        ctx.fillStyle='#b8c2d6';
-        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+        // simple right-facing draw; road is horizontal anyway
+        const sheets = (window.VEHICLE_SHEETS||{});
+        if(sheets[p.kind] && sheets[p.kind].img){
+          ctx.imageSmoothingEnabled=false;
+          ctx.drawImage(sheets[p.kind].img, 0,0,32,32, sx, sy, S, S);
+        }else{
+          ctx.fillStyle='#b8c2d6';
+          ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+        }
       });
     }
   });
