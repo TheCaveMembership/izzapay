@@ -191,24 +191,32 @@
     _m3Parked.push(entry);
   }
 
-  function completeM3(){
+    function completeM3(){
     setM3State('done');
 
-    // If the player was in a car, "exit" = park it where they finished.
     if(m3.driving){
-      _parkCarAt(api.player.x, api.player.y);   // ★ Added
+      _parkCarAt(api.player.x, api.player.y);
     }
-
     m3.driving=false; m3.car=null;
-    // restore walk speed if we boosted it
     if(m3._savedWalkSpeed!=null){ api.player.speed = m3._savedWalkSpeed; m3._savedWalkSpeed=null; }
-    // bump mission count to >=3 (pistols equip unlock)
+
     try{
       const cur = (api.getMissionCount && api.getMissionCount()) || 0;
       localStorage.setItem('izzaMissions', String(Math.max(cur,3)));
     }catch{}
-    // flip the map-tier flag (map-expander will draw/open Tier 2)
+
+    // Flip the map tier
     localStorage.setItem(MAP_TIER_KEY, '2');
+
+    // NEW: set a small build stamp and do a one-time soft reload to drop any old painters
+    localStorage.setItem('izzaMapLayoutBuild', 'clip_safe_v2');
+    setTimeout(()=> {
+      // small guard so we can disable if ever needed from console
+      if(!window.__IZZA_SUPPRESS_TIER2_RELOAD){
+        location.reload();
+      }
+    }, 80);
+
     toast('Mission 3 complete! New district unlocked & pistols enabled.');
   }
 
