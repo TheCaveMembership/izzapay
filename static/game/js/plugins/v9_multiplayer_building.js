@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.4 (wider west, close fix, B-capture)
+// Multiplayer Building & Lobby — v1.5 (wider west, close fix, B-capture, modal events)
 (function(){
-  const BUILD='v1.4-mp-building+wider-west+close-fix';
+  const BUILD='v1.5-mp-building+wider-west+close-fix+modal-events';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -69,6 +69,7 @@
         </div>
 
         <input id="mpSearch" placeholder="Search friends…"
+               autocomplete="off" spellcheck="false" inputmode="text"
                style="width:100%; margin-top:8px; padding:10px; border-radius:10px;
                       background:#0c1422; border:1px solid #2a3550; color:#cfe0ff">
 
@@ -108,7 +109,7 @@
       };
     });
 
-    // copy invite (client will override with server-provided link)
+    // copy invite (client may override with server-provided link)
     host.querySelector('#mpCopyLink').onclick=async ()=>{
       const link = `${location.origin}/auth.html?src=invite&from=${encodeURIComponent(IZZA?.api?.user?.username||'player')}&code=${Math.random().toString(36).slice(2,10)}`;
       try{ await navigator.clipboard.writeText(link); IZZA.emit?.('toast',{text:'Invite link copied'}); }
@@ -122,8 +123,18 @@
     return host;
   }
 
-  function showModal(){ const host=ensureModal(); host.style.display='flex'; open=true; }
-  function hideModal(){ const host=document.getElementById('mpLobby'); if(host){ host.style.display='none'; } open=false; }
+  function showModal(){
+    const host=ensureModal();
+    host.style.display='flex'; open=true;
+    // Let other plugins (e.g., guns) know a modal opened so they can hide Fire
+    window.IZZA?.emit?.('ui-modal-open', { id:'mpLobby' });
+  }
+  function hideModal(){
+    const host=document.getElementById('mpLobby');
+    if(host){ host.style.display='none'; }
+    open=false;
+    window.IZZA?.emit?.('ui-modal-close', { id:'mpLobby' });
+  }
 
   // ---- building draw ----
   function w2sX(api,wx){ return (wx - api.camera.x) * (api.DRAW/api.TILE); }
