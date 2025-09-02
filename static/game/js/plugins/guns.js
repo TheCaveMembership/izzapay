@@ -1,4 +1,6 @@
-// IZZA Guns — v5.0 (point-blank, higher fire button, live ammo patch, cops spawn, + GRENADES)
+// IZZA Guns — v5.3
+// (point-blank, higher fire button, live ammo patch, cops spawn,
+//  GRENADES w/ EQUIP + same FIRE/A key, auto-hide fire UI on popups)
 (function(){
   // ---- tunables / layout ----
   const TUNE = {
@@ -14,10 +16,9 @@
 
   const POINT_BLANK_R = 24; // extra radius for close-quarters shots
 
-  // --- Grenades (NEW) ---
+  // --- Grenades ---
   const GRENADE = {
-    key: 'g',             // desktop key to throw
-    BTN_W: 44, BTN_H: 44, // mobile button
+    key: 'g',             // OPTIONAL desktop hotkey (FIRE also throws when grenade is equipped)
     fuseMs: 900,          // time until detonation
     throwSpeed: 240,      // px/s
     blastR: 72,           // damage radius
@@ -32,7 +33,6 @@
   // Grenade state
   const grenades = [];   // {x,y,vx,vy,born,stopped,bounces}
   const blasts   = [];   // {x,y,at,lifeMs}
-  let grenadeBtn=null;
 
   const now = ()=>performance.now();
   const apiReady = ()=> !!(window.IZZA && IZZA.api && IZZA.api.ready);
@@ -53,9 +53,20 @@
       else localStorage.setItem('izzaInventory', JSON.stringify(inv));
     }catch{}
   }
+
+  // Equip helpers: now includes grenade
   const pistolEquipped = ()=> !!(readInv().pistol && readInv().pistol.equipped);
   const uziEquipped    = ()=> !!(readInv().uzi && readInv().uzi.equipped);
-  const equippedKind   = ()=> uziEquipped()? 'uzi' : (pistolEquipped()? 'pistol' : null);
+  const grenadeEquipped= ()=> !!(readInv().grenade && readInv().grenade.equipped);
+
+  // Priority: grenade > uzi > pistol (so FIRE throws if grenade is equipped)
+  function equippedKind(){
+    if(grenadeEquipped()) return 'grenade';
+    if(uziEquipped()) return 'uzi';
+    if(pistolEquipped()) return 'pistol';
+    return null;
+  }
+
   function ammoFor(kind){ const s=readInv()[kind]; return (s && (s.ammo|0)) || 0; }
 
   function takeAmmo(kind){
@@ -71,7 +82,10 @@
     try{
       const host = document.getElementById('invPanel');
       if(!host || host.style.display==='none') return;
-      const label = (kind==='uzi' ? 'Uzi' : (kind==='grenade'?'Grenades':'Pistol'));
+      const label =
+        kind==='uzi' ? 'Uzi' :
+        kind==='grenade' ? 'Grenades' :
+        'Pistol';
       const rows = host.querySelectorAll('.inv-item');
       rows.forEach(row=>{
         if(row.textContent.includes(label) && row.textContent.includes('Ammo:')){
@@ -214,6 +228,8 @@
   function uziStart(){
     if(uziTimer || !uziEquipped()) return;
     if(!takeAmmo('uzi')) return;
+    // Important: if grenade equipped, we never run uziStart (equippedKind blocks that),
+    // so this only runs when Uzi is actually equipped.
     spawnBulletOrPointBlank();
     uziTimer=setInterval(()=>{
       if(!uziEquipped()){ uziStop(); return; }
@@ -223,20 +239,11 @@
   }
   function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer=null; } }
 
-  // ================== GRENADES (NEW) ==================
-  function grenadeCount(){
-    const s=readInv().grenade; return (s && (s.ammo|0)) || 0;
-  }
-  function takeGrenade(){
-    const inv=readInv(); const s=inv.grenade; if(!s) return false;
-    const n=(s.ammo|0); if(n<=0) return false;
-    s.ammo=n-1; writeInv(inv);
-    patchInventoryAmmo('grenade', s.ammo);
-    return true;
-  }
+  // ================== GRENADES ==================
+  function grenadeCount(){ return ammoFor('grenade'); }
   function throwGrenade(){
     if(grenadeCount()<=0) return;
-    if(!takeGrenade()) return;
+    if(!takeAmmo('grenade')) return;
 
     const p=IZZA.api.player, dir=aimVector();
     const cx=p.x+16, cy=p.y+16;
@@ -295,7 +302,7 @@
         g.vx *= 0.96;
         g.vy *= 0.96;
 
-        // very light “bounce” on map boundaries (camera edges are fine stand-ins)
+        // very light “bounce” on camera bounds (stand-in)
         const cam=IZZA.api.camera, t=IZZA.api.TILE, S=IZZA.api.DRAW;
         const minX = cam.x - 2*t, maxX = cam.x + (document.getElementById('game').width * t / S) + 2*t;
         const minY = cam.y - 2*t, maxY = cam.y + (document.getElementById('game').height* t / S) + 2*t;
@@ -335,8 +342,20 @@
     });
     document.body.appendChild(ammoPill);
 
-    const down=(ev)=>{ ev.preventDefault(); ev.stopPropagation(); const k=equippedKind(); if(!k) return; if(k==='uzi') uziStart(); else firePistol(); };
-    const up  =(ev)=>{ ev.preventDefault(); ev.stopPropagation(); uziStop(); };
+    // One handler for *everything*:
+    // - If GRENADE is equipped → throwGrenade()
+    // - Else if Uzi equipped → hold to auto-fire
+    // - Else pistol → single shots
+    const down=(ev)=>{
+      ev.preventDefault(); ev.stopPropagation();
+      const ek=equippedKind(); if(!ek) return;
+      if(ek==='grenade'){ throwGrenade(); return; }
+      if(ek==='uzi'){ uziStart(); } else { firePistol(); }
+    };
+    const up  =(ev)=>{
+      ev.preventDefault(); ev.stopPropagation();
+      uziStop();
+    };
     fireBtn.addEventListener('touchstart', down, {passive:false});
     fireBtn.addEventListener('pointerdown',down, {passive:false});
     fireBtn.addEventListener('mousedown',  down, {passive:false});
@@ -350,21 +369,6 @@
     addEventListener('orientationchange', positionFire);
     if(placeInterval) clearInterval(placeInterval);
     placeInterval=setInterval(positionFire, 1000);
-
-    // --- Grenade button (mobile) ---
-    grenadeBtn = document.createElement('button');
-    grenadeBtn.id='btnGrenade';
-    grenadeBtn.textContent='G';
-    Object.assign(grenadeBtn.style,{
-      position:'fixed', zIndex:1000, width:GRENADE.BTN_W+'px', height:GRENADE.BTN_H+'px',
-      right:(TUNE.RIGHT_MARGIN+TUNE.FIRE_W+16)+'px',
-      top:'10px',
-      borderRadius:'8px', background:'#2a1f1f', color:'#ffd4d4',
-      border:'2px solid #553333', fontWeight:'800', boxShadow:'0 2px 10px rgba(0,0,0,.35)', touchAction:'none'
-    });
-    grenadeBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); throwGrenade(); }, {passive:false});
-    document.body.appendChild(grenadeBtn);
-
     return fireBtn;
   }
   function positionFire(){
@@ -387,48 +391,73 @@
       ammoPill.style.left = (left + TUNE.FIRE_W/2 - 22)+'px';
       ammoPill.style.top  = (top + TUNE.FIRE_H + 6)+'px';
     }
-    if(grenadeBtn){
-      grenadeBtn.style.left = (left - GRENADE.BTN_W - 12)+'px';
-      grenadeBtn.style.top  = (top + TUNE.FIRE_H + 6)+'px';
-    }
   }
+
+  // Hide FIRE when *any* popup/backdrop-style UI is open
+  function anyPopupOpen(){
+    const ids = [
+      'enterModal','shopModal','hospitalShop','invPanel','mapModal',
+      'm2Modal','m3Modal','mpLobby'
+    ];
+    for(const id of ids){
+      const el=document.getElementById(id);
+      if(el && el.style && el.style.display && el.style.display!=='none') return true;
+    }
+    // generic backdrops
+    const backs = Array.from(document.querySelectorAll('.backdrop'));
+    if(backs.some(el=> getComputedStyle(el).display!=='none')) return true;
+    return false;
+  }
+
   function updateAmmoHUD(){
     if(!ammoPill) return;
     const ek=equippedKind();
-    const g = grenadeCount();
-    ammoPill.textContent = (ek ? (ek==='uzi'?'Uzi ':'Pstl ') + ammoFor(ek) : '—') + `  |  G:${g}`;
+    const g = ammoFor('grenade');
+    let label='—';
+    if(ek==='grenade') label = `GR:${ammoFor('grenade')}`;
+    else if(ek==='uzi') label = `Uzi ${ammoFor('uzi')} | G:${g}`;
+    else if(ek==='pistol') label = `Pstl ${ammoFor('pistol')} | G:${g}`;
+    ammoPill.textContent = label;
     ammoPill.style.opacity = '1';
   }
   function syncFireBtn(){
     ensureFireBtn();
+
+    // hide when popup open
+    const hidden = anyPopupOpen();
+    fireBtn.style.display = hidden ? 'none' : 'block';
+    if(ammoPill) ammoPill.style.display = hidden ? 'none' : 'block';
+    if(hidden) uziStop();
+
+    // enable/disable by equip
     const ek=equippedKind();
     fireBtn.disabled=!ek;
-    fireBtn.style.opacity = ek ? '1' : '0.55';
+    fireBtn.style.opacity = ek && !hidden ? '1' : '0.55';
     updateAmmoHUD();
   }
 
   // ---------- key capture (desktop) ----------
   function attachKeyCapture(){
     const onDownCapture = (e)=>{
+      if(anyPopupOpen()) return; // respect popups
       const k=(e.key||'').toLowerCase();
       if(k==='a'){
         const ek=equippedKind();
         if(!ek) return;
         e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-        if(ek==='uzi'){ if(!uziTimer) uziStart(); } else { firePistol(); }
+        if(ek==='grenade'){ throwGrenade(); }
+        else if(ek==='uzi'){ if(!uziTimer) uziStart(); }
+        else { firePistol(); }
       }else if(k===GRENADE.key){
+        // optional direct hotkey (even if not equipped)
         e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
         throwGrenade();
       }
     };
     const onUpCapture = (e)=>{
       const k=(e.key||'').toLowerCase();
-      if(k==='a'){
-        if(uziTimer) uziStop();
-        e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-      }
+      if(k==='a'){ if(uziTimer) uziStop(); }
     };
-    // capture first so core's melee doesn't trigger
     window.addEventListener('keydown', onDownCapture, {capture:true, passive:false});
     window.addEventListener('keyup',   onUpCapture,   {capture:true, passive:false});
   }
@@ -437,7 +466,7 @@
   function attachHooks(){
     // Keep button/hud in sync
     if(visInterval) clearInterval(visInterval);
-    visInterval=setInterval(syncFireBtn, 700);
+    visInterval=setInterval(syncFireBtn, 300);
 
     // Track external wanted changes
     IZZA.on('wanted-changed', ()=> ensureCops());
