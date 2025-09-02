@@ -1,9 +1,9 @@
-// v1.13 — boats beside dock (south), board-to-water snap, hide boarded boat,
+// v1.14 — boats beside dock (south), board-to-water snap, hide boarded boat,
 //          boating clamped to LAKE rectangle, NO walking on water,
-//          BUT full dock walking allowed (center-on-dock whitelist),
+//          dock is logically 3 tiles thick (y, y-1, y-2) so you can walk it,
 //          and (gx,gy) position marker.
 (function(){
-  const BUILD='v1.13-boat-plugin+dock-whitelist';
+  const BUILD='v1.14-boat-plugin+dock-3wide';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
@@ -20,7 +20,7 @@
   let inBoat=false;
   let ghostBoat=null;
   let lastLand=null, lastWater=null;
-  let claimedDockId=null; // y (row) of dock we boarded from (hide its parked boat)
+  let claimedDockId=null;
 
   // ====== geometry ======
   function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
@@ -51,16 +51,24 @@
   const centerGY = ()=> ((api.player.y+16)/T()|0);
   const playerGrid = ()=> ({gx:centerGX(), gy:centerGY()});
 
+  // Make the dock logically 3 tiles thick: y, y-1, y-2 (north of plank).
+  // We intentionally DO NOT include y+1 (south) so the parked-boat tile stays water.
   function dockCells(){
     if(!api?.ready) return new Set();
     const {DOCKS}=lakeRects(anchors(api));
     const s=new Set();
-    DOCKS.forEach(d=>{ for(let i=0;i<d.len;i++) s.add((d.x0+i)+'|'+d.y); });
-    // NOTE: if your layout renders the dock 1 tile over the sand, also add BEACH_X planks there.
+    DOCKS.forEach(d=>{
+      for(let i=0;i<d.len;i++){
+        const gx = d.x0+i;
+        s.add(gx+'|'+(d.y));      // plank row
+        s.add(gx+'|'+(d.y-1));    // widen north
+        s.add(gx+'|'+(d.y-2));    // widen north again (3-wide)
+      }
+    });
     return s;
   }
 
-  // WATER is ONLY inside the LAKE rectangle; planks are NOT water.
+  // WATER is ONLY inside the LAKE rectangle; planks (incl. widened rows) are NOT water.
   function tileIsWater(gx,gy){
     const a=anchors(api);
     const {LAKE}=lakeRects(a);
@@ -89,13 +97,14 @@
 
   // ====== parked-boat spot: SOUTH of the dock, centered on planks ======
   function parkedSpotForDock(d){
-    const mid = d.x0 + Math.max(1, Math.floor(d.len/2)); // middle (or 2nd) plank tile
-    return { gx: mid, gy: d.y + 1 };                      // water directly below the plank
+    const mid = d.x0 + Math.max(1, Math.floor(d.len/2));
+    return { gx: mid, gy: d.y + 1 }; // stays water (we didn’t add y+1 to dockCells)
   }
 
-  function dockByY(y){
+  function dockByYBand(y){
     const {DOCKS}=lakeRects(anchors(api));
-    return DOCKS.find(d=> d.y===y) || null;
+    // Consider a small vertical band so widened rows still resolve to this dock
+    return DOCKS.find(d => Math.abs(y - d.y) <= 2) || null;
   }
 
   // Which dock are we on/adjacent to? (returns its row Y as the ID)
@@ -104,9 +113,10 @@
     const {DOCKS}=lakeRects(anchors(api));
     for(const d of DOCKS){
       const tipX = d.x0 + d.len - 1;
-      if(gy===d.y && gx>=d.x0 && gx<=tipX) return d.y;               // on plank
-      if(gy===d.y && (gx===d.x0-1 || gx===tipX+1)) return d.y;       // left/right
-      if((gy===d.y-1 || gy===d.y+1) && gx>=d.x0 && gx<=tipX) return d.y; // above/below
+      // inside the 3-wide band and within x-span
+      if(Math.abs(gy - d.y) <= 2 && gx>=d.x0 && gx<=tipX) return d.y;
+      // a tile immediately left/right of the band
+      if(Math.abs(gy - d.y) <= 2 && (gx===d.x0-1 || gx===tipX+1)) return d.y;
     }
     return null;
   }
@@ -117,14 +127,14 @@
     const gx=centerGX(), gy=centerGY();
     const docks=dockCells();
 
-    // prefer adjacent plank (N,E,S,W)
+    // prefer adjacent dock (N,E,S,W)
     const n=[{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
     for(const p of n) if(docks.has(p.x+'|'+p.y)) return p;
 
     // if right beside beach (only where sand exists), snap onto beach column
     if(gx===BEACH_X+1 && gy>=LAKE.y0 && gy<=LAKE.y1) return {x:BEACH_X, y:gy};
 
-    // if already on plank somehow
+    // if already on dock somehow
     if(docks.has(gx+'|'+gy)) return {x:gx,y:gy};
 
     return null;
@@ -135,7 +145,7 @@
     if(!isTier2() || !api?.ready) return false;
     const {gx,gy}=playerGrid();
     const docks=dockCells();
-    if(docks.has(gx+'|'+gy)) return true; // on plank
+    if(docks.has(gx+'|'+gy)) return true; // on dock
     return docks.has((gx+1)+'|'+gy) || docks.has((gx-1)+'|'+gy) ||
            docks.has(gx+'|'+(gy+1)) || docks.has(gx+'|'+(gy-1));
   }
@@ -144,16 +154,13 @@
     if(inBoat || !isTier2() || !canBoardHere()) return false;
 
     // Snap to the water tile SOUTH of the dock (the parked spot) before boating
-    const dockId = nearestDockIdToPlayer();
-    if(dockId!=null){
-      const d = dockByY(dockId);
-      if(d){
-        const spot = parkedSpotForDock(d);
-        api.player.x = (spot.gx*T()) + 1;
-        api.player.y = (spot.gy*T()) + 1;
-        lastWater = { x: api.player.x, y: api.player.y };
-      }
-      claimedDockId = dockId; // hide this dock’s parked boat
+    const d = dockByYBand(centerGY());
+    if(d){
+      const spot = parkedSpotForDock(d);
+      api.player.x = (spot.gx*T()) + 1;
+      api.player.y = (spot.gy*T()) + 1;
+      lastWater = { x: api.player.x, y: api.player.y };
+      claimedDockId = d.y; // hide this dock’s parked boat
     }else{
       claimedDockId = null;
       lastWater = { x: api.player.x, y: api.player.y };
@@ -202,14 +209,11 @@
     const p=api.player;
 
     if(inBoat){
-      // Boat must stay over water (LAKE). Use all-corners to avoid clipping banks.
       if(allCornersWater()){ lastWater={x:p.x,y:p.y}; }
       else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; }
       if(ghostBoat){ ghostBoat.x=p.x; ghostBoat.y=p.y; }
     }else{
-      // ON FOOT:
-      // Block stepping into water if ANY corner is water,
-      // EXCEPT when the player's center tile is a dock plank (allow full dock walking).
+      // Block water unless you're centered on any of the widened dock tiles
       if(anyCornerWater() && !centerOnDock()){
         if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; }
       }else{
@@ -218,7 +222,6 @@
     }
   });
 
-  // run AFTER other plugins to avoid being pushed around
   function postClamp(){
     if(!api?.ready || !isTier2()) return;
     const p=api.player;
@@ -245,7 +248,7 @@
     ctx.fillStyle='#7ca7c7';
     DOCKS.forEach(d=>{
       if(inBoat && claimedDockId===d.y) return; // hide the boat we took
-      const spot = parkedSpotForDock(d);        // SOUTH (under middle plank)
+      const spot = parkedSpotForDock(d);        // SOUTH (under plank)
       const sx = (spot.gx*t - api.camera.x) * (S/t);
       const sy = (spot.gy*t - api.camera.y) * (S/t);
       ctx.fillRect(sx+S*0.18, sy+S*0.34, S*0.64, S*0.32);
@@ -286,7 +289,16 @@
       ctx.fillRect(sx+S*0.18, sy+S*0.34, S*0.64, S*0.32);
     }
 
-    drawPlayerPosMarker(ctx);
+    // optional: keep the position helper visible
+    // (comment out if not needed)
+    (function drawMarker(){
+      const S=api.DRAW, t=T();
+      const gx=centerGX(), gy=centerGY();
+      const sx=(gx*t - api.camera.x)*(S/t);
+      const sy=(gy*t - api.camera.y)*(S/t);
+      ctx.fillStyle='rgba(80,220,255,0.25)';
+      ctx.fillRect(sx+2, sy+2, S-4, S-4);
+    })();
   });
 
   // ====== boot ======
