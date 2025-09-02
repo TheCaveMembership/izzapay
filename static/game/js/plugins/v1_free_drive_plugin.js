@@ -1,23 +1,22 @@
 // v1_free_drive_plugin.js — free car hijack + parking with 5-min despawn
 (function(){
-  const BUILD='v1.3-free-drive+parking+vehicular-hits+capB+invMapOK';
+  const BUILD='v1.4-free-drive+parking+vehicular-hits+vehicleSprites+capB';
   console.log('[IZZA PLAY]', BUILD);
 
-  const M3_KEY='izzaMission3';           // 'done' when mission 3 finished
-  const HIJACK_RADIUS = 22;              // match mission plugin
+  const M3_KEY='izzaMission3';
+  const HIJACK_RADIUS = 22;
   const CAR_SPEED     = 120;
-  const PARK_MS       = 5*60*1000;       // 5 minutes
+  const PARK_MS       = 5*60*1000;
 
-  // vehicular-hit knobs (match Mission 3)
   const CAR_HIT_RADIUS= 24;
   const DROP_GRACE_MS = 1000;
   const DROP_OFFSET   = 18;
 
   let api=null;
-  let driving=false, car=null, savedWalk=null;
+  let driving=false, car=null, savedWalk=null;  // car: {x,y,kind}
 
-  // simple parked-car registry
-  const parked = []; // {x,y,timeoutId}
+  // parked cars registry
+  const parked = []; // {x,y,kind,timeoutId}
 
   function m3Done(){
     try{
@@ -27,9 +26,8 @@
     }catch{ return false; }
   }
 
-  // IMPORTANT: allow B while inventory/map are open
+  // Allow B even with inventory/map; only block true modals
   function uiReallyBusy(){
-    // leave OUT: invPanel, mapModal, miniWrap — these should NOT block car toggling
     const ids = ['enterModal', 'shopModal', 'hospitalShop'];
     return ids
       .map(id=>document.getElementById(id))
@@ -61,11 +59,9 @@
   }
 
   function startDrivingFromTraffic(fromCar){
-    // remove the traffic car
     const idx=(api.cars||[]).indexOf(fromCar);
     if(idx>=0) api.cars.splice(idx,1);
 
-    // optional: eject driver as a pedestrian
     try{
       const skins=['ped_m','ped_f','ped_m_dark','ped_f_dark'];
       const skin=skins[(Math.random()*skins.length)|0];
@@ -78,7 +74,7 @@
       });
     }catch{}
 
-    car={x:api.player.x,y:api.player.y};
+    car={x:api.player.x,y:api.player.y, kind: fromCar.kind || 'sedan'};
     driving=true;
     if(savedWalk==null) savedWalk=api.player.speed;
     api.player.speed=CAR_SPEED;
@@ -88,7 +84,7 @@
     clearTimeout(entry.car.timeoutId);
     parked.splice(entry.idx,1);
 
-    car={x:api.player.x,y:api.player.y};
+    car={x:api.player.x,y:api.player.y, kind: entry.car.kind || 'sedan'};
     driving=true;
     if(savedWalk==null) savedWalk=api.player.speed;
     api.player.speed=CAR_SPEED;
@@ -97,11 +93,12 @@
 
   function parkHereAndStartTimer(){
     const px = api.player.x, py = api.player.y;
-    const p = { x:px, y:py, timeoutId:null };
+    const kind = (car && car.kind) || 'sedan';
+    const p = { x:px, y:py, kind, timeoutId:null };
     p.timeoutId = setTimeout(()=>{
       const i = parked.indexOf(p);
       if(i>=0) parked.splice(i,1);
-      (api.cars||[]).push({ x:px, y:py, dir:(Math.random()<0.5?-1:1), spd:120 });
+      (api.cars||[]).push({ x:px, y:py, dir:(Math.random()<0.5?-1:1), spd:120, kind });
     }, PARK_MS);
     parked.push(p);
   }
@@ -116,7 +113,6 @@
 
   function onB(e){
     if(!api?.ready || !m3Done()) return;
-    // DO NOT block for inventory/map; only block for truly modal UIs
     if(uiReallyBusy()) return;
 
     if(driving){ stopDrivingAndPark(); return; }
@@ -128,14 +124,12 @@
     if(c){ startDrivingFromTraffic(c); }
   }
 
-  // vehicular hits during free-drive
   function handleVehicularHits(){
     if(!driving) return;
 
     const px = api.player.x, py = api.player.y;
     const now = performance.now();
 
-    // pedestrians: eliminate + coin drop + wanted +1
     for(let i=api.pedestrians.length-1; i>=0; i--){
       const p = api.pedestrians[i];
       const d = Math.hypot(px - p.x, py - p.y);
@@ -152,7 +146,6 @@
       }
     }
 
-    // cops: eliminate + loot + wanted -1
     for(let i=api.cops.length-1; i>=0; i--){
       const c = api.cops[i];
       const d = Math.hypot(px - c.x, py - c.y);
@@ -172,16 +165,13 @@
 
   IZZA.on('ready', (a)=>{
     api=a;
-
-    // B must work even with inventory/map open: bind in CAPTURE phase
     window.addEventListener('keydown', e=>{
       if((e.key||'').toLowerCase()==='b') onB(e);
     }, {capture:true, passive:true});
     const btnB=document.getElementById('btnB');
-    if(btnB) btnB.addEventListener('click', onB, true); // capture
+    btnB && btnB.addEventListener('click', onB, true);
   });
 
-  // keep overlay car aligned + vehicular hits
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
     if(driving && car){
@@ -193,21 +183,30 @@
     if(!api?.ready) return;
     const ctx=document.getElementById('game').getContext('2d');
     const S=api.DRAW, w2sX=wx=>(wx-api.camera.x)*(S/api.TILE), w2sY=wy=>(wy-api.camera.y)*(S/api.TILE);
+    const sheets = (window.VEHICLE_SHEETS||{});
 
-    // draw parked cars
-    ctx.save();
-    ctx.fillStyle='#b8c2d6';
+    // parked cars
     parked.forEach(p=>{
       const sx=w2sX(p.x), sy=w2sY(p.y);
-      ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+      if(sheets[p.kind] && sheets[p.kind].img){
+        ctx.imageSmoothingEnabled=false;
+        ctx.drawImage(sheets[p.kind].img, 0,0,32,32, sx, sy, S, S);
+      }else{
+        ctx.fillStyle='#b8c2d6';
+        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+      }
     });
-    ctx.restore();
 
-    // draw current car
+    // current car
     if(driving && car){
       const sx=w2sX(car.x), sy=w2sY(car.y);
-      ctx.fillStyle='#c0c8d8';
-      ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+      if(sheets[car.kind] && sheets[car.kind].img){
+        ctx.imageSmoothingEnabled=false;
+        ctx.drawImage(sheets[car.kind].img, 0,0,32,32, sx, sy, S, S);
+      }else{
+        ctx.fillStyle='#c0c8d8';
+        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
+      }
     }
   });
 })();
