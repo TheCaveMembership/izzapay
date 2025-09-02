@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.3 (wider west, working Close/backdrop, B-capture)
+// Multiplayer Building & Lobby — v1.4 (wider west, close fix, B-capture)
 (function(){
-  const BUILD='v1.3-mp-building+wider-west+close-fix';
+  const BUILD='v1.4-mp-building+wider-west+close-fix';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -99,31 +99,24 @@
     host.addEventListener('click', (e)=>{ if(e.target===host) { hideModal(); } });
     host.querySelector('#mpClose').addEventListener('click', ()=> hideModal());
 
-    // wire buttons
+    // queue buttons (placeholder; real queue handled by mp client)
     host.querySelectorAll('.mp-btn').forEach(b=>{
       b.onclick=()=>{
         const mode=b.getAttribute('data-mode');
         const nice = mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
         host.querySelector('#mpQueueMsg').textContent = `Queued for ${nice}… (waiting for match)`;
-        setTimeout(()=>{ IZZA.emit?.('toast',{text:`Match found for ${nice}!`}); hideModal(); }, 1200);
       };
     });
 
-    // copy invite
+    // copy invite (client will override with server-provided link)
     host.querySelector('#mpCopyLink').onclick=async ()=>{
       const link = `${location.origin}/auth.html?src=invite&from=${encodeURIComponent(IZZA?.api?.user?.username||'player')}&code=${Math.random().toString(36).slice(2,10)}`;
       try{ await navigator.clipboard.writeText(link); IZZA.emit?.('toast',{text:'Invite link copied'}); }
       catch{ prompt('Copy link:', link); }
     };
 
-    // search (friends list is server-backed in your real implementation)
-    const friendsHost = host.querySelector('#mpFriends');
-    const renderFriends=(filter='')=>{
-      friendsHost.innerHTML='';
-      // no placeholder names anymore; start empty UI
-    };
-    host.querySelector('#mpSearch').oninput=(e)=> renderFriends(e.target.value);
-    renderFriends();
+    // basic empty list; real list painted by mp client
+    host.querySelector('#mpFriends').innerHTML = '';
 
     document.body.appendChild(host);
     return host;
@@ -145,11 +138,11 @@
     const sx=w2sX(api, spot.gx*t), sy=w2sY(api, spot.gy*t);
 
     ctx.save();
-    // wider to the WEST: extend box 0.9 tiles left, total width ~2.1 tiles
+    // wider to the WEST
     ctx.fillStyle='#18243b';
     ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
 
-    // door centered slightly left
+    // door
     const doorX = sx + S*0.10, doorY = sy - S*0.02;
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
     ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
