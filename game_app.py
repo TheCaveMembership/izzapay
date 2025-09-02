@@ -224,3 +224,11 @@ def game_play():
     user_ctx = {"username": urow["pi_username"], "id": urow["id"]}
 
     return render_template("game/play.html", profile=profile_dict, user=user_ctx, t=t)
+
+
+# ----------------- Multiplayer API mounted here -----------------
+from mp_api import mp_bp, sock, mp_boot
+
+# Under game_app, so public paths are /izza-game/api/mp/* and /izza-game/api/mp/ws
+app.register_blueprint(mp_bp, url_prefix="/api/mp")
+mp_boot(app)  # creates mp_* tables and attaches Sock to *this* Flask app
