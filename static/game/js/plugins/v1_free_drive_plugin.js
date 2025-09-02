@@ -1,10 +1,10 @@
 // v1_free_drive_plugin.js — free car hijack + parking with 5-min despawn
 (function(){
-  const BUILD='v1.2-free-drive+parking+vehicular-hits';
+  const BUILD='v1.3-free-drive+parking+vehicular-hits+capB+invMapOK';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';           // 'done' when mission 3 finished
-  const HIJACK_RADIUS = 22;              // match your mission plugin
+  const HIJACK_RADIUS = 22;              // match mission plugin
   const CAR_SPEED     = 120;
   const PARK_MS       = 5*60*1000;       // 5 minutes
 
@@ -26,11 +26,14 @@
       return ms>=3;
     }catch{ return false; }
   }
-  function uiBusy(){
-    const any = ['enterModal','shopModal','hospitalShop','invPanel','mapModal']
+
+  // IMPORTANT: allow B while inventory/map are open
+  function uiReallyBusy(){
+    // leave OUT: invPanel, mapModal, miniWrap — these should NOT block car toggling
+    const ids = ['enterModal', 'shopModal', 'hospitalShop'];
+    return ids
       .map(id=>document.getElementById(id))
       .some(el=> el && el.style.display && el.style.display!=='none');
-    return any;
   }
 
   function distance(ax,ay,bx,by){ return Math.hypot(ax-bx, ay-by); }
@@ -82,7 +85,6 @@
     IZZA.emit?.('toast',{text:'Car hijacked! Press B again to park.'});
   }
   function startDrivingFromParked(entry){
-    // cancel despawn and remove from registry
     clearTimeout(entry.car.timeoutId);
     parked.splice(entry.idx,1);
 
@@ -97,7 +99,6 @@
     const px = api.player.x, py = api.player.y;
     const p = { x:px, y:py, timeoutId:null };
     p.timeoutId = setTimeout(()=>{
-      // despawn parked car after 5 min and return one to traffic
       const i = parked.indexOf(p);
       if(i>=0) parked.splice(i,1);
       (api.cars||[]).push({ x:px, y:py, dir:(Math.random()<0.5?-1:1), spd:120 });
@@ -107,19 +108,19 @@
 
   function stopDrivingAndPark(){
     if(!driving) return;
-    // leave a parked car where we stopped
     parkHereAndStartTimer();
     driving=false; car=null;
     if(savedWalk!=null){ api.player.speed=savedWalk; savedWalk=null; }
     IZZA.emit?.('toast',{text:'Parked. It’ll stay ~5 min.'});
   }
 
-  function onB(){
-    if(!api?.ready || !m3Done() || uiBusy()) return;
+  function onB(e){
+    if(!api?.ready || !m3Done()) return;
+    // DO NOT block for inventory/map; only block for truly modal UIs
+    if(uiReallyBusy()) return;
 
     if(driving){ stopDrivingAndPark(); return; }
 
-    // try nearest parked car first; else traffic car
     const p = nearestParkedCar();
     if(p){ startDrivingFromParked(p); return; }
 
@@ -127,7 +128,7 @@
     if(c){ startDrivingFromTraffic(c); }
   }
 
-  // ---- vehicular hits during free-drive ----
+  // vehicular hits during free-drive
   function handleVehicularHits(){
     if(!driving) return;
 
@@ -147,8 +148,7 @@
           droppedAt: now,
           noPickupUntil: now + DROP_GRACE_MS
         });
-        const w = Math.min(5, (api.player.wanted|0) + 1);
-        api.setWanted(w);
+        api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
       }
     }
 
@@ -165,20 +165,23 @@
           droppedAt: now,
           noPickupUntil: now + DROP_GRACE_MS
         });
-        const w = Math.max(0, (api.player.wanted|0) - 1);
-        api.setWanted(w);
+        api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
     }
   }
 
   IZZA.on('ready', (a)=>{
     api=a;
+
+    // B must work even with inventory/map open: bind in CAPTURE phase
+    window.addEventListener('keydown', e=>{
+      if((e.key||'').toLowerCase()==='b') onB(e);
+    }, {capture:true, passive:true});
     const btnB=document.getElementById('btnB');
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(); }, {passive:true});
-    btnB && btnB.addEventListener('click', onB);
+    if(btnB) btnB.addEventListener('click', onB, true); // capture
   });
 
-  // keep overlay car aligned + simple draw + vehicular hits
+  // keep overlay car aligned + vehicular hits
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
     if(driving && car){
