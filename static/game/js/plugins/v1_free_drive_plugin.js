@@ -1,6 +1,6 @@
 // v1_free_drive_plugin.js — free car hijack + parking with 5-min despawn
 (function(){
-  const BUILD='v1.4-free-drive+parking+vehicular-hits+vehicleSprites+capB';
+  const BUILD='v1.6-free-drive+parking+vehicular-hits+vehicleSprites+larger';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -12,11 +12,38 @@
   const DROP_GRACE_MS = 1000;
   const DROP_OFFSET   = 18;
 
+  // Slightly larger visual scale for vehicles
+  const VEH_DRAW_SCALE = 1.15;
+
   let api=null;
   let driving=false, car=null, savedWalk=null;  // car: {x,y,kind}
 
   // parked cars registry
   const parked = []; // {x,y,kind,timeoutId}
+
+  // ---- shared sprite loader ----
+  const VEH_KINDS = ['sedan','taxi','van','pickup','sport'];
+  function ensureVehicleSheets(){
+    if (window.VEHICLE_SHEETS && window.VEHICLE_SHEETS.__ready) return Promise.resolve(window.VEHICLE_SHEETS);
+    window.VEHICLE_SHEETS = window.VEHICLE_SHEETS || {};
+    const root = '/static/game/sprites/vehicles';
+    const load = (k)=> new Promise((res)=> {
+      const img = new Image();
+      img.onload = ()=> res({k, ok:true, img});
+      img.onerror= ()=> res({k, ok:false, img:null});
+      img.src = `${root}/${k}.png`;
+    });
+    return Promise.all(VEH_KINDS.map(load)).then(list=>{
+      list.forEach(r=>{
+        if(r.ok) window.VEHICLE_SHEETS[r.k] = {img:r.img};
+      });
+      window.VEHICLE_SHEETS.__ready = true;
+      return window.VEHICLE_SHEETS;
+    });
+  }
+  function pickRandomKind(){
+    return VEH_KINDS[(Math.random()*VEH_KINDS.length)|0] || 'sedan';
+  }
 
   function m3Done(){
     try{
@@ -74,11 +101,13 @@
       });
     }catch{}
 
-    car={x:api.player.x,y:api.player.y, kind: fromCar.kind || 'sedan'};
+    // preserve the kind; if traffic lacked it, assign a random one and keep it
+    const kind = fromCar.kind || pickRandomKind();
+    car={x:api.player.x,y:api.player.y, kind};
     driving=true;
     if(savedWalk==null) savedWalk=api.player.speed;
     api.player.speed=CAR_SPEED;
-    IZZA.emit?.('toast',{text:'Car hijacked! Press B again to park.'});
+    IZZA.emit?.('toast',{text:`Car hijacked! (${kind}) Press B again to park.`});
   }
   function startDrivingFromParked(entry){
     clearTimeout(entry.car.timeoutId);
@@ -163,8 +192,30 @@
     }
   }
 
+  function drawVehicleSprite(kind, wx, wy){
+    const ctx=document.getElementById('game').getContext('2d');
+    const sheets = (window.VEHICLE_SHEETS||{});
+    const S=api.DRAW;
+    const sx=(wx - api.camera.x)*(S/api.TILE);
+    const sy=(wy - api.camera.y)*(S/api.TILE);
+
+    const dS = S*VEH_DRAW_SCALE;
+    const off = (dS - S)/2;
+
+    if(sheets[kind] && sheets[kind].img){
+      ctx.save();
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(sheets[kind].img, 0,0,32,32, sx-off, sy-off, dS, dS);
+      ctx.restore();
+    }else{
+      ctx.fillStyle='#c0c8d8';
+      ctx.fillRect(sx + S*0.10 - off, sy + S*0.25 - off, S*0.80*VEH_DRAW_SCALE, S*0.50*VEH_DRAW_SCALE);
+    }
+  }
+
   IZZA.on('ready', (a)=>{
     api=a;
+    ensureVehicleSheets(); // load once and cache globally
     window.addEventListener('keydown', e=>{
       if((e.key||'').toLowerCase()==='b') onB(e);
     }, {capture:true, passive:true});
@@ -181,32 +232,15 @@
   });
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
-    const ctx=document.getElementById('game').getContext('2d');
-    const S=api.DRAW, w2sX=wx=>(wx-api.camera.x)*(S/api.TILE), w2sY=wy=>(wy-api.camera.y)*(S/api.TILE);
-    const sheets = (window.VEHICLE_SHEETS||{});
 
     // parked cars
     parked.forEach(p=>{
-      const sx=w2sX(p.x), sy=w2sY(p.y);
-      if(sheets[p.kind] && sheets[p.kind].img){
-        ctx.imageSmoothingEnabled=false;
-        ctx.drawImage(sheets[p.kind].img, 0,0,32,32, sx, sy, S, S);
-      }else{
-        ctx.fillStyle='#b8c2d6';
-        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
-      }
+      drawVehicleSprite(p.kind || 'sedan', p.x, p.y);
     });
 
     // current car
     if(driving && car){
-      const sx=w2sX(car.x), sy=w2sY(car.y);
-      if(sheets[car.kind] && sheets[car.kind].img){
-        ctx.imageSmoothingEnabled=false;
-        ctx.drawImage(sheets[car.kind].img, 0,0,32,32, sx, sy, S, S);
-      }else{
-        ctx.fillStyle='#c0c8d8';
-        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
-      }
+      drawVehicleSprite(car.kind || 'sedan', car.x, car.y);
     }
   });
 })();
