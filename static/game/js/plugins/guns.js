@@ -1,5 +1,5 @@
 // /static/game/plugins/guns.js
-// IZZA Guns — v4.2 (cops spawn on wanted change + live ammo update in opened inventory)
+// IZZA Guns — v4.4 (point-blank hits, higher fire button, live ammo patch, cops spawn)
 (function(){
   // ---- tunables / layout ----
   const TUNE = {
@@ -9,8 +9,11 @@
     pistolDelayMs: 170,
     uziIntervalMs: 90,
     FIRE_W: 66, FIRE_H: 66,
-    ABOVE_STICK_Y: -110, MIN_TOP: 10, RIGHT_MARGIN: 12
+    ABOVE_STICK_Y: -160,  // higher than before
+    MIN_TOP: 10, RIGHT_MARGIN: 12
   };
+
+  const POINT_BLANK_R = 24; // extra radius for close-quarters shots
 
   const bullets = [];
   const copHits = new WeakMap();
@@ -54,12 +57,10 @@
     try{
       const host = document.getElementById('invPanel');
       if(!host || host.style.display==='none') return;
-      // Find the row that mentions the weapon name and has an "Ammo:" snippet
       const label = (kind==='uzi' ? 'Uzi' : 'Pistol');
       const rows = host.querySelectorAll('.inv-item');
       rows.forEach(row=>{
         if(row.textContent.includes(label) && row.textContent.includes('Ammo:')){
-          // find the small meta div and replace number after "Ammo:"
           const metas = row.querySelectorAll('div');
           metas.forEach(m=>{
             if(m.textContent.includes('Ammo:')){
@@ -92,42 +93,17 @@
     }
     return TUNE.speedFallback;
   }
-  function spawnBullet(){
-    const p=IZZA.api.player, dir=aimVector(), spd=bulletSpeed();
-    bullets.push({ x:p.x+16+dir.x*18, y:p.y+16+dir.y*18, vx:dir.x*spd, vy:dir.y*spd, born:now() });
-  }
-
-  // ---------- firing ----------
-  function firePistol(){
-    const t=now();
-    if(t-lastPistolAt < TUNE.pistolDelayMs) return;
-    if(!pistolEquipped()) return;
-    if(!takeAmmo('pistol')){ lastPistolAt=t; return; }
-    spawnBullet(); lastPistolAt=t;
-  }
-  function uziStart(){
-    if(uziTimer || !uziEquipped()) return;
-    if(!takeAmmo('uzi')) return;
-    spawnBullet();
-    uziTimer=setInterval(()=>{
-      if(!uziEquipped()){ uziStop(); return; }
-      if(!takeAmmo('uzi')){ uziStop(); return; }
-      spawnBullet();
-    }, TUNE.uziIntervalMs);
-  }
-  function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer=null; } }
 
   // ---------- cops: mirror maintainCops behavior ----------
   function spawnCop(kind){
-    // spawn just off current camera edges so they walk in naturally
     const cvs=document.getElementById('game'); if(!cvs) return;
     const S=SCALE(), cam=IZZA.api.camera, t=IZZA.api.TILE;
     const viewW = cvs.width / S, viewH = cvs.height / S;
     const edges = [
-      { x: cam.x - 3*t,               y: cam.y + Math.random()*viewH }, // left
-      { x: cam.x + viewW + 3*t,       y: cam.y + Math.random()*viewH }, // right
-      { x: cam.x + Math.random()*viewW, y: cam.y - 3*t },               // top
-      { x: cam.x + Math.random()*viewW, y: cam.y + viewH + 3*t }        // bottom
+      { x: cam.x - 3*t,                 y: cam.y + Math.random()*viewH }, // left
+      { x: cam.x + viewW + 3*t,         y: cam.y + Math.random()*viewH }, // right
+      { x: cam.x + Math.random()*viewW, y: cam.y - 3*t },                 // top
+      { x: cam.x + Math.random()*viewW, y: cam.y + viewH + 3*t }          // bottom
     ];
     const pos = edges[(Math.random()*edges.length)|0];
 
@@ -156,6 +132,82 @@
     IZZA.api.setWanted((IZZA.api.player.wanted|0)+1);
     ensureCops();
   }
+
+  // ---------- point-blank impact ----------
+  function applyImpactAt(x, y){
+    // Cops first (two hits to eliminate)
+    for(const c of IZZA.api.cops){
+      if(Math.hypot(x-(c.x+16), y-(c.y+16)) <= POINT_BLANK_R){
+        const n=(copHits.get(c)||0)+1; copHits.set(c,n);
+        if(n>=2){
+          const idx=IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
+          IZZA.api.setWanted((IZZA.api.player.wanted|0)-1);
+          ensureCops();
+          // Drop (copy of core)
+          const DROP_GRACE_MS=1000, DROP_OFFSET=18;
+          const cx=c.x+16, cy=c.y+16;
+          const dx=cx-IZZA.api.player.x, dy=cy-IZZA.api.player.y;
+          const m=Math.hypot(dx,dy)||1, ux=dx/m, uy=dy/m;
+          const pos={ x:cx+ux*DROP_OFFSET, y:cy+uy*DROP_OFFSET };
+          const t=performance.now();
+          IZZA.emit('cop-killed',{cop:c,x:pos.x,y:pos.y,droppedAt:t,noPickupUntil:t+DROP_GRACE_MS});
+        }
+        return true;
+      }
+    }
+    // Peds next (instant)
+    for(const p of IZZA.api.pedestrians){
+      if(p.state==='blink') continue;
+      if(Math.hypot(x-(p.x+16), y-(p.y+16)) <= POINT_BLANK_R){
+        p.state='blink'; p.blinkT=0.3;
+        if((IZZA.api.player.wanted|0) < 5){ bumpWanted(); }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ---------- projectile spawn OR point-blank ----------
+  function spawnBulletOrPointBlank(){
+    const p=IZZA.api.player, dir=aimVector();
+    const playerCX = p.x+16, playerCY = p.y+16;
+
+    // 1) Point-blank check at player's center
+    if(applyImpactAt(playerCX, playerCY)){
+      return false; // impact consumed the shot
+    }
+
+    // 2) Otherwise spawn a projectile from the muzzle
+    const spd=bulletSpeed();
+    bullets.push({
+      x: playerCX + dir.x*18,
+      y: playerCY + dir.y*18,
+      vx: dir.x*spd,
+      vy: dir.y*spd,
+      born: now()
+    });
+    return true;
+  }
+
+  // ---------- firing ----------
+  function firePistol(){
+    const t=now();
+    if(t-lastPistolAt < TUNE.pistolDelayMs) return;
+    if(!pistolEquipped()) return;
+    if(!takeAmmo('pistol')){ lastPistolAt=t; return; }
+    spawnBulletOrPointBlank(); lastPistolAt=t;
+  }
+  function uziStart(){
+    if(uziTimer || !uziEquipped()) return;
+    if(!takeAmmo('uzi')) return;
+    spawnBulletOrPointBlank();
+    uziTimer=setInterval(()=>{
+      if(!uziEquipped()){ uziStop(); return; }
+      if(!takeAmmo('uzi')){ uziStop(); return; }
+      spawnBulletOrPointBlank();
+    }, TUNE.uziIntervalMs);
+  }
+  function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer=null; } }
 
   // ---------- UI: fire button (higher) + ammo pill ----------
   function ensureFireBtn(){
@@ -199,7 +251,7 @@
     const stick=document.getElementById('stick');
     const vw=innerWidth, vh=innerHeight;
     let left = vw - (TUNE.FIRE_W + TUNE.RIGHT_MARGIN);
-    let top  = Math.max(TUNE.MIN_TOP, Math.round(vh*0.28));
+    let top  = Math.max(TUNE.MIN_TOP, Math.round(vh*0.22)); // a bit higher baseline
     if(stick){
       const r=stick.getBoundingClientRect();
       left = Math.min(vw - (TUNE.FIRE_W + TUNE.RIGHT_MARGIN), r.right + 10);
@@ -231,18 +283,39 @@
     updateAmmoHUD();
   }
 
+  // ---------- key capture (desktop) ----------
+  function attachKeyCapture(){
+    const onDownCapture = (e)=>{
+      const k=(e.key||'').toLowerCase();
+      if(k!=='a') return;
+      const ek=equippedKind();
+      if(!ek) return;
+      e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+      if(ek==='uzi'){ if(!uziTimer) uziStart(); } else { firePistol(); }
+    };
+    const onUpCapture = (e)=>{
+      const k=(e.key||'').toLowerCase();
+      if(k!=='a') return;
+      if(uziTimer) uziStop();
+      e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+    };
+    // capture first so core's melee doesn't trigger
+    window.addEventListener('keydown', onDownCapture, {capture:true, passive:false});
+    window.addEventListener('keyup',   onUpCapture,   {capture:true, passive:false});
+  }
+
   // ---------- hooks ----------
   function attachHooks(){
     // Keep button/hud in sync
     if(visInterval) clearInterval(visInterval);
     visInterval=setInterval(syncFireBtn, 700);
 
-    // If someone else changes wanted, we still mirror cop count
+    // Track external wanted changes
     IZZA.on('wanted-changed', ()=> ensureCops());
 
     // Sim update
     IZZA.on('update-post', ({dtSec})=>{
-      // position/sync UI (low-cost)
+      // position/sync UI (lightweight)
       syncFireBtn();
 
       for(let i=bullets.length-1;i>=0;i--){
@@ -252,18 +325,18 @@
 
         let hitSomething=false;
 
-        // Peds: 1 hit + raise wanted (and spawn units)
+        // Peds: instant + raise wanted (and spawn units)
         for(const p of IZZA.api.pedestrians){
           if(p.state==='blink') continue;
           if(distLE(b.x,b.y,p.x+16,p.y+16,TUNE.hitRadius)){
             p.state='blink'; p.blinkT=0.3;
-            if((IZZA.api.player.wanted|0) < 5){ bumpWanted(); } // ensures cops appear
+            if((IZZA.api.player.wanted|0) < 5){ bumpWanted(); }
             hitSomething=true; break;
           }
         }
         if(hitSomething){ bullets.splice(i,1); continue; }
 
-        // Cops: need 2 hits to eliminate
+        // Cops: 2 hits
         for(const c of IZZA.api.cops){
           if(distLE(b.x,b.y,c.x+16,c.y+16,TUNE.hitRadius)){
             const n=(copHits.get(c)||0)+1; copHits.set(c,n);
@@ -298,12 +371,14 @@
       }
       ctx.restore();
     });
+
+    // Desktop key support
+    attachKeyCapture();
   }
 
   // ---------- boot ----------
   function start(){
     ensureFireBtn(); syncFireBtn();
-    // wait for core, then attach
     const tryAttach=()=>{ if(apiReady()){ attachHooks(); clearInterval(poller); } };
     const poller=setInterval(tryAttach, 80);
     if(window.IZZA && IZZA.on) IZZA.on('ready', tryAttach);
