@@ -49,20 +49,23 @@
   }
 
   // ---------- Lakefront ----------
-  function lakeRects(a){
-    const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
-    const BEACH_X = LAKE.x0 - 1;
-    const DOCKS = [
-      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },
-      { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
-    ];
-    // Hotel pulled back behind sidewalk + lot
-    const hotelTopY = LAKE.y0 - 5; // 1 sidewalk + 3 lot + 1 buffer
-    const HOTEL  = { x0: LAKE.x0+3, y0: hotelTopY, x1: LAKE.x0+9, y1: hotelTopY+3 };
-    const LOT    = { x0: HOTEL.x0,  y0: HOTEL.y1+1, x1: HOTEL.x1,  y1: HOTEL.y1+3 };
+function lakeRects(a){
+  const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
+  const BEACH_X = LAKE.x0 - 1;
 
-    return {LAKE, BEACH_X, DOCKS, HOTEL, LOT};
-  }
+  // Docks extend one tile onto the beach (start at BEACH_X), keeping their old water reach.
+  const DOCKS = [
+    { x0: BEACH_X, y: LAKE.y0+4,  len: 4 }, // previously x0: LAKE.x0, len: 3
+    { x0: BEACH_X, y: LAKE.y0+12, len: 5 }  // previously x0: LAKE.x0, len: 4
+  ];
+
+  // Hotel pulled back behind sidewalk + lot
+  const hotelTopY = LAKE.y0 - 5; // 1 sidewalk + 3 lot + 1 buffer
+  const HOTEL  = { x0: LAKE.x0+3, y0: hotelTopY, x1: LAKE.x0+9, y1: hotelTopY+3 };
+  const LOT    = { x0: HOTEL.x0,  y0: HOTEL.y1+1, x1: HOTEL.x1,  y1: HOTEL.y1+3 };
+
+  return {LAKE, BEACH_X, DOCKS, HOTEL, LOT};
+}
 
   // ---------- Bottom-left neighborhood ----------
   function hoodRects(a){
