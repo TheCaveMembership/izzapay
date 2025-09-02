@@ -1,12 +1,17 @@
 // v1_free_drive_plugin.js — free car hijack + parking with 5-min despawn
 (function(){
-  const BUILD='v1.1-free-drive+parking';
+  const BUILD='v1.2-free-drive+parking+vehicular-hits';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';           // 'done' when mission 3 finished
   const HIJACK_RADIUS = 22;              // match your mission plugin
   const CAR_SPEED     = 120;
   const PARK_MS       = 5*60*1000;       // 5 minutes
+
+  // vehicular-hit knobs (match Mission 3)
+  const CAR_HIT_RADIUS= 24;
+  const DROP_GRACE_MS = 1000;
+  const DROP_OFFSET   = 18;
 
   let api=null;
   let driving=false, car=null, savedWalk=null;
@@ -29,6 +34,11 @@
   }
 
   function distance(ax,ay,bx,by){ return Math.hypot(ax-bx, ay-by); }
+  function _dropPos(vx,vy){
+    const dx = vx - api.player.x, dy = vy - api.player.y;
+    const m  = Math.hypot(dx,dy) || 1;
+    return { x: vx + (dx/m)*DROP_OFFSET, y: vy + (dy/m)*DROP_OFFSET };
+  }
 
   function nearestTrafficCar(){
     let best=null, bestD=1e9;
@@ -117,6 +127,50 @@
     if(c){ startDrivingFromTraffic(c); }
   }
 
+  // ---- vehicular hits during free-drive ----
+  function handleVehicularHits(){
+    if(!driving) return;
+
+    const px = api.player.x, py = api.player.y;
+    const now = performance.now();
+
+    // pedestrians: eliminate + coin drop + wanted +1
+    for(let i=api.pedestrians.length-1; i>=0; i--){
+      const p = api.pedestrians[i];
+      const d = Math.hypot(px - p.x, py - p.y);
+      if(d <= CAR_HIT_RADIUS){
+        api.pedestrians.splice(i,1);
+        const pos = _dropPos(p.x + api.TILE/2, p.y + api.TILE/2);
+        IZZA.emit('ped-killed', {
+          coins: 25,
+          x: pos.x, y: pos.y,
+          droppedAt: now,
+          noPickupUntil: now + DROP_GRACE_MS
+        });
+        const w = Math.min(5, (api.player.wanted|0) + 1);
+        api.setWanted(w);
+      }
+    }
+
+    // cops: eliminate + loot + wanted -1
+    for(let i=api.cops.length-1; i>=0; i--){
+      const c = api.cops[i];
+      const d = Math.hypot(px - c.x, py - c.y);
+      if(d <= CAR_HIT_RADIUS){
+        api.cops.splice(i,1);
+        const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
+        IZZA.emit('cop-killed', {
+          cop: c,
+          x: pos.x, y: pos.y,
+          droppedAt: now,
+          noPickupUntil: now + DROP_GRACE_MS
+        });
+        const w = Math.max(0, (api.player.wanted|0) - 1);
+        api.setWanted(w);
+      }
+    }
+  }
+
   IZZA.on('ready', (a)=>{
     api=a;
     const btnB=document.getElementById('btnB');
@@ -124,10 +178,13 @@
     btnB && btnB.addEventListener('click', onB);
   });
 
-  // keep overlay car aligned + simple draw
+  // keep overlay car aligned + simple draw + vehicular hits
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
-    if(driving && car){ car.x=api.player.x; car.y=api.player.y; }
+    if(driving && car){
+      car.x=api.player.x; car.y=api.player.y;
+      handleVehicularHits();
+    }
   });
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
