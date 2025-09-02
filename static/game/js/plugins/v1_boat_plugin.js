@@ -289,18 +289,6 @@
       ctx.fillRect(sx+S*0.18, sy+S*0.34, S*0.64, S*0.32);
     }
 
-    // optional: keep the position helper visible
-    // (comment out if not needed)
-    (function drawMarker(){
-      const S=api.DRAW, t=T();
-      const gx=centerGX(), gy=centerGY();
-      const sx=(gx*t - api.camera.x)*(S/t);
-      const sy=(gy*t - api.camera.y)*(S/t);
-      ctx.fillStyle='rgba(80,220,255,0.25)';
-      ctx.fillRect(sx+2, sy+2, S-4, S-4);
-    })();
-  });
-
   // ====== boot ======
   IZZA.on('ready', (a)=>{
     api=a;
