@@ -1,47 +1,35 @@
 /**
- * IZZA Multiplayer Client — v1.0
- * Wires the lobby UI created by v1_2_multiplayer_building.js to real backend calls.
- * - No seed friends; lists come from server.
- * - Pi-auth must have set a server session already (auth.html → /auth/exchange).
+ * IZZA Multiplayer Client — v1.1
+ * - Server-backed friends & search via Pi-auth session
+ * - Prevent game hotkeys (I, B, A) while typing in lobby inputs
+ * - Queue + presence + ranks wiring
  *
- * Expected backend (change paths below if needed):
- *   GET  /api/mp/me                -> { username, inviteLink?, ranks:{br10:{w,l}, v1:{w,l}, v2:{w,l}, v3:{w,l}} }
- *   GET  /api/mp/friends/list      -> { friends:[{username,active:true|false}] }
- *   GET  /api/mp/friends/search?q= -> { users:[{username,active,friend:boolean}] }
- *   POST /api/mp/invite            -> { ok:true }  body:{ toUsername }
- *   POST /api/mp/queue             -> { ok:true, queueId } body:{ mode:'br10'|'v1'|'v2'|'v3' }
- *   POST /api/mp/dequeue           -> { ok:true }
- *   GET  /api/mp/ranks             -> { ranks:{...} }
- *   WS   /api/mp/ws                -> JSON messages:
- *        {type:'presence', user:'Alice', active:true}
- *        {type:'queue.update', mode:'v1', pos:2, estMs:8000}
- *        {type:'match.found', mode:'v1', matchId:'...', players:[{username},...]}
- *        {type:'match.result', mode:'v1', result:{win:true}, newRanks:{...}}
- *
- * Emits to game:
- *   IZZA.emit('toast',{text})
- *   IZZA.emit('mp-start',{mode,matchId,players})  // hook this to actually spawn/teleport
+ * Expected backend:
+ *   GET  /api/mp/me
+ *   GET  /api/mp/friends/list
+ *   GET  /api/mp/friends/search?q=
+ *   POST /api/mp/invite               { toUsername }
+ *   POST /api/mp/queue                { mode:'br10'|'v1'|'v2'|'v3' }
+ *   POST /api/mp/dequeue
+ *   GET  /api/mp/ranks
+ *   WS   /api/mp/ws
  */
-
 (function(){
-  const BUILD='v1.0-mp-client';
+  const BUILD='v1.1-mp-client+hotkey-guard';
   console.log('[IZZA PLAY]', BUILD);
 
-  // ---------- CONFIG ----------
   const CFG = {
-    base: '/api/mp',            // REST base
-    ws:   '/api/mp/ws',         // WebSocket path
+    base: '/api/mp',
+    ws:   '/api/mp/ws',
     searchDebounceMs: 250
   };
 
-  // ---------- STATE ----------
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
   let me=null;          // {username, ranks}
   let friends=[];       // [{username,active}]
   let lobby=null;       // #mpLobby
   let ui = {};          // cached nodes
 
-  // ---------- UTIL ----------
   const $  = (sel,root=document)=> root.querySelector(sel);
   const $$ = (sel,root=document)=> Array.from(root.querySelectorAll(sel));
   const toast = (t)=> (window.IZZA && IZZA.emit) ? IZZA.emit('toast',{text:t}) : console.log('[TOAST]',t);
@@ -60,7 +48,6 @@
     if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json();
   }
-
   function debounced(fn, ms){
     let t=null, lastArgs=null;
     return function(...args){
@@ -69,7 +56,7 @@
     };
   }
 
-  // ---------- DATA LOAD ----------
+  // ---------- DATA ----------
   async function loadMe(){ me = await jget('/me'); return me; }
   async function loadFriends(){
     const res = await jget('/friends/list');
@@ -77,6 +64,7 @@
     return friends;
   }
   async function searchFriends(q){
+    // Server should only return users who have Pi-authed & played before.
     const res = await jget('/friends/search?q='+encodeURIComponent(q||''));
     return res.users || [];
   }
@@ -89,7 +77,6 @@
       paintRanks();
     }catch(e){ /* non-fatal */ }
   }
-
   function paintRanks(){
     if(!lobby || !me || !me.ranks) return;
     const set = (id,key)=>{
@@ -99,10 +86,7 @@
       const span = $('span', el);
       if(span) span.textContent = `${r.w}W / ${r.l}L`;
     };
-    set('#r-br10','br10');
-    set('#r-v1','v1');
-    set('#r-v2','v2');
-    set('#r-v3','v3');
+    set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
   // ---------- FRIENDS UI ----------
@@ -119,14 +103,22 @@
           <div>${fr.username}</div>
           <div class="meta ${fr.active?'active':'offline'}">${fr.active?'Active':'Offline'}</div>
         </div>
-        <button class="mp-small" data-u="${fr.username}">Invite</button>
+        <div style="display:flex; gap:8px">
+          <button class="mp-small" data-invite="${fr.username}">Invite</button>
+          ${fr.active ? `<button class="mp-small outline" data-join="${fr.username}">Invite to Lobby</button>` : ''}
+        </div>
       `;
-      $('button',row).addEventListener('click', async ()=>{
-        try{
-          await jpost('/invite', { toUsername: fr.username });
-          toast('Invite sent to '+fr.username);
-        }catch(e){ toast('Invite failed: '+e.message); }
+      $('button[data-invite]',row).addEventListener('click', async ()=>{
+        try{ await jpost('/invite', { toUsername: fr.username }); toast('Invite sent to '+fr.username); }
+        catch(e){ toast('Invite failed: '+e.message); }
       });
+      const joinBtn = $('button[data-join]',row);
+      if(joinBtn){
+        joinBtn.addEventListener('click', async ()=>{
+          try{ await jpost('/invite', { toUsername: fr.username }); toast('Lobby invite sent to '+fr.username); }
+          catch(e){ toast('Invite failed: '+e.message); }
+        });
+      }
       host.appendChild(row);
     });
   }
@@ -200,6 +192,27 @@
     });
   }
 
+  // ---------- HOTKEY GUARD (typing) ----------
+  function hotkeyGuard(e){
+    // Only stop bubbling when typing inside the lobby (inputs/textareas/contentEditable).
+    const target = e.target;
+    const insideLobby = !!(target && target.closest && target.closest('#mpLobby'));
+    const isEditor = insideLobby && (
+      target.tagName==='INPUT' ||
+      target.tagName==='TEXTAREA' ||
+      target.isContentEditable
+    );
+    if(!isEditor) return;
+
+    const k = (e.key||'').toLowerCase();
+    if(k==='i' || k==='b' || k==='a'){
+      // Do NOT preventDefault (so the letter still types). Just stop it reaching game hotkeys.
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+      // Leave default alone.
+    }
+  }
+
   // ---------- LOBBY WIRING ----------
   function mountLobby(host){
     lobby = host || document.getElementById('mpLobby');
@@ -233,6 +246,7 @@
         if(!q){ paintFriends(friends); return; }
         try{
           const list = await searchFriends(q);
+          // list entries are {username, active, friend?}; only show those our backend says exist
           paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
         }catch(e){ /* ignore */ }
       }, CFG.searchDebounceMs);
@@ -263,6 +277,10 @@
       refreshRanks();
       connectWS();
       bootObserver();
+
+      // Global capture to guard hotkeys while typing in lobby inputs
+      window.addEventListener('keydown', hotkeyGuard, {capture:true, passive:false});
+
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
       console.log('[MP] client ready', {user:me?.username, friends:friends.length});
