@@ -1,41 +1,20 @@
 /**
- * IZZA Multiplayer Client — v1.3
+ * IZZA Multiplayer Client — v1.4 (game_app paths)
  * - Friends: request / accept
  * - Lobby invites with 30-min notification window
  * - Clear messages when friend is busy (in game) or session ended
  * - Offer to "Send a notification to join your lobby now?"
  * - Hotkey guard while typing (I/B/A won't trigger)
  * - Fallback search (works even if server search not live yet)
- *
- * Expected backend (adjust paths if yours differ):
- *   GET  /api/mp/me
- *   GET  /api/mp/friends/list
- *   GET  /api/mp/friends/search?q=
- *   POST /api/mp/friends/request         { username }
- *   POST /api/mp/friends/accept          { username }
- *   POST /api/mp/lobby/invite            { toUsername }     -> { ok:true } OR { ok:false, reason:'in_game'|'offline'|'ended' }
- *   POST /api/mp/lobby/notify            { toUsername, ttlSec }  // enqueue a push/inbox notif (ttl suggested: 1800)
- *   GET  /api/mp/notifications           -> { invites:[{from,mode,lobbyId,sentAt}], requests:[{from,sentAt}] }
- *   POST /api/mp/lobby/accept            { from }           // accept a pending lobby invite
- *   POST /api/mp/queue                   { mode }
- *   POST /api/mp/dequeue
- *   GET  /api/mp/ranks
- *   WS   /api/mp/ws  (optional live pushes)
- *        messages:
- *          {type:'presence', user, active}
- *          {type:'notify.invite', from, mode, lobbyId, sentAt}
- *          {type:'notify.request', from, sentAt}
- *          {type:'queue.update', mode, pos, estMs}
- *          {type:'match.found', mode, matchId, players:[{username},...]}
- *          {type:'match.result', newRanks:{...}}
+ * - Uses /izza-game/api/mp by default (overridable via window.__MP_BASE__/__MP_WS__)
  */
 (function(){
-  const BUILD='v1.3-mp-client+friends+invites+notifs';
+  const BUILD='v1.4-mp-client+gameapp-paths';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
-    base: '/api/mp',
-    ws:   '/api/mp/ws',
+    base: (window.__MP_BASE__ || '/izza-game/api/mp'),
+    ws:   (window.__MP_WS__   || '/izza-game/api/mp/ws'),
     searchDebounceMs: 250,
     minChars: 2,
     notifTTLsec: 1800  // 30 minutes
@@ -43,11 +22,11 @@
 
   // -------- STATE --------
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
-  let me=null;                // {username, ranks}
+  let me=null;                // {username, ranks, inviteLink}
   let friends=[];             // [{username,active,friend:true}]
-  let lobby=null;             // #mpLobby
-  let ui = {};                // cached nodes
-  let notifHost=null;         // in-app notification area
+  let lobby=null;
+  let ui = {};
+  let notifHost=null;
 
   // -------- UTIL --------
   const $  = (sel,root=document)=> root.querySelector(sel);
@@ -100,7 +79,6 @@
     try{
       await jpost('/friends/accept', { username });
       toast('You are now friends with '+username);
-      // refresh list so it shows as friend
       await loadFriends();
       repaintFriendsArea();
     }catch(e){ toast('Could not accept: '+e.message); }
@@ -114,7 +92,6 @@
         toast('Lobby invite sent to '+username);
         return;
       }
-      // Not OK — reason may be 'in_game' | 'offline' | 'ended'
       const reason = (res && res.reason) || 'unavailable';
       let msg = 'Your friend cannot join right now.';
       if(reason==='in_game')  msg = 'Your friend is currently in a game.';
@@ -164,9 +141,8 @@
   async function pullNotifications(){
     try{
       const res = await jget('/notifications');
-      const invites  = res.invites  || []; // [{from, mode, lobbyId, sentAt}]
-      const requests = res.requests || []; // [{from, sentAt}]
-      // Friend requests
+      const invites  = res.invites  || [];
+      const requests = res.requests || [];
       requests.forEach(r=>{
         showBanner(
           `Friend request from <b>${r.from}</b>`,
@@ -174,7 +150,6 @@
           ()=>{}
         );
       });
-      // Lobby invites (still valid if within 30 min server-side TTL)
       invites.forEach(inv=>{
         showBanner(
           `<b>${inv.from}</b> invited you to their lobby${inv.mode?` (${prettyMode(inv.mode)})`:''}. Join?`,
@@ -251,7 +226,7 @@
       if(usedFallback){
         const note=document.createElement('div');
         note.className='meta'; note.style.opacity='0.8';
-        note.textContent='(Showing local/fallback results. Implement /api/mp/friends/search for global results.)';
+        note.textContent='(Showing local/fallback results. Implement /izza-game/api/mp/friends/search for global results.)';
         host.appendChild(note);
       }
       return;
@@ -279,7 +254,6 @@
   function repaintFriendsArea(){
     const search = $('#mpSearch', lobby);
     if(search && search.value.trim().length >= CFG.minChars){
-      // re-run search to include newly accepted friends
       search.dispatchEvent(new Event('input'));
     }else{
       paintFriends(friends);
@@ -312,6 +286,7 @@
   function connectWS(){
     try{
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // CFG.ws is a path like /izza-game/api/mp/ws
       const url = proto + '//' + location.host + CFG.ws;
       ws = new WebSocket(url);
     }catch(e){ console.warn('WS failed', e); return; }
@@ -387,12 +362,13 @@
     $('#mpCopyLink', lobby)?.addEventListener('click', async ()=>{
       try{
         const res = await jget('/me');
-        const link = (res && res.inviteLink) || (location.origin + '/auth.html?src=invite&from=' + encodeURIComponent(res.username||'player'));
+        const link = (res && res.inviteLink)
+          || (location.origin + '/izza-game/auth?src=invite&from=' + encodeURIComponent(res.username||'player'));
         await navigator.clipboard.writeText(link);
         toast('Invite link copied');
       }catch(e){
+        const link = location.origin + '/izza-game/auth';
         toast('Copy failed; showing link…');
-        const link = location.origin + '/auth.html';
         prompt('Copy this invite link:', link);
       }
     });
@@ -409,11 +385,9 @@
         try{
           const list = await searchFriendsServer(q);
           if(Array.isArray(list) && list.length){
-            // server may include friend:true if already friends
             paintSearchResults(q, list.map(u=>({username:u.username, active:!!u.active, friend:!!u.friend})));
             return;
           }
-          // fallback: local filter of known friends
           const local = friends.filter(x=> x.username.toLowerCase().includes(q.toLowerCase()));
           paintSearchResults(q, local, /*usedFallback*/ true);
         }catch(e){
@@ -428,7 +402,6 @@
     paintFriends(friends);
   }
 
-  // Observe when #mpLobby becomes visible to (re)mount
   const obs = new MutationObserver(()=>{
     const h = document.getElementById('mpLobby');
     if(!h) return;
@@ -449,7 +422,6 @@
       connectWS();
       bootObserver();
       window.addEventListener('keydown', hotkeyGuard, {capture:true, passive:false});
-      // Pull any outstanding notifications (friend requests / lobby invites still valid)
       pullNotifications();
 
       const h=document.getElementById('mpLobby');
