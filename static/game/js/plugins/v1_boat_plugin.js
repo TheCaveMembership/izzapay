@@ -1,8 +1,8 @@
-// v1.11 — boats beside dock (south), board-to-water snap, hide boarded boat,
-//          full-lake boating clamped to LAKE rectangle (no grass/road),
+// v1.12 — no on-foot water entry (any-corner clamp), boats beside dock (south),
+//          board-to-water snap, hide boarded boat, boating clamped to LAKE,
 //          smooth dock walking (4-corner tests), and (gx,gy) position marker.
 (function(){
-  const BUILD='v1.11-boat-plugin+lake-bounds';
+  const BUILD='v1.12-boat-plugin+no-foot-water';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
@@ -78,7 +78,8 @@
       {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
     ];
   }
-  function allCornersWater(){ return cornersGrid().every(c=> tileIsWater(c.x,c.y)); }
+  const allCornersWater = ()=> cornersGrid().every(c=> tileIsWater(c.x,c.y));
+  const anyCornerWater  = ()=> cornersGrid().some (c=> tileIsWater(c.x,c.y));
 
   // ====== parked-boat spot: SOUTH of the dock, centered on planks ======
   function parkedSpotForDock(d){
@@ -168,6 +169,9 @@
     api.player.x = (spot.x*T()) + 1;
     api.player.y = (spot.y*T()) + 1;
 
+    // ensure we remember this safe land spot so we never "stick"
+    lastLand = { x: api.player.x, y: api.player.y };
+
     inBoat=false;
     setBoatFlag(false);
     ghostBoat=null;
@@ -189,22 +193,27 @@
     }
   }
 
-  // ====== movement clamps (4-corner tests) ======
+  // ====== movement clamps ======
   IZZA.on('update-pre', ()=>{
     if(!api?.ready || !isTier2()) return;
     const p=api.player;
 
     if(inBoat){
+      // Boating requires ALL corners to be water (keeps boat fully inside lake)
       if(allCornersWater()){ lastWater={x:p.x,y:p.y}; }
       else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; }
       if(ghostBoat){ ghostBoat.x=p.x; ghostBoat.y=p.y; }
     }else{
-      if(allCornersWater()){ lastLand={x:p.x,y:p.y}; } // being fully over water → push back
-      else if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; } // allows full plank walking
+      // On foot: disallow stepping into ANY water at all (even shoreline row)
+      if(anyCornerWater()){
+        if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; }
+      }else{
+        lastLand = {x:p.x, y:p.y};
+      }
     }
   });
 
-  // run AFTER other plugins to avoid being pushed back to shore
+  // run AFTER other plugins to avoid being pushed back to shore while boating
   function postClamp(){
     if(!api?.ready || !isTier2() || !inBoat) return;
     const p=api.player;
@@ -270,6 +279,9 @@
   // ====== boot ======
   IZZA.on('ready', (a)=>{
     api=a;
+    // initialize lastLand to current safe position so first shoreline check never "sticks"
+    lastLand = { x: api.player.x, y: api.player.y };
+
     const btnB=document.getElementById('btnB'); btnB?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
     setBoatFlag(false);
