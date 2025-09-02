@@ -1,8 +1,8 @@
-// v1.10 — boats beside dock (south/under the middle plank), board-to-water snap,
-//          hide boarded boat, full-lake boating (right of beach), smooth dock
-//          walking via 4-corner tests, and (gx,gy) position marker.
+// v1.11 — boats beside dock (south), board-to-water snap, hide boarded boat,
+//          full-lake boating clamped to LAKE rectangle (no grass/road),
+//          smooth dock walking (4-corner tests), and (gx,gy) position marker.
 (function(){
-  const BUILD='v1.10-boat-plugin+south-park+corner-tests';
+  const BUILD='v1.11-boat-plugin+lake-bounds';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
@@ -58,12 +58,12 @@
     return s;
   }
 
-  // full-lake water to the right of the beach; planks are NOT water
+  // WATER is ONLY inside the LAKE rectangle; planks are NOT water.
   function tileIsWater(gx,gy){
     const a=anchors(api);
-    const {BEACH_X}=lakeRects(a);
-    if(gx<=BEACH_X) return false;
-    if(gy<a.un.y0 || gy>a.un.y1) return false;
+    const {LAKE}=lakeRects(a);
+    const insideLake = (gx>=LAKE.x0 && gx<=LAKE.x1 && gy>=LAKE.y0 && gy<=LAKE.y1);
+    if(!insideLake) return false;
     if(dockCells().has(gx+'|'+gy)) return false;
     return true;
   }
@@ -106,7 +106,7 @@
 
   // Best land tile to snap to when leaving the boat
   function nearestDisembarkSpot(){
-    const a=anchors(api), {BEACH_X}=lakeRects(a);
+    const a=anchors(api), {LAKE,BEACH_X}=lakeRects(a);
     const gx=centerGX(), gy=centerGY();
     const docks=dockCells();
 
@@ -114,8 +114,8 @@
     const n=[{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
     for(const p of n) if(docks.has(p.x+'|'+p.y)) return p;
 
-    // if right beside beach, snap onto beach column
-    if(gx===BEACH_X+1 && gy>=a.un.y0 && gy<=a.un.y1) return {x:BEACH_X, y:gy};
+    // if right beside beach (only where sand exists), snap onto beach column
+    if(gx===BEACH_X+1 && gy>=LAKE.y0 && gy<=LAKE.y1) return {x:BEACH_X, y:gy};
 
     // if already on plank somehow
     if(docks.has(gx+'|'+gy)) return {x:gx,y:gy};
