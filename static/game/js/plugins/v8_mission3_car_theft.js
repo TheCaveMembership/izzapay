@@ -1,5 +1,6 @@
+// /static/game/js/plugins/v8_mission3_car_theft.js
 (function(){
-  const BUILD = 'v8.9-mission3-car-theft+vehicular-hits+vehicleSprites+capB';
+  const BUILD = 'v9.0-mission3-car-theft+vehicular-hits+vehicleSprites+larger';
   console.log('[IZZA PLAY]', BUILD);
 
   const M2_KEY       = 'izzaMission2';
@@ -17,8 +18,35 @@
   const DROP_GRACE_MS = 1000;
   const DROP_OFFSET   = 18;
 
+  // Slightly larger visual scale for vehicles (centered)
+  const VEH_DRAW_SCALE = 1.15; // 15% bigger than 32×32 tile draw
+
   const PARK_MS = 5*60*1000;
   const _m3Parked = []; // {x,y,kind,timeoutId}
+
+  // ---- vehicle sprite loader (shared cache) ----
+  const VEH_KINDS = ['sedan','taxi','van','pickup','sport'];
+  function ensureVehicleSheets(){
+    if (window.VEHICLE_SHEETS && window.VEHICLE_SHEETS.__ready) return Promise.resolve(window.VEHICLE_SHEETS);
+    window.VEHICLE_SHEETS = window.VEHICLE_SHEETS || {};
+    const root = '/static/game/sprites/vehicles';
+    const load = (k)=> new Promise((res)=> {
+      const img = new Image();
+      img.onload = ()=> res({k, ok:true, img});
+      img.onerror= ()=> res({k, ok:false, img:null});
+      img.src = `${root}/${k}.png`;
+    });
+    return Promise.all(VEH_KINDS.map(load)).then(list=>{
+      list.forEach(r=>{
+        if(r.ok) window.VEHICLE_SHEETS[r.k] = {img:r.img};
+      });
+      window.VEHICLE_SHEETS.__ready = true;
+      return window.VEHICLE_SHEETS;
+    });
+  }
+  function pickRandomKind(){
+    return VEH_KINDS[(Math.random()*VEH_KINDS.length)|0] || 'sedan';
+  }
 
   let api = null;
   const m3 = {
@@ -133,9 +161,30 @@
     return { x0: u.x1-1, x1: u.x1, gy };
   }
 
-  // ---------- Drawing ----------
+  // ---------- Drawing helpers ----------
   function w2sX(wx){ return (wx - api.camera.x) * (api.DRAW/api.TILE); }
   function w2sY(wy){ return (wy - api.camera.y) * (api.DRAW/api.TILE); }
+  function drawVehicleSprite(kind, wx, wy){
+    const ctx=document.getElementById('game').getContext('2d');
+    const sheets = (window.VEHICLE_SHEETS||{});
+    const S=api.DRAW;
+    const sx=w2sX(wx), sy=w2sY(wy);
+
+    // upscale a bit and center the sprite
+    const dS = S*VEH_DRAW_SCALE;
+    const off = (dS - S)/2;
+
+    if(sheets[kind] && sheets[kind].img){
+      ctx.save();
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(sheets[kind].img, 0,0,32,32, sx-off, sy-off, dS, dS);
+      ctx.restore();
+    }else{
+      // fallback rect also scaled
+      ctx.fillStyle='#c0c8d8';
+      ctx.fillRect(sx + S*0.10 - off, sy + S*0.25 - off, S*0.80*VEH_DRAW_SCALE, S*0.50*VEH_DRAW_SCALE);
+    }
+  }
 
   function drawStartSquare(){
     if(m3.state==='done') return;
@@ -165,28 +214,10 @@
   }
   function drawCarOverlay(){
     if(!m3.driving || !m3.car) return;
-    const S=api.DRAW;
-    const kind = m3.car.kind || 'sedan';
-    const dir  = 1; // overlay car always faces player direction of travel horizontally; simple right-facing
-    // use core's vehicle drawer
-    (function drawVehicle(){
-      const imgPack = ((window.IZZA||{}).api && kind) ? kind : 'sedan';
-      // Call the same drawer core uses by re-implementing the few lines
-      const sheets = window.VEHICLE_SHEETS || null; // not globally exported; fallback to simple rect
-      const ctx=document.getElementById('game').getContext('2d');
-      const sx=w2sX(m3.car.x), sy=w2sY(m3.car.y);
-      if(!sheets || !sheets[kind] || !sheets[kind].img){
-        ctx.fillStyle='#c0c8d8';
-        ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
-        return;
-      }
-      ctx.save();
-      ctx.imageSmoothingEnabled=false;
-      ctx.drawImage(sheets[kind].img, 0,0,32,32, sx, sy, S, S);
-      ctx.restore();
-    })();
+    drawVehicleSprite(m3.car.kind || 'sedan', m3.car.x, m3.car.y);
   }
 
+  // ---------- Mission helpers ----------
   function setM3State(s){ m3.state=s; localStorage.setItem(M3_KEY, s); }
 
   function _parkCarAt(x,y,kind){
@@ -241,14 +272,16 @@
       });
     }catch{}
 
-    m3.car  = { x: api.player.x, y: api.player.y, kind: fromCar.kind || 'sedan' };
+    // keep exact kind the player hijacked; fallback random if traffic lacked kind
+    const hijackKind = fromCar.kind || pickRandomKind();
+    m3.car  = { x: api.player.x, y: api.player.y, kind: hijackKind };
     m3.driving = true;
     setM3State('active');
 
     if(m3._savedWalkSpeed==null) m3._savedWalkSpeed = api.player.speed;
     api.player.speed = CAR_SPEED;
 
-    toast('You hijacked a car! Drive to the glowing edge.');
+    toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
   }
   function nearestCar(){
     let best=null, bestD=1e9;
@@ -336,6 +369,7 @@
   // ---------- Hooks ----------
   IZZA.on('ready', (a)=>{
     api=a;
+    ensureVehicleSheets(); // fire & forget
     loadPos();
 
     // capture-phase so B works even with inventory/map open
@@ -352,19 +386,8 @@
 
     // draw any parked car left at mission finish (with sprites)
     if(_m3Parked.length){
-      const S=api.DRAW, t=api.TILE;
-      const ctx=document.getElementById('game').getContext('2d');
       _m3Parked.forEach(p=>{
-        const sx=w2sX(p.x), sy=w2sY(p.y);
-        // simple right-facing draw; road is horizontal anyway
-        const sheets = (window.VEHICLE_SHEETS||{});
-        if(sheets[p.kind] && sheets[p.kind].img){
-          ctx.imageSmoothingEnabled=false;
-          ctx.drawImage(sheets[p.kind].img, 0,0,32,32, sx, sy, S, S);
-        }else{
-          ctx.fillStyle='#b8c2d6';
-          ctx.fillRect(sx+S*0.10, sy+S*0.25, S*0.80, S*0.50);
-        }
+        drawVehicleSprite(p.kind || 'sedan', p.x, p.y);
       });
     }
   });
