@@ -1,15 +1,14 @@
+// Multiplayer Building & Lobby — v1.3 (wider west, working Close/backdrop, B-capture)
 (function(){
-  const BUILD='v1.3-mp-building+larger-west+clean-ui';
+  const BUILD='v1.3-mp-building+wider-west+close-fix';
   console.log('[IZZA PLAY]', BUILD);
 
-  const M3_KEY='izzaMission3';   // must be done to show the building
+  const M3_KEY='izzaMission3';
   const TIER_KEY='izzaMapTier';
 
-  // ----- geometry helpers -----
   function unlockedRect(tier){
-    return (tier==='2')
-      ? { x0:10, y0:12, x1:80, y1:50 }
-      : { x0:18, y0:18, x1:72, y1:42 };
+    return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 }
+                        : { x0:18, y0:18, x1:72, y1:42 };
   }
   function anchors(api){
     const tier=localStorage.getItem(TIER_KEY)||'1';
@@ -19,24 +18,20 @@
     const bY = un.y0 + 5;
     const hRoadY = bY + bH + 1;
     const vRoadX = Math.min(un.x1-3, bX + bW + 6);
-    return {un, bX, bY, bW, bH, hRoadY, vRoadX};
+    return {un,bX,bY,bW,bH,hRoadY,vRoadX};
   }
 
-  // Bottom-left-ish, lifted UP off the road
+  // Position bottom-left, lifted up from road
   function buildingSpot(api){
     const a = anchors(api);
-    // Keep it in the bottom-left quarter but clearly off the horizontal road:
-    const gx = a.un.x0 + 7;   // near the west side
-    const gy = a.un.y1 - 11;  // lifted off road/sidewalk
-    return {gx, gy};          // this tile = doorway / interaction anchor
+    const gx = a.un.x0 + 7;
+    const gy = a.un.y1 - 11;
+    return {gx, gy};
   }
 
-  // ----- locals -----
-  let api=null;
-  let open=false;
-  let near=false, lastNear=false;
+  let api=null, open=false, near=false;
 
-  // ----- UI skeleton (logic comes from v1_multiplayer_client.js) -----
+  // ---- modal ----
   function ensureModal(){
     let host=document.getElementById('mpLobby');
     if(host) return host;
@@ -50,17 +45,15 @@
     });
 
     host.innerHTML = `
-      <div style="background:#0f1625;border:1px solid #2a3550;border-radius:14px;
-                  width:min(92vw,700px); padding:16px; color:#cfe0ff; max-height:86vh; overflow:auto">
+      <div id="mpCard" style="background:#0f1625;border:1px solid #2a3550;border-radius:14px;
+                  width:min(92vw,640px); padding:16px; color:#cfe0ff; max-height:86vh; overflow:auto">
         <div style="font-size:18px; font-weight:700; margin-bottom:8px">Play Modes</div>
-
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
           <button class="mp-btn" data-mode="br10">Battle Royale (10)</button>
           <button class="mp-btn" data-mode="v1">1 vs 1</button>
           <button class="mp-btn" data-mode="v2">2 vs 2</button>
           <button class="mp-btn" data-mode="v3">3 vs 3</button>
         </div>
-
         <div id="mpQueueMsg" style="opacity:.75; margin-top:10px"></div>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px">
@@ -87,6 +80,7 @@
       </div>
     `;
 
+    // styles
     const style=document.createElement('style');
     style.textContent=`
       #mpLobby .mp-btn{ padding:12px 10px; border-radius:12px; background:#1a2340; color:#cfe0ff;
@@ -101,21 +95,44 @@
     `;
     document.head.appendChild(style);
 
+    // close handlers
+    host.addEventListener('click', (e)=>{ if(e.target===host) { hideModal(); } });
+    host.querySelector('#mpClose').addEventListener('click', ()=> hideModal());
+
+    // wire buttons
+    host.querySelectorAll('.mp-btn').forEach(b=>{
+      b.onclick=()=>{
+        const mode=b.getAttribute('data-mode');
+        const nice = mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
+        host.querySelector('#mpQueueMsg').textContent = `Queued for ${nice}… (waiting for match)`;
+        setTimeout(()=>{ IZZA.emit?.('toast',{text:`Match found for ${nice}!`}); hideModal(); }, 1200);
+      };
+    });
+
+    // copy invite
+    host.querySelector('#mpCopyLink').onclick=async ()=>{
+      const link = `${location.origin}/auth.html?src=invite&from=${encodeURIComponent(IZZA?.api?.user?.username||'player')}&code=${Math.random().toString(36).slice(2,10)}`;
+      try{ await navigator.clipboard.writeText(link); IZZA.emit?.('toast',{text:'Invite link copied'}); }
+      catch{ prompt('Copy link:', link); }
+    };
+
+    // search (friends list is server-backed in your real implementation)
+    const friendsHost = host.querySelector('#mpFriends');
+    const renderFriends=(filter='')=>{
+      friendsHost.innerHTML='';
+      // no placeholder names anymore; start empty UI
+    };
+    host.querySelector('#mpSearch').oninput=(e)=> renderFriends(e.target.value);
+    renderFriends();
+
     document.body.appendChild(host);
     return host;
   }
 
-  function showModal(){
-    const host=ensureModal();
-    host.style.display='flex'; open=true;
-    // No button wiring or friend seeding here — handled by v1_multiplayer_client.js
-  }
-  function hideModal(){
-    const host=document.getElementById('mpLobby'); if(host) host.style.display='none';
-    open=false;
-  }
+  function showModal(){ const host=ensureModal(); host.style.display='flex'; open=true; }
+  function hideModal(){ const host=document.getElementById('mpLobby'); if(host){ host.style.display='none'; } open=false; }
 
-  // ----- drawing -----
+  // ---- building draw ----
   function w2sX(api,wx){ return (wx - api.camera.x) * (api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy - api.camera.y) * (api.DRAW/api.TILE); }
 
@@ -124,50 +141,38 @@
     if(localStorage.getItem(M3_KEY)!=='done') return;
 
     const t=api.TILE, S=api.DRAW, ctx=document.getElementById('game').getContext('2d');
-    const spot=buildingSpot(api);              // doorway anchor tile
+    const spot=buildingSpot(api);
     const sx=w2sX(api, spot.gx*t), sy=w2sY(api, spot.gy*t);
 
     ctx.save();
-
-    // Make the building larger and extended WEST (left):
-    // Width ~2.0 tiles, shifted ~1.1 tiles to the left of the doorway anchor.
-    const bodyW = S*2.0;
-    const bodyH = S*1.35;
-    const left  = sx - S*1.1;   // push west
-    const top   = sy - bodyH;   // sits above the doorway tile
-
+    // wider to the WEST: extend box 0.9 tiles left, total width ~2.1 tiles
     ctx.fillStyle='#18243b';
-    ctx.fillRect(left, top, bodyW, bodyH);
+    ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
 
-    // Door slab centered on the anchor tile; glow blue→green when in range
-    const doorW = S*0.24, doorH = S*0.14;
-    const doorX = sx + S*0.5 - doorW/2;
-    const doorY = sy - S*0.06;
+    // door centered slightly left
+    const doorX = sx + S*0.10, doorY = sy - S*0.02;
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
-    ctx.fillRect(doorX, doorY, doorW, doorH);
+    ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
 
-    // Header label (shifted a bit left so it sits nicely on wider building)
+    // label
     ctx.fillStyle='#b7d0ff';
     ctx.font = '12px monospace';
-    ctx.fillText('MULTIPLAYER', left + S*0.18, top + S*0.32);
-
+    ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
 
-  // ----- interaction -----
   function playerGrid(){
     const t=api.TILE;
     return { gx: ((api.player.x+t/2)/t|0), gy: ((api.player.y+t/2)/t|0) };
   }
   function manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
-
   function inRange(){
     const {gx,gy}=playerGrid();
     const s=buildingSpot(api);
-    // Slightly generous: doorway tile or orthogonal neighbor
     return manhattan(gx,gy, s.gx, s.gy) <= 1;
   }
 
+  // ---- input ----
   function onB(e){
     if(localStorage.getItem(M3_KEY)!=='done') return;
     if(!inRange()) return;
@@ -175,10 +180,9 @@
     e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
   }
 
-  // ----- hooks -----
+  // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    // B works even with inventory/map open (capture phase)
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:true});
     const btnB=document.getElementById('btnB'); btnB && btnB.addEventListener('click', onB, true);
   });
@@ -186,7 +190,6 @@
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
     if(localStorage.getItem(M3_KEY)!=='done') return;
-    lastNear = near;
     near = inRange();
   });
 
