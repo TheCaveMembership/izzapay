@@ -315,28 +315,6 @@
     if(btnB){ btnB.addEventListener('click', onB); }
   }
 
-  // ---------- Tiny test button (for quick positioning while tuning) ----------
-  function ensureTestButton(){
-    if(document.getElementById('m2TestBtn')) return;
-    const b = document.createElement('button');
-    b.id = 'm2TestBtn';
-    b.textContent = 'M2 Here';
-    Object.assign(b.style,{
-      position:'fixed', right:'18px', bottom:'120px', zIndex:11,
-      fontSize:'12px', padding:'6px 10px',
-      opacity:.9
-    });
-    b.title = 'Move Mission 2 square to your current tile';
-    b.addEventListener('click', ()=>{
-      const {gx,gy} = playerGrid();
-      mission.goalGX = gx; mission.goalGY = gy;
-      localStorage.setItem(POS_KEY, JSON.stringify({gx,gy}));
-      localStorage.setItem(POS_VER_KEY, POS_VERSION);
-      toast(`Mission 2 anchor set to ${gx},${gy}`);
-    });
-    document.body.appendChild(b);
-  }
-
   // ---------- Hook into game ----------
   IZZA.on('ready', (a)=>{
     api = a;
