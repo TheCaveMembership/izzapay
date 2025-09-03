@@ -1,13 +1,12 @@
 /**
- * IZZA Multiplayer Client — v1.6.6
+ * IZZA Multiplayer Client — v1.6.7
  * - Reliable search (button + Return + input/change/paste)
- * - Live status line ("Searching…", counts, errors)
  * - Presence refresher every 20s
  * - Notifications: invites + match start
- * - Simple queue: reacts to server start payload
+ * - Queue + invite accept: robust start handling (no silent close)
  */
 (function(){
-  const BUILD='v1.6.6-mp-client+presence+invites+queue';
+  const BUILD='v1.6.7-mp-client+invites-robust';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -71,10 +70,22 @@
         ${u.active?`<button class="mp-small outline" data-join="${u.username}">Invite to Lobby</button>`:''}
       </div>`;
     row.querySelector('button[data-invite]')?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Invite sent to '+u.username); }catch(e){ toast('Invite failed: '+e.message); }
+      try{
+        const r = await jpost('/lobby/invite',{toUsername:u.username});
+        console.log('[MP] invite result', r);
+        toast('Invite sent to '+u.username);
+      }catch(e){
+        toast('Invite failed: '+e.message);
+      }
     });
     row.querySelector('button[data-join]')?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Lobby invite sent to '+u.username); }catch(e){ toast('Invite failed: '+e.message); }
+      try{
+        const r = await jpost('/lobby/invite',{toUsername:u.username});
+        console.log('[MP] lobby-invite result', r);
+        toast('Lobby invite sent to '+u.username);
+      }catch(e){
+        toast('Invite failed: '+e.message);
+      }
     });
     return row;
   }
@@ -95,18 +106,22 @@
       lastQueueMode=mode;
       const nice= mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
       if(ui.queueMsg) ui.queueMsg.textContent=`Queued for ${nice}… (waiting for match)`;
-      const res = await jpost('/queue',{mode});               // reacts to start
+      const res = await jpost('/queue',{mode});
+      console.log('[MP] /queue =>', res);
       if(res && res.start){
         if(ui.queueMsg) ui.queueMsg.textContent='';
         if(lobby) lobby.style.display='none';
         window.IZZA?.emit?.('mp-start', res.start);
         toast('Match found! Starting…');
       }
-    }catch(e){ if(ui.queueMsg) ui.queueMsg.textContent=''; toast('Queue error: '+e.message); }
+    }catch(e){
+      if(ui.queueMsg) ui.queueMsg.textContent='';
+      toast('Queue error: '+e.message);
+    }
   }
   async function dequeue(){ try{ await jpost('/dequeue'); }catch{} if(ui.queueMsg) ui.queueMsg.textContent=''; lastQueueMode=null; }
 
-  // --- WS (unchanged behavior) ---
+  // --- WS hooks left in place, but not required for invites/starts ---
   function connectWS(){
     try{
       const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
@@ -137,8 +152,6 @@
 
   function installShield(){
     if(lobbyOpen) return; lobbyOpen=true;
-
-    // disable HUD buttons + swallow
     hudEls=['#btnA','#btnB','#btnI'].map(id=>document.querySelector(id)).filter(Boolean);
     hudCssPrev = hudEls.map(el=>el.getAttribute('style')||'');
     hudEls.forEach(el=>{
@@ -149,15 +162,11 @@
       el.addEventListener('pointerdown', swallowClick, true);
       el.__mp_swallow = swallowClick;
     });
-
     installShield._key = (ev)=>{ if(lobbyOpen && keyIsABI(ev)) swallow(ev); };
     ['keydown','keypress','keyup'].forEach(t=> window.addEventListener(t, installShield._key, {capture:true}));
-
-    // transparent overlay
     shield=document.createElement('div');
     Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:1002, background:'transparent', touchAction:'none'});
     document.body.appendChild(shield);
-
     setTimeout(function(){
       const node=document.getElementById('mpLobby');
       const visible = !!(node && node.style.display && node.style.display!=='none');
@@ -205,8 +214,6 @@
   function mountLobby(host){
     lobby = host || document.getElementById('mpLobby');
     if(!lobby) return;
-
-    // prevent duplicate bindings when the modal is re-shown
     if(lobby.dataset.mpMounted === '1') return;
     lobby.dataset.mpMounted = '1';
 
@@ -233,7 +240,6 @@
     // ---------- SEARCH ----------
     const doSearch = async (immediate=false)=>{
       const q=(ui.search?.value||'').trim();
-      // reset status, disable button for the duration of this run
       const thisRun = ++searchRunId;
       const setStatus = (txt)=>{ if(searchRunId===thisRun && ui.searchStatus) ui.searchStatus.textContent = txt; };
       const enableBtn = ()=>{ if(ui.searchBtn) ui.searchBtn.disabled=false; };
@@ -255,7 +261,7 @@
       setStatus('Searching…');
       try{
         const list = await searchPlayers(q);
-        if(searchRunId !== thisRun) return; // ignore stale result
+        if(searchRunId !== thisRun) return;
         paintFriends((list||[]).map(u=>({username:u.username, active:!!u.active})));
         setStatus((list&&list.length)?`Found ${list.length} result${list.length===1?'':'s'}`:'No players found');
 
@@ -286,20 +292,12 @@
     };
 
     const debouncedSearch = debounced(()=>doSearch(false), CFG.searchDebounceMs);
-
     ui.search?.addEventListener('input',  debouncedSearch);
     ui.search?.addEventListener('change', debouncedSearch);
     ui.search?.addEventListener('paste',  debouncedSearch);
-
-    // Return / Done -> immediate
     ui.search?.addEventListener('keydown', (e)=>{
-      if((e.key||'').toLowerCase()==='enter'){
-        e.preventDefault();
-        doSearch(true);
-      }
+      if((e.key||'').toLowerCase()==='enter'){ e.preventDefault(); doSearch(true); }
     });
-
-    // Tap Search button -> immediate
     ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
     paintRanks(); paintFriends(friends);
@@ -320,46 +318,74 @@
       await loadMe(); await loadFriends(); refreshRanks();
 
       // --- presence refresher: keep me active every 20s ---
-      setInterval(async () => {
-        try { await jget('/me'); } catch(e) { /* ignore */ }
-      }, 20000);
+      setInterval(async () => { try { await jget('/me'); } catch(e) {} }, 20000);
 
       // --- notifications polling: invites + direct start ---
       const startMatch = (payload)=>{
+        if(!payload || !payload.mode || !payload.matchId || !payload.players){
+          console.warn('[MP] start payload malformed', payload);
+          toast('Could not start match (bad payload).');
+          return;
+        }
         if(ui.queueMsg) ui.queueMsg.textContent='';
         if(lobby) lobby.style.display='none';
+        console.log('[MP] starting match', payload);
         window.IZZA?.emit?.('mp-start', payload);
         toast('Match starting…');
       };
+
+      // after we accept an invite, we poll more aggressively for a short window
+      let burstPollUntil = 0;
+
       const pull=async()=>{
         try{
           const n = await jget('/notifications');
-          // show minimal toast if invites present
+          // Minimal heads-up
           if(n && Array.isArray(n.invites) && n.invites.length){
             toast(`Invite from ${n.invites[0].from} (${n.invites[0].mode})`);
           }
-          // auto-start if server already prepared match for me
+          // If server already staged a start for me
           if(n && n.start){ startMatch(n.start); return; }
-          // optional: inline accept/decline for first pending invite
+
+          // Inline accept/decline UX (safe fallback)
           if(n && Array.isArray(n.invites) && n.invites.length){
             const inv = n.invites[0];
             if(pull._lastInviteId !== inv.id){
               pull._lastInviteId = inv.id;
               const ask = confirm(`${inv.from} invited you${inv.mode?` (${inv.mode})`:''}. Accept?`);
               if(ask){
+                console.log('[MP] accepting invite', inv.id);
                 const r = await jpost('/lobby/accept',{inviteId:inv.id});
-                if(r && r.start) startMatch(r.start);
+                console.log('[MP] /lobby/accept =>', r);
+                if(r && r.start){
+                  startMatch(r.start);
+                }else{
+                  // don’t close anything—keep lobby open and poll fast for a moment
+                  toast('Accepted—waiting for match…');
+                  burstPollUntil = Date.now() + 8000; // 8s burst
+                }
               }else{
                 try{ await jpost('/lobby/decline',{inviteId:inv.id}); }catch{}
               }
             }
           }
-        }catch{}
+        }catch(e){
+          console.warn('[MP] notifications error', e);
+        }
       };
       pull();
-      notifTimer=setInterval(pull, 5000);
+      notifTimer=setInterval(()=>{
+        // speed up temporarily after accept
+        if(burstPollUntil && Date.now() < burstPollUntil){
+          pull();
+        }else{
+          // normal cadence
+          pull();
+        }
+      }, 5000);
 
-      connectWS();
+      // WS is optional; not required for invites/starts
+      // connectWS();
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
