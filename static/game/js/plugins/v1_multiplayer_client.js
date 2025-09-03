@@ -1,12 +1,12 @@
 /**
- * IZZA Multiplayer Client — v1.6.3
- * - Use /players/search (case-insensitive, profile-verified)
- * - Show “Player not found — invite…” fallback
- * - Toast on auth errors so silence never hides problems
- * - Keeps all existing typing/shield logic exactly as-is
+ * IZZA Multiplayer Client — v1.6.4
+ * - Appends ?t=<short-lived token> to all API calls when available (Pi Browser safe)
+ * - Uses /players/search (profile-verified)
+ * - Shows “Player not found — invite…” fallback
+ * - Surfaces auth errors via toast
  */
 (function(){
-  const BUILD='v1.6.3-mp-client+players-search';
+  const BUILD='v1.6.4-mp-client+tokenized';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -25,17 +25,28 @@
   const $  = (s,r=document)=> r.querySelector(s);
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
+  // ---- add ?t= token automatically (works even if cookies aren’t sent yet) ----
+  function withTok(path){
+    const tok = (window.__IZZA_T__ || '').trim ? (window.__IZZA_T__ || '').trim() : (window.__IZZA_T__ || '');
+    if(!tok) return path;
+    return path + (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(tok);
+  }
+
   async function jget(p){
-    const r = await fetch(CFG.base+p, {credentials:'include'});
+    const r = await fetch(CFG.base + withTok(p), {credentials:'include'});
     if(!r.ok){
-      // surface common auth error; let caller decide UI
       if(r.status===401) toast('Sign-in expired. Reopen Auth and try again.');
       throw new Error(`${r.status} ${r.statusText}`);
     }
     return r.json();
   }
   async function jpost(p,b){
-    const r = await fetch(CFG.base+p,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+    const r = await fetch(CFG.base + withTok(p), {
+      method:'POST',
+      credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(b||{})
+    });
     if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json();
   }
@@ -43,7 +54,6 @@
 
   async function loadMe(){ me = await jget('/me'); return me; }
   async function loadFriends(){ const res=await jget('/friends/list'); friends=res.friends||[]; return friends; }
-  // NOTE: use /players/search (not /friends/search)
   async function searchPlayers(q){ const res=await jget('/players/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
 
   async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
@@ -109,14 +119,14 @@
     });
   }
 
-  // --- typing guard + shield (unchanged from your v1.6.2) ---
+  // --- typing guard + shield (unchanged) ---
   function isLobbyEditor(el){ if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   function guardKeyEvent(e){ if(!isLobbyEditor(e.target)) return; const k=(e.key||'').toLowerCase(); if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); } }
   ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
   function keyIsABI(e){ const k=(e.key||'').toLowerCase(); return k==='a'||k==='b'||k==='i'; }
   function swallow(e){ e.stopImmediatePropagation(); e.stopPropagation(); e.preventDefault?.(); }
-  function installShield(){ /* same as your file */ }
-  function removeShield(){ /* same as your file */ }
+  function installShield(){ /* your existing shield body stays here unchanged */ }
+  function removeShield(){ /* your existing shield body stays here unchanged */ }
   function tryShieldOnce(){ const node=document.getElementById('mpLobby'); const v=!!(node&&node.style.display&&node.style.display!=='none'); if(v) installShield(); }
   if(window.IZZA && IZZA.on){
     IZZA.on('ui-modal-open',  e=>{ if(e&&e.id==='mpLobby'){ tryShieldOnce(); requestAnimationFrame(tryShieldOnce); setTimeout(tryShieldOnce,80);} });
@@ -172,7 +182,6 @@
             }
           }
         }catch(err){
-          // show something if search failed (401, 5xx, etc.)
           const host = lobby.querySelector('#mpFriends');
           if(host){
             host.innerHTML='';
@@ -203,7 +212,7 @@
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
-      console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
+      console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws, tok: !!(window.__IZZA_T__)});
     }catch(e){
       console.error('MP client start failed', e);
       toast('Multiplayer unavailable: '+e.message);
