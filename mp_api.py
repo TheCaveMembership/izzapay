@@ -1,4 +1,4 @@
-# mp_api.py — v1.8 (adds /echo and /debug/auth to verify Pi auth -> API)
+# mp_api.py — v1.8 (robust player search + debug helpers)
 
 from typing import Optional, Tuple
 from flask import Blueprint, jsonify, request, session
@@ -6,6 +6,7 @@ from db import conn
 
 mp_bp = Blueprint("mp", __name__)
 
+# --- reuse main app token verifier if available ---
 def _import_main_verifier():
     try:
         from app import verify_login_token
@@ -14,8 +15,8 @@ def _import_main_verifier():
         return None
 VERIFY_TOKEN = _import_main_verifier()
 
-def _bearer_from_req() -> Optional[str]:
-    # ?t= or form t= wins; else Authorization: Bearer
+# ------------- helpers -------------
+def _bearer_from_req():
     t = request.args.get("t") or request.form.get("t")
     if t:
         return t.strip()
@@ -26,9 +27,8 @@ def _bearer_from_req() -> Optional[str]:
 
 def _current_user_ids() -> Optional[Tuple[int, str, str]]:
     """
-    Returns (user_id, pi_uid, pi_username) if authenticated by either:
-      - session["user_id"] (shared-secret cookie), or
-      - VERIFY_TOKEN(bearer 't') short-lived token
+    Returns (user_id, pi_uid, pi_username) or None.
+    Accepts the izzapay short-lived login token (?t= / Bearer).
     """
     uid = session.get("user_id")
     if not uid:
@@ -76,13 +76,17 @@ def _ensure_schema():
         """)
 
 def _user_id_by_username(username: str):
+    """
+    Case/at-symbol insensitive resolver: 'CamMac' == '@CamMac'
+    """
     username = (username or "").strip()
     if not username:
         return None
+    want = username.lstrip("@").lower()
     with conn() as cx:
         r = cx.execute(
-            "SELECT id FROM users WHERE pi_username=?",
-            (username,)
+            "SELECT id FROM users WHERE LOWER(REPLACE(pi_username,'@',''))=?",
+            (want,)
         ).fetchone()
         return int(r["id"]) if r else None
 
@@ -91,77 +95,29 @@ def _is_friend(a: int, b: int) -> bool:
         r = cx.execute(
             """
             SELECT 1
-              FROM mp_friend_requests
-             WHERE status='accepted'
-               AND (
-                 (from_user=? AND to_user=?)
-                 OR (from_user=? AND to_user=?)
-               )
-             LIMIT 1
+            FROM mp_friend_requests
+            WHERE status='accepted'
+              AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
+            LIMIT 1
             """,
-            (a, b, b, a)
+            (a, b, b, a),
         ).fetchone()
         return bool(r)
 
-# ------------------- DEBUG/VERIFY ENDPOINTS -------------------
+# ------------- endpoints -------------
 
 @mp_bp.get("/echo")
 def mp_echo():
-    """
-    Quick sanity check from device:
-    /izza-game/api/mp/echo
-    /izza-game/api/mp/echo?t=<token>
-    """
-    _ensure_schema()
-    tok = _bearer_from_req()
+    """Tiny debug: shows whether cookie or ?t= produced a user."""
     who = _current_user_ids()
     return jsonify({
         "ok": True,
-        "has_auth_header": bool(tok),
+        "q": request.args.get("q"),
         "session_user_id": session.get("user_id"),
+        "has_auth_header": bool(request.headers.get("Authorization")),
         "authed": bool(who),
-        "who": {
-            "user_id": who[0] if who else None,
-            "pi_uid":   who[1] if who else None,
-            "username": who[2] if who else None,
-        }
+        "who": {"id": who[0], "pi_uid": who[1], "username": who[2]} if who else None,
     })
-
-@mp_bp.get("/debug/auth")
-def mp_debug_auth():
-    """
-    Deep check to prove Pi auth is flowing into this API.
-    Never returns secrets; only shows IDs and presence of related rows.
-    """
-    _ensure_schema()
-    tok = _bearer_from_req()
-    who = _current_user_ids()
-
-    out = {
-        "has_bearer_or_t": bool(tok),
-        "session_user_id": session.get("user_id"),
-        "authed": bool(who),
-        "user": None,
-        "has_profile": False
-    }
-
-    if who:
-        uid, pi_uid, username = who
-        out["user"] = {
-            "id": uid,
-            "pi_uid": pi_uid,
-            "pi_username": username
-        }
-        with conn() as cx:
-            prof = cx.execute(
-                "SELECT 1 FROM game_profiles WHERE pi_uid=? LIMIT 1",
-                (pi_uid,)
-            ).fetchone()
-        out["has_profile"] = bool(prof)
-
-    return jsonify(out)
-
-# ------------------- NORMAL API -------------------
 
 @mp_bp.get("/me")
 def mp_me():
@@ -180,48 +136,62 @@ def mp_friends_list():
         return jsonify({"error": "not_authenticated"}), 401
     uid, _, _ = who
     with conn() as cx:
-        rows = cx.execute("""
-          SELECT DISTINCT u.pi_username AS username
+        rows = cx.execute(
+            """
+            SELECT DISTINCT u.pi_username AS username
             FROM mp_friend_requests fr
             JOIN users u ON u.id = CASE
-                                    WHEN fr.from_user=? THEN fr.to_user
-                                    ELSE fr.from_user
-                                  END
-           WHERE fr.status='accepted'
-             AND (fr.from_user=? OR fr.to_user=?)
-           ORDER BY u.pi_username COLLATE NOCASE
-        """, (uid, uid, uid)).fetchall()
-    return jsonify({
-        "friends": [
-            {"username": r["username"], "active": False, "friend": True}
-            for r in rows
-        ]
-    })
+                                     WHEN fr.from_user=? THEN fr.to_user
+                                     ELSE fr.from_user
+                                   END
+            WHERE fr.status='accepted'
+              AND (fr.from_user=? OR fr.to_user=?)
+            ORDER BY u.pi_username COLLATE NOCASE
+            """,
+            (uid, uid, uid),
+        ).fetchall()
+    return jsonify({"friends": [
+        {"username": r["username"], "active": False, "friend": True} for r in rows
+    ]})
 
-@mp_bp.get("/friends/search")
+# --- NEW: robust players search (case-insensitive, strips '@', requires profile) ---
 @mp_bp.get("/players/search")
+@mp_bp.get("/friends/search")  # alias
 def mp_players_search():
     _ensure_schema()
     who = _current_user_ids()
     if not who:
         return jsonify({"error": "not_authenticated"}), 401
     my_id, _, _ = who
-    q = (request.args.get("q") or "").strip()
-    if len(q) < 2:
+
+    raw_q = (request.args.get("q") or "").strip()
+    if len(raw_q) < 2:
         return jsonify({"users": []})
+
+    # normalize: remove leading '@' and lower
+    q = raw_q.lstrip("@").lower()
+    like = f"%{q}%"
+
     with conn() as cx:
-        rows = cx.execute("""
-          SELECT DISTINCT u.id AS uid, u.pi_username AS username
+        rows = cx.execute(
+            """
+            SELECT DISTINCT u.id   AS uid,
+                            u.pi_username AS username
             FROM users u
-            JOIN game_profiles gp ON gp.pi_uid = u.pi_uid   -- only users who created a character
-           WHERE u.pi_username LIKE ? COLLATE NOCASE
-           ORDER BY u.pi_username COLLATE NOCASE
-           LIMIT 15
-        """, (f"%{q}%",)).fetchall()
-    users = [
-        {"username": r["username"], "active": False, "friend": _is_friend(my_id, int(r["uid"]))}
-        for r in rows
-    ]
+            JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
+            WHERE LOWER(REPLACE(u.pi_username,'@','')) LIKE ?
+            ORDER BY u.pi_username COLLATE NOCASE
+            LIMIT 15
+            """,
+            (like,),
+        ).fetchall()
+
+    users = [{
+        "username": r["username"],
+        "active": False,
+        "friend": _is_friend(my_id, int(r["uid"]))
+    } for r in rows]
+
     return jsonify({"users": users})
 
 @mp_bp.post("/lobby/invite")
@@ -243,6 +213,47 @@ def mp_lobby_invite():
     with conn() as cx:
         cx.execute(
             "INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
-            (me, to_id, (data.get('mode') or None), int(data.get('ttlSec') or 1800))
+            (me, to_id, (data.get('mode') or None), int(data.get('ttlSec') or 1800)),
         )
     return jsonify({"ok": True})
+
+# ---- OPTIONAL DEBUG (safe to keep during testing) ----
+@mp_bp.get("/debug/status")
+def mp_debug_status():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"authed": False}), 401
+    uid, pi_uid, uname = who
+    with conn() as cx:
+        has_profile = bool(cx.execute(
+            "SELECT 1 FROM game_profiles WHERE pi_uid=? LIMIT 1", (pi_uid,)
+        ).fetchone())
+        total_users = cx.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+    return jsonify({
+        "authed": True,
+        "user": {"id": uid, "username": uname, "pi_uid": pi_uid, "has_profile": has_profile},
+        "total_users": total_users
+    })
+
+@mp_bp.get("/debug/search")
+def mp_debug_search():
+    """Check exactly what the server would match."""
+    q = (request.args.get("q") or "").strip()
+    norm = q.lstrip("@").lower()
+    like = f"%{norm}%"
+    with conn() as cx:
+        rows = cx.execute(
+            """
+            SELECT u.pi_username AS username,
+                   (SELECT 1 FROM game_profiles gp WHERE gp.pi_uid=u.pi_uid LIMIT 1) AS has_profile
+            FROM users u
+            WHERE LOWER(REPLACE(u.pi_username,'@','')) LIKE ?
+            ORDER BY u.pi_username COLLATE NOCASE
+            LIMIT 20
+            """,
+            (like,),
+        ).fetchall()
+    return jsonify({
+        "q": q, "norm": norm,
+        "results": [{"username": r["username"], "has_profile": bool(r["has_profile"])} for r in rows]
+    })
