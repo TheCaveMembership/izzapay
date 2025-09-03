@@ -124,7 +124,7 @@
 
   <!-- Pass profile + the short-lived auth token to JS -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
-  <script>window.__IZZA_T__ = {{ (t or '""')|safe }};</script>
+  <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
 
   <!-- Multiplayer base paths for game_app (mounted at /izza-game) -->
   <script>
@@ -146,7 +146,7 @@
   <script src="/static/game/js/plugins/v1_free_drive_plugin.js"></script>
   <script src="/static/game/js/plugins/guns.js?v=1.4"></script>
 
-  <!-- Multiplayer building (Tier 2) -->
+  <!-- Multiplayer (unchanged load order) -->
   <script defer src="/static/game/js/plugins/v9_multiplayer_building.js"></script>
   <script defer src="/static/game/js/plugins/v1_multiplayer_client.js"></script>
   <script src="/static/game/js/plugins/v1_pvp_duel.js"></script>
