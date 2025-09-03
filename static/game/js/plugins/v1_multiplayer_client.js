@@ -334,7 +334,13 @@
       const pull=async()=>{
         try{
           const n = await jget('/notifications');
+          // show minimal toast if invites present
+          if(n && Array.isArray(n.invites) && n.invites.length){
+            toast(`Invite from ${n.invites[0].from} (${n.invites[0].mode})`);
+          }
+          // auto-start if server already prepared match for me
           if(n && n.start){ startMatch(n.start); return; }
+          // optional: inline accept/decline for first pending invite
           if(n && Array.isArray(n.invites) && n.invites.length){
             const inv = n.invites[0];
             if(pull._lastInviteId !== inv.id){
@@ -350,7 +356,8 @@
           }
         }catch{}
       };
-      pull(); notifTimer=setInterval(pull, 5000);
+      pull();
+      notifTimer=setInterval(pull, 5000);
 
       connectWS();
 
