@@ -1,8 +1,10 @@
+# db.py
 import os, sqlite3, threading
 
 # --- Persistent locations (works on Render or locally) ---
 DATA_ROOT = os.getenv("DATA_ROOT", "/var/data/izzapay")
 DB_PATH   = os.getenv("SQLITE_DB_PATH", os.path.join(DATA_ROOT, "app.sqlite"))
+BUSY_TIMEOUT_MS = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "3000"))  # 3s default
 
 _lock = threading.Lock()
 
@@ -15,12 +17,14 @@ def _ensure_dirs():
 
 def conn():
     _ensure_dirs()
-    cx = sqlite3.connect(DB_PATH)
+    # Allow use across threads if needed; each request should still open/close its own conn.
+    cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
     cx.row_factory = sqlite3.Row
-    # sensible defaults
+    # Sensible defaults for a web app on SQLite
     cx.execute("PRAGMA foreign_keys=ON;")
     cx.execute("PRAGMA journal_mode=WAL;")
     cx.execute("PRAGMA synchronous=NORMAL;")
+    cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
     return cx
 
 def init_db():
