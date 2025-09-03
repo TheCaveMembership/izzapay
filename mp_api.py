@@ -1,80 +1,376 @@
-# mp_api.py  — safe fallback if WS stack isn't available
+# mp_api.py — real friends + invites using your existing Pi auth & DB
 import os
-from flask import Blueprint, jsonify, request
+import time
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
+from flask import Blueprint, jsonify, request, session, current_app
 from db import conn
 
-mp_bp = Blueprint("mp", __name__, url_prefix="/api/mp")
+# We mount at /izza-game/api via game_app.py; keep routes under /mp/*
+mp_bp = Blueprint("mp", __name__)
 
-# ---------- simple REST (always available) ----------
-@mp_bp.get("/me")
+# ---- optional WS discovery (kept for future) ----
+_WS_ENABLED = False
+_WS_PATH = None  # e.g. "/izza-game/api/mp/ws"
+
+# -------------------- AUTH HELPERS --------------------
+def _import_main_verifier():
+    try:
+        from app import verify_login_token
+        return verify_login_token
+    except Exception:
+        return None
+
+VERIFY_TOKEN = _import_main_verifier()
+
+def _bearer_from_req() -> Optional[str]:
+    t = request.args.get("t") or request.form.get("t")
+    if t: return t.strip()
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return None
+
+def _current_user_ids() -> Optional[Tuple[int, str, str]]:
+    """
+    Returns (user_id, pi_uid, pi_username) from your existing `users` table.
+    Works with cookie session or ?t= short-lived token using your main verifier.
+    """
+    uid = session.get("user_id")
+    if not uid:
+        tok = _bearer_from_req()
+        if tok and VERIFY_TOKEN:
+            uid = VERIFY_TOKEN(tok)
+    if not uid:
+        return None
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT id, pi_uid, pi_username FROM users WHERE id=?", (uid,)
+        ).fetchone()
+        if not row:
+            return None
+        return int(row["id"]), row["pi_uid"], row["pi_username"]
+
+# -------------------- DB BOOTSTRAP --------------------
+def _ensure_schema():
+    with conn() as cx:
+        cx.executescript("""
+        CREATE TABLE IF NOT EXISTS mp_users(
+          id INTEGER PRIMARY KEY,
+          pi_uid TEXT UNIQUE,
+          pi_username TEXT,
+          last_seen TIMESTAMP
+        );
+
+        -- One row per friend request (directional). When accepted, friendship is established.
+        CREATE TABLE IF NOT EXISTS mp_friend_requests(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_user INTEGER NOT NULL,
+          to_user   INTEGER NOT NULL,
+          status    TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | rejected | cancelled
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(from_user, to_user)
+        );
+
+        -- Lightweight invites to lobby
+        CREATE TABLE IF NOT EXISTS mp_invites(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_user INTEGER NOT NULL,
+          to_user   INTEGER NOT NULL,
+          mode      TEXT,                           -- e.g., br10 | v1 | v2 | v3
+          status    TEXT NOT NULL DEFAULT 'pending',-- pending | accepted | expired | cancelled
+          ttl_sec   INTEGER NOT NULL DEFAULT 1800,  -- 30m default
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- (Optional) simple ranks store (W/L). Expand later as needed.
+        CREATE TABLE IF NOT EXISTS mp_ranks(
+          user_id INTEGER PRIMARY KEY,
+          br10_w INTEGER DEFAULT 0, br10_l INTEGER DEFAULT 0,
+          v1_w   INTEGER DEFAULT 0, v1_l   INTEGER DEFAULT 0,
+          v2_w   INTEGER DEFAULT 0, v2_l   INTEGER DEFAULT 0,
+          v3_w   INTEGER DEFAULT 0, v3_l   INTEGER DEFAULT 0
+        );
+        """)
+
+def _touch_mp_user(user_id:int, pi_uid:str, pi_username:str):
+    with conn() as cx:
+        cx.execute("""
+          INSERT INTO mp_users(id, pi_uid, pi_username, last_seen)
+          VALUES(?,?,?,CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET
+            pi_uid=excluded.pi_uid,
+            pi_username=excluded.pi_username,
+            last_seen=CURRENT_TIMESTAMP
+        """, (user_id, pi_uid, pi_username))
+
+def _user_id_by_username(username:str) -> Optional[int]:
+    username = (username or "").strip()
+    if not username:
+        return None
+    with conn() as cx:
+        r = cx.execute("SELECT id FROM users WHERE pi_username=?", (username,)).fetchone()
+        return int(r["id"]) if r else None
+
+def _user_public(username:str) -> dict:
+    return {"username": username, "active": False, "friend": False}
+
+def _cleanup_expired_invites():
+    with conn() as cx:
+        cx.executescript("""
+        UPDATE mp_invites
+           SET status='expired'
+         WHERE status='pending'
+           AND (strftime('%s','now') - strftime('%s', created_at)) > ttl_sec;
+        """)
+
+# -------------------- ROUTES --------------------
+@mp_bp.get("/mp/me")
 def mp_me():
-    # Return minimal identity; expand as you like
-    return jsonify({"username": request.headers.get("X-User", "player"), "inviteLink": "/izza-game/auth"})
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, pi_uid, pi_name = who
+    _touch_mp_user(uid, pi_uid, pi_name)
+    return jsonify({
+        "username": pi_name,
+        "inviteLink": "/izza-game/auth",        # deep link into your auth
+        "ws_url": _WS_PATH if _WS_ENABLED else None
+    })
 
-@mp_bp.get("/friends/list")
+@mp_bp.get("/mp/friends/list")
 def mp_friends_list():
-    # Demo data; replace with DB queries
-    return jsonify({"friends": []})
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    # We derive accepted friends by looking for an accepted request either direction.
+    with conn() as cx:
+        rows = cx.execute("""
+          SELECT DISTINCT u.pi_username AS username
+          FROM mp_friend_requests fr
+          JOIN mp_users u ON u.id = CASE
+              WHEN fr.from_user=? THEN fr.to_user
+              ELSE fr.from_user
+          END
+          WHERE fr.status='accepted' AND (fr.from_user=? OR fr.to_user=?)
+          ORDER BY u.pi_username COLLATE NOCASE
+        """, (uid, uid, uid)).fetchall()
+    return jsonify({"friends": [{"username": r["username"], "active": False, "friend": True} for r in rows]})
 
-@mp_bp.get("/friends/search")
+@mp_bp.get("/mp/friends/search")
 def mp_friends_search():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
     q = (request.args.get("q") or "").strip()
-    return jsonify({"users": [] if len(q) < 2 else [{"username": q, "active": False, "friend": False}]})
+    if len(q) < 2:
+        return jsonify({"users": []})
+    with conn() as cx:
+        found = cx.execute("""
+          SELECT pi_username FROM users
+          WHERE pi_username LIKE ? ESCAPE '\\'
+          ORDER BY pi_username COLLATE NOCASE LIMIT 10
+        """, (f"%{q}%",)).fetchall()
+    return jsonify({"users": [{"username": r["pi_username"], "active": False, "friend": False} for r in found]})
 
-@mp_bp.post("/friends/request")
+@mp_bp.post("/mp/friends/request")
 def mp_friends_request():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, me_name = who
+    data = request.get_json(silent=True) or {}
+    to_user_name = (data.get("username") or "").strip()
+    if not to_user_name:
+        return jsonify({"ok": False, "error": "missing_username"}), 400
+    to_id = _user_id_by_username(to_user_name)
+    if not to_id:
+        return jsonify({"ok": False, "error": "user_not_found"}), 404
+    if to_id == me:
+        return jsonify({"ok": False, "error": "cannot_friend_self"}), 400
+    with conn() as cx:
+        # If they already sent me a request, accept it automatically.
+        pending = cx.execute("""
+          SELECT id FROM mp_friend_requests
+          WHERE from_user=? AND to_user=? AND status='pending'
+        """, (to_id, me)).fetchone()
+        if pending:
+            cx.execute("UPDATE mp_friend_requests SET status='accepted' WHERE id=?", (pending["id"],))
+            return jsonify({"ok": True, "autoAccepted": True})
+
+        # Otherwise create/refresh my outgoing request.
+        cx.execute("""
+          INSERT INTO mp_friend_requests(from_user, to_user, status)
+          VALUES(?,?, 'pending')
+          ON CONFLICT(from_user, to_user) DO UPDATE SET status='pending', created_at=CURRENT_TIMESTAMP
+        """, (me, to_id))
     return jsonify({"ok": True})
 
-@mp_bp.post("/friends/accept")
+@mp_bp.post("/mp/friends/accept")
 def mp_friends_accept():
-    return jsonify({"ok": True})
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
+    data = request.get_json(silent=True) or {}
+    from_name = (data.get("username") or "").strip()
+    if not from_name:
+        return jsonify({"ok": False, "error": "missing_username"}), 400
+    from_id = _user_id_by_username(from_name)
+    if not from_id:
+        return jsonify({"ok": False, "error": "user_not_found"}), 404
+    with conn() as cx:
+        n = cx.execute("""
+          UPDATE mp_friend_requests
+             SET status='accepted'
+           WHERE from_user=? AND to_user=? AND status='pending'
+        """, (from_id, me)).rowcount
+    return jsonify({"ok": n > 0})
 
-@mp_bp.post("/lobby/invite")
+@mp_bp.post("/mp/lobby/invite")
 def mp_lobby_invite():
-    # Pretend invite went out; return reason codes if you want
+    _ensure_schema()
+    _cleanup_expired_invites()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
+    data = request.get_json(silent=True) or {}
+    to_name = (data.get("toUsername") or "").strip()
+    mode = (data.get("mode") or "").strip() or None
+    ttl = int(data.get("ttlSec") or 1800)
+    to_id = _user_id_by_username(to_name)
+    if not to_id:
+        return jsonify({"ok": False, "error": "user_not_found"}), 404
+    if to_id == me:
+        return jsonify({"ok": False, "error": "cannot_invite_self"}), 400
+
+    # (Optional) enforce friendship first:
+    with conn() as cx:
+        is_friend = cx.execute("""
+          SELECT 1
+            FROM mp_friend_requests
+           WHERE status='accepted'
+             AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
+        """, (me, to_id, to_id, me)).fetchone()
+        if not is_friend:
+            return jsonify({"ok": False, "error": "not_friends"}), 403
+
+        cx.execute("""
+          INSERT INTO mp_invites(from_user, to_user, mode, ttl_sec, status)
+          VALUES(?,?,?,?, 'pending')
+        """, (me, to_id, mode, ttl))
     return jsonify({"ok": True})
 
-@mp_bp.post("/lobby/notify")
+@mp_bp.post("/mp/lobby/notify")
 def mp_lobby_notify():
-    return jsonify({"ok": True})
+    # This endpoint is conceptually the same as invite, kept for UI wording.
+    return mp_lobby_invite()
 
-@mp_bp.get("/notifications")
+@mp_bp.get("/mp/notifications")
 def mp_notifications():
-    return jsonify({"invites": [], "requests": []})
+    _ensure_schema()
+    _cleanup_expired_invites()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
+    with conn() as cx:
+        # Pending friend requests (incoming)
+        fr = cx.execute("""
+          SELECT u.pi_username AS from_name
+            FROM mp_friend_requests r
+            JOIN mp_users u ON u.id=r.from_user
+           WHERE r.to_user=? AND r.status='pending'
+           ORDER BY r.created_at DESC
+        """, (me,)).fetchall()
 
-@mp_bp.post("/lobby/accept")
+        # Pending invites (incoming, not expired)
+        inv = cx.execute("""
+          SELECT u.pi_username AS from_name, i.mode
+            FROM mp_invites i
+            JOIN mp_users u ON u.id=i.from_user
+           WHERE i.to_user=? AND i.status='pending'
+           ORDER BY i.created_at DESC
+           LIMIT 10
+        """, (me,)).fetchall()
+    return jsonify({
+        "requests": [{"from": r["from_name"]} for r in fr],
+        "invites":  [{"from": r["from_name"], "mode": invi["mode"]} for invi in inv],
+    })
+
+@mp_bp.post("/mp/lobby/accept")
 def mp_lobby_accept():
-    return jsonify({"ok": True})
+    _ensure_schema()
+    _cleanup_expired_invites()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
+    data = request.get_json(silent=True) or {}
+    from_name = (data.get("from") or "").strip()
+    if not from_name:
+        return jsonify({"ok": False, "error": "missing_from"}), 400
+    from_id = _user_id_by_username(from_name)
+    if not from_id:
+        return jsonify({"ok": False, "error": "user_not_found"}), 404
 
-@mp_bp.post("/queue")
+    # Mark newest pending invite from that user as accepted.
+    with conn() as cx:
+        row = cx.execute("""
+          SELECT id, mode
+            FROM mp_invites
+           WHERE from_user=? AND to_user=? AND status='pending'
+           ORDER BY created_at DESC
+           LIMIT 1
+        """, (from_id, me)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "no_pending_invite"}), 404
+        cx.execute("UPDATE mp_invites SET status='accepted' WHERE id=?", (row["id"],))
+
+    # TODO: start a match here (create a match row, return matchId, players, mode)
+    return jsonify({"ok": True, "mode": row["mode"]})
+
+@mp_bp.post("/mp/queue")
 def mp_queue():
+    # Stub for now; later: insert into a queue table and matchmake.
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    # You can store desired mode in a queue table here.
     return jsonify({"ok": True})
 
-@mp_bp.post("/dequeue")
+@mp_bp.post("/mp/dequeue")
 def mp_dequeue():
+    # Stub for now; later: remove from queue table.
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
     return jsonify({"ok": True})
 
-@mp_bp.get("/ranks")
-def mp_ranks():
-    return jsonify({"ranks": {"br10": {"w": 0, "l": 0}, "v1": {"w": 0, "l": 0}, "v2": {"w": 0, "l": 0}, "v3": {"w": 0, "l": 0}}})
-
-# ---------- optional Sock/WS ----------
+# -------- optional Sock/WS boot (kept compatible with your earlier file) -----
 sock = None
 
-def _want_ws():
-    # enable unless disabled explicitly OR worker is clearly incompatible
-    if os.getenv("MP_DISABLE_WS", "").lower() in ("1", "true", "yes"):
-        return False
-    return True
+def _want_ws() -> bool:
+    return os.getenv("MP_DISABLE_WS", "").lower() not in ("1", "true", "yes")
 
-def mp_boot(app):
+def mp_boot(app, mount_prefix="/izza-game"):
     """
-    Always safe to call. If eventlet/gevent + flask-sock are available and
-    MP_DISABLE_WS is not set, it attaches /api/mp/ws. Otherwise it logs and skips.
+    Safe to call. If flask-sock is available and not disabled, a WS route is added.
+    The REST API works regardless.
     """
     app.logger.info("[mp] boot start")
-    # ensure tables if you have any (no-ops here)
-    # with conn() as cx: cx.executescript("/* your schema here */")
+    global _WS_ENABLED, _WS_PATH
+    _WS_ENABLED = False
+    _WS_PATH = None
 
     if not _want_ws():
         app.logger.warning("[mp] WS disabled via MP_DISABLE_WS; REST only.")
@@ -85,18 +381,23 @@ def mp_boot(app):
         global sock
         sock = Sock(app)
 
-        @sock.route("/api/mp/ws")
+        _WS_PATH = f"{mount_prefix}/api/mp/ws"
+
+        @sock.route(_WS_PATH)
         def mp_ws(ws):
-            # Simple echo/ping channel; expand to your real events
+            # Minimal echo; later, you can broadcast events, presence, etc.
             try:
                 while True:
-                    msg = ws.receive(timeout=30)  # simple-websocket respects eventlet/gevent
+                    msg = ws.receive(timeout=30)
                     if msg is None:
                         break
                     ws.send(msg if isinstance(msg, str) else "ok")
             except Exception:
                 pass
 
-        app.logger.info("[mp] WS enabled at /api/mp/ws")
+        _WS_ENABLED = True
+        app.logger.info(f"[mp] WS enabled at {_WS_PATH}")
     except Exception as e:
-        app.logger.warning(f"[mp] WS not enabled ({e!r}); REST endpoints available.")
+        _WS_ENABLED = False
+        _WS_PATH = None
+        app.logger.warning(f"[mp] WS not enabled ({e!r}); REST endpoints only.")
