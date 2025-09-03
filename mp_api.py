@@ -4,8 +4,8 @@ from typing import Optional, Tuple
 from flask import Blueprint, jsonify, request, session
 from db import conn
 
-# We are registered in game_app.py with url_prefix="/api/mp"
-# So every route here should be like "/me", "/friends/list", etc.
+# NOTE: game_app.py registers this with url_prefix="/api/mp"
+# → All routes here are plain like "/me", "/friends/list", etc.
 mp_bp = Blueprint("mp", __name__)
 
 # ---- optional WS discovery (kept for future) ----
