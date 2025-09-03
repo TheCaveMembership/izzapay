@@ -12,7 +12,14 @@
     const bX=((un.x0+un.x1)/2|0)-(bW/2|0), bY=un.y0+5, hRoadY=bY+bH+1, vRoadX=Math.min(un.x1-3,bX+bW+6);
     return {un,bX,bY,bW,bH,hRoadY,vRoadX};
   }
-  function buildingSpot(api){ const a=anchors(api); return {gx:a.un.x0+7, gy:a.un.y1-11}; }
+
+  // NEW: place building relative to the opening spawn (door) — 3E, 4S
+  function buildingSpot(api){
+    const t = api.TILE;
+    const doorGX = Math.floor((api.doorSpawn.x + t/2) / t);
+    const doorGY = Math.floor(api.doorSpawn.y / t);
+    return { gx: doorGX + 3, gy: doorGY + 4 };
+  }
 
   let api=null, open=false, near=false;
 
