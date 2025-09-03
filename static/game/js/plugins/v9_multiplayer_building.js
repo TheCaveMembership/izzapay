@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.6.5 (adds Search button + status text)
+// Multiplayer Building & Lobby — v1.6.6 (pairs with client 1.6.6)
 (function(){
-  const BUILD='v1.6.5-mp-building';
+  const BUILD='v1.6.6-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -60,7 +60,6 @@
           <button id="mpClose" class="mp-small">Close</button>
         </div>
       </div>`;
-
     const style=document.createElement('style');
     style.textContent=`
       #mpLobby .mp-btn{padding:12px 10px;border-radius:12px;background:#1a2340;color:#cfe0ff;border:1px solid #2a3550;font-weight:700;}
@@ -73,12 +72,8 @@
       #mpLobby .offline::before{content:'• ';color:#7a889f}`;
     document.head.appendChild(style);
 
-    // close handlers
     host.addEventListener('click', function(e){ if(e.target===host) hideModal(); }, {passive:true});
-    const btnClose = host.querySelector('#mpClose');
-    if(btnClose) btnClose.addEventListener('click', hideModal, {passive:true});
-
-    // simple visual queue text
+    host.querySelector('#mpClose')?.addEventListener('click', hideModal, {passive:true});
     host.querySelectorAll('.mp-btn').forEach(function(b){
       b.addEventListener('click', function(){
         var m=b.getAttribute('data-mode');
@@ -88,74 +83,52 @@
       }, {passive:true});
     });
 
-    var copyBtn = host.querySelector('#mpCopyLink');
-    if(copyBtn){
-      copyBtn.addEventListener('click', async function(){
-        var link=location.origin+'/izza-game/auth?src=invite&from=' + encodeURIComponent((window.IZZA && IZZA.api && IZZA.api.user && IZZA.api.user.username) || 'player');
-        try{ await navigator.clipboard.writeText(link); window.IZZA && IZZA.emit && IZZA.emit('toast',{text:'Invite link copied'}); }
-        catch{ prompt('Copy link:', link); }
-      });
-    }
-
     document.body.appendChild(host);
     return host;
   }
 
   function showModal(){
-    try{
-      const host=ensureModal();
-      host.style.display='flex';
-      open=true;
-      requestAnimationFrame(function(){
-        window.IZZA && IZZA.emit && IZZA.emit('ui-modal-open', { id:'mpLobby' });
-      });
-    }catch(err){
-      console.error('[mp] modal error:', err);
-      open=false;
-      window.IZZA && IZZA.emit && IZZA.emit('ui-modal-close', { id:'mpLobby' });
-    }
+    const host=ensureModal();
+    host.style.display='flex';
+    requestAnimationFrame(()=> window.IZZA?.emit?.('ui-modal-open', { id:'mpLobby' }));
   }
   function hideModal(){
     const host=document.getElementById('mpLobby');
     if(host) host.style.display='none';
-    open=false;
-    window.IZZA && IZZA.emit && IZZA.emit('ui-modal-close', { id:'mpLobby' });
+    window.IZZA?.emit?.('ui-modal-close', { id:'mpLobby' });
   }
 
-  // ---- draw building ----
   function w2sX(api,wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy-api.camera.y)*(api.DRAW/api.TILE); }
+  function buildingSpot(api){ const t=api.TILE, a=(function(){
+    const tier=localStorage.getItem('izzaMapTier')||'1'; const un=(tier==='2')?{x0:10,y0:12,x1:80,y1:50}:{x0:18,y0:18,x1:72,y1:42};
+    return {gx:un.x0+7, gy:un.y1-11};
+  })(); return a; }
+
   function drawBuilding(){
-    if(!api||!api.ready) return;
-    if(localStorage.getItem(M3_KEY)!=='done') return;
-    const t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
-    const spot=buildingSpot(api), sx=w2sX(api,spot.gx*t), sy=w2sY(api,spot.gy*t);
+    if(!window.IZZA || !IZZA.ready) return;
+    if(localStorage.getItem('izzaMission3')!=='done') return;
+    const api = IZZA.api, t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
+    const s=buildingSpot(api), sx=w2sX(api,s.gx*t), sy=w2sY(api,s.gy*t);
     ctx.save();
     ctx.fillStyle='#18243b'; ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
     const doorX=sx + S*0.10, doorY=sy - S*0.02;
-    ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
-    ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
+    ctx.fillStyle='rgba(60,140,255,0.9)'; ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
     ctx.fillStyle='#b7d0ff'; ctx.font='12px monospace'; ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
-  function playerGrid(){ const t=api.TILE; return {gx:((api.player.x+t/2)/t|0), gy:((api.player.y+t/2)/t|0)}; }
-  function manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
-  function inRange(){ const p=playerGrid(), s=buildingSpot(api); return manhattan(p.gx,p.gy,s.gx,s.gy)<=1; }
 
   function onB(e){
-    if(localStorage.getItem(M3_KEY)!=='done') return;
-    if(!inRange()) return;
+    if(localStorage.getItem('izzaMission3')!=='done') return;
     showModal();
-    if(e){ e.preventDefault && e.preventDefault(); e.stopPropagation && e.stopPropagation(); e.stopImmediatePropagation && e.stopImmediatePropagation(); }
+    e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
   }
 
   if(window.IZZA && IZZA.on){
-    IZZA.on('ready', function(a){
-      api=a;
+    IZZA.on('ready', function(api){
       window.addEventListener('keydown', function(e){ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
-      var btnB=document.getElementById('btnB'); if(btnB) btnB.addEventListener('click', onB, true);
+      document.getElementById('btnB')?.addEventListener('click', onB, true);
     });
-    IZZA.on('update-post', function(){ if(!api||!api.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return; near=inRange(); });
     IZZA.on('render-post', function(){ drawBuilding(); });
   }
 })();
