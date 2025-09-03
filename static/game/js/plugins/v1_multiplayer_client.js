@@ -1,11 +1,13 @@
 /**
- * IZZA Multiplayer Client — v1.6.5
- * - Reliable search: Search button + Return + input/change/paste
- * - Live status line shows "Searching…", counts, or errors
- * - Still uses /players/search (case/at-insensitive, profile-verified)
+ * IZZA Multiplayer Client — v1.6.6
+ * - Reliable search (button + Return + input/change/paste)
+ * - Live status line ("Searching…", counts, errors)
+ * - Presence refresher every 20s
+ * - Notifications: invites + match start
+ * - Simple queue: reacts to server start payload
  */
 (function(){
-  const BUILD='v1.6.5-mp-client+reliable-search-button';
+  const BUILD='v1.6.6-mp-client+presence+invites+queue';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -93,12 +95,18 @@
       lastQueueMode=mode;
       const nice= mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
       if(ui.queueMsg) ui.queueMsg.textContent=`Queued for ${nice}… (waiting for match)`;
-      await jpost('/queue',{mode});
+      const res = await jpost('/queue',{mode});               // reacts to start
+      if(res && res.start){
+        if(ui.queueMsg) ui.queueMsg.textContent='';
+        if(lobby) lobby.style.display='none';
+        window.IZZA?.emit?.('mp-start', res.start);
+        toast('Match found! Starting…');
+      }
     }catch(e){ if(ui.queueMsg) ui.queueMsg.textContent=''; toast('Queue error: '+e.message); }
   }
   async function dequeue(){ try{ await jpost('/dequeue'); }catch{} if(ui.queueMsg) ui.queueMsg.textContent=''; lastQueueMode=null; }
 
-  // --- WS (unchanged) ---
+  // --- WS (unchanged behavior) ---
   function connectWS(){
     try{
       const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
@@ -247,7 +255,7 @@
       setStatus('Searching…');
       try{
         const list = await searchPlayers(q);
-        if(searchRunId !== thisRun) return; // a newer search started; ignore stale result
+        if(searchRunId !== thisRun) return; // ignore stale result
         paintFriends((list||[]).map(u=>({username:u.username, active:!!u.active})));
         setStatus((list&&list.length)?`Found ${list.length} result${list.length===1?'':'s'}`:'No players found');
 
@@ -313,16 +321,35 @@
 
       // --- presence refresher: keep me active every 20s ---
       setInterval(async () => {
-        try {
-          await jget('/me');
-          console.log('[MP] presence refreshed');
-        } catch(e) {
-          console.warn('presence refresh failed', e);
-        }
+        try { await jget('/me'); } catch(e) { /* ignore */ }
       }, 20000);
 
-      // lightweight notifications polling (no-op server ok)
-      const pull=async()=>{ try{ await jget('/notifications'); }catch{} };
+      // --- notifications polling: invites + direct start ---
+      const startMatch = (payload)=>{
+        if(ui.queueMsg) ui.queueMsg.textContent='';
+        if(lobby) lobby.style.display='none';
+        window.IZZA?.emit?.('mp-start', payload);
+        toast('Match starting…');
+      };
+      const pull=async()=>{
+        try{
+          const n = await jget('/notifications');
+          if(n && n.start){ startMatch(n.start); return; }
+          if(n && Array.isArray(n.invites) && n.invites.length){
+            const inv = n.invites[0];
+            if(pull._lastInviteId !== inv.id){
+              pull._lastInviteId = inv.id;
+              const ask = confirm(`${inv.from} invited you${inv.mode?` (${inv.mode})`:''}. Accept?`);
+              if(ask){
+                const r = await jpost('/lobby/accept',{inviteId:inv.id});
+                if(r && r.start) startMatch(r.start);
+              }else{
+                try{ await jpost('/lobby/decline',{inviteId:inv.id}); }catch{}
+              }
+            }
+          }
+        }catch{}
+      };
       pull(); notifTimer=setInterval(pull, 5000);
 
       connectWS();
