@@ -1,21 +1,38 @@
-// Multiplayer Building & Lobby — v1.6.6 (pairs with client 1.6.6)
+// Multiplayer Building & Lobby — v1.6.8 (always show + Tier-1 west placement)
 (function(){
-  const BUILD='v1.6.6-mp-building';
+  const BUILD='v1.6.8-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
-  const M3_KEY='izzaMission3';
-  const TIER_KEY='izzaMapTier';
-
-  function unlockedRect(tier){ return (tier==='2')?{x0:10,y0:12,x1:80,y1:50}:{x0:18,y0:18,x1:72,y1:42}; }
-  function anchors(api){
-    const tier=localStorage.getItem(TIER_KEY)||'1', un=unlockedRect(tier), bW=10,bH=6;
-    const bX=((un.x0+un.x1)/2|0)-(bW/2|0), bY=un.y0+5, hRoadY=bY+bH+1, vRoadX=Math.min(un.x1-3,bX+bW+6);
-    return {un,bX,bY,bW,bH,hRoadY,vRoadX};
+  // Tier bounds (same shape as your map expander)
+  function unlockedRect(tier){
+    return (tier==='2')
+      ? {x0:10,y0:12,x1:80,y1:50}
+      : {x0:18,y0:18,x1:72,y1:42}; // Tier 1
   }
-  function buildingSpot(api){ const a=anchors(api); return {gx:a.un.x0+7, gy:a.un.y1-11}; }
 
-  let api=null, open=false, near=false;
+  function anchors(api){
+    const tier = localStorage.getItem('izzaMapTier') || '1';
+    const un   = unlockedRect(tier);
+    const bW=10, bH=6;
+    const bX=((un.x0+un.x1)/2|0)-(bW/2|0), bY=un.y0+5;
+    return {tier, un, bX, bY, bW, bH};
+  }
 
+  // **** Placement rule ****
+  // Tier 1: push the building to the LEFT (west) side of the unlocked region,
+  // a little above vertical center. Tier 2+: keep the previous centered offset.
+  function buildingSpot(api){
+    const a = anchors(api);
+    if (a.tier === '1') {
+      const gx = a.un.x0 + 5;                                  // WEST of HQ area
+      const gy = Math.max(a.un.y0+3, ((a.un.y0+a.un.y1)/2|0)-2);
+      return {gx, gy};
+    }
+    // Tier 2+: previous centered spot
+    return {gx:a.un.x0+7, gy:a.un.y1-11};
+  }
+
+  // ---------- Modal ----------
   function ensureModal(){
     let host=document.getElementById('mpLobby');
     if(host) return host;
@@ -37,24 +54,16 @@
           <button class="mp-btn" data-mode="v3">3 vs 3</button>
         </div>
         <div id="mpQueueMsg" style="opacity:.75;margin-top:10px"></div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
-          <div class="rank pill" id="r-br10">BR10 <span>0W / 0L</span></div>
-          <div class="rank pill" id="r-v1">1V1 <span>0W / 0L</span></div>
-          <div class="rank pill" id="r-v2">2V2 <span>0W / 0L</span></div>
-          <div class="rank pill" id="r-v3">3V3 <span>0W / 0L</span></div>
-        </div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px">
           <div style="font-weight:700">Friends</div>
           <button id="mpCopyLink" class="mp-small">Copy Invite Link</button>
         </div>
-
         <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
           <input id="mpSearch" placeholder="Search players…" autocomplete="off" spellcheck="false" inputmode="text"
                  style="flex:1;padding:10px;border-radius:10px;background:#0c1422;border:1px solid #2a3550;color:#cfe0ff">
           <button id="mpSearchBtn" class="mp-small" type="button">Search</button>
         </div>
         <div id="mpSearchStatus" style="margin-top:6px;opacity:.75;font-size:12px">Type a name and press Search or Return</div>
-
         <div id="mpFriends" style="margin-top:10px;display:flex;flex-direction:column;gap:10px"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:16px">
           <button id="mpClose" class="mp-small">Close</button>
@@ -65,24 +74,12 @@
       #mpLobby .mp-btn{padding:12px 10px;border-radius:12px;background:#1a2340;color:#cfe0ff;border:1px solid #2a3550;font-weight:700;}
       #mpLobby .mp-btn:active{transform:translateY(1px);}
       #mpLobby .mp-small{padding:8px 10px;border-radius:10px;background:#101827;color:#cfe0ff;border:1px solid #2a3550;}
-      #mpLobby .pill{padding:8px 10px;border-radius:10px;background:#101827;border:1px solid #2a3550;display:inline-flex;gap:8px;}
       #mpLobby .friend{background:#0f1625;border:1px solid #2a3550;border-radius:12px;padding:10px;display:flex;align-items:center;justify-content:space-between;}
-      #mpLobby .meta{opacity:.8;font-size:12px}
-      #mpLobby .active::before{content:'• ';color:#6cf08a}
-      #mpLobby .offline::before{content:'• ';color:#7a889f}`;
+      #mpLobby .meta{opacity:.8;font-size:12px}`;
     document.head.appendChild(style);
 
-    host.addEventListener('click', function(e){ if(e.target===host) hideModal(); }, {passive:true});
+    host.addEventListener('click', e=>{ if(e.target===host) hideModal(); }, {passive:true});
     host.querySelector('#mpClose')?.addEventListener('click', hideModal, {passive:true});
-    host.querySelectorAll('.mp-btn').forEach(function(b){
-      b.addEventListener('click', function(){
-        var m=b.getAttribute('data-mode');
-        var nice=m==='br10'?'Battle Royale (10)': m==='v1'?'1v1': m==='v2'?'2v2':'3v3';
-        var msgEl = host.querySelector('#mpQueueMsg');
-        if(msgEl) msgEl.textContent='Queued for '+nice+'… (waiting for match)';
-      }, {passive:true});
-    });
-
     document.body.appendChild(host);
     return host;
   }
@@ -98,16 +95,12 @@
     window.IZZA?.emit?.('ui-modal-close', { id:'mpLobby' });
   }
 
+  // ---------- Drawing ----------
   function w2sX(api,wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy-api.camera.y)*(api.DRAW/api.TILE); }
-  function buildingSpot(api){ const t=api.TILE, a=(function(){
-    const tier=localStorage.getItem('izzaMapTier')||'1'; const un=(tier==='2')?{x0:10,y0:12,x1:80,y1:50}:{x0:18,y0:18,x1:72,y1:42};
-    return {gx:un.x0+7, gy:un.y1-11};
-  })(); return a; }
 
   function drawBuilding(){
     if(!window.IZZA || !IZZA.ready) return;
-    if(localStorage.getItem('izzaMission3')!=='done') return;
     const api = IZZA.api, t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
     const s=buildingSpot(api), sx=w2sX(api,s.gx*t), sy=w2sY(api,s.gy*t);
     ctx.save();
@@ -118,14 +111,11 @@
     ctx.restore();
   }
 
-  function onB(e){
-    if(localStorage.getItem('izzaMission3')!=='done') return;
-    showModal();
-    e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
-  }
+  // Open the modal when B is pressed or HUD B clicked
+  function onB(e){ showModal(); e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.(); }
 
   if(window.IZZA && IZZA.on){
-    IZZA.on('ready', function(api){
+    IZZA.on('ready', function(){
       window.addEventListener('keydown', function(e){ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
       document.getElementById('btnB')?.addEventListener('click', onB, true);
     });
