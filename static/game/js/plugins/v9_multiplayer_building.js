@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.6 (modal events + higher z to sit above shield)
+// Multiplayer Building & Lobby — v1.7 (B-capture hardened; emits modal events)
 (function(){
-  const BUILD='v1.6-mp-building';
+  const BUILD='v1.7-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -9,12 +9,12 @@
   function unlockedRect(tier){ return (tier==='2')?{x0:10,y0:12,x1:80,y1:50}:{x0:18,y0:18,x1:72,y1:42}; }
   function anchors(api){
     const tier=localStorage.getItem(TIER_KEY)||'1', un=unlockedRect(tier), bW=10,bH=6;
-    const bX=((un.x0+un.x1)/2|0)- (bW/2|0), bY=un.y0+5, hRoadY=bY+bH+1, vRoadX=Math.min(un.x1-3,bX+bW+6);
+    const bX=((un.x0+un.x1)/2|0)-(bW/2|0), bY=un.y0+5, hRoadY=bY+bH+1, vRoadX=Math.min(un.x1-3,bX+bW+6);
     return {un,bX,bY,bW,bH,hRoadY,vRoadX};
   }
   function buildingSpot(api){ const a=anchors(api); return {gx:a.un.x0+7, gy:a.un.y1-11}; }
 
-  let api=null, open=false, near=false;
+  let api=null, near=false;
 
   // ---- modal ----
   function ensureModal(){
@@ -59,19 +59,10 @@
       #mpLobby .active::before{content:'• ';color:#6cf08a}
       #mpLobby .offline::before{content:'• ';color:#7a889f}`; document.head.appendChild(style);
 
-    host.addEventListener('click', e=>{ if(e.target===host) hideModal(); });
-    $('#mpClose',host).addEventListener('click', ()=> hideModal());
+    host.addEventListener('click', e=>{ if(e.target===host) hideModal(); }, {capture:true});
+    host.querySelector('#mpClose').addEventListener('click', hideModal, {capture:true});
 
-    // temporary visual queue text; real queue managed by client
-    host.querySelectorAll('.mp-btn').forEach(b=>{
-      b.onclick=()=>{
-        const m=b.getAttribute('data-mode');
-        const nice=m==='br10'?'Battle Royale (10)': m==='v1'?'1v1': m==='v2'?'2v2':'3v3';
-        $('#mpQueueMsg',host).textContent=`Queued for ${nice}… (waiting for match)`;
-      };
-    });
-
-    $('#mpCopyLink',host).onclick=async ()=>{
+    host.querySelector('#mpCopyLink').onclick=async ()=>{
       const link=`${location.origin}/izza-game/auth?src=invite&from=${encodeURIComponent(IZZA?.api?.user?.username||'player')}`;
       try{ await navigator.clipboard.writeText(link); IZZA.emit?.('toast',{text:'Invite link copied'}); }
       catch{ prompt('Copy link:', link); }
@@ -81,8 +72,16 @@
     return host;
   }
 
-  function showModal(){ const host=ensureModal(); host.style.display='flex'; open=true; window.IZZA?.emit?.('ui-modal-open',{id:'mpLobby'}); }
-  function hideModal(){ const host=document.getElementById('mpLobby'); if(host) host.style.display='none'; open=false; window.IZZA?.emit?.('ui-modal-close',{id:'mpLobby'}); }
+  function showModal(){
+    const host=ensureModal();
+    host.style.display='flex';
+    window.IZZA?.emit?.('ui-modal-open',{id:'mpLobby'});
+  }
+  function hideModal(){
+    const host=document.getElementById('mpLobby');
+    if(host) host.style.display='none';
+    window.IZZA?.emit?.('ui-modal-close',{id:'mpLobby'});
+  }
 
   // ---- draw building ----
   function w2sX(api,wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
@@ -91,11 +90,13 @@
     if(!api?.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return;
     const t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
     const spot=buildingSpot(api), sx=w2sX(api,spot.gx*t), sy=w2sY(api,spot.gy*t);
+    // door rect (for optional tap-to-open)
+    const door = {x:sx + S*0.10, y:sy - S*0.02, w:S*0.22, h:S*0.14};
+
     ctx.save();
     ctx.fillStyle='#18243b'; ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
-    const doorX=sx + S*0.10, doorY=sy - S*0.02;
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
-    ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
+    ctx.fillRect(door.x, door.y, door.w, door.h);
     ctx.fillStyle='#b7d0ff'; ctx.font='12px monospace'; ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
@@ -108,15 +109,22 @@
     if(localStorage.getItem(M3_KEY)!=='done') return;
     if(!inRange()) return;
     showModal();
-    e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
+    if(e){ e.stopImmediatePropagation(); e.stopPropagation(); e.preventDefault?.(); }
   }
 
   // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:true});
+    // Use passive:false so our preventDefault is honored
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
     document.getElementById('btnB')?.addEventListener('click', onB, true);
   });
-  IZZA.on('update-post', ()=>{ if(!api?.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return; near=inRange(); });
+
+  IZZA.on('update-post', ()=>{
+    if(!api?.ready) return;
+    if(localStorage.getItem(M3_KEY)!=='done') return;
+    near=inRange();
+  });
+
   IZZA.on('render-post', ()=> drawBuilding());
 })();
