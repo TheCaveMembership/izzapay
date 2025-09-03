@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.6.6 (focus search; no freeze)
+// Multiplayer Building & Lobby — v1.6.5 (adds Search button + status text)
 (function(){
-  const BUILD='v1.6.6-mp-building';
+  const BUILD='v1.6.5-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -22,7 +22,11 @@
 
     host=document.createElement('div');
     host.id='mpLobby';
-    Object.assign(host.style,{position:'fixed', inset:'0', display:'none', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,.35)', zIndex:1003});
+    Object.assign(host.style,{
+      position:'fixed', inset:'0', display:'none',
+      alignItems:'center', justifyContent:'center',
+      background:'rgba(0,0,0,.35)', zIndex:1003
+    });
     host.innerHTML=`
       <div id="mpCard" style="background:#0f1625;border:1px solid #2a3550;border-radius:14px;width:min(92vw,640px);padding:16px;color:#cfe0ff;max-height:86vh;overflow:auto;position:relative;z-index:1004">
         <div style="font-size:18px;font-weight:700;margin-bottom:8px">Play Modes</div>
@@ -33,14 +37,12 @@
           <button class="mp-btn" data-mode="v3">3 vs 3</button>
         </div>
         <div id="mpQueueMsg" style="opacity:.75;margin-top:10px"></div>
-
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
           <div class="rank pill" id="r-br10">BR10 <span>0W / 0L</span></div>
           <div class="rank pill" id="r-v1">1V1 <span>0W / 0L</span></div>
           <div class="rank pill" id="r-v2">2V2 <span>0W / 0L</span></div>
           <div class="rank pill" id="r-v3">3V3 <span>0W / 0L</span></div>
         </div>
-
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px">
           <div style="font-weight:700">Friends</div>
           <button id="mpCopyLink" class="mp-small">Copy Invite Link</button>
@@ -62,69 +64,98 @@
     const style=document.createElement('style');
     style.textContent=`
       #mpLobby .mp-btn{padding:12px 10px;border-radius:12px;background:#1a2340;color:#cfe0ff;border:1px solid #2a3550;font-weight:700;}
+      #mpLobby .mp-btn:active{transform:translateY(1px);}
       #mpLobby .mp-small{padding:8px 10px;border-radius:10px;background:#101827;color:#cfe0ff;border:1px solid #2a3550;}
       #mpLobby .pill{padding:8px 10px;border-radius:10px;background:#101827;border:1px solid #2a3550;display:inline-flex;gap:8px;}
       #mpLobby .friend{background:#0f1625;border:1px solid #2a3550;border-radius:12px;padding:10px;display:flex;align-items:center;justify-content:space-between;}
-      #mpLobby .meta{opacity:.8;font-size:12px}`;
+      #mpLobby .meta{opacity:.8;font-size:12px}
+      #mpLobby .active::before{content:'• ';color:#6cf08a}
+      #mpLobby .offline::before{content:'• ';color:#7a889f}`;
     document.head.appendChild(style);
 
-    host.addEventListener('click', e=>{ if(e.target===host) hideModal(); }, {passive:true});
-    host.querySelector('#mpClose')?.addEventListener('click', hideModal, {passive:true});
+    // close handlers
+    host.addEventListener('click', function(e){ if(e.target===host) hideModal(); }, {passive:true});
+    const btnClose = host.querySelector('#mpClose');
+    if(btnClose) btnClose.addEventListener('click', hideModal, {passive:true});
+
+    // simple visual queue text
+    host.querySelectorAll('.mp-btn').forEach(function(b){
+      b.addEventListener('click', function(){
+        var m=b.getAttribute('data-mode');
+        var nice=m==='br10'?'Battle Royale (10)': m==='v1'?'1v1': m==='v2'?'2v2':'3v3';
+        var msgEl = host.querySelector('#mpQueueMsg');
+        if(msgEl) msgEl.textContent='Queued for '+nice+'… (waiting for match)';
+      }, {passive:true});
+    });
+
+    var copyBtn = host.querySelector('#mpCopyLink');
+    if(copyBtn){
+      copyBtn.addEventListener('click', async function(){
+        var link=location.origin+'/izza-game/auth?src=invite&from=' + encodeURIComponent((window.IZZA && IZZA.api && IZZA.api.user && IZZA.api.user.username) || 'player');
+        try{ await navigator.clipboard.writeText(link); window.IZZA && IZZA.emit && IZZA.emit('toast',{text:'Invite link copied'}); }
+        catch{ prompt('Copy link:', link); }
+      });
+    }
 
     document.body.appendChild(host);
     return host;
   }
 
   function showModal(){
-    const host=ensureModal();
-    host.style.display='flex';
-    open=true;
-    requestAnimationFrame(()=> window.IZZA?.emit?.('ui-modal-open',{id:'mpLobby'}));
-    setTimeout(()=> document.querySelector('#mpSearch')?.focus(), 120);
+    try{
+      const host=ensureModal();
+      host.style.display='flex';
+      open=true;
+      requestAnimationFrame(function(){
+        window.IZZA && IZZA.emit && IZZA.emit('ui-modal-open', { id:'mpLobby' });
+      });
+    }catch(err){
+      console.error('[mp] modal error:', err);
+      open=false;
+      window.IZZA && IZZA.emit && IZZA.emit('ui-modal-close', { id:'mpLobby' });
+    }
   }
   function hideModal(){
     const host=document.getElementById('mpLobby');
     if(host) host.style.display='none';
     open=false;
-    window.IZZA?.emit?.('ui-modal-close',{id:'mpLobby'});
+    window.IZZA && IZZA.emit && IZZA.emit('ui-modal-close', { id:'mpLobby' });
   }
 
-  // building render
+  // ---- draw building ----
   function w2sX(api,wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy-api.camera.y)*(api.DRAW/api.TILE); }
-  function buildingSpot(api){ const a=anchors(api); return {gx:a.un.x0+7, gy:a.un.y1-11}; }
-  function playerGrid(api){ const t=api.TILE; return {gx:((api.player.x+t/2)/t|0), gy:((api.player.y+t/2)/t|0)}; }
-  function manhattan(a,b,c,d){ return Math.abs(a-c)+Math.abs(b-d); }
-  function inRange(api){ const p=playerGrid(api), s=buildingSpot(api); return manhattan(p.gx,p.gy,s.gx,s.gy)<=1; }
-
   function drawBuilding(){
-    if(!api?.ready) return;
+    if(!api||!api.ready) return;
     if(localStorage.getItem(M3_KEY)!=='done') return;
     const t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
-    const s=buildingSpot(api), sx=w2sX(api,s.gx*t), sy=w2sY(api,s.gy*t);
+    const spot=buildingSpot(api), sx=w2sX(api,spot.gx*t), sy=w2sY(api,spot.gy*t);
     ctx.save();
     ctx.fillStyle='#18243b'; ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
     const doorX=sx + S*0.10, doorY=sy - S*0.02;
-    const near = inRange(api);
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
     ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
     ctx.fillStyle='#b7d0ff'; ctx.font='12px monospace'; ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
+  function playerGrid(){ const t=api.TILE; return {gx:((api.player.x+t/2)/t|0), gy:((api.player.y+t/2)/t|0)}; }
+  function manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
+  function inRange(){ const p=playerGrid(), s=buildingSpot(api); return manhattan(p.gx,p.gy,s.gx,s.gy)<=1; }
 
   function onB(e){
     if(localStorage.getItem(M3_KEY)!=='done') return;
-    if(!inRange(api)) return;
+    if(!inRange()) return;
     showModal();
-    e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
+    if(e){ e.preventDefault && e.preventDefault(); e.stopPropagation && e.stopPropagation(); e.stopImmediatePropagation && e.stopImmediatePropagation(); }
   }
 
   if(window.IZZA && IZZA.on){
-    IZZA.on('ready', a=>{
+    IZZA.on('ready', function(a){
       api=a;
-      window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
-      document.getElementById('btnB')?.addEventListener('click', onB, true);
+      window.addEventListener('keydown', function(e){ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
+      var btnB=document.getElementById('btnB'); if(btnB) btnB.addEventListener('click', onB, true);
     });
-    IZZA.on('render-post', ()=> drawBuilding());
+    IZZA.on('update-post', function(){ if(!api||!api.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return; near=inRange(); });
+    IZZA.on('render-post', function(){ drawBuilding(); });
   }
 })();
