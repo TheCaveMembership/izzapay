@@ -1,4 +1,4 @@
-# mp_api.py — v2.2 (HTTP-only mini sync + render profile + invites/queue unchanged)
+# mp_api.py — v2.1 (30-min presence + invites + notifications + simple v1 queue + duel sync)
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
 from db import conn
@@ -116,9 +116,6 @@ def _ensure_schema():
         """)
 
 def _user_id_by_username(username: str):
-    """
-    Case/at-symbol insensitive resolver: 'CamMac' == '@CamMac'
-    """
     username = (username or "").strip()
     if not username:
         return None
@@ -144,140 +141,80 @@ def _is_friend(a: int, b: int) -> bool:
         ).fetchone()
         return bool(r)
 
-# ------------------- mini realtime sync over HTTP -------------------
-# In-memory live match states.
-_MATCHES: Dict[int, Dict[str, Any]] = {}  # matchId -> {mode, players:[uids], states:{uid:{x,y,facing,anim,ts}}}
+# ---------------- minimal duel sync (REST polling) ----------------
+# matchId -> {
+#   "players": { uid: {"x":float,"y":float,"facing":str,"hp":int,"ts":float,"skin":str} },
+#   "ttl": float
+# }
+_DUELS: Dict[str, Dict[str, Any]] = {}
+_DUEL_TTL = 60.0  # seconds of inactivity before cleanup
 
-def _ensure_match(match_id: int, mode: str, players: List[int]):
-    m = _MATCHES.get(match_id)
-    if not m:
-        m = {"mode": mode, "players": players[:], "states": {}}
-        _MATCHES[match_id] = m
-    return m
+def _clean_duels():
+    now = time.time()
+    dead = []
+    for mid, obj in _DUELS.items():
+        ts = max([p.get("ts",0) for p in obj.get("players",{}).values()] or [0])
+        if (now - ts) > _DUEL_TTL:
+            dead.append(mid)
+    for mid in dead:
+        _DUELS.pop(mid, None)
 
-@mp_bp.post("/match/join")
-def mp_match_join():
-    who = _current_user_ids()
-    if not who:
-        return jsonify({"error":"not_authenticated"}), 401
-    uid, _, _ = who
-    data = request.get_json(silent=True) or {}
-    mid = int(data.get("matchId") or 0)
-    mode = (data.get("mode") or "v1")
-    players = data.get("players") or [uid]
-    _ensure_match(mid, mode, [int(x) for x in players])
-    return jsonify({"ok": True})
-
-@mp_bp.post("/match/leave")
-def mp_match_leave():
-    who = _current_user_ids()
-    if not who:
-        return jsonify({"error":"not_authenticated"}), 401
-    uid, _, _ = who
-    data = request.get_json(silent=True) or {}
-    mid = int(data.get("matchId") or 0)
-    if mid in _MATCHES:
-        _MATCHES[mid]["states"].pop(uid, None)
-    return jsonify({"ok": True})
-
-@mp_bp.post("/match/state")
-def mp_match_state():
-    who = _current_user_ids()
-    if not who:
-        return jsonify({"error":"not_authenticated"}), 401
-    uid, _, _ = who
-    data = request.get_json(silent=True) or {}
-    mid = int(data.get("matchId") or 0)
-    st = data.get("state") or {}
-    st["ts"] = time.time()
-    m = _ensure_match(mid, data.get("mode") or "v1", data.get("players") or [uid])
-    m["states"][uid] = st
-    return jsonify({"ok": True})
-
-@mp_bp.get("/match/others")
-def mp_match_others():
-    who = _current_user_ids()
-    if not who:
-        return jsonify({"error":"not_authenticated"}), 401
-    uid, _, _ = who
-    mid = int(request.args.get("matchId") or 0)
-    since = float(request.args.get("since") or 0)
-    m = _MATCHES.get(mid) or {"states": {}}
-    out = []
-    for k,v in m["states"].items():
-        if int(k) == int(uid):
-            continue
-        if (v.get("ts") or 0) > since:
-            out.append({"userId": int(k), **v})
-    return jsonify({"ok": True, "states": out, "now": time.time()})
-
-# ------------------- appearance / render profile -------------------
-@mp_bp.get("/render/profile")
-def mp_render_profile():
+@mp_bp.post("/duel/poke")
+def mp_duel_poke():
     """
-    Return the opponent's render data (as stored in SQLite). We try the most
-    likely spots: a JSON blob column `render_json` in `game_profiles`, otherwise
-    we compose a minimal profile from known columns when present.
-    Accepts ?username=@name OR ?userId=123.
+    Upserts my realtime state into the duel.
+    Body: {"matchId": "...", "x": number, "y": number, "facing": "up|down|left|right", "hp": int, "skin": str}
     """
-    q_user = (request.args.get("username") or "").strip()
-    q_uid  = request.args.get("userId")
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    data = request.get_json(silent=True) or {}
+    mid = str(data.get("matchId") or "").strip()
+    if not mid:
+        return jsonify({"ok": False, "error": "no_match"}), 400
+    _clean_duels()
+    d = _DUELS.setdefault(mid, {"players": {}})
+    d["players"][uid] = {
+        "x": float(data.get("x") or 0.0),
+        "y": float(data.get("y") or 0.0),
+        "facing": str(data.get("facing") or "down"),
+        "hp": int(data.get("hp") or 5),
+        "skin": (data.get("skin") or ""),
+        "ts": time.time(),
+    }
+    return jsonify({"ok": True})
 
-    with conn() as cx:
-        row = None
-        if q_uid:
-            row = cx.execute("""
-                SELECT u.id, u.pi_uid, u.pi_username,
-                       gp.render_json,
-                       gp.skin, gp.outfit, gp.sprite
-                FROM users u
-                LEFT JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
-                WHERE u.id = ?
-                """, (int(q_uid),)
-            ).fetchone()
-        else:
-            want = q_user.lstrip("@")
-            row = cx.execute("""
-                SELECT u.id, u.pi_uid, u.pi_username,
-                       gp.render_json,
-                       gp.skin, gp.outfit, gp.sprite
-                FROM users u
-                LEFT JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
-                WHERE LOWER(REPLACE(u.pi_username,'@','')) = LOWER(REPLACE(?, '@',''))
-                """, (want,)
-            ).fetchone()
+@mp_bp.get("/duel/pull")
+def mp_duel_pull():
+    """
+    Returns opponent snapshot.
+    Query: ?matchId=...
+    """
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    mid = str((request.args.get("matchId") or "").strip())
+    if not mid:
+        return jsonify({"ok": False, "error": "no_match"}), 400
+    _clean_duels()
+    d = _DUELS.get(mid) or {"players": {}}
+    opp = None
+    for k, v in d["players"].items():
+        if int(k) != int(uid):
+            opp = {"userId": int(k), **v}
+            break
+    return jsonify({"ok": True, "opponent": opp})
+# -----------------------------------------------------------------
 
-    if not row:
-        return jsonify({"ok": False, "error": "not_found"}), 404
-
-    # Prefer a JSON blob if present
-    import json as _json
-    render = None
-    if row["render_json"]:
-        try:
-            render = _json.loads(row["render_json"])
-        except Exception:
-            render = None
-
-    if not render:
-        # Minimal fallback
-        render = {
-            "username": row["pi_username"],
-            "sprite": row["sprite"] or "default",
-            "skin": row["skin"] or "default",
-            "outfit": row["outfit"] or "default"
-        }
-
-    return jsonify({"ok": True, "userId": row["id"], "profile": render})
-
-# ---------------- endpoints (existing) ----------------
+# ---------------- endpoints ----------------
 
 @mp_bp.get("/echo")
 def mp_echo():
-    """Tiny debug: shows whether cookie or ?t= produced a user."""
     who = _current_user_ids()
     if who:
-        _mark_active(who[0])  # touching echo counts as presence
+        _mark_active(who[0])
     return jsonify({
         "ok": True,
         "q": request.args.get("q"),
@@ -294,7 +231,7 @@ def mp_me():
     if not who:
         return jsonify({"error": "not_authenticated"}), 401
     uid, _, name = who
-    _mark_active(uid)  # mark present when client boots MP
+    _mark_active(uid)
     return jsonify({"username": name, "active": True, "inviteLink": "/izza-game/auth"})
 
 @mp_bp.get("/friends/list")
@@ -327,7 +264,7 @@ def mp_friends_list():
     ]})
 
 @mp_bp.get("/players/search")
-@mp_bp.get("/friends/search")  # alias
+@mp_bp.get("/friends/search")
 def mp_players_search():
     _ensure_schema()
     who = _current_user_ids()
@@ -379,9 +316,6 @@ def mp_lobby_invite():
         return jsonify({"ok": False, "error": "player_not_found"}), 404
     if to_id == me:
         return jsonify({"ok": False, "error": "cannot_invite_self"}), 400
-    # Allow testing even if not friends; re-enable later if desired
-    # if not _is_friend(me, to_id):
-    #     return jsonify({"ok": False, "error": "not_friends"}), 403
     with conn() as cx:
         cx.execute(
             "INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
@@ -408,6 +342,8 @@ def mp_lobby_accept():
     start = _make_start(inv["mode"] or "v1", int(inv["from_user"]), int(inv["to_user"]))
     _STARTS[int(inv["from_user"])] = start
     _STARTS[int(inv["to_user"])]   = start
+    # initialize duel container so /duel/poke doesn't race
+    _DUELS[str(start["matchId"])] = {"players": {}}
     return jsonify({"ok": True, "start": start})
 
 @mp_bp.post("/lobby/decline")
@@ -471,9 +407,9 @@ def mp_queue():
         _try_match_v1()
         start = _STARTS.pop(uid, None)
         if start:
+            _DUELS[str(start["matchId"])] = {"players": {}}
             return jsonify({"ok": True, "start": start})
         return jsonify({"ok": True, "queued": True})
-    # stubs for other modes
     return jsonify({"ok": True, "queued": True})
 
 @mp_bp.post("/dequeue")
@@ -508,7 +444,6 @@ def mp_debug_status():
 
 @mp_bp.get("/debug/search")
 def mp_debug_search():
-    """Check exactly what the server would match."""
     q = (request.args.get("q") or "").strip()
     norm = q.lstrip("@").lower()
     like = f"%{norm}%"
