@@ -1,19 +1,17 @@
 /**
- * IZZA Multiplayer Client — v1.6.4
- * - Search fires on iOS "Return/Done", paste, and autocorrect
- * - Uses /players/search (case/at-insensitive, profile-verified)
- * - Keeps all typing guard & shield logic
+ * IZZA Multiplayer Client — v1.6.5
+ * - Reliable search: Search button + Return + input/change/paste
+ * - Live status line shows "Searching…", counts, or errors
+ * - Still uses /players/search (case/at-insensitive, profile-verified)
  */
 (function(){
-  const BUILD='v1.6.4-mp-client+reliable-search';
+  const BUILD='v1.6.5-mp-client+reliable-search-button';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
     base: (window.__MP_BASE__ || '/izza-game/api/mp'),
     ws:   (window.__MP_WS__   || '/izza-game/api/mp/ws'),
     searchDebounceMs: 250,
-    notifPollMs: 5000,
-    minChars: 2
   };
 
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
@@ -84,7 +82,7 @@
   }
   async function dequeue(){ try{ await jpost('/dequeue'); }catch{} if(ui.queueMsg) ui.queueMsg.textContent=''; lastQueueMode=null; }
 
-  // --- WS ---
+  // --- WS (unchanged) ---
   function connectWS(){
     try{
       const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
@@ -106,7 +104,7 @@
     });
   }
 
-  // --- typing guard + shield (from v1.6.2) ---
+  // --- typing guard + shield (unchanged logic) ---
   function isLobbyEditor(el){ if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   function guardKeyEvent(e){ if(!isLobbyEditor(e.target)) return; const k=(e.key||'').toLowerCase(); if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); } }
   ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
@@ -128,16 +126,14 @@
       el.__mp_swallow = swallowClick;
     });
 
-    // global ABI kill switch
     installShield._key = (ev)=>{ if(lobbyOpen && keyIsABI(ev)) swallow(ev); };
     ['keydown','keypress','keyup'].forEach(t=> window.addEventListener(t, installShield._key, {capture:true}));
 
-    // transparent overlay to grab stray taps
+    // transparent overlay
     shield=document.createElement('div');
     Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:1002, background:'transparent', touchAction:'none'});
     document.body.appendChild(shield);
 
-    // safety: if modal somehow not visible, auto-remove after a moment
     setTimeout(function(){
       const node=document.getElementById('mpLobby');
       const visible = !!(node && node.style.display && node.style.display!=='none');
@@ -172,6 +168,9 @@
         tryShieldOnce();
         requestAnimationFrame(tryShieldOnce);
         setTimeout(tryShieldOnce, 80);
+
+        // focus into search for instant typing on mobile
+        setTimeout(()=> { $('#mpSearch')?.focus(); }, 120);
       }
     });
     IZZA.on('ui-modal-close', function(e){ if(e && e.id==='mpLobby') removeShield(); });
@@ -181,7 +180,10 @@
   function mountLobby(host){
     lobby = host || document.getElementById('mpLobby');
     if(!lobby) return;
-    ui.queueMsg = lobby.querySelector('#mpQueueMsg');
+    ui.queueMsg     = lobby.querySelector('#mpQueueMsg');
+    ui.search       = lobby.querySelector('#mpSearch');
+    ui.searchBtn    = lobby.querySelector('#mpSearchBtn');
+    ui.searchStatus = lobby.querySelector('#mpSearchStatus');
 
     lobby.querySelectorAll('.mp-btn').forEach(btn=> btn.onclick=()=> enqueue(btn.getAttribute('data-mode')));
     lobby.querySelector('#mpClose')?.addEventListener('click', ()=>{ if(lastQueueMode) dequeue(); });
@@ -198,71 +200,69 @@
       }
     });
 
-    // --------- FIXED: reliable search on iOS ---------
-    const search = lobby.querySelector('#mpSearch');
-    if(search){
-      const perform = async () => {
-        const q=(search.value||'').trim();
-        if(!q){ paintFriends(friends); return; }
-        try{
-          const list = await searchPlayers(q);
-          paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
-          if(!list.length){
-            const host = lobby.querySelector('#mpFriends');
-            if(host){
-              host.innerHTML='';
-              const none=document.createElement('div');
-              none.className='friend';
-              none.innerHTML=`
-                <div>
-                  <div>${q}</div>
-                  <div class="meta">Player not found — Invite user to join IZZA GAME</div>
-                </div>
-                <button class="mp-small">Copy Invite</button>`;
-              none.querySelector('button')?.addEventListener('click', async ()=>{
-                const link = location.origin + '/izza-game/auth?src=invite&from=' + encodeURIComponent(me?.username||'player');
-                try{ await navigator.clipboard.writeText(link); toast('Invite link copied'); }
-                catch{ prompt('Copy link:', link); }
-              });
-              host.appendChild(none);
-            }
-          }
-        }catch(err){
+    // ---------- SEARCH ----------
+    const doSearch = async (immediate=false)=>{
+      const q=(ui.search?.value||'').trim();
+      if(!q){
+        paintFriends(friends);
+        if(ui.searchStatus) ui.searchStatus.textContent='Type a name and press Search or Return';
+        return;
+      }
+      if(!immediate && q.length<2){
+        if(ui.searchStatus) ui.searchStatus.textContent='Type at least 2 characters';
+        return;
+      }
+      if(ui.searchStatus) ui.searchStatus.textContent='Searching…';
+      try{
+        const list = await searchPlayers(q);
+        paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
+        if(ui.searchStatus){
+          ui.searchStatus.textContent = list.length ? `Found ${list.length} result${list.length===1?'':'s'}` : 'No players found';
+        }
+        if(!list.length){
           const host = lobby.querySelector('#mpFriends');
           if(host){
-            host.innerHTML='';
-            const row=document.createElement('div');
-            row.className='friend';
-            row.innerHTML = `<div><div class="meta">Search unavailable (${err.message}).</div></div>`;
-            host.appendChild(row);
+            const none=document.createElement('div');
+            none.className='friend';
+            none.innerHTML=`
+              <div>
+                <div>${q}</div>
+                <div class="meta">Player not found — Invite user to join IZZA GAME</div>
+              </div>
+              <button class="mp-small">Copy Invite</button>`;
+            none.querySelector('button')?.addEventListener('click', async ()=>{
+              const link = location.origin + '/izza-game/auth?src=invite&from=' + encodeURIComponent(me?.username||'player');
+              try{ await navigator.clipboard.writeText(link); toast('Invite link copied'); }
+              catch{ prompt('Copy link:', link); }
+            });
+            host.appendChild(none);
           }
         }
-      };
+      }catch(err){
+        if(ui.searchStatus) ui.searchStatus.textContent=`Search failed: ${err.message}`;
+      }
+    };
 
-      const run = debounced(perform, CFG.searchDebounceMs);
+    const debouncedSearch = debounced(()=>doSearch(false), CFG.searchDebounceMs);
 
-      // Fire on all events iOS actually emits
-      search.addEventListener('input',  run);  // typing
-      search.addEventListener('change', run);  // autocorrect / suggestion commit
-      search.addEventListener('paste',  run);  // paste
+    ui.search?.addEventListener('input',  debouncedSearch);
+    ui.search?.addEventListener('change', debouncedSearch);
+    ui.search?.addEventListener('paste',  debouncedSearch);
 
-      // Immediate search on iOS "Done/Return"
-      search.addEventListener('keydown', (e)=>{
-        if((e.key||'').toLowerCase()==='enter'){
-          e.preventDefault();
-          perform(); // no debounce
-        }
-      });
+    // Return / Done -> immediate
+    ui.search?.addEventListener('keydown', (e)=>{
+      if((e.key||'').toLowerCase()==='enter'){
+        e.preventDefault();
+        doSearch(true);
+      }
+    });
 
-      // typing guard flags (unchanged)
-      search.addEventListener('focus', ()=>{ window.__IZZA_TYPING_IN_LOBBY = true; });
-      search.addEventListener('blur',  ()=>{ window.__IZZA_TYPING_IN_LOBBY = false; });
-    }
+    // Tap Search button -> immediate
+    ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
     paintRanks(); paintFriends(friends);
   }
 
-  // observe visibility to mount once shown
   const obs = new MutationObserver(function(){
     const h=document.getElementById('mpLobby'); if(!h) return;
     const visible = h.style.display && h.style.display!=='none';
@@ -276,10 +276,12 @@
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
-      connectWS();
 
+      // lightweight notifications polling (no-op server ok)
       const pull=async()=>{ try{ await jget('/notifications'); }catch{} };
-      pull(); notifTimer=setInterval(pull, CFG.notifPollMs);
+      pull(); notifTimer=setInterval(pull, 5000);
+
+      connectWS();
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
