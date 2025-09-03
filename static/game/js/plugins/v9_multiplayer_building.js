@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.6.2 (iOS-safe: emit after paint + hard guards)
+// Multiplayer Building & Lobby — v1.6.3 (iOS-safe + placeholder "Search players…")
 (function(){
-  const BUILD='v1.6.2-mp-building';
+  const BUILD='v1.6.3-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -47,7 +47,7 @@
           <div style="font-weight:700">Friends</div>
           <button id="mpCopyLink" class="mp-small">Copy Invite Link</button>
         </div>
-        <input id="mpSearch" placeholder="Search friends…" autocomplete="off" spellcheck="false" inputmode="text"
+        <input id="mpSearch" placeholder="Search players…" autocomplete="off" spellcheck="false" inputmode="text"
                style="width:100%;margin-top:8px;padding:10px;border-radius:10px;background:#0c1422;border:1px solid #2a3550;color:#cfe0ff">
         <div id="mpFriends" style="margin-top:10px;display:flex;flex-direction:column;gap:10px"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:16px">
@@ -72,7 +72,7 @@
     const btnClose = host.querySelector('#mpClose');
     if(btnClose) btnClose.addEventListener('click', hideModal, {passive:true});
 
-    // simple visual queue text; (real queue handled by client)
+    // queue message (visual only)
     host.querySelectorAll('.mp-btn').forEach(function(b){
       b.addEventListener('click', function(){
         var m=b.getAttribute('data-mode');
@@ -100,13 +100,11 @@
       const host=ensureModal();
       host.style.display='flex';
       open=true;
-      // emit AFTER paint so the client can see it and won’t install shield too early
       requestAnimationFrame(function(){
         window.IZZA && IZZA.emit && IZZA.emit('ui-modal-open', { id:'mpLobby' });
       });
     }catch(err){
       console.error('[mp] modal error:', err);
-      // best-effort: don’t leave the game “frozen”
       open=false;
       window.IZZA && IZZA.emit && IZZA.emit('ui-modal-close', { id:'mpLobby' });
     }
