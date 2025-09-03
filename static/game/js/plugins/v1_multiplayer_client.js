@@ -14,10 +14,9 @@
     searchDebounceMs: 250,
   };
 
-  // --- NEW: pass short-lived token on all API calls (minimal change) ---
+  // Pass short-lived token on all API calls
   const TOK = (window.__IZZA_T__ || '').toString();
   const withTok = (p) => TOK ? p + (p.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK) : p;
-  // ---------------------------------------------------------------------
 
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
   let me=null, friends=[], lobby=null, ui={};
@@ -28,7 +27,7 @@
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
   async function jget(p){
-    const r = await fetch(withTok(CFG.base+p), {credentials:'include'});   // token added
+    const r = await fetch(withTok(CFG.base+p), {credentials:'include'});
     if(!r.ok){
       if(r.status===401) toast('Sign-in expired. Reopen Auth and try again.');
       throw new Error(`${r.status} ${r.statusText}`);
@@ -36,8 +35,8 @@
     return r.json();
   }
   async function jpost(p,b){
-    const r = await fetch(withTok(CFG.base+p), {                           // token added
-      method:'POST', credentials:'include',
+    const r = await fetch(withTok(CFG.base+p),{
+      method:'POST',credentials:'include',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(b||{})
     });
@@ -77,8 +76,16 @@
     });
     return row;
   }
-  function paintFriends(list){ const host=$('#mpFriends',lobby); if(!host) return; host.innerHTML=''; list.forEach(u=> host.appendChild(makeRow(u))); }
-  function repaintFriends(){ const q=$('#mpSearch',lobby)?.value?.trim().toLowerCase()||''; const filtered = q ? friends.filter(x=>x.username.toLowerCase().includes(q)) : friends; paintFriends(filtered); }
+  function paintFriends(list){
+    const host=$('#mpFriends',lobby); if(!host) return;
+    host.innerHTML='';
+    (list||[]).forEach(u=> host.appendChild(makeRow(u)));
+  }
+  function repaintFriends(){
+    const q=$('#mpSearch',lobby)?.value?.trim().toLowerCase()||'';
+    const filtered = q ? friends.filter(x=> (x.username||'').toLowerCase().includes(q)) : friends;
+    paintFriends(filtered);
+  }
   function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
 
   async function enqueue(mode){
@@ -177,8 +184,6 @@
         tryShieldOnce();
         requestAnimationFrame(tryShieldOnce);
         setTimeout(tryShieldOnce, 80);
-
-        // focus into search for instant typing on mobile
         setTimeout(()=> { $('#mpSearch')?.focus(); }, 120);
       }
     });
@@ -186,9 +191,17 @@
     IZZA.on('mp-start',       function(){ removeShield(); });
   }
 
+  // ---------- SEARCH state (in-flight guard) ----------
+  let searchRunId = 0;
+
   function mountLobby(host){
     lobby = host || document.getElementById('mpLobby');
     if(!lobby) return;
+
+    // prevent duplicate bindings when the modal is re-shown
+    if(lobby.dataset.mpMounted === '1') return;
+    lobby.dataset.mpMounted = '1';
+
     ui.queueMsg     = lobby.querySelector('#mpQueueMsg');
     ui.search       = lobby.querySelector('#mpSearch');
     ui.searchBtn    = lobby.querySelector('#mpSearchBtn');
@@ -212,23 +225,33 @@
     // ---------- SEARCH ----------
     const doSearch = async (immediate=false)=>{
       const q=(ui.search?.value||'').trim();
+      // reset status, disable button for the duration of this run
+      const thisRun = ++searchRunId;
+      const setStatus = (txt)=>{ if(searchRunId===thisRun && ui.searchStatus) ui.searchStatus.textContent = txt; };
+      const enableBtn = ()=>{ if(ui.searchBtn) ui.searchBtn.disabled=false; };
+      const disableBtn= ()=>{ if(ui.searchBtn) ui.searchBtn.disabled=true; };
+
       if(!q){
+        disableBtn();
         paintFriends(friends);
-        if(ui.searchStatus) ui.searchStatus.textContent='Type a name and press Search or Return';
+        setStatus('Type a name and press Search or Return');
+        enableBtn();
         return;
       }
       if(!immediate && q.length<2){
-        if(ui.searchStatus) ui.searchStatus.textContent='Type at least 2 characters';
+        setStatus('Type at least 2 characters');
         return;
       }
-      if(ui.searchStatus) ui.searchStatus.textContent='Searching…';
+
+      disableBtn();
+      setStatus('Searching…');
       try{
         const list = await searchPlayers(q);
-        paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
-        if(ui.searchStatus){
-          ui.searchStatus.textContent = list.length ? `Found ${list.length} result${list.length===1?'':'s'}` : 'No players found';
-        }
-        if(!list.length){
+        if(searchRunId !== thisRun) return; // a newer search started; ignore stale result
+        paintFriends((list||[]).map(u=>({username:u.username, active:!!u.active})));
+        setStatus((list&&list.length)?`Found ${list.length} result${list.length===1?'':'s'}`:'No players found');
+
+        if(!list || !list.length){
           const host = lobby.querySelector('#mpFriends');
           if(host){
             const none=document.createElement('div');
@@ -248,7 +271,9 @@
           }
         }
       }catch(err){
-        if(ui.searchStatus) ui.searchStatus.textContent=`Search failed: ${err.message}`;
+        if(searchRunId === thisRun) setStatus(`Search failed: ${err.message}`);
+      }finally{
+        if(searchRunId === thisRun) enableBtn();
       }
     };
 
