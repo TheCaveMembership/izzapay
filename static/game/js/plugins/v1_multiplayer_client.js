@@ -311,6 +311,16 @@
     try{
       await loadMe(); await loadFriends(); refreshRanks();
 
+      // --- presence refresher: keep me active every 20s ---
+      setInterval(async () => {
+        try {
+          await jget('/me');
+          console.log('[MP] presence refreshed');
+        } catch(e) {
+          console.warn('presence refresh failed', e);
+        }
+      }, 20000);
+
       // lightweight notifications polling (no-op server ok)
       const pull=async()=>{ try{ await jget('/notifications'); }catch{} };
       pull(); notifTimer=setInterval(pull, 5000);
