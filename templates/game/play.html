@@ -44,6 +44,14 @@
     .shop-item .buy{ background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
     #invPanel{ max-width:1100px; margin:8px auto 0; display:none; }
+
+    /* Auth Debug styles */
+    #authDock{ position:fixed; top:66px; left:10px; z-index:9999; }
+    #authDock .chip{ background:#1a2340; color:#cfe0ff; border:1px solid #2a3550; border-radius:14px; padding:6px 10px; font-size:12px; }
+    #authPanel{ display:none; background:rgba(12,18,30,.92); border:1px solid #2a3550; border-radius:10px; padding:8px 10px; font-size:12px; color:#9fd4ff; max-width:88vw; line-height:1.35; backdrop-filter:blur(4px); }
+    #authPanel .row{ margin-top:6px; display:flex; gap:6px; flex-wrap:wrap }
+    #authPanel button{ background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 8px; font-size:12px; }
+    #authPanel .close{ margin-left:auto }
   </style>
 
   <!-- Pi SDK (for in-lobby re-auth if needed) -->
@@ -128,7 +136,6 @@
   <!-- Pass profile + the short-lived auth token to JS -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
   <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
-  <!-- Optional: sandbox flag for re-auth flow; defaults to false if not present -->
   <script>window.__PI_SANDBOX__ = {{ (sandbox|tojson) if sandbox is defined else 'false' }};</script>
 
   <!-- Multiplayer base paths for game_app (mounted at /izza-game) -->
@@ -156,101 +163,61 @@
   <script defer src="/static/game/js/plugins/v1_multiplayer_client.js"></script>
   <script src="/static/game/js/plugins/v1_pvp_duel.js"></script>
 
-  <!-- ===== Auth Debug Panel (safe to remove later) ===== -->
+  <!-- ===== Collapsible Auth Debug (non-blocking) ===== -->
+  <div id="authDock">
+    <button id="authChip" class="chip" type="button">Auth ✓</button>
+    <div id="authPanel">
+      <div id="authStatus">Auth: checking…</div>
+      <div id="authToken" style="margin-top:6px;word-break:break-all">t: </div>
+      <div class="row">
+        <button id="btnCopy" type="button">Copy token</button>
+        <button id="btnEcho" type="button">Open echo</button>
+        <button id="btnRefresh" type="button">Refresh</button>
+        <button id="btnClose" type="button" class="close">×</button>
+      </div>
+    </div>
+  </div>
   <script>
     (function(){
-      try{
-        var t = (window.__IZZA_T__ || '').toString();
-        var panel = document.createElement('div');
-        panel.id = 'authDebug';
-        panel.style.position = 'fixed';
-        panel.style.left = '10px';
-        panel.style.bottom = '10px';
-        panel.style.background = 'rgba(12,18,30,.92)';
-        panel.style.border = '1px solid #2a3550';
-        panel.style.borderRadius = '10px';
-        panel.style.padding = '8px 10px';
-        panel.style.fontSize = '12px';
-        panel.style.color = '#9fd4ff';
-        panel.style.zIndex = '9999';
-        panel.style.maxWidth = '88vw';
-        panel.style.lineHeight = '1.35';
-        panel.style.backdropFilter = 'blur(4px)';
+      var t = (window.__IZZA_T__ || '').toString();
+      var chip = document.getElementById('authChip');
+      var panel = document.getElementById('authPanel');
+      var status = document.getElementById('authStatus');
+      var tok = document.getElementById('authToken');
+      tok.textContent = 't: ' + (t || '(none)');
 
-        var status = document.createElement('div');
-        status.textContent = 'Auth: checking…';
-        var tokenRow = document.createElement('div');
-        tokenRow.style.marginTop = '6px';
-        tokenRow.style.wordBreak = 'break-all';
-        tokenRow.textContent = 't: ' + (t || '(none)');
+      function openPanel(){ panel.style.display='block'; }
+      function closePanel(){ panel.style.display='none'; }
+      chip.addEventListener('click', openPanel, {passive:true});
+      document.getElementById('btnClose').addEventListener('click', closePanel, {passive:true});
 
-        var row = document.createElement('div');
-        row.style.marginTop = '6px';
-        row.style.display = 'flex';
-        row.style.gap = '6px';
-        row.style.flexWrap = 'wrap';
+      document.getElementById('btnCopy').onclick = async function(){
+        try{ await navigator.clipboard.writeText(t||''); status.textContent='Auth: token copied'; }
+        catch(e){ status.textContent='Auth: copy failed — prompt shown'; prompt('Copy token:', t||''); }
+      };
+      document.getElementById('btnEcho').onclick = function(){
+        var url = (location.origin + '/izza-game/api/mp/echo' + (t?('?t='+encodeURIComponent(t)):''));
+        location.href = url; // same-tab for Pi Browser
+      };
+      document.getElementById('btnRefresh').onclick = runEcho;
 
-        var btnCopy = document.createElement('button');
-        btnCopy.textContent = 'Copy token';
-        var btnEcho = document.createElement('button');
-        btnEcho.textContent = 'Open echo';
-        var btnRefresh = document.createElement('button');
-        btnRefresh.textContent = 'Refresh';
-
-        [btnCopy, btnEcho, btnRefresh].forEach(function(b){
-          b.style.background = '#162134';
-          b.style.color = '#cfe0ff';
-          b.style.border = '1px solid #2a3550';
-          b.style.borderRadius = '8px';
-          b.style.padding = '6px 8px';
-          b.style.fontSize = '12px';
-        });
-
-        btnCopy.onclick = async function(){
-          try{
-            await navigator.clipboard.writeText(t || '');
-            status.textContent = 'Auth: token copied';
-          }catch(e){
-            status.textContent = 'Auth: copy failed — showing prompt';
-            prompt('Copy token:', t || '');
+      async function runEcho(){
+        if(!t){ status.textContent='Auth: no token'; return; }
+        status.textContent='Auth: checking…';
+        try{
+          const r = await fetch('/izza-game/api/mp/echo?t='+encodeURIComponent(t), {credentials:'include'});
+          const j = await r.json();
+          if(j && (j.authed===true || j.session_user_id || (j.who&&j.who.username))){
+            status.textContent='Auth: authed ✅' + (j.who&&j.who.username?(' ('+j.who.username+')'):'');
+          }else{
+            status.textContent='Auth: not authed ❌';
           }
-        };
-        btnEcho.onclick = function(){
-          var url = (location.origin + '/izza-game/api/mp/echo' + (t ? ('?t=' + encodeURIComponent(t)) : ''));
-          // Open in same tab (Pi Browser)
-          location.href = url;
-        };
-        btnRefresh.onclick = function(){ runEcho(); };
-
-        row.appendChild(btnCopy);
-        row.appendChild(btnEcho);
-        row.appendChild(btnRefresh);
-
-        panel.appendChild(status);
-        panel.appendChild(tokenRow);
-        panel.appendChild(row);
-        document.body.appendChild(panel);
-
-        async function runEcho(){
-          if(!t){ status.textContent = 'Auth: no token'; return; }
-          status.textContent = 'Auth: checking…';
-          try{
-            const r = await fetch('/izza-game/api/mp/echo?t=' + encodeURIComponent(t), {credentials:'include'});
-            const j = await r.json();
-            if(j && (j.authed === true || j.session_user_id || (j.who && j.who.username))){
-              status.textContent = 'Auth: authed ✅' + (j.who && j.who.username ? (' ('+j.who.username+')') : '');
-            }else{
-              status.textContent = 'Auth: not authed ❌';
-            }
-          }catch(e){
-            status.textContent = 'Auth: echo error';
-          }
-        }
-        // auto-run once
-        runEcho();
-      }catch(e){}
+        }catch(e){ status.textContent='Auth: echo error'; }
+      }
+      runEcho(); // one check on load
+      // stays collapsed by default; won’t cover B/joystick/etc.
     })();
   </script>
-  <!-- ===== /Auth Debug Panel ===== -->
+  <!-- ===== /Collapsible Auth Debug ===== -->
 </body>
 </html>
