@@ -1,5 +1,5 @@
-# mp_api.py — v1.9.1 (presence 30min TTL + active flags in search/friends)
-from typing import Optional, Tuple
+# mp_api.py — v2.0 (30-min presence + invites + notifications + simple v1 queue)
+from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
 from db import conn
 import time
@@ -16,8 +16,8 @@ def _import_main_verifier():
 VERIFY_TOKEN = _import_main_verifier()
 
 # ---------------- presence (in-memory) ----------------
-_PRESENCE = {}          # user_id -> last_seen_epoch_seconds
-_PRESENCE_TTL = 1800.0  # 30 minutes in seconds
+_PRESENCE: Dict[int, float] = {}      # user_id -> last_seen_epoch_seconds
+_PRESENCE_TTL = 1800.0                # 30 minutes
 
 def _mark_active(user_id: int):
     if user_id:
@@ -26,6 +26,34 @@ def _mark_active(user_id: int):
 def _is_active(user_id: int) -> bool:
     ts = _PRESENCE.get(int(user_id))
     return bool(ts and (time.time() - ts) < _PRESENCE_TTL)
+
+# ---------------- simple in-memory queue & starts ----------------
+_QUEUES: Dict[str, List[int]] = {"v1": []}   # mode -> user_id list
+_STARTS: Dict[int, Dict[str, Any]] = {}      # user_id -> start payload
+
+def _username_by_id(uid: int) -> Optional[str]:
+    with conn() as cx:
+        r = cx.execute("SELECT pi_username FROM users WHERE id=?", (uid,)).fetchone()
+        return r["pi_username"] if r else None
+
+def _make_start(mode: str, a: int, b: int) -> Dict[str, Any]:
+    return {
+        "mode": mode,
+        "matchId": int(time.time() * 1000),
+        "players": [
+            {"id": a, "username": _username_by_id(a)},
+            {"id": b, "username": _username_by_id(b)},
+        ]
+    }
+
+def _try_match_v1():
+    q = _QUEUES["v1"]
+    if len(q) >= 2:
+        a = q.pop(0)
+        b = q.pop(0)
+        start = _make_start("v1", a, b)
+        _STARTS[a] = start
+        _STARTS[b] = start
 
 # ---------------- helpers ----------------
 def _bearer_from_req():
@@ -226,13 +254,112 @@ def mp_lobby_invite():
         return jsonify({"ok": False, "error": "player_not_found"}), 404
     if to_id == me:
         return jsonify({"ok": False, "error": "cannot_invite_self"}), 400
-    if not _is_friend(me, to_id):
-        return jsonify({"ok": False, "error": "not_friends"}), 403
+    # Allow testing even if not friends. Re-enable later if desired.
+    # if not _is_friend(me, to_id):
+    #     return jsonify({"ok": False, "error": "not_friends"}), 403
     with conn() as cx:
         cx.execute(
             "INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
-            (me, to_id, (data.get('mode') or None), int(data.get('ttlSec') or 1800)),
+            (me, to_id, (data.get('mode') or 'v1'), int(data.get('ttlSec') or 1800)),
         )
+    return jsonify({"ok": True})
+
+@mp_bp.post("/lobby/accept")
+def mp_lobby_accept():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    data = (request.get_json(silent=True) or {})
+    inv_id = int(data.get("inviteId") or 0)
+    if not inv_id:
+        return jsonify({"ok": False, "error": "bad_invite"}), 400
+    with conn() as cx:
+        inv = cx.execute("SELECT * FROM mp_invites WHERE id=? AND to_user=? AND status='pending'", (inv_id, uid)).fetchone()
+        if not inv:
+            return jsonify({"ok": False, "error": "invite_not_found"}), 404
+        cx.execute("UPDATE mp_invites SET status='accepted' WHERE id=?", (inv_id,))
+    start = _make_start(inv["mode"] or "v1", int(inv["from_user"]), int(inv["to_user"]))
+    _STARTS[int(inv["from_user"])] = start
+    _STARTS[int(inv["to_user"])]   = start
+    return jsonify({"ok": True, "start": start})
+
+@mp_bp.post("/lobby/decline")
+def mp_lobby_decline():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    data = (request.get_json(silent=True) or {})
+    inv_id = int(data.get("inviteId") or 0)
+    if not inv_id:
+        return jsonify({"ok": False, "error": "bad_invite"}), 400
+    with conn() as cx:
+        inv = cx.execute("SELECT * FROM mp_invites WHERE id=? AND to_user=? AND status='pending'", (inv_id, uid)).fetchone()
+        if not inv:
+            return jsonify({"ok": False, "error": "invite_not_found"}), 404
+        cx.execute("UPDATE mp_invites SET status='declined' WHERE id=?", (inv_id,))
+    return jsonify({"ok": True})
+
+@mp_bp.get("/notifications")
+def mp_notifications():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    _mark_active(uid)
+
+    start = _STARTS.pop(uid, None)
+
+    with conn() as cx:
+        rows = cx.execute(
+            """
+            SELECT i.id, u.pi_username AS from_username, i.mode
+            FROM mp_invites i
+            JOIN users u ON u.id = i.from_user
+            WHERE i.to_user=? AND i.status='pending'
+            ORDER BY i.created_at DESC LIMIT 5
+            """,
+            (uid,)
+        ).fetchall()
+
+    invites = [{"id": r["id"], "from": r["from_username"], "mode": r["mode"] or "v1"} for r in rows]
+    return jsonify({"invites": invites, "start": start})
+
+@mp_bp.post("/queue")
+def mp_queue():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    _mark_active(uid)
+    data = (request.get_json(silent=True) or {})
+    mode = (data.get("mode") or "v1").lower()
+
+    if mode == "v1":
+        if uid not in _QUEUES["v1"]:
+            _QUEUES["v1"].append(uid)
+        _try_match_v1()
+        start = _STARTS.pop(uid, None)
+        if start:
+            return jsonify({"ok": True, "start": start})
+        return jsonify({"ok": True, "queued": True})
+    # stubs for other modes
+    return jsonify({"ok": True, "queued": True})
+
+@mp_bp.post("/dequeue")
+def mp_dequeue():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    for m in _QUEUES:
+        if uid in _QUEUES[m]:
+            _QUEUES[m].remove(uid)
     return jsonify({"ok": True})
 
 # ---- OPTIONAL DEBUG ----
@@ -250,13 +377,7 @@ def mp_debug_status():
         total_users = cx.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
     return jsonify({
         "authed": True,
-        "user": {
-            "id": uid,
-            "username": uname,
-            "pi_uid": pi_uid,
-            "has_profile": has_profile,
-            "active": True
-        },
+        "user": {"id": uid, "username": uname, "pi_uid": pi_uid, "has_profile": has_profile, "active": True},
         "total_users": total_users
     })
 
