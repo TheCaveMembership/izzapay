@@ -39,8 +39,10 @@ try:
     from app import verify_login_token, is_admin_name  # same fns as in app.py
 except Exception:
     verify_login_token = None  # guarded below
+
     def is_admin_name(_):  # fallback if import fails
         return False
+
 
 def _get_bearer_token_from_request() -> str | None:
     """Query ?t= or form t= or Authorization: Bearer <token>."""
@@ -51,6 +53,22 @@ def _get_bearer_token_from_request() -> str | None:
     if auth and auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
     return None
+
+
+# ---------- ensure a valid ?t= logs the user into this Flask app ----------
+@app.before_request
+def _hydrate_session_from_token():
+    """
+    If a short-lived token (?t= or Authorization: Bearer) is present and valid,
+    persist it into this app's session so /api/mp/* sees an authenticated cookie.
+    """
+    if "user_id" not in session:
+        tok = _get_bearer_token_from_request()
+        if tok and verify_login_token:
+            uid = verify_login_token(tok)
+            if uid:
+                session["user_id"] = uid
+
 
 # -------------------- helpers --------------------
 def current_user_row():
@@ -68,6 +86,7 @@ def current_user_row():
     with conn() as cx:
         row = cx.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
         return row
+
 
 def _is_admin(urow) -> bool:
     """True if user row reflects admin/owner role or admin username (e.g., CamMac)."""
@@ -87,6 +106,7 @@ def _is_admin(urow) -> bool:
         return bool(is_admin_name(uname))
     except Exception:
         return False
+
 
 def require_login_redirect():
     """Redirect to /signin if not logged in (cookie) AND no valid token."""
@@ -133,7 +153,8 @@ def game_create():
 
     # Bootstrap the game_profiles table
     with conn() as cx:
-        cx.executescript("""
+        cx.executescript(
+            """
         CREATE TABLE IF NOT EXISTS game_profiles(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           pi_uid TEXT UNIQUE NOT NULL,
@@ -143,14 +164,16 @@ def game_create():
           outfit TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        """)
+        """
+        )
 
     if request.method == "POST":
         sprite = request.form.get("sprite_skin", "default")
-        hair   = request.form.get("hair", "short")
+        hair = request.form.get("hair", "short")
         outfit = request.form.get("outfit", "street")
         with conn() as cx:
-            cx.execute("""
+            cx.execute(
+                """
               INSERT INTO game_profiles(pi_uid, username, sprite_skin, hair, outfit)
               VALUES(?,?,?,?,?)
               ON CONFLICT(pi_uid) DO UPDATE SET
@@ -158,7 +181,9 @@ def game_create():
                 sprite_skin=excluded.sprite_skin,
                 hair=excluded.hair,
                 outfit=excluded.outfit
-            """, (pi_uid, pi_username, sprite, hair, outfit))
+            """,
+                (pi_uid, pi_username, sprite, hair, outfit),
+            )
 
         # After save -> go play (preserve token if present)
         if t:
@@ -204,7 +229,7 @@ def game_play():
     with conn() as cx:
         profile = cx.execute(
             "SELECT pi_uid, username, sprite_skin, hair, outfit FROM game_profiles WHERE pi_uid=?",
-            (pi_uid,)
+            (pi_uid,),
         ).fetchone()
 
     if not profile:
@@ -227,8 +252,7 @@ def game_play():
 
 
 # ----------------- Multiplayer API mounted here -----------------
-from mp_api import mp_bp, sock, mp_boot
+from mp_api import mp_bp  # REST-only blueprint
 
-# Under game_app, so public paths are /izza-game/api/mp/* and /izza-game/api/mp/ws
+# Public paths become /izza-game/api/mp/*
 app.register_blueprint(mp_bp, url_prefix="/api/mp")
-mp_boot(app)  # creates mp_* tables and attaches Sock to *this* Flask app
