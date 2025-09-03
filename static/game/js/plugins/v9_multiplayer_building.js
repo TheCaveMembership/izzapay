@@ -90,13 +90,11 @@
     if(!api?.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return;
     const t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
     const spot=buildingSpot(api), sx=w2sX(api,spot.gx*t), sy=w2sY(api,spot.gy*t);
-    // door rect (for optional tap-to-open)
-    const door = {x:sx + S*0.10, y:sy - S*0.02, w:S*0.22, h:S*0.14};
-
     ctx.save();
     ctx.fillStyle='#18243b'; ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
+    const doorX=sx + S*0.10, doorY=sy - S*0.02;
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
-    ctx.fillRect(door.x, door.y, door.w, door.h);
+    ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
     ctx.fillStyle='#b7d0ff'; ctx.font='12px monospace'; ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
@@ -115,7 +113,7 @@
   // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    // Use passive:false so our preventDefault is honored
+    // Important: passive:false so preventDefault can actually work
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
     document.getElementById('btnB')?.addEventListener('click', onB, true);
   });
