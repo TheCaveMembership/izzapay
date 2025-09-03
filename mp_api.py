@@ -1,13 +1,13 @@
-# mp_api.py — friends + invites using your existing Pi auth & DB
+# mp_api.py — friends + players search + invites (Pi auth + game_profiles)
 import os
-from typing import Optional, Tuple
 from flask import Blueprint, jsonify, request, session, current_app
+from typing import Optional, Tuple
 from db import conn
 
-# Mounted by game_app.py at /izza-game/api/mp
+# Mounted by game_app at /izza-game/api/mp
 mp_bp = Blueprint("mp", __name__)
 
-# ---- optional WS discovery (kept for future) ----
+# ---- optional WS discovery (kept for later if you enable Sock) ----
 _WS_ENABLED = False
 _WS_PATH = None  # e.g. "/izza-game/api/mp/ws"
 
@@ -23,8 +23,7 @@ VERIFY_TOKEN = _import_main_verifier()
 
 def _bearer_from_req() -> Optional[str]:
     t = request.args.get("t") or request.form.get("t")
-    if t:
-        return t.strip()
+    if t: return t.strip()
     auth = request.headers.get("Authorization", "")
     if auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
@@ -43,9 +42,7 @@ def _current_user_ids() -> Optional[Tuple[int, str, str]]:
     if not uid:
         return None
     with conn() as cx:
-        row = cx.execute(
-            "SELECT id, pi_uid, pi_username FROM users WHERE id=?", (uid,)
-        ).fetchone()
+        row = cx.execute("SELECT id, pi_uid, pi_username FROM users WHERE id=?", (uid,)).fetchone()
         if not row:
             return None
         return int(row["id"]), row["pi_uid"], row["pi_username"]
@@ -53,10 +50,9 @@ def _current_user_ids() -> Optional[Tuple[int, str, str]]:
 # -------------------- DB BOOTSTRAP --------------------
 def _ensure_schema():
     with conn() as cx:
-        cx.executescript(
-            """
+        cx.executescript("""
         CREATE TABLE IF NOT EXISTS mp_users(
-          id INTEGER PRIMARY KEY,         -- same id as users.id
+          id INTEGER PRIMARY KEY,
           pi_uid TEXT UNIQUE,
           pi_username TEXT,
           last_seen TIMESTAMP
@@ -66,7 +62,7 @@ def _ensure_schema():
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           from_user INTEGER NOT NULL,
           to_user   INTEGER NOT NULL,
-          status    TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | rejected | cancelled
+          status    TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | rejected | cancelled
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(from_user, to_user)
         );
@@ -75,9 +71,9 @@ def _ensure_schema():
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           from_user INTEGER NOT NULL,
           to_user   INTEGER NOT NULL,
-          mode      TEXT,                           -- br10 | v1 | v2 | v3
-          status    TEXT NOT NULL DEFAULT 'pending',-- pending | accepted | expired | cancelled
-          ttl_sec   INTEGER NOT NULL DEFAULT 1800,  -- 30m
+          mode      TEXT,
+          status    TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | expired | cancelled
+          ttl_sec   INTEGER NOT NULL DEFAULT 1800,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -88,49 +84,37 @@ def _ensure_schema():
           v2_w   INTEGER DEFAULT 0, v2_l   INTEGER DEFAULT 0,
           v3_w   INTEGER DEFAULT 0, v3_l   INTEGER DEFAULT 0
         );
+        """)
 
-        -- helpful indexes
-        CREATE INDEX IF NOT EXISTS idx_mp_fr_to_pending ON mp_friend_requests(to_user, status, created_at);
-        CREATE INDEX IF NOT EXISTS idx_mp_inv_to_pending ON mp_invites(to_user, status, created_at);
-        """
-        )
-
-def _touch_mp_user(user_id: int, pi_uid: str, pi_username: str):
+def _touch_mp_user(user_id:int, pi_uid:str, pi_username:str):
     with conn() as cx:
-        cx.execute(
-            """
+        cx.execute("""
           INSERT INTO mp_users(id, pi_uid, pi_username, last_seen)
           VALUES(?,?,?,CURRENT_TIMESTAMP)
           ON CONFLICT(id) DO UPDATE SET
             pi_uid=excluded.pi_uid,
             pi_username=excluded.pi_username,
             last_seen=CURRENT_TIMESTAMP
-        """,
-            (user_id, pi_uid, pi_username),
-        )
+        """, (user_id, pi_uid, pi_username))
 
-def _user_id_by_username(username: str) -> Optional[int]:
+def _user_id_by_username(username:str) -> Optional[int]:
     username = (username or "").strip()
     if not username:
         return None
     with conn() as cx:
-        r = cx.execute(
-            "SELECT id FROM users WHERE pi_username=?", (username,)
-        ).fetchone()
+        r = cx.execute("SELECT id FROM users WHERE pi_username=?", (username,)).fetchone()
         return int(r["id"]) if r else None
 
 def _cleanup_expired_invites():
     with conn() as cx:
-        cx.executescript(
-            """
+        cx.executescript("""
         UPDATE mp_invites
            SET status='expired'
          WHERE status='pending'
            AND (strftime('%s','now') - strftime('%s', created_at)) > ttl_sec;
-        """
-        )
+        """)
 
-# -------------------- ROUTES (NO extra /mp prefix here) --------------------
+# -------------------- ROUTES --------------------
 @mp_bp.get("/me")
 def mp_me():
     _ensure_schema()
@@ -139,13 +123,11 @@ def mp_me():
         return jsonify({"error": "not_authenticated"}), 401
     uid, pi_uid, pi_name = who
     _touch_mp_user(uid, pi_uid, pi_name)
-    return jsonify(
-        {
-            "username": pi_name,
-            "inviteLink": "/izza-game/auth",
-            "ws_url": _WS_PATH if _WS_ENABLED else None,
-        }
-    )
+    return jsonify({
+        "username": pi_name,
+        "inviteLink": "/izza-game/auth",
+        "ws_url": _WS_PATH if _WS_ENABLED else None
+    })
 
 @mp_bp.get("/friends/list")
 def mp_friends_list():
@@ -155,70 +137,63 @@ def mp_friends_list():
         return jsonify({"error": "not_authenticated"}), 401
     uid, _, _ = who
     with conn() as cx:
-        rows = cx.execute(
-            """
+        rows = cx.execute("""
           SELECT DISTINCT u.pi_username AS username
           FROM mp_friend_requests fr
-          JOIN mp_users u ON u.id = CASE
+          JOIN users u ON u.id = CASE
               WHEN fr.from_user=? THEN fr.to_user
               ELSE fr.from_user
           END
           WHERE fr.status='accepted' AND (fr.from_user=? OR fr.to_user=?)
           ORDER BY u.pi_username COLLATE NOCASE
-        """,
-            (uid, uid, uid),
-        ).fetchall()
-    return jsonify(
-        {"friends": [{"username": r["username"], "active": False, "friend": True} for r in rows]}
-    )
+        """, (uid, uid, uid)).fetchall()
+    return jsonify({"friends": [{"username": r["username"], "active": False, "friend": True} for r in rows]})
 
+# NOTE: legacy path (kept so old clients don't 404). We recommend /players/search below.
 @mp_bp.get("/friends/search")
-def mp_friends_search():
+def mp_friends_search_legacy():
+    return jsonify({"users": []})
+
+@mp_bp.get("/players/search")
+def mp_players_search():
     """
-    Search ONLY players who have completed Pi auth + created a character.
-    users ⨝ game_profiles (via pi_uid), LIKE search on pi_username.
+    Search PLAYERS (not just friends):
+    - Only returns users who have finished Pi auth AND created a character (joined on game_profiles).
+    - Includes whether they are already your friend.
     """
     _ensure_schema()
     who = _current_user_ids()
     if not who:
         return jsonify({"error": "not_authenticated"}), 401
+
     q = (request.args.get("q") or "").strip()
     if len(q) < 2:
         return jsonify({"users": []})
-    like = f"%{q}%"
+
+    me, _, _ = who
     with conn() as cx:
-        found = cx.execute(
-            """
-          SELECT u.pi_username AS username
+        # Only show users who have a game_profiles row (finished create).
+        rows = cx.execute("""
+          SELECT u.id AS uid,
+                 u.pi_username AS username,
+                 EXISTS(
+                   SELECT 1 FROM mp_friend_requests fr
+                    WHERE fr.status='accepted'
+                      AND ((fr.from_user=? AND fr.to_user=u.id)
+                        OR (fr.from_user=u.id AND fr.to_user=?))
+                 ) AS is_friend
             FROM users u
             JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
            WHERE u.pi_username LIKE ?
            ORDER BY u.pi_username COLLATE NOCASE
-           LIMIT 12
-        """,
-            (like,),
-        ).fetchall()
+           LIMIT 20
+        """, (me, me, f"%{q}%")).fetchall()
 
-        # mark friend flag where applicable
-        uid, _, _ = who
-        results = []
-        for r in found:
-            uname = r["username"]
-            other_id = _user_id_by_username(uname)
-            is_friend = False
-            if other_id:
-                row = cx.execute(
-                    """
-                    SELECT 1 FROM mp_friend_requests
-                     WHERE status='accepted' AND
-                           ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
-                    """,
-                    (uid, other_id, other_id, uid),
-                ).fetchone()
-                is_friend = bool(row)
-            results.append({"username": uname, "active": False, "friend": is_friend})
-
-    return jsonify({"users": results})
+    users = []
+    for r in rows:
+        # active presence is a TODO if/when you add presence tracking via WS
+        users.append({"username": r["username"], "active": False, "friend": bool(r["is_friend"])})
+    return jsonify({"users": users})
 
 @mp_bp.post("/friends/request")
 def mp_friends_request():
@@ -238,26 +213,20 @@ def mp_friends_request():
         return jsonify({"ok": False, "error": "cannot_friend_self"}), 400
     with conn() as cx:
         # If they already sent me a request, accept it automatically.
-        pending = cx.execute(
-            """
+        pending = cx.execute("""
           SELECT id FROM mp_friend_requests
-           WHERE from_user=? AND to_user=? AND status='pending'
-        """,
-            (to_id, me),
-        ).fetchone()
+          WHERE from_user=? AND to_user=? AND status='pending'
+        """, (to_id, me)).fetchone()
         if pending:
             cx.execute("UPDATE mp_friend_requests SET status='accepted' WHERE id=?", (pending["id"],))
             return jsonify({"ok": True, "autoAccepted": True})
 
-        cx.execute(
-            """
+        # Otherwise create/refresh my outgoing request.
+        cx.execute("""
           INSERT INTO mp_friend_requests(from_user, to_user, status)
-          VALUES(?,?,'pending')
-          ON CONFLICT(from_user, to_user) DO UPDATE SET
-              status='pending', created_at=CURRENT_TIMESTAMP
-        """,
-            (me, to_id),
-        )
+          VALUES(?,?, 'pending')
+          ON CONFLICT(from_user, to_user) DO UPDATE SET status='pending', created_at=CURRENT_TIMESTAMP
+        """, (me, to_id))
     return jsonify({"ok": True})
 
 @mp_bp.post("/friends/accept")
@@ -275,14 +244,11 @@ def mp_friends_accept():
     if not from_id:
         return jsonify({"ok": False, "error": "user_not_found"}), 404
     with conn() as cx:
-        n = cx.execute(
-            """
+        n = cx.execute("""
           UPDATE mp_friend_requests
              SET status='accepted'
            WHERE from_user=? AND to_user=? AND status='pending'
-        """,
-            (from_id, me),
-        ).rowcount
+        """, (from_id, me)).rowcount
     return jsonify({"ok": n > 0})
 
 @mp_bp.post("/lobby/invite")
@@ -303,30 +269,26 @@ def mp_lobby_invite():
     if to_id == me:
         return jsonify({"ok": False, "error": "cannot_invite_self"}), 400
 
-    # require friendship
+    # Must be friends first
     with conn() as cx:
-        is_friend = cx.execute(
-            """
-          SELECT 1 FROM mp_friend_requests
+        is_friend = cx.execute("""
+          SELECT 1
+            FROM mp_friend_requests
            WHERE status='accepted'
              AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
-        """,
-            (me, to_id, to_id, me),
-        ).fetchone()
+        """, (me, to_id, to_id, me)).fetchone()
         if not is_friend:
             return jsonify({"ok": False, "error": "not_friends"}), 403
 
-        cx.execute(
-            """
+        cx.execute("""
           INSERT INTO mp_invites(from_user, to_user, mode, ttl_sec, status)
           VALUES(?,?,?,?, 'pending')
-        """,
-            (me, to_id, mode, ttl),
-        )
+        """, (me, to_id, mode, ttl))
     return jsonify({"ok": True})
 
 @mp_bp.post("/lobby/notify")
 def mp_lobby_notify():
+    # Same contract as invite; kept for UI wording
     return mp_lobby_invite()
 
 @mp_bp.get("/notifications")
@@ -338,34 +300,26 @@ def mp_notifications():
         return jsonify({"error": "not_authenticated"}), 401
     me, _, _ = who
     with conn() as cx:
-        fr = cx.execute(
-            """
+        fr = cx.execute("""
           SELECT u.pi_username AS from_name
             FROM mp_friend_requests r
-            JOIN mp_users u ON u.id=r.from_user
+            JOIN users u ON u.id=r.from_user
            WHERE r.to_user=? AND r.status='pending'
            ORDER BY r.created_at DESC
-        """,
-            (me,),
-        ).fetchall()
+        """, (me,)).fetchall()
 
-        inv = cx.execute(
-            """
+        inv = cx.execute("""
           SELECT u.pi_username AS from_name, i.mode
             FROM mp_invites i
-            JOIN mp_users u ON u.id=i.from_user
+            JOIN users u ON u.id=i.from_user
            WHERE i.to_user=? AND i.status='pending'
            ORDER BY i.created_at DESC
            LIMIT 10
-        """,
-            (me,),
-        ).fetchall()
-    return jsonify(
-        {
-            "requests": [{"from": r["from_name"]} for r in fr],
-            "invites": [{"from": r["from_name"], "mode": i["mode"]} for i in inv],
-        }
-    )
+        """, (me,)).fetchall()
+    return jsonify({
+        "requests": [{"from": r["from_name"]} for r in fr],
+        "invites":  [{"from": i["from_name"], "mode": i["mode"]} for i in inv],
+    })
 
 @mp_bp.post("/lobby/accept")
 def mp_lobby_accept():
@@ -384,21 +338,18 @@ def mp_lobby_accept():
         return jsonify({"ok": False, "error": "user_not_found"}), 404
 
     with conn() as cx:
-        row = cx.execute(
-            """
+        row = cx.execute("""
           SELECT id, mode
             FROM mp_invites
            WHERE from_user=? AND to_user=? AND status='pending'
            ORDER BY created_at DESC
            LIMIT 1
-        """,
-            (from_id, me),
-        ).fetchone()
+        """, (from_id, me)).fetchone()
         if not row:
             return jsonify({"ok": False, "error": "no_pending_invite"}), 404
         cx.execute("UPDATE mp_invites SET status='accepted' WHERE id=?", (row["id"],))
 
-    # TODO: create a match row and return its id
+    # TODO: create a match row and return matchId/players
     return jsonify({"ok": True, "mode": row["mode"]})
 
 @mp_bp.post("/queue")
@@ -415,17 +366,13 @@ def mp_dequeue():
         return jsonify({"error": "not_authenticated"}), 401
     return jsonify({"ok": True})
 
-# -------- optional Sock/WS boot (compatible with your earlier file) -----
+# -------- optional Sock/WS boot (no change needed) -----
 sock = None
 
 def _want_ws() -> bool:
     return os.getenv("MP_DISABLE_WS", "").lower() not in ("1", "true", "yes")
 
 def mp_boot(app, mount_prefix="/izza-game"):
-    """
-    Safe to call. If flask-sock is available and not disabled, a WS route is added.
-    The REST API works regardless.
-    """
     app.logger.info("[mp] boot start")
     global _WS_ENABLED, _WS_PATH
     _WS_ENABLED = False
@@ -439,7 +386,6 @@ def mp_boot(app, mount_prefix="/izza-game"):
         from flask_sock import Sock
         global sock
         sock = Sock(app)
-
         _WS_PATH = f"{mount_prefix}/api/mp/ws"
 
         @sock.route(_WS_PATH)
