@@ -155,5 +155,102 @@
   <script defer src="/static/game/js/plugins/v9_multiplayer_building.js"></script>
   <script defer src="/static/game/js/plugins/v1_multiplayer_client.js"></script>
   <script src="/static/game/js/plugins/v1_pvp_duel.js"></script>
+
+  <!-- ===== Auth Debug Panel (safe to remove later) ===== -->
+  <script>
+    (function(){
+      try{
+        var t = (window.__IZZA_T__ || '').toString();
+        var panel = document.createElement('div');
+        panel.id = 'authDebug';
+        panel.style.position = 'fixed';
+        panel.style.left = '10px';
+        panel.style.bottom = '10px';
+        panel.style.background = 'rgba(12,18,30,.92)';
+        panel.style.border = '1px solid #2a3550';
+        panel.style.borderRadius = '10px';
+        panel.style.padding = '8px 10px';
+        panel.style.fontSize = '12px';
+        panel.style.color = '#9fd4ff';
+        panel.style.zIndex = '9999';
+        panel.style.maxWidth = '88vw';
+        panel.style.lineHeight = '1.35';
+        panel.style.backdropFilter = 'blur(4px)';
+
+        var status = document.createElement('div');
+        status.textContent = 'Auth: checking…';
+        var tokenRow = document.createElement('div');
+        tokenRow.style.marginTop = '6px';
+        tokenRow.style.wordBreak = 'break-all';
+        tokenRow.textContent = 't: ' + (t || '(none)');
+
+        var row = document.createElement('div');
+        row.style.marginTop = '6px';
+        row.style.display = 'flex';
+        row.style.gap = '6px';
+        row.style.flexWrap = 'wrap';
+
+        var btnCopy = document.createElement('button');
+        btnCopy.textContent = 'Copy token';
+        var btnEcho = document.createElement('button');
+        btnEcho.textContent = 'Open echo';
+        var btnRefresh = document.createElement('button');
+        btnRefresh.textContent = 'Refresh';
+
+        [btnCopy, btnEcho, btnRefresh].forEach(function(b){
+          b.style.background = '#162134';
+          b.style.color = '#cfe0ff';
+          b.style.border = '1px solid #2a3550';
+          b.style.borderRadius = '8px';
+          b.style.padding = '6px 8px';
+          b.style.fontSize = '12px';
+        });
+
+        btnCopy.onclick = async function(){
+          try{
+            await navigator.clipboard.writeText(t || '');
+            status.textContent = 'Auth: token copied';
+          }catch(e){
+            status.textContent = 'Auth: copy failed — showing prompt';
+            prompt('Copy token:', t || '');
+          }
+        };
+        btnEcho.onclick = function(){
+          var url = (location.origin + '/izza-game/api/mp/echo' + (t ? ('?t=' + encodeURIComponent(t)) : ''));
+          // Open in same tab (Pi Browser)
+          location.href = url;
+        };
+        btnRefresh.onclick = function(){ runEcho(); };
+
+        row.appendChild(btnCopy);
+        row.appendChild(btnEcho);
+        row.appendChild(btnRefresh);
+
+        panel.appendChild(status);
+        panel.appendChild(tokenRow);
+        panel.appendChild(row);
+        document.body.appendChild(panel);
+
+        async function runEcho(){
+          if(!t){ status.textContent = 'Auth: no token'; return; }
+          status.textContent = 'Auth: checking…';
+          try{
+            const r = await fetch('/izza-game/api/mp/echo?t=' + encodeURIComponent(t), {credentials:'include'});
+            const j = await r.json();
+            if(j && (j.authed === true || j.session_user_id || (j.who && j.who.username))){
+              status.textContent = 'Auth: authed ✅' + (j.who && j.who.username ? (' ('+j.who.username+')') : '');
+            }else{
+              status.textContent = 'Auth: not authed ❌';
+            }
+          }catch(e){
+            status.textContent = 'Auth: echo error';
+          }
+        }
+        // auto-run once
+        runEcho();
+      }catch(e){}
+    })();
+  </script>
+  <!-- ===== /Auth Debug Panel ===== -->
 </body>
 </html>
