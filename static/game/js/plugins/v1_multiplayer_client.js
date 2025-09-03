@@ -1,59 +1,94 @@
 /**
- * IZZA Multiplayer Client — v1.4 (game_app paths)
+ * IZZA Multiplayer Client — v1.5 (game_app paths)
  * - Friends: request / accept
  * - Lobby invites with 30-min notification window
- * - Clear messages when friend is busy (in game) or session ended
- * - Offer to "Send a notification to join your lobby now?"
+ * - Auto-poll notifications every 5s
+ * - Safe WS boot (non-blocking; uses server-advertised ws_url if provided)
  * - Hotkey guard while typing (I/B/A won't trigger)
  * - Fallback search (works even if server search not live yet)
- * - Uses /izza-game/api/mp by default (overridable via window.__MP_BASE__/__MP_WS__)
+ * - Path auto-fallback: supports /izza-game/api/mp/{...} AND /izza-game/api/mp/mp/{...}
  */
 (function(){
-  const BUILD='v1.4-mp-client+gameapp-paths';
+  const BUILD='v1.5-mp-client+gameapp-paths';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
     base: (window.__MP_BASE__ || '/izza-game/api/mp'),
+    // prefix is appended between base and endpoint; will switch to '/mp' automatically if server uses nested routes
+    prefix: '',
+    altPrefix: '/mp',
     ws:   (window.__MP_WS__   || '/izza-game/api/mp/ws'),
     searchDebounceMs: 250,
     minChars: 2,
-    notifTTLsec: 1800  // 30 minutes
+    notifTTLsec: 1800,  // 30 minutes
+    notifPollMs: 5000
   };
 
   // -------- STATE --------
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
-  let me=null;                // {username, ranks, inviteLink}
+  let me=null;                // {username, ranks, inviteLink, ws_url?}
   let friends=[];             // [{username,active,friend:true}]
   let lobby=null;
   let ui = {};
   let notifHost=null;
+  let mounted=false;
+  let notifTimer=null;
 
   // -------- UTIL --------
   const $  = (sel,root=document)=> root.querySelector(sel);
   const $$ = (sel,root=document)=> Array.from(root.querySelectorAll(sel));
   const toast = (t)=> (window.IZZA && IZZA.emit) ? IZZA.emit('toast',{text:t}) : console.log('[TOAST]',t);
 
-  async function jget(path){
-    const r = await fetch(CFG.base+path, {credentials:'include'});
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    return r.json();
+  async function _fetchJSON(url, init){
+    const r = await fetch(url, init);
+    // We treat 404 specially for path auto-fallback
+    return { ok: r.ok, status: r.status, json: r.ok ? await r.json() : null };
   }
+
+  function _mkUrl(path){ return CFG.base + CFG.prefix + path; }
+  function _mkAlt(path){ return CFG.base + CFG.altPrefix + path; }
+
+  async function jget(path){
+    // try current prefix
+    let res = await _fetchJSON(_mkUrl(path), {credentials:'include'});
+    if(res.ok) return res.json;
+    if(res.status === 404 && CFG.prefix !== CFG.altPrefix){
+      // try alt once, then switch permanently
+      const res2 = await _fetchJSON(_mkAlt(path), {credentials:'include'});
+      if(res2.ok){ CFG.prefix = CFG.altPrefix; return res2.json; }
+    }
+    throw new Error(`${res.status || '???'} GET ${path}`);
+  }
+
   async function jpost(path, body){
-    const r = await fetch(CFG.base+path, {
+    let res = await _fetchJSON(_mkUrl(path), {
       method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body||{})
     });
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    return r.json();
+    if(res.ok) return res.json;
+    if(res.status === 404 && CFG.prefix !== CFG.altPrefix){
+      // fallback try
+      const res2 = await _fetchJSON(_mkAlt(path), {
+        method:'POST', credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body||{})
+      });
+      if(res2.ok){ CFG.prefix = CFG.altPrefix; return res2.json; }
+    }
+    throw new Error(`${res.status || '???'} POST ${path}`);
   }
+
   function debounced(fn, ms){
     let t=null, lastArgs=null;
     return function(...args){ lastArgs=args; clearTimeout(t); t=setTimeout(()=>fn.apply(this,lastArgs), ms); };
   }
 
   // -------- DATA --------
-  async function loadMe(){ me = await jget('/me'); return me; }
+  async function loadMe(){
+    me = await jget('/me');   // if this 404s with new backend, we auto-switch to '/mp/me'
+    return me;
+  }
   async function loadFriends(){
     const res = await jget('/friends/list');
     friends = (res.friends||[]).map(f=>({username:f.username, active:!!f.active, friend:true}));
@@ -92,11 +127,12 @@
         toast('Lobby invite sent to '+username);
         return;
       }
-      const reason = (res && res.reason) || 'unavailable';
+      const reason = (res && (res.reason || res.error)) || 'unavailable';
       let msg = 'Your friend cannot join right now.';
       if(reason==='in_game')  msg = 'Your friend is currently in a game.';
       if(reason==='offline')  msg = 'Your friend is offline.';
       if(reason==='ended')    msg = 'Your friend ended their session.';
+      if(reason==='not_friends') msg = 'You must be friends before inviting to a lobby.';
       showConfirm(`${msg}\n\nSend them a notification to join your lobby now?`, async ()=>{
         try{
           await jpost('/lobby/notify', { toUsername: username, ttlSec: CFG.notifTTLsec });
@@ -155,8 +191,13 @@
           `<b>${inv.from}</b> invited you to their lobby${inv.mode?` (${prettyMode(inv.mode)})`:''}. Join?`,
           async ()=>{
             try{
-              await jpost('/lobby/accept', { from: inv.from });
-              toast('Joining lobby…');
+              const ok = await jpost('/lobby/accept', { from: inv.from });
+              if(ok && ok.mode){
+                // If your game reacts to mp-start, we can emit here later.
+                toast('Joining lobby…');
+              }else{
+                toast('Accepted invite');
+              }
             }catch(e){ toast('Could not join: '+e.message); }
           },
           ()=>{}
@@ -226,7 +267,7 @@
       if(usedFallback){
         const note=document.createElement('div');
         note.className='meta'; note.style.opacity='0.8';
-        note.textContent='(Showing local/fallback results. Implement /izza-game/api/mp/friends/search for global results.)';
+        note.textContent='(Showing local/fallback results.)';
         host.appendChild(note);
       }
       return;
@@ -283,19 +324,21 @@
   }
 
   // -------- SOCKET --------
-  function connectWS(){
+  function connectWS(urlOverride){
+    let finalPath = urlOverride || me?.ws_url || CFG.ws;
     try{
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // CFG.ws is a path like /izza-game/api/mp/ws
-      const url = proto + '//' + location.host + CFG.ws;
+      // finalPath can be an absolute path ("/izza-game/api/mp/ws"); build full URL
+      const url = finalPath.startsWith('ws') ? finalPath : (proto + '//' + location.host + finalPath);
       ws = new WebSocket(url);
-    }catch(e){ console.warn('WS failed', e); return; }
+    }catch(e){ console.warn('WS failed to construct', e); return; }
 
     ws.addEventListener('open', ()=>{ wsReady=true; });
     ws.addEventListener('close', ()=>{
       wsReady=false; ws=null;
       if(reconnectT) clearTimeout(reconnectT);
-      reconnectT=setTimeout(connectWS, 1500);
+      // Reconnect politely; if server doesn’t have WS, this won’t keep the UI from working.
+      reconnectT=setTimeout(()=>connectWS(urlOverride), 2500);
     });
     ws.addEventListener('message', (evt)=>{
       let msg=null; try{ msg=JSON.parse(evt.data); }catch{}
@@ -333,6 +376,11 @@
     });
   }
 
+  async function maybeConnectWS(){
+    // Try quickly; if it throws, we just proceed with REST-only.
+    try{ connectWS(me?.ws_url); }catch(e){ /* ignore */ }
+  }
+
   // -------- HOTKEY GUARD (typing) --------
   function hotkeyGuard(e){
     const t=e.target;
@@ -348,8 +396,11 @@
 
   // -------- LOBBY WIRING --------
   function mountLobby(host){
+    if(mounted) return; // guard to prevent duplicate wire-up causing freezes
     lobby = host || document.getElementById('mpLobby');
     if(!lobby) return;
+
+    mounted = true;
 
     ui.queueMsg = $('#mpQueueMsg', lobby);
 
@@ -402,13 +453,15 @@
     paintFriends(friends);
   }
 
-  const obs = new MutationObserver(()=>{
-    const h = document.getElementById('mpLobby');
-    if(!h) return;
-    const visible = h.style.display && h.style.display!=='none';
-    if(visible) mountLobby(h);
-  });
+  let obs=null;
   function bootObserver(){
+    if(obs) return;
+    obs = new MutationObserver(()=>{
+      const h = document.getElementById('mpLobby');
+      if(!h) return;
+      const visible = h.style.display && h.style.display!=='none';
+      if(visible) mountLobby(h);
+    });
     const root = document.body || document.documentElement;
     if(root) obs.observe(root, {subtree:true, attributes:true, childList:true, attributeFilter:['style']});
   }
@@ -416,17 +469,24 @@
   // -------- BOOT --------
   async function start(){
     try{
-      await loadMe();
+      await loadMe();               // may flip CFG.prefix if backend uses /mp/*
       await loadFriends();
       refreshRanks();
-      connectWS();
+
+      // Try WS—but never block. If server advertised ws_url, connectWS will use it.
+      await maybeConnectWS();
+
       bootObserver();
       window.addEventListener('keydown', hotkeyGuard, {capture:true, passive:false});
+
+      // Poll notifications regularly so invites show up without reload
       pullNotifications();
+      if(!notifTimer) notifTimer = setInterval(pullNotifications, CFG.notifPollMs);
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
-      console.log('[MP] client ready', {user:me?.username, friends:friends.length});
+
+      console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
     }catch(e){
       console.error('MP client start failed', e);
       toast('Multiplayer unavailable: '+e.message);
