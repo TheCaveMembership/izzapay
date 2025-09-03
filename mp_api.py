@@ -1,8 +1,9 @@
-# mp_api.py — v2.0 (30-min presence + invites + notifications + simple v1 queue)
+# mp_api.py — v2.1 (30-min presence + invites + simple v1 queue + mini sync w/ WS fallback)
 from typing import Optional, Tuple, Dict, Any, List
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, current_app
 from db import conn
 import time
+import json
 
 mp_bp = Blueprint("mp", __name__)
 
@@ -144,7 +145,154 @@ def _is_friend(a: int, b: int) -> bool:
         ).fetchone()
         return bool(r)
 
-# ---------------- endpoints ----------------
+# ------------------- mini realtime sync (HTTP + optional WS) -------------------
+# In-memory live match states.
+_MATCHES: Dict[int, Dict[str, Any]] = {}  # matchId -> {mode, players:[uids], states:{uid:{x,y,facing,ts}}}
+
+def _ensure_match(match_id: int, mode: str, players: List[int]):
+    m = _MATCHES.get(match_id)
+    if not m:
+        m = {"mode": mode, "players": players[:], "states": {}}
+        _MATCHES[match_id] = m
+    return m
+
+@mp_bp.post("/match/join")
+def mp_match_join():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    data = request.get_json(silent=True) or {}
+    mid = int(data.get("matchId") or 0)
+    mode = (data.get("mode") or "v1")
+    players = data.get("players") or [uid]
+    _ensure_match(mid, mode, [int(x) for x in players])
+    return jsonify({"ok": True})
+
+@mp_bp.post("/match/leave")
+def mp_match_leave():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    data = request.get_json(silent=True) or {}
+    mid = int(data.get("matchId") or 0)
+    if mid in _MATCHES:
+        _MATCHES[mid]["states"].pop(uid, None)
+    return jsonify({"ok": True})
+
+@mp_bp.post("/match/state")
+def mp_match_state():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    data = request.get_json(silent=True) or {}
+    mid = int(data.get("matchId") or 0)
+    st = data.get("state") or {}
+    st["ts"] = time.time()
+    m = _ensure_match(mid, data.get("mode") or "v1", data.get("players") or [uid])
+    m["states"][uid] = st
+    return jsonify({"ok": True})
+
+@mp_bp.get("/match/others")
+def mp_match_others():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    mid = int(request.args.get("matchId") or 0)
+    since = float(request.args.get("since") or 0)
+    m = _MATCHES.get(mid) or {"states": {}}
+    out = []
+    for k,v in m["states"].items():
+        if int(k) == int(uid): 
+            continue
+        if (v.get("ts") or 0) > since:
+            out.append({"userId": k, **v})
+    return jsonify({"ok": True, "states": out, "now": time.time()})
+
+# ----- Optional WebSocket (if flask_sock is available) -----
+try:
+    from flask_sock import Sock
+    _sock = Sock()
+
+    # must be initialized once with the app (usually in app.py):
+    #   from mp_api import _sock
+    #   _sock.init_app(app)
+    @_sock.route("/izza-game/api/mp/ws/duel")
+    def ws_duel(ws):
+        """
+        Very small relay: a client sends {"matchId":..., "state":{x,y,facing}}.
+        Server tags it with the sender and relays to *other* peers currently connected
+        with the same matchId. No persistence; HTTP endpoints above remain as fallback.
+        """
+        try:
+            # simple registry: app global, map matchId -> list of sockets
+            registry: Dict[int, List] = current_app.config.setdefault("MP_DUEL_SOCKS", {})
+            cur_mid = None
+            me_uid = None
+
+            # First message must include matchId
+            first = ws.receive()
+            init = json.loads(first or "{}")
+            cur_mid = int(init.get("matchId") or 0)
+            me_uid = None
+            who = _current_user_ids()
+            if who:
+                me_uid = int(who[0])
+
+            registry.setdefault(cur_mid, []).append(ws)
+
+            # Broadcast helper
+            def broadcast(msg: str):
+                dead = []
+                for peer in list(registry.get(cur_mid, [])):
+                    if peer is ws:
+                        continue
+                    try:
+                        peer.send(msg)
+                    except Exception:
+                        dead.append(peer)
+                for d in dead:
+                    try:
+                        registry[cur_mid].remove(d)
+                    except Exception:
+                        pass
+
+            # If the client sent a state with the init, relay it
+            if init.get("state"):
+                pkt = {"type":"state", "from":me_uid, **init}
+                broadcast(json.dumps(pkt))
+
+            # Main loop
+            while True:
+                raw = ws.receive()
+                if raw is None:
+                    break
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    continue
+                # Expect {"matchId": mid, "state": {...}}
+                if int(data.get("matchId") or 0) != cur_mid:
+                    continue
+                pkt = {"type":"state", "from":me_uid, **data}
+                broadcast(json.dumps(pkt))
+        except Exception:
+            pass
+        finally:
+            try:
+                reg = current_app.config.get("MP_DUEL_SOCKS", {})
+                if reg and cur_mid in reg and ws in reg[cur_mid]:
+                    reg[cur_mid].remove(ws)
+            except Exception:
+                pass
+
+except Exception:
+    _sock = None  # WS not available; HTTP fallback still works
+
+# ---------------- endpoints (existing) ----------------
 
 @mp_bp.get("/echo")
 def mp_echo():
@@ -200,7 +348,6 @@ def mp_friends_list():
         for r in rows
     ]})
 
-# --- players search (case-insensitive, strips '@', requires profile) ---
 @mp_bp.get("/players/search")
 @mp_bp.get("/friends/search")  # alias
 def mp_players_search():
@@ -254,7 +401,7 @@ def mp_lobby_invite():
         return jsonify({"ok": False, "error": "player_not_found"}), 404
     if to_id == me:
         return jsonify({"ok": False, "error": "cannot_invite_self"}), 400
-    # Allow testing even if not friends. Re-enable later if desired.
+    # Allow testing even if not friends; re-enable later if desired
     # if not _is_friend(me, to_id):
     #     return jsonify({"ok": False, "error": "not_friends"}), 403
     with conn() as cx:
