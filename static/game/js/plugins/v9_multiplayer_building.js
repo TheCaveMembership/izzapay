@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.5.1 (typing guard + non-passive keydown)
-(function(){
-  const BUILD='v1.5.1-mp-building+typing-guard';
+// Multiplayer Building & Lobby — v1.6 (hide HUD + modal focus)
+(function () {
+  const BUILD='v1.6-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -96,7 +96,7 @@
     host.addEventListener('click', (e)=>{ if(e.target===host) hideModal(); });
     host.querySelector('#mpClose').addEventListener('click', ()=> hideModal());
 
-    // Temporary local actions; real queue handled by mp client
+    // Temporary local UI; real queue handled by mp client
     host.querySelectorAll('.mp-btn').forEach(b=>{
       b.onclick=()=>{
         const mode=b.getAttribute('data-mode');
@@ -118,20 +118,21 @@
   function showModal(){
     const host=ensureModal();
     host.style.display='flex'; open=true;
-    // focus search so typing doesn't hit game hotkeys
+    // focus search to keep keys from hitting the game
     setTimeout(()=> host.querySelector('#mpSearch')?.focus(), 0);
+    // broadcast so client can hide HUD
     window.IZZA?.emit?.('ui-modal-open', { id:'mpLobby' });
   }
   function hideModal(){
     const host=document.getElementById('mpLobby');
     if(host){ host.style.display='none'; }
     open=false;
-    // blur active element so keys go back to game only after closing
-    try{ document.activeElement && document.activeElement.blur && document.activeElement.blur(); }catch{}
+    try{ document.activeElement?.blur?.(); }catch{}
+    // broadcast so client can restore HUD
     window.IZZA?.emit?.('ui-modal-close', { id:'mpLobby' });
   }
 
-  // ---- drawing ----
+  // ---- draw ----
   function w2sX(api,wx){ return (wx - api.camera.x) * (api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy - api.camera.y) * (api.DRAW/api.TILE); }
   function drawBuilding(){
@@ -173,7 +174,6 @@
   }
   function onB(e){
     if(localStorage.getItem(M3_KEY)!=='done') return;
-    // Ignore B shortcut while typing inside the lobby
     if(isTypingTarget(e?.target)) return;
     if(!inRange()) return;
     showModal();
@@ -183,7 +183,7 @@
   // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    // IMPORTANT: passive:false so preventDefault actually works
+    // IMPORTANT: passive:false so preventDefault works
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
     const btnB=document.getElementById('btnB'); btnB && btnB.addEventListener('click', onB, true);
   });
