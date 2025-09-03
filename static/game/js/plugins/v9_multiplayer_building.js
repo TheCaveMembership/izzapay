@@ -1,4 +1,4 @@
-// Multiplayer Building & Lobby — v1.6.1 (no $ helper, safe selectors)
+// Multiplayer Building & Lobby — v1.6.1 (fix: no jQuery-style $, safe key listener)
 (function(){
   const BUILD='v1.6.1-mp-building';
   console.log('[IZZA PLAY]', BUILD);
@@ -18,12 +18,18 @@
 
   // ---- modal ----
   function ensureModal(){
-    let host=document.getElementById('mpLobby'); if(host) return host;
+    let host=document.getElementById('mpLobby'); 
+    if(host) return host;
+
     host=document.createElement('div');
     host.id='mpLobby';
-    Object.assign(host.style,{position:'fixed', inset:'0', display:'none', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,.35)', zIndex:1003});
+    Object.assign(host.style,{
+      position:'fixed', inset:'0', display:'none',
+      alignItems:'center', justifyContent:'center',
+      background:'rgba(0,0,0,.35)', zIndex:1003
+    });
     host.innerHTML=`
-      <div id="mpCard" style="background:#0f1625;border:1px solid #2a3550;border-radius:14px;width:min(92vw,640px);padding:16px;color:#cfe0ff;max-height:86vh;overflow:auto;position:relative;zIndex:1004">
+      <div id="mpCard" style="background:#0f1625;border:1px solid #2a3550;border-radius:14px;width:min(92vw,640px);padding:16px;color:#cfe0ff;max-height:86vh;overflow:auto;position:relative;z-index:1004">
         <div style="font-size:18px;font-weight:700;margin-bottom:8px">Play Modes</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <button class="mp-btn" data-mode="br10">Battle Royale (10)</button>
@@ -50,7 +56,8 @@
         </div>
       </div>`;
 
-    const style=document.createElement('style'); style.textContent=`
+    const style=document.createElement('style'); 
+    style.textContent=`
       #mpLobby .mp-btn{padding:12px 10px;border-radius:12px;background:#1a2340;color:#cfe0ff;border:1px solid #2a3550;font-weight:700;}
       #mpLobby .mp-btn:active{transform:translateY(1px);}
       #mpLobby .mp-small{padding:8px 10px;border-radius:10px;background:#101827;color:#cfe0ff;border:1px solid #2a3550;}
@@ -58,20 +65,21 @@
       #mpLobby .friend{background:#0f1625;border:1px solid #2a3550;border-radius:12px;padding:10px;display:flex;align-items:center;justify-content:space-between;}
       #mpLobby .meta{opacity:.8;font-size:12px}
       #mpLobby .active::before{content:'• ';color:#6cf08a}
-      #mpLobby .offline::before{content:'• ';color:#7a889f}`; document.head.appendChild(style);
+      #mpLobby .offline::before{content:'• ';color:#7a889f}`; 
+    document.head.appendChild(style);
 
     // close handlers
     host.addEventListener('click', e=>{ if(e.target===host) hideModal(); });
-    const closeBtn = host.querySelector('#mpClose');
-    if(closeBtn) closeBtn.addEventListener('click', ()=> hideModal());
+    const btnClose = host.querySelector('#mpClose');
+    if(btnClose) btnClose.addEventListener('click', ()=> hideModal());
 
     // temporary visual queue text; real queue managed by client
     host.querySelectorAll('.mp-btn').forEach(b=>{
       b.onclick=()=>{
         const m=b.getAttribute('data-mode');
         const nice=m==='br10'?'Battle Royale (10)': m==='v1'?'1v1': m==='v2'?'2v2':'3v3';
-        const qEl = host.querySelector('#mpQueueMsg');
-        if(qEl) qEl.textContent=`Queued for ${nice}… (waiting for match)`;
+        const msgEl = host.querySelector('#mpQueueMsg');
+        if(msgEl) msgEl.textContent=`Queued for ${nice}… (waiting for match)`;
       };
     });
 
@@ -88,14 +96,25 @@
     return host;
   }
 
-  function showModal(){ const host=ensureModal(); host.style.display='flex'; open=true; window.IZZA?.emit?.('ui-modal-open',{id:'mpLobby'}); }
-  function hideModal(){ const host=document.getElementById('mpLobby'); if(host) host.style.display='none'; open=false; window.IZZA?.emit?.('ui-modal-close',{id:'mpLobby'}); }
+  function showModal(){ 
+    const host=ensureModal(); 
+    host.style.display='flex'; 
+    open=true; 
+    window.IZZA?.emit?.('ui-modal-open',{id:'mpLobby'}); 
+  }
+  function hideModal(){ 
+    const host=document.getElementById('mpLobby'); 
+    if(host) host.style.display='none'; 
+    open=false; 
+    window.IZZA?.emit?.('ui-modal-close',{id:'mpLobby'}); 
+  }
 
   // ---- draw building ----
   function w2sX(api,wx){ return (wx-api.camera.x)*(api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy-api.camera.y)*(api.DRAW/api.TILE); }
   function drawBuilding(){
-    if(!api?.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return;
+    if(!api?.ready) return; 
+    if(localStorage.getItem(M3_KEY)!=='done') return;
     const t=api.TILE,S=api.DRAW,ctx=document.getElementById('game').getContext('2d');
     const spot=buildingSpot(api), sx=w2sX(api,spot.gx*t), sy=w2sY(api,spot.gy*t);
     ctx.save();
@@ -121,8 +140,10 @@
   // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:true});
-    document.getElementById('btnB')?.addEventListener('click', onB, true);
+    // passive:false so preventDefault is honored; capture:true to beat other listeners
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
+    const btnB=document.getElementById('btnB'); 
+    if(btnB) btnB.addEventListener('click', onB, true);
   });
   IZZA.on('update-post', ()=>{ if(!api?.ready) return; if(localStorage.getItem(M3_KEY)!=='done') return; near=inRange(); });
   IZZA.on('render-post', ()=> drawBuilding());
