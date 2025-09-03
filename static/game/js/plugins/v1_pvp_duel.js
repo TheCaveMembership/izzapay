@@ -1,19 +1,15 @@
-// PvP Duel bootstrap — v1.2
-// - Opposite-edge spawns, deterministic & safe (no water/buildings when engine exposes checks)
-// - Opponent visible (minimal render overlay)
-// - Mini sync: WS (/ws/duel) with HTTP fallback (/match/*), isolated to duel
+// PvP Duel bootstrap — v1.3
+// - HTTP-only mini sync (no websockets)
+// - Opponent rendered as their actual character (from /render/profile)
+// - Opposite-edge safe spawns: never water/buildings when APIs are available
 (function(){
-  const BUILD='v1.2-pvp-duel-safe-spawn+mini-sync';
+  const BUILD='v1.3-pvp-duel-http-sync+exact-render';
   console.log('[IZZA PLAY]', BUILD);
 
-  // ---------- config ----------
   const MP_BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
-  const MP_WS   = (window.__MP_WS__   || '/izza-game/api/mp/ws');
   const TOK     = (window.__IZZA_T__  || '').toString();
-
   const withTok = (p)=> TOK ? p + (p.includes('?')?'&':'?') + 't=' + encodeURIComponent(TOK) : p;
 
-  // ---------- tiny fetch helpers (local to this plugin) ----------
   async function jget(p){
     const r = await fetch(withTok(MP_BASE+p), {credentials:'include'});
     if(!r.ok) throw new Error(r.status+' '+r.statusText);
@@ -25,8 +21,7 @@
     return r.json();
   }
 
-  // ---------- name & random helpers ----------
-  const normName = (s)=> (s||'').toString().trim().replace(/^@+/,'').toLowerCase();
+  const norm = (s)=> (s||'').toString().trim().replace(/^@+/,'').toLowerCase();
   function randFromHash(str, salt){
     let h = 2166136261 >>> 0;
     const s = (str + '|' + (salt||'')).toString();
@@ -35,14 +30,11 @@
     return ((h>>>0) % 100000) / 100000;
   }
 
-  // ---------- safe duel region ----------
   function unlockedRect(tier){
-    // mirrors your building plugin
     return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 }
                         : { x0:18, y0:18, x1:72, y1:42 };
   }
 
-  // ---- walkability probes (best effort: uses any available API; else assumes walkable) ----
   function tileInfo(api, gx, gy){
     try{
       if(api.map?.getTile) return api.map.getTile(gx,gy);
@@ -57,29 +49,22 @@
       if (api.map?.isWalkable) return !!api.map.isWalkable(gx,gy);
       if (api.tileIsFree) return !!api.tileIsFree(gx,gy);
     }catch(e){}
-    // Heuristic on tile type if available
     const t = tileInfo(api, gx, gy);
     const type = (t && (t.type||t.kind||t.name||'')).toString().toLowerCase();
     if(type){
-      if(type.includes('water')) return false;
-      if(type.includes('river')) return false;
-      if(type.includes('sea'))   return false;
+      if(type.includes('water')||type.includes('river')||type.includes('sea')) return false;
       if(type.includes('building')||type.includes('wall')||type.includes('house')) return false;
       if(type.includes('tree')||type.includes('rock')) return false;
-      // allow grass/road/sidewalk/path
-      return (type.includes('grass') || type.includes('road') || type.includes('street') || type.includes('sidewalk') || type.includes('pavement') || type.includes('path'));
+      return (type.includes('grass')||type.includes('road')||type.includes('street')||type.includes('sidewalk')||type.includes('pavement')||type.includes('path'));
     }
-    // Fallback if we can't read map data: assume walkable; margins below still keep us safe.
-    return true;
+    return true; // fallback
   }
-
   function findSafeTile(api, gx, gy, dirx, diry, steps=12){
     let x=gx, y=gy;
     for(let i=0;i<=steps;i++){
       if(isWalkable(api, x, y)) return {gx:x, gy:y};
       x += dirx; y += diry;
     }
-    // last resort: radial search inward box
     for(let r=1;r<=steps;r++){
       for(let dx=-r; dx<=r; dx++){
         for(let dy=-r; dy<=r; dy++){
@@ -91,25 +76,20 @@
     return {gx, gy};
   }
 
-  // ---------- side + axis ----------
   function chooseAxis(matchId){ return randFromHash(String(matchId),'axis') >= 0.5; }
   function sideAssignment(matchId, players){
-    const a = normName(players[0]?.username);
-    const b = normName(players[1]?.username);
+    const a = norm(players[0]?.username);
+    const b = norm(players[1]?.username);
     const sorted = [a,b].sort();
     const flip = randFromHash(String(matchId),'flip') >= 0.5;
     const leftTop = flip ? sorted[1] : sorted[0];
     const rightBottom = flip ? sorted[0] : sorted[1];
     return { leftTop, rightBottom };
   }
-
   function edgeSpawn(api, tier, axisTopBottom, isLeftOrTop, matchId){
     const un = unlockedRect(tier);
     const t  = api.TILE;
-
-    // Larger margins to avoid water/impassables and ensure distinctness
-    const marginEdge   = 10; // keep far off borders
-    const marginSearch = 8;  // inward search budget
+    const marginEdge=10, marginSearch=8;
 
     if(axisTopBottom){
       const minX = un.x0 + marginEdge, maxX = un.x1 - marginEdge;
@@ -132,194 +112,155 @@
     }
   }
 
-  // ---------- simple HUD countdown ----------
-  function showCountdown(n=3){
-    let host = document.getElementById('pvpCountdown');
-    if(!host){
-      host = document.createElement('div');
-      host.id='pvpCountdown';
-      Object.assign(host.style,{
-        position:'fixed', inset:'0', display:'flex', alignItems:'center', justifyContent:'center',
-        zIndex: 30, pointerEvents:'none', fontFamily:'system-ui,Arial,sans-serif'
+  // ---- opponent render support ----
+  let OPP = { userId:null, username:null, profile:null, state:null };
+  async function loadOpponentProfile(username, userId){
+    try{
+      const qs = userId ? ('?userId='+encodeURIComponent(userId)) : ('?username='+encodeURIComponent(username));
+      const r = await jget('/render/profile'+qs);
+      if(r && r.ok){
+        OPP.userId = r.userId || userId || null;
+        OPP.profile = r.profile || null;
+      }
+    }catch(e){ console.warn('render profile fetch failed', e); }
+  }
+
+  function drawOpponent(ctx, api, wx, wy){
+    if(!OPP.profile){
+      // tiny fallback marker while profile loads
+      ctx.fillStyle='rgba(255,70,70,0.9)';
+      ctx.beginPath();
+      ctx.arc(wx + api.TILE*0.25, wy + api.TILE*0.25, Math.max(6, api.TILE*0.20), 0, Math.PI*2);
+      ctx.fill();
+      return;
+    }
+    // Try common render hooks your engine may expose
+    if(api.renderAvatar){
+      api.renderAvatar(ctx, wx, wy, OPP.profile);
+      return;
+    }
+    if(api.drawAvatar){
+      api.drawAvatar(ctx, wx, wy, OPP.profile);
+      return;
+    }
+    if(api.avatars?.draw){
+      api.avatars.draw(ctx, wx, wy, OPP.profile);
+      return;
+    }
+    // last resort – still show something:
+    ctx.fillStyle='rgba(255,70,70,0.9)';
+    ctx.fillRect(wx, wy, api.TILE*0.5, api.TILE*0.8);
+  }
+
+  // ---- HTTP-only mini sync (10 Hz)
+  let SYNC = { timer:null, lastRecv:0, remote:{} };
+  async function httpJoin(match){ try{ await jpost('/match/join', {matchId:match.matchId, mode:match.mode, players:(match.players||[]).map(p=>p.id)}); }catch{} }
+  async function httpLeave(match){ try{ await jpost('/match/leave', {matchId:match.matchId}); }catch{} }
+  async function httpPush(match, api){
+    try{
+      await jpost('/match/state', {
+        matchId: match.matchId,
+        mode: match.mode,
+        players: (match.players||[]).map(p=>p.id),
+        state: { x: api.player.x|0, y: api.player.y|0, facing: api.player.facing||'down', anim: api.player.anim||'idle' }
       });
-      document.body.appendChild(host);
-    }
-    const label = document.createElement('div');
-    Object.assign(label.style,{
-      background:'rgba(6,10,18,.6)', color:'#cfe0ff', border:'1px solid #2a3550',
-      padding:'16px 22px', borderRadius:'14px', fontSize:'28px', fontWeight:'800',
-      textShadow:'0 2px 6px rgba(0,0,0,.4)'
-    });
-    host.innerHTML=''; host.appendChild(label);
-    let cur = n; label.textContent = 'Ready…';
-    setTimeout(function tick(){
-      if(cur>0){ label.textContent = String(cur); cur--; setTimeout(tick, 800); }
-      else { label.textContent = 'GO!'; setTimeout(()=>host.remove(), 600); }
-    }, 500);
+    }catch{}
   }
-
-  // ---------- mini sync (WS first, HTTP fallback) ----------
-  let SYNC = { ws:null, timer:null, lastSent:0, lastRecv:0, remote:{} };
-
-  function openWS(matchId){
+  async function httpPull(match){
     try{
-      const proto = location.protocol==='https:'?'wss:':'ws:';
-      const url = proto+'//'+location.host + withTok(MP_WS + '/duel') + '&match=' + encodeURIComponent(matchId);
-      const ws = new WebSocket(url);
-      ws.onopen = ()=>{
-        // initial identify
-        ws.send(JSON.stringify({matchId, hello:true}));
-      };
-      ws.onmessage = (evt)=>{
-        try{
-          const pkt = JSON.parse(evt.data);
-          if(pkt && pkt.type==='state' && pkt.state){
-            SYNC.lastRecv = Date.now()/1000;
-            SYNC.remote = { ...pkt.state, ts: Date.now()/1000 };
-          }
-        }catch{}
-      };
-      ws.onclose = ()=>{ SYNC.ws=null; };
-      ws.onerror = ()=>{ try{ ws.close(); }catch{}; SYNC.ws=null; };
-      SYNC.ws = ws;
-      return true;
-    }catch(e){
-      console.warn('[duel] ws open failed', e);
-      return false;
-    }
-  }
-
-  async function httpJoin(matchId, mode, players){
-    try{ await jpost('/match/join', {matchId, mode, players}); }catch{}
-  }
-  async function httpLeave(matchId){
-    try{ await jpost('/match/leave', {matchId}); }catch{}
-  }
-  async function httpPush(matchId, state, mode, players){
-    try{ await jpost('/match/state', {matchId, state, mode, players}); }catch{}
-  }
-  async function httpPull(matchId){
-    try{
-      const since = SYNC.lastRecv || 0;
-      const r = await jget('/match/others?matchId='+encodeURIComponent(matchId)+'&since='+encodeURIComponent(since));
+      const r = await jget('/match/others?matchId='+encodeURIComponent(match.matchId)+'&since='+encodeURIComponent(SYNC.lastRecv||0));
       if(r && r.states && r.states.length){
-        // take the newest
         const newest = r.states.reduce((a,b)=> (a.ts||0) > (b.ts||0) ? a : b);
-        SYNC.remote = {...newest, ts: r.now || Date.now()/1000};
+        SYNC.remote = newest;
         SYNC.lastRecv = r.now || Date.now()/1000;
       }
     }catch{}
   }
-
   function startSync(match){
     const api = IZZA.api;
-    const mode = match.mode || 'v1';
-    const players = (match.players||[]).map(p=>p.id);
-
-    // HTTP join (safe no-op if WS also in use)
-    httpJoin(match.matchId, mode, players);
-
-    // Try WS; if not available, timer loop uses HTTP
-    openWS(match.matchId);
-
-    // 10 Hz send, 10 Hz pull (pull only if no WS)
     if(SYNC.timer) clearInterval(SYNC.timer);
+    httpJoin(match);
     SYNC.timer = setInterval(async ()=>{
-      // send my state
-      const state = {
-        x: api.player.x|0, y: api.player.y|0,
-        facing: api.player.facing||'down',
-        anim: api.player.anim||'idle'
-      };
-      if(SYNC.ws && SYNC.ws.readyState===1){
-        try{ SYNC.ws.send(JSON.stringify({matchId:match.matchId, state})); }catch{}
-      }else{
-        await httpPush(match.matchId, state, mode, players);
-      }
-      // pull if not on WS
-      if(!SYNC.ws || SYNC.ws.readyState!==1){
-        await httpPull(match.matchId);
-      }
-    }, 100); // ~10 Hz
+      await httpPush(match, api);
+      await httpPull(match);
+    }, 100); // 10 Hz
+  }
+  function stopSync(match){
+    if(SYNC.timer){ clearInterval(SYNC.timer); SYNC.timer=null; }
+    httpLeave(match);
+    SYNC.remote = {}; SYNC.lastRecv=0;
   }
 
-  function stopSync(matchId){
-    if(SYNC.timer) { clearInterval(SYNC.timer); SYNC.timer=null; }
-    if(SYNC.ws){ try{ SYNC.ws.close(); }catch{}; SYNC.ws=null; }
-    httpLeave(matchId);
-    SYNC.remote = {};
-  }
-
-  // ---------- render opponent (very lightweight overlay) ----------
-  function worldToScreenX(api, wx){ return (wx - api.camera.x)*(api.DRAW/api.TILE); }
-  function worldToScreenY(api, wy){ return (wy - api.camera.y)*(api.DRAW/api.TILE); }
+  function w2sX(api,wx){ return (wx - api.camera.x)*(api.DRAW/api.TILE); }
+  function w2sY(api,wy){ return (wy - api.camera.y)*(api.DRAW/api.TILE); }
 
   IZZA.on('render-post', ()=>{
     const api = IZZA.api;
     if(!api?.ready) return;
     const r = SYNC.remote;
     if(!r || r.x==null || r.y==null) return;
-    const cx = worldToScreenX(api, r.x);
-    const cy = worldToScreenY(api, r.y);
     const ctx = document.getElementById('game')?.getContext('2d');
     if(!ctx) return;
     ctx.save();
-    // opponent marker (simple silhouette)
-    ctx.fillStyle='rgba(255,70,70,0.9)';
-    ctx.beginPath();
-    ctx.arc(cx+api.TILE*0.25, cy+api.TILE*0.25, Math.max(6, api.TILE*0.20), 0, Math.PI*2);
-    ctx.fill();
+    drawOpponent(ctx, api, r.x, r.y);
     ctx.restore();
   });
 
-  // ---------- main listener ----------
-  IZZA.on('mp-start', ({mode, matchId, players})=>{
+  function showCountdown(n=3){
+    let host = document.getElementById('pvpCountdown');
+    if(!host){
+      host = document.createElement('div');
+      host.id='pvpCountdown';
+      Object.assign(host.style,{position:'fixed', inset:'0', display:'flex', alignItems:'center', justifyContent:'center', zIndex:30, pointerEvents:'none', fontFamily:'system-ui,Arial,sans-serif'});
+      document.body.appendChild(host);
+    }
+    const label = document.createElement('div');
+    Object.assign(label.style,{background:'rgba(6,10,18,.6)', color:'#cfe0ff', border:'1px solid #2a3550', padding:'16px 22px', borderRadius:'14px', fontSize:'28px', fontWeight:'800'});
+    host.innerHTML=''; host.appendChild(label);
+    let cur=n; label.textContent='Ready…';
+    setTimeout(function tick(){ if(cur>0){ label.textContent=String(cur); cur--; setTimeout(tick,800);} else { label.textContent='GO!'; setTimeout(()=>host.remove(),600);} }, 500);
+  }
+
+  // ---------- main ----------
+  IZZA.on('mp-start', async ({mode, matchId, players})=>{
     try{
       const api = IZZA.api;
       if(!api?.ready || !players || players.length<2) return;
-      if(mode!=='v1') return; // this plugin handles 1v1
+      if(mode!=='v1') return;
 
       const tier = localStorage.getItem('izzaMapTier') || '2';
-      const axisTB = chooseAxis(matchId); // true=top/bottom, false=left/right
-      const assign = sideAssignment(matchId, players);
-      const meU = normName(api.user?.username || 'player');
-
-      // deterministic opposite sides
+      const axisTB = (randFromHash(String(matchId),'axis') >= 0.5);
+      const assign = (function(){
+        const a = norm(players[0]?.username), b = norm(players[1]?.username);
+        const sorted=[a,b].sort(); const flip = randFromHash(String(matchId),'flip')>=0.5;
+        return { leftTop: (flip?sorted[1]:sorted[0]), rightBottom: (flip?sorted[0]:sorted[1]) };
+      })();
+      const meU = norm(api.user?.username || 'player');
       const amLeftOrTop = (meU === assign.leftTop);
       const spawn = edgeSpawn(api, tier, axisTB, amLeftOrTop, matchId);
 
-      // Teleport + face
-      api.player.x = spawn.x;
-      api.player.y = spawn.y;
-      api.player.facing = spawn.facing || 'down';
+      // Self place
+      api.player.x = spawn.x; api.player.y = spawn.y; api.player.facing = spawn.facing || 'down';
       api.setWanted?.(0);
+      if(api.camera){ api.camera.x = Math.max(0, api.player.x - api.DRAW/2); api.camera.y = Math.max(0, api.player.y - api.DRAW/2); }
 
-      // Center camera near me (helps when far apart)
-      if(api.camera){
-        api.camera.x = Math.max(0, api.player.x - api.DRAW/2);
-        api.camera.y = Math.max(0, api.player.y - api.DRAW/2);
-      }
+      // Figure opponent & load appearance
+      const opp = players.find(p=> norm(p.username)!==meU);
+      if(opp){ OPP.username = opp.username; await loadOpponentProfile(opp.username, opp.id); }
 
-      // Start mini sync so we see each other
+      // Start HTTP sync
       startSync({mode, matchId, players});
 
-      // HUD niceties
-      const opp = players.find(p=> normName(p.username)!==meU);
       IZZA.emit?.('toast', {text:`1v1 vs ${opp?.username || 'opponent'} — good luck!`});
       showCountdown(3);
 
-      // mark duel active
-      window.__IZZA_DUEL = { active:true, mode, matchId, axisTB,
-        leftTop:assign.leftTop, rightBottom:assign.rightBottom };
-    }catch(e){
-      console.warn('[PvP duel] failed to start', e);
-    }
+      window.__IZZA_DUEL = { active:true, mode, matchId };
+    }catch(e){ console.warn('[PvP duel] failed', e); }
   });
 
-  IZZA.on?.('mp-end', (e)=>{
-    if(window.__IZZA_DUEL?.active && window.__IZZA_DUEL.matchId){
-      stopSync(window.__IZZA_DUEL.matchId);
-    }
+  IZZA.on?.('mp-end', ()=>{
+    const m = window.__IZZA_DUEL;
+    if(m?.active){ stopSync({matchId:m.matchId}); }
     window.__IZZA_DUEL = { active:false };
   });
 
