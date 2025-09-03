@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.5 (wider west, close fix, B-capture, modal events)
+// Multiplayer Building & Lobby — v1.5.1 (typing guard + non-passive keydown)
 (function(){
-  const BUILD='v1.5-mp-building+wider-west+close-fix+modal-events';
+  const BUILD='v1.5.1-mp-building+typing-guard';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -20,8 +20,6 @@
     const vRoadX = Math.min(un.x1-3, bX + bW + 6);
     return {un,bX,bY,bW,bH,hRoadY,vRoadX};
   }
-
-  // Position bottom-left, lifted up from road
   function buildingSpot(api){
     const a = anchors(api);
     const gx = a.un.x0 + 7;
@@ -81,7 +79,6 @@
       </div>
     `;
 
-    // styles
     const style=document.createElement('style');
     style.textContent=`
       #mpLobby .mp-btn{ padding:12px 10px; border-radius:12px; background:#1a2340; color:#cfe0ff;
@@ -96,11 +93,10 @@
     `;
     document.head.appendChild(style);
 
-    // close handlers
-    host.addEventListener('click', (e)=>{ if(e.target===host) { hideModal(); } });
+    host.addEventListener('click', (e)=>{ if(e.target===host) hideModal(); });
     host.querySelector('#mpClose').addEventListener('click', ()=> hideModal());
 
-    // queue buttons (placeholder; real queue handled by mp client)
+    // Temporary local actions; real queue handled by mp client
     host.querySelectorAll('.mp-btn').forEach(b=>{
       b.onclick=()=>{
         const mode=b.getAttribute('data-mode');
@@ -109,15 +105,11 @@
       };
     });
 
-    // copy invite (client may override with server-provided link)
     host.querySelector('#mpCopyLink').onclick=async ()=>{
-      const link = `${location.origin}/auth.html?src=invite&from=${encodeURIComponent(IZZA?.api?.user?.username||'player')}&code=${Math.random().toString(36).slice(2,10)}`;
+      const link = `${location.origin}/izza-game/auth?src=invite&from=${encodeURIComponent(IZZA?.api?.user?.username||'player')}`;
       try{ await navigator.clipboard.writeText(link); IZZA.emit?.('toast',{text:'Invite link copied'}); }
       catch{ prompt('Copy link:', link); }
     };
-
-    // basic empty list; real list painted by mp client
-    host.querySelector('#mpFriends').innerHTML = '';
 
     document.body.appendChild(host);
     return host;
@@ -126,20 +118,22 @@
   function showModal(){
     const host=ensureModal();
     host.style.display='flex'; open=true;
-    // Let other plugins (e.g., guns) know a modal opened so they can hide Fire
+    // focus search so typing doesn't hit game hotkeys
+    setTimeout(()=> host.querySelector('#mpSearch')?.focus(), 0);
     window.IZZA?.emit?.('ui-modal-open', { id:'mpLobby' });
   }
   function hideModal(){
     const host=document.getElementById('mpLobby');
     if(host){ host.style.display='none'; }
     open=false;
+    // blur active element so keys go back to game only after closing
+    try{ document.activeElement && document.activeElement.blur && document.activeElement.blur(); }catch{}
     window.IZZA?.emit?.('ui-modal-close', { id:'mpLobby' });
   }
 
-  // ---- building draw ----
+  // ---- drawing ----
   function w2sX(api,wx){ return (wx - api.camera.x) * (api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy - api.camera.y) * (api.DRAW/api.TILE); }
-
   function drawBuilding(){
     if(!api?.ready) return;
     if(localStorage.getItem(M3_KEY)!=='done') return;
@@ -149,36 +143,38 @@
     const sx=w2sX(api, spot.gx*t), sy=w2sY(api, spot.gy*t);
 
     ctx.save();
-    // wider to the WEST
     ctx.fillStyle='#18243b';
     ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
 
-    // door
     const doorX = sx + S*0.10, doorY = sy - S*0.02;
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
     ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
 
-    // label
     ctx.fillStyle='#b7d0ff';
     ctx.font = '12px monospace';
     ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
-
   function playerGrid(){
     const t=api.TILE;
     return { gx: ((api.player.x+t/2)/t|0), gy: ((api.player.y+t/2)/t|0) };
   }
-  function manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
+  const manhattan=(ax,ay,bx,by)=> Math.abs(ax-bx)+Math.abs(ay-by);
   function inRange(){
-    const {gx,gy}=playerGrid();
-    const s=buildingSpot(api);
+    const {gx,gy}=playerGrid(); const s=buildingSpot(api);
     return manhattan(gx,gy, s.gx, s.gy) <= 1;
   }
 
   // ---- input ----
+  function isTypingTarget(t){
+    if(!t) return false;
+    if(t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable) return true;
+    return !!t.closest?.('#mpLobby');
+  }
   function onB(e){
     if(localStorage.getItem(M3_KEY)!=='done') return;
+    // Ignore B shortcut while typing inside the lobby
+    if(isTypingTarget(e?.target)) return;
     if(!inRange()) return;
     showModal();
     e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
@@ -187,7 +183,8 @@
   // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:true});
+    // IMPORTANT: passive:false so preventDefault actually works
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
     const btnB=document.getElementById('btnB'); btnB && btnB.addEventListener('click', onB, true);
   });
 
