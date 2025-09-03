@@ -1,9 +1,8 @@
-# mp_api.py — v2.1 (30-min presence + invites + simple v1 queue + mini sync w/ WS fallback)
+# mp_api.py — v2.2 (HTTP-only mini sync + render profile + invites/queue unchanged)
 from typing import Optional, Tuple, Dict, Any, List
-from flask import Blueprint, jsonify, request, session, current_app
+from flask import Blueprint, jsonify, request, session
 from db import conn
 import time
-import json
 
 mp_bp = Blueprint("mp", __name__)
 
@@ -145,9 +144,9 @@ def _is_friend(a: int, b: int) -> bool:
         ).fetchone()
         return bool(r)
 
-# ------------------- mini realtime sync (HTTP + optional WS) -------------------
+# ------------------- mini realtime sync over HTTP -------------------
 # In-memory live match states.
-_MATCHES: Dict[int, Dict[str, Any]] = {}  # matchId -> {mode, players:[uids], states:{uid:{x,y,facing,ts}}}
+_MATCHES: Dict[int, Dict[str, Any]] = {}  # matchId -> {mode, players:[uids], states:{uid:{x,y,facing,anim,ts}}}
 
 def _ensure_match(match_id: int, mode: str, players: List[int]):
     m = _MATCHES.get(match_id)
@@ -206,91 +205,70 @@ def mp_match_others():
     m = _MATCHES.get(mid) or {"states": {}}
     out = []
     for k,v in m["states"].items():
-        if int(k) == int(uid): 
+        if int(k) == int(uid):
             continue
         if (v.get("ts") or 0) > since:
-            out.append({"userId": k, **v})
+            out.append({"userId": int(k), **v})
     return jsonify({"ok": True, "states": out, "now": time.time()})
 
-# ----- Optional WebSocket (if flask_sock is available) -----
-try:
-    from flask_sock import Sock
-    _sock = Sock()
+# ------------------- appearance / render profile -------------------
+@mp_bp.get("/render/profile")
+def mp_render_profile():
+    """
+    Return the opponent's render data (as stored in SQLite). We try the most
+    likely spots: a JSON blob column `render_json` in `game_profiles`, otherwise
+    we compose a minimal profile from known columns when present.
+    Accepts ?username=@name OR ?userId=123.
+    """
+    q_user = (request.args.get("username") or "").strip()
+    q_uid  = request.args.get("userId")
 
-    # must be initialized once with the app (usually in app.py):
-    #   from mp_api import _sock
-    #   _sock.init_app(app)
-    @_sock.route("/izza-game/api/mp/ws/duel")
-    def ws_duel(ws):
-        """
-        Very small relay: a client sends {"matchId":..., "state":{x,y,facing}}.
-        Server tags it with the sender and relays to *other* peers currently connected
-        with the same matchId. No persistence; HTTP endpoints above remain as fallback.
-        """
+    with conn() as cx:
+        row = None
+        if q_uid:
+            row = cx.execute("""
+                SELECT u.id, u.pi_uid, u.pi_username,
+                       gp.render_json,
+                       gp.skin, gp.outfit, gp.sprite
+                FROM users u
+                LEFT JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
+                WHERE u.id = ?
+                """, (int(q_uid),)
+            ).fetchone()
+        else:
+            want = q_user.lstrip("@")
+            row = cx.execute("""
+                SELECT u.id, u.pi_uid, u.pi_username,
+                       gp.render_json,
+                       gp.skin, gp.outfit, gp.sprite
+                FROM users u
+                LEFT JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
+                WHERE LOWER(REPLACE(u.pi_username,'@','')) = LOWER(REPLACE(?, '@',''))
+                """, (want,)
+            ).fetchone()
+
+    if not row:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    # Prefer a JSON blob if present
+    import json as _json
+    render = None
+    if row["render_json"]:
         try:
-            # simple registry: app global, map matchId -> list of sockets
-            registry: Dict[int, List] = current_app.config.setdefault("MP_DUEL_SOCKS", {})
-            cur_mid = None
-            me_uid = None
-
-            # First message must include matchId
-            first = ws.receive()
-            init = json.loads(first or "{}")
-            cur_mid = int(init.get("matchId") or 0)
-            me_uid = None
-            who = _current_user_ids()
-            if who:
-                me_uid = int(who[0])
-
-            registry.setdefault(cur_mid, []).append(ws)
-
-            # Broadcast helper
-            def broadcast(msg: str):
-                dead = []
-                for peer in list(registry.get(cur_mid, [])):
-                    if peer is ws:
-                        continue
-                    try:
-                        peer.send(msg)
-                    except Exception:
-                        dead.append(peer)
-                for d in dead:
-                    try:
-                        registry[cur_mid].remove(d)
-                    except Exception:
-                        pass
-
-            # If the client sent a state with the init, relay it
-            if init.get("state"):
-                pkt = {"type":"state", "from":me_uid, **init}
-                broadcast(json.dumps(pkt))
-
-            # Main loop
-            while True:
-                raw = ws.receive()
-                if raw is None:
-                    break
-                try:
-                    data = json.loads(raw)
-                except Exception:
-                    continue
-                # Expect {"matchId": mid, "state": {...}}
-                if int(data.get("matchId") or 0) != cur_mid:
-                    continue
-                pkt = {"type":"state", "from":me_uid, **data}
-                broadcast(json.dumps(pkt))
+            render = _json.loads(row["render_json"])
         except Exception:
-            pass
-        finally:
-            try:
-                reg = current_app.config.get("MP_DUEL_SOCKS", {})
-                if reg and cur_mid in reg and ws in reg[cur_mid]:
-                    reg[cur_mid].remove(ws)
-            except Exception:
-                pass
+            render = None
 
-except Exception:
-    _sock = None  # WS not available; HTTP fallback still works
+    if not render:
+        # Minimal fallback
+        render = {
+            "username": row["pi_username"],
+            "sprite": row["sprite"] or "default",
+            "skin": row["skin"] or "default",
+            "outfit": row["outfit"] or "default"
+        }
+
+    return jsonify({"ok": True, "userId": row["id"], "profile": render})
 
 # ---------------- endpoints (existing) ----------------
 
