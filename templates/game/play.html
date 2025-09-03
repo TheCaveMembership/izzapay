@@ -45,7 +45,7 @@
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
     #invPanel{ max-width:1100px; margin:8px auto 0; display:none; }
 
-    /* tiny debug chip */
+    /* Auth Debug styles */
     #authDock{ position:fixed; top:66px; left:10px; z-index:9999; }
     #authDock .chip{ background:#1a2340; color:#cfe0ff; border:1px solid #2a3550; border-radius:14px; padding:6px 10px; font-size:12px; }
     #authPanel{ display:none; background:rgba(12,18,30,.92); border:1px solid #2a3550; border-radius:10px; padding:8px 10px; font-size:12px; color:#9fd4ff; max-width:88vw; line-height:1.35; backdrop-filter:blur(4px); }
@@ -54,6 +54,7 @@
     #authPanel .close{ margin-left:auto }
   </style>
 
+  <!-- Pi SDK (for in-lobby re-auth if needed) -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body class="cw-blue theme-a">
@@ -92,20 +93,58 @@
     <button class="btn" id="btnMap" type="button" title="Toggle Minimap">Map</button>
   </div>
 
-  <!-- Map, enter, shop modals (unchanged markup)… -->
+  <div class="modal" id="mapModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>IZZA City — World Map</h3>
+      <canvas id="bigmap" width="700" height="520" style="width:100%;height:auto;border-radius:10px;background:#0b0f17"></canvas>
+      <div class="row"><button class="ghost" id="closeMap">Close</button></div>
+      <div style="margin-top:8px; font-size:12px; opacity:.85">
+        <span style="display:inline-block;width:12px;height:12px;background:#1c293e;border:1px solid #31415d;margin-right:6px;border-radius:3px"></span>Unlocked
+        <span style="display:inline-block;width:12px;height:12px;background:rgba(163,176,197,.25);border:1px solid #485771;margin-right:6px;border-radius:3px;margin-left:12px"></span>Preview
+        <span style="display:inline-block;width:12px;height:12px;background:#000;border:1px solid #2a3140;margin-right:6px;border-radius:3px;margin-left:12px"></span>Locked
+      </div>
+    </div>
+  </div>
 
-  <!-- Pass profile + short-lived token to JS -->
+  <div class="modal" id="enterModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>IZZA HQ</h3>
+      <p>Welcome! Tutorial:</p>
+      <ol style="margin:0 0 8px 18px; padding:0">
+        <li>Press <strong>A</strong> to hit the pedestrian (3 hits to knock down, then 1 to finish).</li>
+        <li>Oh no! Then eliminate the cop within <strong>30 seconds</strong> or more will arrive.</li>
+      </ol>
+      <div class="row">
+        <button class="ghost" id="startTutorial">Start Tutorial</button>
+        <button class="ghost" id="closeEnter">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="shopModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>Shop — Cashier</h3>
+      <div class="shop-list" id="shopList"></div>
+      <div class="shop-note" id="shopNote"></div>
+      <div class="row"><button class="ghost" id="closeShop">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Pass profile + the short-lived auth token to JS -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
   <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
   <script>window.__PI_SANDBOX__ = {{ (sandbox|tojson) if sandbox is defined else 'false' }};</script>
 
-  <!-- Multiplayer API roots -->
+  <!-- Multiplayer base paths for game_app (mounted at /izza-game) -->
   <script>
     window.__MP_BASE__ = '/izza-game/api/mp';
     window.__MP_WS__   = '/izza-game/api/mp/ws';
   </script>
 
-  <!-- Core + game plugins -->
+  <!-- LOAD ORDER: core FIRST, then plugins -->
   <script src="/static/game/js/izza_core_v3.js?v=12"></script>
   <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
   <script src="/static/game/js/plugins/v5_loot.js?v=6"></script>
@@ -124,7 +163,7 @@
   <script defer src="/static/game/js/plugins/v1_multiplayer_client.js"></script>
   <script src="/static/game/js/plugins/v1_pvp_duel.js"></script>
 
-  <!-- Small in-page Auth panel (same tab; helpful in Pi) -->
+  <!-- ===== Collapsible Auth Debug (non-blocking) ===== -->
   <div id="authDock">
     <button id="authChip" class="chip" type="button">Auth ✓</button>
     <div id="authPanel">
@@ -147,8 +186,10 @@
       var tok = document.getElementById('authToken');
       tok.textContent = 't: ' + (t || '(none)');
 
-      chip.addEventListener('click', ()=> panel.style.display='block', {passive:true});
-      document.getElementById('btnClose').addEventListener('click', ()=> panel.style.display='none', {passive:true});
+      function openPanel(){ panel.style.display='block'; }
+      function closePanel(){ panel.style.display='none'; }
+      chip.addEventListener('click', openPanel, {passive:true});
+      document.getElementById('btnClose').addEventListener('click', closePanel, {passive:true});
 
       document.getElementById('btnCopy').onclick = async function(){
         try{ await navigator.clipboard.writeText(t||''); status.textContent='Auth: token copied'; }
@@ -156,7 +197,7 @@
       };
       document.getElementById('btnEcho').onclick = function(){
         var url = (location.origin + '/izza-game/api/mp/echo' + (t?('?t='+encodeURIComponent(t)):''));
-        location.href = url; // Pi Browser same-tab
+        location.href = url; // same-tab for Pi Browser
       };
       document.getElementById('btnRefresh').onclick = runEcho;
 
@@ -166,11 +207,17 @@
         try{
           const r = await fetch('/izza-game/api/mp/echo?t='+encodeURIComponent(t), {credentials:'include'});
           const j = await r.json();
-          status.textContent = (j && (j.authed || j.who)) ? ('Auth: authed ✅ ('+(j.who?.username||'')+')') : 'Auth: not authed ❌';
-        }catch{ status.textContent='Auth: echo error'; }
+          if(j && (j.authed===true || j.session_user_id || (j.who&&j.who.username))){
+            status.textContent='Auth: authed ✅' + (j.who&&j.who.username?(' ('+j.who.username+')'):'');
+          }else{
+            status.textContent='Auth: not authed ❌';
+          }
+        }catch(e){ status.textContent='Auth: echo error'; }
       }
-      runEcho();
+      runEcho(); // one check on load
+      // stays collapsed by default; won’t cover B/joystick/etc.
     })();
   </script>
+  <!-- ===== /Collapsible Auth Debug ===== -->
 </body>
 </html>
