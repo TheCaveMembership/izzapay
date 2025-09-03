@@ -1,5 +1,4 @@
-# mp_api.py — v1.7 (same as last, just ensure .strip() is used)
-
+# mp_api.py — v1.7.1
 from typing import Optional, Tuple
 from flask import Blueprint, jsonify, request, session
 from db import conn
@@ -16,8 +15,7 @@ VERIFY_TOKEN = _import_main_verifier()
 
 def _bearer_from_req():
     t = request.args.get("t") or request.form.get("t")
-    if t:
-        return t.strip()
+    if t: return t.strip()
     auth = request.headers.get("Authorization", "")
     if auth and auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
@@ -88,6 +86,16 @@ def mp_me():
     _,_, name = who
     return jsonify({"username": name, "inviteLink": "/izza-game/auth"})
 
+@mp_bp.get("/debug/selfcheck")
+def mp_selfcheck():
+    """For quick diagnosis in logs / mobile: auth + has_profile for current user."""
+    who = _current_user_ids()
+    if not who: return jsonify({"authed": False}), 200
+    uid, pi_uid, uname = who
+    with conn() as cx:
+        gp = cx.execute("SELECT 1 FROM game_profiles WHERE pi_uid=?", (pi_uid,)).fetchone()
+    return jsonify({"authed": True, "username": uname, "has_profile": bool(gp)}), 200
+
 @mp_bp.get("/friends/list")
 def mp_friends_list():
     _ensure_schema()
@@ -112,16 +120,22 @@ def mp_players_search():
     if not who: return jsonify({"error":"not_authenticated"}), 401
     my_id,_,_ = who
     q = (request.args.get("q") or "").strip()
-    if len(q)<2: return jsonify({"users":[]})
+    if len(q) < 2:
+        return jsonify({"users": []})
+
+    like = f"%{q}%"
     with conn() as cx:
         rows = cx.execute("""
           SELECT DISTINCT u.id AS uid, u.pi_username AS username
             FROM users u
             JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
-           WHERE u.pi_username LIKE ?
-           ORDER BY u.pi_username COLLATE NOCASE
+           WHERE u.pi_username LIKE ? COLLATE NOCASE
+           ORDER BY 
+             CASE WHEN u.pi_username = ? THEN 0 ELSE 1 END,
+             u.pi_username COLLATE NOCASE
            LIMIT 15
-        """, (f"%{q}%",)).fetchall()
+        """, (like, q)).fetchall()
+
     users=[{"username":r["username"],"active":False,"friend":_is_friend(my_id,int(r["uid"]))} for r in rows]
     return jsonify({"users": users})
 
@@ -139,5 +153,5 @@ def mp_lobby_invite():
     if not _is_friend(me,to_id): return jsonify({"ok":False,"error":"not_friends"}), 403
     with conn() as cx:
         cx.execute("INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
-                   (me,to,(data.get('mode') or None), int(data.get('ttlSec') or 1800)))
+                   (me,to_id,(data.get('mode') or None), int(data.get('ttlSec') or 1800)))
     return jsonify({"ok":True})
