@@ -1,10 +1,8 @@
-// PvP Duel — v2.1 (REST sync, safe spawns, real opponent render, PvP damage, robot support, MINIMAP OPP DOT)
-// - Draws opponent as a proper sprite in-world
-// - Adds a red dot for the opponent on the minimap (updates every frame)
-// - Keeps your controls unfrozen by force-closing lobby
-// - REST /duel/poke & /duel/pull (~8Hz alternating) — no websockets needed
+// PvP Duel — v2.3 (REST sync, safe spawns, real opponent render, PvP damage, minimap)
+// - Uses /duel/poke + /duel/pull alternating (no websockets)
+// - Sends appearance on first poke so the opponent renders correctly
 (function(){
-  const BUILD='v2.1-pvp-duel-rest+minimap-opp';
+  const BUILD='v2.3-pvp-duel-rest+appearance+minimap';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -14,7 +12,7 @@
 
   // ----- MAP + SPAWN -----
   function unlockedRect(tier){ return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 } : { x0:18, y0:18, x1:72, y1:42 }; }
-  function chooseAxis(matchId){ return hash01(matchId,'axis') >= 0.5; }
+  function chooseAxis(matchId){ return hash01(matchId,'axis') >= 0.5; } // true => top/bottom, false => left/right
   function sideAssignment(matchId, players){
     const a = norm(players[0]?.username), b = norm(players[1]?.username);
     const sorted = [a,b].sort(); const flip = hash01(matchId,'flip') >= 0.5;
@@ -25,152 +23,147 @@
       ? { xMin:un.x0+m, xMax:un.x1-m, yTop:un.y0+m, yBottom:un.y1-m }
       : { yMin:un.y0+m, yMax:un.y1-m, xLeft:un.x0+m, xRight:un.x1-m };
   }
+  function isWalkable(api, gx, gy){
+    if(api.isWalkableTile) return !!api.isWalkableTile(gx,gy);
+    if(api.tileIsBlocked)  return !api.tileIsBlocked(gx,gy);
+    return true; // best-effort if engine doesn’t expose collisions
+  }
   function edgeSpawn(api, tier, axisTB, leftOrTop, matchId){
     const un = unlockedRect(tier), lane=safeLane(un,axisTB), t=api.TILE;
+    const tries = 40;
     if(axisTB){
       const span=Math.max(1,lane.xMax-lane.xMin), r=hash01(matchId,(leftOrTop?'top':'bottom')+'|off');
-      const gx=(lane.xMin + Math.floor(r*span)), gy=leftOrTop?lane.yTop:lane.yBottom;
-      return { x:gx*t, y:gy*t, facing:leftOrTop?'down':'up' };
+      for(let i=0;i<tries;i++){
+        const jitter=((i?hash01(matchId,'jit'+i):r)), gx=(lane.xMin + Math.floor(jitter*span));
+        const gy=leftOrTop?lane.yTop:lane.yBottom;
+        if(isWalkable(api,gx,gy)) return { x:gx*t, y:gy*t, facing:leftOrTop?'down':'up' };
+      }
     }else{
       const span=Math.max(1,lane.yMax-lane.yMin), r=hash01(matchId,(leftOrTop?'left':'right')+'|off');
-      const gy=(lane.yMin + Math.floor(r*span)), gx=leftOrTop?lane.xLeft:lane.xRight;
-      return { x:gx*t, y:gy*t, facing:leftOrTop?'right':'left' };
+      for(let i=0;i<tries;i++){
+        const jitter=((i?hash01(matchId,'jitY'+i):r)), gy=(lane.yMin + Math.floor(jitter*span));
+        const gx=leftOrTop?lane.xLeft:lane.xRight;
+        if(isWalkable(api,gx,gy)) return { x:gx*t, y:gy*t, facing:leftOrTop?'right':'left' };
+      }
     }
+    // fallback center-ish
+    const cgx=((un.x0+un.x1)/2)|0, cgy=((un.y0+un.y1)/2)|0;
+    return { x: cgx*t, y: cgy*t, facing:'down' };
   }
   function hash01(str,salt){
     let h=2166136261>>>0, s=(String(str)+'|'+(salt||'')); for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); }
     h^=h<<13; h^=h>>>17; h^=h<<5; return ((h>>>0)%100000)/100000;
   }
 
-  // ----- OPP SNAPSHOT -----
-  const OPP = { active:false, name:'', x:0, y:0, facing:'down', hp:4.0, inv:{} };
+  // ----- OPPONENT SNAPSHOT/STATE -----
+  const OPP = { active:false, name:'', x:0, y:0, facing:'down', hp:4.0, inv:{}, appearance:null, _sprite:null };
 
-  // ----- RENDER: opponent sprite -----
-  function drawOpponent(api){
-    if(!OPP.active) return;
-    const ctx=document.getElementById('game').getContext('2d');
-    const scale = api.DRAW/api.TILE;
-    const sx = (OPP.x - api.camera.x) * scale;
-    const sy = (OPP.y - api.camera.y) * scale;
+  // try to render as a real character (preferred), otherwise fallback
+  function ensureOppSprite(api, snap){
+    if(OPP._sprite && OPP._sprite.__native) return OPP._sprite;
+    if(api.addRemotePlayer){
+      const rp = api.addRemotePlayer({ username: snap.username, appearance: snap.appearance||{} });
+      OPP._sprite = rp; OPP._sprite.__native = true;
+      return rp;
+    }
+    // fallback: canvas overlay (kept from v2.1 so you still see *something*)
+    if(!OPP._sprite){
+      OPP._sprite = { drawFallback:true };
+      IZZA.on?.('render-post', drawOpponentFallback);
+    }
+    return OPP._sprite;
+  }
+  function drawOpponentFallback(){
+    try{
+      if(!OPP.active || !OPP._sprite?.drawFallback) return;
+      const api=IZZA.api, ctx=document.getElementById('game').getContext('2d');
+      const scale = api.DRAW/api.TILE;
+      const sx = (OPP.x - api.camera.x) * scale;
+      const sy = (OPP.y - api.camera.y) * scale;
+      ctx.save(); ctx.imageSmoothingEnabled=false;
 
-    ctx.save(); ctx.imageSmoothingEnabled=false;
+      // body proxy
+      ctx.fillStyle='#4ad1ff';
+      ctx.fillRect(sx + api.DRAW*0.15, sy + api.DRAW*0.05, api.DRAW*0.70, api.DRAW*0.82);
 
-    // Body
-    ctx.fillStyle='#4ad1ff'; // teal/cyan-ish body for visibility
-    ctx.fillRect(sx + api.DRAW*0.15, sy + api.DRAW*0.05, api.DRAW*0.70, api.DRAW*0.82);
+      // name
+      ctx.fillStyle = 'rgba(8,12,20,.85)';
+      ctx.fillRect(sx + api.DRAW*0.02, sy - api.DRAW*0.28, api.DRAW*0.96, api.DRAW*0.22);
+      ctx.fillStyle = '#d9ecff'; ctx.font = (api.DRAW*0.20)+'px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(OPP.name||'Opponent', sx + api.DRAW*0.50, sy - api.DRAW*0.17, api.DRAW*0.92);
 
-    // Weapon hint
-    const inv = OPP.inv || {};
-    if(inv.uzi?.equipped){ ctx.fillStyle='#9ff'; ctx.fillRect(sx+api.DRAW*0.60, sy+api.DRAW*0.28, api.DRAW*0.22, api.DRAW*0.10); }
-    else if(inv.pistol?.equipped){ ctx.fillStyle='#cff'; ctx.fillRect(sx+api.DRAW*0.60, sy+api.DRAW*0.28, api.DRAW*0.18, api.DRAW*0.10); }
-    else if(inv.grenade?.equipped){ ctx.fillStyle='#e7f26a'; ctx.beginPath(); ctx.arc(sx+api.DRAW*0.70, sy+api.DRAW*0.34, api.DRAW*0.08, 0, Math.PI*2); ctx.fill(); }
-
-    // Name
-    ctx.fillStyle = 'rgba(8,12,20,.85)'; ctx.fillRect(sx + api.DRAW*0.02, sy - api.DRAW*0.28, api.DRAW*0.96, api.DRAW*0.22);
-    ctx.fillStyle = '#d9ecff'; ctx.font = (api.DRAW*0.20)+'px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(OPP.name||'Opponent', sx + api.DRAW*0.50, sy - api.DRAW*0.17, api.DRAW*0.92);
-
-    // HP bar (4 hearts)
-    const w = api.DRAW*0.92, hpPct=Math.max(0,Math.min(1, OPP.hp/4.0));
-    ctx.fillStyle='#2b394f'; ctx.fillRect(sx + api.DRAW*0.04, sy - api.DRAW*0.38, w, api.DRAW*0.07);
-    ctx.fillStyle='#8cf08a'; ctx.fillRect(sx + api.DRAW*0.04, sy - api.DRAW*0.38, w*hpPct, api.DRAW*0.07);
-
-    ctx.restore();
+      // hp bar
+      const w = api.DRAW*0.92, hpPct=Math.max(0,Math.min(1, OPP.hp/4.0));
+      ctx.fillStyle='#2b394f'; ctx.fillRect(sx + api.DRAW*0.04, sy - api.DRAW*0.38, w, api.DRAW*0.07);
+      ctx.fillStyle='#8cf08a'; ctx.fillRect(sx + api.DRAW*0.04, sy - api.DRAW*0.38, w*hpPct, api.DRAW*0.07);
+      ctx.restore();
+    }catch{}
   }
 
-  // ===== MINIMAP OPPONENT DOT =====
-  // We overlay a tiny absolutely-positioned dot inside your existing minimap container.
-  // We attempt common ids/classes; if none found, we create a small fixed mini overlay (failsafe).
-  const MINI = { host:null, oppDot:null, selfDot:null, lastHostId:'' };
-
+  // ===== MINIMAP RED DOT =====
+  const MINI = { host:null, oppDot:null };
   function findMiniHost(){
     if (MINI.host && document.body.contains(MINI.host)) return MINI.host;
-    const candidates = [
-      '#miniMap','#minimap','#mapMini','#hudMini','#mini','.minimap','[data-minimap]'
-    ];
-    for(const sel of candidates){
-      const el = document.querySelector(sel);
-      if(el){ MINI.host = el; break; }
-    }
+    const candidates=['#miniMap','#minimap','#mapMini','#hudMini','#mini','.minimap','[data-minimap]'];
+    for(const sel of candidates){ const el=document.querySelector(sel); if(el){ MINI.host=el; break; } }
     if(!MINI.host){
-      // failsafe: create a small fixed mini box (top-right)
       const box=document.createElement('div');
-      Object.assign(box.style,{
-        position:'fixed', right:'10px', top:'10px', width:'110px', height:'80px',
-        background:'rgba(10,14,22,.55)', border:'1px solid #2a3550', borderRadius:'8px',
-        zIndex:12
-      });
-      box.setAttribute('data-minimap','1');
-      document.body.appendChild(box);
-      MINI.host = box;
+      Object.assign(box.style,{position:'fixed', right:'10px', top:'10px', width:'110px', height:'80px',
+        background:'rgba(10,14,22,.55)', border:'1px solid #2a3550', borderRadius:'8px', zIndex:12});
+      box.setAttribute('data-minimap','1'); document.body.appendChild(box); MINI.host=box;
     }
     MINI.host.style.position = MINI.host.style.position || 'relative';
     return MINI.host;
   }
-
-  function ensureMiniDots(){
-    const host = findMiniHost();
-
+  function ensureMiniDot(){
+    const host=findMiniHost();
     if(!MINI.oppDot){
       const d=document.createElement('div');
-      Object.assign(d.style,{
-        position:'absolute', width:'6px', height:'6px', borderRadius:'50%',
-        background:'#ff4d4d', boxShadow:'0 0 4px rgba(255,70,70,.85)', pointerEvents:'none',
-        transform:'translate(-50%,-50%)'
-      });
-      d.title='Opponent';
+      Object.assign(d.style,{position:'absolute', width:'6px', height:'6px', borderRadius:'50%',
+        background:'#ff4d4d', boxShadow:'0 0 4px rgba(255,70,70,.85)', pointerEvents:'none', transform:'translate(-50%,-50%)'});
       host.appendChild(d); MINI.oppDot=d;
     }
-    // We don’t add selfDot unless you need it; your game already draws a blue self marker.
   }
-
-  function updateMiniDots(api){
+  function updateMiniDot(api){
     if(!OPP.active) return;
-    ensureMiniDots();
+    ensureMiniDot();
     const host = MINI.host; if(!host) return;
-
     const tier = localStorage.getItem('izzaMapTier') || '2';
     const un = unlockedRect(tier);
     const rect = host.getBoundingClientRect();
     const t = api.TILE;
 
-    // map world->grid
-    const meGX = Math.floor(api.player.x / t), meGY = Math.floor(api.player.y / t);
-    const opGX = Math.floor(OPP.x / t),       opGY = Math.floor(OPP.y / t);
-
+    const opGX = Math.floor(OPP.x / t), opGY = Math.floor(OPP.y / t);
     const clamp=(v,a,b)=> Math.max(a, Math.min(b, v));
-    const spanX = (un.x1 - un.x0) || 1;
-    const spanY = (un.y1 - un.y0) || 1;
+    const spanX = (un.x1 - un.x0) || 1, spanY = (un.y1 - un.y0) || 1;
+    const opNX = clamp((opGX - un.x0) / spanX, 0, 1), opNY = clamp((opGY - un.y0) / spanY, 0, 1);
 
-    // normalized [0..1] within unlocked bounds
-    const opNX = clamp((opGX - un.x0) / spanX, 0, 1);
-    const opNY = clamp((opGY - un.y0) / spanY, 0, 1);
-
-    // place dot; Y grows downward both in tiles and CSS so no flip is needed
-    const left = rect.width  * opNX;
-    const top  = rect.height * opNY;
-
-    MINI.oppDot.style.left = left + 'px';
-    MINI.oppDot.style.top  = top  + 'px';
+    MINI.oppDot.style.left = (rect.width  * opNX) + 'px';
+    MINI.oppDot.style.top  = (rect.height * opNY) + 'px';
     MINI.oppDot.style.display = 'block';
   }
-  // ===== /MINIMAP OPPONENT DOT =====
 
-  // ----- SYNC (no websockets) -----
-  let SYNC = { mid:null, timer:null, flip:false, pollMs:125 };
+  // ----- SYNC (REST alternating) -----
+  let SYNC = { mid:null, timer:null, flip:false, pollMs:125, sentAppearance:false };
 
   async function poke(){
     const api=IZZA.api; if(!api?.ready || !SYNC.mid) return;
+    const body = {
+      matchId: SYNC.mid,
+      x: api.player.x, y: api.player.y, facing: api.player.facing||'down',
+      hp: api.player.hp||4.0,
+      inv: safeInv()
+    };
+    // include my appearance once so opponent can render me
+    if(!SYNC.sentAppearance){
+      body.appearance = readAppearance();
+      SYNC.sentAppearance = true;
+    }
     try{
       await fetch(withTok(BASE+'/duel/poke'), {
         method:'POST', credentials:'include',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          matchId: SYNC.mid,
-          x: api.player.x, y: api.player.y, facing: api.player.facing||'down',
-          hp: api.player.hp||4.0,
-          inv: safeInv()
-        })
+        body: JSON.stringify(body)
       });
     }catch{}
   }
@@ -187,6 +180,10 @@
         OPP.facing = j.opponent.facing || 'down';
         OPP.hp     = (j.opponent.hp!=null? j.opponent.hp : OPP.hp);
         OPP.inv    = j.opponent.inv || {};
+        OPP.appearance = j.opponent.appearance || OPP.appearance;
+        // ensure real sprite if engine supports it
+        const spr = ensureOppSprite(IZZA.api, {username:OPP.name, appearance:OPP.appearance});
+        if(spr && spr.__native){ spr.x=OPP.x; spr.y=OPP.y; spr.facing=OPP.facing; }
       }
     }catch{}
   }
@@ -196,7 +193,7 @@
   }
   function stopSync(){ if(SYNC.timer){ clearInterval(SYNC.timer); SYNC.timer=null; } }
 
-  // ----- INVENTORY BRIDGE -----
+  // ----- INVENTORY / APPEARANCE -----
   function readInv(){
     try{
       if(IZZA?.api?.getInventory) return IZZA.api.getInventory() || {};
@@ -209,9 +206,20 @@
       pistol:  { equipped: !!inv?.pistol?.equipped,  ammo: inv?.pistol?.ammo|0 },
       uzi:     { equipped: !!inv?.uzi?.equipped,     ammo: inv?.uzi?.ammo|0 },
       grenade: { equipped: !!inv?.grenade?.equipped, count: inv?.grenade?.count|0 },
-      bat:     { equipped: !!inv?.bat?.equipped },
-      knucks:  { equipped: !!inv?.knucks?.equipped }
+      bat:     { equipped: !!inv?.bat?.equipped,     uses: inv?.bat?.uses|0 },
+      knucks:  { equipped: !!inv?.knucks?.equipped,  uses: inv?.knucks?.uses|0 }
     };
+  }
+  function readAppearance(){
+    try{
+      if(IZZA?.api?.getAppearance) return IZZA.api.getAppearance() || {};
+      // fallback fields; adjust to your character system if different
+      return {
+        skin: IZZA.api.user?.skin || 'ped_m',
+        hair: IZZA.api.user?.hair || 'short',
+        outfit: IZZA.api.user?.outfit || 'default'
+      };
+    }catch{ return {}; }
   }
   function equippedKind(){
     const inv=readInv();
@@ -223,7 +231,8 @@
     return 'hand';
   }
 
-  // ----- DAMAGE HOOKS -----
+  // ----- DAMAGE (client → server) -----
+  // Your guns/melee still run as usual; we just inform the server for PvP hearts.
   let uziHitTimer=null;
   async function applyHit(kind){
     if(!SYNC.mid) return;
@@ -279,7 +288,7 @@
 
       const api = apiArg || IZZA.api; if(!api?.ready) return;
 
-      // close any lobby/shield that could freeze controls
+      // ensure lobby isn’t freezing input
       try{ IZZA.emit?.('ui-modal-close',{id:'mpLobby'}); }catch{}
       try{ const m=document.getElementById('mpLobby'); if(m) m.style.display='none'; }catch{}
 
@@ -300,9 +309,13 @@
 
       OPP.active=true; OPP.name=oppName; OPP.x=oppSpawn.x; OPP.y=oppSpawn.y; OPP.facing=oppSpawn.facing||'up'; OPP.hp=4.0; OPP.inv={};
 
+      // if engine supports native remote players, instantiate now with placeholder appearance
+      ensureOppSprite(api, {username:OPP.name, appearance:OPP.appearance||{}});
+
       window.__IZZA_DUEL={active:true,mode,matchId,axisTB,leftTop:assign.leftTop,rightBottom:assign.rightBottom};
 
       SYNC.mid = String(matchId);
+      SYNC.sentAppearance = false; // send mine on first poke
       startSync();
       setTimeout(hookFire, 50);
 
@@ -329,8 +342,9 @@
     try{
       const api=IZZA.api;
       if(api?.ready){
-        drawOpponent(api);
-        updateMiniDots(api); // <<< keep the red dot in sync every frame
+        // if native remote sprite exists, keep it synced
+        if(OPP._sprite && OPP._sprite.__native){ OPP._sprite.x=OPP.x; OPP._sprite.y=OPP.y; OPP._sprite.facing=OPP.facing; }
+        updateMiniDot(api);
       }
     }catch{}
   });
