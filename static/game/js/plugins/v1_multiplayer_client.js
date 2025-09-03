@@ -1,13 +1,12 @@
 /**
- * IZZA Multiplayer Client — v1.6
- * - Strong hotkey guard (lets A/B/I type in lobby inputs, blocks game handlers)
- * - Hard input shield while lobby open (keys + hidden HUD buttons disabled)
- * - Friends/search/queue/invites via server
- * - WS optional & non-blocking
- * - Auto base: uses window.__MP_BASE__/__MP_WS__ or defaults to /izza-game/api/mp
+ * IZZA Multiplayer Client — v1.7
+ * - Search PLAYERS (not just friends) via /players/search (Pi-auth + created)
+ * - Add Friend when not friends; Invite when friends
+ * - Strong typing guard + hard shield (unchanged)
+ * - Works at /izza-game/api/mp
  */
 (function(){
-  const BUILD='v1.6-mp-client+strong-guard+shield';
+  const BUILD='v1.7-mp-client+players-search';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -18,7 +17,6 @@
     minChars: 2
   };
 
-  // ---------- state ----------
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
   let me=null, friends=[], lobby=null, ui={};
   let notifTimer=null;
@@ -26,7 +24,6 @@
   // shield state
   let lobbyOpen=false, shield=null, hudEls=[], hudCssPrev=[];
 
-  // ---------- utils ----------
   const $  = (s,r=document)=> r.querySelector(s);
   const $$ = (s,r=document)=> Array.from(r.querySelectorAll(s));
   const toast = (t)=> (window.IZZA && IZZA.emit) ? IZZA.emit('toast',{text:t}) : console.log('[TOAST]',t);
@@ -50,7 +47,7 @@
   // ---------- data ----------
   async function loadMe(){ me = await jget('/me'); return me; }
   async function loadFriends(){ const res = await jget('/friends/list'); friends = res.friends||[]; return friends; }
-  async function searchFriends(q){ const res = await jget('/friends/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
+  async function searchPlayers(q){ const res = await jget('/players/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
 
   // ---------- ranks ----------
   async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
@@ -60,7 +57,7 @@
     set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
-  // ---------- friends UI ----------
+  // ---------- friends / players UI ----------
   function makeRow(u){
     const row=document.createElement('div');
     row.className='friend';
@@ -70,20 +67,29 @@
         <div class="meta ${u.active?'active':'offline'}">${u.active?'Active':'Offline'}</div>
       </div>
       <div style="display:flex; gap:8px">
-        <button class="mp-small" data-invite="${u.username}">Invite</button>
-        ${u.active?`<button class="mp-small outline" data-join="${u.username}">Invite to Lobby</button>`:''}
+        ${u.friend
+          ? `<button class="mp-small" data-invite="${u.username}">Invite to Lobby</button>`
+          : `<button class="mp-small" data-request="${u.username}">Add Friend</button>`}
       </div>`;
     $('button[data-invite]',row)?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Invite sent to '+u.username); }catch(e){ toast('Invite failed: '+e.message); }
-    });
-    $('button[data-join]',row)?.addEventListener('click', async ()=>{
       try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Lobby invite sent to '+u.username); }catch(e){ toast('Invite failed: '+e.message); }
+    });
+    $('button[data-request]',row)?.addEventListener('click', async ()=>{
+      try{ await jpost('/friends/request',{username:u.username}); toast('Friend request sent to '+u.username); }
+      catch(e){ toast('Could not send request: '+e.message); }
     });
     return row;
   }
   function paintFriends(list){
     const host=$('#mpFriends',lobby); if(!host) return;
-    host.innerHTML=''; list.forEach(u=> host.appendChild(makeRow(u)));
+    host.innerHTML='';
+    if(!list.length){
+      const empty=document.createElement('div');
+      empty.className='meta'; empty.style.opacity='.85';
+      empty.textContent='No players yet. Search a Pi username above.';
+      host.appendChild(empty); return;
+    }
+    list.forEach(u=> host.appendChild(makeRow(u)));
   }
   function repaintFriends(){
     const q=$('#mpSearch',lobby)?.value?.trim().toLowerCase()||'';
@@ -127,31 +133,20 @@
     });
   }
 
-  // ---------- strong hotkey guard (typing in lobby inputs) ----------
-  function isLobbyEditor(el){
-    if(!el) return false;
-    const inLobby = !!(el.closest && el.closest('#mpLobby'));
-    return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
-  }
+  // ---------- strong hotkey guard (unchanged) ----------
+  function isLobbyEditor(el){ return !!(el && el.closest && el.closest('#mpLobby') && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable)); }
   function guardKeyEvent(e){
     if(!isLobbyEditor(e.target)) return;
     const k=(e.key||'').toLowerCase();
-    if(k==='i'||k==='b'||k==='a'){
-      // allow text entry but stop the game from seeing it
-      e.stopImmediatePropagation(); e.stopPropagation();
-    }
+    if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); }
   }
-  ['keydown','keypress','keyup'].forEach(type=>{
-    window.addEventListener(type, guardKeyEvent, {capture:true, passive:false});
-  });
+  ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
 
-  // ---------- hard input shield while lobby open ----------
+  // ---------- hard input shield while lobby open (unchanged) ----------
   function keyIsABI(e){ const k=(e.key||'').toLowerCase(); return k==='a'||k==='b'||k==='i'; }
   function swallow(e){ e.stopImmediatePropagation(); e.stopPropagation(); e.preventDefault?.(); }
-
   function installShield(){
     if(lobbyOpen) return; lobbyOpen=true;
-
     // disable HUD buttons + swallow
     hudEls=['#btnA','#btnB','#btnI'].map(id=>document.querySelector(id)).filter(Boolean);
     hudCssPrev = hudEls.map(el=>el.getAttribute('style')||'');
@@ -163,19 +158,14 @@
       el.addEventListener('pointerdown', swallowClick, true);
       el.__mp_swallow = swallowClick;
     });
-
-    // global ABI kill switch (for when focus leaves input but lobby still open)
     installShield._key = (ev)=>{ if(lobbyOpen && keyIsABI(ev)) swallow(ev); };
     ['keydown','keypress','keyup'].forEach(t=> window.addEventListener(t, installShield._key, {capture:true}));
-
-    // transparent overlay to grab stray taps
     shield=document.createElement('div');
     Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:1002, background:'transparent', touchAction:'none'});
     document.body.appendChild(shield);
   }
   function removeShield(){
     if(!lobbyOpen) return; lobbyOpen=false;
-
     if(installShield._key){
       ['keydown','keypress','keyup'].forEach(t=> window.removeEventListener(t, installShield._key, {capture:true}));
       installShield._key=null;
@@ -194,8 +184,6 @@
     if(shield && shield.parentNode) shield.parentNode.removeChild(shield);
     shield=null;
   }
-
-  // listen for lobby open/close from building plugin
   if(window.IZZA && IZZA.on){
     IZZA.on('ui-modal-open',  e=>{ if(e?.id==='mpLobby') installShield(); });
     IZZA.on('ui-modal-close', e=>{ if(e?.id==='mpLobby') removeShield(); });
@@ -227,10 +215,28 @@
     if(search){
       const run = debounced(async ()=>{
         const q = search.value.trim();
-        if(!q){ paintFriends(friends); return; }
+        if(q.length < CFG.minChars){ paintFriends(friends); return; }
         try{
-          const list = await searchFriends(q); // only Pi-auth + created users from server
-          paintFriends(list.map(u=>({username:u.username, active:!!u.active})));
+          // Server returns only players who finished auth + created character
+          const list = await searchPlayers(q);
+          if(list.length){
+            paintFriends(list.map(u=>({username:u.username, active:!!u.active, friend:!!u.friend})));
+          }else{
+            const hostEl = $('#mpFriends', lobby);
+            hostEl.innerHTML='';
+            const none=document.createElement('div');
+            none.className='meta'; none.style.opacity='.85';
+            none.textContent='Player not found — send a friend request?';
+            hostEl.appendChild(none);
+            // Offer an inline request button to the exact query
+            const row=document.createElement('div');
+            row.className='friend';
+            row.innerHTML = `
+              <div><div>${q}</div><div class="meta">Not found</div></div>
+              <button class="mp-small" data-request="${q}">Add Friend</button>`;
+            $('button[data-request]',row).addEventListener('click', ()=> jpost('/friends/request',{username:q}).then(()=>toast('Friend request sent to '+q)).catch(e=>toast('Could not send request: '+e.message)));
+            hostEl.appendChild(row);
+          }
         }catch{}
       }, CFG.searchDebounceMs);
       search.oninput = run;
@@ -241,7 +247,6 @@
     paintRanks(); paintFriends(friends);
   }
 
-  // observe visibility to mount once shown
   const obs = new MutationObserver(()=>{
     const h=document.getElementById('mpLobby'); if(!h) return;
     const visible = h.style.display && h.style.display!=='none';
@@ -258,13 +263,12 @@
       await loadMe(); await loadFriends(); refreshRanks();
       connectWS();
 
-      // poll notifications so invites show up
+      // lightweight notifications poll (same as before)
       const pull=async()=>{ try{ await jget('/notifications'); }catch{} };
       pull(); notifTimer=setInterval(pull, CFG.notifPollMs);
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
-
       console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
     }catch(e){
       console.error('MP client start failed', e);
