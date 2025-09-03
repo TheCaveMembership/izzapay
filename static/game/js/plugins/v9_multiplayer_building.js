@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.6.3 (iOS-safe + placeholder "Search players…")
+// Multiplayer Building & Lobby — v1.6.5 (adds Search button + status text)
 (function(){
-  const BUILD='v1.6.3-mp-building';
+  const BUILD='v1.6.5-mp-building';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -47,8 +47,14 @@
           <div style="font-weight:700">Friends</div>
           <button id="mpCopyLink" class="mp-small">Copy Invite Link</button>
         </div>
-        <input id="mpSearch" placeholder="Search players…" autocomplete="off" spellcheck="false" inputmode="text"
-               style="width:100%;margin-top:8px;padding:10px;border-radius:10px;background:#0c1422;border:1px solid #2a3550;color:#cfe0ff">
+
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <input id="mpSearch" placeholder="Search players…" autocomplete="off" spellcheck="false" inputmode="text"
+                 style="flex:1;padding:10px;border-radius:10px;background:#0c1422;border:1px solid #2a3550;color:#cfe0ff">
+          <button id="mpSearchBtn" class="mp-small" type="button">Search</button>
+        </div>
+        <div id="mpSearchStatus" style="margin-top:6px;opacity:.75;font-size:12px">Type a name and press Search or Return</div>
+
         <div id="mpFriends" style="margin-top:10px;display:flex;flex-direction:column;gap:10px"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:16px">
           <button id="mpClose" class="mp-small">Close</button>
@@ -72,7 +78,7 @@
     const btnClose = host.querySelector('#mpClose');
     if(btnClose) btnClose.addEventListener('click', hideModal, {passive:true});
 
-    // queue message (visual only)
+    // simple visual queue text
     host.querySelectorAll('.mp-btn').forEach(function(b){
       b.addEventListener('click', function(){
         var m=b.getAttribute('data-mode');
@@ -136,7 +142,6 @@
   function manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
   function inRange(){ const p=playerGrid(), s=buildingSpot(api); return manhattan(p.gx,p.gy,s.gx,s.gy)<=1; }
 
-  // ---- input ----
   function onB(e){
     if(localStorage.getItem(M3_KEY)!=='done') return;
     if(!inRange()) return;
@@ -144,7 +149,6 @@
     if(e){ e.preventDefault && e.preventDefault(); e.stopPropagation && e.stopPropagation(); e.stopImmediatePropagation && e.stopImmediatePropagation(); }
   }
 
-  // ---- hooks ----
   if(window.IZZA && IZZA.on){
     IZZA.on('ready', function(a){
       api=a;
