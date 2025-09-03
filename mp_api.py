@@ -1,10 +1,8 @@
-# mp_api.py — v2.3 (30-min presence + invites + notifications + simple v1 queue + duel REST sync + PvP damage + robot)
+# mp_api.py — v2.2 (duel handshake + state sync; presence + queue unchanged)
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
 from db import conn
 import time
-import math
-import random
 
 mp_bp = Blueprint("mp", __name__)
 
@@ -33,9 +31,16 @@ def _is_active(user_id: int) -> bool:
 _QUEUES: Dict[str, List[int]] = {"v1": []}   # mode -> user_id list
 _STARTS: Dict[int, Dict[str, Any]] = {}      # user_id -> start payload
 
+# In-memory duel room store (matchId -> room)
+# room = {
+#   "mode": "v1",
+#   "players": [uidA, uidB],
+#   "snapshots": { uid: {username, appearance, inventory} },
+#   "state": { uid: {x,y,facing,anim,attacking,hp,t} }
+# }
+_DUELS: Dict[str, Dict[str, Any]] = {}
+
 def _username_by_id(uid: int) -> Optional[str]:
-    if uid == -1:
-        return "robot"
     with conn() as cx:
         r = cx.execute("SELECT pi_username FROM users WHERE id=?", (uid,)).fetchone()
         return r["pi_username"] if r else None
@@ -43,7 +48,7 @@ def _username_by_id(uid: int) -> Optional[str]:
 def _make_start(mode: str, a: int, b: int) -> Dict[str, Any]:
     return {
         "mode": mode,
-        "matchId": int(time.time() * 1000),
+        "matchId": str(int(time.time() * 1000)),
         "players": [
             {"id": a, "username": _username_by_id(a)},
             {"id": b, "username": _username_by_id(b)},
@@ -58,7 +63,6 @@ def _try_match_v1():
         start = _make_start("v1", a, b)
         _STARTS[a] = start
         _STARTS[b] = start
-        _seed_duel_from_start(start)
 
 # ---------------- helpers ----------------
 def _bearer_from_req():
@@ -128,8 +132,6 @@ def _user_id_by_username(username: str):
     if not username:
         return None
     want = username.lstrip("@").lower()
-    if want in ("robot", "bot", "testbot"):
-        return -1  # special robot id
     with conn() as cx:
         r = cx.execute(
             "SELECT id FROM users WHERE LOWER(REPLACE(pi_username,'@',''))=?",
@@ -138,8 +140,6 @@ def _user_id_by_username(username: str):
         return int(r["id"]) if r else None
 
 def _is_friend(a: int, b: int) -> bool:
-    if a == -1 or b == -1:
-        return True  # allow robot without friendship
     with conn() as cx:
         r = cx.execute(
             """
@@ -153,79 +153,7 @@ def _is_friend(a: int, b: int) -> bool:
         ).fetchone()
         return bool(r)
 
-# ---------------- DUEL STATE (REST sync; no websockets) ----------------
-# Hearts model: 4.0 hearts total (so 0.25 = quarter)
-_DUELS: Dict[str, Dict[str, Any]] = {}  # matchId -> {mode, created, players:{uid:{x,y,facing,hp,hits_melee,inv,username,is_bot}}}
-
-_PVP_DAMAGE = {
-    "pistol": 0.25,
-    "uzi":    0.25,
-    "grenade":1.00,
-    # melee below handled with counters (every 2 hits)
-}
-
-def _seed_duel_from_start(start: Dict[str, Any]):
-    mid = str(start["matchId"])
-    players = {}
-    for p in start["players"]:
-        uid = int(p["id"])
-        players[uid] = {
-            "x": 0.0, "y": 0.0, "facing": "down",
-            "hp": 4.0,                   # 4 hearts
-            "hits_melee": 0,             # for 1/4 per 2 hits (hand)
-            "hits_bat":   0,             # 1/2 per 2 hits (bat)
-            "hits_knucks":0,             # 1/2 per 2 hits (knucks)
-            "inv": {},                   # equipped snapshot if client sends
-            "username": _username_by_id(uid),
-            "is_bot": (uid == -1)
-        }
-    _DUELS[mid] = {"mode": start["mode"], "created": time.time(), "players": players}
-
-def _duel_for_user(uid: int) -> Optional[Dict[str, Any]]:
-    # find duel for this user (linear scan is fine for test)
-    for mid, d in _DUELS.items():
-        if uid in d["players"]:
-            return d
-    return None
-
-# Robot simple brain (wanders + sometimes fires)
-def _tick_robot(mid: str):
-    d = _DUELS.get(mid)
-    if not d:
-        return
-    for uid, st in list(d["players"].items()):
-        if not st.get("is_bot"):
-            continue
-        # wander inside a safe box (Tier 2 default)
-        speed = 60.0  # px/sec
-        dt = 0.12
-        ang = random.random() * math.tau
-        st["x"] += math.cos(ang) * speed * dt
-        st["y"] += math.sin(ang) * speed * dt
-        st["facing"] = random.choice(["up","down","left","right"])
-        # 10% chance to "fire" a pistol -> apply damage if close enough (2 tiles)
-        others = [k for k in d["players"].keys() if k != uid]
-        if others and random.random() < 0.10:
-            tgt = d["players"][others[0]]
-            if (abs(tgt["x"] - st["x"])**2 + abs(tgt["y"] - st["y"])**2) ** 0.5 < 64.0:
-                tgt["hp"] = max(0.0, tgt["hp"] - _PVP_DAMAGE["pistol"])
-
-# ---------------- endpoints ----------------
-
-@mp_bp.get("/echo")
-def mp_echo():
-    who = _current_user_ids()
-    if who:
-        _mark_active(who[0])
-    return jsonify({
-        "ok": True,
-        "q": request.args.get("q"),
-        "session_user_id": session.get("user_id"),
-        "has_auth_header": bool(request.headers.get("Authorization")),
-        "authed": bool(who),
-        "who": {"id": who[0], "pi_uid": who[1], "username": who[2]} if who else None,
-    })
-
+# ---------------- endpoints already in your v2.0 (unchanged) ----------------
 @mp_bp.get("/me")
 def mp_me():
     _ensure_schema()
@@ -273,12 +201,14 @@ def mp_players_search():
     if not who:
         return jsonify({"error": "not_authenticated"}), 401
     my_id, _, _ = who
+
     raw_q = (request.args.get("q") or "").strip()
     if len(raw_q) < 2:
         return jsonify({"users": []})
+
     q = raw_q.lstrip("@").lower()
     like = f"%{q}%"
-    users = []
+
     with conn() as cx:
         rows = cx.execute(
             """
@@ -293,15 +223,13 @@ def mp_players_search():
             """,
             (like,),
         ).fetchall()
-    for r in rows:
-        users.append({
-            "username": r["username"],
-            "active": _is_active(int(r["uid"])),
-            "friend": _is_friend(my_id, int(r["uid"]))
-        })
-    # add robot to search if it matches
-    if "robot".startswith(q):
-        users.append({"username": "robot", "active": True, "friend": True})
+
+    users = [{
+        "username": r["username"],
+        "active": _is_active(int(r["uid"])),
+        "friend": _is_friend(my_id, int(r["uid"]))
+    } for r in rows]
+
     return jsonify({"users": users})
 
 @mp_bp.post("/lobby/invite")
@@ -314,20 +242,13 @@ def mp_lobby_invite():
     data = (request.get_json(silent=True) or {})
     to = (data.get("toUsername") or "").strip()
     to_id = _user_id_by_username(to)
-    if to_id is None:
+    if not to_id:
         return jsonify({"ok": False, "error": "player_not_found"}), 404
     if to_id == me:
         return jsonify({"ok": False, "error": "cannot_invite_self"}), 400
-    if to_id != -1 and not _is_friend(me, to_id):
-        # allow testing: not enforcing friendship strictly
-        pass
-    # insert or auto-accept for robot
-    if to_id == -1:
-        start = _make_start("v1", me, -1)
-        _STARTS[me] = start
-        _STARTS[-1] = start
-        _seed_duel_from_start(start)
-        return jsonify({"ok": True, "robot": True})
+    # allow testing regardless of friend link:
+    # if not _is_friend(me, to_id):
+    #     return jsonify({"ok": False, "error": "not_friends"}), 403
     with conn() as cx:
         cx.execute(
             "INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
@@ -354,7 +275,9 @@ def mp_lobby_accept():
     start = _make_start(inv["mode"] or "v1", int(inv["from_user"]), int(inv["to_user"]))
     _STARTS[int(inv["from_user"])] = start
     _STARTS[int(inv["to_user"])]   = start
-    _seed_duel_from_start(start)
+    # seed duel room
+    _DUELS[start["matchId"]] = {"mode": start["mode"], "players": [int(inv["from_user"]), int(inv["to_user"])],
+                                "snapshots": {}, "state": {}}
     return jsonify({"ok": True, "start": start})
 
 @mp_bp.post("/lobby/decline")
@@ -418,6 +341,8 @@ def mp_queue():
         _try_match_v1()
         start = _STARTS.pop(uid, None)
         if start:
+            _DUELS[start["matchId"]] = {"mode": start["mode"], "players": [start["players"][0]["id"], start["players"][1]["id"]],
+                                        "snapshots": {}, "state": {}}
             return jsonify({"ok": True, "start": start})
         return jsonify({"ok": True, "queued": True})
     return jsonify({"ok": True, "queued": True})
@@ -433,167 +358,63 @@ def mp_dequeue():
             _QUEUES[m].remove(uid)
     return jsonify({"ok": True})
 
-# ---------------- DUEL SYNC + DAMAGE (REST) ----------------
+# ---------------- NEW: Duel handshake/state ----------------
 
-@mp_bp.post("/duel/poke")
-def duel_poke():
+@mp_bp.post("/duel/handshake")
+def mp_duel_handshake():
+    """Client posts its snapshot; returns opponent snapshot when both present."""
     who = _current_user_ids()
     if not who:
-        return jsonify({"error": "not_authenticated"}), 401
+        return jsonify({"error":"not_authenticated"}), 401
     uid, _, uname = who
     data = (request.get_json(silent=True) or {})
     mid = str(data.get("matchId") or "")
-    if not mid or mid not in _DUELS:
-        return jsonify({"ok": False, "error": "no_match"}), 404
-    d = _DUELS[mid]
-    st = d["players"].get(uid)
-    if not st:
-        return jsonify({"ok": False, "error": "not_in_match"}), 400
+    snap = {
+        "username": uname,
+        "appearance": data.get("appearance") or {},
+        "inventory": data.get("inventory") or {},
+        "hp": int(data.get("hp") or 4)  # 4 hearts default
+    }
+    room = _DUELS.get(mid)
+    if not room or uid not in room.get("players", []):
+        return jsonify({"ok": False, "error": "no_room"}), 404
+    room["snapshots"][uid] = snap
+    # return when we have both
+    if len(room["snapshots"]) == 2:
+        a, b = room["players"]
+        return jsonify({"ok": True, "you": room["snapshots"][uid], "opponent":
+                        room["snapshots"][a if uid==b else b]})
+    return jsonify({"ok": True, "waiting": True})
 
-    st["x"] = float(data.get("x") or st["x"])
-    st["y"] = float(data.get("y") or st["y"])
-    st["facing"] = (data.get("facing") or st["facing"])[:8]
-    if "hp" in data:
-        # client may send local hp for UI sync; server treats server hp as truth, but clamp to server if lower
-        st["hp"] = max(0.0, min(4.0, float(st["hp"])))
-    inv = data.get("inv")
-    if isinstance(inv, dict):
-        st["inv"] = inv
-    st["username"] = uname
-
-    # bot AI tick if any bot present
-    for k, v in d["players"].items():
-        if v.get("is_bot"):
-            _tick_robot(mid)
-            break
-
-    return jsonify({"ok": True})
-
-@mp_bp.get("/duel/pull")
-def duel_pull():
+@mp_bp.post("/duel/state")
+def mp_duel_state():
+    """Bi-directional polling: post my state; get opponent state + snapshot if needed."""
     who = _current_user_ids()
     if not who:
-        return jsonify({"error": "not_authenticated"}), 401
-    uid, _, uname = who
-    mid = str(request.args.get("matchId") or "")
-    if not mid or mid not in _DUELS:
-        return jsonify({"ok": False, "error": "no_match"}), 404
-    d = _DUELS[mid]
-    me = d["players"].get(uid)
-    if not me:
-        return jsonify({"ok": False, "error": "not_in_match"}), 400
-    opp = None
-    for k, v in d["players"].items():
-        if k != uid:
-            opp = v
-            break
-    if not opp:
-        return jsonify({"ok": True, "done": True})
-
-    return jsonify({
-        "ok": True,
-        "me": {"hp": me["hp"]},
-        "opponent": {
-            "username": opp["username"],
-            "x": opp["x"], "y": opp["y"],
-            "facing": opp["facing"],
-            "hp": opp["hp"],
-            "inv": opp.get("inv", {})
-        }
-    })
-
-@mp_bp.post("/duel/hit")
-def duel_hit():
-    """
-    Apply damage to the opponent. Client calls when a local action should count
-    (pistol/uzi bullet connected, grenade explosion near target, or melee cadence).
-    """
-    who = _current_user_ids()
-    if not who:
-        return jsonify({"error": "not_authenticated"}), 401
+        return jsonify({"error":"not_authenticated"}), 401
     uid, _, _ = who
     data = (request.get_json(silent=True) or {})
     mid = str(data.get("matchId") or "")
-    kind = (data.get("kind") or "").lower()
-    if not mid or mid not in _DUELS:
-        return jsonify({"ok": False, "error": "no_match"}), 404
-    d = _DUELS[mid]
-    if uid not in d["players"]:
-        return jsonify({"ok": False, "error": "not_in_match"}), 400
+    room = _DUELS.get(mid)
+    if not room or uid not in room.get("players", []):
+        return jsonify({"ok": False, "error": "no_room"}), 404
 
-    # find opponent
-    opp_uid = None
-    for k in d["players"].keys():
-        if k != uid:
-            opp_uid = k
-            break
-    if opp_uid is None:
-        return jsonify({"ok": False})
-    opp = d["players"][opp_uid]
+    # store my state
+    st = {
+        "x": float(data.get("x") or 0.0),
+        "y": float(data.get("y") or 0.0),
+        "facing": data.get("facing") or "down",
+        "anim": data.get("anim") or "idle",
+        "attacking": bool(data.get("attacking") or False),
+        "hp": int(data.get("hp") or 1),
+        "t": time.time()
+    }
+    room["state"][uid] = st
 
-    dmg = 0.0
-    if kind in ("pistol", "uzi", "grenade"):
-        dmg = _PVP_DAMAGE[kind]
-    elif kind == "hand":
-        d["players"][uid]["hits_melee"] = (d["players"][uid]["hits_melee"] or 0) + 1
-        if d["players"][uid]["hits_melee"] % 2 == 0:
-            dmg = 0.25
-    elif kind == "bat":
-        d["players"][uid]["hits_bat"] = (d["players"][uid]["hits_bat"] or 0) + 1
-        if d["players"][uid]["hits_bat"] % 2 == 0:
-            dmg = 0.50
-    elif kind == "knucks":
-        d["players"][uid]["hits_knucks"] = (d["players"][uid]["hits_knucks"] or 0) + 1
-        if d["players"][uid]["hits_knucks"] % 2 == 0:
-            dmg = 0.50
+    # fetch opponent state + snapshot if available
+    a, b = room["players"]
+    opp_id = a if uid == b else b
+    opp_state = room["state"].get(opp_id)
+    opp_snap  = room["snapshots"].get(opp_id)
 
-    if dmg > 0:
-        opp["hp"] = max(0.0, opp["hp"] - dmg)
-
-    return jsonify({"ok": True, "hp": opp["hp"]})
-
-# ---- OPTIONAL DEBUG ----
-@mp_bp.get("/debug/status")
-def mp_debug_status():
-    who = _current_user_ids()
-    if not who:
-        return jsonify({"authed": False}), 401
-    uid, pi_uid, uname = who
-    _mark_active(uid)
-    with conn() as cx:
-        has_profile = bool(cx.execute(
-            "SELECT 1 FROM game_profiles WHERE pi_uid=? LIMIT 1", (pi_uid,)
-        ).fetchone())
-        total_users = cx.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
-    return jsonify({
-        "authed": True,
-        "user": {"id": uid, "username": uname, "pi_uid": pi_uid, "has_profile": has_profile, "active": True},
-        "total_users": total_users
-    })
-
-@mp_bp.get("/debug/search")
-def mp_debug_search():
-    q = (request.args.get("q") or "").strip()
-    norm = q.lstrip("@").lower()
-    like = f"%{norm}%"
-    with conn() as cx:
-        rows = cx.execute(
-            """
-            SELECT u.id AS uid,
-                   u.pi_username AS username,
-                   (SELECT 1 FROM game_profiles gp WHERE gp.pi_uid=u.pi_uid LIMIT 1) AS has_profile
-            FROM users u
-            WHERE LOWER(REPLACE(u.pi_username,'@','')) LIKE ?
-            ORDER BY u.pi_username COLLATE NOCASE
-            LIMIT 20
-            """,
-            (like,),
-        ).fetchall()
-    return jsonify({
-        "q": q, "norm": norm,
-        "results": [{
-            "username": r["username"],
-            "has_profile": bool(r["has_profile"]),
-            "active": _is_active(int(r["uid"]))
-        } for r in rows]
-    })
+    return jsonify({"ok": True, "opponentState": opp_state, "opponent": opp_snap})
