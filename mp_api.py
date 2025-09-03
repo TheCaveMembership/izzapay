@@ -1,8 +1,8 @@
-# mp_api.py — v1.8 (robust player search + debug helpers)
-
+# mp_api.py — v1.9.1 (presence 30min TTL + active flags in search/friends)
 from typing import Optional, Tuple
 from flask import Blueprint, jsonify, request, session
 from db import conn
+import time
 
 mp_bp = Blueprint("mp", __name__)
 
@@ -15,7 +15,19 @@ def _import_main_verifier():
         return None
 VERIFY_TOKEN = _import_main_verifier()
 
-# ------------- helpers -------------
+# ---------------- presence (in-memory) ----------------
+_PRESENCE = {}          # user_id -> last_seen_epoch_seconds
+_PRESENCE_TTL = 1800.0  # 30 minutes in seconds
+
+def _mark_active(user_id: int):
+    if user_id:
+        _PRESENCE[int(user_id)] = time.time()
+
+def _is_active(user_id: int) -> bool:
+    ts = _PRESENCE.get(int(user_id))
+    return bool(ts and (time.time() - ts) < _PRESENCE_TTL)
+
+# ---------------- helpers ----------------
 def _bearer_from_req():
     t = request.args.get("t") or request.form.get("t")
     if t:
@@ -104,12 +116,14 @@ def _is_friend(a: int, b: int) -> bool:
         ).fetchone()
         return bool(r)
 
-# ------------- endpoints -------------
+# ---------------- endpoints ----------------
 
 @mp_bp.get("/echo")
 def mp_echo():
     """Tiny debug: shows whether cookie or ?t= produced a user."""
     who = _current_user_ids()
+    if who:
+        _mark_active(who[0])  # touching echo counts as presence
     return jsonify({
         "ok": True,
         "q": request.args.get("q"),
@@ -125,8 +139,9 @@ def mp_me():
     who = _current_user_ids()
     if not who:
         return jsonify({"error": "not_authenticated"}), 401
-    _, _, name = who
-    return jsonify({"username": name, "inviteLink": "/izza-game/auth"})
+    uid, _, name = who
+    _mark_active(uid)  # mark present when client boots MP
+    return jsonify({"username": name, "active": True, "inviteLink": "/izza-game/auth"})
 
 @mp_bp.get("/friends/list")
 def mp_friends_list():
@@ -138,7 +153,9 @@ def mp_friends_list():
     with conn() as cx:
         rows = cx.execute(
             """
-            SELECT DISTINCT u.pi_username AS username
+            SELECT DISTINCT
+                   CASE WHEN fr.from_user=? THEN fr.to_user ELSE fr.from_user END AS fid,
+                   u.pi_username AS username
             FROM mp_friend_requests fr
             JOIN users u ON u.id = CASE
                                      WHEN fr.from_user=? THEN fr.to_user
@@ -148,13 +165,14 @@ def mp_friends_list():
               AND (fr.from_user=? OR fr.to_user=?)
             ORDER BY u.pi_username COLLATE NOCASE
             """,
-            (uid, uid, uid),
+            (uid, uid, uid, uid),
         ).fetchall()
     return jsonify({"friends": [
-        {"username": r["username"], "active": False, "friend": True} for r in rows
+        {"username": r["username"], "active": _is_active(int(r["fid"])), "friend": True}
+        for r in rows
     ]})
 
-# --- NEW: robust players search (case-insensitive, strips '@', requires profile) ---
+# --- players search (case-insensitive, strips '@', requires profile) ---
 @mp_bp.get("/players/search")
 @mp_bp.get("/friends/search")  # alias
 def mp_players_search():
@@ -168,15 +186,15 @@ def mp_players_search():
     if len(raw_q) < 2:
         return jsonify({"users": []})
 
-    # normalize: remove leading '@' and lower
     q = raw_q.lstrip("@").lower()
     like = f"%{q}%"
 
     with conn() as cx:
         rows = cx.execute(
             """
-            SELECT DISTINCT u.id   AS uid,
-                            u.pi_username AS username
+            SELECT DISTINCT
+                   u.id           AS uid,
+                   u.pi_username  AS username
             FROM users u
             JOIN game_profiles gp ON gp.pi_uid = u.pi_uid
             WHERE LOWER(REPLACE(u.pi_username,'@','')) LIKE ?
@@ -188,7 +206,7 @@ def mp_players_search():
 
     users = [{
         "username": r["username"],
-        "active": False,
+        "active": _is_active(int(r["uid"])),
         "friend": _is_friend(my_id, int(r["uid"]))
     } for r in rows]
 
@@ -217,13 +235,14 @@ def mp_lobby_invite():
         )
     return jsonify({"ok": True})
 
-# ---- OPTIONAL DEBUG (safe to keep during testing) ----
+# ---- OPTIONAL DEBUG ----
 @mp_bp.get("/debug/status")
 def mp_debug_status():
     who = _current_user_ids()
     if not who:
         return jsonify({"authed": False}), 401
     uid, pi_uid, uname = who
+    _mark_active(uid)
     with conn() as cx:
         has_profile = bool(cx.execute(
             "SELECT 1 FROM game_profiles WHERE pi_uid=? LIMIT 1", (pi_uid,)
@@ -231,7 +250,13 @@ def mp_debug_status():
         total_users = cx.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
     return jsonify({
         "authed": True,
-        "user": {"id": uid, "username": uname, "pi_uid": pi_uid, "has_profile": has_profile},
+        "user": {
+            "id": uid,
+            "username": uname,
+            "pi_uid": pi_uid,
+            "has_profile": has_profile,
+            "active": True
+        },
         "total_users": total_users
     })
 
@@ -244,7 +269,8 @@ def mp_debug_search():
     with conn() as cx:
         rows = cx.execute(
             """
-            SELECT u.pi_username AS username,
+            SELECT u.id AS uid,
+                   u.pi_username AS username,
                    (SELECT 1 FROM game_profiles gp WHERE gp.pi_uid=u.pi_uid LIMIT 1) AS has_profile
             FROM users u
             WHERE LOWER(REPLACE(u.pi_username,'@','')) LIKE ?
@@ -255,5 +281,9 @@ def mp_debug_search():
         ).fetchall()
     return jsonify({
         "q": q, "norm": norm,
-        "results": [{"username": r["username"], "has_profile": bool(r["has_profile"])} for r in rows]
+        "results": [{
+            "username": r["username"],
+            "has_profile": bool(r["has_profile"]),
+            "active": _is_active(int(r["uid"]))
+        } for r in rows]
     })
