@@ -1,11 +1,11 @@
 /**
- * IZZA Multiplayer Client — v1.7
- * - ALWAYS sends token `t` (Authorization: Bearer + ?t=) on every request
- * - Gentle PI re-auth gate appears inside lobby if auth is missing/expired
- * - Keeps your existing typing/shield behavior intact
+ * IZZA Multiplayer Client — v1.6.4
+ * - Search fires on iOS "Return/Done", paste, and autocorrect
+ * - Uses /players/search (case/at-insensitive, profile-verified)
+ * - Keeps all typing guard & shield logic
  */
 (function(){
-  const BUILD='v1.7-mp-client+always-bearer+t+reauth';
+  const BUILD='v1.6.4-mp-client+reliable-search';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -24,60 +24,32 @@
   const $  = (s,r=document)=> r.querySelector(s);
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
-  // ---------- auth helpers ----------
-  function authHeaders() {
-    const h = {};
-    if (window.__IZZA_T__) {
-      h['Authorization'] = 'Bearer ' + window.__IZZA_T__;
-    }
-    return h;
-  }
-  function withTokenQuery(p) {
-    if (!window.__IZZA_T__) return p;
-    const hasQ = p.includes('?');
-    return p + (hasQ ? '&' : '?') + 't=' + encodeURIComponent(window.__IZZA_T__);
-  }
-
-  // ---------- fetch wrappers (ALWAYS include cookie + bearer + ?t=) ----------
   async function jget(p){
-    const r = await fetch(CFG.base + withTokenQuery(p), {
-      credentials: 'include',
-      headers: authHeaders()
-    });
-    if (!r.ok) {
-      if (r.status === 401) showReauthBanner();
+    const r = await fetch(CFG.base+p, {credentials:'include'});
+    if(!r.ok){
+      if(r.status===401) toast('Sign-in expired. Reopen Auth and try again.');
       throw new Error(`${r.status} ${r.statusText}`);
     }
     return r.json();
   }
-  async function jpost(p, body){
-    const r = await fetch(CFG.base + withTokenQuery(p), {
-      method: 'POST',
-      credentials: 'include',
-      headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-      body: JSON.stringify(body || {})
-    });
-    if (!r.ok) {
-      if (r.status === 401) showReauthBanner();
-      throw new Error(`${r.status} ${r.statusText}`);
-    }
+  async function jpost(p,b){
+    const r = await fetch(CFG.base+p,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json();
   }
+  const debounced=(fn,ms)=>{ let t=null,a=null; return (...args)=>{a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms);}};
 
-  // ---------- data ----------
   async function loadMe(){ me = await jget('/me'); return me; }
   async function loadFriends(){ const res=await jget('/friends/list'); friends=res.friends||[]; return friends; }
   async function searchPlayers(q){ const res=await jget('/players/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
-  async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
 
-  // ---------- ranks UI ----------
+  async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
   function paintRanks(){
     if(!lobby || !me || !me.ranks) return;
     const set=(id,key)=>{ const el=$(id,lobby); if(!el) return; const r=me.ranks[key]||{w:0,l:0}; const sp=el.querySelector('span'); if(sp) sp.textContent=`${r.w}W / ${r.l}L`; };
     set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
-  // ---------- friend rows ----------
   function makeRow(u){
     const row=document.createElement('div');
     row.className='friend';
@@ -102,7 +74,6 @@
   function repaintFriends(){ const q=$('#mpSearch',lobby)?.value?.trim().toLowerCase()||''; const filtered = q ? friends.filter(x=>x.username.toLowerCase().includes(q)) : friends; paintFriends(filtered); }
   function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
 
-  // ---------- queue ----------
   async function enqueue(mode){
     try{
       lastQueueMode=mode;
@@ -113,7 +84,7 @@
   }
   async function dequeue(){ try{ await jpost('/dequeue'); }catch{} if(ui.queueMsg) ui.queueMsg.textContent=''; lastQueueMode=null; }
 
-  // ---------- WS (unchanged) ----------
+  // --- WS ---
   function connectWS(){
     try{
       const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
@@ -135,7 +106,7 @@
     });
   }
 
-  // ---------- typing guard + shield (unchanged) ----------
+  // --- typing guard + shield (from v1.6.2) ---
   function isLobbyEditor(el){ if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   function guardKeyEvent(e){ if(!isLobbyEditor(e.target)) return; const k=(e.key||'').toLowerCase(); if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); } }
   ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
@@ -144,6 +115,8 @@
 
   function installShield(){
     if(lobbyOpen) return; lobbyOpen=true;
+
+    // disable HUD buttons + swallow
     hudEls=['#btnA','#btnB','#btnI'].map(id=>document.querySelector(id)).filter(Boolean);
     hudCssPrev = hudEls.map(el=>el.getAttribute('style')||'');
     hudEls.forEach(el=>{
@@ -154,11 +127,17 @@
       el.addEventListener('pointerdown', swallowClick, true);
       el.__mp_swallow = swallowClick;
     });
+
+    // global ABI kill switch
     installShield._key = (ev)=>{ if(lobbyOpen && keyIsABI(ev)) swallow(ev); };
     ['keydown','keypress','keyup'].forEach(t=> window.addEventListener(t, installShield._key, {capture:true}));
+
+    // transparent overlay to grab stray taps
     shield=document.createElement('div');
     Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:1002, background:'transparent', touchAction:'none'});
     document.body.appendChild(shield);
+
+    // safety: if modal somehow not visible, auto-remove after a moment
     setTimeout(function(){
       const node=document.getElementById('mpLobby');
       const visible = !!(node && node.style.display && node.style.display!=='none');
@@ -182,66 +161,23 @@
     if(shield && shield.parentNode) shield.parentNode.removeChild(shield);
     shield=null;
   }
-
+  function tryShieldOnce(){
+    const node=document.getElementById('mpLobby');
+    const visible = !!(node && node.style.display && node.style.display!=='none');
+    if(visible) installShield();
+  }
   if(window.IZZA && IZZA.on){
     IZZA.on('ui-modal-open',  function(e){
       if(e && e.id==='mpLobby'){
-        tryShieldOnce(); requestAnimationFrame(tryShieldOnce); setTimeout(tryShieldOnce,80);
+        tryShieldOnce();
+        requestAnimationFrame(tryShieldOnce);
+        setTimeout(tryShieldOnce, 80);
       }
     });
     IZZA.on('ui-modal-close', function(e){ if(e && e.id==='mpLobby') removeShield(); });
     IZZA.on('mp-start',       function(){ removeShield(); });
   }
-  function tryShieldOnce(){ const node=document.getElementById('mpLobby'); const v=!!(node&&node.style.display&&node.style.display!=='none'); if(v) installShield(); }
 
-  // ---------- in-lobby re-auth banner (Pi Browser friendly) ----------
-  function ensureBannerHost(){
-    if(!lobby) return null;
-    let host = lobby.querySelector('#mpAuthBanner');
-    if(host) return host;
-    const card = lobby.querySelector('#mpCard') || lobby;
-    host = document.createElement('div');
-    host.id = 'mpAuthBanner';
-    host.style.cssText = 'margin:8px 0 12px; padding:10px; border:1px solid #394769; border-radius:10px; background:#101827; color:#cfe0ff; display:none;';
-    host.innerHTML = `
-      <div style="font-weight:700; margin-bottom:6px">Multiplayer needs a quick verify</div>
-      <div style="opacity:.85; font-size:13px; margin-bottom:8px">Tap verify to refresh your Pi session, then try search/invites again.</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap">
-        <button id="mpDoVerify" class="mp-small">Verify with Pi</button>
-        <a id="mpOpenAuth" class="mp-small" href="/izza-game/auth" style="text-decoration:none; display:inline-block; line-height:1.1">Open Auth</a>
-      </div>`;
-    card.insertBefore(host, card.firstChild);
-    const btn=host.querySelector('#mpDoVerify');
-    if(btn) btn.addEventListener('click', doPiReauth);
-    return host;
-  }
-  function showReauthBanner(){
-    const host = ensureBannerHost(); if(!host) return;
-    host.style.display = 'block';
-  }
-  async function doPiReauth(){
-    try{
-      if(!window.Pi || !Pi.init) { toast('Open Auth page from banner if Pi SDK not ready.'); return; }
-      try { Pi.init({ version: "2.0", sandbox: !!window.__PI_SANDBOX__ }); } catch(_) {}
-
-      const scopes = ['username'];
-      const auth = await Pi.authenticate(scopes, function onIncompletePaymentFound(){} );
-      // submit to backend to refresh cookie + mint new t that redirects back to /izza-game/play
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = '/auth/exchange';
-      const payload = document.createElement('input');
-      payload.type='hidden'; payload.name='payload';
-      payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user, next: '/izza-game/play' });
-      form.appendChild(payload);
-      document.body.appendChild(form);
-      form.submit();
-    }catch(e){
-      toast('Verify failed: ' + (e?.message || e));
-    }
-  }
-
-  // ---------- lobby wiring ----------
   function mountLobby(host){
     lobby = host || document.getElementById('mpLobby');
     if(!lobby) return;
@@ -262,9 +198,10 @@
       }
     });
 
+    // --------- FIXED: reliable search on iOS ---------
     const search = lobby.querySelector('#mpSearch');
     if(search){
-      const run = debounce(async ()=>{
+      const perform = async () => {
         const q=(search.value||'').trim();
         if(!q){ paintFriends(friends); return; }
         try{
@@ -273,6 +210,7 @@
           if(!list.length){
             const host = lobby.querySelector('#mpFriends');
             if(host){
+              host.innerHTML='';
               const none=document.createElement('div');
               none.className='friend';
               none.innerHTML=`
@@ -290,7 +228,6 @@
             }
           }
         }catch(err){
-          showReauthBanner();
           const host = lobby.querySelector('#mpFriends');
           if(host){
             host.innerHTML='';
@@ -300,8 +237,24 @@
             host.appendChild(row);
           }
         }
-      }, CFG.searchDebounceMs);
-      search.oninput = run;
+      };
+
+      const run = debounced(perform, CFG.searchDebounceMs);
+
+      // Fire on all events iOS actually emits
+      search.addEventListener('input',  run);  // typing
+      search.addEventListener('change', run);  // autocorrect / suggestion commit
+      search.addEventListener('paste',  run);  // paste
+
+      // Immediate search on iOS "Done/Return"
+      search.addEventListener('keydown', (e)=>{
+        if((e.key||'').toLowerCase()==='enter'){
+          e.preventDefault();
+          perform(); // no debounce
+        }
+      });
+
+      // typing guard flags (unchanged)
       search.addEventListener('focus', ()=>{ window.__IZZA_TYPING_IN_LOBBY = true; });
       search.addEventListener('blur',  ()=>{ window.__IZZA_TYPING_IN_LOBBY = false; });
     }
@@ -309,23 +262,22 @@
     paintRanks(); paintFriends(friends);
   }
 
-  // small util: debounce
-  function debounce(fn,ms){ let t=null,a=null; return (...args)=>{a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
-
   // observe visibility to mount once shown
-  const obs = new MutationObserver(()=>{ const h=document.getElementById('mpLobby'); if(!h) return; const v=h.style.display && h.style.display!=='none'; if(v) mountLobby(h); });
+  const obs = new MutationObserver(function(){
+    const h=document.getElementById('mpLobby'); if(!h) return;
+    const visible = h.style.display && h.style.display!=='none';
+    if(visible) mountLobby(h);
+  });
   (function bootObserver(){
     const root=document.body||document.documentElement;
     if(root) obs.observe(root,{subtree:true, attributes:true, childList:true, attributeFilter:['style']});
   })();
 
-  // ---------- boot ----------
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
       connectWS();
 
-      // pull notifications (invites)
       const pull=async()=>{ try{ await jget('/notifications'); }catch{} };
       pull(); notifTimer=setInterval(pull, CFG.notifPollMs);
 
@@ -335,7 +287,6 @@
       console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
     }catch(e){
       console.error('MP client start failed', e);
-      showReauthBanner();
       toast('Multiplayer unavailable: '+e.message);
     }
   }
