@@ -256,3 +256,18 @@ from mp_api import mp_bp  # REST-only blueprint
 
 # Public paths become /izza-game/api/mp/*
 app.register_blueprint(mp_bp, url_prefix="/api/mp")
+
+# ---- DEBUG: route list so we can confirm mounting in Pi Browser ----
+@app.get("/debug/routes")
+def debug_routes():
+    try:
+        rules = []
+        for r in app.url_map.iter_rules():
+            rules.append({
+                "rule": str(r),
+                "endpoint": r.endpoint,
+                "methods": sorted([m for m in r.methods if m not in ("HEAD","OPTIONS")])
+            })
+        return {"ok": True, "count": len(rules), "routes": rules}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
