@@ -14,6 +14,11 @@
     searchDebounceMs: 250,
   };
 
+  // --- NEW: pass short-lived token on all API calls (minimal change) ---
+  const TOK = (window.__IZZA_T__ || '').toString();
+  const withTok = (p) => TOK ? p + (p.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK) : p;
+  // ---------------------------------------------------------------------
+
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
   let me=null, friends=[], lobby=null, ui={};
   let notifTimer=null;
@@ -23,7 +28,7 @@
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
   async function jget(p){
-    const r = await fetch(CFG.base+p, {credentials:'include'});
+    const r = await fetch(withTok(CFG.base+p), {credentials:'include'});   // token added
     if(!r.ok){
       if(r.status===401) toast('Sign-in expired. Reopen Auth and try again.');
       throw new Error(`${r.status} ${r.statusText}`);
@@ -31,7 +36,11 @@
     return r.json();
   }
   async function jpost(p,b){
-    const r = await fetch(CFG.base+p,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+    const r = await fetch(withTok(CFG.base+p), {                           // token added
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(b||{})
+    });
     if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json();
   }
