@@ -122,8 +122,9 @@
     </div>
   </div>
 
-  <!-- Pass profile to JS -->
+  <!-- Pass profile + the short-lived auth token to JS -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
+  <script>window.__IZZA_T__ = {{ (t or '""')|safe }};</script>
 
   <!-- Multiplayer base paths for game_app (mounted at /izza-game) -->
   <script>
