@@ -1,70 +1,99 @@
-// PvP Duel bootstrap — v1.0
-// Spawns players at randomized opposite edges on mp-start
+<script>
+// PvP Duel bootstrap — v1.1 (distinct + safe spawns)
 (function(){
-  const BUILD='v1.0-pvp-duel-opposite-edges';
+  const BUILD='v1.1-pvp-duel-opposite-edges-safe';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- helpers ----
+  const normName = (s)=> (s||'').toString().trim().replace(/^@+/,'').toLowerCase();
+
   function randFromHash(str, salt){
-    // simple deterministic 0..1 based on string + salt
     let h = 2166136261 >>> 0;
     const s = (str + '|' + (salt||'')).toString();
     for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-    // xorshift
     h ^= h << 13; h ^= h >>> 17; h ^= h << 5;
     return ((h>>>0) % 100000) / 100000;
   }
 
   function unlockedRect(tier){
-    // Mirror your other plugins; Tier 2 duel happens here by default
+    // same regions you already use; duel prefers tier 2 when available
     return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 }
                         : { x0:18, y0:18, x1:72, y1:42 };
   }
 
   function chooseAxis(matchId){
-    // 50/50: false => Left/Right, true => Top/Bottom
+    // 50/50 Top/Bottom vs Left/Right, deterministic per match
     return randFromHash(matchId,'axis') >= 0.5;
   }
 
   function sideAssignment(matchId, players){
-    // players: [{username}, ...] — we only care about first two for v1
-    // Randomize which username gets which side each match (but deterministic per matchId)
-    const a = players[0].username;
-    const b = players[1].username;
-    // lexicographic order baseline, then flip by hash
-    const sorted = [a,b].sort();
-    const flip = randFromHash(matchId,'flip') >= 0.5; // flip about half the time
+    // Normalize names so both clients make the same decision
+    const a = normName(players[0]?.username);
+    const b = normName(players[1]?.username);
+    const sorted = [a,b].sort();             // baseline order
+    const flip = randFromHash(matchId,'flip') >= 0.5;
     const leftTop = flip ? sorted[1] : sorted[0];
     const rightBottom = flip ? sorted[0] : sorted[1];
     return { leftTop, rightBottom };
+  }
+
+  // Best-effort walkability check (works if engine exposes one; otherwise returns true)
+  function isWalkable(api, gx, gy){
+    // Try a few possible hooks the core might expose; fall back to true.
+    try{
+      if (api.isWalkable) return !!api.isWalkable(gx,gy);
+      if (api.map?.isWalkable) return !!api.map.isWalkable(gx,gy);
+      if (api.map?.walkable) return !!api.map.walkable(gx,gy);
+      if (api.tileIsFree) return !!api.tileIsFree(gx,gy);
+    }catch(e){}
+    return true;
+  }
+
+  // Find a safe tile by nudging inward if needed
+  function findSafeTile(api, gx, gy, stepX, stepY, maxSteps){
+    let x=gx, y=gy;
+    for(let i=0;i<=maxSteps;i++){
+      if (isWalkable(api, x, y)) return {gx:x, gy:y};
+      x += stepX; y += stepY;
+    }
+    return {gx:gx, gy:gy}; // fallback
   }
 
   function edgeSpawn(api, tier, axisTopBottom, isLeftOrTop, matchId){
     const un = unlockedRect(tier);
     const t  = api.TILE;
 
-    // random offset along the edge, leaving a small margin
-    const margin = 2;
+    // Larger margins to avoid water/impassables near borders
+    const marginOuter = 8;            // keep off edges/water
+    const marginInner = 6;            // where the search will end up at worst
+
     if(axisTopBottom){
-      // Top/Bottom edges: x varies, y fixed
-      const minX = un.x0 + margin, maxX = un.x1 - margin;
-      const span = maxX - minX;
+      // Top/Bottom edges: x varies, y fixed close to edge but inside safe margin
+      const minX = un.x0 + marginOuter, maxX = un.x1 - marginOuter;
+      const span = Math.max(1, maxX - minX);
       const r    = randFromHash(matchId, (isLeftOrTop?'top':'bottom') + '|off');
-      const gx   = Math.floor(minX + r*span);
-      const gy   = isLeftOrTop ? un.y0 + margin : un.y1 - margin;
-      return { x: gx*t, y: gy*t, facing: isLeftOrTop ? 'down' : 'up' };
+      const gx0  = Math.floor(minX + r*span);
+      const gy0  = isLeftOrTop ? (un.y0 + marginOuter) : (un.y1 - marginOuter);
+
+      // Nudge inward (down from top, up from bottom) until walkable
+      const stepY = isLeftOrTop ? +1 : -1;
+      const safe  = findSafeTile(api, gx0, gy0, 0, stepY, marginOuter - marginInner);
+      return { x: safe.gx*t, y: safe.gy*t, facing: isLeftOrTop ? 'down' : 'up' };
     }else{
-      // Left/Right edges: y varies, x fixed
-      const minY = un.y0 + margin, maxY = un.y1 - margin;
-      const span = maxY - minY;
+      // Left/Right edges: y varies, x fixed close to edge but inside safe margin
+      const minY = un.y0 + marginOuter, maxY = un.y1 - marginOuter;
+      const span = Math.max(1, maxY - minY);
       const r    = randFromHash(matchId, (isLeftOrTop?'left':'right') + '|off');
-      const gy   = Math.floor(minY + r*span);
-      const gx   = isLeftOrTop ? un.x0 + margin : un.x1 - margin;
-      return { x: gx*t, y: gy*t, facing: isLeftOrTop ? 'right' : 'left' };
+      const gy0  = Math.floor(minY + r*span);
+      const gx0  = isLeftOrTop ? (un.x0 + marginOuter) : (un.x1 - marginOuter);
+
+      // Nudge inward (right from left, left from right) until walkable
+      const stepX = isLeftOrTop ? +1 : -1;
+      const safe  = findSafeTile(api, gx0, gy0, stepX, 0, marginOuter - marginInner);
+      return { x: safe.gx*t, y: safe.gy*t, facing: isLeftOrTop ? 'right' : 'left' };
     }
   }
 
-  // ---- countdown HUD ----
   function showCountdown(n=3){
     let host = document.getElementById('pvpCountdown');
     if(!host){
@@ -104,16 +133,14 @@
     try{
       const api = IZZA.api;
       if(!api?.ready || !players || players.length<2) return;
+      if(mode!=='v1') return; // this plugin only handles 1v1 spawns
 
-      // Only handle 1v1 (v1) here. Other modes can reuse this approach.
-      if(mode!=='v1'){ return; }
-
-      const tier = localStorage.getItem('izzaMapTier') || '2';
-      const axisTB = chooseAxis(matchId); // true = top/bottom, false = left/right
+      const tier = (localStorage.getItem('izzaMapTier') || '2');
+      const axisTB = chooseAxis(matchId);          // true = top/bottom, false = left/right
       const assign = sideAssignment(matchId, players);
-      const meU = api.user?.username || 'player';
+      const meU = normName(api.user?.username);
 
-      // Decide which side this client gets
+      // Decide sides deterministically; opposite edges guaranteed
       const amLeftOrTop = (meU === assign.leftTop);
       const spawn = edgeSpawn(api, tier, axisTB, amLeftOrTop, matchId);
 
@@ -122,25 +149,24 @@
       api.player.y = spawn.y;
       api.player.facing = spawn.facing || 'down';
 
-      // Optional: reset wanted level for a clean duel start
+      // Tidy start
       api.setWanted?.(0);
+      IZZA.emit?.('toast',{text:`1v1 vs ${(players.find(p=>normName(p.username)!==meU)||{}).username || 'opponent'}`});
 
-      // Flag a simple “duel active” state (if other plugins want to check)
-      window.__IZZA_DUEL = { active:true, mode, matchId, axisTB, leftTop:assign.leftTop, rightBottom:assign.rightBottom };
+      // Optional: center camera in case two clients spawned far apart
+      if (api.camera) {
+        api.camera.x = Math.max(0, api.player.x - api.DRAW/2);
+        api.camera.y = Math.max(0, api.player.y - api.DRAW/2);
+      }
 
-      // Small countdown overlay
       showCountdown(3);
-
-      // Friendly note
-      IZZA.emit?.('toast',{text:`1v1 vs ${players.find(p=>p.username!==meU)?.username || 'opponent'} — good luck!`});
+      window.__IZZA_DUEL = { active:true, mode, matchId, axisTB,
+        leftTop:assign.leftTop, rightBottom:assign.rightBottom };
     }catch(e){
       console.warn('[PvP duel] failed to start', e);
     }
   });
 
-  // Optional: if you later need to clear duel state on your own event
-  IZZA.on?.('mp-end', ()=>{
-    window.__IZZA_DUEL = { active:false };
-  });
-
+  IZZA.on?.('mp-end', ()=>{ window.__IZZA_DUEL = { active:false }; });
 })();
+</script>
