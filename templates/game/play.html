@@ -45,6 +45,9 @@
     .shop-note{ opacity:.8; font-size:12px; margin-top:6px }
     #invPanel{ max-width:1100px; margin:8px auto 0; display:none; }
   </style>
+
+  <!-- Pi SDK (for in-lobby re-auth if needed) -->
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body class="cw-blue theme-a">
   <div class="wrap">
@@ -125,6 +128,8 @@
   <!-- Pass profile + the short-lived auth token to JS -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
   <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
+  <!-- Optional: sandbox flag for re-auth flow; defaults to false if not present -->
+  <script>window.__PI_SANDBOX__ = {{ (sandbox|tojson) if sandbox is defined else 'false' }};</script>
 
   <!-- Multiplayer base paths for game_app (mounted at /izza-game) -->
   <script>
@@ -146,7 +151,7 @@
   <script src="/static/game/js/plugins/v1_free_drive_plugin.js"></script>
   <script src="/static/game/js/plugins/guns.js?v=1.4"></script>
 
-  <!-- Multiplayer (unchanged load order) -->
+  <!-- Multiplayer -->
   <script defer src="/static/game/js/plugins/v9_multiplayer_building.js"></script>
   <script defer src="/static/game/js/plugins/v1_multiplayer_client.js"></script>
   <script src="/static/game/js/plugins/v1_pvp_duel.js"></script>
