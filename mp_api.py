@@ -1,4 +1,4 @@
-# mp_api.py — v1.7
+# mp_api.py — v1.8
 # Minimal multiplayer REST on top of your existing Pi-authenticated session.
 # A "player" == user with a row in game_profiles (finished character creation).
 
@@ -171,7 +171,7 @@ def mp_friends_list():
     )
 
 @mp_bp.get("/friends/search")
-@mp_bp.get("/players/search")  # alias; UI copies call either path
+@mp_bp.get("/players/search")  # alias; UI may call either
 def mp_players_search():
     """
     Players search = users that ALSO exist in game_profiles.
@@ -181,7 +181,9 @@ def mp_players_search():
     if not who:
         return jsonify({"error": "not_authenticated"}), 401
     my_id, _, _ = who
-    q = (request.args.get("q") or "").trim()
+
+    # FIX: Python uses .strip(), not .trim()
+    q = (request.args.get("q") or "").strip()
     if len(q) < 2:
         return jsonify({"users": []})
 
@@ -387,3 +389,9 @@ def mp_dequeue():
     if not _current_user_ids():
         return jsonify({"error": "not_authenticated"}), 401
     return jsonify({"ok": True})
+
+# ---------- compatibility stubs so game_app.py can still import these ----------
+sock = None
+def mp_boot(app, mount_prefix="/izza-game"):
+    """No-op: WS optional. Keeping this for backward compatibility."""
+    return
