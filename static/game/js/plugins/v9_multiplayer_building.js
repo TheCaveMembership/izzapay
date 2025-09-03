@@ -1,6 +1,6 @@
-// Multiplayer Building & Lobby — v1.6 (hide HUD + modal focus)
-(function () {
-  const BUILD='v1.6-mp-building';
+// Multiplayer Building & Lobby — v1.6 (input-shield hooks + higher modal z-index)
+(function(){
+  const BUILD='v1.6-mp-building+input-shield-hooks';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -39,12 +39,12 @@
     Object.assign(host.style,{
       position:'fixed', inset:'0', display:'none',
       alignItems:'center', justifyContent:'center',
-      background:'rgba(0,0,0,.35)', zIndex:20
+      background:'rgba(0,0,0,.35)', zIndex:1003  // above client shield (1002)
     });
 
     host.innerHTML = `
       <div id="mpCard" style="background:#0f1625;border:1px solid #2a3550;border-radius:14px;
-                  width:min(92vw,640px); padding:16px; color:#cfe0ff; max-height:86vh; overflow:auto">
+                  width:min(92vw,640px); padding:16px; color:#cfe0ff; max-height:86vh; overflow:auto; position:relative; z-index:1004">
         <div style="font-size:18px; font-weight:700; margin-bottom:8px">Play Modes</div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
           <button class="mp-btn" data-mode="br10">Battle Royale (10)</button>
@@ -93,10 +93,10 @@
     `;
     document.head.appendChild(style);
 
-    host.addEventListener('click', (e)=>{ if(e.target===host) hideModal(); });
+    host.addEventListener('click', (e)=>{ if(e.target===host) { hideModal(); } });
     host.querySelector('#mpClose').addEventListener('click', ()=> hideModal());
 
-    // Temporary local UI; real queue handled by mp client
+    // temporary visual queue msg (actual queue handled by client)
     host.querySelectorAll('.mp-btn').forEach(b=>{
       b.onclick=()=>{
         const mode=b.getAttribute('data-mode');
@@ -118,23 +118,21 @@
   function showModal(){
     const host=ensureModal();
     host.style.display='flex'; open=true;
-    // focus search to keep keys from hitting the game
-    setTimeout(()=> host.querySelector('#mpSearch')?.focus(), 0);
-    // broadcast so client can hide HUD
+    // Tell the client to install the hard input shield
     window.IZZA?.emit?.('ui-modal-open', { id:'mpLobby' });
   }
   function hideModal(){
     const host=document.getElementById('mpLobby');
     if(host){ host.style.display='none'; }
     open=false;
-    try{ document.activeElement?.blur?.(); }catch{}
-    // broadcast so client can restore HUD
+    // Remove the shield so HUD and keys work again
     window.IZZA?.emit?.('ui-modal-close', { id:'mpLobby' });
   }
 
-  // ---- draw ----
+  // ---- draw building ----
   function w2sX(api,wx){ return (wx - api.camera.x) * (api.DRAW/api.TILE); }
   function w2sY(api,wy){ return (wy - api.camera.y) * (api.DRAW/api.TILE); }
+
   function drawBuilding(){
     if(!api?.ready) return;
     if(localStorage.getItem(M3_KEY)!=='done') return;
@@ -144,37 +142,35 @@
     const sx=w2sX(api, spot.gx*t), sy=w2sY(api, spot.gy*t);
 
     ctx.save();
+    // wider to the west
     ctx.fillStyle='#18243b';
     ctx.fillRect(sx - S*0.9, sy - S*0.95, S*2.1, S*1.25);
 
+    // door
     const doorX = sx + S*0.10, doorY = sy - S*0.02;
     ctx.fillStyle = near ? 'rgba(60,200,110,0.9)' : 'rgba(60,140,255,0.9)';
     ctx.fillRect(doorX, doorY, S*0.22, S*0.14);
 
+    // label
     ctx.fillStyle='#b7d0ff';
     ctx.font = '12px monospace';
     ctx.fillText('MULTIPLAYER', sx - S*0.55, sy - S*0.70);
     ctx.restore();
   }
+
   function playerGrid(){
     const t=api.TILE;
     return { gx: ((api.player.x+t/2)/t|0), gy: ((api.player.y+t/2)/t|0) };
   }
-  const manhattan=(ax,ay,bx,by)=> Math.abs(ax-bx)+Math.abs(ay-by);
+  function manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
   function inRange(){
     const {gx,gy}=playerGrid(); const s=buildingSpot(api);
     return manhattan(gx,gy, s.gx, s.gy) <= 1;
   }
 
   // ---- input ----
-  function isTypingTarget(t){
-    if(!t) return false;
-    if(t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable) return true;
-    return !!t.closest?.('#mpLobby');
-  }
   function onB(e){
     if(localStorage.getItem(M3_KEY)!=='done') return;
-    if(isTypingTarget(e?.target)) return;
     if(!inRange()) return;
     showModal();
     e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
@@ -183,9 +179,8 @@
   // ---- hooks ----
   IZZA.on('ready', (a)=>{
     api=a;
-    // IMPORTANT: passive:false so preventDefault works
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:false});
-    const btnB=document.getElementById('btnB'); btnB && btnB.addEventListener('click', onB, true);
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {capture:true, passive:true});
+    document.getElementById('btnB')?.addEventListener('click', onB, true);
   });
 
   IZZA.on('update-post', ()=>{
