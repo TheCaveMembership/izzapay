@@ -1,11 +1,11 @@
 /**
- * IZZA Multiplayer Client — v1.6.6
- * - Always forwards short-lived auth token (?t= + Bearer header)
- * - Search button + Return + input/change/paste
- * - Clear status line; no sticky "2+ chars" freeze
+ * IZZA Multiplayer Client — v1.6.5
+ * - Reliable search: Search button + Return + input/change/paste
+ * - Live status line shows "Searching…", counts, or errors
+ * - Still uses /players/search (case/at-insensitive, profile-verified)
  */
 (function(){
-  const BUILD='v1.6.6-mp-client+force-token';
+  const BUILD='v1.6.5-mp-client+reliable-search-button';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -22,33 +22,16 @@
   const $  = (s,r=document)=> r.querySelector(s);
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
-  // --- AUTH HELPERS: always attach t + Bearer ---
-  function withT(path){
-    try{
-      const t = (window.__IZZA_T__||'').trim();
-      if(!t) return path;
-      const hasQ = path.includes('?');
-      const hasT = /(?:\?|&)t=/.test(path);
-      return hasT ? path : (path + (hasQ ? '&' : '?') + 't=' + encodeURIComponent(t));
-    }catch{ return path; }
-  }
-  function authFetch(path, opts){
-    const t = (window.__IZZA_T__||'').trim();
-    const headers = Object.assign({}, (opts&&opts.headers)||{});
-    if(t && !headers['Authorization']) headers['Authorization'] = 'Bearer '+t;
-    return fetch(withT(path), Object.assign({credentials:'include', headers}, opts||{}));
-  }
-
   async function jget(p){
-    const r = await authFetch(CFG.base+p, {method:'GET'});
+    const r = await fetch(CFG.base+p, {credentials:'include'});
     if(!r.ok){
-      if(r.status===401) toast('Sign-in expired or not attached. Use Auth ▶ Refresh.');
+      if(r.status===401) toast('Sign-in expired. Reopen Auth and try again.');
       throw new Error(`${r.status} ${r.statusText}`);
     }
     return r.json();
   }
   async function jpost(p,b){
-    const r = await authFetch(CFG.base+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+    const r = await fetch(CFG.base+p,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
     if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json();
   }
@@ -102,7 +85,7 @@
   // --- WS (unchanged) ---
   function connectWS(){
     try{
-      const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+withT(CFG.ws);
+      const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
       ws=new WebSocket(url);
     }catch(e){ console.warn('WS failed', e); return; }
     ws.addEventListener('open', ()=>{ wsReady=true; });
@@ -131,7 +114,7 @@
   function installShield(){
     if(lobbyOpen) return; lobbyOpen=true;
 
-    // disable HUD buttons while lobby open
+    // disable HUD buttons + swallow
     hudEls=['#btnA','#btnB','#btnI'].map(id=>document.querySelector(id)).filter(Boolean);
     hudCssPrev = hudEls.map(el=>el.getAttribute('style')||'');
     hudEls.forEach(el=>{
@@ -146,6 +129,7 @@
     installShield._key = (ev)=>{ if(lobbyOpen && keyIsABI(ev)) swallow(ev); };
     ['keydown','keypress','keyup'].forEach(t=> window.addEventListener(t, installShield._key, {capture:true}));
 
+    // transparent overlay
     shield=document.createElement('div');
     Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:1002, background:'transparent', touchAction:'none'});
     document.body.appendChild(shield);
@@ -184,6 +168,8 @@
         tryShieldOnce();
         requestAnimationFrame(tryShieldOnce);
         setTimeout(tryShieldOnce, 80);
+
+        // focus into search for instant typing on mobile
         setTimeout(()=> { $('#mpSearch')?.focus(); }, 120);
       }
     });
@@ -233,6 +219,25 @@
         if(ui.searchStatus){
           ui.searchStatus.textContent = list.length ? `Found ${list.length} result${list.length===1?'':'s'}` : 'No players found';
         }
+        if(!list.length){
+          const host = lobby.querySelector('#mpFriends');
+          if(host){
+            const none=document.createElement('div');
+            none.className='friend';
+            none.innerHTML=`
+              <div>
+                <div>${q}</div>
+                <div class="meta">Player not found — Invite user to join IZZA GAME</div>
+              </div>
+              <button class="mp-small">Copy Invite</button>`;
+            none.querySelector('button')?.addEventListener('click', async ()=>{
+              const link = location.origin + '/izza-game/auth?src=invite&from=' + encodeURIComponent(me?.username||'player');
+              try{ await navigator.clipboard.writeText(link); toast('Invite link copied'); }
+              catch{ prompt('Copy link:', link); }
+            });
+            host.appendChild(none);
+          }
+        }
       }catch(err){
         if(ui.searchStatus) ui.searchStatus.textContent=`Search failed: ${err.message}`;
       }
@@ -244,6 +249,7 @@
     ui.search?.addEventListener('change', debouncedSearch);
     ui.search?.addEventListener('paste',  debouncedSearch);
 
+    // Return / Done -> immediate
     ui.search?.addEventListener('keydown', (e)=>{
       if((e.key||'').toLowerCase()==='enter'){
         e.preventDefault();
@@ -251,6 +257,7 @@
       }
     });
 
+    // Tap Search button -> immediate
     ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
     paintRanks(); paintFriends(friends);
@@ -269,6 +276,8 @@
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
+
+      // lightweight notifications polling (no-op server ok)
       const pull=async()=>{ try{ await jget('/notifications'); }catch{} };
       pull(); notifTimer=setInterval(pull, 5000);
 
