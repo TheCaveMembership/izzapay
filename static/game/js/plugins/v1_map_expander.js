@@ -15,8 +15,8 @@
     lot:'#474747',
     hospital:'#b94a48',
     doorBlue:'#5aa0ff',
-    doorGreen:'#35d27a'
-    bankGold:'#d6b34a',
+    doorGreen:'#35d27a',
+    bankGold:'#d6b34a'
   };
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
