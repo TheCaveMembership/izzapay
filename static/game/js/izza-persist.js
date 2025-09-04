@@ -3,74 +3,14 @@
   const LOG_PREFIX = '[izza-persist]';
   function log(...a){ try{ console.log(LOG_PREFIX, ...a); }catch{} }
 
-  // ---------- Username resolution (no core edits required) ----------
-  // Strategy:
-  // 1) window.__IZZA_PROFILE__.username (if your server injected it anywhere)
-  // 2) previously cached username in localStorage
-  // 3) call your existing endpoint /izza-game/api/mp/me (cookie or t= query)
-  // 4) fallback to "guest" but keep retrying in the background
-  const LS_USER_KEY = 'izzaLastUsername';
-  let _username = null;
-  let _usernameReady = null;
+  // Toggle: set to false if you ever want to disable restoring position
+  const RESTORE_POSITION = true;
 
-  function cacheUsername(u){
-    try { localStorage.setItem(LS_USER_KEY, u); } catch {}
-    _username = u;
-    log('username =', u);
-    return u;
+  function uname(){
+    return (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase();
   }
-
-  async function fetchUsernameFromMe(){
-    // Try both with and without the short-lived token if present in the URL
-    const url = new URL(location.href);
-    const t   = url.searchParams.get('t');
-    const me  = t ? `/izza-game/api/mp/me?t=${encodeURIComponent(t)}` : `/izza-game/api/mp/me`;
-    try{
-      const r = await fetch(me, { credentials:'include' });
-      if(!r.ok) throw new Error('status '+r.status);
-      const j = await r.json();
-      if(j && (j.username || j.user?.username)){
-        return (j.username || j.user.username).toString().replace(/^@+/,'').toLowerCase();
-      }
-    }catch(e){
-      log('me() failed', e);
-    }
-    return null;
-  }
-
-  function resolveUsername(){
-    if(_usernameReady) return _usernameReady;
-
-    _usernameReady = (async ()=>{
-      // 1) inline profile (if your server put it on the page)
-      const inline = (window.__IZZA_PROFILE__?.username || window.__IZZA_PROFILE__?.user?.username);
-      if(inline) return cacheUsername(String(inline).replace(/^@+/,'').toLowerCase());
-
-      // 2) cached from a previous visit
-      try{
-        const cached = localStorage.getItem(LS_USER_KEY);
-        if(cached) return cacheUsername(cached);
-      }catch{}
-
-      // 3) ask backend
-      const fromMe = await fetchUsernameFromMe();
-      if(fromMe) return cacheUsername(fromMe);
-
-      // 4) fallback + background retry
-      cacheUsername('guest');
-      setTimeout(async ()=>{
-        const late = await fetchUsernameFromMe();
-        if(late && late !== 'guest') cacheUsername(late);
-      }, 2500);
-      return 'guest';
-    })();
-
-    return _usernameReady;
-  }
-
   function bankKeyFor(u){ return 'izzaBank_'+u; }
 
-  // ---------- Hearts helpers ----------
   function heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
   function getHeartSegs(){
     const p=IZZA.api?.player||{};
@@ -80,9 +20,8 @@
     return isNaN(raw) ? max : Math.max(0, Math.min(max, raw|0));
   }
 
-  // ---------- Load / save ----------
   async function loadPlayerState(){
-    const u = await resolveUsername();
+    const u = uname();
     const url = `${API_BASE}/api/state/${encodeURIComponent(u)}`;
     log('GET', url);
     let s={};
@@ -119,6 +58,16 @@
       log('applied heartsSegs', s.player.heartsSegs|0);
     }
 
+    // NEW: restore position (pixels) if present
+    if(RESTORE_POSITION && typeof s.player?.x === 'number' && typeof s.player?.y === 'number'){
+      const p = IZZA.api?.player;
+      if(p){
+        p.x = s.player.x|0;
+        p.y = s.player.y|0;
+        log('applied position', p.x, p.y);
+      }
+    }
+
     // re-apply once next tick to win races with any “new game” initializer
     setTimeout(()=>{
       try{
@@ -128,12 +77,21 @@
           localStorage.setItem('izzaCurHeartSegments', String(s.player.heartsSegs|0));
           if(typeof window._redrawHeartsHud === 'function') window._redrawHeartsHud();
         }
+        // re-apply position again after init race
+        if(RESTORE_POSITION && typeof s.player?.x === 'number' && typeof s.player?.y === 'number'){
+          const p = IZZA.api?.player;
+          if(p){
+            p.x = s.player.x|0;
+            p.y = s.player.y|0;
+          }
+        }
         log('re-applied state after init race');
       }catch(e){ log('re-apply failed', e); }
     }, 0);
   }
 
-  function collectPlayerState(u){
+  function collectPlayerState(){
+    const u = uname();
     const k = bankKeyFor(u);
     let bank = { coins:0, items:{}, ammo:{} };
     try{ bank = JSON.parse(localStorage.getItem(k) || '{"coins":0,"items":{},"ammo":{}}'); }catch{}
@@ -153,9 +111,9 @@
 
   let _saveTimer=null, _debounce=null;
   async function savePlayerState(reason='periodic'){
-    const u = _username || await resolveUsername();
+    const u = uname();
     const url = `${API_BASE}/api/state/${encodeURIComponent(u)}`;
-    const body = collectPlayerState(u);
+    const body = collectPlayerState();
     try{
       const r = await fetch(url, {
         method: 'POST',
@@ -179,31 +137,28 @@
     if(_saveTimer) clearInterval(_saveTimer);
     _saveTimer = setInterval(()=> savePlayerState('interval'), 5000); // every 5s
 
-    // iOS-friendly lifecycle — use fetch keepalive (not sendBeacon) to keep JSON Content-Type
+    // iOS-friendly lifecycle — use fetch keepalive
     window.addEventListener('pagehide', ()=> savePlayerState('pagehide'), { capture:true });
     document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') savePlayerState('visibility-hidden'); }, { capture:true });
     window.addEventListener('beforeunload', ()=> savePlayerState('beforeunload'), { capture:true });
   }
 
-  // ---------- Bank watcher ----------
   function installBankWatcher(){
-    resolveUsername().then(u=>{
-      const k = bankKeyFor(u);
-      let last = null;
-      try{ last = localStorage.getItem(k); }catch{}
-      setInterval(()=>{
-        let cur=null;
-        try{ cur = localStorage.getItem(k); }catch{}
-        if(cur!==last){
-          last = cur;
-          debouncedSave('bank-ls-changed');
-          log('bank localStorage changed → save');
-        }
-      }, 400); // snappier detection
-    });
+    const u = uname();
+    const k = bankKeyFor(u);
+    let last = null;
+    try{ last = localStorage.getItem(k); }catch{}
+    setInterval(()=>{
+      let cur=null;
+      try{ cur = localStorage.getItem(k); }catch{}
+      if(cur!==last){
+        last = cur;
+        debouncedSave('bank-ls-changed');
+        log('bank localStorage changed → save');
+      }
+    }, 1500);
   }
 
-  // ---------- Auto-save hooks ----------
   function installAutoSaveHooks(){
     if(!IZZA?.api) return;
     try{
@@ -220,24 +175,18 @@
         api.__persist_wrapped_setInventory = true;
       }
 
-      // If bank UI dispatches this, we’ll save immediately too
       window.addEventListener('izza-bank-changed', ()=> debouncedSave('bank-changed'));
     }catch(e){ log('install hooks failed', e); }
   }
 
-  // Manual trigger for console tests
   window.izzaPersistSave = ()=> savePlayerState('manual');
 
-  // ---------- Boot ----------
+  // Boot
   log('API_BASE =', API_BASE || '(same origin)');
-  // Pre-resolve username ASAP (don’t block on ready for background cache)
-  resolveUsername();
-
   IZZA.on('ready', async ()=>{
     try{
-      await resolveUsername();          // make sure we have the real user before hitting disk
-      await loadPlayerState();          // pull state
-      await savePlayerState('onload');  // write once so file exists
+      await loadPlayerState();          // pull state (now restores x/y)
+      await savePlayerState('onload');  // write once so file exists / touches mtime
       installAutoSaveHooks();           // wrap setters
       installBankWatcher();             // watch localStorage for bank changes
       scheduleAutoSave();               // periodic + lifecycle
