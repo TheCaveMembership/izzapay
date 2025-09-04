@@ -1,14 +1,15 @@
-// PvP Duel Client — v4.6
-// - REAL opponent sprite via remote_players_api.js (unchanged)
-// - Spawn logic: per-round, far-apart, deterministic by (matchId, round, sorted usernames)
-// - Red-dot minimap (unchanged)
-// - Hearts HUD bridge (unchanged; updates localStorage segs)
-// - Reliable hits: hitscan + melee range
-// - Mobile melee: hook btnA
-// - Tracers + impact sparks, and NOW pistol tracers STOP on hit (no follow-through)
-// - Match flow: round banners centered, Bo3, bounce to lobby at end
+// PvP Duel Client — v5.2
+// - Opponent sprite via remote_players_api.js (unchanged)
+// - Far-apart spawns: TWO DISTINCT spots per round (never stacked)
+//   * Role A/B is resolved by /mp/me against payload.players (case/@"@" insensitive)
+//   * Round 1 and every round: different pair, deterministic by (matchId, round, sorted usernames)
+// - Countdown: fires ONCE after identity + scene ready
+// - Hearts HUD bridge (unchanged)
+// - Reliable hits: hitscan + melee; pistol tracer NEVER passes through (clamped to impact & no follow-up)
+// - Uzi continuous tracers always clamp to latest impact point (no overshoot)
+// - Mirror cops (visual only), tracers & sparks effects
 (function(){
-  const BUILD='v4.6-duel-client';
+  const BUILD='v5.2-duel-client';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -20,14 +21,8 @@
   async function $get(p){ try{ const r=await fetch(withTok(BASE+p),{credentials:'include'}); return r.ok? r.json():null; }catch{ return null; } }
 
   // ---------- RNG helpers ----------
-  function hash32(str){
-    let h=2166136261>>>0;
-    for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); }
-    h^=h<<13; h^=h>>>17; h^=h<<5;
-    return (h>>>0);
-  }
+  function hash32(str){ let h=2166136261>>>0; const s=String(str); for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} h^=h<<13; h^=h>>>17; h^=h<<5; return (h>>>0); }
   function hash01(str){ return (hash32(String(str)) % 100000) / 100000; }
-  function choice(arr, seed){ if(!arr.length) return null; const i = Math.floor(hash01(seed)*arr.length); return arr[i]; }
 
   // ---------- map helpers (match core) ----------
   function unlockedRect(tier){ return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 } : { x0:18, y0:18, x1:72, y1:42 }; }
@@ -41,13 +36,8 @@
     const sidewalkTopY = hRoadY - 1, sidewalkBotY = hRoadY + 1;
     const leftX  = vRoadX - 1, rightX = vRoadX + 1;
 
-    // four bands: top/bottom rows, left/right cols — sample several evenly spaced points
-    function linspace(a,b,n){
-      const out=[]; const span=(b-a)/(n-1);
-      for(let i=0;i<n;i++) out.push(Math.round(a+i*span));
-      return out;
-    }
-    const nPts = 10; // enough variation
+    function linspace(a,b,n){ const out=[]; const span=(b-a)/(n-1); for(let i=0;i<n;i++) out.push(Math.round(a+i*span)); return out; }
+    const nPts = 10;
     const gxTop = linspace(un.x0+3, un.x1-3, nPts);
     const gxBot = linspace(un.x0+3, un.x1-3, nPts);
     const gyL   = linspace(un.y0+3, un.y1-3, nPts);
@@ -58,38 +48,35 @@
     gxBot.forEach(gx=> cand.push({ x: gx*t, y: sidewalkBotY*t, facing:'up'   , band:'bot',  key:`B${gx}` }));
     gyL.forEach(gy => cand.push({ x: leftX*t,  y: gy*t,        facing:'right', band:'left', key:`L${gy}` }));
     gyR.forEach(gy => cand.push({ x: rightX*t, y: gy*t,        facing:'left' , band:'right',key:`R${gy}` }));
-    return { cand, un };
+    return cand;
   }
 
   // Pick two far-apart candidates deterministically by (matchId, round, sorted usernames)
-  function computeRoundSpawns(api, matchId, roundNum, usernames){
-    const sorted = [...usernames].map(norm).sort(); // [A,B]
-    const seedBase = `${matchId}|r${roundNum}|${sorted[0]}|${sorted[1]}`;
-
-    const {cand, un} = buildSpawnCandidates(api);
-
-    // pick first index anywhere
+  function computeRoundSpawns(api, matchId, roundNum, sortedUsernames){
+    const cand = buildSpawnCandidates(api);
+    // seed
+    const seedBase = `${matchId}|r${roundNum}|${sortedUsernames[0]}|${sortedUsernames[1]}`;
+    // choose first anywhere (deterministic)
     const idx1 = Math.floor(hash01(seedBase+'|p1') * cand.length);
     const s1 = cand[idx1];
-
-    // pick second index that maximizes Manhattan distance in grid space (greedy deterministic)
-    let best = s1, bestD=-1, bestIdx=idx1;
+    // choose second = farthest by Manhattan distance (deterministic greedy)
+    let best=s1, bestIdx=idx1, bestD=-1;
     for(let i=0;i<cand.length;i++){
       const s2=cand[i];
-      const d = Math.abs((s2.x - s1.x)) + Math.abs((s2.y - s1.y));
+      const d = Math.abs(s2.x - s1.x) + Math.abs(s2.y - s1.y);
       if(d>bestD){ bestD=d; best=s2; bestIdx=i; }
     }
-
-    // assign deterministic owner: A gets the lexicographically "earlier" seed slot
-    // to avoid symmetry issues, flip order based on parity of hash
-    const flip = (hash32(seedBase+'|flip') & 1) === 1;
-    const aGets = flip ? best : s1;
-    const bGets = flip ? s1   : best;
-
-    return {
-      A: aGets,
-      B: bGets
-    };
+    // To avoid occasional same-band overlaps when paths later converge, nudge facing oppositely
+    const A = Object.assign({}, s1);
+    const B = Object.assign({}, best);
+    // If both on same band and very close in y/x, flip B's facing away
+    if(A.band===B.band){
+      if(A.band==='top')   B.facing='up';
+      if(A.band==='bot')   B.facing='down';
+      if(A.band==='left')  B.facing='left';
+      if(A.band==='right') B.facing='right';
+    }
+    return { A, B };
   }
 
   // ---------- inv / equipped ----------
@@ -137,11 +124,11 @@
   }
 
   // ---------- minimap opp dot ----------
-  function unlockedRectForMini(){ return unlockedRect(localStorage.getItem('izzaMapTier') || '2'); }
   function updateMinimapDot(oppX, oppY){
     const mini = document.getElementById('minimap'); if(!mini) return;
     const ctx = mini.getContext('2d'); if(!ctx) return;
-    const un = unlockedRectForMini();
+    const tier = localStorage.getItem('izzaMapTier') || '2';
+    const un = unlockedRect(tier);
     const W=90,H=60; const sx = mini.width / W, sy = mini.height / H;
     const gx = Math.floor(oppX / IZZA.api.TILE), gy = Math.floor(oppY / IZZA.api.TILE);
     const clamp=(v,a,b)=> Math.max(a, Math.min(b, v));
@@ -154,13 +141,12 @@
   // ---------- canvas banners ----------
   function showBanner(text, kind='win'){
     const cvs=document.getElementById('game'); if(!cvs) return;
-    let host=document.getElementById('duelBanner');
+    // host sits over the canvas parent to center exactly
+    let host=document.getElementById('duelBannerHost');
     if(!host){
-      host=document.createElement('div'); host.id='duelBanner';
-      Object.assign(host.style,{
-        position:'absolute', zIndex:31, left:'0', top:'0', width:'0', height:'0',
-        pointerEvents:'none'
-      });
+      host=document.createElement('div'); host.id='duelBannerHost';
+      Object.assign(host.style,{position:'absolute',inset:'0',display:'block',zIndex:31,pointerEvents:'none'});
+      cvs.parentElement.style.position = cvs.parentElement.style.position || 'relative';
       cvs.parentElement.appendChild(host);
     }
     const rect=cvs.getBoundingClientRect();
@@ -203,11 +189,13 @@
     pollMs:125, timer:null, flip:false,
     myHP:null,
     oppCops:[],
-    lastRoundNum:1,
+    lastRoundNum:0,
     myScore:0, oppScore:0,
     usernames:['',''],   // [A,B] sorted
-    meIsA:false,         // mapping
-    effects:[]
+    meIsA:false,         // my role
+    effects:[],
+    started:false,       // guard for double starts
+    hooksInstalled:false // guard to avoid duplicate fire hooks
   };
 
   // ---------- polling ----------
@@ -271,6 +259,8 @@
     // Round flow (respawn on every new number)
     if(j.round){
       const rn = j.round.number|0;
+
+      // New round detected
       if(rn !== (DUEL.lastRoundNum|0)){
         DUEL.lastRoundNum = rn;
 
@@ -279,7 +269,7 @@
         saveSegmentsFromHP(DUEL.myHP);
         drawHeartsDOM(DUEL.myHP);
 
-        // Different spawn each round (including round 1)
+        // Different spawn each round (including 1) AND different for each player
         const spAll = computeRoundSpawns(IZZA.api, String(DUEL.mid), rn, DUEL.usernames);
         const mySpot = DUEL.meIsA ? spAll.A : spAll.B;
         const oppSpot= DUEL.meIsA ? spAll.B : spAll.A;
@@ -290,10 +280,12 @@
 
         showBanner(`Round ${rn} — FIGHT!`, 'round');
       }
+
       if(j.round.justEnded){
         const iWon = j.round.winner === 'me';
         showBanner(iWon ? `You won Round ${j.round.number}` : `You lost Round ${j.round.number}`, iWon?'win':'lose');
       }
+
       if(j.round.matchOver){
         const iWon = j.round.winner === 'me';
         showBanner(iWon ? 'MATCH WIN!' : 'MATCH LOSS', iWon?'win':'lose');
@@ -318,6 +310,7 @@
   function cleanupDuel(){
     stopPolling();
     DUEL.mid=null; DUEL.oppCops.length=0; DUEL.oppSprite=null; DUEL.effects.length=0;
+    DUEL.started=false; DUEL.hooksInstalled=false; DUEL.lastRoundNum=0;
     window.__IZZA_DUEL = { active:false };
   }
 
@@ -348,18 +341,19 @@
 
     const along = (vx*dir.x + vy*dir.y);
     if(dist > maxDist || along <= 0){
-      return {hit:false, hitPoint:{x:me.x+dir.x*Math.min(maxDist, Math.max(60,along)), y:me.y+dir.y*Math.min(maxDist, Math.max(60,along))}};
+      // miss: extend a short distance only (no infinite line)
+      const missLen = Math.min(Math.max(along, 60), maxDist);
+      return {hit:false, hitPoint:{x:me.x+dir.x*missLen, y:me.y+dir.y*missLen}};
     }
     const perp = Math.abs(vx*dir.y - vy*dir.x) / Math.hypot(dir.x,dir.y);
     const radius = (kind==='uzi'||kind==='pistol') ? 18
                  : (kind==='grenade' ? 36 : 24);
     const hit = perp <= radius;
-    const hitPoint = hit ? opp : {x:me.x+dir.x*Math.min(dist, maxDist), y:me.y+dir.y*Math.min(dist, maxDist)};
-    return {hit, hitPoint};
-  }
-  function meleeInRange(){
-    const m=meCenter(), o=oppCenter();
-    return Math.hypot(m.x-o.x, m.y-o.y) <= 24;
+
+    // Clamp the tracer endpoint to JUST BEFORE the center to avoid visual overshoot
+    const impact = hit ? { x: opp.x - dir.x*2, y: opp.y - dir.y*2 }
+                       : { x: me.x + dir.x*Math.min(dist, maxDist), y: me.y + dir.y*Math.min(dist, maxDist) };
+    return {hit, hitPoint: impact};
   }
 
   function addTracer(from, to, life=110){
@@ -376,6 +370,9 @@
 
   // ---------- controls (fire/melee) ----------
   function installHitHooks(){
+    if(DUEL.hooksInstalled) return;
+    DUEL.hooksInstalled = true;
+
     const fire=document.getElementById('btnFire');
     if(fire && !fire.__duelHooked){
       fire.__duelHooked=true;
@@ -389,9 +386,8 @@
           const r=hitscan('uzi'); addTracer(me, r.hitPoint); if(r.hit){ addSpark(r.hitPoint); sendHit('uzi'); }
           if(!uziTimer) uziTimer=setInterval(()=>{ const r2=hitscan('uzi'); const m2=meCenter(); addTracer(m2, r2.hitPoint); if(r2.hit){ addSpark(r2.hitPoint); sendHit('uzi'); } }, 105);
         }else if(k==='pistol'){
-          // Single-shot: if we hit, DO NOT fire the follow-up tracer (prevents pass-through look)
-          const r=hitscan('pistol'); addTracer(me, r.hitPoint); if(r.hit){ addSpark(r.hitPoint); sendHit('pistol'); return; }
-          setTimeout(()=>{ const r2=hitscan('pistol'); const m2=meCenter(); addTracer(m2, r2.hitPoint); if(r2.hit){ addSpark(r2.hitPoint); sendHit('pistol'); } }, 85);
+          // Single-shot ONLY. If we hit, we do not draw or send any follow-up — prevents pass-through look.
+          const r=hitscan('pistol'); addTracer(me, r.hitPoint); if(r.hit){ addSpark(r.hitPoint); sendHit('pistol'); }
         }else if(k==='grenade'){
           setTimeout(()=>{ const r=hitscan('grenade'); if(r.hit){ addSpark(r.hitPoint, 220); sendHit('grenade'); } }, 900);
         }else if(k==='bat'){
@@ -433,54 +429,89 @@
     }, {capture:true, passive:true});
   }
 
-  // ---------- begin ----------
-  function begin(payload, apiArg, myName){
+  function meleeInRange(){
+    const m=meCenter(), o=oppCenter();
+    return Math.hypot(m.x-o.x, m.y-o.y) <= 24;
+  }
+
+  // ---------- begin (with identity resolution & double-start guard) ----------
+  async function resolveMeUsername(){
+    // Prefer server truth to avoid casing/@ differences
+    const j = await $get('/me');
+    if(j && j.username) return j.username;
+    // Fallback to core if server not available
+    return (IZZA?.api?.user?.username) || (window.__MP_LAST_ME && window.__MP_LAST_ME.username) || '';
+  }
+
+  function onceSceneReady(cb){
+    // Ensure the core is ready and remote sprite system has had a tick
+    let tries=0;
+    (function wait(){
+      if(IZZA?.api?.ready){ cb(); return; }
+      if(tries++>60){ cb(); return; }
+      setTimeout(wait, 50);
+    })();
+  }
+
+  async function begin(payload){
+    if(DUEL.started){ return; } // guard double start
     const {mode, matchId, players} = payload||{};
     if(mode!=='v1' || !Array.isArray(players) || players.length<2) return;
-    const api = apiArg || IZZA.api; if(!api?.ready) return;
 
+    // close lobby
     try{ IZZA.emit?.('ui-modal-close',{id:'mpLobby'}); }catch{}
     try{ const m=document.getElementById('mpLobby'); if(m) m.style.display='none'; }catch{}
 
-    const nameA = players[0]?.username || '';
-    const nameB = players[1]?.username || '';
-    const sorted = [nameA,nameB].map(norm).sort(); // [A,B]
+    // Resolve me via server, then map to A/B using the exact players[] list
+    const meServerName = await resolveMeUsername();
+    const pA = players[0]?.username || '';
+    const pB = players[1]?.username || '';
+    const pAL = norm(pA), pBL = norm(pB), meL = norm(meServerName);
+
+    DUEL.meIsA = (meL && (meL===pAL || meL===pBL)) ? (meL===pAL) : (hash32(TOK||('mid:'+matchId)) & 1)!==0;
+    // Set sorted user list for deterministic spawn-pairs
+    const sorted = [pA,pB].map(norm).sort();
     DUEL.usernames = sorted;
-    DUEL.meIsA = (norm(myName) === sorted[0]);
 
-    const oppName = (norm(myName)===norm(nameA)) ? (nameB||'Opponent') : (nameA||'Opponent');
+    const oppName = (meL===pAL) ? (pB||'Opponent') : (pA||'Opponent');
+    DUEL.oppName = oppName;
 
-    // Round 1 spawn (already different via deterministic two-point selection)
-    const spAll = computeRoundSpawns(api, String(matchId), /*round*/1, sorted);
+    // Compute Round 1 spawns (guaranteed different for each player)
+    const spAll = computeRoundSpawns(IZZA.api, String(matchId), 1, sorted);
     const mySpot = DUEL.meIsA ? spAll.A : spAll.B;
     const oppSpot= DUEL.meIsA ? spAll.B : spAll.A;
 
-    api.player.x = mySpot.x; api.player.y = mySpot.y; api.player.facing = mySpot.facing || 'down';
-    api.setWanted?.(0);
-    DUEL.oppName = oppName; DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
+    onceSceneReady(()=>{
+      // place me
+      IZZA.api.player.x = mySpot.x; IZZA.api.player.y = mySpot.y; IZZA.api.player.facing = mySpot.facing || 'down';
+      IZZA.api.setWanted?.(0);
+      // placeholder opp until first pull
+      DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
 
-    DUEL.myHP = 4;
-    saveSegmentsFromHP(DUEL.myHP);
-    drawHeartsDOM(DUEL.myHP);
+      // hearts full
+      DUEL.myHP = 4; saveSegmentsFromHP(DUEL.myHP); drawHeartsDOM(DUEL.myHP);
 
-    DUEL.lastRoundNum = 1;
-    DUEL.myScore = DUEL.oppScore = 0;
+      // flags + start polling
+      DUEL.mid = String(matchId); DUEL.mode = mode; DUEL.started = true; DUEL.lastRoundNum = 1;
+      window.__IZZA_DUEL = { active:true, mode, matchId };
+      startPolling();
 
-    window.__IZZA_DUEL = { active:true, mode, matchId };
-    DUEL.mid = String(matchId);
-    DUEL.meName = myName || api.user?.username || 'me';
-    startPolling();
-    setTimeout(installHitHooks, 40);
-    showCountdown(3);
-    showBanner(`1v1 vs ${oppName}`, 'round');
+      // ensure hooks installed once (after UI is live)
+      setTimeout(installHitHooks, 60);
+
+      // countdown once (after sprites and state settled)
+      showCountdown(3);
+      showBanner(`1v1 vs ${oppName}`, 'round');
+    });
   }
 
   function showCountdown(n=3){
+    const cvs=document.getElementById('game'); if(!cvs) return;
     let host=document.getElementById('pvpCountdown');
-    const cvs=document.getElementById('game');
     if(!host){
       host=document.createElement('div'); host.id='pvpCountdown';
       Object.assign(host.style,{position:'absolute',inset:'0',display:'flex',alignItems:'center',justifyContent:'center',zIndex:30,pointerEvents:'none',fontFamily:'system-ui,Arial,sans-serif'});
+      cvs.parentElement.style.position = cvs.parentElement.style.position || 'relative';
       cvs.parentElement.appendChild(host);
     }
     const rect=cvs.getBoundingClientRect();
@@ -539,13 +570,6 @@
   });
 
   // ---------- hooks ----------
-  function withReadyUser(fn, payload, tries=0){
-    const api=IZZA.api, uname=api?.user?.username || window.__MP_LAST_ME?.username;
-    if(api?.ready && uname){ fn(payload, api, uname); return; }
-    if(tries>40){ fn(payload, api||{}, uname||''); return; }
-    setTimeout(()=> withReadyUser(fn, payload, tries+1), 50);
-  }
-
-  IZZA.on?.('mp-start', (payload)=> withReadyUser(begin, payload));
-  IZZA.on?.('mp-end', ()=> cleanupDuel());
+  IZZA.on?.('mp-start', (payload)=> { if(!DUEL.started) begin(payload); });
+  IZZA.on?.('mp-end',   ()=> cleanupDuel());
 })();
