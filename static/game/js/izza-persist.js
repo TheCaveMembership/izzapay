@@ -26,11 +26,8 @@
     const bankKey = 'izzaBank_'+u;
     if(s.bank) localStorage.setItem(bankKey, JSON.stringify(s.bank));
 
-    // position
-    if(IZZA.api?.player && typeof s.player?.x === 'number' && typeof s.player?.y === 'number'){
-      IZZA.api.player.x = s.player.x|0;
-      IZZA.api.player.y = s.player.y|0;
-    }
+    // Position: keep HQ spawn — do not override x/y on load
+    // (still save x/y periodically so you could enable restore later)
 
     // hearts
     if(typeof s.player?.heartsSegs === 'number'){
@@ -75,7 +72,12 @@
   function scheduleAutoSave(){
     if(_saveTimer) clearInterval(_saveTimer);
     _saveTimer = setInterval(savePlayerState, 15000); // every 15s
-    window.addEventListener('beforeunload', ()=>{ navigator.sendBeacon?.(`${API_BASE}/api/state/${encodeURIComponent(uname())}`, JSON.stringify(collectPlayerState())); });
+    window.addEventListener('beforeunload', ()=>{
+      navigator.sendBeacon?.(
+        `${API_BASE}/api/state/${encodeURIComponent(uname())}`,
+        JSON.stringify(collectPlayerState())
+      );
+    });
   }
 
   // Run when the game reports ready
