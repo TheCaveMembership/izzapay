@@ -202,7 +202,7 @@
     const v = Math.max(0, n|0);
     localStorage.setItem(LS.coins, String(v));
     const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
-    if(el) el.textContent = `Coins: ${v} IC`;
+    if(el) el.textContent = `Wallet: ${v} IC`;
     player.coins = v;
   }
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
