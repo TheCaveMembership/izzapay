@@ -61,6 +61,45 @@
     return null;
   }
 
+  // ===== quick pre-seed so HUD shows correct coins immediately =====
+  (async function preseedEarly(){
+    const USER = userName();
+
+    // 1) If we already have a local LastGood mirror, seed from it right away
+    const localLG = getLSJSON(`izzaBankLastGood_${USER}`, null);
+    if (localLG && !isEmptySnapshot(localLG)) {
+      const bankCoins = (localLG.bank && (localLG.bank.coins|0)) || 0;
+      const total     = (localLG.coins|0) || 0;
+      const onHand    = Math.max(0, total - bankCoins);
+      setLS('izzaCoins', String(onHand));
+      // also mirror the bank for other plugins/UI
+      setLSJSON(`izzaBank_${USER}`, {
+        coins: bankCoins,
+        items: (localLG.bank && localLG.bank.items) || {},
+        ammo:  (localLG.bank && localLG.bank.ammo)  || {}
+      });
+    }
+
+    // 2) Kick a no-overlay background fetch; if it returns fast enough,
+    //    update localStorage again before the core reads it.
+    try{
+      const snap = await fetchSnapshot(USER);
+      if (snap && !isEmptySnapshot(snap)) {
+        const bankCoins = (snap.bank && (snap.bank.coins|0)) || 0;
+        const total     = (snap.coins|0) || 0;
+        const onHand    = Math.max(0, total - bankCoins);
+        setLS('izzaCoins', String(onHand));
+        setLSJSON(`izzaBank_${USER}`, {
+          coins: bankCoins,
+          items: (snap.bank && snap.bank.items) || {},
+          ammo:  (snap.bank && snap.bank.ammo)  || {}
+        });
+        // refresh our local last-good mirror too
+        setLSJSON(`izzaBankLastGood_${USER}`, snap);
+      }
+    }catch(_){}
+  })();
+
   // ===== apply snapshot to the running cores =====
   function applySnapshot(snap, USER){
     // --- coins/bank mirrors ---
@@ -78,25 +117,22 @@
       ammo:  (snap.bank && snap.bank.ammo)  || {}
     });
 
-    // === Coins semantics (dual-format tolerant) ===
-    // If snapshot.coins >= bank.coins ⇒ snapshot.coins is TOTAL, on-hand = total - bank
-    // If snapshot.coins <  bank.coins ⇒ snapshot.coins is ON-HAND, on-hand = snapshot.coins
-    const coinsField = (snap.coins|0) || 0;
-    let onHand;
-    if (coinsField >= bankCoins) {
-      onHand = Math.max(0, coinsField - bankCoins);
-    } else {
-      onHand = coinsField; // treat as on-hand (matches your current snapshot format)
-    }
+    // === On-hand coins semantics ===
+    // snapshot.coins = TOTAL coins (on-hand + bank)
+    // on-hand = max(0, snapshot.coins - bank.coins)
+    const totalCoins  = (snap.coins|0) || 0;
+    const coinsOnHand = Math.max(0, totalCoins - bankCoins);
+
+    // Always seed localStorage so any late core reads still see the right value
+    setLS('izzaCoins', String(coinsOnHand));
 
     if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
-      try { IZZA.api.setCoins(onHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
+      try { IZZA.api.setCoins(coinsOnHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
     } else {
-      // Fallback to LS + pill if core setter isn't ready yet
+      // Fallback to pill update if setter isn't ready yet
       try {
-        setLS('izzaCoins', String(onHand));
         const pill = document.getElementById('coinPill');
-        if(pill) pill.textContent = `Coins: ${onHand} IC`;
+        if(pill) pill.textContent = `Coins: ${coinsOnHand} IC`;
       } catch(e){}
     }
     // Let autosave & listeners react
@@ -106,7 +142,7 @@
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
-      coins: onHand,
+      coins: coinsOnHand,
       missionsCompleted: missions,
       inventory: invList
     });
@@ -148,9 +184,7 @@
         readySeen = true; return resolve();
       }
       const handler = ()=>{ readySeen = true; resolve(); };
-      try {
-        (window.IZZA = window.IZZA || {}).on?.('ready', handler);
-      } catch {}
+      try { (window.IZZA = window.IZZA || {}).on?.('ready', handler); } catch {}
       await sleep(1000);
       resolve();
     });
