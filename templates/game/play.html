@@ -91,6 +91,7 @@
     <button class="btn" id="btnB" type="button">B</button>
     <button class="btn" id="btnI" type="button" title="Inventory">I</button>
     <button class="btn" id="btnMap" type="button" title="Toggle Minimap">Map</button>
+    <button class="btn" id="btnSave" type="button" title="Save progress">Save</button>
   </div>
 
   <div class="modal" id="mapModal">
@@ -172,6 +173,43 @@
   <!-- >>> point persistence to the service that has the disk with your data <<< -->
 <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
+  <script>
+(function(){
+  const btn = document.getElementById('btnSave');
+  if(!btn) return;
+
+  let busy = false, t = null;
+
+  function setBusy(v){
+    busy = v;
+    btn.disabled = v;
+    btn.style.opacity = v ? .6 : 1;
+  }
+
+  async function doSave(){
+    if(busy) return;
+    setBusy(true);
+    const orig = btn.textContent;
+    btn.textContent = 'Saving…';
+    try{
+      const r = await (window.IZZA_PERSIST && IZZA_PERSIST.save());
+      if(r && r.ok){
+        btn.textContent = 'Saved!';
+      }else{
+        btn.textContent = 'Retry Save';
+      }
+    }catch(e){
+      btn.textContent = 'Error — Retry';
+      console.warn('[save] failed', e);
+    }finally{
+      clearTimeout(t);
+      t = setTimeout(()=>{ btn.textContent = 'Save'; setBusy(false); }, 1200);
+    }
+  }
+
+  btn.addEventListener('click', doSave, {passive:true});
+})();
+</script>
 
   <!-- Multiplayer -->
   <script defer src="/static/game/js/plugins/v9_multiplayer_building.js"></script>
