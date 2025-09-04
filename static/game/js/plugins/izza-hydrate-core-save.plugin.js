@@ -69,13 +69,13 @@
     return { onHand, bank, total };
   }
 
-  // ===== quick pre-seed (atomic) so HUD & core read correct values immediately =====
+  // ===== quick pre-seed (only if we are the owner — we aren’t if bank plugin loaded) =====
   (function preseedEarly(){
+    if (window.__IZZA_MONEY_OWNER__ === 'bank-plugin') return; // money handled elsewhere
     const USER = userName();
     const localLG = getLSJSON(`izzaBankLastGood_${USER}`, null);
     if (localLG && !isEmptySnapshot(localLG)) {
       const money = deriveMoneyFields(localLG);
-      // atomically seed both, no events yet
       setLS('izzaCoins', String(money.onHand));
       setLSJSON(`izzaBank_${USER}`, {
         coins: money.bank,
@@ -85,40 +85,37 @@
     }
   })();
 
-  // ===== apply snapshot to the running cores (atomic + gated events) =====
+  // ===== apply snapshot to the running cores (skip MONEY if bank plugin owns it) =====
   function applySnapshot(snap, USER){
-    // Gate reactions from other plugins during hydrate
-    window.__IZZA_HYDRATING__ = true;
-
-    const money = deriveMoneyFields(snap);
-
     // Persist a local last-good mirror first (whole snapshot)
     setLSJSON(`izzaBankLastGood_${USER}`, snap);
 
-    // Atomically mirror bank + wallet to LS
-    setLSJSON(`izzaBank_${USER}`, {
-      coins: money.bank,
-      items: (snap.bank && snap.bank.items) || {},
-      ammo:  (snap.bank && snap.bank.ammo)  || {}
-    });
-    setLS('izzaCoins', String(money.onHand));
-
-    // Push into core if setter available
-    if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
-      try { IZZA.api.setCoins(money.onHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
-    } else {
-      // Fallback to pill update if core setter isn't ready yet
-      try {
-        const pill = document.getElementById('coinPill');
-        if(pill) pill.textContent = `Coins: ${money.onHand} IC`;
-      } catch(e){}
+    // MONEY: skip if bank plugin owns it
+    if (window.__IZZA_MONEY_OWNER__ !== 'bank-plugin'){
+      const money = deriveMoneyFields(snap);
+      setLSJSON(`izzaBank_${USER}`, {
+        coins: money.bank,
+        items: (snap.bank && snap.bank.items) || {},
+        ammo:  (snap.bank && snap.bank.ammo)  || {}
+      });
+      setLS('izzaCoins', String(money.onHand));
+      if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
+        try { IZZA.api.setCoins(money.onHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
+      } else {
+        try {
+          const pill = document.getElementById('coinPill');
+          if(pill) pill.textContent = `Wallet: ${money.onHand} IC`;
+        } catch(e){}
+      }
+      try { window.dispatchEvent(new Event('izza-bank-changed')); } catch {}
+      try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
     }
 
-    // Legacy keys / Core v2 compatibility (wallet value)
+    // Legacy keys / Core v2 compatibility (wallet value if present; else leave existing)
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
-      coins: money.onHand,
+      coins: parseInt(getLS('izzaCoins')||'0',10) || 0,
       missionsCompleted: missions,
       inventory: invList
     });
@@ -141,12 +138,6 @@
         try { window.IZZA.api.camera.x = p.x - 200; window.IZZA.api.camera.y = p.y - 120; } catch {}
       }
     }
-
-    // Now that both LS and core are consistent, release the gate and notify
-    window.__IZZA_HYDRATING__ = false;
-    try { window.dispatchEvent(new Event('izza-money-hydrated')); } catch {}
-    try { window.dispatchEvent(new Event('izza-bank-changed')); } catch {}
-    try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
   }
 
   // ===== boot sequence =====
@@ -188,7 +179,7 @@
       return;
     }
 
-    // 4) Apply (atomic + gated events)
+    // 4) Apply
     applySnapshot(snap, USER);
 
     await waitFrames(2);
