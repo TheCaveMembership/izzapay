@@ -463,6 +463,40 @@ function lakeRects(a){
     const nearDoor = Math.abs(pgx-_hospitalDoor.x)<=1 && Math.abs(pgy-_hospitalDoor.y)<=1;
     set(_hospitalDoor.x, _hospitalDoor.y, nearDoor ? COL.doorGreen : COL.doorBlue);
 
+    // =========================
+    //        BANK (NEW)
+    // =========================
+    // Bank sits 5 tiles south of the hospital building
+    window.__IZZA_BANK__ = window.__IZZA_BANK__ || {};
+    const _bank = (__IZZA_BANK__.rect = __IZZA_BANK__.rect || {
+      x0: _hospital.x0, y0: _hospital.y1 + 5, x1: _hospital.x1, y1: _hospital.y1 + 8, color: COL.civic
+    });
+    const _bankDoor = (__IZZA_BANK__.door = __IZZA_BANK__.door || {
+      x: Math.floor((_hospital.x0 + _hospital.x1)/2), y: _hospital.y1 + 4  // one tile north of bank
+    });
+
+    // draw bank body
+    for(let gy=_bank.y0; gy<=_bank.y1; gy++)
+      for(let gx=_bank.x0; gx<=_bank.x1; gx++) fillTile(api,ctx,gx,gy,_bank.color);
+
+    // bank door highlight
+    const nearBankDoor = Math.abs(pgx-_bankDoor.x)<=1 && Math.abs(pgy-_bankDoor.y)<=1;
+    set(_bankDoor.x, _bankDoor.y, nearBankDoor ? COL.doorGreen : COL.doorBlue);
+
+    // label shadow strip
+    const sx=w2sX(api,_bank.x0*api.TILE), sy=w2sY(api,(_bank.y0)*api.TILE);
+    ctx.fillStyle='rgba(0,0,0,.14)';
+    ctx.fillRect(sx,sy, (_bank.x1-_bank.x0+1)*api.DRAW, Math.floor(api.DRAW*0.18));
+
+    // tiny “BANK” glyph (optional minimalist)
+    try{
+      ctx.fillStyle='#d9e6ff';
+      ctx.font = Math.floor(api.DRAW*0.44)+'px sans-serif';
+      ctx.textAlign='center'; ctx.textBaseline='top';
+      ctx.fillText('BANK', w2sX(api,(_bankDoor.x)*api.TILE)+api.DRAW/2, w2sY(api,(_bank.y0)*api.TILE)+api.DRAW*0.2);
+    }catch{}
+    // =========================
+
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
       patches:{
@@ -505,6 +539,13 @@ function lakeRects(a){
 
     // Hospital solid
     if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
+
+    // ===== BANK solid (NEW) =====
+    if(window.__IZZA_BANK__?.rect){
+      const B = window.__IZZA_BANK__.rect;
+      solids.push({x:B.x0,y:B.y0,w:rectW(B),h:rectH(B)});
+    }
+    // ============================
 
     // Manual solid house strips + singles
     (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
@@ -569,6 +610,297 @@ if (!window._izzaBoatActive) {             // <— add this guard
   const btnA = document.getElementById('btnA');
   btnA?.addEventListener('click', tryHospitalHeal);
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='a') tryHospitalHeal(); });
+
+  // ===============================
+  //           BANK UI (NEW)
+  // ===============================
+
+  // Per-user persistent key
+  function _bankKey(){
+    const u = (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase();
+    return 'izzaBank_'+u;
+  }
+  function _readBank(){
+    try{
+      const raw = localStorage.getItem(_bankKey());
+      if(!raw) return { coins:0, items:{}, ammo:{} };
+      const j = JSON.parse(raw);
+      return { coins: j.coins|0 || 0, items: j.items||{}, ammo: j.ammo||{} };
+    }catch{ return { coins:0, items:{}, ammo:{} }; }
+  }
+  function _writeBank(b){ try{ localStorage.setItem(_bankKey(), JSON.stringify(b)); }catch{} }
+
+  function _readInv(){
+    try{
+      if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+      const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+    }catch{ return {}; }
+  }
+  function _writeInv(inv){
+    try{
+      if(IZZA?.api?.setInventory){ IZZA.api.setInventory(inv); }
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+    }catch{}
+  }
+
+  function _ensureBankUI(){
+    if(document.getElementById('bankUI')) return;
+    const wrap=document.createElement('div');
+    wrap.id='bankUI';
+    wrap.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.48);z-index:60;';
+    wrap.innerHTML = `
+      <div style="min-width:320px;max-width:560px;background:#0f1624;border:1px solid #2b3b57;border-radius:12px;padding:14px 14px 10px;color:#e7eef7;box-shadow:0 14px 38px rgba(0,0,0,.55)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong style="font-size:16px">🏦 IZZA Bank</strong>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="bankCoinsView" style="opacity:.85"></span>
+            <button id="bankClose" style="background:#263447;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
+          </div>
+        </div>
+        <div style="margin:6px 0 10px;opacity:.9">Click here to deposit IZZA Coins &amp; Items.</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button id="bankTabDeposit"  style="flex:1;padding:8px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:700;cursor:pointer">Deposit</button>
+          <button id="bankTabWithdraw" style="flex:1;padding:8px;border:0;border-radius:8px;background:#2b3b57;color:#cfe3ff;font-weight:700;cursor:pointer">Withdraw</button>
+        </div>
+        <div id="bankBody"></div>
+      </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('#bankClose').onclick = ()=> _bankClose();
+    wrap.querySelector('#bankTabDeposit').onclick  = ()=> _drawDeposit();
+    wrap.querySelector('#bankTabWithdraw').onclick = ()=> _drawWithdraw();
+  }
+
+  function _bankOpen(){
+    _ensureBankUI();
+    document.getElementById('bankUI').style.display='flex';
+    _updateBankCoinsView();
+    _drawDeposit();
+  }
+  function _bankClose(){
+    const el=document.getElementById('bankUI'); if(el) el.style.display='none';
+  }
+  function _updateBankCoinsView(){
+    const api=IZZA.api; const bank=_readBank();
+    document.getElementById('bankCoinsView').textContent = `Bank: ${bank.coins|0} IC · You: ${api.getCoins()} IC`;
+  }
+
+  function _drawDeposit(){
+    const host=document.getElementById('bankBody'); if(!host) return;
+    const api=IZZA.api, bank=_readBank(), inv=_readInv();
+
+    const coinPart = `
+      <div style="background:#111b29;border:1px solid #2b3b57;border-radius:10px;padding:10px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div><strong>Deposit Coins</strong><div style="opacity:.7;font-size:12px">Move IZZA Coins into your safe.</div></div>
+          <div>
+            <input id="bankDepCoinsAmt" type="number" min="0" max="${api.getCoins()}" value="${Math.min(100, api.getCoins())}" style="width:90px;background:#0c1422;border:1px solid #2b3b57;border-radius:6px;color:#cfe3ff;padding:4px 6px">
+            <button id="bankDepCoinsBtn" style="margin-left:6px;background:#1f6feb;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Deposit</button>
+          </div>
+        </div>
+      </div>`;
+
+    // Build item list (stackables + weapon ammo)
+    function itemRow(label, hint, btnId, disabled){
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid #19243a">
+          <div><strong>${label}</strong><div style="opacity:.7;font-size:12px">${hint||''}</div></div>
+          <button id="${btnId}" ${disabled?'disabled':''} style="background:${disabled?'#243248':'#2ea043'};color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:${disabled?'default':'pointer'}">${disabled?'—':'Deposit 1'}</button>
+        </div>`;
+    }
+
+    // Detect stackables by .count
+    const stackables = [];
+    Object.keys(inv||{}).forEach(k=>{
+      const v=inv[k];
+      if(v && typeof v==='object' && typeof v.count==='number' && v.count>0){
+        stackables.push({key:k, count:v.count});
+      }
+    });
+
+    // Ammo rows for pistol/uzi
+    const ammoRows = [];
+    if(inv?.pistol?.ammo>0){
+      ammoRows.push({ key:'pistol', ammo: inv.pistol.ammo|0 });
+    }
+    if(inv?.uzi?.ammo>0){
+      ammoRows.push({ key:'uzi', ammo: inv.uzi.ammo|0 });
+    }
+
+    let list = `<div style="background:#0c1422;border:1px solid #22314b;border-radius:10px;overflow:hidden">`;
+    if(stackables.length===0 && ammoRows.length===0){
+      list += `<div style="padding:12px;opacity:.75">No depositable items in your inventory right now.</div>`;
+    }else{
+      stackables.forEach(s=>{
+        list += itemRow(`${s.key} ×${s.count}`, `Click to move 1 to bank.`, `dep_item_${s.key}`, false);
+      });
+      ammoRows.forEach(a=>{
+        list += `
+          <div style="padding:10px;border-bottom:1px solid #19243a">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><strong>${a.key} ammo</strong><div style="opacity:.7;font-size:12px">You have ${a.ammo} rounds</div></div>
+              <div>
+                <input id="dep_${a.key}_amt" type="number" min="1" max="${a.ammo}" value="${Math.min(10,a.ammo)}" style="width:80px;background:#0c1422;border:1px solid #2b3b57;border-radius:6px;color:#cfe3ff;padding:4px 6px">
+                <button id="dep_${a.key}_btn" style="margin-left:6px;background:#2ea043;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Deposit Ammo</button>
+              </div>
+            </div>
+          </div>`;
+      });
+    }
+    list += `</div>`;
+
+    host.innerHTML = coinPart + list;
+
+    // wire coin deposit
+    host.querySelector('#bankDepCoinsBtn')?.addEventListener('click', ()=>{
+      const amt = Math.max(0, Math.min(api.getCoins(), parseInt(host.querySelector('#bankDepCoinsAmt').value||'0',10)));
+      if(amt>0){
+        api.setCoins(api.getCoins()-amt);
+        bank.coins = (bank.coins|0) + amt;
+        _writeBank(bank);
+        _updateBankCoinsView();
+        host.querySelector('#bankDepCoinsAmt').max = api.getCoins();
+      }
+    });
+
+    // wire stackables deposit (1 each click)
+    stackables.forEach(s=>{
+      host.querySelector(`#dep_item_${s.key}`)?.addEventListener('click', ()=>{
+        const inv2=_readInv(), bank2=_readBank();
+        if(inv2?.[s.key]?.count>0){
+          inv2[s.key].count -= 1;
+          if(inv2[s.key].count<=0){ inv2[s.key].count=0; }
+          bank2.items[s.key] = (bank2.items[s.key]|0) + 1;
+          _writeInv(inv2); _writeBank(bank2);
+          _drawDeposit(); // refresh view counts
+        }
+      });
+    });
+
+    // wire ammo deposit
+    ammoRows.forEach(a=>{
+      host.querySelector(`#dep_${a.key}_btn`)?.addEventListener('click', ()=>{
+        const n = Math.max(1, Math.min((_readInv()?.[a.key]?.ammo|0), parseInt(host.querySelector(`#dep_${a.key}_amt`).value||'1',10)));
+        if(n>0){
+          const inv2=_readInv(), bank2=_readBank();
+          inv2[a.key].ammo = (inv2[a.key].ammo|0)-n; if(inv2[a.key].ammo<0) inv2[a.key].ammo=0;
+          bank2.ammo[a.key] = (bank2.ammo[a.key]|0)+n;
+          _writeInv(inv2); _writeBank(bank2);
+          _drawDeposit();
+        }
+      });
+    });
+  }
+
+  function _drawWithdraw(){
+    const host=document.getElementById('bankBody'); if(!host) return;
+    const api=IZZA.api, bank=_readBank(), inv=_readInv();
+
+    const coinPart = `
+      <div style="background:#111b29;border:1px solid #2b3b57;border-radius:10px;padding:10px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div><strong>Withdraw Coins</strong><div style="opacity:.7;font-size:12px">Move IZZA Coins back to your wallet.</div></div>
+          <div>
+            <input id="bankWCoinsAmt" type="number" min="0" max="${bank.coins|0}" value="${Math.min(100, bank.coins|0)}" style="width:90px;background:#0c1422;border:1px solid #2b3b57;border-radius:6px;color:#cfe3ff;padding:4px 6px">
+            <button id="bankWCoinsBtn" style="margin-left:6px;background:#2ea043;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Withdraw</button>
+          </div>
+        </div>
+      </div>`;
+
+    // Items listing
+    const entries = [];
+    Object.keys(bank.items||{}).forEach(k=>{
+      const c=bank.items[k]|0;
+      if(c>0) entries.push({type:'item', key:k, count:c});
+    });
+    Object.keys(bank.ammo||{}).forEach(k=>{
+      const a=bank.ammo[k]|0;
+      if(a>0) entries.push({type:'ammo', key:k, ammo:a});
+    });
+
+    let list = `<div style="background:#0c1422;border:1px solid #22314b;border-radius:10px;overflow:hidden">`;
+    if(entries.length===0){
+      list += `<div style="padding:12px;opacity:.75">Your bank is empty.</div>`;
+    }else{
+      entries.forEach(e=>{
+        if(e.type==='item'){
+          list += `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid #19243a">
+              <div><strong>${e.key}</strong><div style="opacity:.7;font-size:12px">In bank: ${e.count}</div></div>
+              <button id="w_item_${e.key}" style="background:#1f6feb;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Withdraw 1</button>
+            </div>`;
+        }else{
+          list += `
+            <div style="padding:10px;border-bottom:1px solid #19243a">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div><strong>${e.key} ammo</strong><div style="opacity:.7;font-size:12px">In bank: ${e.ammo}</div></div>
+                <div>
+                  <input id="w_${e.key}_amt" type="number" min="1" max="${e.ammo}" value="${Math.min(10,e.ammo)}" style="width:80px;background:#0c1422;border:1px solid #2b3b57;border-radius:6px;color:#cfe3ff;padding:4px 6px">
+                  <button id="w_${e.key}_btn" style="margin-left:6px;background:#1f6feb;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Withdraw</button>
+                </div>
+              </div>
+            </div>`;
+        }
+      });
+    }
+    list += `</div>`;
+    host.innerHTML = coinPart + list;
+
+    // wire coin withdraw
+    host.querySelector('#bankWCoinsBtn')?.addEventListener('click', ()=>{
+      const b=_readBank();
+      const amt = Math.max(0, Math.min(b.coins|0, parseInt(host.querySelector('#bankWCoinsAmt').value||'0',10)));
+      if(amt>0){
+        b.coins = (b.coins|0)-amt; if(b.coins<0)b.coins=0;
+        _writeBank(b);
+        api.setCoins(api.getCoins()+amt);
+        _updateBankCoinsView();
+        _drawWithdraw();
+      }
+    });
+
+    // wire item withdraws
+    entries.filter(e=>e.type==='item').forEach(e=>{
+      host.querySelector(`#w_item_${e.key}`)?.addEventListener('click', ()=>{
+        const b=_readBank(), inv2=_readInv();
+        if((b.items[e.key]|0)>0){
+          b.items[e.key]-=1; if(b.items[e.key]<0)b.items[e.key]=0;
+          inv2[e.key] = inv2[e.key]||{count:0};
+          if(typeof inv2[e.key].count!=='number') inv2[e.key].count=0;
+          inv2[e.key].count += 1;
+          _writeBank(b); _writeInv(inv2);
+          _drawWithdraw();
+        }
+      });
+    });
+
+    // wire ammo withdraws
+    entries.filter(e=>e.type==='ammo').forEach(e=>{
+      host.querySelector(`#w_${e.key}_btn`)?.addEventListener('click', ()=>{
+        const b=_readBank(), inv2=_readInv();
+        const n = Math.max(1, Math.min((b.ammo[e.key]|0), parseInt(host.querySelector(`#w_${e.key}_amt`).value||'1',10)));
+        if(n>0){
+          b.ammo[e.key] = (b.ammo[e.key]|0)-n; if(b.ammo[e.key]<0)b.ammo[e.key]=0;
+          inv2[e.key] = inv2[e.key]||{};
+          inv2[e.key].ammo = (inv2[e.key].ammo|0)+n;
+          _writeBank(b); _writeInv(inv2);
+          _drawWithdraw();
+        }
+      });
+    });
+  }
+
+  // --------- BANK input: press B near bank door ----------
+  function _onPressBankB(e){
+    const api=IZZA.api; if(!api?.ready) return;
+    const B = window.__IZZA_BANK__?.door; if(!B) return;
+    const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+    const near = Math.abs(gx-B.x)<=1 && Math.abs(gy-B.y)<=1;
+    if(!near) return;
+    if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
+    _bankOpen();
+  }
+  document.getElementById('btnB')?.addEventListener('click', _onPressBankB, true);
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') _onPressBankB(e); }, true);
 
   // ---------- Minimap / Bigmap overlay ----------
   function paintOverlay(id){
@@ -678,6 +1010,13 @@ if (!window._izzaBoatActive) {             // <— add this guard
     if(_hospital){
       ctx.fillStyle = COL.hospital;
       ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,( (_hospital.x1-_hospital.x0+1) )*sx,( (_hospital.y1-_hospital.y0+1) )*sy);
+    }
+
+    // ---- BANK (overlay block) ----
+    if(window.__IZZA_BANK__?.rect){
+      const B = window.__IZZA_BANK__.rect;
+      ctx.fillStyle = '#6f87b3'; // civic tint
+      ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
     }
 
     // ---- Docks (planks)
