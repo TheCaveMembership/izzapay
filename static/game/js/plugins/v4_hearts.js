@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v4_hearts.js
 (function () {
-  const BUILD = 'v4.2-hearts-plugin+svg-hearts+low-blink';
+  const BUILD = 'v4.3-hearts-plugin+svg-hearts+low-blink';
   console.log('[IZZA PLAY]', BUILD);
 
   const LS = {
@@ -29,8 +29,8 @@
       player.heartSegs = player.maxHearts * 3;
       setCurSegs(player.heartSegs, player.maxHearts);
     }
-    drawDOMHearts();  // initial draw
-    placeHeartsHud(); // and position
+    drawDOMHearts();
+    placeHeartsHud();
   }
   function healFull(){
     player.heartSegs = player.maxHearts * 3;
@@ -180,10 +180,15 @@
 
   // ===================================================================
   //                 Cop melee (1/3 heart per 2s in range)
+  //                 PAUSED during PvP duels
   // ===================================================================
   function attachCopMelee(){
     IZZA.on('update-post', ({ now })=>{
       if (!api) return;
+
+      // Pause world-damage while PvP duel is active; duel client handles duel hearts
+      if (window.__IZZA_DUEL && window.__IZZA_DUEL.active) return;
+
       const atkRange = 26, cd = 2000;
       for (const c of cops){
         c._nextAtk ??= now;
