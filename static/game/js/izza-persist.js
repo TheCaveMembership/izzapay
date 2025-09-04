@@ -6,9 +6,10 @@
   function uname(){
     return (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase();
   }
+  function bankKeyFor(u){ return 'izzaBank_'+u; }
+
   function heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
   function getHeartSegs(){
-    // your HUD code uses localStorage('izzaCurHeartSegments') if not on player obj
     const p=IZZA.api?.player||{};
     if(typeof p.heartSegs==='number') return p.heartSegs|0;
     const max = heartsMax()*3;
@@ -41,15 +42,13 @@
       log('applied inventory');
     }
 
-    // bank (mirror into your localStorage-based bank so the existing bank UI keeps working)
-    const bankKey = 'izzaBank_'+u;
+    // bank (mirror into localStorage so bank UI keeps working)
     if(s.bank) {
-      localStorage.setItem(bankKey, JSON.stringify(s.bank));
+      localStorage.setItem(bankKeyFor(u), JSON.stringify(s.bank));
       log('applied bank payload');
     }
 
     // Option A — Keep HQ spawn (don’t restore position)
-    // (we still save x/y periodically so you can enable restore later if desired)
 
     // hearts
     if(typeof s.player?.heartsSegs === 'number'){
@@ -58,7 +57,7 @@
       log('applied heartsSegs', s.player.heartsSegs|0);
     }
 
-    // Re-apply once on the next tick to win races with any late “new game” initializer
+    // re-apply once next tick to win races with any “new game” initializer
     setTimeout(()=>{
       try{
         if(typeof s.coins === 'number' && IZZA.api?.setCoins) IZZA.api.setCoins(s.coins|0);
@@ -74,9 +73,9 @@
 
   function collectPlayerState(){
     const u = uname();
-    const bankKey = 'izzaBank_'+u;
+    const k = bankKeyFor(u);
     let bank = { coins:0, items:{}, ammo:{} };
-    try{ bank = JSON.parse(localStorage.getItem(bankKey) || '{"coins":0,"items":{},"ammo":{}}'); }catch{}
+    try{ bank = JSON.parse(localStorage.getItem(k) || '{"coins":0,"items":{},"ammo":{}}'); }catch{}
     const inv = (IZZA.api?.getInventory && IZZA.api.getInventory()) || {};
     const coins = (IZZA.api?.getCoins && IZZA.api.getCoins()) || 0;
     const p = IZZA.api?.player||{x:0,y:0};
@@ -101,7 +100,8 @@
         method: 'POST',
         headers: {'content-type':'application/json'},
         body: JSON.stringify(body),
-        credentials:'omit'
+        credentials:'omit',
+        keepalive: reason==='pagehide' || reason==='visibility-hidden' || reason==='beforeunload' // hint for iOS
       });
       log('POST', reason, r.ok ? 'ok' : `fail ${r.status}`);
     }catch(e){
@@ -117,24 +117,28 @@
   function scheduleAutoSave(){
     if(_saveTimer) clearInterval(_saveTimer);
     _saveTimer = setInterval(()=> savePlayerState('interval'), 5000); // every 5s
-    // iOS-friendly lifecycle
-    window.addEventListener('pagehide', ()=> savePlayerState('pagehide'));
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') savePlayerState('visibility-hidden'); });
-    window.addEventListener('beforeunload', ()=>{
-      try{
-        const u = uname();
-        const url = `${API_BASE}/api/state/${encodeURIComponent(u)}`;
-        const payload = JSON.stringify(collectPlayerState());
-        if(navigator.sendBeacon){
-          navigator.sendBeacon(url, payload);
-          log('sendBeacon fired');
-        }else{
-          // best-effort sync
-          fetch(url, {method:'POST', headers:{'content-type':'application/json'}, body: payload, keepalive: true});
-          log('keepalive POST fired');
-        }
-      }catch(e){ log('beforeunload save failed', e); }
-    });
+
+    // iOS-friendly lifecycle — use fetch keepalive (not sendBeacon) to keep JSON Content-Type
+    window.addEventListener('pagehide', ()=> savePlayerState('pagehide'), { capture:true });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') savePlayerState('visibility-hidden'); }, { capture:true });
+    window.addEventListener('beforeunload', ()=> savePlayerState('beforeunload'), { capture:true });
+  }
+
+  // Bank watcher (if the bank UI doesn’t dispatch events)
+  function installBankWatcher(){
+    const u = uname();
+    const k = bankKeyFor(u);
+    let last = null;
+    try{ last = localStorage.getItem(k); }catch{}
+    setInterval(()=>{
+      let cur=null;
+      try{ cur = localStorage.getItem(k); }catch{}
+      if(cur!==last){
+        last = cur;
+        debouncedSave('bank-ls-changed');
+        log('bank localStorage changed → save');
+      }
+    }, 1500);
   }
 
   // Wrap core setters so any coin/inventory change gets saved
@@ -154,7 +158,7 @@
         api.__persist_wrapped_setInventory = true;
       }
 
-      // If your bank UI dispatches this, we’ll save immediately
+      // If your bank UI dispatches this, we’ll save immediately too
       window.addEventListener('izza-bank-changed', ()=> debouncedSave('bank-changed'));
     }catch(e){ log('install hooks failed', e); }
   }
@@ -169,6 +173,7 @@
       await loadPlayerState();          // pull state
       await savePlayerState('onload');  // write once so file exists
       installAutoSaveHooks();           // wrap setters
+      installBankWatcher();             // watch localStorage for bank changes
       scheduleAutoSave();               // periodic + lifecycle
       log('persistence initialized');
     }catch(e){
