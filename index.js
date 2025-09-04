@@ -1,71 +1,121 @@
-// Simple persistence API for IZZA — stores per-user JSON on disk
-// Mount your Render disk at /var/data
-import express from 'express';
-import fs from 'fs/promises';
-import path from 'path';
-import cors from 'cors';
-import morgan from 'morgan';
+// index.js — IZZA persistence service (rotation + LastGood + CORS + healthz)
+// Node 18+ (CommonJS)
+
+const path    = require('path');
+const fs      = require('fs').promises;
+const express = require('express');
+const morgan  = require('morgan');
+const cors    = require('cors');
 
 const app = express();
 
-// --- middleware ---
-app.use(cors());
-// accept normal JSON and also text/plain (what Safari sendBeacon often uses)
-app.use(express.json({ limit: '1mb' }));
-app.use(express.text({ type: ['text/plain', 'application/octet-stream'], limit: '1mb' }));
-app.use(morgan('combined'));
+// ---------- storage config ----------
+const ROOT = process.env.DATA_DIR || '/var/data/izza/players';
+const HISTORY_DEPTH = 5;
 
-const ROOT = '/var/data/izza/players';
 async function ensureDir() { await fs.mkdir(ROOT, { recursive: true }); }
+function normUser(u){ return String(u||'').trim().toLowerCase().replace(/[^a-z0-9_\-\.]/g,''); }
 
-function fileFor(user) {
-  // sanitize to [a-z0-9-_]
-  const safe = String(user || 'guest').toLowerCase().replace(/[^a-z0-9-_]/g, '-');
-  return path.join(ROOT, `${safe}.json`);
+function filePath(base, suffix){ return path.join(ROOT, `${base}${suffix||''}.json`); }
+
+async function readJSON(file){
+  try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return null; }
+}
+async function writeJSON(file, obj){
+  await fs.writeFile(file, JSON.stringify(obj, null, 2), 'utf8');
 }
 
-app.get('/api/state/:user', async (req, res) => {
-  try {
+function isPlainObject(o){ return !!o && typeof o==='object' && !Array.isArray(o); }
+function isEmptySnapshot(snap){
+  if(!isPlainObject(snap)) return true;
+  if(snap.version !== 1) return false; // future versions: treat as non-empty
+  const coins    = (snap.coins|0) || 0;
+  const invEmpty = !isPlainObject(snap.inventory) || Object.keys(snap.inventory).length===0;
+  const b        = isPlainObject(snap.bank) ? snap.bank : {};
+  const bCoins   = (b.coins|0) || 0;
+  const bEmpty   = bCoins===0 &&
+                   (!isPlainObject(b.items) || Object.keys(b.items).length===0) &&
+                   (!isPlainObject(b.ammo)  || Object.keys(b.ammo ).length===0);
+  return (coins===0 && invEmpty && bEmpty);
+}
+
+async function rotateHistory(base){
+  // .(HISTORY_DEPTH-1) -> .HISTORY_DEPTH
+  for(let i=HISTORY_DEPTH-1;i>=1;i--){
+    const src=filePath(base, `.${i}`), dst=filePath(base, `.${i+1}`);
+    try{ await fs.rename(src,dst); }catch{}
+  }
+  // current -> .1
+  try{ await fs.rename(filePath(base,''), filePath(base,'.1')); }catch{}
+}
+
+async function readBest(base, preferLastGood){
+  const lastGood = await readJSON(filePath(base, '.lastgood'));
+  const latest   = await readJSON(filePath(base, ''));
+  if(preferLastGood && lastGood) return lastGood;
+  if(latest && !isEmptySnapshot(latest)) return latest;
+  if(lastGood) return lastGood;
+  for(let i=1;i<=HISTORY_DEPTH;i++){
+    const h = await readJSON(filePath(base, `.${i}`));
+    if(h && !isEmptySnapshot(h)) return h;
+  }
+  return latest || lastGood || null;
+}
+
+// ---------- middleware ----------
+app.use(cors());
+app.use(morgan('combined'));
+// accept normal JSON and also text/plain (Safari sendBeacon)
+app.use(express.json({ limit:'1mb' }));
+app.use(express.text({ type: ['text/plain','application/octet-stream'], limit:'1mb' }));
+
+// ---------- routes ----------
+app.get('/healthz', (_req,res)=> res.json({ ok:true }));
+
+app.get('/api/state/:username', async (req,res)=>{
+  try{
     await ensureDir();
-    const f = fileFor(req.params.user);
-    const data = JSON.parse(await fs.readFile(f, 'utf8'));
-    res.json(data);
-  } catch (e) {
-    // not found => return empty default state
-    res.json({
-      version: 1,
-      player: { x: 0, y: 0, heartsSegs: null },
-      coins: 0,
-      inventory: {},
-      bank: { coins: 0, items: {}, ammo: {} },
-      timestamp: Date.now()
-    });
+    const user = normUser(req.params.username);
+    if(!user) return res.status(400).json({ error:'bad-username' });
+    const preferLastGood = req.query.prefer === 'lastGood';
+    const best = await readBest(user, preferLastGood);
+    if(!best) return res.status(404).json({ error:'not-found' });
+    res.set('Cache-Control','no-store');
+    res.json(best);
+  }catch(e){
+    console.error('GET state error', e);
+    res.status(500).json({ error:'server-error' });
   }
 });
 
-app.post('/api/state/:user', async (req, res) => {
-  try {
+app.post('/api/state/:username', async (req,res)=>{
+  try{
     await ensureDir();
-    const f = fileFor(req.params.user);
+    const user = normUser(req.params.username);
+    if(!user) return res.status(400).json({ error:'bad-username' });
 
-    // accept JSON from fetch() and JSON string from sendBeacon()
-    let payload = req.body || {};
-    if (typeof payload === 'string') {
-      try { payload = JSON.parse(payload); } catch { payload = {}; }
+    let incoming = req.body;
+    if(typeof incoming === 'string'){
+      try{ incoming = JSON.parse(incoming); }catch{ incoming = {}; }
+    }
+    if(!isPlainObject(incoming)) return res.status(400).json({ error:'invalid-json' });
+
+    const stamped = { ...incoming, timestamp: Date.now(), version: 1 };
+
+    if(isEmptySnapshot(stamped)){
+      // do NOT overwrite lastGood on empty saves
+      return res.status(202).json({ ok:true, ignored:true, reason:'empty-snapshot' });
     }
 
-    payload.version = 1;
-    payload.timestamp = Date.now();
-
-    await fs.writeFile(f, JSON.stringify(payload, null, 2), 'utf8');
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e) });
+    await rotateHistory(user);
+    await writeJSON(filePath(user,''), stamped);
+    await writeJSON(filePath(user,'.lastgood'), stamped);
+    res.json({ ok:true });
+  }catch(e){
+    console.error('POST state error', e);
+    res.status(500).json({ error:'server-error' });
   }
 });
 
-// tiny health check
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
-
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`IZZA persistence on ${PORT}`));
+app.listen(PORT, ()=> console.log(`IZZA persistence on ${PORT}`));
