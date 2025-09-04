@@ -1,164 +1,243 @@
 <!-- /static/game/js/plugins/izza-hydrate-bank-and-inventory.plugin.js -->
 <script>
-/*
-  IZZA hydrate: Bank & Inventory mirror (glitch-free)
-  - Bank coins live in: localStorage["izzaBank_<user>"] => {coins, items, ammo}
-  - On-hand coins live in: localStorage["izzaCoins"] (and IZZA.api.setCoins if available)
-  - This plugin NEVER derives on-hand from any "total". It only moves value between
-    bank and on-hand, and emits events so autosave snaps the combined total.
-
-  Public helpers exposed at window.izzaBankAPI:
-    - getBalances() -> { bank: number, you: number }
-    - deposit(n)
-    - withdraw(n)
-*/
+/* IZZA hydrate — Bank & Inventory restore (fixes "double withdraw" + shows Wallet) */
 (function(){
-  // ---------- Utils ----------
-  const log  = (...a)=> console.log('[IZZA bank+inv]', ...a);
-  const warn = (...a)=> console.warn('[IZZA bank+inv]', ...a);
+  // ---------- small overlay while restoring ----------
+  const overlay = document.createElement('div');
+  Object.assign(overlay.style,{
+    position:'fixed', inset:'0', background:'rgba(5,8,14,.90)',
+    display:'none', alignItems:'center', justifyContent:'center',
+    zIndex:99999, color:'#cfe0ff',
+    fontFamily:'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+    fontSize:'15px'
+  });
+  overlay.innerHTML = `<div style="padding:14px 18px;border:1px solid #394769;border-radius:10px;background:#0b1120">
+    Loading your items & bank…</div>`;
+  document.addEventListener('DOMContentLoaded', ()=> document.body.appendChild(overlay));
 
+  // ---------- utils ----------
+  const clamp0 = n => Math.max(0, (n|0));
+  const sleep  = ms => new Promise(r=>setTimeout(r,ms));
   function getLS(k,d=null){ const v=localStorage.getItem(k); return v==null? d : v; }
   function setLS(k,v){ localStorage.setItem(k,v); }
   function getJSON(k,d=null){ try{ const v=getLS(k,null); return v==null? d : JSON.parse(v); }catch{ return d; } }
-  function setJSON(k,o){ setLS(k, JSON.stringify(o||{})); }
+  function setJSON(k,o){ setLS(k, JSON.stringify(o)); }
 
-  function resolveUser(){
-    const profile = window.__IZZA_PROFILE__ || {};
-    const fromPlugin = (window.izzaUserKey && typeof izzaUserKey.get==='function') ? izzaUserKey.get() : null;
-    const u = (profile.username || profile.user || fromPlugin || getLS('izzaUserKey') || 'guest')
-      .toString().trim().toLowerCase().replace(/[^a-z0-9-_]/g,'-');
-    return u || 'guest';
+  function userKey(){
+    const p = (window.__IZZA_PROFILE__||{});
+    const maybe = (p.username||p.user||'').toString();
+    const plug  = (window.izzaUserKey && typeof izzaUserKey.get==='function') ? izzaUserKey.get() : '';
+    const u = (maybe || plug || getLS('izzaUserKey') || 'guest').toLowerCase();
+    return u.replace(/[^a-z0-9-_]/g,'-');
   }
 
-  // ---------- On-hand coins (HUD) ----------
-  function getOnHand(){
-    // Prefer the core getter if present, but NEVER infer from totals.
-    try{
-      if (window.IZZA?.api?.getCoins) {
-        const n = window.IZZA.api.getCoins()|0;
-        // keep LS in sync too
-        const ls = parseInt(getLS('izzaCoins')||'0',10)|0;
-        if (ls !== n) setLS('izzaCoins', String(n));
-        return Math.max(0, n);
-      }
-    }catch{}
-    const raw = getLS('izzaCoins','0');
-    return Math.max(0, parseInt(raw,10) || 0);
+  function isEmptyLike(s){
+    if (!s || typeof s!=='object') return true;
+    const inv = s.inventory || {};
+    const invCount = Array.isArray(inv) ? inv.length : Object.keys(inv).length;
+    const bank = s.bank || {};
+    const bankCoins = Number(bank.coins||0);
+    const bankItems = bank.items ? Object.keys(bank.items).length : 0;
+    const bankAmmo  = bank.ammo  ? Object.keys(bank.ammo ).length : 0;
+    const total = Number(s.coins||0);
+    return (invCount===0 && total===0 && bankCoins===0 && bankItems===0 && bankAmmo===0);
   }
 
-  function setOnHand(n){
-    const v = Math.max(0, n|0);
-    setLS('izzaCoins', String(v));
-    // Update core if available (this also refreshes the HUD pill)
-    try{ if(window.IZZA?.api?.setCoins) window.IZZA.api.setCoins(v); }catch(e){ warn('setCoins failed', e); }
-    // Fire change event so autosave and any UI listeners react
-    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
-    return v;
+  function unwrapSnapshot(d){ return d && d.snapshot ? d.snapshot : d; }
+
+  async function fetchSnapshotAuthoritative(u){
+    const urls = [
+      `/api/state/${encodeURIComponent(u)}?prefer=lastGood`,
+      `/api/state/${encodeURIComponent(u)}`
+    ];
+    for (let i=0;i<6;i++) urls.push(`/api/state/${encodeURIComponent(u)}?offset=${i}`);
+    for (const url of urls){
+      try{
+        const r = await fetch(url, { credentials:'omit', cache:'no-store' });
+        if (!r.ok) continue;
+        const raw  = await r.json();
+        const snap = unwrapSnapshot(raw);
+        if (snap && !isEmptyLike(snap)) return snap;
+      }catch(_){}
+    }
+    return null;
   }
 
-  // ---------- Bank mirror ----------
-  function bankKeyFor(user){ return `izzaBank_${user}`; }
-  function getBank(user){
-    const b = getJSON(bankKeyFor(user), { coins:0, items:{}, ammo:{} });
-    const coins = Math.max(0, (b && b.coins|0) || 0);
-    return { coins, items: (b && b.items)||{}, ammo:(b && b.ammo)||{} };
-  }
-  function setBank(user, next){
-    const clean = {
-      coins: Math.max(0, (next && next.coins|0) || 0),
-      items: (next && next.items)||{},
-      ammo:  (next && next.ammo) ||{}
-    };
-    setJSON(bankKeyFor(user), clean);
+  // ---------- write helpers ----------
+  function writeBankMirror(u, bank){
+    const clean = bank && typeof bank==='object'
+      ? { coins: clamp0(bank.coins), items: bank.items||{}, ammo: bank.ammo||{} }
+      : { coins:0, items:{}, ammo:{} };
+    setJSON(`izzaBank_${u}`, clean);
     try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
     return clean;
   }
-  function setBankCoins(user, coins){
-    const b = getBank(user);
-    b.coins = Math.max(0, coins|0);
-    return setBank(user, b);
+  function writeWallet(n){
+    const v = clamp0(n);
+    setLS('izzaCoins', String(v));
+    try{
+      if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins==='function'){
+        IZZA.api.setCoins(v);
+      }else{
+        const pill = document.getElementById('coinPill');
+        if (pill) pill.textContent = `Wallet: ${v} IC`;
+      }
+      window.dispatchEvent(new Event('izza-coins-changed'));
+    }catch(_){}
+    return v;
   }
 
-  // ---------- Moves ----------
-  function deposit(user, amount){
-    const amt = Math.max(0, amount|0);
-    if(!amt) return getBalances(user);
+  // ---------- pre-seed (fixes HUD showing 0 on first paint) ----------
+  (function preseed(){
+    const u = userKey();
+    const lg = getJSON(`izzaBankLastGood_${u}`, null);
+    if (!lg || isEmptyLike(lg)) return;
 
-    const you  = getOnHand();
-    const take = Math.min(you, amt); // can't deposit more than you hold
-    if (take<=0) return getBalances(user);
+    const total  = clamp0(lg.coins||0);                 // TOTAL
+    const bankC  = clamp0((lg.bank && lg.bank.coins)||0);
+    const wallet = clamp0(total - bankC);               // ON-HAND
 
-    const afterYou   = setOnHand(you - take);
-    const bank       = getBank(user);
-    const afterBank  = setBankCoins(user, bank.coins + take);
-
-    // Optional toast
-    try{ window.IZZA?.toast?.(`Deposited ${take} IC`); }catch{}
-    return { bank: afterBank.coins, you: afterYou };
-  }
-
-  function withdraw(user, amount){
-    const amt = Math.max(0, amount|0);
-    if(!amt) return getBalances(user);
-
-    const bank = getBank(user);
-    const take = Math.min(bank.coins, amt); // can't withdraw more than bank
-    if (take<=0) return getBalances(user);
-
-    const afterBank  = setBankCoins(user, bank.coins - take);
-    const afterYou   = setOnHand(getOnHand() + take);
-
-    // Optional toast
-    try{ window.IZZA?.toast?.(`Withdrew ${take} IC`); }catch{}
-    return { bank: afterBank.coins, you: afterYou };
-  }
-
-  function getBalances(user=resolveUser()){
-    const bank = getBank(user);
-    const you  = getOnHand();
-    return { bank: bank.coins, you };
-  }
-
-  // ---------- Init guards (no mutation on load) ----------
-  // Ensure both stores exist without altering values (prevents “double” effects).
-  (function initMirrors(){
-    const user = resolveUser();
-
-    // Bank mirror default
-    const hasBank = getJSON(bankKeyFor(user), null);
-    if(!hasBank){
-      setJSON(bankKeyFor(user), { coins:0, items:{}, ammo:{} });
-    }
-
-    // On-hand default (do NOT derive from totals here!)
-    const hasCoins = getLS('izzaCoins', null);
-    if(hasCoins==null) setLS('izzaCoins', '0');
+    writeBankMirror(u, lg.bank || {coins:0,items:{},ammo:{}});
+    writeWallet(wallet);
+    // store the boot total for reconciling inside the modal (prevents doubling)
+    setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   })();
 
-  // ---------- Public API ----------
-  window.izzaBankAPI = {
-    getBalances,
-    deposit: (n)=> deposit(resolveUser(), n|0),
-    withdraw: (n)=> withdraw(resolveUser(), n|0),
-    // direct accessors if a UI wants them:
-    _getOnHand: getOnHand,
-    _setOnHand: setOnHand,
-    _getBank: ()=> getBank(resolveUser()),
-    _setBankCoins: (n)=> setBankCoins(resolveUser(), n|0)
-  };
+  // ---------- apply snapshot once cores are ready ----------
+  function applySnapshot(snap, u){
+    const total  = clamp0(snap.coins||0);
+    const bankC  = clamp0((snap.bank && snap.bank.coins)||0);
+    const wallet = clamp0(total - bankC);
 
-  // ---------- Optional: keep HUD pill synced if core isn’t ready yet ----------
-  // If your core already updates the pill via setCoins, this is harmless.
-  function refreshCoinPill(){
-    const pill = document.getElementById('coinPill');
-    if(pill){
-      const you = getOnHand();
-      pill.textContent = `Coins: ${you} IC`;
+    writeBankMirror(u, snap.bank || {coins:0,items:{},ammo:{}});
+    writeWallet(wallet);
+    setJSON('izzaInventory', snap.inventory || {});
+    try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+
+    if (snap.player && typeof snap.player.heartsSegs==='number'){
+      setLS(`izzaCurHeartSegments_${u}`, String(clamp0(snap.player.heartsSegs)));
+      if (typeof window._redrawHeartsHud==='function'){ try{ window._redrawHeartsHud(); }catch(_){ } }
     }
-  }
-  document.addEventListener('DOMContentLoaded', refreshCoinPill, {once:true});
-  window.addEventListener('izza-coins-changed', refreshCoinPill);
 
-  log('ready');
+    // refresh boot total for the session
+    setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
+  }
+
+  // ---------- bank modal guard (prevents "double" on first withdraw) ----------
+  (function installBankModalGuard(){
+    // We observe when an element titled "IZZA Bank" appears and:
+    //  - Replace the header to show "Bank: X IC · Wallet: Y IC" (Wallet = on-hand)
+    //  - After any Deposit/Withdraw click, reconcile so bank+wallet stays == bootTotal
+    const u = userKey();
+    const mo = new MutationObserver(()=>{
+      const cards = Array.from(document.querySelectorAll('.modal .card'));
+      const bankCard = cards.find(c => /IZZA\s*Bank/i.test(c.textContent||''));
+      if (!bankCard) return;
+
+      // compute authoritative values
+      const bank  = getJSON(`izzaBank_${u}`, {coins:0,items:{},ammo:{}});
+      const wallet= clamp0(parseInt(getLS('izzaCoins')||'0',10));
+      const bootTotal = clamp0(parseInt(getLS(`izzaBootTotal_${u}`)||String(wallet+clamp0(bank.coins)),10));
+
+      // rewrite header line
+      const h = bankCard.querySelector('h3, h2, .card-title') || bankCard.querySelector('div');
+      if (h) {
+        // Try to find the line where "Bank: ... · You: ..." lives and rewrite it.
+        // If none, append a small line under the title.
+        let headerLine = bankCard.querySelector('[data-izza-bank-header]');
+        if (!headerLine){
+          headerLine = document.createElement('div');
+          headerLine.setAttribute('data-izza-bank-header','1');
+          headerLine.style.cssText = 'margin-top:6px;opacity:.9';
+          h.insertAdjacentElement('afterend', headerLine);
+        }
+        headerLine.textContent = `Bank: ${clamp0(bank.coins)} IC · Wallet: ${wallet} IC`;
+      }
+
+      // after a click on buttons that look like deposit/withdraw, reconcile
+      const root = bankCard;
+      const clickHandler = async (ev)=>{
+        const btn = ev.target.closest('button');
+        if (!btn) return;
+
+        const label = (btn.textContent||'').trim().toLowerCase();
+        if (!/deposit|withdraw/.test(label)) return;
+
+        // Let existing handlers run and update LS first
+        setTimeout(()=>{
+          const bankNow   = getJSON(`izzaBank_${u}`, {coins:0,items:{},ammo:{}});
+          let walletNow   = clamp0(parseInt(getLS('izzaCoins')||'0',10));
+          let bankCoinsNow= clamp0(bankNow.coins);
+
+          // Reconcile to keep sum == bootTotal
+          const sum = walletNow + bankCoinsNow;
+          if (sum !== bootTotal){
+            // If sum grew/shrank (e.g. loot or spend), adopt new total for rest of session
+            if (Math.abs(sum - bootTotal) > 0){
+              setLS(`izzaBootTotal_${u}`, String(sum));
+            } else {
+              // Clamp bank to maintain bootTotal
+              bankCoinsNow = clamp0(bootTotal - walletNow);
+              writeBankMirror(u, {coins:bankCoinsNow, items:bankNow.items||{}, ammo:bankNow.ammo||{}});
+            }
+          }
+
+          // refresh header text with final numbers
+          const headerLine = root.querySelector('[data-izza-bank-header]');
+          if (headerLine){
+            headerLine.textContent = `Bank: ${clamp0(bankCoinsNow)} IC · Wallet: ${clamp0(parseInt(getLS('izzaCoins')||'0',10))} IC`;
+          }
+        }, 0);
+      };
+
+      // attach once per card instance
+      if (!bankCard.__izzaBankGuardInstalled){
+        bankCard.addEventListener('click', clickHandler, true);
+        bankCard.__izzaBankGuardInstalled = true;
+      }
+    });
+
+    mo.observe(document.documentElement, { childList:true, subtree:true });
+  })();
+
+  // ---------- boot (wait for cores) ----------
+  async function hydrateAfterCores(){
+    overlay.style.display='flex';
+
+    // Wait for core "ready" or 1s
+    const ready = new Promise(async (resolve)=>{
+      if (window.IZZA && window.IZZA.api && window.IZZA.api.ready) return resolve();
+      const handler = ()=> resolve();
+      try{ (window.IZZA = window.IZZA || {}).on?.('ready', handler); }catch(_){}
+      await sleep(1000); resolve();
+    });
+    await ready;
+
+    await sleep(250); // let tier/map settle
+
+    const u = userKey();
+    let snap = null;
+    try{ snap = await fetchSnapshotAuthoritative(u); }catch(_){}
+    if (!snap){
+      const lg = getJSON(`izzaBankLastGood_${u}`, null);
+      if (lg && !isEmptyLike(lg)) snap = lg;
+    }
+
+    if (!snap || isEmptyLike(snap)){
+      overlay.style.display='none';
+      return;
+    }
+
+    setJSON(`izzaBankLastGood_${u}`, snap);  // cache
+    applySnapshot(snap, u);
+
+    overlay.style.display='none';
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', hydrateAfterCores, {once:true});
+  }else{
+    hydrateAfterCores();
+  }
 })();
 </script>
