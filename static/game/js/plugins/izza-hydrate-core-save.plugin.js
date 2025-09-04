@@ -1,4 +1,5 @@
-// /static/game/js/plugins/izza-hydrate-core-save.plugin.js
+<!-- /static/game/js/plugins/izza-hydrate-core-save.plugin.js -->
+<script>
 (function(){
   // ===== tiny "restoring" overlay =====
   const overlay = document.createElement('div');
@@ -70,14 +71,19 @@
     setLSJSON(LASTGOOD_LS, snap);
 
     // Bank (mirror for other plugins)
+    const bankCoins = (snap.bank && (snap.bank.coins|0)) || 0;
     setLSJSON(BANK_KEY, {
-      coins: (snap.bank && (snap.bank.coins|0)) || 0,
+      coins: bankCoins,
       items: (snap.bank && snap.bank.items) || {},
       ammo:  (snap.bank && snap.bank.ammo)  || {}
     });
 
-    // === NEW: hydrate on-hand coins from snapshot via core ===
-    const coinsOnHand = (snap.coins|0) || 0;
+    // === On-hand coins semantics ===
+    // snapshot.coins = TOTAL coins (on-hand + bank)
+    // on-hand = max(0, snapshot.coins - bank.coins)
+    const totalCoins  = (snap.coins|0) || 0;
+    const coinsOnHand = Math.max(0, totalCoins - bankCoins);
+
     if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
       try { IZZA.api.setCoins(coinsOnHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
     } else {
@@ -104,19 +110,17 @@
     // Hearts (optional)
     if (snap.player && typeof snap.player.heartsSegs === 'number'){
       setLS(`izzaCurHeartSegments_${USER}`, String(snap.player.heartsSegs|0));
-      // custom HUD hook if present
       if (typeof window._redrawHeartsHud === 'function') {
         try { window._redrawHeartsHud(); } catch {}
       }
     }
 
-    // Position: cores read from IZZA.api or internal player; expose a gentle nudge:
+    // Position nudge
     if (window.IZZA && window.IZZA.api && window.IZZA.api.player && snap.player) {
       const p = window.IZZA.api.player;
       if (typeof snap.player.x === 'number') p.x = snap.player.x;
       if (typeof snap.player.y === 'number') p.y = snap.player.y;
       if (window.IZZA.api.doorSpawn) {
-        // keep camera sane after teleports
         try {
           window.IZZA.api.camera.x = p.x - 200;
           window.IZZA.api.camera.y = p.y - 120;
@@ -132,8 +136,7 @@
   async function hydrateAfterGameSettles(){
     addOverlay();
 
-    // 1) Wait for cores to say they're ready (Core v3 emits IZZA.emit('ready'))
-    //    If not present, just wait a bit.
+    // 1) Wait for cores to say they're ready
     let readySeen = false;
     const waitReady = new Promise(async (resolve)=>{
       if (window.IZZA && window.IZZA.api && window.IZZA.api.ready) {
@@ -143,20 +146,17 @@
       try {
         (window.IZZA = window.IZZA || {}).on?.('ready', handler);
       } catch {}
-      // fallback: 1s
       await sleep(1000);
       resolve();
     });
     await waitReady;
 
-    // 2) Allow the map expander / refresh to run first.
-    //    We wait for a few render cycles + fixed delay so tier changes settle.
-    //    Also listen for an IZZA 'update-post' tick to ensure at least a frame.
+    // 2) Let map expander / first frames settle
     let gotTick = false;
     const onTick = ()=>{ gotTick = true; };
     try { (window.IZZA = window.IZZA || {}).on?.('update-post', onTick); } catch {}
-    await waitFrames(6);       // ~6 frames
-    await sleep(450);          // settle UI / images
+    await waitFrames(6);
+    await sleep(450);
     if (!gotTick) await waitFrames(6);
 
     const USER = userName();
@@ -165,7 +165,6 @@
     let snap = null;
     try { snap = await fetchSnapshot(USER); } catch {}
     if (!snap) {
-      // fallback to local LastGood mirror if present
       const localLG = getLSJSON(`izzaBankLastGood_${USER}`, null);
       if (localLG && !isEmptySnapshot(localLG)) snap = localLG;
     }
@@ -176,10 +175,9 @@
       return;
     }
 
-    // 4) Apply to cores and legacy keys
+    // 4) Apply
     applySnapshot(snap, USER);
 
-    // tiny grace to avoid flicker while HUD updates
     await waitFrames(2);
     removeOverlay();
   }
@@ -191,3 +189,4 @@
     hydrateAfterGameSettles();
   }
 })();
+</script>
