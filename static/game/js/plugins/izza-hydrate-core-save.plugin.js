@@ -78,20 +78,25 @@
       ammo:  (snap.bank && snap.bank.ammo)  || {}
     });
 
-    // === On-hand coins semantics ===
-    // snapshot.coins = TOTAL coins (on-hand + bank)
-    // on-hand = max(0, snapshot.coins - bank.coins)
-    const totalCoins  = (snap.coins|0) || 0;
-    const coinsOnHand = Math.max(0, totalCoins - bankCoins);
+    // === Coins semantics (dual-format tolerant) ===
+    // If snapshot.coins >= bank.coins ⇒ snapshot.coins is TOTAL, on-hand = total - bank
+    // If snapshot.coins <  bank.coins ⇒ snapshot.coins is ON-HAND, on-hand = snapshot.coins
+    const coinsField = (snap.coins|0) || 0;
+    let onHand;
+    if (coinsField >= bankCoins) {
+      onHand = Math.max(0, coinsField - bankCoins);
+    } else {
+      onHand = coinsField; // treat as on-hand (matches your current snapshot format)
+    }
 
     if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
-      try { IZZA.api.setCoins(coinsOnHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
+      try { IZZA.api.setCoins(onHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
     } else {
       // Fallback to LS + pill if core setter isn't ready yet
       try {
-        setLS('izzaCoins', String(coinsOnHand));
+        setLS('izzaCoins', String(onHand));
         const pill = document.getElementById('coinPill');
-        if(pill) pill.textContent = `Coins: ${coinsOnHand} IC`;
+        if(pill) pill.textContent = `Coins: ${onHand} IC`;
       } catch(e){}
     }
     // Let autosave & listeners react
@@ -101,7 +106,7 @@
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
-      coins: coinsOnHand,
+      coins: onHand,
       missionsCompleted: missions,
       inventory: invList
     });
