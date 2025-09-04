@@ -1,13 +1,17 @@
-// index.js — IZZA persistence service (rotation + LastGood + CORS + healthz)
-// Node 18+ (CommonJS)
+// index.js — IZZA persistence service (ESM)
+// - Stores per-user snapshots under /var/data/izza/players
+// - Keeps history (last 5) and a .lastgood.json that never gets overwritten by empty saves
+// - Endpoints:
+//     GET  /healthz
+//     GET  /api/state/:username
+//     GET  /api/state/:username?prefer=lastGood
+//     POST /api/state/:username
 
-const path    = require('path');
-const fs      = require('fs').promises;
-const express = require('express');
-const morgan  = require('morgan');
-const cors    = require('cors');
-
-const app = express();
+import express from 'express';
+import morgan from 'morgan';
+import cors from 'cors';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 // ---------- storage config ----------
 const ROOT = process.env.DATA_DIR || '/var/data/izza/players';
@@ -15,8 +19,7 @@ const HISTORY_DEPTH = 5;
 
 async function ensureDir() { await fs.mkdir(ROOT, { recursive: true }); }
 function normUser(u){ return String(u||'').trim().toLowerCase().replace(/[^a-z0-9_\-\.]/g,''); }
-
-function filePath(base, suffix){ return path.join(ROOT, `${base}${suffix||''}.json`); }
+function filePath(base, suffix=''){ return path.join(ROOT, `${base}${suffix}.json`); }
 
 async function readJSON(file){
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return null; }
@@ -28,7 +31,7 @@ async function writeJSON(file, obj){
 function isPlainObject(o){ return !!o && typeof o==='object' && !Array.isArray(o); }
 function isEmptySnapshot(snap){
   if(!isPlainObject(snap)) return true;
-  if(snap.version !== 1) return false; // future versions: treat as non-empty
+  if(snap.version !== 1) return false; // unknown future versions: treat as non-empty
   const coins    = (snap.coins|0) || 0;
   const invEmpty = !isPlainObject(snap.inventory) || Object.keys(snap.inventory).length===0;
   const b        = isPlainObject(snap.bank) ? snap.bank : {};
@@ -40,12 +43,11 @@ function isEmptySnapshot(snap){
 }
 
 async function rotateHistory(base){
-  // .(HISTORY_DEPTH-1) -> .HISTORY_DEPTH
   for(let i=HISTORY_DEPTH-1;i>=1;i--){
-    const src=filePath(base, `.${i}`), dst=filePath(base, `.${i+1}`);
+    const src=filePath(base, `.${i}`);
+    const dst=filePath(base, `.${i+1}`);
     try{ await fs.rename(src,dst); }catch{}
   }
-  // current -> .1
   try{ await fs.rename(filePath(base,''), filePath(base,'.1')); }catch{}
 }
 
@@ -62,14 +64,15 @@ async function readBest(base, preferLastGood){
   return latest || lastGood || null;
 }
 
-// ---------- middleware ----------
+// ---------- app ----------
+const app = express();
 app.use(cors());
 app.use(morgan('combined'));
-// accept normal JSON and also text/plain (Safari sendBeacon)
+
+// accept JSON and Safari/Pi sendBeacon text payloads
 app.use(express.json({ limit:'1mb' }));
 app.use(express.text({ type: ['text/plain','application/octet-stream'], limit:'1mb' }));
 
-// ---------- routes ----------
 app.get('/healthz', (_req,res)=> res.json({ ok:true }));
 
 app.get('/api/state/:username', async (req,res)=>{
@@ -77,8 +80,10 @@ app.get('/api/state/:username', async (req,res)=>{
     await ensureDir();
     const user = normUser(req.params.username);
     if(!user) return res.status(400).json({ error:'bad-username' });
+
     const preferLastGood = req.query.prefer === 'lastGood';
     const best = await readBest(user, preferLastGood);
+
     if(!best) return res.status(404).json({ error:'not-found' });
     res.set('Cache-Control','no-store');
     res.json(best);
@@ -103,7 +108,7 @@ app.post('/api/state/:username', async (req,res)=>{
     const stamped = { ...incoming, timestamp: Date.now(), version: 1 };
 
     if(isEmptySnapshot(stamped)){
-      // do NOT overwrite lastGood on empty saves
+      // don’t overwrite lastGood on empty saves
       return res.status(202).json({ ok:true, ignored:true, reason:'empty-snapshot' });
     }
 
@@ -118,4 +123,4 @@ app.post('/api/state/:username', async (req,res)=>{
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, ()=> console.log(`IZZA persistence on ${PORT}`));
+app.listen(PORT, ()=> console.log(`IZZA persistence on ${PORT} (root=${ROOT})`));
