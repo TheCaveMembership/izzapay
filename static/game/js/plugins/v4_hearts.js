@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v4_hearts.js
 (function () {
-  const BUILD = 'v4.3-hearts-plugin+svg-hearts+low-blink';
+  const BUILD = 'v4.3-hearts-plugin+svg-hearts+low-blink+pvp-isolation';
   console.log('[IZZA PLAY]', BUILD);
 
   const LS = {
@@ -29,8 +29,8 @@
       player.heartSegs = player.maxHearts * 3;
       setCurSegs(player.heartSegs, player.maxHearts);
     }
-    drawDOMHearts();
-    placeHeartsHud();
+    drawDOMHearts();  // initial draw
+    placeHeartsHud(); // and position
   }
   function healFull(){
     player.heartSegs = player.maxHearts * 3;
@@ -38,6 +38,11 @@
     drawDOMHearts();
   }
   function takeDamageSegs(n=1){
+    // If a PvP duel is active, DO NOT touch normal hearts or death/respawn.
+    if (window.__IZZA_DUEL && window.__IZZA_DUEL.active) {
+      try { if (window.IZZA && IZZA.emit) IZZA.emit('pvp-cop-damage', { segs:n }); } catch {}
+      return;
+    }
     player.heartSegs = Math.max(0, player.heartSegs - n);
     setCurSegs(player.heartSegs, player.maxHearts);
     drawDOMHearts();
@@ -180,21 +185,21 @@
 
   // ===================================================================
   //                 Cop melee (1/3 heart per 2s in range)
-  //                 PAUSED during PvP duels
   // ===================================================================
   function attachCopMelee(){
     IZZA.on('update-post', ({ now })=>{
       if (!api) return;
-
-      // Pause world-damage while PvP duel is active; duel client handles duel hearts
-      if (window.__IZZA_DUEL && window.__IZZA_DUEL.active) return;
-
       const atkRange = 26, cd = 2000;
       for (const c of cops){
         c._nextAtk ??= now;
         const dist = Math.hypot(player.x - c.x, player.y - c.y);
         if (dist <= atkRange && now >= c._nextAtk){
-          takeDamageSegs(1); // 1 segment = 1/3 heart (as before)
+          // During PvP duel: send damage to duel hearts only
+          if (window.__IZZA_DUEL && window.__IZZA_DUEL.active) {
+            try { IZZA.emit('pvp-cop-damage', { segs:1 }); } catch {}
+          } else {
+            takeDamageSegs(1); // normal world damage
+          }
           c._nextAtk = now + cd;
         }
       }
