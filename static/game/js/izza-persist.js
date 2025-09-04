@@ -1,4 +1,4 @@
-<script>
+
 /* IZZA Persist v2 — posts/loads per-user state to your Node service
    Requires: window.IZZA_PERSIST_BASE (e.g. https://izzagame.onrender.com)
    Reads the same LS keys shown in Diagnostics so the snapshot matches your UI.
@@ -199,4 +199,3 @@
   });
 
 })();
-</script>
