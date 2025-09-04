@@ -1,5 +1,5 @@
 (function(){
-  const API_BASE = 'https://izzagame.onrender.com';
+  const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'') || '';
   function uname(){ return (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase(); }
   function heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
   function getHeartSegs(){
