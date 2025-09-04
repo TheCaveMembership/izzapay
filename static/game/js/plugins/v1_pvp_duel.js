@@ -1,13 +1,15 @@
-// PvP Duel Client — v6.1
+// PvP Duel Client — v7.0
 // - Real opponent sprite via remote_players_api.js (kept)
-// - Far-apart spawns (A/B roles), unique per player & per round (kept)
-// - Countdown fires once; add 5s preload hold before countdown; block firing until GO
-// - Hearts HUD bridge (kept)
+// - Far-apart spawns per player & per round (kept)
+// - 5s preload hold, single countdown; fire blocked until GO (kept)
+// - Hearts HUD bridge + low-life blink (kept)
 // - Hitscan + tracers clamp at impact (no pass-through look) (kept)
-// - MIRRORED COPS: draw as real sprites (police/swat/military) instead of capsules
-// - Cleanup: remove remote sprite on match end, bounce to lobby (kept, hardened)
+// - MIRRORED COPS: draw as real sprites (police/swat/military) (kept)
+// - NEW: Show opponent's equipped weapon overlay (and vice versa)
+// - NEW: Networked visual effects: share tracers/sparks so the opponent sees them
+// - NEW: Hardened cleanup for loser: remove remote sprite, bounce to lobby
 (function(){
-  const BUILD='v6.1-duel-client';
+  const BUILD='v7.0-duel-client';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -105,7 +107,7 @@
       const ratio = segForHeart / 3;
       const svgNS='http://www.w3.org/2000/svg';
       const wrap=document.createElement('div'); wrap.style.width='24px'; wrap.style.height='22px';
-      if(i===Math.floor((seg-1)/3) && seg<=3){ wrap.className='heart-blink'; } // low-life blink on the last heart
+      if(i===Math.floor((seg-1)/3) && seg<=3){ wrap.className='heart-blink'; } // low-life blink
       const svg=document.createElementNS(svgNS,'svg'); svg.setAttribute('viewBox','0 0 24 22'); svg.setAttribute('width','24'); svg.setAttribute('height','22');
       const base=document.createElementNS(svgNS,'path'); base.setAttribute('d',HEART_PATH); base.setAttribute('fill','#3a3f4a');
       const clip=document.createElementNS(svgNS,'clipPath'); const clipId='hclip_'+Math.random().toString(36).slice(2); clip.setAttribute('id',clipId);
@@ -114,7 +116,6 @@
       const red=document.createElementNS(svgNS,'path'); red.setAttribute('d',HEART_PATH); red.setAttribute('fill','#ff5555'); red.setAttribute('clip-path',`url(#${clipId})`);
       svg.appendChild(base); svg.appendChild(clip); svg.appendChild(red); wrap.appendChild(svg); hud.appendChild(wrap);
     }
-    // inject blink CSS once
     if(!document.getElementById('heartBlinkCSS')){
       const st=document.createElement('style'); st.id='heartBlinkCSS';
       st.textContent=`@keyframes heartBlink{0%,100%{filter:drop-shadow(0 0 0 rgba(255,90,90,.0))}50%{filter:drop-shadow(0 0 10px rgba(255,90,90,.9))}}
@@ -180,7 +181,7 @@
     setTimeout(()=>{ card.style.transform='scale(.96)'; card.style.opacity='0'; setTimeout(()=>card.remove(),260); }, 1600);
   }
 
-  // ---------- NPC sheet loading for mirrored cops ----------
+  // ---------- NPC sheets for mirrored cops ----------
   const NPC_SRC = {
     police:   '/static/game/sprites/izza_police_sheet.png',
     swat:     '/static/game/sprites/izza_swat_sheet.png',
@@ -200,7 +201,6 @@
     const row = DIR_INDEX[facing]||0;
     const FRAME_W=32, FRAME_H=32;
     ctx.imageSmoothingEnabled=false;
-    // idle frame = column 0
     ctx.drawImage(pack.img, 0, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, S,S);
   }
 
@@ -212,13 +212,14 @@
     pollMs:125, timer:null, flip:false,
     myHP:null,
     oppCops:[],
+    oppEquipped:'hand',
     lastRoundNum:0,
     usernames:['',''],
     meIsA:false,
-    effects:[],
+    effects:[],        // local + received
     started:false,
     hooksInstalled:false,
-    canFire:false // blocked until GO
+    canFire:false
   };
 
   // ---------- polling ----------
@@ -242,6 +243,7 @@
       x: api.player.x, y: api.player.y, facing: api.player.facing || 'down',
       hp: DUEL.myHP==null ? 4 : DUEL.myHP,
       inv: readInv(),
+      equipped: equippedKind(),                // << share live equipped weapon
       appearance: (IZZA.api.getAppearance && IZZA.api.getAppearance()),
       cops: copyMyCops()
     };
@@ -256,6 +258,13 @@
     if(j.opponent){
       DUEL.oppName = j.opponent.username || DUEL.oppName || 'Opponent';
       DUEL.opp.x = (j.opponent.x|0); DUEL.opp.y=(j.opponent.y|0); DUEL.opp.facing=j.opponent.facing||'down';
+      DUEL.oppEquipped = j.opponent.equipped || (j.opponent.inv&&(
+          j.opponent.inv.uzi?.equipped ? 'uzi' :
+          j.opponent.inv.pistol?.equipped ? 'pistol' :
+          j.opponent.inv.grenade?.equipped ? 'grenade' :
+          j.opponent.inv.bat?.equipped ? 'bat' :
+          j.opponent.inv.knuckles?.equipped ? 'knuckles' : 'hand'
+      )) || 'hand';
       if(!DUEL.oppSprite && IZZA.api.addRemotePlayer){
         DUEL.oppSprite = IZZA.api.addRemotePlayer({ username: DUEL.oppName, appearance: j.opponent.appearance || {} });
       }
@@ -266,9 +275,22 @@
       DUEL.myHP = j.me.hp;
       saveSegmentsFromHP(DUEL.myHP);
       drawHeartsDOM(DUEL.myHP);
+      // Fallback: if server doesn't send round-over but I'm dead, ensure exit
+      if(DUEL.myHP<=0 && !j.round){ setTimeout(()=>{ showBanner('You were defeated', 'lose'); bounceToLobby(); cleanupDuel(); }, 650); return; }
     }
 
     DUEL.oppCops = Array.isArray(j.opponentCops) ? j.opponentCops.slice(0,6) : [];
+
+    // Received effects from opponent (tracers/sparks)
+    if(Array.isArray(j.effects)){
+      for(const e of j.effects){
+        if(e.type==='tracer' && e.p){
+          DUEL.effects.push({ kind:'tracer', x1:e.p.x1, y1:e.p.y1, x2:e.p.x2, y2:e.p.y2, t:0, life:110 });
+        }else if(e.type==='spark' && e.p){
+          DUEL.effects.push({ kind:'spark', x:e.p.x, y:e.p.y, t:0, life:140 });
+        }
+      }
+    }
 
     if(j.round){
       const rn = j.round.number|0;
@@ -283,7 +305,6 @@
         IZZA.api.player.x = mySpot.x; IZZA.api.player.y = mySpot.y; IZZA.api.player.facing = mySpot.facing || 'down';
         DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
         showBanner(`Round ${rn} — FIGHT!`, 'round');
-        // re-arm firing only after the GO banner of this round (handled by countdown in begin)
       }
 
       if(j.round.justEnded){
@@ -314,12 +335,11 @@
 
   function cleanupDuel(){
     stopPolling();
-    // remove remote sprite if the engine exposes remover
     try{
       if(DUEL.oppSprite && IZZA.api.removeRemotePlayer){ IZZA.api.removeRemotePlayer(DUEL.oppSprite); }
     }catch{}
     DUEL.mid=null; DUEL.oppCops.length=0; DUEL.oppSprite=null; DUEL.effects.length=0;
-    DUEL.started=false; DUEL.hooksInstalled=false; DUEL.lastRoundNum=0; DUEL.canFire=false;
+    DUEL.started=false; DUEL.hooksInstalled=false; DUEL.lastRoundNum=0; DUEL.canFire=false; DUEL.oppEquipped='hand';
     window.__IZZA_DUEL = { active:false };
   }
 
@@ -363,9 +383,13 @@
 
   function addTracer(from, to, life=110){
     DUEL.effects.push({ kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y, t:0, life });
+    // share to opponent
+    $post('/duel/effect', { matchId: DUEL.mid, type:'tracer', p:{ x1:from.x, y1:from.y, x2:to.x, y2:to.y } });
   }
   function addSpark(at, life=140){
     DUEL.effects.push({ kind:'spark', x:at.x, y:at.y, t:0, life });
+    // share to opponent
+    $post('/duel/effect', { matchId: DUEL.mid, type:'spark', p:{ x:at.x, y:at.y } });
   }
 
   function sendHit(kind){
@@ -438,13 +462,12 @@
     return Math.hypot(m.x-o.x, m.y-o.y) <= 24;
   }
 
-  // ---------- begin (with 5s preload hold + single start guard) ----------
+  // ---------- begin (5s preload + single countdown) ----------
   async function resolveMeUsername(){
     const j = await $get('/me');
     if(j && j.username) return j.username;
     return (IZZA?.api?.user?.username) || (window.__MP_LAST_ME && window.__MP_LAST_ME.username) || '';
   }
-
   function onceSceneReady(cb){
     let tries=0;
     (function wait(){
@@ -485,7 +508,7 @@
       DUEL.myHP = 4; saveSegmentsFromHP(DUEL.myHP); drawHeartsDOM(DUEL.myHP);
 
       DUEL.mid = String(matchId); DUEL.mode = mode; DUEL.started = true; DUEL.lastRoundNum = 1;
-      DUEL.canFire = false; // block until GO
+      DUEL.canFire = false;
       window.__IZZA_DUEL = { active:true, mode, matchId };
       startPolling();
       setTimeout(installHitHooks, 60);
@@ -503,7 +526,6 @@
         hold.innerHTML='<div style="background:rgba(6,10,18,.65);border:1px solid #2a3550;border-radius:14px;color:#cfe0ff;font-weight:800;font-family:system-ui,Arial,sans-serif;padding:12px 18px">Preparing match…</div>';
         setTimeout(()=>{ hold.remove(); showCountdown(3, ()=>{ DUEL.canFire = true; showBanner(`1v1 vs ${oppName}`, 'round'); }); }, 5000);
       }else{
-        // fallback if canvas not found
         setTimeout(()=> showCountdown(3, ()=>{ DUEL.canFire = true; showBanner(`1v1 vs ${oppName}`, 'round'); }), 5000);
       }
     });
@@ -528,10 +550,11 @@
     },500);
   }
 
-  // ---------- render: minimap + mirrored cops (as sprites) + effects ----------
+  // ---------- render: minimap + mirrored cops + effects + opp weapon overlay ----------
   IZZA.on?.('render-post', ({dtSec})=>{
     try{
       if(!DUEL.mid) return;
+
       updateMinimapDot(DUEL.opp.x, DUEL.opp.y);
 
       // MIRRORED COPS as sprites
@@ -546,13 +569,35 @@
           if(pack && pack.img){
             drawSprite(ctx, pack, c.facing||'down', sx, sy, S);
           }else{
-            // lazy-load once and draw a colored box for this frame
             ensureNpc(kind);
             ctx.fillStyle = kind==='military' ? '#3e8a3e' : kind==='swat' ? '#0a0a0a' : '#0a2455';
             ctx.fillRect(sx+S*0.18, sy+S*0.18, S*0.64, S*0.64);
           }
         }
         ctx.restore();
+      }
+
+      // Opponent held-weapon overlay (matches core visual language)
+      if(DUEL.oppSprite){
+        const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
+        const ctx=cvs.getContext('2d'); const S=api.DRAW, scale=S/api.TILE;
+        const sx=(DUEL.opp.x - api.camera.x)*scale, sy=(DUEL.opp.y - api.camera.y)*scale;
+        const weapon = DUEL.oppEquipped || 'hand';
+        if(weapon!=='hand'){
+          const w=Math.floor(S*0.30), h=Math.floor(S*0.12);
+          if(weapon==='bat')      ctx.fillStyle='#8b5a2b';
+          else if(weapon==='knuckles') ctx.fillStyle='#cfcfcf';
+          else if(weapon==='pistol')   ctx.fillStyle='#202833';
+          else if(weapon==='uzi')      ctx.fillStyle='#0b0e14';
+          else if(weapon==='grenade'){ ctx.fillStyle='#5b7d61'; ctx.fillRect(sx+S*0.45, sy+S*0.34, Math.floor(S*0.12), Math.floor(S*0.12)); }
+          if(weapon!=='grenade'){
+            const f=DUEL.opp.facing||'down';
+            if(f==='down')      ctx.fillRect(sx + S*0.55, sy + S*0.65, w, h);
+            else if(f==='up')   ctx.fillRect(sx + S*0.10, sy + S*0.25, w, h);
+            else if(f==='left') ctx.fillRect(sx + S*0.10, sy + S*0.55, w, h);
+            else                ctx.fillRect(sx + S*0.60, sy + S*0.55, w, h);
+          }
+        }
       }
 
       // effects (tracers/sparks)
