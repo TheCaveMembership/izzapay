@@ -697,6 +697,14 @@
     }
   }
 
+  // Refresh inventory UI if it's open when bank contents change
+window.addEventListener('izza-bank-changed', ()=>{
+  const host = document.getElementById('invPanel');
+  if(host && host.style.display!=='none'){
+    try{ renderInventoryPanel(); }catch(e){ console.error(e); }
+  }
+});
+
   // ===== NPCs & cars =====
   const pedestrians=[];
   const cars=[];        // {x,y,dir,spd,kind}
@@ -1233,7 +1241,8 @@
       ready: true
     };
     IZZA.emit('ready', IZZA.api);
-
+// If the map plugin exposed the HUD redraw, sync hearts from saved state now
+if (typeof window._redrawHeartsHud === 'function') { try{ window._redrawHeartsHud(); }catch{} }
     setCoins(getCoins());
     centerCamera();
 
