@@ -1,17 +1,14 @@
-// PvP Duel Client — v4.2
+// PvP Duel Client — v4.6
 // - REAL opponent sprite via remote_players_api.js (unchanged)
-// - Opposite-sidewalk safe spawns (per round salt -> different spot each round)
+// - Spawn logic: per-round, far-apart, deterministic by (matchId, round, sorted usernames)
 // - Red-dot minimap (unchanged)
-// - Hearts HUD bridge -> updates localStorage segs so v4_hearts.js reflects server HP
-// - Reliable hits: hitscan geometry (pistol/uzi/grenade) + melee range
-// - Mobile melee: hook btnA too
-// - Knuckles key matches core inventory ("knuckles")
-// - Mirror cops: share your active cops to opponent; render their cops on your side
-// - Round UI: best-of-3 (reads round/score from server) with centered canvas banners
-// - Visual tracers + hit-sparks so bullets no longer look like they pass through
-// - Match end: bounce back to MP building with lobby open
+// - Hearts HUD bridge (unchanged; updates localStorage segs)
+// - Reliable hits: hitscan + melee range
+// - Mobile melee: hook btnA
+// - Tracers + impact sparks, and NOW pistol tracers STOP on hit (no follow-through)
+// - Match flow: round banners centered, Bo3, bounce to lobby at end
 (function(){
-  const BUILD='v4.2-duel-client';
+  const BUILD='v4.6-duel-client';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -22,48 +19,80 @@
   async function $post(p,b){ try{ const r=await fetch(withTok(BASE+p),{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}); return r.ok? r.json():null; }catch{ return null; } }
   async function $get(p){ try{ const r=await fetch(withTok(BASE+p),{credentials:'include'}); return r.ok? r.json():null; }catch{ return null; } }
 
-  // ---- unlocked + sidewalks (match core) ----
+  // ---------- RNG helpers ----------
+  function hash32(str){
+    let h=2166136261>>>0;
+    for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); }
+    h^=h<<13; h^=h>>>17; h^=h<<5;
+    return (h>>>0);
+  }
+  function hash01(str){ return (hash32(String(str)) % 100000) / 100000; }
+  function choice(arr, seed){ if(!arr.length) return null; const i = Math.floor(hash01(seed)*arr.length); return arr[i]; }
+
+  // ---------- map helpers (match core) ----------
   function unlockedRect(tier){ return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 } : { x0:18, y0:18, x1:72, y1:42 }; }
-  function chooseAxis(seed){ return hash01(seed,'axis') >= 0.5; } // true=top/bottom, false=left/right
-  function sideAssignment(seed, players){
-    const a = norm(players[0]?.username), b = norm(players[1]?.username);
-    const sorted = [a,b].sort(); const flip = hash01(seed,'flip') >= 0.5;
-    return { leftTop: (flip?sorted[1]:sorted[0]), rightBottom: (flip?sorted[0]:sorted[1]) };
-  }
-  function hash01(str,salt){
-    let h=2166136261>>>0, s=(String(str)+'|'+(salt||'')); for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); }
-    h^=h<<13; h^=h>>>17; h^=h<<5; return ((h>>>0)%100000)/100000;
-  }
-  function sidewalkSpawns(api, matchId, amLeftTop, roundNum){
+
+  // Build a set of widely separated spawn candidates along sidewalks
+  function buildSpawnCandidates(api){
+    const t=api.TILE;
     const tier = localStorage.getItem('izzaMapTier') || '2';
     const un   = unlockedRect(tier);
-    const t    = api.TILE;
     const hRoadY = api.hRoadY, vRoadX = api.vRoadX;
     const sidewalkTopY = hRoadY - 1, sidewalkBotY = hRoadY + 1;
     const leftX  = vRoadX - 1, rightX = vRoadX + 1;
 
-    const axisTB = chooseAxis(String(matchId));
-    function randSpan(a,b, salt){
-      const span = Math.max(1, (b-a));
-      const r = hash01(String(matchId)+'|r'+roundNum, salt);
-      return a + Math.floor(r*span);
+    // four bands: top/bottom rows, left/right cols — sample several evenly spaced points
+    function linspace(a,b,n){
+      const out=[]; const span=(b-a)/(n-1);
+      for(let i=0;i<n;i++) out.push(Math.round(a+i*span));
+      return out;
     }
-    if(axisTB){
-      const gxTop = randSpan(un.x0+3, un.x1-3, amLeftTop?'topA':'topB');
-      const gxBot = randSpan(un.x0+3, un.x1-3, amLeftTop?'botB':'botA');
-      const me  = amLeftTop ? { x: gxTop*t, y: sidewalkTopY*t, facing:'down' } : { x: gxBot*t, y: sidewalkBotY*t, facing:'up' };
-      const opp = amLeftTop ? { x: gxBot*t, y: sidewalkBotY*t, facing:'up' }   : { x: gxTop*t, y: sidewalkTopY*t, facing:'down' };
-      return { me, opp };
-    }else{
-      const gyL = randSpan(un.y0+3, un.y1-3, amLeftTop?'leftA':'leftB');
-      const gyR = randSpan(un.y0+3, un.y1-3, amLeftTop?'rightB':'rightA');
-      const me  = amLeftTop ? { x: leftX*t,  y: gyL*t, facing:'right' } : { x: rightX*t, y: gyR*t, facing:'left' };
-      const opp = amLeftTop ? { x: rightX*t, y: gyR*t, facing:'left' }  : { x: leftX*t,  y: gyL*t, facing:'right' };
-      return { me, opp };
-    }
+    const nPts = 10; // enough variation
+    const gxTop = linspace(un.x0+3, un.x1-3, nPts);
+    const gxBot = linspace(un.x0+3, un.x1-3, nPts);
+    const gyL   = linspace(un.y0+3, un.y1-3, nPts);
+    const gyR   = linspace(un.y0+3, un.y1-3, nPts);
+
+    const cand = [];
+    gxTop.forEach(gx=> cand.push({ x: gx*t, y: sidewalkTopY*t, facing:'down' , band:'top',  key:`T${gx}` }));
+    gxBot.forEach(gx=> cand.push({ x: gx*t, y: sidewalkBotY*t, facing:'up'   , band:'bot',  key:`B${gx}` }));
+    gyL.forEach(gy => cand.push({ x: leftX*t,  y: gy*t,        facing:'right', band:'left', key:`L${gy}` }));
+    gyR.forEach(gy => cand.push({ x: rightX*t, y: gy*t,        facing:'left' , band:'right',key:`R${gy}` }));
+    return { cand, un };
   }
 
-  // ---- inv / equipped ----
+  // Pick two far-apart candidates deterministically by (matchId, round, sorted usernames)
+  function computeRoundSpawns(api, matchId, roundNum, usernames){
+    const sorted = [...usernames].map(norm).sort(); // [A,B]
+    const seedBase = `${matchId}|r${roundNum}|${sorted[0]}|${sorted[1]}`;
+
+    const {cand, un} = buildSpawnCandidates(api);
+
+    // pick first index anywhere
+    const idx1 = Math.floor(hash01(seedBase+'|p1') * cand.length);
+    const s1 = cand[idx1];
+
+    // pick second index that maximizes Manhattan distance in grid space (greedy deterministic)
+    let best = s1, bestD=-1, bestIdx=idx1;
+    for(let i=0;i<cand.length;i++){
+      const s2=cand[i];
+      const d = Math.abs((s2.x - s1.x)) + Math.abs((s2.y - s1.y));
+      if(d>bestD){ bestD=d; best=s2; bestIdx=i; }
+    }
+
+    // assign deterministic owner: A gets the lexicographically "earlier" seed slot
+    // to avoid symmetry issues, flip order based on parity of hash
+    const flip = (hash32(seedBase+'|flip') & 1) === 1;
+    const aGets = flip ? best : s1;
+    const bGets = flip ? s1   : best;
+
+    return {
+      A: aGets,
+      B: bGets
+    };
+  }
+
+  // ---------- inv / equipped ----------
   function readInv(){
     try{
       if(IZZA?.api?.getInventory) return IZZA.api.getInventory() || {};
@@ -80,7 +109,7 @@
     return 'hand';
   }
 
-  // ---- hearts HUD bridge ----
+  // ---------- hearts HUD bridge ----------
   function maxHearts(){ return Math.max(1, parseInt(localStorage.getItem('izzaMaxHearts') || '3', 10)); }
   function saveSegmentsFromHP(hpFloat){
     const seg = Math.max(0, Math.min(maxHearts()*3, Math.round((hpFloat||0)*3)));
@@ -107,12 +136,12 @@
     }
   }
 
-  // ---- minimap opp dot ----
+  // ---------- minimap opp dot ----------
+  function unlockedRectForMini(){ return unlockedRect(localStorage.getItem('izzaMapTier') || '2'); }
   function updateMinimapDot(oppX, oppY){
     const mini = document.getElementById('minimap'); if(!mini) return;
     const ctx = mini.getContext('2d'); if(!ctx) return;
-    const tier = localStorage.getItem('izzaMapTier') || '2';
-    const un = unlockedRect(tier);
+    const un = unlockedRectForMini();
     const W=90,H=60; const sx = mini.width / W, sy = mini.height / H;
     const gx = Math.floor(oppX / IZZA.api.TILE), gy = Math.floor(oppY / IZZA.api.TILE);
     const clamp=(v,a,b)=> Math.max(a, Math.min(b, v));
@@ -122,7 +151,7 @@
     ctx.fillRect((un.x0+nx*(un.x1-un.x0))*sx-1, (un.y0+ny*(un.y1-un.y0))*sy-1, 2, 2);
   }
 
-  // ---- canvas banners (centered) ----
+  // ---------- canvas banners ----------
   function showBanner(text, kind='win'){
     const cvs=document.getElementById('game'); if(!cvs) return;
     let host=document.getElementById('duelBanner');
@@ -142,46 +171,46 @@
     const border = kind==='win' ? '#64b5ff' : kind==='lose' ? '#ff7a7a' : '#9fe3c8';
     Object.assign(card.style,{
       position:'fixed',
-      left:(rect.left + rect.width/2 - 160)+'px',
-      top:(rect.top + rect.height/2 - 48)+'px',
-      width:'320px',
-      padding:'14px 18px',
+      left:(rect.left + rect.width/2 - 170)+'px',
+      top:(rect.top + rect.height/2 - 52)+'px',
+      width:'340px',
+      padding:'16px 20px',
       background:bg,
       border:'2px solid '+border,
       borderRadius:'14px',
       color:'#e7f2ff',
       fontWeight:'800',
       fontFamily:'system-ui,Arial,sans-serif',
-      fontSize:'24px',
+      fontSize:'26px',
       textAlign:'center',
       textShadow:'0 2px 8px rgba(0,0,0,.35)',
       boxShadow:'0 12px 30px rgba(0,0,0,.35), inset 0 0 24px rgba(255,255,255,.05)',
-      transform:'scale(.88)',
+      transform:'scale(.9)',
       opacity:'0',
       transition:'transform 200ms ease, opacity 200ms ease'
     });
     card.textContent=text;
     host.appendChild(card);
     requestAnimationFrame(()=>{ card.style.transform='scale(1)'; card.style.opacity='1'; });
-    setTimeout(()=>{ card.style.transform='scale(.96)'; card.style.opacity='0'; setTimeout(()=>card.remove(),260); }, 1500);
+    setTimeout(()=>{ card.style.transform='scale(.96)'; card.style.opacity='0'; setTimeout(()=>card.remove(),260); }, 1600);
   }
 
-  // ---- duel state ----
+  // ---------- duel state ----------
   let DUEL = {
     mid:null, mode:'v1',
     meName:'', oppName:'',
     oppSprite:null, opp:{x:0,y:0,facing:'down'},
     pollMs:125, timer:null, flip:false,
     myHP:null,
-    oppCops:[],                // mirrored cops from opponent
-    lastRoundNum:1,            // for round change detection
+    oppCops:[],
+    lastRoundNum:1,
     myScore:0, oppScore:0,
-    side:{},                   // {leftTop,rightBottom}
-    amLeftTop:false,
-    effects:[]                 // bullet tracers & hit-sparks
+    usernames:['',''],   // [A,B] sorted
+    meIsA:false,         // mapping
+    effects:[]
   };
 
-  // ---- polling ----
+  // ---------- polling ----------
   function startPolling(){ stopPolling(); DUEL.timer = setInterval(()=>{ if(DUEL.flip) poke(); else pull(); DUEL.flip=!DUEL.flip; }, DUEL.pollMs); }
   function stopPolling(){ if(DUEL.timer){ clearInterval(DUEL.timer); DUEL.timer=null; } }
 
@@ -200,7 +229,7 @@
     const body = {
       matchId: DUEL.mid,
       x: api.player.x, y: api.player.y, facing: api.player.facing || 'down',
-      hp: DUEL.myHP==null ? maxHearts() : DUEL.myHP,
+      hp: DUEL.myHP==null ? 4 : DUEL.myHP,
       inv: readInv(),
       appearance: (IZZA.api.getAppearance && IZZA.api.getAppearance()),
       cops: copyMyCops()
@@ -223,47 +252,48 @@
       if(DUEL.oppSprite){ DUEL.oppSprite.x=DUEL.opp.x; DUEL.oppSprite.y=DUEL.opp.y; DUEL.oppSprite.facing=DUEL.opp.facing; }
     }
 
-    // My HP from server → hearts plugin
+    // My HP → hearts
     if(j.me && typeof j.me.hp === 'number'){
       DUEL.myHP = j.me.hp;
       saveSegmentsFromHP(DUEL.myHP);
-      drawHeartsDOM(DUEL.myHP); // instant visual
+      drawHeartsDOM(DUEL.myHP);
     }
 
-    // Mirror opponent's cops (visual only)
+    // Cops mirror
     DUEL.oppCops = Array.isArray(j.opponentCops) ? j.opponentCops.slice(0,6) : [];
 
-    // Round / score UI
+    // Score
     if(j.score){
-      const oldMy=DUEL.myScore, oldOpp=DUEL.oppScore;
       DUEL.myScore = (j.score.me|0);
       DUEL.oppScore= (j.score.opponent|0);
-      if(DUEL.myScore!==oldMy || DUEL.oppScore!==oldOpp){
-        // lightweight update only; round banners below
-      }
     }
+
+    // Round flow (respawn on every new number)
     if(j.round){
       const rn = j.round.number|0;
-      // New round?
-      if(rn > (DUEL.lastRoundNum|0)){
+      if(rn !== (DUEL.lastRoundNum|0)){
         DUEL.lastRoundNum = rn;
+
         // full hearts locally
-        DUEL.myHP = 4; // server baseline hearts=4 (maps to 12 segs locally)
+        DUEL.myHP = 4;
         saveSegmentsFromHP(DUEL.myHP);
         drawHeartsDOM(DUEL.myHP);
 
-        // respawn to *different* spot (salted by round number)
-        const sp = sidewalkSpawns(IZZA.api, String(DUEL.mid), DUEL.amLeftTop, rn);
-        IZZA.api.player.x = sp.me.x; IZZA.api.player.y = sp.me.y; IZZA.api.player.facing = sp.me.facing || 'down';
+        // Different spawn each round (including round 1)
+        const spAll = computeRoundSpawns(IZZA.api, String(DUEL.mid), rn, DUEL.usernames);
+        const mySpot = DUEL.meIsA ? spAll.A : spAll.B;
+        const oppSpot= DUEL.meIsA ? spAll.B : spAll.A;
+
+        IZZA.api.player.x = mySpot.x; IZZA.api.player.y = mySpot.y; IZZA.api.player.facing = mySpot.facing || 'down';
+        // pre-place opp placeholder too (in case pull is slightly behind)
+        DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
 
         showBanner(`Round ${rn} — FIGHT!`, 'round');
       }
-      // Round result banner
       if(j.round.justEnded){
         const iWon = j.round.winner === 'me';
         showBanner(iWon ? `You won Round ${j.round.number}` : `You lost Round ${j.round.number}`, iWon?'win':'lose');
       }
-      // Match over -> clean up and bounce back to lobby
       if(j.round.matchOver){
         const iWon = j.round.winner === 'me';
         showBanner(iWon ? 'MATCH WIN!' : 'MATCH LOSS', iWon?'win':'lose');
@@ -275,7 +305,6 @@
 
   function bounceToLobby(){
     try{
-      // Teleport to MP building entrance (use core doorSpawn)
       const ds = IZZA.api.doorSpawn;
       if(ds){ IZZA.api.player.x = ds.x; IZZA.api.player.y = ds.y; IZZA.api.player.facing='down'; }
     }catch{}
@@ -283,20 +312,16 @@
       const lobby = document.getElementById('mpLobby');
       if(lobby){ lobby.style.display='flex'; }
     }catch{}
-    // Let any other systems know
     IZZA.emit?.('mp-end');
   }
 
   function cleanupDuel(){
     stopPolling();
-    DUEL.mid=null;
-    DUEL.oppCops.length=0;
-    DUEL.oppSprite=null;
-    DUEL.effects.length=0;
+    DUEL.mid=null; DUEL.oppCops.length=0; DUEL.oppSprite=null; DUEL.effects.length=0;
     window.__IZZA_DUEL = { active:false };
   }
 
-  // ---- HIT DETECTION (hitscan geometry) + visual tracers/sparks ----
+  // ---------- HIT DETECTION + effects ----------
   function aimVector(){
     const nub=document.getElementById('nub');
     if(nub){
@@ -320,11 +345,11 @@
     const vx=opp.x-me.x, vy=opp.y-me.y;
     const dist = Math.hypot(vx,vy);
     const maxDist = (kind==='grenade'? 220 : 240);
-    if(dist > maxDist) return {hit:false, hitPoint:{x:me.x+dir.x*maxDist, y:me.y+dir.y*maxDist}};
 
     const along = (vx*dir.x + vy*dir.y);
-    if(along <= 0) return {hit:false, hitPoint:{x:me.x+dir.x*60, y:me.y+dir.y*60}}; // behind -> short tracer
-
+    if(dist > maxDist || along <= 0){
+      return {hit:false, hitPoint:{x:me.x+dir.x*Math.min(maxDist, Math.max(60,along)), y:me.y+dir.y*Math.min(maxDist, Math.max(60,along))}};
+    }
     const perp = Math.abs(vx*dir.y - vy*dir.x) / Math.hypot(dir.x,dir.y);
     const radius = (kind==='uzi'||kind==='pistol') ? 18
                  : (kind==='grenade' ? 36 : 24);
@@ -332,17 +357,16 @@
     const hitPoint = hit ? opp : {x:me.x+dir.x*Math.min(dist, maxDist), y:me.y+dir.y*Math.min(dist, maxDist)};
     return {hit, hitPoint};
   }
-
   function meleeInRange(){
     const m=meCenter(), o=oppCenter();
     return Math.hypot(m.x-o.x, m.y-o.y) <= 24;
   }
 
-  function addTracer(from, to){
-    DUEL.effects.push({ kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y, t:0, life:120 });
+  function addTracer(from, to, life=110){
+    DUEL.effects.push({ kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y, t:0, life });
   }
-  function addSpark(at){
-    DUEL.effects.push({ kind:'spark', x:at.x, y:at.y, t:0, life:140 });
+  function addSpark(at, life=140){
+    DUEL.effects.push({ kind:'spark', x:at.x, y:at.y, t:0, life });
   }
 
   function sendHit(kind){
@@ -350,7 +374,7 @@
     $post('/duel/hit', { matchId: DUEL.mid, kind });
   }
 
-  // Hook FIRE + btnA + keyboard 'A'
+  // ---------- controls (fire/melee) ----------
   function installHitHooks(){
     const fire=document.getElementById('btnFire');
     if(fire && !fire.__duelHooked){
@@ -360,14 +384,16 @@
         if(!DUEL.mid) return;
         const k=equippedKind();
         const me=meCenter();
+
         if(k==='uzi'){
           const r=hitscan('uzi'); addTracer(me, r.hitPoint); if(r.hit){ addSpark(r.hitPoint); sendHit('uzi'); }
-          if(!uziTimer) uziTimer=setInterval(()=>{ const r2=hitscan('uzi'); addTracer(meCenter(), r2.hitPoint); if(r2.hit){ addSpark(r2.hitPoint); sendHit('uzi'); } }, 105);
+          if(!uziTimer) uziTimer=setInterval(()=>{ const r2=hitscan('uzi'); const m2=meCenter(); addTracer(m2, r2.hitPoint); if(r2.hit){ addSpark(r2.hitPoint); sendHit('uzi'); } }, 105);
         }else if(k==='pistol'){
-          const r=hitscan('pistol'); addTracer(me, r.hitPoint); if(r.hit){ addSpark(r.hitPoint); sendHit('pistol'); }
-          setTimeout(()=>{ const r2=hitscan('pistol'); addTracer(meCenter(), r2.hitPoint); if(r2.hit){ addSpark(r2.hitPoint); sendHit('pistol'); } }, 85);
+          // Single-shot: if we hit, DO NOT fire the follow-up tracer (prevents pass-through look)
+          const r=hitscan('pistol'); addTracer(me, r.hitPoint); if(r.hit){ addSpark(r.hitPoint); sendHit('pistol'); return; }
+          setTimeout(()=>{ const r2=hitscan('pistol'); const m2=meCenter(); addTracer(m2, r2.hitPoint); if(r2.hit){ addSpark(r2.hitPoint); sendHit('pistol'); } }, 85);
         }else if(k==='grenade'){
-          setTimeout(()=>{ const r=hitscan('grenade'); if(r.hit){ addSpark(r.hitPoint); sendHit('grenade'); } }, 900);
+          setTimeout(()=>{ const r=hitscan('grenade'); if(r.hit){ addSpark(r.hitPoint, 220); sendHit('grenade'); } }, 900);
         }else if(k==='bat'){
           if(meleeInRange()){ addSpark(oppCenter()); sendHit('bat'); }
         }else if(k==='knuckles'){
@@ -385,7 +411,6 @@
       fire.addEventListener('mouseup',   up,  {passive:true});
     }
 
-    // BTN A (mobile melee convenience)
     const btnA=document.getElementById('btnA');
     if(btnA && !btnA.__duelHooked){
       btnA.__duelHooked = true;
@@ -398,7 +423,6 @@
       }, {passive:true});
     }
 
-    // Keyboard 'A' (desktop melee)
     window.addEventListener('keydown', (e)=>{
       if((e.key||'').toLowerCase()!=='a') return;
       if(!DUEL.mid) return;
@@ -409,7 +433,7 @@
     }, {capture:true, passive:true});
   }
 
-  // ---- begin/cleanup ----
+  // ---------- begin ----------
   function begin(payload, apiArg, myName){
     const {mode, matchId, players} = payload||{};
     if(mode!=='v1' || !Array.isArray(players) || players.length<2) return;
@@ -418,29 +442,27 @@
     try{ IZZA.emit?.('ui-modal-close',{id:'mpLobby'}); }catch{}
     try{ const m=document.getElementById('mpLobby'); if(m) m.style.display='none'; }catch{}
 
-    const pA=players[0]?.username||'', pB=players[1]?.username||'';
-    const myN=norm(myName), nA=norm(pA), nB=norm(pB);
-    const oppName = (myN && (myN===nA||myN===nB)) ? ((myN===nA)?pB:pA) : (pB||pA||'Opponent');
+    const nameA = players[0]?.username || '';
+    const nameB = players[1]?.username || '';
+    const sorted = [nameA,nameB].map(norm).sort(); // [A,B]
+    DUEL.usernames = sorted;
+    DUEL.meIsA = (norm(myName) === sorted[0]);
 
-    const assign = sideAssignment(String(matchId), [{username:pA},{username:pB}]);
-    DUEL.side = assign;
-    DUEL.amLeftTop = (norm(myName) === assign.leftTop);
+    const oppName = (norm(myName)===norm(nameA)) ? (nameB||'Opponent') : (nameA||'Opponent');
 
-    const sp = sidewalkSpawns(api, String(matchId), DUEL.amLeftTop, /*round*/1);
+    // Round 1 spawn (already different via deterministic two-point selection)
+    const spAll = computeRoundSpawns(api, String(matchId), /*round*/1, sorted);
+    const mySpot = DUEL.meIsA ? spAll.A : spAll.B;
+    const oppSpot= DUEL.meIsA ? spAll.B : spAll.A;
 
-    // me spawn
-    api.player.x = sp.me.x; api.player.y = sp.me.y; api.player.facing = sp.me.facing || 'down';
+    api.player.x = mySpot.x; api.player.y = mySpot.y; api.player.facing = mySpot.facing || 'down';
     api.setWanted?.(0);
+    DUEL.oppName = oppName; DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
 
-    // opp placeholder
-    DUEL.oppName = oppName; DUEL.opp.x = sp.opp.x; DUEL.opp.y = sp.opp.y; DUEL.opp.facing = sp.opp.facing || 'up';
-
-    // hearts start full (server baseline 4 hearts)
     DUEL.myHP = 4;
     saveSegmentsFromHP(DUEL.myHP);
     drawHeartsDOM(DUEL.myHP);
 
-    // go
     DUEL.lastRoundNum = 1;
     DUEL.myScore = DUEL.oppScore = 0;
 
@@ -451,12 +473,6 @@
     setTimeout(installHitHooks, 40);
     showCountdown(3);
     showBanner(`1v1 vs ${oppName}`, 'round');
-  }
-
-  function cleanupDuel(){
-    stopPolling();
-    DUEL.mid=null; DUEL.oppCops.length=0; DUEL.oppSprite=null; DUEL.effects.length=0;
-    window.__IZZA_DUEL = { active:false };
   }
 
   function showCountdown(n=3){
@@ -475,13 +491,13 @@
     let cur=n; label.textContent='Ready…'; setTimeout(function tick(){ if(cur>0){ label.textContent=String(cur--); setTimeout(tick,800);} else { label.textContent='GO!'; setTimeout(()=>host.remove(),650);} },500);
   }
 
-  // ---- render: minimap + mirror cops + tracers/sparks ----
+  // ---------- render: minimap + mirror cops + effects ----------
   IZZA.on?.('render-post', ({dtSec})=>{
     try{
       if(!DUEL.mid) return;
       updateMinimapDot(DUEL.opp.x, DUEL.opp.y);
 
-      // Draw opponent's cops (visual mirror only)
+      // mirror cops (simple capsules)
       if(DUEL.oppCops && DUEL.oppCops.length){
         const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
         const ctx=cvs.getContext('2d'); const S=api.DRAW, scale=S/api.TILE;
@@ -494,7 +510,7 @@
         ctx.restore();
       }
 
-      // Effects: tracers + sparks
+      // effects
       if(DUEL.effects.length){
         const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
         const ctx=cvs.getContext('2d'); const scale=api.DRAW/api.TILE;
@@ -504,7 +520,7 @@
           const alpha = 1 - (e.t/e.life);
           if(alpha<=0){ DUEL.effects.splice(i,1); continue; }
           if(e.kind==='tracer'){
-            ctx.globalAlpha = Math.max(.15, alpha*.8);
+            ctx.globalAlpha = Math.max(.18, alpha*.9);
             ctx.strokeStyle = '#e6f1ff';
             ctx.lineWidth = 2;
             const sx1=(e.x1-IZZA.api.camera.x)*scale, sy1=(e.y1-IZZA.api.camera.y)*scale;
@@ -522,7 +538,7 @@
     }catch{}
   });
 
-  // ---- hooks ----
+  // ---------- hooks ----------
   function withReadyUser(fn, payload, tries=0){
     const api=IZZA.api, uname=api?.user?.username || window.__MP_LAST_ME?.username;
     if(api?.ready && uname){ fn(payload, api, uname); return; }
@@ -532,21 +548,4 @@
 
   IZZA.on?.('mp-start', (payload)=> withReadyUser(begin, payload));
   IZZA.on?.('mp-end', ()=> cleanupDuel());
-
-  // helper toast (kept)
-  function toast(text, seconds=3){
-    let h = document.getElementById('tutHint');
-    if(!h){
-      h = document.createElement('div');
-      h.id='tutHint';
-      Object.assign(h.style,{
-        position:'fixed', left:'12px', top:'64px', zIndex:7,
-        background:'rgba(10,12,18,.85)', border:'1px solid #394769',
-        color:'#cfe0ff', padding:'8px 10px', borderRadius:'10px', fontSize:'14px'
-      });
-      document.body.appendChild(h);
-    }
-    h.textContent=text; h.style.display='block';
-    setTimeout(()=>{ h.style.display='none'; }, seconds*1000);
-  }
 })();
