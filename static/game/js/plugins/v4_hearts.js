@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v4_hearts.js
 (function () {
-  const BUILD = 'v4-hearts-plugin+svg-hearts';
+  const BUILD = 'v4.2-hearts-plugin+svg-hearts+low-blink';
   console.log('[IZZA PLAY]', BUILD);
 
   const LS = {
@@ -104,25 +104,28 @@
       filter:'drop-shadow(0 1px 0 rgba(0,0,0,.35))'
     });
     document.body.appendChild(hud);
+    // add low-life blink css once
+    if(!document.getElementById('heartBlinkCSS')){
+      const st=document.createElement('style'); st.id='heartBlinkCSS';
+      st.textContent=`@keyframes heartBlink{0%,100%{filter:drop-shadow(0 0 0 rgba(255,90,90,0))}50%{filter:drop-shadow(0 0 12px rgba(255,90,90,.95))}}
+      #heartsHud .heart-blink{animation:heartBlink .6s infinite}`;
+      document.head.appendChild(st);
+    }
     return hud;
   }
 
-  // heart path (24x22 viewBox), rounded, “Zelda-ish”
-  // looks good small and on iPhone
   const HEART_PATH = 'M12 21c-.5-.5-4.9-3.7-7.2-6C3 13.2 2 11.6 2 9.7 2 7.2 4 5 6.6 5c1.6 0 3 .8 3.8 2.1C11.2 5.8 12.6 5 14.2 5 16.8 5 19 7.2 19 9.7c0 1.9-1 3.5-2.8 5.3-2.3 2.3-6.7 5.5-7.2 6Z';
 
-  function makeHeartSVG(ratio){ // ratio 0..1 of red fill from left to right
+  function makeHeartSVG(ratio){ // ratio 0..1
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('viewBox','0 0 24 22');
     svg.setAttribute('width','24'); svg.setAttribute('height','22');
 
-    // base grey heart
     const base = document.createElementNS(SVG_NS, 'path');
     base.setAttribute('d', HEART_PATH);
     base.setAttribute('fill', '#3a3f4a');
     svg.appendChild(base);
 
-    // red overlay clipped by a rect width = ratio
     const clipId = 'hclip_' + Math.random().toString(36).slice(2);
     const clip = document.createElementNS(SVG_NS, 'clipPath');
     clip.setAttribute('id', clipId);
@@ -156,20 +159,21 @@
       const wrap = document.createElement('div');
       wrap.style.width = '24px';
       wrap.style.height = '22px';
+      // low-life blink: if overall remaining segs <=3, blink the last heart
+      if(seg <= 3 && i === Math.floor((seg-1)/3)) wrap.className='heart-blink';
       wrap.appendChild(makeHeartSVG(ratio));
       hud.appendChild(wrap);
     }
     placeHeartsHud();
   }
 
-  // Position directly under the cop stars
   function placeHeartsHud(){
     const hud   = ensureHeartsHud();
     const stars = document.getElementById('stars');
     if (!stars) return;
     const r = stars.getBoundingClientRect();
     hud.style.left = Math.round(r.left) + 'px';
-    hud.style.top  = Math.round(r.bottom + 6) + 'px';  // exactly like your chosen spot
+    hud.style.top  = Math.round(r.bottom + 6) + 'px';
   }
   window.addEventListener('resize', placeHeartsHud, { passive:true });
   window.addEventListener('orientationchange', placeHeartsHud, { passive:true });
@@ -185,7 +189,7 @@
         c._nextAtk ??= now;
         const dist = Math.hypot(player.x - c.x, player.y - c.y);
         if (dist <= atkRange && now >= c._nextAtk){
-          takeDamageSegs(1);
+          takeDamageSegs(1); // 1 segment = 1/3 heart (as before)
           c._nextAtk = now + cd;
         }
       }
