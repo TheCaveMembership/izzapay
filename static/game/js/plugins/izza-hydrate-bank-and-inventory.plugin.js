@@ -1,77 +1,164 @@
-// IZZA hydrate: restore ONLY Bank + Inventory after all cores & map loads
-(function(){
-  // ---------- Mini overlay while we restore ----------
-  const overlay = document.createElement('div');
-  Object.assign(overlay.style,{
-    position:'fixed', inset:'0', background:'rgba(5,8,14,.90)',
-    display:'none', alignItems:'center', justifyContent:'center',
-    zIndex:99999, color:'#cfe0ff',
-    fontFamily:'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-    fontSize:'15px'
-  });
-  overlay.innerHTML = `<div style="padding:14px 18px;border:1px solid #394769;border-radius:10px;background:#0b1120">
-    Loading your items & bank…</div>`;
-  document.addEventListener('DOMContentLoaded', ()=> document.body.appendChild(overlay));
+<!-- /static/game/js/plugins/izza-hydrate-bank-and-inventory.plugin.js -->
+<script>
+/*
+  IZZA hydrate: Bank & Inventory mirror (glitch-free)
+  - Bank coins live in: localStorage["izzaBank_<user>"] => {coins, items, ammo}
+  - On-hand coins live in: localStorage["izzaCoins"] (and IZZA.api.setCoins if available)
+  - This plugin NEVER derives on-hand from any "total". It only moves value between
+    bank and on-hand, and emits events so autosave snaps the combined total.
 
+  Public helpers exposed at window.izzaBankAPI:
+    - getBalances() -> { bank: number, you: number }
+    - deposit(n)
+    - withdraw(n)
+*/
+(function(){
   // ---------- Utils ----------
-  const log  = (...a)=> console.log('[IZZA hydrate BI]', ...a);
-  const warn = (...a)=> console.warn('[IZZA hydrate BI]', ...a);
-  const sleep= (ms)=> new Promise(r=>setTimeout(r, ms));
+  const log  = (...a)=> console.log('[IZZA bank+inv]', ...a);
+  const warn = (...a)=> console.warn('[IZZA bank+inv]', ...a);
 
   function getLS(k,d=null){ const v=localStorage.getItem(k); return v==null? d : v; }
   function setLS(k,v){ localStorage.setItem(k,v); }
-  function setJSON(k,o){ setLS(k, JSON.stringify(o)); }
+  function getJSON(k,d=null){ try{ const v=getLS(k,null); return v==null? d : JSON.parse(v); }catch{ return d; } }
+  function setJSON(k,o){ setLS(k, JSON.stringify(o||{})); }
 
   function resolveUser(){
     const profile = window.__IZZA_PROFILE__ || {};
     const fromPlugin = (window.izzaUserKey && typeof izzaUserKey.get==='function') ? izzaUserKey.get() : null;
     const u = (profile.username || profile.user || fromPlugin || getLS('izzaUserKey') || 'guest')
-      .toString().toLowerCase();
-    return u.replace(/[^a-z0-9-_]/g,'-');
+      .toString().trim().toLowerCase().replace(/[^a-z0-9-_]/g,'-');
+    return u || 'guest';
   }
 
-  // Treat snapshots that would zero-out a player as "empty-like"
-  function isEmptyLike(s){
-    if (!s || typeof s!=='object') return true;
-    const inv = s.inventory || {};
-    const invCount = Array.isArray(inv) ? inv.length : Object.keys(inv).length;
-    const bank = s.bank || {};
-    const bankCoins = Number(bank.coins||0);
-    const bankItems = bank.items ? Object.keys(bank.items).length : 0;
-    const bankAmmo  = bank.ammo  ? Object.keys(bank.ammo ).length : 0;
-    return (invCount===0 && bankCoins===0 && bankItems===0 && bankAmmo===0);
+  // ---------- On-hand coins (HUD) ----------
+  function getOnHand(){
+    // Prefer the core getter if present, but NEVER infer from totals.
+    try{
+      if (window.IZZA?.api?.getCoins) {
+        const n = window.IZZA.api.getCoins()|0;
+        // keep LS in sync too
+        const ls = parseInt(getLS('izzaCoins')||'0',10)|0;
+        if (ls !== n) setLS('izzaCoins', String(n));
+        return Math.max(0, n);
+      }
+    }catch{}
+    const raw = getLS('izzaCoins','0');
+    return Math.max(0, parseInt(raw,10) || 0);
   }
 
-  // Accepts either:
-  //  1) {version, player, coins, inventory, bank, timestamp}
-  //  2) { ok:true, empty:false, snapshot:{...} }
-  function unwrapSnapshot(data){
-    if (!data) return null;
-    if (data.snapshot) return data.snapshot;
-    return data;
+  function setOnHand(n){
+    const v = Math.max(0, n|0);
+    setLS('izzaCoins', String(v));
+    // Update core if available (this also refreshes the HUD pill)
+    try{ if(window.IZZA?.api?.setCoins) window.IZZA.api.setCoins(v); }catch(e){ warn('setCoins failed', e); }
+    // Fire change event so autosave and any UI listeners react
+    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+    return v;
   }
 
-  async function fetchValidSnapshot(user){
-    // Try latest then step back a few — your API may accept ?offset=N
-    const tryOffsets = [0,1,2,3,4,5];
-    for (const off of tryOffsets){
-      try{
-        const url = `/api/state/${encodeURIComponent(user)}?offset=${off}`;
-        const res = await fetch(url, { credentials:'omit' });
-        if (!res.ok){ warn('GET failed', off, res.status); continue; }
-        const raw = await res.json();
-        const snap = unwrapSnapshot(raw);
-        if (snap && !isEmptyLike(snap)) return snap;
-        log(`offset ${off} empty-like; trying older…`);
-      }catch(e){ warn('fetch error (offset', off, '):', e); }
+  // ---------- Bank mirror ----------
+  function bankKeyFor(user){ return `izzaBank_${user}`; }
+  function getBank(user){
+    const b = getJSON(bankKeyFor(user), { coins:0, items:{}, ammo:{} });
+    const coins = Math.max(0, (b && b.coins|0) || 0);
+    return { coins, items: (b && b.items)||{}, ammo:(b && b.ammo)||{} };
+  }
+  function setBank(user, next){
+    const clean = {
+      coins: Math.max(0, (next && next.coins|0) || 0),
+      items: (next && next.items)||{},
+      ammo:  (next && next.ammo) ||{}
+    };
+    setJSON(bankKeyFor(user), clean);
+    try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
+    return clean;
+  }
+  function setBankCoins(user, coins){
+    const b = getBank(user);
+    b.coins = Math.max(0, coins|0);
+    return setBank(user, b);
+  }
+
+  // ---------- Moves ----------
+  function deposit(user, amount){
+    const amt = Math.max(0, amount|0);
+    if(!amt) return getBalances(user);
+
+    const you  = getOnHand();
+    const take = Math.min(you, amt); // can't deposit more than you hold
+    if (take<=0) return getBalances(user);
+
+    const afterYou   = setOnHand(you - take);
+    const bank       = getBank(user);
+    const afterBank  = setBankCoins(user, bank.coins + take);
+
+    // Optional toast
+    try{ window.IZZA?.toast?.(`Deposited ${take} IC`); }catch{}
+    return { bank: afterBank.coins, you: afterYou };
+  }
+
+  function withdraw(user, amount){
+    const amt = Math.max(0, amount|0);
+    if(!amt) return getBalances(user);
+
+    const bank = getBank(user);
+    const take = Math.min(bank.coins, amt); // can't withdraw more than bank
+    if (take<=0) return getBalances(user);
+
+    const afterBank  = setBankCoins(user, bank.coins - take);
+    const afterYou   = setOnHand(getOnHand() + take);
+
+    // Optional toast
+    try{ window.IZZA?.toast?.(`Withdrew ${take} IC`); }catch{}
+    return { bank: afterBank.coins, you: afterYou };
+  }
+
+  function getBalances(user=resolveUser()){
+    const bank = getBank(user);
+    const you  = getOnHand();
+    return { bank: bank.coins, you };
+  }
+
+  // ---------- Init guards (no mutation on load) ----------
+  // Ensure both stores exist without altering values (prevents “double” effects).
+  (function initMirrors(){
+    const user = resolveUser();
+
+    // Bank mirror default
+    const hasBank = getJSON(bankKeyFor(user), null);
+    if(!hasBank){
+      setJSON(bankKeyFor(user), { coins:0, items:{}, ammo:{} });
     }
-    return null;
-  }
 
-  // Write bank into LS mirror for plugins/UI that depend on it
-  function writeBankToLocalStorage(user, bank){
-    const key = `izzaBank_${user}`;
-    const clean = bank && typeof bank==='object'
-      ? { coins: Number(bank.coins||0),
-          items: bank.items||{},
-          ammo: 
+    // On-hand default (do NOT derive from totals here!)
+    const hasCoins = getLS('izzaCoins', null);
+    if(hasCoins==null) setLS('izzaCoins', '0');
+  })();
+
+  // ---------- Public API ----------
+  window.izzaBankAPI = {
+    getBalances,
+    deposit: (n)=> deposit(resolveUser(), n|0),
+    withdraw: (n)=> withdraw(resolveUser(), n|0),
+    // direct accessors if a UI wants them:
+    _getOnHand: getOnHand,
+    _setOnHand: setOnHand,
+    _getBank: ()=> getBank(resolveUser()),
+    _setBankCoins: (n)=> setBankCoins(resolveUser(), n|0)
+  };
+
+  // ---------- Optional: keep HUD pill synced if core isn’t ready yet ----------
+  // If your core already updates the pill via setCoins, this is harmless.
+  function refreshCoinPill(){
+    const pill = document.getElementById('coinPill');
+    if(pill){
+      const you = getOnHand();
+      pill.textContent = `Coins: ${you} IC`;
+    }
+  }
+  document.addEventListener('DOMContentLoaded', refreshCoinPill, {once:true});
+  window.addEventListener('izza-coins-changed', refreshCoinPill);
+
+  log('ready');
+})();
+</script>
