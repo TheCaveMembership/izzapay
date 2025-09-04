@@ -1223,6 +1223,9 @@
       setCoins, getCoins, setWanted,
       TILE, DRAW, camera,
       doorSpawn,
+      
+      user: { username: (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || 'guest' },
+      
       // expose for plugins:
       getMissionCount,
       getInventory, setInventory,
