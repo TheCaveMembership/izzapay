@@ -195,7 +195,7 @@
   };
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
-    const n = raw==null ? 300 : (parseInt(raw,10)||0);
+    const n = raw==null ? 0 : (parseInt(raw,10)||0);
     return Math.max(0,n);
   }
   function setCoins(n){
