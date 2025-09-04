@@ -136,7 +136,6 @@ def _reset_round(room:Dict[str,Any]):
     room["round"]["winner"] = None
     room["round"]["justEnded"] = False
     room["round"]["number"] = int(room["round"]["number"])+1
-    # restore full HP to both (server baseline: 4.0 hearts ≡ 16 qhp)
     for uid in room.get("players",[]):
         st = room["state"].get(uid) or {}
         st["_qhp"] = 16
@@ -312,6 +311,8 @@ def mp_dequeue():
 
 # ======== Duel REST ========
 
+def _get_room(mid:str): return _DUELS.get(str(mid))
+
 @mp_bp.post("/duel/poke")
 def mp_duel_poke():
     who=_current_user_ids()
@@ -322,7 +323,6 @@ def mp_duel_poke():
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
-    # store state
     st = room["state"].get(uid, {})
     st.update({
         "x": float(data.get("x") or 0.0),
@@ -333,15 +333,11 @@ def mp_duel_poke():
         "cops": data.get("cops") or [],
         "t": time.time()
     })
-    # initialize fractional qhp if missing (16 = 4 hearts * 4 quarters)
     if st.get("_qhp") is None:
-        try:
-            st["_qhp"] = int(round((st["hp"] if st.get("hp") is not None else 4.0) * 4))
-        except Exception:
-            st["_qhp"] = 16
+        try: st["_qhp"] = int(round((st["hp"] if st.get("hp") is not None else 4.0) * 4))
+        except Exception: st["_qhp"] = 16
     room["state"][uid]=st
 
-    # one-time snapshot (username + appearance at start)
     snap = room["snapshots"].get(uid, {})
     snap.setdefault("username", uname)
     if "appearance" in data and data["appearance"]:
@@ -361,7 +357,6 @@ def mp_duel_pull():
     my=room["state"].get(uid) or {}
     os=room["state"].get(opp); ss=room["snapshots"].get(opp,{})
 
-    # assemble response
     res: Dict[str,Any] = {"ok":True}
     if os:
       res["opponent"] = {
@@ -377,11 +372,7 @@ def mp_duel_pull():
       res["opponentCops"] = []
 
     res["me"] = { "hp": float((my.get("hp", 4.0))) }
-
-    # score in me/opponent terms
     res["score"] = {"me": int(room["score"].get(uid,0)), "opponent": int(room["score"].get(opp,0))}
-
-    # round info
     r = room["round"]
     res["round"] = {
         "number": int(r.get("number",1)),
@@ -390,9 +381,7 @@ def mp_duel_pull():
         "winner": ("me" if r.get("winner")==uid else ("opponent" if r.get("winner")==opp else None)),
         "justEnded": bool(r.get("justEnded",False))
     }
-    # one-pull "justEnded" flag resets after reading
     room["round"]["justEnded"] = False
-
     return jsonify(res)
 
 @mp_bp.post("/duel/hit")
@@ -411,14 +400,11 @@ def mp_duel_hit():
     os=room["state"].get(opp) or {"hp":4.0}
     hp=float(os.get("hp",4.0))
 
-    # quarter-damage encoding
-    # pistol/uzI/bullet: 1 quarter; grenade: 4; bat/knucks: 2; hand: 1
     delta = 1
     if kind in ("pistol","uzi","bullet"): delta = 1
     elif kind=="grenade": delta = 4
     elif kind in ("bat","knuckles","knuck2hits","bat2hits"): delta = 2
     elif kind in ("hand","melee"): delta = 1
-    else: delta = 1
 
     qhp = os.get("_qhp")
     if qhp is None: qhp = int(hp*4)
@@ -427,13 +413,11 @@ def mp_duel_hit():
     os["hp"]= (qhp/4.0)
     room["state"][opp]=os
 
-    # Round finished?
     if qhp <= 0 and not room["round"]["ended"] and not room["round"]["matchOver"]:
         room["round"]["ended"] = True
         room["round"]["winner"] = uid
         room["round"]["justEnded"] = True
         room["score"][uid] = int(room["score"].get(uid,0)) + 1
-        # Next: either finish match or prep a new round
         _maybe_finish_match(room)
         if not room["round"]["matchOver"]:
             _reset_round(room)
