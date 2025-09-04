@@ -1,222 +1,171 @@
-// server/api-state.js (router)
-// Persistence API for IZZA — per-user JSON snapshot ring with empty-snapshot protection.
+// server/api-state.js
+// Express router that persists player snapshots with rotation + "LastGood" protection.
+//
+// Endpoints:
+//   GET  /api/state/:username            -> latest valid snapshot (falls back to LastGood)
+//   GET  /api/state/:username?prefer=lastGood -> force LastGood
+//   POST /api/state/:username            -> validate + write (keeps last 5), updates LastGood iff valid & non-empty
+//
+// Storage layout (DATA_DIR = process.env.DATA_DIR || './var/data'):
+//   <user>.json            -> latest write attempt (even if invalid is rejected, this file stays last valid)
+//   <user>.1.json .. .5.json  -> rolling history (1 = newest history, 5 = oldest)
+//   <user>.lastgood.json   -> last known good (non-empty) snapshot
+//
+// "Empty/bad" snapshot detection prevents saving sessions that reset progress to 0.
 
-import { Router } from 'express';
-import fs from 'fs/promises';
-import path from 'path';
+const path    = require('path');
+const fs      = require('fs').promises;
+const express = require('express');
 
-const api = Router();
+const router  = express.Router();
+router.use(express.json({ limit: '256kb' }));
 
-// ---- config ----
-const ROOT = '/var/data/izza/players';
-const MAX_SNAPSHOTS = parseInt(process.env.IZZA_MAX_SNAPS || '10', 10);
+// ---------- config ----------
+const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'var', 'data');
+const HISTORY_DEPTH = 5;
 
-// ---- fs helpers ----
+// ensure data dir exists
 async function ensureDir() {
-  await fs.mkdir(ROOT, { recursive: true });
+  await fs.mkdir(DATA_DIR, { recursive: true });
 }
-function safeUser(user) {
-  return String(user || 'guest').toLowerCase().replace(/[^a-z0-9-_]/g, '-');
-}
-function fileFor(user) {
-  return path.join(ROOT, `${safeUser(user)}.json`);
-}
-async function readUserFile(user) {
+
+// safe helpers
+async function readJSON(file) {
   try {
-    const f = fileFor(user);
-    const raw = await fs.readFile(f, 'utf8');
-    return JSON.parse(raw);
-  } catch {
+    const buf = await fs.readFile(file);
+    return JSON.parse(buf.toString('utf8'));
+  } catch (e) {
     return null;
   }
 }
-async function writeUserFile(user, data) {
-  const f = fileFor(user);
-  await fs.writeFile(f, JSON.stringify(data, null, 2), 'utf8');
+async function writeJSON(file, obj) {
+  await fs.writeFile(file, JSON.stringify(obj, null, 2), 'utf8');
 }
 
-// ---- domain helpers ----
-// What we consider an “empty-like” snapshot that should NOT become the new latest.
-function isEmptyLike(snap) {
-  if (!snap || typeof snap !== 'object') return true;
-  const coins = Number(snap.coins || 0);
-  const bankCoins = Number((snap.bank && snap.bank.coins) || 0);
-  const inv = snap.inventory || {};
-  const hasInv = Array.isArray(inv)
-    ? inv.length > 0
-    : Object.keys(inv).length > 0;
-  const bankItems = snap.bank && snap.bank.items ? Object.keys(snap.bank.items).length : 0;
-  const bankAmmo = snap.bank && snap.bank.ammo ? Object.keys(snap.bank.ammo).length : 0;
-
-  // Treat as empty if no coins anywhere AND inventory/bank are empty.
-  if (coins === 0 && bankCoins === 0 && !hasInv && bankItems === 0 && bankAmmo === 0) return true;
-
-  // Accept any snapshot that shows meaningful progress
-  return false;
+function normUser(u) {
+  return String(u || '').trim().toLowerCase().replace(/[^a-z0-9_\-\.]/g, '');
 }
 
-function normalizeSnapshot(incoming) {
-  const now = Date.now();
-  const v = { ...(incoming || {}) };
-
-  // Strongly type/shape the snapshot
-  v.version = 1;
-  v.timestamp = typeof v.timestamp === 'number' ? v.timestamp : now;
-
-  if (!v.player || typeof v.player !== 'object') v.player = {};
-  if (typeof v.player.x !== 'number') v.player.x = 0;
-  if (typeof v.player.y !== 'number') v.player.y = 0;
-  if (typeof v.player.heartsSegs !== 'number' && v.player.heartsSegs !== null) v.player.heartsSegs = null;
-
-  if (typeof v.coins !== 'number') v.coins = 0;
-
-  if (!v.inventory || typeof v.inventory !== 'object') v.inventory = {};
-
-  if (!v.bank || typeof v.bank !== 'object') v.bank = {};
-  if (typeof v.bank.coins !== 'number') v.bank.coins = 0;
-  if (!v.bank.items || typeof v.bank.items !== 'object') v.bank.items = {};
-  if (!v.bank.ammo || typeof v.bank.ammo !== 'object') v.bank.ammo = {};
-
-  return v;
+function isPlainObject(o) {
+  return !!o && typeof o === 'object' && !Array.isArray(o);
 }
 
-function latestValidSnapshot(fileDoc) {
-  if (!fileDoc || !Array.isArray(fileDoc.snapshots)) return null;
-  for (let i = fileDoc.snapshots.length - 1; i >= 0; i--) {
-    const s = fileDoc.snapshots[i];
-    if (!isEmptyLike(s)) return s;
-  }
-  return null;
+// "empty/bad" snapshot detection — tune as needed
+function isEmptySnapshot(snap) {
+  if (!isPlainObject(snap)) return true;
+  if (snap.version !== 1) return false; // unknown future versions: treat as not-empty
+  const coinsTop = (snap.coins|0) || 0;
+  const invEmpty = !isPlainObject(snap.inventory) || Object.keys(snap.inventory).length === 0;
+  const bankObj  = isPlainObject(snap.bank) ? snap.bank : {};
+  const bankCoins = (bankObj.coins|0) || 0;
+  const bankEmpty = bankCoins === 0 &&
+                    (!isPlainObject(bankObj.items) || Object.keys(bankObj.items).length === 0) &&
+                    (!isPlainObject(bankObj.ammo)  || Object.keys(bankObj.ammo).length  === 0);
+
+  // treat as "empty" if nothing tangible stored
+  const empty = coinsTop === 0 && invEmpty && bankEmpty;
+  return empty;
 }
 
-function nthFromEnd(fileDoc, n /* 0=latest,1=prev,... */, { requireValid = true } = {}) {
-  if (!fileDoc || !Array.isArray(fileDoc.snapshots) || fileDoc.snapshots.length === 0) return null;
-  let idx = fileDoc.snapshots.length - 1 - n;
-  while (idx >= 0) {
-    const s = fileDoc.snapshots[idx];
-    if (!requireValid || !isEmptyLike(s)) return s;
-    idx--;
+// rotate <user>.N.json -> <user>.(N+1).json, up to HISTORY_DEPTH
+async function rotateHistory(userBase) {
+  for (let i = HISTORY_DEPTH - 1; i >= 1; i--) {
+    const src = path.join(DATA_DIR, `${userBase}.${i}.json`);
+    const dst = path.join(DATA_DIR, `${userBase}.${i+1}.json`);
+    try { await fs.rename(src, dst); } catch {}
   }
-  return null;
+  // move current -> .1
+  const current = path.join(DATA_DIR, `${userBase}.json`);
+  const hist1   = path.join(DATA_DIR, `${userBase}.1.json`);
+  try { await fs.rename(current, hist1); } catch {}
 }
 
-// ---- routes ----
+// find best snapshot to serve
+async function readBest(userBase, preferLastGood = false) {
+  const lastGood = await readJSON(path.join(DATA_DIR, `${userBase}.lastgood.json`));
+  const latest   = await readJSON(path.join(DATA_DIR, `${userBase}.json`));
 
-// GET /api/state/:user
-// Options:
-//   ?offset=N     -> 0=latest (default), 1=previous, etc. (valid-only)
-//   ?raw=1        -> return entire file {version, snapshots: [...]}
-//   ?allowEmpty=1 -> when fetching a specific offset, allow empty-like
-api.get('/state/:user', async (req, res) => {
-  await ensureDir();
-  const user = req.params.user;
-  const raw = req.query.raw === '1';
-  const offset = Math.max(0, parseInt(req.query.offset || '0', 10));
-  const allowEmpty = req.query.allowEmpty === '1';
+  if (preferLastGood && lastGood) return lastGood;
 
-  const doc = await readUserFile(user);
+  if (latest && !isEmptySnapshot(latest)) return latest;
+  if (lastGood) return lastGood;
 
-  if (raw) {
-    return res.json(doc || { version: 2, snapshots: [] });
+  // search history
+  for (let i = 1; i <= HISTORY_DEPTH; i++) {
+    const h = await readJSON(path.join(DATA_DIR, `${userBase}.${i}.json`));
+    if (h && !isEmptySnapshot(h)) return h;
   }
+  return latest || lastGood || null;
+}
 
-  let snap;
-  if (offset === 0) {
-    snap = latestValidSnapshot(doc) || null;
-  } else {
-    snap = nthFromEnd(doc, offset, { requireValid: !allowEmpty }) || null;
+// ---------- routes ----------
+router.get('/state/:username', async (req, res) => {
+  try {
+    await ensureDir();
+    const user = normUser(req.params.username);
+    if (!user) return res.status(400).json({ error: 'bad-username' });
+
+    const preferLastGood = (req.query.prefer === 'lastGood');
+    const best = await readBest(user, preferLastGood);
+
+    if (!best) return res.status(404).json({ error: 'not-found' });
+
+    // Small safety header for caches
+    res.set('Cache-Control', 'no-store');
+    return res.json(best);
+  } catch (e) {
+    console.error('GET state error', e);
+    return res.status(500).json({ error: 'server-error' });
   }
-
-  if (!snap) {
-    // No valid snapshots yet. Return a clear empty payload + flags.
-    return res.json({
-      ok: true,
-      empty: true,
-      snapshot: {
-        version: 1,
-        player: { x: 0, y: 0, heartsSegs: null },
-        coins: 0,
-        inventory: {},
-        bank: { coins: 0, items: {}, ammo: {} },
-        timestamp: Date.now()
-      }
-    });
-  }
-
-  return res.json({
-    ok: true,
-    empty: false,
-    snapshot: snap
-  });
 });
 
-// GET /api/state/:user/snapshots
-// Returns { total, snapshots: [ {timestamp, emptyLike, ...minimal}, ... ] }
-// Use this endpoint for debugging/diagnostics UIs.
-api.get('/state/:user/snapshots', async (req, res) => {
-  await ensureDir();
-  const user = req.params.user;
-  const doc = await readUserFile(user);
-  const snaps = (doc && Array.isArray(doc.snapshots)) ? doc.snapshots : [];
-  const compact = snaps.map(s => ({
-    timestamp: s.timestamp,
-    emptyLike: isEmptyLike(s),
-    coins: s.coins|0,
-    bankCoins: (s.bank && s.bank.coins)|0,
-    invKeys: Array.isArray(s.inventory) ? s.inventory.length : Object.keys(s.inventory||{}).length
-  }));
-  res.json({ ok: true, total: snaps.length, snapshots: compact });
-});
+router.post('/state/:username', async (req, res) => {
+  try {
+    await ensureDir();
+    const user = normUser(req.params.username);
+    if (!user) return res.status(400).json({ error: 'bad-username' });
 
-// POST /api/state/:user
-// Accepts a snapshot, normalizes it, and appends it **only if not empty-like**.
-// Returns the snapshot actually stored and whether it was ignored.
-api.post('/state/:user', async (req, res) => {
-  await ensureDir();
-  const user = req.params.user;
-
-  // Accept JSON object or JSON string (sendBeacon)
-  let incoming = req.body || {};
-  if (typeof incoming === 'string') {
-    try { incoming = JSON.parse(incoming); } catch { incoming = {}; }
-  }
-
-  const snap = normalizeSnapshot(incoming);
-  const empty = isEmptyLike(snap);
-
-  const doc = (await readUserFile(user)) || { version: 2, snapshots: [] };
-
-  if (empty) {
-    // Do not store, but still report ok so client doesn't panic.
-    return res.json({ ok: true, stored: false, reason: 'empty-like-ignored', snapshot: snap });
-  }
-
-  // De-dupe identical latest (same content except timestamp)
-  const last = doc.snapshots[doc.snapshots.length - 1];
-  const sameAsLast =
-    last &&
-    last.coins === snap.coins &&
-    JSON.stringify(last.inventory || {}) === JSON.stringify(snap.inventory || {}) &&
-    JSON.stringify(last.bank || {}) === JSON.stringify(snap.bank || {}) &&
-    JSON.stringify(last.player || {}) === JSON.stringify(snap.player || {});
-
-  if (!sameAsLast) {
-    doc.snapshots.push(snap);
-    if (doc.snapshots.length > MAX_SNAPSHOTS) {
-      doc.snapshots = doc.snapshots.slice(doc.snapshots.length - MAX_SNAPSHOTS);
+    const incoming = req.body;
+    if (!isPlainObject(incoming)) {
+      return res.status(400).json({ error: 'invalid-json' });
     }
-    await writeUserFile(user, doc);
-    return res.json({ ok: true, stored: true, snapshot: snap, total: doc.snapshots.length });
-  } else {
-    // Same snapshot state as latest — update timestamp only?
-    // We'll still push to keep a time trail, but cap by MAX_SNAPSHOTS anyway.
-    doc.snapshots.push(snap);
-    if (doc.snapshots.length > MAX_SNAPSHOTS) {
-      doc.snapshots = doc.snapshots.slice(doc.snapshots.length - MAX_SNAPSHOTS);
+
+    // Always stamp a server-side timestamp (ms)
+    const stamped = { ...incoming, timestamp: Date.now() };
+
+    if (isEmptySnapshot(stamped)) {
+      // DO NOT rotate or overwrite lastGood on empty saves
+      // Optionally keep a "rejected" drop if you ever want to debug:
+      // await writeJSON(path.join(DATA_DIR, `${user}.rejected-${Date.now()}.json`), stamped);
+      return res.status(202).json({ ok: true, ignored: true, reason: 'empty-snapshot' });
     }
-    await writeUserFile(user, doc);
-    return res.json({ ok: true, stored: true, dedupLike: true, snapshot: snap, total: doc.snapshots.length });
+
+    // rotate history, then write current and update lastGood
+    await rotateHistory(user);
+    await writeJSON(path.join(DATA_DIR, `${user}.json`), stamped);
+    await writeJSON(path.join(DATA_DIR, `${user}.lastgood.json`), stamped);
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('POST state error', e);
+    return res.status(500).json({ error: 'server-error' });
   }
 });
 
-export default api;
+module.exports = router;
+
+/*
+USAGE in your main server:
+---------------------------------
+const express = require('express');
+const apiState = require('./server/api-state'); // <- this file
+const app = express();
+
+// (optional) CORS for your domain/app
+app.use((req,res,next)=>{ res.set('Access-Control-Allow-Origin','*'); res.set('Access-Control-Allow-Headers','Content-Type'); if(req.method==='OPTIONS'){ return res.sendStatus(200); } next(); });
+
+app.use('/api', apiState);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, ()=> console.log('Server listening on', PORT));
+*/
