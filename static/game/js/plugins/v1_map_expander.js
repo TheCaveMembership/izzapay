@@ -473,7 +473,7 @@ function lakeRects(a){
 
     // Compute bank rect once per page load to keep stable
     const bx0 = (_hospitalDoor.x + 5);
-    const by0 = (_hospitalDoor.y - 8);
+    const by0 = (_hospitalDoor.y - 9);
     const bankRect = { x0: bx0, y0: by0, x1: bx0 + 2, y1: by0 + 2 }; // 3x3
     const bankDoor = { x: bx0 + 1, y: by0 - 1 }; // north-middle in front
 
@@ -791,6 +791,7 @@ if (!window._izzaBoatActive) {             // <— add this guard
       });
     });
 
+    
     // wire ammo deposit
     ammoRows.forEach(a=>{
       host.querySelector(`#dep_${a.key}_btn`)?.addEventListener('click', ()=>{
@@ -806,6 +807,9 @@ if (!window._izzaBoatActive) {             // <— add this guard
     });
   }
 
+// after a successful deposit or withdraw:
+window.dispatchEvent(new Event('izza-bank-changed'));
+  
   function _drawWithdraw(){
     const host=document.getElementById('bankBody'); if(!host) return;
     const api=IZZA.api, bank=_readBank(), inv=_readInv();
