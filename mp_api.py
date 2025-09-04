@@ -1,5 +1,6 @@
-# mp_api.py — v3.1
-# Adds robust Duel REST (best-of-3 rounds, tracer sharing, mirrored cops, equipped-weapon mirroring)
+# mp_api.py — v3.2
+# Duel REST: best-of-3 rounds, tracer sharing, mirrored cops, equipped-weapon mirroring,
+# and self-KO (environmental death) so cops/SWAT/army can end a duel round.
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
 from db import conn
@@ -96,7 +97,7 @@ def _is_friend(a:int,b:int)->bool:
                         LIMIT 1""",(a,b,b,a)).fetchone()
         return bool(r)
 
-# ---- simple mm queues --------------------------------------------------------
+# ---- queues & starts ---------------------------------------------------------
 
 _QUEUES: Dict[str, List[int]] = {"v1": []}
 _STARTS: Dict[int, Dict[str, Any]] = {}  # per-user "start" payloads
@@ -326,13 +327,13 @@ def mp_duel_poke():
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
-    # live state
+    # live state (hp here is DUEL hearts; separate from overworld hearts)
     st = room["state"].get(uid, {})
     st.update({
         "x": float(data.get("x") or 0.0),
         "y": float(data.get("y") or 0.0),
         "facing": data.get("facing") or "down",
-        "hp": float(data.get("hp") or 3.0),  # client sends its heart float
+        "hp": float(data.get("hp") or 3.0),
         "inv": data.get("inv") or {},
         "t": time.time()
     })
@@ -380,7 +381,6 @@ def mp_duel_pull():
     new_traces = [e for e in all_traces if e.get("t",0)>since and e.get("from")!=uid]
     room["pullSince"][uid] = time.time()
 
-    # round state
     rnd = room["round"].copy()
 
     payload = {
@@ -420,18 +420,15 @@ def mp_duel_hit():
     opp = _other(room, uid)
     os  = room["state"].get(opp) or {"hp":3.0}
 
-    # damage in quarter segments: 3 hearts => 12 segments
-    # client uses its local max hearts; we store fractional float hp and qhp backing
     def delta_quarters(k:str)->int:
         if k in ("pistol","uzi","bullet"): return 1     # 1/4 heart
         if k=="grenade": return 4                       # 1 heart
-        if k in ("bat","knucks","knuckles"): return 2   # 1/2 heart (per swing hit)
-        if k in ("hand","melee"): return 1              # 1/4 heart (every 2 taps client-side can throttle)
+        if k in ("bat","knucks","knuckles"): return 2   # 1/2 heart
+        if k in ("hand","melee"): return 1              # 1/4 heart
         return 1
 
     qhp = os.get("_qhp")
     if qhp is None:
-        # default to 3 hearts (12 quarters) if client didn't send first
         base = os.get("hp", 3.0)
         qhp  = int(round(float(base)*4))
 
@@ -440,13 +437,27 @@ def mp_duel_hit():
     os["hp"]   = float(qhp/4.0)
     room["state"][opp] = os
 
-    # round/match resolution
     ended_now = False
     if qhp <= 0:
         ended_now = True
         _on_round_end(room, winner_uid=uid)
 
     return jsonify({"ok":True, "opponentHp": os["hp"], "roundEnded": ended_now, "round": room["round"]})
+
+@mp_bp.post("/duel/self_ko")
+def mp_duel_self_ko():
+    """The caller died to environment (e.g., cops/SWAT/army) during a duel; count as round loss."""
+    who=_current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid,_,_=who
+    data=(request.get_json(silent=True) or {})
+    mid=str(data.get("matchId") or "")
+    room=_get_room(mid)
+    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
+
+    opp = _other(room, uid)
+    _on_round_end(room, winner_uid=opp)
+    return jsonify({"ok":True, "round": room["round"]})
 
 @mp_bp.post("/duel/trace")
 def mp_duel_trace():
@@ -470,9 +481,8 @@ def mp_duel_trace():
     }
     buf = room["events"]["traces"]
     buf.append(e)
-    # keep buffer small
-    if len(buf) > 120:
-        room["events"]["traces"] = buf[-120:]
+    if len(buf) > 160:
+        room["events"]["traces"] = buf[-160:]
     return jsonify({"ok":True})
 
 # ---- round helpers -----------------------------------------------------------
@@ -491,21 +501,21 @@ def _on_round_end(room:Dict[str,Any], winner_uid:int):
     best = int(rnd.get("bestOf",3))
     need = best//2 + 1
 
-    # decide match
     if a_w >= need or b_w >= need:
         rnd["matchOver"] = True
         _apply_match_result(mode=room.get("mode","v1"), a=a, b=b, a_w=a_w, b_w=b_w)
         return
 
-    # schedule next round (bump number; set countdown +5s settle)
+    # prepare next round after a short settle
     rnd["number"] = int(rnd.get("number",1)) + 1
     rnd["ended"] = False
-    rnd["countdownAt"] = time.time() + 5.0  # both clients can wait for this
+    rnd["countdownAt"] = time.time() + 5.0
 
-    # reset both players server-side hp backing; clients will reset hearts visually
+    # reset server-side hp backing to whatever client heart size is (kept)
     for uid in (a,b):
         st = room["state"].get(uid) or {}
-        st["_qhp"] = int(round(float(st.get("hp", 3.0))*4))  # keep whatever hearts client uses
+        base = float(st.get("hp", 3.0))
+        st["_qhp"] = int(round(base*4))
         room["state"][uid] = st
 
 def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
@@ -523,32 +533,25 @@ def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
                     cx.execute("UPDATE mp_ranks SET v1_l = COALESCE(v1_l,0)+1 WHERE user_id=?", (a,))
     except Exception:
         pass
-    # Soft-clean room later (gives clients time to read matchOver)
-    def _expire(mid: str):
-        try:
-            _DUELS.pop(mid, None)
-        except Exception:
-            pass
-    # schedule via coarse timer wheel (stateless)
+    # schedule cleanup ~15s later (clients can still pull matchOver)
     mid_list = [k for k,v in _DUELS.items() if v.get("players")==[a,b] or v.get("players")==[b,a]]
     for mid in mid_list:
-        # mark as to be cleaned in ~15s
         room = _DUELS.get(mid)
         if room:
             room["_expireAt"] = time.time() + 15.0
 
-# ---- background sweeper (lazy, on each request) -----------------------------
+# ---- background sweeper (runs before each request) --------------------------
 
 @mp_bp.before_app_request
 def _sweep_duel_rooms():
     now = time.time()
     trash = []
     for mid, room in list(_DUELS.items()):
-        # drop old traces
+        # trim old trace events
         traces = room["events"]["traces"]
         if traces:
             room["events"]["traces"] = [e for e in traces if (now - e.get("t",now)) < 12.0]
-        # expire room if flagged
+        # expire finished rooms
         exp = room.get("_expireAt")
         if exp and now >= exp:
             trash.append(mid)
