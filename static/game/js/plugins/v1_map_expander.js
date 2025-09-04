@@ -15,8 +15,7 @@
     lot:'#474747',
     hospital:'#b94a48',
     doorBlue:'#5aa0ff',
-    doorGreen:'#35d27a',
-    bankGold:'#d6b34a'
+    doorGreen:'#35d27a'
   };
   const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
 
@@ -260,181 +259,6 @@ function lakeRects(a){
     const curSegs = _getSegs();
     if(curSegs >= maxSegs){ alert('Hearts are already full'); return; }
 
-      // ---------- BANK (UI + helpers) ----------
-  let _bank = null, _bankDoor = null;
-
-  function ensureBankUI(){
-    if(document.getElementById('bankUI')) return;
-    const d=document.createElement('div');
-    d.id='bankUI';
-    d.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:55;';
-    d.innerHTML =
-      `<div style="min-width:320px;background:#0f1623;border:1px solid #374868;border-radius:12px;padding:16px;color:#dfe9ff;box-shadow:0 16px 38px rgba(0,0,0,.6)">
-         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-           <strong style="font-size:17px">IZZA Bank</strong>
-           <button id="bankClose" style="background:#2a3850;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
-         </div>
-         <div id="bankBlurb" style="opacity:.9;margin-bottom:10px">Click an action below:</div>
-         <div style="display:flex;gap:10px">
-           <button id="bankDeposit"  style="flex:1;padding:10px;border:0;border-radius:8px;background:#2a884a;color:#fff;font-weight:700;cursor:pointer">Deposit</button>
-           <button id="bankWithdraw" style="flex:1;padding:10px;border:0;border-radius:8px;background:#2863b0;color:#fff;font-weight:700;cursor:pointer">Withdraw</button>
-         </div>
-         <div id="bankPanel" style="margin-top:12px;max-height:240px;overflow:auto;border-top:1px solid #2b3b57;padding-top:10px"></div>
-       </div>`;
-    document.body.appendChild(d);
-    d.querySelector('#bankClose').onclick = ()=> bankClose();
-    d.querySelector('#bankDeposit').onclick = ()=> bankShowDeposit();
-    d.querySelector('#bankWithdraw').onclick= ()=> bankShowWithdraw();
-  }
-
-  function _fireBtn(show){
-    const b=document.getElementById('btnFire');
-    if(b){ b.style.display = show ? '' : 'none'; }
-  }
-
-  function bankOpen(){
-    ensureBankUI();
-    document.getElementById('bankUI').style.display='flex';
-    _fireBtn(false); // hide Fire while bank is open
-  }
-  function bankClose(){
-    const el=document.getElementById('bankUI'); if(el) el.style.display='none';
-    _fireBtn(true); // show Fire again
-  }
-
-  // Minimal local-only store (per-username) for persistence
-  const BANK_LS_KEY = 'izzaBank';
-  function _me(){ return (IZZA.api?.user?.username)||'player'; }
-  function _loadBank(){
-    try{ const j=JSON.parse(localStorage.getItem(BANK_LS_KEY)||'{}'); return j; }catch{ return {}; }
-  }
-  function _saveBank(obj){ try{ localStorage.setItem(BANK_LS_KEY, JSON.stringify(obj)); }catch{} }
-  function _getAcct(){
-    const all=_loadBank(); const u=_me();
-    all.byUser ||= {};
-    all.byUser[u] ||= { coins:0, items:{}, ammo:{} };
-    return { root:all, acct:all.byUser[u], key:u };
-  }
-
-  function bankShowDeposit(){
-    const api=IZZA.api; if(!api?.ready) return;
-    const inv = (api.getInventory && api.getInventory()) || {};
-    const coins = api.getCoins();
-    const panel = document.getElementById('bankPanel'); if(!panel) return;
-    let html = `<div style="margin-bottom:8px;opacity:.9">Inventory Coins: <b>${coins} IC</b></div>`;
-    html += `<div style="font-weight:700;margin:6px 0 4px">Items</div>`;
-    const rows=[];
-    Object.entries(inv).forEach(([k,v])=>{
-      const amt = (typeof v==='number')? v : (v.amount||v.count||1);
-      if(amt>0) rows.push(`<button data-item="${k}" class="bank-dep" style="margin:4px 6px 0 0;padding:6px 10px;border:0;border-radius:7px;background:#335a38;color:#e9ffe9;cursor:pointer">${k} × ${amt}</button>`);
-      const ammo = v.ammo||v.bullets||0;
-      if(ammo>0) rows.push(`<button data-ammo="${k}" class="bank-dep-ammo" style="margin:4px 6px 0 0;padding:6px 10px;border:0;border-radius:7px;background:#6a8a3a;color:#faffea;cursor:pointer">${k} ammo × ${ammo}</button>`);
-    });
-    if(!rows.length) html += `<div style="opacity:.7">No items to deposit.</div>`;
-    else html += `<div>${rows.join('')}</div>`;
-
-    html += `<div style="font-weight:700;margin:10px 0 4px">Coins</div>
-             <button id="bankDepositCoins" style="padding:6px 10px;border:0;border-radius:7px;background:#335a38;color:#e9ffe9;cursor:pointer">Deposit 100 IC</button>`;
-    panel.innerHTML = html;
-
-    // wire
-    panel.querySelectorAll('.bank-dep').forEach(b=>{
-      b.onclick = ()=>{
-        const item=b.getAttribute('data-item');
-        const {root,acct}= _getAcct();
-        acct.items[item] = (acct.items[item]||0) + 1;
-        // remove from inv (very light touch)
-        if(inv[item]?.amount){ inv[item].amount--; } else { delete inv[item]; }
-        api.setInventory && api.setInventory(inv);
-        _saveBank(root);
-        bankShowDeposit();
-      };
-    });
-    panel.querySelectorAll('.bank-dep-ammo').forEach(b=>{
-      b.onclick = ()=>{
-        const gun=b.getAttribute('data-ammo');
-        const have = (inv[gun]?.ammo||inv[gun]?.bullets||0)|0;
-        if(have<=0) return;
-        const add = Math.min(25, have);
-        const {root,acct}= _getAcct();
-        acct.ammo[gun] = (acct.ammo[gun]||0) + add;
-        if(inv[gun].ammo!=null) inv[gun].ammo -= add;
-        else if(inv[gun].bullets!=null) inv[gun].bullets -= add;
-        api.setInventory && api.setInventory(inv);
-        _saveBank(root);
-        bankShowDeposit();
-      };
-    });
-    const depCoins = panel.querySelector('#bankDepositCoins');
-    if(depCoins) depCoins.onclick = ()=>{
-      if(api.getCoins()<100) return;
-      const {root,acct}= _getAcct();
-      acct.coins = (acct.coins||0) + 100;
-      api.setCoins(api.getCoins()-100);
-      _saveBank(root);
-      bankShowDeposit();
-    };
-  }
-
-  function bankShowWithdraw(){
-    const api=IZZA.api; if(!api?.ready) return;
-    const {root,acct}= _getAcct();
-    const panel = document.getElementById('bankPanel'); if(!panel) return;
-    let html = `<div style="margin-bottom:8px;opacity:.9">Bank Coins: <b>${acct.coins|0} IC</b></div>`;
-    const rows=[];
-    Object.entries(acct.items||{}).forEach(([k,n])=>{
-      if(n>0) rows.push(`<button data-item="${k}" class="bank-wd" style="margin:4px 6px 0 0;padding:6px 10px;border:0;border-radius:7px;background:#2a4a86;color:#e9f3ff;cursor:pointer">Withdraw ${k} × 1 (of ${n})</button>`);
-    });
-    Object.entries(acct.ammo||{}).forEach(([gun,n])=>{
-      if(n>0) rows.push(`<button data-ammo="${gun}" class="bank-wd-ammo" style="margin:4px 6px 0 0;padding:6px 10px;border:0;border-radius:7px;background:#425c9a;color:#eef5ff;cursor:pointer">Withdraw ${gun} ammo × 25 (of ${n})</button>`);
-    });
-    if(!rows.length) html += `<div style="opacity:.7">No banked items/ammo.</div>`;
-    else html += `<div>${rows.join('')}</div>`;
-
-    html += `<div style="font-weight:700;margin:10px 0 4px">Coins</div>
-             <button id="bankWithdrawCoins" style="padding:6px 10px;border:0;border-radius:7px;background:#2a4a86;color:#e9f3ff;cursor:pointer">Withdraw 100 IC</button>`;
-    panel.innerHTML = html;
-
-    // wire
-    panel.querySelectorAll('.bank-wd').forEach(b=>{
-      b.onclick = ()=>{
-        const item=b.getAttribute('data-item');
-        if((acct.items[item]||0)<=0) return;
-        acct.items[item]--;
-        const inv = (api.getInventory && api.getInventory()) || {};
-        if(!inv[item]) inv[item]={ amount:1, equipped:false };
-        else if(inv[item].amount!=null) inv[item].amount++;
-        else inv[item].amount = (inv[item].amount||1)+1;
-        api.setInventory && api.setInventory(inv);
-        _saveBank(root);
-        bankShowWithdraw();
-      };
-    });
-    panel.querySelectorAll('.bank-wd-ammo').forEach(b=>{
-      b.onclick = ()=>{
-        const gun=b.getAttribute('data-ammo');
-        if((acct.ammo[gun]||0)<=0) return;
-        const take = Math.min(25, acct.ammo[gun]);
-        acct.ammo[gun]-=take;
-        const inv = (api.getInventory && api.getInventory()) || {};
-        inv[gun] ||= { amount:1, equipped:false, ammo:0 };
-        if(inv[gun].ammo!=null) inv[gun].ammo += take;
-        else inv[gun].bullets = (inv[gun].bullets||0) + take;
-        api.setInventory && api.setInventory(inv);
-        _saveBank(root);
-        bankShowWithdraw();
-      };
-    });
-    const wdCoins = panel.querySelector('#bankWithdrawCoins');
-    if(wdCoins) wdCoins.onclick = ()=>{
-      if((acct.coins|0) < 100) return;
-      acct.coins -= 100;
-      api.setCoins(api.getCoins()+100);
-      _saveBank(root);
-      bankShowWithdraw();
-    };
-  }
-
     // top off current heart first, else add a full heart (3 segs)
     const remInCurrent = curSegs % 3;                 // 0..2
     const topOff = remInCurrent===0 ? 0 : (3-remInCurrent); // 0,1,2
@@ -634,73 +458,51 @@ function lakeRects(a){
     for(let gy=_hospital.y0; gy<=_hospital.y1; gy++)
       for(let gx=_hospital.x0; gx<=_hospital.x1; gx++) fillTile(api,ctx,gx,gy,_hospital.color);
 
-        // ---- Bank building: 3x3 gold, glowing, 8N & 5E from hospital door ----
-    // Hospital door is the anchor:
-    const hd = _hospitalDoor; // {x:34, y:35}
-    if(hd){
-      // Bank CENTER at (hd.x+5, hd.y-8). Building is 3x3 centered there.
-      const cx = hd.x + 5;
-      const cy = hd.y - 8;
-      _bank = { x0: cx-1, y0: cy-1, x1: cx+1, y1: cy+1, color: COL.bankGold };
-      // Door on the NORTH side, in front of the north row middle tile:
-      _bankDoor = { x: cx, y: _bank.y0 - 1 };
-
-      // Glow backdrop (soft aura)
-      for(let gy=_bank.y0-1; gy<=_bank.y1+1; gy++){
-        for(let gx=_bank.x0-1; gx<=_bank.x1+1; gx++){
-          if(gx>=_bank.x0 && gx<=_bank.x1 && gy>=_bank.y0 && gy<=_bank.y1) continue;
-          // light halo tint
-          fillTile(api,ctx,gx,gy,'#a88e34');
-        }
-      }
-      // Building body
-      for(let gy=_bank.y0; gy<=_bank.y1; gy++)
-        for(let gx=_bank.x0; gx<=_bank.x1; gx++)
-          fillTile(api,ctx,gx,gy,_bank.color);
-
-      // Door: green if within 1 tile, else blue
-      const tB=api.TILE, pgxB=((api.player.x+16)/tB|0), pgyB=((api.player.y+16)/tB|0);
-      const nearBank = Math.abs(pgxB-_bankDoor.x)<=1 && Math.abs(pgyB-_bankDoor.y)<=1;
-      fillTile(api,ctx,_bankDoor.x,_bankDoor.y, nearBank ? COL.doorGreen : COL.doorBlue);
-    }
-
     // Door tile: blue by default; turns green if player within 1 tile
     const t=api.TILE, pgx=((api.player.x+16)/t|0), pgy=((api.player.y+16)/t|0);
     const nearDoor = Math.abs(pgx-_hospitalDoor.x)<=1 && Math.abs(pgy-_hospitalDoor.y)<=1;
     set(_hospitalDoor.x, _hospitalDoor.y, nearDoor ? COL.doorGreen : COL.doorBlue);
 
     // =========================
-    //        BANK (NEW)
+    //        BANK (UPDATED)
     // =========================
-    // Bank sits 5 tiles south of the hospital building
+    // Position: 8 tiles north & 5 tiles east of the hospital door
+    // Footprint: 3x3, gold, glows
+    // Door: north side, centered (one tile above bank north row middle)
     window.__IZZA_BANK__ = window.__IZZA_BANK__ || {};
-    const _bank = (__IZZA_BANK__.rect = __IZZA_BANK__.rect || {
-      x0: _hospital.x0, y0: _hospital.y1 + 5, x1: _hospital.x1, y1: _hospital.y1 + 8, color: COL.civic
-    });
-    const _bankDoor = (__IZZA_BANK__.door = __IZZA_BANK__.door || {
-      x: Math.floor((_hospital.x0 + _hospital.x1)/2), y: _hospital.y1 + 4  // one tile north of bank
-    });
 
-    // draw bank body
-    for(let gy=_bank.y0; gy<=_bank.y1; gy++)
-      for(let gx=_bank.x0; gx<=_bank.x1; gx++) fillTile(api,ctx,gx,gy,_bank.color);
+    // Compute bank rect once per page load to keep stable
+    const bx0 = (_hospitalDoor.x + 5);
+    const by0 = (_hospitalDoor.y - 8);
+    const bankRect = { x0: bx0, y0: by0, x1: bx0 + 2, y1: by0 + 2 }; // 3x3
+    const bankDoor = { x: bx0 + 1, y: by0 - 1 }; // north-middle in front
 
-    // bank door highlight
-    const nearBankDoor = Math.abs(pgx-_bankDoor.x)<=1 && Math.abs(pgy-_bankDoor.y)<=1;
-    set(_bankDoor.x, _bankDoor.y, nearBankDoor ? COL.doorGreen : COL.doorBlue);
+    // Persist to global holder
+    __IZZA_BANK__.rect = bankRect;
+    __IZZA_BANK__.door = bankDoor;
 
-    // label shadow strip
-    const sx=w2sX(api,_bank.x0*api.TILE), sy=w2sY(api,(_bank.y0)*api.TILE);
-    ctx.fillStyle='rgba(0,0,0,.14)';
-    ctx.fillRect(sx,sy, (_bank.x1-_bank.x0+1)*api.DRAW, Math.floor(api.DRAW*0.18));
+    // Draw bank with a gold glow
+    const goldFill = '#e7c14a';
+    const glowCol  = 'rgba(255,215,64,0.55)';
+    // Glow pass: draw one big rect with shadow
+    (function drawGoldBlockWithGlow(){
+      const sx=w2sX(api, bankRect.x0*api.TILE);
+      const sy=w2sY(api, bankRect.y0*api.TILE);
+      const w = 3*api.DRAW, h = 3*api.DRAW;
+      ctx.save();
+      ctx.shadowColor = glowCol;
+      ctx.shadowBlur  = 18;
+      ctx.fillStyle   = goldFill;
+      ctx.fillRect(sx, sy, w, h);
+      ctx.restore();
+    })();
+    // Ensure tiles are gold (keeps grid look)
+    for(let gy=bankRect.y0; gy<=bankRect.y1; gy++)
+      for(let gx=bankRect.x0; gx<=bankRect.x1; gx++) fillTile(api,ctx,gx,gy,goldFill);
 
-    // tiny “BANK” glyph (optional minimalist)
-    try{
-      ctx.fillStyle='#d9e6ff';
-      ctx.font = Math.floor(api.DRAW*0.44)+'px sans-serif';
-      ctx.textAlign='center'; ctx.textBaseline='top';
-      ctx.fillText('BANK', w2sX(api,(_bankDoor.x)*api.TILE)+api.DRAW/2, w2sY(api,(_bank.y0)*api.TILE)+api.DRAW*0.2);
-    }catch{}
+    // bank door highlight (north of building, centered)
+    const nearBankDoor = Math.abs(pgx-bankDoor.x)<=1 && Math.abs(pgy-bankDoor.y)<=1;
+    set(bankDoor.x, bankDoor.y, nearBankDoor ? COL.doorGreen : COL.doorBlue);
     // =========================
 
     _layout = {
@@ -746,10 +548,7 @@ function lakeRects(a){
     // Hospital solid
     if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
 
-        // Bank solid
-    if(_bank){ solids.push({x:_bank.x0,y:_bank.y0,w:rectW(_bank),h:rectH(_bank)}); }
-
-    // ===== BANK solid (NEW) =====
+    // ===== BANK solid (kept) =====
     if(window.__IZZA_BANK__?.rect){
       const B = window.__IZZA_BANK__.rect;
       solids.push({x:B.x0,y:B.y0,w:rectW(B),h:rectH(B)});
@@ -821,7 +620,7 @@ if (!window._izzaBoatActive) {             // <— add this guard
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='a') tryHospitalHeal(); });
 
   // ===============================
-  //           BANK UI (NEW)
+  //           BANK UI (kept, plus hide fire button while open/closed)
   // ===============================
 
   // Per-user persistent key
@@ -879,14 +678,21 @@ if (!window._izzaBoatActive) {             // <— add this guard
     wrap.querySelector('#bankTabWithdraw').onclick = ()=> _drawWithdraw();
   }
 
+  function _setFireVisible(v){
+    const f=document.getElementById('btnFire');
+    if(f){ f.style.visibility = v ? 'visible' : 'hidden'; }
+  }
+
   function _bankOpen(){
     _ensureBankUI();
     document.getElementById('bankUI').style.display='flex';
+    _setFireVisible(false); // HIDE fire button while bank is open
     _updateBankCoinsView();
     _drawDeposit();
   }
   function _bankClose(){
     const el=document.getElementById('bankUI'); if(el) el.style.display='none';
+    _setFireVisible(true);  // SHOW fire button when bank closes
   }
   function _updateBankCoinsView(){
     const api=IZZA.api; const bank=_readBank();
@@ -1224,7 +1030,7 @@ if (!window._izzaBoatActive) {             // <— add this guard
     // ---- BANK (overlay block) ----
     if(window.__IZZA_BANK__?.rect){
       const B = window.__IZZA_BANK__.rect;
-      ctx.fillStyle = '#6f87b3'; // civic tint
+      ctx.fillStyle = '#e7c14a'; // gold tint
       ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
     }
 
