@@ -20,7 +20,6 @@
   const setLS = (k, v)=> localStorage.setItem(k, v);
   const getLSJSON = (k, fb=null)=> safeParse(getLS(k, null), fb);
   const setLSJSON = (k, obj)=> setLS(k, JSON.stringify(obj));
-
   function waitFrames(n=1){ return new Promise(res=>{ let left=n; function tick(){ if(--left<=0) res(); else requestAnimationFrame(tick); } requestAnimationFrame(tick); }); }
   function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
@@ -61,94 +60,71 @@
     return null;
   }
 
-  // ===== quick pre-seed so HUD shows correct coins immediately =====
-  (async function preseedEarly(){
-    const USER = userName();
+  // ---- helper: compute stable on-hand + bank from a snapshot (with clamps) ----
+  function deriveMoneyFields(snap){
+    let total = (snap && (snap.coins|0)) || 0;
+    let bank  = (snap && snap.bank && (snap.bank.coins|0)) || 0;
+    if (bank > total) { bank = total; }                 // clamp impossible states
+    const onHand = Math.max(0, total - bank);           // on-hand = total - bank
+    return { onHand, bank, total };
+  }
 
-    // 1) If we already have a local LastGood mirror, seed from it right away
+  // ===== quick pre-seed (atomic) so HUD & core read correct values immediately =====
+  (function preseedEarly(){
+    const USER = userName();
     const localLG = getLSJSON(`izzaBankLastGood_${USER}`, null);
     if (localLG && !isEmptySnapshot(localLG)) {
-      const bankCoins = (localLG.bank && (localLG.bank.coins|0)) || 0;
-      const total     = (localLG.coins|0) || 0;
-      const onHand    = Math.max(0, total - bankCoins);
-      setLS('izzaCoins', String(onHand));
-      // also mirror the bank for other plugins/UI
+      const money = deriveMoneyFields(localLG);
+      // atomically seed both, no events yet
+      setLS('izzaCoins', String(money.onHand));
       setLSJSON(`izzaBank_${USER}`, {
-        coins: bankCoins,
+        coins: money.bank,
         items: (localLG.bank && localLG.bank.items) || {},
         ammo:  (localLG.bank && localLG.bank.ammo)  || {}
       });
     }
-
-    // 2) Kick a no-overlay background fetch; if it returns fast enough,
-    //    update localStorage again before the core reads it.
-    try{
-      const snap = await fetchSnapshot(USER);
-      if (snap && !isEmptySnapshot(snap)) {
-        const bankCoins = (snap.bank && (snap.bank.coins|0)) || 0;
-        const total     = (snap.coins|0) || 0;
-        const onHand    = Math.max(0, total - bankCoins);
-        setLS('izzaCoins', String(onHand));
-        setLSJSON(`izzaBank_${USER}`, {
-          coins: bankCoins,
-          items: (snap.bank && snap.bank.items) || {},
-          ammo:  (snap.bank && snap.bank.ammo)  || {}
-        });
-        // refresh our local last-good mirror too
-        setLSJSON(`izzaBankLastGood_${USER}`, snap);
-      }
-    }catch(_){}
   })();
 
-  // ===== apply snapshot to the running cores =====
+  // ===== apply snapshot to the running cores (atomic + gated events) =====
   function applySnapshot(snap, USER){
-    // --- coins/bank mirrors ---
-    const BANK_KEY = `izzaBank_${USER}`;
-    const LASTGOOD_LS = `izzaBankLastGood_${USER}`;
+    // Gate reactions from other plugins during hydrate
+    window.__IZZA_HYDRATING__ = true;
 
-    // Keep a local last-good mirror for absolute safety
-    setLSJSON(LASTGOOD_LS, snap);
+    const money = deriveMoneyFields(snap);
 
-    // Bank (mirror for other plugins)
-    const bankCoins = (snap.bank && (snap.bank.coins|0)) || 0;
-    setLSJSON(BANK_KEY, {
-      coins: bankCoins,
+    // Persist a local last-good mirror first (whole snapshot)
+    setLSJSON(`izzaBankLastGood_${USER}`, snap);
+
+    // Atomically mirror bank + wallet to LS
+    setLSJSON(`izzaBank_${USER}`, {
+      coins: money.bank,
       items: (snap.bank && snap.bank.items) || {},
       ammo:  (snap.bank && snap.bank.ammo)  || {}
     });
+    setLS('izzaCoins', String(money.onHand));
 
-    // === On-hand coins semantics ===
-    // snapshot.coins = TOTAL coins (on-hand + bank)
-    // on-hand = max(0, snapshot.coins - bank.coins)
-    const totalCoins  = (snap.coins|0) || 0;
-    const coinsOnHand = Math.max(0, totalCoins - bankCoins);
-
-    // Always seed localStorage so any late core reads still see the right value
-    setLS('izzaCoins', String(coinsOnHand));
-
+    // Push into core if setter available
     if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
-      try { IZZA.api.setCoins(coinsOnHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
+      try { IZZA.api.setCoins(money.onHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
     } else {
-      // Fallback to pill update if setter isn't ready yet
+      // Fallback to pill update if core setter isn't ready yet
       try {
         const pill = document.getElementById('coinPill');
-        if(pill) pill.textContent = `Coins: ${coinsOnHand} IC`;
+        if(pill) pill.textContent = `Coins: ${money.onHand} IC`;
       } catch(e){}
     }
-    // Let autosave & listeners react
-    try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
 
-    // Legacy keys / Core v2
+    // Legacy keys / Core v2 compatibility (wallet value)
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
-      coins: coinsOnHand,
+      coins: money.onHand,
       missionsCompleted: missions,
       inventory: invList
     });
     setLS('izzaMissions', String(missions));
 
-    // Hearts (optional)
+    // Hearts
     if (snap.player && typeof snap.player.heartsSegs === 'number'){
       setLS(`izzaCurHeartSegments_${USER}`, String(snap.player.heartsSegs|0));
       if (typeof window._redrawHeartsHud === 'function') {
@@ -162,27 +138,25 @@
       if (typeof snap.player.x === 'number') p.x = snap.player.x;
       if (typeof snap.player.y === 'number') p.y = snap.player.y;
       if (window.IZZA.api.doorSpawn) {
-        try {
-          window.IZZA.api.camera.x = p.x - 200;
-          window.IZZA.api.camera.y = p.y - 120;
-        } catch {}
+        try { window.IZZA.api.camera.x = p.x - 200; window.IZZA.api.camera.y = p.y - 120; } catch {}
       }
     }
 
-    // Broadcast to any HUD/UI listeners
+    // Now that both LS and core are consistent, release the gate and notify
+    window.__IZZA_HYDRATING__ = false;
+    try { window.dispatchEvent(new Event('izza-money-hydrated')); } catch {}
     try { window.dispatchEvent(new Event('izza-bank-changed')); } catch {}
+    try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
   }
 
   // ===== boot sequence =====
   async function hydrateAfterGameSettles(){
     addOverlay();
 
-    // 1) Wait for cores to say they're ready
+    // 1) Wait for cores to say they're ready (or 1s fallback)
     let readySeen = false;
     const waitReady = new Promise(async (resolve)=>{
-      if (window.IZZA && window.IZZA.api && window.IZZA.api.ready) {
-        readySeen = true; return resolve();
-      }
+      if (window.IZZA && window.IZZA.api && window.IZZA.api.ready) { readySeen = true; return resolve(); }
       const handler = ()=>{ readySeen = true; resolve(); };
       try { (window.IZZA = window.IZZA || {}).on?.('ready', handler); } catch {}
       await sleep(1000);
@@ -214,7 +188,7 @@
       return;
     }
 
-    // 4) Apply
+    // 4) Apply (atomic + gated events)
     applySnapshot(snap, USER);
 
     await waitFrames(2);
