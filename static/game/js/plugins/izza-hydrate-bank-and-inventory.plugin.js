@@ -1,7 +1,14 @@
 <!-- /static/game/js/plugins/izza-hydrate-bank-and-inventory.plugin.js -->
 <script>
-/* IZZA hydrate — Bank & Inventory restore (fixes "double withdraw" + shows Wallet) */
+/* IZZA hydrate — Bank & Inventory restore
+   - Single source of truth for MONEY (bank + wallet)
+   - Fixes "double withdraw" by making 'You' = Wallet (on-hand)
+   - Keeps invariant: TOTAL = wallet + bank at all times
+*/
 (function(){
+  // Claim ownership of money so other plugins (core-save) don’t touch it
+  window.__IZZA_MONEY_OWNER__ = 'bank-plugin';
+
   // ---------- small overlay while restoring ----------
   const overlay = document.createElement('div');
   Object.assign(overlay.style,{
@@ -63,7 +70,7 @@
     return null;
   }
 
-  // ---------- write helpers ----------
+  // ---------- money writers ----------
   function writeBankMirror(u, bank){
     const clean = bank && typeof bank==='object'
       ? { coins: clamp0(bank.coins), items: bank.items||{}, ammo: bank.ammo||{} }
@@ -123,74 +130,64 @@
     setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   }
 
-  // ---------- bank modal guard (prevents "double" on first withdraw) ----------
+  // ---------- bank modal guard (forces 'You' == Wallet; prevents doubling) ----------
   (function installBankModalGuard(){
-    // We observe when an element titled "IZZA Bank" appears and:
-    //  - Replace the header to show "Bank: X IC · Wallet: Y IC" (Wallet = on-hand)
-    //  - After any Deposit/Withdraw click, reconcile so bank+wallet stays == bootTotal
     const u = userKey();
+
+    // Helper to re-render the header line with Bank + Wallet
+    function renderHeader(card){
+      const bank  = getJSON(`izzaBank_${u}`, {coins:0,items:{},ammo:{}});
+      const wallet= clamp0(parseInt(getLS('izzaCoins')||'0',10));
+      let headerLine = card.querySelector('[data-izza-bank-header]');
+      if (!headerLine){
+        const title = card.querySelector('h3, h2, .card-title') || card.querySelector('div');
+        headerLine = document.createElement('div');
+        headerLine.setAttribute('data-izza-bank-header','1');
+        headerLine.style.cssText = 'margin-top:6px;opacity:.9';
+        (title||card).insertAdjacentElement('afterend', headerLine);
+      }
+      headerLine.textContent = `Bank: ${clamp0(bank.coins)} IC · Wallet: ${wallet} IC`;
+    }
+
     const mo = new MutationObserver(()=>{
       const cards = Array.from(document.querySelectorAll('.modal .card'));
       const bankCard = cards.find(c => /IZZA\s*Bank/i.test(c.textContent||''));
       if (!bankCard) return;
 
-      // compute authoritative values
-      const bank  = getJSON(`izzaBank_${u}`, {coins:0,items:{},ammo:{}});
-      const wallet= clamp0(parseInt(getLS('izzaCoins')||'0',10));
-      const bootTotal = clamp0(parseInt(getLS(`izzaBootTotal_${u}`)||String(wallet+clamp0(bank.coins)),10));
+      // Show Bank + Wallet in header (replaces any "You" conceptually)
+      renderHeader(bankCard);
 
-      // rewrite header line
-      const h = bankCard.querySelector('h3, h2, .card-title') || bankCard.querySelector('div');
-      if (h) {
-        // Try to find the line where "Bank: ... · You: ..." lives and rewrite it.
-        // If none, append a small line under the title.
-        let headerLine = bankCard.querySelector('[data-izza-bank-header]');
-        if (!headerLine){
-          headerLine = document.createElement('div');
-          headerLine.setAttribute('data-izza-bank-header','1');
-          headerLine.style.cssText = 'margin-top:6px;opacity:.9';
-          h.insertAdjacentElement('afterend', headerLine);
-        }
-        headerLine.textContent = `Bank: ${clamp0(bank.coins)} IC · Wallet: ${wallet} IC`;
-      }
+      // Capture TOTAL at open time (wallet + bank)
+      const bank0   = getJSON(`izzaBank_${u}`, {coins:0,items:{},ammo:{}});
+      const wallet0 = clamp0(parseInt(getLS('izzaCoins')||'0',10));
+      let sessionTotal = wallet0 + clamp0(bank0.coins);
+      setLS(`izzaBootTotal_${u}`, String(sessionTotal));
 
-      // after a click on buttons that look like deposit/withdraw, reconcile
-      const root = bankCard;
-      const clickHandler = async (ev)=>{
-        const btn = ev.target.closest('button');
-        if (!btn) return;
-
-        const label = (btn.textContent||'').trim().toLowerCase();
-        if (!/deposit|withdraw/.test(label)) return;
-
-        // Let existing handlers run and update LS first
+      // After any deposit/withdraw click, reconcile so bank+wallet === sessionTotal
+      const clickHandler = ()=>{
         setTimeout(()=>{
           const bankNow   = getJSON(`izzaBank_${u}`, {coins:0,items:{},ammo:{}});
           let walletNow   = clamp0(parseInt(getLS('izzaCoins')||'0',10));
-          let bankCoinsNow= clamp0(bankNow.coins);
+          let bankCoins   = clamp0(bankNow.coins);
 
-          // Reconcile to keep sum == bootTotal
-          const sum = walletNow + bankCoinsNow;
-          if (sum !== bootTotal){
-            // If sum grew/shrank (e.g. loot or spend), adopt new total for rest of session
-            if (Math.abs(sum - bootTotal) > 0){
-              setLS(`izzaBootTotal_${u}`, String(sum));
+          // Reconcile
+          const sum = walletNow + bankCoins;
+          if (sum !== sessionTotal){
+            // If something legitimately changed (loot/spend), adopt new total
+            if (Math.abs(sum - sessionTotal) > 0){
+              sessionTotal = sum;
+              setLS(`izzaBootTotal_${u}`, String(sessionTotal));
             } else {
-              // Clamp bank to maintain bootTotal
-              bankCoinsNow = clamp0(bootTotal - walletNow);
-              writeBankMirror(u, {coins:bankCoinsNow, items:bankNow.items||{}, ammo:bankNow.ammo||{}});
+              // Else clamp so we never exceed sessionTotal (prevents double)
+              bankCoins = clamp0(sessionTotal - walletNow);
+              writeBankMirror(u, {coins:bankCoins, items:bankNow.items||{}, ammo:bankNow.ammo||{}});
             }
           }
 
-          // refresh header text with final numbers
-          const headerLine = root.querySelector('[data-izza-bank-header]');
-          if (headerLine){
-            headerLine.textContent = `Bank: ${clamp0(bankCoinsNow)} IC · Wallet: ${clamp0(parseInt(getLS('izzaCoins')||'0',10))} IC`;
-          }
+          renderHeader(bankCard);
         }, 0);
       };
 
-      // attach once per card instance
       if (!bankCard.__izzaBankGuardInstalled){
         bankCard.addEventListener('click', clickHandler, true);
         bankCard.__izzaBankGuardInstalled = true;
