@@ -1,7 +1,6 @@
 # mp_api.py — v3.2
 # Adds robust Duel REST (best-of-3 rounds, tracer sharing, mirrored cops, equipped-weapon mirroring)
-# v3.2: On /duel/poke, if a player's hp <= 0 (e.g., cops KO), end round in favor of the opponent.
-
+# NEW in v3.2: /duel/selfdown so a player eliminated by cops during PvP cleanly loses the round
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
 from db import conn
@@ -286,18 +285,18 @@ def mp_dequeue():
 _DUELS: Dict[str, Dict[str, Any]] = {}
 
 def _new_room(mode:str, a:int, b:int) -> Dict[str, Any]:
-    now=time.time()
-    return {
-        "mode": mode,
-        "players": [int(a),int(b)],
-        "snapshots": {},
-        "state": {},
-        "cops": {int(a):[], int(b):[]},
-        "round": {"number":1, "bestOf":3, "wins":{int(a):0,int(b):0},
-                  "ended":False, "matchOver":False, "countdownAt": now+5.0},
-        "events": {"traces":[]},
-        "pullSince": {int(a):0.0,int(b):0.0}
-    }
+  now=time.time()
+  return {
+      "mode": mode,
+      "players": [int(a),int(b)],
+      "snapshots": {},
+      "state": {},
+      "cops": {int(a):[], int(b):[]},
+      "round": {"number":1, "bestOf":3, "wins":{int(a):0,int(b):0},
+                "ended":False, "matchOver":False, "countdownAt": now+5.0},
+      "events": {"traces":[]},
+      "pullSince": {int(a):0.0,int(b):0.0}
+  }
 
 def _get_room(mid:str):
     return _DUELS.get(str(mid))
@@ -356,14 +355,6 @@ def mp_duel_poke():
             for c in cops[:6]
         ]
 
-    # NEW (v3.2): if this player's hp is 0 or less (e.g., killed by cops during duel), end round in favor of opponent
-    try:
-        if float(st.get("hp", 3.0)) <= 0.0:
-            opp = _other(room, uid)
-            _on_round_end(room, winner_uid=opp)
-    except Exception:
-        pass
-
     return jsonify({"ok":True})
 
 @mp_bp.get("/duel/pull")
@@ -411,7 +402,7 @@ def mp_duel_pull():
             "facing": op_state.get("facing","down"),
             "hp": float(op_state.get("hp", 3.0)),
             "inv": op_inv,
-            "weapon": op_weapon
+            "equipped": op_weapon
         }
 
     return jsonify(payload)
@@ -430,7 +421,7 @@ def mp_duel_hit():
     opp = _other(room, uid)
     os  = room["state"].get(opp) or {"hp":3.0}
 
-    # damage in quarter segments: 3 hearts => 12 segments
+    # damage in quarter segments
     def delta_quarters(k:str)->int:
         if k in ("pistol","uzi","bullet"): return 1     # 1/4 heart
         if k=="grenade": return 4                       # 1 heart
@@ -457,7 +448,7 @@ def mp_duel_hit():
 
 @mp_bp.post("/duel/trace")
 def mp_duel_trace():
-    """Append a short-lived tracer event so the opponent can render bullet lines/sparks."""
+    """Append a short-lived tracer event so the opponent can render bullet lines."""
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
@@ -481,6 +472,21 @@ def mp_duel_trace():
         room["events"]["traces"] = buf[-120:]
     return jsonify({"ok":True})
 
+@mp_bp.post("/duel/selfdown")
+def mp_duel_selfdown():
+    """Caller reports they were eliminated by world hazards during PvP; award the round to the opponent."""
+    who=_current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid,_,_=who
+    data=(request.get_json(silent=True) or {})
+    mid=str(data.get("matchId") or "")
+    room=_get_room(mid)
+    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
+
+    opp = _other(room, uid)
+    _on_round_end(room, winner_uid=opp)
+    return jsonify({"ok":True, "round": room["round"]})
+
 # ---- round helpers -----------------------------------------------------------
 
 def _on_round_end(room:Dict[str,Any], winner_uid:int):
@@ -497,20 +503,25 @@ def _on_round_end(room:Dict[str,Any], winner_uid:int):
     best = int(rnd.get("bestOf",3))
     need = best//2 + 1
 
+    # decide match
     if a_w >= need or b_w >= need:
         rnd["matchOver"] = True
         _apply_match_result(mode=room.get("mode","v1"), a=a, b=b, a_w=a_w, b_w=b_w)
         return
 
+    # schedule next round (bump number; set countdown +5s settle)
     rnd["number"] = int(rnd.get("number",1)) + 1
     rnd["ended"] = False
-    rnd["countdownAt"] = time.time() + 5.0
+    rnd["countdownAt"] = time.time() + 5.0  # both clients can wait for this
+
+    # reset both players server-side hp backing; clients will reset hearts visually
     for uid in (a,b):
         st = room["state"].get(uid) or {}
         st["_qhp"] = int(round(float(st.get("hp", 3.0))*4))
         room["state"][uid] = st
 
 def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
+    """Update simple W/L for v1 on mp_ranks and clear the room shortly after."""
     try:
         with conn() as cx:
             cx.execute("INSERT OR IGNORE INTO mp_ranks(user_id) VALUES(?)", (a,))
@@ -524,22 +535,25 @@ def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
                     cx.execute("UPDATE mp_ranks SET v1_l = COALESCE(v1_l,0)+1 WHERE user_id=?", (a,))
     except Exception:
         pass
+    # mark room for cleanup in ~15s
     mid_list = [k for k,v in _DUELS.items() if v.get("players")==[a,b] or v.get("players")==[b,a]]
     for mid in mid_list:
         room = _DUELS.get(mid)
         if room:
             room["_expireAt"] = time.time() + 15.0
 
-# ---- background sweeper ------------------------------------------------------
+# ---- background sweeper (lazy, on each request) -----------------------------
 
 @mp_bp.before_app_request
 def _sweep_duel_rooms():
     now = time.time()
     trash = []
     for mid, room in list(_DUELS.items()):
+        # drop old traces
         traces = room["events"]["traces"]
         if traces:
             room["events"]["traces"] = [e for e in traces if (now - e.get("t",now)) < 12.0]
+        # expire room if flagged
         exp = room.get("_expireAt")
         if exp and now >= exp:
             trash.append(mid)
