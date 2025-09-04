@@ -76,15 +76,29 @@
       ammo:  (snap.bank && snap.bank.ammo)  || {}
     });
 
+    // === NEW: hydrate on-hand coins from snapshot via core ===
+    const coinsOnHand = (snap.coins|0) || 0;
+    if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
+      try { IZZA.api.setCoins(coinsOnHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
+    } else {
+      // Fallback to LS + pill if core setter isn't ready yet
+      try {
+        setLS('izzaCoins', String(coinsOnHand));
+        const pill = document.getElementById('coinPill');
+        if(pill) pill.textContent = `Coins: ${coinsOnHand} IC`;
+      } catch(e){}
+    }
+    // Let autosave & listeners react
+    try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
+
     // Legacy keys / Core v2
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
-      coins: (snap.coins|0) || ((snap.bank && snap.bank.coins|0) || 0),
+      coins: coinsOnHand,
       missionsCompleted: missions,
       inventory: invList
     });
-    setLS('izzaCoins', String((snap.coins|0) || 0));
     setLS('izzaMissions', String(missions));
 
     // Hearts (optional)
@@ -103,7 +117,10 @@
       if (typeof snap.player.y === 'number') p.y = snap.player.y;
       if (window.IZZA.api.doorSpawn) {
         // keep camera sane after teleports
-        try { window.IZZA.api.camera.x = p.x - 200; window.IZZA.api.camera.y = p.y - 120; } catch {}
+        try {
+          window.IZZA.api.camera.x = p.x - 200;
+          window.IZZA.api.camera.y = p.y - 120;
+        } catch {}
       }
     }
 
