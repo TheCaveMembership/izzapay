@@ -1,15 +1,15 @@
-// PvP Duel Client — v7.0
-// - Real opponent sprite via remote_players_api.js (kept)
+// PvP Duel Client — v7.3
+// - Real opponent sprite (kept)
 // - Far-apart spawns per player & per round (kept)
 // - 5s preload hold, single countdown; fire blocked until GO (kept)
-// - Hearts HUD bridge + low-life blink (kept)
+// - Hearts HUD bridge + low-life blink (kept + PvP-only hearts fed by cops)
 // - Hitscan + tracers clamp at impact (no pass-through look) (kept)
-// - MIRRORED COPS: draw as real sprites (police/swat/military) (kept)
-// - NEW: Show opponent's equipped weapon overlay (and vice versa)
-// - NEW: Networked visual effects: share tracers/sparks so the opponent sees them
-// - NEW: Hardened cleanup for loser: remove remote sprite, bounce to lobby
+// - MIRRORED COPS: draw real sprites (kept) + apply PvP damage to my duel hearts
+// - Opponent's equipped weapon overlay (kept)
+// - Networked visual effects: share tracers/sparks (FIXED: /duel/trace + read j.traces)
+// - Hardened cleanup for loser: remove remote sprite, bounce to lobby (kept)
 (function(){
-  const BUILD='v7.0-duel-client';
+  const BUILD='v7.3-duel-client';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -90,7 +90,7 @@
     return 'hand';
   }
 
-  // ---------- hearts HUD bridge ----------
+  // ---------- hearts HUD bridge (PvP-local) ----------
   function maxHearts(){ return Math.max(1, parseInt(localStorage.getItem('izzaMaxHearts') || '3', 10)); }
   function saveSegmentsFromHP(hpFloat){
     const seg = Math.max(0, Math.min(maxHearts()*3, Math.round((hpFloat||0)*3)));
@@ -107,7 +107,7 @@
       const ratio = segForHeart / 3;
       const svgNS='http://www.w3.org/2000/svg';
       const wrap=document.createElement('div'); wrap.style.width='24px'; wrap.style.height='22px';
-      if(i===Math.floor((seg-1)/3) && seg<=3){ wrap.className='heart-blink'; } // low-life blink
+      if(i===Math.floor((seg-1)/3) && seg<=3){ wrap.className='heart-blink'; }
       const svg=document.createElementNS(svgNS,'svg'); svg.setAttribute('viewBox','0 0 24 22'); svg.setAttribute('width','24'); svg.setAttribute('height','22');
       const base=document.createElementNS(svgNS,'path'); base.setAttribute('d',HEART_PATH); base.setAttribute('fill','#3a3f4a');
       const clip=document.createElementNS(svgNS,'clipPath'); const clipId='hclip_'+Math.random().toString(36).slice(2); clip.setAttribute('id',clipId);
@@ -243,7 +243,7 @@
       x: api.player.x, y: api.player.y, facing: api.player.facing || 'down',
       hp: DUEL.myHP==null ? 4 : DUEL.myHP,
       inv: readInv(),
-      equipped: equippedKind(),                // << share live equipped weapon
+      equipped: equippedKind(),
       appearance: (IZZA.api.getAppearance && IZZA.api.getAppearance()),
       cops: copyMyCops()
     };
@@ -275,20 +275,15 @@
       DUEL.myHP = j.me.hp;
       saveSegmentsFromHP(DUEL.myHP);
       drawHeartsDOM(DUEL.myHP);
-      // Fallback: if server doesn't send round-over but I'm dead, ensure exit
-      if(DUEL.myHP<=0 && !j.round){ setTimeout(()=>{ showBanner('You were defeated', 'lose'); bounceToLobby(); cleanupDuel(); }, 650); return; }
+      if(DUEL.myHP<=0 && (!j.round || j.round.ended)){ setTimeout(()=>{ showBanner('You were defeated', 'lose'); bounceToLobby(); cleanupDuel(); }, 650); return; }
     }
 
     DUEL.oppCops = Array.isArray(j.opponentCops) ? j.opponentCops.slice(0,6) : [];
 
-    // Received effects from opponent (tracers/sparks)
-    if(Array.isArray(j.effects)){
-      for(const e of j.effects){
-        if(e.type==='tracer' && e.p){
-          DUEL.effects.push({ kind:'tracer', x1:e.p.x1, y1:e.p.y1, x2:e.p.x2, y2:e.p.y2, t:0, life:110 });
-        }else if(e.type==='spark' && e.p){
-          DUEL.effects.push({ kind:'spark', x:e.p.x, y:e.p.y, t:0, life:140 });
-        }
+    // Received traces from opponent (networked visual)
+    if(Array.isArray(j.traces)){
+      for(const e of j.traces){
+        DUEL.effects.push({ kind:'tracer', x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, t:0, life:110 });
       }
     }
 
@@ -307,13 +302,9 @@
         showBanner(`Round ${rn} — FIGHT!`, 'round');
       }
 
-      if(j.round.justEnded){
-        const iWon = j.round.winner === 'me';
-        showBanner(iWon ? `You won Round ${j.round.number}` : `You lost Round ${j.round.number}`, iWon?'win':'lose');
-      }
-
       if(j.round.matchOver){
-        const iWon = j.round.winner === 'me';
+        const myWins = (j.round.wins && (DUEL.meIsA ? j.round.wins[IZZA.api.userIdA] : j.round.wins[IZZA.api.userIdB])) || null; // optional
+        const iWon = (j.round.winner === 'me') || (myWins && myWins >= 2);
         showBanner(iWon ? 'MATCH WIN!' : 'MATCH LOSS', iWon?'win':'lose');
         setTimeout(() => { bounceToLobby(); cleanupDuel(); }, 1200);
         return;
@@ -383,13 +374,12 @@
 
   function addTracer(from, to, life=110){
     DUEL.effects.push({ kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y, t:0, life });
-    // share to opponent
-    $post('/duel/effect', { matchId: DUEL.mid, type:'tracer', p:{ x1:from.x, y1:from.y, x2:to.x, y2:to.y } });
+    // share to opponent (FIXED: correct endpoint)
+    $post('/duel/trace', { matchId: DUEL.mid, kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y });
   }
   function addSpark(at, life=140){
     DUEL.effects.push({ kind:'spark', x:at.x, y:at.y, t:0, life });
-    // share to opponent
-    $post('/duel/effect', { matchId: DUEL.mid, type:'spark', p:{ x:at.x, y:at.y } });
+    // optional: can also share as a trace of zero length; keep local for now
   }
 
   function sendHit(kind){
@@ -462,6 +452,20 @@
     return Math.hypot(m.x-o.x, m.y-o.y) <= 24;
   }
 
+  // ---------- PvP damage intake from cops (from hearts plugin) ----------
+  function applyPvpDamageSegments(nSegs){
+    const segs = Math.max(1, nSegs|0);
+    const hpBefore = DUEL.myHP ?? 4;
+    const hpAfter  = Math.max(0, (hpBefore*3 - segs) / 3);
+    DUEL.myHP = hpAfter;
+    saveSegmentsFromHP(DUEL.myHP);
+    drawHeartsDOM(DUEL.myHP);
+    if (DUEL.myHP <= 0){
+      // Tell server I was downed by world hazards so opponent gets the round
+      if (DUEL.mid) $post('/duel/selfdown', { matchId: DUEL.mid });
+    }
+  }
+
   // ---------- begin (5s preload + single countdown) ----------
   async function resolveMeUsername(){
     const j = await $get('/me');
@@ -512,6 +516,11 @@
       window.__IZZA_DUEL = { active:true, mode, matchId };
       startPolling();
       setTimeout(installHitHooks, 60);
+
+      // listen for PvP damage coming from hearts plugin (cops melee while in duel)
+      if (window.IZZA && IZZA.on) {
+        IZZA.on('pvp-cop-damage', (p)=>{ if(DUEL.mid) applyPvpDamageSegments((p&&p.segs)|0 || 1); });
+      }
 
       // 5s preload hold, THEN countdown, THEN unlock fire at GO
       const cvs=document.getElementById('game');
@@ -577,7 +586,7 @@
         ctx.restore();
       }
 
-      // Opponent held-weapon overlay (matches core visual language)
+      // Opponent held-weapon overlay
       if(DUEL.oppSprite){
         const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
         const ctx=cvs.getContext('2d'); const S=api.DRAW, scale=S/api.TILE;
