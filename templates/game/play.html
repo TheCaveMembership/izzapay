@@ -103,6 +103,29 @@
   <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
   <script>window.__PI_SANDBOX__ = {{ (sandbox|tojson) if sandbox is defined else 'false' }};</script>
 
+  <!-- Prefill & keep Coins pill in sync with on-hand wallet -->
+  <script>
+  (function(){
+    function refreshPill(){
+      try{
+        var el = document.getElementById('coinPill');
+        if(!el) return;
+        var v = parseInt(localStorage.getItem('izzaCoins') || '0', 10) || 0;
+        el.textContent = 'Coins: ' + v + ' IC';
+      }catch(_){}
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', refreshPill, { once:true });
+    } else {
+      refreshPill();
+    }
+    window.addEventListener('izza-coins-changed', refreshPill);
+    window.addEventListener('storage', function(e){
+      if (e && e.key === 'izzaCoins') refreshPill();
+    });
+  })();
+  </script>
+
   <!-- Multiplayer base paths -->
   <script>
     window.__MP_BASE__ = '/izza-game/api/mp';
