@@ -216,7 +216,7 @@ function lakeRects(a){
       const wrap=document.createElement('div'); wrap.style.width='24px'; wrap.style.height='22px'; wrap.appendChild(svg); hud.appendChild(wrap);
     }
   }
-
+window._redrawHeartsHud = _redrawHeartsHud;
   // Create a simple popup the first time we need it
   function ensureShopUI(){
     if(document.getElementById('hospitalShop')) return;
@@ -636,7 +636,12 @@ if (!window._izzaBoatActive) {             // <— add this guard
       return { coins: j.coins|0 || 0, items: j.items||{}, ammo: j.ammo||{} };
     }catch{ return { coins:0, items:{}, ammo:{} }; }
   }
-  function _writeBank(b){ try{ localStorage.setItem(_bankKey(), JSON.stringify(b)); }catch{} }
+  function _writeBank(b){
+  try{
+    localStorage.setItem(_bankKey(), JSON.stringify(b));
+    window.dispatchEvent(new Event('izza-bank-changed'));
+  }catch{}
+}
 
   function _readInv(){
     try{
@@ -806,9 +811,6 @@ if (!window._izzaBoatActive) {             // <— add this guard
       });
     });
   }
-
-// after a successful deposit or withdraw:
-window.dispatchEvent(new Event('izza-bank-changed'));
   
   function _drawWithdraw(){
     const host=document.getElementById('bankBody'); if(!host) return;
