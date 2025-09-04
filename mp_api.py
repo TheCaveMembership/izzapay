@@ -1,10 +1,12 @@
-# mp_api.py — v2.3 (adds /duel/poke, /duel/pull, /duel/hit + appearance snapshots)
+# mp_api.py — v3.0 (duel REST: poke/pull/hit • quarter-hearts • 2-hit counters • cops mirror • Bo3 rounds)
+from __future__ import annotations
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
 from db import conn
 import time
 
-mp_bp = Blueprint("mp", __name__)
+# IMPORTANT: mount under the prefix your client uses: /izza-game/api/mp
+mp_bp = Blueprint("mp", __name__, url_prefix="/izza-game/api/mp")
 
 def _import_main_verifier():
     try:
@@ -14,6 +16,7 @@ def _import_main_verifier():
         return None
 VERIFY_TOKEN = _import_main_verifier()
 
+# ---------- presence / friends / invites (unchanged-ish) ----------
 _PRESENCE: Dict[int, float] = {}
 _PRESENCE_TTL = 1800.0
 def _mark_active(uid:int): _PRESENCE[int(uid)] = time.time()
@@ -22,11 +25,6 @@ def _is_active(uid:int)->bool:
 
 _QUEUES: Dict[str, List[int]] = {"v1": []}
 _STARTS: Dict[int, Dict[str, Any]] = {}
-# matchId -> room
-# room = {"mode":"v1","players":[uidA,uidB],
-#         "snapshots":{uid:{username,appearance,inventory}},
-#         "state":{uid:{x,y,facing,hp,inv,t}}}
-_DUELS: Dict[str, Dict[str, Any]] = {}
 
 def _username_by_id(uid: int) -> Optional[str]:
     with conn() as cx:
@@ -49,7 +47,7 @@ def _try_match_v1():
         a=q.pop(0); b=q.pop(0)
         start=_make_start("v1", a, b)
         _STARTS[a]=start; _STARTS[b]=start
-        _DUELS[start["matchId"]]={"mode":"v1","players":[a,b],"snapshots":{},"state":{}}
+        _DUELS[start["matchId"]] = _new_room(start["mode"], a, b)
 
 def _bearer_from_req():
     t = request.args.get("t") or request.form.get("t")
@@ -195,8 +193,7 @@ def mp_lobby_accept():
     start=_make_start(inv["mode"] or "v1", int(inv["from_user"]), int(inv["to_user"]))
     _STARTS[int(inv["from_user"])]=start
     _STARTS[int(inv["to_user"])]=start
-    _DUELS[start["matchId"]]={"mode":start["mode"],"players":[int(inv["from_user"]), int(inv["to_user"])],
-                              "snapshots":{},"state":{}}
+    _DUELS[start["matchId"]] = _new_room(start["mode"], int(inv["from_user"]), int(inv["to_user"]))
     return jsonify({"ok":True,"start":start})
 
 @mp_bp.post("/lobby/decline")
@@ -248,8 +245,7 @@ def mp_queue():
         _try_match_v1()
         start=_STARTS.pop(uid, None)
         if start:
-            _DUELS[start["matchId"]]={"mode":start["mode"],"players":[start["players"][0]["id"], start["players"][1]["id"]],
-                                      "snapshots":{},"state":{}}
+            _DUELS[start["matchId"]] = _new_room(start["mode"], start["players"][0]["id"], start["players"][1]["id"])
             return jsonify({"ok":True,"start":start})
         return jsonify({"ok":True,"queued":True})
     return jsonify({"ok":True,"queued":True})
@@ -263,10 +259,37 @@ def mp_dequeue():
         if uid in _QUEUES[m]: _QUEUES[m].remove(uid)
     return jsonify({"ok":True})
 
-# ======== NEW: Duel REST ========
+# ---------- Duel room state ----------
+# matchId -> room
+# room = {
+#   "mode":"v1",
+#   "players":[uidA,uidB],
+#   "snapshots":{uid:{username,appearance}},
+#   "state":{uid:{x,y,facing,hp,inv,t,cops,_qhp}},
+#   "hits":{uid:{hand:int,bat:int,knuckles:int}},
+#   "score":{uidA:int, uidB:int},
+#   "round":1, "ended":False, "matchOver":False
+# }
+_DUELS: Dict[str, Dict[str, Any]] = {}
 
-def _get_room(mid:str):
-    r=_DUELS.get(str(mid)); return r
+DEFAULT_FULL_HEARTS = 3.0  # full hearts at round start (your hearts plugin default)
+
+def _new_room(mode:str, a:int, b:int)->Dict[str,Any]:
+    return {
+        "mode": mode,
+        "players":[a,b],
+        "snapshots":{},
+        "state":{},
+        "hits":{a:{"hand":0,"bat":0,"knuckles":0}, b:{"hand":0,"bat":0,"knuckles":0}},
+        "score":{a:0,b:0},
+        "round":1,
+        "ended":False,
+        "matchOver":False
+    }
+
+def _get_room(mid:str): return _DUELS.get(str(mid))
+
+# ---------- Duel REST ----------
 
 @mp_bp.post("/duel/poke")
 def mp_duel_poke():
@@ -278,24 +301,37 @@ def mp_duel_poke():
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
-    # store state
+    # store state (keep hp as float; track quarters in _qhp)
     st = room["state"].get(uid, {})
+    hp_val = data.get("hp")
+    if hp_val is None:
+        # if no hp provided yet, assume full
+        hp = float(st.get("hp", DEFAULT_FULL_HEARTS))
+    else:
+        hp = float(hp_val)
+
     st.update({
-        "x": float(data.get("x") or 0.0),
-        "y": float(data.get("y") or 0.0),
-        "facing": data.get("facing") or "down",
-        "hp": int(data.get("hp") or 4),
-        "inv": data.get("inv") or {},
+        "x": float(data.get("x") or st.get("x", 0.0)),
+        "y": float(data.get("y") or st.get("y", 0.0)),
+        "facing": data.get("facing") or st.get("facing", "down"),
+        "hp": hp,
+        "inv": data.get("inv") or st.get("inv", {}),
+        "cops": data.get("cops") or st.get("cops", []),
         "t": time.time()
     })
+    # initialize quarter-hp tracker if missing
+    if st.get("_qhp") is None:
+        st["_qhp"] = int(round(hp * 4.0))
+
     room["state"][uid]=st
 
-    # one-time snapshot (username + appearance + inventory at start)
+    # snapshot (username + appearance at start)
     snap = room["snapshots"].get(uid, {})
     snap.setdefault("username", uname)
     if "appearance" in data and data["appearance"]:
-      snap["appearance"]=data["appearance"]
+        snap["appearance"]=data["appearance"]
     room["snapshots"][uid]=snap
+
     return jsonify({"ok":True})
 
 @mp_bp.get("/duel/pull")
@@ -306,19 +342,57 @@ def mp_duel_pull():
     mid=request.args.get("matchId","")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
+
     a,b=room["players"]; opp=a if uid==b else b
-    os=room["state"].get(opp); ss=room["snapshots"].get(opp,{})
+    ms=room["state"].get(uid) or {"hp":DEFAULT_FULL_HEARTS}
+    os=room["state"].get(opp)
+    ss=room["snapshots"].get(opp,{})
 
-    if not os:
-        return jsonify({"ok":True, "opponent": None})
+    # round transition (best-of-3)
+    roundInfo = {"number":room["round"], "ended":room["ended"], "matchOver":room["matchOver"]}
+    if room["ended"] and not room["matchOver"]:
+        # decide winner by who hit 0
+        me_hp  = float(ms.get("hp", DEFAULT_FULL_HEARTS))
+        opp_hp = float((os or {}).get("hp", DEFAULT_FULL_HEARTS))
+        winner_uid = uid if opp_hp<=0.0 and me_hp>0.0 else (opp if me_hp<=0.0 and opp_hp>0.0 else None)
+        if winner_uid is not None:
+            room["score"][winner_uid] += 1
+        # check match over
+        if room["score"][a] >= 2 or room["score"][b] >= 2:
+            room["matchOver"] = True
+        else:
+            # next round: reset hearts to FULL for both
+            for pid in (a,b):
+                pst = room["state"].setdefault(pid, {})
+                pst["hp"] = DEFAULT_FULL_HEARTS
+                pst["_qhp"] = int(DEFAULT_FULL_HEARTS * 4)
+            room["round"] += 1
+            room["ended"] = False
+        roundInfo = {"number":room["round"], "ended":room["ended"], "matchOver":room["matchOver"]}
 
-    return jsonify({"ok":True, "opponent":{
-        "username": ss.get("username") or _username_by_id(opp) or "Opponent",
-        "appearance": ss.get("appearance") or {},
-        "x": os.get("x",0.0), "y": os.get("y",0.0), "facing": os.get("facing","down"),
-        "hp": int(os.get("hp",4)),
-        "inv": os.get("inv",{})
-    }})
+    resp = {
+        "ok": True,
+        # Send back my own HP so each client can drive the hearts HUD.
+        "me": { "hp": float(ms.get("hp", DEFAULT_FULL_HEARTS)) },
+        "opponent": None,
+        "opponentCops": (os or {}).get("cops", []),
+        "round": roundInfo,
+        "score": { 
+            "me": room["score"][uid],
+            "opponent": room["score"][opp]
+        }
+    }
+    if os:
+        resp["opponent"] = {
+            "username": ss.get("username") or _username_by_id(opp) or "Opponent",
+            "appearance": ss.get("appearance") or {},
+            "x": float(os.get("x",0.0)), "y": float(os.get("y",0.0)),
+            "facing": os.get("facing","down"),
+            # keep float — quarter hearts allowed
+            "hp": float(os.get("hp", DEFAULT_FULL_HEARTS)),
+            "inv": os.get("inv",{})
+        }
+    return jsonify(resp)
 
 @mp_bp.post("/duel/hit")
 def mp_duel_hit():
@@ -327,28 +401,49 @@ def mp_duel_hit():
     uid,_,_=who
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
-    kind=(data.get("kind") or "bullet").lower()
+    kind=(data.get("kind") or "pistol").lower()
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
     a,b=room["players"]; opp=a if uid==b else b
-    os=room["state"].get(opp) or {"hp":4}
-    hp=int(os.get("hp",4))
+    os=room["state"].setdefault(opp, {"hp":DEFAULT_FULL_HEARTS, "_qhp": int(DEFAULT_FULL_HEARTS*4)})
 
-    # Duel damage rules
-    # pistol, uzi -> 1/4 heart; grenade -> 1; bat/knucks every 2 hits -> 1/2; hand every 2 hits -> 1/4
-    delta = 0
-    if kind in ("pistol","uzi","bullet"): delta = 1
-    elif kind=="grenade": delta = 4
-    elif kind in ("bat","knucks"): delta = 2
-    elif kind in ("hand","melee"): delta = 1
-    else: delta = 1
+    # ---- damage rules in QUARTERS ----
+    # pistol/uz i/bullet: 1 → 1/4 heart
+    # grenade:            4 → 1 full heart
+    # bat/knuckles:       every 2 hits → 2 → 1/2 heart
+    # hand:               every 2 hits → 1 → 1/4 heart
+    delta_quarters = 0
+    if kind in ("pistol","uzi","bullet"):
+        delta_quarters = 1
+    elif kind == "grenade":
+        delta_quarters = 4
+    elif kind in ("bat","knucks","knuckles"):
+        h = room["hits"].setdefault(uid, {"hand":0,"bat":0,"knuckles":0})
+        h["bat"] += 1
+        if h["bat"] >= 2:
+            delta_quarters = 2
+            h["bat"] = 0
+    elif kind in ("hand","melee"):
+        h = room["hits"].setdefault(uid, {"hand":0,"bat":0,"knuckles":0})
+        h["hand"] += 1
+        if h["hand"] >= 2:
+            delta_quarters = 1
+            h["hand"] = 0
+    elif kind in ("knucks2","bat2"):
+        # optional explicit kinds from client
+        delta_quarters = 2
+    else:
+        delta_quarters = 1
 
-    # store fractional in quarters (0..16 for 0..4 hearts)
-    qhp = os.get("_qhp")
-    if qhp is None: qhp = int(hp*4)
-    qhp = max(0, qhp - delta)
-    os["_qhp"]=qhp
-    os["hp"]= (qhp/4.0)
-    room["state"][opp]=os
-    return jsonify({"ok":True,"opponentHp":os["hp"]})
+    qhp = int(os.get("_qhp", int(os.get("hp", DEFAULT_FULL_HEARTS)*4)))
+    qhp = max(0, qhp - delta_quarters)
+    os["_qhp"] = qhp
+    os["hp"]   = float(qhp) / 4.0
+    room["state"][opp] = os
+
+    # round ended?
+    if os["hp"] <= 0.0:
+        room["ended"] = True
+
+    return jsonify({"ok":True, "opponentHp": os["hp"]})
