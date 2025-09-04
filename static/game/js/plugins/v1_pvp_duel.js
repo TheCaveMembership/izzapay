@@ -1,14 +1,15 @@
-// PvP Duel Client — v3.5
-// - REAL opponent sprite via remote_players_api.js (unchanged)
+// PvP Duel Client — v3.8
+// - REAL opponent sprite via remote_players_api.js
 // - Opposite-sidewalk safe spawns (unchanged)
 // - Red-dot minimap (unchanged)
-// - Hearts HUD bridge (unchanged; no separate bar)
-// - ✅ Reliable hits: hitscan geometry (pistol/uzi/grenade) + melee range
-// - ✅ Mobile melee: hook btnA too (not just keyboard)
-// - ✅ Knuckles key fixed to match core inventory ("knuckles")
-// - ✅ Mirror cops: share your active cops to opponent; render their cops on your side
+// - Hearts HUD bridge -> updates localStorage segs so v4_hearts.js reflects server HP
+// - Reliable hits: hitscan geometry (pistol/uzi/grenade) + melee range
+// - Mobile melee: hook btnA too
+// - Knuckles key matches core inventory ("knuckles")
+// - Mirror cops: share your active cops to opponent; render their cops on your side
+// - Round UI: best-of-3 (reads round/score from server)
 (function(){
-  const BUILD='v3.5-duel-client';
+  const BUILD='v3.8-duel-client';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -73,13 +74,17 @@
     if(inv?.pistol?.equipped) return 'pistol';
     if(inv?.grenade?.equipped) return 'grenade';
     if(inv?.bat?.equipped) return 'bat';
-    if(inv?.knuckles?.equipped) return 'knuckles'; // ← match core
+    if(inv?.knuckles?.equipped) return 'knuckles';
     return 'hand';
   }
 
   // ---- hearts HUD bridge ----
-  const HEART_PATH = 'M12 21c-.5-.5-4.9-3.7-7.2-6C3 13.2 2 11.6 2 9.7 2 7.2 4 5 6.6 5c1.6 0 3 .8 3.8 2.1C11.2 5.8 12.6 5 14.2 5 16.8 5 19 7.2 19 9.7c0 1.9-1 3.5-2.8 5.3-2.3 2.3-6.7 5.5-7.2 6Z';
   function maxHearts(){ return Math.max(1, parseInt(localStorage.getItem('izzaMaxHearts') || '3', 10)); }
+  function saveSegmentsFromHP(hpFloat){
+    const seg = Math.max(0, Math.min(maxHearts()*3, Math.round((hpFloat||0)*3)));
+    try{ localStorage.setItem('izzaCurHeartSegments', String(seg)); }catch{}
+  }
+  const HEART_PATH = 'M12 21c-.5-.5-4.9-3.7-7.2-6C3 13.2 2 11.6 2 9.7 2 7.2 4 5 6.6 5c1.6 0 3 .8 3.8 2.1C11.2 5.8 12.6 5 14.2 5 16.8 5 19 7.2 19 9.7c0 1.9-1 3.5-2.8 5.3-2.3 2.3-6.7 5.5-7.2 6Z';
   function drawHeartsDOM(heartsFloat){
     const hud = document.getElementById('heartsHud'); if(!hud) return;
     const mh = maxHearts();
@@ -122,7 +127,9 @@
     oppSprite:null, opp:{x:0,y:0,facing:'down'},
     pollMs:125, timer:null, flip:false,
     myHP:null,
-    oppCops:[] // mirrored cops from opponent
+    oppCops:[],                // mirrored cops from opponent
+    lastRoundNum:null,         // for round change detection
+    myScore:0, oppScore:0
   };
 
   // ---- polling ----
@@ -132,7 +139,6 @@
   function copyMyCops(){
     try{
       const cops = IZZA.api.cops||[];
-      // share up to 5 nearest cops; include only essentials
       const me=IZZA.api.player;
       const list = [...cops].sort((a,b)=> (Math.hypot(a.x-me.x,a.y-me.y) - Math.hypot(b.x-me.x,b.y-me.y))).slice(0,5)
         .map(c=>({ x:Math.round(c.x), y:Math.round(c.y), kind:c.kind||'police', facing:c.facing||'down' }));
@@ -148,7 +154,7 @@
       hp: DUEL.myHP==null ? maxHearts() : DUEL.myHP,
       inv: readInv(),
       appearance: (IZZA.api.getAppearance && IZZA.api.getAppearance()),
-      cops: copyMyCops() // ← share my nearby cops so you can render them
+      cops: copyMyCops()
     };
     await $post('/duel/poke', body);
   }
@@ -158,30 +164,52 @@
     const j = await $get('/duel/pull?matchId='+encodeURIComponent(DUEL.mid));
     if(!j || !j.ok) return;
 
+    // Opponent state
     if(j.opponent){
       DUEL.oppName = j.opponent.username || DUEL.oppName || 'Opponent';
-      DUEL.opp.x = j.opponent.x|0; DUEL.opp.y=j.opponent.y|0; DUEL.opp.facing=j.opponent.facing||'down';
+      DUEL.opp.x = (j.opponent.x|0); DUEL.opp.y=(j.opponent.y|0); DUEL.opp.facing=j.opponent.facing||'down';
       if(!DUEL.oppSprite && IZZA.api.addRemotePlayer){
         DUEL.oppSprite = IZZA.api.addRemotePlayer({ username: DUEL.oppName, appearance: j.opponent.appearance || {} });
       }
       if(DUEL.oppSprite){ DUEL.oppSprite.x=DUEL.opp.x; DUEL.oppSprite.y=DUEL.opp.y; DUEL.oppSprite.facing=DUEL.opp.facing; }
     }
 
+    // My HP from server → hearts plugin
     if(j.me && typeof j.me.hp === 'number'){
       DUEL.myHP = j.me.hp;
-      drawHeartsDOM(DUEL.myHP);
+      saveSegmentsFromHP(DUEL.myHP);
+      drawHeartsDOM(DUEL.myHP); // instant visual
     }
 
-    // mirror opponent's cops (visual only)
+    // Mirror opponent's cops (visual only)
     DUEL.oppCops = Array.isArray(j.opponentCops) ? j.opponentCops.slice(0,6) : [];
 
-    if(j.round && j.round.ended && j.round.matchOver){
-      IZZA.emit?.('toast',{text:(j.round.winner==='me'?'You won the match!':'You lost the match.')});
-      cleanupDuel();
-    }else if(j.round && j.round.newRound){
-      DUEL.myHP = maxHearts();
-      drawHeartsDOM(DUEL.myHP);
-      toast(`Round ${j.round.number} — fight!`, 2);
+    // Round / score UI
+    if(j.score){
+      const oldMy=DUEL.myScore, oldOpp=DUEL.oppScore;
+      DUEL.myScore = (j.score.me|0);
+      DUEL.oppScore= (j.score.opponent|0);
+      if(DUEL.myScore!==oldMy || DUEL.oppScore!==oldOpp){
+        toast(`Score • You ${DUEL.myScore} : ${DUEL.oppScore} ${DUEL.oppName}`, 2);
+      }
+    }
+    if(j.round){
+      if(DUEL.lastRoundNum==null) DUEL.lastRoundNum=j.round.number|0;
+      // New round started?
+      if((j.round.number|0) > (DUEL.lastRoundNum|0)){
+        DUEL.lastRoundNum = j.round.number|0;
+        DUEL.myHP = maxHearts();
+        saveSegmentsFromHP(DUEL.myHP);
+        drawHeartsDOM(DUEL.myHP);
+        toast(`Round ${DUEL.lastRoundNum} — fight!`, 2);
+      }
+      // Match over -> clean up
+      if(j.round.matchOver){
+        const msg = (DUEL.myScore>=2) ? 'You won the match!' : 'You lost the match.';
+        toast(msg, 3);
+        cleanupDuel();
+        return;
+      }
     }
   }
 
@@ -189,6 +217,7 @@
     stopPolling();
     DUEL.mid=null;
     DUEL.oppCops.length=0;
+    DUEL.oppSprite=null;
     window.__IZZA_DUEL = { active:false };
   }
 
@@ -211,21 +240,21 @@
   function oppCenter(){ return { x:(DUEL.opp.x|0)+16, y:(DUEL.opp.y|0)+16 }; }
   function meCenter(){ const p=IZZA.api.player; return { x:(p.x|0)+16, y:(p.y|0)+16 }; }
 
-  // hitscan: distance along aim dir + perpendicular error tolerance
+  // hitscan: tests if opponent lies near the ray from me in aim direction
   function hitscan(kind){
     const me = meCenter(), dir=aimVector(), opp=oppCenter();
     const vx=opp.x-me.x, vy=opp.y-me.y;
     const dist = Math.hypot(vx,vy);
-    const maxDist = (kind==='grenade'? 180 : 200); // generous, covers screen
+    const maxDist = (kind==='grenade'? 220 : 240); // generous, covers screen
     if(dist > maxDist) return false;
 
-    const along = (vx*dir.x + vy*dir.y);      // projection length
-    if(along <= 0) return false;              // behind me
+    const along = (vx*dir.x + vy*dir.y);
+    if(along <= 0) return false; // behind me
 
-    // how far off the imaginary bullet line is the opponent?
+    // perpendicular miss distance from line
     const perp = Math.abs(vx*dir.y - vy*dir.x) / Math.hypot(dir.x,dir.y);
-    const radius = (kind==='uzi'||kind==='pistol') ? 20
-                 : (kind==='grenade' ? 38 : 26); // melee uses different path
+    const radius = (kind==='uzi'||kind==='pistol') ? 18
+                 : (kind==='grenade' ? 36 : 24);
     return perp <= radius;
   }
   function meleeInRange(){
@@ -250,14 +279,12 @@
         const k=equippedKind();
         if(k==='uzi'){
           if(hitscan('uzi')) sendHit('uzi');
-          uziTimer=setInterval(()=>{ if(hitscan('uzi')) sendHit('uzi'); }, 110);
+          if(!uziTimer) uziTimer=setInterval(()=>{ if(hitscan('uzi')) sendHit('uzi'); }, 105);
         }else if(k==='pistol'){
-          // single hitscan + a tiny follow-up (travel feel)
           if(hitscan('pistol')) sendHit('pistol');
-          setTimeout(()=>{ if(hitscan('pistol')) sendHit('pistol'); }, 90);
+          setTimeout(()=>{ if(hitscan('pistol')) sendHit('pistol'); }, 85);
         }else if(k==='grenade'){
-          // arm now; detonate after fuse if opp still within blast radius from line
-          setTimeout(()=>{ if(hitscan('grenade')) sendHit('grenade'); }, 900);
+          setTimeout(()=>{ if(hitscan('grenade')) sendHit('grenade'); }, 900); // fuse
         }else if(k==='bat'){
           if(meleeInRange()) sendHit('bat');
         }else if(k==='knuckles'){
@@ -288,7 +315,7 @@
       }, {passive:true});
     }
 
-    // Keyboard 'A' (desktop)
+    // Keyboard 'A' (desktop melee)
     window.addEventListener('keydown', (e)=>{
       if((e.key||'').toLowerCase()!=='a') return;
       if(!DUEL.mid) return;
@@ -325,9 +352,13 @@
 
     // hearts start full
     DUEL.myHP = maxHearts();
+    saveSegmentsFromHP(DUEL.myHP);
     drawHeartsDOM(DUEL.myHP);
 
     // go
+    DUEL.lastRoundNum = 1;
+    DUEL.myScore = DUEL.oppScore = 0;
+
     window.__IZZA_DUEL = { active:true, mode, matchId };
     DUEL.mid = String(matchId);
     DUEL.meName = myName || api.user?.username || 'me';
@@ -339,7 +370,7 @@
 
   function cleanupDuel(){
     stopPolling();
-    DUEL.mid=null; DUEL.oppCops.length=0;
+    DUEL.mid=null; DUEL.oppCops.length=0; DUEL.oppSprite=null;
     window.__IZZA_DUEL = { active:false };
   }
 
@@ -369,7 +400,6 @@
           ctx.save(); ctx.imageSmoothingEnabled=false;
           for(const c of DUEL.oppCops){
             const sx=(c.x - api.camera.x)*scale, sy=(c.y - api.camera.y)*scale;
-            // simple colored capsule per kind (keeps it lightweight)
             ctx.fillStyle = c.kind==='army' ? '#3e8a3e' : c.kind==='swat' ? '#0a0a0a' : '#0a2455';
             ctx.fillRect(sx+S*0.18, sy+S*0.18, S*0.64, S*0.64);
           }
