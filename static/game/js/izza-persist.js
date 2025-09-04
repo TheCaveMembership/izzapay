@@ -1,5 +1,5 @@
 <script>
-/* IZZA Persist v2.2 — iPhone/Pi friendly, never-blank, ready-gated, Save button */
+/* IZZA Persist v2.3 — total coins in snapshot (on-hand + bank), missions included */
 (function(){
   const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
@@ -34,10 +34,16 @@
       const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
     }catch{ return {}; }
   }
-  function readCoins(){
+  function readCoinsOnHand(){
     try{
       if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
       const raw = localStorage.getItem('izzaCoins'); return raw? (parseInt(raw,10)||0) : 0;
+    }catch{ return 0; }
+  }
+  function readMissions(){
+    try{
+      if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
+      const raw = localStorage.getItem('izzaMissions'); return raw? (parseInt(raw,10)||0) : 0;
     }catch{ return 0; }
   }
   function readHeartsSegs(){
@@ -61,17 +67,24 @@
     return {x:0,y:0};
   }
 
+  // ---------- snapshot builder ----------
   function buildSnapshot(){
-    const u = userKey();
-    const bank = readBank(u);
-    const inv  = readInventory();
-    const coins= readCoins();
-    const pos  = readPlayerXY();
+    const u      = userKey();
+    const bank   = readBank(u);
+    const inv    = readInventory();
+    const onHand = readCoinsOnHand();
+    const pos    = readPlayerXY();
     const heartsSegs = readHeartsSegs();
+    const missions   = readMissions();
+
+    // IMPORTANT: store TOTAL coins in snapshot = on-hand + bank
+    const totalCoins = (onHand|0) + ((bank && bank.coins|0) || 0);
+
     return {
       version: 1,
       player: { x: pos.x|0, y: pos.y|0, heartsSegs },
-      coins: coins|0,
+      coins: totalCoins|0,                 // TOTAL = on-hand + bank
+      missions: missions|0,                // include missions for precise restore
       inventory: inv || {},
       bank: bank || { coins:0, items:{}, ammo:{} },
       timestamp: Date.now()
@@ -82,7 +95,7 @@
   function looksEmpty(s){
     const bankEmpty = !s.bank || (((s.bank.coins|0)===0) && !Object.keys(s.bank.items||{}).length && !Object.keys(s.bank.ammo||{}).length);
     const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
-    const coinsZero = (s.coins|0)===0;
+    const coinsZero = (s.coins|0)===0; // s.coins is TOTAL
     return bankEmpty && invEmpty && coinsZero;
   }
 
