@@ -94,45 +94,9 @@
     <button class="btn" id="btnSave" type="button" title="Save progress">Save</button>
   </div>
 
-  <div class="modal" id="mapModal">
-    <div class="backdrop"></div>
-    <div class="card">
-      <h3>IZZA City — World Map</h3>
-      <canvas id="bigmap" width="700" height="520" style="width:100%;height:auto;border-radius:10px;background:#0b0f17"></canvas>
-      <div class="row"><button class="ghost" id="closeMap">Close</button></div>
-      <div style="margin-top:8px; font-size:12px; opacity:.85">
-        <span style="display:inline-block;width:12px;height:12px;background:#1c293e;border:1px solid #31415d;margin-right:6px;border-radius:3px"></span>Unlocked
-        <span style="display:inline-block;width:12px;height:12px;background:rgba(163,176,197,.25);border:1px solid #485771;margin-right:6px;border-radius:3px;margin-left:12px"></span>Preview
-        <span style="display:inline-block;width:12px;height:12px;background:#000;border:1px solid #2a3140;margin-right:6px;border-radius:3px;margin-left:12px"></span>Locked
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="enterModal">
-    <div class="backdrop"></div>
-    <div class="card">
-      <h3>IZZA HQ</h3>
-      <p>Welcome! Tutorial:</p>
-      <ol style="margin:0 0 8px 18px; padding:0">
-        <li>Press <strong>A</strong> to hit the pedestrian.</li>
-        <li>Then eliminate the cop within <strong>30 seconds</strong>.</li>
-      </ol>
-      <div class="row">
-        <button class="ghost" id="startTutorial">Start Tutorial</button>
-        <button class="ghost" id="closeEnter">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="shopModal">
-    <div class="backdrop"></div>
-    <div class="card">
-      <h3>Shop — Cashier</h3>
-      <div class="shop-list" id="shopList"></div>
-      <div class="shop-note" id="shopNote"></div>
-      <div class="row"><button class="ghost" id="closeShop">Close</button></div>
-    </div>
-  </div>
+  <div class="modal" id="mapModal">…</div>
+  <div class="modal" id="enterModal">…</div>
+  <div class="modal" id="shopModal">…</div>
 
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
@@ -170,46 +134,45 @@
   <script src="/static/game/js/plugins/guns.js?v=1.4"></script>
 
   <!-- Persistence -->
-  <!-- >>> point persistence to the service that has the disk with your data <<< -->
-<script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
+  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
   <script>
-(function(){
-  const btn = document.getElementById('btnSave');
-  if(!btn) return;
+  (function(){
+    const btn = document.getElementById('btnSave');
+    if(!btn) return;
 
-  let busy = false, t = null;
+    let busy = false, t = null;
 
-  function setBusy(v){
-    busy = v;
-    btn.disabled = v;
-    btn.style.opacity = v ? .6 : 1;
-  }
-
-  async function doSave(){
-    if(busy) return;
-    setBusy(true);
-    const orig = btn.textContent;
-    btn.textContent = 'Saving…';
-    try{
-      const r = await (window.IZZA_PERSIST && IZZA_PERSIST.save());
-      if(r && r.ok){
-        btn.textContent = 'Saved!';
-      }else{
-        btn.textContent = 'Retry Save';
-      }
-    }catch(e){
-      btn.textContent = 'Error — Retry';
-      console.warn('[save] failed', e);
-    }finally{
-      clearTimeout(t);
-      t = setTimeout(()=>{ btn.textContent = 'Save'; setBusy(false); }, 1200);
+    function setBusy(v){
+      busy = v;
+      btn.disabled = v;
+      btn.style.opacity = v ? .6 : 1;
     }
-  }
 
-  btn.addEventListener('click', doSave, {passive:true});
-})();
-</script>
+    async function doSave(){
+      if(busy) return;
+      setBusy(true);
+      const orig = btn.textContent;
+      btn.textContent = 'Saving…';
+      try{
+        const r = await (window.IZZA_PERSIST && IZZA_PERSIST.save());
+        if(r && r.ok){
+          btn.textContent = '✅ Saved!';
+        }else{
+          btn.textContent = 'Retry Save';
+        }
+      }catch(e){
+        btn.textContent = 'Error — Retry';
+        console.warn('[save] failed', e);
+      }finally{
+        clearTimeout(t);
+        t = setTimeout(()=>{ btn.textContent = orig; setBusy(false); }, 1500);
+      }
+    }
+
+    btn.addEventListener('click', doSave, {passive:true});
+  })();
+  </script>
 
   <!-- Multiplayer -->
   <script defer src="/static/game/js/plugins/v9_multiplayer_building.js"></script>
