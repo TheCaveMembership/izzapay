@@ -523,8 +523,8 @@ window._redrawHeartsHud = _redrawHeartsHud;
     })();
 
     // Pos: 8 east, 4 south of the HQ door
-    const tx0 = A.door.gx + 8;
-    const ty0 = A.door.gy + 4;
+    const tx0 = A.door.gx + 5;
+    const ty0 = A.door.gy + 3;
     const TRADE_RECT = { x0: tx0, y0: ty0, x1: tx0+2, y1: ty0+2 }; // 3x3
     const TRADE_DOOR = { x: tx0+1, y: ty0-1 };                     // north-side door
 
