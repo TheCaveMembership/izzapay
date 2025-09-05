@@ -4,6 +4,7 @@
    - Uses a single absolute API base (same as saver)
    - Prefills HUD from last-good to avoid "0" flash
    - Never applies an empty snapshot
+   - ✅ Treats snapshot.coins as WALLET (no subtracting bank)
 */
 (function(){
   // Claim money ownership so other hydrators don't touch coins/bank
@@ -117,7 +118,7 @@
     const lg = getJSON(`izzaBankLastGood_${u}`, null);
     if (!lg || isEmptyLike(lg)) return;
     const bankC  = clamp0(lg.bank?.coins|0);
-    const wallet = clamp0((lg.coins|0) - bankC);
+    const wallet = clamp0(lg.coins|0);            // ✅ coins IS WALLET
     writeBankMirror(u, lg.bank || {coins:0,items:{},ammo:{}});
     writeWallet(wallet);
     setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
@@ -126,7 +127,7 @@
   // ---------- apply snapshot ----------
   function applySnapshot(snap, u){
     const bankC  = clamp0(snap.bank?.coins|0);
-    const wallet = clamp0((snap.coins|0) - bankC);
+    const wallet = clamp0(snap.coins|0);          // ✅ coins IS WALLET
     writeBankMirror(u, snap.bank || {coins:0,items:{},ammo:{}});
     writeWallet(wallet);
     setJSON('izzaInventory', snap.inventory || {});
