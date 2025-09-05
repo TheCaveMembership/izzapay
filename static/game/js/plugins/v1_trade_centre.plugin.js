@@ -41,7 +41,7 @@
           Object.assign(b.style,{
             position:'fixed',
             left:'50%',
-            bottom:'64px', // roughly where the Fire button sat
+            bottom:'140px', // raised so it sits above the FIRE button
             transform:'translateX(-50%)',
             padding:'12px 20px',
             background:'linear-gradient(90deg,#0fead4,#13b5a3)',
@@ -73,7 +73,7 @@
       window.addEventListener('izza-tradecentre-enter', showTradeBanner);
       window.addEventListener('izza-tradecentre-leave', hideTradeBanner);
 
-      // NEW: if we're already in the Trade Centre (FLAG set), show immediately
+      // If we're already in the Trade Centre (FLAG set), show immediately
       showTradeBanner();
     })();
 
