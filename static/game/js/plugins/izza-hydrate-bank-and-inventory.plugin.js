@@ -1,16 +1,17 @@
 <script>
 /* IZZA hydrate — Bank & Inventory restore (wallet+bank kept separate)
-   Fixes cold-relaunch loss by:
-   - Waiting for real username (not "guest")
-   - Using a single absolute API base (same as saver)
+   Cold-relaunch fix:
+   - Waits for a real username (not "guest") before hitting the server
+   - Uses a single absolute API base (same as saver)
+   - Prefills HUD from last-good to avoid "0" flash
+   - Never applies an empty snapshot
 */
 (function(){
-  // Money ownership so other hydrators don't touch coins/bank
+  // Claim money ownership so other hydrators don't touch coins/bank
   window.__IZZA_MONEY_OWNER__ = 'bank-plugin';
 
   // ---------- API base (canonical) ----------
   const API_BASE = (function(){
-    // If you set window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com' elsewhere, we honor it
     const b = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
     if (b) return b + '/api';
     return 'https://izzagame.onrender.com/api';
@@ -33,10 +34,10 @@
   // ---------- utils ----------
   const clamp0 = n => Math.max(0, (n|0));
   const sleep  = ms => new Promise(r=>setTimeout(r,ms));
-  const getLS = (k,d=null)=>{ const v=localStorage.getItem(k); return v==null?d:v; };
-  const setLS = (k,v)=> localStorage.setItem(k,v);
-  const getJSON = (k,d=null)=>{ try{ const v=getLS(k,null); return v==null? d : JSON.parse(v); }catch{ return d; } };
-  const setJSON = (k,o)=> setLS(k, JSON.stringify(o));
+  const getLS  = (k,d=null)=>{ const v=localStorage.getItem(k); return v==null?d:v; };
+  const setLS  = (k,v)=> localStorage.setItem(k,v);
+  const getJSON= (k,d=null)=>{ try{ const v=getLS(k,null); return v==null? d : JSON.parse(v); }catch{ return d; } };
+  const setJSON= (k,o)=> setLS(k, JSON.stringify(o));
 
   const CANON = s => (s==null?'guest':String(s)).replace(/^@+/,'').toLowerCase().replace(/[^a-z0-9-_]/g,'-');
 
@@ -46,11 +47,11 @@
     const ls   = getLS('izzaUserKey','');
     return CANON(p.username || p.user || plug || ls || 'guest');
   }
-  async function waitForRealUser(maxMs=10000){
+  async function waitForRealUser(maxMs=12000){
     const t0 = performance.now();
     let u = resolveUserImmediate();
     while (u==='guest' && (performance.now()-t0)<maxMs){
-      await sleep(100);
+      await sleep(120);
       u = resolveUserImmediate();
     }
     return u;
@@ -67,22 +68,20 @@
     const wallet = Number(s.coins||0);
     return (invCount===0 && wallet===0 && bankCoins===0 && bankItems===0 && bankAmmo===0);
   }
-
-  function unwrapSnapshot(d){ return d && d.snapshot ? d.snapshot : d; }
+  const unwrap = d => d && d.snapshot ? d.snapshot : d;
 
   async function fetchSnapshotAuthoritative(u){
     const urls = [
       `${SNAP(u)}?prefer=lastGood`,
       `${SNAP(u)}`
     ];
-    // A few historical fallbacks if your service supports offset browsing
-    for (let i=0;i<6;i++) urls.push(`${SNAP(u)}?offset=${i}`);
+    for (let i=0;i<4;i++) urls.push(`${SNAP(u)}?offset=${i}`);
     for (const url of urls){
       try{
         const r = await fetch(url, { credentials:'omit', cache:'no-store' });
         if (!r.ok) continue;
         const raw  = await r.json();
-        const snap = unwrapSnapshot(raw);
+        const snap = unwrap(raw);
         if (snap && !isEmptyLike(snap)) return snap;
       }catch(_){}
     }
@@ -115,17 +114,20 @@
   // ---------- preseed from last-good (prevents 0 HUD flash) ----------
   (function preseed(){
     const u = resolveUserImmediate();
+    if (!u) return;
     const lg = getJSON(`izzaBankLastGood_${u}`, null);
     if (!lg || isEmptyLike(lg)) return;
-    const wallet = clamp0((lg.coins|0) - (lg.bank?.coins|0));
+    const bankC  = clamp0(lg.bank?.coins|0);
+    const wallet = clamp0((lg.coins|0) - bankC);
     writeBankMirror(u, lg.bank || {coins:0,items:{},ammo:{}});
     writeWallet(wallet);
-    setLS(`izzaBootTotal_${u}`, String(wallet + clamp0(lg.bank?.coins|0)));
+    setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   })();
 
   // ---------- apply snapshot ----------
   function applySnapshot(snap, u){
-    const wallet = clamp0((snap.coins|0) - (snap.bank?.coins|0));
+    const bankC  = clamp0(snap.bank?.coins|0);
+    const wallet = clamp0((snap.coins|0) - bankC);
     writeBankMirror(u, snap.bank || {coins:0,items:{},ammo:{}});
     writeWallet(wallet);
     setJSON('izzaInventory', snap.inventory || {});
@@ -134,7 +136,8 @@
       setLS(`izzaCurHeartSegments_${u}`, String(clamp0(snap.player.heartsSegs)));
       if (typeof window._redrawHeartsHud==='function'){ try{ window._redrawHeartsHud(); }catch{} }
     }
-    setLS(`izzaBootTotal_${u}`, String(wallet + clamp0(snap.bank?.coins|0)));
+    setJSON(`izzaBankLastGood_${u}`, snap); // cache last-good after successful apply
+    setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   }
 
   // ---------- boot ----------
@@ -151,8 +154,8 @@
     await sleep(250); // map/tier settle
 
     // wait for REAL username (not guest)
-    const user = await waitForRealUser(10000);
-    const u = CANON(user); // even if timed out, CANON keeps it stable
+    const user = await waitForRealUser(12000);
+    const u = CANON(user);
 
     // fetch server snapshot
     let snap = await fetchSnapshotAuthoritative(u);
@@ -162,7 +165,6 @@
     }
 
     if (snap && !isEmptyLike(snap)){
-      setJSON(`izzaBankLastGood_${u}`, snap);  // cache
       applySnapshot(snap, u);
     }else{
       console.warn('[hydrate bank] no snapshot for', u, '— leaving local values as-is');
