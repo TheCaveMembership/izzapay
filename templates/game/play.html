@@ -96,7 +96,17 @@
 
   <div class="modal" id="mapModal">…</div>
   <div class="modal" id="enterModal">…</div>
-  <div class="modal" id="shopModal">…</div>
+
+  <!-- UPDATED: full shop modal markup -->
+  <div class="modal" id="shopModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>Shop</h3>
+      <div id="shopList" class="shop-list"></div>
+      <div class="shop-note">Tap an item to purchase.</div>
+      <div class="row"><button class="ghost" id="shopClose" type="button">Close</button></div>
+    </div>
+  </div>
 
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
