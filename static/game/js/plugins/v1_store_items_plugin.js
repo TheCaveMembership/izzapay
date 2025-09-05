@@ -140,15 +140,19 @@
           }
         }
 
+        // detect "star emoji" even if wrapped in spans
+        const plainText = (iconHolder.textContent || '').trim();
+        const looksLikeStar = plainText.includes('⭐') || /star/i.test(iconHolder.innerHTML);
+
         if(isBat){
           const html = (iconHolder.innerHTML||'').trim();
-          if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
+          if(!html || looksLikeStar || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgBat());
           }
           ensureName('Baseball Bat');
         }else if(isKnuckles){
           const html = (iconHolder.innerHTML||'').trim();
-          if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
+          if(!html || looksLikeStar || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgKnuckles());
           }
           ensureName('Brass Knuckles');
@@ -157,6 +161,17 @@
     }catch(e){
       console.warn('[store extender] icon repair failed:', e);
     }
+  }
+
+  // Debounced helper for observers
+  let _repairTimer = null;
+  function scheduleRepair(){ clearTimeout(_repairTimer); _repairTimer = setTimeout(repairMissingIcons, 0); }
+
+  function attachListObserver(list){
+    if(!list || list._izzaObsAttached) return;
+    const obs = new MutationObserver(scheduleRepair);
+    obs.observe(list, { childList:true, subtree:true, characterData:true });
+    list._izzaObsAttached = true;
   }
 
   function patchShopStock(){
@@ -184,7 +199,8 @@
         }
       }
 
-      // Repair icons & add missing names for core rows
+      // Keep icons consistent even if core re-renders
+      attachListObserver(list);
       repairMissingIcons();
     }catch(e){
       console.warn('[store extender] patch failed:', e);
