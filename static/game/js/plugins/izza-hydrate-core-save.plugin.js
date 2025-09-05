@@ -1,11 +1,11 @@
 /* IZZA hydrate — Core mirror (position/hearts/inventory legacy keys)
-   - Skips MONEY if bank plugin owns it (bank-plugin writes the wallet/bank)
+   - Skips MONEY if bank plugin owns it
    - Waits for a real username
    - Uses canonical API base
    - Never applies an empty snapshot
+   - ✅ Writes BOTH hearts keys (global + user-scoped)
 */
 (function(){
-  // ---------- API base (canonical) ----------
   const API_BASE = (function(){
     const b = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
     if (b) return b + '/api';
@@ -13,7 +13,6 @@
   })();
   const SNAP = user => `${API_BASE}/state/${encodeURIComponent(user)}`;
 
-  // ===== tiny overlay =====
   const overlay = document.createElement('div');
   Object.assign(overlay.style,{
     position:'fixed', inset:'0', background:'rgba(5,8,14,.86)', display:'flex',
@@ -25,7 +24,6 @@
   const addOverlay = ()=>{ if(!overlay.isConnected) document.body.appendChild(overlay); };
   const removeOverlay = ()=>{ if(overlay.isConnected) overlay.remove(); };
 
-  // ===== utils =====
   const safeParse = (s, fb)=>{ try{ return JSON.parse(s); }catch{ return fb; } };
   const getLS  = (k, fb=null)=> { const v=localStorage.getItem(k); return v==null? fb : v; };
   const setLS  = (k, v)=> localStorage.setItem(k, v);
@@ -39,7 +37,7 @@
   function isEmptySnapshot(s){
     if(!s || typeof s!=='object') return true;
     if (s.version !== 1) return false;
-    const coinsTop = (s.coins|0)||0; // wallet
+    const coinsTop = (s.coins|0)||0;
     const invEmpty = !s.inventory || Object.keys(s.inventory).length===0;
     const bank = s.bank||{};
     const bankCoins = (bank.coins|0)||0;
@@ -82,9 +80,8 @@
     return null;
   }
 
-  // ---- helper: compute stable fields (but MONEY is skipped if bank-plugin owns it)
   function deriveMoneyFields(snap){
-    let total = (snap && (snap.coins|0)) || 0; // wallet in your schema
+    let total = (snap && (snap.coins|0)) || 0;
     let bank  = (snap && snap.bank && (snap.bank.coins|0)) || 0;
     if (bank > total) { bank = total; }
     const onHand = Math.max(0, total - bank);
@@ -92,10 +89,8 @@
   }
 
   function applySnapshot(snap, USER){
-    // Always cache last-good
     setLSJSON(`izzaBankLastGood_${USER}`, snap);
 
-    // MONEY: skip if bank plugin owns it
     if (window.__IZZA_MONEY_OWNER__ !== 'bank-plugin'){
       const money = deriveMoneyFields(snap);
       setLSJSON(`izzaBank_${USER}`, {
@@ -111,7 +106,17 @@
       } catch {}
     }
 
-    // Legacy mirrors
+    // ✅ Hearts: write BOTH keys
+    if (typeof snap.player?.heartsSegs === 'number'){
+      const segs = Math.max(0, snap.player.heartsSegs|0);
+      setLS(`izzaCurHeartSegments_${USER}`, String(segs)); // user-scoped
+      setLS(`izzaCurHeartSegments`, String(segs));         // global
+      try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+      if (typeof window._redrawHeartsHud === 'function') {
+        try { window._redrawHeartsHud(); } catch {}
+      }
+    }
+
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
@@ -121,17 +126,6 @@
     });
     setLS('izzaMissions', String(missions));
 
-    // Hearts — write BOTH keys so v4_hearts.js (global key) sees it
-    if (snap.player && typeof snap.player.heartsSegs === 'number'){
-      const segs = Math.max(0, snap.player.heartsSegs|0);
-      setLS(`izzaCurHeartSegments_${USER}`, String(segs)); // namespaced
-      setLS('izzaCurHeartSegments', String(segs));         // global for v4_hearts.js
-      if (typeof window._redrawHeartsHud === 'function') {
-        try { window._redrawHeartsHud(); } catch {}
-      }
-    }
-
-    // Position nudge
     if (window.IZZA?.api?.player && snap.player) {
       const p = window.IZZA.api.player;
       if (typeof snap.player.x === 'number') p.x = snap.player.x;
@@ -145,14 +139,12 @@
     }
   }
 
-  // ===== boot sequence =====
   async function hydrateAfterGameSettles(){
     addOverlay();
 
-    let readySeen = false;
     const waitReady = new Promise(async (resolve)=>{
-      if (window.IZZA?.api?.ready) { readySeen = true; return resolve(); }
-      const handler = ()=>{ readySeen = true; resolve(); };
+      if (window.IZZA?.api?.ready) return resolve();
+      const handler = ()=> resolve();
       try { (window.IZZA = window.IZZA || {}).on?.('ready', handler); } catch {}
       await sleep(1000);
       resolve();
