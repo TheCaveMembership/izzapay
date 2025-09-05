@@ -95,98 +95,49 @@
   </div>
 
   <div class="modal" id="mapModal">…</div>
+  <div class="modal" id="enterModal">…</div>
 
-  <!-- HQ / Enter modal (old tutorial wording + IDs) -->
-  <div class="modal" id="enterModal">
-    <div class="backdrop"></div>
-    <div class="card">
-      <h3>IZZA HQ</h3>
-      <p>Welcome! Tutorial:</p>
-      <ol style="margin:0 0 8px 18px; padding:0">
-        <li>Press <strong>A</strong> to hit the pedestrian (3 hits to knock down, then 1 to finish).</li>
-        <li>Oh no! Then eliminate the cop within <strong>30 seconds</strong> or more will arrive.</li>
-      </ol>
-      <div class="row">
-        <button class="ghost" id="startTutorial">Start Tutorial</button>
-        <button class="ghost" id="closeEnter">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tiny handlers adjusted to old IDs -->
-  <script>
-  (function(){
-    const modal = document.getElementById('enterModal');
-    if (!modal) return;
-
-    function closeEnter(){
-      modal.style.display = 'none';
-      try { IZZA && IZZA.emit && IZZA.emit('enter-closed'); } catch {}
-    }
-
-    const backdrop = modal.querySelector('.backdrop');
-    backdrop && backdrop.addEventListener('click', closeEnter, { passive:true });
-
-    document.addEventListener('click', function(ev){
-      const btn = ev.target && ev.target.closest('#closeEnter');
-      if (!btn) return;
-      if (modal.style.display === 'none') return;
-      ev.stopPropagation(); ev.preventDefault();
-      closeEnter();
-    }, true);
-
-    document.addEventListener('click', function(ev){
-      const btn = ev.target && ev.target.closest('#startTutorial');
-      if (!btn) return;
-      if (modal.style.display === 'none') return;
-      ev.stopPropagation(); ev.preventDefault();
-      try { IZZA && IZZA.emit && IZZA.emit('enter-start'); } catch {}
-      closeEnter();
-    }, true);
-
-    document.addEventListener('keydown', function(e){
-      if (e.key === 'Escape' && modal.style.display !== 'none') closeEnter();
-    }, { passive:true });
-  })();
-  </script>
-
-  <!-- Shop modal (old wording + IDs) -->
+  <!-- UPDATED: full shop modal markup -->
   <div class="modal" id="shopModal">
     <div class="backdrop"></div>
     <div class="card">
-      <h3>Shop — Cashier</h3>
-      <div class="shop-list" id="shopList"></div>
-      <div class="shop-note" id="shopNote"></div>
-      <div class="row"><button class="ghost" id="closeShop">Close</button></div>
+      <h3>Shop</h3>
+      <div id="shopList" class="shop-list"></div>
+      <div class="shop-note">Tap an item to purchase.</div>
+      <div class="row"><button class="ghost" id="shopClose" type="button">Close</button></div>
     </div>
   </div>
   <script>
-  (function(){
-    const modal = document.getElementById('shopModal');
-    if (!modal) return;
+(function(){
+  const modal = document.getElementById('shopModal');
+  if (!modal) return;
 
-    function closeShop(){
-      modal.style.display = 'none';
-      try { window.IZZA && IZZA.emit && IZZA.emit('shop-closed'); } catch {}
-    }
+  function closeShop(){
+    modal.style.display = 'none';
+    try { window.IZZA && IZZA.emit && IZZA.emit('shop-closed'); } catch {}
+  }
 
-    const backdrop = modal.querySelector('.backdrop');
-    backdrop && backdrop.addEventListener('click', closeShop, { passive:true });
+  // Backdrop failsafe (keep — yours already works)
+  const backdrop = modal.querySelector('.backdrop');
+  backdrop && backdrop.addEventListener('click', closeShop, { passive:true });
 
-    document.addEventListener('click', function(ev){
-      const btn = ev.target && ev.target.closest('#closeShop');
-      if (!btn) return;
-      if (modal.style.display === 'none') return;
-      ev.stopPropagation();
-      ev.preventDefault();
-      closeShop();
-    }, true);
+  // NEW: Delegated click for the Close button (robust vs timing/re-renders)
+  document.addEventListener('click', function(ev){
+    const btn = ev.target && ev.target.closest('#shopClose');
+    if (!btn) return;
+    if (modal.style.display === 'none') return;
+    // beat any other handlers
+    ev.stopPropagation();
+    ev.preventDefault();
+    closeShop();
+  }, true); // capture phase so nothing can swallow it first
 
-    document.addEventListener('keydown', function(e){
-      if (e.key === 'Escape' && modal.style.display !== 'none') closeShop();
-    }, { passive:true });
-  })();
-  </script>
+  // Optional ESC key
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && modal.style.display !== 'none') closeShop();
+  }, { passive:true });
+})();
+</script>
 
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
@@ -226,36 +177,14 @@
   <script src="/static/game/js/izza_core_v3.js?v=12"></script>
   <script src="/static/game/js/plugins/izza-userkey-and-migration.plugin.js"></script>
   <script src="/static/game/js/plugins/izza-ls-wrapper.plugin.js"></script>
+  <script src="/static/game/js/plugins/izza-diagnostics.plugin.js"></script>
 
   <script src="/static/game/js/plugins/v4_hearts.js?v=1"></script>
   <script src="/static/game/js/plugins/v5_loot.js?v=6"></script>
   <script src="/static/game/js/plugins/v6_ui_exclusive.js?v=1"></script>
   <script src="/static/game/js/plugins/v7_mission2_delivery.js"></script>
   <script src="/static/game/js/plugins/v8_mission3_car_theft.js?v=8.0"></script>
-
-  <!-- ALWAYS: refresh once per visit so new map expander loads -->
-<script>
-(function(){
-  try{
-    // If an old layout was pinned by earlier code, unpin it every time.
-    if (localStorage.getItem('izzaMapLayoutBuild') === 'clip_safe_v2') {
-      localStorage.removeItem('izzaMapLayoutBuild');
-      console.log('[IZZA] cleared legacy izzaMapLayoutBuild=clip_safe_v2');
-    }
-
-    // Force exactly one reload per tab load to ensure fresh map state.
-    var FLAG = '__izzaRefreshThisVisit';
-    if (!sessionStorage.getItem(FLAG)) {
-      sessionStorage.setItem(FLAG, '1');  // prevents a reload loop
-      location.reload();
-    }
-  } catch(e) {
-    console.warn('[IZZA] refresh-once script error', e);
-  }
-})();
-</script>
-
-  <script src="/static/game/js/plugins/v2_map_expander.js"></script>
+  <script src="/static/game/js/plugins/v1_map_expander.js"></script>
 
   <!-- Hydrate plugins run AFTER map expander -->
   <script src="/static/game/js/plugins/izza-hydrate-core-save.plugin.js"></script>
