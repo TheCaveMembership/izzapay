@@ -473,7 +473,7 @@ window._redrawHeartsHud = _redrawHeartsHud;
 
     // Compute bank rect once per page load to keep stable
     const bx0 = (_hospitalDoor.x + 5);
-    const by0 = (_hospitalDoor.y - 9);
+    aconst by0 = (_hospitalDoor.y - 9);
     const bankRect = { x0: bx0, y0: by0, x1: bx0 + 2, y1: by0 + 2 }; // 3x3
     const bankDoor = { x: bx0 + 1, y: by0 - 1 }; // north-middle in front
 
@@ -656,6 +656,36 @@ if (!window._izzaBoatActive) {             // <— add this guard
     }catch{}
   }
 
+  /* --- NEW: minimal guard to fix the “wallet cloned from bank on reload” state --- */
+  function _maybeFixBootDuplication() {
+    try {
+      const u = (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase();
+      const lgRaw = localStorage.getItem(`izzaBankLastGood_${u}`);
+      if (!lgRaw) return;
+      const lg = JSON.parse(lgRaw) || {};
+      const walletSnap = (lg.coins|0) || 0;                              // your on-hand per your semantics
+      const bankSnap   = (lg.bank && (lg.bank.coins|0)) || 0;
+
+      const bankNowObj = JSON.parse(localStorage.getItem(`izzaBank_${u}`) || '{"coins":0}');
+      const bankNow    = (bankNowObj.coins|0) || 0;
+      const walletNow  = parseInt(localStorage.getItem('izzaCoins') || '0', 10) || 0;
+
+      // Glitch: last session had ALL in bank, but after reload both "You" and "Bank"
+      // show the bank amount (wallet got cloned from bank).
+      if (walletSnap === 0 && bankSnap > 0 && walletNow === bankNow && walletNow === bankSnap) {
+        // restore authoritative split from snapshot
+        localStorage.setItem('izzaCoins', String(walletSnap)); // 0
+        localStorage.setItem(`izzaBank_${u}`, JSON.stringify({
+          coins: bankSnap, items: (lg.bank?.items||{}), ammo: (lg.bank?.ammo||{})
+        }));
+        try { if (IZZA?.api?.setCoins) IZZA.api.setCoins(walletSnap); } catch {}
+        try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
+        try { window.dispatchEvent(new Event('izza-bank-changed')); } catch {}
+      }
+    } catch {}
+  }
+  /* ------------------------------------------------------------------------------ */
+
   function _ensureBankUI(){
     if(document.getElementById('bankUI')) return;
     const wrap=document.createElement('div');
@@ -690,6 +720,10 @@ if (!window._izzaBoatActive) {             // <— add this guard
 
   function _bankOpen(){
     _ensureBankUI();
+
+    // NEW: heal duplicated wallet/bank before drawing UI (no other behavior changed)
+    _maybeFixBootDuplication();
+
     document.getElementById('bankUI').style.display='flex';
     _setFireVisible(false); // HIDE fire button while bank is open
     _updateBankCoinsView();
@@ -1035,7 +1069,7 @@ if (!window._izzaBoatActive) {             // <— add this guard
 
     // ---- BANK (overlay block) ----
     if(window.__IZZA_BANK__?.rect){
-      const B = window.__IZZA_BANK__.rect;
+      const B = window.__IZZA_BANK__?.rect;
       ctx.fillStyle = '#e7c14a'; // gold tint
       ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
     }
