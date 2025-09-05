@@ -1,5 +1,5 @@
 <script>
-/* IZZA Persist v2.3 — total coins in snapshot (on-hand + bank), missions included */
+/* IZZA Persist v2.4 — coins = WALLET (on-hand), bank saved separately; missions included */
 (function(){
   const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
@@ -77,14 +77,13 @@
     const heartsSegs = readHeartsSegs();
     const missions   = readMissions();
 
-    // IMPORTANT: store TOTAL coins in snapshot = on-hand + bank
-    const totalCoins = (onHand|0) + ((bank && bank.coins|0) || 0);
-
+    // IMPORTANT: store WALLET (on-hand) coins in snapshot.coins
+    // Bank is stored separately at snapshot.bank.coins
     return {
       version: 1,
       player: { x: pos.x|0, y: pos.y|0, heartsSegs },
-      coins: totalCoins|0,                 // TOTAL = on-hand + bank
-      missions: missions|0,                // include missions for precise restore
+      coins: onHand|0,                    // WALLET ONLY
+      missions: missions|0,
       inventory: inv || {},
       bank: bank || { coins:0, items:{}, ammo:{} },
       timestamp: Date.now()
@@ -95,7 +94,7 @@
   function looksEmpty(s){
     const bankEmpty = !s.bank || (((s.bank.coins|0)===0) && !Object.keys(s.bank.items||{}).length && !Object.keys(s.bank.ammo||{}).length);
     const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
-    const coinsZero = (s.coins|0)===0; // s.coins is TOTAL
+    const coinsZero = (s.coins|0)===0; // s.coins is WALLET
     return bankEmpty && invEmpty && coinsZero;
   }
 
