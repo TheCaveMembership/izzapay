@@ -184,6 +184,32 @@
   <script src="/static/game/js/plugins/v6_ui_exclusive.js?v=1"></script>
   <script src="/static/game/js/plugins/v7_mission2_delivery.js"></script>
   <script src="/static/game/js/plugins/v8_mission3_car_theft.js?v=8.0"></script>
+  <script>
+(function(){
+  function bootExpander(){
+    try {
+      const m3 = localStorage.getItem('izzaMission3');
+      const tier = localStorage.getItem('izzaMapTier');
+      if (m3 === 'done' || tier === '2') {
+        // dynamically load your expander if not already loaded
+        if (!window.__IZZA_EXP_VER__) {
+          const s = document.createElement('script');
+          s.src = '/static/game/js/plugins/v2_map_expander.js?v=1';
+          s.onload = ()=>console.log('[IZZA] Expander booted because mission3 done');
+          document.head.appendChild(s);
+        }
+      }
+    } catch(e){ console.warn('expander boot failed', e); }
+  }
+
+  // run once core is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootExpander);
+  } else {
+    bootExpander();
+  }
+})();
+</script>
   <script src="/static/game/js/plugins/v1_map_expander.js"></script>
 
   <!-- Hydrate plugins run AFTER map expander -->
