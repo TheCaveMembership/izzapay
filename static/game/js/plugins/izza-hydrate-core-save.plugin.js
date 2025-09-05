@@ -1,4 +1,3 @@
-<script>
 /* IZZA hydrate — Core mirror (position/hearts/inventory legacy keys)
    - Skips MONEY if bank plugin owns it (bank-plugin writes the wallet/bank)
    - Waits for a real username
@@ -196,5 +195,4 @@
   } else {
     hydrateAfterGameSettles();
   }
-})();
-</script>
+})()
