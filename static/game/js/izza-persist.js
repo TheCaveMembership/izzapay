@@ -1,4 +1,3 @@
-<script>
 /* IZZA Persist v2.4 — coins = WALLET (on-hand), bank saved separately; missions included */
 (function(){
   const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
@@ -274,4 +273,3 @@
   }
 
 })();
-</script>
