@@ -27,19 +27,28 @@
   IZZA.on('ready', (api)=>{
     if(!isInTC()) return;
 
-    // Banner
-    (function(){
-      const b=document.createElement('div');
-      b.id='tcBanner';
-      b.textContent='TRADE CENTRE — Safe Zone';
-      Object.assign(b.style,{
-        position:'fixed', left:'50%', transform:'translateX(-50%)',
-        top:'56px', zIndex:15, background:'linear-gradient(90deg,#0fead4,#13b5a3)',
-        color:'#0b0f17', fontWeight:'800', letterSpacing:'.5px',
-        border:'1px solid #10695f', padding:'6px 10px', borderRadius:'10px'
-      });
-      document.body.appendChild(b);
-    })();
+    // Banner (over fire button area)
+(function(){
+  const b=document.createElement('div');
+  b.id='tcBanner';
+  b.textContent='TRADE CENTRE — Safe Zone';
+  Object.assign(b.style,{
+    position:'fixed',
+    right:'12px',       // same corner as your controls
+    bottom:'14px',
+    zIndex: 99999,      // above buttons
+    background:'linear-gradient(90deg,#0fead4,#13b5a3)',
+    color:'#0b0f17',
+    fontWeight:'800',
+    letterSpacing:'.5px',
+    border:'1px solid #10695f',
+    padding:'8px 10px',
+    borderRadius:'10px',
+    boxShadow:'0 6px 20px rgba(0,0,0,.45)',
+    pointerEvents:'none' // let clicks pass through if any (A is disabled anyway)
+  });
+  document.body.appendChild(b);
+})();
 
     // Disable attacks (A button & key)
     const stop = e=>{ e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.(); };
