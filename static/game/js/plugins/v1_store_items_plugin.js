@@ -47,7 +47,7 @@
 
     const meta = document.createElement('div');
     meta.className='meta';
-    // NOTE: no inline price line; we use the price pill button to match Bat/Knuckles UI.
+    // No inline price line; the pill button shows the price (matches Bat/Knuckles).
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
         <div>${svgIcon(it.id)}</div>
@@ -59,7 +59,7 @@
 
     const btn = document.createElement('button');
     btn.className='buy';
-    btn.textContent = `${it.price} IC`; // price pill, like Bat/Knuckles
+    btn.textContent = `${it.price} IC`; // price pill
     btn.addEventListener('click', ()=>{
       const coins = api.getCoins ? api.getCoins() : (api.player?.coins|0);
       if(coins < it.price){ alert('Not enough coins'); return; }
@@ -99,7 +99,7 @@
     list.appendChild(row);
   }
 
-  // --- Repair icons for core-provided rows if something stripped inline SVGs (UNCHANGED) ---
+  // --- Repair icons & missing names for core-provided rows (NO SVG LOGIC CHANGED) ---
   function repairMissingIcons(){
     try{
       const modal = document.getElementById('shopModal');
@@ -115,20 +115,30 @@
         const nameEl     = meta.querySelector('.name');
         if(!iconHolder || !nameEl) return;
 
-        const name = (nameEl.textContent||'').trim().toLowerCase();
-        const isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);
-        const isKnuckles = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
+        const currentName = (nameEl.textContent||'').trim();
+        let name = currentName.toLowerCase();
+        let isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);
+        let isKnuckles = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
+
+        // If name is empty, infer from icon markup (non-invasive; still not touching the SVGs)
+        if(!isBat && !isKnuckles && !currentName){
+          const html = (iconHolder.innerHTML||'').toLowerCase();
+          if(html.includes('#8b5a2b') || html.includes('#6f4320')) isBat = true;            // bat colors
+          else if(html.includes('#cfcfcf') && html.includes('<circle')) isKnuckles = true;  // knuckles look
+        }
 
         if(isBat){
           const html = (iconHolder.innerHTML||'').trim();
           if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgBat());
           }
+          if(!currentName) nameEl.textContent = 'Baseball Bat';
         }else if(isKnuckles){
           const html = (iconHolder.innerHTML||'').trim();
           if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgKnuckles());
           }
+          if(!currentName) nameEl.textContent = 'Brass Knuckles';
         }
       });
     }catch(e){
@@ -154,13 +164,13 @@
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
-          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',            price:350, sub:'Unlocked at mission 3' });
-          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 round mag)',   price:60  });
-          addShopRow(list, { id:'grenade',      name:'Grenade',                       price:120 });
+          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',          price:350, sub:'Unlocked at mission 3' });
+          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 rounds)',    price:60  });
+          addShopRow(list, { id:'grenade',      name:'Grenade',                     price:120 });
         }
       }
 
-      // Repair icons for core rows (bat/knuckles)
+      // Repair icons & add missing names for core rows
       repairMissingIcons();
     }catch(e){
       console.warn('[store extender] patch failed:', e);
