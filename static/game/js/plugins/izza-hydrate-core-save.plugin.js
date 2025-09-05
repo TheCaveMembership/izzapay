@@ -1,7 +1,7 @@
 <!-- /static/game/js/plugins/izza-hydrate-core-save.plugin.js -->
 <script>
 (function(){
-  // ===== tiny "restoring" overlay =====
+  // ===== tiny overlay =====
   const overlay = document.createElement('div');
   Object.assign(overlay.style,{
     position:'fixed', inset:'0', background:'rgba(5,8,14,.86)', display:'flex',
@@ -10,7 +10,6 @@
   });
   overlay.innerHTML = `<div style="padding:14px 18px;border:1px solid #394769;border-radius:10px;background:#0b1120">
     Restoring your game…</div>`;
-
   const addOverlay = ()=>{ if(!overlay.isConnected) document.body.appendChild(overlay); };
   const removeOverlay = ()=>{ if(overlay.isConnected) overlay.remove(); };
 
@@ -26,14 +25,14 @@
   function isEmptySnapshot(s){
     if(!s || typeof s!=='object') return true;
     if (s.version !== 1) return false;
-    const coinsTop = (s.coins|0)||0;
+    const wallet = (s.coins|0)||0;
     const invEmpty = !s.inventory || Object.keys(s.inventory).length===0;
     const bank = s.bank||{};
     const bankCoins = (bank.coins|0)||0;
     const bankEmpty = bankCoins===0 &&
       (!bank.items || Object.keys(bank.items).length===0) &&
       (!bank.ammo  || Object.keys(bank.ammo ).length===0);
-    return coinsTop===0 && invEmpty && bankEmpty;
+    return wallet===0 && invEmpty && bankEmpty;
   }
 
   function userName(){
@@ -45,13 +44,11 @@
   // ===== server fetch (prefer LastGood) =====
   async function fetchSnapshot(u){
     const base = (window.__IZZA_API_BASE__) || '/api';
-    // First, ask explicitly for LastGood:
     let r = await fetch(`${base}/state/${encodeURIComponent(u)}?prefer=lastGood`, { cache:'no-store' });
     if (r.ok){
       const js = await r.json();
       if (!isEmptySnapshot(js)) return js;
     }
-    // Fallback: latest valid
     r = await fetch(`${base}/state/${encodeURIComponent(u)}`, { cache:'no-store' });
     if (r.ok){
       const js = await r.json();
@@ -60,58 +57,51 @@
     return null;
   }
 
-  // ---- helper: compute stable on-hand + bank from a snapshot (with clamps) ----
-  function deriveMoneyFields(snap){
-    let total = (snap && (snap.coins|0)) || 0;
-    let bank  = (snap && snap.bank && (snap.bank.coins|0)) || 0;
-    if (bank > total) { bank = total; }                 // clamp impossible states
-    const onHand = Math.max(0, total - bank);           // on-hand = total - bank
-    return { onHand, bank, total };
-  }
-
-  // ===== quick pre-seed (only if we are the owner — we aren’t if bank plugin loaded) =====
+  // ===== quick pre-seed if we are the money owner (we AREN’T if bank plugin loaded) =====
   (function preseedEarly(){
-    if (window.__IZZA_MONEY_OWNER__ === 'bank-plugin') return; // money handled elsewhere
+    if (window.__IZZA_MONEY_OWNER__ === 'bank-plugin') return;
     const USER = userName();
-    const localLG = getLSJSON(`izzaBankLastGood_${USER}`, null);
-    if (localLG && !isEmptySnapshot(localLG)) {
-      const money = deriveMoneyFields(localLG);
-      setLS('izzaCoins', String(money.onHand));
+    const lg = getLSJSON(`izzaBankLastGood_${USER}`, null);
+    if (lg && !isEmptySnapshot(lg)) {
+      const wallet = (lg.coins|0) || 0;
+      const bank   = (lg.bank && (lg.bank.coins|0)) || 0;
+      setLS('izzaCoins', String(wallet));
       setLSJSON(`izzaBank_${USER}`, {
-        coins: money.bank,
-        items: (localLG.bank && localLG.bank.items) || {},
-        ammo:  (localLG.bank && localLG.bank.ammo)  || {}
+        coins: bank,
+        items: (lg.bank && lg.bank.items) || {},
+        ammo:  (lg.bank && lg.bank.ammo)  || {}
       });
     }
   })();
 
   // ===== apply snapshot to the running cores (skip MONEY if bank plugin owns it) =====
   function applySnapshot(snap, USER){
-    // Persist a local last-good mirror first (whole snapshot)
+    // persist local last-good
     setLSJSON(`izzaBankLastGood_${USER}`, snap);
 
-    // MONEY: skip if bank plugin owns it
+    // MONEY (wallet/bank only)
     if (window.__IZZA_MONEY_OWNER__ !== 'bank-plugin'){
-      const money = deriveMoneyFields(snap);
+      const wallet = (snap.coins|0) || 0;
+      const bank   = (snap.bank && (snap.bank.coins|0)) || 0;
       setLSJSON(`izzaBank_${USER}`, {
-        coins: money.bank,
+        coins: bank,
         items: (snap.bank && snap.bank.items) || {},
         ammo:  (snap.bank && snap.bank.ammo)  || {}
       });
-      setLS('izzaCoins', String(money.onHand));
-      if (window.IZZA && IZZA.api && typeof IZZA.api.setCoins === 'function') {
-        try { IZZA.api.setCoins(money.onHand); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
+      setLS('izzaCoins', String(wallet));
+      if (window.IZZA?.api?.setCoins) {
+        try { IZZA.api.setCoins(wallet); } catch(e){ console.warn('[hydrate coins] setCoins failed', e); }
       } else {
         try {
           const pill = document.getElementById('coinPill');
-          if(pill) pill.textContent = `Wallet: ${money.onHand} IC`;
+          if(pill) pill.textContent = `Wallet: ${wallet} IC`;
         } catch(e){}
       }
       try { window.dispatchEvent(new Event('izza-bank-changed')); } catch {}
       try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
     }
 
-    // Legacy keys / Core v2 compatibility (wallet value if present; else leave existing)
+    // Legacy + missions
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
@@ -130,7 +120,7 @@
     }
 
     // Position nudge
-    if (window.IZZA && window.IZZA.api && window.IZZA.api.player && snap.player) {
+    if (window.IZZA?.api?.player && snap.player) {
       const p = window.IZZA.api.player;
       if (typeof snap.player.x === 'number') p.x = snap.player.x;
       if (typeof snap.player.y === 'number') p.y = snap.player.y;
@@ -144,10 +134,10 @@
   async function hydrateAfterGameSettles(){
     addOverlay();
 
-    // 1) Wait for cores to say they're ready (or 1s fallback)
+    // 1) Wait for core ready (or 1s)
     let readySeen = false;
     const waitReady = new Promise(async (resolve)=>{
-      if (window.IZZA && window.IZZA.api && window.IZZA.api.ready) { readySeen = true; return resolve(); }
+      if (window.IZZA?.api?.ready) { readySeen = true; return resolve(); }
       const handler = ()=>{ readySeen = true; resolve(); };
       try { (window.IZZA = window.IZZA || {}).on?.('ready', handler); } catch {}
       await sleep(1000);
@@ -155,17 +145,13 @@
     });
     await waitReady;
 
-    // 2) Let map expander / first frames settle
-    let gotTick = false;
-    const onTick = ()=>{ gotTick = true; };
-    try { (window.IZZA = window.IZZA || {}).on?.('update-post', onTick); } catch {}
+    // 2) Let first frames settle a bit
     await waitFrames(6);
     await sleep(450);
-    if (!gotTick) await waitFrames(6);
 
     const USER = userName();
 
-    // 3) Fetch server snapshot with LastGood preference
+    // 3) Fetch snapshot
     let snap = null;
     try { snap = await fetchSnapshot(USER); } catch {}
     if (!snap) {
@@ -186,7 +172,6 @@
     removeOverlay();
   }
 
-  // Kick it off after DOM ready so the overlay can mount cleanly
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', hydrateAfterGameSettles, { once:true });
   } else {
