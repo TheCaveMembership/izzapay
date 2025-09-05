@@ -3,7 +3,7 @@
   const BUILD = 'v1-store-items+stock-extender';
   console.log('[IZZA PLAY]', BUILD);
 
-  let api=null;
+  let api = null;
 
   // Utility: safe DOM query
   const $ = sel => document.querySelector(sel);
@@ -14,9 +14,8 @@
     row.className='shop-item';
     row.setAttribute('data-store-ext','1'); // marker so we don’t duplicate on re-open
 
-    // icon: reuse the core's inline SVGs via a tiny shim
+    // icon shim
     function svgIcon(id, w=24, h=24){
-      // mirror core minimal set; add new ones below
       if(id==='bat')      return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
       if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
       if(id==='pistol')   return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
@@ -46,14 +45,13 @@
       if(coins < it.price){ alert('Not enough coins'); return; }
       api.setCoins(coins - it.price);
 
-      // mutate inventory using your core helpers
       const inv = api.getInventory ? api.getInventory() : {};
       if(it.id==='uzi'){
         const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
         cur.owned = true; cur.ammo = (cur.ammo|0) + 50;
         inv.uzi = cur;
         api.setInventory && api.setInventory(inv);
-        IZZA.emit?.('toast', {text:'Purchased Uzi (+50 ammo)'}); // non-blocking
+        IZZA.emit?.('toast', {text:'Purchased Uzi (+50 ammo)'});
       }else if(it.id==='grenade'){
         const cur = inv.grenade || { count:0 };
         cur.count = (cur.count|0) + 1;
@@ -83,22 +81,33 @@
   }
 
   function patchShopStock(){
-    const modal = document.getElementById('shopModal');
-    if(!modal || modal.style.display==='none') return;
+    try{
+      if(!api) return; // ← guard until ready
 
-    const list = document.getElementById('shopList');
-    if(!list || list.querySelector('[data-store-ext]')) return; // already extended this open
+      const modal = document.getElementById('shopModal');
+      if(!modal) return;
 
-    // Gate extra stock by missions (respect your core rules)
-    const missions = (api.getMissionCount && api.getMissionCount()) || 0;
-    if(missions >= 3){
-      addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)', price:350, sub:'Unlocked at mission 3' });
-      addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (full mag)', price:60 });
-      addShopRow(list, { id:'grenade',      name:'Grenade', price:120 });
+      // consider computed style in case core toggles a class
+      const open = (modal.style.display === 'flex') ||
+                   (getComputedStyle(modal).display === 'flex');
+      if(!open) return;
+
+      const list = document.getElementById('shopList');
+      if(!list || list.querySelector('[data-store-ext]')) return; // already extended for this open
+
+      const missions = (api.getMissionCount && api.getMissionCount()) || 0;
+
+      if(missions >= 3){
+        addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',     price:350, sub:'Unlocked at mission 3' });
+        addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (full mag)', price:60 });
+        addShopRow(list, { id:'grenade',      name:'Grenade',                price:120 });
+      }
+    }catch(e){
+      // Never let a UI error stall input
+      console.warn('[store extender] patch failed:', e);
     }
   }
 
   IZZA.on('ready', a=>{ api=a; });
-  // When the shop opens (core sets display='flex'), we detect & append rows.
   IZZA.on('render-post', patchShopStock);
 })();
