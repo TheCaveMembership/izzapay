@@ -187,7 +187,17 @@
     }
     placeHeartsHud();
   }
-
+// Put this near the bottom of v4_hearts.js (after initHearts is defined)
+window.addEventListener('izza-hearts-changed', ()=>{
+  if (!player) return;
+  const maxH = getMaxHearts();
+  const def  = maxH * 3;
+  const seg  = Math.max(0, Math.min(def, parseInt(localStorage.getItem('izzaCurHeartSegments') || String(def), 10)));
+  player.maxHearts = maxH;
+  player.heartSegs = seg;
+  try { drawDOMHearts(); } catch {}
+}, { passive:true });
+  
   function placeHeartsHud(){
     const hud   = ensureHeartsHud();
     const stars = document.getElementById('stars');
