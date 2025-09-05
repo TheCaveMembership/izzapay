@@ -1,4 +1,4 @@
-/* IZZA Persist v2.4.1 — coins = WALLET (on-hand), bank saved separately; missions included */
+/* IZZA Persist v2.4.2 — coins = WALLET (on-hand), bank saved separately; missions + hearts */
 (function(){
   const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
@@ -88,12 +88,13 @@
     };
   }
 
-  // “blank” means: wallet 0 AND bank empty AND inventory empty (hearts don’t matter)
+  // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   function looksEmpty(s){
     const bankEmpty = !s.bank || (((s.bank.coins|0)===0) && !Object.keys(s.bank.items||{}).length && !Object.keys(s.bank.ammo||{}).length);
     const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
     const coinsZero = (s.coins|0)===0; // s.coins is WALLET
-    return bankEmpty && invEmpty && coinsZero;
+    const heartsKnown = !!(s.player && s.player.heartsSegs!=null);   // <-- NEW: hearts-only is meaningful
+    return bankEmpty && invEmpty && coinsZero && !heartsKnown;
   }
 
   const Persist = {
@@ -177,10 +178,32 @@
     }
   }
 
-  // save on your events & periodic
-  window.addEventListener('izza-bank-changed', ()=> tryKick('bank'));
-  window.addEventListener('izza-coins-changed',()=> tryKick('coins'));
+  // ---- event-driven saves (bank/coins/inventory/hearts) ----
+  window.addEventListener('izza-bank-changed',     ()=> tryKick('bank'));
+  window.addEventListener('izza-coins-changed',    ()=> tryKick('coins'));
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
+  window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));  // <-- listens if your hearts plugin emits
+
+  // ---- hearts watcher (works even if no event is emitted) ----
+  let _lastHearts = readHeartsSegs();
+  setInterval(()=>{
+    const cur = readHeartsSegs();
+    if (cur!=null && cur !== _lastHearts){
+      _lastHearts = cur;
+      tryKick('hearts-watch');
+    }
+  }, 2000);
+
+  // Also react if another tab changes the hearts LS key
+  window.addEventListener('storage', (e)=>{
+    const u=userKey();
+    if (e && (e.key===`izzaCurHeartSegments_${u}` || e.key==='izzaCurHeartSegments')){
+      _lastHearts = readHeartsSegs();
+      tryKick('hearts-storage');
+    }
+  });
+
+  // periodic poll remains
   setInterval(()=> tryKick('poll'), 5000);
 
   // before close (Safari/Pi)
