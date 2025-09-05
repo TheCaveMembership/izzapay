@@ -164,9 +164,10 @@
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
-          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',          price:350, sub:'Unlocked at mission 3' });
-          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 rounds)',    price:60  });
-          addShopRow(list, { id:'grenade',      name:'Grenade',                     price:120 });
+          // NOTE: removed the "Unlocked at mission 3" subtitle for Uzi (per request)
+          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',       price:350 });
+          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 rounds)', price:60  });
+          addShopRow(list, { id:'grenade',      name:'Grenade',                 price:120 });
         }
       }
 
