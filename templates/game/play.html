@@ -278,6 +278,38 @@
 })();
 </script>
 
+  <!-- Trade Centre confirm -->
+<div class="modal" id="tradeModal" style="display:none">
+  <div class="backdrop"></div>
+  <div class="card" style="border-color:#13b5a3">
+    <h3 style="margin-bottom:6px;color:#0fead4">Trade Centre</h3>
+    <div class="shop-note" style="opacity:.95">
+      Visit the <b>Trade Centre</b>? This is a <b>safe-zone</b>: no attacks, no cops/peds.
+      Meet players, open trades, swap items & IZZA Coins.
+    </div>
+    <div class="row">
+      <button class="ghost" id="tradeNo">Not now</button>
+      <button class="ghost" id="tradeYes" style="border-color:#13b5a3">Enter</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const modal = document.getElementById('tradeModal');
+  if(!modal) return;
+  function close(){ modal.style.display='none'; }
+  modal.querySelector('.backdrop').addEventListener('click', close, {passive:true});
+  document.getElementById('tradeNo').addEventListener('click', close, {passive:true});
+  document.getElementById('tradeYes').addEventListener('click', function(ev){
+    ev.preventDefault();
+    try{ localStorage.setItem('izzaTradeCentre','1'); }catch(_){}
+    close();
+    // Light reload so safe-zone hooks engage cleanly (no other state touched)
+    location.reload();
+  }, {passive:false});
+})();
+</script>
+
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
   <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
