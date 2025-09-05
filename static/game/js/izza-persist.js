@@ -49,8 +49,7 @@
     const u=userKey();
     const a = localStorage.getItem('izzaCurHeartSegments_'+u);
     const b = localStorage.getItem('izzaCurHeartSegments');
-    // Prefer the live/global key if present; otherwise fall back to user-scoped
-    const raw = (b!=null ? b : a);
+    const raw = (a??b);
     if (raw==null) return null;
     const v = parseInt(raw,10);
     return Number.isFinite(v) ? Math.max(0, v|0) : null;
@@ -94,7 +93,7 @@
     const bankEmpty = !s.bank || (((s.bank.coins|0)===0) && !Object.keys(s.bank.items||{}).length && !Object.keys(s.bank.ammo||{}).length);
     const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
     const coinsZero = (s.coins|0)===0; // s.coins is WALLET
-    const heartsKnown = !!(s.player && s.player.heartsSegs!=null);   // hearts-only is meaningful
+    const heartsKnown = !!(s.player && s.player.heartsSegs!=null);   // <-- NEW: hearts-only is meaningful
     return bankEmpty && invEmpty && coinsZero && !heartsKnown;
   }
 
@@ -133,8 +132,10 @@
   if (window.IZZA?.on) {
     IZZA.on('ready', ()=>{ ready=true; armOnce(); });
   } else {
+    // fallback in case plugin loads after ready
     setTimeout(()=>{ ready=true; armOnce(); }, 2500);
   }
+  // also give ample grace after any tier reloads
   setTimeout(()=>{ armOnce(); }, 7000);
 
   (async function init(){
@@ -152,9 +153,11 @@
     if(!loaded || !armed || !ready) return;
 
     const snap = buildSnapshot();
+    // never push blank over a non-empty server
     if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
       console.log('[persist] skip blank (server already has data)', reason); return;
     }
+    // if still blank, just wait
     if (looksEmpty(snap)) { console.log('[persist] still blank', reason); return; }
 
     lastGood = snap;
@@ -166,7 +169,7 @@
 
     if (r.ok) {
       console.log('[persist] saved', reason, snap);
-      serverSeed = snap;
+      serverSeed = snap; // from now on, blank overwrites are blocked
       toast('Saved!');
     } else if (needLater) {
       needLater=false; tryKick('retry');
@@ -179,7 +182,7 @@
   window.addEventListener('izza-bank-changed',     ()=> tryKick('bank'));
   window.addEventListener('izza-coins-changed',    ()=> tryKick('coins'));
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
-  window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
+  window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));  // <-- listens if your hearts plugin emits
 
   // ---- hearts watcher (works even if no event is emitted) ----
   let _lastHearts = readHeartsSegs();
