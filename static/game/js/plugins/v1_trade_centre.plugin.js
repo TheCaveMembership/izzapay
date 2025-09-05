@@ -27,7 +27,7 @@
   IZZA.on('ready', (api)=>{
     if(!isInTC()) return;
 
-    // ===== Banner (adjusted as requested) =====
+    // ===== Banner (adjusted) =====
     (function(){
       function showTradeBanner(){
         const fire = document.getElementById('btnFire');
@@ -52,11 +52,13 @@
             borderRadius:'14px',
             boxShadow:'0 6px 20px rgba(0,0,0,.45)',
             zIndex:9999,
-            fontSize:'15px'
+            fontSize:'15px',
+            display:'flex'
           });
           document.body.appendChild(b);
+        } else {
+          b.style.display = 'flex';
         }
-        b.style.display = 'flex';
       }
 
       function hideTradeBanner(){
@@ -67,9 +69,12 @@
         if (b) b.style.display = 'none';
       }
 
-      // Example wiring: show when entering trade centre, hide when leaving
+      // Show/hide on events
       window.addEventListener('izza-tradecentre-enter', showTradeBanner);
       window.addEventListener('izza-tradecentre-leave', hideTradeBanner);
+
+      // NEW: if we're already in the Trade Centre (FLAG set), show immediately
+      showTradeBanner();
     })();
 
     // Disable attacks (A button & key)
