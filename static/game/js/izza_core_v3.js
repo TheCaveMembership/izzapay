@@ -199,12 +199,15 @@
     return Math.max(0,n);
   }
   function setCoins(n){
-    const v = Math.max(0, n|0);
-    localStorage.setItem(LS.coins, String(v));
-    const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
-    if(el) el.textContent = `Wallet: ${v} IC`;
-    player.coins = v;
-  }
+  const v = Math.max(0, n|0);
+  localStorage.setItem(LS.coins, String(v));
+  const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
+  if(el) el.textContent = `Wallet: ${v} IC`;
+  player.coins = v;
+
+  // NEW: let persist/sync know wallet changed
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+}
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
   function setMission1Done(){
     localStorage.setItem(LS.mission1,'done');
