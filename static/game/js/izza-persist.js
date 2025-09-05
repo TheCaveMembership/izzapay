@@ -1,4 +1,4 @@
-/* IZZA Persist v2.4 — coins = WALLET (on-hand), bank saved separately; missions included */
+/* IZZA Persist v2.4.1 — coins = WALLET (on-hand), bank saved separately; missions included */
 (function(){
   const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
@@ -76,8 +76,7 @@
     const heartsSegs = readHeartsSegs();
     const missions   = readMissions();
 
-    // IMPORTANT: store WALLET (on-hand) coins in snapshot.coins
-    // Bank is stored separately at snapshot.bank.coins
+    // WALLET ONLY lives in snapshot.coins
     return {
       version: 1,
       player: { x: pos.x|0, y: pos.y|0, heartsSegs },
@@ -130,10 +129,10 @@
 
   // wait for core ready
   if (window.IZZA?.on) {
-    IZZA.on('ready', ()=>{ ready=true; armOnce(); ensureSaveButton(); });
+    IZZA.on('ready', ()=>{ ready=true; armOnce(); });
   } else {
     // fallback in case plugin loads after ready
-    setTimeout(()=>{ ready=true; armOnce(); ensureSaveButton(); }, 2500);
+    setTimeout(()=>{ ready=true; armOnce(); }, 2500);
   }
   // also give ample grace after any tier reloads
   setTimeout(()=>{ armOnce(); }, 7000);
@@ -198,61 +197,6 @@
   // manual helper for you while testing
   window._izzaForceSave = ()=> { armed=true; ready=true; loaded=true; tryKick('manual'); };
 
-  // ---------- Save Button UI ----------
-  let _saveBtn=null, _saveBusy=false;
-  function ensureSaveButton(){
-    if (_saveBtn) return;
-    const dock = document.querySelector('.controls');
-    if (!dock) { setTimeout(ensureSaveButton, 500); return; }
-
-    const btn = document.createElement('button');
-    btn.id = 'btnSave';
-    btn.className = 'btn';
-    btn.type = 'button';
-    btn.title = 'Save snapshot';
-    btn.textContent = 'Save';
-    btn.style.minWidth = '64px';
-
-    btn.addEventListener('click', async ()=>{
-      if (_saveBusy) return;
-      _saveBusy=true;
-      btn.disabled = true;
-      btn.textContent = 'Saving…';
-
-      // make sure our pipeline is armed for manual saves
-      armed=true; ready=true; loaded=true;
-
-      const snap = buildSnapshot();
-      if (looksEmpty(snap)) {
-        toast('Nothing to save yet');
-        _saveBusy=false; btn.disabled=false; btn.textContent='Save';
-        return;
-      }
-      const r = await Persist.save(snap);
-      if (r.ok){
-        lastGood = snap;
-        serverSeed = snap;
-        toast('Saved!');
-      } else {
-        toast('Save failed');
-      }
-      _saveBusy=false;
-      btn.disabled=false;
-      btn.textContent='Save';
-    });
-
-    dock.appendChild(btn);
-
-    // optional: keyboard shortcut "S"
-    window.addEventListener('keydown', (e)=>{
-      if ((e.key||'').toLowerCase()==='s'){
-        btn.click();
-      }
-    }, true);
-
-    _saveBtn = btn;
-  }
-
   // ---------- tiny toast ----------
   function toast(msg, ms=1400){
     if (window.IZZA?.toast) { IZZA.toast(msg); return; }
@@ -271,5 +215,4 @@
     clearTimeout(h._t);
     h._t = setTimeout(()=>{ h.style.display='none'; }, ms);
   }
-
 })();
