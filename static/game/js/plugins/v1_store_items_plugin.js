@@ -1,6 +1,6 @@
-// v1_store_items_plugin.js — extend shop stock + icon/name repair + price-pill buy
+// v1_store_items_plugin.js — extend shop stock + icon repair (bat/knuckles) + price pill + ammo title
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-name-fix+pricepill';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-2+pricepill+ammo17';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -46,7 +46,7 @@
 
     const meta = document.createElement('div');
     meta.className='meta';
-    // Match core layout: name + optional subline (no duplicate inline price; price is the pill)
+    // No inline price line here; price shows in the button pill.
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
         <div>${svgIcon(it.id)}</div>
@@ -56,7 +56,7 @@
         </div>
       </div>`;
 
-    // Price pill (click-to-buy), same class as core
+    // Price pill (click-to-buy)
     const btn = document.createElement('button');
     btn.className='buy';
     btn.textContent = `${it.price} IC`;
@@ -99,8 +99,8 @@
     list.appendChild(row);
   }
 
-  // --- Repair icons & names for core-provided rows if something stripped inline SVGs / labels ---
-  function repairCoreRows(){
+  // --- Repair icons (and blank names) for core-provided rows if something stripped inline SVGs ---
+  function repairMissingIcons(){
     try{
       const modal = document.getElementById('shopModal');
       if(!modal) return;
@@ -113,35 +113,28 @@
       list.querySelectorAll('.shop-item .meta').forEach(meta=>{
         const iconHolder = meta.querySelector(':scope > div:first-child');
         const nameEl     = meta.querySelector('.name');
-        const subEl      = meta.querySelector('.sub');
+        if(!iconHolder || !nameEl) return;
 
-        const text = ((nameEl && nameEl.textContent) || (subEl && subEl.textContent) || '').toLowerCase();
-
-        const isBat       = /\bbaseball\s*bat\b/i.test(text) || /\bbat\b/i.test(text);
-        const isKnuckles  = /\bbrass\s*knuckles\b/i.test(text) || /\bknuckles\b/i.test(text);
+        const name = (nameEl.textContent||'').trim().toLowerCase();
+        const isBat       = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);
+        const isKnuckles  = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
 
         if(isBat){
-          // icon fix
-          const html = iconHolder ? (iconHolder.innerHTML||'').trim() : '';
-          if(iconHolder && (!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img')))){
+          const html = (iconHolder.innerHTML||'').trim();
+          if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgBat());
           }
-          // name fix
-          if(nameEl && !nameEl.textContent.trim()){
-            nameEl.textContent = 'Bat';
-          }
+          if(!nameEl.textContent.trim()){ nameEl.textContent = 'Bat'; }
         }else if(isKnuckles){
-          const html = iconHolder ? (iconHolder.innerHTML||'').trim() : '';
-          if(iconHolder && (!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img')))){
+          const html = (iconHolder.innerHTML||'').trim();
+          if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgKnuckles());
           }
-          if(nameEl && !nameEl.textContent.trim()){
-            nameEl.textContent = 'Brass Knuckles';
-          }
+          if(!nameEl.textContent.trim()){ nameEl.textContent = 'Brass Knuckles'; }
         }
       });
     }catch(e){
-      console.warn('[store extender] repair failed:', e);
+      console.warn('[store extender] icon repair failed:', e);
     }
   }
 
@@ -159,18 +152,18 @@
       const list = document.getElementById('shopList');
       if(!list) return;
 
-      // Extend stock (only once per open)
+      // Extend stock (once per open)
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
-          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',       price:350, sub:'Unlocked at mission 3' });
-          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 round mag)', price:60 });
-          addShopRow(list, { id:'grenade',      name:'Grenade',                  price:120 });
+          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',           price:350, sub:'Unlocked at mission 3' });
+          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 round mag)',  price:60 });
+          addShopRow(list, { id:'grenade',      name:'Grenade',                      price:120 });
         }
       }
 
-      // Repair icons + names for core rows
-      repairCoreRows();
+      // Repair core icons + names (bat/knuckles)
+      repairMissingIcons();
     }catch(e){
       console.warn('[store extender] patch failed:', e);
     }
