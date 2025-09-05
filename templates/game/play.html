@@ -95,102 +95,98 @@
   </div>
 
   <div class="modal" id="mapModal">…</div>
-  <!-- HQ / Enter modal -->
-<div class="modal" id="enterModal">
-  <div class="backdrop"></div>
-  <div class="card">
-    <h3 id="enterTitle">Headquarters</h3>
-    <div id="enterDesc" class="shop-note">
-      Start the tutorial to learn the basics.
-    </div>
-    <div class="row">
-      <button class="ghost" id="enterClose" type="button">Close</button>
-      <button class="btn" id="enterStart" type="button">Start</button>
+
+  <!-- HQ / Enter modal (old tutorial wording + IDs) -->
+  <div class="modal" id="enterModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>IZZA HQ</h3>
+      <p>Welcome! Tutorial:</p>
+      <ol style="margin:0 0 8px 18px; padding:0">
+        <li>Press <strong>A</strong> to hit the pedestrian (3 hits to knock down, then 1 to finish).</li>
+        <li>Oh no! Then eliminate the cop within <strong>30 seconds</strong> or more will arrive.</li>
+      </ol>
+      <div class="row">
+        <button class="ghost" id="startTutorial">Start Tutorial</button>
+        <button class="ghost" id="closeEnter">Close</button>
+      </div>
     </div>
   </div>
-</div>
 
-<script>
-(function(){
-  const modal = document.getElementById('enterModal');
-  if (!modal) return;
+  <!-- Tiny handlers adjusted to old IDs -->
+  <script>
+  (function(){
+    const modal = document.getElementById('enterModal');
+    if (!modal) return;
 
-  function closeEnter(){
-    modal.style.display = 'none';
-    try { IZZA && IZZA.emit && IZZA.emit('enter-closed'); } catch {}
-  }
+    function closeEnter(){
+      modal.style.display = 'none';
+      try { IZZA && IZZA.emit && IZZA.emit('enter-closed'); } catch {}
+    }
 
-  // Backdrop to close (you already do this pattern for shop)
-  const backdrop = modal.querySelector('.backdrop');
-  backdrop && backdrop.addEventListener('click', closeEnter, { passive:true });
+    const backdrop = modal.querySelector('.backdrop');
+    backdrop && backdrop.addEventListener('click', closeEnter, { passive:true });
 
-  // Delegated click for Close (robust vs timing)
-  document.addEventListener('click', function(ev){
-    const btn = ev.target && ev.target.closest('#enterClose');
-    if (!btn) return;
-    if (modal.style.display === 'none') return;
-    ev.stopPropagation(); ev.preventDefault();
-    closeEnter();
-  }, true);
+    document.addEventListener('click', function(ev){
+      const btn = ev.target && ev.target.closest('#closeEnter');
+      if (!btn) return;
+      if (modal.style.display === 'none') return;
+      ev.stopPropagation(); ev.preventDefault();
+      closeEnter();
+    }, true);
 
-  // “Start” just relays to core (core will launch tutorial mission)
-  document.addEventListener('click', function(ev){
-    const btn = ev.target && ev.target.closest('#enterStart');
-    if (!btn) return;
-    if (modal.style.display === 'none') return;
-    ev.stopPropagation(); ev.preventDefault();
-    try { IZZA && IZZA.emit && IZZA.emit('enter-start'); } catch {}
-    closeEnter();
-  }, true);
+    document.addEventListener('click', function(ev){
+      const btn = ev.target && ev.target.closest('#startTutorial');
+      if (!btn) return;
+      if (modal.style.display === 'none') return;
+      ev.stopPropagation(); ev.preventDefault();
+      try { IZZA && IZZA.emit && IZZA.emit('enter-start'); } catch {}
+      closeEnter();
+    }, true);
 
-  // Optional ESC
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape' && modal.style.display !== 'none') closeEnter();
-  }, { passive:true });
-})();
-</script>
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && modal.style.display !== 'none') closeEnter();
+    }, { passive:true });
+  })();
+  </script>
 
-  <!-- UPDATED: full shop modal markup -->
+  <!-- Shop modal (old wording + IDs) -->
   <div class="modal" id="shopModal">
     <div class="backdrop"></div>
     <div class="card">
-      <h3>Shop</h3>
-      <div id="shopList" class="shop-list"></div>
-      <div class="shop-note">Tap an item to purchase.</div>
-      <div class="row"><button class="ghost" id="shopClose" type="button">Close</button></div>
+      <h3>Shop — Cashier</h3>
+      <div class="shop-list" id="shopList"></div>
+      <div class="shop-note" id="shopNote"></div>
+      <div class="row"><button class="ghost" id="closeShop">Close</button></div>
     </div>
   </div>
   <script>
-(function(){
-  const modal = document.getElementById('shopModal');
-  if (!modal) return;
+  (function(){
+    const modal = document.getElementById('shopModal');
+    if (!modal) return;
 
-  function closeShop(){
-    modal.style.display = 'none';
-    try { window.IZZA && IZZA.emit && IZZA.emit('shop-closed'); } catch {}
-  }
+    function closeShop(){
+      modal.style.display = 'none';
+      try { window.IZZA && IZZA.emit && IZZA.emit('shop-closed'); } catch {}
+    }
 
-  // Backdrop failsafe (keep — yours already works)
-  const backdrop = modal.querySelector('.backdrop');
-  backdrop && backdrop.addEventListener('click', closeShop, { passive:true });
+    const backdrop = modal.querySelector('.backdrop');
+    backdrop && backdrop.addEventListener('click', closeShop, { passive:true });
 
-  // NEW: Delegated click for the Close button (robust vs timing/re-renders)
-  document.addEventListener('click', function(ev){
-    const btn = ev.target && ev.target.closest('#shopClose');
-    if (!btn) return;
-    if (modal.style.display === 'none') return;
-    // beat any other handlers
-    ev.stopPropagation();
-    ev.preventDefault();
-    closeShop();
-  }, true); // capture phase so nothing can swallow it first
+    document.addEventListener('click', function(ev){
+      const btn = ev.target && ev.target.closest('#closeShop');
+      if (!btn) return;
+      if (modal.style.display === 'none') return;
+      ev.stopPropagation();
+      ev.preventDefault();
+      closeShop();
+    }, true);
 
-  // Optional ESC key
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape' && modal.style.display !== 'none') closeShop();
-  }, { passive:true });
-})();
-</script>
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && modal.style.display !== 'none') closeShop();
+    }, { passive:true });
+  })();
+  </script>
 
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
