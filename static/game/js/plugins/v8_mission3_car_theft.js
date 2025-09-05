@@ -377,7 +377,6 @@
       localStorage.setItem(M3_KEY, 'done');           // mark Mission 3 complete
       localStorage.setItem(MAP_TIER_KEY, '2');        // unlock Tier 2
       localStorage.setItem('izzaMissions', '3');      // mission count gate
-      localStorage.setItem('izzaMapLayoutBuild', 'clip_safe_v2'); // make sure layout matches tier2
       m3.state = 'done';                               // reflect in-memory state immediately
       console.log('[M3] TEST MODE: forced mission complete + tier 2 unlocked');
     } catch(e) {
