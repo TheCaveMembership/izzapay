@@ -504,6 +504,87 @@ window._redrawHeartsHud = _redrawHeartsHud;
     const nearBankDoor = Math.abs(pgx-bankDoor.x)<=1 && Math.abs(pgy-bankDoor.y)<=1;
     set(bankDoor.x, bankDoor.y, nearBankDoor ? COL.doorGreen : COL.doorBlue);
     // =========================
+    // === TRADE CENTRE (small building next to HQ) ================================
+(function addTradeCentre(){
+  try{
+    const api = IZZA.api;
+    if (!api) return;
+    const A = (function anchors(){
+      const tier = localStorage.getItem('izzaMapTier')||'1';
+      const un = (tier!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50};
+      const bW=10,bH=6;
+      const bX = Math.floor((un.x0+un.x1)/2) - Math.floor(bW/2);
+      const bY = un.y0 + 5;
+      const hRoadY       = bY + bH + 1;
+      const sidewalkTopY = hRoadY - 1;
+      const vRoadX       = Math.min(un.x1-3, bX + bW + 6);
+      const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY }; // HQ door
+      return {un, door, vRoadX, hRoadY, sidewalkTopY};
+    })();
+
+    // Pos: 8 east, 4 south of the HQ door
+    const tx0 = A.door.gx + 8;
+    const ty0 = A.door.gy + 4;
+    const TRADE_RECT = { x0: tx0, y0: ty0, x1: tx0+2, y1: ty0+2 }; // 3x3
+    const TRADE_DOOR = { x: tx0+1, y: ty0-1 };                     // north-side door
+
+    // Draw building (teal)
+    const ctx = document.getElementById('game').getContext('2d');
+    const fillTile = (gx,gy,col)=>{
+      const S=api.DRAW, sx=(gx*api.TILE - api.camera.x)*(S/api.TILE), sy=(gy*api.TILE - api.camera.y)*(S/api.TILE);
+      ctx.fillStyle = col; ctx.fillRect(sx,sy,S,S);
+    };
+    for(let gy=TRADE_RECT.y0; gy<=TRADE_RECT.y1; gy++)
+      for(let gx=TRADE_RECT.x0; gx<=TRADE_RECT.x1; gx++)
+        fillTile(gx,gy,'#13b5a3'); // teal box
+    // glowing header band
+    (function(){
+      const S=api.DRAW, sx=(TRADE_RECT.x0*api.TILE - api.camera.x)*(S/api.TILE), sy=(TRADE_RECT.y0*api.TILE - api.camera.y)*(S/api.TILE);
+      ctx.save(); ctx.shadowColor='rgba(19,181,163,.7)'; ctx.shadowBlur=16; ctx.fillStyle='#0fead4';
+      ctx.fillRect(sx, sy, 3*S, Math.floor(S*0.22)); ctx.restore();
+    })();
+    // Door highlight (blue/green)
+    const t=api.TILE, pgx=((api.player.x+16)/t|0), pgy=((api.player.y+16)/t|0);
+    const nearDoor = Math.abs(pgx-TRADE_DOOR.x)<=1 && Math.abs(pgy-TRADE_DOOR.y)<=1;
+    fillTile(TRADE_DOOR.x, TRADE_DOOR.y, nearDoor ? '#35d27a' : '#5aa0ff');
+
+    // Export so other plugins can use it; add to collisions later
+    window.__IZZA_TRADE__ = { rect: TRADE_RECT, door: TRADE_DOOR };
+
+    // Hook B near door → open modal
+    function _onPressTradeB(e){
+      if (!window.__IZZA_TRADE__ || !IZZA?.api?.ready) return;
+      const t=IZZA.api.TILE, gx=((IZZA.api.player.x+16)/t|0), gy=((IZZA.api.player.y+16)/t|0);
+      const d=window.__IZZA_TRADE__.door;
+      const near = Math.abs(gx-d.x)<=1 && Math.abs(gy-d.y)<=1;
+      if(!near) return;
+      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      const m=document.getElementById('tradeModal'); if(m){ m.style.display='flex'; }
+    }
+    document.getElementById('btnB')?.addEventListener('click', _onPressTradeB, true);
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressTradeB(e); }, true);
+
+    // Add to overlay + collisions
+    IZZA.on('render-post', ()=>{
+      if(!window.__IZZA_TRADE__) return;
+      const cMini=document.getElementById('minimap'); const cBig=document.getElementById('bigmap');
+      [cMini,cBig].forEach(c=>{
+        if(!c) return; const ctx=c.getContext('2d'); const sx=c.width/90, sy=c.height/60;
+        const R=window.__IZZA_TRADE__.rect; ctx.fillStyle='#13b5a3';
+        ctx.fillRect(R.x0*sx, R.y0*sy, (R.x1-R.x0+1)*sx, (R.y1-R.y0+1)*sy);
+      });
+    });
+    IZZA.on('update-post', ()=>{
+      if(!IZZA?.api?.ready || !window.__IZZA_TRADE__) return;
+      const p = IZZA.api.player, t=IZZA.api.TILE, gx=(p.x/t)|0, gy=(p.y/t)|0;
+      const R=window.__IZZA_TRADE__.rect;
+      if(gx>=R.x0 && gx<=R.x1 && gy>=R.y0 && gy<=R.y1){
+        // simple AABB resolve: push up if inside roofline
+        p.y = (R.y0-0.01)*t;
+      }
+    });
+  }catch(e){ console.warn('[TradeCentre] draw failed', e); }
+})();
 
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
