@@ -1,9 +1,10 @@
-// v1_store_items_plugin.js — extend shop stock + restore Bat/Knuckles icons
+// v1_store_items_plugin.js — extend shop stock without touching core openShop()
+// + resilient icon fix for Bat & Brass Knuckles when core falls back to ⭐️
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix';
+  const BUILD = 'v1-store-items+stock-extender+icon-patch';
   console.log('[IZZA PLAY]', BUILD);
 
-  let api = null;
+  let api=null;
 
   // Append an item row to the existing #shopList (keeps the same visual style)
   function addShopRow(list, it){
@@ -11,7 +12,7 @@
     row.className='shop-item';
     row.setAttribute('data-store-ext','1'); // marker so we don’t duplicate on re-open
 
-    // Tiny inline SVG icon set (same visuals as original)
+    // icon: your inline SVGs (unchanged from the working original)
     function svgIcon(id, w=24, h=24){
       if(id==='bat')         return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
       if(id==='knuckles')    return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
@@ -26,7 +27,7 @@
     meta.className='meta';
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
-        <div data-icon-slot="1">${svgIcon(it.id)}</div>
+        <div>${svgIcon(it.id)}</div>
         <div>
           <div class="name">${it.name}</div>
           <div class="sub">${it.price} IC</div>
@@ -42,13 +43,14 @@
       if(coins < it.price){ alert('Not enough coins'); return; }
       api.setCoins(coins - it.price);
 
+      // mutate inventory using your core helpers
       const inv = api.getInventory ? api.getInventory() : {};
       if(it.id==='uzi'){
         const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
         cur.owned = true; cur.ammo = (cur.ammo|0) + 50;
         inv.uzi = cur;
         api.setInventory && api.setInventory(inv);
-        IZZA.emit?.('toast', {text:'Purchased Uzi (+50 ammo)'});
+        IZZA.emit?.('toast', {text:'Purchased Uzi (+50 ammo)'}); // non-blocking
       }else if(it.id==='grenade'){
         const cur = inv.grenade || { count:0 };
         cur.count = (cur.count|0) + 1;
@@ -77,64 +79,83 @@
     list.appendChild(row);
   }
 
-  // Fix icons for core-provided rows (Bat / Brass Knuckles) when core renders ⭐️
+  // --- Robustly replace core's ⭐️ fallback with your SVGs for Bat/Knuckles ---
   function fixCoreItemIcons(){
     const list = document.getElementById('shopList');
     if(!list) return;
 
-    // Any .shop-item without our marker is from core.
+    // Only touch rows rendered by core (no data-store-ext marker)
     const rows = list.querySelectorAll('.shop-item:not([data-store-ext]):not([data-icon-fixed])');
     rows.forEach(row=>{
-      const nameEl = row.querySelector('.meta .name');
-      const iconSlot = row.querySelector('.meta [data-icon-slot]') || row.querySelector('.meta > div:first-child');
-      if(!nameEl || !iconSlot) return;
+      try{
+        const nameEl = row.querySelector('.meta .name');
+        if(!nameEl) return;
+        const label = (nameEl.textContent || '').trim().toLowerCase();
 
-      const label = (nameEl.textContent || '').trim().toLowerCase();
+        // map visible names
+        let svg = '';
+        if(label === 'brass knuckles' || label === 'knuckles'){
+          svg = `<svg viewBox="0 0 64 64" width="24" height="24"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
+        }else if(label === 'bat' || label === 'baseball bat'){
+          svg = `<svg viewBox="0 0 64 64" width="24" height="24"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
+        }else{
+          return; // not one we need to fix
+        }
 
-      // Map visible names to our SVGs
-      let svg = '';
-      if(label === 'brass knuckles' || label === 'knuckles'){
-        svg = `<svg viewBox="0 0 64 64" width="24" height="24"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
-      }else if(label === 'bat' || label === 'baseball bat'){
-        svg = `<svg viewBox="0 0 64 64" width="24" height="24"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
-      }
+        // find the flex container inside .meta (where core put emoji + text)
+        const meta = row.querySelector('.meta');
+        const flex = meta && meta.firstElementChild; // the <div style="display:flex;…">
+        if(!flex) return;
 
-      if(svg){
-        iconSlot.innerHTML = svg;
-        row.setAttribute('data-icon-fixed','1'); // avoid rework on future frames
-      }
+        // If first child looks like an emoji-only node, remove it.
+        // (covers either a text node or an element that only contains short emoji text)
+        const first = flex.firstChild;
+        if(first){
+          if(first.nodeType === 3){ // text node
+            const t = first.textContent.trim();
+            if(t.length <= 3) flex.removeChild(first);
+          }else if(first.nodeType === 1){ // element
+            const txt = first.textContent && first.textContent.trim();
+            if(txt && txt.length <= 3) flex.removeChild(first);
+          }
+        }
+
+        // Insert our icon as the first element
+        const iconWrap = document.createElement('div');
+        iconWrap.innerHTML = svg;
+        flex.insertBefore(iconWrap, flex.firstChild);
+
+        row.setAttribute('data-icon-fixed','1'); // idempotent on future frames
+      }catch(_){}
     });
   }
 
   function patchShopStock(){
-    try{
-      if(!api) return;
+    const modal = document.getElementById('shopModal');
+    if(!modal) return;
 
-      const modal = document.getElementById('shopModal');
-      if(!modal) return;
+    // Only run when open; use computed style too (some cores toggle classes)
+    const open = (modal.style.display === 'flex') ||
+                 (getComputedStyle(modal).display === 'flex');
+    if(!open) return;
 
-      const open = (modal.style.display === 'flex') ||
-                   (getComputedStyle(modal).display === 'flex');
-      if(!open) return;
+    // Always fix core icons for this open
+    fixCoreItemIcons();
 
-      // Always make sure core icons are correct for this open
-      fixCoreItemIcons();
+    const list = document.getElementById('shopList');
+    if(!list || list.querySelector('[data-store-ext]')) return; // already extended this open
 
-      const list = document.getElementById('shopList');
-      if(!list || list.querySelector('[data-store-ext]')) return; // already extended for this open
-
-      const missions = (api.getMissionCount && api.getMissionCount()) || 0;
-      if(missions >= 3){
-        addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',     price:350, sub:'Unlocked at mission 3' });
-        addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (full mag)', price:60 });
-        addShopRow(list, { id:'grenade',      name:'Grenade',                price:120 });
-      }
-    }catch(e){
-      console.warn('[store extender] patch failed:', e);
+    // Gate extra stock by missions (same as your original)
+    const missions = (api.getMissionCount && api.getMissionCount()) || 0;
+    if(missions >= 3){
+      addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',     price:350, sub:'Unlocked at mission 3' });
+      addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (full mag)', price:60 });
+      addShopRow(list, { id:'grenade',      name:'Grenade',                price:120 });
     }
   }
 
   IZZA.on('ready', a=>{ api=a; });
-  // When the shop opens (core sets display='flex'), we detect & append rows and fix icons.
+  // When the shop opens (core sets display='flex'), we detect & append rows.
+  // We also re-run icon fix on every render-post while open (cheap & safe).
   IZZA.on('render-post', patchShopStock);
 })();
