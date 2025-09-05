@@ -27,27 +27,46 @@
   IZZA.on('ready', (api)=>{
     if(!isInTC()) return;
 
-    // Banner (over fire button area)
+    // Banner (exactly over Fire button)
 (function(){
+  const fire = document.getElementById('btnFire');
+  if(!fire) return;
+  const rect = fire.getBoundingClientRect();
+
   const b=document.createElement('div');
   b.id='tcBanner';
   b.textContent='TRADE CENTRE — Safe Zone';
   Object.assign(b.style,{
     position:'fixed',
-    right:'12px',       // same corner as your controls
-    bottom:'14px',
-    zIndex: 99999,      // above buttons
+    left: (rect.left + window.scrollX) + 'px',
+    top: (rect.top + window.scrollY) + 'px',
+    width: rect.width + 'px',
+    height: rect.height + 'px',
+    display:'flex',
+    alignItems:'center',
+    justifyContent:'center',
+    zIndex: 99999,
     background:'linear-gradient(90deg,#0fead4,#13b5a3)',
     color:'#0b0f17',
     fontWeight:'800',
     letterSpacing:'.5px',
     border:'1px solid #10695f',
-    padding:'8px 10px',
-    borderRadius:'10px',
+    borderRadius: fire.style.borderRadius || '50%',
     boxShadow:'0 6px 20px rgba(0,0,0,.45)',
-    pointerEvents:'none' // let clicks pass through if any (A is disabled anyway)
+    pointerEvents:'none' // don’t block clicks (attacks are disabled anyway)
   });
   document.body.appendChild(b);
+
+  // Update on resize/orientation change
+  function reposition(){
+    const r=fire.getBoundingClientRect();
+    b.style.left = (r.left + window.scrollX) + 'px';
+    b.style.top  = (r.top + window.scrollY) + 'px';
+    b.style.width = r.width + 'px';
+    b.style.height= r.height + 'px';
+  }
+  window.addEventListener('resize', reposition);
+  window.addEventListener('orientationchange', reposition);
 })();
 
     // Disable attacks (A button & key)
