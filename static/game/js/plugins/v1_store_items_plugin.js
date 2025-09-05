@@ -34,6 +34,7 @@
     row.className='shop-item';
     row.setAttribute('data-store-ext','1');
 
+    // (UNCHANGED) inline SVGs
     function svgIcon(id, w=24, h=24){
       if(id==='bat')      return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
       if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
@@ -46,19 +47,19 @@
 
     const meta = document.createElement('div');
     meta.className='meta';
+    // NOTE: no inline price line; we use the price pill button to match Bat/Knuckles UI.
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
         <div>${svgIcon(it.id)}</div>
         <div>
           <div class="name">${it.name}</div>
-          <div class="sub">${it.price} IC</div>
           ${it.sub? `<div class="sub" style="opacity:.85">${it.sub}</div>`:''}
         </div>
       </div>`;
 
     const btn = document.createElement('button');
     btn.className='buy';
-    btn.textContent='Buy';
+    btn.textContent = `${it.price} IC`; // price pill, like Bat/Knuckles
     btn.addEventListener('click', ()=>{
       const coins = api.getCoins ? api.getCoins() : (api.player?.coins|0);
       if(coins < it.price){ alert('Not enough coins'); return; }
@@ -98,7 +99,7 @@
     list.appendChild(row);
   }
 
-  // --- Repair icons for core-provided rows if something stripped inline SVGs ---
+  // --- Repair icons for core-provided rows if something stripped inline SVGs (UNCHANGED) ---
   function repairMissingIcons(){
     try{
       const modal = document.getElementById('shopModal');
@@ -115,7 +116,7 @@
         if(!iconHolder || !nameEl) return;
 
         const name = (nameEl.textContent||'').trim().toLowerCase();
-        const isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);   // <-- updated
+        const isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);
         const isKnuckles = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
 
         if(isBat){
@@ -149,17 +150,17 @@
       const list = document.getElementById('shopList');
       if(!list) return;
 
-      // Extend stock (unchanged)
+      // Extend stock (only once per open)
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
-          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',     price:350, sub:'Unlocked at mission 3' });
-          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (full mag)', price:60 });
-          addShopRow(list, { id:'grenade',      name:'Grenade',                price:120 });
+          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',            price:350, sub:'Unlocked at mission 3' });
+          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 round mag)',   price:60  });
+          addShopRow(list, { id:'grenade',      name:'Grenade',                       price:120 });
         }
       }
 
-      // Repair icons for core rows
+      // Repair icons for core rows (bat/knuckles)
       repairMissingIcons();
     }catch(e){
       console.warn('[store extender] patch failed:', e);
