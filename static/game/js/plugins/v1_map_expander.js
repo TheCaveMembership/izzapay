@@ -473,7 +473,7 @@ window._redrawHeartsHud = _redrawHeartsHud;
 
     // Compute bank rect once per page load to keep stable
     const bx0 = (_hospitalDoor.x + 5);
-    aconst by0 = (_hospitalDoor.y - 9);
+    const by0 = (_hospitalDoor.y - 9);
     const bankRect = { x0: bx0, y0: by0, x1: bx0 + 2, y1: by0 + 2 }; // 3x3
     const bankDoor = { x: bx0 + 1, y: by0 - 1 }; // north-middle in front
 
