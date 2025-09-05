@@ -11,9 +11,25 @@
 
   let api = null, player = null, cops = null;
 
+  // --- tiny helper to mirror to user-scoped key ---
+  function canonUser(){
+    try{
+      const p = (window.__IZZA_PROFILE__||{});
+      const plug = (window.izzaUserKey && typeof izzaUserKey?.get==='function') ? izzaUserKey.get() : '';
+      const ls   = localStorage.getItem('izzaUserKey') || '';
+      const u = (p.username || p.user || plug || ls || 'guest').toString().trim().replace(/^@+/,'').toLowerCase().replace(/[^a-z0-9-_]/g,'-');
+      return u || 'guest';
+    }catch{ return 'guest'; }
+  }
+
   // ---------- persistence ----------
   const getMaxHearts = () => Math.max(1, parseInt(localStorage.getItem(LS.maxHearts) || '3', 10));
-  const setCurSegs   = (seg, maxH) => localStorage.setItem(LS.curSegs, String(Math.max(0, Math.min((maxH||getMaxHearts())*3, seg|0))));
+  const setCurSegs   = (seg, maxH) => {
+    const v = String(Math.max(0, Math.min((maxH||getMaxHearts())*3, seg|0)));
+    localStorage.setItem(LS.curSegs, v);                                     // global
+    try{ localStorage.setItem('izzaCurHeartSegments_'+canonUser(), v); }catch{} // user-scoped mirror
+    try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}     // notify persist
+  };
   const getCurSegs   = (maxH) => {
     const def = maxH*3;
     const raw = parseInt(localStorage.getItem(LS.curSegs) || String(def), 10);
@@ -27,14 +43,14 @@
     player.heartSegs = getCurSegs(player.maxHearts);
     if (player.heartSegs <= 0) {
       player.heartSegs = player.maxHearts * 3;
-      setCurSegs(player.heartSegs, player.maxHearts);
+      setCurSegs(player.heartSegs, player.maxHearts); // (emits event + mirrors)
     }
     drawDOMHearts();  // initial draw
     placeHeartsHud(); // and position
   }
   function healFull(){
     player.heartSegs = player.maxHearts * 3;
-    setCurSegs(player.heartSegs, player.maxHearts);
+    setCurSegs(player.heartSegs, player.maxHearts);   // (emits event + mirrors)
     drawDOMHearts();
   }
   function takeDamageSegs(n=1){
@@ -44,7 +60,7 @@
       return;
     }
     player.heartSegs = Math.max(0, player.heartSegs - n);
-    setCurSegs(player.heartSegs, player.maxHearts);
+    setCurSegs(player.heartSegs, player.maxHearts);   // (emits event + mirrors)
     drawDOMHearts();
     if (player.heartSegs <= 0) onDeath();
   }
