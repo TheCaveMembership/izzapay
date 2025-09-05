@@ -1,6 +1,6 @@
 // v1_store_items_plugin.js — extend shop stock + icon repair (bat/knuckles)
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix-2';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-2.1';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -112,10 +112,11 @@
 
       list.querySelectorAll('.shop-item .meta').forEach(meta=>{
         const iconHolder = meta.querySelector(':scope > div:first-child');
-        const nameEl     = meta.querySelector('.name');
-        if(!iconHolder || !nameEl) return;
+        const rightCol   = meta.querySelector(':scope > div:nth-child(2)');
+        let   nameEl     = rightCol ? rightCol.querySelector('.name') : null;
+        if(!iconHolder || !rightCol) return;
 
-        const currentName = (nameEl.textContent||'').trim();
+        const currentName = (nameEl && nameEl.textContent || '').trim();
         let name = currentName.toLowerCase();
         let isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);
         let isKnuckles = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
@@ -127,18 +128,30 @@
           else if(html.includes('#cfcfcf') && html.includes('<circle')) isKnuckles = true;  // knuckles look
         }
 
+        // helper: ensure there is a .name node with text
+        function ensureName(text){
+          if(!nameEl){
+            nameEl = document.createElement('div');
+            nameEl.className = 'name';
+            rightCol.insertBefore(nameEl, rightCol.firstChild);
+          }
+          if(!nameEl.textContent.trim()){
+            nameEl.textContent = text;
+          }
+        }
+
         if(isBat){
           const html = (iconHolder.innerHTML||'').trim();
           if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgBat());
           }
-          if(!currentName) nameEl.textContent = 'Baseball Bat';
+          ensureName('Baseball Bat');
         }else if(isKnuckles){
           const html = (iconHolder.innerHTML||'').trim();
           if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgKnuckles());
           }
-          if(!currentName) nameEl.textContent = 'Brass Knuckles';
+          ensureName('Brass Knuckles');
         }
       });
     }catch(e){
@@ -164,7 +177,6 @@
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
-          // NOTE: removed the "Unlocked at mission 3" subtitle for Uzi (per request)
           addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',       price:350 });
           addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 rounds)', price:60  });
           addShopRow(list, { id:'grenade',      name:'Grenade',                 price:120 });
