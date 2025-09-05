@@ -233,26 +233,27 @@
   <script src="/static/game/js/plugins/v7_mission2_delivery.js"></script>
   <script src="/static/game/js/plugins/v8_mission3_car_theft.js?v=8.0"></script>
 
-  <!-- ONE-TIME: clear legacy pinned layout before the map expander boots, with forced reload -->
-  <script>
-  (function(){
-    try{
-      var FLAG = '__izzaLayoutReset_v3';
-      if (!localStorage.getItem(FLAG)) {
-        var cur = localStorage.getItem('izzaMapLayoutBuild');
-        if (cur === 'clip_safe_v2') {
-          localStorage.removeItem('izzaMapLayoutBuild');
-          console.log('[IZZA] one-time layout reset: removed legacy clip_safe_v2');
-        }
-        // also clear any old auto-reload marker
-        sessionStorage.removeItem('__izzaTier2Applied');
-        localStorage.setItem(FLAG, '1');
-        // force a clean reload right now so new map expander boots immediately
-        location.reload();
-      }
-    }catch(e){ console.warn('[IZZA] layout reset skipped', e); }
-  })();
-  </script>
+  <!-- ALWAYS: refresh once per visit so new map expander loads -->
+<script>
+(function(){
+  try{
+    // If an old layout was pinned by earlier code, unpin it every time.
+    if (localStorage.getItem('izzaMapLayoutBuild') === 'clip_safe_v2') {
+      localStorage.removeItem('izzaMapLayoutBuild');
+      console.log('[IZZA] cleared legacy izzaMapLayoutBuild=clip_safe_v2');
+    }
+
+    // Force exactly one reload per tab load to ensure fresh map state.
+    var FLAG = '__izzaRefreshThisVisit';
+    if (!sessionStorage.getItem(FLAG)) {
+      sessionStorage.setItem(FLAG, '1');  // prevents a reload loop
+      location.reload();
+    }
+  } catch(e) {
+    console.warn('[IZZA] refresh-once script error', e);
+  }
+})();
+</script>
 
   <script src="/static/game/js/plugins/v1_map_expander.js"></script>
 
