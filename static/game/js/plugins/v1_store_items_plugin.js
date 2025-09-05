@@ -165,9 +165,9 @@
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
           // NOTE: removed the "Unlocked at mission 3" subtitle for Uzi (per request)
-          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',       price:350 });
-          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 rounds)', price:60  });
-          addShopRow(list, { id:'grenade',      name:'Grenade',                 price:120 });
+          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',       price:350, sub:'Compact SMG. +50 ammo.' });
+          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 rounds)', price:60,  sub:'Magazine refuel for pistol.' });
+          addShopRow(list, { id:'grenade',      name:'Grenade',                 price:120, sub:'Area blast. One-time use.' });
         }
       }
 
