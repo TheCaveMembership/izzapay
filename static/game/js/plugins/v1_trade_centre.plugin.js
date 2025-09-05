@@ -27,61 +27,50 @@
   IZZA.on('ready', (api)=>{
     if(!isInTC()) return;
 
+    // ===== Banner (adjusted as requested) =====
     (function(){
-  function showTradeBanner(){
-    const fire = document.getElementById('btnFire');
-    if (fire) fire.style.display = 'none'; // hide fire button completely
+      function showTradeBanner(){
+        const fire = document.getElementById('btnFire');
+        if (fire) fire.style.display = 'none'; // hide fire button completely
 
-    let b = document.getElementById('tcBanner');
-    if (!b) {
-      b = document.createElement('div');
-      b.id = 'tcBanner';
-      b.textContent = 'TRADE CENTRE — Safe Zone';
-      Object.assign(b.style,{
-        position:'fixed',
-        left:'50%',
-        bottom:'64px', // roughly where the Fire button sat
-        transform:'translateX(-50%)',
-        padding:'12px 20px',
-        background:'linear-gradient(90deg,#0fead4,#13b5a3)',
-        color:'#0b0f17',
-        fontWeight:'800',
-        letterSpacing:'.5px',
-        border:'1px solid #10695f',
-        borderRadius:'14px',
-        boxShadow:'0 6px 20px rgba(0,0,0,.45)',
-        zIndex:9999,
-        fontSize:'15px'
-      });
-      document.body.appendChild(b);
-    }
-    b.style.display = 'flex';
-  }
+        let b = document.getElementById('tcBanner');
+        if (!b) {
+          b = document.createElement('div');
+          b.id = 'tcBanner';
+          b.textContent = 'TRADE CENTRE — Safe Zone';
+          Object.assign(b.style,{
+            position:'fixed',
+            left:'50%',
+            bottom:'64px', // roughly where the Fire button sat
+            transform:'translateX(-50%)',
+            padding:'12px 20px',
+            background:'linear-gradient(90deg,#0fead4,#13b5a3)',
+            color:'#0b0f17',
+            fontWeight:'800',
+            letterSpacing:'.5px',
+            border:'1px solid #10695f',
+            borderRadius:'14px',
+            boxShadow:'0 6px 20px rgba(0,0,0,.45)',
+            zIndex:9999,
+            fontSize:'15px'
+          });
+          document.body.appendChild(b);
+        }
+        b.style.display = 'flex';
+      }
 
-  function hideTradeBanner(){
-    const fire = document.getElementById('btnFire');
-    if (fire) fire.style.display = ''; // restore default
+      function hideTradeBanner(){
+        const fire = document.getElementById('btnFire');
+        if (fire) fire.style.display = ''; // restore default
 
-    const b = document.getElementById('tcBanner');
-    if (b) b.style.display = 'none';
-  }
+        const b = document.getElementById('tcBanner');
+        if (b) b.style.display = 'none';
+      }
 
-  // Example wiring: show when entering trade centre, hide when leaving
-  window.addEventListener('izza-tradecentre-enter', showTradeBanner);
-  window.addEventListener('izza-tradecentre-leave', hideTradeBanner);
-})();
-
-  // Update on resize/orientation change
-  function reposition(){
-    const r=fire.getBoundingClientRect();
-    b.style.left = (r.left + window.scrollX) + 'px';
-    b.style.top  = (r.top + window.scrollY) + 'px';
-    b.style.width = r.width + 'px';
-    b.style.height= r.height + 'px';
-  }
-  window.addEventListener('resize', reposition);
-  window.addEventListener('orientationchange', reposition);
-})();
+      // Example wiring: show when entering trade centre, hide when leaving
+      window.addEventListener('izza-tradecentre-enter', showTradeBanner);
+      window.addEventListener('izza-tradecentre-leave', hideTradeBanner);
+    })();
 
     // Disable attacks (A button & key)
     const stop = e=>{ e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.(); };
