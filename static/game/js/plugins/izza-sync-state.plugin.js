@@ -1,6 +1,7 @@
-// /static/game/js/plugins/izza-sync-state.plugin.js
+<!-- /static/game/js/plugins/izza-sync-state.plugin.js -->
+<script>
 (function(){
-  const API_ORIGIN = 'https://izzagame.onrender.com';    // <- your persist service base
+  const API_ORIGIN = 'https://izzagame.onrender.com';    // persist service base
   const SNAP_PATH  = user => `${API_ORIGIN}/api/state/${encodeUser(user)}`;
 
   // ---------- utils ----------
@@ -13,21 +14,21 @@
   function setLS(k, v){ localStorage.setItem(k, v); }
   function setLSJSON(k, o){ setLS(k, JSON.stringify(o)); }
 
-  // Guards so we never write an "empty" snapshot that wipes progress
+  // Never save/restore meaningless snapshots
   function isMeaningfulSnapshot(s){
     if(!s || typeof s!=='object') return false;
-    const invNonEmpty = s.inventory && Object.keys(s.inventory).length>0;
+    const invNonEmpty  = s.inventory && Object.keys(s.inventory).length>0;
     const bankNonEmpty = s.bank && (
       (s.bank.coins|0) > 0 ||
       (s.bank.items && Object.keys(s.bank.items).length>0) ||
       (s.bank.ammo  && Object.keys(s.bank.ammo).length>0)
     );
-    const coins = (s.coins|0) > 0;
-    const heartsKnown = s.player && (s.player.heartsSegs!=null);
-    return invNonEmpty || bankNonEmpty || coins || heartsKnown;
+    const walletCoins  = (s.coins|0) > 0;                 // <- wallet only
+    const heartsKnown  = s.player && (s.player.heartsSegs!=null);
+    return invNonEmpty || bankNonEmpty || walletCoins || heartsKnown;
   }
 
-  // Resolve current user like diagnostics/userkey does
+  // Resolve current user (same canon as diagnostics)
   function resolveUser(){
     const p = (window.__IZZA_PROFILE__) || {};
     const fromPlugin = (window.izzaUserKey && typeof izzaUserKey.get==='function') ? izzaUserKey.get() : null;
@@ -35,25 +36,28 @@
     return encodeUser(p.username || p.user || fromPlugin || fromLS || 'guest');
   }
 
-  // Compose a snapshot from current game + localStorage
+  // ---------- Build snapshot (wallet + bank kept separate; NO total) ----------
   function buildSnapshot(USER){
     const LS_BANK_KEY   = `izzaBank_${USER}`;
     const LS_HEARTS_KEY = `izzaCurHeartSegments_${USER}`;
 
-    // Bank blob produced by your bank plugin (coins/items/ammo)
+    // Bank blob produced by the bank UI/plugin (coins/items/ammo)
     const bank = getLSJSON(LS_BANK_KEY, { coins:0, items:{}, ammo:{} });
 
-    // Coins mirror some cores expect
-    const coinsMirror = (() => {
+    // WALLET: strictly read wallet coins (never fall back to bank)
+    const walletCoins = (()=>{
+      // Prefer core API if available to also update HUD in one place elsewhere
+      if (window.IZZA?.api?.getCoins) {
+        try { return (window.IZZA.api.getCoins()|0); } catch {}
+      }
       const direct = parseInt(getLS('izzaCoins'), 10);
-      if(Number.isFinite(direct) && direct>=0) return direct|0;
-      return bank.coins|0;
+      return Number.isFinite(direct) && direct>=0 ? (direct|0) : 0;
     })();
 
-    // Inventory shape (object map is fine; some older cores like an array/list, but we keep full map here)
+    // Inventory map
     const inventory = getLSJSON('izzaInventory', {});
 
-    // Player + hearts from core v3 + LS
+    // Player + hearts (optional)
     const api = (window.IZZA && window.IZZA.api) || {};
     const player = api.player || { x:0, y:0 };
     const heartsSegs = (function(){
@@ -69,7 +73,7 @@
     return {
       version: 1,
       player: { x: player.x|0, y: player.y|0, heartsSegs },
-      coins: coinsMirror|0,
+      coins: walletCoins|0,         // <- WALLET ONLY
       inventory,
       bank,
       timestamp: now()
@@ -84,14 +88,12 @@
     }
     const url  = SNAP_PATH(USER);
     const body = JSON.stringify(snapshot);
-    // Try sendBeacon first (works well on Pi Browser/iOS)
     try{
       if(navigator.sendBeacon && navigator.sendBeacon(url, body)){
         console.log('[sync-state] beacon ok');
         return;
       }
     }catch(e){}
-    // Fallback to fetch
     fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body })
       .then(()=>console.log('[sync-state] fetch ok'))
       .catch(err=>console.warn('[sync-state] save failed', err));
@@ -110,7 +112,7 @@
     }
   }
 
-  // Apply a server snapshot back into the game’s LS & notifiers (bank+inventory+coins only)
+  // ---------- Apply snapshot (wallet from coins; bank from bank; no cross-talk) ----------
   function applySnapshot(USER, snap){
     if(!isMeaningfulSnapshot(snap)) {
       console.log('[sync-state] server snapshot not meaningful, ignoring', snap);
@@ -120,42 +122,48 @@
     const LS_BANK_KEY   = `izzaBank_${USER}`;
     const LS_HEARTS_KEY = `izzaCurHeartSegments_${USER}`;
 
-    // Bank
+    // WALLET: set from snap.coins ONLY
+    const wallet = snap.coins|0;
+    try{
+      if (window.IZZA?.api?.setCoins) {
+        window.IZZA.api.setCoins(wallet);
+      } else {
+        setLS('izzaCoins', String(wallet));
+        try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+      }
+    }catch{
+      setLS('izzaCoins', String(wallet));
+      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+    }
+
+    // BANK: set from snap.bank ONLY (never mirror to wallet)
     if(snap.bank && typeof snap.bank==='object'){
       setLSJSON(LS_BANK_KEY, {
         coins: snap.bank.coins|0,
         items: snap.bank.items || {},
         ammo:  snap.bank.ammo  || {}
       });
-      // Mirror coin pill keys various cores read
-      setLS('izzaCoins', String((snap.bank.coins|0)));
+      try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
     }
 
-    // Coins mirror (top-level coins) if it’s higher than bank coins (keep the best)
-    if((snap.coins|0) > (parseInt(getLS('izzaCoins')||'0',10)|0)){
-      setLS('izzaCoins', String(snap.coins|0));
-    }
-
-    // Inventory map
+    // Inventory
     if(snap.inventory && typeof snap.inventory==='object'){
       setLSJSON('izzaInventory', snap.inventory);
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
     }
 
     // Hearts (optional)
     if(snap.player && snap.player.heartsSegs!=null){
       setLS(LS_HEARTS_KEY, String(snap.player.heartsSegs|0));
-      // let any HUD know to redraw if they exposed the hook
       if(typeof window._redrawHeartsHud === 'function'){
         try{ window._redrawHeartsHud(); }catch{}
       }
     }
 
-    // Notify any listeners (cores/plugins) that bank/inv changed
-    try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
     return true;
   }
 
-  // Debounced saver: collect quick changes and save at most every N ms
+  // Debounced saver
   function makeDebouncedSaver(USER, intervalMs){
     let timer=null, lastQueued=null;
     return function queue(){
@@ -174,7 +182,7 @@
     // wait for LS/userkey plugin if present
     try{ if (window.izzaLS && typeof izzaLS.ready === 'function') await izzaLS.ready(); }catch{}
 
-    // wait for core v3 (or v2) to expose IZZA.api
+    // wait for core to expose IZZA.api
     let tries=0;
     while(!(window.IZZA && window.IZZA.api && window.IZZA.api.ready) && tries<200){
       await sleep(25); tries++;
@@ -184,30 +192,26 @@
     console.log('[sync-state] user=', USER);
 
     // ---------- LATE RESTORE ----------
-    // Give time for map expansion / tier refresh / initial core reflows
-    // You said “even later”—so we use a generous staged wait.
-    await sleep(1200);       // first settle
-    await sleep(1500);       // extra settle (total ~2.7s after ready)
+    await sleep(1200);  // settle after ready
+    await sleep(1500);  // extra settle
 
-    // Pull the server snapshot and apply iff meaningful (never apply an empty one)
     const serverSnap = await fetchSnapshot(USER);
     if(serverSnap) applySnapshot(USER, serverSnap);
 
     // ---------- LIVE SAVE ----------
     const saveSoon = makeDebouncedSaver(USER, 1200);
 
-    // Save when bank or inventory changes
+    // Save when bank / inventory / coins change
     window.addEventListener('izza-bank-changed', saveSoon);
+    window.addEventListener('izza-inventory-changed', saveSoon);
+    window.addEventListener('izza-coins-changed', saveSoon);
 
-    // Also opportunistically save every few seconds during gameplay
+    // Also opportunistically save during gameplay
     if(window.IZZA && IZZA.on){
-      IZZA.on('update-post', ()=>{
-        // throttle via debounce
-        saveSoon();
-      });
+      IZZA.on('update-post', ()=>{ saveSoon(); });
     }
 
-    // Save when page is hidden / unloaded
+    // Save on hide/unload
     document.addEventListener('visibilitychange', ()=>{
       if(document.visibilityState==='hidden'){
         const snap = buildSnapshot(USER);
@@ -219,8 +223,9 @@
       pushSnapshot(USER, snap);
     });
 
-    // Initial save (only if meaningful), in case you started with a populated LS but no file yet
+    // Initial save if LS already has content
     const initial = buildSnapshot(USER);
     if(isMeaningfulSnapshot(initial)) pushSnapshot(USER, initial);
   })();
 })();
+</script>
