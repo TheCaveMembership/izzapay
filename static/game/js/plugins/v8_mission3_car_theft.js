@@ -371,30 +371,7 @@
     api=a;
     ensureVehicleSheets(); // fire & forget
 
-    // ===== TEST MODE: force Mission 3 complete & Tier 2 unlocked =====
-    try {
-      localStorage.setItem(M2_KEY, 'done');            // ensure M2 done as well
-      localStorage.setItem(M3_KEY, 'done');            // mark Mission 3 complete
-      localStorage.setItem(MAP_TIER_KEY, '2');         // unlock Tier 2
-      localStorage.setItem('izzaMissions', '3');       // mission count gate
-      localStorage.setItem('izzaMapLayoutBuild', 'clip_safe_v2'); // match tier 2 layout
-      m3.state = 'done';                                // reflect in-memory state immediately
-      console.log('[M3] TEST MODE: forced mission complete + tier 2 unlocked');
-
-      // Ensure the expanded map actually loads (one-time soft reload)
-      // Prevent loops via a session marker.
-      if (!window.__IZZA_SUPPRESS_TIER2_RELOAD) {
-        const k='__izzaTier2Applied';
-        if (!sessionStorage.getItem(k)) {
-          sessionStorage.setItem(k,'1');
-          setTimeout(()=>{ location.reload(); }, 60);
-        }
-      }
-    } catch(e) {
-      console.warn('[M3] test mode flagging failed', e);
-    }
-    // ===== /TEST MODE =====
-
+    
     loadPos();
 
     // capture-phase so B works even with inventory/map open
