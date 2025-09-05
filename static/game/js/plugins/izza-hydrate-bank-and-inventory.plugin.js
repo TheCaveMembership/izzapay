@@ -4,12 +4,11 @@
    - Uses a single absolute API base (same as saver)
    - Prefills HUD from last-good to avoid "0" flash
    - Never applies an empty snapshot
+   - ✅ Writes BOTH hearts keys (global + user-scoped)
 */
 (function(){
-  // Claim money ownership so other hydrators don't touch coins/bank
   window.__IZZA_MONEY_OWNER__ = 'bank-plugin';
 
-  // ---------- API base (canonical) ----------
   const API_BASE = (function(){
     const b = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
     if (b) return b + '/api';
@@ -17,7 +16,6 @@
   })();
   const SNAP = user => `${API_BASE}/state/${encodeURIComponent(user)}`;
 
-  // ---------- small overlay ----------
   const overlay = document.createElement('div');
   Object.assign(overlay.style,{
     position:'fixed', inset:'0', background:'rgba(5,8,14,.90)',
@@ -30,14 +28,12 @@
     Loading your items & bank…</div>`;
   document.addEventListener('DOMContentLoaded', ()=> document.body.appendChild(overlay));
 
-  // ---------- utils ----------
   const clamp0 = n => Math.max(0, (n|0));
   const sleep  = ms => new Promise(r=>setTimeout(r,ms));
   const getLS  = (k,d=null)=>{ const v=localStorage.getItem(k); return v==null?d:v; };
   const setLS  = (k,v)=> localStorage.setItem(k,v);
   const getJSON= (k,d=null)=>{ try{ const v=getLS(k,null); return v==null? d : JSON.parse(v); }catch{ return d; } };
   const setJSON= (k,o)=> setLS(k, JSON.stringify(o));
-
   const CANON = s => (s==null?'guest':String(s)).replace(/^@+/,'').toLowerCase().replace(/[^a-z0-9-_]/g,'-');
 
   function resolveUserImmediate(){
@@ -87,7 +83,6 @@
     return null;
   }
 
-  // ---------- money writers ----------
   function writeBankMirror(u, bank){
     const clean = bank && typeof bank==='object'
       ? { coins: clamp0(bank.coins), items: bank.items||{}, ammo: bank.ammo||{} }
@@ -110,7 +105,7 @@
     return v;
   }
 
-  // ---------- preseed from last-good (prevents 0 HUD flash) ----------
+  // ---------- preseed from last-good (also write BOTH hearts keys) ----------
   (function preseed(){
     const u = resolveUserImmediate();
     if (!u) return;
@@ -120,55 +115,51 @@
     const wallet = clamp0((lg.coins|0) - bankC);
     writeBankMirror(u, lg.bank || {coins:0,items:{},ammo:{}});
     writeWallet(wallet);
+
+    if (typeof lg.player?.heartsSegs === 'number'){
+      const segs = clamp0(lg.player.heartsSegs);
+      setLS(`izzaCurHeartSegments_${u}`, String(segs)); // user-scoped
+      setLS(`izzaCurHeartSegments`, String(segs));      // global key (what hearts plugin reads)
+      try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch(_){}
+    }
+
     setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   })();
 
-  // ---------- apply snapshot ----------
   function applySnapshot(snap, u){
     const bankC  = clamp0(snap.bank?.coins|0);
     const wallet = clamp0((snap.coins|0) - bankC);
-
     writeBankMirror(u, snap.bank || {coins:0,items:{},ammo:{}});
     writeWallet(wallet);
-
-    // Inventory
     setJSON('izzaInventory', snap.inventory || {});
     try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
 
-    // Hearts — write BOTH keys so v4_hearts.js (global key) sees it on boot
     if (typeof snap.player?.heartsSegs === 'number'){
       const segs = clamp0(snap.player.heartsSegs);
-      // namespaced (for future multi-user safety)
-      setLS(`izzaCurHeartSegments_${u}`, String(segs));
-      // global (what v4_hearts.js actually reads)
-      setLS('izzaCurHeartSegments', String(segs));
-      // optional HUD refresh hook
+      setLS(`izzaCurHeartSegments_${u}`, String(segs)); // user-scoped
+      setLS(`izzaCurHeartSegments`, String(segs));      // global
+      try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch(_){}
       if (typeof window._redrawHeartsHud==='function'){ try{ window._redrawHeartsHud(); }catch{} }
     }
 
-    // cache last-good & boot total
     setJSON(`izzaBankLastGood_${u}`, snap);
     setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   }
 
-  // ---------- boot ----------
   async function hydrateAfterCores(){
     overlay.style.display='flex';
 
-    // wait core ready (or 1s)
     const ready = new Promise(async (resolve)=>{
       if (window.IZZA?.api?.ready) return resolve();
       try{ (window.IZZA = window.IZZA||{}).on?.('ready', resolve); }catch{}
       await sleep(1000); resolve();
     });
     await ready;
-    await sleep(250); // map/tier settle
+    await sleep(250);
 
-    // wait for REAL username (not guest)
     const user = await waitForRealUser(12000);
     const u = CANON(user);
 
-    // fetch server snapshot
     let snap = await fetchSnapshotAuthoritative(u);
     if (!snap){
       const lg = getJSON(`izzaBankLastGood_${u}`, null);
