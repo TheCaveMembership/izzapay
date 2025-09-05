@@ -38,7 +38,7 @@
 
   function isEmptySnapshot(s){
     if(!s || typeof s!=='object') return true;
-    if (s.version !== 1) return false; // unknown versions treated as non-empty (be conservative)
+    if (s.version !== 1) return false;
     const coinsTop = (s.coins|0)||0; // wallet
     const invEmpty = !s.inventory || Object.keys(s.inventory).length===0;
     const bank = s.bank||{};
@@ -86,7 +86,7 @@
   function deriveMoneyFields(snap){
     let total = (snap && (snap.coins|0)) || 0; // wallet in your schema
     let bank  = (snap && snap.bank && (snap.bank.coins|0)) || 0;
-    if (bank > total) { bank = total; }                 // clamp impossible states
+    if (bank > total) { bank = total; }
     const onHand = Math.max(0, total - bank);
     return { onHand, bank, total };
   }
@@ -95,7 +95,7 @@
     // Always cache last-good
     setLSJSON(`izzaBankLastGood_${USER}`, snap);
 
-    // Skip MONEY if owned by bank-plugin
+    // MONEY: skip if bank plugin owns it
     if (window.__IZZA_MONEY_OWNER__ !== 'bank-plugin'){
       const money = deriveMoneyFields(snap);
       setLSJSON(`izzaBank_${USER}`, {
@@ -111,19 +111,21 @@
       } catch {}
     }
 
-    // Legacy mirrors for older cores / UIs
+    // Legacy mirrors
     const invList = Object.keys(snap.inventory || {});
     const missions = (snap.missions|0) || (snap.missionsCompleted|0) || (parseInt(getLS('izzaMissions')||'0',10)||0);
     setLSJSON('izza_save_v1', {
-      coins: parseInt(getLS('izzaCoins')||'0',10) || 0, // whatever wallet ended up being
+      coins: parseInt(getLS('izzaCoins')||'0',10) || 0,
       missionsCompleted: missions,
       inventory: invList
     });
     setLS('izzaMissions', String(missions));
 
-    // Hearts
+    // Hearts — write BOTH keys so v4_hearts.js (global key) sees it
     if (snap.player && typeof snap.player.heartsSegs === 'number'){
-      setLS(`izzaCurHeartSegments_${USER}`, String(snap.player.heartsSegs|0));
+      const segs = Math.max(0, snap.player.heartsSegs|0);
+      setLS(`izzaCurHeartSegments_${USER}`, String(segs)); // namespaced
+      setLS('izzaCurHeartSegments', String(segs));         // global for v4_hearts.js
       if (typeof window._redrawHeartsHud === 'function') {
         try { window._redrawHeartsHud(); } catch {}
       }
@@ -147,7 +149,6 @@
   async function hydrateAfterGameSettles(){
     addOverlay();
 
-    // 1) Wait for cores to say ready (or 1s fallback)
     let readySeen = false;
     const waitReady = new Promise(async (resolve)=>{
       if (window.IZZA?.api?.ready) { readySeen = true; return resolve(); }
@@ -158,7 +159,6 @@
     });
     await waitReady;
 
-    // 2) Let map / frames settle
     let gotTick = false;
     const onTick = ()=>{ gotTick = true; };
     try { (window.IZZA = window.IZZA || {}).on?.('update-post', onTick); } catch {}
@@ -166,10 +166,8 @@
     await sleep(350);
     if (!gotTick) await waitFrames(6);
 
-    // 3) Wait for a real username
     const USER = await waitForRealUser(12000);
 
-    // 4) Fetch server snapshot with LastGood preference
     let snap = await fetchSnapshot(USER);
     if (!snap) {
       const localLG = getLSJSON(`izzaBankLastGood_${USER}`, null);
@@ -182,17 +180,15 @@
       return;
     }
 
-    // 5) Apply (money skipped if bank-plugin owns it)
     applySnapshot(snap, USER);
 
     await waitFrames(2);
     removeOverlay();
   }
 
-  // Kick after DOM ready so overlay can mount cleanly
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', hydrateAfterGameSettles, { once:true });
   } else {
     hydrateAfterGameSettles();
   }
-})()
+})();
