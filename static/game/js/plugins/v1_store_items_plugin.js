@@ -1,12 +1,9 @@
 // v1_store_items_plugin.js — extend shop stock + icon repair (bat/knuckles)
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-2';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
-
-  // Utility: safe DOM query
-  const $ = sel => document.querySelector(sel);
 
   // --- tiny helpers to produce data-URL images for SVGs (avoids inline-SVG stripping) ---
   function svgToDataURL(svg){
@@ -35,9 +32,8 @@
   function addShopRow(list, it){
     const row = document.createElement('div');
     row.className='shop-item';
-    row.setAttribute('data-store-ext','1'); // marker so we don’t duplicate on re-open
+    row.setAttribute('data-store-ext','1');
 
-    // icon shim (uses inline <svg> by default; OK for our own rows)
     function svgIcon(id, w=24, h=24){
       if(id==='bat')      return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
       if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
@@ -89,7 +85,6 @@
         IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'});
       }
 
-      // live-refresh inventory panel if it’s open
       try{
         const host = document.getElementById('invPanel');
         if(host && host.style.display!=='none' && typeof window.renderInventoryPanel==='function'){
@@ -120,14 +115,17 @@
         if(!iconHolder || !nameEl) return;
 
         const name = (nameEl.textContent||'').trim().toLowerCase();
-        if(name.includes('baseball bat')){
+        const isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);   // <-- updated
+        const isKnuckles = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
+
+        if(isBat){
           const html = (iconHolder.innerHTML||'').trim();
-          if(!html || html.includes('⭐') || !html.includes('<svg') && !html.includes('<img')){
+          if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgBat());
           }
-        }else if(name.includes('brass knuckles')){
+        }else if(isKnuckles){
           const html = (iconHolder.innerHTML||'').trim();
-          if(!html || html.includes('⭐') || !html.includes('<svg') && !html.includes('<img')){
+          if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgKnuckles());
           }
         }
@@ -139,12 +137,11 @@
 
   function patchShopStock(){
     try{
-      if(!api) return; // guard until ready
+      if(!api) return;
 
       const modal = document.getElementById('shopModal');
       if(!modal) return;
 
-      // Is the modal actually open?
       const open = (modal.style.display === 'flex') ||
                    (getComputedStyle(modal).display === 'flex');
       if(!open) return;
@@ -152,7 +149,7 @@
       const list = document.getElementById('shopList');
       if(!list) return;
 
-      // 1) Extend stock (unchanged)
+      // Extend stock (unchanged)
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
@@ -162,10 +159,9 @@
         }
       }
 
-      // 2) Repair missing icons for core rows (Bat/Knuckles) if needed
+      // Repair icons for core rows
       repairMissingIcons();
     }catch(e){
-      // Never let a UI error stall input
       console.warn('[store extender] patch failed:', e);
     }
   }
