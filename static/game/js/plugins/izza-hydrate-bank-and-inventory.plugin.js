@@ -1,4 +1,3 @@
-<script>
 /* IZZA hydrate — Bank & Inventory restore (wallet+bank kept separate)
    Cold-relaunch fix:
    - Waits for a real username (not "guest") before hitting the server
@@ -179,4 +178,3 @@
     hydrateAfterCores();
   }
 })();
-</script>
