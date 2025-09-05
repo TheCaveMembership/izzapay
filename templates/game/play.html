@@ -201,7 +201,7 @@
         var el = document.getElementById('coinPill');
         if(!el) return;
         var v = parseInt(localStorage.getItem('izzaCoins') || '0', 10) || 0;
-        el.textContent = 'Wallet: ' + v + ' IC';
+        el.textContent = 'Coins: ' + v + ' IC';
       }catch(_){}
     }
     if (document.readyState === 'loading') {
@@ -294,50 +294,5 @@
   <!-- Auth Debug Dock (unchanged) -->
   <div id="authDock">…</div>
   <script>…</script>
-
-  <!-- ===== TEMP: one-tap mission reset (remove after testing) ===== -->
-  <style>
-    #izzaDevResetBtn{
-      position:fixed; right:12px; bottom:58px; z-index:99998;
-      background:#2b3550; color:#cfe0ff; border:1px solid #3b4a6d;
-      border-radius:10px; padding:6px 10px; font-size:12px; opacity:.9;
-    }
-    #izzaDevResetBtn:active{ opacity:.8; }
-  </style>
-  <button id="izzaDevResetBtn" type="button" title="Reset missions (dev)">Reset</button>
-  <script>
-  (function(){
-    const btn = document.getElementById('izzaDevResetBtn');
-    if(!btn) return;
-
-    btn.addEventListener('click', function(){
-      if(!confirm('Reset missions & map to fresh tutorial state?')) return;
-
-      // Mission flags
-      localStorage.removeItem('izzaMission1');
-      localStorage.removeItem('izzaMission2');
-      localStorage.removeItem('izzaMission3');
-      localStorage.setItem('izzaMissions','0');
-
-      // Mission 3 helper position (optional, avoids any stale start square)
-      localStorage.removeItem('izzaMission3Pos');
-      localStorage.removeItem('izzaMission3PosVer');
-
-      // Map back to Tier 1
-      localStorage.setItem('izzaMapTier','1');
-      localStorage.removeItem('izzaMapLayoutBuild');
-
-      // Prevent any one-time tier2 auto-reload markers
-      sessionStorage.removeItem('__izzaTier2Applied');
-
-      // Optional: let the UI know (coin pill, etc. won’t be touched though)
-      try { window.dispatchEvent(new Event('izza-bank-changed')); }catch(_){}
-
-      alert('Reset complete. Reloading…');
-      location.reload();
-    }, {passive:true});
-  })();
-  </script>
-  <!-- ===== /TEMP ===== -->
 </body>
 </html>
