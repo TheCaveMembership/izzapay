@@ -232,6 +232,24 @@
   <script src="/static/game/js/plugins/v6_ui_exclusive.js?v=1"></script>
   <script src="/static/game/js/plugins/v7_mission2_delivery.js"></script>
   <script src="/static/game/js/plugins/v8_mission3_car_theft.js?v=8.0"></script>
+  <!-- ONE-TIME: clear legacy pinned layout before the map expander boots -->
+<script>
+(function(){
+  try{
+    var FLAG = '__izzaLayoutReset_v3';
+    if (!sessionStorage.getItem(FLAG)) {
+      var cur = localStorage.getItem('izzaMapLayoutBuild');
+      if (cur === 'clip_safe_v2') {
+        localStorage.removeItem('izzaMapLayoutBuild');
+        console.log('[IZZA] one-time layout reset: removed legacy clip_safe_v2');
+      }
+      // Also clear the old auto-reload marker so we don't get stuck in refresh quirks
+      sessionStorage.removeItem('__izzaTier2Applied');
+      sessionStorage.setItem(FLAG, '1');
+    }
+  }catch(e){ console.warn('[IZZA] layout reset skipped', e); }
+})();
+</script>
   <script src="/static/game/js/plugins/v1_map_expander.js"></script>
 
   <!-- Hydrate plugins run AFTER map expander -->
