@@ -107,6 +107,37 @@
       <div class="row"><button class="ghost" id="shopClose" type="button">Close</button></div>
     </div>
   </div>
+  <script>
+(function(){
+  const modal = document.getElementById('shopModal');
+  if (!modal) return;
+
+  function closeShop(){
+    modal.style.display = 'none';
+    try { window.IZZA && IZZA.emit && IZZA.emit('shop-closed'); } catch {}
+  }
+
+  // Backdrop failsafe (keep — yours already works)
+  const backdrop = modal.querySelector('.backdrop');
+  backdrop && backdrop.addEventListener('click', closeShop, { passive:true });
+
+  // NEW: Delegated click for the Close button (robust vs timing/re-renders)
+  document.addEventListener('click', function(ev){
+    const btn = ev.target && ev.target.closest('#shopClose');
+    if (!btn) return;
+    if (modal.style.display === 'none') return;
+    // beat any other handlers
+    ev.stopPropagation();
+    ev.preventDefault();
+    closeShop();
+  }, true); // capture phase so nothing can swallow it first
+
+  // Optional ESC key
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && modal.style.display !== 'none') closeShop();
+  }, { passive:true });
+})();
+</script>
 
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
