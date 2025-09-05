@@ -133,9 +133,12 @@
     setJSON('izzaInventory', snap.inventory || {});
     try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
     if (typeof snap.player?.heartsSegs === 'number'){
-      setLS(`izzaCurHeartSegments_${u}`, String(clamp0(snap.player.heartsSegs)));
-      if (typeof window._redrawHeartsHud==='function'){ try{ window._redrawHeartsHud(); }catch{} }
-    }
+  const segs = clamp0(snap.player.heartsSegs);
+  setLS(`izzaCurHeartSegments_${u}`, String(segs));  // namespaced
+  setLS('izzaCurHeartSegments', String(segs));       // <-- global key v4_hearts reads
+  try { window.dispatchEvent(new Event('izza-hearts-changed')); } catch {}
+  if (typeof window._redrawHeartsHud==='function'){ try{ window._redrawHeartsHud(); }catch{} }
+}
     setJSON(`izzaBankLastGood_${u}`, snap); // cache last-good after successful apply
     setLS(`izzaBootTotal_${u}`, String(wallet + bankC));
   }
