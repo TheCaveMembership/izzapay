@@ -1,6 +1,6 @@
-// v1_store_items_plugin.js — extend shop stock + icon repair (bat/knuckles) + price pill + ammo title
+// v1_store_items_plugin.js — extend shop stock + icon repair (bat/knuckles)
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix-2+pricepill+ammo17';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-2';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -46,20 +46,19 @@
 
     const meta = document.createElement('div');
     meta.className='meta';
-    // No inline price line here; price shows in the button pill.
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
         <div>${svgIcon(it.id)}</div>
         <div>
           <div class="name">${it.name}</div>
+          <div class="sub">${it.price} IC</div>
           ${it.sub? `<div class="sub" style="opacity:.85">${it.sub}</div>`:''}
         </div>
       </div>`;
 
-    // Price pill (click-to-buy)
     const btn = document.createElement('button');
     btn.className='buy';
-    btn.textContent = `${it.price} IC`;
+    btn.textContent='Buy';
     btn.addEventListener('click', ()=>{
       const coins = api.getCoins ? api.getCoins() : (api.player?.coins|0);
       if(coins < it.price){ alert('Not enough coins'); return; }
@@ -99,7 +98,7 @@
     list.appendChild(row);
   }
 
-  // --- Repair icons (and blank names) for core-provided rows if something stripped inline SVGs ---
+  // --- Repair icons for core-provided rows if something stripped inline SVGs ---
   function repairMissingIcons(){
     try{
       const modal = document.getElementById('shopModal');
@@ -116,21 +115,19 @@
         if(!iconHolder || !nameEl) return;
 
         const name = (nameEl.textContent||'').trim().toLowerCase();
-        const isBat       = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);
-        const isKnuckles  = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
+        const isBat = /\bbaseball\s*bat\b/i.test(name) || /\bbat\b/i.test(name);   // <-- updated
+        const isKnuckles = /\bbrass\s*knuckles\b/i.test(name) || /\bknuckles\b/i.test(name);
 
         if(isBat){
           const html = (iconHolder.innerHTML||'').trim();
           if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgBat());
           }
-          if(!nameEl.textContent.trim()){ nameEl.textContent = 'Bat'; }
         }else if(isKnuckles){
           const html = (iconHolder.innerHTML||'').trim();
           if(!html || html.includes('⭐') || (!html.includes('<svg') && !html.includes('<img'))){
             iconHolder.innerHTML = iconImgHTML(svgKnuckles());
           }
-          if(!nameEl.textContent.trim()){ nameEl.textContent = 'Brass Knuckles'; }
         }
       });
     }catch(e){
@@ -152,17 +149,17 @@
       const list = document.getElementById('shopList');
       if(!list) return;
 
-      // Extend stock (once per open)
+      // Extend stock (unchanged)
       if(!list.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
-          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',           price:350, sub:'Unlocked at mission 3' });
-          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (17 round mag)',  price:60 });
-          addShopRow(list, { id:'grenade',      name:'Grenade',                      price:120 });
+          addShopRow(list, { id:'uzi',          name:'Uzi (w/ +50 ammo)',     price:350, sub:'Unlocked at mission 3' });
+          addShopRow(list, { id:'pistol_ammo',  name:'Pistol Ammo (full mag)', price:60 });
+          addShopRow(list, { id:'grenade',      name:'Grenade',                price:120 });
         }
       }
 
-      // Repair core icons + names (bat/knuckles)
+      // Repair icons for core rows
       repairMissingIcons();
     }catch(e){
       console.warn('[store extender] patch failed:', e);
