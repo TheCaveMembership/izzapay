@@ -139,5 +139,49 @@
     });
   })();
   </script>
+
+  <!-- ADDITIVE: Language selector chip (persists to localStorage.izzaLang) -->
+  <script>
+  (function(){
+    var KEY = 'izzaLang';
+    function getLang(){ try{ return localStorage.getItem(KEY) || 'en'; }catch(e){ return 'en'; } }
+    function setLang(v){
+      try{
+        localStorage.setItem(KEY, v);
+        // optional event for any listeners
+        try{ window.dispatchEvent(new CustomEvent('izza-lang-changed',{detail:{lang:v}})); }catch(_){}
+      }catch(_){}
+    }
+
+    // build small chip
+    var wrap = document.createElement('div');
+    wrap.style.position='fixed';
+    wrap.style.right='10px';
+    wrap.style.bottom='10px';
+    wrap.style.zIndex='9999';
+    wrap.style.background='#121827';
+    wrap.style.border='1px solid #2a3550';
+    wrap.style.borderRadius='10px';
+    wrap.style.padding='6px 8px';
+    wrap.style.font='12px/1.2 system-ui,Arial,sans-serif';
+    wrap.style.color='#cfe0ff';
+    wrap.style.boxShadow='0 6px 18px rgba(0,0,0,.35)';
+    wrap.innerHTML = 'Language: <select id="hsLang">\
+      <option value="en">English</option>\
+      <option value="es">Español</option>\
+      <option value="fr">Français</option>\
+      <option value="de">Deutsch</option>\
+      <option value="pt">Português</option>\
+      <option value="zh">中文</option>\
+      <option value="ja">日本語</option>\
+      <option value="ko">한국어</option>\
+    </select>';
+    document.body.appendChild(wrap);
+
+    var sel = wrap.querySelector('#hsLang');
+    sel.value = getLang();
+    sel.addEventListener('change', function(){ setLang(this.value); });
+  })();
+  </script>
 </body>
 </html>
