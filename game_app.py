@@ -34,7 +34,7 @@ app.config.update(
 
 # ----------------- ENV FLAGS -----------------
 PI_SANDBOX = os.getenv("PI_SANDBOX", "false").lower() == "true"
-LIBRE_EP = (os.getenv("LIBRE_EP") or "").rstrip("/")  # <-- ADDED
+LIBRE_EP = (os.getenv("LIBRE_EP") or "https://izzatranslate.onrender.com").rstrip("/")  # <-- CHANGED: provide safe default
 
 # ----------------- TOKEN VERIFY / ADMIN CHECK (reuse main app) -----------------
 try:
