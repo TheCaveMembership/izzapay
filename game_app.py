@@ -4,6 +4,7 @@ from datetime import timedelta
 from flask import Flask, render_template, session, request, redirect, url_for
 from dotenv import load_dotenv
 from db import conn
+import requests  # <-- ADDED for LibreTranslate proxy
 
 load_dotenv()
 
@@ -33,6 +34,7 @@ app.config.update(
 
 # ----------------- ENV FLAGS -----------------
 PI_SANDBOX = os.getenv("PI_SANDBOX", "false").lower() == "true"
+LIBRE_EP = (os.getenv("LIBRE_EP") or "").rstrip("/")  # <-- ADDED
 
 # ----------------- TOKEN VERIFY / ADMIN CHECK (reuse main app) -----------------
 try:
@@ -271,3 +273,50 @@ def debug_routes():
         return {"ok": True, "count": len(rules), "routes": rules}
     except Exception as e:
         return {"ok": False, "error": str(e)}, 500
+
+
+# ------------- ADDED: lightweight translate proxy -------------
+@app.post("/api/translate")
+def game_translate_api():
+    """
+    Proxy to LibreTranslate (if configured).
+    Request JSON: { text, from, to }
+    Response JSON: { ok: True, text: "<translated or original text>" }
+    - If LIBRE_EP is not set or call fails, we gracefully return the original text.
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        text = (data.get("text") or "").strip()
+        src  = (data.get("from") or "auto")[:5]
+        dest = (data.get("to")   or "en")[:5]
+
+        if not text:
+            return {"ok": False, "error": "empty_text", "text": ""}, 400
+
+        # If no endpoint configured, return the original text unchanged
+        if not LIBRE_EP:
+            return {"ok": True, "text": text}
+
+        r = requests.post(
+            f"{LIBRE_EP}/translate",
+            timeout=12,
+            json={
+                "q": text,
+                "source": ("auto" if src == "auto" else src),
+                "target": dest,
+                "format": "text"
+            }
+        )
+        if r.status_code == 200:
+            try:
+                out = r.json().get("translatedText")
+                if isinstance(out, str) and out:
+                    return {"ok": True, "text": out}
+            except Exception:
+                pass
+
+        # Fallback to original text on any unexpected response
+        return {"ok": True, "text": text}
+    except Exception:
+        # Fail-open: return original text so the UI still renders
+        return {"ok": True, "text": text}
