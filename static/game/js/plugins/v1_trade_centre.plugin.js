@@ -1,5 +1,6 @@
-// v1_trade_centre.plugin.js — Safe-zone + proximity trade UI (additive only)
+// v1_trade_centre.plugin.js — Safe-zone + presence + proximity trade UI (additive only)
 (function(){
+  const BUILD='v1.3-tc+presence+proximity';
   const FLAG = 'izzaTradeCentre';
   const isInTC = ()=> localStorage.getItem(FLAG)==='1';
 
@@ -23,15 +24,65 @@
     return api;
   })();
 
+  // --- presence state for Trade Centre (username -> sprite) ---
+  const TC = {
+    sprites: new Map(),     // uname -> remoteSprite
+    lastPosSend: 0,
+    posSendEveryMs: 140,
+    joined: false
+  };
+
+  function addOrUpdatePeer(uname, appearance){
+    try{
+      if(!uname) return null;
+      if(TC.sprites.has(uname)) return TC.sprites.get(uname);
+      if(!IZZA?.api?.addRemotePlayer) return null;
+      const sp = IZZA.api.addRemotePlayer({ username: uname, appearance: appearance||{} });
+      TC.sprites.set(uname, sp);
+      return sp;
+    }catch(e){ console.warn('[TC] addOrUpdatePeer fail', e); return null; }
+  }
+  function removePeer(uname){
+    try{
+      const sp = TC.sprites.get(uname);
+      if(sp && IZZA?.api?.removeRemotePlayer) IZZA.api.removeRemotePlayer(sp);
+    }catch{}
+    TC.sprites.delete(uname);
+  }
+  function clearPeers(){
+    for(const u of [...TC.sprites.keys()]) removePeer(u);
+    TC.sprites.clear();
+  }
+
+  function joinTradeCentreRoom(){
+    if(TC.joined) return;
+    TC.joined = true;
+    try{
+      Net.send('tc-join', {
+        username: IZZA?.api?.user?.username || '',
+        x: IZZA.api.player.x, y: IZZA.api.player.y,
+        appearance: IZZA?.api?.getAppearance && IZZA.api.getAppearance()
+      });
+    }catch(e){ console.warn('[TC] join send fail', e); }
+  }
+  function leaveTradeCentreRoom(){
+    if(!TC.joined) return;
+    TC.joined = false;
+    try{
+      Net.send('tc-leave', { username: IZZA?.api?.user?.username || '' });
+    }catch{}
+    clearPeers();
+  }
+
   // --- Safe-zone toggles (only active if FLAG set) ---
   IZZA.on('ready', (api)=>{
     if(!isInTC()) return;
 
-    // ===== Banner (adjusted) =====
+    // ===== Banner (as requested) =====
     (function(){
       function showTradeBanner(){
         const fire = document.getElementById('btnFire');
-        if (fire) fire.style.display = 'none'; // hide fire button completely
+        if (fire) fire.style.display = 'none';
 
         let b = document.getElementById('tcBanner');
         if (!b) {
@@ -41,7 +92,7 @@
           Object.assign(b.style,{
             position:'fixed',
             left:'50%',
-            bottom:'140px', // raised so it sits above the FIRE button
+            bottom:'140px', // sits above where FIRE button is
             transform:'translateX(-50%)',
             padding:'12px 20px',
             background:'linear-gradient(90deg,#0fead4,#13b5a3)',
@@ -60,29 +111,64 @@
           b.style.display = 'flex';
         }
       }
-
       function hideTradeBanner(){
         const fire = document.getElementById('btnFire');
-        if (fire) fire.style.display = ''; // restore default
-
+        if (fire) fire.style.display = '';
         const b = document.getElementById('tcBanner');
         if (b) b.style.display = 'none';
       }
-
-      // Show/hide on events
       window.addEventListener('izza-tradecentre-enter', showTradeBanner);
       window.addEventListener('izza-tradecentre-leave', hideTradeBanner);
-
-      // If we're already in the Trade Centre (FLAG set), show immediately
       showTradeBanner();
     })();
 
-    // Disable attacks (A button & key)
+    // ===== Presence: join room, keep peers visible, live position sync =====
+    joinTradeCentreRoom();
+
+    // inbound presence
+    Net.on('tc-join', (d)=>{
+      if(!d || !d.username) return;
+      if(d.username === (IZZA?.api?.user?.username||'')) return;
+      addOrUpdatePeer(d.username, d.appearance);
+      // place where they claim they are (optional snapshot)
+      const sp = TC.sprites.get(d.username);
+      if(sp){ sp.x = d.x|0; sp.y = d.y|0; sp.facing = d.facing||'down'; }
+    });
+    Net.on('tc-leave', (d)=>{
+      if(!d || !d.username) return;
+      removePeer(d.username);
+    });
+    Net.on('tc-pos', (d)=>{
+      if(!d || !d.username) return;
+      if(d.username === (IZZA?.api?.user?.username||'')) return;
+      const sp = addOrUpdatePeer(d.username, d.appearance);
+      if(sp){ sp.x = d.x|0; sp.y = d.y|0; sp.facing = d.facing||'down'; }
+    });
+
+    // send my position on a light cadence
+    IZZA.on('update-post', ()=>{
+      if(!TC.joined) return;
+      const now = performance.now();
+      if(now - TC.lastPosSend >= TC.posSendEveryMs){
+        TC.lastPosSend = now;
+        try{
+          Net.send('tc-pos', {
+            username: IZZA?.api?.user?.username || '',
+            x: IZZA.api.player.x, y: IZZA.api.player.y,
+            facing: IZZA.api.player.facing||'down'
+          });
+        }catch{}
+      }
+    });
+
+    // Safety: if page leaves or player exits TC
+    window.addEventListener('beforeunload', leaveTradeCentreRoom);
+
+    // ===== Safe-zone rules =====
     const stop = e=>{ e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.(); };
     document.getElementById('btnA')?.addEventListener('click', stop, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='a') stop(e); }, true);
 
-    // No cops/peds each tick
     IZZA.on('update-pre', ()=>{
       try{
         api.pedestrians.length = 0;
@@ -90,25 +176,25 @@
       }catch(_){}
     });
 
-    // Door to leave (same door position works in TC too)
+    // ===== Door to leave =====
     function nearDoor(){
       const T = window.__IZZA_TRADE__?.door; if(!T) return false;
       const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
       return Math.abs(gx-T.x)<=1 && Math.abs(gy-T.y)<=1;
     }
-    function onB(e){
+    function onBLeave(e){
       if(!nearDoor()) return;
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
       if(confirm('Leave Trade Centre?')){
         try{ localStorage.removeItem(FLAG); }catch(_){}
+        leaveTradeCentreRoom();
         location.reload();
       }
     }
-    document.getElementById('btnB')?.addEventListener('click', onB, true);
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
+    document.getElementById('btnB')?.addEventListener('click', onBLeave, true);
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onBLeave(e); }, true);
 
-    // ===== Proximity Trading =====
-    // UI bits
+    // ===== Proximity Trading (unchanged core, now peers actually exist) =====
     let ui=null, state=null;
     function closeUI(){ if(ui){ ui.remove(); ui=null; state=null; } }
     function getInv(){
@@ -167,7 +253,6 @@
           + (state.mine.coins? `<div>+ ${state.mine.coins} IC</div>`:'');
         theirBox.innerHTML= (state.theirs.items.map(it=>`<div>- ${it}</div>`).join('')||'<div style="opacity:.6">No items</div>')
           + (state.theirs.coins? `<div>+ ${state.theirs.coins} IC</div>`:'');
-
         ui.querySelector('#theirAccept').textContent = state.theirs.accepted ? 'Accepted ✔' : 'Not accepted';
         ui.querySelector('#doTrade').disabled = !(state.mine.accepted && state.theirs.accepted);
       }
@@ -181,8 +266,7 @@
         const k=prompt('Type item key to add:\n' + keys.join(', '));
         if(!k || !inv[k] || (inv[k].count|0)<=0) return;
         state.mine.items.push(k);
-        state.mine.accepted=false; // any change cancels acceptance
-        ui.querySelector('#mineAccept').checked=false;
+        state.mine.accepted=false; ui.querySelector('#mineAccept').checked=false;
         Net.send('tc-offer', { to:state.peer, kind:'mine', items:state.mine.items, coins:state.mine.coins, accepted:false });
         redraw();
       };
@@ -190,8 +274,7 @@
         const max = IZZA.api.getCoins();
         const n = Math.max(0, Math.min(max, parseInt(prompt('Coins to offer (0-'+max+')','0')||'0',10)));
         state.mine.coins = n;
-        state.mine.accepted=false;
-        ui.querySelector('#mineAccept').checked=false;
+        state.mine.accepted=false; ui.querySelector('#mineAccept').checked=false;
         Net.send('tc-offer', { to:state.peer, kind:'mine', items:state.mine.items, coins:state.mine.coins, accepted:false });
         redraw();
       };
@@ -202,18 +285,13 @@
       };
       ui.querySelector('#doTrade').onclick = ()=>{
         if(!(state.mine.accepted && state.theirs.accepted)) return;
-
         // Apply transfer locally
         const inv = getInv();
-        // remove mine items
         state.mine.items.forEach(k=>{ inv[k] = inv[k]||{count:0}; inv[k].count = Math.max(0,(inv[k].count|0)-1); });
-        // add theirs items
         state.theirs.items.forEach(k=>{ inv[k] = inv[k]||{count:0}; inv[k].count = (inv[k].count|0)+1; });
         setInv(inv);
-        // coins
         IZZA.api.setCoins(IZZA.api.getCoins() - (state.mine.coins|0) + (state.theirs.coins|0));
         try{ window.dispatchEvent(new Event('izza-inventory-changed')); window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-
         Net.send('tc-complete', { to:state.peer });
         closeUI();
         IZZA.toast?.('Trade complete!');
@@ -224,7 +302,7 @@
         if(!d || d.from!==state.peer) return;
         state.theirs.items = Array.isArray(d.items)? d.items.slice(0,32) : [];
         state.theirs.coins = d.coins|0;
-        state.mine.accepted=false; ui.querySelector('#mineAccept').checked=false; // they changed, unaccept me
+        state.mine.accepted=false; ui.querySelector('#mineAccept').checked=false;
         state.theirs.accepted=false;
         redraw();
       });
@@ -235,33 +313,40 @@
       });
       Net.on('tc-complete', (d)=>{
         if(!d || d.from!==state.peer) return;
-        // Mirror application for peer’s side:
-        // (Nothing to do here—we already applied locally.)
         closeUI();
         IZZA.toast?.('Trade complete!');
       });
     }
 
-    // Proximity check + B to start trade
+    // Proximity check + B to start trade (uses sprites we now spawn)
     function nearestPeer(){
       try{
-        const me = IZZA.api.player, t=IZZA.api.TILE;
-        let best=null, bestD=1e9;
-        (window.__REMOTE_PLAYERS__||[]).forEach(p=>{
-          const d = Math.hypot(me.x - p.x, me.y - p.y);
-          if(d < bestD){ best=p; bestD=d; }
+        const me = IZZA.api.player;
+        let best=null, bestD=1e9, bestName=null;
+        TC.sprites.forEach((sp, uname)=>{
+          const d = Math.hypot(me.x - sp.x, me.y - sp.y);
+          if(d < bestD){ best=sp; bestD=d; bestName=uname; }
         });
-        return (bestD<=48) ? best : null; // ~1.5 tiles
+        return (best && bestD<=48) ? {sprite:best, name:bestName} : null;
       }catch(_){ return null; }
     }
     function onTradeB(e){
-      if (nearDoor()) return; // door handler takes priority
+      // NOTE: door handler still on B (leave), so only trigger trade if not near door
+      const nearDoorNow = (function(){
+        const T = window.__IZZA_TRADE__?.door; if(!T) return false;
+        const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+        return Math.abs(gx-T.x)<=1 && Math.abs(gy-T.y)<=1;
+      })();
+      if(nearDoorNow) return;
       const peer = nearestPeer();
       if(!peer) return;
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      buildUI(peer.username || peer.name || 'peer');
+      buildUI(peer.name || 'peer');
     }
     document.getElementById('btnB')?.addEventListener('click', onTradeB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onTradeB(e); }, true);
   });
+
+  // Cleanup on full page unload just in case
+  window.addEventListener('unload', ()=>{ if(isInTC()) try{ Net.send('tc-leave', { username: IZZA?.api?.user?.username||'' }); }catch{} });
 })();
