@@ -3,7 +3,6 @@ libretranslate==1.6.0
 argostranslate==1.9.6
 argostranslate-files==1.1.0
 waitress>=2.1
-requests>=2.31.0
 Pillow>=10.0.0
 python-dotenv==1.0.1
 requests==2.32.3
