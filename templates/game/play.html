@@ -443,6 +443,28 @@
   <script src="/static/game/js/plugins/v1_pvp_duel.js"></script>
   <script src="/static/game/js/plugins/v1_trade_centre.plugin.js"></script>
 
+  <!-- NEW: Area Chat & translation hook (added, nothing else changed) -->
+  <script src="/static/game/js/plugins/v1_area_chat.plugin.js"></script>
+  <script>
+  window.TRANSLATE_TEXT = async (text, from, to) => {
+    try {
+      // TODO: call your backend or an API to actually translate
+      // Example:
+      // const r = await fetch('/api/translate', {
+      //   method:'POST',
+      //   headers:{'Content-Type':'application/json'},
+      //   body: JSON.stringify({ text, from, to })
+      // });
+      // const j = await r.json();
+      // return j.text;
+
+      return text; // fallback: no translation
+    } catch {
+      return text;
+    }
+  };
+  </script>
+
   <!-- Auth Debug Dock (unchanged) -->
   <div id="authDock">…</div>
   <script>…</script>
