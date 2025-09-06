@@ -448,19 +448,11 @@
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
-      // TODO: call your backend or an API to actually translate
-      // const r = await fetch('/api/translate', {
-      //   method:'POST',
-      //   headers:{'Content-Type':'application/json'},
-      //   body: JSON.stringify({ text, from, to })
-      // });
-      // const j = await r.json();
-      // return j.text;
-
+      // Implement this to actually translate:
+      // const r = await fetch('/api/translate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, from, to }) });
+      // const j = await r.json(); return j.text;
       return text; // fallback: no translation
-    } catch {
-      return text;
-    }
+    } catch { return text; }
   };
   </script>
   <script>
@@ -469,18 +461,15 @@
     const to=(localStorage.getItem(LANG_KEY)||'en').slice(0,5);
     const from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
     if(typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
-
     const SKIP=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
-
     function collect(root){
-      const out=[]; const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
+      const nodes=[]; const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
         const p=n.parentElement; if(!p||SKIP.has(p.tagName)) return NodeFilter.FILTER_REJECT;
         const s=n.nodeValue; if(!s||!s.trim()) return NodeFilter.FILTER_REJECT;
         if(p.closest('[data-no-i18n="1"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }});
-      let n; while((n=w.nextNode())) out.push(n);
-      return out;
+      let n; while((n=w.nextNode())) nodes.push(n); return nodes;
     }
     async function translate(nodes){
       for(const n of nodes){
