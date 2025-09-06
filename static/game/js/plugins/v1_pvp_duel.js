@@ -1,15 +1,10 @@
-// PvP Duel Client — v7.3
-// - Real opponent sprite (kept)
-// - Far-apart spawns per player & per round (kept)
-// - 5s preload hold, single countdown; fire blocked until GO (kept)
-// - Hearts HUD bridge + low-life blink (kept + PvP-only hearts fed by cops)
-// - Hitscan + tracers clamp at impact (no pass-through look) (kept)
-// - MIRRORED COPS: draw real sprites (kept) + apply PvP damage to my duel hearts
-// - Opponent's equipped weapon overlay (kept)
-// - Networked visual effects: share tracers/sparks (FIXED: /duel/trace + read j.traces)
-// - Hardened cleanup for loser: remove remote sprite, bounce to lobby (kept)
+// PvP Duel Client — v7.8
+// - Aligns with MP client v1.7.2: duel-config, duel-round-start, duel-round-end, duel-match-finish
+// - Best-of-3 coordination: emits single winner per round + final winner
+// - Hardened winner resolution (multiple server fields + HP fallback)
+// - No double "loss" banners; no regressions to other systems
 (function(){
-  const BUILD='v7.3-duel-client';
+  const BUILD='v7.8-duel-client';
   console.log('[IZZA PLAY]', BUILD);
 
   const BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
@@ -24,7 +19,7 @@
   function hash32(str){ let h=2166136261>>>0; const s=String(str); for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} h^=h<<13; h^=h>>>17; h^=h<<5; return (h>>>0); }
   function hash01str(str){ return (hash32(String(str)) % 100000) / 100000; }
 
-  // ---------- map helpers (match core) ----------
+  // ---------- map helpers ----------
   function unlockedRect(tier){ return (tier==='2') ? { x0:10, y0:12, x1:80, y1:50 } : { x0:18, y0:18, x1:72, y1:42 }; }
 
   function buildSpawnCandidates(api){
@@ -124,21 +119,6 @@
     }
   }
 
-  // ---------- minimap opp dot ----------
-  function updateMinimapDot(oppX, oppY){
-    const mini = document.getElementById('minimap'); if(!mini) return;
-    const ctx = mini.getContext('2d'); if(!ctx) return;
-    const tier = localStorage.getItem('izzaMapTier') || '2';
-    const un = unlockedRect(tier);
-    const W=90,H=60; const sx = mini.width / W, sy = mini.height / H;
-    const gx = Math.floor(oppX / IZZA.api.TILE), gy = Math.floor(oppY / IZZA.api.TILE);
-    const clamp=(v,a,b)=> Math.max(a, Math.min(b, v));
-    const nx = clamp((gx - un.x0) / Math.max(1,(un.x1-un.x0)), 0, 1);
-    const ny = clamp((gy - un.y0) / Math.max(1,(un.y1-un.y0)), 0, 1);
-    ctx.fillStyle = '#ff4d4d';
-    ctx.fillRect((un.x0+nx*(un.x1-un.x0))*sx-1, (un.y0+ny*(un.y1-un.y0))*sy-1, 2, 2);
-  }
-
   // ---------- canvas banners ----------
   function showBanner(text, kind='win'){
     const cvs=document.getElementById('game'); if(!cvs) return;
@@ -187,7 +167,7 @@
     swat:     '/static/game/sprites/izza_swat_sheet.png',
     military: '/static/game/sprites/izza_military_sheet.png'
   };
-  const NPC_SHEETS = {}; // kind -> {img, cols}
+  const NPC_SHEETS = {};
   function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('load:'+src)); i.src=src; }); }
   async function ensureNpc(kind){
     if(NPC_SHEETS[kind]) return NPC_SHEETS[kind];
@@ -207,8 +187,10 @@
   // ---------- duel state ----------
   let DUEL = {
     mid:null, mode:'v1',
-    meName:'', oppName:'',
+    meName:'', meNameNorm:'',
+    oppName:'',
     oppSprite:null, opp:{x:0,y:0,facing:'down'},
+    oppHP:null,
     pollMs:125, timer:null, flip:false,
     myHP:null,
     oppCops:[],
@@ -216,10 +198,13 @@
     lastRoundNum:0,
     usernames:['',''],
     meIsA:false,
-    effects:[],        // local + received
+    effects:[],
     started:false,
     hooksInstalled:false,
-    canFire:false
+    canFire:false,
+    downReported:false,
+    roundsToWin:2,
+    myWins:0, oppWins:0
   };
 
   // ---------- polling ----------
@@ -250,6 +235,39 @@
     await $post('/duel/poke', body);
   }
 
+  function isMe(name){
+    if(!name) return false;
+    if(name==='me') return true;
+    return norm(name) === DUEL.meNameNorm;
+  }
+
+  // Winner resolution aligned with MP client expectations
+  function resolveWinnerForMe(round){
+    const wUser = round.winnerUsername || round.winnerName || round.winner;
+    const youWon= (round.youWon===true);
+    if(youWon) return true;
+    if(wUser && isMe(wUser)) return true;
+    if((round.ended || round.matchOver) && DUEL.myHP!=null && DUEL.oppHP!=null){
+      if(DUEL.myHP>0 && DUEL.oppHP<=0) return true;
+      if(DUEL.myHP<=0 && DUEL.oppHP>0) return false;
+    }
+    return null;
+  }
+
+  // Emit round start (after GO)
+  function emitRoundStart(roundNumber){
+    try{ IZZA.emit?.('duel-round-start', { roundNumber, matchId: DUEL.mid }); }catch{}
+  }
+  // Emit round end winner
+  function emitRoundEnd(opts){
+    // opts: { roundId, winnerIsMe, winner }
+    try{ IZZA.emit?.('duel-round-end', Object.assign({ matchId: DUEL.mid }, opts)); }catch{}
+  }
+  // Emit match finish
+  function emitMatchFinish(winnerName){
+    try{ IZZA.emit?.('duel-match-finish', { matchId: DUEL.mid, winner: winnerName }); }catch{}
+  }
+
   async function pull(){
     if(!DUEL.mid) return;
     const j = await $get('/duel/pull?matchId='+encodeURIComponent(DUEL.mid));
@@ -258,6 +276,7 @@
     if(j.opponent){
       DUEL.oppName = j.opponent.username || DUEL.oppName || 'Opponent';
       DUEL.opp.x = (j.opponent.x|0); DUEL.opp.y=(j.opponent.y|0); DUEL.opp.facing=j.opponent.facing||'down';
+      if(typeof j.opponent.hp === 'number') DUEL.oppHP = j.opponent.hp;
       DUEL.oppEquipped = j.opponent.equipped || (j.opponent.inv&&(
           j.opponent.inv.uzi?.equipped ? 'uzi' :
           j.opponent.inv.pistol?.equipped ? 'pistol' :
@@ -275,12 +294,16 @@
       DUEL.myHP = j.me.hp;
       saveSegmentsFromHP(DUEL.myHP);
       drawHeartsDOM(DUEL.myHP);
-      if(DUEL.myHP<=0 && (!j.round || j.round.ended)){ setTimeout(()=>{ showBanner('You were defeated', 'lose'); bounceToLobby(); cleanupDuel(); }, 650); return; }
+      if(DUEL.myHP <= 0 && !DUEL.downReported){
+        DUEL.downReported = true;
+        DUEL.canFire = false;
+        if (DUEL.mid) $post('/duel/selfdown', { matchId: DUEL.mid });
+      }
     }
 
     DUEL.oppCops = Array.isArray(j.opponentCops) ? j.opponentCops.slice(0,6) : [];
 
-    // Received traces from opponent (networked visual)
+    // received effects
     if(Array.isArray(j.traces)){
       for(const e of j.traces){
         DUEL.effects.push({ kind:'tracer', x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, t:0, life:110 });
@@ -289,25 +312,55 @@
 
     if(j.round){
       const rn = j.round.number|0;
-      if(rn !== (DUEL.lastRoundNum|0)){
+
+      // round (re)spawn step
+      if(rn && rn !== (DUEL.lastRoundNum|0)){
         DUEL.lastRoundNum = rn;
-        DUEL.myHP = 4;
-        saveSegmentsFromHP(DUEL.myHP);
-        drawHeartsDOM(DUEL.myHP);
+        DUEL.myHP = 4; DUEL.downReported=false; DUEL.canFire=false;
+        saveSegmentsFromHP(DUEL.myHP); drawHeartsDOM(DUEL.myHP);
+
         const spAll = computeRoundSpawns(IZZA.api, String(DUEL.mid), rn, DUEL.usernames);
         const mySpot = DUEL.meIsA ? spAll.A : spAll.B;
         const oppSpot= DUEL.meIsA ? spAll.B : spAll.A;
         IZZA.api.player.x = mySpot.x; IZZA.api.player.y = mySpot.y; IZZA.api.player.facing = mySpot.facing || 'down';
         DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
+
+        // banner + unlock shortly after; then emit round start
         showBanner(`Round ${rn} — FIGHT!`, 'round');
+        setTimeout(()=>{ DUEL.canFire = true; emitRoundStart(rn); }, 650);
       }
 
-      if(j.round.matchOver){
-        const myWins = (j.round.wins && (DUEL.meIsA ? j.round.wins[IZZA.api.userIdA] : j.round.wins[IZZA.api.userIdB])) || null; // optional
-        const iWon = (j.round.winner === 'me') || (myWins && myWins >= 2);
-        showBanner(iWon ? 'MATCH WIN!' : 'MATCH LOSS', iWon?'win':'lose');
-        setTimeout(() => { bounceToLobby(); cleanupDuel(); }, 1200);
-        return;
+      // round end / match over
+      if(j.round.ended || j.round.matchOver){
+        const iWon = resolveWinnerForMe(j.round);
+        // Only proceed if we can tell the winner (prevents "both loss")
+        if(iWon === null) return;
+
+        const myName = DUEL.meName || (IZZA?.api?.user?.username) || 'me';
+        const oppName= DUEL.oppName || 'Opponent';
+        const winnerName = iWon ? myName : oppName;
+
+        // update local tallies (to keep overlay consistent with MP)
+        if(iWon) DUEL.myWins++; else DUEL.oppWins++;
+
+        // banner
+        showBanner(j.round.matchOver ? (iWon ? 'MATCH WIN!' : 'MATCH LOSS')
+                                     : (iWon ? 'ROUND WIN'  : 'ROUND LOSS'),
+                   iWon ? 'win' : 'lose');
+
+        // Emit a single authoritative round end to MP client
+        const roundId = j.round.roundId || (`r${rn}`) || ('r_'+Date.now());
+        emitRoundEnd({ roundId, winnerIsMe: !!iWon, winner: winnerName });
+
+        // If match is over locally, emit finish so MP client can finalize
+        if (j.round.matchOver || DUEL.myWins>=DUEL.roundsToWin || DUEL.oppWins>=DUEL.roundsToWin){
+          emitMatchFinish(winnerName);
+          setTimeout(() => { bounceToLobby(); cleanupDuel(); }, 1200);
+          return;
+        }else{
+          // Wait for server/MP to start next round; disable fire meanwhile
+          DUEL.canFire = false;
+        }
       }
     }
   }
@@ -331,6 +384,8 @@
     }catch{}
     DUEL.mid=null; DUEL.oppCops.length=0; DUEL.oppSprite=null; DUEL.effects.length=0;
     DUEL.started=false; DUEL.hooksInstalled=false; DUEL.lastRoundNum=0; DUEL.canFire=false; DUEL.oppEquipped='hand';
+    DUEL.downReported=false; DUEL.meName=''; DUEL.meNameNorm=''; DUEL.oppHP=null; DUEL.myHP=null;
+    DUEL.myWins=0; DUEL.oppWins=0;
     window.__IZZA_DUEL = { active:false };
   }
 
@@ -374,12 +429,11 @@
 
   function addTracer(from, to, life=110){
     DUEL.effects.push({ kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y, t:0, life });
-    // share to opponent (FIXED: correct endpoint)
+    // share to opponent
     $post('/duel/trace', { matchId: DUEL.mid, kind:'tracer', x1:from.x, y1:from.y, x2:to.x, y2:to.y });
   }
   function addSpark(at, life=140){
     DUEL.effects.push({ kind:'spark', x:at.x, y:at.y, t:0, life });
-    // optional: can also share as a trace of zero length; keep local for now
   }
 
   function sendHit(kind){
@@ -460,13 +514,14 @@
     DUEL.myHP = hpAfter;
     saveSegmentsFromHP(DUEL.myHP);
     drawHeartsDOM(DUEL.myHP);
-    if (DUEL.myHP <= 0){
-      // Tell server I was downed by world hazards so opponent gets the round
+    if (DUEL.myHP <= 0 && !DUEL.downReported){
+      DUEL.downReported = true;
+      DUEL.canFire = false;
       if (DUEL.mid) $post('/duel/selfdown', { matchId: DUEL.mid });
     }
   }
 
-  // ---------- begin (5s preload + single countdown) ----------
+  // ---------- begin (config + 5s preload + countdown) ----------
   async function resolveMeUsername(){
     const j = await $get('/me');
     if(j && j.username) return j.username;
@@ -481,18 +536,31 @@
     })();
   }
 
+  // Accept config from MP client
+  IZZA.on?.('duel-config', (_,_p)=>{
+    if(!_p) return;
+    if(typeof _p.roundsToWin === 'number') DUEL.roundsToWin = Math.max(1,_p.roundsToWin|0);
+    if(_p.matchId) DUEL.mid = String(_p.matchId);
+  });
+
   async function begin(payload){
     if(DUEL.started){ return; }
-    const {mode, matchId, players} = payload||{};
+    const {mode, matchId, players, roundsToWin} = payload||{};
     if(mode!=='v1' || !Array.isArray(players) || players.length<2) return;
+
+    // take roundsToWin if provided
+    if(typeof roundsToWin === 'number') DUEL.roundsToWin = Math.max(1, roundsToWin|0);
 
     try{ IZZA.emit?.('ui-modal-close',{id:'mpLobby'}); }catch{}
     try{ const m=document.getElementById('mpLobby'); if(m) m.style.display='none'; }catch{}
 
     const meServerName = await resolveMeUsername();
-    const pA = players[0]?.username || '';
-    const pB = players[1]?.username || '';
-    const pAL = norm(pA), pBL = norm(pB), meL = norm(meServerName);
+    DUEL.meName = meServerName;
+    DUEL.meNameNorm = norm(meServerName);
+
+    const pA = players[0]?.username || players[0] || '';
+    const pB = players[1]?.username || players[1] || '';
+    const pAL = norm(pA), pBL = norm(pB), meL = DUEL.meNameNorm;
 
     DUEL.meIsA = (meL && (meL===pAL || meL===pBL)) ? (meL===pAL) : (hash32(TOK||('mid:'+matchId)) & 1)!==0;
     const sorted = [pA,pB].map(norm).sort();
@@ -509,20 +577,19 @@
       IZZA.api.setWanted?.(0);
       DUEL.opp.x = oppSpot.x; DUEL.opp.y = oppSpot.y; DUEL.opp.facing = oppSpot.facing || 'up';
 
-      DUEL.myHP = 4; saveSegmentsFromHP(DUEL.myHP); drawHeartsDOM(DUEL.myHP);
-
+      DUEL.myHP = 4; DUEL.downReported=false; saveSegmentsFromHP(DUEL.myHP); drawHeartsDOM(DUEL.myHP);
       DUEL.mid = String(matchId); DUEL.mode = mode; DUEL.started = true; DUEL.lastRoundNum = 1;
-      DUEL.canFire = false;
+      DUEL.canFire = false; DUEL.myWins=0; DUEL.oppWins=0;
       window.__IZZA_DUEL = { active:true, mode, matchId };
       startPolling();
       setTimeout(installHitHooks, 60);
 
-      // listen for PvP damage coming from hearts plugin (cops melee while in duel)
+      // Listen for PvP damage coming from hearts plugin
       if (window.IZZA && IZZA.on) {
         IZZA.on('pvp-cop-damage', (p)=>{ if(DUEL.mid) applyPvpDamageSegments((p&&p.segs)|0 || 1); });
       }
 
-      // 5s preload hold, THEN countdown, THEN unlock fire at GO
+      // 5s preload hold, THEN countdown, THEN unlock & emit round start
       const cvs=document.getElementById('game');
       if(cvs){
         let hold=document.getElementById('duelHold');
@@ -533,9 +600,17 @@
           cvs.parentElement.appendChild(hold);
         }
         hold.innerHTML='<div style="background:rgba(6,10,18,.65);border:1px solid #2a3550;border-radius:14px;color:#cfe0ff;font-weight:800;font-family:system-ui,Arial,sans-serif;padding:12px 18px">Preparing match…</div>';
-        setTimeout(()=>{ hold.remove(); showCountdown(3, ()=>{ DUEL.canFire = true; showBanner(`1v1 vs ${oppName}`, 'round'); }); }, 5000);
+        setTimeout(()=>{ hold.remove(); showCountdown(3, ()=>{
+          DUEL.canFire = true;
+          showBanner(`1v1 vs ${oppName}`, 'round');
+          emitRoundStart(1);
+        }); }, 5000);
       }else{
-        setTimeout(()=> showCountdown(3, ()=>{ DUEL.canFire = true; showBanner(`1v1 vs ${oppName}`, 'round'); }), 5000);
+        setTimeout(()=> showCountdown(3, ()=>{
+          DUEL.canFire = true;
+          showBanner(`1v1 vs ${oppName}`, 'round');
+          emitRoundStart(1);
+        }), 5000);
       }
     });
   }
@@ -564,9 +639,21 @@
     try{
       if(!DUEL.mid) return;
 
-      updateMinimapDot(DUEL.opp.x, DUEL.opp.y);
+      // minimap opp dot
+      const mini = document.getElementById('minimap'); if(mini){
+        const ctx = mini.getContext('2d'); if(ctx){
+          const api=IZZA.api; const tier=(localStorage.getItem('izzaMapTier')||'2'); const un=unlockedRect(tier);
+          const W=90,H=60; const sx = mini.width / W, sy = mini.height / H;
+          const gx = Math.floor(DUEL.opp.x / api.TILE), gy = Math.floor(DUEL.opp.y / api.TILE);
+          const clamp=(v,a,b)=> Math.max(a, Math.min(b, v));
+          const nx = clamp((gx - un.x0) / Math.max(1,(un.x1-un.x0)), 0, 1);
+          const ny = clamp((gy - un.y0) / Math.max(1,(un.y1-un.y0)), 0, 1);
+          ctx.fillStyle = '#ff4d4d';
+          ctx.fillRect((un.x0+nx*(un.x1-un.x0))*sx-1, (un.y0+ny*(un.y1-un.y0))*sy-1, 2, 2);
+        }
+      }
 
-      // MIRRORED COPS as sprites
+      // mirrored cops
       if(DUEL.oppCops && DUEL.oppCops.length){
         const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
         const ctx=cvs.getContext('2d'); const S=api.DRAW, scale=S/api.TILE;
@@ -586,7 +673,7 @@
         ctx.restore();
       }
 
-      // Opponent held-weapon overlay
+      // opp weapon overlay
       if(DUEL.oppSprite){
         const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
         const ctx=cvs.getContext('2d'); const S=api.DRAW, scale=S/api.TILE;
@@ -594,7 +681,7 @@
         const weapon = DUEL.oppEquipped || 'hand';
         if(weapon!=='hand'){
           const w=Math.floor(S*0.30), h=Math.floor(S*0.12);
-          if(weapon==='bat')      ctx.fillStyle='#8b5a2b';
+          if(weapon==='bat')         ctx.fillStyle='#8b5a2b';
           else if(weapon==='knuckles') ctx.fillStyle='#cfcfcf';
           else if(weapon==='pistol')   ctx.fillStyle='#202833';
           else if(weapon==='uzi')      ctx.fillStyle='#0b0e14';
@@ -609,7 +696,7 @@
         }
       }
 
-      // effects (tracers/sparks)
+      // effects
       if(DUEL.effects.length){
         const api=IZZA.api, cvs=document.getElementById('game'); if(!cvs) return;
         const ctx=cvs.getContext('2d'); const scale=api.DRAW/api.TILE;
