@@ -140,48 +140,37 @@
   })();
   </script>
 
-  <!-- ADDITIVE: Language selector chip (persists to localStorage.izzaLang) -->
+  <!-- ADDITIVE: Language selector chip (persists to localStorage.izzaLang and reloads) -->
   <script>
   (function(){
-    var KEY = 'izzaLang';
-    function getLang(){ try{ return localStorage.getItem(KEY) || 'en'; }catch(e){ return 'en'; } }
+    var KEY='izzaLang';
+    var LABEL='Language: ';
+    var choices=[
+      ['af','Afrikaans'],['ar','العربية'],['bn','বাংলা'],['bg','Български'],['ca','Català'],
+      ['cs','Čeština'],['da','Dansk'],['de','Deutsch'],['el','Ελληνικά'],['en','English'],
+      ['es','Español'],['et','Eesti'],['fa','فارسی'],['fi','Suomi'],['fil','Filipino'],
+      ['fr','Français'],['gu','ગુજરાતી'],['he','עברית'],['hi','हिन्दी'],['hr','Hrvatski'],
+      ['hu','Magyar'],['id','Indonesia'],['it','Italiano'],['ja','日本語'],['kn','ಕನ್ನಡ'],
+      ['ko','한국어'],['lt','Lietuvių'],['lv','Latviešu'],['ms','Melayu'],['nl','Nederlands'],
+      ['no','Norsk'],['pl','Polski'],['pt','Português'],['ro','Română'],['ru','Русский'],
+      ['sk','Slovenčina'],['sl','Slovenščina'],['sv','Svenska'],['ta','தமிழ்'],['te','తెలుగు'],
+      ['th','ไทย'],['tr','Türkçe'],['uk','Українська'],['ur','اردو'],['vi','Tiếng Việt'],
+      ['zh','中文']
+    ];
+    function getLang(){ try{ return localStorage.getItem(KEY)||'en'; }catch(_){ return 'en'; } }
     function setLang(v){
       try{
-        localStorage.setItem(KEY, v);
-        // optional event for any listeners
+        localStorage.setItem(KEY,v);
         try{ window.dispatchEvent(new CustomEvent('izza-lang-changed',{detail:{lang:v}})); }catch(_){}
         location.reload();
       }catch(_){}
     }
-
-    // build small chip
-    var wrap = document.createElement('div');
-    wrap.style.position='fixed';
-    wrap.style.right='10px';
-    wrap.style.bottom='10px';
-    wrap.style.zIndex='9999';
-    wrap.style.background='#121827';
-    wrap.style.border='1px solid #2a3550';
-    wrap.style.borderRadius='10px';
-    wrap.style.padding='6px 8px';
-    wrap.style.font='12px/1.2 system-ui,Arial,sans-serif';
-    wrap.style.color='#cfe0ff';
-    wrap.style.boxShadow='0 6px 18px rgba(0,0,0,.35)';
-    wrap.innerHTML = 'Language: <select id="hsLang">\
-      <option value="en">English</option>\
-      <option value="es">Español</option>\
-      <option value="fr">Français</option>\
-      <option value="de">Deutsch</option>\
-      <option value="pt">Português</option>\
-      <option value="zh">中文</option>\
-      <option value="ja">日本語</option>\
-      <option value="ko">한국어</option>\
-    </select>';
-    document.body.appendChild(wrap);
-
-    var sel = wrap.querySelector('#hsLang');
-    sel.value = getLang();
-    sel.addEventListener('change', function(){ setLang(this.value); });
+    var wrap=document.createElement('div');
+    Object.assign(wrap.style,{position:'fixed',right:'10px',bottom:'10px',zIndex:'9999',background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',padding:'6px 8px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',boxShadow:'0 6px 18px rgba(0,0,0,.35)'});
+    var sel=document.createElement('select'); sel.id='hsLang';
+    choices.forEach(function(c){ var o=document.createElement('option'); o.value=c[0]; o.textContent=c[1]; sel.appendChild(o); });
+    var lab=document.createElement('span'); lab.textContent=LABEL; wrap.appendChild(lab); wrap.appendChild(sel); document.body.appendChild(wrap);
+    sel.value=getLang(); sel.addEventListener('change',function(){ setLang(this.value); });
   })();
   </script>
 
@@ -189,7 +178,7 @@
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
-      // TODO: call your backend or an API to actually translate
+      // Implement this to actually translate:
       // const r = await fetch('/api/translate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, from, to }) });
       // const j = await r.json(); return j.text;
       return text; // fallback: no translation
@@ -202,18 +191,15 @@
     const to=(localStorage.getItem(LANG_KEY)||'en').slice(0,5);
     const from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
     if(typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
-
     const SKIP=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
-
     function collect(root){
-      const out=[]; const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
+      const nodes=[]; const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
         const p=n.parentElement; if(!p||SKIP.has(p.tagName)) return NodeFilter.FILTER_REJECT;
         const s=n.nodeValue; if(!s||!s.trim()) return NodeFilter.FILTER_REJECT;
         if(p.closest('[data-no-i18n="1"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }});
-      let n; while((n=w.nextNode())) out.push(n);
-      return out;
+      let n; while((n=w.nextNode())) nodes.push(n); return nodes;
     }
     async function translate(nodes){
       for(const n of nodes){
