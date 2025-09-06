@@ -1,6 +1,6 @@
 // v1_free_drive_plugin.js — free car hijack + parking with 5-min despawn
 (function(){
-  const BUILD='v1.9-free-drive+parking+vehicular-hits+vehicleSprites+larger+pursuit-persist-SAME-COPS';
+  const BUILD='v1.10-free-drive+pursuit-guard-SAME-COPS';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -12,43 +12,60 @@
   const DROP_GRACE_MS = 1000;
   const DROP_OFFSET   = 18;
 
-  // Slightly larger visual scale for vehicles
   const VEH_DRAW_SCALE = 1.15;
 
   let api=null;
-  let driving=false, car=null, savedWalk=null;  // car: {x,y,kind}
+  let driving=false, car=null, savedWalk=null;
 
-  // parked cars registry
   const parked = []; // {x,y,kind,timeoutId}
 
-  // Remember recent car-related crimes so pursuit persists after exit
+  // --- pursuit persistence ---
   let lastCarCrimeAt = 0;
   const now = ()=>performance.now();
 
-  // NEW: snapshot of the *actual chasing cops* so we can restore the same ones
+  // snapshot of the exact pursuers right before exit
   let preExitCops = null;
+  // guard window to block/undo "wanted=0" wipes right after exit
+  let guardUntil = 0;
+  let guardWanted = 0;
+
   function snapshotCops(){
     try{
       const src = api.cops || [];
-      // Shallow-clone essential fields so we can reinsert same-looking pursuers
       preExitCops = src.map(c => ({
         x:c.x, y:c.y, spd:c.spd, hp:c.hp, kind:c.kind,
         facing:c.facing||'down', reinforceAt:c.reinforceAt||now()+30000
       }));
     }catch{ preExitCops=null; }
   }
-  function restoreSameCopsIfCleared(){
+  function restoreSnapshotCops(){
     try{
       if(!preExitCops || !preExitCops.length) return;
       if(!api.cops) api.cops = [];
-      // Only restore if someone wiped them right after exit
-      if(api.cops.length < preExitCops.length){
-        preExitCops.forEach(c => api.cops.push(Object.assign({}, c)));
-      }
+      // restore same chasers in-place (positions preserved)
+      api.cops.length = 0;
+      preExitCops.forEach(c => api.cops.push(Object.assign({}, c)));
     }catch{}
   }
 
-  // ---- shared sprite loader ----
+  // During the guard window, if someone zeros wanted (and thus clears cops),
+  // immediately put wanted back and restore the same cop instances.
+  IZZA.on?.('wanted-changed', ()=>{
+    if(!api) return;
+    if(now() <= guardUntil){
+      if((api.player.wanted|0) < guardWanted){
+        api.setWanted(guardWanted);
+      }
+      restoreSnapshotCops();
+      // run again on next tick to beat any late listeners
+      setTimeout(()=>{
+        if((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+        restoreSnapshotCops();
+      }, 0);
+    }
+  });
+
+  // ---- vehicle sprite loader ----
   const VEH_KINDS = ['sedan','taxi','van','pickup','sport'];
   function ensureVehicleSheets(){
     if (window.VEHICLE_SHEETS && window.VEHICLE_SHEETS.__ready) return Promise.resolve(window.VEHICLE_SHEETS);
@@ -80,7 +97,6 @@
     }catch{ return false; }
   }
 
-  // Allow B even with inventory/map; only block true modals
   function uiReallyBusy(){
     const ids = ['enterModal', 'shopModal', 'hospitalShop'];
     return ids
@@ -88,7 +104,6 @@
       .some(el=> el && el.style.display && el.style.display!=='none');
   }
 
-  function distance(ax,ay,bx,by){ return Math.hypot(ax-bx, ay-by); }
   function _dropPos(vx,vy){
     const dx = vx - api.player.x, dy = vy - api.player.y;
     const m  = Math.hypot(dx,dy) || 1;
@@ -106,7 +121,7 @@
   function nearestParkedCar(){
     let best=null, bestD=1e9, bestIdx=-1;
     parked.forEach((p,i)=>{
-      const d = distance(api.player.x,api.player.y,p.x,p.y);
+      const d = Math.hypot(api.player.x-p.x, api.player.y-p.y);
       if(d<bestD){ best=p; bestD=d; bestIdx=i; }
     });
     return (best && bestD<=HIJACK_RADIUS) ? {car:best, idx:bestIdx} : null;
@@ -164,27 +179,25 @@
   function stopDrivingAndPark(){
     if(!driving) return;
 
-    // Take a snapshot of current pursuers *before* anything else can wipe them.
+    // snapshot pursuers and arm guard BEFORE anything else can zero wanted
     snapshotCops();
-    const preWanted = api.player.wanted|0;
+    guardWanted = Math.max(1, api.player.wanted|0, (now()-lastCarCrimeAt<30000?1:0));
+    guardUntil = now() + 700; // ~0.7s guard window
 
     parkHereAndStartTimer();
     driving=false; car=null;
     if(savedWalk!=null){ api.player.speed=savedWalk; savedWalk=null; }
     IZZA.emit?.('toast',{text:'Parked. It’ll stay ~5 min.'});
 
-    // If some other system clears wanted/cops on exit, restore both quickly.
-    const targetWanted = Math.max(1, preWanted, (now()-lastCarCrimeAt<30000?1:0));
+    // immediate restore in case someone already cleared
+    if((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+    restoreSnapshotCops();
 
-    // microtask & follow-up check
+    // belt & suspenders—one more tick
     setTimeout(()=>{
-      if((api.player.wanted|0) < targetWanted){ api.setWanted(targetWanted); }
-      restoreSameCopsIfCleared(); // reinsert the *same* pursuers
+      if((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+      restoreSnapshotCops();
     }, 0);
-    setTimeout(()=>{
-      if((api.player.wanted|0) < targetWanted){ api.setWanted(targetWanted); }
-      restoreSameCopsIfCleared();
-    }, 120);
   }
 
   function onB(e){
@@ -263,7 +276,7 @@
 
   IZZA.on('ready', (a)=>{
     api=a;
-    ensureVehicleSheets(); // load once and cache globally
+    ensureVehicleSheets();
     window.addEventListener('keydown', e=>{
       if((e.key||'').toLowerCase()==='b') onB(e);
     }, {capture:true, passive:true});
@@ -280,15 +293,7 @@
   });
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
-
-    // parked cars
-    parked.forEach(p=>{
-      drawVehicleSprite(p.kind || 'sedan', p.x, p.y);
-    });
-
-    // current car
-    if(driving && car){
-      drawVehicleSprite(car.kind || 'sedan', car.x, car.y);
-    }
+    parked.forEach(p=>{ drawVehicleSprite(p.kind || 'sedan', p.x, p.y); });
+    if(driving && car){ drawVehicleSprite(car.kind || 'sedan', car.x, car.y); }
   });
 })();
