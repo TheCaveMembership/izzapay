@@ -448,13 +448,18 @@
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
-      // Implement this to actually translate:
-      // const r = await fetch('/api/translate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, from, to }) });
-      // const j = await r.json(); return j.text;
-      return text; // fallback: no translation
-    } catch { return text; }
+      const r = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, from, to })
+      });
+      const j = await r.json();
+      return (j && j.ok && typeof j.text === 'string') ? j.text : text;
+    } catch {
+      return text;
+    }
   };
-  </script>
+</script>
   <script>
   (function(){
     const LANG_KEY='izzaLang';
