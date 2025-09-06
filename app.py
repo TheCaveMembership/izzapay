@@ -150,7 +150,105 @@ def inject_globals():
         "PI_USD_RATE": PI_USD_RATE,
         "MEDIA_PREFIX": MEDIA_PREFIX,  # handy in templates if you ever need it
     }
+# -------- Auto-translate injector (global) --------
+I18N_SNIPPET = r"""
+<script>
+if(!window.__IZZA_I18N_BOOTED__){
+  window.__IZZA_I18N_BOOTED__=true;
 
+  // Same-origin proxy — main app serves /api/translate
+  window.TRANSLATE_TEXT = async (text, from, to) => {
+    try {
+      const r = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, from, to })
+      });
+      const j = await r.json();
+      return (j && j.ok && typeof j.text === 'string') ? j.text : text;
+    } catch {
+      return text;
+    }
+  };
+
+  (function(){
+    const LANG_KEY='izzaLang';
+    const to  =(localStorage.getItem(LANG_KEY)||'es').slice(0,5);
+    const from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
+    if(typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
+
+    const SKIP=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
+
+    function collect(root){
+      const nodes=[];
+      const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
+        const p=n.parentElement; if(!p||SKIP.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+        const s=n.nodeValue; if(!s||!s.trim()) return NodeFilter.FILTER_REJECT;
+        if(p.closest('[data-no-i18n="1"]')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }});
+      let n; while((n=w.nextNode())) nodes.push(n);
+      return nodes;
+    }
+
+    async function translate(nodes){
+      for(const n of nodes){
+        try{
+          const p=n.parentElement, orig=(p?.dataset?.i18nOriginal)||n.nodeValue;
+          const out=(to===from)?orig:await window.TRANSLATE_TEXT(orig,from,to);
+          if(p&&p.dataset) p.dataset.i18nOriginal=orig;
+          if(typeof out==='string'&&out&&out!==n.nodeValue) n.nodeValue=out;
+        }catch{}
+      }
+    }
+
+    async function run(){ await translate(collect(document.body)); }
+
+    const mo=new MutationObserver(muts=>{
+      const batch=[];
+      for(const m of muts){
+        if(m.type==='childList'){
+          m.addedNodes&&m.addedNodes.forEach(nd=>{
+            if(nd.nodeType===1) batch.push(...collect(nd));
+            else if(nd.nodeType===3) batch.push(nd);
+          });
+        } else if(m.type==='characterData'&&m.target&&m.target.nodeType===3){
+            batch.push(m.target);
+        }
+      }
+      if(batch.length) translate(batch);
+    });
+
+    function arm(){ try{ mo.observe(document.body,{childList:true,characterData:true,subtree:true}); }catch{} }
+
+    if(document.readyState==='loading'){
+      document.addEventListener('DOMContentLoaded',()=>{ run(); arm(); },{once:true});
+    } else { run(); arm(); }
+  })();
+}
+</script>
+"""
+
+@app.after_request
+def _inject_i18n(resp):
+    try:
+        ctype = resp.headers.get("Content-Type", "")
+        if resp.status_code == 200 and "text/html" in ctype:
+            body = resp.get_data(as_text=True)
+            # allow page-level opt-out via data-no-global-i18n="1"
+            if 'data-no-global-i18n="1"' not in body and "__IZZA_I18N_BOOTED__" not in body:
+                i = body.lower().rfind("</body>")
+                if i != -1:
+                    body = body[:i] + I18N_SNIPPET + body[i:]
+                    resp.set_data(body)
+                    try:
+                        resp.headers["Content-Length"] = str(len(body.encode("utf-8")))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return resp
+# -------- /Auto-translate injector --------
 # --- Admin ENV ---
 ADMIN_PI_USERNAME = (os.getenv("ADMIN_PI_USERNAME") or "").lstrip("@").strip()
 ADMIN_PI_WALLET   = (os.getenv("ADMIN_PI_WALLET") or "").strip()
