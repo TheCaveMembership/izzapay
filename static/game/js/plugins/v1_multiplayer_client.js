@@ -1,14 +1,12 @@
 /**
- * IZZA Multiplayer Client — v1.7.0
- * - Reliable search (button + Return + input/change/paste)
- * - Presence refresher every 20s
- * - Notifications: invites + match start
- * - Simple queue: reacts to server start payload
- * - Robust match start (works even if duel plugin not ready yet)
- * - NEW: Best-of-3 round coordinator + single authoritative winner
+ * IZZA Multiplayer Client — v1.7.2
+ * - Best-of-3 round coordinator (first to 2)
+ * - Single authoritative winner (no “both lose”)
+ * - FIX: round lifecycle state machine + watchdog to avoid freezes
+ * - FIX: hard reset between matches; no double wiring; idempotent handlers
  */
 (function(){
-  const BUILD='v1.7.0-mp-client+bo3-coordinator+authoritative-finish';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -17,21 +15,14 @@
     searchDebounceMs: 250,
   };
   const MATCH_CFG = {
-    roundsToWin: 2,        // best of 3
-    reportTimeoutMs: 4000, // network guard for round reports
+    roundsToWin: 2,          // best of 3
+    roundWatchdogMs: 8000,   // if a round is "in play" too long without an end event, nudge
+    betweenWatchdogMs: 5000, // if we reported a round end but no start of next, nudge
   };
 
-  // Pass short-lived token on all API calls
+  // --- helpers / fetch ---
   const TOK = (window.__IZZA_T__ || '').toString();
   const withTok = (p) => TOK ? p + (p.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK) : p;
-
-  let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
-  let me=null, friends=[], lobby=null, ui={};
-  let notifTimer=null;
-
-  let lobbyOpen=false, shield=null, hudEls=[], hudCssPrev=[];
-  const $  = (s,r=document)=> r.querySelector(s);
-  const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
   async function jget(p){
     const r = await fetch(withTok(CFG.base+p), {credentials:'include'});
@@ -43,7 +34,7 @@
   }
   async function jpost(p,b){
     const r = await fetch(withTok(CFG.base+p),{
-      method:'POST',credentials:'include',
+      method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(b||{})
     });
@@ -51,6 +42,14 @@
     return r.json();
   }
   const debounced=(fn,ms)=>{ let t=null,a=null; return (...args)=>{a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms);}};
+
+  let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
+  let me=null, friends=[], lobby=null, ui={};
+  let notifTimer=null;
+
+  let lobbyOpen=false, shield=null, hudEls=[], hudCssPrev=[];
+  const $  = (s,r=document)=> r.querySelector(s);
+  const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
   async function loadMe(){ me = await jget('/me'); return me; }
   async function loadFriends(){ const res=await jget('/friends/list'); friends=res.friends||[]; return friends; }
@@ -95,11 +94,49 @@
   }
   function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
 
-  // ==== MATCH / ROUND COORDINATOR ===========================================
-  // Tracks best-of-3, reports rounds, and resolves a single authoritative winner.
-  let match = null; // { id, mode, players[], myName, oppName, myWins, oppWins, roundsToWin, finished, fence }
+  // ==== MATCH / ROUNDS — state machine + watchdogs ===========================
+  // match states: 'idle' | 'in_round' | 'between' | 'finished'
+  let match = null; // { id, mode, players[], myName, oppName, myWins, oppWins, state, fence, tWatch, lastChange }
+
+  function clearWatch(){
+    if(match && match.tWatch){ clearTimeout(match.tWatch); match.tWatch=null; }
+  }
+
+  function armWatch(ms, label){
+    clearWatch();
+    if(!match) return;
+    match.tWatch = setTimeout(async()=>{
+      if(!match || match.finished) return;
+      try{
+        if(match.state==='in_round'){
+          // Nudge server: round looks stuck, ask status
+          await jpost('/match/ping',{matchId:match.id, phase:'in_round', since:match.lastChange||0});
+        }else if(match.state==='between'){
+          // Ask to start the next round if it hasn't yet
+          await jpost('/match/next',{matchId:match.id});
+        }
+      }catch{}
+      // re-arm lightly to avoid spam
+      armWatch(ms, label);
+    }, ms);
+  }
+
+  function setState(s){
+    if(!match) return;
+    match.state = s;
+    match.lastChange = Date.now();
+    if(s==='in_round')      armWatch(MATCH_CFG.roundWatchdogMs,'in');
+    else if(s==='between')  armWatch(MATCH_CFG.betweenWatchdogMs,'between');
+    else                    clearWatch();
+  }
+
+  function hardResetMatch(){
+    clearWatch();
+    match = null;
+  }
 
   function initMatch(payload){
+    hardResetMatch();
     const players = payload?.players || [];
     const myName  = me?.username || 'me';
     const oppName = players.find(p=>p!==myName) || (players[0]||'opponent');
@@ -110,70 +147,85 @@
       myWins:0, oppWins:0,
       roundsToWin: MATCH_CFG.roundsToWin,
       finished:false,
-      fence: {} // idempotency for round ids
+      fence: Object.create(null),
+      state:'between',
+      tWatch:null,
+      lastChange:Date.now()
     };
+    // Tell duel plugin how many wins we play to.
+    IZZA?.emit?.('duel-config', { roundsToWin: MATCH_CFG.roundsToWin, matchId: match.id });
   }
 
-  // Accept round end events from the duel plugin.
-  // Expected payloads (any one works):
-  //  - { roundId?, winner:'username' }
-  //  - { roundId?, winnerIsMe:true/false }
-  function onRoundEnd(data){
+  // Round started (from duel plugin or server)
+  function onRoundStart(data){
     if(!match || match.finished) return;
-    const rid = data?.roundId || ('r_'+Date.now());
-    if(match.fence[rid]) return; // idempotent
-    match.fence[rid] = 1;
-
-    const iWon = data?.winnerIsMe===true || (data?.winner && data.winner===match.myName);
-    if(iWon) match.myWins++; else match.oppWins++;
-
-    IZZA.emit?.('toast', {text:`Round over • ${match.myName}: ${match.myWins} — ${match.oppName}: ${match.oppWins}`});
-
-    // Report to server (best-effort; non-blocking)
-    (async()=>{
-      try{ await jpost('/match/round',{matchId:match.id, winner: iWon?match.myName:match.oppName, myWins:match.myWins, oppWins:match.oppWins}); }
-      catch{}
-    })();
-
-    // Check for match point
-    if(match.myWins>=match.roundsToWin || match.oppWins>=match.roundsToWin){
-      finishMatch(iWon?match.myName:match.oppName, 'local');
+    // Avoid regressing state if multiple signals arrive
+    if(match.state !== 'in_round'){
+      setState('in_round');
     }
   }
 
-  // Single finish path (trust server if it speaks).
+  // Round ended (from duel plugin or server)
+  function onRoundEnd(data){
+    if(!match || match.finished) return;
+    // idempotency for round IDs
+    const rid = (data && data.roundId) || ('r_'+Date.now());
+    if(match.fence[rid]) return;
+    match.fence[rid]=1;
+
+    // Accept either winner name or winnerIsMe
+    const iWon = data?.winnerIsMe===true || (data?.winner && data.winner===match.myName);
+    if(iWon) match.myWins++; else match.oppWins++;
+
+    IZZA.emit?.('toast', {text:`Round • ${match.myName}: ${match.myWins} — ${match.oppName}: ${match.oppWins}`});
+
+    // Report (best-effort) & go to BETWEEN state
+    (async()=>{ try{
+      await jpost('/match/round',{matchId:match.id, roundId:rid, winner: iWon?match.myName:match.oppName, myWins:match.myWins, oppWins:match.oppWins});
+    }catch{} })();
+
+    if(match.myWins>=match.roundsToWin || match.oppWins>=match.roundsToWin){
+      finishMatch(iWon?match.myName:match.oppName, 'local');
+    }else{
+      setState('between');
+      // polite nudge to server to start next round (does nothing if server already will)
+      (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
+    }
+  }
+
+  // Single finish path
   function finishMatch(winnerName, source){
     if(!match || match.finished) return;
     match.finished = true;
+    setState('finished');
 
     const loserName = (winnerName===match.myName) ? match.oppName : match.myName;
 
-    // Tell duel plugin & HUD — ONE clear winner.
     IZZA.emit?.('mp-finish', { matchId:match.id, winner:winnerName, loser:loserName, myWins:match.myWins, oppWins:match.oppWins });
 
-    // Inform server (best-effort). If server responds later via WS/notifications,
-    // we will ignore since we're already finished.
-    (async()=>{
-      try{ await jpost('/match/finish',{matchId:match.id, winner:winnerName}); }catch{}
-    })();
+    (async()=>{ try{ await jpost('/match/finish',{matchId:match.id, winner:winnerName}); }catch{} })();
 
-    // Friendly toast
     const msg = (winnerName===match.myName) ? 'You won the match!' : `${winnerName} won the match`;
-    IZZA.emit?.('toast', {text: msg});
+    toast(msg);
   }
 
-  // Wire duel plugin hooks once.
+  // Wire duel hooks exactly once
   (function wireDuelHooksOnce(){
-    if(!window.IZZA || !IZZA.on) return;
-    let wired=false;
-    IZZA.on('ready', function(){
-      if(wired) return; wired=true;
-      // Round end from duel plugin
-      IZZA.on('duel-round-end', (_,payload)=> onRoundEnd(payload));
-      // If duel plugin ever declares a full match winner explicitly, honor it.
-      IZZA.on('duel-match-finish', (_,payload)=>{
-        if(payload && payload.winner) finishMatch(payload.winner, 'duel');
-      });
+    if(!window.IZZA) return;
+    if(wireDuelHooksOnce._wired) return;
+    wireDuelHooksOnce._wired = true;
+
+    IZZA.on?.('ready', function(){
+      // Start / end signals from duel plugin
+      IZZA.on?.('duel-round-start', (_,_payload)=> onRoundStart(_payload||{}));
+      IZZA.on?.('duel-round-end',   (_,_payload)=> onRoundEnd(_payload||{}));
+      IZZA.on?.('duel-match-finish',(_,_payload)=>{ if(_payload && _payload.winner) finishMatch(_payload.winner, 'duel'); });
+
+      // In case match was queued before IZZA ready
+      if(window.__MP_START_PENDING){
+        const p = window.__MP_START_PENDING; delete window.__MP_START_PENDING;
+        startMatch(p);
+      }
     });
   })();
   // ==========================================================================
@@ -181,20 +233,23 @@
   // ---- match start helper (robust) ----
   function startMatch(payload){
     try{
-      if(ui.queueMsg) ui.queueMsg.textContent='';
-      if(lobby) lobby.style.display='none';
+      ui.queueMsg && (ui.queueMsg.textContent='');
+      lobby && (lobby.style.display='none');
 
-      // initialize best-of-3 coordinator
       initMatch(payload);
 
-      // Hand off to duel system; include roundsToWin so UI can show BO3
-      const startPayload = Object.assign({}, payload, { roundsToWin: MATCH_CFG.roundsToWin });
+      const startPayload = Object.assign({}, payload, { roundsToWin: MATCH_CFG.roundsToWin, matchId: match.id });
       if(window.IZZA && typeof IZZA.emit==='function'){
         IZZA.emit('mp-start', startPayload);
       }else{
         window.__MP_START_PENDING = startPayload;
       }
       toast('Match starting…');
+
+      // We begin between rounds; duel plugin should emit the first duel-round-start soon.
+      setState('between');
+      // Nudge server just in case
+      (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
     }catch(e){
       console.warn('startMatch failed', e);
       window.__MP_START_PENDING = payload;
@@ -205,12 +260,12 @@
     try{
       lastQueueMode=mode;
       const nice= mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
-      if(ui.queueMsg) ui.queueMsg.textContent=`Queued for ${nice}… (waiting for match)`;
+      ui.queueMsg && (ui.queueMsg.textContent=`Queued for ${nice}… (waiting for match)`);
       const res = await jpost('/queue',{mode});
       if(res && res.start){ startMatch(res.start); }
-    }catch(e){ if(ui.queueMsg) ui.queueMsg.textContent=''; toast('Queue error: '+e.message); }
+    }catch(e){ ui.queueMsg && (ui.queueMsg.textContent=''); toast('Queue error: '+e.message); }
   }
-  async function dequeue(){ try{ await jpost('/dequeue'); }catch{} if(ui.queueMsg) ui.queueMsg.textContent=''; lastQueueMode=null; }
+  async function dequeue(){ try{ await jpost('/dequeue'); }catch{} ui.queueMsg && (ui.queueMsg.textContent=''); lastQueueMode=null; }
 
   // --- WS (now also listens for round/finish authority) ---
   function connectWS(){
@@ -223,31 +278,35 @@
     ws.addEventListener('message',(evt)=>{
       let msg=null; try{ msg=JSON.parse(evt.data);}catch{}
       if(!msg) return;
-      if(msg.type==='presence'){ updatePresence(msg.user, !!msg.active); }
-      else if(msg.type==='queue.update' && ui.queueMsg){
+
+      if(msg.type==='presence'){
+        updatePresence(msg.user, !!msg.active);
+
+      }else if(msg.type==='queue.update' && ui.queueMsg){
         const nice= msg.mode==='br10'?'Battle Royale (10)': msg.mode==='v1'?'1v1': msg.mode==='v2'?'2v2':'3v3';
         const eta= msg.estMs!=null?` ~${Math.ceil(msg.estMs/1000)}s`:''; ui.queueMsg.textContent=`Queued for ${nice}… (${msg.pos||1} in line${eta})`;
+
       }else if(msg.type==='match.found'){
         startMatch({mode:msg.mode,matchId:msg.matchId,players:msg.players});
+
+      }else if(msg.type==='match.round.start'){
+        onRoundStart(msg); // authoritative start
+
       }else if(msg.type==='match.round'){
-        // Authoritative round broadcast (optional)
-        if(match && !match.finished){
-          const w = msg.winner;
-          if(w===match.myName) match.myWins++; else if(w===match.oppName) match.oppWins++;
-          IZZA.emit?.('toast', {text:`Round update • ${match.myName}: ${match.myWins} — ${match.oppName}: ${match.oppWins}`});
-          if(match.myWins>=match.roundsToWin || match.oppWins>=match.roundsToWin){
-            finishMatch(w, 'server');
-          }
-        }
+        // authoritative round result
+        if(!match || match.finished) return;
+        if(msg.matchId && match.id !== msg.matchId) return;
+        const w = msg.winner;
+        onRoundEnd({ roundId: msg.roundId || ('ws_'+Date.now()), winner: w });
+
       }else if(msg.type==='match.finish'){
-        // Single authoritative winner from server
-        if(msg.matchId && match && match.id!==msg.matchId) return; // different match
+        if(msg.matchId && match && match.id!==msg.matchId) return;
         if(msg.winner) finishMatch(msg.winner, 'server');
       }
     });
   }
 
-  // --- typing guard + shield (unchanged) ---
+  // --- typing shield (unchanged) ---
   function isLobbyEditor(el){ if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   function guardKeyEvent(e){ if(!isLobbyEditor(e.target)) return; const k=(e.key||'').toLowerCase(); if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); } }
   ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
@@ -310,7 +369,7 @@
     });
     IZZA.on('ui-modal-close', function(e){ if(e && e.id==='mpLobby') removeShield(); });
 
-    // If a match payload was stashed before IZZA was ready, start it now.
+    // If a match payload was stashed before IZZA was ready, start it now (safety, though we also wire inside hooks).
     IZZA.on('ready', function(){
       if(window.__MP_START_PENDING){
         const p = window.__MP_START_PENDING; delete window.__MP_START_PENDING;
@@ -422,16 +481,17 @@
       // presence refresher
       setInterval(async () => { try { await jget('/me'); } catch{} }, 20000);
 
-      // notifications poll: invites + direct start + authoritative finish/rounds
+      // notifications poll
       const pull=async()=>{
         try{
           const n = await jget('/notifications');
           if(n && n.start){ startMatch(n.start); return; }
-          if(n && n.round && match && !match.finished){
-            // optional polling channel for round updates
-            onRoundEnd({ roundId:n.round.roundId, winner:n.round.winner });
+          if(n && n.round){
+            // optional polling channel
+            if(n.round.type==='start') onRoundStart(n.round);
+            else onRoundEnd({ roundId:n.round.roundId, winner:n.round.winner });
           }
-          if(n && n.finish && n.finish.matchId && (!match || match.id===n.finish.matchId)){
+          if(n && n.finish && (!match || !n.finish.matchId || n.finish.matchId===match.id)){
             if(n.finish.winner) finishMatch(n.finish.winner, 'server');
           }
           if(n && Array.isArray(n.invites) && n.invites.length){
