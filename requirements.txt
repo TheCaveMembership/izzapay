@@ -1,7 +1,7 @@
 flask==3.0.3
 libretranslate==1.6.0
 argostranslate==1.9.6
-argostranslate-files==1.1.0
+argostranslate-files @ git+https://github.com/argosopentech/argostranslate-files@v1.1.0
 waitress>=2.1
 Pillow>=10.0.0
 python-dotenv==1.0.1
