@@ -24,6 +24,8 @@ APP_NAME      = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL  = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN   = APP_BASE_URL
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
+# NEW: LibreTranslate endpoint for browser-safe proxying
+LIBRE_EP = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
 
 # Optional: estimated USD per π to display conversion on /orders (0 disables)
 try:
@@ -477,6 +479,35 @@ def pi_me():
     except Exception:
         return {"ok": False, "error": "server_error"}, 500
 
+# NEW: Same-origin proxy to your LibreTranslate service
+@app.post("/api/translate")
+def api_translate():
+    """
+    Accepts JSON: { "text": "...", "from": "auto"|lang, "to": "lang" }
+    Returns: { ok:true, text:"...", source, target }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        q     = (data.get("text") or data.get("q") or "").strip()
+        src   = (data.get("from") or data.get("source") or "auto").strip() or "auto"
+        tgt   = (data.get("to")   or data.get("target") or "en").strip()   or "en"
+        if not q:
+            return {"ok": False, "error": "empty_text"}, 400
+
+        r = requests.post(
+            f"{LIBRE_EP}/translate",
+            json={"q": q, "source": src, "target": tgt, "format": "text"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "error": "upstream_error", "status": r.status_code}, 502
+
+        j = r.json()
+        out = j.get("translatedText") or j.get("translated_text") or q
+        return {"ok": True, "text": out, "source": src, "target": tgt}
+    except Exception:
+        return {"ok": False, "error": "server_error"}, 500
+
 from urllib.parse import urlparse
 
 def _safe_next_path(raw):
@@ -689,7 +720,7 @@ def merchant_setup_form():
     u = require_user()
     if isinstance(u, Response): return u
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE owner_user_id=?", (u["id"]),).fetchone()
     if m:
         tok = get_bearer_token_from_request()
         return redirect(f"/merchant/{m['slug']}/items{('?t='+tok) if tok else ''}")
@@ -1001,7 +1032,7 @@ def cart_view(cid):
     with conn() as cx:
         cart = cx.execute("SELECT * FROM carts WHERE id=?", (cid,)).fetchone()
         if not cart: abort(404)
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
           SELECT cart_items.id as cid, cart_items.qty, items.*
           FROM cart_items JOIN items ON items.id=cart_items.item_id
@@ -1040,7 +1071,7 @@ def checkout_cart(cid):
         if not cart:
             abort(404)
 
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (cart["merchant_id"]),).fetchone()
         rows = cx.execute("""
             SELECT cart_items.qty, items.*
             FROM cart_items
@@ -1849,7 +1880,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
