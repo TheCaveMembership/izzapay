@@ -259,7 +259,7 @@ I18N_SNIPPET = r"""
 if(!window.__IZZA_I18N_BOOTED__){
   window.__IZZA_I18N_BOOTED__=true;
 
-  // Same-origin proxy — resolves to /api/translate (or /izza-game/api/translate when inside game)
+  // Same-origin proxy — main app serves /api/translate
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
       const r = await fetch('/api/translate', {
@@ -280,16 +280,54 @@ if(!window.__IZZA_I18N_BOOTED__){
     const from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
     if(typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
 
-    const SKIP=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
+    // Elements to always skip
+    const SKIP_TAGS=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
+
+    // --- Sensitive text detectors ---
+    function isLikelyStellarPubKey(s){
+      // Strip whitespace inside (some UIs wrap/space long keys)
+      const t=s.replace(/\s+/g,'').trim();
+      // G + 55 chars in Base32 alphabet used by Stellar (A-Z, 2-7)
+      return /^G[A-Z2-7]{55}$/.test(t);
+    }
+    function isLongBase32ish(s){
+      // Long runs of uppercase letters/digits typical of keys (30+)
+      const t=s.replace(/\s+/g,'').trim();
+      return /^[A-Z0-9]{30,}$/.test(t);
+    }
+    function isLongHexHash(s){
+      // 40+ hex characters (common for hashes)
+      const t=s.replace(/\s+/g,'').trim();
+      return /^[a-fA-F0-9]{40,}$/.test(t);
+    }
+    function isSensitiveText(s){
+      if(!s) return false;
+      // Keep it cheap for short strings:
+      if(s.length<10) return false;
+      return isLikelyStellarPubKey(s) || isLongBase32ish(s) || isLongHexHash(s);
+    }
 
     function collect(root){
       const nodes=[];
-      const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
-        const p=n.parentElement; if(!p||SKIP.has(p.tagName)) return NodeFilter.FILTER_REJECT;
-        const s=n.nodeValue; if(!s||!s.trim()) return NodeFilter.FILTER_REJECT;
-        if(p.closest('[data-no-i18n="1"]')) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }});
+      const w=document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_TEXT,
+        { acceptNode(n){
+            const p=n.parentElement;
+            if(!p) return NodeFilter.FILTER_REJECT;
+            if(SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+            if(p.closest('[data-no-i18n="1"]')) return NodeFilter.FILTER_REJECT;
+
+            const s=n.nodeValue;
+            if(!s || !s.trim()) return NodeFilter.FILTER_REJECT;
+
+            // NEW: skip anything that looks like a key/hash
+            if(isSensitiveText(s)) return NodeFilter.FILTER_REJECT;
+
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
       let n; while((n=w.nextNode())) nodes.push(n);
       return nodes;
     }
@@ -297,10 +335,15 @@ if(!window.__IZZA_I18N_BOOTED__){
     async function translate(nodes){
       for(const n of nodes){
         try{
-          const p=n.parentElement, orig=(p?.dataset?.i18nOriginal)||n.nodeValue;
+          const p=n.parentElement;
+          // Double-check at translate-time too (if text changed)
+          if(!p || p.closest('[data-no-i18n="1"]')) continue;
+          if(isSensitiveText(n.nodeValue)) continue;
+
+          const orig=(p?.dataset?.i18nOriginal) ?? n.nodeValue;
           const out=(to===from)?orig:await window.TRANSLATE_TEXT(orig,from,to);
-          if(p&&p.dataset) p.dataset.i18nOriginal=orig;
-          if(typeof out==='string'&&out&&out!==n.nodeValue) n.nodeValue=out;
+          if(p && p.dataset && !p.dataset.i18nOriginal) p.dataset.i18nOriginal=orig;
+          if(typeof out==='string' && out && out!==n.nodeValue) n.nodeValue=out;
         }catch{}
       }
     }
@@ -311,12 +354,12 @@ if(!window.__IZZA_I18N_BOOTED__){
       const batch=[];
       for(const m of muts){
         if(m.type==='childList'){
-          m.addedNodes&&m.addedNodes.forEach(nd=>{
+          m.addedNodes && m.addedNodes.forEach(nd=>{
             if(nd.nodeType===1) batch.push(...collect(nd));
             else if(nd.nodeType===3) batch.push(nd);
           });
-        } else if(m.type==='characterData'&&m.target&&m.target.nodeType===3){
-            batch.push(m.target);
+        } else if(m.type==='characterData' && m.target && m.target.nodeType===3){
+          batch.push(m.target);
         }
       }
       if(batch.length) translate(batch);
