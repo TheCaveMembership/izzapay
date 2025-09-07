@@ -11,9 +11,13 @@
  * - Friend requests (send/accept) + minimal UI
  * - Notification bell with unread badge (friend requests + battle invites)
  * - Friends List toggle popup (scrollable)
+ *
+ * PATCH (overlay fix):
+ * - Bell & notifications dropdown rendered as GLOBAL overlays (fixed; high z-index),
+ *   not inside the Play Modes modal — so they sit above the lobby and do not close with it.
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -26,6 +30,9 @@
     roundWatchdogMs: 8000,   // if a round is "in play" too long without an end event, nudge
     betweenWatchdogMs: 5000, // if we reported a round end but no start of next, nudge
   };
+
+  // === overlay z-indexes (ensure we sit above lobby/shield) ==================
+  const Z = { shield:1002, lobby:1003, bell:1011, drop:1012 };
 
   // --- helpers / fetch ---
   const TOK = (window.__IZZA_T__ || '').toString();
@@ -82,7 +89,6 @@
   function makeRow(u, source='search'){
     const row=document.createElement('div');
     row.className='friend';
-    // label under avatar was "Friends"; we don't rely on that now; we render rows directly
 
     const alreadyFriend = isFriend(u.username);
     const activeLabel   = u.active ? 'Active' : 'Offline';
@@ -108,10 +114,8 @@
     });
     row.querySelector('button[data-add]')?.addEventListener('click', async ()=>{
       try{
-        // tolerant payload; backend may accept toUsername or username
         await jpost('/friends/request',{ toUsername:u.username, username:u.username });
         toast('Friend request sent to '+u.username);
-        // Optionally disable button
         const b=row.querySelector('button[data-add]'); if(b){ b.disabled=true; b.textContent='Requested'; }
       }catch(e){ toast('Friend request failed: '+e.message); }
     });
@@ -165,7 +169,7 @@
   function initMatch(payload){
     hardResetMatch();
     const players = payload?.players || [];
-    const myName  = me?.username || 'me';
+       const myName  = me?.username || 'me';
     const oppName = players.find(p=>p!==myName) || (players[0]||'opponent');
     match = {
       id: payload?.matchId || payload?.id || ('m_'+Math.random().toString(36).slice(2)),
@@ -349,7 +353,7 @@
     installShield._key = (ev)=>{ if(lobbyOpen && keyIsABI(ev)) swallow(ev); };
     ['keydown','keypress','keyup'].forEach(t=> window.addEventListener(t, installShield._key, {capture:true}));
     shield=document.createElement('div');
-    Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:1002, background:'transparent', touchAction:'none'});
+    Object.assign(shield.style,{position:'fixed', inset:'0', zIndex:Z.shield, background:'transparent', touchAction:'none'});
     document.body.appendChild(shield);
     setTimeout(function(){
       const node=document.getElementById('mpLobby');
@@ -399,89 +403,64 @@
   // ---------- SEARCH state ----------
   let searchRunId = 0;
 
-  // NEW: Notification UI helpers
-  function ensureNotifUI(){
-    if(!lobby) return;
+  // ===== GLOBAL notification bell & dropdown (fixed overlays) ================
+  function ensureBellOverlay(){
+    if(ui.notifBell && ui.notifBadge && ui.notifDropdown) return;
 
-    // Header actions host
-    let header = lobby.querySelector('.mp-header-actions');
-    if(!header){
-      header = document.createElement('div');
-      header.className = 'mp-header-actions';
-      Object.assign(header.style, { display:'flex', gap:'8px', alignItems:'center', marginLeft:'auto' });
-      // try placing at top of lobby
-      (lobby.querySelector('.mp-head') || lobby).appendChild(header);
-    }
+    // bell
+    const bell = document.createElement('button');
+    bell.id = 'mpNotifBell';
+    bell.title = 'Notifications';
+    bell.textContent = '🔔';
+    Object.assign(bell.style, {
+      position:'fixed', right:'14px', top:'14px', zIndex:Z.bell,
+      width:'34px', height:'34px', borderRadius:'18px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    bell.addEventListener('click', toggleNotifDropdown);
+    document.body.appendChild(bell);
 
-    // Friends list toggle
-    if(!ui.friendsToggle){
-      const b = document.createElement('button');
-      b.id = 'mpFriendsToggle';
-      b.className = 'mp-small';
-      b.textContent = 'Friends';
-      b.title = 'Open your friends list';
-      b.addEventListener('click', toggleFriendsPopup);
-      header.appendChild(b);
-      ui.friendsToggle = b;
-    }
+    // badge
+    const badge = document.createElement('span');
+    badge.id='mpNotifBadge';
+    Object.assign(badge.style, {
+      position:'fixed', right:'10px', top:'8px', zIndex:Z.drop,
+      minWidth:'16px', height:'16px', borderRadius:'8px',
+      background:'#e11d48', color:'#fff', fontSize:'11px',
+      display:'none', alignItems:'center', justifyContent:'center',
+      padding:'0 4px', lineHeight:'16px'
+    });
+    document.body.appendChild(badge);
 
-    // Notif bell
-    if(!ui.notifWrap){
-      const wrap = document.createElement('div');
-      wrap.style.position='relative';
+    // dropdown
+    const dd = document.createElement('div');
+    dd.id='mpNotifDropdown';
+    Object.assign(dd.style, {
+      position:'fixed', right:'10px', top:'54px', zIndex:Z.drop,
+      background:'#0f1522', color:'#e8eef7',
+      border:'1px solid #2a3550', borderRadius:'12px',
+      minWidth:'280px', maxWidth:'92vw', maxHeight:'300px', overflow:'auto',
+      display:'none', boxShadow:'0 10px 24px rgba(0,0,0,.45)'
+    });
+    document.body.appendChild(dd);
 
-      const bell = document.createElement('button');
-      bell.id = 'mpNotifBell';
-      bell.className = 'mp-small';
-      bell.textContent = '🔔';
-      bell.title = 'Notifications';
-      bell.addEventListener('click', toggleNotifDropdown);
-
-      const badge = document.createElement('span');
-      badge.id='mpNotifBadge';
-      Object.assign(badge.style, {
-        position:'absolute', right:'-6px', top:'-6px',
-        minWidth:'16px', height:'16px', borderRadius:'8px',
-        background:'#ff4d4f', color:'#fff',
-        display:'none', alignItems:'center', justifyContent:'center',
-        fontSize:'10px', padding:'0 4px', lineHeight:'16px'
-      });
-
-      // dropdown
-      const dd = document.createElement('div');
-      dd.id='mpNotifDropdown';
-      Object.assign(dd.style, {
-        position:'absolute', right:'0', top:'36px', zIndex:1003,
-        background:'#0f1522', border:'1px solid #2a3550', borderRadius:'10px',
-        minWidth:'260px', maxHeight:'260px', overflow:'auto', display:'none', boxShadow:'0 8px 24px rgba(0,0,0,.35)'
-      });
-
-      wrap.appendChild(bell);
-      wrap.appendChild(badge);
-      wrap.appendChild(dd);
-      header.appendChild(wrap);
-
-      ui.notifWrap = wrap;
-      ui.notifBell = bell;
-      ui.notifBadge = badge;
-      ui.notifDropdown = dd;
-    }
-
-    // Rename label to "Search All Players" if host exists
-    const label = $('#mpFriendsLabel', lobby);
-    if(label) label.textContent = 'Search All Players';
-
-    // Also hint in status line
-    if(ui.searchStatus && !ui.searchStatus._relabelled){
-      ui.searchStatus.textContent = 'Search All Players — type a name and press Search or Return';
-      ui.searchStatus._relabelled = true;
-    }
+    ui.notifBell = bell;
+    ui.notifBadge = badge;
+    ui.notifDropdown = dd;
   }
 
+  // NEW: Notification UI helpers (uses global overlay now)
   function renderNotifDropdown(){
     if(!ui.notifDropdown) return;
     const host = ui.notifDropdown;
     host.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.textContent = 'Notifications';
+    header.style.cssText='padding:10px 12px;font-weight:700;border-bottom:1px solid #24324e';
+    host.appendChild(header);
 
     if(!notifications.items.length){
       const empty = document.createElement('div');
@@ -493,7 +472,7 @@
 
     notifications.items.forEach(n=>{
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px; border-bottom:1px solid #2a3550;';
+      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border-bottom:1px solid #18233a;';
       const label = document.createElement('div');
       label.style.cssText='font-size:13px; line-height:1.3;';
 
@@ -508,7 +487,6 @@
           try{
             await jpost('/friends/accept', { requestId:n.id, from:n.from, username:n.from });
             toast('Friend added: '+n.from);
-            // update local friends & UI
             try{ await loadFriends(); repaintFriends(); }catch{}
             removeNotification(n.id);
           }catch(e){ toast('Accept failed: '+e.message); }
@@ -518,13 +496,9 @@
         decline.className='mp-small ghost';
         decline.textContent='Decline';
         decline.addEventListener('click', async ()=>{
-          try{
-            await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from });
-            removeNotification(n.id);
-          }catch(e){
-            // If no decline route, just remove locally
-            removeNotification(n.id);
-          }
+          try{ await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from }); }
+          catch(e){}
+          removeNotification(n.id);
         });
 
         actions.appendChild(accept); actions.appendChild(decline);
@@ -547,8 +521,7 @@
         decline.className='mp-small ghost';
         decline.textContent='Decline';
         decline.addEventListener('click', async ()=>{
-          try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }
-          catch(e){}
+          try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }catch(e){}
           removeNotification(n.id);
         });
 
@@ -565,21 +538,24 @@
 
   function setUnread(n){
     notifications.unread = Math.max(0, n|0);
-    if(!ui.notifBadge || !ui.notifBell) return;
+    ensureBellOverlay();
     if(notifications.unread>0){
       ui.notifBadge.style.display='flex';
       ui.notifBadge.textContent = String(notifications.unread);
-      ui.notifBell.style.borderColor = '#ff4d4f';
+      ui.notifBell.style.background = '#2b1720';
+      ui.notifBell.style.borderColor = '#7d223a';
+      ui.notifBell.style.color = '#ffd7df';
     }else{
       ui.notifBadge.style.display='none';
-      ui.notifBell.style.borderColor = '';
+      ui.notifBell.style.background = '#162134';
+      ui.notifBell.style.borderColor = '#2a3550';
+      ui.notifBell.style.color = '#cfe0ff';
     }
   }
   function addNotification(n){
     notifications.items.unshift(n);
     setUnread(notifications.unread+1);
     if(ui.notifDropdown && ui.notifDropdown.style.display!=='none'){
-      // if open, re-render and mark as read
       renderNotifDropdown();
       markAllNotificationsRead();
     }
@@ -592,7 +568,7 @@
     setUnread(0);
   }
   function toggleNotifDropdown(){
-    if(!ui.notifDropdown) return;
+    ensureBellOverlay();
     const vis = (ui.notifDropdown.style.display!=='none');
     ui.notifDropdown.style.display = vis ? 'none' : 'block';
     if(!vis){
@@ -601,13 +577,13 @@
     }
   }
 
-  // Friends popup
+  // Friends popup (global overlay)
   function ensureFriendsPopup(){
     if(ui.friendsPopup) return ui.friendsPopup;
     const pop = document.createElement('div');
     pop.id='mpFriendsPopup';
     Object.assign(pop.style, {
-      position:'fixed', right:'14px', top:'82px', zIndex:1003,
+      position:'fixed', right:'14px', top:'82px', zIndex:Z.drop,
       background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
       width:'320px', maxHeight:'340px', overflow:'auto', display:'none',
       boxShadow:'0 10px 28px rgba(0,0,0,.35)'
@@ -680,6 +656,37 @@
     const vis = (ui.friendsPopup.style.display!=='none');
     ui.friendsPopup.style.display = vis ? 'none' : 'block';
     if(!vis) renderFriendsPopup();
+  }
+
+  // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
+  function ensureNotifUI(){
+    // Ensure global overlays exist (bell/badge/dropdown)
+    ensureBellOverlay();
+
+    // Rename label to "Search All Players" if host exists
+    if(lobby){
+      const label = $('#mpFriendsLabel', lobby);
+      if(label) label.textContent = 'Search All Players';
+
+      // Also hint in status line once
+      if(ui.searchStatus && !ui.searchStatus._relabelled){
+        ui.searchStatus.textContent = 'Search All Players — type a name and press Search or Return';
+        ui.searchStatus._relabelled = true;
+      }
+
+      // Add Friends toggle button into lobby header (just opens global popup)
+      if(!ui.friendsToggle){
+        const head = lobby.querySelector('.mp-head') || lobby;
+        const btn = document.createElement('button');
+        btn.id='mpFriendsToggle';
+        btn.className='mp-small';
+        btn.textContent='Friends';
+        btn.style.marginLeft='8px';
+        btn.addEventListener('click', toggleFriendsPopup);
+        head.appendChild(btn);
+        ui.friendsToggle = btn;
+      }
+    }
   }
 
   function mountLobby(host){
@@ -762,7 +769,7 @@
     });
     ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
-    // NEW: Upgrade the header with our actions
+    // NEW: Upgrade the header with our actions / rename labels
     ensureNotifUI();
 
     paintRanks(); paintFriends(friends);
@@ -792,18 +799,16 @@
         if(n.finish.winner) finishMatch(n.finish.winner, 'server');
       }
 
-      // battle invites (existing shape)
+      // battle invites
       if(n && Array.isArray(n.invites) && n.invites.length){
         const inv = n.invites[0];
         if(pullNotifications._lastInviteId !== inv.id){
           pullNotifications._lastInviteId = inv.id;
-          // add to notifications rather than immediate confirm (per your UX spec)
           addNotification({ id:inv.id, type:'battle', from:inv.from, mode:inv.mode });
         }
       }
 
-      // NEW: friend requests support (if backend supplies)
-      // Accept multiple shapes: {friendRequests:[{id,from}]} or {requests:[...]} or single {friend:{...}}
+      // optional friend requests (any supported shape)
       const reqs = (n && (n.friendRequests || n.requests)) || (n && n.friend ? [n.friend] : []);
       if(Array.isArray(reqs)){
         reqs.forEach(fr=>{
@@ -819,6 +824,9 @@
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
+
+      // make sure global bell exists immediately
+      ensureBellOverlay();
 
       // presence refresher
       setInterval(async () => { try { await jget('/me'); } catch{} }, 20000);
