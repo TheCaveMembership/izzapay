@@ -1,6 +1,6 @@
 // v1_area_chat.plugin.js — per-area chat (duel/trade centre) + bubbles + feed + language toggle + translation hook
 (function(){
-  const BUILD='v1.5-area-chat+i18n-hook+typing-guard+sendbtn+bubble-posfix+uname-normalize';
+  const BUILD='v1.4-area-chat+i18n-hook+typing-guard+sendbtn+bubble-rAF-fix+uname-normalize+test-hook+z3000';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- lightweight MP adapter (works with any of your 3 buses) ----
@@ -16,7 +16,7 @@
     api.on = function(type, cb){
       try{
         if (window.REMOTE_PLAYERS_API?.on) return window.REMOTE_PLAYERS_API.on(type, cb);
-        if (window.RemotePlayers?.on)      return window.RemotePlayers.on(type, cb);
+        if (window.RemotePlayers?.on)      return RemotePlayers.on(type, cb);
         if (window.IZZA?.on)               return IZZA.on('mp-'+type, (_,{data})=>cb(data));
       }catch(e){ console.warn('[CHAT] on failed', e); }
     };
@@ -126,7 +126,7 @@
     Chat.input.addEventListener('blur',  ()=> setTyping(false));
   }
 
-  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game WITHOUT blocking typing) ----
+  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game) ----
   function isEditable(el){
     return !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
   }
@@ -136,7 +136,6 @@
     const k = (e.key||'').toLowerCase();
     const block = new Set(['a','b','i',' ','arrowup','arrowdown','arrowleft','arrowright','escape']);
     if(block.has(k) || k.length===1){
-      // Do NOT call preventDefault here; we want the input to receive the character.
       e.stopImmediatePropagation();
       e.stopPropagation();
     }
@@ -167,7 +166,7 @@
     return `${hh}:${mm}`;
   }
   function escapeHTML(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-  const norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
+  const _norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
 
   function appendFeedLine({from,text,ts,meta}){
     if(!Chat.feed) return;
@@ -180,13 +179,10 @@
     Chat.feed.scrollTop = Chat.feed.scrollHeight;
   }
 
-  // ---- floating bubbles above heads (fixed to viewport; high z-index) ----
+  // ---- floating bubbles above heads (DOM overlay, fixed to viewport) ----
   const Bubbles = new Map(); // key = normalized username -> {el, tDie}
-  const _norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
 
-  function _gameCanvas(){
-    return document.getElementById('game') || null;
-  }
+  function _gameCanvas(){ return document.getElementById('game') || null; }
 
   function _findPeerByKey(key){
     const pools = [
@@ -201,40 +197,6 @@
       }
     }
     return null;
-  }
-
-  function showBubble(unameRaw, text){
-    try{
-      const key = _norm(unameRaw);
-      if (!key) return;
-
-      let b = Bubbles.get(key);
-      if (!b){
-        const el = document.createElement('div');
-        Object.assign(el.style, {
-          position:'fixed',
-          zIndex: 1000,
-          pointerEvents:'none',
-          background:'rgba(8,12,20,.92)',
-          color:'#e8eef7',
-          border:'1px solid #2a3550',
-          borderRadius:'10px',
-          padding:'4px 8px',
-          fontSize:'12px',
-          maxWidth:'60vw',
-          whiteSpace:'pre-wrap',
-          transform:'translateZ(0)',
-          transition:'opacity 160ms linear',
-          opacity:'1'
-        });
-        document.body.appendChild(el);
-        b = { el, tDie: 0 };
-        Bubbles.set(key, b);
-      }
-      b.el.textContent = text;
-      b.tDie = performance.now() + 4000; // visible ~4s
-      _positionBubbleNow(key, b.el);     // snap into place for local echo
-    }catch(e){}
   }
 
   function _positionBubbleNow(key, el){
@@ -257,21 +219,64 @@
       sy = (p.y - api.camera.y) * scale;
     }
 
-    const left = rect.left + sx - el.offsetWidth/2 + 16; // center on sprite
-    const top  = rect.top  + sy - 36;                    // above head
+    // Wait one frame if width is 0 (layout not settled yet)
+    if (!el.offsetWidth){
+      requestAnimationFrame(()=> _positionBubbleNow(key, el));
+      return;
+    }
+
+    // convert sprite-space → viewport; center and lift above head
+    const left = rect.left + sx - el.offsetWidth/2 + 16; // center over ~32px sprite
+    const top  = rect.top  + sy - 36;                    // lift above head
     el.style.left = Math.round(left) + 'px';
     el.style.top  = Math.round(top)  + 'px';
     el.style.opacity = '1';
   }
 
+  function showBubble(unameRaw, text){
+    try{
+      const key = _norm(unameRaw);
+      if (!key) return;
+
+      let b = Bubbles.get(key);
+      if (!b){
+        const el = document.createElement('div');
+        Object.assign(el.style, {
+          position:'fixed',
+          zIndex: 3000,              // above HUD/joystick/map
+          pointerEvents:'none',
+          background:'rgba(8,12,20,.92)',
+          color:'#e8eef7',
+          border:'1px solid #2a3550',
+          borderRadius:'10px',
+          padding:'4px 8px',
+          fontSize:'12px',
+          maxWidth:'60vw',
+          whiteSpace:'pre-wrap',
+          transform:'translateZ(0)',
+          transition:'opacity 160ms linear',
+          opacity:'0'
+        });
+        document.body.appendChild(el);
+        b = { el, tDie: 0 };
+        Bubbles.set(key, b);
+      }
+      b.el.textContent = text;
+      b.tDie = performance.now() + 4000; // ~4s lifetime
+
+      // Ensure placement happens *after* layout
+      requestAnimationFrame(()=> _positionBubbleNow(key, b.el));
+    }catch(e){ console.warn('[CHAT] bubble fail', e); }
+  }
+
   // follow owners and cull when expired
-  IZZA.on?.('render-post', ()=>{
+  IZZA?.on?.('render-post', ()=>{
     try{
       if (!IZZA?.api?.ready || !_gameCanvas()) return;
       const now = performance.now();
 
       for (const [key, b] of Array.from(Bubbles.entries())){
-        _positionBubbleNow(key, b.el);
+        _positionBubbleNow(key, b.el); // keep stuck to head while moving/camera panning
         if (now > b.tDie){
           b.el.remove();
           Bubbles.delete(key);
@@ -302,7 +307,7 @@
     };
     Net.send('chat-say', payload);
     appendFeedLine({from:payload.from, text, ts:payload.ts}); // local echo
-    showBubble(uname, text); // immediate local bubble
+    showBubble(uname, text); // immediate local bubble (DOM overlay)
   }
 
   Net.on('chat-say', async (m)=>{
@@ -314,13 +319,13 @@
       if(out && out!==m.text){ txt = out; meta = { translated: `${m.lang}→${myLang}` }; }
     }
     appendFeedLine({from:m.from, text:txt, ts:m.ts, meta});
-    showBubble(m.from, txt); // bubble shows translated text client-side
+    showBubble(m.from, txt); // show viewer-local (translated) text above sender
   });
 
   // ---- area tracking ----
   function refreshArea(){ Chat.area = currentArea(); }
-  IZZA.on?.('mp-start', refreshArea);
-  IZZA.on?.('mp-end',   refreshArea);
+  IZZA?.on?.('mp-start', refreshArea);
+  IZZA?.on?.('mp-end',   refreshArea);
   window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaTradeCentre') refreshArea(); });
 
   // ---- mount UI when DOM ready ----
@@ -330,7 +335,15 @@
     ensureUI(); refreshArea();
   }
 
+  // ---- test hook (so you can try it in the console) ----
+  window.IZZA_CHAT = window.IZZA_CHAT || {};
+  window.IZZA_CHAT.showBubble = function(text='Test'){
+    try{
+      const uname = IZZA?.api?.user?.username || IZZA?.api?.user?.name || 'me';
+      showBubble(uname, text);
+    }catch(e){ console.warn('bubble test failed', e); }
+  };
+
   // ---- OPTIONAL: example translator shim (no-op). Replace from server/SDK. ----
   // window.TRANSLATE_TEXT = async (text, from, to) => text;
-
 })();
