@@ -1,6 +1,6 @@
 // v1_area_chat.plugin.js — per-area chat (duel/trade centre) + bubbles + feed + language toggle + translation hook
 (function(){
-  const BUILD='v1.4-area-chat+i18n-hook+typing-guard+sendbtn+bubble-rAF-fix+uname-normalize+test-hook+z3000';
+  const BUILD='v1.5-area-chat+username-fix+player-bubbles+z3000';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- lightweight MP adapter (works with any of your 3 buses) ----
@@ -47,7 +47,6 @@
     if(Chat.host) return;
     const card = document.getElementById('gameCard'); if(!card) return;
 
-    // bar (left: toggle, center: input, right: language + send)
     const bar = document.createElement('div');
     bar.id='chatBar';
     Object.assign(bar.style,{
@@ -80,7 +79,6 @@
       IZZA?.emit?.('ui-lang-changed', { lang: Chat.lang });
     };
 
-    // feed (hidden by default; toggling hides FIRE button while open)
     const feed = document.createElement('div');
     feed.id='chatFeed';
     Object.assign(feed.style,{
@@ -102,7 +100,6 @@
       }
     };
 
-    // send helper
     function trySend(){
       const txt = (Chat.input.value||'').trim();
       if(!txt) return;
@@ -110,38 +107,29 @@
       Chat.input.value='';
     }
 
-    // send on Enter (Return)
     Chat.input.addEventListener('keydown', (e)=>{
       if((e.key||'').toLowerCase()!=='enter') return;
       e.preventDefault();
       trySend();
     });
-
-    // send on button press (mobile-friendly)
     Chat.sendBtn.addEventListener('click', (e)=>{ e.preventDefault(); trySend(); });
 
-    // Mark typing focus (optional hint for other subsystems)
     const setTyping = v => { window.__IZZA_TYPING__ = !!v; IZZA && (IZZA.typing = !!v); };
     Chat.input.addEventListener('focus', ()=> setTyping(true));
     Chat.input.addEventListener('blur',  ()=> setTyping(false));
   }
 
-  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game) ----
-  function isEditable(el){
-    return !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
-  }
+  // ---- GLOBAL TYPING GUARD ----
+  function isEditable(el){ return !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   window.addEventListener('keydown', (e)=>{
     const el = document.activeElement;
     if(!isEditable(el)) return;
     const k = (e.key||'').toLowerCase();
     const block = new Set(['a','b','i',' ','arrowup','arrowdown','arrowleft','arrowright','escape']);
-    if(block.has(k) || k.length===1){
-      e.stopImmediatePropagation();
-      e.stopPropagation();
-    }
+    if(block.has(k) || k.length===1){ e.stopImmediatePropagation(); e.stopPropagation(); }
   }, true);
 
-  // ---- translation hook (optional) ----
+  // ---- translation hook ----
   async function translateMaybe(text, from, to){
     if(!text) return text;
     if(!to || from===to) return text;
@@ -150,21 +138,13 @@
         const out = await window.TRANSLATE_TEXT(text, from, to);
         return out || text;
       }
-    }catch(e){ console.warn('[CHAT] translate hook failed', e); }
+    }catch(e){ console.warn('[CHAT] translate fail', e); }
     return text;
   }
 
   // ---- helpers ----
-  function areaRoom(){
-    const a = currentArea();
-    return (a==='duel') ? 'duel' : (a==='tc' ? 'tc' : 'world');
-  }
-  function tsStamp(ms){
-    const d = ms ? new Date(ms) : new Date();
-    const hh = String(d.getHours()).padStart(2,'0');
-    const mm = String(d.getMinutes()).padStart(2,'0');
-    return `${hh}:${mm}`;
-  }
+  function areaRoom(){ const a = currentArea(); return (a==='duel') ? 'duel' : (a==='tc' ? 'tc' : 'world'); }
+  function tsStamp(ms){ const d = ms ? new Date(ms) : new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
   function escapeHTML(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
   const _norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
 
@@ -179,9 +159,8 @@
     Chat.feed.scrollTop = Chat.feed.scrollHeight;
   }
 
-  // ---- floating bubbles above heads (DOM overlay, fixed to viewport) ----
-  const Bubbles = new Map(); // key = normalized username -> {el, tDie}
-
+  // ---- bubbles ----
+  const Bubbles = new Map();
   function _gameCanvas(){ return document.getElementById('game') || null; }
 
   function _findPeerByKey(key){
@@ -200,126 +179,74 @@
   }
 
   function _positionBubbleNow(key, el){
-    const api = IZZA?.api; const cvs = _gameCanvas();
-    if (!api?.ready || !cvs) return;
-
-    const rect  = cvs.getBoundingClientRect();
-    const scale = api.DRAW / api.TILE;
-
-    const meKey = _norm(api?.user?.username || api?.user?.name || '');
+    const api = IZZA?.api; const cvs = _gameCanvas(); if (!api?.ready || !cvs) return;
+    const rect  = cvs.getBoundingClientRect(); const scale = api.DRAW / api.TILE;
+    const meKey = _norm(api?.user?.username || 'guest');
     let sx, sy;
-
-    if (key === meKey){
-      sx = (api.player.x - api.camera.x) * scale;
-      sy = (api.player.y - api.camera.y) * scale;
-    }else{
-      const p = _findPeerByKey(key);
-      if (!p) return;
-      sx = (p.x - api.camera.x) * scale;
-      sy = (p.y - api.camera.y) * scale;
-    }
-
-    // Wait one frame if width is 0 (layout not settled yet)
-    if (!el.offsetWidth){
-      requestAnimationFrame(()=> _positionBubbleNow(key, el));
-      return;
-    }
-
-    // convert sprite-space → viewport; center and lift above head
-    const left = rect.left + sx - el.offsetWidth/2 + 16; // center over ~32px sprite
-    const top  = rect.top  + sy - 36;                    // lift above head
-    el.style.left = Math.round(left) + 'px';
-    el.style.top  = Math.round(top)  + 'px';
+    if (key === meKey){ sx = (api.player.x - api.camera.x) * scale; sy = (api.player.y - api.camera.y) * scale; }
+    else{ const p = _findPeerByKey(key); if (!p) return; sx = (p.x - api.camera.x) * scale; sy = (p.y - api.camera.y) * scale; }
+    if (!el.offsetWidth){ requestAnimationFrame(()=> _positionBubbleNow(key, el)); return; }
+    el.style.left = Math.round(rect.left + sx - el.offsetWidth/2 + 16) + 'px';
+    el.style.top  = Math.round(rect.top  + sy - 36) + 'px';
     el.style.opacity = '1';
   }
 
   function showBubble(unameRaw, text){
     try{
-      const key = _norm(unameRaw);
-      if (!key) return;
-
+      const key = _norm(unameRaw); if (!key) return;
       let b = Bubbles.get(key);
       if (!b){
         const el = document.createElement('div');
-        Object.assign(el.style, {
-          position:'fixed',
-          zIndex: 3000,              // above HUD/joystick/map
-          pointerEvents:'none',
-          background:'rgba(8,12,20,.92)',
-          color:'#e8eef7',
-          border:'1px solid #2a3550',
-          borderRadius:'10px',
-          padding:'4px 8px',
-          fontSize:'12px',
-          maxWidth:'60vw',
-          whiteSpace:'pre-wrap',
-          transform:'translateZ(0)',
-          transition:'opacity 160ms linear',
-          opacity:'0'
+        Object.assign(el.style,{
+          position:'fixed', zIndex:3000, pointerEvents:'none',
+          background:'rgba(8,12,20,.92)', color:'#e8eef7',
+          border:'1px solid #2a3550', borderRadius:'10px',
+          padding:'4px 8px', fontSize:'12px', maxWidth:'60vw',
+          whiteSpace:'pre-wrap', transform:'translateZ(0)',
+          transition:'opacity 160ms linear', opacity:'0'
         });
         document.body.appendChild(el);
-        b = { el, tDie: 0 };
-        Bubbles.set(key, b);
+        b = { el, tDie: 0 }; Bubbles.set(key, b);
       }
-      b.el.textContent = text;
-      b.tDie = performance.now() + 4000; // ~4s lifetime
-
-      // Ensure placement happens *after* layout
+      b.el.textContent = text; b.tDie = performance.now() + 4000;
       requestAnimationFrame(()=> _positionBubbleNow(key, b.el));
     }catch(e){ console.warn('[CHAT] bubble fail', e); }
   }
 
-  // follow owners and cull when expired
   IZZA?.on?.('render-post', ()=>{
     try{
       if (!IZZA?.api?.ready || !_gameCanvas()) return;
       const now = performance.now();
-
       for (const [key, b] of Array.from(Bubbles.entries())){
-        _positionBubbleNow(key, b.el); // keep stuck to head while moving/camera panning
-        if (now > b.tDie){
-          b.el.remove();
-          Bubbles.delete(key);
-        }
+        _positionBubbleNow(key, b.el);
+        if (now > b.tDie){ b.el.remove(); Bubbles.delete(key); }
       }
     }catch{}
   });
 
-  // keep bubbles anchored on scroll/resize too
   ['scroll','resize','orientationchange'].forEach(evt=>{
-    window.addEventListener(evt, ()=>{
-      for (const [key, b] of Bubbles.entries()){
-        _positionBubbleNow(key, b.el);
-      }
-    }, { passive:true });
+    window.addEventListener(evt, ()=>{ for (const [key, b] of Bubbles.entries()){ _positionBubbleNow(key, b.el); } }, { passive:true });
   });
 
-  // ---- sending & receiving ----
+  // ---- send/recv ----
   function sendChat(text){
     const lang = Chat.lang || 'en';
-    const uname = IZZA?.api?.user?.username || IZZA?.api?.user?.name || 'me';
-    const payload = {
-      room: areaRoom(),
-      from: uname,
-      text,
-      lang,
-      ts: Date.now()
-    };
+    const uname = IZZA?.api?.user?.username || 'guest';
+    const payload = { room: areaRoom(), from: uname, text, lang, ts: Date.now() };
     Net.send('chat-say', payload);
-    appendFeedLine({from:payload.from, text, ts:payload.ts}); // local echo
-    showBubble(uname, text); // immediate local bubble (DOM overlay)
+    appendFeedLine({from:payload.from, text, ts:payload.ts});
+    showBubble(uname, text);
   }
 
   Net.on('chat-say', async (m)=>{
-    if(!m || m.room !== areaRoom()) return; // only current-area messages
-    const myLang = Chat.lang || 'en';
-    let txt = m.text, meta=null;
+    if(!m || m.room !== areaRoom()) return;
+    const myLang = Chat.lang || 'en'; let txt = m.text, meta=null;
     if(m.lang && myLang && m.lang!==myLang){
       const out = await translateMaybe(m.text, m.lang, myLang);
       if(out && out!==m.text){ txt = out; meta = { translated: `${m.lang}→${myLang}` }; }
     }
     appendFeedLine({from:m.from, text:txt, ts:m.ts, meta});
-    showBubble(m.from, txt); // show viewer-local (translated) text above sender
+    showBubble(m.from, txt);
   });
 
   // ---- area tracking ----
@@ -328,22 +255,9 @@
   IZZA?.on?.('mp-end',   refreshArea);
   window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaTradeCentre') refreshArea(); });
 
-  // ---- mount UI when DOM ready ----
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ ensureUI(); refreshArea(); }, {once:true});
-  }else{
-    ensureUI(); refreshArea();
-  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', ()=>{ ensureUI(); refreshArea(); }, {once:true}); }
+  else{ ensureUI(); refreshArea(); }
 
-  // ---- test hook (so you can try it in the console) ----
   window.IZZA_CHAT = window.IZZA_CHAT || {};
-  window.IZZA_CHAT.showBubble = function(text='Test'){
-    try{
-      const uname = IZZA?.api?.user?.username || IZZA?.api?.user?.name || 'me';
-      showBubble(uname, text);
-    }catch(e){ console.warn('bubble test failed', e); }
-  };
-
-  // ---- OPTIONAL: example translator shim (no-op). Replace from server/SDK. ----
-  // window.TRANSLATE_TEXT = async (text, from, to) => text;
+  window.IZZA_CHAT.showBubble = function(text='Test'){ try{ const uname = IZZA?.api?.user?.username || 'guest'; showBubble(uname, text); }catch(e){} };
 })();
