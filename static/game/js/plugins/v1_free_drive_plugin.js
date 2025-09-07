@@ -1,6 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.11.1-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime';
+  const BUILD='v1.11.2-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime+hotCar';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -17,21 +17,32 @@
   let api=null;
   let driving=false, car=null, savedWalk=null;
 
-  const parked = []; // {x,y,kind,timeoutId}
+  const parked = []; // {x,y,kind,timeoutId,hijackTag?}
 
   // --- pursuit persistence ---
   const PURSUER_KEYS = ['cops','swat','military','army','helicopters','tanks'];
-  let lastCarCrimeAt = 0; // NOTE: updated ONLY on hijack now
+  let lastCarCrimeAt = 0; // updated ONLY on hijack
   const now = ()=>performance.now();
+
+  // “Hot car” session: set when a traffic car is hijacked; cleared when all pursuers are gone.
+  let hijackTag = null;
 
   // Snapshots of exact pursuers before transitions
   let pursuerSnap = null;
   // Guard window to block/undo wanted=0 wipes right after transitions
   let guardUntil = 0;
   let guardWanted = 0;
-  let spawnLockUntil = 0; // prevents other systems from respawning “fresh” squads immediately (not used on hijack)
+  let spawnLockUntil = 0; // prevents other systems from respawning “fresh” squads (not used on hijack)
 
   function isArray(a){ return Array.isArray(a); }
+
+  function pursuerCount(){
+    try{
+      let n=0;
+      PURSUER_KEYS.forEach(k=>{ n += (api[k]&&api[k].length)|0; });
+      return n|0;
+    }catch{ return 0; }
+  }
 
   function snapshotPursuers(){
     try{
@@ -39,7 +50,6 @@
       PURSUER_KEYS.forEach(k=>{
         const src = api[k];
         if (isArray(src) && src.length){
-          // shallow clone each pursuer; keep position & important fields
           pursuerSnap[k] = src.map(u=>({
             x:u.x, y:u.y, spd:u.spd, hp:u.hp, kind:u.kind||k,
             facing:u.facing||'down',
@@ -67,7 +77,7 @@
     // Only hijack (“enter-traffic”) is a car crime.
     const isCarCrime = (reason==='enter-traffic');
 
-    // Keep exactly current wanted unless a car crime just happened (or very recently).
+    // Keep current wanted; ensure >=1 only when a car crime is active/recent.
     guardWanted = (api.player?.wanted|0) || 0;
     if (isCarCrime || (now() - lastCarCrimeAt < 30000)) {
       guardWanted = Math.max(guardWanted, 1);
@@ -76,8 +86,8 @@
     // short guard to defeat “clear wanted” listeners racing this transition
     guardUntil = now() + 900; // ~0.9s
 
-    // Allow spawners to react immediately on HIJACK (we want new cops if you hijack after clearing them).
-    // For non-crime transitions, keep the brief spawn lock.
+    // Allow spawners immediately on HIJACK (so fresh cops can appear after you cleared them).
+    // For non-crime transitions, keep brief spawn lock.
     spawnLockUntil = isCarCrime ? 0 : (guardUntil + 400);
 
     // immediately enforce once
@@ -91,6 +101,19 @@
     }, 0);
   }
 
+  // Wanted stars ↔ pursuers: ensure at least 1 star while chased; 0 when chase is over & no hot car.
+  function syncWantedWithPursuit(){
+    if(!api?.player) return;
+    const n = pursuerCount();
+    if(n>0){
+      if((api.player.wanted|0) < 1) api.setWanted(1);
+    }else{
+      // If no pursuers remain, end the hot-car session and clear stars.
+      if(hijackTag) hijackTag = null;
+      if((api.player.wanted|0) !== 0) api.setWanted(0);
+    }
+  }
+
   // If anyone tries to zero wanted during the guard window, undo it and restore the SAME pursuers.
   IZZA.on?.('wanted-changed', ()=>{
     if (!api) return;
@@ -99,7 +122,6 @@
         api.setWanted(guardWanted);
       }
       restorePursuers();
-      // re-assert next tick as well (late listeners)
       setTimeout(()=>{
         if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
         restorePursuers();
@@ -197,6 +219,7 @@
 
     // HIJACK is the ONLY car crime:
     lastCarCrimeAt = now();
+    hijackTag = 'hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
     if((api.player.wanted|0)===0){ api.setWanted(1); }
     armGuard('enter-traffic'); // no spawn lock here; let new cops spawn
   }
@@ -214,6 +237,9 @@
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:'Back in your car. Press B to park.'});
 
+    // If the parked car was the same hijacked car, carry the tag forward.
+    hijackTag = entry.car.hijackTag || hijackTag || null;
+
     // NOT a crime; keep wanted as-is and allow normal spawner behavior.
     armGuard('enter-parked');
   }
@@ -222,6 +248,8 @@
     const px = api.player.x, py = api.player.y;
     const kind = (car && car.kind) || 'sedan';
     const p = { x:px, y:py, kind, timeoutId:null };
+    // Preserve “hot car” status while pursuers still exist
+    if(hijackTag) p.hijackTag = hijackTag;
     p.timeoutId = setTimeout(()=>{
       const i = parked.indexOf(p);
       if(i>=0) parked.splice(i,1);
@@ -276,14 +304,13 @@
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
-        // Still raise wanted for running over pedestrians,
-        // BUT do NOT mark it as a "car crime" (no lastCarCrimeAt update).
+        // Running over pedestrians raises wanted,
+        // but it is NOT a “car crime” (no lastCarCrimeAt update).
         api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
       }
     }
 
-    // IMPORTANT: only remove a pursuer when we actually hit them.
-    // Re-entering a car will NOT clear these arrays anymore.
+    // Only remove a pursuer when we actually hit them.
     for(let i=api.cops.length-1; i>=0; i--){
       const c = api.cops[i];
       const d = Math.hypot(px - c.x, py - c.y);
@@ -296,7 +323,7 @@
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
-        // Keep existing behavior here: lower wanted by 1 when a cop is eliminated by vehicle.
+        // Lower wanted by 1 when a cop is eliminated by vehicle.
         api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
     }
@@ -347,7 +374,10 @@
       car.x=api.player.x; car.y=api.player.y;
       handleVehicularHits();
     }
+    // Keep stars in sync and end the hot-car session once pursuers are gone.
+    syncWantedWithPursuit();
   });
+
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
     parked.forEach(p=>{ drawVehicleSprite(p.kind || 'sedan', p.x, p.y); });
