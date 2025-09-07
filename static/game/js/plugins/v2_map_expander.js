@@ -1038,209 +1038,148 @@ if (!window._izzaBoatActive) {             // <— add this guard
   document.getElementById('btnB')?.addEventListener('click', _onPressBankB, true);
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') _onPressBankB(e); }, true);
 
-  // ---------- Minimap / Bigmap overlay (fast, paint-on-demand) ----------
-(function(){
-  // only draw when tier2 is active and we actually have a layout
-  function _isTier2(){ try{ return localStorage.getItem('izzaMapTier') === '2'; }catch{ return false; } }
-  function _isVisible(el){ if(!el) return false; const s=getComputedStyle(el); return s.display!=='none' && s.visibility!=='hidden' && s.opacity!=='0'; }
-
-  // prepare canvas size in CSS pixels (avoid DPR math to keep it simple + crisp)
-  function _prepCanvas(c){
-    const cssW = (c.clientWidth||0) | 0;
-    const cssH = (c.clientHeight||0) | 0;
-    if(cssW<=0 || cssH<=0) return false;
-    if(c.width !== cssW)  c.width  = cssW;
-    if(c.height !== cssH) c.height = cssH;
-    return true;
-  }
-
-  function paintOverlayUsingLayout(c){
-    if(!_layout || !c) return;
-    if(!_prepCanvas(c)) return;
-
-    const ctx = c.getContext('2d');
-    const sx  = c.width/90;
-    const sy  = c.height/60;
+  // ---------- Minimap / Bigmap overlay ----------
+  function paintOverlay(id){
+    if(!_layout) return;
+    const c=document.getElementById(id); if(!c) return;
+    const ctx=c.getContext('2d');
+    const sx=c.width/90, sy=c.height/60;
 
     const api = IZZA.api;
     const A   = anchors(api);
+    const {LAKE, BEACH_X, HOTEL, LOT} = lakeRects(A);
+    const {HOOD, HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(A);
 
-    // pull PRECOMPUTED rows/cols/buildings from _layout
-    const H_ROADS = _layout.H_ROADS || [];
-    const V_ROADS = _layout.V_ROADS || [];
-    const BUILDINGS = _layout.BUILDINGS || [];
+    // ---- Recompute the same road grid used in render-under so overlays always match ----
+    const FORBID = [
+      {x0:LAKE.x0,y0:LAKE.y0,x1:LAKE.x1,y1:LAKE.y1},
+      {x0:A.HQ.x0-1,y0:A.HQ.y0-1,x1:A.HQ.x1+1,y1:A.HQ.y1+1},
+      {x0:A.SH.x0-1,y0:A.SH.y0-1,x1:A.SH.x1+1,y1:A.SH.y1+1}
+    ];
+    const {H,V} = (function desiredRoadGrid(a){
+      const H = [ a.hRoadY - 10, a.hRoadY, a.hRoadY + 6 ];
+      const V = [ a.vRoadX - 12, a.vRoadX + 10 ];
+      return {H,V};
+    })(A);
 
-    const {LAKE, BEACH_X, HOTEL, LOT} = _layout;
-    const {HOOD, HOUSES, HOOD_PARK} = _layout;
-
-    // sets for quick sidewalk masking
-    const HOOD_H = [HOOD.y0+2, HOOD.y0+6];
-    const HOOD_V = [HOOD.x0+8, HOOD.x0+16];
+    let H_ROADS = [];
+    let V_ROADS = [];
+    H.forEach(y=>{
+      const segs = clipHRow(y, A.un.x0, A.un.x1, FORBID);
+      segs.forEach(s=>{
+        const shaved = shaveDeadEndsH({y:s.y,x0:s.x0,x1:s.x1}, FORBID);
+        if(shaved) H_ROADS.push(shaved);
+      });
+    });
+    V.forEach(x=>{
+      const segs = clipVCol(x, A.un.y0, A.un.y1, FORBID);
+      segs.forEach(s=>{
+        const shaved = shaveDeadEndsV({x:s.x,y0:s.y0,y1:s.y1}, FORBID);
+        if(shaved) V_ROADS.push(shaved);
+      });
+    });
 
     const H_ROWS_ALL = new Set([...H_ROADS.map(r=>r.y), ...HOOD_H]);
     const V_COLS_ALL = new Set([...V_ROADS.map(r=>r.x), ...HOOD_V]);
     const isTier1Y = y => (y===A.hRoadY || y===A.sidewalkTopY || y===A.sidewalkBotY);
 
-    // draw helpers that operate in grid units
-    const fillG = (gx,gy,w,h,color)=>{ ctx.fillStyle=color; ctx.fillRect(gx*sx, gy*sy, w*sx, h*sy); };
+    // ---- Draw order: water & blocks → sidewalks → roads → buildings → patches/POIs ----
 
-    try{
-      // clear
-      ctx.clearRect(0,0,c.width,c.height);
+    // Lake + beach + lot + hotel footprints
+    ctx.fillStyle = COL.water;
+    ctx.fillRect(LAKE.x0*sx, LAKE.y0*sy, (LAKE.x1-LAKE.x0+1)*sx, (LAKE.y1-LAKE.y0+1)*sy);
+    ctx.fillStyle = COL.sand;
+    ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
+    ctx.fillStyle = COL.lot;
+    ctx.fillRect(LOT.x0*sx, LOT.y0*sy, (LOT.x1-LOT.x0+1)*sx, (LOT.y1-LOT.y0+1)*sy);
+    ctx.fillStyle = COL.hotel;
+    ctx.fillRect(HOTEL.x0*sx, HOTEL.y0*sy, (HOTEL.x1-HOTEL.x0+1)*sx, (HOTEL.y1-HOTEL.y0+1)*sy);
 
-      // ---- Draw order: water & blocks → sidewalks → roads → buildings → patches/POIs ----
-      // Lake + beach + lot + hotel footprints
-      fillG(LAKE.x0, LAKE.y0, LAKE.x1-LAKE.x0+1, LAKE.y1-LAKE.y0+1, COL.water);
-      fillG(BEACH_X, LAKE.y0, 1, LAKE.y1-LAKE.y0+1, COL.sand);
-      fillG(LOT.x0, LOT.y0, LOT.x1-LOT.x0+1, LOT.y1-LOT.y0+1, COL.lot);
-      fillG(HOTEL.x0, HOTEL.y0, HOTEL.x1-HOTEL.x0+1, HOTEL.y1-HOTEL.y0+1, COL.hotel);
+    // Hood park & houses
+    ctx.fillStyle = COL.hoodPark;
+    ctx.fillRect(HOOD_PARK.x0*sx, HOOD_PARK.y0*sy, (HOOD_PARK.x1-HOOD_PARK.x0+1)*sx, (HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
+    ctx.fillStyle = COL.house;
+    HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
 
-      // Hood park & houses
-      fillG(HOOD_PARK.x0, HOOD_PARK.y0, HOOD_PARK.x1-HOOD_PARK.x0+1, HOOD_PARK.y1-HOOD_PARK.y0+1, COL.hoodPark);
-      ctx.fillStyle = COL.house;
-      HOUSES.forEach(h=> fillG(h.x0,h.y0,(h.x1-h.x0+1),(h.y1-h.y0+1),COL.house));
-
-      // ---- Sidewalks around the road grid (overlay tint)
-      ctx.fillStyle = '#a1a6b0';
-      H_ROADS.forEach(r=>{
-        for(let x=r.x0;x<=r.x1;x++){
-          if(!V_COLS_ALL.has(x)){
-            if(!isOriginalTile(x, r.y-1, A)) fillG(x, r.y-1, 1, 1, '#a1a6b0');
-            if(!isOriginalTile(x, r.y+1, A)) fillG(x, r.y+1, 1, 1, '#a1a6b0');
-          }
+    // ---- Sidewalks around the new road grid (matches render-under logic) ----
+    // H-road sidewalks
+    ctx.fillStyle = '#a1a6b0'; // sidewalk tint for overlay
+    H_ROADS.forEach(r=>{
+      for(let x=r.x0;x<=r.x1;x++){
+        if(!V_COLS_ALL.has(x)){
+          if(!isOriginalTile(x, r.y-1, A))
+            ctx.fillRect(x*sx, (r.y-1)*sy, 1*sx, 1*sy);
+          if(!V_COLS_ALL.has(x) && !isOriginalTile(x, r.y+1, A))
+            ctx.fillRect(x*sx, (r.y+1)*sy, 1*sx, 1*sy);
         }
-      });
-      V_ROADS.forEach(r=>{
-        for(let y=r.y0;y<=r.y1;y++){
-          if(H_ROWS_ALL.has(y) || isTier1Y(y)) continue;
-          if(!isOriginalTile(r.x-1, y, A)) fillG(r.x-1, y, 1, 1, '#a1a6b0');
-          if(!isOriginalTile(r.x+1, y, A)) fillG(r.x+1, y, 1, 1, '#a1a6b0');
-        }
-      });
-
-      // ---- Roads (overlay tint)
-      ctx.fillStyle = '#8a90a0';
-      H_ROADS.forEach(r=> fillG(r.x0, r.y, (r.x1-r.x0+1), 1.2, '#8a90a0'));
-      V_ROADS.forEach(r=> fillG(r.x, r.y0, 1.2, (r.y1-r.y0+1), '#8a90a0'));
-      // Hood roads
-      // (clip only by hood park to match render-under)
-      const clipHRow = (y, x0, x1, R)=> {
-        const parts=[{y,x0,x1}];
-        if(R){ // single forbid rect
-          const out=[];
-          parts.forEach(p=>{
-            if(y<R.y0||y>R.y1||p.x1<R.x0||p.x0>R.x1){ out.push(p); return; }
-            if(p.x0 < R.x0) out.push({y, x0:p.x0, x1:R.x0-1});
-            if(p.x1 > R.x1) out.push({y, x0:R.x1+1, x1:p.x1});
-          });
-          return out;
-        }
-        return parts;
-      };
-      const clipVCol = (x, y0, y1, R)=>{
-        const parts=[{x,y0,y1}];
-        if(R){
-          const out=[];
-          parts.forEach(p=>{
-            if(x<R.x0||x>R.x1||p.y1<R.y0||p.y0>R.y1){ out.push(p); return; }
-            if(p.y0 < R.y0) out.push({x, y0:p.y0, y1:R.y0-1});
-            if(p.y1 > R.y1) out.push({x, y0:R.y1+1, y1:p.y1});
-          });
-          return out;
-        }
-        return parts;
-      };
-
-      HOOD_H.forEach(y=>{
-        clipHRow(y, A.un.x0, A.un.x1, HOOD_PARK).forEach(s=>{
-          fillG(s.x0, y, (s.x1-s.x0+1), 1.2, '#8a90a0');
-        });
-      });
-      HOOD_V.forEach(x=>{
-        clipVCol(x, A.un.y0, A.un.y1, HOOD_PARK).forEach(s=>{
-          fillG(x, s.y0, 1.2, (s.y1-s.y0+1), '#8a90a0');
-        });
-      });
-
-      // ---- Buildings (downtown blocks)
-      ctx.fillStyle = '#6f87b3';
-      BUILDINGS.forEach(b=> fillG(b.x,b.y,b.w,b.h,'#6f87b3'));
-
-      // ---- Hospital building
-      if(_hospital){
-        fillG(_hospital.x0,_hospital.y0,(_hospital.x1-_hospital.x0+1),(_hospital.y1-_hospital.y0+1),COL.hospital);
       }
+    });
 
-      // ---- BANK (overlay block)
-      if(window.__IZZA_BANK__?.rect){
-        const B = window.__IZZA_BANK__.rect;
-        fillG(B.x0,B.y0,(B.x1-B.x0+1),(B.y1-B.y0+1),'#e7c14a');
+    // V-road sidewalks (skip where H roads live and Tier-1 rows)
+    V_ROADS.forEach(r=>{
+      for(let y=r.y0;y<=r.y1;y++){
+        if(H_ROWS_ALL.has(y) || isTier1Y(y)) continue;
+        if(!isOriginalTile(r.x-1, y, A)) ctx.fillRect((r.x-1)*sx, y*sy, 1*sx, 1*sy);
+        if(!isOriginalTile(r.x+1, y, A)) ctx.fillRect((r.x+1)*sx, y*sy, 1*sx, 1*sy);
       }
+    });
 
-      // ---- Docks
-      ctx.fillStyle = COL.wood;
-      lakeRects(A).DOCKS.forEach(d=>{
-        fillG(d.x0, d.y, d.len, 1, COL.wood);
-      });
+    // ---- Roads (overlay tint)
+    ctx.fillStyle = '#8a90a0';
+    H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
+    V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
+    // Hood roads
+    HOOD_H.forEach(y=>{
+      const segs = clipHRow(y, A.un.x0, A.un.x1, [HOOD_PARK]);
+      segs.forEach(s=> ctx.fillRect(s.x0*sx, y*sy, (s.x1-s.x0+1)*sx, 1.2*sy));
+    });
+    HOOD_V.forEach(x=>{
+      const segs = clipVCol(x, A.un.y0, A.un.y1, [HOOD_PARK]);
+      segs.forEach(s=> ctx.fillRect(x*sx, s.y0*sy, 1.2*sx, (s.y1-s.y0+1)*sy));
+    });
 
-      // ---- Manual patches kept for overlay parity
-      ctx.fillStyle='#8a90a0';
-      [
-        {x:27,y:24},{x:29,y:24},
-        {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
-        {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
-        {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
-        {x:66,y:34}
-      ].forEach(p=> fillG(p.x,p.y,1,1.2,'#8a90a0'));
-      fillG(69,30,(76-69+1),1.2,'#8a90a0'); // long strip
+    // ---- Buildings (downtown blocks)
+    ctx.fillStyle = '#6f87b3';
+    (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
 
-      ctx.fillStyle='#a1a6b0';
-      fillG(69,31,(76-69+1),1.2,'#a1a6b0');
-      fillG(66,15,(72-66+1),1.2,'#a1a6b0');
-      [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
-        .forEach(p=> fillG(p.x,p.y,1,1.2,'#a1a6b0'));
-
-    }catch(e){
-      console.warn('[overlay] paint failed', e);
+    // ---- Hospital building
+    if(_hospital){
+      ctx.fillStyle = COL.hospital;
+      ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,( (_hospital.x1-_hospital.x0+1) )*sx,( (_hospital.y1-_hospital.y0+1) )*sy);
     }
+
+    // ---- BANK (overlay block) ----
+    if(window.__IZZA_BANK__?.rect){
+      const B = window.__IZZA_BANK__?.rect;
+      ctx.fillStyle = '#e7c14a'; // gold tint
+      ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
+    }
+
+    // ---- Docks (planks)
+    ctx.fillStyle = COL.wood;
+    lakeRects(A).DOCKS.forEach(d=>{
+      ctx.fillRect(d.x0*sx, d.y*sy, d.len*sx, 1*sy);
+    });
+
+    // ---- Notable manual patches you already had (kept so the overlay matches)
+    ctx.fillStyle='#8a90a0'; // roads
+    [
+      {x:27,y:24},{x:29,y:24},
+      {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
+      {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
+      {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
+      {x:66,y:34}
+    ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+    // long strips
+    ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
+
+    // sidewalk-highlight strips
+    ctx.fillStyle='#a1a6b0';
+    ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
+    ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
+    [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
+      .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
   }
-
-  // Throttle so we don’t repaint every frame:
-  let _miniTick = 0;
-  IZZA.on('render-post', ()=>{
-    if(!_isTier2() || !_layout) return;
-
-    // Minimap: paint every ~10 frames
-    const mini = document.getElementById('minimap');
-    if(mini && (++_miniTick % 10) === 0){
-      paintOverlayUsingLayout(mini);
-    }
-
-    // Big map: only paint if its modal is visible (or canvas itself is visible)
-    const big = document.getElementById('bigmap');
-    if(big){
-      const modal = document.getElementById('mapModal');
-      if(_isVisible(big) || _isVisible(modal)){
-        paintOverlayUsingLayout(big);
-      }
-    }
-  });
-
-  // Also repaint on resize/open to avoid “dots” from stale buffers
-  const rqRepaint = ()=>{
-    const mini = document.getElementById('minimap');
-    const big  = document.getElementById('bigmap');
-    if(mini) paintOverlayUsingLayout(mini);
-    if(big)  paintOverlayUsingLayout(big);
-  };
-  window.addEventListener('resize', rqRepaint, {passive:true});
-
-  // If your map modal toggles its display, repaint when it opens
-  (function watchModal(){
-    const m = document.getElementById('mapModal');
-    if(!m) return;
-    const mo = new MutationObserver(()=> rqRepaint());
-    mo.observe(m, { attributes:true, attributeFilter:['style','class'] });
-  })();
+  IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
 })();
