@@ -481,12 +481,15 @@
     if(!r){ return; }
     const gapBtn = 8;   // gap under Send/EN for button
     const gapPop = 12;  // gap under Type box for popup
-    const btnBottom = Math.max(0, window.innerHeight - r.bottom + gapBtn);
-    const popupBottom = Math.max(0, window.innerHeight - r.top + gapPop);
+    // Place the Friends button *under* the Send/EN row by anchoring with TOP
+    const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
     if(ui.friendsToggle){
+      ui.friendsToggle.style.top = btnTop+'px';
       ui.friendsToggle.style.right = '14px';
-      ui.friendsToggle.style.bottom = btnBottom+'px';
+      ui.friendsToggle.style.bottom = ''; // ensure we don't anchor by bottom anymore
     }
+    // Popup stays under the Type box using bottom anchor derived from r.top
+    const popupBottom = Math.max(0, window.innerHeight - r.top + gapPop);
     if(ui.friendsPopup){
       ui.friendsPopup.style.right = '14px';
       ui.friendsPopup.style.bottom = popupBottom+'px';
@@ -504,7 +507,7 @@
     Object.assign(btn.style, {
       position:'fixed',
       right:'14px',
-      bottom:'64px',  // will be adjusted dynamically by positionFriendsUI()
+      top:'0px',   // will be positioned precisely by positionFriendsUI()
       zIndex:Z.bell,
       height:'34px', padding:'0 12px', borderRadius:'18px',
       background:'#162134', color:'#cfe0ff',
