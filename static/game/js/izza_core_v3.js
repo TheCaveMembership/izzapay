@@ -1349,6 +1349,7 @@ Promise.all([
     TILE, DRAW, camera,
     doorSpawn,
     user: { username: (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || 'guest' },
+
     // expose for plugins:
     getMissionCount,
     getInventory, setInventory,
@@ -1356,70 +1357,29 @@ Promise.all([
     ready: true
   };
   IZZA.emit('ready', IZZA.api);
+
   // If the map plugin exposed the HUD redraw, sync hearts from saved state now
   if (typeof window._redrawHeartsHud === 'function') { try{ window._redrawHeartsHud(); }catch{} }
+
   setCoins(getCoins());
   centerCamera();
 
-  let last=performance.now();
+  let last = performance.now();
   (function loop(now){
     try{
-      const dtMs=Math.min(32, now-last); last=now;
-      const dtSec = dtMs/1000;
+      const dtMs  = Math.min(32, now - last); last = now;
+      const dtSec = dtMs / 1000;
       update(dtSec, dtMs);
       render(imgs);
       IZZA.emit('render-post', { now: performance.now() });
     }catch(err){
       console.error('Game loop error:', err);
-      bootMsg('Game loop error: '+err.message, '#ff6b6b');
+      bootMsg('Game loop error: ' + err.message, '#ff6b6b');
     }
     requestAnimationFrame(loop);
-  })(last+16);
+  })(last + 16);
 }).catch(err=>{
   console.error('Sprite load failed', err);
-  bootMsg('Sprite load failed: '+(err && err.message ? err.message : err), '#ff6b6b');
+  bootMsg('Sprite load failed: ' + (err && err.message ? err.message : err), '#ff6b6b');
 });
-    NPC_SHEETS = npcs;
-    VEHICLE_SHEETS = vehicles;
-    const imgs={body,outfit,hair};
-
-    const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
-    IZZA.api = {
-      player, cops, pedestrians, cars,
-      setCoins, getCoins, setWanted,
-      TILE, DRAW, camera,
-      doorSpawn,
-      
-      user: { username: (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || 'guest' },
-      
-      // expose for plugins:
-      getMissionCount,
-      getInventory, setInventory,
-      hRoadY, vRoadX,
-      ready: true
-    };
-    IZZA.emit('ready', IZZA.api);
-// If the map plugin exposed the HUD redraw, sync hearts from saved state now
-if (typeof window._redrawHeartsHud === 'function') { try{ window._redrawHeartsHud(); }catch{} }
-    setCoins(getCoins());
-    centerCamera();
-
-    let last=performance.now();
-    (function loop(now){
-      try{
-        const dtMs=Math.min(32, now-last); last=now;
-        const dtSec = dtMs/1000;
-        update(dtSec, dtMs);
-        render(imgs);
-        IZZA.emit('render-post', { now: performance.now() });
-      }catch(err){
-        console.error('Game loop error:', err);
-        bootMsg('Game loop error: '+err.message, '#ff6b6b');
-      }
-      requestAnimationFrame(loop);
-    })(last+16);
-  }).catch(err=>{
-    console.error('Sprite load failed', err);
-    bootMsg('Sprite load failed: '+(err && err.message ? err.message : err), '#ff6b6b');
-  });
 })();
