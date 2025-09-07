@@ -1,6 +1,6 @@
 // v1_area_chat.plugin.js — per-area chat (duel/trade centre) + bubbles + feed + language toggle + translation hook
 (function(){
-  const BUILD='v1.4-area-chat+i18n-hook+typing-guard+sendbtn+bubble-posfix+uname-normalize';
+  const BUILD='v1.5-area-chat+i18n-hook+typing-guard+sendbtn+bubble-posfix+uname-normalize';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- lightweight MP adapter (works with any of your 3 buses) ----
@@ -16,7 +16,7 @@
     api.on = function(type, cb){
       try{
         if (window.REMOTE_PLAYERS_API?.on) return window.REMOTE_PLAYERS_API.on(type, cb);
-        if (window.RemotePlayers?.on)      return window.RemotePlayers.on(type, cb); // <-- fixed
+        if (window.RemotePlayers?.on)      return window.RemotePlayers.on(type, cb);
         if (window.IZZA?.on)               return IZZA.on('mp-'+type, (_,{data})=>cb(data));
       }catch(e){ console.warn('[CHAT] on failed', e); }
     };
@@ -126,7 +126,7 @@
     Chat.input.addEventListener('blur',  ()=> setTyping(false));
   }
 
-  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game) ----
+  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game WITHOUT blocking typing) ----
   function isEditable(el){
     return !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
   }
@@ -136,7 +136,7 @@
     const k = (e.key||'').toLowerCase();
     const block = new Set(['a','b','i',' ','arrowup','arrowdown','arrowleft','arrowright','escape']);
     if(block.has(k) || k.length===1){
-      e.preventDefault();                  // <-- added to stop page/engine handling
+      // Do NOT call preventDefault here; we want the input to receive the character.
       e.stopImmediatePropagation();
       e.stopPropagation();
     }
@@ -213,7 +213,7 @@
         const el = document.createElement('div');
         Object.assign(el.style, {
           position:'fixed',
-          zIndex: 1000,                // higher than joystick/overlays
+          zIndex: 1000,
           pointerEvents:'none',
           background:'rgba(8,12,20,.92)',
           color:'#e8eef7',
@@ -233,9 +233,7 @@
       }
       b.el.textContent = text;
       b.tDie = performance.now() + 4000; // visible ~4s
-
-      // snap into place immediately for local echo
-      _positionBubbleNow(key, b.el);
+      _positionBubbleNow(key, b.el);     // snap into place for local echo
     }catch(e){}
   }
 
@@ -259,9 +257,8 @@
       sy = (p.y - api.camera.y) * scale;
     }
 
-    // convert sprite-space → viewport; center and lift above head
-    const left = rect.left + sx - el.offsetWidth/2 + 16; // +16 ≈ sprite center
-    const top  = rect.top  + sy - 36;                    // lift above head
+    const left = rect.left + sx - el.offsetWidth/2 + 16; // center on sprite
+    const top  = rect.top  + sy - 36;                    // above head
     el.style.left = Math.round(left) + 'px';
     el.style.top  = Math.round(top)  + 'px';
     el.style.opacity = '1';
