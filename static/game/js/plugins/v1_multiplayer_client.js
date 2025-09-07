@@ -23,11 +23,13 @@
  *   above the FIRE button. When opened, the FIRE button is hidden and restored on close.
  *
  * PATCH3 (requested tweaks):
- * - Make the bell a little smaller (kept in the same top-right spot).
- * - Move the Friends button to the lower-right, just under the Send + EN controls.
+ * - Make the bell a little smaller.
+ * - Move the bell down so it doesn’t sit beside the hearts.
+ * - Move the Friends button to sit just under the Send/EN controls.
+ * - Friends popup appears just under the Type box and hides the FIRE button while open.
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton+tweakpos';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton+tweakpos2';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -231,7 +233,7 @@
       const modeKey = match.mode || 'v1';
       me = me || {};
       me.ranks = me.ranks || {};
-      me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0 };
+      me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0};
       if (winnerName === (me.username || match.myName)) me.ranks[modeKey].w++; else me.ranks[modeKey].l++;
       paintRanks();
     }catch(e){}
@@ -417,13 +419,13 @@
   function ensureBellOverlay(){
     if(ui.notifBell && ui.notifBadge && ui.notifDropdown) return;
 
-    // bell (smaller)
+    // bell (smaller & moved down so it doesn't sit beside hearts)
     const bell = document.createElement('button');
     bell.id = 'mpNotifBell';
     bell.title = 'Notifications';
     bell.textContent = '🔔';
     Object.assign(bell.style, {
-      position:'fixed', right:'14px', top:'14px', zIndex:Z.bell,
+      position:'fixed', right:'14px', top:'56px', zIndex:Z.bell,
       width:'28px', height:'28px', borderRadius:'16px',
       background:'#162134', color:'#cfe0ff',
       border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
@@ -432,11 +434,11 @@
     bell.addEventListener('click', toggleNotifDropdown);
     document.body.appendChild(bell);
 
-    // badge (nudged for smaller bell)
+    // badge (aligned with smaller bell)
     const badge = document.createElement('span');
     badge.id='mpNotifBadge';
     Object.assign(badge.style, {
-      position:'fixed', right:'6px', top:'6px', zIndex:Z.drop,
+      position:'fixed', right:'6px', top:'48px', zIndex:Z.drop,
       minWidth:'14px', height:'14px', borderRadius:'7px',
       background:'#e11d48', color:'#fff', fontSize:'10px',
       display:'none', alignItems:'center', justifyContent:'center',
@@ -444,11 +446,11 @@
     });
     document.body.appendChild(badge);
 
-    // dropdown (slightly closer to smaller bell)
+    // dropdown (follows new bell y)
     const dd = document.createElement('div');
     dd.id='mpNotifDropdown';
     Object.assign(dd.style, {
-      position:'fixed', right:'10px', top:'48px', zIndex:Z.drop,
+      position:'fixed', right:'10px', top:'90px', zIndex:Z.drop,
       background:'#0f1522', color:'#e8eef7',
       border:'1px solid #2a3550', borderRadius:'12px',
       minWidth:'280px', maxWidth:'92vw', maxHeight:'300px', overflow:'auto',
@@ -461,7 +463,38 @@
     ui.notifDropdown = dd;
   }
 
-  // ===== GLOBAL friends button (always visible; moved under Send/EN) ========
+  // ===== Utility: find chat bar rect (Type/Send/EN) & position friends UI ===
+  function findChatBarRect(){
+    // Try input/textarea with placeholder "Type..."
+    const txt = document.querySelector('input[placeholder="Type..."], textarea[placeholder="Type..."]');
+    if(txt) return txt.getBoundingClientRect();
+    // Try the Send button
+    const send = Array.from(document.querySelectorAll('button')).find(b=> (b.textContent||'').trim()==='Send');
+    if(send) return send.getBoundingClientRect();
+    // Try EN button
+    const en = Array.from(document.querySelectorAll('button,div')).find(b=> (b.textContent||'').trim()==='EN');
+    if(en) return en.getBoundingClientRect();
+    return null;
+  }
+  function positionFriendsUI(){
+    const r = findChatBarRect();
+    if(!r){ return; }
+    const gapBtn = 8;   // gap under Send/EN for button
+    const gapPop = 12;  // gap under Type box for popup
+    const btnBottom = Math.max(0, window.innerHeight - r.bottom + gapBtn);
+    const popupBottom = Math.max(0, window.innerHeight - r.top + gapPop);
+    if(ui.friendsToggle){
+      ui.friendsToggle.style.right = '14px';
+      ui.friendsToggle.style.bottom = btnBottom+'px';
+    }
+    if(ui.friendsPopup){
+      ui.friendsPopup.style.right = '14px';
+      ui.friendsPopup.style.bottom = popupBottom+'px';
+    }
+  }
+  window.addEventListener('resize', positionFriendsUI);
+
+  // ===== GLOBAL friends button (always visible; sits under Send/EN) =========
   function ensureFriendsButtonOverlay(){
     if(ui.friendsToggle && ui.friendsToggle._global) return;
     const btn = document.createElement('button');
@@ -471,7 +504,7 @@
     Object.assign(btn.style, {
       position:'fixed',
       right:'14px',
-      bottom:'64px',  // sits just under Send/EN controls, above bottom edge
+      bottom:'64px',  // will be adjusted dynamically by positionFriendsUI()
       zIndex:Z.bell,
       height:'34px', padding:'0 12px', borderRadius:'18px',
       background:'#162134', color:'#cfe0ff',
@@ -482,6 +515,8 @@
     document.body.appendChild(btn);
     ui.friendsToggle = btn;
     ui.friendsToggle._global = true;
+    // initial position under chat bar if present
+    setTimeout(positionFriendsUI, 0);
   }
 
   // NEW: Notification UI helpers (uses global overlay now)
@@ -612,19 +647,42 @@
 
   // --- FIRE button helpers (hide while friends list open) --------------------
   function getFireButton(){
-    // try common ids; fallback to a button with "FIRE" text
-    const byId = document.querySelector('#btnFire') || document.querySelector('#fireBtn') || document.querySelector('#shootBtn');
-    if(byId) return byId;
-    const candidates = Array.from(document.querySelectorAll('button,div'));
-    return candidates.find(el => (el.textContent||'').trim().toUpperCase()==='FIRE') || null;
+    // Common ids/classes
+    const byCommon = document.querySelector('#btnFire, #fireBtn, #shootBtn, .btn-fire, .fire');
+    if(byCommon) return byCommon;
+    // Any element whose text contains FIRE (case-insensitive)
+    const all = Array.from(document.querySelectorAll('button,div,span'));
+    const byText = all.find(el => /\bFIRE\b/i.test((el.textContent||'').trim()));
+    if(byText) return byText.closest('button,div') || byText;
+    // Circle near bottom-right (fallback): pick element with large size there
+    const candidates = all
+      .map(el=>[el, el.getBoundingClientRect?.()])
+      .filter(([,r])=>r && r.width>50 && r.height>50 && r.bottom>window.innerHeight*0.6 && r.right>window.innerWidth*0.6)
+      .sort((a,b)=> (b[1].width*b[1].height)-(a[1].width*a[1].height));
+    return candidates.length? candidates[0][0] : null;
   }
   function setFireHidden(hidden){
     const fire = getFireButton(); if(!fire) return;
-    fire.__prevDisplay = fire.__prevDisplay || fire.style.display || '';
-    fire.style.display = hidden ? 'none' : fire.__prevDisplay;
+    // hide the container too if it’s a nested label
+    const target = fire.closest('button,div') || fire;
+    if(hidden){
+      target.__prevVis = {display:target.style.display, opacity:target.style.opacity, pointerEvents:target.style.pointerEvents};
+      target.style.opacity='0'; target.style.pointerEvents='none'; target.style.display='none';
+    }else{
+      if(target.__prevVis){
+        target.style.display = target.__prevVis.display || '';
+        target.style.opacity = target.__prevVis.opacity || '';
+        target.style.pointerEvents = target.__prevVis.pointerEvents || '';
+        delete target.__prevVis;
+      }else{
+        target.style.display='';
+        target.style.opacity='';
+        target.style.pointerEvents='';
+      }
+    }
   }
 
-  // Friends popup (global overlay; repositioned near bottom-right over canvas)
+  // Friends popup (global overlay; positioned under Type box)
   function ensureFriendsPopup(){
     if(ui.friendsPopup) return ui.friendsPopup;
     const pop = document.createElement('div');
@@ -632,7 +690,7 @@
     Object.assign(pop.style, {
       position:'fixed',
       right:'14px',
-      bottom:'110px',     // sit above the FIRE button area
+      bottom:'110px',     // will be adjusted by positionFriendsUI()
       zIndex:Z.drop,
       background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
       width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
@@ -659,6 +717,8 @@
     document.body.appendChild(pop);
     ui.friendsPopup = pop;
     ui.friendsBody  = body;
+    // position relative to chat bar
+    setTimeout(positionFriendsUI, 0);
     return pop;
   }
   function renderFriendsPopup(){
@@ -705,7 +765,7 @@
     if(!ui.friendsPopup) return;
     const vis = (ui.friendsPopup.style.display!=='none');
     ui.friendsPopup.style.display = vis ? 'none' : 'block';
-    if(!vis){ renderFriendsPopup(); setFireHidden(true); }
+    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
     else { setFireHidden(false); }
   }
 
@@ -726,7 +786,7 @@
         ui.searchStatus._relabelled = true;
       }
 
-      // If a lobby-scoped friends toggle exists from earlier builds, keep it from duplicating
+      // If a lobby-scoped friends toggle exists from earlier builds, remove duplication
       if(!ui.friendsToggle || !ui.friendsToggle._global){
         const old = lobby.querySelector('#mpFriendsToggle');
         if(old){ old.remove(); }
@@ -885,6 +945,9 @@
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
+
+      // ensure overlays track chat bar location after initial layout
+      setTimeout(positionFriendsUI, 250);
 
       console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
     }catch(e){
