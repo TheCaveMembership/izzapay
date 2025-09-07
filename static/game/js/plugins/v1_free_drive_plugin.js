@@ -1,6 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.11.2-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime+hotCar';
+  const BUILD='v1.12-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime+hotCar+escalation+tankBoss';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -19,7 +19,7 @@
 
   const parked = []; // {x,y,kind,timeoutId,hijackTag?}
 
-  // --- pursuit persistence ---
+  // --- pursuit persistence / escalation ---
   const PURSUER_KEYS = ['cops','swat','military','army','helicopters','tanks'];
   let lastCarCrimeAt = 0; // updated ONLY on hijack
   const now = ()=>performance.now();
@@ -34,14 +34,34 @@
   let guardWanted = 0;
   let spawnLockUntil = 0; // prevents other systems from respawning “fresh” squads (not used on hijack)
 
+  // --- escalation helpers ---
+  const MAX_WANTED = 5;
+  let fiveStarSince = 0;
+
+  // Tank boss (composite of existing sprites)
+  let tankBoss = null;   // {x,y,hp,parts:[{dx,dy}],fireCd}
+  const TANK_BUILD_STARS = 5;
+  const TANK_BUILD_HOLD_MS = 30000;
+  const TANK_SPEED = 70;
+  const TANK_HP = 40;
+  const TANK_PARTS = [
+    {dx:-16, dy:-8}, {dx:0, dy:-8}, {dx:16, dy:-8},
+    {dx:-16, dy:8},  {dx:0, dy:8},  {dx:16, dy:8}
+  ];
+  const ROCKET_SPEED = 240;
+  const ROCKET_COOLDOWN_MS = 1400;
+  const ROCKET_RADIUS = 10;
+  let rockets = []; // {x,y,vx,vy}
+
   function isArray(a){ return Array.isArray(a); }
 
   function pursuerCount(){
     try{
       let n=0;
       PURSUER_KEYS.forEach(k=>{ n += (api[k]&&api[k].length)|0; });
+      if (tankBoss) n += 1;
       return n|0;
-    }catch{ return 0; }
+    }catch{ return tankBoss?1:0; }
   }
 
   function snapshotPursuers(){
@@ -101,6 +121,45 @@
     }, 0);
   }
 
+  // Request more pursuers for current wanted (use game spawner if present; otherwise fallback)
+  function requestSpawnsForWanted(reason){
+    const lvl = (api.player?.wanted|0) || 0;
+    if (lvl<=0) return;
+
+    if (typeof api.spawnPursuers === 'function'){
+      try{ api.spawnPursuers(lvl, reason); return; }catch{}
+    }
+    // Fallback minimal spawner: add units near screen edges
+    const base = {spd:90, hp:3, state:'chase', facing:'down'};
+    const px = api.player.x, py = api.player.y;
+    const randOff = ()=> (Math.random()<0.5?-1:1) * (180 + Math.random()*120);
+    const spawnAt = (arr, count)=>{
+      for(let i=0;i<count;i++){
+        arr.push({ x:px+randOff(), y:py+randOff(), spd:base.spd, hp:base.hp, state:base.state, facing:base.facing });
+      }
+    };
+    api.cops = api.cops || [];
+    api.swat = api.swat || [];
+    api.military = api.military || [];
+    if (lvl===1){ spawnAt(api.cops, 2); }
+    else if (lvl===2){ spawnAt(api.cops, 2); spawnAt(api.swat, 1); }
+    else if (lvl===3){ spawnAt(api.cops, 2); spawnAt(api.swat, 2); }
+    else if (lvl===4){ spawnAt(api.cops, 2); spawnAt(api.swat, 2); spawnAt(api.military, 1); }
+    else /*5*/ { spawnAt(api.cops, 2); spawnAt(api.swat, 2); spawnAt(api.military, 2); }
+  }
+
+  // Escalate: add a star (max 5) and spawn more pursuers (never replacing current ones)
+  function escalatePursuit(reason){
+    const cur = (api.player?.wanted|0) || 0;
+    const next = Math.min(MAX_WANTED, cur + 1);
+    if (next !== cur){
+      api.setWanted(next);
+      // If you just hit 5, start the 5-star timer
+      if (next>=TANK_BUILD_STARS && fiveStarSince===0) fiveStarSince = now();
+    }
+    requestSpawnsForWanted(reason);
+  }
+
   // Wanted stars ↔ pursuers: ensure at least 1 star while chased; 0 when chase is over & no hot car.
   function syncWantedWithPursuit(){
     if(!api?.player) return;
@@ -108,9 +167,11 @@
     if(n>0){
       if((api.player.wanted|0) < 1) api.setWanted(1);
     }else{
-      // If no pursuers remain, end the hot-car session and clear stars.
+      // If no pursuers remain, end the hot-car session and clear stars, reset 5-star timer and tank.
       if(hijackTag) hijackTag = null;
       if((api.player.wanted|0) !== 0) api.setWanted(0);
+      fiveStarSince = 0;
+      destroyTankBoss();
     }
   }
 
@@ -126,6 +187,13 @@
         if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
         restorePursuers();
       }, 0);
+    }
+    // Track 5-star timer
+    if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
+      if (!fiveStarSince) fiveStarSince = now();
+    }else{
+      fiveStarSince = 0;
+      destroyTankBoss();
     }
   });
 
@@ -219,8 +287,12 @@
 
     // HIJACK is the ONLY car crime:
     lastCarCrimeAt = now();
-    hijackTag = 'hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
-    if((api.player.wanted|0)===0){ api.setWanted(1); }
+
+    // Mark / continue hot session
+    hijackTag = hijackTag || ('hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
+
+    // Always escalate by +1 star on hijack (caps at 5)
+    escalatePursuit('hijack');
     armGuard('enter-traffic'); // no spawn lock here; let new cops spawn
   }
 
@@ -304,9 +376,9 @@
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
-        // Running over pedestrians raises wanted,
-        // but it is NOT a “car crime” (no lastCarCrimeAt update).
-        api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
+        // Running over pedestrians ALWAYS raises wanted and escalates pursuit.
+        api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
+        escalatePursuit('ped-hit');
       }
     }
 
@@ -327,6 +399,102 @@
         api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
     }
+  }
+
+  // ---------- Tank boss (composite from military sprites) ----------
+  function spawnTankBoss(){
+    if (tankBoss) return;
+    // Place just off-screen from player
+    const px = api.player.x, py = api.player.y;
+    const off = 280;
+    const sx = px + (Math.random()<0.5?-off:off);
+    const sy = py + (Math.random()<0.5?-off:off);
+    tankBoss = { x:sx, y:sy, hp:TANK_HP, parts:TANK_PARTS.slice(), fireCd:0 };
+    // Make sure at least one military unit exists to visually “sell” the fusion
+    api.military = api.military || [];
+    for(let i=0;i<3;i++){
+      api.military.push({ x:sx+(Math.random()*40-20), y:sy+(Math.random()*40-20), spd:80, hp:5, state:'escort' });
+    }
+    IZZA.emit?.('toast',{text:'⚠️ Military tank deployed!'});
+  }
+  function destroyTankBoss(){
+    tankBoss = null;
+    rockets.length = 0;
+  }
+  function updateTankBoss(dt){
+    if(!tankBoss) return;
+    const px = api.player.x, py = api.player.y;
+    // Move toward player
+    const dx = px - tankBoss.x, dy = py - tankBoss.y;
+    const m = Math.hypot(dx,dy)||1;
+    const vx = (dx/m) * (TANK_SPEED * dt), vy = (dy/m) * (TANK_SPEED * dt);
+    tankBoss.x += vx; tankBoss.y += vy;
+
+    // Fire rockets
+    tankBoss.fireCd -= dt*1000;
+    if (tankBoss.fireCd <= 0){
+      tankBoss.fireCd = ROCKET_COOLDOWN_MS;
+      const rdx = px - tankBoss.x, rdy = py - tankBoss.y;
+      const rm = Math.hypot(rdx,rdy)||1;
+      rockets.push({
+        x: tankBoss.x, y: tankBoss.y,
+        vx: (rdx/rm) * ROCKET_SPEED,
+        vy: (rdy/rm) * ROCKET_SPEED
+      });
+      IZZA.emit?.('tank-rocket-fired', {x:tankBoss.x,y:tankBoss.y});
+    }
+
+    // If tank somehow far with no stars, despawn safely handled elsewhere.
+  }
+  function updateRockets(dt){
+    if(!rockets.length) return;
+    const px = api.player.x, py = api.player.y;
+    for(let i=rockets.length-1;i>=0;i--){
+      const r = rockets[i];
+      r.x += r.vx*dt; r.y += r.vy*dt;
+      // Hit player?
+      const d = Math.hypot(px - r.x, py - r.y);
+      if (d <= ROCKET_RADIUS + 12){ // fudge radius
+        IZZA.emit?.('player-hit', {by:'rocket', dmg:4});
+        rockets.splice(i,1);
+        continue;
+      }
+      // Lifetime/Offscreen trim
+      if (Math.abs(r.x-px)>900 || Math.abs(r.y-py)>700) rockets.splice(i,1);
+    }
+  }
+  function drawTankBoss(ctx, S){
+    if(!tankBoss) return;
+    // Draw by reusing military units as “segments”—simple rectangles if no sprite painter available.
+    const sx=(tankBoss.x - api.camera.x)*(S/api.TILE);
+    const sy=(tankBoss.y - api.camera.y)*(S/api.TILE);
+    ctx.save();
+    ctx.imageSmoothingEnabled=false;
+    // Body plates (using existing style colors)
+    ctx.fillStyle='#394b63';
+    tankBoss.parts.forEach(p=>{
+      ctx.fillRect(sx + p.dx, sy + p.dy, 18, 12);
+    });
+    // Turret
+    ctx.fillStyle='#233044';
+    ctx.fillRect(sx-8, sy-6, 16, 12);
+    // Barrel pointing to player
+    const dx = (api.player.x - tankBoss.x);
+    const dy = (api.player.y - tankBoss.y);
+    const a = Math.atan2(dy,dx);
+    ctx.translate(sx,sy);
+    ctx.rotate(a);
+    ctx.fillStyle='#1b2636';
+    ctx.fillRect(6,-2,16,4);
+    ctx.restore();
+
+    // Rockets
+    rockets.forEach(r=>{
+      const rx=(r.x - api.camera.x)*(S/api.TILE);
+      const ry=(r.y - api.camera.y)*(S/api.TILE);
+      ctx.fillStyle='#ffcc66';
+      ctx.beginPath(); ctx.arc(rx,ry,4,0,Math.PI*2); ctx.fill();
+    });
   }
 
   function drawVehicleSprite(kind, wx, wy){
@@ -370,6 +538,19 @@
 
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
+
+    // Escalate to tank if 5-star sustained
+    if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
+      if (fiveStarSince && (now() - fiveStarSince) >= TANK_BUILD_HOLD_MS){
+        spawnTankBoss();
+      }
+    }
+
+    // Update tank + rockets
+    const dt = Math.min(0.05, (api.dt||0.016)); // dt seconds (clamped)
+    updateTankBoss(dt);
+    updateRockets(dt);
+
     if(driving && car){
       car.x=api.player.x; car.y=api.player.y;
       handleVehicularHits();
@@ -380,7 +561,13 @@
 
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
+    const ctx=document.getElementById('game').getContext('2d');
+    const S=api.DRAW;
+
     parked.forEach(p=>{ drawVehicleSprite(p.kind || 'sedan', p.x, p.y); });
     if(driving && car){ drawVehicleSprite(car.kind || 'sedan', car.x, car.y); }
+
+    // Draw the tank boss & rockets last to sit on top
+    drawTankBoss(ctx, S);
   });
 })();
