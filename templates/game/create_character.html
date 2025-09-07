@@ -55,16 +55,16 @@
               <input type="hidden" name="t" value="{{ t }}">
             {% endif %}
 
-            <!-- NEW: body type & tones (encoded into sprite_skin on submit) -->
+            <!-- NEW -->
             <label>Body Type</label>
-            <select id="body_type">
+            <select id="body_type" name="body_type">
               <option value="male">Male</option>
               <option value="female">Female</option>
               <option value="neutral">Prefer not to say</option>
             </select>
 
             <label>Skin Tone</label>
-            <select id="skin_tone">
+            <select id="skin_tone" name="skin_tone">
               <option value="light">Light</option>
               <option value="medium">Medium</option>
               <option value="tan">Tan</option>
@@ -72,7 +72,7 @@
               <option value="deep">Deep</option>
             </select>
 
-            <!-- EXISTING fields (kept) -->
+            <!-- EXISTING -->
             <label>Sprite Skin</label>
             <select name="sprite_skin" id="sprite_skin">
               <option value="default">Default</option>
@@ -87,9 +87,9 @@
               <option value="long">Long</option>
             </select>
 
-            <!-- NEW: hair color (encoded into hair on submit) -->
+            <!-- NEW -->
             <label>Hair Color</label>
-            <select id="hair_color">
+            <select id="hair_color" name="hair_color">
               <option value="black">Black</option>
               <option value="brown">Brown</option>
               <option value="blonde">Blonde</option>
@@ -124,15 +124,9 @@
 
   <script>
   (function(){
-    // We keep your existing loader contract.
-    // Files are looked up like:
-    //  /static/game/sprites/body/<sprite_skin[__body__tone]>.png
-    //  /static/game/sprites/hair/<hair[__color]>.png
-    // If a composed variant is missing, we fall back to the base file.
-
+    // ---------- Asset roots (unchanged) ----------
     const SPRITES = {
       body: {
-        // base body “themes”
         default:  "/static/game/sprites/body/default.png",
         street_a: "/static/game/sprites/body/street_a.png",
         street_b: "/static/game/sprites/body/street_b.png"
@@ -140,7 +134,9 @@
       hair: {
         short: "/static/game/sprites/hair/short.png",
         buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png"
+        long:  "/static/game/sprites/hair/long.png",
+        // optional female-specific long hair silhouette; fallback to long.png
+        long_f: "/static/game/sprites/hair/long_f.png"
       },
       outfit: {
         street:   "/static/game/sprites/outfit/street.png",
@@ -149,17 +145,31 @@
       }
     };
 
-    // Human labels for the live text
-    const LABELS = {
-      sprite_skin: { default:"Default", street_a:"Street A", street_b:"Street B" },
-      hair:        { short:"Short", buzz:"Buzz", long:"Long" },
-      outfit:      { street:"Street", athletic:"Athletic", luxury:"Luxury" },
-      body_type:   { male:"Male", female:"Female", neutral:"Neutral" },
-      skin_tone:   { light:"Light", medium:"Medium", tan:"Tan", dark:"Dark", deep:"Deep" },
-      hair_color:  { black:"Black", brown:"Brown", blonde:"Blonde", red:"Red", white:"White", blue:"Blue", green:"Green", pink:"Pink" }
+    // ---------- Palettes for tinting ----------
+    // IMPORTANT: these "from" colors should match the base art ramps used for skin & hair.
+    // If yours differ, edit SKIN_BASE and HAIR_BASE to your actual hexes.
+    const SKIN_BASE = ["#F7D7C6", "#E8BEA8", "#D6A48E"]; // base, mid, shadow
+    const HAIR_BASE = ["#C8C8C8", "#9C9C9C", "#6E6E6E"]; // neutral gray ramp for hair
+
+    const SKIN_TO = {
+      light:  ["#FFE3CF","#F7CDB5","#E6B39E"],
+      medium: ["#F3C7A2","#E2A982","#C48B69"],
+      tan:    ["#E8B58F","#D19872","#AE7654"],
+      dark:   ["#C28F6A","#A47250","#84583E"],
+      deep:   ["#9E6E4D","#7F563D","#5E3F2C"]
+    };
+    const HAIR_TO = {
+      black:  ["#3E3E44","#2A2A2F","#151519"],
+      brown:  ["#7A5336","#5E3F29","#412B1C"],
+      blonde: ["#F7E08A","#E6C55F","#C2A548"],
+      red:    ["#E06A3A","#B94F28","#8E3B1E"],
+      white:  ["#F2F2F2","#DCDCDC","#BEBEBE"],
+      blue:   ["#78A7FF","#4C7DE0","#2F5CB8"],
+      green:  ["#7AD27A","#4CAF4C","#2E7D32"],
+      pink:   ["#FF9BC2","#E46FA1","#C34E80"]
     };
 
-    // DOM
+    // ---------- DOM ----------
     const selType = document.getElementById('body_type');
     const selTone = document.getElementById('skin_tone');
     const selSkin = document.getElementById('sprite_skin');
@@ -170,9 +180,9 @@
     const ctx     = cvs.getContext('2d');
     const preset  = document.getElementById('presetLabel');
     const form    = document.getElementById('charForm');
-
     ctx.imageSmoothingEnabled = false;
 
+    // ---------- helpers ----------
     function loadImg(src){
       return new Promise(resolve => {
         const img = new Image();
@@ -182,96 +192,128 @@
         img.src = src;
       });
     }
-
-    function composeBodyKey(){
-      const base = selSkin.value; // default | street_a | street_b
-      const t = selType.value;    // male | female | neutral
-      const s = selTone.value;    // light | medium | tan | dark | deep
-      // Neutral maps to “male” or “female”? Keep as-is so you can add assets later.
-      // If you have no neutral sprites, you can alias it to male by changing this line:
-      const typeKey = (t==='neutral' ? 'male' : t);
-      return base + '__' + typeKey + '__' + s; // e.g., street_a__female__tan
+    function hexToRgb(h){
+      const s = h.replace('#',''); const n=parseInt(s,16);
+      return {r:(n>>16)&255, g:(n>>8)&255, b:n&255};
     }
-
-    function composeHairKey(){
-      return selHair.value + '__' + selHairColor.value; // e.g., short__blonde
+    function rgbToHex(r,g,b){
+      const n=(r<<16)|(g<<8)|b; return '#'+n.toString(16).padStart(6,'0').toUpperCase();
     }
+    function dist(a,b){ const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b; return dr*dr+dg*dg+db*db; }
 
-    function bodyURL(){
-      const key = composeBodyKey();
-      // first try composed variant, then base
-      const composed = '/static/game/sprites/body/' + encodeURIComponent(key) + '.png';
-      const base = SPRITES.body[selSkin.value] || SPRITES.body.default;
-      return {primary: composed, fallback: base};
-    }
+    // Build a map { hex -> hex } with tolerance matching
+    function paletteSwap(img, fromRamp, toRamp, tolerance=1200){
+      const w = img.width, h = img.height;
+      const oc = document.createElement('canvas');
+      oc.width = w; oc.height = h;
+      const octx = oc.getContext('2d', { willReadFrequently:true });
+      octx.imageSmoothingEnabled = false;
+      octx.drawImage(img, 0, 0);
+      const id = octx.getImageData(0,0,w,h);
+      const d = id.data;
 
-    function hairURL(){
-      const key = composeHairKey();
-      const composed = '/static/game/sprites/hair/' + encodeURIComponent(key) + '.png';
-      const base = SPRITES.hair[selHair.value] || SPRITES.hair.short;
-      return {primary: composed, fallback: base};
-    }
+      const fromRGB = fromRamp.map(hexToRgb);
+      const toRGB   = toRamp.map(hexToRgb);
 
-    function outfitURL(){
-      return SPRITES.outfit[selOut.value] || SPRITES.outfit.street;
+      // Precompute closest index for a given pixel color (3-swatch ramp)
+      for(let i=0;i<d.length;i+=4){
+        const r=d[i], g=d[i+1], b=d[i+2], a=d[i+3];
+        if(a===0) continue;
+
+        // Find closest base swatch
+        const p={r,g,b};
+        let best=-1, bestScore=Infinity;
+        for(let k=0;k<fromRGB.length;k++){
+          const score = dist(p, fromRGB[k]);
+          if(score < bestScore){ best=k; bestScore=score; }
+        }
+        if(bestScore <= tolerance){
+          const t = toRGB[best] || toRGB[toRGB.length-1];
+          d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
+        }
+      }
+      octx.putImageData(id,0,0);
+      return oc;
     }
 
     async function draw(){
+      // Clear + simple vignette
       ctx.clearRect(0,0,cvs.width,cvs.height);
-
       const g = ctx.createRadialGradient(80,80,10, 80,80,90);
       g.addColorStop(0, "rgba(255,255,255,0.08)");
       g.addColorStop(1, "rgba(0,0,0,0.0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0,0,cvs.width,cvs.height);
+      ctx.fillStyle = g; ctx.fillRect(0,0,cvs.width,cvs.height);
 
       const DW = 96, DH = 96, X = (cvs.width - DW)/2, Y = (cvs.height - DH)/2;
 
-      const b = bodyURL();
-      const h = hairURL();
-      const o = outfitURL();
+      // BODY: try gendered base first, then theme default
+      const theme = selSkin.value; // default | street_a | street_b
+      const isFemale = (selType.value === 'female');
+      const femaleTry = `/static/game/sprites/body/${theme}__female.png`;
+      let body = await loadImg(femaleTry);
+      if(!body){
+        body = await loadImg(SPRITES.body[theme] || SPRITES.body.default);
+      }
 
-      // load with graceful fallback
-      let body = await loadImg(b.primary); if(!body) body = await loadImg(b.fallback);
-      let hair = await loadImg(h.primary); if(!hair) hair = await loadImg(h.fallback);
-      const outfit = await loadImg(o);
+      // OUTFIT: unchanged
+      const outfit = await loadImg(SPRITES.outfit[selOut.value] || SPRITES.outfit.street);
 
-      if (body) ctx.drawImage(body, X, Y, DW, DH);
-      else { ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH); }
+      // HAIR: choose long_f for female+long if present; else base
+      let hairURL = SPRITES.hair[selHair.value] || SPRITES.hair.short;
+      if(isFemale && selHair.value==='long'){
+        hairURL = SPRITES.hair.long_f || SPRITES.hair.long;
+      }
+      let hair = await loadImg(hairURL);
 
-      if (outfit) ctx.drawImage(outfit, X, Y, DW, DH);
-      else { ctx.fillStyle="#5aa6ff"; ctx.fillRect(X+2, Y+38, DW-4, DH-40); }
+      // TINT: apply skin + hair palette swaps to offscreen canvases, then draw
+      const skinRamp = SKIN_TO[selTone.value] || SKIN_TO.light;
+      const hairRamp = HAIR_TO[selHairColor.value] || HAIR_TO.black;
 
-      if (hair) ctx.drawImage(hair, X, Y, DW, DH);
-      else { ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28, Y+6, 40, 22); }
+      if(body){
+        const tintedBody = paletteSwap(body, SKIN_BASE, skinRamp, 1500);
+        ctx.drawImage(tintedBody, X, Y, DW, DH);
+      }else{
+        ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH);
+      }
 
-      // Label
+      if(outfit){ ctx.drawImage(outfit, X, Y, DW, DH); }
+      else{ ctx.fillStyle="#5aa6ff"; ctx.fillRect(X+2, Y+38, DW-4, DH-40); }
+
+      if(hair){
+        const tintedHair = paletteSwap(hair, HAIR_BASE, hairRamp, 1200);
+        ctx.drawImage(tintedHair, X, Y, DW, DH);
+      }else{
+        ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28, Y+6, 40, 22);
+      }
+
+      // Label text
+      const labels = {
+        body_type: { male:"Male", female:"Female", neutral:"Neutral" },
+        skin_tone: { light:"Light", medium:"Medium", tan:"Tan", dark:"Dark", deep:"Deep" },
+        hair: { short:"Short", buzz:"Buzz", long:"Long" },
+        hair_color: { black:"Black", brown:"Brown", blonde:"Blonde", red:"Red", white:"White", blue:"Blue", green:"Green", pink:"Pink" },
+        outfit: { street:"Street", athletic:"Athletic", luxury:"Luxury" },
+        sprite_skin: { default:"Default", street_a:"Street A", street_b:"Street B" }
+      };
       preset.textContent =
-        `Body: ${LABELS.body_type[selType.value]} • Skin: ${LABELS.skin_tone[selTone.value]} • ` +
-        `Hair: ${LABELS.hair[selHair.value]} (${LABELS.hair_color[selHairColor.value]}) • ` +
-        `Outfit: ${LABELS.outfit[selOut.value]}`;
+        `Body: ${labels.body_type[selType.value]} • Skin: ${labels.skin_tone[selTone.value]} • ` +
+        `Hair: ${labels.hair[selHair.value]} (${labels.hair_color[selHairColor.value]}) • ` +
+        `Outfit: ${labels.outfit[selOut.value]} • Theme: ${labels.sprite_skin[selSkin.value]}`;
     }
 
-    // Keep existing field names for backend; we only change their VALUES on submit.
+    // Confirm lock-in on submit (keeps your existing POST fields intact).
     form.addEventListener('submit', function(ev){
-      // mutate the values before POST so the game loads the correct files
-      const composedSkin = composeBodyKey();   // e.g., street_a__female__tan
-      const composedHair = composeHairKey();   // e.g., short__blonde
-      document.getElementById('sprite_skin').value = composedSkin;
-      document.getElementById('hair').value = composedHair;
-
       const ok = confirm(
         "Save character?\n\nBase appearance will be LOCKED.\nYou can still change style via in-game shops (barber, outfitters, mods)."
       );
       if (!ok) { ev.preventDefault(); return false; }
     });
 
-    // Live preview updates
+    // Live preview wiring
     [selType, selTone, selSkin, selHair, selHairColor, selOut].forEach(el=>{
       el.addEventListener('change', draw);
     });
 
-    // Initial render
     draw();
   })();
   </script>
