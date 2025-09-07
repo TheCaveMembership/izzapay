@@ -179,125 +179,117 @@
     Chat.feed.scrollTop = Chat.feed.scrollHeight;
   }
 
-  // ---- floating bubbles above heads ----
-  const Bubbles = new Map(); // key = normalized username -> {el, tDie, text}
+  // ---- floating bubbles above heads (fixed to viewport; high z-index) ----
+const Bubbles = new Map(); // key = normalized username -> {el, tDie}
+const _norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
 
-  function ensureBubbleHost(){
-    const cvs=document.getElementById('game'); if(!cvs) return null;
-    const parent = cvs.parentElement;
-    if (parent && getComputedStyle(parent).position==='static') {
-      parent.style.position = 'relative';
+function _gameCanvas(){
+  return document.getElementById('game') || null;
+}
+
+function _findPeerByKey(key){
+  const pools = [
+    (window.__REMOTE_PLAYERS__||[]),
+    (window.REMOTE_PLAYERS_API?.list?.() || []),
+    (IZZA?.api?.peers || [])
+  ];
+  for (const arr of pools){
+    for (const p of arr){
+      const uname = p?.username || p?.name || p?.id || '';
+      if (_norm(uname) === key) return p;
     }
-    return { cvs, parent };
+  }
+  return null;
+}
+
+function showBubble(unameRaw, text){
+  try{
+    const key = _norm(unameRaw);
+    if (!key) return;
+
+    let b = Bubbles.get(key);
+    if (!b){
+      const el = document.createElement('div');
+      Object.assign(el.style, {
+        position:'fixed',
+        zIndex: 1000,                // higher than joystick/overlays
+        pointerEvents:'none',
+        background:'rgba(8,12,20,.92)',
+        color:'#e8eef7',
+        border:'1px solid #2a3550',
+        borderRadius:'10px',
+        padding:'4px 8px',
+        fontSize:'12px',
+        maxWidth:'60vw',
+        whiteSpace:'pre-wrap',
+        transform:'translateZ(0)',
+        transition:'opacity 160ms linear',
+        opacity:'1'
+      });
+      document.body.appendChild(el);
+      b = { el, tDie: 0 };
+      Bubbles.set(key, b);
+    }
+    b.el.textContent = text;
+    b.tDie = performance.now() + 4000; // visible ~4s
+
+    // snap into place immediately for local echo
+    _positionBubbleNow(key, b.el);
+  }catch(e){}
+}
+
+function _positionBubbleNow(key, el){
+  const api = IZZA?.api; const cvs = _gameCanvas();
+  if (!api?.ready || !cvs) return;
+
+  const rect  = cvs.getBoundingClientRect();
+  const scale = api.DRAW / api.TILE;
+
+  const meKey = _norm(api?.user?.username || api?.user?.name || '');
+  let sx, sy;
+
+  if (key === meKey){
+    sx = (api.player.x - api.camera.x) * scale;
+    sy = (api.player.y - api.camera.y) * scale;
+  }else{
+    const p = _findPeerByKey(key);
+    if (!p) return;
+    sx = (p.x - api.camera.x) * scale;
+    sy = (p.y - api.camera.y) * scale;
   }
 
-  function showBubble(unameRaw, text){
-    try{
-      const key = norm(unameRaw);
-      if(!key) return;
-      const host = ensureBubbleHost(); if(!host) return;
-      let b=Bubbles.get(key);
-      if(!b){
-        const el=document.createElement('div');
-        Object.assign(el.style,{
-          position:'absolute', zIndex:29, pointerEvents:'none',
-          background:'rgba(8,12,20,.92)', color:'#e8eef7',
-          border:'1px solid #2a3550', borderRadius:'10px',
-          padding:'4px 8px', fontSize:'12px', maxWidth:'180px', whiteSpace:'pre-wrap',
-          transition:'opacity 160ms linear', opacity:'1'
-        });
-        host.parent.appendChild(el);
-        b = { el, tDie:0, text:'' };
-        Bubbles.set(key, b);
-      }
-      b.text=text; b.el.textContent=text; b.tDie = performance.now() + 4000; // ~4s
+  // convert sprite-space → viewport; center and lift above head
+  const left = rect.left + sx - el.offsetWidth/2 + 16; // +16 ≈ sprite center
+  const top  = rect.top  + sy - 36;                    // lift above head
+  el.style.left = Math.round(left) + 'px';
+  el.style.top  = Math.round(top)  + 'px';
+  el.style.opacity = '1';
+}
 
-      // Try to position immediately (for snappy local display)
-      const api=IZZA.api;
-      if(api?.ready){
-        const S=api.DRAW, scale=S/api.TILE;
-        const parentRect = host.parent.getBoundingClientRect();
-        const canvasRect = host.cvs.getBoundingClientRect();
-        const offX = canvasRect.left - parentRect.left;
-        const offY = canvasRect.top  - parentRect.top;
+// follow owners and cull when expired
+IZZA.on?.('render-post', ()=>{
+  try{
+    if (!IZZA?.api?.ready || !_gameCanvas()) return;
+    const now = performance.now();
 
-        const meKey = norm(api?.user?.username || api?.user?.name);
-        if(key===meKey){
-          const sx=(api.player.x - api.camera.x)*scale;
-          const sy=(api.player.y - api.camera.y)*scale;
-          positionBubble(b.el, offX, offY, sx, sy);
-        }else{
-          const p = findPeerByKey(key); // try remote immediately
-          if(p){
-            const sx=(p.x - api.camera.x)*scale, sy=(p.y - api.camera.y)*scale;
-            positionBubble(b.el, offX, offY, sx, sy);
-          }
-        }
-      }
-    }catch(e){}
-  }
-
-  function positionBubble(el, offX, offY, sx, sy){
-    el.style.left = (offX + sx - el.offsetWidth/2 + 16) + 'px';
-    el.style.top  = (offY + sy - 36) + 'px';
-    el.style.opacity = '1';
-  }
-
-  function findPeerByKey(key){
-    // Try multiple sources for remote players; normalize each name
-    const pools = [
-      (window.__REMOTE_PLAYERS__||[]),
-      (window.REMOTE_PLAYERS_API?.list?.() || []),
-      (IZZA?.api?.peers || [])
-    ];
-    for(const arr of pools){
-      for(const p of arr){
-        const uname = p?.username || p?.name || p?.id || '';
-        if(norm(uname)===key) return p;
+    for (const [key, b] of Array.from(Bubbles.entries())){
+      _positionBubbleNow(key, b.el);
+      if (now > b.tDie){
+        b.el.remove();
+        Bubbles.delete(key);
       }
     }
-    return null;
-  }
+  }catch{}
+});
 
-  // Reposition & cull bubbles each frame
-  IZZA.on?.('render-post', ()=>{
-    try{
-      const api=IZZA.api; if(!api?.ready) return;
-      const host = ensureBubbleHost(); if(!host) return;
-      const S=api.DRAW, scale=S/api.TILE;
-      const now=performance.now();
-
-      const parentRect = host.parent.getBoundingClientRect();
-      const canvasRect = host.cvs.getBoundingClientRect();
-      const offX = canvasRect.left - parentRect.left;
-      const offY = canvasRect.top  - parentRect.top;
-
-      const meKey = norm(api?.user?.username || api?.user?.name);
-
-      // Position my bubble (if any)
-      if(meKey && Bubbles.has(meKey)){
-        const b=Bubbles.get(meKey);
-        const sx=(api.player.x - api.camera.x)*scale;
-        const sy=(api.player.y - api.camera.y)*scale;
-        positionBubble(b.el, offX, offY, sx, sy);
-        if(now>b.tDie){ b.el.remove(); Bubbles.delete(meKey); }
-      }
-
-      // Position remote bubbles
-      for (const [key, b] of Array.from(Bubbles.entries())){
-        if(key===meKey) continue;
-        const p = findPeerByKey(key);
-        if(p){
-          const sx=(p.x - api.camera.x)*scale, sy=(p.y - api.camera.y)*scale;
-          positionBubble(b.el, offX, offY, sx, sy);
-        }
-        if(now>b.tDie){
-          b.el.remove();
-          Bubbles.delete(key);
-        }
-      }
-    }catch{}
-  });
+// keep bubbles anchored on scroll/resize too
+['scroll','resize','orientationchange'].forEach(evt=>{
+  window.addEventListener(evt, ()=>{
+    for (const [key, b] of Bubbles.entries()){
+      _positionBubbleNow(key, b.el);
+    }
+  }, { passive:true });
+});
 
   // ---- sending & receiving ----
   function sendChat(text){
