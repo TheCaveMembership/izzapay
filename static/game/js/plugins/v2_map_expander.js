@@ -1182,8 +1182,7 @@ if (!window._izzaBoatActive) {             // <— add this guard
   }
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
 
-})();
-// ===== Bigmap overlay: open on minimap tap, close on tap/Esc, block input safely =====
+})();// ===== Bigmap overlay: open on minimap tap, close on tap/Esc, block input safely =====
 (function initBigmapOverlay(){
   let bigOpen = false;
   let prevInputBlocked = false;
@@ -1195,15 +1194,24 @@ if (!window._izzaBoatActive) {             // <— add this guard
     wrap.id = 'bigmapWrap';
     wrap.style.cssText =
       'position:absolute;inset:0;display:none;align-items:center;justify-content:center;' +
-      'background:rgba(0,0,0,.55);z-index:120;'; // above HUD
+      'background:rgba(0,0,0,.55);z-index:120;';
+    wrap.style.touchAction = 'none'; // disable browser gestures under overlay
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'bigmapClose';
+    closeBtn.textContent = 'Close ✕';
+    closeBtn.style.cssText =
+      'position:absolute;top:10px;right:12px;background:#263447;color:#cfe3ff;' +
+      'border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;z-index:2;';
+    wrap.appendChild(closeBtn);
 
     // Big canvas mirrors your overlay painter
     const c = document.createElement('canvas');
     c.id = 'bigmap';
-    // responsive but crisp
     const W = Math.min(window.innerWidth * 0.9, 900);
     const H = Math.min(window.innerHeight * 0.8, 600);
-    c.width  = 900;   // logical grid 90×60 scaled ×10
+    c.width  = 900;   // logical 90×60 grid ×10
     c.height = 600;
     c.style.width  = Math.round(W) + 'px';
     c.style.height = Math.round(H) + 'px';
@@ -1222,11 +1230,15 @@ if (!window._izzaBoatActive) {             // <— add this guard
     wrap.appendChild(inner);
     document.body.appendChild(wrap);
 
-    // Close on any click inside overlay
-    wrap.addEventListener('click', closeBigmap, {capture:true});
-    // Prevent any pointer event from reaching the chat or HUD
-    wrap.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopImmediatePropagation(); }, {capture:true});
-    wrap.addEventListener('touchstart',  e=>{ e.preventDefault(); e.stopImmediatePropagation(); }, {capture:true});
+    const closeOnDown = e => { e.preventDefault(); e.stopImmediatePropagation(); closeBigmap(); };
+    // Close button
+    closeBtn.addEventListener('pointerdown', closeOnDown, {capture:true});
+    closeBtn.addEventListener('touchstart',  closeOnDown, {capture:true, passive:false});
+
+    // Close on any tap anywhere on the overlay (including canvas)
+    wrap.addEventListener('pointerdown', closeOnDown, {capture:true});
+    wrap.addEventListener('touchstart',  closeOnDown, {capture:true, passive:false});
+
     // Esc closes
     window.addEventListener('keydown', e=>{
       if (!bigOpen) return;
@@ -1239,18 +1251,21 @@ if (!window._izzaBoatActive) {             // <— add this guard
     if (!IZZA?.api?.ready) return;
     ensureBigmapUI();
 
-    // Block player input while open, remember prior state if your engine exposes it
+    // Block player input while open, remember prior state
     prevInputBlocked = !!IZZA.inputBlocked;
     IZZA.inputBlocked = true;
 
-    // Show and paint immediately
     const wrap = document.getElementById('bigmapWrap');
     wrap.style.display = 'flex';
     bigOpen = true;
     paintOverlay('bigmap');
 
-    // Hide the on-screen joystick to avoid phantom touches under the overlay
-    document.getElementById('stickZone')?.style && (document.getElementById('stickZone').style.visibility='hidden');
+    // Optional: disable Map button highlight while open
+    document.getElementById('btnMap')?.setAttribute('disabled','true');
+
+    // Hide joystick to avoid phantom touches under the overlay
+    const stick = document.getElementById('stickZone');
+    if (stick && stick.style) stick.style.visibility = 'hidden';
   }
 
   function closeBigmap(){
@@ -1262,15 +1277,18 @@ if (!window._izzaBoatActive) {             // <— add this guard
     // Restore input state
     IZZA.inputBlocked = prevInputBlocked ? true : false;
 
-    // Restore joystick visibility
-    document.getElementById('stickZone')?.style && (document.getElementById('stickZone').style.visibility='visible');
+    // Restore joystick & Map button
+    const stick = document.getElementById('stickZone');
+    if (stick && stick.style) stick.style.visibility = 'visible';
+    document.getElementById('btnMap')?.removeAttribute('disabled');
   }
 
   // Hook minimap tap → openBigmap, and stop the tap from reaching chat UI
   const mini = document.getElementById('minimap');
   if (mini){
-    ['click','pointerdown','touchstart'].forEach(evt=>{
-      mini.addEventListener(evt, openBigmap, {capture:true});
+    const openAndStop = e => { openBigmap(e); };
+    ['pointerdown','touchstart','click'].forEach(evt=>{
+      mini.addEventListener(evt, openAndStop, {capture:true, passive: evt==='touchstart' ? false : undefined});
     });
   }
 
