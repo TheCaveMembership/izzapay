@@ -1,6 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.11-free-drive+pursuit-guard-PERSIST';
+  const BUILD='v1.11.1-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -21,7 +21,7 @@
 
   // --- pursuit persistence ---
   const PURSUER_KEYS = ['cops','swat','military','army','helicopters','tanks'];
-  let lastCarCrimeAt = 0;
+  let lastCarCrimeAt = 0; // NOTE: updated ONLY on hijack now
   const now = ()=>performance.now();
 
   // Snapshots of exact pursuers before transitions
@@ -29,7 +29,7 @@
   // Guard window to block/undo wanted=0 wipes right after transitions
   let guardUntil = 0;
   let guardWanted = 0;
-  let spawnLockUntil = 0; // prevents other systems from respawning “fresh” squads immediately
+  let spawnLockUntil = 0; // prevents other systems from respawning “fresh” squads immediately (not used on hijack)
 
   function isArray(a){ return Array.isArray(a); }
 
@@ -64,13 +64,21 @@
   }
 
   function armGuard(reason){
-    // keep at least current wanted (and bump to 1 if we’ve committed a vehicle crime recently)
-    guardWanted = Math.max( (api.player?.wanted|0)||0, (now()-lastCarCrimeAt<30000 ? 1 : 0) );
-    if (guardWanted <= 0) guardWanted = 1;
+    // Only hijack (“enter-traffic”) is a car crime.
+    const isCarCrime = (reason==='enter-traffic');
+
+    // Keep exactly current wanted unless a car crime just happened (or very recently).
+    guardWanted = (api.player?.wanted|0) || 0;
+    if (isCarCrime || (now() - lastCarCrimeAt < 30000)) {
+      guardWanted = Math.max(guardWanted, 1);
+    }
 
     // short guard to defeat “clear wanted” listeners racing this transition
     guardUntil = now() + 900; // ~0.9s
-    spawnLockUntil = guardUntil + 400; // also slow down re-spawners for a moment
+
+    // Allow spawners to react immediately on HIJACK (we want new cops if you hijack after clearing them).
+    // For non-crime transitions, keep the brief spawn lock.
+    spawnLockUntil = isCarCrime ? 0 : (guardUntil + 400);
 
     // immediately enforce once
     if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
@@ -187,9 +195,10 @@
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:`Car hijacked! (${kind}) Press B again to park.`});
 
+    // HIJACK is the ONLY car crime:
     lastCarCrimeAt = now();
     if((api.player.wanted|0)===0){ api.setWanted(1); }
-    armGuard('enter-traffic');
+    armGuard('enter-traffic'); // no spawn lock here; let new cops spawn
   }
 
   function startDrivingFromParked(entry){
@@ -205,6 +214,7 @@
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:'Back in your car. Press B to park.'});
 
+    // NOT a crime; keep wanted as-is and allow normal spawner behavior.
     armGuard('enter-parked');
   }
 
@@ -231,6 +241,7 @@
     if(savedWalk!=null){ api.player.speed=savedWalk; savedWalk=null; }
     IZZA.emit?.('toast',{text:'Parked. It’ll stay ~5 min.'});
 
+    // NOT a crime; keep wanted as-is.
     armGuard('park');
   }
 
@@ -265,8 +276,9 @@
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
+        // Still raise wanted for running over pedestrians,
+        // BUT do NOT mark it as a "car crime" (no lastCarCrimeAt update).
         api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
-        lastCarCrimeAt = tNow;
       }
     }
 
@@ -284,6 +296,7 @@
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
+        // Keep existing behavior here: lower wanted by 1 when a cop is eliminated by vehicle.
         api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
     }
