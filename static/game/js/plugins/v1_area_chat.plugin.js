@@ -1,6 +1,6 @@
 // v1_area_chat.plugin.js — per-area chat (duel/trade centre) + bubbles + feed + language toggle + translation hook
 (function(){
-  const BUILD='v1.1-area-chat+i18n-hook';
+  const BUILD='v1.2-area-chat+i18n-hook+typing-guard+sendbtn+bubble-posfix';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- lightweight MP adapter (works with any of your 3 buses) ----
@@ -16,7 +16,7 @@
     api.on = function(type, cb){
       try{
         if (window.REMOTE_PLAYERS_API?.on) return window.REMOTE_PLAYERS_API.on(type, cb);
-        if (window.RemotePlayers?.on)      return window.RemotePlayers.on(type, cb);
+        if (window.RemotePlayers?.on)      return RemotePlayers.on(type, cb);
         if (window.IZZA?.on)               return IZZA.on('mp-'+type, (_,{data})=>cb(data));
       }catch(e){ console.warn('[CHAT] on failed', e); }
     };
@@ -30,6 +30,7 @@
     area: 'world', // 'tc' | 'duel' | 'world'
     host: null,
     input: null,
+    sendBtn: null,
     toggleBtn: null,
     feed: null,
     fireBtnPrevDisplay: null
@@ -46,7 +47,7 @@
     if(Chat.host) return;
     const card = document.getElementById('gameCard'); if(!card) return;
 
-    // bar (left: toggle, center: input, right: language)
+    // bar (left: toggle, center: input, right: language + send)
     const bar = document.createElement('div');
     bar.id='chatBar';
     Object.assign(bar.style,{
@@ -56,7 +57,9 @@
     });
     bar.innerHTML = `
       <button id="chatToggle" title="Chat" style="background:#1a2540;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:6px 8px">💬</button>
-      <input id="chatInput" type="text" placeholder="Type…" style="flex:1;background:#0e1626;color:#e8eef7;border:1px solid #2a3550;border-radius:8px;padding:8px 10px;font-size:14px">
+      <input id="chatInput" type="text" placeholder="Type…" autocomplete="off" autocapitalize="sentences" spellcheck="false"
+        style="flex:1;background:#0e1626;color:#e8eef7;border:1px solid #2a3550;border-radius:8px;padding:8px 10px;font-size:14px">
+      <button id="chatSend" title="Send" style="background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Send</button>
       <select id="chatLang" title="Language" style="background:#0e1626;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:6px 8px">
         <option value="en">EN</option><option value="es">ES</option><option value="fr">FR</option><option value="de">DE</option>
         <option value="it">IT</option><option value="pt">PT</option><option value="ru">RU</option><option value="zh">ZH</option>
@@ -66,6 +69,7 @@
     card.after(bar);
     Chat.host = bar;
     Chat.input = bar.querySelector('#chatInput');
+    Chat.sendBtn = bar.querySelector('#chatSend');
     Chat.toggleBtn = bar.querySelector('#chatToggle');
 
     const sel = bar.querySelector('#chatLang');
@@ -73,7 +77,6 @@
     sel.onchange = ()=>{
       Chat.lang = sel.value || 'en';
       try{ localStorage.setItem('izzaLang', Chat.lang); }catch{}
-      // let the rest of the app react (menus, HUD, etc.)
       IZZA?.emit?.('ui-lang-changed', { lang: Chat.lang });
     };
 
@@ -99,16 +102,52 @@
       }
     };
 
-    // send on Enter
-    Chat.input.addEventListener('keydown', (e)=>{
-      if((e.key||'').toLowerCase()!=='enter') return;
-      e.preventDefault();
+    // send helper
+    function trySend(){
       const txt = (Chat.input.value||'').trim();
       if(!txt) return;
       sendChat(txt);
       Chat.input.value='';
+    }
+
+    // send on Enter (Return)
+    Chat.input.addEventListener('keydown', (e)=>{
+      if((e.key||'').toLowerCase()!=='enter') return;
+      e.preventDefault();
+      trySend();
     });
+
+    // send on button press (mobile-friendly)
+    Chat.sendBtn.addEventListener('click', (e)=>{ e.preventDefault(); trySend(); });
+
+    // Mark typing focus to help other subsystems (optional)
+    const setTyping = v => { window.__IZZA_TYPING__ = !!v; IZZA && (IZZA.typing = !!v); };
+    Chat.input.addEventListener('focus', ()=> setTyping(true));
+    Chat.input.addEventListener('blur',  ()=> setTyping(false));
   }
+
+  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game) ----
+  // Stop gameplay key handlers while an editable is focused.
+  function isEditable(el){
+    return !!el && (
+      el.tagName==='INPUT' ||
+      el.tagName==='TEXTAREA' ||
+      el.isContentEditable
+    );
+  }
+  window.addEventListener('keydown', (e)=>{
+    const el = document.activeElement;
+    if(!isEditable(el)) return;
+
+    const k = (e.key||'').toLowerCase();
+    // Block common gameplay keys while typing: a,b,i,space,arrow keys, etc.
+    const block = new Set(['a','b','i',' ','arrowup','arrowdown','arrowleft','arrowright','escape']);
+    if(block.has(k) || k.length===1){
+      // Let the input receive the character (no preventDefault), but stop the game from seeing it
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+    }
+  }, true); // capture-phase so we win
 
   // ---- translation hook (optional) ----
   async function translateMaybe(text, from, to){
@@ -161,8 +200,10 @@
           border:'1px solid #2a3550', borderRadius:'10px',
           padding:'4px 8px', fontSize:'12px', maxWidth:'180px', whiteSpace:'pre-wrap'
         });
-        cvs.parentElement.style.position = cvs.parentElement.style.position || 'relative';
-        cvs.parentElement.appendChild(el);
+        // ensure parent is positioned
+        const parent = cvs.parentElement;
+        parent.style.position = parent.style.position || 'relative';
+        parent.appendChild(el);
         b = { el, tDie:0, text:'' };
         Bubbles.set(uname, b);
       }
@@ -176,32 +217,36 @@
       const S=api.DRAW, scale=S/api.TILE;
       const now=performance.now();
 
+      const parentRect = cvs.parentElement.getBoundingClientRect();
+      const canvasRect = cvs.getBoundingClientRect();
+      const offX = canvasRect.left - parentRect.left;
+      const offY = canvasRect.top  - parentRect.top;
+
       // my bubble
       const meName = IZZA?.api?.user?.username || '';
       if(meName && Bubbles.has(meName)){
         const b=Bubbles.get(meName);
         const sx=(api.player.x - api.camera.x)*scale;
         const sy=(api.player.y - api.camera.y)*scale;
-        positionBubble(b.el, cvs, sx, sy);
+        positionBubble(b.el, offX, offY, sx, sy);
         if(now>b.tDie){ b.el.remove(); Bubbles.delete(meName); }
       }
 
-      // remote players (from your remote players pool)
+      // remote players
       const peers = (window.__REMOTE_PLAYERS__||[]);
       peers.forEach(p=>{
         const uname=p.username||p.name; if(!uname) return;
         const b=Bubbles.get(uname); if(!b) return;
         const sx=(p.x - api.camera.x)*scale, sy=(p.y - api.camera.y)*scale;
-        positionBubble(b.el, cvs, sx, sy);
+        positionBubble(b.el, offX, offY, sx, sy);
         if(now>b.tDie){ b.el.remove(); Bubbles.delete(uname); }
       });
     }catch{}
   });
-  function positionBubble(el, cvs, sx, sy){
-    const rect=cvs.getBoundingClientRect();
-    // center over head; +16 to move to sprite center; raise a bit above
-    el.style.left = (rect.left + sx - el.offsetWidth/2 + 16) + 'px';
-    el.style.top  = (rect.top + sy - 18 - 18) + 'px';
+  function positionBubble(el, offX, offY, sx, sy){
+    // position within canvas parent
+    el.style.left = (offX + sx - el.offsetWidth/2 + 16) + 'px';
+    el.style.top  = (offY + sy - 36) + 'px'; // ~18px above center
   }
 
   // ---- sending & receiving ----
