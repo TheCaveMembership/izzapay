@@ -1153,12 +1153,22 @@ window.addEventListener('izza-bank-changed', ()=>{
     }
   }
 
-  function drawSprite(img, cols, facing, moving, t, dx,dy){
-    const row = DIR_INDEX[facing]||0;
-    const frame = currentFrame(cols, moving, t);
-    ctx.imageSmoothingEnabled=false;
-    ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx,dy, DRAW,DRAW);
-  }
+  function drawSprite(img, cols, facing, moving, t, dx, dy){
+  // Derive how many 32px rows actually exist in this sheet (some have only 1)
+  const rows = Math.max(1, Math.floor((img && img.height ? img.height : 32) / FRAME_H));
+  const rowRequested = DIR_INDEX[facing] || 0;
+  const row = Math.min(rowRequested, rows - 1);   // clamp to available rows
+
+  const safeCols = Math.max(1, cols|0);
+  const frame = currentFrame(safeCols, moving, t);
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    img,
+    frame * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H,
+    dx, dy, DRAW, DRAW
+  );
+}
 
   // --- Vehicles: draw with sprite; flip when dir<0 (faces left) ---
   function drawVehicle(kind, x, y, dir){
