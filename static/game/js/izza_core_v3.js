@@ -214,7 +214,80 @@ function emptyLayer(){
         return map;
       });
   }
+// === Appearance tinting (match creator) =====================================
+// ramps from creator:
+const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
+const SKIN_TO = {
+  light:  ["#FFE7D6","#F3C6A7","#D8A187"],
+  medium: ["#F1BD94","#D79A73","#B67955"],
+  tan:    ["#E2A878","#C88756","#9F663C"],
+  dark:   ["#B9825B","#9A6644","#714A31"],
+  deep:   ["#8B5A3B","#6A402A","#432818"]
+};
+const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
+const FEMALE_DRESS_TO = {
+  blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
+  red:    ["#FF7A7A","#E24C4C","#B12F2F"],
+  green:  ["#7DD68A","#4CB56B","#2F7F47"],
+  purple: ["#B796FF","#8C6BE0","#6A49B8"],
+  yellow: ["#FFE08A","#E7C45A","#B89433"],
+  pink:   ["#FFA6D6","#E57CB2","#C45C96"],
+  black:  ["#3A3A3D","#232326","#0E0E10"],
+  white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
+  brown:  ["#A87854","#7C563A","#593D29"],
+  orange: ["#FFB46A","#E4873A","#B65E1F"]
+};
+const HAIR_TO = {
+  black:  ["#2C2C31","#17171B","#0A0A0D"],
+  brown:  ["#7A5336","#5C3E28","#3E2B1B"],
+  blonde: ["#FBE58F","#E5C35A","#B89433"],
+  red:    ["#E65F35","#B54426","#8E321A"],
+  white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
+  blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
+  green:  ["#7DD68A","#4CB56B","#2F7F47"],
+  pink:   ["#FFA6D6","#E57CB2","#C45C96"]
+};
 
+// tiny utils
+const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+
+function paletteSwapCanvas(img, fromRampHex, toRampHex, tolerance=2000){
+  const from = fromRampHex.map(hexToRgb), to = toRampHex.map(hexToRgb);
+  const c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
+  const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
+  const id=g.getImageData(0,0,c.width,c.height), d=id.data;
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]===0) continue;
+    const p={r:d[i],g:d[i+1],b:d[i+2]};
+    let k=0, best=1e9; for(let j=0;j<from.length;j++){ const s=dist2(p,from[j]); if(s<best){best=s;k=j;} }
+    if(best<=tolerance){ const t=to[k]||to[1]||to[0]; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+  }
+  g.putImageData(id,0,0);
+  return c;
+}
+
+// keep the same {img, cols} shape used elsewhere
+function tintBodyLayer(pack, skinTone, isFemale, femaleDress){
+  try{
+    let c = pack.img;
+    const skin = SKIN_TO[skinTone] || SKIN_TO.light;
+    c = paletteSwapCanvas(c, SKIN_BASE, skin, 4000);
+    if(isFemale){
+      const dress = FEMALE_DRESS_TO[femaleDress] || FEMALE_DRESS_TO.blue;
+      c = paletteSwapCanvas(c, FEMALE_DRESS_BASE, dress, 4000);
+    }
+    return { img: c, cols: pack.cols };
+  }catch{ return pack; }
+}
+function tintHairLayer(pack, hairColor){
+  try{
+    const target = HAIR_TO[hairColor] || HAIR_TO.black;
+    // use a neutral 3-tone “base-ish” ramp for hair; we only need approximate clustering
+    const c = paletteSwapCanvas(pack.img, ["#C8C8C8","#9C9C9C","#6E6E6E"], target, 4000);
+    return { img: c, cols: pack.cols };
+  }catch{ return pack; }
+}
   // ===== Coins & Progress (persist) =====
   const LS = {
     coins:      'izzaCoins',
@@ -1245,14 +1318,67 @@ window.addEventListener('izza-bank-changed', ()=>{
     drawMini();
   }
 
-  // ===== Boot =====
-  Promise.all([
+// ===== Boot =====
+Promise.all([
   loadLayer('body', RESOLVED.body),
   (RESOLVED.outfit ? loadLayer('outfit', RESOLVED.outfit) : Promise.resolve(emptyLayer())),
-  loadLayerTry('hair', RESOLVED.hairTry),
+  // IMPORTANT: only ask for base hair file; we'll tint it (no colored files on disk)
+  loadLayer('hair', hairStyle),
   loadNPCSheets(),
   loadVehicleSheets()
-]).then(([body,outfit,hair,npcs,vehicles])=>{
+]).then(([bodyRaw, outfitRaw, hairRaw, npcs, vehicles])=>{
+  NPC_SHEETS = npcs;
+  VEHICLE_SHEETS = vehicles;
+
+  // Apply tints to match the creator choices
+  const isFemale = (bodyType === 'female');
+  const tintedBody = tintBodyLayer(
+    bodyRaw,
+    (AP.skin_tone || 'light'),
+    isFemale,
+    (AP.female_outfit_color || 'blue')
+  );
+  const tintedHair = tintHairLayer(hairRaw, (hairColor || 'black'));
+
+  const imgs = { body: tintedBody, outfit: outfitRaw, hair: tintedHair };
+
+  const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
+  IZZA.api = {
+    player, cops, pedestrians, cars,
+    setCoins, getCoins, setWanted,
+    TILE, DRAW, camera,
+    doorSpawn,
+    user: { username: (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || 'guest' },
+    // expose for plugins:
+    getMissionCount,
+    getInventory, setInventory,
+    hRoadY, vRoadX,
+    ready: true
+  };
+  IZZA.emit('ready', IZZA.api);
+  // If the map plugin exposed the HUD redraw, sync hearts from saved state now
+  if (typeof window._redrawHeartsHud === 'function') { try{ window._redrawHeartsHud(); }catch{} }
+  setCoins(getCoins());
+  centerCamera();
+
+  let last=performance.now();
+  (function loop(now){
+    try{
+      const dtMs=Math.min(32, now-last); last=now;
+      const dtSec = dtMs/1000;
+      update(dtSec, dtMs);
+      render(imgs);
+      IZZA.emit('render-post', { now: performance.now() });
+    }catch(err){
+      console.error('Game loop error:', err);
+      bootMsg('Game loop error: '+err.message, '#ff6b6b');
+    }
+    requestAnimationFrame(loop);
+  })(last+16);
+}).catch(err=>{
+  console.error('Sprite load failed', err);
+  bootMsg('Sprite load failed: '+(err && err.message ? err.message : err), '#ff6b6b');
+});
     NPC_SHEETS = npcs;
     VEHICLE_SHEETS = vehicles;
     const imgs={body,outfit,hair};
