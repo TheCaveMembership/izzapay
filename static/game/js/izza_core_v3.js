@@ -251,7 +251,53 @@ const HAIR_TO = {
 // tiny utils
 const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
 const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+// === creator-page hair helpers (for colored sheets) ===
+function extractThreeToneRamp(img){
+  const w=img.width,h=img.height;
+  const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true});
+  c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const d=c.getImageData(0,0,w,h).data;
 
+  function lum(r,g,b){ return 0.2126*r + 0.7152*g + 0.0722*b; }
+
+  const samples=[];
+  for(let i=0;i<d.length;i+=4){
+    const a=d[i+3]; if(a<10) continue;
+    const r=d[i],g=d[i+1],b=d[i+2];
+    samples.push({r,g,b,L:lum(r,g,b)});
+  }
+  if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+  samples.sort((a,b)=>a.L-b.L);
+  const pick = q => {
+    const idx = Math.max(0, Math.min(samples.length-1, Math.floor(q*(samples.length-1))));
+    const s = samples[idx];
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');
+  };
+  return [pick(0.2), pick(0.55), pick(0.85)];
+}
+
+function overlayTintCanvas(img, hex, strength=1.0){
+  const w=img.width,h=img.height;
+  const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true});
+  c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const id=c.getImageData(0,0,w,h), d=id.data;
+
+  const n = parseInt(hex.replace('#',''),16);
+  const tr=(n>>16)&255, tg=(n>>8)&255, tb=n&255;
+  function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]===0) continue;
+    const r=ov(d[i],tr), g=ov(d[i+1],tg), b=ov(d[i+2],tb);
+    d[i]=Math.round(d[i]*(1-strength)+r*strength);
+    d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+    d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+  }
+  c.putImageData(id,0,0);
+  return oc;
+}
 function paletteSwapCanvas(img, fromRampHex, toRampHex, tolerance=2000){
   const from = fromRampHex.map(hexToRgb), to = toRampHex.map(hexToRgb);
   const c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
@@ -283,10 +329,35 @@ function tintBodyLayer(pack, skinTone, isFemale, femaleDress){
 function tintHairLayer(pack, hairColor){
   try{
     const target = HAIR_TO[hairColor] || HAIR_TO.black;
-    // use a neutral 3-tone “base-ish” ramp for hair; we only need approximate clustering
-    const c = paletteSwapCanvas(pack.img, ["#C8C8C8","#9C9C9C","#6E6E6E"], target, 4000);
-    return { img: c, cols: pack.cols };
-  }catch{ return pack; }
+
+    // Detect the actual ramp from the loaded sheet (works for colored animated sheets)
+    const detected = extractThreeToneRamp(pack.img);
+
+    // Try palette swap first (same behavior as creator)
+    const swapped = paletteSwapCanvas(pack.img, detected, target, 4000);
+
+    // Quick diff check to see if anything meaningfully changed
+    const g = swapped.getContext('2d');
+    const before = document.createElement('canvas');
+    before.width = pack.img.width; before.height = pack.img.height;
+    const gb = before.getContext('2d'); gb.imageSmoothingEnabled=false; gb.drawImage(pack.img,0,0);
+
+    const A = gb.getImageData(0,0,before.width,before.height).data;
+    const B = g.getImageData(0,0,swapped.width,swapped.height).data;
+    let diffs=0;
+    for(let i=0;i<B.length;i+=16){
+      if(A[i]!==B[i]||A[i+1]!==B[i+1]||A[i+2]!==B[i+2]){ diffs++; if(diffs>20) break; }
+    }
+
+    let canvas = swapped;
+    if(diffs<=20){
+      // Fallback: strong overlay to force visible color (exactly like creator page)
+      canvas = overlayTintCanvas(pack.img, target[1], 1.0);
+    }
+    return { img: canvas, cols: pack.cols };
+  }catch{
+    return pack;
+  }
 }
   // ===== Coins & Progress (persist) =====
   const LS = {
