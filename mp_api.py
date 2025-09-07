@@ -170,6 +170,96 @@ def mp_players_search():
     users=[{"username":r["username"],"active":_is_active(int(r["uid"])),"friend":_is_friend(my_id,int(r["uid"]))} for r in rows]
     return jsonify({"users":users})
 
+# ---- Friends: request / accept / decline ------------------------------------
+
+@mp_bp.post("/friends/request")
+def mp_friends_request():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    me,_,_ = who
+
+    data = (request.get_json(silent=True) or {})
+    to_name = (data.get("toUsername") or data.get("username") or "").strip()
+    to_id = _user_id_by_username(to_name)
+    if not to_id: return jsonify({"ok":False, "error":"player_not_found"}), 404
+    if to_id == me: return jsonify({"ok":False, "error":"cannot_friend_self"}), 400
+
+    with conn() as cx:
+        # if already friends, return ok
+        if _is_friend(me, to_id):
+            return jsonify({"ok": True, "already":"friends"})
+        try:
+            cx.execute("""INSERT INTO mp_friend_requests(from_user,to_user,status)
+                          VALUES(?,?, 'pending')""", (me, to_id))
+        except Exception:
+            # If exists (either direction) and not accepted, set to pending
+            cx.execute("""UPDATE mp_friend_requests
+                          SET status='pending'
+                          WHERE ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
+                            AND status!='accepted'""", (me, to_id, to_id, me))
+    return jsonify({"ok": True})
+
+@mp_bp.post("/friends/accept")
+def mp_friends_accept():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    me,_,_ = who
+
+    data = (request.get_json(silent=True) or {})
+    req_id = data.get("requestId")
+    from_name = (data.get("from") or data.get("username") or "").strip()
+
+    with conn() as cx:
+        if req_id:
+            row = cx.execute("""SELECT * FROM mp_friend_requests
+                                WHERE id=? AND to_user=? AND status='pending'""",
+                             (int(req_id), me)).fetchone()
+        else:
+            from_id = _user_id_by_username(from_name)
+            row = None
+            if from_id:
+                row = cx.execute("""SELECT * FROM mp_friend_requests
+                                    WHERE from_user=? AND to_user=? AND status='pending'""",
+                                 (from_id, me)).fetchone()
+        if not row:
+            return jsonify({"ok":False, "error":"request_not_found"}), 404
+
+        cx.execute("UPDATE mp_friend_requests SET status='accepted' WHERE id=?", (row["id"],))
+
+    return jsonify({"ok": True})
+
+@mp_bp.post("/friends/decline")
+def mp_friends_decline():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    me,_,_ = who
+
+    data = (request.get_json(silent=True) or {})
+    req_id = data.get("requestId")
+    from_name = (data.get("from") or data.get("username") or "").strip()
+
+    with conn() as cx:
+        if req_id:
+            row = cx.execute("""SELECT * FROM mp_friend_requests
+                                WHERE id=? AND to_user=? AND status='pending'""",
+                             (int(req_id), me)).fetchone()
+        else:
+            from_id = _user_id_by_username(from_name)
+            row = None
+            if from_id:
+                row = cx.execute("""SELECT * FROM mp_friend_requests
+                                    WHERE from_user=? AND to_user=? AND status='pending'""",
+                                 (from_id, me)).fetchone()
+        if not row:
+            return jsonify({"ok":False, "error":"request_not_found"}), 404
+
+        cx.execute("UPDATE mp_friend_requests SET status='declined' WHERE id=?", (row["id"],))
+
+    return jsonify({"ok": True})
+
 @mp_bp.post("/lobby/invite")
 def mp_lobby_invite():
     _ensure_schema()
@@ -236,8 +326,18 @@ def mp_notifications():
             WHERE i.to_user=? AND i.status='pending'
             ORDER BY i.created_at DESC LIMIT 5
         """,(uid,)).fetchall()
+
+        # include pending friend requests (NEW)
+        fr_rows=cx.execute("""
+            SELECT fr.id, u.pi_username AS from_username
+            FROM mp_friend_requests fr
+            JOIN users u ON u.id = fr.from_user
+            WHERE fr.to_user=? AND fr.status='pending'
+            ORDER BY fr.created_at DESC LIMIT 10
+        """,(uid,)).fetchall()
     invites=[{"id":r["id"],"from":r["from_username"],"mode":r["mode"] or "v1"} for r in rows]
-    return jsonify({"invites":invites, "start":start})
+    friend_requests=[{"id":r["id"],"from":r["from_username"]} for r in fr_rows]
+    return jsonify({"invites":invites, "friendRequests": friend_requests, "start":start})
 
 @mp_bp.post("/queue")
 def mp_queue():
