@@ -72,8 +72,8 @@
               <option value="deep">Deep</option>
             </select>
 
-            <!-- EXISTING -->
-            <label>Sprite Skin</label>
+            <!-- EXISTING (text updated only) -->
+            <label>Sleeve Color</label>
             <select name="sprite_skin" id="sprite_skin">
               <option value="default">Default</option>
               <option value="street_a">Street A</option>
@@ -100,7 +100,8 @@
               <option value="pink">Pink</option>
             </select>
 
-            <label>Outfit</label>
+            <!-- EXISTING (text updated only) -->
+            <label>Vest Color</label>
             <select name="outfit" id="outfit">
               <option value="street">Street</option>
               <option value="athletic">Athletic</option>
@@ -124,7 +125,6 @@
 
   <script>
   (function(){
-    // ---------- Asset roots (unchanged) ----------
     const SPRITES = {
       body: {
         default:  "/static/game/sprites/body/default.png",
@@ -135,8 +135,7 @@
         short: "/static/game/sprites/hair/short.png",
         buzz:  "/static/game/sprites/hair/buzz.png",
         long:  "/static/game/sprites/hair/long.png",
-        // optional female-specific long hair silhouette; fallback to long.png
-        long_f: "/static/game/sprites/hair/long_f.png"
+        long_f: "/static/game/sprites/hair/long_f.png" // optional female-specific
       },
       outfit: {
         street:   "/static/game/sprites/outfit/street.png",
@@ -145,31 +144,30 @@
       }
     };
 
-    // ---------- Palettes for tinting ----------
-    // IMPORTANT: these "from" colors should match the base art ramps used for skin & hair.
-    // If yours differ, edit SKIN_BASE and HAIR_BASE to your actual hexes.
-    const SKIN_BASE = ["#F7D7C6", "#E8BEA8", "#D6A48E"]; // base, mid, shadow
-    const HAIR_BASE = ["#C8C8C8", "#9C9C9C", "#6E6E6E"]; // neutral gray ramp for hair
+    // Base ramps used inside your art (adjust if needed)
+    const SKIN_BASE = ["#F7D7C6", "#E8BEA8", "#D6A48E"];        // body skin ramp
+    const HAIR_BASE = ["#C8C8C8", "#9C9C9C", "#6E6E6E"];        // neutral hair ramp
 
+    // Stronger target ramps (deeper shadows; bigger spread)
     const SKIN_TO = {
-      light:  ["#FFE3CF","#F7CDB5","#E6B39E"],
-      medium: ["#F3C7A2","#E2A982","#C48B69"],
-      tan:    ["#E8B58F","#D19872","#AE7654"],
-      dark:   ["#C28F6A","#A47250","#84583E"],
-      deep:   ["#9E6E4D","#7F563D","#5E3F2C"]
+      light:  ["#FFE7D6","#F3C6A7","#D8A187"],
+      medium: ["#F1BD94","#D79A73","#B67955"],
+      tan:    ["#E2A878","#C88756","#9F663C"],
+      dark:   ["#B9825B","#9A6644","#714A31"],
+      deep:   ["#8B5A3B","#6A402A","#432818"]   // intensified
     };
     const HAIR_TO = {
-      black:  ["#3E3E44","#2A2A2F","#151519"],
+      black:  ["#2C2C31","#1C1C20","#0D0D10"],
       brown:  ["#7A5336","#5E3F29","#412B1C"],
-      blonde: ["#F7E08A","#E6C55F","#C2A548"],
-      red:    ["#E06A3A","#B94F28","#8E3B1E"],
-      white:  ["#F2F2F2","#DCDCDC","#BEBEBE"],
-      blue:   ["#78A7FF","#4C7DE0","#2F5CB8"],
-      green:  ["#7AD27A","#4CAF4C","#2E7D32"],
-      pink:   ["#FF9BC2","#E46FA1","#C34E80"]
+      blonde: ["#FBE58F","#E7C65A","#BC9E3D"],
+      red:    ["#E65F35","#BE4525","#8F321A"],
+      white:  ["#F5F5F5","#E1E1E1","#C6C6C6"],
+      blue:   ["#79A5FF","#4A79DE","#2B59B6"],
+      green:  ["#7CD67C","#4FB54F","#2F7F31"],
+      pink:   ["#FFA0C8","#E475A6","#C35486"]
     };
 
-    // ---------- DOM ----------
+    // DOM
     const selType = document.getElementById('body_type');
     const selTone = document.getElementById('skin_tone');
     const selSkin = document.getElementById('sprite_skin');
@@ -182,138 +180,123 @@
     const form    = document.getElementById('charForm');
     ctx.imageSmoothingEnabled = false;
 
-    // ---------- helpers ----------
-    function loadImg(src){
-      return new Promise(resolve => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
-        img.src = src;
-      });
-    }
-    function hexToRgb(h){
-      const s = h.replace('#',''); const n=parseInt(s,16);
-      return {r:(n>>16)&255, g:(n>>8)&255, b:n&255};
-    }
-    function rgbToHex(r,g,b){
-      const n=(r<<16)|(g<<8)|b; return '#'+n.toString(16).padStart(6,'0').toUpperCase();
-    }
-    function dist(a,b){ const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b; return dr*dr+dg*dg+db*db; }
+    // utils
+    function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
+    const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+    const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
 
-    // Build a map { hex -> hex } with tolerance matching
+    // palette swap; returns {canvas, changedPixels}
     function paletteSwap(img, fromRamp, toRamp, tolerance=1200){
-      const w = img.width, h = img.height;
-      const oc = document.createElement('canvas');
-      oc.width = w; oc.height = h;
-      const octx = oc.getContext('2d', { willReadFrequently:true });
-      octx.imageSmoothingEnabled = false;
-      octx.drawImage(img, 0, 0);
-      const id = octx.getImageData(0,0,w,h);
-      const d = id.data;
+      const w=img.width,h=img.height;
+      const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true});
+      c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const id=c.getImageData(0,0,w,h), d=id.data;
 
-      const fromRGB = fromRamp.map(hexToRgb);
-      const toRGB   = toRamp.map(hexToRgb);
+      const from=fromRamp.map(hexToRgb), to=toRamp.map(hexToRgb);
+      let changed=0;
 
-      // Precompute closest index for a given pixel color (3-swatch ramp)
       for(let i=0;i<d.length;i+=4){
-        const r=d[i], g=d[i+1], b=d[i+2], a=d[i+3];
-        if(a===0) continue;
-
-        // Find closest base swatch
-        const p={r,g,b};
-        let best=-1, bestScore=Infinity;
-        for(let k=0;k<fromRGB.length;k++){
-          const score = dist(p, fromRGB[k]);
-          if(score < bestScore){ best=k; bestScore=score; }
-        }
-        if(bestScore <= tolerance){
-          const t = toRGB[best] || toRGB[toRGB.length-1];
+        const a=d[i+3]; if(a===0) continue;
+        const p={r:d[i],g:d[i+1],b:d[i+2]};
+        let best=-1, bestScore=1e9;
+        for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<bestScore){best=k;bestScore=s;} }
+        if(bestScore<=tolerance){
+          const t=to[best]||to[to.length-1];
+          if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b){ changed++; }
           d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
         }
       }
-      octx.putImageData(id,0,0);
+      c.putImageData(id,0,0);
+      return {canvas:oc, changedPixels:changed};
+    }
+
+    // overlay tint fallback (preserve shading)
+    function overlayTint(img, hex, strength=1.0){
+      const w=img.width,h=img.height;
+      const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true});
+      c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const id=c.getImageData(0,0,w,h), d=id.data;
+      const tc=hexToRgb(hex);
+      function overlay(a,b){ // a: base (0..255), b: tint (0..255)
+        a/=255; b/=255;
+        const out = (a<0.5) ? (2*a*b) : (1-2*(1-a)*(1-b));
+        return Math.round(255*out);
+      }
+      for(let i=0;i<d.length;i+=4){
+        if(d[i+3]===0) continue;
+        const r=overlay(d[i], tc.r), g=overlay(d[i+1], tc.g), b=overlay(d[i+2], tc.b);
+        d[i]   = Math.round(d[i]*(1-strength) + r*strength);
+        d[i+1] = Math.round(d[i+1]*(1-strength) + g*strength);
+        d[i+2] = Math.round(d[i+2]*(1-strength) + b*strength);
+      }
+      c.putImageData(id,0,0);
       return oc;
     }
 
     async function draw(){
-      // Clear + simple vignette
+      // bg
       ctx.clearRect(0,0,cvs.width,cvs.height);
-      const g = ctx.createRadialGradient(80,80,10, 80,80,90);
-      g.addColorStop(0, "rgba(255,255,255,0.08)");
-      g.addColorStop(1, "rgba(0,0,0,0.0)");
-      ctx.fillStyle = g; ctx.fillRect(0,0,cvs.width,cvs.height);
+      const g = ctx.createRadialGradient(80,80,10,80,80,90);
+      g.addColorStop(0,"rgba(255,255,255,.08)"); g.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
 
-      const DW = 96, DH = 96, X = (cvs.width - DW)/2, Y = (cvs.height - DH)/2;
+      const DW=96,DH=96,X=(cvs.width-DW)/2,Y=(cvs.height-DH)/2;
 
-      // BODY: try gendered base first, then theme default
-      const theme = selSkin.value; // default | street_a | street_b
-      const isFemale = (selType.value === 'female');
-      const femaleTry = `/static/game/sprites/body/${theme}__female.png`;
-      let body = await loadImg(femaleTry);
-      if(!body){
-        body = await loadImg(SPRITES.body[theme] || SPRITES.body.default);
-      }
+      // body choose
+      const theme=selSkin.value;
+      const isFemale=(selType.value==='female');
+      const femaleTry=`/static/game/sprites/body/${theme}__female.png`;
+      let body=await loadImg(femaleTry);
+      if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
 
-      // OUTFIT: unchanged
-      const outfit = await loadImg(SPRITES.outfit[selOut.value] || SPRITES.outfit.street);
+      let outfit=await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
 
-      // HAIR: choose long_f for female+long if present; else base
-      let hairURL = SPRITES.hair[selHair.value] || SPRITES.hair.short;
-      if(isFemale && selHair.value==='long'){
-        hairURL = SPRITES.hair.long_f || SPRITES.hair.long;
-      }
-      let hair = await loadImg(hairURL);
+      let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
+      if(isFemale && selHair.value==='long') hairURL=SPRITES.hair.long_f||SPRITES.hair.long;
+      let hair=await loadImg(hairURL);
 
-      // TINT: apply skin + hair palette swaps to offscreen canvases, then draw
-      const skinRamp = SKIN_TO[selTone.value] || SKIN_TO.light;
-      const hairRamp = HAIR_TO[selHairColor.value] || HAIR_TO.black;
+      // tint ramps
+      const skinRamp=SKIN_TO[selTone.value]||SKIN_TO.light;
+      const hairRamp=HAIR_TO[selHairColor.value]||HAIR_TO.black;
 
+      // draw body with strong skin tint
       if(body){
-        const tintedBody = paletteSwap(body, SKIN_BASE, skinRamp, 1500);
-        ctx.drawImage(tintedBody, X, Y, DW, DH);
+        const bodySwap = paletteSwap(body, SKIN_BASE, skinRamp, 1500);
+        ctx.drawImage(bodySwap.canvas, X, Y, DW, DH);
       }else{
         ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH);
       }
 
-      if(outfit){ ctx.drawImage(outfit, X, Y, DW, DH); }
-      else{ ctx.fillStyle="#5aa6ff"; ctx.fillRect(X+2, Y+38, DW-4, DH-40); }
+      // vest/sleeves are in outfit layer (unchanged art)
+      if(outfit) ctx.drawImage(outfit, X, Y, DW, DH);
+      else { ctx.fillStyle="#5aa6ff"; ctx.fillRect(X+2,Y+38,DW-4,DH-40); }
 
+      // hair with robust recolor
       if(hair){
-        const tintedHair = paletteSwap(hair, HAIR_BASE, hairRamp, 1200);
-        ctx.drawImage(tintedHair, X, Y, DW, DH);
+        const swap = paletteSwap(hair, HAIR_BASE, hairRamp, 1200);
+        let hairCanvas = swap.canvas;
+        if(swap.changedPixels < 8){ // fallback if palette didn't match
+          hairCanvas = overlayTint(hair, hairRamp[1] /* mid swatch */, 1.0);
+        }
+        ctx.drawImage(hairCanvas, X, Y, DW, DH);
       }else{
-        ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28, Y+6, 40, 22);
+        ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28,Y+6,40,22);
       }
 
-      // Label text
-      const labels = {
-        body_type: { male:"Male", female:"Female", neutral:"Neutral" },
-        skin_tone: { light:"Light", medium:"Medium", tan:"Tan", dark:"Dark", deep:"Deep" },
-        hair: { short:"Short", buzz:"Buzz", long:"Long" },
-        hair_color: { black:"Black", brown:"Brown", blonde:"Blonde", red:"Red", white:"White", blue:"Blue", green:"Green", pink:"Pink" },
-        outfit: { street:"Street", athletic:"Athletic", luxury:"Luxury" },
-        sprite_skin: { default:"Default", street_a:"Street A", street_b:"Street B" }
-      };
+      // label
       preset.textContent =
-        `Body: ${labels.body_type[selType.value]} • Skin: ${labels.skin_tone[selTone.value]} • ` +
-        `Hair: ${labels.hair[selHair.value]} (${labels.hair_color[selHairColor.value]}) • ` +
-        `Outfit: ${labels.outfit[selOut.value]} • Theme: ${labels.sprite_skin[selSkin.value]}`;
+        `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value}) • ` +
+        `Vest: ${selOut.value} • Sleeves: ${selSkin.value}`;
     }
 
-    // Confirm lock-in on submit (keeps your existing POST fields intact).
     form.addEventListener('submit', function(ev){
-      const ok = confirm(
-        "Save character?\n\nBase appearance will be LOCKED.\nYou can still change style via in-game shops (barber, outfitters, mods)."
-      );
-      if (!ok) { ev.preventDefault(); return false; }
+      const ok = confirm("Save character?\n\nBase appearance will be LOCKED.\nYou can still change style via in-game shops.");
+      if(!ok){ ev.preventDefault(); }
     });
 
-    // Live preview wiring
-    [selType, selTone, selSkin, selHair, selHairColor, selOut].forEach(el=>{
-      el.addEventListener('change', draw);
-    });
-
+    [selType, selTone, selSkin, selHair, selHairColor, selOut].forEach(el=> el.addEventListener('change', draw));
     draw();
   })();
   </script>
