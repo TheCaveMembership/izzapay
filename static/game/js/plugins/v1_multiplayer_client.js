@@ -504,7 +504,7 @@
     Object.assign(btn.style, {
       position:'fixed',
       right:'14px',
-      bottom:'64px',  // will be adjusted dynamically by positionFriendsUI()
+      bottom:'28px',  // will be adjusted dynamically by positionFriendsUI()
       zIndex:Z.bell,
       height:'34px', padding:'0 12px', borderRadius:'18px',
       background:'#162134', color:'#cfe0ff',
@@ -690,7 +690,6 @@
     Object.assign(pop.style, {
       position:'fixed',
       right:'14px',
-      bottom:'110px',     // will be adjusted by positionFriendsUI()
       zIndex:Z.drop,
       background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
       width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
@@ -766,6 +765,10 @@
     const vis = (ui.friendsPopup.style.display!=='none');
     ui.friendsPopup.style.display = vis ? 'none' : 'block';
     if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
+      // --- position popup to open DOWN from the Friends button ---
+    const btnRect = ui.friendsToggle.getBoundingClientRect();   // NEW
+    ui.friendsPopup.style.top = (btnRect.bottom + 8) + 'px';     // NEW (opens downward)
+    ui.friendsPopup.style.bottom = 'auto';                       // NEW (disable upward anchor)
     else { setFireHidden(false); }
   }
 
