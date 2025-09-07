@@ -17,19 +17,15 @@
  *   not inside the Play Modes modal — so they sit above the lobby and do not close with it.
  *
  * PATCH2 (friends button always-on + popup placement):
- * - Friends button is now a GLOBAL overlay too (fixed), kept visually beside the bell
- *   so it’s always available even when the Play Modes modal is closed.
- * - Friends list popup now appears over the game canvas near the bottom-right,
- *   above the FIRE button. When opened, the FIRE button is hidden and restored on close.
+ * - Friends button is now a GLOBAL overlay too (fixed), and always available.
  *
  * PATCH3 (requested tweaks):
- * - Make the bell a little smaller.
- * - Move the bell down so it doesn’t sit beside the hearts.
- * - Move the Friends button to sit just under the Send/EN controls.
- * - Friends popup appears just under the Type box and hides the FIRE button while open.
+ * - Bell sized a little smaller and kept beside the hearts (top: 56px).
+ * - Friends button sits just under the Send/EN controls.
+ * - Friends popup opens downward (under the Type box) and hides FIRE while open.
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton+tweakpos2';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton+final-tweak';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -181,7 +177,7 @@
   function initMatch(payload){
     hardResetMatch();
     const players = payload?.players || [];
-       const myName  = me?.username || 'me';
+    const myName  = me?.username || 'me';
     const oppName = players.find(p=>p!==myName) || (players[0]||'opponent');
     match = {
       id: payload?.matchId || payload?.id || ('m_'+Math.random().toString(36).slice(2)),
@@ -233,7 +229,7 @@
       const modeKey = match.mode || 'v1';
       me = me || {};
       me.ranks = me.ranks || {};
-      me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0};
+      me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0 };
       if (winnerName === (me.username || match.myName)) me.ranks[modeKey].w++; else me.ranks[modeKey].l++;
       paintRanks();
     }catch(e){}
@@ -419,7 +415,7 @@
   function ensureBellOverlay(){
     if(ui.notifBell && ui.notifBadge && ui.notifDropdown) return;
 
-    // bell (smaller & moved down so it doesn't sit beside hearts)
+    // bell (smaller & kept beside hearts)
     const bell = document.createElement('button');
     bell.id = 'mpNotifBell';
     bell.title = 'Notifications';
@@ -434,7 +430,7 @@
     bell.addEventListener('click', toggleNotifDropdown);
     document.body.appendChild(bell);
 
-    // badge (aligned with smaller bell)
+    // badge (aligned with bell)
     const badge = document.createElement('span');
     badge.id='mpNotifBadge';
     Object.assign(badge.style, {
@@ -446,7 +442,7 @@
     });
     document.body.appendChild(badge);
 
-    // dropdown (follows new bell y)
+    // dropdown (follows bell y)
     const dd = document.createElement('div');
     dd.id='mpNotifDropdown';
     Object.assign(dd.style, {
@@ -465,31 +461,21 @@
 
   // ===== Utility: find chat bar rect (Type/Send/EN) & position friends UI ===
   function findChatBarRect(){
-    // Try input/textarea with placeholder "Type..."
     const txt = document.querySelector('input[placeholder="Type..."], textarea[placeholder="Type..."]');
     if(txt) return txt.getBoundingClientRect();
-    // Try the Send button
     const send = Array.from(document.querySelectorAll('button')).find(b=> (b.textContent||'').trim()==='Send');
     if(send) return send.getBoundingClientRect();
-    // Try EN button
     const en = Array.from(document.querySelectorAll('button,div')).find(b=> (b.textContent||'').trim()==='EN');
     if(en) return en.getBoundingClientRect();
     return null;
   }
   function positionFriendsUI(){
     const r = findChatBarRect();
-    if(!r){ return; }
-    const gapBtn = 8;   // gap under Send/EN for button
-    const gapPop = 12;  // gap under Type box for popup
-    const btnBottom = Math.max(0, window.innerHeight - r.bottom + gapBtn);
-    const popupBottom = Math.max(0, window.innerHeight - r.top + gapPop);
+    if(!r) return;
+    const gapBtn = 8; // gap under Send/EN for button
     if(ui.friendsToggle){
       ui.friendsToggle.style.right = '14px';
-      ui.friendsToggle.style.bottom = btnBottom+'px';
-    }
-    if(ui.friendsPopup){
-      ui.friendsPopup.style.right = '14px';
-      ui.friendsPopup.style.bottom = popupBottom+'px';
+      ui.friendsToggle.style.bottom = Math.max(0, window.innerHeight - r.bottom + gapBtn) + 'px';
     }
   }
   window.addEventListener('resize', positionFriendsUI);
@@ -504,7 +490,7 @@
     Object.assign(btn.style, {
       position:'fixed',
       right:'14px',
-      bottom:'28px',  // will be adjusted dynamically by positionFriendsUI()
+      bottom:'28px', // adjusted dynamically after layout
       zIndex:Z.bell,
       height:'34px', padding:'0 12px', borderRadius:'18px',
       background:'#162134', color:'#cfe0ff',
@@ -515,146 +501,16 @@
     document.body.appendChild(btn);
     ui.friendsToggle = btn;
     ui.friendsToggle._global = true;
-    // initial position under chat bar if present
     setTimeout(positionFriendsUI, 0);
-  }
-
-  // NEW: Notification UI helpers (uses global overlay now)
-  function renderNotifDropdown(){
-    if(!ui.notifDropdown) return;
-    const host = ui.notifDropdown;
-    host.innerHTML = '';
-
-    const header = document.createElement('div');
-    header.textContent = 'Notifications';
-    header.style.cssText='padding:10px 12px;font-weight:700;border-bottom:1px solid #24324e';
-    host.appendChild(header);
-
-    if(!notifications.items.length){
-      const empty = document.createElement('div');
-      empty.style.cssText = 'padding:10px; opacity:.8;';
-      empty.textContent = 'No notifications';
-      host.appendChild(empty);
-      return;
-    }
-
-    notifications.items.forEach(n=>{
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border-bottom:1px solid #18233a;';
-      const label = document.createElement('div');
-      label.style.cssText='font-size:13px; line-height:1.3;';
-
-      if(n.type==='friend'){
-        label.textContent = `${n.from} sent you a friend request`;
-        const actions = document.createElement('div');
-        actions.style.cssText='display:flex; gap:6px;';
-        const accept = document.createElement('button');
-        accept.className='mp-small';
-        accept.textContent='Accept';
-        accept.addEventListener('click', async ()=>{
-          try{
-            await jpost('/friends/accept', { requestId:n.id, from:n.from, username:n.from });
-            toast('Friend added: '+n.from);
-            try{ await loadFriends(); repaintFriends(); }catch{}
-            removeNotification(n.id);
-          }catch(e){ toast('Accept failed: '+e.message); }
-        });
-
-        const decline = document.createElement('button');
-        decline.className='mp-small ghost';
-        decline.textContent='Decline';
-        decline.addEventListener('click', async ()=>{
-          try{ await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from }); }
-          catch(e){}
-          removeNotification(n.id);
-        });
-
-        actions.appendChild(accept); actions.appendChild(decline);
-        row.appendChild(label); row.appendChild(actions);
-      }else if(n.type==='battle'){
-        label.textContent = `${n.from} invited you${n.mode?(' ('+n.mode+')'):''}`;
-        const actions = document.createElement('div');
-        actions.style.cssText='display:flex; gap:6px;';
-        const accept = document.createElement('button');
-        accept.className='mp-small';
-        accept.textContent='Accept';
-        accept.addEventListener('click', async ()=>{
-          try{
-            const r = await jpost('/lobby/accept',{ inviteId:n.id, from:n.from });
-            removeNotification(n.id);
-            if(r && r.start) startMatch(r.start);
-          }catch(e){ toast('Accept failed: '+e.message); }
-        });
-        const decline = document.createElement('button');
-        decline.className='mp-small ghost';
-        decline.textContent='Decline';
-        decline.addEventListener('click', async ()=>{
-          try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }catch(e){}
-          removeNotification(n.id);
-        });
-
-        actions.appendChild(accept); actions.appendChild(decline);
-        row.appendChild(label); row.appendChild(actions);
-      }else{
-        label.textContent = 'Notification';
-        row.appendChild(label);
-      }
-
-      host.appendChild(row);
-    });
-  }
-
-  function setUnread(n){
-    notifications.unread = Math.max(0, n|0);
-    ensureBellOverlay();
-    if(notifications.unread>0){
-      ui.notifBadge.style.display='flex';
-      ui.notifBadge.textContent = String(notifications.unread);
-      ui.notifBell.style.background = '#2b1720';
-      ui.notifBell.style.borderColor = '#7d223a';
-      ui.notifBell.style.color = '#ffd7df';
-    }else{
-      ui.notifBadge.style.display='none';
-      ui.notifBell.style.background = '#162134';
-      ui.notifBell.style.borderColor = '#2a3550';
-      ui.notifBell.style.color = '#cfe0ff';
-    }
-  }
-  function addNotification(n){
-    notifications.items.unshift(n);
-    setUnread(notifications.unread+1);
-    if(ui.notifDropdown && ui.notifDropdown.style.display!=='none'){
-      renderNotifDropdown();
-      markAllNotificationsRead();
-    }
-  }
-  function removeNotification(id){
-    notifications.items = notifications.items.filter(x=>x.id!==id);
-    renderNotifDropdown();
-  }
-  function markAllNotificationsRead(){
-    setUnread(0);
-  }
-  function toggleNotifDropdown(){
-    ensureBellOverlay();
-    const vis = (ui.notifDropdown.style.display!=='none');
-    ui.notifDropdown.style.display = vis ? 'none' : 'block';
-    if(!vis){
-      renderNotifDropdown();
-      markAllNotificationsRead();
-    }
   }
 
   // --- FIRE button helpers (hide while friends list open) --------------------
   function getFireButton(){
-    // Common ids/classes
     const byCommon = document.querySelector('#btnFire, #fireBtn, #shootBtn, .btn-fire, .fire');
     if(byCommon) return byCommon;
-    // Any element whose text contains FIRE (case-insensitive)
     const all = Array.from(document.querySelectorAll('button,div,span'));
     const byText = all.find(el => /\bFIRE\b/i.test((el.textContent||'').trim()));
     if(byText) return byText.closest('button,div') || byText;
-    // Circle near bottom-right (fallback): pick element with large size there
     const candidates = all
       .map(el=>[el, el.getBoundingClientRect?.()])
       .filter(([,r])=>r && r.width>50 && r.height>50 && r.bottom>window.innerHeight*0.6 && r.right>window.innerWidth*0.6)
@@ -663,7 +519,6 @@
   }
   function setFireHidden(hidden){
     const fire = getFireButton(); if(!fire) return;
-    // hide the container too if it’s a nested label
     const target = fire.closest('button,div') || fire;
     if(hidden){
       target.__prevVis = {display:target.style.display, opacity:target.style.opacity, pointerEvents:target.style.pointerEvents};
@@ -675,14 +530,12 @@
         target.style.pointerEvents = target.__prevVis.pointerEvents || '';
         delete target.__prevVis;
       }else{
-        target.style.display='';
-        target.style.opacity='';
-        target.style.pointerEvents='';
+        target.style.display=''; target.style.opacity=''; target.style.pointerEvents='';
       }
     }
   }
 
-  // Friends popup (global overlay; positioned under Type box)
+  // Friends popup (global overlay; opens downward under Type box area)
   function ensureFriendsPopup(){
     if(ui.friendsPopup) return ui.friendsPopup;
     const pop = document.createElement('div');
@@ -716,8 +569,6 @@
     document.body.appendChild(pop);
     ui.friendsPopup = pop;
     ui.friendsBody  = body;
-    // position relative to chat bar
-    setTimeout(positionFriendsUI, 0);
     return pop;
   }
   function renderFriendsPopup(){
@@ -762,34 +613,39 @@
   function toggleFriendsPopup(){
     ensureFriendsPopup();
     if(!ui.friendsPopup) return;
-    const vis = (ui.friendsPopup.style.display!=='none');
-    ui.friendsPopup.style.display = vis ? 'none' : 'block';
-    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
-      // --- position popup to open DOWN from the Friends button ---
-    const btnRect = ui.friendsToggle.getBoundingClientRect();   // NEW
-    ui.friendsPopup.style.top = (btnRect.bottom + 8) + 'px';     // NEW (opens downward)
-    ui.friendsPopup.style.bottom = 'auto';                       // NEW (disable upward anchor)
-    else { setFireHidden(false); }
+
+    const isVisible = (ui.friendsPopup.style.display!=='none');
+    ui.friendsPopup.style.display = isVisible ? 'none' : 'block';
+
+    if(!isVisible){
+      renderFriendsPopup();
+      // open downward from the Friends button (under the Type box area)
+      const btnRect = ui.friendsToggle.getBoundingClientRect();
+      ui.friendsPopup.style.top = (btnRect.bottom + 8) + 'px';
+      ui.friendsPopup.style.bottom = 'auto';
+      // keep within viewport height
+      const maxH = Math.max(160, window.innerHeight - (btnRect.bottom + 24));
+      ui.friendsPopup.style.maxHeight = maxH + 'px';
+      setFireHidden(true);
+    }else{
+      setFireHidden(false);
+    }
   }
 
   // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
   function ensureNotifUI(){
-    // Ensure global overlays exist (bell/badge/dropdown + friends button)
     ensureBellOverlay();
     ensureFriendsButtonOverlay();
 
-    // Rename label to "Search All Players" if host exists
     if(lobby){
       const label = $('#mpFriendsLabel', lobby);
       if(label) label.textContent = 'Search All Players';
 
-      // Also hint in status line once
       if(ui.searchStatus && !ui.searchStatus._relabelled){
         ui.searchStatus.textContent = 'Search All Players — type a name and press Search or Return';
         ui.searchStatus._relabelled = true;
       }
 
-      // If a lobby-scoped friends toggle exists from earlier builds, remove duplication
       if(!ui.friendsToggle || !ui.friendsToggle._global){
         const old = lobby.querySelector('#mpFriendsToggle');
         if(old){ old.remove(); }
@@ -877,7 +733,7 @@
     });
     ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
-    // NEW: Upgrade the header with our actions / rename labels
+    // Upgrade the header with our actions / rename labels
     ensureNotifUI();
 
     paintRanks(); paintFriends(friends);
@@ -897,7 +753,6 @@
   async function pullNotifications(){
     try{
       const n = await jget('/notifications');
-      // starts / rounds / finishes (existing)
       if(n && n.start){ startMatch(n.start); return; }
       if(n && n.round){
         if(n.round.type==='start') onRoundStart(n.round);
@@ -907,7 +762,6 @@
         if(n.finish.winner) finishMatch(n.finish.winner, 'server');
       }
 
-      // battle invites
       if(n && Array.isArray(n.invites) && n.invites.length){
         const inv = n.invites[0];
         if(pullNotifications._lastInviteId !== inv.id){
@@ -916,7 +770,6 @@
         }
       }
 
-      // optional friend requests (any supported shape)
       const reqs = (n && (n.friendRequests || n.requests)) || (n && n.friend ? [n.friend] : []);
       if(Array.isArray(reqs)){
         reqs.forEach(fr=>{
@@ -933,7 +786,6 @@
     try{
       await loadMe(); await loadFriends(); refreshRanks();
 
-      // make sure global overlays exist immediately
       ensureBellOverlay();
       ensureFriendsButtonOverlay();
 
@@ -949,7 +801,7 @@
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
 
-      // ensure overlays track chat bar location after initial layout
+      // place Friends button after initial layout
       setTimeout(positionFriendsUI, 250);
 
       console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
