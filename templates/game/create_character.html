@@ -56,7 +56,6 @@
               <input type="hidden" name="t" value="{{ t }}">
             {% endif %}
 
-            <!-- NEW -->
             <label>Body Type</label>
             <select id="body_type" name="body_type">
               <option value="male">Male</option>
@@ -73,8 +72,8 @@
               <option value="deep">Deep</option>
             </select>
 
-            <!-- EXISTING (text updated only) -->
-            <label>Sleeve Color</label>
+            <!-- text only change -->
+            <label id="lbl_sleeves">Sleeve Color</label>
             <select name="sprite_skin" id="sprite_skin">
               <option value="default">Default</option>
               <option value="street_a">Street A</option>
@@ -88,7 +87,6 @@
               <option value="long">Long</option>
             </select>
 
-            <!-- NEW -->
             <label>Hair Color</label>
             <select id="hair_color" name="hair_color">
               <option value="black">Black</option>
@@ -101,8 +99,8 @@
               <option value="pink">Pink</option>
             </select>
 
-            <!-- EXISTING (text updated only) -->
-            <label>Vest Color</label>
+            <!-- text only change -->
+            <label id="lbl_vest">Vest Color</label>
             <select name="outfit" id="outfit">
               <option value="street">Street</option>
               <option value="athletic">Athletic</option>
@@ -133,9 +131,9 @@
         street_b: "/static/game/sprites/body/street_b.png"
       },
       hair: {
-        short: "/static/game/sprites/hair/short.png",
-        buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png",
+        short:  "/static/game/sprites/hair/short.png",
+        buzz:   "/static/game/sprites/hair/buzz.png",
+        long:   "/static/game/sprites/hair/long.png",
         long_f: "/static/game/sprites/hair/long_f.png" // optional female-specific
       },
       outfit: {
@@ -145,17 +143,23 @@
       }
     };
 
-    // Base ramps (used to match pixels in the sprites)
+    // --- Palette ramps -------------------------------------------------------
+    // Skin: used to match pixels inside the base body art
     const SKIN_BASE = ["#F7D7C6", "#E8BEA8", "#D6A48E"];
-    const HAIR_BASE = ["#C8C8C8", "#9C9C9C", "#6E6E6E"];
-
-    // Stronger target ramps
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
       medium: ["#F1BD94","#D79A73","#B67955"],
       tan:    ["#E2A878","#C88756","#9F663C"],
       dark:   ["#B9825B","#9A6644","#714A31"],
       deep:   ["#8B5A3B","#6A402A","#432818"]
+    };
+
+    // Hair: **per-style** base ramps (what restored the accurate color names)
+    const HAIR_BASES = {
+      short:  ["#AFA7E8", "#8E85D6", "#6E67B8"], // matches short.png purplish base
+      buzz:   ["#A2D2FF", "#75B6FF", "#4A8EE3"], // matches buzz.png sky/blue base
+      long:   ["#FFE07A", "#E9C55A", "#C29C38"], // matches long.png yellow/blonde base
+      long_f: ["#FFE07A", "#E9C55A", "#C29C38"]
     };
     const HAIR_TO = {
       black:  ["#2C2C31","#1C1C20","#0D0D10"],
@@ -168,7 +172,7 @@
       pink:   ["#FFA0C8","#E475A6","#C35486"]
     };
 
-    // DOM
+    // --- DOM -----------------------------------------------------------------
     const selType = document.getElementById('body_type');
     const selTone = document.getElementById('skin_tone');
     const selSkin = document.getElementById('sprite_skin');
@@ -181,12 +185,12 @@
     const form    = document.getElementById('charForm');
     ctx.imageSmoothingEnabled = false;
 
-    // utils
+    // --- Utils ---------------------------------------------------------------
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
 
-    function paletteSwap(img, fromRamp, toRamp, tolerance=1200){
+    function paletteSwap(img, fromRamp, toRamp, tolerance=1500){
       const w=img.width,h=img.height;
       const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
       const c=oc.getContext('2d',{willReadFrequently:true});
@@ -197,13 +201,13 @@
       let changed=0;
 
       for(let i=0;i<d.length;i+=4){
-        const a=d[i+3]; if(a===0) continue;
+        if(d[i+3]===0) continue;
         const p={r:d[i],g:d[i+1],b:d[i+2]};
         let best=-1, bestScore=1e9;
         for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<bestScore){best=k;bestScore=s;} }
         if(bestScore<=tolerance){
           const t=to[best]||to[to.length-1];
-          if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b){ changed++; }
+          if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
           d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
         }
       }
@@ -232,15 +236,14 @@
 
     function updateFieldVisibility(){
       const isFemale = selType.value==='female';
-      // hide sleeves/vest for female if they don't conceptually apply
-      document.querySelector('label[for="sprite_skin"]')?.classList.toggle('hide', isFemale);
+      document.getElementById('lbl_sleeves').classList.toggle('hide', isFemale);
       document.getElementById('sprite_skin').classList.toggle('hide', isFemale);
-      document.querySelector('label[for="outfit"]')?.classList.toggle('hide', isFemale);
+      document.getElementById('lbl_vest').classList.toggle('hide', isFemale);
       document.getElementById('outfit').classList.toggle('hide', isFemale);
     }
 
+    // --- Draw ---------------------------------------------------------------
     async function draw(){
-      // bg
       ctx.clearRect(0,0,cvs.width,cvs.height);
       const g = ctx.createRadialGradient(80,80,10,80,80,90);
       g.addColorStop(0,"rgba(255,255,255,.08)"); g.addColorStop(1,"rgba(0,0,0,0)");
@@ -253,35 +256,27 @@
       let body=null;
 
       if(isFemale){
-        // only try female file when body_type is female
-        body = await loadImg(`/static/game/sprites/body/${theme}__female.png`);
-        if(!body){
-          // fallback to default female if theme-specific missing
-          body = await loadImg(`/static/game/sprites/body/default__female.png`);
-        }
+        body = await loadImg(`/static/game/sprites/body/${theme}__female.png`)
+             || await loadImg(`/static/game/sprites/body/default__female.png`);
       }
       if(!body){
-        // male/neutral or fallback
         body = await loadImg(SPRITES.body[theme]||SPRITES.body.default);
       }
 
-      let outfit = null;
-      if(!isFemale){ // hide vest layer for female
-        outfit = await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
-      }
+      let outfit=null;
+      if(!isFemale) outfit = await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
 
-      let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
-      if(isFemale && selHair.value==='long') hairURL=SPRITES.hair.long_f||SPRITES.hair.long;
-      let hair=await loadImg(hairURL);
+      let hairURL = SPRITES.hair[selHair.value]||SPRITES.hair.short;
+      if(isFemale && selHair.value==='long') hairURL = SPRITES.hair.long_f || SPRITES.hair.long;
+      const hairBaseRamp = HAIR_BASES[(isFemale && selHair.value==='long') ? 'long_f' : selHair.value] || HAIR_BASES.short;
+      let hair = await loadImg(hairURL);
 
       const skinRamp=SKIN_TO[selTone.value]||SKIN_TO.light;
       const hairRamp=HAIR_TO[selHairColor.value]||HAIR_TO.black;
 
-      // body tint (palette swap with overlay fallback)
       if(body){
         let swapped = paletteSwap(body, SKIN_BASE, skinRamp, 1500);
         if(swapped.changedPixels < 12){
-          // Female bases may not match SKIN_BASE exactly; ensure tint
           const oc = overlayTint(body, skinRamp[1], 1.0);
           ctx.drawImage(oc, X, Y, DW, DH);
         }else{
@@ -298,7 +293,8 @@
       }
 
       if(hair){
-        const swap = paletteSwap(hair, HAIR_BASE, hairRamp, 1200);
+        // Use the per-style base ramp for accurate tint mapping
+        const swap = paletteSwap(hair, hairBaseRamp, hairRamp, 1800);
         let hairCanvas = swap.canvas;
         if(swap.changedPixels < 8){
           hairCanvas = overlayTint(hair, hairRamp[1], 1.0);
@@ -318,12 +314,10 @@
       if(!ok){ ev.preventDefault(); }
     });
 
-    // Live preview + field visibility
     [selType, selTone, selSkin, selHair, selHairColor, selOut].forEach(el=>{
       el.addEventListener('change', ()=>{ updateFieldVisibility(); draw(); });
     });
 
-    // Initial paint
     updateFieldVisibility();
     draw();
   })();
