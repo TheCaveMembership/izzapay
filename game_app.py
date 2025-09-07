@@ -1,5 +1,6 @@
 # game_app.py
 import os
+import json  # <-- ADDED
 from datetime import timedelta
 from flask import Flask, render_template, session, request, redirect, url_for
 from dotenv import load_dotenv
@@ -120,6 +121,31 @@ def require_login_redirect():
     return redirect("/signin")
 
 
+def _ensure_game_profiles_columns():
+    """
+    Ensure the appearance TEXT column exists (for JSON blob of extended creator fields).
+    Does not alter or remove any existing columns.
+    """
+    with conn() as cx:
+        cx.executescript(
+            """
+        CREATE TABLE IF NOT EXISTS game_profiles(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pi_uid TEXT UNIQUE NOT NULL,
+          username TEXT,
+          sprite_skin TEXT,
+          hair TEXT,
+          outfit TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        )
+        # Check existing columns
+        cols = [r[1] for r in cx.execute("PRAGMA table_info(game_profiles)").fetchall()]
+        if "appearance" not in cols:
+            cx.execute("ALTER TABLE game_profiles ADD COLUMN appearance TEXT")  # JSON blob
+
+
 # -------------------- routes --------------------
 @app.route("/auth")
 def game_auth():
@@ -153,38 +179,44 @@ def game_create():
     pi_username = urow["pi_username"]
     admin = _is_admin(urow)
 
-    # Bootstrap the game_profiles table
-    with conn() as cx:
-        cx.executescript(
-            """
-        CREATE TABLE IF NOT EXISTS game_profiles(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          pi_uid TEXT UNIQUE NOT NULL,
-          username TEXT,
-          sprite_skin TEXT,
-          hair TEXT,
-          outfit TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        )
+    # Ensure table + appearance column
+    _ensure_game_profiles_columns()
 
     if request.method == "POST":
+        # Legacy fields (unchanged)
         sprite = request.form.get("sprite_skin", "default")
         hair = request.form.get("hair", "short")
         outfit = request.form.get("outfit", "street")
+
+        # NEW extended creator fields (safe defaults)
+        body_type = request.form.get("body_type", "male")
+        hair_color = request.form.get("hair_color", "").strip()
+        skin_tone = request.form.get("skin_tone", "light")
+        female_outfit_color = request.form.get("female_outfit_color", "blue")
+
+        appearance = {
+            "body_type": body_type,
+            "sprite_skin": sprite,
+            "hair": hair,
+            "hair_color": hair_color,
+            "outfit": outfit,
+            "skin_tone": skin_tone,
+            "female_outfit_color": female_outfit_color,
+        }
+
         with conn() as cx:
             cx.execute(
                 """
-              INSERT INTO game_profiles(pi_uid, username, sprite_skin, hair, outfit)
-              VALUES(?,?,?,?,?)
+              INSERT INTO game_profiles(pi_uid, username, sprite_skin, hair, outfit, appearance)
+              VALUES(?,?,?,?,?,?)
               ON CONFLICT(pi_uid) DO UPDATE SET
                 username=excluded.username,
                 sprite_skin=excluded.sprite_skin,
                 hair=excluded.hair,
-                outfit=excluded.outfit
+                outfit=excluded.outfit,
+                appearance=excluded.appearance
             """,
-                (pi_uid, pi_username, sprite, hair, outfit),
+                (pi_uid, pi_username, sprite, hair, outfit, json.dumps(appearance)),
             )
 
         # After save -> go play (preserve token if present)
@@ -227,10 +259,13 @@ def game_play():
     if not urow:
         return redirect("/signin")
 
+    # Ensure schema (in case /create hasn't been hit since deploy)
+    _ensure_game_profiles_columns()
+
     pi_uid = urow["pi_uid"]
     with conn() as cx:
         profile = cx.execute(
-            "SELECT pi_uid, username, sprite_skin, hair, outfit FROM game_profiles WHERE pi_uid=?",
+            "SELECT pi_uid, username, sprite_skin, hair, outfit, appearance FROM game_profiles WHERE pi_uid=?",
             (pi_uid,),
         ).fetchone()
 
@@ -240,12 +275,35 @@ def game_play():
             return redirect(f"{url_for('game_create')}?t={t}")
         return redirect(url_for("game_create"))
 
+    # Build the profile dict + appearance (JSON) for the front-end
+    # JS reads: window.__IZZA_PROFILE__ or .appearance
+    appearance = {}
+    try:
+        if profile[5]:
+            appearance = json.loads(profile[5]) or {}
+    except Exception:
+        appearance = {}
+
+    # Fallbacks so older rows still work (tinting code will use appearance if present)
+    if not appearance:
+        appearance = {
+            "sprite_skin": profile[2] or "default",
+            "hair": profile[3] or "short",
+            "outfit": profile[4] or "street",
+            # defaults the JS already expects:
+            "body_type": "male",
+            "hair_color": "",
+            "skin_tone": "light",
+            "female_outfit_color": "blue",
+        }
+
     profile_dict = dict(
         pi_uid=profile[0],
         username=profile[1],
         sprite_skin=profile[2],
         hair=profile[3],
         outfit=profile[4],
+        appearance=appearance,  # <-- IMPORTANT for tinting & female body sheet
     )
 
     user_ctx = {"username": urow["pi_username"], "id": urow["id"]}
