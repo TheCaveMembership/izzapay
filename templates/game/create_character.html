@@ -29,6 +29,8 @@
     .note{font-size:13px}
     .danger{color:#ff9aa2}
     .btns{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
+    /* tiny helper for hide/show of fields */
+    .hide{display:none}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -71,13 +73,39 @@
               <option value="deep">Deep</option>
             </select>
 
-            <!-- Text only changed previously -->
-            <label>Sleeve Color</label>
-            <select name="sprite_skin" id="sprite_skin">
-              <option value="default">Default</option>
-              <option value="street_a">Street A</option>
-              <option value="street_b">Street B</option>
-            </select>
+            <!-- Sleeve/Vest block (hidden/disabled for female) -->
+            <div id="block_male">
+              <label>Sleeve Color</label>
+              <select name="sprite_skin" id="sprite_skin">
+                <option value="default">Default</option>
+                <option value="street_a">Street A</option>
+                <option value="street_b">Street B</option>
+              </select>
+
+              <label>Vest Color</label>
+              <select name="outfit" id="outfit">
+                <option value="street">Street</option>
+                <option value="athletic">Athletic</option>
+                <option value="luxury">Luxury</option>
+              </select>
+            </div>
+
+            <!-- Female-only: dress/outfit color -->
+            <div id="block_female" class="hide">
+              <label>Outfit Color</label>
+              <select id="female_outfit_color" name="female_outfit_color">
+                <option value="blue">Blue</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="purple">Purple</option>
+                <option value="yellow">Yellow</option>
+                <option value="pink">Pink</option>
+                <option value="black">Black</option>
+                <option value="white">White</option>
+                <option value="brown">Brown</option>
+                <option value="orange">Orange</option>
+              </select>
+            </div>
 
             <label>Hair Style</label>
             <select name="hair" id="hair">
@@ -96,13 +124,6 @@
               <option value="blue">Blue</option>
               <option value="green">Green</option>
               <option value="pink">Pink</option>
-            </select>
-
-            <label>Vest Color</label>
-            <select name="outfit" id="outfit">
-              <option value="street">Street</option>
-              <option value="athletic">Athletic</option>
-              <option value="luxury">Luxury</option>
             </select>
 
             <div class="btns">
@@ -131,7 +152,7 @@
       hair: {
         short: "/static/game/sprites/hair/short.png",
         buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png"  // use same long hair for male & female
+        long:  "/static/game/sprites/hair/long.png" // same for male/female
       },
       outfit: {
         street:   "/static/game/sprites/outfit/street.png",
@@ -140,7 +161,7 @@
       }
     };
 
-    // Skin ramps
+    // --- Ramps ---------------------------------------------------------------
     const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
@@ -150,7 +171,21 @@
       deep:   ["#8B5A3B","#6A402A","#432818"]
     };
 
-    // Hair tints — the “approved” set
+    // Dress base = current female sprite’s blue ramp (approx.)
+    const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
+    const FEMALE_DRESS_TO = {
+      blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
+      red:    ["#FF7A7A","#E24C4C","#B12F2F"],
+      green:  ["#7DD68A","#4CB56B","#2F7F47"],
+      purple: ["#B796FF","#8C6BE0","#6A49B8"],
+      yellow: ["#FFE08A","#E7C45A","#B89433"],
+      pink:   ["#FFA6D6","#E57CB2","#C45C96"],
+      black:  ["#3A3A3D","#232326","#0E0E10"],
+      white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
+      brown:  ["#A87854","#7C563A","#593D29"],
+      orange: ["#FFB46A","#E4873A","#B65E1F"]
+    };
+
     const HAIR_TO = {
       black:  ["#2C2C31","#17171B","#0A0A0D"],
       brown:  ["#7A5336","#5C3E28","#3E2B1B"],
@@ -162,20 +197,25 @@
       pink:   ["#FFA6D6","#E57CB2","#C45C96"]
     };
 
-    // DOM
+    // --- DOM -----------------------------------------------------------------
     const selType = document.getElementById('body_type');
     const selTone = document.getElementById('skin_tone');
     const selSkin = document.getElementById('sprite_skin');
+    const selOut  = document.getElementById('outfit');
+    const blockMale   = document.getElementById('block_male');
+    const blockFemale = document.getElementById('block_female');
+    const selFemaleOutfit = document.getElementById('female_outfit_color');
+
     const selHair = document.getElementById('hair');
     const selHairColor = document.getElementById('hair_color');
-    const selOut  = document.getElementById('outfit');
-    const cvs     = document.getElementById('avatar');
-    const ctx     = cvs.getContext('2d');
-    const preset  = document.getElementById('presetLabel');
-    const form    = document.getElementById('charForm');
+
+    const cvs = document.getElementById('avatar');
+    const ctx = cvs.getContext('2d');
+    const preset = document.getElementById('presetLabel');
+    const form = document.getElementById('charForm');
     ctx.imageSmoothingEnabled = false;
 
-    // utils
+    // --- utils ---------------------------------------------------------------
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
@@ -249,17 +289,18 @@
       return oc;
     }
 
-    function toggleFemaleOnlyUI(){
+    function toggleBlocks(){
       const isFemale = (selType.value === 'female');
-      // Disable sleeve & vest selectors for female (not drawn)
+      blockMale.classList.toggle('hide', isFemale);
+      blockFemale.classList.toggle('hide', !isFemale);
+      // keep selects enabled/disabled to avoid accidental submission
       selSkin.disabled = isFemale;
       selOut.disabled  = isFemale;
-      selSkin.title = isFemale ? 'Not used for female body' : '';
-      selOut.title  = isFemale ? 'Not used for female body' : '';
     }
 
+    // --- draw ----------------------------------------------------------------
     async function draw(){
-      toggleFemaleOnlyUI();
+      toggleBlocks();
 
       // bg
       ctx.clearRect(0,0,cvs.width,cvs.height);
@@ -269,50 +310,59 @@
 
       const DW=96,DH=96,X=(cvs.width-DW)/2,Y=(cvs.height-DH)/2;
 
-      // body
+      // choose base body sprite
       const theme=selSkin.value;
       const isFemale=(selType.value==='female');
 
-      // try *_female_wide, then *_female, else base
       const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
       const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
-
-      let body = null;
+      let body=null;
       if(isFemale){
-        body = await loadImg(femaleWide);
-        if(!body) body = await loadImg(femaleSlim);
+        body=await loadImg(femaleWide);
+        if(!body) body=await loadImg(femaleSlim);
       }
-      if(!body) body = await loadImg(SPRITES.body[theme]||SPRITES.body.default);
+      if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
 
-      // hair (same art for male/female; only special-case the buzz offset)
-      let hairURL = SPRITES.hair[selHair.value] || SPRITES.hair.short;
-      let hair = await loadImg(hairURL);
+      // hair
+      let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
+      let hair=await loadImg(hairURL);
 
-      // outfit (drawn only for non-female bodies per your instruction)
-      let outfit = null;
+      // outfit (only for non-female)
+      let outfit=null;
       if(!isFemale){
-        outfit = await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
+        outfit=await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
       }
 
-      // --- SKIN ---
+      // --- skin tint first ---
+      let bodyCanvas;
       if(body){
-        const targetRamp = SKIN_TO[selTone.value]||SKIN_TO.light;
-        const swapped = paletteSwap(body, SKIN_BASE, targetRamp, 4000);
-        let bodyCanvas = swapped.canvas;
+        const targetSkin = SKIN_TO[selTone.value]||SKIN_TO.light;
+        const swapped = paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+        bodyCanvas = swapped.canvas;
         if(swapped.changedPixels < 8){
-          bodyCanvas = overlayTint(body, targetRamp[1], 0.98);
+          bodyCanvas = overlayTint(body, targetSkin[1], 0.98);
         }
-        ctx.drawImage(bodyCanvas, X, Y, DW, DH);
-      }else{
-        ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH);
       }
 
-      // --- OUTFIT (skip for female) ---
-      if(outfit){
-        ctx.drawImage(outfit, X, Y, DW, DH);
+      // --- female dress tint (if female) ---
+      if(isFemale && bodyCanvas){
+        const targetDress = FEMALE_DRESS_TO[selFemaleOutfit.value] || FEMALE_DRESS_TO.blue;
+        const reDress = paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+        bodyCanvas = reDress.canvas;
+        if(reDress.changedPixels < 6){
+          // strong fallback so it’s clearly different
+          bodyCanvas = overlayTint(bodyCanvas, targetDress[1], 0.85);
+        }
       }
 
-      // --- HAIR (with ramp detect + swap). Adjust buzz-on-female vertical offset. ---
+      // draw body
+      if(bodyCanvas) ctx.drawImage(bodyCanvas, X, Y, DW, DH);
+      else { ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH); }
+
+      // outfit (skip for female)
+      if(outfit){ ctx.drawImage(outfit, X, Y, DW, DH); }
+
+      // hair (keep “approved” approach)
       if(hair){
         const detected = extractThreeToneRamp(hair);
         const target   = HAIR_TO[selHairColor.value]||HAIR_TO.black;
@@ -321,7 +371,6 @@
         if(swap.changedPixels < 8){
           hairCanvas = overlayTint(hair, target[1], 1.0);
         }
-        // Nudge buzz up a touch on female to avoid a visible gap
         const hairY = (isFemale && selHair.value==='buzz') ? (Y - 4) : Y;
         ctx.drawImage(hairCanvas, X, hairY, DW, DH);
       }else{
@@ -331,7 +380,7 @@
       // label
       preset.textContent =
         `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value})` +
-        (!isFemale ? ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}` : '');
+        (isFemale ? ` • Outfit: ${selFemaleOutfit.value}` : ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}`);
     }
 
     form.addEventListener('submit', function(ev){
@@ -339,7 +388,11 @@
       if(!ok){ ev.preventDefault(); }
     });
 
-    [selType, selTone, selSkin, selHair, selHairColor, selOut].forEach(el=> el.addEventListener('change', draw));
+    [selType, selTone, selSkin, selOut, selFemaleOutfit, selHair, selHairColor]
+      .forEach(el=> el.addEventListener('change', draw));
+
+    // initial
+    toggleBlocks();
     draw();
   })();
   </script>
