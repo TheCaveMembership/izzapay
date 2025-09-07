@@ -21,9 +21,13 @@
  *   so it’s always available even when the Play Modes modal is closed.
  * - Friends list popup now appears over the game canvas near the bottom-right,
  *   above the FIRE button. When opened, the FIRE button is hidden and restored on close.
+ *
+ * PATCH3 (requested tweaks):
+ * - Make the bell a little smaller (kept in the same top-right spot).
+ * - Move the Friends button to the lower-right, just under the Send + EN controls.
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton+tweakpos';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -413,14 +417,14 @@
   function ensureBellOverlay(){
     if(ui.notifBell && ui.notifBadge && ui.notifDropdown) return;
 
-    // bell
+    // bell (smaller)
     const bell = document.createElement('button');
     bell.id = 'mpNotifBell';
     bell.title = 'Notifications';
     bell.textContent = '🔔';
     Object.assign(bell.style, {
       position:'fixed', right:'14px', top:'14px', zIndex:Z.bell,
-      width:'34px', height:'34px', borderRadius:'18px',
+      width:'28px', height:'28px', borderRadius:'16px',
       background:'#162134', color:'#cfe0ff',
       border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
       boxShadow:'0 2px 8px rgba(0,0,0,.25)'
@@ -428,23 +432,23 @@
     bell.addEventListener('click', toggleNotifDropdown);
     document.body.appendChild(bell);
 
-    // badge
+    // badge (nudged for smaller bell)
     const badge = document.createElement('span');
     badge.id='mpNotifBadge';
     Object.assign(badge.style, {
-      position:'fixed', right:'10px', top:'8px', zIndex:Z.drop,
-      minWidth:'16px', height:'16px', borderRadius:'8px',
-      background:'#e11d48', color:'#fff', fontSize:'11px',
+      position:'fixed', right:'6px', top:'6px', zIndex:Z.drop,
+      minWidth:'14px', height:'14px', borderRadius:'7px',
+      background:'#e11d48', color:'#fff', fontSize:'10px',
       display:'none', alignItems:'center', justifyContent:'center',
-      padding:'0 4px', lineHeight:'16px'
+      padding:'0 4px', lineHeight:'14px'
     });
     document.body.appendChild(badge);
 
-    // dropdown
+    // dropdown (slightly closer to smaller bell)
     const dd = document.createElement('div');
     dd.id='mpNotifDropdown';
     Object.assign(dd.style, {
-      position:'fixed', right:'10px', top:'54px', zIndex:Z.drop,
+      position:'fixed', right:'10px', top:'48px', zIndex:Z.drop,
       background:'#0f1522', color:'#e8eef7',
       border:'1px solid #2a3550', borderRadius:'12px',
       minWidth:'280px', maxWidth:'92vw', maxHeight:'300px', overflow:'auto',
@@ -457,7 +461,7 @@
     ui.notifDropdown = dd;
   }
 
-  // ===== GLOBAL friends button (always visible) ==============================
+  // ===== GLOBAL friends button (always visible; moved under Send/EN) ========
   function ensureFriendsButtonOverlay(){
     if(ui.friendsToggle && ui.friendsToggle._global) return;
     const btn = document.createElement('button');
@@ -466,9 +470,10 @@
     btn.textContent='Friends';
     Object.assign(btn.style, {
       position:'fixed',
-      // place just to the left of the bell to mimic the same spot visually
-      right:'58px', top:'14px', zIndex:Z.bell,
-      height:'34px', padding:'0 10px', borderRadius:'18px',
+      right:'14px',
+      bottom:'64px',  // sits just under Send/EN controls, above bottom edge
+      zIndex:Z.bell,
+      height:'34px', padding:'0 12px', borderRadius:'18px',
       background:'#162134', color:'#cfe0ff',
       border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
       boxShadow:'0 2px 8px rgba(0,0,0,.25)'
