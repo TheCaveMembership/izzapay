@@ -31,10 +31,24 @@
   }
 
   // ===== Profile / assets =====
-  const profile = window.__IZZA_PROFILE__ || {};
-  const BODY   = profile.sprite_skin || "default";
-  const HAIR   = profile.hair || "short";
-  const OUTFIT = profile.outfit || "street";
+const profile = window.__IZZA_PROFILE__ || {};
+const AP = (profile.appearance) || profile || {};
+
+const bodyType  = AP.body_type  || 'male';
+const themeKey  = AP.sprite_skin || 'default';
+const hairStyle = AP.hair        || 'short';
+const hairColor = AP.hair_color  || '';
+const outfitKey = AP.outfit      || 'street';
+
+// Resolve filenames based on creation choices
+const RESOLVED = {
+  // Female uses the “*_female_wide” body sheet; male/default uses the base sheet
+  body: bodyType === 'female' ? `${themeKey}__female_wide` : themeKey,
+  // Hair: try colorized variant first (e.g. "long__green"), then fall back to base (e.g. "long")
+  hairTry: hairColor ? [`${hairStyle}__${hairColor}`, hairStyle] : [hairStyle],
+  // Female outfit is baked into body (dress), so skip separate outfit layer
+  outfit: bodyType === 'female' ? null : outfitKey
+};
 
   // ===== Canvas / constants =====
   const cvs = document.getElementById('game');
@@ -126,7 +140,22 @@
     return loadImg(p2).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))}))
                       .catch(()=>loadImg(p1).then(img=>({img,cols:Math.max(1,Math.floor(img.width/32))})));
   }
+// Try multiple candidate names in order; first that loads wins
+function loadLayerTry(kind, names){
+  if(!names || !names.length) return Promise.reject(new Error('no names'));
+  let i = 0;
+  function next(){
+    return loadLayer(kind, names[i++])
+      .catch(()=> (i < names.length) ? next() : Promise.reject(new Error('missing '+kind+': '+names.join(', '))));
+  }
+  return next();
+}
 
+// Transparent 32×32 placeholder layer (used when female has no separate outfit)
+function emptyLayer(){
+  const c = document.createElement('canvas'); c.width = 32; c.height = 32;
+  return { img: c, cols: 1 };
+}
   // === NPC sprite sheets (32x32 frames) ===
   const NPC_SRC = {
     ped_m:       '/static/game/sprites/pedestrian_sheet.png',
@@ -1218,12 +1247,12 @@ window.addEventListener('izza-bank-changed', ()=>{
 
   // ===== Boot =====
   Promise.all([
-    loadLayer('body',   BODY),
-    loadLayer('outfit', OUTFIT),
-    loadLayer('hair',   HAIR),
-    loadNPCSheets(),
-    loadVehicleSheets()
-  ]).then(([body,outfit,hair,npcs,vehicles])=>{
+  loadLayer('body', RESOLVED.body),
+  (RESOLVED.outfit ? loadLayer('outfit', RESOLVED.outfit) : Promise.resolve(emptyLayer())),
+  loadLayerTry('hair', RESOLVED.hairTry),
+  loadNPCSheets(),
+  loadVehicleSheets()
+]).then(([body,outfit,hair,npcs,vehicles])=>{
     NPC_SHEETS = npcs;
     VEHICLE_SHEETS = vehicles;
     const imgs={body,outfit,hair};
