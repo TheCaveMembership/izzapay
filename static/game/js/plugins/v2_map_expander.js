@@ -1154,7 +1154,14 @@ if (!window._izzaBoatActive) {             // <— add this guard
       ctx.fillStyle = '#e7c14a'; // gold tint
       ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
     }
+// ---- Tier-1 HQ & Shop (always draw on overlay) ----
+ctx.fillStyle = COL.civic; // HQ tint
+ctx.fillRect(A.HQ.x0*sx, A.HQ.y0*sy,
+  (A.HQ.x1 - A.HQ.x0 + 1)*sx, (A.HQ.y1 - A.HQ.y0 + 1)*sy);
 
+ctx.fillStyle = COL.shop;  // Shop tint
+ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy,
+  (A.SH.x1 - A.SH.x0 + 1)*sx, (A.SH.y1 - A.SH.y0 + 1)*sy);
     // ---- Docks (planks)
     ctx.fillStyle = COL.wood;
     lakeRects(A).DOCKS.forEach(d=>{
