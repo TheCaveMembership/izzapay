@@ -144,7 +144,8 @@
       }
     };
 
-    // Stronger target ramps for skin (unchanged from your last working state)
+    // SKIN ramps: base (what your sprite uses) and targets (strong spread).
+    const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
       medium: ["#F1BD94","#D79A73","#B67955"],
@@ -153,8 +154,7 @@
       deep:   ["#8B5A3B","#6A402A","#432818"]
     };
 
-    // Target ramps for HAIR (names ↔ actual colors).
-    // These are tuned to look “correct” when mapped from any neutral 3-tone sprite.
+    // Hair targets (kept from the version that looked right for you)
     const HAIR_TO = {
       black:  ["#2C2C31","#17171B","#0A0A0D"],
       brown:  ["#7A5336","#5C3E28","#3E2B1B"],
@@ -185,7 +185,6 @@
     const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
     const lum   = (r,g,b)=> 0.2126*r + 0.7152*g + 0.0722*b;
 
-    // Extract a 3-tone ramp (shadow, mid, highlight) from an image automatically.
     function extractThreeToneRamp(img){
       const w=img.width,h=img.height;
       const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
@@ -199,24 +198,16 @@
         const r=d[i],g=d[i+1],b=d[i+2];
         samples.push({r,g,b,L:lum(r,g,b)});
       }
-      if(samples.length<10){
-        // not enough info — return a neutral ramp; overlay tint will kick in later
-        return ["#C8C8C8","#9C9C9C","#6E6E6E"];
-      }
+      if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick = q => {
         const idx = Math.max(0, Math.min(samples.length-1, Math.floor(q*(samples.length-1))));
-        const s = samples[idx]; const toHex = v=>('#'+v.toString(16).padStart(2,'0'));
-        return '#'
-          + s.r.toString(16).padStart(2,'0')
-          + s.g.toString(16).padStart(2,'0')
-          + s.b.toString(16).padStart(2,'0');
+        const s = samples[idx];
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');
       };
-      // 20% / 55% / 85% quantiles = shadow/mid/highlight
       return [pick(0.2), pick(0.55), pick(0.85)];
     }
 
-    // palette swap using nearest-color to detected ramp
     function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
       const from = fromRampHex.map(hexToRgb);
       const to   = toRampHex.map(hexToRgb);
@@ -243,7 +234,6 @@
       return {canvas:oc, changedPixels:changed};
     }
 
-    // overlay-tint fallback if paletteSwap didn’t match enough pixels
     function overlayTint(img, hex, strength=1.0){
       const w=img.width,h=img.height;
       const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
@@ -285,12 +275,16 @@
       if(isFemale && selHair.value==='long') hairURL=SPRITES.hair.long_f||SPRITES.hair.long;
       let hair=await loadImg(hairURL);
 
-      // draw body (skin tint via overlay so your sleeves/outfit stay separate)
+      // --- SKIN: strong palette swap, overlay fallback if no match ---
       if(body){
-        // use mid tone of chosen ramp to bias overall skin; then outfit overlays
-        const ramp=SKIN_TO[selTone.value]||SKIN_TO.light;
-        const skinCanvas = overlayTint(body, ramp[1], 0.95);
-        ctx.drawImage(skinCanvas, X, Y, DW, DH);
+        const targetRamp = SKIN_TO[selTone.value]||SKIN_TO.light;
+        const swapped = paletteSwap(body, SKIN_BASE, targetRamp, 4000); // higher tol to catch near colors
+        let bodyCanvas = swapped.canvas;
+        if(swapped.changedPixels < 8){
+          // Fallback: strong overlay with the mid tone so it’s visibly different
+          bodyCanvas = overlayTint(body, targetRamp[1], 0.98);
+        }
+        ctx.drawImage(bodyCanvas, X, Y, DW, DH);
       }else{
         ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH);
       }
@@ -299,13 +293,13 @@
       if(outfit) ctx.drawImage(outfit, X, Y, DW, DH);
       else { ctx.fillStyle="#5aa6ff"; ctx.fillRect(X+2,Y+38,DW-4,DH-40); }
 
-      // hair: auto-detect ramp then map to target
+      // --- HAIR: keep the version that matched your screenshots ---
       if(hair){
-        const detected = extractThreeToneRamp(hair);          // from current sprite
+        const detected = extractThreeToneRamp(hair);
         const target   = HAIR_TO[selHairColor.value]||HAIR_TO.black;
         const swap     = paletteSwap(hair, detected, target, 4000);
         let hairCanvas = swap.canvas;
-        if(swap.changedPixels < 8){ // fallback if detection fails
+        if(swap.changedPixels < 8){
           hairCanvas = overlayTint(hair, target[1], 1.0);
         }
         ctx.drawImage(hairCanvas, X, Y, DW, DH);
