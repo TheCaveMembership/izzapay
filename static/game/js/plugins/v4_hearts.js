@@ -1,6 +1,6 @@
 // /static/game/js/plugins/v4_hearts.js
 (function () {
-  const BUILD = 'v4.3-hearts-plugin+svg-hearts+low-blink+pvp-isolation';
+  const BUILD = 'v4.4-hearts-plugin+svg-hearts+low-blink+pvp-isolation+rocket-damage';
   console.log('[IZZA PLAY]', BUILD);
 
   const LS = {
@@ -38,7 +38,7 @@
     return Math.max(0, Math.min(def, raw));
   };
 
-  // ✅ FIX: inventory should be an object, not an array
+  // inventory should be an object, not an array
   const loseAllItems = () => {
     try { localStorage.setItem(LS.inventory, '{}'); } catch {}
     try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
@@ -46,7 +46,7 @@
 
   // ---------- hearts model ----------
   function initHearts(){
-    // ✅ one-time migration in case older runs stored "[]"
+    // one-time migration in case older runs stored "[]"
     try{
       const invRaw = localStorage.getItem(LS.inventory);
       if (invRaw && invRaw.trim().startsWith('[')) {
@@ -243,6 +243,22 @@
     });
   }
 
+  // ===================================================================
+  //            Projectile / special hits (e.g., tank rockets)
+  // ===================================================================
+  function attachSpecialHitListener(){
+    // free_drive tanks emit: IZZA.emit('player-hit', {by:'rocket', dmg:3})
+    IZZA.on('player-hit', (e)=>{
+      const dmgSegs = Math.max(1, (e && e.dmg|0) || 1); // default 1 seg; rockets use 3
+      if (window.__IZZA_DUEL && window.__IZZA_DUEL.active) {
+        // Keep PvP isolated from world damage
+        try { IZZA.emit('pvp-cop-damage', { segs: dmgSegs }); } catch {}
+        return;
+      }
+      takeDamageSegs(dmgSegs);
+    });
+  }
+
   // ---------- boot ----------
   if (window.IZZA && IZZA.on){
     IZZA.on('ready', (coreApi)=>{
@@ -251,6 +267,7 @@
       cops   = api.cops;
       initHearts();
       attachCopMelee();
+      attachSpecialHitListener();   // <-- add rocket/tank damage hookup
       IZZA.on('wanted-changed', placeHeartsHud);
     });
   }else{
