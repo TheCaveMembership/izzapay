@@ -15,9 +15,15 @@
  * PATCH (overlay fix):
  * - Bell & notifications dropdown rendered as GLOBAL overlays (fixed; high z-index),
  *   not inside the Play Modes modal — so they sit above the lobby and do not close with it.
+ *
+ * PATCH2 (friends button always-on + popup placement):
+ * - Friends button is now a GLOBAL overlay too (fixed), kept visually beside the bell
+ *   so it’s always available even when the Play Modes modal is closed.
+ * - Friends list popup now appears over the game canvas near the bottom-right,
+ *   above the FIRE button. When opened, the FIRE button is hidden and restored on close.
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -451,6 +457,28 @@
     ui.notifDropdown = dd;
   }
 
+  // ===== GLOBAL friends button (always visible) ==============================
+  function ensureFriendsButtonOverlay(){
+    if(ui.friendsToggle && ui.friendsToggle._global) return;
+    const btn = document.createElement('button');
+    btn.id='mpFriendsToggleGlobal';
+    btn.title='Friends';
+    btn.textContent='Friends';
+    Object.assign(btn.style, {
+      position:'fixed',
+      // place just to the left of the bell to mimic the same spot visually
+      right:'58px', top:'14px', zIndex:Z.bell,
+      height:'34px', padding:'0 10px', borderRadius:'18px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    btn.addEventListener('click', toggleFriendsPopup);
+    document.body.appendChild(btn);
+    ui.friendsToggle = btn;
+    ui.friendsToggle._global = true;
+  }
+
   // NEW: Notification UI helpers (uses global overlay now)
   function renderNotifDropdown(){
     if(!ui.notifDropdown) return;
@@ -577,15 +605,32 @@
     }
   }
 
-  // Friends popup (global overlay)
+  // --- FIRE button helpers (hide while friends list open) --------------------
+  function getFireButton(){
+    // try common ids; fallback to a button with "FIRE" text
+    const byId = document.querySelector('#btnFire') || document.querySelector('#fireBtn') || document.querySelector('#shootBtn');
+    if(byId) return byId;
+    const candidates = Array.from(document.querySelectorAll('button,div'));
+    return candidates.find(el => (el.textContent||'').trim().toUpperCase()==='FIRE') || null;
+  }
+  function setFireHidden(hidden){
+    const fire = getFireButton(); if(!fire) return;
+    fire.__prevDisplay = fire.__prevDisplay || fire.style.display || '';
+    fire.style.display = hidden ? 'none' : fire.__prevDisplay;
+  }
+
+  // Friends popup (global overlay; repositioned near bottom-right over canvas)
   function ensureFriendsPopup(){
     if(ui.friendsPopup) return ui.friendsPopup;
     const pop = document.createElement('div');
     pop.id='mpFriendsPopup';
     Object.assign(pop.style, {
-      position:'fixed', right:'14px', top:'82px', zIndex:Z.drop,
+      position:'fixed',
+      right:'14px',
+      bottom:'110px',     // sit above the FIRE button area
+      zIndex:Z.drop,
       background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
-      width:'320px', maxHeight:'340px', overflow:'auto', display:'none',
+      width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
       boxShadow:'0 10px 28px rgba(0,0,0,.35)'
     });
     const head = document.createElement('div');
@@ -596,7 +641,7 @@
     const x = document.createElement('button');
     x.className='mp-small ghost';
     x.textContent='Close';
-    x.addEventListener('click', ()=>{ pop.style.display='none'; });
+    x.addEventListener('click', ()=>{ pop.style.display='none'; setFireHidden(false); });
 
     head.appendChild(ttl); head.appendChild(x);
 
@@ -655,13 +700,15 @@
     if(!ui.friendsPopup) return;
     const vis = (ui.friendsPopup.style.display!=='none');
     ui.friendsPopup.style.display = vis ? 'none' : 'block';
-    if(!vis) renderFriendsPopup();
+    if(!vis){ renderFriendsPopup(); setFireHidden(true); }
+    else { setFireHidden(false); }
   }
 
   // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
   function ensureNotifUI(){
-    // Ensure global overlays exist (bell/badge/dropdown)
+    // Ensure global overlays exist (bell/badge/dropdown + friends button)
     ensureBellOverlay();
+    ensureFriendsButtonOverlay();
 
     // Rename label to "Search All Players" if host exists
     if(lobby){
@@ -674,17 +721,10 @@
         ui.searchStatus._relabelled = true;
       }
 
-      // Add Friends toggle button into lobby header (just opens global popup)
-      if(!ui.friendsToggle){
-        const head = lobby.querySelector('.mp-head') || lobby;
-        const btn = document.createElement('button');
-        btn.id='mpFriendsToggle';
-        btn.className='mp-small';
-        btn.textContent='Friends';
-        btn.style.marginLeft='8px';
-        btn.addEventListener('click', toggleFriendsPopup);
-        head.appendChild(btn);
-        ui.friendsToggle = btn;
+      // If a lobby-scoped friends toggle exists from earlier builds, keep it from duplicating
+      if(!ui.friendsToggle || !ui.friendsToggle._global){
+        const old = lobby.querySelector('#mpFriendsToggle');
+        if(old){ old.remove(); }
       }
     }
   }
@@ -825,8 +865,9 @@
     try{
       await loadMe(); await loadFriends(); refreshRanks();
 
-      // make sure global bell exists immediately
+      // make sure global overlays exist immediately
       ensureBellOverlay();
+      ensureFriendsButtonOverlay();
 
       // presence refresher
       setInterval(async () => { try { await jget('/me'); } catch{} }, 20000);
