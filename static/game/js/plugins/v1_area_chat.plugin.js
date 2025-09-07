@@ -1,6 +1,6 @@
 // v1_area_chat.plugin.js — per-area chat (duel/trade centre) + bubbles + feed + language toggle + translation hook
 (function(){
-  const BUILD='v1.3-area-chat+i18n-hook+typing-guard+sendbtn+bubble-posfix+uname-normalize';
+  const BUILD='v1.4-area-chat+i18n-hook+typing-guard+sendbtn+bubble-posfix+uname-normalize';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- lightweight MP adapter (works with any of your 3 buses) ----
@@ -16,7 +16,7 @@
     api.on = function(type, cb){
       try{
         if (window.REMOTE_PLAYERS_API?.on) return window.REMOTE_PLAYERS_API.on(type, cb);
-        if (window.RemotePlayers?.on)      return RemotePlayers.on(type, cb);
+        if (window.RemotePlayers?.on)      return window.RemotePlayers.on(type, cb); // <-- fixed
         if (window.IZZA?.on)               return IZZA.on('mp-'+type, (_,{data})=>cb(data));
       }catch(e){ console.warn('[CHAT] on failed', e); }
     };
@@ -136,6 +136,7 @@
     const k = (e.key||'').toLowerCase();
     const block = new Set(['a','b','i',' ','arrowup','arrowdown','arrowleft','arrowright','escape']);
     if(block.has(k) || k.length===1){
+      e.preventDefault();                  // <-- added to stop page/engine handling
       e.stopImmediatePropagation();
       e.stopPropagation();
     }
@@ -180,116 +181,116 @@
   }
 
   // ---- floating bubbles above heads (fixed to viewport; high z-index) ----
-const Bubbles = new Map(); // key = normalized username -> {el, tDie}
-const _norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
+  const Bubbles = new Map(); // key = normalized username -> {el, tDie}
+  const _norm = u => (u||'').toString().trim().replace(/^@+/,'').toLowerCase();
 
-function _gameCanvas(){
-  return document.getElementById('game') || null;
-}
-
-function _findPeerByKey(key){
-  const pools = [
-    (window.__REMOTE_PLAYERS__||[]),
-    (window.REMOTE_PLAYERS_API?.list?.() || []),
-    (IZZA?.api?.peers || [])
-  ];
-  for (const arr of pools){
-    for (const p of arr){
-      const uname = p?.username || p?.name || p?.id || '';
-      if (_norm(uname) === key) return p;
-    }
-  }
-  return null;
-}
-
-function showBubble(unameRaw, text){
-  try{
-    const key = _norm(unameRaw);
-    if (!key) return;
-
-    let b = Bubbles.get(key);
-    if (!b){
-      const el = document.createElement('div');
-      Object.assign(el.style, {
-        position:'fixed',
-        zIndex: 1000,                // higher than joystick/overlays
-        pointerEvents:'none',
-        background:'rgba(8,12,20,.92)',
-        color:'#e8eef7',
-        border:'1px solid #2a3550',
-        borderRadius:'10px',
-        padding:'4px 8px',
-        fontSize:'12px',
-        maxWidth:'60vw',
-        whiteSpace:'pre-wrap',
-        transform:'translateZ(0)',
-        transition:'opacity 160ms linear',
-        opacity:'1'
-      });
-      document.body.appendChild(el);
-      b = { el, tDie: 0 };
-      Bubbles.set(key, b);
-    }
-    b.el.textContent = text;
-    b.tDie = performance.now() + 4000; // visible ~4s
-
-    // snap into place immediately for local echo
-    _positionBubbleNow(key, b.el);
-  }catch(e){}
-}
-
-function _positionBubbleNow(key, el){
-  const api = IZZA?.api; const cvs = _gameCanvas();
-  if (!api?.ready || !cvs) return;
-
-  const rect  = cvs.getBoundingClientRect();
-  const scale = api.DRAW / api.TILE;
-
-  const meKey = _norm(api?.user?.username || api?.user?.name || '');
-  let sx, sy;
-
-  if (key === meKey){
-    sx = (api.player.x - api.camera.x) * scale;
-    sy = (api.player.y - api.camera.y) * scale;
-  }else{
-    const p = _findPeerByKey(key);
-    if (!p) return;
-    sx = (p.x - api.camera.x) * scale;
-    sy = (p.y - api.camera.y) * scale;
+  function _gameCanvas(){
+    return document.getElementById('game') || null;
   }
 
-  // convert sprite-space → viewport; center and lift above head
-  const left = rect.left + sx - el.offsetWidth/2 + 16; // +16 ≈ sprite center
-  const top  = rect.top  + sy - 36;                    // lift above head
-  el.style.left = Math.round(left) + 'px';
-  el.style.top  = Math.round(top)  + 'px';
-  el.style.opacity = '1';
-}
-
-// follow owners and cull when expired
-IZZA.on?.('render-post', ()=>{
-  try{
-    if (!IZZA?.api?.ready || !_gameCanvas()) return;
-    const now = performance.now();
-
-    for (const [key, b] of Array.from(Bubbles.entries())){
-      _positionBubbleNow(key, b.el);
-      if (now > b.tDie){
-        b.el.remove();
-        Bubbles.delete(key);
+  function _findPeerByKey(key){
+    const pools = [
+      (window.__REMOTE_PLAYERS__||[]),
+      (window.REMOTE_PLAYERS_API?.list?.() || []),
+      (IZZA?.api?.peers || [])
+    ];
+    for (const arr of pools){
+      for (const p of arr){
+        const uname = p?.username || p?.name || p?.id || '';
+        if (_norm(uname) === key) return p;
       }
     }
-  }catch{}
-});
+    return null;
+  }
 
-// keep bubbles anchored on scroll/resize too
-['scroll','resize','orientationchange'].forEach(evt=>{
-  window.addEventListener(evt, ()=>{
-    for (const [key, b] of Bubbles.entries()){
+  function showBubble(unameRaw, text){
+    try{
+      const key = _norm(unameRaw);
+      if (!key) return;
+
+      let b = Bubbles.get(key);
+      if (!b){
+        const el = document.createElement('div');
+        Object.assign(el.style, {
+          position:'fixed',
+          zIndex: 1000,                // higher than joystick/overlays
+          pointerEvents:'none',
+          background:'rgba(8,12,20,.92)',
+          color:'#e8eef7',
+          border:'1px solid #2a3550',
+          borderRadius:'10px',
+          padding:'4px 8px',
+          fontSize:'12px',
+          maxWidth:'60vw',
+          whiteSpace:'pre-wrap',
+          transform:'translateZ(0)',
+          transition:'opacity 160ms linear',
+          opacity:'1'
+        });
+        document.body.appendChild(el);
+        b = { el, tDie: 0 };
+        Bubbles.set(key, b);
+      }
+      b.el.textContent = text;
+      b.tDie = performance.now() + 4000; // visible ~4s
+
+      // snap into place immediately for local echo
       _positionBubbleNow(key, b.el);
+    }catch(e){}
+  }
+
+  function _positionBubbleNow(key, el){
+    const api = IZZA?.api; const cvs = _gameCanvas();
+    if (!api?.ready || !cvs) return;
+
+    const rect  = cvs.getBoundingClientRect();
+    const scale = api.DRAW / api.TILE;
+
+    const meKey = _norm(api?.user?.username || api?.user?.name || '');
+    let sx, sy;
+
+    if (key === meKey){
+      sx = (api.player.x - api.camera.x) * scale;
+      sy = (api.player.y - api.camera.y) * scale;
+    }else{
+      const p = _findPeerByKey(key);
+      if (!p) return;
+      sx = (p.x - api.camera.x) * scale;
+      sy = (p.y - api.camera.y) * scale;
     }
-  }, { passive:true });
-});
+
+    // convert sprite-space → viewport; center and lift above head
+    const left = rect.left + sx - el.offsetWidth/2 + 16; // +16 ≈ sprite center
+    const top  = rect.top  + sy - 36;                    // lift above head
+    el.style.left = Math.round(left) + 'px';
+    el.style.top  = Math.round(top)  + 'px';
+    el.style.opacity = '1';
+  }
+
+  // follow owners and cull when expired
+  IZZA.on?.('render-post', ()=>{
+    try{
+      if (!IZZA?.api?.ready || !_gameCanvas()) return;
+      const now = performance.now();
+
+      for (const [key, b] of Array.from(Bubbles.entries())){
+        _positionBubbleNow(key, b.el);
+        if (now > b.tDie){
+          b.el.remove();
+          Bubbles.delete(key);
+        }
+      }
+    }catch{}
+  });
+
+  // keep bubbles anchored on scroll/resize too
+  ['scroll','resize','orientationchange'].forEach(evt=>{
+    window.addEventListener(evt, ()=>{
+      for (const [key, b] of Bubbles.entries()){
+        _positionBubbleNow(key, b.el);
+      }
+    }, { passive:true });
+  });
 
   // ---- sending & receiving ----
   function sendChat(text){
