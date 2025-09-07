@@ -29,7 +29,6 @@
     .note{font-size:13px}
     .danger{color:#ff9aa2}
     .btns{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
-    /* tiny helper for hide/show of fields */
     .hide{display:none}
   </style>
 </head>
@@ -73,7 +72,7 @@
               <option value="deep">Deep</option>
             </select>
 
-            <!-- Sleeve/Vest block (hidden/disabled for female) -->
+            <!-- Male/neutral block -->
             <div id="block_male">
               <label>Sleeve Color</label>
               <select name="sprite_skin" id="sprite_skin">
@@ -90,7 +89,7 @@
               </select>
             </div>
 
-            <!-- Female-only: dress/outfit color -->
+            <!-- Female-only outfit color -->
             <div id="block_female" class="hide">
               <label>Outfit Color</label>
               <select id="female_outfit_color" name="female_outfit_color">
@@ -171,7 +170,7 @@
       deep:   ["#8B5A3B","#6A402A","#432818"]
     };
 
-    // Dress base = current female sprite’s blue ramp (approx.)
+    // Dress base ramp ≈ current female blue
     const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
     const FEMALE_DRESS_TO = {
       blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
@@ -186,6 +185,7 @@
       orange: ["#FFB46A","#E4873A","#B65E1F"]
     };
 
+    // Hair ramps you liked
     const HAIR_TO = {
       black:  ["#2C2C31","#17171B","#0A0A0D"],
       brown:  ["#7A5336","#5C3E28","#3E2B1B"],
@@ -289,11 +289,38 @@
       return oc;
     }
 
+    // NEW: remove bright dress highlights in chest area (female only)
+    function removeFemaleChestHighlights(canvas, brightHex, midHex){
+      const w = canvas.width, h = canvas.height;
+      const ctx = canvas.getContext('2d', {willReadFrequently:true});
+      const img = ctx.getImageData(0,0,w,h);
+      const d = img.data;
+
+      // central torso window for 32x32-ish sprites
+      const x0 = Math.floor(w*0.34), x1 = Math.floor(w*0.66);
+      const y0 = Math.floor(h*0.38), y1 = Math.floor(h*0.58);
+
+      const bright = hexToRgb(brightHex);
+      const mid    = hexToRgb(midHex);
+
+      for(let y=y0;y<y1;y++){
+        for(let x=x0;x<x1;x++){
+          const i=(y*w+x)*4;
+          if(d[i+3]===0) continue;
+          const r=d[i],g=d[i+1],b=d[i+2];
+          // if very close to the “bright” highlight, replace with mid tone
+          const s = dist2({r,g,b}, bright);
+          if(s < 400){ d[i]=mid.r; d[i+1]=mid.g; d[i+2]=mid.b; }
+        }
+      }
+      ctx.putImageData(img,0,0);
+      return canvas;
+    }
+
     function toggleBlocks(){
       const isFemale = (selType.value === 'female');
-      blockMale.classList.toggle('hide', isFemale);
-      blockFemale.classList.toggle('hide', !isFemale);
-      // keep selects enabled/disabled to avoid accidental submission
+      document.getElementById('block_male').classList.toggle('hide', isFemale);
+      document.getElementById('block_female').classList.toggle('hide', !isFemale);
       selSkin.disabled = isFemale;
       selOut.disabled  = isFemale;
     }
@@ -310,7 +337,6 @@
 
       const DW=96,DH=96,X=(cvs.width-DW)/2,Y=(cvs.height-DH)/2;
 
-      // choose base body sprite
       const theme=selSkin.value;
       const isFemale=(selType.value==='female');
 
@@ -323,17 +349,17 @@
       }
       if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
 
-      // hair
+      // Hair (same sprites for male/female)
       let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
       let hair=await loadImg(hairURL);
 
-      // outfit (only for non-female)
+      // Male/neutral outfit
       let outfit=null;
       if(!isFemale){
         outfit=await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
       }
 
-      // --- skin tint first ---
+      // --- skin tint ---
       let bodyCanvas;
       if(body){
         const targetSkin = SKIN_TO[selTone.value]||SKIN_TO.light;
@@ -344,15 +370,13 @@
         }
       }
 
-      // --- female dress tint (if female) ---
+      // --- female dress tint + remove “nipple dots” ---
       if(isFemale && bodyCanvas){
-        const targetDress = FEMALE_DRESS_TO[selFemaleOutfit.value] || FEMALE_DRESS_TO.blue;
+        const targetDress = FEMALE_DRESS_TO[document.getElementById('female_outfit_color').value] || FEMALE_DRESS_TO.blue;
         const reDress = paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
         bodyCanvas = reDress.canvas;
-        if(reDress.changedPixels < 6){
-          // strong fallback so it’s clearly different
-          bodyCanvas = overlayTint(bodyCanvas, targetDress[1], 0.85);
-        }
+        // remove two bright chest highlights by mapping bright->mid in central torso window
+        bodyCanvas = removeFemaleChestHighlights(bodyCanvas, targetDress[0], targetDress[1]);
       }
 
       // draw body
@@ -362,7 +386,7 @@
       // outfit (skip for female)
       if(outfit){ ctx.drawImage(outfit, X, Y, DW, DH); }
 
-      // hair (keep “approved” approach)
+      // hair (keep the “approved” tint approach)
       if(hair){
         const detected = extractThreeToneRamp(hair);
         const target   = HAIR_TO[selHairColor.value]||HAIR_TO.black;
@@ -371,7 +395,7 @@
         if(swap.changedPixels < 8){
           hairCanvas = overlayTint(hair, target[1], 1.0);
         }
-        const hairY = (isFemale && selHair.value==='buzz') ? (Y - 4) : Y;
+        const hairY = (isFemale && selHair.value==='buzz') ? (Y - 4) : Y; // nudge buzz up for female
         ctx.drawImage(hairCanvas, X, hairY, DW, DH);
       }else{
         ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28,Y+6,40,22);
@@ -380,7 +404,7 @@
       // label
       preset.textContent =
         `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value})` +
-        (isFemale ? ` • Outfit: ${selFemaleOutfit.value}` : ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}`);
+        (isFemale ? ` • Outfit: ${document.getElementById('female_outfit_color').value}` : ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}`);
     }
 
     form.addEventListener('submit', function(ev){
@@ -388,10 +412,9 @@
       if(!ok){ ev.preventDefault(); }
     });
 
-    [selType, selTone, selSkin, selOut, selFemaleOutfit, selHair, selHairColor]
+    [selType, selTone, selSkin, selOut, document.getElementById('female_outfit_color'), selHair, selHairColor]
       .forEach(el=> el.addEventListener('change', draw));
 
-    // initial
     toggleBlocks();
     draw();
   })();
