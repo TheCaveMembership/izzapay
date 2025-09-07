@@ -173,34 +173,35 @@ if(!window.__IZZA_I18N_BOOTED__){
 
   (function(){
     const LANG_KEY='izzaLang';
-    const to  =(localStorage.getItem(LANG_KEY)||'es').slice(0,5);
-    const from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
-    if(typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
+
+    // >>> ONLY RUN IF USER PICKED A LANGUAGE <<<
+    const raw = localStorage.getItem(LANG_KEY);
+    if (!raw) return; // user hasn't chosen — do nothing
+
+    const to   = String(raw).slice(0,5);
+    const from = (document.documentElement.getAttribute('lang')||'en').slice(0,5);
+    if (!to || to === from) return; // nothing to translate — do nothing
+
+    if (typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
 
     // Elements to always skip
     const SKIP_TAGS=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
 
-    // --- Sensitive text detectors ---
+    // --- Sensitive text detectors (avoid touching keys / hashes) ---
     function isLikelyStellarPubKey(s){
-      // Strip whitespace inside (some UIs wrap/space long keys)
       const t=s.replace(/\s+/g,'').trim();
-      // G + 55 chars in Base32 alphabet used by Stellar (A-Z, 2-7)
       return /^G[A-Z2-7]{55}$/.test(t);
     }
     function isLongBase32ish(s){
-      // Long runs of uppercase letters/digits typical of keys (30+)
       const t=s.replace(/\s+/g,'').trim();
       return /^[A-Z0-9]{30,}$/.test(t);
     }
     function isLongHexHash(s){
-      // 40+ hex characters (common for hashes)
       const t=s.replace(/\s+/g,'').trim();
       return /^[a-fA-F0-9]{40,}$/.test(t);
     }
     function isSensitiveText(s){
-      if(!s) return false;
-      // Keep it cheap for short strings:
-      if(s.length<10) return false;
+      if(!s || s.length<10) return false;
       return isLikelyStellarPubKey(s) || isLongBase32ish(s) || isLongHexHash(s);
     }
 
@@ -218,7 +219,6 @@ if(!window.__IZZA_I18N_BOOTED__){
             const s=n.nodeValue;
             if(!s || !s.trim()) return NodeFilter.FILTER_REJECT;
 
-            // NEW: skip anything that looks like a key/hash
             if(isSensitiveText(s)) return NodeFilter.FILTER_REJECT;
 
             return NodeFilter.FILTER_ACCEPT;
@@ -233,12 +233,11 @@ if(!window.__IZZA_I18N_BOOTED__){
       for(const n of nodes){
         try{
           const p=n.parentElement;
-          // Double-check at translate-time too (if text changed)
           if(!p || p.closest('[data-no-i18n="1"]')) continue;
           if(isSensitiveText(n.nodeValue)) continue;
 
           const orig=(p?.dataset?.i18nOriginal) ?? n.nodeValue;
-          const out=(to===from)?orig:await window.TRANSLATE_TEXT(orig,from,to);
+          const out=await window.TRANSLATE_TEXT(orig,from,to);
           if(p && p.dataset && !p.dataset.i18nOriginal) p.dataset.i18nOriginal=orig;
           if(typeof out==='string' && out && out!==n.nodeValue) n.nodeValue=out;
         }catch{}
