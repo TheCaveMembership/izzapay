@@ -193,7 +193,7 @@
     }
   }
 
-  // Single finish path
+  // Single finish path (now also bumps local W/L + refreshes from server)
   function finishMatch(winnerName, source){
     if(!match || match.finished) return;
     match.finished = true;
@@ -201,9 +201,28 @@
 
     const loserName = (winnerName===match.myName) ? match.oppName : match.myName;
 
+    // Notify the rest of the app
     IZZA.emit?.('mp-finish', { matchId:match.id, winner:winnerName, loser:loserName, myWins:match.myWins, oppWins:match.oppWins });
 
-    (async()=>{ try{ await jpost('/match/finish',{matchId:match.id, winner:winnerName}); }catch{} })();
+    // Optimistically bump local ranks so the UI reflects the result immediately
+    try{
+      const modeKey = match.mode || 'v1';
+      me = me || {};
+      me.ranks = me.ranks || {};
+      me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0 };
+      if (winnerName === (me.username || match.myName)) {
+        me.ranks[modeKey].w++;
+      } else {
+        me.ranks[modeKey].l++;
+      }
+      paintRanks();
+    }catch(e){}
+
+    // Report to server (authoritative) then refresh ranks to sync
+    (async()=>{
+      try{ await jpost('/match/finish',{matchId:match.id, winner:winnerName}); }catch{}
+      try{ await refreshRanks(); }catch{}
+    })();
 
     const msg = (winnerName===match.myName) ? 'You won the match!' : `${winnerName} won the match`;
     toast(msg);
