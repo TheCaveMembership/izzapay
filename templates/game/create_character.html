@@ -55,7 +55,6 @@
               <input type="hidden" name="t" value="{{ t }}">
             {% endif %}
 
-            <!-- NEW -->
             <label>Body Type</label>
             <select id="body_type" name="body_type">
               <option value="male">Male</option>
@@ -72,7 +71,7 @@
               <option value="deep">Deep</option>
             </select>
 
-            <!-- EXISTING (text updated only) -->
+            <!-- Text only changed previously -->
             <label>Sleeve Color</label>
             <select name="sprite_skin" id="sprite_skin">
               <option value="default">Default</option>
@@ -87,7 +86,6 @@
               <option value="long">Long</option>
             </select>
 
-            <!-- NEW -->
             <label>Hair Color</label>
             <select id="hair_color" name="hair_color">
               <option value="black">Black</option>
@@ -100,7 +98,6 @@
               <option value="pink">Pink</option>
             </select>
 
-            <!-- EXISTING (text updated only) -->
             <label>Vest Color</label>
             <select name="outfit" id="outfit">
               <option value="street">Street</option>
@@ -134,8 +131,7 @@
       hair: {
         short: "/static/game/sprites/hair/short.png",
         buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png",
-        long_f: "/static/game/sprites/hair/long_f.png" // optional female-specific
+        long:  "/static/game/sprites/hair/long.png"  // use same long hair for male & female
       },
       outfit: {
         street:   "/static/game/sprites/outfit/street.png",
@@ -144,7 +140,7 @@
       }
     };
 
-    // SKIN ramps: base (what your sprite uses) and targets (strong spread).
+    // Skin ramps
     const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
@@ -154,7 +150,7 @@
       deep:   ["#8B5A3B","#6A402A","#432818"]
     };
 
-    // Hair targets — this matches the version you approved
+    // Hair tints — the “approved” set
     const HAIR_TO = {
       black:  ["#2C2C31","#17171B","#0A0A0D"],
       brown:  ["#7A5336","#5C3E28","#3E2B1B"],
@@ -253,7 +249,18 @@
       return oc;
     }
 
+    function toggleFemaleOnlyUI(){
+      const isFemale = (selType.value === 'female');
+      // Disable sleeve & vest selectors for female (not drawn)
+      selSkin.disabled = isFemale;
+      selOut.disabled  = isFemale;
+      selSkin.title = isFemale ? 'Not used for female body' : '';
+      selOut.title  = isFemale ? 'Not used for female body' : '';
+    }
+
     async function draw(){
+      toggleFemaleOnlyUI();
+
       // bg
       ctx.clearRect(0,0,cvs.width,cvs.height);
       const g = ctx.createRadialGradient(80,80,10,80,80,90);
@@ -266,7 +273,7 @@
       const theme=selSkin.value;
       const isFemale=(selType.value==='female');
 
-      // NEW: prefer *_female_wide.png, then *_female.png, then base
+      // try *_female_wide, then *_female, else base
       const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
       const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
 
@@ -277,13 +284,17 @@
       }
       if(!body) body = await loadImg(SPRITES.body[theme]||SPRITES.body.default);
 
-      let outfit=await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
+      // hair (same art for male/female; only special-case the buzz offset)
+      let hairURL = SPRITES.hair[selHair.value] || SPRITES.hair.short;
+      let hair = await loadImg(hairURL);
 
-      let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
-      if(isFemale && selHair.value==='long') hairURL=SPRITES.hair.long_f||SPRITES.hair.long;
-      let hair=await loadImg(hairURL);
+      // outfit (drawn only for non-female bodies per your instruction)
+      let outfit = null;
+      if(!isFemale){
+        outfit = await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
+      }
 
-      // --- SKIN: strong palette swap, overlay fallback if no match ---
+      // --- SKIN ---
       if(body){
         const targetRamp = SKIN_TO[selTone.value]||SKIN_TO.light;
         const swapped = paletteSwap(body, SKIN_BASE, targetRamp, 4000);
@@ -296,11 +307,12 @@
         ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH);
       }
 
-      // outfit on top
-      if(outfit) ctx.drawImage(outfit, X, Y, DW, DH);
-      else { ctx.fillStyle="#5aa6ff"; ctx.fillRect(X+2,Y+38,DW-4,DH-40); }
+      // --- OUTFIT (skip for female) ---
+      if(outfit){
+        ctx.drawImage(outfit, X, Y, DW, DH);
+      }
 
-      // --- HAIR: use ramp-detection + swap (the “good” version) ---
+      // --- HAIR (with ramp detect + swap). Adjust buzz-on-female vertical offset. ---
       if(hair){
         const detected = extractThreeToneRamp(hair);
         const target   = HAIR_TO[selHairColor.value]||HAIR_TO.black;
@@ -309,15 +321,17 @@
         if(swap.changedPixels < 8){
           hairCanvas = overlayTint(hair, target[1], 1.0);
         }
-        ctx.drawImage(hairCanvas, X, Y, DW, DH);
+        // Nudge buzz up a touch on female to avoid a visible gap
+        const hairY = (isFemale && selHair.value==='buzz') ? (Y - 4) : Y;
+        ctx.drawImage(hairCanvas, X, hairY, DW, DH);
       }else{
         ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28,Y+6,40,22);
       }
 
       // label
       preset.textContent =
-        `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value}) • ` +
-        `Vest: ${selOut.value} • Sleeves: ${selSkin.value}`;
+        `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value})` +
+        (!isFemale ? ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}` : '');
     }
 
     form.addEventListener('submit', function(ev){
