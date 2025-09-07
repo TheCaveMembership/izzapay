@@ -488,11 +488,16 @@
       ui.friendsToggle.style.right = '14px';
       ui.friendsToggle.style.bottom = ''; // ensure we don't anchor by bottom anymore
     }
-    // Popup stays under the Type box using bottom anchor derived from r.top
-    const popupBottom = Math.max(0, window.innerHeight - r.top + gapPop);
+    // ▼ Popup opens DOWNWARD under the message box (anchor with TOP)
     if(ui.friendsPopup){
+      const popTop = Math.round(window.scrollY + r.bottom + gapPop);
+      ui.friendsPopup.style.top = popTop + 'px';
       ui.friendsPopup.style.right = '14px';
-      ui.friendsPopup.style.bottom = popupBottom+'px';
+      ui.friendsPopup.style.bottom = ''; // stop anchoring by bottom
+
+      // keep within viewport height
+      const remaining = Math.max(120, window.innerHeight - (popTop - window.scrollY) - 16);
+      ui.friendsPopup.style.maxHeight = remaining + 'px';
     }
   }
   window.addEventListener('resize', positionFriendsUI);
@@ -693,7 +698,7 @@
     Object.assign(pop.style, {
       position:'fixed',
       right:'14px',
-      bottom:'110px',     // will be adjusted by positionFriendsUI()
+      top:'0px',           // <- anchor by TOP; precise value set by positionFriendsUI()
       zIndex:Z.drop,
       background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
       width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
