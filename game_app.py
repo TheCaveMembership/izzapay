@@ -297,6 +297,9 @@ def game_play():
             "female_outfit_color": "blue",
         }
 
+    # NOTE: Mirror extended fields to top-level too.
+    # The on-canvas JS does `const AP = profile.appearance || profile || {};`
+    # so exposing hair_color (etc.) at top-level removes any ambiguity.
     profile_dict = dict(
         pi_uid=profile[0],
         username=profile[1],
@@ -304,6 +307,10 @@ def game_play():
         hair=profile[3],
         outfit=profile[4],
         appearance=appearance,  # <-- IMPORTANT for tinting & female body sheet
+        body_type=appearance.get("body_type", "male"),
+        hair_color=appearance.get("hair_color", ""),
+        skin_tone=appearance.get("skin_tone", "light"),
+        female_outfit_color=appearance.get("female_outfit_color", "blue"),
     )
 
     user_ctx = {"username": urow["pi_username"], "id": urow["id"]}
