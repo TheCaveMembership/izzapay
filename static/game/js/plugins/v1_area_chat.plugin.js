@@ -1,5 +1,4 @@
 <!-- v1_area_chat.plugin.js -->
-<script>
 (function(){
   const BUILD='v1.5.1-area-chat+username-fix+player-bubbles+translate+typing-guard+z3000';
   console.log('[IZZA PLAY]', BUILD);
@@ -325,4 +324,3 @@
     }catch(e){}
   };
 })();
-</script>
