@@ -1,6 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.12-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime+hotCar+escalation+tankBoss';
+  const BUILD='v1.13-free-drive+pursuit-guard-PERSIST-hijackOnlyCrime+hotCar+escalation+tanks-xtra';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -38,20 +38,30 @@
   const MAX_WANTED = 5;
   let fiveStarSince = 0;
 
-  // Tank boss (composite of existing sprites)
-  let tankBoss = null;   // {x,y,hp,parts:[{dx,dy}],fireCd}
+  // Tanks: composite “boss” units built from existing sprites, can be many
+  let tanks = [];   // [{x,y,hp,parts:[{dx,dy,w,h}],fireCd}]
   const TANK_BUILD_STARS = 5;
-  const TANK_BUILD_HOLD_MS = 30000;
-  const TANK_SPEED = 70;
+  const TANK_BUILD_HOLD_MS = 30000;     // first tank after holding 5★ for 30s
+  const TANK_RESPAWN_EVERY_MS = 30000;  // additional tanks every 30s while still 5★
+  const TANK_SPEED = CAR_SPEED;         // move as fast as cars (requested)
   const TANK_HP = 40;
+  let nextTankAt = 0;
+
+  // Larger body footprint + “digital camo” rectangles
   const TANK_PARTS = [
-    {dx:-16, dy:-8}, {dx:0, dy:-8}, {dx:16, dy:-8},
-    {dx:-16, dy:8},  {dx:0, dy:8},  {dx:16, dy:8}
+    {dx:-28, dy:-18, w:22, h:14}, {dx:-2,  dy:-18, w:22, h:14}, {dx:24, dy:-18, w:22, h:14},
+    {dx:-28, dy:  2, w:22, h:14}, {dx:-2,  dy:  2, w:22, h:14}, {dx:24, dy:  2, w:22, h:14}
   ];
+
+  // Rockets
   const ROCKET_SPEED = 240;
-  const ROCKET_COOLDOWN_MS = 1400;
+  const ROCKET_COOLDOWN_MS = 1200;
   const ROCKET_RADIUS = 10;
   let rockets = []; // {x,y,vx,vy}
+
+  // Rolling reinforcement while pursued
+  const REINFORCE_EVERY_MS = 30000;
+  let lastReinforceAt = 0;
 
   function isArray(a){ return Array.isArray(a); }
 
@@ -59,9 +69,9 @@
     try{
       let n=0;
       PURSUER_KEYS.forEach(k=>{ n += (api[k]&&api[k].length)|0; });
-      if (tankBoss) n += 1;
+      n += tanks.length;
       return n|0;
-    }catch{ return tankBoss?1:0; }
+    }catch{ return tanks.length|0; }
   }
 
   function snapshotPursuers(){
@@ -155,7 +165,10 @@
     if (next !== cur){
       api.setWanted(next);
       // If you just hit 5, start the 5-star timer
-      if (next>=TANK_BUILD_STARS && fiveStarSince===0) fiveStarSince = now();
+      if (next>=TANK_BUILD_STARS && fiveStarSince===0) {
+        fiveStarSince = now();
+        nextTankAt = 0; // will be set after first tank spawns
+      }
     }
     requestSpawnsForWanted(reason);
   }
@@ -167,11 +180,12 @@
     if(n>0){
       if((api.player.wanted|0) < 1) api.setWanted(1);
     }else{
-      // If no pursuers remain, end the hot-car session and clear stars, reset 5-star timer and tank.
+      // If no pursuers remain, end the hot-car session and clear stars, reset 5-star timer and tanks.
       if(hijackTag) hijackTag = null;
       if((api.player.wanted|0) !== 0) api.setWanted(0);
       fiveStarSince = 0;
-      destroyTankBoss();
+      nextTankAt = 0;
+      destroyAllTanks();
     }
   }
 
@@ -193,7 +207,8 @@
       if (!fiveStarSince) fiveStarSince = now();
     }else{
       fiveStarSince = 0;
-      destroyTankBoss();
+      nextTankAt = 0;
+      destroyAllTanks();
     }
   });
 
@@ -362,12 +377,12 @@
     if(!driving) return;
 
     const px = api.player.x, py = api.player.y;
-    const tNow = now();
 
     for(let i=api.pedestrians.length-1; i>=0; i--){
       const p = api.pedestrians[i];
       const d = Math.hypot(px - p.x, py - p.y);
       if(d <= CAR_HIT_RADIUS){
+        const tNow = now();
         api.pedestrians.splice(i,1);
         const pos = _dropPos(p.x + api.TILE/2, p.y + api.TILE/2);
         IZZA.emit('ped-killed', {
@@ -392,8 +407,8 @@
         IZZA.emit('cop-killed', {
           cop: c,
           x: pos.x, y: pos.y,
-          droppedAt: tNow,
-          noPickupUntil: tNow + DROP_GRACE_MS
+          droppedAt: now(),
+          noPickupUntil: now() + DROP_GRACE_MS
         });
         // Lower wanted by 1 when a cop is eliminated by vehicle.
         api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
@@ -401,50 +416,49 @@
     }
   }
 
-  // ---------- Tank boss (composite from military sprites) ----------
-  function spawnTankBoss(){
-    if (tankBoss) return;
+  // ---------- Tanks (composite from military sprites) ----------
+  function spawnTank(){
     // Place just off-screen from player
     const px = api.player.x, py = api.player.y;
-    const off = 280;
+    const off = 320;
     const sx = px + (Math.random()<0.5?-off:off);
     const sy = py + (Math.random()<0.5?-off:off);
-    tankBoss = { x:sx, y:sy, hp:TANK_HP, parts:TANK_PARTS.slice(), fireCd:0 };
-    // Make sure at least one military unit exists to visually “sell” the fusion
+    tanks.push({ x:sx, y:sy, hp:TANK_HP, parts:TANK_PARTS.slice(), fireCd:0 });
+    // optional escort to help sell the formation
     api.military = api.military || [];
-    for(let i=0;i<3;i++){
-      api.military.push({ x:sx+(Math.random()*40-20), y:sy+(Math.random()*40-20), spd:80, hp:5, state:'escort' });
+    for(let i=0;i<2;i++){
+      api.military.push({ x:sx+(Math.random()*50-25), y:sy+(Math.random()*50-25), spd:80, hp:5, state:'escort' });
     }
-    IZZA.emit?.('toast',{text:'⚠️ Military tank deployed!'});
+    IZZA.emit?.('toast',{text:'⚠️ Tank deployed!'});
   }
-  function destroyTankBoss(){
-    tankBoss = null;
+  function destroyAllTanks(){
+    tanks.length = 0;
     rockets.length = 0;
   }
-  function updateTankBoss(dt){
-    if(!tankBoss) return;
+  function updateTanks(dt){
+    if(!tanks.length) return;
     const px = api.player.x, py = api.player.y;
-    // Move toward player
-    const dx = px - tankBoss.x, dy = py - tankBoss.y;
-    const m = Math.hypot(dx,dy)||1;
-    const vx = (dx/m) * (TANK_SPEED * dt), vy = (dy/m) * (TANK_SPEED * dt);
-    tankBoss.x += vx; tankBoss.y += vy;
+    for(let t of tanks){
+      // Move toward player
+      const dx = px - t.x, dy = py - t.y;
+      const m = Math.hypot(dx,dy)||1;
+      t.x += (dx/m) * (TANK_SPEED * dt);
+      t.y += (dy/m) * (TANK_SPEED * dt);
 
-    // Fire rockets
-    tankBoss.fireCd -= dt*1000;
-    if (tankBoss.fireCd <= 0){
-      tankBoss.fireCd = ROCKET_COOLDOWN_MS;
-      const rdx = px - tankBoss.x, rdy = py - tankBoss.y;
-      const rm = Math.hypot(rdx,rdy)||1;
-      rockets.push({
-        x: tankBoss.x, y: tankBoss.y,
-        vx: (rdx/rm) * ROCKET_SPEED,
-        vy: (rdy/rm) * ROCKET_SPEED
-      });
-      IZZA.emit?.('tank-rocket-fired', {x:tankBoss.x,y:tankBoss.y});
+      // Fire rockets
+      t.fireCd -= dt*1000;
+      if (t.fireCd <= 0){
+        t.fireCd = ROCKET_COOLDOWN_MS;
+        const rdx = px - t.x, rdy = py - t.y;
+        const rm = Math.hypot(rdx,rdy)||1;
+        rockets.push({
+          x: t.x, y: t.y,
+          vx: (rdx/rm) * ROCKET_SPEED,
+          vy: (rdy/rm) * ROCKET_SPEED
+        });
+        IZZA.emit?.('tank-rocket-fired', {x:t.x,y:t.y});
+      }
     }
-
-    // If tank somehow far with no stars, despawn safely handled elsewhere.
   }
   function updateRockets(dt){
     if(!rockets.length) return;
@@ -455,40 +469,46 @@
       // Hit player?
       const d = Math.hypot(px - r.x, py - r.y);
       if (d <= ROCKET_RADIUS + 12){ // fudge radius
-        IZZA.emit?.('player-hit', {by:'rocket', dmg:4});
+        // full-heart damage = 1 heart
+        IZZA.emit?.('player-hit', {by:'rocket', dmg:1});
         rockets.splice(i,1);
         continue;
       }
       // Lifetime/Offscreen trim
-      if (Math.abs(r.x-px)>900 || Math.abs(r.y-py)>700) rockets.splice(i,1);
+      if (Math.abs(r.x-px)>1100 || Math.abs(r.y-py)>900) rockets.splice(i,1);
     }
   }
-  function drawTankBoss(ctx, S){
-    if(!tankBoss) return;
-    // Draw by reusing military units as “segments”—simple rectangles if no sprite painter available.
-    const sx=(tankBoss.x - api.camera.x)*(S/api.TILE);
-    const sy=(tankBoss.y - api.camera.y)*(S/api.TILE);
-    ctx.save();
-    ctx.imageSmoothingEnabled=false;
-    // Body plates (using existing style colors)
-    ctx.fillStyle='#394b63';
-    tankBoss.parts.forEach(p=>{
-      ctx.fillRect(sx + p.dx, sy + p.dy, 18, 12);
-    });
-    // Turret
-    ctx.fillStyle='#233044';
-    ctx.fillRect(sx-8, sy-6, 16, 12);
-    // Barrel pointing to player
-    const dx = (api.player.x - tankBoss.x);
-    const dy = (api.player.y - tankBoss.y);
-    const a = Math.atan2(dy,dx);
-    ctx.translate(sx,sy);
-    ctx.rotate(a);
-    ctx.fillStyle='#1b2636';
-    ctx.fillRect(6,-2,16,4);
-    ctx.restore();
+  function drawTanks(ctx, S){
+    if(!tanks.length) return;
+    for(const t of tanks){
+      const sx=(t.x - api.camera.x)*(S/api.TILE);
+      const sy=(t.y - api.camera.y)*(S/api.TILE);
+      ctx.save();
+      ctx.imageSmoothingEnabled=false;
 
-    // Rockets
+      // Digital camo (greens)
+      const camo = ['#2f4f2f','#3a5f3a','#507a50','#2b402b','#476b47'];
+      // Body plates
+      t.parts.forEach((p,idx)=>{
+        ctx.fillStyle = camo[idx % camo.length];
+        ctx.fillRect(sx + p.dx, sy + p.dy, p.w, p.h);
+      });
+      // Turret block
+      ctx.fillStyle='#2b402b';
+      ctx.fillRect(sx-12, sy-10, 24, 20);
+
+      // Barrel pointing to player
+      const dx = (api.player.x - t.x);
+      const dy = (api.player.y - t.y);
+      const a = Math.atan2(dy,dx);
+      ctx.translate(sx,sy);
+      ctx.rotate(a);
+      ctx.fillStyle='#1f301f';
+      ctx.fillRect(10,-3,28,6);
+      ctx.restore();
+    }
+
+    // Rockets (draw once after all tanks)
     rockets.forEach(r=>{
       const rx=(r.x - api.camera.x)*(S/api.TILE);
       const ry=(r.y - api.camera.y)*(S/api.TILE);
@@ -526,6 +546,23 @@
     }
   });
 
+  // --- ensure cops cleared & wanted reset on death/respawn ---
+  function clearAllPursuitAndWanted(){
+    try{
+      PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
+      destroyAllTanks();
+      if(api?.player){ api.setWanted(0); }
+      hijackTag = null;
+      fiveStarSince = 0;
+      nextTankAt = 0;
+      lastReinforceAt = 0;
+    }catch{}
+  }
+  IZZA.on?.('player-died', clearAllPursuitAndWanted);
+  IZZA.on?.('player-death', clearAllPursuitAndWanted);
+  IZZA.on?.('player-respawn', clearAllPursuitAndWanted);
+  IZZA.on?.('respawn', clearAllPursuitAndWanted);
+
   IZZA.on('ready', (a)=>{
     api=a;
     ensureVehicleSheets();
@@ -539,22 +576,43 @@
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
 
-    // Escalate to tank if 5-star sustained
+    // 5★ logic: first tank after 30s, then more every 30s while still 5★
     if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
-      if (fiveStarSince && (now() - fiveStarSince) >= TANK_BUILD_HOLD_MS){
-        spawnTankBoss();
+      const tNow = now();
+      if (fiveStarSince && (tNow - fiveStarSince) >= TANK_BUILD_HOLD_MS){
+        if (!nextTankAt){
+          // first tank
+          spawnTank();
+          nextTankAt = tNow + TANK_RESPAWN_EVERY_MS;
+        }else if (tNow >= nextTankAt){
+          spawnTank();
+          nextTankAt = tNow + TANK_RESPAWN_EVERY_MS;
+        }
       }
     }
 
-    // Update tank + rockets
+    // Update tanks + rockets
     const dt = Math.min(0.05, (api.dt||0.016)); // dt seconds (clamped)
-    updateTankBoss(dt);
+    updateTanks(dt);
     updateRockets(dt);
 
     if(driving && car){
       car.x=api.player.x; car.y=api.player.y;
       handleVehicularHits();
     }
+
+    // Rolling reinforcements every 30s while pursued
+    if (pursuerCount()>0){
+      const t = now();
+      if (!lastReinforceAt) lastReinforceAt = t;
+      if (t - lastReinforceAt >= REINFORCE_EVERY_MS){
+        requestSpawnsForWanted('pursuit-reinforcement');
+        lastReinforceAt = t;
+      }
+    }else{
+      lastReinforceAt = 0;
+    }
+
     // Keep stars in sync and end the hot-car session once pursuers are gone.
     syncWantedWithPursuit();
   });
@@ -567,7 +625,7 @@
     parked.forEach(p=>{ drawVehicleSprite(p.kind || 'sedan', p.x, p.y); });
     if(driving && car){ drawVehicleSprite(car.kind || 'sedan', car.x, car.y); }
 
-    // Draw the tank boss & rockets last to sit on top
-    drawTankBoss(ctx, S);
+    // Draw tanks & rockets last to sit on top
+    drawTanks(ctx, S);
   });
 })();
