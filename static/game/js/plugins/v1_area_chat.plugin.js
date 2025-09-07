@@ -1,6 +1,6 @@
-// v1_area_chat.plugin.js — per-area chat (duel/trade centre) + feed + language toggle + translation hook (no bubbles)
+// v1_area_chat.plugin.js — per-area chat (duel/trade centre) + feed + read-only language + translation hook + typing guard
 (function(){
-  const BUILD='v1.6-area-chat+nobubbles+typing-guard+translate';
+  const BUILD='v1.6-area-chat+readonly-lang+translate+typing-guard+sendbtn';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- lightweight MP adapter (works with any of your 3 buses) ----
@@ -23,16 +23,33 @@
     return api;
   })();
 
+  // ---- language: resolve once (profile -> localStorage -> browser) ----
+  function resolvePlayerLang(){
+    // 1) From profile injected by your auth / Pi SDK, if present
+    const profLang =
+      (window.__IZZA_PROFILE__ && (window.__IZZA_PROFILE__.lang || window.__IZZA_PROFILE__.language)) ||
+      (IZZA?.api?.user && (IZZA.api.user.lang || IZZA.api.user.language));
+    // 2) Saved pref from previous sessions
+    const saved = localStorage.getItem('izzaLang');
+    // 3) Browser language fallback
+    const br = (navigator.language || 'en').slice(0,2).toLowerCase();
+
+    const lang = (profLang || saved || br || 'en').slice(0,2).toLowerCase();
+    try{ localStorage.setItem('izzaLang', lang); }catch{}
+    return lang;
+  }
+
   // ---- chat state ----
   const Chat = {
-    lang: (localStorage.getItem('izzaLang')||'en'),
+    lang: resolvePlayerLang(),     // display + translation target
     open: false,
-    area: 'world', // 'tc' | 'duel' | 'world'
+    area: 'world',                 // 'tc' | 'duel' | 'world'
     host: null,
     input: null,
     sendBtn: null,
     toggleBtn: null,
     feed: null,
+    langLabel: null,
     fireBtnPrevDisplay: null
   };
 
@@ -42,7 +59,7 @@
     return 'world';
   }
 
-  // ---- UI: compact bar + expandable feed ----
+  // ---- UI: compact bar + expandable feed (lang label is read-only) ----
   function ensureUI(){
     if(Chat.host) return;
     const card = document.getElementById('gameCard'); if(!card) return;
@@ -59,26 +76,19 @@
       <input id="chatInput" type="text" placeholder="Type…" autocomplete="off" autocapitalize="sentences" spellcheck="false"
         style="flex:1;background:#0e1626;color:#e8eef7;border:1px solid #2a3550;border-radius:8px;padding:8px 10px;font-size:14px">
       <button id="chatSend" title="Send" style="background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Send</button>
-      <select id="chatLang" title="Language" style="background:#0e1626;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:6px 8px">
-        <option value="en">EN</option><option value="es">ES</option><option value="fr">FR</option><option value="de">DE</option>
-        <option value="it">IT</option><option value="pt">PT</option><option value="ru">RU</option><option value="zh">ZH</option>
-        <option value="ja">JA</option><option value="ko">KO</option><option value="ar">AR</option>
-      </select>
+      <span id="chatLangLabel" title="Your language (for translation)"
+        style="min-width:34px;text-align:center;background:#0e1626;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:6px 8px;font-weight:700">
+        ${Chat.lang.toUpperCase()}
+      </span>
     `;
     card.after(bar);
     Chat.host = bar;
     Chat.input = bar.querySelector('#chatInput');
     Chat.sendBtn = bar.querySelector('#chatSend');
     Chat.toggleBtn = bar.querySelector('#chatToggle');
+    Chat.langLabel = bar.querySelector('#chatLangLabel');
 
-    const sel = bar.querySelector('#chatLang');
-    sel.value = Chat.lang;
-    sel.onchange = ()=>{
-      Chat.lang = sel.value || 'en';
-      try{ localStorage.setItem('izzaLang', Chat.lang); }catch{}
-      IZZA?.emit?.('ui-lang-changed', { lang: Chat.lang });
-    };
-
+    // feed
     const feed = document.createElement('div');
     feed.id='chatFeed';
     Object.assign(feed.style,{
@@ -90,6 +100,7 @@
     card.after(feed);
     Chat.feed = feed;
 
+    // toggle feed + hide FIRE while open
     Chat.toggleBtn.onclick = ()=>{
       Chat.open = !Chat.open;
       Chat.feed.style.display = Chat.open ? 'block' : 'none';
@@ -100,39 +111,38 @@
       }
     };
 
+    // send helper
     function trySend(){
       const txt = (Chat.input.value||'').trim();
       if(!txt) return;
       sendChat(txt);
       Chat.input.value='';
     }
-
-    // Enter submits
     Chat.input.addEventListener('keydown', (e)=>{
       if((e.key||'').toLowerCase()!=='enter') return;
       e.preventDefault();
       trySend();
     });
-    // Button submits (mobile)
     Chat.sendBtn.addEventListener('click', (e)=>{ e.preventDefault(); trySend(); });
 
-    // Typing marker (optional signal to other subsystems)
-    const setTyping = v => { window.__IZZA_TYPING__ = !!v; IZZA && (IZZA.typing = !!v); };
+    // typing marker (optional for other subsystems)
+    const setTyping = v => { window.__IZZA_TYPING__ = !!v; if(window.IZZA) IZZA.typing = !!v; };
     Chat.input.addEventListener('focus', ()=> setTyping(true));
     Chat.input.addEventListener('blur',  ()=> setTyping(false));
   }
 
-  // ---- GLOBAL TYPING GUARD (let inputs type; block the game) ----
+  // ---- GLOBAL TYPING GUARD (fixes A/B/I triggering game) ----
   function isEditable(el){ return !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
-  function swallowForInputs(e){
+  window.addEventListener('keydown', (e)=>{
     const el = document.activeElement;
     if(!isEditable(el)) return;
-    // Do NOT preventDefault: we want the character to enter the field.
-    e.stopImmediatePropagation();
-    e.stopPropagation();
-  }
-  window.addEventListener('keydown', swallowForInputs, true);
-  window.addEventListener('keyup',   swallowForInputs, true);
+    const k = (e.key||'').toLowerCase();
+    const block = new Set(['a','b','i',' ','arrowup','arrowdown','arrowleft','arrowright','escape']);
+    if(block.has(k) || k.length===1){
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+    }
+  }, true);
 
   // ---- translation hook ----
   async function translateMaybe(text, from, to){
@@ -165,11 +175,11 @@
 
   // ---- send/recv ----
   function sendChat(text){
-    const lang = Chat.lang || 'en';
-    const uname = IZZA?.api?.user?.username || 'guest';
+    const lang = Chat.lang || 'en'; // mark outgoing with player's language
+    const uname = (IZZA?.api?.user && (IZZA.api.user.username || IZZA.api.user.name)) || 'guest';
     const payload = { room: areaRoom(), from: uname, text, lang, ts: Date.now() };
     Net.send('chat-say', payload);
-    appendFeedLine({from:payload.from, text, ts:payload.ts}); // local feed echo
+    appendFeedLine({from:payload.from, text, ts:payload.ts}); // local echo
   }
 
   Net.on('chat-say', async (m)=>{
@@ -189,7 +199,7 @@
   IZZA?.on?.('mp-end',   refreshArea);
   window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaTradeCentre') refreshArea(); });
 
-  // ---- mount ----
+  // ---- boot ----
   if(document.readyState==='loading'){
     document.addEventListener('DOMContentLoaded', ()=>{ ensureUI(); refreshArea(); }, {once:true});
   }else{
