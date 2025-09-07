@@ -4,9 +4,16 @@
  * - Single authoritative winner (no “both lose”)
  * - FIX: round lifecycle state machine + watchdog to avoid freezes
  * - FIX: hard reset between matches; no double wiring; idempotent handlers
+ *
+ * ADDITIONS (v1.7.2+friends+notifs):
+ * - "Friends" label -> "Search All Players"
+ * - Add Friend button next to Invite
+ * - Friend requests (send/accept) + minimal UI
+ * - Notification bell with unread badge (friend requests + battle invites)
+ * - Friends List toggle popup (scrollable)
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog';
+  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -47,6 +54,12 @@
   let me=null, friends=[], lobby=null, ui={};
   let notifTimer=null;
 
+  // NEW: notifications state
+  let notifications = {
+    unread: 0,
+    items: [] // {id,type:'friend'|'battle', from, mode?, createdAt?}
+  };
+
   let lobbyOpen=false, shield=null, hudEls=[], hudCssPrev=[];
   const $  = (s,r=document)=> r.querySelector(s);
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
@@ -62,30 +75,54 @@
     set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
-  function makeRow(u){
+  // NEW: quick friend helper
+  const isFriend = (name)=> !!friends.find(f=> (f.username||'').toLowerCase() === (name||'').toLowerCase());
+
+  // === UI BUILDERS ===========================================================
+  function makeRow(u, source='search'){
     const row=document.createElement('div');
     row.className='friend';
+    // label under avatar was "Friends"; we don't rely on that now; we render rows directly
+
+    const alreadyFriend = isFriend(u.username);
+    const activeLabel   = u.active ? 'Active' : 'Offline';
+
     row.innerHTML=`
       <div>
         <div>${u.username}</div>
-        <div class="meta ${u.active?'active':'offline'}">${u.active?'Active':'Offline'}</div>
+        <div class="meta ${u.active?'active':'offline'}">${activeLabel}</div>
       </div>
-      <div style="display:flex; gap:8px">
+      <div style="display:flex; gap:8px; align-items:center">
         <button class="mp-small" data-invite="${u.username}">Invite</button>
         ${u.active?`<button class="mp-small outline" data-join="${u.username}">Invite to Lobby</button>`:''}
+        ${alreadyFriend ? '' : `<button class="mp-small ghost" data-add="${u.username}">Add Friend</button>`}
       </div>`;
+
     row.querySelector('button[data-invite]')?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Invite sent to '+u.username); }catch(e){ toast('Invite failed: '+e.message); }
+      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Invite sent to '+u.username); }
+      catch(e){ toast('Invite failed: '+e.message); }
     });
     row.querySelector('button[data-join]')?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Lobby invite sent to '+u.username); }catch(e){ toast('Invite failed: '+e.message); }
+      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Lobby invite sent to '+u.username); }
+      catch(e){ toast('Invite failed: '+e.message); }
     });
+    row.querySelector('button[data-add]')?.addEventListener('click', async ()=>{
+      try{
+        // tolerant payload; backend may accept toUsername or username
+        await jpost('/friends/request',{ toUsername:u.username, username:u.username });
+        toast('Friend request sent to '+u.username);
+        // Optionally disable button
+        const b=row.querySelector('button[data-add]'); if(b){ b.disabled=true; b.textContent='Requested'; }
+      }catch(e){ toast('Friend request failed: '+e.message); }
+    });
+
     return row;
   }
+
   function paintFriends(list){
     const host=$('#mpFriends',lobby); if(!host) return;
     host.innerHTML='';
-    (list||[]).forEach(u=> host.appendChild(makeRow(u)));
+    (list||[]).forEach(u=> host.appendChild(makeRow(u, 'friends')));
   }
   function repaintFriends(){
     const q=$('#mpSearch',lobby)?.value?.trim().toLowerCase()||'';
@@ -95,45 +132,35 @@
   function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
 
   // ==== MATCH / ROUNDS — state machine + watchdogs ===========================
-  // match states: 'idle' | 'in_round' | 'between' | 'finished'
   let match = null; // { id, mode, players[], myName, oppName, myWins, oppWins, state, fence, tWatch, lastChange }
 
   function clearWatch(){
     if(match && match.tWatch){ clearTimeout(match.tWatch); match.tWatch=null; }
   }
-
-  function armWatch(ms, label){
+  function armWatch(ms){
     clearWatch();
     if(!match) return;
     match.tWatch = setTimeout(async()=>{
       if(!match || match.finished) return;
       try{
         if(match.state==='in_round'){
-          // Nudge server: round looks stuck, ask status
           await jpost('/match/ping',{matchId:match.id, phase:'in_round', since:match.lastChange||0});
         }else if(match.state==='between'){
-          // Ask to start the next round if it hasn't yet
           await jpost('/match/next',{matchId:match.id});
         }
       }catch{}
-      // re-arm lightly to avoid spam
-      armWatch(ms, label);
+      armWatch(ms);
     }, ms);
   }
-
   function setState(s){
     if(!match) return;
     match.state = s;
     match.lastChange = Date.now();
-    if(s==='in_round')      armWatch(MATCH_CFG.roundWatchdogMs,'in');
-    else if(s==='between')  armWatch(MATCH_CFG.betweenWatchdogMs,'between');
+    if(s==='in_round')      armWatch(MATCH_CFG.roundWatchdogMs);
+    else if(s==='between')  armWatch(MATCH_CFG.betweenWatchdogMs);
     else                    clearWatch();
   }
-
-  function hardResetMatch(){
-    clearWatch();
-    match = null;
-  }
+  function hardResetMatch(){ clearWatch(); match = null; }
 
   function initMatch(payload){
     hardResetMatch();
@@ -152,34 +179,20 @@
       tWatch:null,
       lastChange:Date.now()
     };
-    // Tell duel plugin how many wins we play to.
     IZZA?.emit?.('duel-config', { roundsToWin: MATCH_CFG.roundsToWin, matchId: match.id });
   }
-
-  // Round started (from duel plugin or server)
-  function onRoundStart(data){
-    if(!match || match.finished) return;
-    // Avoid regressing state if multiple signals arrive
-    if(match.state !== 'in_round'){
-      setState('in_round');
-    }
-  }
-
-  // Round ended (from duel plugin or server)
+  function onRoundStart(_data){ if(!match || match.finished) return; if(match.state!=='in_round'){ setState('in_round'); } }
   function onRoundEnd(data){
     if(!match || match.finished) return;
-    // idempotency for round IDs
     const rid = (data && data.roundId) || ('r_'+Date.now());
     if(match.fence[rid]) return;
     match.fence[rid]=1;
 
-    // Accept either winner name or winnerIsMe
     const iWon = data?.winnerIsMe===true || (data?.winner && data.winner===match.myName);
     if(iWon) match.myWins++; else match.oppWins++;
 
     IZZA.emit?.('toast', {text:`Round • ${match.myName}: ${match.myWins} — ${match.oppName}: ${match.oppWins}`});
 
-    // Report (best-effort) & go to BETWEEN state
     (async()=>{ try{
       await jpost('/match/round',{matchId:match.id, roundId:rid, winner: iWon?match.myName:match.oppName, myWins:match.myWins, oppWins:match.oppWins});
     }catch{} })();
@@ -188,37 +201,27 @@
       finishMatch(iWon?match.myName:match.oppName, 'local');
     }else{
       setState('between');
-      // polite nudge to server to start next round (does nothing if server already will)
       (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
     }
   }
-
-  // Single finish path (now also bumps local W/L + refreshes from server)
-  function finishMatch(winnerName, source){
+  function finishMatch(winnerName){
     if(!match || match.finished) return;
     match.finished = true;
     setState('finished');
 
     const loserName = (winnerName===match.myName) ? match.oppName : match.myName;
 
-    // Notify the rest of the app
     IZZA.emit?.('mp-finish', { matchId:match.id, winner:winnerName, loser:loserName, myWins:match.myWins, oppWins:match.oppWins });
 
-    // Optimistically bump local ranks so the UI reflects the result immediately
     try{
       const modeKey = match.mode || 'v1';
       me = me || {};
       me.ranks = me.ranks || {};
       me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0 };
-      if (winnerName === (me.username || match.myName)) {
-        me.ranks[modeKey].w++;
-      } else {
-        me.ranks[modeKey].l++;
-      }
+      if (winnerName === (me.username || match.myName)) me.ranks[modeKey].w++; else me.ranks[modeKey].l++;
       paintRanks();
     }catch(e){}
 
-    // Report to server (authoritative) then refresh ranks to sync
     (async()=>{
       try{ await jpost('/match/finish',{matchId:match.id, winner:winnerName}); }catch{}
       try{ await refreshRanks(); }catch{}
@@ -228,28 +231,24 @@
     toast(msg);
   }
 
-  // Wire duel hooks exactly once
+  // Wire duel hooks once
   (function wireDuelHooksOnce(){
     if(!window.IZZA) return;
     if(wireDuelHooksOnce._wired) return;
     wireDuelHooksOnce._wired = true;
 
     IZZA.on?.('ready', function(){
-      // Start / end signals from duel plugin
       IZZA.on?.('duel-round-start', (_,_payload)=> onRoundStart(_payload||{}));
       IZZA.on?.('duel-round-end',   (_,_payload)=> onRoundEnd(_payload||{}));
       IZZA.on?.('duel-match-finish',(_,_payload)=>{ if(_payload && _payload.winner) finishMatch(_payload.winner, 'duel'); });
 
-      // In case match was queued before IZZA ready
       if(window.__MP_START_PENDING){
         const p = window.__MP_START_PENDING; delete window.__MP_START_PENDING;
         startMatch(p);
       }
     });
   })();
-  // ==========================================================================
 
-  // ---- match start helper (robust) ----
   function startMatch(payload){
     try{
       ui.queueMsg && (ui.queueMsg.textContent='');
@@ -265,9 +264,7 @@
       }
       toast('Match starting…');
 
-      // We begin between rounds; duel plugin should emit the first duel-round-start soon.
       setState('between');
-      // Nudge server just in case
       (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
     }catch(e){
       console.warn('startMatch failed', e);
@@ -286,7 +283,7 @@
   }
   async function dequeue(){ try{ await jpost('/dequeue'); }catch{} ui.queueMsg && (ui.queueMsg.textContent=''); lastQueueMode=null; }
 
-  // --- WS (now also listens for round/finish authority) ---
+  // --- WS ---
   function connectWS(){
     try{
       const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
@@ -309,10 +306,9 @@
         startMatch({mode:msg.mode,matchId:msg.matchId,players:msg.players});
 
       }else if(msg.type==='match.round.start'){
-        onRoundStart(msg); // authoritative start
+        onRoundStart(msg);
 
       }else if(msg.type==='match.round'){
-        // authoritative round result
         if(!match || match.finished) return;
         if(msg.matchId && match.id !== msg.matchId) return;
         const w = msg.winner;
@@ -321,6 +317,12 @@
       }else if(msg.type==='match.finish'){
         if(msg.matchId && match && match.id!==msg.matchId) return;
         if(msg.winner) finishMatch(msg.winner, 'server');
+
+      // OPTIONAL: friend request via WS
+      }else if(msg.type==='friend.request'){
+        addNotification({ id: msg.id || ('fr_'+Date.now()), type:'friend', from: msg.from });
+      }else if(msg.type==='invite'){ // battle request
+        addNotification({ id: msg.id || ('inv_'+Date.now()), type:'battle', from: msg.from, mode: msg.mode });
       }
     });
   }
@@ -388,17 +390,297 @@
     });
     IZZA.on('ui-modal-close', function(e){ if(e && e.id==='mpLobby') removeShield(); });
 
-    // If a match payload was stashed before IZZA was ready, start it now (safety, though we also wire inside hooks).
-    IZZA.on('ready', function(){
-      if(window.__MP_START_PENDING){
-        const p = window.__MP_START_PENDING; delete window.__MP_START_PENDING;
-        startMatch(p);
-      }
-    });
+    if(window.__MP_START_PENDING){
+      const p = window.__MP_START_PENDING; delete window.__MP_START_PENDING;
+      startMatch(p);
+    }
   }
 
   // ---------- SEARCH state ----------
   let searchRunId = 0;
+
+  // NEW: Notification UI helpers
+  function ensureNotifUI(){
+    if(!lobby) return;
+
+    // Header actions host
+    let header = lobby.querySelector('.mp-header-actions');
+    if(!header){
+      header = document.createElement('div');
+      header.className = 'mp-header-actions';
+      Object.assign(header.style, { display:'flex', gap:'8px', alignItems:'center', marginLeft:'auto' });
+      // try placing at top of lobby
+      (lobby.querySelector('.mp-head') || lobby).appendChild(header);
+    }
+
+    // Friends list toggle
+    if(!ui.friendsToggle){
+      const b = document.createElement('button');
+      b.id = 'mpFriendsToggle';
+      b.className = 'mp-small';
+      b.textContent = 'Friends';
+      b.title = 'Open your friends list';
+      b.addEventListener('click', toggleFriendsPopup);
+      header.appendChild(b);
+      ui.friendsToggle = b;
+    }
+
+    // Notif bell
+    if(!ui.notifWrap){
+      const wrap = document.createElement('div');
+      wrap.style.position='relative';
+
+      const bell = document.createElement('button');
+      bell.id = 'mpNotifBell';
+      bell.className = 'mp-small';
+      bell.textContent = '🔔';
+      bell.title = 'Notifications';
+      bell.addEventListener('click', toggleNotifDropdown);
+
+      const badge = document.createElement('span');
+      badge.id='mpNotifBadge';
+      Object.assign(badge.style, {
+        position:'absolute', right:'-6px', top:'-6px',
+        minWidth:'16px', height:'16px', borderRadius:'8px',
+        background:'#ff4d4f', color:'#fff',
+        display:'none', alignItems:'center', justifyContent:'center',
+        fontSize:'10px', padding:'0 4px', lineHeight:'16px'
+      });
+
+      // dropdown
+      const dd = document.createElement('div');
+      dd.id='mpNotifDropdown';
+      Object.assign(dd.style, {
+        position:'absolute', right:'0', top:'36px', zIndex:1003,
+        background:'#0f1522', border:'1px solid #2a3550', borderRadius:'10px',
+        minWidth:'260px', maxHeight:'260px', overflow:'auto', display:'none', boxShadow:'0 8px 24px rgba(0,0,0,.35)'
+      });
+
+      wrap.appendChild(bell);
+      wrap.appendChild(badge);
+      wrap.appendChild(dd);
+      header.appendChild(wrap);
+
+      ui.notifWrap = wrap;
+      ui.notifBell = bell;
+      ui.notifBadge = badge;
+      ui.notifDropdown = dd;
+    }
+
+    // Rename label to "Search All Players" if host exists
+    const label = $('#mpFriendsLabel', lobby);
+    if(label) label.textContent = 'Search All Players';
+
+    // Also hint in status line
+    if(ui.searchStatus && !ui.searchStatus._relabelled){
+      ui.searchStatus.textContent = 'Search All Players — type a name and press Search or Return';
+      ui.searchStatus._relabelled = true;
+    }
+  }
+
+  function renderNotifDropdown(){
+    if(!ui.notifDropdown) return;
+    const host = ui.notifDropdown;
+    host.innerHTML = '';
+
+    if(!notifications.items.length){
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:10px; opacity:.8;';
+      empty.textContent = 'No notifications';
+      host.appendChild(empty);
+      return;
+    }
+
+    notifications.items.forEach(n=>{
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px; border-bottom:1px solid #2a3550;';
+      const label = document.createElement('div');
+      label.style.cssText='font-size:13px; line-height:1.3;';
+
+      if(n.type==='friend'){
+        label.textContent = `${n.from} sent you a friend request`;
+        const actions = document.createElement('div');
+        actions.style.cssText='display:flex; gap:6px;';
+        const accept = document.createElement('button');
+        accept.className='mp-small';
+        accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          try{
+            await jpost('/friends/accept', { requestId:n.id, from:n.from, username:n.from });
+            toast('Friend added: '+n.from);
+            // update local friends & UI
+            try{ await loadFriends(); repaintFriends(); }catch{}
+            removeNotification(n.id);
+          }catch(e){ toast('Accept failed: '+e.message); }
+        });
+
+        const decline = document.createElement('button');
+        decline.className='mp-small ghost';
+        decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          try{
+            await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from });
+            removeNotification(n.id);
+          }catch(e){
+            // If no decline route, just remove locally
+            removeNotification(n.id);
+          }
+        });
+
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else if(n.type==='battle'){
+        label.textContent = `${n.from} invited you${n.mode?(' ('+n.mode+')'):''}`;
+        const actions = document.createElement('div');
+        actions.style.cssText='display:flex; gap:6px;';
+        const accept = document.createElement('button');
+        accept.className='mp-small';
+        accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          try{
+            const r = await jpost('/lobby/accept',{ inviteId:n.id, from:n.from });
+            removeNotification(n.id);
+            if(r && r.start) startMatch(r.start);
+          }catch(e){ toast('Accept failed: '+e.message); }
+        });
+        const decline = document.createElement('button');
+        decline.className='mp-small ghost';
+        decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }
+          catch(e){}
+          removeNotification(n.id);
+        });
+
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else{
+        label.textContent = 'Notification';
+        row.appendChild(label);
+      }
+
+      host.appendChild(row);
+    });
+  }
+
+  function setUnread(n){
+    notifications.unread = Math.max(0, n|0);
+    if(!ui.notifBadge || !ui.notifBell) return;
+    if(notifications.unread>0){
+      ui.notifBadge.style.display='flex';
+      ui.notifBadge.textContent = String(notifications.unread);
+      ui.notifBell.style.borderColor = '#ff4d4f';
+    }else{
+      ui.notifBadge.style.display='none';
+      ui.notifBell.style.borderColor = '';
+    }
+  }
+  function addNotification(n){
+    notifications.items.unshift(n);
+    setUnread(notifications.unread+1);
+    if(ui.notifDropdown && ui.notifDropdown.style.display!=='none'){
+      // if open, re-render and mark as read
+      renderNotifDropdown();
+      markAllNotificationsRead();
+    }
+  }
+  function removeNotification(id){
+    notifications.items = notifications.items.filter(x=>x.id!==id);
+    renderNotifDropdown();
+  }
+  function markAllNotificationsRead(){
+    setUnread(0);
+  }
+  function toggleNotifDropdown(){
+    if(!ui.notifDropdown) return;
+    const vis = (ui.notifDropdown.style.display!=='none');
+    ui.notifDropdown.style.display = vis ? 'none' : 'block';
+    if(!vis){
+      renderNotifDropdown();
+      markAllNotificationsRead();
+    }
+  }
+
+  // Friends popup
+  function ensureFriendsPopup(){
+    if(ui.friendsPopup) return ui.friendsPopup;
+    const pop = document.createElement('div');
+    pop.id='mpFriendsPopup';
+    Object.assign(pop.style, {
+      position:'fixed', right:'14px', top:'82px', zIndex:1003,
+      background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
+      width:'320px', maxHeight:'340px', overflow:'auto', display:'none',
+      boxShadow:'0 10px 28px rgba(0,0,0,.35)'
+    });
+    const head = document.createElement('div');
+    head.style.cssText='display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #2a3550;';
+    const ttl = document.createElement('div');
+    ttl.textContent='Friends';
+    ttl.style.cssText='font-weight:700';
+    const x = document.createElement('button');
+    x.className='mp-small ghost';
+    x.textContent='Close';
+    x.addEventListener('click', ()=>{ pop.style.display='none'; });
+
+    head.appendChild(ttl); head.appendChild(x);
+
+    const body = document.createElement('div');
+    body.id='mpFriendsListBody';
+    body.style.cssText='display:flex; flex-direction:column; gap:6px; padding:10px;';
+
+    pop.appendChild(head);
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+    ui.friendsPopup = pop;
+    ui.friendsBody  = body;
+    return pop;
+  }
+  function renderFriendsPopup(){
+    ensureFriendsPopup();
+    if(!ui.friendsBody) return;
+    ui.friendsBody.innerHTML='';
+    (friends||[]).forEach(f=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; background:#0f1624; border:1px solid #2a3550; border-radius:8px;';
+      const left=document.createElement('div');
+      left.innerHTML = `<div>${f.username}</div><div class="meta ${f.active?'active':'offline'}" style="opacity:.8;font-size:12px">${f.active?'Active':'Offline'}</div>`;
+      const right=document.createElement('div');
+      right.style.cssText='display:flex; gap:6px;';
+      const invite=document.createElement('button');
+      invite.className='mp-small';
+      invite.textContent='Invite';
+      invite.addEventListener('click', async ()=>{
+        try{ await jpost('/lobby/invite',{toUsername:f.username}); toast('Invite sent to '+f.username); }
+        catch(e){ toast('Invite failed: '+e.message); }
+      });
+      right.appendChild(invite);
+      if(f.active){
+        const join=document.createElement('button');
+        join.className='mp-small outline';
+        join.textContent='Invite to Lobby';
+        join.addEventListener('click', async ()=>{
+          try{ await jpost('/lobby/invite',{toUsername:f.username}); toast('Lobby invite sent to '+f.username); }
+          catch(e){ toast('Invite failed: '+e.message); }
+        });
+        right.appendChild(join);
+      }
+      row.appendChild(left); row.appendChild(right);
+      ui.friendsBody.appendChild(row);
+    });
+    if(!friends || !friends.length){
+      const none=document.createElement('div');
+      none.style.cssText='opacity:.8; padding:10px;';
+      none.textContent='No friends yet. Use "Search All Players" to add some!';
+      ui.friendsBody.appendChild(none);
+    }
+  }
+  function toggleFriendsPopup(){
+    ensureFriendsPopup();
+    if(!ui.friendsPopup) return;
+    const vis = (ui.friendsPopup.style.display!=='none');
+    ui.friendsPopup.style.display = vis ? 'none' : 'block';
+    if(!vis) renderFriendsPopup();
+  }
 
   function mountLobby(host){
     lobby = host || document.getElementById('mpLobby');
@@ -435,7 +717,7 @@
       const disableBtn= ()=>{ if(ui.searchBtn) ui.searchBtn.disabled=true; };
 
       if(!q){
-        disableBtn(); paintFriends(friends); setStatus('Type a name and press Search or Return'); enableBtn(); return;
+        disableBtn(); paintFriends(friends); setStatus('Search All Players — type a name and press Search or Return'); enableBtn(); return;
       }
       if(!immediate && q.length<2){ setStatus('Type at least 2 characters'); return; }
 
@@ -480,6 +762,9 @@
     });
     ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
+    // NEW: Upgrade the header with our actions
+    ensureNotifUI();
+
     paintRanks(); paintFriends(friends);
   }
 
@@ -493,6 +778,44 @@
     if(root) obs.observe(root,{subtree:true, attributes:true, childList:true, attributeFilter:['style']});
   })();
 
+  // ---- Notifications poll (extended) ----
+  async function pullNotifications(){
+    try{
+      const n = await jget('/notifications');
+      // starts / rounds / finishes (existing)
+      if(n && n.start){ startMatch(n.start); return; }
+      if(n && n.round){
+        if(n.round.type==='start') onRoundStart(n.round);
+        else onRoundEnd({ roundId:n.round.roundId, winner:n.round.winner });
+      }
+      if(n && n.finish && (!match || !n.finish.matchId || n.finish.matchId===match.id)){
+        if(n.finish.winner) finishMatch(n.finish.winner, 'server');
+      }
+
+      // battle invites (existing shape)
+      if(n && Array.isArray(n.invites) && n.invites.length){
+        const inv = n.invites[0];
+        if(pullNotifications._lastInviteId !== inv.id){
+          pullNotifications._lastInviteId = inv.id;
+          // add to notifications rather than immediate confirm (per your UX spec)
+          addNotification({ id:inv.id, type:'battle', from:inv.from, mode:inv.mode });
+        }
+      }
+
+      // NEW: friend requests support (if backend supplies)
+      // Accept multiple shapes: {friendRequests:[{id,from}]} or {requests:[...]} or single {friend:{...}}
+      const reqs = (n && (n.friendRequests || n.requests)) || (n && n.friend ? [n.friend] : []);
+      if(Array.isArray(reqs)){
+        reqs.forEach(fr=>{
+          const id = fr.id || fr.requestId || ('fr_'+(fr.from||'')+'_'+Date.now());
+          if(!notifications.items.find(x=>x.id===id)){
+            addNotification({ id, type:'friend', from: fr.from || fr.username || 'player' });
+          }
+        });
+      }
+    }catch{}
+  }
+
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
@@ -501,34 +824,8 @@
       setInterval(async () => { try { await jget('/me'); } catch{} }, 20000);
 
       // notifications poll
-      const pull=async()=>{
-        try{
-          const n = await jget('/notifications');
-          if(n && n.start){ startMatch(n.start); return; }
-          if(n && n.round){
-            // optional polling channel
-            if(n.round.type==='start') onRoundStart(n.round);
-            else onRoundEnd({ roundId:n.round.roundId, winner:n.round.winner });
-          }
-          if(n && n.finish && (!match || !n.finish.matchId || n.finish.matchId===match.id)){
-            if(n.finish.winner) finishMatch(n.finish.winner, 'server');
-          }
-          if(n && Array.isArray(n.invites) && n.invites.length){
-            const inv = n.invites[0];
-            if(pull._lastInviteId !== inv.id){
-              pull._lastInviteId = inv.id;
-              const ok = confirm(`${inv.from} invited you${inv.mode?` (${inv.mode})`:''}. Accept?`);
-              if(ok){
-                const r = await jpost('/lobby/accept',{inviteId:inv.id});
-                if(r && r.start) startMatch(r.start);
-              }else{
-                try{ await jpost('/lobby/decline',{inviteId:inv.id}); }catch{}
-              }
-            }
-          }
-        }catch{}
-      };
-      pull(); notifTimer=setInterval(pull, 5000);
+      pullNotifications();
+      notifTimer=setInterval(pullNotifications, 5000);
 
       connectWS();
 
