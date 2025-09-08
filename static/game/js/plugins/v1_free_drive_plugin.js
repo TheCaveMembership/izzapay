@@ -542,6 +542,10 @@
       nextTankAt = 0;
       lastReinforceAt = 0;
 
+      // 🔧 Ensure no residual heat/snapshots can revive stars or units on respawn
+      lastCarCrimeAt = 0;     // forget the recent hijack window entirely
+      pursuerSnap   = null;   // drop any saved pursuer state that could be restored
+
       // Drop all guards and block any spawn attempts for a short window
       guardUntil = 0; guardWanted = 0;
       spawnLockUntil = now() + 1200;
