@@ -14,9 +14,18 @@
   let api=null;
   let reinforceAt = 0;
   let zeroLockUntil = 0;
-
+// ✅ Chaser speed tuning (px/sec-ish; scaled by dtSec)
+const TUNE = {
+  policeSpd: 55,
+  swatSpd:   65,
+  armySpd:   72
+};
   // Cop stats
-  function copSpeed(kind){ return kind==='army'? 0 : kind==='swat'? 0 : 0; }
+  function copSpeed(kind){
+  return kind==='army' ? TUNE.armySpd
+       : kind==='swat' ? TUNE.swatSpd
+       :                 TUNE.policeSpd;
+}
   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
 
   function kindForStars(stars){
