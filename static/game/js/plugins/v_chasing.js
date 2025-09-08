@@ -4,7 +4,7 @@
   if (window.__IZZA_CHASING_BOUND) return;
   window.__IZZA_CHASING_BOUND = true;
 
-  const BUILD = 'v1.1-chasing-plugin';
+  const BUILD = 'v1.2-chasing-plugin+5s-escalation';
   console.log('[IZZA CHASING]', BUILD);
 
   // Signal to core/other plugins to disable any internal chasing logic.
@@ -12,7 +12,7 @@
 
   // Tunables
   const MAX_STARS = 5;
-  const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 };
+  const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 }; // (still used for 3★+ passive drip if needed)
   const ZERO_LOCK_MS = 1500;       // suppress phantom 1★ rebound after clear
   const SPAWN_GRACE_MS = 300;      // grace to let maintainCops() spawn before we clear stars
 
@@ -27,6 +27,28 @@
   let reinforceAt = 0;
   let zeroLockUntil = 0;
   let lastWantedChangeAt = 0;
+
+  // ---- “hijack session” 5s-escalation state (test mode you asked for) ----
+  // Timeline (relative to hijack start):
+  //  t=0s:   1★ + spawn police
+  //  t=5s:   2★ + spawn police
+  //  t=10s:  3★ + spawn police
+  //  t=15s:  4★ + spawn SWAT
+  //  t=20s:  5★ + spawn Army   (tanks then handled by free-drive after 30s at 5★)
+  const HIJACK_STEPS = [
+    { at:  0,    stars: 1, kind: 'police' },
+    { at:  5000, stars: 2, kind: 'police' },
+    { at: 10000, stars: 3, kind: 'police' },
+    { at: 15000, stars: 4, kind: 'swat'   },
+    { at: 20000, stars: 5, kind: 'army'   },
+  ];
+  let hijackStartAt = 0;
+  let hijackStepIdx = 0;
+
+  function resetHijackTimeline(){
+    hijackStartAt = 0;
+    hijackStepIdx = 0;
+  }
 
   // --- helpers ---------------------------------------------------------------
   function ensureArrays(){
@@ -98,6 +120,33 @@
     }
   }
 
+  // Drive 5s hijack timeline
+  function tickHijackTimeline(){
+    if (!hijackStartAt) return;
+    const now = performance.now();
+
+    // If player wiped all cops, pause the timeline until at least one exists
+    // (so “if the player hasn’t killed the cops” the timeline continues).
+    ensureArrays();
+    if (api.cops.length === 0 && (api.player.wanted|0) > 0) return;
+
+    while (hijackStepIdx < HIJACK_STEPS.length && now - hijackStartAt >= HIJACK_STEPS[hijackStepIdx].at){
+      const step = HIJACK_STEPS[hijackStepIdx];
+
+      // Only ever escalate upward (don’t reduce if other systems dropped stars)
+      const cur = api.player.wanted|0;
+      if (step.stars > cur){
+        safeSetWanted(step.stars);
+      }
+      // Spawn one extra of the step's tier to make the ramp visible
+      spawnCop(step.kind);
+      // Maintain to match total == stars (keeps things tidy if extras existed)
+      maintainCops();
+
+      hijackStepIdx++;
+    }
+  }
+
   function updateCops(dtSec){
     const stars = api.player.wanted|0;
 
@@ -117,7 +166,7 @@
       return;
     }
 
-    // Chase
+    // Chase movement
     for(const c of api.cops){
       const dx = api.player.x - c.x, dy = api.player.y - c.y;
       const m = Math.hypot(dx,dy) || 1;
@@ -127,7 +176,10 @@
       else                              c.facing = dx < 0 ? 'left' : 'right';
     }
 
-    // Reinforce toward +1 star every interval at 3★+
+    // Run the 5s hijack escalation
+    tickHijackTimeline();
+
+    // Legacy reinforcement toward +1 star every interval at 3★+ (kept, but your 5s path will usually reach 5★ first)
     const now = performance.now();
     if (reinforceAt && now >= reinforceAt){
       const cur = api.player.wanted|0;
@@ -136,7 +188,6 @@
         if (next > cur) safeSetWanted(next);
         reinforceAt = performance.now() + (REINFORCE_MS[next] || 20000);
       } else {
-        // If we’re <3★, kill any stale timer
         reinforceAt = 0;
       }
     }
@@ -177,6 +228,8 @@
       // Clear completely when last chaser drops.
       safeSetWanted(0);
       zeroLockUntil = performance.now() + ZERO_LOCK_MS;
+      // Pause hijack timeline if everything got wiped
+      resetHijackTimeline();
     }else{
       // Drop 1 star per cop kill (never below number of remaining chasers)
       const next = Math.max(api.cops.length, (api.player.wanted|0) - 1);
@@ -190,12 +243,19 @@
 
     switch(evt.kind){
       case 'hijack': {
-        // Immediate 2★ on hijack; cap chasers to 2
-        safeSetWanted(2);
+        // Start 5s timeline fresh
+        hijackStartAt = performance.now();
+        hijackStepIdx = 0;
+
+        // Apply step0 immediately: 1★ + spawn police
+        const s0 = HIJACK_STEPS[0];
+        safeSetWanted(s0.stars);
+        spawnCop(s0.kind);
         maintainCops();
         break;
       }
       case 'vehicular-ped': {
+        // Still allow small instant bumps for hits while driving
         safeSetWanted((api.player.wanted|0) + 1);
         break;
       }
@@ -221,7 +281,7 @@
     if(!api) return;
     maintainCops();
     lastWantedChangeAt = performance.now();
-    // Start or stop reinforcement timer
+    // Start or stop legacy reinforcement timer
     if((to|0)>=3) reinforceAt = performance.now() + (REINFORCE_MS[to|0] || 20000);
     else reinforceAt = 0;
   });
@@ -233,6 +293,10 @@
       zeroLockUntil = 0;
       lastWantedChangeAt = performance.now();
       ensureArrays();
+      resetHijackTimeline();
+      // Also clear any remaining cops so the next hijack is a clean ramp
+      if (api && api.cops) api.cops.length = 0;
+      if (api && api.player) api.setWanted(0);
     });
   });
 })();
