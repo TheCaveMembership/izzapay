@@ -1,6 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.16-free-drive+delegate-chasing+tanks-slower+rocket-fullheart+cool-reenter';
+  const BUILD='v1.17-free-drive+delegate-chasing+correct-sprite-layer+tanks-slower+rocket-fullheart+cool-reenter';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -251,7 +251,7 @@
     IZZA.emit('crime', {kind:'hijack'});
 
     // IMPORTANT: allow spawns immediately during hijack transition
-    armGuard('enter-traffic'); // <-- was 'enter-parked'; this was blocking spawns
+    armGuard('enter-traffic');
   }
 
   function startDrivingFromParked(entry){
@@ -419,6 +419,28 @@
       if (Math.abs(r.x-px)>1100 || Math.abs(r.y-py)>900) rockets.splice(i,1);
     }
   }
+
+  // Draw one vehicle using the same ctx/S as the engine frame
+  function drawVehicleSprite(ctx, S, kind, wx, wy){
+    const sheets = (window.VEHICLE_SHEETS||{});
+    const sx=(wx - api.camera.x)*(S/api.TILE);
+    const sy=(wy - api.camera.y)*(S/api.TILE);
+
+    const dS = S*VEH_DRAW_SCALE;
+    const off = (dS - S)/2;
+
+    if(sheets[kind] && sheets[kind].img){
+      ctx.save();
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(sheets[kind].img, 0,0,32,32, sx-off, sy-off, dS, dS);
+      ctx.restore();
+    }else{
+      // fallback box if sprite not loaded yet
+      ctx.fillStyle='#c0c8d8';
+      ctx.fillRect(sx + S*0.10 - off, sy + S*0.25 - off, S*0.80*VEH_DRAW_SCALE, S*0.50*VEH_DRAW_SCALE);
+    }
+  }
+
   function drawTanks(ctx, S){
     if(!tanks.length) return;
     for(const t of tanks){
@@ -523,6 +545,7 @@
     btnB && btnB.addEventListener('click', onB, true);
   });
 
+  // Use ctx/S provided by the engine so we paint on the correct layer
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
 
@@ -557,13 +580,19 @@
     syncWantedWithPursuit();
   });
 
-  IZZA.on('render-post', ()=>{
+  IZZA.on('render-post', (payload)=>{
     if(!api?.ready) return;
-    const ctx=document.getElementById('game').getContext('2d');
-    const S=api.DRAW;
+    const ctx = (payload && payload.ctx) || document.getElementById('game').getContext('2d');
+    const S   = (payload && payload.S)   || api.DRAW;
 
-    parked.forEach(p=>{ drawVehicleSprite(p.kind || 'sedan', p.x, p.y); });
-    if(driving && car){ drawVehicleSprite(car.kind || 'sedan', car.x, car.y); }
+    // Parked cars
+    for(const p of parked){
+      drawVehicleSprite(ctx, S, p.kind || 'sedan', p.x, p.y);
+    }
+    // Current car
+    if(driving && car){
+      drawVehicleSprite(ctx, S, car.kind || 'sedan', car.x, car.y);
+    }
 
     // Draw tanks & rockets last to sit on top
     drawTanks(ctx, S);
