@@ -1030,6 +1030,8 @@ function _reinforceIntervalFor(level){
   return 30000;                // fallback (should rarely be used)
 }
 function maintainCops(){
+  if (window.__IZZA_CHASING_PLUGIN_ACTIVE) { return; }
+
   const needed = player.wanted;
   let cur = cops.length;
   while(cur < needed){
@@ -1041,16 +1043,14 @@ function maintainCops(){
   while(cur > needed){ cops.pop(); cur--; }
 }
 function updateCops(dtSec, nowMs){
+  if (window.__IZZA_CHASING_PLUGIN_ACTIVE) { return; }
+
   // If all chasers are gone, hard reset to 0 stars (crime loop resets).
-  if (cops.length===0 && player.wanted!==0) {
-    // Only let core zero out stars if no other system is actively managing pursuit
-    if (!window.__IZZA_SUPPRESS_WANTED_RESET) {
-      setWanted(0);
-      __zeroLockUntil = performance.now() + 1500;
-    }
+  if(!window.__IZZA_CHASING_PLUGIN_ACTIVE && cops.length===0 && player.wanted!==0){
+    setWanted(0);
+    __zeroLockUntil = performance.now() + 1500; // 1.5s grace: no phantom 1â immediately after clear
   }
 
-  let __izza_didReinforce=false;
   for(const c of cops){
     const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
     c.x += (dx/m) * c.spd * dtSec;
@@ -1059,16 +1059,12 @@ function updateCops(dtSec, nowMs){
     else                              c.facing = dx < 0 ? 'left' : 'right';
 
     // Tiered reinforcement toward 5â
-    if(!isFinite(c.reinforceAt)) c.reinforceAt = nowMs + _reinforceIntervalFor(player.wanted|0);
-    if(!__izza_didReinforce && nowMs >= c.reinforceAt && player.wanted < 5){
+    if(nowMs >= c.reinforceAt && player.wanted < 5){
       const curLevel  = player.wanted|0;
       const nextLevel = Math.min(5, curLevel + 1);
       setWanted(nextLevel);
       maintainCops();
-      __izza_didReinforce=true;
-      const __intv = _reinforceIntervalFor(nextLevel);
-      // align all pursuers to the same next reinforcement window to avoid double-skips
-      for(const __cx of cops){ __cx.reinforceAt = nowMs + __intv; }
+      c.reinforceAt = nowMs + _reinforceIntervalFor(nextLevel);
     }
   }
 }
