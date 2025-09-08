@@ -2,6 +2,9 @@
   const BUILD = 'v2-police+shop+npc+tutorial+persist-1';
   console.log('[IZZA PLAY]', BUILD);
 
+  // Centralized pursuit & stars handled in izza_core_v3.js
+  const POLICE_LOGIC_ENABLED = false;
+
   // ---------- Profile / assets ----------
   const profile = window.__IZZA_PROFILE__ || {};
   const BODY   = profile.sprite_skin || "default";
@@ -163,7 +166,7 @@
   function handleB(){
     if (registerInRange()) openShop();
     else if (doorInRange()) openHQ();
-    else setWanted(0);
+    else POLICE_LOGIC_ENABLED && setWanted(0);
   }
 
   window.addEventListener('keydown', e=>{
@@ -204,7 +207,7 @@
   window.addEventListener('mouseup',  endDrag);
 
   // ---------- HUD ----------
-  function setWanted(n){
+  function POLICE_LOGIC_ENABLED && setWanted(n){
     player.wanted = Math.max(0, Math.min(5, n|0));
     document.querySelectorAll('#stars .star').forEach((s,i)=> s.className='star' + (i<player.wanted?' on':'') );
     saveGame();
@@ -621,6 +624,8 @@
   }
 
   function maintainCops(){
+  if(!POLICE_LOGIC_ENABLED) return;
+
     const need = desiredCopCount();
     if (cops.length < need){
       for(let i=0;i<need - cops.length;i++){
@@ -633,6 +638,8 @@
   }
 
   function updateCops(dt){
+  if(!POLICE_LOGIC_ENABLED) return;
+
     maintainCops();
     const ptx = player.x + TILE/2, pty = player.y + TILE/2;
 
@@ -756,7 +763,7 @@
     layerCols.outfit = getFrameCols(images.outfit);
     layerCols.hair   = getFrameCols(images.hair);
 
-    updateCoinUI(); setWanted(player.wanted);
+    updateCoinUI(); POLICE_LOGIC_ENABLED && setWanted(player.wanted);
     centerCamera();
 
     let last = performance.now();
