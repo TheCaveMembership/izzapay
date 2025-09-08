@@ -1,5 +1,4 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
-<script>
 (function(){
   const BUILD='v1.16-free-drive+death-econ+clean-respawn+30s-reinforce+tanks-slower+rocket-fullheart+cool-reenter';
   console.log('[IZZA PLAY]', BUILD);
@@ -707,4 +706,3 @@
     drawTanks(ctx, S);
   });
 })();
-</script>
