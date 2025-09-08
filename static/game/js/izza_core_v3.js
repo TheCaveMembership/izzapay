@@ -42,7 +42,7 @@ const outfitKey = AP.outfit      || 'street';
 
 // Resolve filenames based on creation choices
 const RESOLVED = {
-  // Female uses the “*_female_wide” body sheet; male/default uses the base sheet
+  // Female uses the â*_female_wideâ body sheet; male/default uses the base sheet
   body: bodyType === 'female' ? `${themeKey}__female_wide` : themeKey,
   // Hair: try colorized variant first (e.g. "long__green"), then fall back to base (e.g. "long")
   hairTry: hairColor ? [`${hairStyle}__${hairColor}`, hairStyle] : [hairStyle],
@@ -151,7 +151,7 @@ function loadLayerTry(kind, names){
   return next();
 }
 
-// Transparent 32×32 placeholder layer (used when female has no separate outfit)
+// Transparent 32Ã32 placeholder layer (used when female has no separate outfit)
 function emptyLayer(){
   const c = document.createElement('canvas'); c.width = 32; c.height = 32;
   return { img: c, cols: 1 };
@@ -551,7 +551,7 @@ function tintHairLayer(pack, hairColor){
   if(btnA) btnA.addEventListener('click', doAttack);
   if(btnB) btnB.addEventListener('click', handleB);
 
-  // ===== Inventory ↔ Map exclusives (kept) =====
+  // ===== Inventory â Map exclusives (kept) =====
   const miniWrap = document.getElementById('miniWrap');
   const mapModal = document.getElementById('mapModal');
   function invOpen(){ const p=document.getElementById('invPanel'); return p && p.style.display!=='none'; }
@@ -594,13 +594,13 @@ function tintHairLayer(pack, hairColor){
   }
 
   // ===== HUD =====
-let __zeroLockUntil = 0;  // prevents spurious 1★ rebounds for a moment after clearing pursuit
+let __zeroLockUntil = 0;  // prevents spurious 1â rebounds for a moment after clearing pursuit
 
 function setWanted(n){
   const prev = player.wanted|0;
   const now  = performance.now();
 
-  // if we just cleared pursuit, ignore stray bumps to 1★ for a brief moment
+  // if we just cleared pursuit, ignore stray bumps to 1â for a brief moment
   if (prev===0 && n===1 && now < __zeroLockUntil) {
     // swallow the spurious bump
     return;
@@ -613,7 +613,7 @@ function setWanted(n){
 (function(){
   const _setWanted = setWanted;
   setWanted = function(n){
-    try { console.log('[wanted]', player.wanted, '→', n, '\n', new Error().stack); } catch(e){}
+    try { console.log('[wanted]', player.wanted, 'â', n, '\n', new Error().stack); } catch(e){}
     return _setWanted(n);
   };
 })();
@@ -1025,8 +1025,8 @@ function spawnCop(kind){
   });
 }
 function _reinforceIntervalFor(level){
-  if(level>=4) return 10000;   // 10s at 4★ and 5★
-  if(level>=3) return 20000;   // 20s at 3★
+  if(level>=4) return 10000;   // 10s at 4â and 5â
+  if(level>=3) return 20000;   // 20s at 3â
   return 30000;                // fallback (should rarely be used)
 }
 function maintainCops(){
@@ -1034,17 +1034,20 @@ function maintainCops(){
   let cur = cops.length;
   while(cur < needed){
     let kind='police';
-    if(needed>=4)      kind='army';   // military at 4★+
-    else if(needed>=3) kind='swat';   // swat at 3★
+    if(needed>=4)      kind='army';   // military at 4â+
+    else if(needed>=3) kind='swat';   // swat at 3â
     spawnCop(kind); cur++;
   }
   while(cur > needed){ cops.pop(); cur--; }
 }
 function updateCops(dtSec, nowMs){
   // If all chasers are gone, hard reset to 0 stars (crime loop resets).
-  if(cops.length===0 && player.wanted!==0){
-    setWanted(0);
-    __zeroLockUntil = performance.now() + 1500; // 1.5s grace: no phantom 1★ immediately after clear
+  if (cops.length===0 && player.wanted!==0) {
+    // Only let core zero out stars if no other system is actively managing pursuit
+    if (!window.__IZZA_SUPPRESS_WANTED_RESET) {
+      setWanted(0);
+      __zeroLockUntil = performance.now() + 1500;
+    }
   }
 
   let __izza_didReinforce=false;
@@ -1055,7 +1058,7 @@ function updateCops(dtSec, nowMs){
     if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
     else                              c.facing = dx < 0 ? 'left' : 'right';
 
-    // Tiered reinforcement toward 5★
+    // Tiered reinforcement toward 5â
     if(!isFinite(c.reinforceAt)) c.reinforceAt = nowMs + _reinforceIntervalFor(player.wanted|0);
     if(!__izza_didReinforce && nowMs >= c.reinforceAt && player.wanted < 5){
       const curLevel  = player.wanted|0;
@@ -1076,7 +1079,7 @@ function damageCop(c, amount){
     if(i>=0) cops.splice(i,1);
 
     if(cops.length===0){
-      // Last chaser down → tanks (if any, in other module) should clear and stars drop to 0.
+      // Last chaser down â tanks (if any, in other module) should clear and stars drop to 0.
       setWanted(0);
       __zeroLockUntil = performance.now() + 1500; // match updateCops grace window
     }else{
