@@ -97,6 +97,8 @@
   }
 
   function restorePursuers(){
+    if(!POLICE_LOGIC_ENABLED) return;
+
     try{
       if (!pursuerSnap) return;
       PURSUER_KEYS.forEach(k=>{
@@ -121,10 +123,10 @@
     guardUntil = now() + 900; // ~0.9s
     spawnLockUntil = isCarCrime ? 0 : (guardUntil + 400);
 
-    if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+    if ((api.player.wanted|0) < guardWanted) POLICE_LOGIC_ENABLED && api.setWanted(guardWanted);
     restorePursuers();
     setTimeout(()=>{
-      if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+      if ((api.player.wanted|0) < guardWanted) POLICE_LOGIC_ENABLED && api.setWanted(guardWanted);
       restorePursuers();
     }, 0);
   }
@@ -134,6 +136,8 @@
     arr.push(spec);
   }
   function spawnCopNearPlayer(kind){
+    if(!POLICE_LOGIC_ENABLED) return null;
+
     const px = api.player.x, py = api.player.y;
     const off = 200 + Math.random()*120;
     const dx = (Math.random()<0.5?-1:1)*off;
@@ -152,58 +156,42 @@
 
   // Sync wanted to pursuer presence (end hot-car session when clear)
   function syncWantedWithPursuit(){
+    if(!POLICE_LOGIC_ENABLED) return;
+
     if(!api?.player) return;
     const n = pursuerCount();
     if(n>0){
-      if((api.player.wanted|0) < 1) api.setWanted(1);
+      if((api.player.wanted|0) < 1) POLICE_LOGIC_ENABLED && api.setWanted(1);
     }else{
       if(hijackTag) hijackTag = null;
       // fully cool down — forget the recent-hijack window
       lastCarCrimeAt = 0;
 
-      if((api.player.wanted|0) !== 0) api.setWanted(0);
+      if((api.player.wanted|0) !== 0) POLICE_LOGIC_ENABLED && api.setWanted(0);
 
       // Reset all tier timers and remove heavies
       lastSwatAt = 0;
       lastMilitaryAt = 0;
       nextTankAt = 0;
       destroyAllTanks();
-      // Clear any guard/snapshot so stars won't bounce back after final pursuer dies
-      pursuerSnap = null;
-      guardUntil = 0;
-      guardWanted = 0;
-      spawnLockUntil = 0;
-      suppressAllSpawnsUntil = 0;
-
     }
   }
 
   // Guard against unwanted star wipes during transitions
   IZZA.on?.('wanted-changed', ()=>{
     if (!api) return;
-    
-    // If there are no pursuers left, drop guards/snapshots so wanted can fall to 0 cleanly
-    try {
-      const pc = pursuerCount();
-      if (pc === 0) { guardUntil = 0; guardWanted = 0; pursuerSnap = null; }
-    } catch {}
-
-    // Apply guard only when there are still pursuers
-    const hasPursuit = (()=>{ try{return pursuerCount()>0;}catch{return false;} })();
-    if (hasPursuit && now() <= guardUntil){
+    // Allow a clean reset when all pursuers are gone
+    if (((api.player?.wanted|0)===0) && (pursuerCount()===0)) { disarmGuard(); return; }
+    if (now() <= guardUntil){
       if ((api.player.wanted|0) < guardWanted){
-        api.setWanted(guardWanted);
+        POLICE_LOGIC_ENABLED && api.setWanted(guardWanted);
       }
       restorePursuers();
       setTimeout(()=>{
-        if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+        if ((api.player.wanted|0) < guardWanted) POLICE_LOGIC_ENABLED && api.setWanted(guardWanted);
         restorePursuers();
       }, 0);
     }
-
-    // If stars already hit 0, ensure guards are cleared permanently
-    if ((api.player?.wanted|0) === 0){ guardUntil = 0; guardWanted = 0; pursuerSnap = null; destroyAllTanks(); }
-
     // When dropping below 5★, stop tank timer & clear tanks
     if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
       // keep timer running; no hold required in this build
@@ -303,8 +291,8 @@
     // HIJACK is a car crime: +1 star & spawn exactly 1 cop
     lastCarCrimeAt = now();
     hijackTag = hijackTag || ('hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
-    api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
-    spawnCopNearPlayer('police'); // exactly one
+    POLICE_LOGIC_ENABLED && api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
+    if ( ((api.player?.wanted|0) <= 1) && ((api.cops?.length|0) < 1) ) spawnCopNearPlayer('police'); // exactly one
 
     armGuard('enter-traffic');
   }
@@ -390,7 +378,7 @@
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
-        api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
+        POLICE_LOGIC_ENABLED && api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
         spawnCopNearPlayer('police'); // one unit only
       }
     }
@@ -408,7 +396,7 @@
           droppedAt: now(),
           noPickupUntil: now() + DROP_GRACE_MS
         });
-        api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
+        POLICE_LOGIC_ENABLED && api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
     }
   }
@@ -549,7 +537,7 @@
       // Clear in-place to keep references intact
       PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
       destroyAllTanks();
-      if(api?.player){ api.setWanted(0); }
+      if(api?.player){ POLICE_LOGIC_ENABLED && api.setWanted(0); }
 
       hijackTag = null;
       lastSwatAt = 0;
@@ -576,7 +564,7 @@
         try{
           PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
           destroyAllTanks();
-          if(api?.player){ api.setWanted(0); }
+          if(api?.player){ POLICE_LOGIC_ENABLED && api.setWanted(0); }
         }catch{}
       }, 0);
     }catch{}
