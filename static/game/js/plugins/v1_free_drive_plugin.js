@@ -534,9 +534,14 @@
   // --- ensure cops cleared & wanted reset on death/respawn (hard) ---
   function clearAllPursuitAndWanted(){
     try{
+      // Clear in-place
       PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
       destroyAllTanks();
       if(api?.player){ api.setWanted(0); }
+
+      // EXTRA HARD RESET: replace arrays to guarantee pursuerCount() == 0
+      api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
+
       hijackTag = null;
       fiveStarSince = 0;
       nextTankAt = 0;
@@ -561,6 +566,7 @@
       setTimeout(()=>{
         try{
           PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
+          api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
           destroyAllTanks();
           if(api?.player){ api.setWanted(0); }
         }catch{}
