@@ -642,7 +642,10 @@
 
     // Keep stars in sync and end the hot-car session once pursuers are gone.
     syncWantedWithPursuit();
+    // Keep core from clearing stars while we still have active pursuit/driving
+    try{ window.__IZZA_SUPPRESS_WANTED_RESET = (pursuerCount()>0) || !!driving; }catch{ window.__IZZA_SUPPRESS_WANTED_RESET = !!driving; }
   });
+
 
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
