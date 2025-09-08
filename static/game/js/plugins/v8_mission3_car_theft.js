@@ -267,7 +267,8 @@
         x: fromCar.x, y: fromCar.y,
         mode:'vert', dir: (Math.random()<0.5?-1:1), spd:40,
         hp:4, state:'walk', crossSide:'top',
-        vertX: Math.floor(fromCar.x/api.TILE),
+        // steer ejected driver toward nearest vertical sidewalk lane
+        vertX: (function(){ try{ const vx=api.vRoadX|0; const left=vx-1, right=vx+1; const cx=Math.floor(fromCar.x/api.TILE); return (Math.abs(cx-left)<=Math.abs(cx-right)?left:right); }catch(e){ return Math.floor(fromCar.x/api.TILE); } })(),
         blinkT:0, skin, facing:'down', moving:true
       });
     }catch{}
@@ -284,6 +285,8 @@
     // NEW (chasing moved to v_chasing.js): tell the chaser plugin
     IZZA.emit('crime', { kind: 'hijack' });
 
+    // Notify chasing system
+    try{ IZZA.emit('crime', { kind: 'hijack' }); }catch{}
     toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
   }
   function nearestCar(){
@@ -296,7 +299,7 @@
   }
   function nearStart(){
     const {gx,gy}=playerGrid();
-    return (Math.abs(gx-m3.gx)+Math.abs(gy-m3.gy))<=1;
+    return (Math.Math.abs(gx-m3.gx)+Math.Math.abs(gy-m3.gy))<=1;
   }
   function onB(e){
     if(localStorage.getItem(M2_KEY)!=='done') return;
@@ -329,6 +332,7 @@
       if(d <= CAR_HIT_RADIUS){
         api.pedestrians.splice(i,1);
         const pos = _dropPos(p.x + api.TILE/2, p.y + api.TILE/2);
+        IZZA.emit('crime', { kind: 'vehicular-ped' });
         IZZA.emit('ped-killed', {
           coins: 25,
           x: pos.x, y: pos.y,
@@ -345,6 +349,7 @@
       if(d <= CAR_HIT_RADIUS){
         api.cops.splice(i,1);
         const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
+        IZZA.emit('crime', { kind: 'vehicular-cop-kill' });
         IZZA.emit('cop-killed', {
           cop: c,
           x: pos.x, y: pos.y,
