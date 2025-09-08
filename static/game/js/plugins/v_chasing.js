@@ -6,30 +6,31 @@
   // Signal to core/other plugins to disable any internal chasing logic.
   window.__IZZA_CHASING_PLUGIN_ACTIVE = true;
 
-   // Tunables
- const MAX_STARS = 5;
- const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 };
- const ZERO_LOCK_MS = 1500; // suppress phantom 1★ rebound after clear
+  // Tunables
+  const MAX_STARS = 5;
+  const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 };
+  const ZERO_LOCK_MS = 1500;       // suppress phantom 1★ rebound after clear
+  const SPAWN_GRACE_MS = 250;      // grace to let maintainCops() spawn before we clear stars
 
-+// Chaser speed tuning (px/sec-ish; multiplied by dtSec)
-+const TUNE = {
-+  policeSpd: 55,
-+  swatSpd:   65,
-+  armySpd:   72
-+};
+  // Chaser speed tuning (px/sec-ish; multiplied by dtSec)
+  const TUNE = {
+    policeSpd: 55,
+    swatSpd:   65,
+    armySpd:   72
+  };
 
-   let api=null;
-   let reinforceAt = 0;
-   let zeroLockUntil = 0;
+  let api = null;
+  let reinforceAt = 0;
+  let zeroLockUntil = 0;
+  let lastWantedChangeAt = 0;
 
-   // Cop stats
--  function copSpeed(kind){ return kind==='army'? 0 : kind==='swat'? 0 : 0; }
-+  function copSpeed(kind){
-+    return kind==='army' ? TUNE.armySpd
-+         : kind==='swat' ? TUNE.swatSpd
-+         :                 TUNE.policeSpd;
-+  }
-   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
+  // Cop stats
+  function copSpeed(kind){
+    return kind==='army' ? TUNE.armySpd
+         : kind==='swat' ? TUNE.swatSpd
+         :                 TUNE.policeSpd;
+  }
+  function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
 
   function kindForStars(stars){
     if(stars>=4) return 'army';
@@ -74,6 +75,7 @@
     const clamped = Math.max(0, Math.min(MAX_STARS, n|0));
     if (clamped !== prev){
       api.setWanted(clamped);
+      lastWantedChangeAt = now;
       // (Re)start reinforcement timer when escalating into 3★+
       if (clamped>=3){
         reinforceAt = now + (REINFORCE_MS[clamped] || 20000);
@@ -85,11 +87,19 @@
   }
 
   function updateCops(dtSec){
+    const stars = api.player.wanted|0;
+
+    // If there are no chasers but stars > 0, allow a short grace for spawns before clearing.
     if(!api.cops.length){
-      // If there are no chasers and we still have stars, clear completely with zero-lock.
-      if((api.player.wanted|0)!==0){
+      if(stars!==0){
+        const now = performance.now();
+        if (now - lastWantedChangeAt <= SPAWN_GRACE_MS){
+          maintainCops(); // try to spawn immediately
+          return;         // skip clearing this frame
+        }
+        // Past the grace window and still no cops? Then clear safely.
         safeSetWanted(0);
-        zeroLockUntil = performance.now() + ZERO_LOCK_MS;
+        zeroLockUntil = now + ZERO_LOCK_MS;
       }
       return;
     }
@@ -107,11 +117,15 @@
     // Reinforce toward +1 star every interval at 3★+
     const now = performance.now();
     if (reinforceAt && now >= reinforceAt){
-      const next = Math.min(MAX_STARS, (api.player.wanted|0) + 1);
-      if (next > (api.player.wanted|0)){
-        safeSetWanted(next);
+      const cur = api.player.wanted|0;
+      if (cur >= 3){
+        const next = Math.min(MAX_STARS, cur + 1);
+        if (next > cur) safeSetWanted(next);
+        reinforceAt = performance.now() + (REINFORCE_MS[next] || 20000);
+      } else {
+        // If we’re <3★, kill any stale timer
+        reinforceAt = 0;
       }
-      reinforceAt = now + (REINFORCE_MS[next] || 20000);
     }
   }
 
@@ -189,8 +203,18 @@
   IZZA.on('wanted-changed', ({to})=>{
     if(!api) return;
     maintainCops();
+    lastWantedChangeAt = performance.now();
     // Start or stop reinforcement timer
     if((to|0)>=3) reinforceAt = performance.now() + (REINFORCE_MS[to|0] || 20000);
     else reinforceAt = 0;
+  });
+
+  // Reset internal timers/state on death/respawn (defensive vs stale timers)
+  ;['player-death','player-died','player-respawn','respawn'].forEach(ev=>{
+    IZZA.on(ev, ()=>{
+      reinforceAt = 0;
+      zeroLockUntil = 0;
+      lastWantedChangeAt = performance.now();
+    });
   });
 })();
