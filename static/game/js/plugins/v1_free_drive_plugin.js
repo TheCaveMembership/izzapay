@@ -1,6 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.14-free-drive+clean-respawn+30s-reinforce+tanks-slower+rocket-fullheart';
+  const BUILD='v1.15-free-drive+clean-respawn+30s-reinforce+tanks-slower+rocket-fullheart+cool-reenter';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -108,10 +108,13 @@
     }catch{}
   }
 
+  // NOTE: ONLY actual hijacks may force a minimum wanted level.
   function armGuard(reason){
-    const isCarCrime = (reason==='enter-traffic');
+    const isCarCrime = (reason==='enter-traffic'); // hijack only
     guardWanted = (api.player?.wanted|0) || 0;
-    if (isCarCrime || (now() - lastCarCrimeAt < 30000)) {
+
+    // ⬇️ CHANGE: Do NOT bump stars on enter-parked, even if hijack was recent
+    if (isCarCrime) {
       guardWanted = Math.max(guardWanted, 1);
     }
 
@@ -166,6 +169,9 @@
       if((api.player.wanted|0) < 1) api.setWanted(1);
     }else{
       if(hijackTag) hijackTag = null;
+      // ⬇️ CHANGE: fully cool down — forget the recent-hijack window
+      lastCarCrimeAt = 0;
+
       if((api.player.wanted|0) !== 0) api.setWanted(0);
       fiveStarSince = 0;
       nextTankAt = 0;
@@ -303,17 +309,22 @@
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:'Back in your car. Press B to park.'});
 
-    // If the parked car was the same hijacked car, carry tag.
+    // If the parked car was the same hijacked car AND heat still existed when it was parked, carry tag.
     hijackTag = entry.car.hijackTag || hijackTag || null;
 
-    armGuard('enter-parked');
+    armGuard('enter-parked'); // safe: no wanted floor on re-entry
   }
 
   function parkHereAndStartTimer(){
     const px = api.player.x, py = api.player.y;
     const kind = (car && car.kind) || 'sedan';
     const p = { x:px, y:py, kind, timeoutId:null };
-    if(hijackTag) p.hijackTag = hijackTag;
+
+    // ⬇️ CHANGE: only keep “hot” tag if you STILL have heat right now
+    if ((api.player.wanted|0) > 0 || pursuerCount() > 0) {
+      if(hijackTag) p.hijackTag = hijackTag;
+    }
+
     p.timeoutId = setTimeout(()=>{
       const i = parked.indexOf(p);
       if(i>=0) parked.splice(i,1);
