@@ -1,8 +1,6 @@
 <!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const __CHASE_OFF = !!window.__IZZA_CHASING_PLUGIN_ACTIVE;
-
-  const BUILD='v1.16-free-drive+tiered-spawns(3★=SWAT/20s,4★=MIL/10s,5★=TANK/10s)+clean-reset';
+  const BUILD='v1.15-free-drive+clean-respawn+30s-reinforce+tanks-slower+rocket-fullheart+cool-reenter';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -38,22 +36,18 @@
 
   // --- escalation helpers ---
   const MAX_WANTED = 5;
+  let fiveStarSince = 0;
 
-  // Tanks: composite “boss” units built from existing sprites
+  // Tanks: composite “boss” units built from existing sprites, can be many
   let tanks = [];   // [{x,y,hp,parts:[{dx,dy,w,h}],fireCd}]
   const TANK_BUILD_STARS = 5;
-
-  // New tiered reinforcement cadences
-  const SWAT_EVERY_MS      = 20000; // ≥3★
-  const MILITARY_EVERY_MS  = 10000; // ≥4★
-  const TANK_EVERY_MS      = 10000; // ≥5★ (no initial hold)
-  let lastSwatAt = 0;
-  let lastMilitaryAt = 0;
-  let nextTankAt = 0;
+  const TANK_BUILD_HOLD_MS = 30000;     // first tank after holding 5★ for 30s
+  const TANK_RESPAWN_EVERY_MS = 30000;  // additional tanks every 30s while still 5★
 
   // Tanks should be a little slower than cars (about 85%)
   const TANK_SPEED = Math.round(CAR_SPEED * 0.85);
   const TANK_HP = 40;
+  let nextTankAt = 0;
 
   // Bigger body footprint (~2x car footprint) with “digital camo”
   const TANK_PARTS = [
@@ -66,6 +60,10 @@
   const ROCKET_COOLDOWN_MS = 1200;
   const ROCKET_RADIUS = 10;
   let rockets = []; // {x,y,vx,vy}
+
+  // Rolling reinforcement while pursued (global, 30s only)
+  const REINFORCE_EVERY_MS = 30000;
+  let lastReinforceAt = 0;
 
   // After-death spawn suppression (defense vs other systems)
   let suppressAllSpawnsUntil = 0;
@@ -123,11 +121,11 @@
     guardUntil = now() + 900; // ~0.9s
     spawnLockUntil = isCarCrime ? 0 : (guardUntil + 400);
 
-    if ((api.player.wanted|0) < guardWanted)
-restorePursuers();
+    if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+    restorePursuers();
     setTimeout(()=>{
-      if ((api.player.wanted|0) < guardWanted)
-restorePursuers();
+      if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+      restorePursuers();
     }, 0);
   }
 
@@ -152,21 +150,30 @@ restorePursuers();
     }
   }
 
+  // Reinforcement every 30s: exactly ONE pursuer matching current tier
+  function timedReinforcement(){
+    const lvl = (api.player?.wanted|0) || 0;
+    if (lvl<=0) return;
+    if (now() < suppressAllSpawnsUntil) return;
+
+    if (lvl >= 5)      spawnCopNearPlayer('military');
+    else if (lvl >= 4) spawnCopNearPlayer('swat');
+    else               spawnCopNearPlayer('police');
+  }
+
   // Sync wanted to pursuer presence (end hot-car session when clear)
   function syncWantedWithPursuit(){
     if(!api?.player) return;
     const n = pursuerCount();
     if(n>0){
-      if((api.player.wanted|0) < 1)
-}else{
+      if((api.player.wanted|0) < 1) api.setWanted(1);
+    }else{
       if(hijackTag) hijackTag = null;
       // fully cool down — forget the recent-hijack window
       lastCarCrimeAt = 0;
 
-      if((api.player.wanted|0) !== 0)
-// Reset all tier timers and remove heavies
-      lastSwatAt = 0;
-      lastMilitaryAt = 0;
+      if((api.player.wanted|0) !== 0) api.setWanted(0);
+      fiveStarSince = 0;
       nextTankAt = 0;
       destroyAllTanks();
     }
@@ -177,17 +184,18 @@ restorePursuers();
     if (!api) return;
     if (now() <= guardUntil){
       if ((api.player.wanted|0) < guardWanted){
-}
+        api.setWanted(guardWanted);
+      }
       restorePursuers();
       setTimeout(()=>{
-        if ((api.player.wanted|0) < guardWanted)
-restorePursuers();
+        if ((api.player.wanted|0) < guardWanted) api.setWanted(guardWanted);
+        restorePursuers();
       }, 0);
     }
-    // When dropping below 5★, stop tank timer & clear tanks
     if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
-      // keep timer running; no hold required in this build
+      if (!fiveStarSince) fiveStarSince = now();
     }else{
+      fiveStarSince = 0;
       nextTankAt = 0;
       destroyAllTanks();
     }
@@ -280,7 +288,11 @@ restorePursuers();
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:`Car hijacked! (${kind}) Press B again to park.`});
 
-    IZZA.emit && IZZA.emit('crime', { kind: 'hijack' });
+    // HIJACK is a car crime: +1 star & spawn exactly 1 cop
+    lastCarCrimeAt = now();
+    hijackTag = hijackTag || ('hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
+    api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
+    spawnCopNearPlayer('police'); // exactly one
 
     armGuard('enter-traffic');
   }
@@ -366,7 +378,8 @@ restorePursuers();
           droppedAt: tNow,
           noPickupUntil: tNow + DROP_GRACE_MS
         });
-// one unit only
+        api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
+        spawnCopNearPlayer('police'); // one unit only
       }
     }
 
@@ -383,7 +396,8 @@ restorePursuers();
           droppedAt: now(),
           noPickupUntil: now() + DROP_GRACE_MS
         });
-}
+        api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
+      }
     }
   }
 
@@ -520,16 +534,18 @@ restorePursuers();
   // --- ensure cops cleared & wanted reset on death/respawn (hard) ---
   function clearAllPursuitAndWanted(){
     try{
-      // Clear in-place to keep references intact
+      // Clear in-place
       PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
       destroyAllTanks();
-      if(api?.player){
-}
+      if(api?.player){ api.setWanted(0); }
+
+      // EXTRA HARD RESET: replace arrays to guarantee pursuerCount() == 0
+      api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
 
       hijackTag = null;
-      lastSwatAt = 0;
-      lastMilitaryAt = 0;
+      fiveStarSince = 0;
       nextTankAt = 0;
+      lastReinforceAt = 0;
 
       // Ensure no residual heat/snapshots can revive stars or units on respawn
       lastCarCrimeAt = 0;     // forget the recent hijack window entirely
@@ -550,9 +566,9 @@ restorePursuers();
       setTimeout(()=>{
         try{
           PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
+          api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
           destroyAllTanks();
-          if(api?.player){
-}
+          if(api?.player){ api.setWanted(0); }
         }catch{}
       }, 0);
     }catch{}
@@ -572,48 +588,21 @@ restorePursuers();
     btnB && btnB.addEventListener('click', onB, true);
   });
 
-  IZZA.on('update-post', ()=>{ if (!!window.__IZZA_CHASING_PLUGIN_ACTIVE) return; 
+  IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
 
-    const tNow = now();
-
-    // ---------- Tiered timed reinforcements ----------
-    // Only reinforce if there is an active pursuit (someone chasing) and stars > 0
-    if (pursuerCount()>0 && (api.player?.wanted|0)>0 && tNow >= suppressAllSpawnsUntil){
-      const lvl = (api.player?.wanted|0) || 0;
-
-      // ≥3★ → SWAT every 20s
-      if (lvl >= 3){
-        if (!lastSwatAt || (tNow - lastSwatAt) >= SWAT_EVERY_MS){
-lastSwatAt = tNow;
-        }
-      } else {
-        lastSwatAt = 0;
-      }
-
-      // ≥4★ → MILITARY every 10s
-      if (lvl >= 4){
-        if (!lastMilitaryAt || (tNow - lastMilitaryAt) >= MILITARY_EVERY_MS){
-lastMilitaryAt = tNow;
-        }
-      } else {
-        lastMilitaryAt = 0;
-      }
-
-      // ≥5★ → TANK every 10s (no initial hold)
-      if (lvl >= TANK_BUILD_STARS){
-        if (!nextTankAt || tNow >= nextTankAt){
+    // 5★ logic: first tank after 30s, then more every 30s while still 5★
+    if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
+      const tNow = now();
+      if (fiveStarSince && (tNow - fiveStarSince) >= TANK_BUILD_HOLD_MS){
+        if (!nextTankAt){
           spawnTank();
-          nextTankAt = tNow + TANK_EVERY_MS;
+          nextTankAt = tNow + TANK_RESPAWN_EVERY_MS;
+        }else if (tNow >= nextTankAt){
+          spawnTank();
+          nextTankAt = tNow + TANK_RESPAWN_EVERY_MS;
         }
-      } else {
-        nextTankAt = 0;
       }
-    }else{
-      // No pursuit → timers idle
-      lastSwatAt = 0;
-      lastMilitaryAt = 0;
-      nextTankAt = 0;
     }
 
     // Update tanks + rockets
@@ -624,6 +613,18 @@ lastMilitaryAt = tNow;
     if(driving && car){
       car.x=api.player.x; car.y=api.player.y;
       handleVehicularHits();
+    }
+
+    // Global reinforcements every 30s while pursued (single unit; tiered)
+    if (pursuerCount()>0 && (api.player?.wanted|0)>0){
+      const t = now();
+      if (!lastReinforceAt) lastReinforceAt = t;
+      if (t - lastReinforceAt >= REINFORCE_EVERY_MS){
+        timedReinforcement();
+        lastReinforceAt = t;
+      }
+    }else{
+      lastReinforceAt = 0;
     }
 
     // Keep stars in sync and end the hot-car session once pursuers are gone.
