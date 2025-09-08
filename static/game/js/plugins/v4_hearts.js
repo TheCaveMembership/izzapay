@@ -85,6 +85,9 @@
 
   // ---------- death / respawn ----------
   function onDeath(){
+    // Notify systems that depend on death/respawn transitions (e.g., free-drive cleanup)
+    try { if (window.IZZA && IZZA.emit) IZZA.emit('player-died'); } catch {}
+
     const keep = Math.floor(api.getCoins() / 3); // keep 1/3
     api.setCoins(keep);
     loseAllItems();
@@ -96,6 +99,10 @@
     player.facing='down'; player.moving=false; player.animTime=0;
 
     healFull();
+
+    // Signal the respawn completion so other plugins can finalize state
+    try { if (window.IZZA && IZZA.emit) IZZA.emit('player-respawn'); } catch {}
+
     toast('You were taken out! Lost items and 2/3 of your coins.', 4);
   }
 
