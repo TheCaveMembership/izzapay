@@ -267,8 +267,7 @@
         x: fromCar.x, y: fromCar.y,
         mode:'vert', dir: (Math.random()<0.5?-1:1), spd:40,
         hp:4, state:'walk', crossSide:'top',
-        // steer ejected driver toward nearest vertical sidewalk lane
-        vertX: (function(){ try{ const vx=api.vRoadX|0; const left=vx-1, right=vx+1; const cx=Math.floor(fromCar.x/api.TILE); return (Math.abs(cx-left)<=Math.abs(cx-right)?left:right); }catch(e){ return Math.floor(fromCar.x/api.TILE); } })(),
+        vertX: Math.floor(fromCar.x/api.TILE),
         blinkT:0, skin, facing:'down', moving:true
       });
     }catch{}
@@ -281,8 +280,8 @@
 
     if(m3._savedWalkSpeed==null) m3._savedWalkSpeed = api.player.speed;
     api.player.speed = CAR_SPEED;
-    IZZA.emit('crime', { kind: 'hijack' });
-toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
+
+    toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
   }
   function nearestCar(){
     let best=null, bestD=1e9;
@@ -317,9 +316,6 @@ toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
     const px = api.player.x, py = api.player.y;
     const now = performance.now();
 
-    let pedKills = 0;
-    let copKills = 0;
-
     // pedestrians
     for(let i=api.pedestrians.length-1; i>=0; i--){
       const p = api.pedestrians[i];
@@ -327,14 +323,13 @@ toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
       if(d <= CAR_HIT_RADIUS){
         api.pedestrians.splice(i,1);
         const pos = _dropPos(p.x + api.TILE/2, p.y + api.TILE/2);
-        IZZA.emit('crime', { kind: 'vehicular-ped' });
         IZZA.emit('ped-killed', {
           coins: 25,
           x: pos.x, y: pos.y,
           droppedAt: now,
           noPickupUntil: now + DROP_GRACE_MS
         });
-        pedKills++;
+        api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
       }
     }
     // cops
@@ -344,29 +339,14 @@ toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
       if(d <= CAR_HIT_RADIUS){
         api.cops.splice(i,1);
         const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
-        IZZA.emit('crime', { kind: 'vehicular-cop-kill' });
         IZZA.emit('cop-killed', {
           cop: c,
           x: pos.x, y: pos.y,
           droppedAt: now,
           noPickupUntil: now + DROP_GRACE_MS
         });
-        copKills++;
+        api.setWanted(Math.max(0, (api.player.wanted|0) - 1));
       }
-    }
-
-    // Wanted logic (batched & grace-protected)
-    if (pedKills > 0) {
-      if (!(m3._hijackGraceUntil && now < m3._hijackGraceUntil)) {
-        // at most +1★ per update frame
-        IZZA.emit('crime', { kind: 'vehicular-ped' });
-      }
-    }
-    if (copKills > 0) {
-      const next = Math.max(0, (api.player.wanted|0) - copKills);
-// if no chasers remain and stars should be 0, force a clean reset
-      if ((api.cops||[]).length === 0 && next === 0) {
-}
     }
   }
 
