@@ -6,27 +6,30 @@
   // Signal to core/other plugins to disable any internal chasing logic.
   window.__IZZA_CHASING_PLUGIN_ACTIVE = true;
 
-  // Tunables
-  const MAX_STARS = 5;
-  const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 };
-  const ZERO_LOCK_MS = 1500; // suppress phantom 1★ rebound after clear
+   // Tunables
+ const MAX_STARS = 5;
+ const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 };
+ const ZERO_LOCK_MS = 1500; // suppress phantom 1★ rebound after clear
 
-  let api=null;
-  let reinforceAt = 0;
-  let zeroLockUntil = 0;
-// ✅ Chaser speed tuning (px/sec-ish; scaled by dtSec)
-const TUNE = {
-  policeSpd: 55,
-  swatSpd:   65,
-  armySpd:   72
-};
-  // Cop stats
-  function copSpeed(kind){
-  return kind==='army' ? TUNE.armySpd
-       : kind==='swat' ? TUNE.swatSpd
-       :                 TUNE.policeSpd;
-}
-  function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
++// Chaser speed tuning (px/sec-ish; multiplied by dtSec)
++const TUNE = {
++  policeSpd: 55,
++  swatSpd:   65,
++  armySpd:   72
++};
+
+   let api=null;
+   let reinforceAt = 0;
+   let zeroLockUntil = 0;
+
+   // Cop stats
+-  function copSpeed(kind){ return kind==='army'? 0 : kind==='swat'? 0 : 0; }
++  function copSpeed(kind){
++    return kind==='army' ? TUNE.armySpd
++         : kind==='swat' ? TUNE.swatSpd
++         :                 TUNE.policeSpd;
++  }
+   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
 
   function kindForStars(stars){
     if(stars>=4) return 'army';
