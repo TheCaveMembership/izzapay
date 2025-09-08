@@ -283,7 +283,6 @@
 
     // NEW: lock to exactly 2★ on hijack and cap active chasers to 2 for a short grace period
     m3._hijackGraceUntil = performance.now() + 1200;
-    api.setWanted(2);
     while ((api.cops||[]).length > 2) api.cops.pop();
 
     toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
@@ -366,11 +365,9 @@
     }
     if (copKills > 0) {
       const next = Math.max(0, (api.player.wanted|0) - copKills);
-      api.setWanted(next);
       // if no chasers remain and stars should be 0, force a clean reset
       if ((api.cops||[]).length === 0 && next === 0) {
-        api.setWanted(0);
-      }
+        }
     }
   }
 
