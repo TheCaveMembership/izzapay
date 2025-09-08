@@ -281,9 +281,8 @@
     if(m3._savedWalkSpeed==null) m3._savedWalkSpeed = api.player.speed;
     api.player.speed = CAR_SPEED;
 
-    // NEW: lock to exactly 2★ on hijack and cap active chasers to 2 for a short grace period
-    m3._hijackGraceUntil = performance.now() + 1200;
-    while ((api.cops||[]).length > 2) api.cops.pop();
+    // NEW (chasing moved to v_chasing.js): tell the chaser plugin
+    IZZA.emit('crime', { kind: 'hijack' });
 
     toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
   }
@@ -360,14 +359,16 @@
     if (pedKills > 0) {
       if (!(m3._hijackGraceUntil && now < m3._hijackGraceUntil)) {
         // at most +1★ per update frame
-        api.setWanted(Math.min(5, (api.player.wanted|0) + 1));
+        IZZA.emit('crime', { kind: 'vehicular-ped' });
       }
     }
     if (copKills > 0) {
       const next = Math.max(0, (api.player.wanted|0) - copKills);
+      api.setWanted(next);
       // if no chasers remain and stars should be 0, force a clean reset
       if ((api.cops||[]).length === 0 && next === 0) {
-        }
+        api.setWanted(0);
+      }
     }
   }
 
