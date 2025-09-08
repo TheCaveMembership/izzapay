@@ -281,13 +281,8 @@
 
     if(m3._savedWalkSpeed==null) m3._savedWalkSpeed = api.player.speed;
     api.player.speed = CAR_SPEED;
-
-    // NEW (chasing moved to v_chasing.js): tell the chaser plugin
     IZZA.emit('crime', { kind: 'hijack' });
-
-    // Notify chasing system
-    try{ IZZA.emit('crime', { kind: 'hijack' }); }catch{}
-    toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
+toast(`You hijacked a ${hijackKind}! Drive to the glowing edge.`);
   }
   function nearestCar(){
     let best=null, bestD=1e9;
@@ -299,7 +294,7 @@
   }
   function nearStart(){
     const {gx,gy}=playerGrid();
-    return (Math.Math.abs(gx-m3.gx)+Math.Math.abs(gy-m3.gy))<=1;
+    return (Math.abs(gx-m3.gx)+Math.abs(gy-m3.gy))<=1;
   }
   function onB(e){
     if(localStorage.getItem(M2_KEY)!=='done') return;
@@ -369,11 +364,9 @@
     }
     if (copKills > 0) {
       const next = Math.max(0, (api.player.wanted|0) - copKills);
-      api.setWanted(next);
-      // if no chasers remain and stars should be 0, force a clean reset
+// if no chasers remain and stars should be 0, force a clean reset
       if ((api.cops||[]).length === 0 && next === 0) {
-        api.setWanted(0);
-      }
+}
     }
   }
 
