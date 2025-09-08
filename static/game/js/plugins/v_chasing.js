@@ -1,6 +1,10 @@
 // /static/game/js/plugins/v_chasing.js
 (function(){
-  const BUILD = 'v1.0-chasing-plugin';
+  // Prevent double-binding if this plugin hot-reloads
+  if (window.__IZZA_CHASING_BOUND) return;
+  window.__IZZA_CHASING_BOUND = true;
+
+  const BUILD = 'v1.1-chasing-plugin';
   console.log('[IZZA CHASING]', BUILD);
 
   // Signal to core/other plugins to disable any internal chasing logic.
@@ -10,7 +14,7 @@
   const MAX_STARS = 5;
   const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 };
   const ZERO_LOCK_MS = 1500;       // suppress phantom 1★ rebound after clear
-  const SPAWN_GRACE_MS = 250;      // grace to let maintainCops() spawn before we clear stars
+  const SPAWN_GRACE_MS = 300;      // grace to let maintainCops() spawn before we clear stars
 
   // Chaser speed tuning (px/sec-ish; multiplied by dtSec)
   const TUNE = {
@@ -23,6 +27,11 @@
   let reinforceAt = 0;
   let zeroLockUntil = 0;
   let lastWantedChangeAt = 0;
+
+  // --- helpers ---------------------------------------------------------------
+  function ensureArrays(){
+    api.cops = api.cops || [];
+  }
 
   // Cop stats
   function copSpeed(kind){
@@ -39,6 +48,7 @@
   }
 
   function spawnCop(kind){
+    ensureArrays();
     // spawn at map edge corners
     const left = Math.random()<0.5;
     const top  = Math.random()<0.5;
@@ -53,6 +63,8 @@
   }
 
   function maintainCops(){
+    ensureArrays();
+
     // Keep number of active cops equal to current stars
     const target = api.player.wanted|0;
     if (target<=0){
@@ -90,6 +102,7 @@
     const stars = api.player.wanted|0;
 
     // If there are no chasers but stars > 0, allow a short grace for spawns before clearing.
+    ensureArrays();
     if(!api.cops.length){
       if(stars!==0){
         const now = performance.now();
@@ -129,15 +142,18 @@
     }
   }
 
-  // --- Event wiring ---
+  // --- Event wiring ----------------------------------------------------------
   IZZA.on('ready', (a)=>{
     api = a;
     // expose unlocked rect if not provided (compat)
     if(!api.unlocked){
       api.unlocked = api.unlocked || { x0:18, y0:18, x1:72, y1:42 };
     }
+    ensureArrays();
+
     // If core started with any cops, clear them so we are authoritative
     api.cops.length = 0;
+
     // If there are existing stars, sync chasers to that count
     maintainCops();
     console.log('[CHASING] ready; stars=', api.player.wanted);
@@ -152,6 +168,7 @@
   // Normalize cop kills from anywhere
   IZZA.on('cop-killed', ({cop})=>{
     if(!api) return;
+    ensureArrays();
     // Remove reference if still present (defensive)
     const i = api.cops.indexOf(cop);
     if(i>=0) api.cops.splice(i,1);
@@ -167,7 +184,7 @@
     }
   });
 
-  // Optional: respond to crimes emitted by other modules (vehicle hijack, vehicular hits, etc.)
+  // Respond to crimes emitted by other modules (vehicle hijack, vehicular hits, etc.)
   IZZA.on('crime', (evt)=>{
     if(!api || !evt || !evt.kind) return;
 
@@ -215,6 +232,7 @@
       reinforceAt = 0;
       zeroLockUntil = 0;
       lastWantedChangeAt = performance.now();
+      ensureArrays();
     });
   });
 })();
