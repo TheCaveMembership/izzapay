@@ -168,15 +168,29 @@
       lastMilitaryAt = 0;
       nextTankAt = 0;
       destroyAllTanks();
+      // Clear any guard/snapshot so stars won't bounce back after final pursuer dies
+      pursuerSnap = null;
+      guardUntil = 0;
+      guardWanted = 0;
+      spawnLockUntil = 0;
+      suppressAllSpawnsUntil = 0;
+
     }
   }
 
   // Guard against unwanted star wipes during transitions
   IZZA.on?.('wanted-changed', ()=>{
     if (!api) return;
-    // Allow a clean reset when all pursuers are gone
-    if (((api.player?.wanted|0)===0) && (pursuerCount()===0)) { disarmGuard(); return; }
-    if (now() <= guardUntil){
+    
+    // If there are no pursuers left, drop guards/snapshots so wanted can fall to 0 cleanly
+    try {
+      const pc = pursuerCount();
+      if (pc === 0) { guardUntil = 0; guardWanted = 0; pursuerSnap = null; }
+    } catch {}
+
+    // Apply guard only when there are still pursuers
+    const hasPursuit = (()=>{ try{return pursuerCount()>0;}catch{return false;} })();
+    if (hasPursuit && now() <= guardUntil){
       if ((api.player.wanted|0) < guardWanted){
         api.setWanted(guardWanted);
       }
@@ -186,6 +200,10 @@
         restorePursuers();
       }, 0);
     }
+
+    // If stars already hit 0, ensure guards are cleared permanently
+    if ((api.player?.wanted|0) === 0){ guardUntil = 0; guardWanted = 0; pursuerSnap = null; destroyAllTanks(); }
+
     // When dropping below 5★, stop tank timer & clear tanks
     if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
       // keep timer running; no hold required in this build
@@ -286,7 +304,7 @@
     lastCarCrimeAt = now();
     hijackTag = hijackTag || ('hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
     api.setWanted(Math.min(MAX_WANTED, (api.player.wanted|0) + 1));
-    if ( ((api.player?.wanted|0) <= 1) && ((api.cops?.length|0) < 1) ) spawnCopNearPlayer('police'); // exactly one
+    spawnCopNearPlayer('police'); // exactly one
 
     armGuard('enter-traffic');
   }
