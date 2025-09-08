@@ -16,7 +16,7 @@
   let zeroLockUntil = 0;
 
   // Cop stats
-  function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
+  function copSpeed(kind){ return kind==='army'? 0 : kind==='swat'? 0 : 0; }
   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
 
   function kindForStars(stars){
