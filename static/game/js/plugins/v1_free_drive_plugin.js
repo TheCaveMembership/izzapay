@@ -113,7 +113,7 @@
     const isCarCrime = (reason==='enter-traffic'); // hijack only
     guardWanted = (api.player?.wanted|0) || 0;
 
-    // ⬇️ CHANGE: Do NOT bump stars on enter-parked, even if hijack was recent
+    // Do NOT bump stars on enter-parked, even if hijack was recent
     if (isCarCrime) {
       guardWanted = Math.max(guardWanted, 1);
     }
@@ -169,7 +169,7 @@
       if((api.player.wanted|0) < 1) api.setWanted(1);
     }else{
       if(hijackTag) hijackTag = null;
-      // ⬇️ CHANGE: fully cool down — forget the recent-hijack window
+      // fully cool down — forget the recent-hijack window
       lastCarCrimeAt = 0;
 
       if((api.player.wanted|0) !== 0) api.setWanted(0);
@@ -320,7 +320,7 @@
     const kind = (car && car.kind) || 'sedan';
     const p = { x:px, y:py, kind, timeoutId:null };
 
-    // ⬇️ CHANGE: only keep “hot” tag if you STILL have heat right now
+    // only keep “hot” tag if you STILL have heat right now
     if ((api.player.wanted|0) > 0 || pursuerCount() > 0) {
       if(hijackTag) p.hijackTag = hijackTag;
     }
@@ -542,9 +542,15 @@
       nextTankAt = 0;
       lastReinforceAt = 0;
 
-      // 🔧 Ensure no residual heat/snapshots can revive stars or units on respawn
+      // Ensure no residual heat/snapshots can revive stars or units on respawn
       lastCarCrimeAt = 0;     // forget the recent hijack window entirely
       pursuerSnap   = null;   // drop any saved pursuer state that could be restored
+
+      // ✅ Force the player OUT of the vehicle on death/respawn
+      driving = false;
+      car = null;
+      if (api?.player && savedWalk != null) { api.player.speed = savedWalk; }
+      savedWalk = null;
 
       // Drop all guards and block any spawn attempts for a short window
       guardUntil = 0; guardWanted = 0;
