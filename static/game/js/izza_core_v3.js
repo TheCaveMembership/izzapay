@@ -996,63 +996,88 @@ window.addEventListener('izza-bank-changed', ()=>{
   function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
   function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
   function spawnCop(kind){
-    const left = Math.random()<0.5;
-    const top  = Math.random()<0.5;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const gy = top  ? unlocked.y0 : unlocked.y1;
-    const now = performance.now();
-    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000, facing:'down' });
-  }
+  const left = Math.random()<0.5;
+  const top  = Math.random()<0.5;
+  const gx = left ? unlocked.x0 : unlocked.x1;
+  const gy = top  ? unlocked.y0 : unlocked.y1;
+  const now = performance.now();
+  cops.push({
+    x: gx*TILE, y: gy*TILE,
+    spd: copSpeed(kind), hp: copHP(kind), kind,
+    reinforceAt: now + _reinforceIntervalFor(player.wanted|0),
+    facing:'down'
+  });
+}
+  function _reinforceIntervalFor(level){
+  if(level>=4) return 10000;   // 10s at 4★ and 5★
+  if(level>=3) return 20000;   // 20s at 3★
+  return 30000;                // fallback (should rarely be used)
+}
   function maintainCops(){
-    const needed = player.wanted;
-    let cur = cops.length;
-    while(cur < needed){
-      let kind='police';
-      if(needed>=5) kind='army';
-      else if(needed>=4) kind='swat';
-      spawnCop(kind); cur++;
-    }
-    while(cur > needed){ cops.pop(); cur--; }
+  const needed = player.wanted;
+  let cur = cops.length;
+  while(cur < needed){
+    let kind='police';
+    if(needed>=4)      kind='army';   // military at 4★+
+    else if(needed>=3) kind='swat';   // swat at 3★
+    spawnCop(kind); cur++;
   }
+  while(cur > needed){ cops.pop(); cur--; }
+}
   function updateCops(dtSec, nowMs){
-    for(const c of cops){
-      const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
-      c.x += (dx/m) * c.spd * dtSec;
-      c.y += (dy/m) * c.spd * dtSec;
-      if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
-      else                              c.facing = dx < 0 ? 'left' : 'right';
-      if(nowMs >= c.reinforceAt && player.wanted < 5){
-        setWanted(player.wanted + 1);
-        maintainCops();
-        c.reinforceAt = nowMs + 30000;
-      }
+  // If all chasers are gone, hard reset to 0 stars (crime loop resets).
+  if(cops.length===0 && player.wanted!==0){
+    setWanted(0);
+  }
+
+  for(const c of cops){
+    const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
+    c.x += (dx/m) * c.spd * dtSec;
+    c.y += (dy/m) * c.spd * dtSec;
+    if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
+    else                              c.facing = dx < 0 ? 'left' : 'right';
+
+    // Tiered reinforcement toward 5★
+    if(nowMs >= c.reinforceAt && player.wanted < 5){
+      const curLevel  = player.wanted|0;
+      const nextLevel = Math.min(5, curLevel + 1);
+      setWanted(nextLevel);
+      maintainCops();
+      c.reinforceAt = nowMs + _reinforceIntervalFor(nextLevel);
     }
   }
+}
   function damageCop(c, amount){
-    c.hp -= amount;
-    if(c.hp <= 0){
-      const i=cops.indexOf(c);
-      if(i>=0) cops.splice(i,1);
+  c.hp -= amount;
+  if(c.hp <= 0){
+    const i=cops.indexOf(c);
+    if(i>=0) cops.splice(i,1);
+
+    if(cops.length===0){
+      // Last chaser down → tanks (if any, in other module) should clear and stars drop to 0.
+      setWanted(0);
+    }else{
       setWanted(player.wanted - 1);
       maintainCops();
+    }
 
-      const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
-      const pos = makeDropPos(centerX, centerY);
-      const tnow = performance.now();
-      IZZA.emit('cop-killed', {
-        cop: c,
-        x: pos.x, y: pos.y,
-        droppedAt: tnow,
-        noPickupUntil: tnow + DROP_GRACE_MS
-      });
+    const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
+    const pos = makeDropPos(centerX, centerY);
+    const tnow = performance.now();
+    IZZA.emit('cop-killed', {
+      cop: c,
+      x: pos.x, y: pos.y,
+      droppedAt: tnow,
+      noPickupUntil: tnow + DROP_GRACE_MS
+    });
 
-      if(tutorial.active && tutorial.step==='hitCop'){
-        tutorial.active=false; tutorial.step='';
-        setMission1Done();
-        showHint('Tutorial complete! Shops now carry starter items.', 4);
-      }
+    if(tutorial.active && tutorial.step==='hitCop'){
+      tutorial.active=false; tutorial.step='';
+      setMission1Done();
+      showHint('Tutorial complete! Shops now carry starter items.', 4);
     }
   }
+}
 
   // ===== Combat (kept) =====
   function hitTest(ax,ay, bx,by, radius=20){ return Math.hypot(ax-bx, ay-by) <= radius; }
