@@ -73,7 +73,9 @@
   function pursuerCount(){
     try{
       let n=0;
-      PURSUER_KEYS.forEach(k=>{ n += (api[k]&&api[k].length)|0; });
+      PURSUER_KEYS.forEach(k=>{
+        n += (api[k]&&api[k].length)|0;
+      });
       n += tanks.length;
       return n|0;
     }catch{ return tanks.length|0; }
@@ -141,9 +143,9 @@
     if(kind==='swat'){
       api.swat = api.swat || [];
       spawnOne(api.swat, { x:px+dx, y:py+dy, spd:55, hp:5, state:'chase', facing:'down' });
-    }else if(kind==='military'){
-      api.military = api.military || [];
-      spawnOne(api.military, { x:px+dx, y:py+dy, spd:58, hp:6, state:'chase', facing:'down' });
+    }else if(kind==='army'){ // was 'military'
+      api.army = api.army || [];
+      spawnOne(api.army, { x:px+dx, y:py+dy, spd:58, hp:6, state:'chase', facing:'down' });
     }else{ // police
       api.cops = api.cops || [];
       spawnOne(api.cops, { x:px+dx, y:py+dy, spd:45, hp:3, state:'chase', facing:'down' });
@@ -156,7 +158,7 @@
     if (lvl<=0) return;
     if (now() < suppressAllSpawnsUntil) return;
 
-    if (lvl >= 5)      spawnCopNearPlayer('military');
+    if (lvl >= 5)      spawnCopNearPlayer('army');   // was 'military'
     else if (lvl >= 4) spawnCopNearPlayer('swat');
     else               spawnCopNearPlayer('police');
   }
@@ -410,9 +412,9 @@
     const sy = py + (Math.random()<0.5?-off:off);
     tanks.push({ x:sx, y:sy, hp:TANK_HP, parts:TANK_PARTS.slice(), fireCd:0 });
     // optional escort to help sell the formation
-    api.military = api.military || [];
+    api.army = api.army || []; // was api.military
     for(let i=0;i<2;i++){
-      api.military.push({ x:sx+(Math.random()*50-25), y:sy+(Math.random()*50-25), spd:80, hp:5, state:'escort' });
+      api.army.push({ x:sx+(Math.random()*50-25), y:sy+(Math.random()*50-25), spd:80, hp:5, state:'escort' });
     }
     IZZA.emit?.('toast',{text:'⚠️ Tank deployed!'});
   }
