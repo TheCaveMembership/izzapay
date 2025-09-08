@@ -992,68 +992,6 @@ window.addEventListener('izza-bank-changed', ()=>{
     if(c.x > unlocked.x1*TILE) c.x = unlocked.x0*TILE;
   }
 
-  // ===== Cops & wanted =====
-  function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
-  function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
-  function spawnCop(kind){
-    const left = Math.random()<0.5;
-    const top  = Math.random()<0.5;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const gy = top  ? unlocked.y0 : unlocked.y1;
-    const now = performance.now();
-    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000, facing:'down' });
-  }
-  function maintainCops(){
-    const needed = player.wanted;
-    let cur = cops.length;
-    while(cur < needed){
-      let kind='police';
-      if(needed>=5) kind='army';
-      else if(needed>=4) kind='swat';
-      spawnCop(kind); cur++;
-    }
-    while(cur > needed){ cops.pop(); cur--; }
-  }
-  function updateCops(dtSec, nowMs){
-    for(const c of cops){
-      const dx = player.x - c.x, dy = player.y - c.y, m=Math.hypot(dx,dy)||1;
-      c.x += (dx/m) * c.spd * dtSec;
-      c.y += (dy/m) * c.spd * dtSec;
-      if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
-      else                              c.facing = dx < 0 ? 'left' : 'right';
-      if(nowMs >= c.reinforceAt && player.wanted < 5){
-        setWanted(player.wanted + 1);
-        maintainCops();
-        c.reinforceAt = nowMs + 30000;
-      }
-    }
-  }
-  function damageCop(c, amount){
-    c.hp -= amount;
-    if(c.hp <= 0){
-      const i=cops.indexOf(c);
-      if(i>=0) cops.splice(i,1);
-      setWanted(player.wanted - 1);
-      maintainCops();
-
-      const centerX = c.x + TILE/2, centerY = c.y + TILE/2;
-      const pos = makeDropPos(centerX, centerY);
-      const tnow = performance.now();
-      IZZA.emit('cop-killed', {
-        cop: c,
-        x: pos.x, y: pos.y,
-        droppedAt: tnow,
-        noPickupUntil: tnow + DROP_GRACE_MS
-      });
-
-      if(tutorial.active && tutorial.step==='hitCop'){
-        tutorial.active=false; tutorial.step='';
-        setMission1Done();
-        showHint('Tutorial complete! Shops now carry starter items.', 4);
-      }
-    }
-  }
-
   // ===== Combat (kept) =====
   function hitTest(ax,ay, bx,by, radius=20){ return Math.hypot(ax-bx, ay-by) <= radius; }
   function weaponDamage(){
@@ -1307,9 +1245,7 @@ window.addEventListener('izza-bank-changed', ()=>{
     if(cars.length<3 && Math.random()<0.02) spawnCar();
     pedestrians.forEach(p=>updatePed(p, dtSec));
     cars.forEach(c=>updateCar(c, dtSec));
-
-    // Cops
-    updateCops(dtSec, performance.now());
+   
 
     IZZA.emit('update-post', { dtSec, now: performance.now() });
   }
