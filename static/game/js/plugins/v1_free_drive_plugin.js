@@ -250,8 +250,8 @@
     hijackTag = hijackTag || ('hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
     IZZA.emit('crime', {kind:'hijack'});
 
-    // Guard transitions without touching stars
-    armGuard('enter-parked'); // no wanted floor
+    // IMPORTANT: allow spawns immediately during hijack transition
+    armGuard('enter-traffic'); // <-- was 'enter-parked'; this was blocking spawns
   }
 
   function startDrivingFromParked(entry){
