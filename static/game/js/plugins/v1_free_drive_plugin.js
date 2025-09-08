@@ -539,8 +539,8 @@
       destroyAllTanks();
       if(api?.player){ api.setWanted(0); }
 
-      // EXTRA HARD RESET: replace arrays to guarantee pursuerCount() == 0
-      api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
+      // (removed) DO NOT replace arrays; keep shared references intact
+      // api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
 
       hijackTag = null;
       fiveStarSince = 0;
@@ -566,7 +566,8 @@
       setTimeout(()=>{
         try{
           PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
-          api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
+          // (removed) DO NOT replace arrays here either
+          // api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
           destroyAllTanks();
           if(api?.player){ api.setWanted(0); }
         }catch{}
