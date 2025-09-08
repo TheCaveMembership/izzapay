@@ -609,8 +609,7 @@
   ];
 
   function desiredCopCount(){
-    if (player.wanted <= 0) return 0;
-    return Math.min(8, 1 + player.wanted * 2);
+    return 0; // patched: v2 should not drive cop count
   }
 
   function spawnCopAt(sp){
@@ -669,13 +668,8 @@
   }
 
   function drawCops(){
-    for(const c of cops){
-      const dx = w2sX(c.x), dy = w2sY(c.y);
-      if (policeImg){
-        // animate horizontally if multiple cols
-        const frame = policeCols>1 ? Math.floor(c.anim*8)%policeCols : 0;
-        ctx.drawImage(policeImg, frame*POLICE_FRAME_W, 0, POLICE_FRAME_W, POLICE_FRAME_H, dx, dy, DRAW, DRAW);
-      } else {
+    return; // patched: v2 should not draw cops
+  } else {
         // fallback box + hat
         ctx.fillStyle = '#0d2b4d'; // navy
         ctx.fillRect(dx, dy, DRAW, DRAW);
