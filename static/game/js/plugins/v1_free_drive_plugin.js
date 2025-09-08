@@ -142,13 +142,13 @@
     const dy = (Math.random()<0.5?-1:1)*off;
     if(kind==='swat'){
       api.swat = api.swat || [];
-      spawnOne(api.swat, { x:px+dx, y:py+dy, spd:55, hp:5, state:'chase', facing:'down' });
+      spawnOne(api.swat, { x:px+dx, y:py+dy, spd:0, hp:5, state:'chase', facing:'down' });
     }else if(kind==='army'){ // was 'military'
       api.army = api.army || [];
-      spawnOne(api.army, { x:px+dx, y:py+dy, spd:58, hp:6, state:'chase', facing:'down' });
+      spawnOne(api.army, { x:px+dx, y:py+dy, spd:0, hp:6, state:'chase', facing:'down' });
     }else{ // police
       api.cops = api.cops || [];
-      spawnOne(api.cops, { x:px+dx, y:py+dy, spd:45, hp:3, state:'chase', facing:'down' });
+      spawnOne(api.cops, { x:px+dx, y:py+dy, spd:0, hp:3, state:'chase', facing:'down' });
     }
   }
 
