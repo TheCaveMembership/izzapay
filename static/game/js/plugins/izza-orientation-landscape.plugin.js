@@ -1,5 +1,5 @@
 /* izza-orientation-landscape.plugin.js
-   One rotated+scaled overlay; no other files touched. */
+   One rotated+scaled overlay; touch nothing else. */
 (function () {
   const BASE_W = 960, BASE_H = 540;     // canvas intrinsic
   const BODY   = document.body;
@@ -12,13 +12,18 @@
 
   if (!card || !canvas || !hud || !stick || !ctrls) return;
 
+  // --- FIRE tile offsets (from screen center inside the stage) ---
+  const TILE = 60;           // 960×540 => 16×9 grid → 60px tiles
+  const FIRE_TILES_RIGHT = 7;
+  const FIRE_TILES_DOWN  = 1;
+
   // ---------- CSS ----------
   (function injectCSS(){
     if (document.getElementById('izzaLandscapeCSS')) return;
     const css = `
       body[data-fakeland="1"]{ overflow:hidden; background:#0b0f17; }
 
-      /* Rotated stage that holds the play layer */
+      /* The single rotated stage that holds the play layer */
       #izzaLandStage{
         position:fixed; left:50%; top:50%;
         width:${BASE_W}px; height:${BASE_H}px;
@@ -27,41 +32,64 @@
       }
       #izzaLandStage > *{ pointer-events:auto; }
 
+      /* keep canvas intrinsic */
       #izzaLandStage #game{ width:${BASE_W}px !important; height:${BASE_H}px !important; display:block; }
 
-      /* HUD inside stage */
-      #izzaLandStage .hud{ position:absolute; left:12px; right:12px; top:8px; }
+      /* HUD spans the top inside the stage */
+      #izzaLandStage .hud{
+        position:absolute; left:12px; right:12px; top:8px;
+      }
 
-      /* A/B/I/Map row (you already nailed this) */
+      /* A/B/I/Map row (already correct) */
       #izzaLandStage .controls{
         position:absolute; right:14px; bottom:14px;
         display:flex; gap:10px;
       }
 
-      /* Joystick bottom-left — IMPORTANT: no rotation (fixes axis mapping) */
+      /* Joystick bottom-left — bigger & keep upright so axes are correct */
       #izzaLandStage #stick{
         position:absolute; left:14px; bottom:14px;
-        width:120px; height:120px;
-        transform:none; /* no -90deg */
+        width:150px; height:150px;          /* bigger */
+        transform:none;                      /* DO NOT rotate: fixes axis */
+      }
+      /* center the nub in the bigger base */
+      #izzaLandStage #stick .nub{
+        left:50% !important; top:50% !important;
+        transform:translate(-50%,-50%) !important;
+        width:44px !important; height:44px !important;
       }
 
       /* Minimap */
       #izzaLandStage #miniWrap{ position:absolute; right:12px; top:74px; display:block; }
 
-      /* Chat bar docked along the bottom, upright text */
+      /* Chat bar docked along the bottom (upright text) */
       #izzaLandStage #chatBar{
         position:absolute !important; left:12px; right:12px; bottom:8px;
         transform:rotate(-90deg); transform-origin:left bottom;
       }
 
-      /* Hearts + bell live inside stage when active */
+      /* Hearts inside stage */
       #izzaLandStage #heartsHud{ position:absolute !important; right:14px; top:46px; }
 
-      /* We’ll move bell + badge + dropdown into stage coords via JS */
+      /* MP bell/badge/dropdown inside stage coords */
       #izzaLandStage #mpNotifBell{ position:absolute !important; right:14px; top:12px; }
       #izzaLandStage #mpNotifBadge{ position:absolute !important; right:6px; top:4px; }
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important; right:10px; top:44px; max-height:300px;
+      }
+
+      /* Friends toggle sits above the ABIM row at bottom-right */
+      #izzaLandStage #mpFriendsToggleGlobal{
+        position:absolute !important; right:14px; bottom:72px;   /* <- moved */
+      }
+
+      /* FIRE button — we position it in JS by tile offsets */
+      #izzaLandStage .btn-fire, 
+      #izzaLandStage #btnFire, 
+      #izzaLandStage #fireBtn, 
+      #izzaLandStage button[data-role="fire"],
+      #izzaLandStage .fire{
+        position:absolute !important;
       }
 
       /* CTA */
@@ -77,7 +105,6 @@
   const ph = {};
   const keepPlace = (el, key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key], el); stage.appendChild(el); };
 
-  // optional helpers
   const byId = (id)=> document.getElementById(id);
 
   function adopt(){
@@ -88,20 +115,16 @@
     if (mini) keepPlace(mini,'mini');
 
     // chat bar from area-chat plugin
-    const chatBar = byId('chatBar');           /* from v1_area_chat.plugin.js */    //  [oai_citation:3‡v1_area_chat.plugin.js](file-service://file-BXpEEHCaHN7DxGBjCF6Eba)
-    if (chatBar){ keepPlace(chatBar,'chat'); }
+    const chatBar = byId('chatBar'); if (chatBar) keepPlace(chatBar,'chat');
 
     // hearts HUD from hearts plugin
-    const hearts = byId('heartsHud');          /* created by v4_hearts.js */        //  [oai_citation:4‡v4_hearts.js](file-service://file-CZeVJRvprWh9KqNHS4N8yx)
-    if (hearts){ keepPlace(hearts,'hearts'); }
+    const hearts = byId('heartsHud'); if (hearts) keepPlace(hearts,'hearts');
 
-    // MP bell overlays (if present)
-    const bell   = byId('mpNotifBell');
-    const badge  = byId('mpNotifBadge');
-    const drop   = byId('mpNotifDropdown');
-    if (bell)  keepPlace(bell,'bell');
-    if (badge) keepPlace(badge,'badge');
-    if (drop)  keepPlace(drop,'drop');
+    // MP overlays (bell + friends button + dropdown/badge)
+    const bell   = byId('mpNotifBell');      if (bell)  keepPlace(bell,'bell');
+    const badge  = byId('mpNotifBadge');     if (badge) keepPlace(badge,'badge');
+    const drop   = byId('mpNotifDropdown');  if (drop)  keepPlace(drop,'drop');
+    const friend = byId('mpFriendsToggleGlobal'); if (friend) keepPlace(friend,'friends');
 
     document.body.appendChild(stage);
   }
@@ -110,18 +133,36 @@
     const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node, ph[key]); ph[key].remove(); }catch{} };
     putBack(card,'card'); putBack(hud,'hud'); putBack(stick,'stick'); putBack(ctrls,'ctrls');
     if (mini) putBack(mini,'mini');
-
-    const chat = byId('chatBar');   if (chat)  putBack(chat,'chat');
+    const chat = byId('chatBar');     if (chat)  putBack(chat,'chat');
     const hearts = byId('heartsHud'); if (hearts) putBack(hearts,'hearts');
-
-    const bell=byId('mpNotifBell'); if (bell)  putBack(bell,'bell');
+    const bell=byId('mpNotifBell');   if (bell)  putBack(bell,'bell');
     const badge=byId('mpNotifBadge'); if (badge) putBack(badge,'badge');
     const drop=byId('mpNotifDropdown'); if (drop) putBack(drop,'drop');
-
+    const friend=byId('mpFriendsToggleGlobal'); if (friend) putBack(friend,'friends');
     try{ stage.remove(); }catch{}
   }
 
-  // ---------- layout ----------
+  // ---------- layout (stage, fire, etc.) ----------
+  function placeFire(){
+    const fire =
+      stage.querySelector('#btnFire') ||
+      stage.querySelector('#fireBtn') ||
+      stage.querySelector('.btn-fire') ||
+      stage.querySelector('button[data-role="fire"]') ||
+      stage.querySelector('.fire');
+
+    if (!fire) return;
+
+    const cx = (BASE_W / 2) + (FIRE_TILES_RIGHT * TILE);
+    const cy = (BASE_H / 2) + (FIRE_TILES_DOWN  * TILE);
+
+    const w = fire.offsetWidth  || 72;
+    const h = fire.offsetHeight || 72;
+
+    fire.style.left = (cx - w/2) + 'px';
+    fire.style.top  = (cy - h/2) + 'px';
+  }
+
   function applyLayout(){
     const vw=innerWidth, vh=innerHeight;
     const scale = Math.min(vw/BASE_H, vh/BASE_W);
@@ -130,6 +171,9 @@
     // keep canvas intrinsic
     canvas.style.width = BASE_W+'px';
     canvas.style.height= BASE_H+'px';
+
+    // FIRE alignment after scale settles
+    requestAnimationFrame(placeFire);
   }
 
   // ---------- enter/exit ----------
@@ -151,7 +195,7 @@
   cta.textContent='Rotate to landscape for best play'; document.body.appendChild(cta);
   cta.addEventListener('click', enter, {passive:true});
 
-  // ---------- keep scale right ----------
+  // ---------- keep scale right; modals stay upright (z-index > 15) ----------
   const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); };
   addEventListener('resize', onResize, {passive:true});
   addEventListener('orientationchange', ()=> setTimeout(onResize,120), {passive:true});
