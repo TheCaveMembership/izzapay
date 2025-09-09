@@ -1,4 +1,4 @@
-/* izza-orientation-landscape.plugin.js — rotated overlay + small Full/Exit */
+/* izza-orientation-landscape.plugin.js — rotated overlay + small Full/Exit + joystick delta fix + hide chat in Full */
 (function(){
   const BASE_W=960, BASE_H=540, TILE=60;
   const BODY=document.body;
@@ -32,11 +32,11 @@
       #izzaLandStage .hud{position:absolute;left:12px;right:12px;top:8px;}
       #izzaLandStage .controls{position:absolute;right:14px;bottom:14px;display:flex;gap:10px;}
 
-      /* Joystick — larger, nudged right.  ⟵ now -90deg per request */
+      /* Joystick — larger, nudged right (visual only) */
       #izzaLandStage #stick{
         position:absolute;left:48px;bottom:24px;
         width:180px;height:180px;
-        transform:rotate(-90deg);
+        transform:none; /* visual; input is corrected in code */
         transform-origin:center center;
       }
       #izzaLandStage #stick .base{border-radius:90px!important;}
@@ -45,10 +45,10 @@
         width:48px!important;height:48px!important;border-radius:24px!important;
       }
 
-      /* Minimap preview position (we’ll hide it on enter) */
+      /* Minimap preview position (closed on enter) */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row — bottom, upright, forced docking */
+      /* Chat row (we'll HIDE in Full to avoid OS keyboard issues) */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute !important;
@@ -57,6 +57,8 @@
         transform:rotate(-90deg) !important;
         transform-origin:left bottom !important;
       }
+      body[data-fakeland="1"] #chatBar,
+      body[data-fakeland="1"] .land-chat-dock{ display:none !important; } /* <- hide while in Full */
 
       /* Hearts + bell/badge/dropdown + friends (upright inside stage) */
       #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
@@ -160,13 +162,13 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); adoptChatIfNeeded(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   }
 
   // observe late nodes (chat/friends/bell/fire)
   const mo=new MutationObserver(()=>{
     if(!active) return;
-    adoptChatIfNeeded();
+    const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
     ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
       const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
     });
@@ -175,14 +177,6 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   });
 
-  // super-reliable chat adopter (mutation + light polling)
-  let chatPoll=null;
-  function adoptChatIfNeeded(){
-    if(!active) return;
-    const chat=findChatDock();
-    if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-  }
-
   // keep the map closed when entering Full (both big modal + mini preview)
   function closeMapsOnEnter(){
     const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
@@ -190,8 +184,28 @@
   }
   function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
 
+  // ---------- Joystick correction (rotate applied movement by -90°) ----------
+  // Observed mapping: right→down, left→up, up→right, down→left (= +90° CCW).
+  // We correct by rotating the per-frame delta by -90°.
+  let prevX=null, prevY=null;
+  function fixJoystickDelta(){
+    if(!window.IZZA || !IZZA.api || !IZZA.api.player) return;
+    const p = IZZA.api.player;
+    if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
+    const dx = p.x - prevX, dy = p.y - prevY;
+    // rotate -90°: (x',y') = ( y, -x )
+    const fx =  dy;
+    const fy = -dx;
+    // Only apply when stick is likely in use (non-trivial delta)
+    if(Math.abs(dx)+Math.abs(dy) > 0.0001){
+      p.x = prevX + fx;
+      p.y = prevY + fy;
+    }
+    prevX = p.x; prevY = p.y;
+  }
+
   // ---------- enter / exit ----------
-  let active=false, fireTick=null;
+  let active=false, fireTick=null, joyHooked=false;
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
@@ -202,14 +216,19 @@
     try{ mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','id']}); }catch{}
 
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
-    clearInterval(chatPoll); chatPoll=setInterval(adoptChatIfNeeded, 400);   // <- ensures chat gets pulled in
+
+    // hook once into the game loop to correct joystick motion
+    if(!joyHooked && window.IZZA && IZZA.on){
+      IZZA.on('update-post', fixJoystickDelta);
+      joyHooked = true;
+    }
+    prevX=null; prevY=null; // reset baseline
   }
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
     fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
-    clearInterval(chatPoll); chatPoll=null;
     restoreMiniOnExit();
     restore();
     stage.style.transform=''; canvas.style.width=canvas.style.height='';
@@ -217,6 +236,9 @@
   }
 
   // toggle button
+  const fullBtn=document.createElement('button');
+  fullBtn.id='izzaFullToggle'; fullBtn.className='btn'; fullBtn.type='button'; fullBtn.textContent='Full';
+  document.body.appendChild(fullBtn);
   fullBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
 
   // keep scale right
