@@ -663,21 +663,6 @@ def _safe_next_path(raw):
         return None
     return raw
 
-from urllib.parse import urlparse
-
-def _safe_next_path(raw):
-    """
-    Only allow same-site relative paths, like /izza-game/create or /dashboard?tab=1.
-    Disallow absolute URLs and paths without a leading slash.
-    """
-    if not raw or not isinstance(raw, str):
-        return None
-    if not raw.startswith("/"):
-        return None
-    parsed = urlparse(raw)
-    if parsed.scheme or parsed.netloc:
-        return None
-    return raw
 
 @app.post("/auth/exchange")
 def auth_exchange():
