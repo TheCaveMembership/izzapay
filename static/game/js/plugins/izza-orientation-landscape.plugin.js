@@ -164,42 +164,76 @@
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
   // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated
+  let fixingNotif = false;
+  let fixNotifQueued = false;
   function fixNotifDropdown(){
-    const dd = byId('mpNotifDropdown');
-    if(!dd) return;
+    if(fixingNotif){ fixNotifQueued = true; return; }
+    fixingNotif = true;
 
-    // adopt into stage if needed
-    if(!stage.contains(dd) && dd.parentNode){
-      const key = 'modal:mpNotifDropdown';
-      if(!ph[key]) keep(dd, key);
+    try{
+      const dd = byId('mpNotifDropdown');
+      if(!dd){ return; }
+
+      // adopt into stage if needed
+      if(!stage.contains(dd) && dd.parentNode){
+        const key = 'modal:mpNotifDropdown';
+        if(!ph[key]) keep(dd, key);
+      }
+
+      // one-time wrap so we rotate the content, not the container
+      let wrapper = dd.querySelector(':scope > .izza-upright');
+      if(!wrapper){
+        wrapper = document.createElement('div');
+        wrapper.className = 'izza-upright';
+        // Move existing children once
+        const kids = Array.from(dd.childNodes);
+        kids.forEach(n=>wrapper.appendChild(n));
+        dd.appendChild(wrapper);
+      }
+
+      // position the container
+      dd.style.position = 'absolute';
+      dd.style.right = '72px';
+      dd.style.top = '64px';
+      dd.style.zIndex = '20';
+      dd.style.overflow = 'visible';
+
+      // Only measure when the dropdown is actually visible; otherwise skip sizing
+      const visible = dd.offsetParent !== null && getComputedStyle(dd).display !== 'none' && getComputedStyle(dd).visibility !== 'hidden';
+
+      if(visible){
+        // temporarily un-rotate to get natural size
+        const prev = wrapper.style.transform;
+        wrapper.style.transform = 'none';
+
+        const w = wrapper.scrollWidth;
+        const h = wrapper.scrollHeight;
+
+        // restore rotation
+        wrapper.style.transform = prev || 'rotate(-90deg)';
+        wrapper.style.transformOrigin = 'top right';
+
+        // fit container to rotated content (swap W/H)
+        dd.style.width = h + 'px';
+        dd.style.height = w + 'px';
+      }else{
+        // ensure rotation style is present even when hidden
+        wrapper.style.transform = wrapper.style.transform || 'rotate(-90deg)';
+        wrapper.style.transformOrigin = 'top right';
+        dd.style.width = '';
+        dd.style.height = '';
+      }
+    }catch(e){
+      // swallow to avoid breaking Full enter
+      // console.warn('[notif fix]', e);
+    }finally{
+      fixingNotif = false;
+      if(fixNotifQueued){
+        fixNotifQueued = false;
+        // debounce to next frame to avoid mutation loops
+        requestAnimationFrame(fixNotifDropdown);
+      }
     }
-
-    // one-time wrap: move existing children under an inner wrapper we can rotate
-    let wrapper = dd.querySelector(':scope > .izza-upright');
-    if(!wrapper){
-      wrapper = document.createElement('div');
-      wrapper.className = 'izza-upright';
-      while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
-      dd.appendChild(wrapper);
-    }
-
-    // Temporarily un-rotate to measure natural size, then set container w/h swapped
-    const prevTransform = wrapper.style.transform;
-    wrapper.style.transform = 'none';
-    // force layout read
-    const w = wrapper.scrollWidth;
-    const h = wrapper.scrollHeight;
-    // restore rotation
-    wrapper.style.transform = prevTransform || 'rotate(-90deg)';
-
-    // position container; size to fit rotated content
-    dd.style.position = 'absolute';
-    dd.style.right = '72px';
-    dd.style.top = '64px';
-    dd.style.width = h + 'px';   // swap W/H because inner is rotated
-    dd.style.height = w + 'px';
-    dd.style.zIndex = '20';
-    dd.style.overflow = 'visible';
   }
 
   // Collect ALL modal / popup candidates so they counter-rotate in Full
@@ -305,7 +339,7 @@
 
     // adopt any modals so they render upright (includes bell dropdown)
     adoptModals();
-    fixNotifDropdown();
+    requestAnimationFrame(fixNotifDropdown);
 
     document.body.appendChild(stage);
   }
@@ -361,7 +395,8 @@
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      fixNotifDropdown();
+      // debounce notif fix to avoid mutation loop
+      requestAnimationFrame(fixNotifDropdown);
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
