@@ -65,12 +65,15 @@
       /* In rotated Full, dropdown is inside stage, offset in from the right */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        right:72px !important;      /* was 10px */
-        top:64px !important;        /* was 56px */
+        right:72px !important;      /* positioned safely inside the game area */
+        top:64px !important;
         max-height:300px;
+        z-index:20 !important;
+      }
+      /* Counter-rotate the CONTENT of the dropdown, not the container */
+      #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
         transform-origin:top right !important;
-        z-index:20 !important;
       }
 
       #izzaLandStage #mpFriendsToggleGlobal{
@@ -159,19 +162,29 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Make sure the bell dropdown is inside the stage and counter-rotated + pinned inward
+  // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated
   function fixNotifDropdown(){
     const dd = byId('mpNotifDropdown');
     if(!dd) return;
+
+    // adopt into stage if needed
     if(!stage.contains(dd) && dd.parentNode){
       const key = 'modal:mpNotifDropdown';
       if(!ph[key]) keep(dd, key);
     }
+
+    // one-time wrap: move existing children under an inner wrapper we can rotate
+    if(!dd.querySelector(':scope > .izza-upright')){
+      const wrapper = document.createElement('div');
+      wrapper.className = 'izza-upright';
+      while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
+      dd.appendChild(wrapper);
+    }
+
+    // position container; rotation handled by the inner wrapper via CSS
     dd.style.position = 'absolute';
-    dd.style.right = '72px';      // was 10px
-    dd.style.top = '64px';        // was 56px
-    dd.style.transform = 'rotate(-90deg)';
-    dd.style.transformOrigin = 'top right';
+    dd.style.right = '72px';
+    dd.style.top = '64px';
     dd.style.zIndex = '20';
   }
 
