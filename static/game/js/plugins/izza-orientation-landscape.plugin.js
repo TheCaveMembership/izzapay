@@ -61,10 +61,25 @@
       #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
-      #izzaLandStage #mpNotifDropdown{
-        position:absolute!important;right:10px;top:44px;max-height:300px;
-        transform:rotate(-90deg)!important;transform-origin:top right!important;
+
+      /* (Surgical) Bell dropdown fix */
+      /* Normal (not rotated): ensure upright */
+      body:not([data-fakeland="1"]) #mpNotifDropdown{
+        transform:none !important; rotate:0deg !important;
       }
+      /* Rotated Full: counter-rotate and center; also nuke inner rotates */
+      #izzaLandStage #mpNotifDropdown{
+        position:absolute!important;
+        left:50% !important; top:50% !important;
+        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform-origin:center center !important;
+        z-index:20 !important;
+        max-width:80vw; width:auto;
+      }
+      #izzaLandStage #mpNotifDropdown *{
+        transform:none !important; rotate:0deg !important;
+      }
+
       #izzaLandStage #mpFriendsToggleGlobal{
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
@@ -93,7 +108,7 @@
         top:auto!important;left:auto!important;z-index:10010!important;
       }
 
-      /* ---------- POPUP ORIENTATION FIX ---------- */
+      /* ---------- POPUP ORIENTATION FIX (generic) ---------- */
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
@@ -113,7 +128,6 @@
       body:not([data-fakeland="1"]) [data-pool="hospital"],
       body:not([data-fakeland="1"]) [data-pool="trade-centre"],
       body:not([data-fakeland="1"]) [data-pool="bank"],
-      body:not([data-fakeland="1"]) #mpNotifDropdown,
       body:not([data-fakeland="1"]) #mpFriendsPopup{
         transform:none !important; rotate:0deg !important;
       }
@@ -136,7 +150,6 @@
       #izzaLandStage [data-pool="hospital"],
       #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage [data-pool="bank"],
-      #izzaLandStage #mpNotifDropdown,
       #izzaLandStage #mpFriendsPopup{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
@@ -175,6 +188,16 @@
     const txt = document.querySelector('input[placeholder="Type…"],textarea[placeholder="Type…"],input[placeholder="Type..."],textarea[placeholder="Type..."]');
     if(txt){ const row = txt.closest('#chatBar,.area-chat,.chat,.row,div'); if(row){ row.classList.add('land-chat-dock'); return row; } }
     return null;
+  }
+
+  // ----- (Surgical) helper to ensure bell dropdown is upright in Full -----
+  function uprightBellDropdown(){
+    const dd = document.getElementById('mpNotifDropdown');
+    if(!dd) return;
+    if(!stage.contains(dd)) adoptOnce(dd, 'mpNotifDropdown'); // ensure it's inside stage in Full
+    // force a layout pass so CSS transform applies after adoption
+    dd.style.willChange = 'transform';
+    requestAnimationFrame(()=>{ dd.style.willChange = ''; });
   }
 
   // ----- Full/Exit button (resilient) -----
@@ -258,6 +281,9 @@
     // adopt any modals so they render upright
     adoptModals();
 
+    // make sure bell dropdown is correct in Full
+    uprightBellDropdown();
+
     document.body.appendChild(stage);
   }
   function restore(){
@@ -297,7 +323,7 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); uprightBellDropdown(); });
   }
 
   // Observe DOM changes
@@ -313,6 +339,7 @@
 
       // late modals / popups
       adoptModals();
+      uprightBellDropdown();
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
