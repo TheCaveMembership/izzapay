@@ -11,7 +11,7 @@
   if(!card||!canvas||!hud||!stick||!ctrls) return;
 
   // FIRE placement (bigger, a touch left)
-  const FIRE_TILES_RIGHT = 6.0;     // was 7 → 6.5 → 6.0
+  const FIRE_TILES_RIGHT = 6.0;
   const FIRE_TILES_DOWN  = 1;
 
   // ---------- CSS ----------
@@ -28,15 +28,15 @@
 
       #izzaLandStage #game{width:${BASE_W}px!important;height:${BASE_H}px!important;display:block;}
 
-      /* HUD + ABIM row (you already had these good) */
+      /* HUD + ABIM row */
       #izzaLandStage .hud{position:absolute;left:12px;right:12px;top:8px;}
       #izzaLandStage .controls{position:absolute;right:14px;bottom:14px;display:flex;gap:10px;}
 
-      /* Joystick — larger, nudged right. IMPORTANT: try +90° this time. */
+      /* Joystick — larger, nudged right.  ⟵ now -90deg per request */
       #izzaLandStage #stick{
         position:absolute;left:48px;bottom:24px;
         width:180px;height:180px;
-        transform:rotate(90deg);               /* <- swapped from -90 to +90 */
+        transform:rotate(-90deg);
         transform-origin:center center;
       }
       #izzaLandStage #stick .base{border-radius:90px!important;}
@@ -48,11 +48,14 @@
       /* Minimap preview position (we’ll hide it on enter) */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row — bottom, upright */
+      /* Chat row — bottom, upright, forced docking */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
-        position:absolute!important;left:12px;right:12px;bottom:8px;
-        transform:rotate(-90deg);transform-origin:left bottom;
+        position:absolute !important;
+        left:12px !important; right:12px !important; bottom:8px !important;
+        margin:0 !important; z-index:18 !important;
+        transform:rotate(-90deg) !important;
+        transform-origin:left bottom !important;
       }
 
       /* Hearts + bell/badge/dropdown + friends (upright inside stage) */
@@ -61,14 +64,14 @@
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
       #izzaLandStage #mpNotifDropdown{
         position:absolute!important;right:10px;top:44px;max-height:300px;
-        transform:rotate(-90deg);transform-origin:top right;
+        transform:rotate(-90deg)!important;transform-origin:top right!important;
       }
       #izzaLandStage #mpFriendsToggleGlobal{
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
       #izzaLandStage #mpFriendsPopup{
         position:absolute!important;right:14px!important;bottom:116px!important;top:auto!important;left:auto!important;
-        transform:rotate(-90deg);transform-origin:right bottom;
+        transform:rotate(-90deg)!important;transform-origin:right bottom!important;
       }
 
       /* FIRE (tile-placed; scaled up) */
@@ -157,13 +160,13 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); adoptChatIfNeeded(); });
   }
 
   // observe late nodes (chat/friends/bell/fire)
   const mo=new MutationObserver(()=>{
     if(!active) return;
-    const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
+    adoptChatIfNeeded();
     ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
       const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
     });
@@ -172,14 +175,20 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   });
 
+  // super-reliable chat adopter (mutation + light polling)
+  let chatPoll=null;
+  function adoptChatIfNeeded(){
+    if(!active) return;
+    const chat=findChatDock();
+    if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
+  }
+
   // keep the map closed when entering Full (both big modal + mini preview)
   function closeMapsOnEnter(){
     const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
-    if(mini){ mini.style.display='none'; }          // hide the small preview while in Full
+    if(mini){ mini.style.display='none'; }
   }
-  function restoreMiniOnExit(){
-    if(mini){ mini.style.display=''; }              // restore whatever default was
-  }
+  function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
 
   // ---------- enter / exit ----------
   let active=false, fireTick=null;
@@ -189,22 +198,25 @@
     fullBtn.textContent='Exit';
     adopt(); applyLayout();
     closeMapsOnEnter();
+
     try{ mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','id']}); }catch{}
+
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
+    clearInterval(chatPoll); chatPoll=setInterval(adoptChatIfNeeded, 400);   // <- ensures chat gets pulled in
   }
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
     fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
+    clearInterval(chatPoll); chatPoll=null;
     restoreMiniOnExit();
     restore();
     stage.style.transform=''; canvas.style.width=canvas.style.height='';
-    // redirect as requested
     try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
   }
 
-  // toggle button (fixed)
+  // toggle button
   fullBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
 
   // keep scale right
