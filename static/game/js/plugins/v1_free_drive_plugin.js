@@ -103,7 +103,8 @@
       if (!pursuerSnap) return;
       PURSUER_KEYS.forEach(k=>{
         if (pursuerSnap[k]){
-          api[k] = [];
+          if (!api[k]) api[k] = [];
+          api[k].length = 0; // clear in place (preserve references)
           pursuerSnap[k].forEach(u=> api[k].push(Object.assign({}, u)));
         }
       });
@@ -492,12 +493,14 @@
   function clearAllPursuitAndWanted(){
     try{
       // Clear in-place
-      PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
+      PURSUER_KEYS.forEach(k=>{
+        if (!api[k]) api[k] = [];
+        api[k].length = 0;
+      });
       destroyAllTanks();
       if(api?.player){ api.setWanted(0); }
 
-      // EXTRA HARD RESET: replace arrays to guarantee pursuerCount() == 0
-      api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
+      // (Do NOT replace arrays; preserve references)
 
       hijackTag = null;
       fiveStarSince = 0;
@@ -519,11 +522,13 @@
       spawnLockUntil = now() + 1200;
       suppressAllSpawnsUntil = now() + 1500;
 
-      // Belt & suspenders: repeat clears next tick as well
+      // Belt & suspenders: repeat clears next tick as well (still in place)
       setTimeout(()=>{
         try{
-          PURSUER_KEYS.forEach(k=>{ if(api[k]) api[k].length = 0; });
-          api.cops = []; api.swat = []; api.military = []; api.army = []; api.helicopters = []; api.tanks = [];
+          PURSUER_KEYS.forEach(k=>{
+            if (!api[k]) api[k] = [];
+            api[k].length = 0;
+          });
           destroyAllTanks();
           if(api?.player){ api.setWanted(0); }
         }catch{}
