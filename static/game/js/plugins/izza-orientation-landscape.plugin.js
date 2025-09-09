@@ -1,82 +1,73 @@
-<!-- /static/game/js/plugins/izza-orientation-landscape.plugin.js -->
-(function(){
-  const BASE_W = 960, BASE_H = 540;
+<!-- /static/game/js/plugins/izza-orientation-landscape.plugin.js -->(function(){
+  const BASE_W = 960, BASE_H = 540;   // canvas logical size
   const BODY   = document.body;
+  const HUD    = document.querySelector('.hud');
   const CARD   = document.getElementById('gameCard');
   const CANVAS = document.getElementById('game');
-  const HUD    = document.querySelector('.hud');
   const STICK  = document.getElementById('stick');
   const CTRLS  = document.querySelector('.controls');
   const MINI   = document.getElementById('miniWrap');
-  if (!CARD || !CANVAS){ console.warn('[IZZA landscape] missing #gameCard/#game'); return; }
 
-  // --- state: do nothing in portrait until user taps CTA
-  let ACTIVE = false;
+  if (!HUD || !CARD || !CANVAS){ console.warn('[IZZA land] missing HUD/#gameCard/#game'); return; }
 
-  const log = (...a)=>console.log('[IZZA landscape]', ...a);
-  const vpW = ()=> (window.visualViewport?.width  || window.innerWidth);
-  const vpH = ()=> (window.visualViewport?.height || window.innerHeight);
-  const isLandscape = ()=>{
-    try{ if (screen.orientation?.type?.startsWith('landscape')) return true; }catch{}
-    try{ if (matchMedia('(orientation: landscape)').matches) return true; }catch{}
-    return vpW() > vpH();
-  };
-  const hudH = ()=> Math.ceil(HUD?.getBoundingClientRect()?.height || 0);
+  let ACTIVE = false; // we only modify layout after user taps CTA
 
-  // ---------- CSS (scoped ONLY to active landscape modes) ----------
+  // ------------------ CSS ------------------
   (function injectCSS(){
-    if (document.getElementById('izzaLandscapeCSS')) return;
+    if (document.getElementById('izzaLandCSS')) return;
     const css = `
-      /* Nothing is overridden in portrait. All rules are gated by data-* flags. */
+      /* Portrait: do not touch your normal layout */
+      /* All rules below act only after we create #izzaland-root (ACTIVE) */
 
-      /* Use full viewport and safe areas when rotated or faking */
-      body[data-orient="landscape"], body[data-fakeland="1"]{ overflow:hidden; }
-
-      /* Remove wrapper constraints so the stage can float */
-      body[data-orient="landscape"] .wrap,
-      body[data-fakeland="1"] .wrap{ max-width:none; padding:0; }
-
-      /* Card becomes our full-viewport host only in landscape modes */
-      body[data-orient="landscape"] #gameCard,
-      body[data-fakeland="1"] #gameCard{
-        position:fixed; inset:0; background:transparent; border:0; padding:0; margin:0; border-radius:0; z-index:1;
+      #izzaland-root{
+        position:fixed; inset:0; z-index:9990;    /* above game chrome */
+        transform-origin: top left;               /* rotate from top-left */
+        pointer-events:auto;
+      }
+      #izzaland-layout{
+        /* "Landscape logical canvas": width = game width, height = HUD + game + dock */
+        display:flex; flex-direction:column;
+        width: var(--land-w, 960px);
+        height: var(--land-h, 640px);
+        background: transparent;
       }
 
-      /* We control the canvas size ONLY in landscape modes */
-      body[data-orient="landscape"] #game,
-      body[data-fakeland="1"] #game{
-        display:block; background:#000; image-rendering:pixelated;
-        width:${BASE_W}px !important; height:${BASE_H}px !important;  /* portrait keeps your 100%/auto */
-        transform-origin: top left; border-radius:0 !important;
+      /* Slots */
+      #izzaland-hud{ flex:0 0 auto; }
+      #izzaland-stage{
+        flex:0 0 auto;
+        display:flex; align-items:center; justify-content:center;
+        height: ${BASE_H}px;
+        background: transparent;
       }
-
-      /* HUD pinned at the top in landscape, unchanged in portrait */
-      body[data-orient="landscape"] .hud,
-      body[data-fakeland="1"] .hud{
-        position:fixed; left:0; right:0; top:0; z-index:7;
-      }
-
-      /* Bottom dock (created only when ACTIVE) */
-      #gameDock{
-        position:fixed; left:0; right:0; bottom:0; z-index:6;
+      #izzaland-dock{
+        flex:0 0 auto;
+        display:flex; align-items:center; justify-content:space-between; gap:12px;
         background:rgba(10,12,18,.86); border-top:1px solid #2a3550;
-        display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px;
+        padding:10px 12px;
       }
-      #gameDock .dock-left, #gameDock .dock-center, #gameDock .dock-right{ display:flex; align-items:center; gap:10px; }
-      #gameDock .dock-center{ flex:1; justify-content:center; min-width:120px; }
+      #izzaland-dock .dock-left,
+      #izzaland-dock .dock-center,
+      #izzaland-dock .dock-right{ display:flex; align-items:center; gap:10px; }
+      #izzaland-dock .dock-center{ flex:1; justify-content:center; min-width:120px; }
 
-      /* Move existing UI into the dock (only when the dock exists) */
-      #gameDock #stick{ position:static !important; transform:none !important; width:120px; height:120px; }
-      #gameDock .controls{ position:static !important; display:flex !important; flex-direction:column !important; gap:8px !important; }
-      #gameDock .fire-wrap{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+      /* Put existing UI into dock nicely */
+      #izzaland-dock #stick{ position:static !important; transform:none !important; width:120px; height:120px; }
+      #izzaland-dock .controls{ position:static !important; display:flex !important; flex-direction:column !important; gap:8px !important; }
 
-      /* Minimap pinned near top-right in landscape */
-      body[data-orient="landscape"] .mini,
-      body[data-fakeland="1"] .mini{
-        position:fixed !important; right:12px; top:74px; z-index:5; display:block !important;
+      /* Make sure canvas uses its intrinsic size (we scale the WHOLE root) */
+      #izzaland-stage #game{
+        width:${BASE_W}px !important; height:${BASE_H}px !important;
+        display:block; image-rendering:pixelated; transform:none !important;
+        border-radius:0 !important; background:#000;
       }
 
-      /* CTA shown only in portrait (we toggle it) */
+      /* Minimap pinned inside rotated root */
+      #izzaland-root .mini{
+        position:absolute !important; right:12px; top:74px; z-index:5; display:block !important;
+      }
+
+      /* CTA shown in portrait only (before activating) */
       .izzaland-cta{
         position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
         padding:10px 14px; border-radius:10px; z-index:9999;
@@ -86,156 +77,148 @@
       .izzaland-cta.hide{ display:none; }
     `;
     const tag = document.createElement('style');
-    tag.id = 'izzaLandscapeCSS';
+    tag.id = 'izzaLandCSS';
     tag.textContent = css;
     document.head.appendChild(tag);
   })();
 
-  // ---------- helpers ----------
-  function ensureDock(dockH){
-    let dock = document.getElementById('gameDock');
-    if (!dock){
-      dock = document.createElement('div');
-      dock.id = 'gameDock';
-      dock.innerHTML = `
-        <div class="dock-left"></div>
-        <div class="dock-center"></div>
-        <div class="dock-right"></div>`;
-      document.body.appendChild(dock);
-    }
-    dock.style.height = dockH + 'px';
-    return dock;
+  // -------------- DOM scaffold for rotated layout --------------
+  function buildRoot(){
+    let root = document.getElementById('izzaland-root');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'izzaland-root';
+    root.innerHTML = `
+      <div id="izzaland-layout">
+        <div id="izzaland-hud"></div>
+        <div id="izzaland-stage"></div>
+        <div id="izzaland-dock">
+          <div class="dock-left"></div>
+          <div class="dock-center"></div>
+          <div class="dock-right"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(root);
+    return root;
   }
-  function moveUIIntoDock(dock){
-    const left   = dock.querySelector('.dock-left');
-    const center = dock.querySelector('.dock-center');
-    const right  = dock.querySelector('.dock-right');
 
+  function moveIntoRotatedRoot(){
+    const root   = buildRoot();
+    const layout = root.querySelector('#izzaland-layout');
+    const slotHUD   = root.querySelector('#izzaland-hud');
+    const slotStage = root.querySelector('#izzaland-stage');
+    const slotDock  = root.querySelector('#izzaland-dock');
+    const left   = slotDock.querySelector('.dock-left');
+    const center = slotDock.querySelector('.dock-center');
+    const right  = slotDock.querySelector('.dock-right');
+
+    // Move HUD, stage/card, dock content
+    if (HUD && HUD.parentNode !== slotHUD) slotHUD.appendChild(HUD);
+    if (CARD && CARD.parentNode !== slotStage) slotStage.appendChild(CARD);
+
+    // Controls into dock
     if (STICK && STICK.parentNode !== left) left.appendChild(STICK);
+    if (CTRLS && CTRLS.parentNode !== right) right.appendChild(CTRLS);
 
-    // Put FIRE (if found) in the center
-    let fireBtn = Array.from(document.querySelectorAll('.controls .btn, .controls button'))
+    // Try to center the FIRE button (if present)
+    const fireBtn = Array.from(CTRLS?.querySelectorAll('button,.btn')||[])
       .find(b => (b.textContent||'').trim().toLowerCase()==='fire');
     if (fireBtn){
-      let wrap = center.querySelector('.fire-wrap');
-      if (!wrap){ wrap = document.createElement('div'); wrap.className='fire-wrap'; center.appendChild(wrap); }
-      if (fireBtn.parentNode !== wrap) wrap.appendChild(fireBtn);
+      if (fireBtn.parentNode !== center) center.appendChild(fireBtn);
     }
-    if (CTRLS && CTRLS.parentNode !== right) right.appendChild(CTRLS);
-  }
-  function computeDockHeight(){
-    const stickH = STICK?.getBoundingClientRect()?.height || 0;
-    const btnsH  = CTRLS?.getBoundingClientRect()?.height || 0;
-    return Math.max(120, Math.ceil(Math.max(stickH, btnsH) + 20));
-  }
-  function clearCanvas(){
-    // When leaving landscape, restore portrait defaults
-    CANVAS.style.transform = '';
-    // width/height are scoped in CSS, so no need to set here for portrait
+
+    // Keep minimap inside rotated world
+    if (MINI && MINI.parentNode !== root) root.appendChild(MINI);
+
+    return root;
   }
 
-  // ---------- layouts (run ONLY when ACTIVE) ----------
-  function layoutReal(){
+  function computeDockH(){
+    const dock = document.getElementById('izzaland-dock');
+    if (!dock) return 140;
+    // ensure stick/controls measured in portrait logical px (we scale the root later)
+    const h = Math.max(120,
+      Math.ceil(Math.max(
+        (STICK?.getBoundingClientRect()?.height || 0),
+        (CTRLS?.getBoundingClientRect()?.height || 0)
+      ) + 20)
+    );
+    dock.style.height = h + 'px';
+    return h;
+  }
+
+  // -------------- Layout math (full UI rotated 90°) --------------
+  const vpW = ()=> (window.visualViewport?.width  || window.innerWidth);
+  const vpH = ()=> (window.visualViewport?.height || window.innerHeight);
+
+  function layoutPiFake(){
     if (!ACTIVE) return;
-    clearCanvas();
+
+    const root = moveIntoRotatedRoot();
+
+    // Measure HUD & dock AFTER they’re in the rotated structure (but before scaling)
+    const hudH  = Math.ceil(document.getElementById('izzaland-hud')?.getBoundingClientRect()?.height || 0);
+    const dockH = computeDockH();
+
+    // Logical "landscape page" dimensions BEFORE rotation
+    const landW = BASE_W;                // width: canvas width
+    const landH = hudH + BASE_H + dockH; // height: HUD + canvas + dock
+
+    // Fit that into the portrait viewport (we rotate root by 90deg):
+    // After rotation, visual width = landH*s   must fit vpW()
+    //                visual height = landW*s   must fit vpH()
     const vw = vpW(), vh = vpH();
-    const top = hudH() + 8;
-    const dockH = computeDockHeight();
-    const dock  = ensureDock(dockH);
-    moveUIIntoDock(dock);
+    const s  = Math.min(vw / landH, vh / landW);
 
-    const availH = Math.max(0, vh - top - dockH);
-    const scale = Math.min(vw / BASE_W, availH / BASE_H);
+    // Center it
+    const visW = landH * s;
+    const visH = landW * s;
+    const tx = Math.round((vw - visW)/2);
+    const ty = Math.round((vh - visH)/2);
 
-    const visualW = BASE_W * scale;
-    const tx = Math.round((vw - visualW)/2);
-    const ty = Math.round(top);
+    // Apply variables and transform
+    const layout = document.getElementById('izzaland-layout');
+    layout.style.setProperty('--land-w', landW + 'px');
+    layout.style.setProperty('--land-h', landH + 'px');
 
-    CANVAS.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    root.style.transform = `translate(${tx}px, ${ty}px) rotate(90deg) scale(${s})`;
 
-    BODY.setAttribute('data-orient','landscape');
-    BODY.removeAttribute('data-fakeland');
-    if (MINI) MINI.style.display='block';
-  }
-
-  function layoutFake(){
-    if (!ACTIVE) return;
-    clearCanvas();
-    const vw = vpW(), vh = vpH();
-    const top = hudH() + 8;
-    const dockH = computeDockHeight();
-    const dock  = ensureDock(dockH);
-    moveUIIntoDock(dock);
-
-    const availH = Math.max(0, vh - top - dockH);
-    const scale = Math.min(availH / BASE_W, vw / BASE_H);
-    const rotatedW = BASE_H * scale;
-    const tx = Math.round((vw - rotatedW)/2);
-    const ty = Math.round(top);
-
-    CANVAS.style.transform = `translate(${tx}px, ${ty}px) rotate(90deg) scale(${scale})`;
-
-    BODY.setAttribute('data-fakeland','1');
-    BODY.removeAttribute('data-orient');
-    if (MINI) MINI.style.display='block';
+    // Hide page scroll behind the overlay
+    BODY.style.overflow = 'hidden';
   }
 
   function resetPortrait(){
-    clearCanvas();
-    BODY.removeAttribute('data-orient');
-    BODY.removeAttribute('data-fakeland');
-    const dock = document.getElementById('gameDock');
-    if (dock) dock.remove();
-    cta.classList.remove('hide');
+    // If user reloads or escapes, we just leave things in default DOM
+    BODY.style.overflow = '';
+    const root = document.getElementById('izzaland-root');
+    if (root) root.style.transform = '';
   }
 
-  async function tryLock(){
-    const el = document.documentElement;
-    try{ if (el.requestFullscreen) await el.requestFullscreen(); }catch{}
-    try{
-      if (screen.orientation?.lock){ await screen.orientation.lock('landscape'); return true; }
-    }catch(e){ log('lock failed', e?.name||e); }
-    return false;
-  }
-
-  async function start(){
-    ACTIVE = true;            // arm the plugin
-    cta.classList.add('hide');
-    const locked = await tryLock();
-    // checkpoints to let URL bars settle
-    const times=[120,350,800];
-    for (const t of times){
-      await new Promise(r=>setTimeout(r,t));
-      if (isLandscape()){ layoutReal(); return; }
-    }
-    layoutFake();
-  }
-
-  // CTA button (portrait only)
+  // -------------- Activation (CTA) --------------
   const cta = document.createElement('button');
   cta.className = 'izzaland-cta';
   cta.type = 'button';
   cta.textContent = 'Rotate to landscape for best play';
   document.body.appendChild(cta);
-  cta.addEventListener('click', start, {passive:true});
 
-  // Relayout (only if ACTIVE)
+  cta.addEventListener('click', ()=>{
+    ACTIVE = true;
+    cta.classList.add('hide');
+    // Build & place once; then lay out and keep responsive
+    moveIntoRotatedRoot();
+    // iOS URL bars settle rhythms
+    setTimeout(layoutPiFake, 80);
+    setTimeout(layoutPiFake, 300);
+    setTimeout(layoutPiFake, 800);
+  }, {passive:true});
+
+  // -------------- Keep responsive --------------
   let raf = 0;
-  const schedule = ()=>{ cancelAnimationFrame(raf); raf = requestAnimationFrame(apply); };
-  function apply(){
-    if (!ACTIVE){ resetPortrait(); return; }
-    if (BODY.hasAttribute('data-fakeland')) { layoutFake(); return; }
-    if (isLandscape()) layoutReal(); else layoutFake();
-  }
-
+  const schedule = ()=>{ cancelAnimationFrame(raf); raf = requestAnimationFrame(()=>{ if (ACTIVE) layoutPiFake(); }); };
   window.addEventListener('resize', schedule, {passive:true});
   window.addEventListener('orientationchange', ()=>{ setTimeout(schedule,100); setTimeout(schedule,600); }, {passive:true});
   try{ screen.orientation?.addEventListener('change', ()=> setTimeout(schedule,60), {passive:true}); }catch{}
-  try{
-    const mm = matchMedia('(orientation: landscape)');
-    mm && (mm.addEventListener ? mm.addEventListener('change', schedule) : mm.addListener(schedule));
-  }catch{}
 
-  // On initial load: NOT ACTIVE → leave portrait exactly as-is
-  log('plugin ready (idle until user taps rotate CTA)');
+  // Initial state: idle (portrait untouched)
+  // If you ever want an exit button, we can add one that calls resetPortrait().
 })();
