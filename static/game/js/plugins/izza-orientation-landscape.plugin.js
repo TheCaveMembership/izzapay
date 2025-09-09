@@ -82,14 +82,12 @@
         position:absolute!important;transform:scale(1.35);transform-origin:center;
       }
 
-      /* Full/Exit button — enforce pill sizing so the word "Full" centers correctly */
+      /* Full/Exit button (portrait/normal vs rotated in-stage) */
       #izzaFullToggle{
         position:fixed;z-index:10010;
-        display:inline-block; min-width:60px; height:auto;
-        padding:8px 12px; line-height:1; text-align:center; white-space:nowrap;
-        transform:none !important;
+        /* tiny normalization so text centers on iOS */
+        display:inline-block; line-height:1; padding:8px 12px; border-radius:10px;
       }
-      /* In rotated stage, absolute coords handled by JS adopting into stage */
       #izzaLandStage #izzaFullToggle{
         position:absolute!important;right:14px!important;bottom:116px!important;
         top:auto!important;left:auto!important;z-index:10010!important;
@@ -104,10 +102,19 @@
       body:not([data-fakeland="1"]) [data-modal],
       body:not([data-fakeland="1"]) [id$="Modal"],
       body:not([data-fakeland="1"]) #enterModal,
+      body:not([data-fakeland="1"]) #tutorialModal,
       body:not([data-fakeland="1"]) #shopModal,
+      body:not([data-fakeland="1"]) #hospitalModal,
+      body:not([data-fakeland="1"]) #tradeCentreModal,
+      body:not([data-fakeland="1"]) #bankModal,
       body:not([data-fakeland="1"]) #mapModal,
-      body:not([data-fakeland="1"]) #mpFriendsPopup,
-      body:not([data-fakeland="1"]) #mpNotifDropdown{
+      body:not([data-fakeland="1"]) [data-pool="tutorial"],
+      body:not([data-fakeland="1"]) [data-pool="shop"],
+      body:not([data-fakeland="1"]) [data-pool="hospital"],
+      body:not([data-fakeland="1"]) [data-pool="trade-centre"],
+      body:not([data-fakeland="1"]) [data-pool="bank"],
+      body:not([data-fakeland="1"]) #mpNotifDropdown,
+      body:not([data-fakeland="1"]) #mpFriendsPopup{
         transform:none !important; rotate:0deg !important;
       }
 
@@ -118,10 +125,19 @@
       #izzaLandStage [data-modal],
       #izzaLandStage [id$="Modal"],
       #izzaLandStage #enterModal,
+      #izzaLandStage #tutorialModal,
       #izzaLandStage #shopModal,
+      #izzaLandStage #hospitalModal,
+      #izzaLandStage #tradeCentreModal,
+      #izzaLandStage #bankModal,
       #izzaLandStage #mapModal,
-      #izzaLandStage #mpFriendsPopup,
-      #izzaLandStage #mpNotifDropdown{
+      #izzaLandStage [data-pool="tutorial"],
+      #izzaLandStage [data-pool="shop"],
+      #izzaLandStage [data-pool="hospital"],
+      #izzaLandStage [data-pool="trade-centre"],
+      #izzaLandStage [data-pool="bank"],
+      #izzaLandStage #mpNotifDropdown,
+      #izzaLandStage #mpFriendsPopup{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
         transform-origin:center center !important; z-index:20 !important;
@@ -137,9 +153,15 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // modal adoption (so they get counter-rotated in Full)
+  // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
-    const nodes = document.querySelectorAll('.modal,.backdrop,[role="dialog"],[data-modal],[id$="Modal"],#enterModal,#shopModal,#mapModal,#mpFriendsPopup,#mpNotifDropdown');
+    const sel = [
+      '.modal','.backdrop','[role="dialog"]','[data-modal]','[id$="Modal"]',
+      '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
+      '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
+      '#mpNotifDropdown','#mpFriendsPopup'
+    ].join(',');
+    const nodes = document.querySelectorAll(sel);
     nodes.forEach((el,i)=>{
       if(stage.contains(el)) return;
       const key = el.id ? ('modal:'+el.id) : ('modal@'+i+'@'+Date.now());
@@ -157,18 +179,16 @@
 
   // ----- Full/Exit button (resilient) -----
   let fullBtn=null, active=false;
+
   function ensureFullButton(){
     if(!fullBtn || !document.body.contains(fullBtn)){
       fullBtn=document.createElement('button');
       fullBtn.id='izzaFullToggle'; fullBtn.className='btn'; fullBtn.type='button';
       fullBtn.textContent = active ? 'Exit' : 'Full';
-      // make sure the pill’s text centers (fix for the “Full” word drifting)
-      fullBtn.style.display='inline-block';
-      fullBtn.style.minWidth='60px';
-      fullBtn.style.padding='8px 12px';
+      // normalize baseline/line-height so text is centered on iOS
       fullBtn.style.lineHeight='1';
-      fullBtn.style.textAlign='center';
-      fullBtn.style.whiteSpace='nowrap';
+      fullBtn.style.padding='8px 12px';
+      fullBtn.style.borderRadius='10px';
       fullBtn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
       document.body.appendChild(fullBtn);
     }
@@ -179,7 +199,7 @@
     return fullBtn;
   }
 
-  // Place Full relative to the Map button (above & a bit LEFT; bigger gap so it never crowding)
+  // Place Full relative to the Map button (above & a bit left; 8px gap).
   function placeFullButton(){
     if(active){ return; }
     const mapBtn =
@@ -187,34 +207,37 @@
       Array.from(document.querySelectorAll('.controls button, .controls .btn')).find(b=>/^\s*map\s*$/i.test(b.textContent||''));
     if(!fullBtn) return;
 
-    if(mapBtn && mapBtn.getBoundingClientRect){
-      const r = mapBtn.getBoundingClientRect();
-      const w = fullBtn.offsetWidth  || 60;
-      const h = fullBtn.offsetHeight || 28;
+    const doPlace = ()=>{
+      if(mapBtn && mapBtn.getBoundingClientRect){
+        const r = mapBtn.getBoundingClientRect();
+        const w = fullBtn.offsetWidth  || 56;
+        const h = fullBtn.offsetHeight || 28;
 
-      // Above + a hair left of Map
-      const GAP_Y = 10, GAP_X = 12;
-      let left = Math.round(r.left + r.width - w - GAP_X);
-      let top  = Math.round(r.top - h - GAP_Y);
+        const GAP_Y = 8, GAP_X = 6;
+        let left = Math.round(r.left + r.width - w - GAP_X);
+        let top  = Math.round(r.top - h - GAP_Y);
 
-      // Clamp inside viewport
-      const vw = Math.max(document.documentElement.clientWidth,  window.innerWidth || 0);
-      const vh = Math.max(document.documentElement.clientHeight, window.innerHeight|| 0);
-      left = Math.max(8, Math.min(left, vw - w - 8));
-      top  = Math.max(8, Math.min(top,  vh - h - 8));
+        const vw = Math.max(document.documentElement.clientWidth,  window.innerWidth || 0);
+        const vh = Math.max(document.documentElement.clientHeight, window.innerHeight|| 0);
+        left = Math.max(8, Math.min(left, vw - w - 8));
+        top  = Math.max(8, Math.min(top,  vh - h - 8));
 
-      fullBtn.style.position='fixed';
-      fullBtn.style.left = left+'px';
-      fullBtn.style.top  = top +'px';
-      fullBtn.style.right=''; fullBtn.style.bottom='';
-      fullBtn.style.zIndex='10010';
-    }else{
-      fullBtn.style.position='fixed';
-      fullBtn.style.right='12px';
-      fullBtn.style.bottom='72px';
-      fullBtn.style.left=''; fullBtn.style.top='';
-      fullBtn.style.zIndex='10010';
-    }
+        fullBtn.style.position='fixed';
+        fullBtn.style.left = left+'px';
+        fullBtn.style.top  = top +'px';
+        fullBtn.style.right=''; fullBtn.style.bottom='';
+        fullBtn.style.zIndex='10010';
+      }else{
+        fullBtn.style.position='fixed';
+        fullBtn.style.right='12px';
+        fullBtn.style.bottom='72px';
+        fullBtn.style.left=''; fullBtn.style.top='';
+        fullBtn.style.zIndex='10010';
+      }
+    };
+
+    // place after layout to keep text centered in the pill
+    requestAnimationFrame(()=>requestAnimationFrame(doPlace));
   }
 
   function keepFullVisible(){
@@ -240,7 +263,8 @@
   function restore(){
     const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node,ph[key]); ph[key].remove(); delete ph[key]; }catch{} };
     Object.keys(ph).forEach(k=>{
-      const node = byId(k) || (k.startsWith('modal:') ? document.querySelector('#'+k.slice(6)) : null) || null;
+      const byKeyId = (k.startsWith('modal:')? k.slice(6): k);
+      const node = byId(byKeyId) || null;
       if(node && ph[k]) putBack(node,k);
       else if(ph[k]){
         const guess = ph[k].nextSibling && ph[k].nextSibling.parentNode===stage ? ph[k].nextSibling : null;
@@ -287,7 +311,7 @@
       const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
-      // late modals
+      // late modals / popups
       adoptModals();
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
