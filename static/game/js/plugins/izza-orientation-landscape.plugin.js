@@ -65,16 +65,17 @@
       /* In rotated Full, dropdown is inside stage, offset in from the right */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        right:72px !important;      /* positioned safely inside the game area */
+        right:72px !important;   /* safely inside the game area */
         top:64px !important;
         max-height:300px;
         z-index:20 !important;
-        overflow:visible !important; /* allow rotated child to render fully */
+        overflow:visible !important; /* rotated child can extend */
       }
-      /* Counter-rotate the CONTENT of the dropdown, not the container */
+      /* Counter-rotate only the CONTENT, not the container */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
         transform-origin:top right !important;
+        writing-mode: horizontal-tb !important;
       }
 
       #izzaLandStage #mpFriendsToggleGlobal{
@@ -164,73 +165,69 @@
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
   // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated
-  let fixingNotif = false;
-  let fixNotifQueued = false;
+  let fixingNotif=false, fixNotifQueued=false;
   function fixNotifDropdown(){
-    if(fixingNotif){ fixNotifQueued = true; return; }
-    fixingNotif = true;
+    if(fixingNotif){ fixNotifQueued=true; return; }
+    fixingNotif=true;
 
     try{
       const dd = byId('mpNotifDropdown');
       if(!dd){ return; }
 
-      // adopt into stage if needed
+      // Bring into stage once
       if(!stage.contains(dd) && dd.parentNode){
         const key = 'modal:mpNotifDropdown';
         if(!ph[key]) keep(dd, key);
       }
 
-      // one-time wrap so we rotate the content, not the container
+      // Ensure wrapper exists
       let wrapper = dd.querySelector(':scope > .izza-upright');
       if(!wrapper){
         wrapper = document.createElement('div');
         wrapper.className = 'izza-upright';
-        // Move existing children once
-        const kids = Array.from(dd.childNodes);
-        kids.forEach(n=>wrapper.appendChild(n));
+        while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
         dd.appendChild(wrapper);
       }
+      // If new children were injected outside the wrapper, move them in
+      const stray = Array.from(dd.childNodes).filter(n => n !== wrapper);
+      if(stray.length){
+        stray.forEach(n => wrapper.appendChild(n));
+      }
 
-      // position the container
+      // Container placement (no rotation on container)
       dd.style.position = 'absolute';
       dd.style.right = '72px';
       dd.style.top = '64px';
       dd.style.zIndex = '20';
       dd.style.overflow = 'visible';
 
-      // Only measure when the dropdown is actually visible; otherwise skip sizing
-      const visible = dd.offsetParent !== null && getComputedStyle(dd).display !== 'none' && getComputedStyle(dd).visibility !== 'hidden';
+      // Force horizontal text flow on content
+      wrapper.style.writingMode = 'horizontal-tb';
+      wrapper.style.transformOrigin = 'top right';
+      if(!wrapper.style.transform) wrapper.style.transform = 'rotate(-90deg)';
 
+      // Only size when visible
+      const cs = getComputedStyle(dd);
+      const visible = dd.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
       if(visible){
-        // temporarily un-rotate to get natural size
+        // Temporarily unrotate to measure natural size
         const prev = wrapper.style.transform;
         wrapper.style.transform = 'none';
-
         const w = wrapper.scrollWidth;
         const h = wrapper.scrollHeight;
-
-        // restore rotation
         wrapper.style.transform = prev || 'rotate(-90deg)';
-        wrapper.style.transformOrigin = 'top right';
-
-        // fit container to rotated content (swap W/H)
-        dd.style.width = h + 'px';
+        dd.style.width  = h + 'px';  // swap because child is rotated
         dd.style.height = w + 'px';
       }else{
-        // ensure rotation style is present even when hidden
-        wrapper.style.transform = wrapper.style.transform || 'rotate(-90deg)';
-        wrapper.style.transformOrigin = 'top right';
         dd.style.width = '';
         dd.style.height = '';
       }
     }catch(e){
-      // swallow to avoid breaking Full enter
-      // console.warn('[notif fix]', e);
+      /* no-op to avoid breaking flow */
     }finally{
-      fixingNotif = false;
+      fixingNotif=false;
       if(fixNotifQueued){
-        fixNotifQueued = false;
-        // debounce to next frame to avoid mutation loops
+        fixNotifQueued=false;
         requestAnimationFrame(fixNotifDropdown);
       }
     }
@@ -395,7 +392,6 @@
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      // debounce notif fix to avoid mutation loop
       requestAnimationFrame(fixNotifDropdown);
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
