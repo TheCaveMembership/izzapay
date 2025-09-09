@@ -1,4 +1,4 @@
-/* izza-orientation-landscape.plugin.js — rotated overlay + resilient Full/Exit + joystick fix + hide chat in Full */
+/* izza-orientation-landscape.plugin.js — rotated overlay + resilient Full/Exit + (KEEP joystick) + wall-stick + upright popups */
 (function(){
   const BASE_W=960, BASE_H=540, TILE=60;
   const BODY=document.body;
@@ -31,7 +31,7 @@
       #izzaLandStage .hud{position:absolute;left:12px;right:12px;top:8px;}
       #izzaLandStage .controls{position:absolute;right:14px;bottom:14px;display:flex;gap:10px;}
 
-      /* Joystick — larger, nudged right (visual) */
+      /* Joystick — DO NOT CHANGE (visual only) */
       #izzaLandStage #stick{
         position:absolute;left:48px;bottom:24px;
         width:180px;height:180px;transform:none;transform-origin:center center;
@@ -45,7 +45,7 @@
       /* Minimap */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row (hide during Full to avoid OS keyboard issues) */
+      /* Chat row is hidden in Full (OSK issues) */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute !important;
@@ -91,12 +91,38 @@
         top:auto!important;left:auto!important;z-index:10010!important;
       }
 
-      /* Modals upright anywhere */
-      body[data-fakeland="1"] .modal{transform:none!important;}
-      #izzaLandStage .modal{
-        position:absolute!important;left:50%!important;top:50%!important;
-        transform:translate(-50%,-50%) rotate(-90deg)!important;
-        transform-origin:center center!important;z-index:20!important;
+      /* ---------- POPUP ORIENTATION FIX ---------- */
+
+      /* NORMAL VIEW (not fakeland): ensure ALL popups are upright */
+      body:not([data-fakeland="1"]) .modal,
+      body:not([data-fakeland="1"]) #tutorialModal,
+      body:not([data-fakeland="1"]) #shopModal,
+      body:not([data-fakeland="1"]) #hospitalModal,
+      body:not([data-fakeland="1"]) #tradeCentreModal,
+      body:not([data-fakeland="1"]) #bankModal,
+      body:not([data-fakeland="1"]) [data-pool="tutorial"],
+      body:not([data-fakeland="1"]) [data-pool="shop"],
+      body:not([data-fakeland="1"]) [data-pool="hospital"],
+      body:not([data-fakeland="1"]) [data-pool="trade-centre"],
+      body:not([data-fakeland="1"]) [data-pool="bank"]{
+        transform:none !important;
+      }
+
+      /* FULL VIEW (rotated): if a popup ends up inside the stage, counter-rotate so it reads upright */
+      #izzaLandStage .modal,
+      #izzaLandStage #tutorialModal,
+      #izzaLandStage #shopModal,
+      #izzaLandStage #hospitalModal,
+      #izzaLandStage #tradeCentreModal,
+      #izzaLandStage #bankModal,
+      #izzaLandStage [data-pool="tutorial"],
+      #izzaLandStage [data-pool="shop"],
+      #izzaLandStage [data-pool="hospital"],
+      #izzaLandStage [data-pool="trade-centre"],
+      #izzaLandStage [data-pool="bank"]{
+        position:absolute !important; left:50% !important; top:50% !important;
+        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform-origin:center center !important; z-index:20 !important;
       }
     `;
     const tag=document.createElement('style'); tag.id='izzaLandscapeCSS'; tag.textContent=css; document.head.appendChild(tag);
@@ -109,7 +135,6 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Find chat row; tag if needed
   function findChatDock(){
     const direct = byId('chatBar') || byId('areaChatDock') || document.querySelector('.area-chat');
     if(direct) return direct;
@@ -118,7 +143,7 @@
     return null;
   }
 
-  // ----- Full/Exit button (never disappears) ---------------------------------
+  // ----- Full/Exit button (resilient) -----
   let fullBtn=null, active=false;
   function ensureFullButton(){
     if(!fullBtn || !document.body.contains(fullBtn)){
@@ -131,21 +156,18 @@
     fullBtn.style.display='block';
     fullBtn.style.opacity='1';
     fullBtn.style.pointerEvents='auto';
-    placeFullButton(); // make sure it’s above Map in normal view
+    placeFullButton();
     return fullBtn;
   }
 
-  // Place Full button ABOVE the Map button in normal view (portrait),
-  // and leave absolute coords to CSS when in rotated stage.
   function placeFullButton(){
-    if(active){ return; } // in Full, CSS inside stage handles it
+    if(active){ return; }
     const mapBtn =
       document.querySelector('#btnMap, #mapBtn, button[data-role="map"], .map') ||
       Array.from(document.querySelectorAll('.controls button, .controls .btn')).find(b=>/^\s*map\s*$/i.test(b.textContent||''));
     if(!fullBtn) return;
     if(mapBtn && mapBtn.getBoundingClientRect){
       const r = mapBtn.getBoundingClientRect();
-      // center above Map, with 6px gap
       const w = fullBtn.offsetWidth || 56;
       const h = fullBtn.offsetHeight || 28;
       const left = Math.round(r.left + (r.width - w)/2);
@@ -156,7 +178,6 @@
       fullBtn.style.right=''; fullBtn.style.bottom='';
       fullBtn.style.zIndex='10010';
     }else{
-      // fallback
       fullBtn.style.position='fixed';
       fullBtn.style.right='12px';
       fullBtn.style.bottom='72px';
@@ -165,7 +186,6 @@
     }
   }
 
-  // Re-place the Full button on resize / DOM changes (normal view)
   function keepFullVisible(){
     ensureFullButton();
     placeFullButton();
@@ -177,10 +197,7 @@
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
-
-    // IMPORTANT: only adopt the Full button when entering Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
-
     document.body.appendChild(stage);
   }
   function restore(){
@@ -193,7 +210,7 @@
     try{ stage.remove(); }catch{}
   }
 
-  // tile helpers + FIRE placement (and kill tiny dash under it)
+  // FIRE placement + dash removal
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
@@ -219,7 +236,7 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   }
 
-  // observe late nodes (chat/friends/bell/fire) + keep Full visible
+  // Observe DOM changes
   const mo=new MutationObserver(()=>{
     if(!active){ keepFullVisible(); }
     if(active){
@@ -233,14 +250,14 @@
     }
   });
 
-  // keep the map closed when entering Full (both big modal + mini preview)
+  // keep map closed when entering Full
   function closeMapsOnEnter(){
     const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
     if(mini){ mini.style.display='none'; }
   }
   function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
 
-  // ---------- Joystick: rotate ONLY while stick is being dragged -------------
+  // ---------- Joystick correction (UNCHANGED FEEL) + wall-stick guard ----------
   let joyActive=false;
   const markOn = ()=>{ joyActive=true; };
   const markOff= ()=>{ joyActive=false; };
@@ -250,19 +267,26 @@
   window.addEventListener('mouseup',   markOff, {passive:true});
   window.addEventListener('touchcancel',markOff,{passive:true});
 
-  // Correct per-frame player movement by -90° when joystick is active
   let prevX=null, prevY=null;
   function fixJoystickDelta(){
     if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
     const p = IZZA.api.player;
     if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
     const dx = p.x - prevX, dy = p.y - prevY;
-    if(Math.abs(dx)+Math.abs(dy) > 0.0001){
-      const fx =  dy;
-      const fy = -dx;
-      p.x = prevX + fx;
-      p.y = prevY + fy;
-    }
+    const mag = Math.abs(dx)+Math.abs(dy);
+
+    // --- wall-stick guard ---
+    // If movement is tiny or clamped to a single axis (common when pressing into a wall),
+    // skip correction this frame so we don't push the player into the collider.
+    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001); // XOR: exactly one axis moved
+    if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
+
+    // Rotate -90°: (x',y') = ( y, -x )
+    const fx =  dy;
+    const fy = -dx;
+    p.x = prevX + fx;
+    p.y = prevY + fy;
+
     prevX = p.x; prevY = p.y;
   }
 
@@ -294,7 +318,6 @@
     restore();
     stage.style.transform=''; canvas.style.width=canvas.style.height='';
     try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
-    // after exit, immediately re-place the button above Map
     setTimeout(keepFullVisible, 0);
   }
 
