@@ -99,9 +99,15 @@
       body:not([data-fakeland="1"]) [role="dialog"],
       body:not([data-fakeland="1"]) [data-modal],
       body:not([data-fakeland="1"]) [id$="Modal"],
+      body:not([data-fakeland="1"]) #tutorialModal,
+      body:not([data-fakeland="1"]) #hospitalModal,
+      body:not([data-fakeland="1"]) #tradeCentreModal,
+      body:not([data-fakeland="1"]) #bankModal,
       body:not([data-fakeland="1"]) #enterModal,
       body:not([data-fakeland="1"]) #shopModal,
-      body:not([data-fakeland="1"]) #mapModal{
+      body:not([data-fakeland="1"]) #mapModal,
+      body:not([data-fakeland="1"]) #mpNotifDropdown,
+      body:not([data-fakeland="1"]) #mpFriendsPopup{
         transform:none !important; rotate:0deg !important;
       }
 
@@ -111,12 +117,18 @@
       #izzaLandStage [role="dialog"],
       #izzaLandStage [data-modal],
       #izzaLandStage [id$="Modal"],
+      #izzaLandStage #tutorialModal,
+      #izzaLandStage #hospitalModal,
+      #izzaLandStage #tradeCentreModal,
+      #izzaLandStage #bankModal,
       #izzaLandStage #enterModal,
       #izzaLandStage #shopModal,
-      #izzaLandStage #mapModal{
+      #izzaLandStage #mapModal,
+      #izzaLandStage #mpNotifDropdown,
+      #izzaLandStage #mpFriendsPopup{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
-        transform-origin:center center !important; z-index:20 !important;
+        transform-origin:center center !important; z-index:2000 !important;
       }
     `;
     const tag=document.createElement('style'); tag.id='izzaLandscapeCSS'; tag.textContent=css; document.head.appendChild(tag);
@@ -131,7 +143,11 @@
 
   // modal adoption (so they get counter-rotated in Full)
   function adoptModals(){
-    const nodes = document.querySelectorAll('.modal,.backdrop,[role="dialog"],[data-modal],[id$="Modal"],#enterModal,#shopModal,#mapModal');
+    const nodes = document.querySelectorAll(
+      '.modal,.backdrop,[role="dialog"],[data-modal],[id$="Modal"],' +
+      '#tutorialModal,#hospitalModal,#tradeCentreModal,#bankModal,#enterModal,#shopModal,#mapModal,' +
+      '#mpNotifDropdown,#mpFriendsPopup'
+    );
     nodes.forEach((el,i)=>{
       if(stage.contains(el)) return;
       const key = el.id ? ('modal:'+el.id) : ('modal@'+i+'@'+Date.now());
@@ -164,7 +180,7 @@
     return fullBtn;
   }
 
-  // Place Full relative to the Map button (above & a bit left; 8px gap).
+  // Place Full centered above the Map button with a bigger gap (no overlap).
   function placeFullButton(){
     if(active){ return; }
     const mapBtn =
@@ -177,20 +193,17 @@
       const w = fullBtn.offsetWidth  || 56;
       const h = fullBtn.offsetHeight || 28;
 
-      // Snap above & right-aligned to Map, with gaps
-      const GAP_Y = 8, GAP_X = 6;
-      let left = Math.round(r.left + r.width - w - GAP_X);
-      let top  = Math.round(r.top - h - GAP_Y);
+      const GAP_Y = 14; // ↑ increased vertical gap so "Full" never kisses Map
+      const left = Math.round(r.left + (r.width - w)/2);
+      const top  = Math.round(r.top - h - GAP_Y);
 
       // Clamp inside viewport
       const vw = Math.max(document.documentElement.clientWidth,  window.innerWidth || 0);
       const vh = Math.max(document.documentElement.clientHeight, window.innerHeight|| 0);
-      left = Math.max(8, Math.min(left, vw - w - 8));
-      top  = Math.max(8, Math.min(top,  vh - h - 8));
 
       fullBtn.style.position='fixed';
-      fullBtn.style.left = left+'px';
-      fullBtn.style.top  = top +'px';
+      fullBtn.style.left = Math.max(8, Math.min(left, vw - w - 8)) + 'px';
+      fullBtn.style.top  = Math.max(8, Math.min(top,  vh - h - 8)) + 'px';
       fullBtn.style.right=''; fullBtn.style.bottom='';
       fullBtn.style.zIndex='10010';
     }else{
@@ -226,7 +239,6 @@
     const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node,ph[key]); ph[key].remove(); delete ph[key]; }catch{} };
     Object.keys(ph).forEach(k=>{
       const node = byId(k) || (k.startsWith('modal:') ? document.querySelector('#'+k.slice(6)) : null) || null;
-      // If we don't find by id (e.g., generated key), just move the first child from stage that matches
       if(node && ph[k]) putBack(node,k);
       else if(ph[k]){
         const guess = ph[k].nextSibling && ph[k].nextSibling.parentNode===stage ? ph[k].nextSibling : null;
@@ -257,7 +269,7 @@
   function applyLayout(){
     const vw=innerWidth, vh=innerHeight;
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
-    stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
+    stage.style.transform=`translate(-50%, -50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   }
