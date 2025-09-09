@@ -10,8 +10,8 @@
   const mini=document.getElementById('miniWrap');
   if(!card||!canvas||!hud||!stick||!ctrls) return;
 
-  // FIRE placement: bigger, a touch left
-  const FIRE_TILES_RIGHT = 6.5;   // was 7
+  // FIRE placement: bigger, a touch LEFT
+  const FIRE_TILES_RIGHT = 6.3;      // <- moved slightly more left
   const FIRE_TILES_DOWN  = 1;
 
   // ---------- CSS ----------
@@ -32,11 +32,11 @@
       #izzaLandStage .hud{position:absolute;left:12px;right:12px;top:8px;}
       #izzaLandStage .controls{position:absolute;right:14px;bottom:14px;display:flex;gap:10px;}
 
-      /* Joystick: larger, nudged right, axes corrected */
+      /* JOYSTICK: larger, nudged right; NO rotation (fixes axes) */
       #izzaLandStage #stick{
         position:absolute;left:48px;bottom:24px;
         width:170px;height:170px;
-        transform:rotate(-90deg);transform-origin:center center;
+        transform:none; /* important: do NOT rotate the input surface */
       }
       #izzaLandStage #stick .base{border-radius:85px!important;}
       #izzaLandStage #stick .nub{
@@ -44,10 +44,10 @@
         width:46px!important;height:46px!important;border-radius:23px!important;
       }
 
-      /* Minimap (small preview) */
+      /* Minimap (small preview position only) */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row pinned along the bottom (support id OR helper class) */
+      /* Chat row pinned along the bottom */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute!important;left:12px;right:12px;bottom:8px;
@@ -70,13 +70,13 @@
         transform:rotate(-90deg);transform-origin:right bottom;
       }
 
-      /* FIRE (we place by tiles; also scale up) */
+      /* FIRE (placed by tiles; larger) */
       #izzaLandStage #btnFire,
       #izzaLandStage .btn-fire,
       #izzaLandStage #fireBtn,
       #izzaLandStage button[data-role="fire"],
       #izzaLandStage .fire{
-        position:absolute!important;transform:scale(1.22);transform-origin:center;
+        position:absolute!important;transform:scale(1.28);transform-origin:center;
       }
 
       /* Small Full/Exit button (Map-sized) */
@@ -100,12 +100,10 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // find chat bar reliably and tag with helper class when needed
   function findChatDock(){
-    const direct = byId('chatBar');
-    if(direct) return direct;
-    const txt = document.querySelector('input[placeholder="Type…"],textarea[placeholder="Type…"],input[placeholder="Type..."],textarea[placeholder="Type..."]');
-    if(txt){ const row = txt.closest('#chatBar,.area-chat,.chat,.row,div'); if(row){ row.classList.add('land-chat-dock'); return row; } }
+    const direct = byId('chatBar'); if(direct) return direct;
+    const txt=document.querySelector('input[placeholder="Type…"],textarea[placeholder="Type…"],input[placeholder="Type..."],textarea[placeholder="Type..."]');
+    if(txt){ const row=txt.closest('#chatBar,.area-chat,.chat,.row,div'); if(row){ row.classList.add('land-chat-dock'); return row; } }
     return null;
   }
 
@@ -118,7 +116,9 @@
     keep(card,'card'); keep(hud,'hud'); keep(stick,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]'); if(fire) adoptOnce(fire,'btnFire');
+    const fire = (byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]')
+                 || Array.from(document.querySelectorAll('button,div')).find(x=>/\bFIRE\b/i.test((x.textContent||'').trim())));
+    if(fire) adoptOnce(fire,'btnFire');
     adoptOnce(fullBtn,'izzaFullToggle');
     document.body.appendChild(stage);
   }
@@ -126,7 +126,8 @@
     const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node,ph[key]); ph[key].remove(); delete ph[key]; }catch{} };
     ['card','hud','stick','ctrls','mini','chat','heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup','btnFire','izzaFullToggle']
       .forEach(k=>{
-        const node=(k==='btnFire')?(byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]')):byId(k);
+        const node=(k==='btnFire')?(byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]')
+                    || Array.from(document.querySelectorAll('button,div')).find(x=>/\bFIRE\b/i.test((x.textContent||'').trim()))):byId(k);
         if(node&&ph[k]) putBack(node,k);
       });
     try{ stage.remove(); }catch{}
@@ -135,20 +136,21 @@
   // tile helpers + FIRE placement
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"]');
+    const fire = byId('btnFire')||byId('fireBtn')||stage.querySelector('.btn-fire,.fire,button[data-role="fire"]')
+               || Array.from(stage.querySelectorAll('button,div')).find(x=>/\bFIRE\b/i.test((x.textContent||'').trim()));
     if(!fire) return;
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
-    const w=fire.offsetWidth||66, h=fire.offsetHeight||66;
+    const w=fire.offsetWidth||70, h=fire.offsetHeight||70;
     fire.style.left=(cx-w/2)+'px';
     fire.style.top =(cy-h/2)+'px';
-    // nuke the tiny dash element if it exists under FIRE
+    // remove small dash under FIRE if present
     const sibs=Array.from(fire.parentElement?fire.parentElement.children:[]);
     const dash=sibs.find(el=>el!==fire && (el.textContent||'').trim()==='-');
     if(dash) dash.style.display='none';
   }
   function pinFriendsUI(){
     const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
-    const pop=byId('mpFriendsPopup'); if(pop){ pop.style.right='14px'; pop.style.bottom='116px'; pop.style.top=''; pop.style.left=''; }
+    const pop=byId('mpFriendsPopup');        if(pop){ pop.style.right='14px'; pop.style.bottom='116px'; pop.style.top=''; pop.style.left=''; }
   }
 
   function applyLayout(){
@@ -166,15 +168,16 @@
     ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
       const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
     });
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]');
+    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]')
+              || Array.from(document.querySelectorAll('button,div')).find(x=>/\bFIRE\b/i.test((x.textContent||'').trim()));
     if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   });
 
-  // keep the map modal closed when entering Full
+  // ensure Map modal is CLOSED when entering Full
   function closeMapModalIfOpen(){
     const mm=byId('mapModal');
-    if(mm && getComputedStyle(mm).display!=='none'){ mm.style.display='none'; }
+    if(mm){ mm.style.display='none'; mm.classList.remove('open'); mm.setAttribute('aria-hidden','true'); }
   }
 
   // ---------- enter / exit ----------
@@ -189,14 +192,8 @@
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
   }
   function exit(){
-    if(!active) return; active=false;
-    BODY.removeAttribute('data-fakeland');
-    fullBtn.textContent='Full';
-    mo.disconnect(); clearInterval(fireTick); fireTick=null;
-    restore();
-    stage.style.transform=''; canvas.style.width=canvas.style.height='';
-    // make sure page is visible (avoid “black page” feel)
-    requestAnimationFrame(()=>window.scrollTo(0,0));
+    // go to signin per your request
+    location.href = 'https://izzapay.onrender.com/signin';
   }
 
   // toggle button
