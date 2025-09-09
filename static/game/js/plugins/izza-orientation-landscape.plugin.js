@@ -82,12 +82,16 @@
         position:absolute!important;transform:scale(1.35);transform-origin:center;
       }
 
-      /* Full/Exit button */
+      /* Full/Exit button — enforce pill sizing so the word "Full" centers correctly */
       #izzaFullToggle{
-        position:fixed;right:12px;bottom:72px;z-index:10010; /* portrait / normal */
+        position:fixed;z-index:10010;
+        display:inline-block; min-width:60px; height:auto;
+        padding:8px 12px; line-height:1; text-align:center; white-space:nowrap;
+        transform:none !important;
       }
+      /* In rotated stage, absolute coords handled by JS adopting into stage */
       #izzaLandStage #izzaFullToggle{
-        position:absolute!important;right:14px!important;bottom:116px!important; /* rotated */
+        position:absolute!important;right:14px!important;bottom:116px!important;
         top:auto!important;left:auto!important;z-index:10010!important;
       }
 
@@ -99,15 +103,11 @@
       body:not([data-fakeland="1"]) [role="dialog"],
       body:not([data-fakeland="1"]) [data-modal],
       body:not([data-fakeland="1"]) [id$="Modal"],
-      body:not([data-fakeland="1"]) #tutorialModal,
-      body:not([data-fakeland="1"]) #hospitalModal,
-      body:not([data-fakeland="1"]) #tradeCentreModal,
-      body:not([data-fakeland="1"]) #bankModal,
       body:not([data-fakeland="1"]) #enterModal,
       body:not([data-fakeland="1"]) #shopModal,
       body:not([data-fakeland="1"]) #mapModal,
-      body:not([data-fakeland="1"]) #mpNotifDropdown,
-      body:not([data-fakeland="1"]) #mpFriendsPopup{
+      body:not([data-fakeland="1"]) #mpFriendsPopup,
+      body:not([data-fakeland="1"]) #mpNotifDropdown{
         transform:none !important; rotate:0deg !important;
       }
 
@@ -117,18 +117,14 @@
       #izzaLandStage [role="dialog"],
       #izzaLandStage [data-modal],
       #izzaLandStage [id$="Modal"],
-      #izzaLandStage #tutorialModal,
-      #izzaLandStage #hospitalModal,
-      #izzaLandStage #tradeCentreModal,
-      #izzaLandStage #bankModal,
       #izzaLandStage #enterModal,
       #izzaLandStage #shopModal,
       #izzaLandStage #mapModal,
-      #izzaLandStage #mpNotifDropdown,
-      #izzaLandStage #mpFriendsPopup{
+      #izzaLandStage #mpFriendsPopup,
+      #izzaLandStage #mpNotifDropdown{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
-        transform-origin:center center !important; z-index:2000 !important;
+        transform-origin:center center !important; z-index:20 !important;
       }
     `;
     const tag=document.createElement('style'); tag.id='izzaLandscapeCSS'; tag.textContent=css; document.head.appendChild(tag);
@@ -143,11 +139,7 @@
 
   // modal adoption (so they get counter-rotated in Full)
   function adoptModals(){
-    const nodes = document.querySelectorAll(
-      '.modal,.backdrop,[role="dialog"],[data-modal],[id$="Modal"],' +
-      '#tutorialModal,#hospitalModal,#tradeCentreModal,#bankModal,#enterModal,#shopModal,#mapModal,' +
-      '#mpNotifDropdown,#mpFriendsPopup'
-    );
+    const nodes = document.querySelectorAll('.modal,.backdrop,[role="dialog"],[data-modal],[id$="Modal"],#enterModal,#shopModal,#mapModal,#mpFriendsPopup,#mpNotifDropdown');
     nodes.forEach((el,i)=>{
       if(stage.contains(el)) return;
       const key = el.id ? ('modal:'+el.id) : ('modal@'+i+'@'+Date.now());
@@ -170,17 +162,24 @@
       fullBtn=document.createElement('button');
       fullBtn.id='izzaFullToggle'; fullBtn.className='btn'; fullBtn.type='button';
       fullBtn.textContent = active ? 'Exit' : 'Full';
+      // make sure the pill’s text centers (fix for the “Full” word drifting)
+      fullBtn.style.display='inline-block';
+      fullBtn.style.minWidth='60px';
+      fullBtn.style.padding='8px 12px';
+      fullBtn.style.lineHeight='1';
+      fullBtn.style.textAlign='center';
+      fullBtn.style.whiteSpace='nowrap';
       fullBtn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
       document.body.appendChild(fullBtn);
     }
-    fullBtn.style.display='block';
+    fullBtn.style.display='inline-block';
     fullBtn.style.opacity='1';
     fullBtn.style.pointerEvents='auto';
     placeFullButton();
     return fullBtn;
   }
 
-  // Place Full centered above the Map button with a bigger gap (no overlap).
+  // Place Full relative to the Map button (above & a bit LEFT; bigger gap so it never crowding)
   function placeFullButton(){
     if(active){ return; }
     const mapBtn =
@@ -190,20 +189,23 @@
 
     if(mapBtn && mapBtn.getBoundingClientRect){
       const r = mapBtn.getBoundingClientRect();
-      const w = fullBtn.offsetWidth  || 56;
+      const w = fullBtn.offsetWidth  || 60;
       const h = fullBtn.offsetHeight || 28;
 
-      const GAP_Y = 14; // ↑ increased vertical gap so "Full" never kisses Map
-      const left = Math.round(r.left + (r.width - w)/2);
-      const top  = Math.round(r.top - h - GAP_Y);
+      // Above + a hair left of Map
+      const GAP_Y = 10, GAP_X = 12;
+      let left = Math.round(r.left + r.width - w - GAP_X);
+      let top  = Math.round(r.top - h - GAP_Y);
 
       // Clamp inside viewport
       const vw = Math.max(document.documentElement.clientWidth,  window.innerWidth || 0);
       const vh = Math.max(document.documentElement.clientHeight, window.innerHeight|| 0);
+      left = Math.max(8, Math.min(left, vw - w - 8));
+      top  = Math.max(8, Math.min(top,  vh - h - 8));
 
       fullBtn.style.position='fixed';
-      fullBtn.style.left = Math.max(8, Math.min(left, vw - w - 8)) + 'px';
-      fullBtn.style.top  = Math.max(8, Math.min(top,  vh - h - 8)) + 'px';
+      fullBtn.style.left = left+'px';
+      fullBtn.style.top  = top +'px';
       fullBtn.style.right=''; fullBtn.style.bottom='';
       fullBtn.style.zIndex='10010';
     }else{
@@ -269,7 +271,7 @@
   function applyLayout(){
     const vw=innerWidth, vh=innerHeight;
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
-    stage.style.transform=`translate(-50%, -50%) rotate(90deg) scale(${scale})`;
+    stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   }
