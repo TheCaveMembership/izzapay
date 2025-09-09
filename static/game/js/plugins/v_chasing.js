@@ -4,29 +4,39 @@
   if (window.__IZZA_CHASING_BOUND) return;
   window.__IZZA_CHASING_BOUND = true;
 
-  const BUILD = 'v1.2-chasing-plugin+5s-escalation';
+  const BUILD = 'v1.3-chasing-plugin+5s-escalation+cling-attack+no-upgrades';
   console.log('[IZZA CHASING]', BUILD);
 
   // Signal to core/other plugins to disable any internal chasing logic.
   window.__IZZA_CHASING_PLUGIN_ACTIVE = true;
 
   // Tunables
-  const MAX_STARS = 5;
-  const REINFORCE_MS = { 3: 20000, 4: 10000, 5: 10000 }; // (still used for 3★+ passive drip if needed)
-  const ZERO_LOCK_MS = 1500;       // suppress phantom 1★ rebound after clear
-  const SPAWN_GRACE_MS = 300;      // grace to let maintainCops() spawn before we clear stars
+  const MAX_STARS       = 5;
+  const REINFORCE_MS    = { 3: 20000, 4: 10000, 5: 10000 }; // legacy drip for >=3★ (kept)
+  const ZERO_LOCK_MS    = 1500;  // suppress phantom 1★ rebound after clear
+  const SPAWN_GRACE_MS  = 300;   // grace to let maintainCops() spawn before we clear stars
 
-  // Chaser speed tuning (px/sec-ish; multiplied by dtSec)
+  // --- Collision/attack test behavior ---
+  const CLING_RADIUS       = 18;    // contact distance to “latch” when player is stopped
+  const STATIONARY_EPS     = 1.2;   // px of movement considered "not moving"
+  const MOVE_BREAK_DIST    = 2.0;   // if player moves this much while clung, cop dies
+  const CLING_HIT_EVERY_MS = 600;   // damage cadence while cop is clung and player is stopped
+  const CLING_DMG          = 1;     // damage per hit tick
+
+  // Chaser speed tuning (px/sec-ish; multiplied by dtSec) — for testing SWAT/Army same as police
   const TUNE = {
     policeSpd: 55,
-    swatSpd:   65,
-    armySpd:   72
+    swatSpd:   55,  // same as police for now (testing)
+    armySpd:   55   // same as police for now (testing)
   };
 
   let api = null;
   let reinforceAt = 0;
   let zeroLockUntil = 0;
   let lastWantedChangeAt = 0;
+
+  // Track player movement between frames (to detect “started moving”)
+  let lastPX = 0, lastPY = 0;
 
   // ---- “hijack session” 5s-escalation state (test mode you asked for) ----
   // Timeline (relative to hijack start):
@@ -80,26 +90,34 @@
     api.cops.push({
       x: gx*TILE, y: gy*TILE,
       spd: copSpeed(kind), hp: copHP(kind), kind,
-      facing:'down'
+      facing:'down',
+      state:'chase',         // 'chase' | 'cling'
+      clingSince: 0,
+      nextHitAt: 0
     });
   }
 
+  // IMPORTANT: no upgrading existing cops’ kind/hp when stars rise — new spawns only.
   function maintainCops(){
     ensureArrays();
 
-    // Keep number of active cops equal to current stars
     const target = api.player.wanted|0;
     if (target<=0){
       api.cops.length = 0;
       return;
     }
-    // normalize kinds for current tier
+
+    // Only ensure count == stars with the *current tier’s kind*.
     const k = kindForStars(target);
-    // trim or pad
     while(api.cops.length > target) api.cops.pop();
     while(api.cops.length < target) spawnCop(k);
-    // upgrade all to current tier if needed
-    for(const c of api.cops){ c.kind = k; c.spd = copSpeed(k); c.hp = Math.max(c.hp|0, copHP(k)); }
+
+    // Do NOT normalize kinds of existing units (keeps canvas from “evolving” sprites).
+    // We only make sure they at least have a speed set (defensive).
+    for(const c of api.cops){
+      if (!c.spd) c.spd = copSpeed(c.kind || 'police');
+      if (!c.state) c.state = 'chase';
+    }
   }
 
   function safeSetWanted(n){
@@ -126,32 +144,40 @@
     const now = performance.now();
 
     // If player wiped all cops, pause the timeline until at least one exists
-    // (so “if the player hasn’t killed the cops” the timeline continues).
     ensureArrays();
     if (api.cops.length === 0 && (api.player.wanted|0) > 0) return;
 
     while (hijackStepIdx < HIJACK_STEPS.length && now - hijackStartAt >= HIJACK_STEPS[hijackStepIdx].at){
       const step = HIJACK_STEPS[hijackStepIdx];
 
-      // Only ever escalate upward (don’t reduce if other systems dropped stars)
+      // Only ever escalate upward
       const cur = api.player.wanted|0;
       if (step.stars > cur){
         safeSetWanted(step.stars);
       }
-      // Spawn one extra of the step's tier to make the ramp visible
+      // Spawn one *new* unit of the step's tier
       spawnCop(step.kind);
-      // Maintain to match total == stars (keeps things tidy if extras existed)
+
+      // Then trim/pad to equal stars (keeps tidy without upgrading old units)
       maintainCops();
 
       hijackStepIdx++;
     }
   }
 
+  function killCop(idx){
+    const c = api.cops[idx];
+    api.cops.splice(idx,1);
+    IZZA.emit?.('cop-killed', { cop: c });
+  }
+
   function updateCops(dtSec){
+    ensureArrays();
+
     const stars = api.player.wanted|0;
+    const px = api.player.x, py = api.player.y;
 
     // If there are no chasers but stars > 0, allow a short grace for spawns before clearing.
-    ensureArrays();
     if(!api.cops.length){
       if(stars!==0){
         const now = performance.now();
@@ -163,23 +189,64 @@
         safeSetWanted(0);
         zeroLockUntil = now + ZERO_LOCK_MS;
       }
+      // update last pos so movement deltas stay sane
+      lastPX = px; lastPY = py;
       return;
     }
 
-    // Chase movement
-    for(const c of api.cops){
-      const dx = api.player.x - c.x, dy = api.player.y - c.y;
-      const m = Math.hypot(dx,dy) || 1;
-      c.x += (dx/m) * c.spd * dtSec;
-      c.y += (dy/m) * c.spd * dtSec;
-      if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
-      else                              c.facing = dx < 0 ? 'left' : 'right';
+    // Player movement delta (to detect "started moving" while a cop clings)
+    const dMove = Math.hypot(px - lastPX, py - lastPY);
+
+    // Move & handle cling/attack logic
+    for(let i = api.cops.length-1; i>=0; i--){
+      const c = api.cops[i];
+
+      // chase movement unless clinging
+      if (c.state !== 'cling'){
+        const dx = px - c.x, dy = py - c.y;
+        const m = Math.hypot(dx,dy) || 1;
+        c.x += (dx/m) * c.spd * dtSec;
+        c.y += (dy/m) * c.spd * dtSec;
+        if(Math.abs(dy) >= Math.abs(dx)) c.facing = dy < 0 ? 'up' : 'down';
+        else                              c.facing = dx < 0 ? 'left' : 'right';
+
+        // If cop reaches player and player is effectively stopped, start cling
+        const dToPlayer = Math.hypot(px - c.x, py - c.y);
+        if (dToPlayer <= CLING_RADIUS && dMove <= STATIONARY_EPS && (api.player.wanted|0) > 0){
+          c.state = 'cling';
+          c.clingSince = performance.now();
+          c.nextHitAt  = c.clingSince + CLING_HIT_EVERY_MS;
+          // snap a tiny offset so they visibly “attach”
+          const off = 8;
+          c.x = px + (Math.random()<0.5?-off:off);
+          c.y = py + (Math.random()<0.5?-off:off);
+        }
+      }else{
+        // CLING: if the player starts moving, this cop dies
+        if (dMove >= MOVE_BREAK_DIST){
+          killCop(i);
+          continue;
+        }
+        // Otherwise, stick near the player and deal periodic damage
+        const now = performance.now();
+        // stay attached visually near the player
+        const stick = 10;
+        if (Math.hypot(c.x - px, c.y - py) > stick){
+          const dx = px - c.x, dy = py - c.y, m = Math.hypot(dx,dy) || 1;
+          c.x += (dx/m) * Math.min(120, c.spd) * dtSec; // small follow while clung
+          c.y += (dy/m) * Math.min(120, c.spd) * dtSec;
+        }
+        if (now >= c.nextHitAt){
+          IZZA.emit?.('player-hit', { by:'cop', dmg: CLING_DMG });
+          c.nextHitAt = now + CLING_HIT_EVERY_MS;
+        }
+      }
     }
 
     // Run the 5s hijack escalation
     tickHijackTimeline();
 
-    // Legacy reinforcement toward +1 star every interval at 3★+ (kept, but your 5s path will usually reach 5★ first)
+    // Legacy reinforcement toward +1 star every interval at 3★+ (kept)
     const now = performance.now();
     if (reinforceAt && now >= reinforceAt){
       const cur = api.player.wanted|0;
@@ -191,6 +258,9 @@
         reinforceAt = 0;
       }
     }
+
+    // record player pos for next frame’s movement delta
+    lastPX = px; lastPY = py;
   }
 
   // --- Event wiring ----------------------------------------------------------
@@ -208,6 +278,9 @@
     // If there are existing stars, sync chasers to that count
     maintainCops();
     console.log('[CHASING] ready; stars=', api.player.wanted);
+
+    // seed last position
+    lastPX = api.player.x; lastPY = api.player.y;
   });
 
   // Drive the chasing loop
@@ -255,7 +328,7 @@
         break;
       }
       case 'vehicular-ped': {
-        // Still allow small instant bumps for hits while driving
+        // small instant bumps for hits while driving
         safeSetWanted((api.player.wanted|0) + 1);
         break;
       }
@@ -276,7 +349,7 @@
   });
 
   // If someone else changes stars (e.g., on-foot combat code),
-  // we only handle the chaser count to match.
+  // we only handle the chaser count to match (NO upgrading kinds).
   IZZA.on('wanted-changed', ({to})=>{
     if(!api) return;
     maintainCops();
@@ -286,7 +359,7 @@
     else reinforceAt = 0;
   });
 
-  // Reset internal timers/state on death/respawn (defensive vs stale timers)
+  // Reset internal timers/state on death/respawn (clean slate for next hijack)
   ;['player-death','player-died','player-respawn','respawn'].forEach(ev=>{
     IZZA.on(ev, ()=>{
       reinforceAt = 0;
@@ -294,9 +367,13 @@
       lastWantedChangeAt = performance.now();
       ensureArrays();
       resetHijackTimeline();
-      // Also clear any remaining cops so the next hijack is a clean ramp
+
+      // Hard clear so the next hijack ramps cleanly
       if (api && api.cops) api.cops.length = 0;
       if (api && api.player) api.setWanted(0);
+
+      // reset last player pos for movement delta
+      if (api && api.player){ lastPX = api.player.x; lastPY = api.player.y; }
     });
   });
 })();
