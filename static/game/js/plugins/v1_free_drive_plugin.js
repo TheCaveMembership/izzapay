@@ -1,6 +1,5 @@
-<!-- /static/game/js/plugins/v1_free_drive_plugin.js -->
 (function(){
-  const BUILD='v1.18-free-drive+guard-wanted-floor+delegate-chasing+correct-sprite-layer+tanks-slower+rocket-fullheart+cool-reenter';
+  const BUILD='v1.19-free-drive+hit-only-when-moving+delegate-chasing+correct-sprite-layer+tanks-slower+rocket-fullheart+cool-reenter';
   console.log('[IZZA PLAY]', BUILD);
 
   const M3_KEY='izzaMission3';
@@ -14,8 +13,15 @@
 
   const VEH_DRAW_SCALE = 1.15;
 
+  // NEW: threshold to count as "moving" (pixels per second)
+  const CAR_HIT_SPEED_MIN = 18; // tweak if needed
+
   let api=null;
   let driving=false, car=null, savedWalk=null;
+
+  // Track movement to decide if collisions kill cops
+  let prevPX=0, prevPY=0;
+  let carMoving=false;
 
   const parked = []; // {x,y,kind,timeoutId,hijackTag?}
 
@@ -121,8 +127,7 @@
     guardUntil = now() + 900; // ~0.9s
     spawnLockUntil = isCarCrime ? 0 : (guardUntil + 400);
 
-    // Keep whatever stars exist; no floors here — floors are enforced
-    // in 'wanted-changed' during the brief guard window.
+    // Keep whatever stars exist; no floors.
     restorePursuers();
     setTimeout(restorePursuers, 0);
   }
@@ -147,22 +152,10 @@
   // Guard against unwanted star wipes during transitions
   IZZA.on?.('wanted-changed', ()=>{
     if (!api) return;
-    // 🔒 During the guard window, never allow stars to drop below the value
-    // we had right before pressing B. This prevents the “press B → cop
-    // despawns & stars = 0” issue after on-foot crimes.
     if (now() <= guardUntil){
-      if ((api.player.wanted|0) < guardWanted){
-        api.setWanted(guardWanted);
-      }
       restorePursuers();
-      setTimeout(()=>{
-        if ((api.player.wanted|0) < guardWanted){
-          api.setWanted(guardWanted);
-        }
-        restorePursuers();
-      }, 0);
+      setTimeout(restorePursuers, 0);
     }
-
     if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
       if (!fiveStarSince) fiveStarSince = now();
     }else{
@@ -259,6 +252,9 @@
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:`Car hijacked! (${kind}) Press B again to park.`});
 
+    // init movement tracker at start so the first frame isn't counted as a huge jump
+    prevPX = api.player.x; prevPY = api.player.y; carMoving = false;
+
     // Delegate escalation to chasing plugin
     lastCarCrimeAt = now();
     hijackTag = hijackTag || ('hot_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
@@ -279,6 +275,9 @@
     if(savedWalk==null) savedWalk=api.player.speed;
     api.player.speed=CAR_SPEED;
     IZZA.emit?.('toast',{text:'Back in your car. Press B to park.'});
+
+    // init movement tracker on re-entry
+    prevPX = api.player.x; prevPY = api.player.y; carMoving = false;
 
     // If the parked car was the same hijacked car AND heat still existed when it was parked, carry tag.
     hijackTag = entry.car.hijackTag || hijackTag || null;
@@ -313,6 +312,8 @@
     driving=false; car=null;
     if(savedWalk!=null){ api.player.speed=savedWalk; savedWalk=null; }
     IZZA.emit?.('toast',{text:'Parked. It’ll stay ~5 min.'});
+
+    carMoving = false;
 
     armGuard('park');
   }
@@ -353,20 +354,22 @@
       }
     }
 
-    // Running over a cop: chasing plugin already listens to 'cop-killed' for star logic.
+    // Running over a cop: ONLY kill if the car is moving fast enough this frame.
     for(let i=api.cops.length-1; i>=0; i--){
       const c = api.cops[i];
       const d = Math.hypot(px - c.x, py - c.y);
       if(d <= CAR_HIT_RADIUS){
-        api.cops.splice(i,1);
-        const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
-        IZZA.emit('cop-killed', {
-          cop: c,
-          x: pos.x, y: pos.y,
-          droppedAt: now(),
-          noPickupUntil: now() + DROP_GRACE_MS
-        });
-        // No direct setWanted here.
+        if (carMoving){
+          api.cops.splice(i,1);
+          const pos = _dropPos(c.x + api.TILE/2, c.y + api.TILE/2);
+          IZZA.emit('cop-killed', {
+            cop: c,
+            x: pos.x, y: pos.y,
+            droppedAt: now(),
+            noPickupUntil: now() + DROP_GRACE_MS
+          });
+        }
+        // If not moving, do nothing; the cop can attack via other systems.
       }
     }
   }
@@ -530,6 +533,8 @@
       if (api?.player && savedWalk != null) { api.player.speed = savedWalk; }
       savedWalk = null;
 
+      carMoving = false;
+
       // Drop all guards and block any spawn attempts for a short window
       guardUntil = 0; guardWanted = 0;
       spawnLockUntil = now() + 1200;
@@ -587,8 +592,20 @@
     updateRockets(dt);
 
     if(driving && car){
-      car.x=api.player.x; car.y=api.player.y;
+      // compute movement BEFORE we sync car to player
+      const curx = api.player.x, cury = api.player.y;
+      const dist = Math.hypot(curx - prevPX, cury - prevPY);
+      const speed = dt > 0 ? (dist / dt) : 0; // px/sec
+      carMoving = speed >= CAR_HIT_SPEED_MIN;
+      prevPX = curx; prevPY = cury;
+
+      // sync car to player and resolve hits
+      car.x=curx; car.y=cury;
       handleVehicularHits();
+    }else{
+      carMoving = false;
+      prevPX = api?.player?.x||0;
+      prevPY = api?.player?.y||0;
     }
 
     // (Removed) global free-drive reinforcements; chasing plugin handles escalation.
