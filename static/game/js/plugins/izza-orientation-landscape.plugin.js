@@ -69,6 +69,7 @@
         top:64px !important;
         max-height:300px;
         z-index:20 !important;
+        overflow:visible !important; /* allow rotated child to render fully */
       }
       /* Counter-rotate the CONTENT of the dropdown, not the container */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
@@ -174,18 +175,31 @@
     }
 
     // one-time wrap: move existing children under an inner wrapper we can rotate
-    if(!dd.querySelector(':scope > .izza-upright')){
-      const wrapper = document.createElement('div');
+    let wrapper = dd.querySelector(':scope > .izza-upright');
+    if(!wrapper){
+      wrapper = document.createElement('div');
       wrapper.className = 'izza-upright';
       while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
       dd.appendChild(wrapper);
     }
 
-    // position container; rotation handled by the inner wrapper via CSS
+    // Temporarily un-rotate to measure natural size, then set container w/h swapped
+    const prevTransform = wrapper.style.transform;
+    wrapper.style.transform = 'none';
+    // force layout read
+    const w = wrapper.scrollWidth;
+    const h = wrapper.scrollHeight;
+    // restore rotation
+    wrapper.style.transform = prevTransform || 'rotate(-90deg)';
+
+    // position container; size to fit rotated content
     dd.style.position = 'absolute';
     dd.style.right = '72px';
     dd.style.top = '64px';
+    dd.style.width = h + 'px';   // swap W/H because inner is rotated
+    dd.style.height = w + 'px';
     dd.style.zIndex = '20';
+    dd.style.overflow = 'visible';
   }
 
   // Collect ALL modal / popup candidates so they counter-rotate in Full
