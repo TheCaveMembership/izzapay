@@ -535,10 +535,26 @@ function tintHairLayer(pack, hairColor){
   function toast(msg, seconds=2.2){ showHint(msg, seconds); }
 
   function handleB(){
-    if (doorInRange()) openEnter();
-    else if (atRegister()) openShop();
-    else setWanted(0);
+  if (doorInRange()) { 
+    openEnter();
+    return;
   }
+  if (atRegister()) {
+    openShop();
+    return;
+  }
+
+  // Only clear wanted if there are NO active cops
+  const activeCops =
+    (IZZA.api && Array.isArray(IZZA.api.cops) ? IZZA.api.cops : cops) || [];
+
+  if (activeCops.length === 0) {
+    setWanted(0);
+  } else {
+    // Optional: tiny UX nudge; safe to delete if you don’t want a hint
+    try { toast('Cops nearby! Lose them first.'); } catch {}
+  }
+}
 
   window.addEventListener('keydown', e=>{
     const k=e.key.toLowerCase(); keys[k]=true;
