@@ -62,11 +62,11 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* In rotated Full, the dropdown is ALSO inside the stage, under the bell */
+      /* In rotated Full, dropdown is inside stage, under bell */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        right:10px !important;           /* align with bell */
-        top:56px !important;             /* below the bell, inside the game area */
+        right:10px !important;
+        top:56px !important;
         max-height:300px;
         transform:rotate(-90deg) !important;
         transform-origin:top right !important;
@@ -159,6 +159,24 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
+  // Make sure the bell dropdown is inside the stage and counter-rotated + pinned under bell
+  function fixNotifDropdown(){
+    const dd = byId('mpNotifDropdown');
+    if(!dd) return;
+    // adopt into stage if needed
+    if(!stage.contains(dd) && dd.parentNode){
+      const key = 'modal:mpNotifDropdown';
+      if(!ph[key]) keep(dd, key);
+    }
+    // place under the bell, inside stage coordinates
+    dd.style.position = 'absolute';
+    dd.style.right = '10px';
+    dd.style.top = '56px';
+    dd.style.transform = 'rotate(-90deg)';
+    dd.style.transformOrigin = 'top right';
+    dd.style.zIndex = '20';
+  }
+
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
@@ -166,7 +184,6 @@
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
       '#mpFriendsPopup',
-      /* NEW: adopt the bell dropdown too so it positions within the stage */
       '#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
@@ -261,8 +278,10 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (now includes the bell dropdown)
+    // adopt any modals so they render upright (includes bell dropdown)
     adoptModals();
+    // immediately fix bell dropdown placement/rotation
+    fixNotifDropdown();
 
     document.body.appendChild(stage);
   }
@@ -303,10 +322,10 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); });
   }
 
-  // Observe DOM changes
+  // Observe DOM changes (fix dropdown whenever it appears/changes)
   const mo=new MutationObserver(()=>{
     if(!active){ keepFullVisible(); }
     if(active){
@@ -317,8 +336,8 @@
       const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
-      // late modals / popups (includes the bell dropdown now)
       adoptModals();
+      fixNotifDropdown(); // <— keep the bell dropdown corrected
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
