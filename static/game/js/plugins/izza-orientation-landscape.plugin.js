@@ -62,8 +62,16 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* In rotated Full we will adopt + place #mpNotifDropdown via JS; keep base upright if it remains in normal view */
-      body:not([data-fakeland="1"]) #mpNotifDropdown{ transform:none !important; }
+      /* In rotated Full, dropdown is inside stage, offset in from the right */
+      #izzaLandStage #mpNotifDropdown{
+        position:absolute !important;
+        right:72px !important;      /* was 10px */
+        top:64px !important;        /* was 56px */
+        max-height:300px;
+        transform:rotate(-90deg) !important;
+        transform-origin:top right !important;
+        z-index:20 !important;
+      }
 
       #izzaLandStage #mpFriendsToggleGlobal{
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
@@ -94,12 +102,12 @@
 
       /* ---------- POPUP ORIENTATION FIX ---------- */
 
-      /* NORMAL VIEW: force upright */
+      /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) .backdrop,
       body:not([data-fakeland="1"]) [role="dialog"],
       body:not([data-fakeland="1"]) [data-modal],
-      body:not([data-fakeland="1")] [id$="Modal"],
+      body:not([data-fakeland="1"]) [id$="Modal"],
       body:not([data-fakeland="1"]) #enterModal,
       body:not([data-fakeland="1"]) #tutorialModal,
       body:not([data-fakeland="1"]) #shopModal,
@@ -112,7 +120,8 @@
       body:not([data-fakeland="1"]) [data-pool="hospital"],
       body:not([data-fakeland="1"]) [data-pool="trade-centre"],
       body:not([data-fakeland="1"]) [data-pool="bank"],
-      body:not([data-fakeland="1"]) #mpFriendsPopup{
+      body:not([data-fakeland="1"]) #mpFriendsPopup,
+      body:not([data-fakeland="1"]) #mpNotifDropdown{
         transform:none !important; rotate:0deg !important;
       }
 
@@ -150,53 +159,20 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Place the bell dropdown under the bell, inside the rotated stage, upright.
-  function placeNotifDropdown(){
+  // Make sure the bell dropdown is inside the stage and counter-rotated + pinned inward
+  function fixNotifDropdown(){
     const dd = byId('mpNotifDropdown');
-    const bell = byId('mpNotifBell');
-    if(!dd || !bell) return;
-
-    // If it's not inside the stage yet, adopt it.
+    if(!dd) return;
     if(!stage.contains(dd) && dd.parentNode){
-      if(!ph['modal:mpNotifDropdown']) keep(dd, 'modal:mpNotifDropdown');
+      const key = 'modal:mpNotifDropdown';
+      if(!ph[key]) keep(dd, key);
     }
-
-    // Make sure it's visible enough to measure.
-    const prevDisplay = dd.style.display || '';
-    if(prevDisplay==='none') dd.style.display = 'block';
-
-    // Counter-rotate so text reads upright in rotated stage.
     dd.style.position = 'absolute';
+    dd.style.right = '72px';      // was 10px
+    dd.style.top = '64px';        // was 56px
     dd.style.transform = 'rotate(-90deg)';
-    dd.style.transformOrigin = 'top left';
+    dd.style.transformOrigin = 'top right';
     dd.style.zIndex = '20';
-
-    // Compute position under the bell using stage coordinates.
-    const rStage = stage.getBoundingClientRect();
-    const rBell  = bell.getBoundingClientRect();
-
-    const ddW = dd.offsetWidth  || 280;
-    const ddH = dd.offsetHeight || 160;
-
-    // Bell position relative to stage:
-    const bellLeft = rBell.left - rStage.left;
-    const bellTop  = rBell.top  - rStage.top;
-
-    // Put dropdown so its left edge aligns with bell's right edge - dropdown width,
-    // and 8px below the bell.
-    let left = Math.round(bellLeft + bell.offsetWidth - ddW);
-    let top  = Math.round(bellTop + bell.offsetHeight + 8);
-
-    // Clamp inside stage bounds with 10px padding.
-    const PAD = 10;
-    left = Math.max(PAD, Math.min(left, stage.clientWidth  - ddW - PAD));
-    top  = Math.max(PAD, Math.min(top,  stage.clientHeight - ddH - PAD));
-
-    dd.style.left = left + 'px';
-    dd.style.top  = top  + 'px';
-
-    // restore display if we temporarily opened it for measuring
-    if(prevDisplay==='none') dd.style.display = 'none';
   }
 
   // Collect ALL modal / popup candidates so they counter-rotate in Full
@@ -302,8 +278,7 @@
 
     // adopt any modals so they render upright (includes bell dropdown)
     adoptModals();
-    // immediately position/rotate bell dropdown
-    placeNotifDropdown();
+    fixNotifDropdown();
 
     document.body.appendChild(stage);
   }
@@ -344,7 +319,7 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); placeNotifDropdown(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); });
   }
 
   // Observe DOM changes (fix dropdown whenever it appears/changes)
@@ -359,7 +334,7 @@
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      placeNotifDropdown(); // keep the bell dropdown corrected
+      fixNotifDropdown();
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
