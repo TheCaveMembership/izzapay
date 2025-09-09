@@ -1,14 +1,14 @@
-/* izza-orientation-landscape.plugin.js — rotated overlay + small Full/Exit + joystick delta fix + hide chat in Full */
+/* izza-orientation-landscape.plugin.js — rotated overlay + resilient Full/Exit + joystick fix + hide chat in Full */
 (function(){
   const BASE_W=960, BASE_H=540, TILE=60;
   const BODY=document.body;
   const card=document.getElementById('gameCard');
   const canvas=document.getElementById('game');
   const hud=document.querySelector('.hud');
-  const stick=document.getElementById('stick');
+  const stickEl=document.getElementById('stick');
   const ctrls=document.querySelector('.controls');
   const mini=document.getElementById('miniWrap');
-  if(!card||!canvas||!hud||!stick||!ctrls) return;
+  if(!card||!canvas||!hud||!stickEl||!ctrls) return;
 
   // FIRE placement (bigger, a touch left)
   const FIRE_TILES_RIGHT = 6.0;
@@ -32,12 +32,10 @@
       #izzaLandStage .hud{position:absolute;left:12px;right:12px;top:8px;}
       #izzaLandStage .controls{position:absolute;right:14px;bottom:14px;display:flex;gap:10px;}
 
-      /* Joystick — larger, nudged right (visual only) */
+      /* Joystick — larger, nudged right (visual only; input corrected in code) */
       #izzaLandStage #stick{
         position:absolute;left:48px;bottom:24px;
-        width:180px;height:180px;
-        transform:none; /* visual; input is corrected in code */
-        transform-origin:center center;
+        width:180px;height:180px;transform:none;transform-origin:center center;
       }
       #izzaLandStage #stick .base{border-radius:90px!important;}
       #izzaLandStage #stick .nub{
@@ -45,10 +43,10 @@
         width:48px!important;height:48px!important;border-radius:24px!important;
       }
 
-      /* Minimap preview position (closed on enter) */
+      /* Minimap preview position (we’ll hide it on enter) */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row (we'll HIDE in Full to avoid OS keyboard issues) */
+      /* Chat row (hidden in Full to avoid OS keyboard issues) */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute !important;
@@ -58,7 +56,7 @@
         transform-origin:left bottom !important;
       }
       body[data-fakeland="1"] #chatBar,
-      body[data-fakeland="1"] .land-chat-dock{ display:none !important; } /* <- hide while in Full */
+      body[data-fakeland="1"] .land-chat-dock{ display:none !important; } /* hide while in Full */
 
       /* Hearts + bell/badge/dropdown + friends (upright inside stage) */
       #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
@@ -78,16 +76,19 @@
 
       /* FIRE (tile-placed; scaled up) */
       #izzaLandStage #btnFire,
-      #izzaLandStage .btn-fire,
       #izzaLandStage #fireBtn,
+      #izzaLandStage .btn-fire,
       #izzaLandStage button[data-role="fire"],
       #izzaLandStage .fire{
         position:absolute!important;transform:scale(1.35);transform-origin:center;
       }
 
       /* Small Full/Exit button (Map-sized) */
-      #izzaFullToggle{position:fixed;right:12px;bottom:72px;z-index:8;}
-      #izzaLandStage #izzaFullToggle{position:absolute!important;right:14px!important;bottom:116px!important;top:auto!important;left:auto!important;}
+      #izzaFullToggle{position:fixed;right:12px;bottom:72px;z-index:10010;}
+      #izzaLandStage #izzaFullToggle{
+        position:absolute!important;right:14px!important;bottom:116px!important;
+        top:auto!important;left:auto!important;z-index:10010!important;
+      }
 
       /* Modals upright anywhere */
       body[data-fakeland="1"] .modal{transform:none!important;}
@@ -116,16 +117,27 @@
     return null;
   }
 
-  // tiny Full/Exit button
-  const fullBtn=document.createElement('button');
-  fullBtn.id='izzaFullToggle'; fullBtn.className='btn'; fullBtn.type='button'; fullBtn.textContent='Full';
-  document.body.appendChild(fullBtn);
+  // --- resilient Full/Exit button (re-create if missing) --------------------
+  function ensureFullButton(){
+    let btn = byId('izzaFullToggle');
+    if(!btn){
+      btn=document.createElement('button');
+      btn.id='izzaFullToggle'; btn.className='btn'; btn.type='button';
+      btn.textContent=active?'Exit':'Full';
+      btn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
+      document.body.appendChild(btn);
+    }
+    Object.assign(btn.style,{position:'fixed',right:'12px',bottom:'72px',zIndex:'10010',display:'block',opacity:'1',pointerEvents:'auto'});
+    return btn;
+  }
+  let fullBtn = ensureFullButton();
 
   function adopt(){
-    keep(card,'card'); keep(hud,'hud'); keep(stick,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
+    keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]'); if(fire) adoptOnce(fire,'btnFire');
+    fullBtn = ensureFullButton();
     adoptOnce(fullBtn,'izzaFullToggle');
     document.body.appendChild(stage);
   }
@@ -142,7 +154,7 @@
   // tile helpers + FIRE placement (and kill tiny dash under it)
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"]');
+    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
     if(!fire) return;
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
     const w=fire.offsetWidth||66, h=fire.offsetHeight||66;
@@ -172,8 +184,10 @@
     ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
       const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
     });
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]');
+    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
     if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
+    // Button could have been removed; re-ensure
+    fullBtn = ensureFullButton();
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   });
 
@@ -184,20 +198,29 @@
   }
   function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
 
-  // ---------- Joystick correction (rotate applied movement by -90°) ----------
-  // Observed mapping: right→down, left→up, up→right, down→left (= +90° CCW).
-  // We correct by rotating the per-frame delta by -90°.
+  // ---------- Joystick: rotate ONLY while stick is being dragged -------------
+  let joyActive=false;
+  const markOn = ()=>{ joyActive=true; };
+  const markOff= ()=>{ joyActive=false; };
+  stickEl.addEventListener('touchstart',markOn,{passive:false});
+  stickEl.addEventListener('mousedown', markOn);
+  window.addEventListener('touchend',  markOff, {passive:true});
+  window.addEventListener('mouseup',   markOff, {passive:true});
+  window.addEventListener('touchcancel',markOff,{passive:true});
+
+  // Correct per-frame player movement by -90° when joystick is active:
+  // Observed wrong mapping: right→down, left→up, up→right, down→left (≈ +90° rotation).
+  // Fix: rotate the delta by -90° (x',y') = ( y, -x ) while dragging.
   let prevX=null, prevY=null;
   function fixJoystickDelta(){
-    if(!window.IZZA || !IZZA.api || !IZZA.api.player) return;
+    if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
     const p = IZZA.api.player;
     if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
     const dx = p.x - prevX, dy = p.y - prevY;
-    // rotate -90°: (x',y') = ( y, -x )
-    const fx =  dy;
-    const fy = -dx;
-    // Only apply when stick is likely in use (non-trivial delta)
+    // only adjust meaningful movement
     if(Math.abs(dx)+Math.abs(dy) > 0.0001){
+      const fx =  dy;
+      const fy = -dx;
       p.x = prevX + fx;
       p.y = prevY + fy;
     }
@@ -209,7 +232,7 @@
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
-    fullBtn.textContent='Exit';
+    fullBtn = ensureFullButton(); fullBtn.textContent='Exit';
     adopt(); applyLayout();
     closeMapsOnEnter();
 
@@ -222,12 +245,12 @@
       IZZA.on('update-post', fixJoystickDelta);
       joyHooked = true;
     }
-    prevX=null; prevY=null; // reset baseline
+    prevX=null; prevY=null;
   }
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
-    fullBtn.textContent='Full';
+    fullBtn = ensureFullButton(); fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
     restoreMiniOnExit();
     restore();
@@ -235,11 +258,8 @@
     try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
   }
 
-  // toggle button
-  const fullBtn=document.createElement('button');
-  fullBtn.id='izzaFullToggle'; fullBtn.className='btn'; fullBtn.type='button'; fullBtn.textContent='Full';
-  document.body.appendChild(fullBtn);
-  fullBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
+  // ensure button is alive even if something nukes it
+  fullBtn = ensureFullButton();
 
   // keep scale right
   const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); };
