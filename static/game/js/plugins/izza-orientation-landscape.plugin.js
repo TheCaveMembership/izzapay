@@ -1,5 +1,5 @@
 /* izza-orientation-landscape.plugin.js
-   One rotated+scaled overlay; touch nothing else. */
+   One rotated+scaled overlay; plus a small Full/Exit toggle above Map. */
 (function () {
   const BASE_W = 960, BASE_H = 540;     // canvas intrinsic
   const BODY   = document.body;
@@ -9,21 +9,20 @@
   const stick  = document.getElementById('stick');
   const ctrls  = document.querySelector('.controls');
   const mini   = document.getElementById('miniWrap');
-
   if (!card || !canvas || !hud || !stick || !ctrls) return;
 
   // --- FIRE tile offsets (from screen center inside the stage) ---
-  const TILE = 60;           // 960×540 => 16×9 grid → 60px tiles
+  const TILE = 60;                 // 960×540 → 16×9 → 60px tiles
   const FIRE_TILES_RIGHT = 7;
   const FIRE_TILES_DOWN  = 1;
 
-  // ---------- CSS ----------
+  // ---------- CSS (only for moved things) ----------
   (function injectCSS(){
     if (document.getElementById('izzaLandscapeCSS')) return;
     const css = `
       body[data-fakeland="1"]{ overflow:hidden; background:#0b0f17; }
 
-      /* The single rotated stage that holds the play layer */
+      /* The rotated stage that holds the play layer */
       #izzaLandStage{
         position:fixed; left:50%; top:50%;
         width:${BASE_W}px; height:${BASE_H}px;
@@ -35,24 +34,17 @@
       /* keep canvas intrinsic */
       #izzaLandStage #game{ width:${BASE_W}px !important; height:${BASE_H}px !important; display:block; }
 
-      /* HUD spans the top inside the stage */
-      #izzaLandStage .hud{
-        position:absolute; left:12px; right:12px; top:8px;
-      }
+      /* HUD, ABIM row */
+      #izzaLandStage .hud{ position:absolute; left:12px; right:12px; top:8px; }
+      #izzaLandStage .controls{ position:absolute; right:14px; bottom:14px; display:flex; gap:10px; }
 
-      /* A/B/I/Map row (already correct) */
-      #izzaLandStage .controls{
-        position:absolute; right:14px; bottom:14px;
-        display:flex; gap:10px;
-      }
-
-      /* Joystick bottom-left — bigger & keep upright so axes are correct */
+      /* Joystick: larger + counter-rotate local space so axes feel correct */
       #izzaLandStage #stick{
         position:absolute; left:14px; bottom:14px;
-        width:150px; height:150px;          /* bigger */
-        transform:none;                      /* DO NOT rotate: fixes axis */
+        width:150px; height:150px;
+        transform:rotate(90deg);              /* cancels stage rotation for input */
+        transform-origin:center center;
       }
-      /* center the nub in the bigger base */
       #izzaLandStage #stick .nub{
         left:50% !important; top:50% !important;
         transform:translate(-50%,-50%) !important;
@@ -62,50 +54,63 @@
       /* Minimap */
       #izzaLandStage #miniWrap{ position:absolute; right:12px; top:74px; display:block; }
 
-      /* Chat bar docked along the bottom (upright text) */
+      /* Chat bar pinned along the bottom (upright text) */
       #izzaLandStage #chatBar{
         position:absolute !important; left:12px; right:12px; bottom:8px;
         transform:rotate(-90deg); transform-origin:left bottom;
       }
 
-      /* Hearts inside stage */
-      #izzaLandStage #heartsHud{ position:absolute !important; right:14px; top:46px; }
-
-      /* MP bell/badge/dropdown inside stage coords */
+      /* Hearts; bell/badge/dropdown inside stage coords; friends upright */
+      #izzaLandStage #heartsHud{ position:absolute !important; left:14px; top:54px; }
       #izzaLandStage #mpNotifBell{ position:absolute !important; right:14px; top:12px; }
-      #izzaLandStage #mpNotifBadge{ position:absolute !important; right:6px; top:4px; }
+      #izzaLandStage #mpNotifBadge{ position:absolute !important; right:6px;  top:4px;  }
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important; right:10px; top:44px; max-height:300px;
+        transform:rotate(-90deg); transform-origin:top right;
       }
-
-      /* Friends toggle sits above the ABIM row at bottom-right */
       #izzaLandStage #mpFriendsToggleGlobal{
-        position:absolute !important; right:14px; bottom:72px;   /* <- moved */
+        position:absolute !important; right:14px !important; bottom:72px !important;
+        top:auto !important; left:auto !important;
+      }
+      #izzaLandStage #mpFriendsPopup{
+        position:absolute !important; right:14px !important; bottom:116px !important;
+        top:auto !important; left:auto !important;
+        transform:rotate(-90deg); transform-origin:right bottom;
       }
 
-      /* FIRE button — we position it in JS by tile offsets */
-      #izzaLandStage .btn-fire, 
-      #izzaLandStage #btnFire, 
-      #izzaLandStage #fireBtn, 
-      #izzaLandStage button[data-role="fire"],
-      #izzaLandStage .fire{
-        position:absolute !important;
-      }
+      /* FIRE button (tile-placed via JS) */
+      #izzaLandStage #btnFire{ position:absolute !important; }
 
-      /* CTA */
-      .izzaland-cta{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
-        padding:10px 14px; border-radius:10px; background:rgba(0,0,0,.65); color:#fff; z-index:1000; }
-      .izzaland-cta.hide{ display:none; }
+      /* NEW: small Full/Exit button — sits just above the Map row */
+      #izzaFullToggle{
+        position:fixed; right:12px; bottom:72px; z-index:8;  /* portrait */
+      }
+      #izzaLandStage #izzaFullToggle{
+        position:absolute !important; right:14px !important; bottom:116px !important;  /* rotated */
+        top:auto !important; left:auto !important;
+      }
     `;
     const tag=document.createElement('style'); tag.id='izzaLandscapeCSS'; tag.textContent=css; document.head.appendChild(tag);
   })();
 
-  // ---------- build rotated stage & adopt nodes ----------
+  // ---------- rotated stage & placeholders ----------
   const stage = document.createElement('div'); stage.id='izzaLandStage';
   const ph = {};
   const keepPlace = (el, key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key], el); stage.appendChild(el); };
-
   const byId = (id)=> document.getElementById(id);
+
+  // Small Full/Exit toggle (styled like your .btn)
+  const fullBtn = document.createElement('button');
+  fullBtn.id = 'izzaFullToggle';
+  fullBtn.className = 'btn';
+  fullBtn.type = 'button';
+  fullBtn.textContent = 'Full';
+  document.body.appendChild(fullBtn);
+
+  function adoptOnce(el, key){
+    if(!el || ph[key]) return;
+    keepPlace(el, key);
+  }
 
   function adopt(){
     keepPlace(card,'card');
@@ -114,88 +119,88 @@
     keepPlace(ctrls,'ctrls');
     if (mini) keepPlace(mini,'mini');
 
-    // chat bar from area-chat plugin
-    const chatBar = byId('chatBar'); if (chatBar) keepPlace(chatBar,'chat');
-
-    // hearts HUD from hearts plugin
-    const hearts = byId('heartsHud'); if (hearts) keepPlace(hearts,'hearts');
-
-    // MP overlays (bell + friends button + dropdown/badge)
-    const bell   = byId('mpNotifBell');      if (bell)  keepPlace(bell,'bell');
-    const badge  = byId('mpNotifBadge');     if (badge) keepPlace(badge,'badge');
-    const drop   = byId('mpNotifDropdown');  if (drop)  keepPlace(drop,'drop');
-    const friend = byId('mpFriendsToggleGlobal'); if (friend) keepPlace(friend,'friends');
+    // Hearts, bell, badge, dropdown, friends button/popup, chat, FIRE, FullToggle
+    ['heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup','chatBar','btnFire','izzaFullToggle']
+      .forEach(id => { const n = byId(id); if(n) adoptOnce(n, id); });
 
     document.body.appendChild(stage);
   }
 
   function restore(){
-    const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node, ph[key]); ph[key].remove(); }catch{} };
-    putBack(card,'card'); putBack(hud,'hud'); putBack(stick,'stick'); putBack(ctrls,'ctrls');
-    if (mini) putBack(mini,'mini');
-    const chat = byId('chatBar');     if (chat)  putBack(chat,'chat');
-    const hearts = byId('heartsHud'); if (hearts) putBack(hearts,'hearts');
-    const bell=byId('mpNotifBell');   if (bell)  putBack(bell,'bell');
-    const badge=byId('mpNotifBadge'); if (badge) putBack(badge,'badge');
-    const drop=byId('mpNotifDropdown'); if (drop) putBack(drop,'drop');
-    const friend=byId('mpFriendsToggleGlobal'); if (friend) putBack(friend,'friends');
+    const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node, ph[key]); ph[key].remove(); delete ph[key]; }catch{} };
+    ['card','hud','stick','ctrls','mini','heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup','chatBar','btnFire','izzaFullToggle']
+      .forEach(k=>{
+        const node = byId(k);
+        if(node && ph[k]) putBack(node,k);
+      });
     try{ stage.remove(); }catch{}
   }
 
-  // ---------- layout (stage, fire, etc.) ----------
+  // ----- helpers that may appear later (chat bar, bell, friends popup, FIRE) -----
+  const mo = new MutationObserver(()=>{
+    if(!active) return;
+    ['chatBar','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup','btnFire']
+      .forEach(id=>{
+        const n = byId(id);
+        if(n && !stage.contains(n)) adoptOnce(n, id);
+      });
+    requestAnimationFrame(()=>{ placeFire(); fixFriendsTogglePin(); });
+  });
+
+  // ---------- layout (stage + fire) ----------
+  function tileToXY(tx, ty){
+    return { x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE };
+  }
   function placeFire(){
-    const fire =
-      stage.querySelector('#btnFire') ||
-      stage.querySelector('#fireBtn') ||
-      stage.querySelector('.btn-fire') ||
-      stage.querySelector('button[data-role="fire"]') ||
-      stage.querySelector('.fire');
-
-    if (!fire) return;
-
-    const cx = (BASE_W / 2) + (FIRE_TILES_RIGHT * TILE);
-    const cy = (BASE_H / 2) + (FIRE_TILES_DOWN  * TILE);
-
-    const w = fire.offsetWidth  || 72;
-    const h = fire.offsetHeight || 72;
-
+    const fire = byId('btnFire');
+    if(!fire || !stage.contains(fire)) return;
+    const w = fire.offsetWidth || 66, h = fire.offsetHeight || 66;
+    const {x:cx, y:cy} = tileToXY(FIRE_TILES_RIGHT, FIRE_TILES_DOWN);
     fire.style.left = (cx - w/2) + 'px';
     fire.style.top  = (cy - h/2) + 'px';
   }
-
+  function fixFriendsTogglePin(){
+    const btn = byId('mpFriendsToggleGlobal');
+    if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
+    const pop = byId('mpFriendsPopup');
+    if(pop){ pop.style.right='14px'; pop.style.bottom='116px'; pop.style.top=''; pop.style.left=''; }
+  }
   function applyLayout(){
     const vw=innerWidth, vh=innerHeight;
     const scale = Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${scale})`;
-
-    // keep canvas intrinsic
     canvas.style.width = BASE_W+'px';
     canvas.style.height= BASE_H+'px';
-
-    // FIRE alignment after scale settles
     requestAnimationFrame(placeFire);
   }
 
   // ---------- enter/exit ----------
-  let active=false;
+  let active=false, fireTick=null;
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
-    adopt(); applyLayout(); cta.classList.add('hide');
+    fullBtn.textContent = 'Exit';
+    adopt(); applyLayout();
+
+    try{ mo.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['style','class','id']}); }catch{}
+    if(fireTick) clearInterval(fireTick);
+    fireTick = setInterval(placeFire, 350);
   }
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
+    fullBtn.textContent = 'Full';
+    mo.disconnect(); if(fireTick) clearInterval(fireTick); fireTick=null;
     restore(); stage.style.transform=''; canvas.style.width=canvas.style.height='';
-    cta.classList.remove('hide');
   }
 
-  // ---------- CTA ----------
-  const cta=document.createElement('button'); cta.className='izzaland-cta'; cta.type='button';
-  cta.textContent='Rotate to landscape for best play'; document.body.appendChild(cta);
-  cta.addEventListener('click', enter, {passive:true});
+  // Toggle wiring
+  fullBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    if(active) exit(); else enter();
+  }, {passive:false});
 
-  // ---------- keep scale right; modals stay upright (z-index > 15) ----------
+  // ---------- keep scale right ----------
   const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); };
   addEventListener('resize', onResize, {passive:true});
   addEventListener('orientationchange', ()=> setTimeout(onResize,120), {passive:true});
