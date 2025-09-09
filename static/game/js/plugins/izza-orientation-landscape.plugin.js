@@ -57,14 +57,18 @@
       body[data-fakeland="1"] #chatBar,
       body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
-      /* Hearts + bell/badge/dropdown + friends */
+      /* Hearts + bell/badge + friends (kept fixed in <body>) */
       #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
-      #izzaLandStage #mpNotifDropdown{
-        position:absolute!important;right:10px;top:44px;max-height:300px;
-        transform:rotate(-90deg)!important;transform-origin:top right!important;
+
+      /* IMPORTANT: In rotated (fake-land) mode, keep notif dropdown in <body> but counter-rotate it in place under the bell */
+      body[data-fakeland="1"] #mpNotifDropdown{
+        transform:rotate(-90deg) !important;
+        transform-origin:top right !important;
+        right:10px !important; top:90px !important; /* same anchor as builder */
       }
+
       #izzaLandStage #mpFriendsToggleGlobal{
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
@@ -85,7 +89,6 @@
       /* Full/Exit button (portrait/normal vs rotated in-stage) */
       #izzaFullToggle{
         position:fixed;z-index:10010;
-        /* tiny normalization so text centers on iOS */
         display:inline-block; line-height:1; padding:8px 12px; border-radius:10px;
       }
       #izzaLandStage #izzaFullToggle{
@@ -113,12 +116,11 @@
       body:not([data-fakeland="1"]) [data-pool="hospital"],
       body:not([data-fakeland="1"]) [data-pool="trade-centre"],
       body:not([data-fakeland="1"]) [data-pool="bank"],
-      body:not([data-fakeland="1"]) #mpNotifDropdown,
       body:not([data-fakeland="1"]) #mpFriendsPopup{
         transform:none !important; rotate:0deg !important;
       }
 
-      /* ROTATED VIEW: anything inside the stage is counter-rotated to read upright */
+      /* ROTATED VIEW: center/counter-rotate items that are adopted into the stage */
       #izzaLandStage .modal,
       #izzaLandStage .backdrop,
       #izzaLandStage [role="dialog"],
@@ -136,7 +138,6 @@
       #izzaLandStage [data-pool="hospital"],
       #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage [data-pool="bank"],
-      #izzaLandStage #mpNotifDropdown,
       #izzaLandStage #mpFriendsPopup{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
@@ -159,7 +160,8 @@
       '.modal','.backdrop','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      '#mpNotifDropdown','#mpFriendsPopup'
+      /* NOTE: intentionally NOT adopting #mpNotifDropdown — it stays fixed under the bell */
+      '#mpFriendsPopup'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
     nodes.forEach((el,i)=>{
@@ -249,13 +251,13 @@
   function adopt(){
     keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
-    ['heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
+    ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
 
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright
+    // adopt any modals so they render upright (NOT the bell dropdown)
     adoptModals();
 
     document.body.appendChild(stage);
@@ -305,13 +307,13 @@
     if(!active){ keepFullVisible(); }
     if(active){
       const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
+      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
         const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
       });
       const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
-      // late modals / popups
+      // late modals / popups (NOT the bell dropdown)
       adoptModals();
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
