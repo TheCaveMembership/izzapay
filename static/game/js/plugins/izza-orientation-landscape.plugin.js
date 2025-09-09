@@ -1,15 +1,14 @@
 <!-- /static/game/js/plugins/izza-orientation-landscape.plugin.js -->
 (function(){
-  const BASE_W = 960, BASE_H = 540;
-  const BODY = document.body;
-  const card   = document.getElementById('gameCard') || document.body;
+  const BASE_W = 960, BASE_H = 540;        // your canvas' intrinsic size
+  const BODY   = document.body;
   const canvas = document.getElementById('game');
   const mini   = document.getElementById('miniWrap');
   const log = (...a)=>console.log('[IZZA landscape]', ...a);
 
   if (!canvas){ console.warn('[IZZA landscape] #game canvas not found'); return; }
 
-  // Inject CSS once
+  // --- Inject CSS (landscape only; no fake-landscape styling) ---
   (function injectCSS(){
     if (document.getElementById('izzaLandscapeCSS')) return;
     const tag = document.createElement('style'); tag.id='izzaLandscapeCSS';
@@ -17,28 +16,25 @@
       /* Base reset */
       #game { display:block; background:#000; }
 
-      /* Let the page use the whole screen when rotated or fake-rotated */
-      body[data-orient="landscape"],
-      body[data-fakeland="1"]{
+      /* Use the whole screen in real landscape */
+      body[data-orient="landscape"]{
         overflow:hidden;
         padding: env(safe-area-inset-top) env(safe-area-inset-right)
                  env(safe-area-inset-bottom) env(safe-area-inset-left);
       }
 
-      /* Remove wrapper constraints so the stage can center full-bleed */
-      body[data-orient="landscape"] .wrap,
-      body[data-fakeland="1"] .wrap { max-width:none; padding:0; }
+      /* Remove wrapper constraints so stage can center full-bleed */
+      body[data-orient="landscape"] .wrap { max-width:none; padding:0; }
 
-      /* Remove the card chrome in landscape/fake-landscape */
-      body[data-orient="landscape"] #gameCard,
-      body[data-fakeland="1"] #gameCard{
+      /* Card becomes a centered stage host in landscape */
+      body[data-orient="landscape"] #gameCard{
         position:fixed; left:50%; top:50%;
         transform:translate(-50%,-50%);
         background:transparent; border:0; padding:0; margin:0; z-index:1;
-        border-radius:0; /* no rounded clipping */
+        border-radius:0;
       }
 
-      /* Real landscape: scale canvas to fit viewport */
+      /* Scale canvas to fit viewport while preserving aspect */
       body[data-orient="landscape"] #game{
         width:${BASE_W}px !important;
         height:${BASE_H}px !important;
@@ -47,34 +43,19 @@
         border-radius:0;
       }
 
-      /* Fake landscape (portrait device): we rotate + scale the canvas */
-      body[data-fakeland="1"] #game{
-        transform-origin: top left;
-        border-radius:0;
+      /* HUD/controls/minimap pinned sensibly in landscape */
+      body[data-orient="landscape"] .hud{ position:fixed; left:0; right:0; top:0; z-index:7; }
+      body[data-orient="landscape"] .controls{
+        position:fixed; right:14px; bottom:14px; display:flex; flex-direction:column; gap:10px; z-index:6;
       }
-
-      /* Keep HUD and controls placed sensibly in both modes */
-      body[data-orient="landscape"] .hud,
-      body[data-fakeland="1"] .hud{ z-index:5; }
-
-      body[data-orient="landscape"] .controls,
-      body[data-fakeland="1"] .controls{
-        position:fixed; right:14px; bottom:14px;
-        display:flex; flex-direction:column; gap:10px; z-index:6;
+      body[data-orient="landscape"] .stick{
+        position:fixed; left:14px; bottom:14px; transform:scale(1.1); transform-origin: bottom left; z-index:6;
       }
-
-      body[data-orient="landscape"] .stick,
-      body[data-fakeland="1"] .stick{
-        position:fixed; left:14px; bottom:14px;
-        transform:scale(1.1); transform-origin: bottom left; z-index:6;
-      }
-
-      body[data-orient="landscape"] .mini,
-      body[data-fakeland="1"] .mini{
+      body[data-orient="landscape"] .mini{
         position:fixed; right:12px; top:74px; bottom:auto; display:block; z-index:4;
       }
 
-      /* CTA button that shows only in portrait before we rotate/lock */
+      /* CTA shown only in portrait */
       .izzaland-cta{
         position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
         padding:10px 14px; border-radius:10px;
@@ -88,7 +69,7 @@
 
   const isLandscape = ()=> window.innerWidth > window.innerHeight;
 
-  // CTA (tap to try fullscreen+lock or fall back to fake landscape)
+  // CTA (tap to try fullscreen+lock; if not, tell user to rotate)
   const cta = document.createElement('button');
   cta.className = 'izzaland-cta';
   cta.type = 'button';
@@ -117,26 +98,6 @@
     canvas.style.transform = `scale(${scale})`;
 
     BODY.setAttribute('data-orient', 'landscape');
-    BODY.removeAttribute('data-fakeland');
-    cta.classList.add('hide');
-    if (mini) mini.style.display = 'block';
-  }
-
-  function layoutFakeLandscape(){
-    const vw = window.innerWidth, vh = window.innerHeight;
-
-    const scale = Math.min(vh / BASE_W, vw / BASE_H);
-    const rotatedW = BASE_H * scale;   // visual width after 90deg
-    const rotatedH = BASE_W * scale;   // visual height after 90deg
-    const tx = (vw - rotatedW) / 2;
-    const ty = (vh - rotatedH) / 2;
-
-    canvas.style.width  = BASE_W + 'px';
-    canvas.style.height = BASE_H + 'px';
-    canvas.style.transform = `translate(${tx}px, ${ty}px) rotate(90deg) scale(${scale})`;
-
-    BODY.removeAttribute('data-orient');
-    BODY.setAttribute('data-fakeland','1');
     cta.classList.add('hide');
     if (mini) mini.style.display = 'block';
   }
@@ -146,10 +107,10 @@
     canvas.style.width  = '';
     canvas.style.height = '';
     BODY.removeAttribute('data-orient');
-    BODY.removeAttribute('data-fakeland');
     cta.classList.remove('hide');
   }
 
+  // Apply current layout
   let rafId = 0;
   const schedule = ()=>{ cancelAnimationFrame(rafId); rafId = requestAnimationFrame(apply); };
 
@@ -157,19 +118,23 @@
     if (isLandscape()){
       layoutLandscapeScale();
     } else {
-      // Give iOS URL bar a moment to settle
-      setTimeout(()=>{
-        if (isLandscape()) layoutLandscapeScale();
-        else resetPortrait();
-      }, 50);
+      // give iOS bars a moment to settle
+      setTimeout(()=>{ isLandscape() ? layoutLandscapeScale() : resetPortrait(); }, 50);
     }
   }
 
+  // On tap: try to lock; if not, ask user to rotate device
   cta.addEventListener('click', async ()=>{
     const locked = await tryLockLandscape();
     setTimeout(()=>{
-      if (isLandscape() || locked) layoutLandscapeScale();
-      else layoutFakeLandscape();
+      if (isLandscape()) {
+        layoutLandscapeScale();
+      } else if (locked) {
+        // some webviews report portrait briefly; recheck shortly
+        setTimeout(()=>{ if (isLandscape()) layoutLandscapeScale(); }, 250);
+      } else {
+        alert('Please rotate your phone to landscape for the best view.');
+      }
     }, 120);
   }, { passive:true });
 
@@ -188,5 +153,5 @@
     schedule();
   }
 
-  log('plugin ready');
+  log('plugin ready (no fake-landscape)');
 })();
