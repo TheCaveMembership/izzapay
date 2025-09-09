@@ -1,4 +1,5 @@
-/* izza-orientation-landscape.plugin.js — rotated overlay + resilient Full/Exit + (KEEP joystick) + wall-stick + upright popups */
+/* izza-orientation-landscape.plugin.js — rotated overlay + resilient Full/Exit
+   (KEEP joystick behavior exactly as is) + wall-stick guard + upright popups */
 (function(){
   const BASE_W=960, BASE_H=540, TILE=60;
   const BODY=document.body;
@@ -45,7 +46,7 @@
       /* Minimap */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row is hidden in Full (OSK issues) */
+      /* Chat row is hidden in Full (OS keyboard issues) */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute !important;
@@ -100,12 +101,18 @@
       body:not([data-fakeland="1"]) #hospitalModal,
       body:not([data-fakeland="1"]) #tradeCentreModal,
       body:not([data-fakeland="1"]) #bankModal,
+      body:not([data-fakeland="1"]) #hqTutorial,
+      body:not([data-fakeland="1"]) #tradeUI,
       body:not([data-fakeland="1"]) [data-pool="tutorial"],
       body:not([data-fakeland="1"]) [data-pool="shop"],
       body:not([data-fakeland="1"]) [data-pool="hospital"],
       body:not([data-fakeland="1"]) [data-pool="trade-centre"],
-      body:not([data-fakeland="1"]) [data-pool="bank"]{
+      body:not([data-fakeland="1"]) [data-pool="bank"],
+      body:not([data-fakeland="1"]) .popup,
+      body:not([data-fakeland="1"]) .dialog,
+      body:not([data-fakeland="1"]) .pool{
         transform:none !important;
+        transform-origin:center center !important;
       }
 
       /* FULL VIEW (rotated): if a popup ends up inside the stage, counter-rotate so it reads upright */
@@ -115,11 +122,16 @@
       #izzaLandStage #hospitalModal,
       #izzaLandStage #tradeCentreModal,
       #izzaLandStage #bankModal,
+      #izzaLandStage #hqTutorial,
+      #izzaLandStage #tradeUI,
       #izzaLandStage [data-pool="tutorial"],
       #izzaLandStage [data-pool="shop"],
       #izzaLandStage [data-pool="hospital"],
       #izzaLandStage [data-pool="trade-centre"],
-      #izzaLandStage [data-pool="bank"]{
+      #izzaLandStage [data-pool="bank"],
+      #izzaLandStage .popup,
+      #izzaLandStage .dialog,
+      #izzaLandStage .pool{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
         transform-origin:center center !important; z-index:20 !important;
@@ -160,29 +172,39 @@
     return fullBtn;
   }
 
+  // Place Full above Map without overlap; align right edges; ~80% Map width.
   function placeFullButton(){
-    if(active){ return; }
+    if(active){ return; } // in Full, CSS inside stage handles it
     const mapBtn =
       document.querySelector('#btnMap, #mapBtn, button[data-role="map"], .map') ||
-      Array.from(document.querySelectorAll('.controls button, .controls .btn')).find(b=>/^\s*map\s*$/i.test(b.textContent||''));
+      Array.from(document.querySelectorAll('.controls button, .controls .btn'))
+        .find(b=>/^\s*map\s*$/i.test((b.textContent||'').trim()));
     if(!fullBtn) return;
+
+    fullBtn.style.position='fixed';
+    fullBtn.style.zIndex='10010';
+    fullBtn.style.pointerEvents='auto';
+    fullBtn.style.display='block';
+
     if(mapBtn && mapBtn.getBoundingClientRect){
       const r = mapBtn.getBoundingClientRect();
-      const w = fullBtn.offsetWidth || 56;
-      const h = fullBtn.offsetHeight || 28;
-      const left = Math.round(r.left + (r.width - w)/2);
-      const top  = Math.max(8, Math.round(r.top - h - 6));
-      fullBtn.style.position='fixed';
+      const targetW = Math.max(52, Math.round(r.width * 0.8)); // 80% of Map, min 52px
+      fullBtn.style.width = targetW + 'px';
+
+      const fbW = fullBtn.offsetWidth || targetW;
+      const fbH = fullBtn.offsetHeight || 30;
+
+      const left = Math.round(r.right - fbW);        // align right edges
+      const top  = Math.max(8, Math.round(r.top - fbH - 8)); // 8px gap above
+
       fullBtn.style.left = left+'px';
       fullBtn.style.top  = top +'px';
       fullBtn.style.right=''; fullBtn.style.bottom='';
-      fullBtn.style.zIndex='10010';
     }else{
-      fullBtn.style.position='fixed';
+      // fallback
       fullBtn.style.right='12px';
       fullBtn.style.bottom='72px';
       fullBtn.style.left=''; fullBtn.style.top='';
-      fullBtn.style.zIndex='10010';
     }
   }
 
@@ -276,9 +298,9 @@
     const mag = Math.abs(dx)+Math.abs(dy);
 
     // --- wall-stick guard ---
-    // If movement is tiny or clamped to a single axis (common when pressing into a wall),
-    // skip correction this frame so we don't push the player into the collider.
-    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001); // XOR: exactly one axis moved
+    // If movement is tiny or clamped to a single axis (pressing into a wall),
+    // skip correction so we don't push the player into the collider.
+    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001); // XOR
     if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
     // Rotate -90°: (x',y') = ( y, -x )
