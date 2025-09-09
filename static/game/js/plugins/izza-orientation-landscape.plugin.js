@@ -25,14 +25,13 @@
         transform-origin:center center;z-index:15;pointer-events:none;
       }
       #izzaLandStage > *{pointer-events:auto;}
-
       #izzaLandStage #game{width:${BASE_W}px!important;height:${BASE_H}px!important;display:block;}
 
       /* HUD + ABIM row */
       #izzaLandStage .hud{position:absolute;left:12px;right:12px;top:8px;}
       #izzaLandStage .controls{position:absolute;right:14px;bottom:14px;display:flex;gap:10px;}
 
-      /* Joystick — larger, nudged right (visual only; input corrected in code) */
+      /* Joystick — larger, nudged right (visual) */
       #izzaLandStage #stick{
         position:absolute;left:48px;bottom:24px;
         width:180px;height:180px;transform:none;transform-origin:center center;
@@ -43,10 +42,10 @@
         width:48px!important;height:48px!important;border-radius:24px!important;
       }
 
-      /* Minimap preview position (we’ll hide it on enter) */
+      /* Minimap */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row (hidden in Full to avoid OS keyboard issues) */
+      /* Chat row (hide during Full to avoid OS keyboard issues) */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute !important;
@@ -56,9 +55,9 @@
         transform-origin:left bottom !important;
       }
       body[data-fakeland="1"] #chatBar,
-      body[data-fakeland="1"] .land-chat-dock{ display:none !important; } /* hide while in Full */
+      body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
-      /* Hearts + bell/badge/dropdown + friends (upright inside stage) */
+      /* Hearts + bell/badge/dropdown + friends */
       #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
@@ -83,10 +82,12 @@
         position:absolute!important;transform:scale(1.35);transform-origin:center;
       }
 
-      /* Small Full/Exit button (Map-sized) */
-      #izzaFullToggle{position:fixed;right:12px;bottom:72px;z-index:10010;}
+      /* Full/Exit button */
+      #izzaFullToggle{
+        position:fixed;right:12px;bottom:72px;z-index:10010; /* portrait / normal */
+      }
       #izzaLandStage #izzaFullToggle{
-        position:absolute!important;right:14px!important;bottom:116px!important;
+        position:absolute!important;right:14px!important;bottom:116px!important; /* rotated */
         top:auto!important;left:auto!important;z-index:10010!important;
       }
 
@@ -108,7 +109,7 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // find chat bar reliably and tag with helper class if needed
+  // Find chat row; tag if needed
   function findChatDock(){
     const direct = byId('chatBar') || byId('areaChatDock') || document.querySelector('.area-chat');
     if(direct) return direct;
@@ -117,35 +118,76 @@
     return null;
   }
 
-  // --- resilient Full/Exit button (re-create if missing) --------------------
+  // ----- Full/Exit button (never disappears) ---------------------------------
+  let fullBtn=null, active=false;
   function ensureFullButton(){
-    let btn = byId('izzaFullToggle');
-    if(!btn){
-      btn=document.createElement('button');
-      btn.id='izzaFullToggle'; btn.className='btn'; btn.type='button';
-      btn.textContent=active?'Exit':'Full';
-      btn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
-      document.body.appendChild(btn);
+    if(!fullBtn || !document.body.contains(fullBtn)){
+      fullBtn=document.createElement('button');
+      fullBtn.id='izzaFullToggle'; fullBtn.className='btn'; fullBtn.type='button';
+      fullBtn.textContent = active ? 'Exit' : 'Full';
+      fullBtn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); active?exit():enter(); }, {passive:false});
+      document.body.appendChild(fullBtn);
     }
-    Object.assign(btn.style,{position:'fixed',right:'12px',bottom:'72px',zIndex:'10010',display:'block',opacity:'1',pointerEvents:'auto'});
-    return btn;
+    fullBtn.style.display='block';
+    fullBtn.style.opacity='1';
+    fullBtn.style.pointerEvents='auto';
+    placeFullButton(); // make sure it’s above Map in normal view
+    return fullBtn;
   }
-  let fullBtn = ensureFullButton();
 
+  // Place Full button ABOVE the Map button in normal view (portrait),
+  // and leave absolute coords to CSS when in rotated stage.
+  function placeFullButton(){
+    if(active){ return; } // in Full, CSS inside stage handles it
+    const mapBtn =
+      document.querySelector('#btnMap, #mapBtn, button[data-role="map"], .map') ||
+      Array.from(document.querySelectorAll('.controls button, .controls .btn')).find(b=>/^\s*map\s*$/i.test(b.textContent||''));
+    if(!fullBtn) return;
+    if(mapBtn && mapBtn.getBoundingClientRect){
+      const r = mapBtn.getBoundingClientRect();
+      // center above Map, with 6px gap
+      const w = fullBtn.offsetWidth || 56;
+      const h = fullBtn.offsetHeight || 28;
+      const left = Math.round(r.left + (r.width - w)/2);
+      const top  = Math.max(8, Math.round(r.top - h - 6));
+      fullBtn.style.position='fixed';
+      fullBtn.style.left = left+'px';
+      fullBtn.style.top  = top +'px';
+      fullBtn.style.right=''; fullBtn.style.bottom='';
+      fullBtn.style.zIndex='10010';
+    }else{
+      // fallback
+      fullBtn.style.position='fixed';
+      fullBtn.style.right='12px';
+      fullBtn.style.bottom='72px';
+      fullBtn.style.left=''; fullBtn.style.top='';
+      fullBtn.style.zIndex='10010';
+    }
+  }
+
+  // Re-place the Full button on resize / DOM changes (normal view)
+  function keepFullVisible(){
+    ensureFullButton();
+    placeFullButton();
+  }
+
+  // ---------- adopt/restore ----------
   function adopt(){
     keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]'); if(fire) adoptOnce(fire,'btnFire');
-    fullBtn = ensureFullButton();
-    adoptOnce(fullBtn,'izzaFullToggle');
+    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
+
+    // IMPORTANT: only adopt the Full button when entering Full
+    if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
+
     document.body.appendChild(stage);
   }
   function restore(){
     const putBack=(node,key)=>{ try{ ph[key].parentNode.insertBefore(node,ph[key]); ph[key].remove(); delete ph[key]; }catch{} };
     ['card','hud','stick','ctrls','mini','chat','heartsHud','mpNotifBell','mpNotifBadge','mpNotifDropdown','mpFriendsToggleGlobal','mpFriendsPopup','btnFire','izzaFullToggle']
       .forEach(k=>{
-        const node=(k==='btnFire')?(byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"]')):byId(k);
+        const node=(k==='btnFire')?(byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn')):byId(k);
         if(node&&ph[k]) putBack(node,k);
       });
     try{ stage.remove(); }catch{}
@@ -177,18 +219,18 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
   }
 
-  // observe late nodes (chat/friends/bell/fire)
+  // observe late nodes (chat/friends/bell/fire) + keep Full visible
   const mo=new MutationObserver(()=>{
-    if(!active) return;
-    const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-    ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
-      const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
-    });
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
-    if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
-    // Button could have been removed; re-ensure
-    fullBtn = ensureFullButton();
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
+    if(!active){ keepFullVisible(); }
+    if(active){
+      const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
+      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','mpNotifDropdown'].forEach(id=>{
+        const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
+      });
+      const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
+      if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
+      requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
+    }
   });
 
   // keep the map closed when entering Full (both big modal + mini preview)
@@ -208,16 +250,13 @@
   window.addEventListener('mouseup',   markOff, {passive:true});
   window.addEventListener('touchcancel',markOff,{passive:true});
 
-  // Correct per-frame player movement by -90° when joystick is active:
-  // Observed wrong mapping: right→down, left→up, up→right, down→left (≈ +90° rotation).
-  // Fix: rotate the delta by -90° (x',y') = ( y, -x ) while dragging.
+  // Correct per-frame player movement by -90° when joystick is active
   let prevX=null, prevY=null;
   function fixJoystickDelta(){
     if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
     const p = IZZA.api.player;
     if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
     const dx = p.x - prevX, dy = p.y - prevY;
-    // only adjust meaningful movement
     if(Math.abs(dx)+Math.abs(dy) > 0.0001){
       const fx =  dy;
       const fy = -dx;
@@ -228,11 +267,11 @@
   }
 
   // ---------- enter / exit ----------
-  let active=false, fireTick=null, joyHooked=false;
+  let fireTick=null, joyHooked=false;
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
-    fullBtn = ensureFullButton(); fullBtn.textContent='Exit';
+    ensureFullButton(); fullBtn.textContent='Exit';
     adopt(); applyLayout();
     closeMapsOnEnter();
 
@@ -240,7 +279,6 @@
 
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
 
-    // hook once into the game loop to correct joystick motion
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
       joyHooked = true;
@@ -250,21 +288,24 @@
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
-    fullBtn = ensureFullButton(); fullBtn.textContent='Full';
+    ensureFullButton(); fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
     restoreMiniOnExit();
     restore();
     stage.style.transform=''; canvas.style.width=canvas.style.height='';
     try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
+    // after exit, immediately re-place the button above Map
+    setTimeout(keepFullVisible, 0);
   }
 
-  // ensure button is alive even if something nukes it
-  fullBtn = ensureFullButton();
+  // boot: make sure button exists & is placed in normal view
+  ensureFullButton();
+  keepFullVisible();
 
-  // keep scale right
-  const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); };
+  // keep scale right + keep button placed in normal view
+  const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
   addEventListener('resize', onResize, {passive:true});
-  addEventListener('orientationchange', ()=>setTimeout(onResize,120), {passive:true});
+  addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
 
   console.log('[IZZA land] ready');
 })();
