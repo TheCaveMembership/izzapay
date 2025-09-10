@@ -228,31 +228,34 @@ body[data-fakeland="1"] #enterModal .card *{
   transform: none !important;
   writing-mode: horizontal-tb !important;
 }
-/* ===== HOSPITAL (rotate card only) ===== */
+/* HOSPITAL popup — rotate the inner card only (keep backdrop/container normal) */
 body[data-fakeland="1"] #hospitalModal{
-  position:fixed !important;
-  left:50% !important;
-  top:50% !important;
-  right:auto !important;
-  bottom:auto !important;
-  transform:translate(-50%, -50%) !important;  /* container unrotated */
-  z-index:10030 !important;
+  position:absolute !important;
+  left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
+  transform:translate(-50%, -50%) !important;           /* cancel any -90° on the container */
+  transform-origin:center center !important;
+  z-index:9999 !important;
   pointer-events:auto !important;
 }
 
-/* rotate the inner panel/card (cover both DOM variants) */
-body[data-fakeland="1"] #hospitalModal .card,
-body[data-fakeland="1"] #hospitalUI > div{
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
+/* If hospital renders as a .modal with a .card */
+body[data-fakeland="1"] #hospitalModal .card{
+  transform:rotate(90deg) !important;
+  transform-origin:center center !important;
 }
 
-/* normalize children so nothing keeps a weird rotation */
+/* If hospital renders as a custom #hospitalUI container */
+body[data-fakeland="1"] #hospitalUI > div{
+  transform:rotate(90deg) !important;
+  transform-origin:center center !important;
+}
+
+/* Normalize inside so text/buttons are upright and clickable */
 body[data-fakeland="1"] #hospitalModal .card *,
 body[data-fakeland="1"] #hospitalUI > div *{
-  rotate: 0 !important;
-  transform: none !important;
-  writing-mode: horizontal-tb !important;
+  rotate:0 !important;
+  transform:none !important;
+  writing-mode:horizontal-tb !important;
 }
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
