@@ -23,6 +23,12 @@
         position:fixed;left:50%;top:50%;
         width:${BASE_W}px;height:${BASE_H}px;
         transform-origin:center center;z-index:15;pointer-events:none;
+
+        /* perf hints (new) */
+        will-change: transform;
+        contain: layout paint size;
+        backface-visibility: hidden;
+        transform: translateZ(0);
       }
       #izzaLandStage > *{pointer-events:auto;}
       #izzaLandStage #game{width:${BASE_W}px!important;height:${BASE_H}px!important;display:block;}
@@ -44,6 +50,15 @@
 
       /* Minimap */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
+
+      /* ===== INVENTORY PANEL (always over canvas in Full) ===== */
+      #izzaLandStage #invPanel{
+        position:absolute !important;
+        left:12px !important; right:12px !important;
+        top:74px !important;
+        z-index:10040 !important; /* above game & HUD widgets */
+        max-width:none !important; margin:0 !important;
+      }
 
       /* Chat row hidden in Full (OSK issues) */
       #izzaLandStage #chatBar,
@@ -204,55 +219,50 @@
         transform:none !important;
         rotate:0deg !important;
       }
-/* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
-body[data-fakeland="1"] #enterModal{
-  position:fixed !important;
-  left:50% !important;
-  top:50% !important;
-  right:auto !important;
-  bottom:auto !important;
-  transform:translate(-50%, -50%) !important;  /* container stays unrotated */
-  z-index:10030 !important;
-  pointer-events:auto !important;
-}
 
-/* rotate the inner card so text reads left→right */
-body[data-fakeland="1"] #enterModal .card{
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
-}
+      /* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
+      body[data-fakeland="1"] #enterModal{
+        position:fixed !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;
+        bottom:auto !important;
+        transform:translate(-50%, -50%) !important;  /* container stays unrotated */
+        z-index:10030 !important;
+        pointer-events:auto !important;
+      }
+      body[data-fakeland="1"] #enterModal .card{
+        transform: rotate(90deg) !important;
+        transform-origin: center center !important;
+      }
+      body[data-fakeland="1"] #enterModal .card *{
+        rotate: 0 !important;
+        transform: none !important;
+        writing-mode: horizontal-tb !important;
+      }
 
-/* normalize descendants so nothing keeps odd rotations */
-body[data-fakeland="1"] #enterModal .card *{
-  rotate: 0 !important;
-  transform: none !important;
-  writing-mode: horizontal-tb !important;
-}
-/* ===== HOSPITAL POPUP (rotate container directly) ===== */
-body[data-fakeland="1"] #hospitalShop{
-  position:fixed !important;
-  left:50% !important;
-  top:50% !important;
-  right:auto !important;
-  bottom:auto !important;
-  transform:translate(-50%, -50%) rotate(90deg) !important;
-  transform-origin:center center !important;
-  z-index:10040 !important;
-  pointer-events:auto !important;
-}
+      /* ===== HOSPITAL POPUP (rotate inner card only) ===== */
+      body[data-fakeland="1"] #hospitalShop{
+        position:fixed !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;
+        bottom:auto !important;
+        transform:translate(-50%, -50%) !important;  /* container stays unrotated */
+        transform-origin:center center !important;
+        z-index:10040 !important;
+        pointer-events:auto !important;
+      }
+      body[data-fakeland="1"] #hospitalShop .card{
+        transform:rotate(90deg) !important;
+        transform-origin:center center !important;
+      }
+      body[data-fakeland="1"] #hospitalShop .card *{
+        rotate:0 !important;
+        transform:none !important;
+        writing-mode:horizontal-tb !important;
+      }
 
-/* normalize descendants so text/buttons are upright and clickable */
-body[data-fakeland="1"] #hospitalShop *{
-  rotate:0 !important;
-  transform:none !important;
-  writing-mode:horizontal-tb !important;
-}
-
-/* reset in normal view */
-body:not([data-fakeland="1"]) #hospitalShop{
-  transform:none !important;
-  rotate:0deg !important;
-}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
@@ -303,6 +313,9 @@ body:not([data-fakeland="1"]) #hospitalShop{
   const ph={};
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
+
+  // small utility: debounce (for resize/orientation)
+  const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
   // Wrap/center/upright helper (shared) — used by notif/friends/generic; unchanged
   function centerAndUpright(container){
@@ -539,7 +552,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
     try{ stage.remove(); }catch{}
   }
 
-  // FIRE placement + dash removal
+  // FIRE placement + dash removal (UNCHANGED)
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
@@ -631,7 +644,10 @@ body:not([data-fakeland="1"]) #hospitalShop{
     adopt(); applyLayout();
     closeMapsOnEnter();
 
-    try{ mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','id']}); }catch{}
+    try{
+      // PERF: observe only inside the stage, not the whole body
+      mo.observe(stage, { subtree:true, childList:true });
+    }catch{}
 
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
 
@@ -657,10 +673,14 @@ body:not([data-fakeland="1"]) #hospitalShop{
   ensureFullButton();
   keepFullVisible();
 
-  // keep scale right + keep button placed in normal view
-  const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
+  // keep scale right + keep button placed in normal view — debounced (perf)
+  const onResize = debounce(() => {
+    if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout));
+    else keepFullVisible();
+  }, 120);
+
   addEventListener('resize', onResize, {passive:true});
-  addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
+  addEventListener('orientationchange', () => { setTimeout(onResize, 120); }, {passive:true});
 
   console.log('[IZZA land] ready');
 })();
