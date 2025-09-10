@@ -228,6 +228,32 @@ body[data-fakeland="1"] #enterModal .card *{
   transform: none !important;
   writing-mode: horizontal-tb !important;
 }
+/* ===== HOSPITAL (rotate card only) ===== */
+body[data-fakeland="1"] #hospitalModal{
+  position:fixed !important;
+  left:50% !important;
+  top:50% !important;
+  right:auto !important;
+  bottom:auto !important;
+  transform:translate(-50%, -50%) !important;  /* container unrotated */
+  z-index:10030 !important;
+  pointer-events:auto !important;
+}
+
+/* rotate the inner panel/card (cover both DOM variants) */
+body[data-fakeland="1"] #hospitalModal .card,
+body[data-fakeland="1"] #hospitalUI > div{
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
+
+/* normalize children so nothing keeps a weird rotation */
+body[data-fakeland="1"] #hospitalModal .card *,
+body[data-fakeland="1"] #hospitalUI > div *{
+  rotate: 0 !important;
+  transform: none !important;
+  writing-mode: horizontal-tb !important;
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
