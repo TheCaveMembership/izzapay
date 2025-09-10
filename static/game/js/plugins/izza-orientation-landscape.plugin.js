@@ -147,7 +147,11 @@
         transform-origin:top left !important;
         writing-mode:horizontal-tb !important;
       }
-
+/* nudge the Trade modal up only in fake-landscape */
+body[data-fakeland="1"] #tradeModal{
+  /* uses the independent CSS "translate" property so we don't stomp any transforms */
+  translate: 0 -14vh;   /* tweak this value up/down if you want */
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
