@@ -574,32 +574,8 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
   }
 
-    // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
+      // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
   let needsFix = false, rafId = 0;
-
-  // FIRE: handle outside the throttle (pre-throttle behavior)
-  const FIRE_SEL = '#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn';
-
-  function ensureFireInStage(){
-    const fresh = document.querySelector(FIRE_SEL);
-    if (!fresh) return;
-
-    if (stage.contains(fresh)){
-      requestAnimationFrame(placeFire);
-      return;
-    }
-
-    const existing = stage.querySelector(FIRE_SEL);
-    if (existing && existing !== fresh){ try{ existing.remove(); }catch{} }
-
-    if (!ph['btnFire']) {
-      keep(fresh, 'btnFire');
-    } else {
-      try{ stage.appendChild(fresh); }catch{}
-    }
-
-    requestAnimationFrame(placeFire);
-  }
 
   function scheduleFix(){
     if (rafId) return;
@@ -607,7 +583,7 @@
       rafId = 0;
       if (!active || !needsFix) return;
       needsFix = false;
-      // run once per frame (NOTE: fire placement excluded to avoid flicker)
+      // run once per frame (NOTE: fire placement is intentionally excluded here)
       adoptModals();
       fixNotifDropdown();
       fixFriendsPopup();
@@ -619,31 +595,23 @@
   const mo = new MutationObserver((mutations)=>{
     if (!active) { keepFullVisible(); return; }
 
-    let sawChange = false;
-    let fireTouched = false;
+    // If chat/bell/badge/friends appear, adopt them
+    const chat = findChatDock();
+    if (chat && !stage.contains(chat)) adoptOnce(chat,'chat');
+    ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
+      const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
+    });
 
-    for (const m of mutations){
-      if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
-        sawChange = true;
-        for (const n of [...m.addedNodes, ...m.removedNodes]){
-          if (n && n.nodeType === 1 && n.matches && n.matches(FIRE_SEL)){
-            fireTouched = true;
-            break;
-          }
-        }
-      }
-      if (fireTouched) break;
-    }
+    // If a fire button exists outside the stage, adopt it once (no replacing/removing inside stage)
+    const fireOutside = document.querySelector('#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn');
+    if (fireOutside && !stage.contains(fireOutside)) adoptOnce(fireOutside,'btnFire');
 
-    if (fireTouched){
-      ensureFireInStage();            // immediate (not throttled)
-      requestAnimationFrame(placeFire);
-    }
-
-    if (sawChange){
-      needsFix = true;                // everything else stays throttled
-      scheduleFix();
-    }
+    // Always fix modals and place fire on mutation (fire is immediate to avoid flicker)
+    needsFix = true;
+    requestAnimationFrame(()=>{
+      placeFire();           // immediate, unthrottled
+      scheduleFix();         // everything else stays throttled
+    });
   });
 
   function startObserver(){
@@ -660,8 +628,12 @@
       cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
     } else if (active){
       startObserver();
+      // kick a single fix + fire place to resettle UI
       needsFix = true;
-      scheduleFix();
+      requestAnimationFrame(()=>{
+        placeFire();
+        scheduleFix();
+      });
     }
   }, {passive:true});
 
@@ -713,8 +685,8 @@
 
     startObserver();   // PERF
 
-    ensureFireInStage();                         // make sure fire is adopted immediately
-    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // original cadence
+    // heartbeat that previously worked well (no flicker)
+    clearInterval(fireTick); fireTick=setInterval(placeFire,350);
 
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
