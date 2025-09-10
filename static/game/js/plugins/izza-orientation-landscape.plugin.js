@@ -170,17 +170,23 @@
         rotate: 0 !important; transform: none !important; writing-mode: horizontal-tb !important;
       }
 
-      /* ===== MULTIPLAYER LOBBY (counter-rotate by CSS only) ===== */
-      #izzaLandStage #mpLobby{
-        position:absolute !important;
-        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(360deg) !important;
-        transform-origin:center center !important;
-        z-index:20 !important;
-      }
-      body:not([data-fakeland="1"]) #mpLobby{
-        transform:none !important; rotate:0deg !important;
-      }
+      //* ===== MULTIPLAYER LOBBY (scaled to fit) ===== */
+#izzaLandStage #mpLobby{
+  position:absolute !important;
+  left:50% !important; 
+  top:50% !important; 
+  right:auto !important; 
+  bottom:auto !important;
+  transform:translate(-50%, -50%) rotate(360deg) scale(0.85) !important;
+  transform-origin:center center !important;
+  z-index:20 !important;
+}
+
+/* Reset in normal view */
+body:not([data-fakeland="1"]) #mpLobby{
+  transform:none !important; 
+  rotate:0deg !important;
+}
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
