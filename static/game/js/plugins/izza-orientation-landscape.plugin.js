@@ -184,15 +184,15 @@
 
       /* No nudge needed for bank */
 
-      /* ===== MULTIPLAYER LOBBY (new) ===== */
+      /* ===== MULTIPLAYER LOBBY (fixed: container unrotated; wrapper rotates) ===== */
       #izzaLandStage #mpLobby{
         position:absolute !important;
         left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform:translate(-50%, -50%) !important; /* no rotate here */
         transform-origin:center center !important;
-        z-index:20 !important;
+        z-index:9999 !important;
       }
-      /* Reset in normal view */
+      /* Normal view reset */
       body:not([data-fakeland="1"]) #mpLobby{
         transform:none !important; rotate:0deg !important;
       }
