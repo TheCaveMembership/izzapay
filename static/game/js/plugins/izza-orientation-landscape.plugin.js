@@ -141,23 +141,20 @@
         transform-origin:center center !important; z-index:20 !important;
       }
 
-      /* ---------- TRADE CENTRE: container centered; rotate CONTENT 90deg RIGHT ---------- */
-      #izzaLandStage #tradeCentreModal,
-      #izzaLandStage [data-pool="trade-centre"],
-      #izzaLandStage .izza-trade-centre{
-        position:absolute !important;
+      /* ---------- TRADE CENTRE (GLOBAL in Full): if it isn't adopted into the stage ---------- */
+      body[data-fakeland="1"] #tradeCentreModal,
+      body[data-fakeland="1"] [data-pool="trade-centre"],
+      body[data-fakeland="1"] .izza-trade-centre-global{
+        position:fixed !important;
         left:50% !important; top:50% !important;
         right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) !important;
-        margin:0 !important;
-        z-index:9999 !important;
-        overflow:visible !important;
-        pointer-events:auto !important;
+        transform:translate(-50%,-50%) !important;
+        z-index:10020 !important; margin:0 !important; pointer-events:auto !important; overflow:visible !important;
       }
-      /* rotate content +90deg (right) so it reads correctly in your rotated full mode */
-      #izzaLandStage #tradeCentreModal > .izza-upright,
-      #izzaLandStage [data-pool="trade-centre"] > .izza-upright,
-      #izzaLandStage .izza-trade-centre > .izza-upright{
+      body[data-fakeland="1"] #tradeCentreModal > .izza-upright,
+      body[data-fakeland="1"] [data-pool="trade-centre"] > .izza-upright,
+      body[data-fakeland="1"] .izza-trade-centre-global > .izza-upright{
+        /* rotate content +90° (to the right) so it reads correctly in rotated full mode */
         transform:rotate(90deg) !important;
         transform-origin:top left !important;
         writing-mode:horizontal-tb !important;
@@ -215,14 +212,19 @@
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
   // Wrap/center/upright helper (shared)
-  function centerAndUpright(container){
+  function centerAndUpright(container, opts){
     const host = (typeof container==='string') ? byId(container) : container;
     if(!host) return;
 
-    // Bring into stage
-    if(!stage.contains(host) && host.parentNode){
-      const key = 'modal:'+ (host.id || ('@'+Date.now()));
-      if(!ph[key]) keep(host, key);
+    // If not in-place, bring into stage
+    if(!opts || !opts.inPlace){
+      if(!stage.contains(host) && host.parentNode){
+        const key = 'modal:'+ (host.id || ('@'+Date.now()));
+        if(!ph[key]) keep(host, key);
+      }
+    }else{
+      // mark so global CSS can target it when left in-place
+      host.classList.add('izza-trade-centre-global');
     }
 
     // Ensure content wrapper for rotation
@@ -236,16 +238,14 @@
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
 
-    // mark so CSS override applies even if element has odd selector
-    host.classList.add('izza-trade-centre');
-
-    // Center host (JS inline for immediate effect; CSS has !important backup)
+    // Center host (inline immediate)
     Object.assign(host.style, {
-      position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
+      position: (opts && opts.inPlace) ? 'fixed' : 'absolute',
+      left:'50%', top:'50%', right:'auto', bottom:'auto',
       transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0'
     });
 
-    // Normalize + rotate content for Trade Centre specifically (+90deg)
+    // Normalize + rotate content to +90deg (right)
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
     wrapper.style.transform = 'rotate(90deg)';
@@ -302,16 +302,16 @@
     try{
       // 1) explicit id
       const t1 = byId('tradeCentreModal');
-      if(t1) centerAndUpright(t1);
+      if(t1) centerAndUpright(t1, { inPlace:true });
 
       // 2) data-pool version
-      const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
-      if(t2) centerAndUpright(t2);
+      const t2 = document.querySelector('[data-pool="trade-centre"]');
+      if(t2) centerAndUpright(t2, { inPlace:true });
 
-      // 3) fallback by contents
+      // 3) fallback by contents (any modal/dialog containing "Trade Centre")
       const candidates = Array.from(document.querySelectorAll('.modal,[role="dialog"],[data-modal],[id$="Modal"]'))
         .filter(el => (/trade\\s*centre/i).test(el.innerText||''));
-      candidates.forEach(centerAndUpright);
+      candidates.forEach(el=>centerAndUpright(el, { inPlace:true }));
     }catch{} finally{
       fixingTrade=false;
       if(fixTradeQueued){ fixTradeQueued=false; requestAnimationFrame(fixTradeCentrePopup); }
@@ -418,7 +418,7 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (bell + friends + trade)
+    // adopt any modals so they render upright (bell + friends); Trade handled in-place too
     adoptModals();
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
 
@@ -556,7 +556,7 @@
 
   // keep scale right + keep button placed in normal view
   const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
-  addEventListener('resize', onResize, {passive:true});
+  addEventListener('resize,', onResize, {passive:true});
   addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
 
   console.log('[IZZA land] ready');
