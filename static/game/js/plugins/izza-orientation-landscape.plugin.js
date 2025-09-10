@@ -174,7 +174,7 @@
       #izzaLandStage #mpLobby{
         position:absolute !important;
         left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(90deg) !important;
+        transform:translate(-50%, -50%) rotate(180deg) !important;
         transform-origin:center center !important;
         z-index:20 !important;
       }
