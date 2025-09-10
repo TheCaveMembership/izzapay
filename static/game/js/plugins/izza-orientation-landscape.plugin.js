@@ -58,11 +58,7 @@
       body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
       /* Hearts + bell/badge (inside stage in Full) */
-      #izzaLandStage #heartsHud{
-        position:absolute!important;
-        right:14px!important; top:46px!important; left:auto!important;
-        z-index:10050!important; /* keep above canvas at all times */
-      }
+      #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
@@ -230,24 +226,29 @@
         writing-mode: horizontal-tb !important;
       }
 
-      /* ===== HOSPITAL POPUP (rotate container directly) ===== */
+      /* ===== HOSPITAL POPUP (rotate inner card only) ===== */
       body[data-fakeland="1"] #hospitalShop{
         position:fixed !important;
         left:50% !important;
         top:50% !important;
         right:auto !important;
         bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(90deg) !important;
+        transform:translate(-50%, -50%) !important;
         transform-origin:center center !important;
         z-index:10040 !important;
         pointer-events:auto !important;
       }
-      body[data-fakeland="1"] #hospitalShop *{
+      body[data-fakeland="1"] #hospitalShop .card{
+        transform:rotate(90deg) !important;
+        transform-origin:center center !important;
+      }
+      body[data-fakeland="1"] #hospitalShop .card *{
         rotate:0 !important;
         transform:none !important;
         writing-mode:horizontal-tb !important;
       }
-      body:not([data-fakeland="1"]) #hospitalShop{
+      body:not([data-fakeland="1"]) #hospitalShop,
+      body:not([data-fakeland="1"]) #hospitalShop .card{
         transform:none !important;
         rotate:0deg !important;
       }
@@ -312,7 +313,7 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Wrap/center/upright helper (shared)
+  // Wrap/center/upright helper (shared) — used by notif/friends/generic; unchanged
   function centerAndUpright(container){
     const host = (typeof container==='string') ? byId(container) : container;
     if(!host) return;
@@ -331,6 +332,8 @@
     }else{
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
+
+    host.classList.add('izza-trade-centre');
 
     Object.assign(host.style, {
       position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
@@ -421,6 +424,40 @@
       fixingTrade=false;
       if(fixTradeQueued){ fixTradeQueued=false; requestAnimationFrame(fixTradeCentrePopup); }
     }
+  }
+
+  // ======= PERFORMANCE THROTTLE FOR DOM MUTATIONS (no fire/joystick changes) =======
+  let scheduled = false;
+  function scheduleWork(){
+    if(scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(()=>{
+      scheduled = false;
+
+      if(!active){
+        // In normal view, just keep the Full button placed (throttled to rAF)
+        keepFullVisible();
+        return;
+      }
+
+      // In Full view, batch adoption and fixes once per frame — EXCLUDING fire & joystick.
+      const chat = findChatDock(); 
+      if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
+
+      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
+        const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
+      });
+
+      // adopt bell/friends only; lobby stays in-place
+      adoptModals();
+
+      // run fixers + layout nudges once this frame
+      fixNotifDropdown(); 
+      fixFriendsPopup(); 
+      fixTradeCentrePopup(); 
+      // NO placeFire() here, per instruction
+      pinFriendsUI();
+    });
   }
 
   // Collect ALL modal / popup candidates so they counter-rotate in Full
@@ -519,10 +556,6 @@
     keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
-
-    // inventory panel should render above the canvas in Full
-    const inv = byId('invPanel'); if(inv) adoptOnce(inv, 'invPanel');
-
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
 
     // adopt Full button only in Full
@@ -531,7 +564,11 @@
     // adopt any modals so they render upright (bell + friends) — lobby stays in-place
     adoptModals();
 
-    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
+    requestAnimationFrame(()=>{
+      fixNotifDropdown(); 
+      fixFriendsPopup(); 
+      fixTradeCentrePopup(); 
+    });
 
     document.body.appendChild(stage);
   }
@@ -549,98 +586,21 @@
     try{ stage.remove(); }catch{}
   }
 
-      // FIRE + WEAPON PILL placement (adopt both and lock together)
-  const FIRE_SEL   = '#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn';
-  const WEAPON_SEL = [
-    '#weaponName','#weaponHud','#weaponHUD',
-    '.weapon','.hud-weapon','.weapon-pill','.weaponBadge',
-    '.gun','.ammo','.ammo-pill','.equipped','.equip',
-    '[data-role="weapon"]','[data-role="ammo"]'
-  ].join(',');
-
+  // FIRE placement + dash removal (UNCHANGED)
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
-
-  function adoptIfNeeded(el, key){
-    if(!el) return null;
-    if(!ph[key]) keep(el, key); else if(!stage.contains(el)) try{ stage.appendChild(el); }catch{};
-    return el;
-  }
-
-  // find a likely weapon pill if there isn't an obvious selector match:
-  function guessWeaponPillFrom(fire){
-    if(!fire || !fire.parentElement) return null;
-    const sibs = Array.from(fire.parentElement.children).filter(n=>n!==fire && n.nodeType===1);
-    // heuristics: short label/pill-like thing that isn’t a control button
-    const bad = /^(map|friends|exit|full|a|b|i)$/i;
-    return sibs.find(n=>{
-      const t=(n.textContent||'').trim();
-      const isBtn = n.matches('button,.btn,[role="button"]');
-      const looksPill = n.matches('.pill,.badge,.label,.chip,.tag') || (t && t.length<=16);
-      return !isBtn && looksPill && !bad.test(t);
-    }) || null;
-  }
-
-  function ensureFireAndPill(){
-    // fire
-    const fireFresh = document.querySelector(FIRE_SEL);
-    if (fireFresh) adoptIfNeeded(fireFresh, 'btnFire');
-
-    // weapon/pill
-    let pill = document.querySelector(WEAPON_SEL);
-    if(!pill && fireFresh) pill = guessWeaponPillFrom(fireFresh);
-    if(pill) adoptIfNeeded(pill, 'weaponPill');
-
-    // normalize styles (keep them above canvas)
-    const fire = stage.querySelector(FIRE_SEL);
-    if(fire){
-      fire.style.position='absolute';
-      fire.style.zIndex='10060';
-      fire.style.transformOrigin='center';
-      // keep any scale already applied by CSS
-    }
-    const wpill = ph['weaponPill'] ? stage.querySelector(WEAPON_SEL) : null;
-    if(wpill){
-      wpill.style.position='absolute';
-      wpill.style.zIndex='10060';
-      wpill.style.transformOrigin='center';
-    }
-  }
-
-  function placeFireAndPill(){
-    const fire = stage.querySelector(FIRE_SEL);
+  function placeFire(){
+    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
     if(!fire) return;
-
-    // place FIRE at our tile spot
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
-    const fw = fire.offsetWidth  || 66;
-    const fh = fire.offsetHeight || 66;
-    const left = (cx - fw/2);
-    const top  = (cy - fh/2);
-    fire.style.left = left + 'px';
-    fire.style.top  = top  + 'px';
-
-    // hide any stray "-" separator that sometimes rides with the fire button
-    const parent = fire.parentElement;
-    if(parent){
-      const dash = Array.from(parent.children).find(el=>el!==fire && (el.textContent||'').trim()==='-');
-      if(dash) dash.style.display='none';
-    }
-
-    // place WEAPON PILL locked to fire’s left side (center aligned)
-    const pill = stage.querySelector(WEAPON_SEL);
-    if(pill){
-      const pw = pill.offsetWidth  || 48;
-      const phh = pill.offsetHeight || 24;
-      const gap = 12; // space between pill and fire
-      pill.style.left = (left - pw - gap) + 'px';
-      pill.style.top  = (top + (fh - phh)/2) + 'px';
-      pill.style.display=''; // ensure visible when adopted
-    }
+    const w=fire.offsetWidth||66, h=fire.offsetHeight||66;
+    fire.style.left=(cx-w/2)+'px';
+    fire.style.top =(cy-h/2)+'px';
+    const sibs=Array.from(fire.parentElement?fire.parentElement.children:[]);
+    const dash=sibs.find(el=>el!==fire && (el.textContent||'').trim()==='-');
+    if(dash) dash.style.display='none';
   }
-
   function pinFriendsUI(){
-    const btn=byId('mpFriendsToggleGlobal');
-    if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
+    const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
   }
 
   function applyLayout(){
@@ -649,80 +609,16 @@
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
     requestAnimationFrame(()=>{
-      ensureFireAndPill();
-      placeFireAndPill();
-      pinFriendsUI();
-      fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup();
-    });
-  }
-
-  // --- PERF: throttle general fixes; fire/pill handled immediately to avoid flicker
-  let needsFix = false, rafId = 0;
-
-  function scheduleFix(){
-    if (rafId) return;
-    rafId = requestAnimationFrame(() => {
-      rafId = 0;
-      if (!active || !needsFix) return;
-      needsFix = false;
-      adoptModals();
-      fixNotifDropdown();
-      fixFriendsPopup();
+      placeFire();              // UNCHANGED
+      pinFriendsUI(); 
+      fixNotifDropdown(); 
+      fixFriendsPopup(); 
       fixTradeCentrePopup();
-      pinFriendsUI();
     });
   }
 
-  const mo = new MutationObserver((mutations)=>{
-    if (!active) { keepFullVisible(); return; }
-
-    let sawChange = false;
-    let fireOrPillTouched = false;
-
-    for (const m of mutations){
-      if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
-        sawChange = true;
-        for (const n of [...m.addedNodes, ...m.removedNodes]){
-          if (n && n.nodeType === 1 && n.matches && (n.matches(FIRE_SEL) || n.matches(WEAPON_SEL))){
-            fireOrPillTouched = true;
-            break;
-          }
-        }
-      }
-      if (fireOrPillTouched) break;
-    }
-
-    if (fireOrPillTouched){
-      ensureFireAndPill();                 // adopt immediately (no throttle)
-      requestAnimationFrame(placeFireAndPill);
-    }
-
-    if (sawChange){
-      needsFix = true;
-      scheduleFix();
-    }
-  });
-
-  function startObserver(){
-    try{
-      mo.observe(document.body, { subtree:true, childList:true, attributes:false });
-    }catch{}
-  }
-  function stopObserver(){ try{ mo.disconnect(); }catch{} }
-
-  // --- PERF: pause when tab not visible ---
-  document.addEventListener('visibilitychange', ()=>{
-    if (document.hidden){
-      stopObserver();
-      cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
-    } else if (active){
-      startObserver();
-      needsFix = true;
-      scheduleFix();
-      // also re-lock fire/pill on return
-      requestAnimationFrame(()=>{ ensureFireAndPill(); placeFireAndPill(); });
-    }
-  }, {passive:true});
+  // Observe DOM changes (now THROTTLED to rAF; excludes fire/joystick)
+  const mo=new MutationObserver(()=>{ scheduleWork(); });
 
   // keep map closed when entering Full
   function closeMapsOnEnter(){
@@ -749,6 +645,7 @@
     const dx = p.x - prevX, dy = p.y - prevY;
     const mag = Math.abs(dx)+Math.abs(dy);
 
+    // wall-stick guard
     const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
     if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
@@ -770,10 +667,9 @@
     adopt(); applyLayout();
     closeMapsOnEnter();
 
-    startObserver();   // PERF
+    try{ mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','id']}); }catch{}
 
-    ensureFireInStage();                         // adopt once, hide future duplicates
-    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // steady cadence (pre-throttle behavior)
+    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // UNCHANGED
 
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
@@ -785,9 +681,7 @@
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
     ensureFullButton(); fullBtn.textContent='Full';
-    stopObserver();
-    cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
-    clearInterval(fireTick); fireTick=null;
+    mo.disconnect(); clearInterval(fireTick); fireTick=null;
     restoreMiniOnExit();
     restore();
     stage.style.transform=''; canvas.style.width=canvas.style.height='';
