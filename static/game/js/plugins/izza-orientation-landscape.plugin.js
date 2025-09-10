@@ -152,6 +152,23 @@ body[data-fakeland="1"] #tradeModal{
   /* uses the independent CSS "translate" property so we don't stomp any transforms */
   translate: 0 -14vh;   /* tweak this value up/down if you want */
 }
+/* SHOP: rotate the card only (container/backdrop untouched) */
+body[data-fakeland="1"] #shopModal .card{
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important; /* keep it nicely centered in the flex modal */
+}
+
+/* Optional: nudge the whole shop modal up a bit */
+body[data-fakeland="1"] #shopModal{
+  translate: 0 -6vh; /* tweak to taste: -4vh … -10vh */
+}
+
+/* Fallback for older Safari that doesn't support the independent translate property */
+@supports not (translate: 0) {
+  body[data-fakeland="1"] #shopModal{
+    transform: translateY(-6vh) !important;
+  }
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
