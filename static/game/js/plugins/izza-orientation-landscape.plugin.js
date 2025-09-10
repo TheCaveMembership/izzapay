@@ -45,7 +45,7 @@
       /* Minimap */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
 
-      /* Chat row is hidden in Full (OSK issues) */
+      /* Chat row hidden in Full (OSK issues) */
       #izzaLandStage #chatBar,
       #izzaLandStage .land-chat-dock{
         position:absolute !important;
@@ -57,12 +57,12 @@
       body[data-fakeland="1"] #chatBar,
       body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
-      /* Hearts + bell/badge (these live inside the stage in Full) */
+      /* Hearts + bell/badge (inside stage in Full) */
       #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* DROPDOWN: centered container (unrotated), rotated content */
+      /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
         left:50% !important;
@@ -74,11 +74,19 @@
         overflow:visible !important;
         pointer-events:auto !important;
       }
-      /* Rotate only the content wrapper */
+      /* Inner wrapper we rotate upright */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
         transform-origin:top left !important;
         writing-mode: horizontal-tb !important;
+      }
+      /* Hard normalization so text cannot stay vertical or sit absolutely */
+      #izzaLandStage #mpNotifDropdown > .izza-upright,
+      #izzaLandStage #mpNotifDropdown > .izza-upright *{
+        rotate:0 !important;
+        transform:none !important;
+        writing-mode:horizontal-tb !important;
+        position:static !important;
       }
 
       #izzaLandStage #mpFriendsToggleGlobal{
@@ -98,7 +106,7 @@
         position:absolute!important;transform:scale(1.35);transform-origin:center;
       }
 
-      /* Full/Exit button (portrait/normal vs rotated in-stage) */
+      /* Full/Exit button */
       #izzaFullToggle{
         position:fixed;z-index:10010;
         display:inline-block; line-height:1; padding:8px 12px; border-radius:10px;
@@ -167,34 +175,6 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Heuristic: move stray vertical notification labels into the wrapper
-  function stealNotifStrays(dd, wrapper){
-    try{
-      const isInside = (n)=> dd.contains(n);
-      const looksLikeText = (el)=>{
-        const t=(el.textContent||'').trim().toLowerCase();
-        return t && t.length<=40 && /notification/.test(t);
-      };
-      const looksVertical = (el)=>{
-        const cs = getComputedStyle(el);
-        return (cs.writingMode && cs.writingMode !== 'horizontal-tb') ||
-               (cs.transform && cs.transform !== 'none');
-      };
-
-      // Candidates: siblings first (common case)
-      const root = dd.parentNode || document;
-      const candidates = Array.from(root.querySelectorAll('div,span,p,h1,h2,h3,h4,h5,h6,li'));
-
-      candidates.forEach(el=>{
-        if(isInside(el)) return;
-        if(!looksLikeText(el)) return;
-        if(!looksVertical(el)) return;
-        // Move into the rotated wrapper
-        try{ wrapper.appendChild(el); }catch{}
-      });
-    }catch{}
-  }
-
   // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated + centered
   let fixingNotif=false, fixNotifQueued=false;
   function fixNotifDropdown(){
@@ -218,14 +198,10 @@
         wrapper.className = 'izza-upright';
         while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
         dd.appendChild(wrapper);
+      }else{
+        // Move any stray children that are not the wrapper into it
+        Array.from(dd.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
       }
-
-      // If new children were injected outside the wrapper, move them in
-      const strayChildren = Array.from(dd.childNodes).filter(n => n !== wrapper);
-      if(strayChildren.length){ strayChildren.forEach(n => wrapper.appendChild(n)); }
-
-      // Also scoop up typical vertical label elements
-      stealNotifStrays(dd, wrapper);
 
       // Center container in stage (no rotation on container)
       dd.style.position = 'absolute';
@@ -237,10 +213,17 @@
       dd.style.overflow = 'visible';
       dd.style.pointerEvents = 'auto';
 
-      // Force horizontal text flow on content + counter-rotate
+      // --- HARD RESET of any lingering vertical/absolute styles inside ---
       wrapper.style.writingMode = 'horizontal-tb';
       wrapper.style.transformOrigin = 'top left';
-      if(!wrapper.style.transform) wrapper.style.transform = 'rotate(-90deg)';
+      wrapper.style.transform = 'rotate(-90deg)';
+      // Normalize descendants so text can't keep old vertical rules
+      wrapper.querySelectorAll('*').forEach(el=>{
+        el.style.rotate = '0';
+        el.style.transform = 'none';
+        el.style.writingMode = 'horizontal-tb';
+        if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
+      });
 
       // Size container to fit rotated content
       const cs = getComputedStyle(dd);
@@ -250,7 +233,7 @@
         wrapper.style.transform = 'none';
         const w = wrapper.scrollWidth;
         const h = wrapper.scrollHeight;
-        wrapper.style.transform = prev || 'rotate(-90deg)';
+        wrapper.style.transform = prev;
         dd.style.width  = h + 'px';
         dd.style.height = w + 'px';
       }else{
