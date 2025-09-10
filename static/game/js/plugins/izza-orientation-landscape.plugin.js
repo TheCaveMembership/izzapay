@@ -169,6 +169,11 @@ body[data-fakeland="1"] #shopModal{
     transform: translateY(-6vh) !important;
   }
 }
+/* BANK: rotate the card only (container/backdrop untouched) */
+body[data-fakeland="1"] #bankModal .card{
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
