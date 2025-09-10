@@ -549,19 +549,37 @@
     try{ stage.remove(); }catch{}
   }
 
-  // FIRE placement + dash removal
+    // FIRE placement + dash removal
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
+
+  // Use transform only (no left/top) to avoid layout flashes
   function placeFire(){
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
+    const fire = stage.querySelector('[data-izza-fire="1"]') ||
+                 document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn,#izzaLandStage #btnFire,#izzaLandStage #fireBtn');
     if(!fire) return;
+
+    // cache intrinsic size once to avoid reflow jitter
+    const w = fire._izzaW || (fire._izzaW = (fire.offsetWidth||66));
+    const h = fire._izzaH || (fire._izzaH = (fire.offsetHeight||66));
+
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
-    const w=fire.offsetWidth||66, h=fire.offsetHeight||66;
-    fire.style.left=(cx-w/2)+'px';
-    fire.style.top =(cy-h/2)+'px';
+    const tx = Math.round(cx - w/2);
+    const ty = Math.round(cy - h/2);
+
+    fire.style.position = 'absolute';
+    fire.style.transformOrigin = 'center';
+    fire.style.transition = 'none';
+    fire.style.willChange = 'transform';
+    fire.style.zIndex = '10060';
+    // single composite transform (prevents flicker)
+    fire.style.transform = `translate3d(${tx}px,${ty}px,0) scale(1.35)`;
+
+    // ensure any decorative dash sibling is hidden
     const sibs=Array.from(fire.parentElement?fire.parentElement.children:[]);
     const dash=sibs.find(el=>el!==fire && (el.textContent||'').trim()==='-');
     if(dash) dash.style.display='none';
   }
+
   function pinFriendsUI(){
     const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
   }
@@ -574,8 +592,55 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
   }
 
-      // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
+  // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
   let needsFix = false, rafId = 0;
+
+  // FIRE: handle outside the throttle (pre-throttle behavior)
+  const FIRE_SEL = '#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn';
+
+  // Adopt the FIRST real fire button and keep it forever; hide later duplicates.
+  function ensureFireInStage(){
+    const inStage = stage.querySelector('[data-izza-fire="1"]');
+    const fresh = document.querySelector(FIRE_SEL);
+    if (!fresh) return;
+
+    // If we already have one adopted, hide any newly spawned duplicates quietly
+    if (inStage && fresh !== inStage){
+      if (!fresh.hasAttribute('data-izza-fire-dupe')){
+        fresh.setAttribute('data-izza-fire-dupe','1');
+        fresh.setAttribute('aria-hidden','true');
+        Object.assign(fresh.style,{
+          visibility:'hidden',
+          pointerEvents:'none',
+          position:'absolute',
+          width:'0px', height:'0px',
+        });
+      }
+      requestAnimationFrame(placeFire);
+      return;
+    }
+
+    // No adopted button yet — adopt this one and lock it
+    if (!inStage){
+      if (!ph['btnFire']) {
+        keep(fresh, 'btnFire'); // move into stage with placeholder (once)
+      } else {
+        try{ stage.appendChild(fresh); }catch{}
+      }
+      fresh.setAttribute('data-izza-fire','1');
+      fresh.removeAttribute('data-izza-fire-dupe');
+      // harden styles to prevent flicker
+      Object.assign(fresh.style,{
+        position:'absolute',
+        transformOrigin:'center',
+        transition:'none',
+        willChange:'transform',
+        zIndex:'10060'
+      });
+      requestAnimationFrame(placeFire);
+      return;
+    }
+  }
 
   function scheduleFix(){
     if (rafId) return;
@@ -583,7 +648,7 @@
       rafId = 0;
       if (!active || !needsFix) return;
       needsFix = false;
-      // run once per frame (NOTE: fire placement is intentionally excluded here)
+      // run once per frame (NOTE: fire placement excluded to avoid flicker)
       adoptModals();
       fixNotifDropdown();
       fixFriendsPopup();
@@ -595,28 +660,40 @@
   const mo = new MutationObserver((mutations)=>{
     if (!active) { keepFullVisible(); return; }
 
-    // If chat/bell/badge/friends appear, adopt them
-    const chat = findChatDock();
-    if (chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-    ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
-      const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
-    });
+    let sawChange = false;
+    let fireTouched = false;
 
-    // If a fire button exists outside the stage, adopt it once (no replacing/removing inside stage)
-    const fireOutside = document.querySelector('#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn');
-    if (fireOutside && !stage.contains(fireOutside)) adoptOnce(fireOutside,'btnFire');
+    for (const m of mutations){
+      if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
+        sawChange = true;
+        for (const n of [...m.addedNodes, ...m.removedNodes]){
+          if (n && n.nodeType === 1 && n.matches && n.matches(FIRE_SEL)){
+            fireTouched = true;
+            break;
+          }
+        }
+      }
+      if (m.type === 'attributes' && m.target && m.target.matches && m.target.matches(FIRE_SEL)){
+        // some frameworks mutate classes/styles on the same node → treat as touched
+        fireTouched = true;
+      }
+      if (fireTouched) break;
+    }
 
-    // Always fix modals and place fire on mutation (fire is immediate to avoid flicker)
-    needsFix = true;
-    requestAnimationFrame(()=>{
-      placeFire();           // immediate, unthrottled
-      scheduleFix();         // everything else stays throttled
-    });
+    if (fireTouched){
+      ensureFireInStage();            // immediate (not throttled)
+      requestAnimationFrame(placeFire);
+    }
+
+    if (sawChange){
+      needsFix = true;                // everything else stays throttled
+      scheduleFix();
+    }
   });
 
   function startObserver(){
     try{
-      mo.observe(document.body, { subtree:true, childList:true, attributes:false });
+      mo.observe(document.body, { subtree:true, childList:true, attributes:true, attributeFilter:['class','style','id'] });
     }catch{}
   }
   function stopObserver(){ try{ mo.disconnect(); }catch{} }
@@ -628,12 +705,8 @@
       cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
     } else if (active){
       startObserver();
-      // kick a single fix + fire place to resettle UI
       needsFix = true;
-      requestAnimationFrame(()=>{
-        placeFire();
-        scheduleFix();
-      });
+      scheduleFix();
     }
   }, {passive:true});
 
@@ -685,8 +758,8 @@
 
     startObserver();   // PERF
 
-    // heartbeat that previously worked well (no flicker)
-    clearInterval(fireTick); fireTick=setInterval(placeFire,350);
+    ensureFireInStage();                         // adopt once, hide future duplicates
+    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // steady cadence (pre-throttle behavior)
 
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
