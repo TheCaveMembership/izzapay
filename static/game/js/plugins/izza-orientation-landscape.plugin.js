@@ -74,27 +74,43 @@
         overflow:visible !important;
         pointer-events:auto !important;
       }
-      /* Inner wrapper we rotate upright */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
         transform-origin:top left !important;
         writing-mode: horizontal-tb !important;
       }
-      /* Hard normalization so text cannot stay vertical or sit absolutely */
+
+      /* -------- FRIENDS POPUP: centered container (unrotated), rotated content -------- */
+      #izzaLandStage #mpFriendsPopup{
+        position:absolute !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important; bottom:auto !important;
+        transform:translate(-50%, -50%) !important;
+        z-index:9999 !important;
+        overflow:visible !important;
+        pointer-events:auto !important;
+      }
+      #izzaLandStage #mpFriendsPopup > .izza-upright{
+        transform:rotate(-90deg) !important;
+        transform-origin:top left !important;
+        writing-mode: horizontal-tb !important;
+      }
+
+      /* Toggle button stays docked */
+      #izzaLandStage #mpFriendsToggleGlobal{
+        position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
+      }
+
+      /* Normalize rotated content deeply for BOTH popups so text can’t remain vertical/absolute */
       #izzaLandStage #mpNotifDropdown > .izza-upright,
-      #izzaLandStage #mpNotifDropdown > .izza-upright *{
+      #izzaLandStage #mpFriendsPopup > .izza-upright,
+      #izzaLandStage #mpNotifDropdown > .izza-upright *,
+      #izzaLandStage #mpFriendsPopup > .izza-upright *{
         rotate:0 !important;
         transform:none !important;
         writing-mode:horizontal-tb !important;
         position:static !important;
-      }
-
-      #izzaLandStage #mpFriendsToggleGlobal{
-        position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
-      }
-      #izzaLandStage #mpFriendsPopup{
-        position:absolute!important;right:14px!important;bottom:116px!important;top:auto!important;left:auto!important;
-        transform:rotate(-90deg)!important;transform-origin:right bottom!important;
       }
 
       /* FIRE (tile-placed; scaled up) */
@@ -141,7 +157,7 @@
         transform:none !important; rotate:0deg !important;
       }
 
-      /* ROTATED VIEW: center/counter-rotate items adopted into the stage */
+      /* ROTATED VIEW: center/counter-rotate generic modals (kept for other modals) */
       #izzaLandStage .modal,
       #izzaLandStage .backdrop,
       #izzaLandStage [role="dialog"],
@@ -158,8 +174,7 @@
       #izzaLandStage [data-pool="shop"],
       #izzaLandStage [data-pool="hospital"],
       #izzaLandStage [data-pool="trade-centre"],
-      #izzaLandStage [data-pool="bank"],
-      #izzaLandStage #mpFriendsPopup{
+      #izzaLandStage [data-pool="bank"]{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
         transform-origin:center center !important; z-index:20 !important;
@@ -175,79 +190,86 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated + centered
+  // Wrap/center/upright helper (shared by bell + friends)
+  function centerAndUpright(containerId){
+    const host = byId(containerId);
+    if(!host) return;
+
+    // Bring into stage
+    if(!stage.contains(host) && host.parentNode){
+      const key = 'modal:'+containerId;
+      if(!ph[key]) keep(host, key);
+    }
+
+    // Ensure content wrapper for rotation
+    let wrapper = host.querySelector(':scope > .izza-upright');
+    if(!wrapper){
+      wrapper = document.createElement('div');
+      wrapper.className = 'izza-upright';
+      while(host.firstChild){ wrapper.appendChild(host.firstChild); }
+      host.appendChild(wrapper);
+    }else{
+      Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
+    }
+
+    // Center host unrotated
+    host.style.position = 'absolute';
+    host.style.left = '50%';
+    host.style.top  = '50%';
+    host.style.right = 'auto';
+    host.style.bottom = 'auto';
+    host.style.transform = 'translate(-50%, -50%)';
+    host.style.zIndex = '9999';
+    host.style.overflow = 'visible';
+    host.style.pointerEvents = 'auto';
+
+    // Normalize + counter-rotate content
+    wrapper.style.writingMode = 'horizontal-tb';
+    wrapper.style.transformOrigin = 'top left';
+    wrapper.style.transform = 'rotate(-90deg)';
+
+    wrapper.querySelectorAll('*').forEach(el=>{
+      el.style.rotate = '0';
+      el.style.transform = 'none';
+      el.style.writingMode = 'horizontal-tb';
+      if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
+    });
+
+    // Size host to the rotated content so the box isn’t “empty”
+    const cs = getComputedStyle(host);
+    const visible = host.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
+    if(visible){
+      const prev = wrapper.style.transform;
+      wrapper.style.transform = 'none';
+      const w = wrapper.scrollWidth;
+      const h = wrapper.scrollHeight;
+      wrapper.style.transform = prev;
+      host.style.width  = h + 'px';
+      host.style.height = w + 'px';
+    }else{
+      host.style.width = '';
+      host.style.height = '';
+    }
+  }
+
+  // Specialized wrappers
   let fixingNotif=false, fixNotifQueued=false;
   function fixNotifDropdown(){
     if(fixingNotif){ fixNotifQueued=true; return; }
     fixingNotif=true;
-
-    try{
-      const dd = byId('mpNotifDropdown');
-      if(!dd){ return; }
-
-      // Bring into stage once
-      if(!stage.contains(dd) && dd.parentNode){
-        const key = 'modal:mpNotifDropdown';
-        if(!ph[key]) keep(dd, key);
-      }
-
-      // Ensure wrapper exists (content-only rotation)
-      let wrapper = dd.querySelector(':scope > .izza-upright');
-      if(!wrapper){
-        wrapper = document.createElement('div');
-        wrapper.className = 'izza-upright';
-        while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
-        dd.appendChild(wrapper);
-      }else{
-        // Move any stray children that are not the wrapper into it
-        Array.from(dd.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
-      }
-
-      // Center container in stage (no rotation on container)
-      dd.style.position = 'absolute';
-      dd.style.left = '50%';
-      dd.style.top  = '50%';
-      dd.style.right = 'auto';
-      dd.style.transform = 'translate(-50%, -50%)';
-      dd.style.zIndex = '9999';
-      dd.style.overflow = 'visible';
-      dd.style.pointerEvents = 'auto';
-
-      // --- HARD RESET of any lingering vertical/absolute styles inside ---
-      wrapper.style.writingMode = 'horizontal-tb';
-      wrapper.style.transformOrigin = 'top left';
-      wrapper.style.transform = 'rotate(-90deg)';
-      // Normalize descendants so text can't keep old vertical rules
-      wrapper.querySelectorAll('*').forEach(el=>{
-        el.style.rotate = '0';
-        el.style.transform = 'none';
-        el.style.writingMode = 'horizontal-tb';
-        if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
-      });
-
-      // Size container to fit rotated content
-      const cs = getComputedStyle(dd);
-      const visible = dd.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
-      if(visible){
-        const prev = wrapper.style.transform;
-        wrapper.style.transform = 'none';
-        const w = wrapper.scrollWidth;
-        const h = wrapper.scrollHeight;
-        wrapper.style.transform = prev;
-        dd.style.width  = h + 'px';
-        dd.style.height = w + 'px';
-      }else{
-        dd.style.width = '';
-        dd.style.height = '';
-      }
-    }catch(e){
-      /* swallow to avoid breaking gameplay */
-    }finally{
+    try{ centerAndUpright('mpNotifDropdown'); }catch{} finally{
       fixingNotif=false;
-      if(fixNotifQueued){
-        fixNotifQueued=false;
-        requestAnimationFrame(fixNotifDropdown);
-      }
+      if(fixNotifQueued){ fixNotifQueued=false; requestAnimationFrame(fixNotifDropdown); }
+    }
+  }
+
+  let fixingFriends=false, fixFriendsQueued=false;
+  function fixFriendsPopup(){
+    if(fixingFriends){ fixFriendsQueued=true; return; }
+    fixingFriends=true;
+    try{ centerAndUpright('mpFriendsPopup'); }catch{} finally{
+      fixingFriends=false;
+      if(fixFriendsQueued){ fixFriendsQueued=false; requestAnimationFrame(fixFriendsPopup); }
     }
   }
 
@@ -257,8 +279,7 @@
       '.modal','.backdrop','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      '#mpFriendsPopup',
-      '#mpNotifDropdown'
+      '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
     nodes.forEach((el,i)=>{
@@ -352,9 +373,9 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (includes bell dropdown)
+    // adopt any modals so they render upright (includes bell + friends)
     adoptModals();
-    requestAnimationFrame(fixNotifDropdown);
+    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); });
 
     document.body.appendChild(stage);
   }
@@ -387,7 +408,6 @@
   }
   function pinFriendsUI(){
     const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
-    const pop=byId('mpFriendsPopup');        if(pop){ pop.style.right='14px'; pop.style.bottom='116px'; pop.style.top=''; pop.style.left=''; }
   }
 
   function applyLayout(){
@@ -395,10 +415,10 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); });
   }
 
-  // Observe DOM changes (fix dropdown whenever it appears/changes)
+  // Observe DOM changes (fix dropdowns/popups whenever they appear/changes)
   const mo=new MutationObserver(()=>{
     if(!active){ keepFullVisible(); }
     if(active){
@@ -410,7 +430,7 @@
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      requestAnimationFrame(fixNotifDropdown);
+      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); });
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
