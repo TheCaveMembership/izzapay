@@ -102,7 +102,7 @@
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
 
-      /* Normalize rotated content deeply so text can’t remain vertical/absolute */
+      /* Normalize rotated content deeply for BOTH popups so text can’t remain vertical/absolute */
       #izzaLandStage #mpNotifDropdown > .izza-upright,
       #izzaLandStage #mpFriendsPopup > .izza-upright,
       #izzaLandStage #mpNotifDropdown > .izza-upright *,
@@ -112,6 +112,10 @@
         writing-mode:horizontal-tb !important;
         position:static !important;
       }
+
+      /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
+      /* The opaque rectangle over Trade Centre was the backdrop. In rotated mode we suppress all backdrops. */
+      body[data-fakeland="1"] .backdrop{ display:none !important; }
 
       /* FIRE (tile-placed; scaled up) */
       #izzaLandStage #btnFire,
@@ -136,7 +140,6 @@
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
-      body:not([data-fakeland="1"]) .backdrop,
       body:not([data-fakeland="1"]) [role="dialog"],
       body:not([data-fakeland="1"]) [data-modal],
       body:not([data-fakeland="1"]) [id$="Modal"],
@@ -157,7 +160,7 @@
         transform:none !important; rotate:0deg !important;
       }
 
-      /* ROTATED VIEW: center/counter-rotate generic modals (BUT NOT .backdrop!) */
+      /* ROTATED VIEW: center/counter-rotate generic modals (EXCLUDES .backdrop now) */
       #izzaLandStage .modal,
       #izzaLandStage [role="dialog"],
       #izzaLandStage [data-modal],
@@ -178,15 +181,6 @@
         transform:translate(-50%, -50%) rotate(-90deg) !important;
         transform-origin:center center !important; z-index:20 !important;
       }
-
-      /* IMPORTANT: prevent rotated backdrops from turning into a vertical strip */
-      #izzaLandStage .backdrop{
-        position:absolute !important;
-        left:0 !important; top:0 !important; right:0 !important; bottom:0 !important;
-        width:100% !important; height:100% !important;
-        transform:none !important; rotate:0deg !important;
-        z-index:19 !important; /* under the modal */
-      }
     `;
     const tag=document.createElement('style'); tag.id='izzaLandscapeCSS'; tag.textContent=css; document.head.appendChild(tag);
   }
@@ -198,18 +192,18 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Wrap/center/upright helper (reused by bell + friends + trade centre)
-  function centerAndUpright(containerId){
-    const host = byId(containerId);
+  // Wrap/center/upright helper (shared)
+  function centerAndUpright(container){
+    const host = (typeof container==='string') ? byId(container) : container;
     if(!host) return;
 
     // Bring into stage
     if(!stage.contains(host) && host.parentNode){
-      const key = 'modal:'+containerId;
+      const key = 'modal:'+ (host.id || ('@'+Date.now()));
       if(!ph[key]) keep(host, key);
     }
 
-    // Ensure content wrapper
+    // Ensure content wrapper for rotation
     let wrapper = host.querySelector(':scope > .izza-upright');
     if(!wrapper){
       wrapper = document.createElement('div');
@@ -220,18 +214,13 @@
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
 
-    // Center host (unrotated)
-    host.style.position = 'absolute';
-    host.style.left = '50%';
-    host.style.top  = '50%';
-    host.style.right = 'auto';
-    host.style.bottom = 'auto';
-    host.style.transform = 'translate(-50%, -50%)';
-    host.style.zIndex = '9999';
-    host.style.overflow = 'visible';
-    host.style.pointerEvents = 'auto';
+    // Center host unrotated
+    Object.assign(host.style, {
+      position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
+      transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto'
+    });
 
-    // Counter-rotate content
+    // Normalize + counter-rotate content
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
     wrapper.style.transform = 'rotate(-90deg)';
@@ -243,7 +232,7 @@
       if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
     });
 
-    // Fit container to rotated content
+    // Size host to the rotated content
     const cs = getComputedStyle(host);
     const visible = host.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
     if(visible){
@@ -260,7 +249,7 @@
     }
   }
 
-  // Specialized wrappers
+  // ---------- element-specific fixers ----------
   let fixingNotif=false, fixNotifQueued=false;
   function fixNotifDropdown(){
     if(fixingNotif){ fixNotifQueued=true; return; }
@@ -282,35 +271,33 @@
   }
 
   let fixingTrade=false, fixTradeQueued=false;
-  function fixTradeCentreModal(){
+  function fixTradeCentrePopup(){
     if(fixingTrade){ fixTradeQueued=true; return; }
     fixingTrade=true;
     try{
-      // move & upright the modal
-      centerAndUpright('tradeCentreModal');
+      // Try #tradeCentreModal first…
+      const tradeById = byId('tradeCentreModal');
+      if(tradeById) centerAndUpright(tradeById);
 
-      // DO NOT adopt/rotate the backdrop; if one exists *inside* the stage, normalize it
-      const modal = byId('tradeCentreModal');
-      if(modal){
-        const bd = modal.previousElementSibling && /backdrop/i.test(modal.previousElementSibling.className||'')
-                  ? modal.previousElementSibling
-                  : modal.nextElementSibling && /backdrop/i.test(modal.nextElementSibling.className||'')
-                    ? modal.nextElementSibling
-                    : null;
-        if(bd && stage.contains(bd)){
-          Object.assign(bd.style,{
-            position:'absolute', left:'0', top:'0', right:'0', bottom:'0',
-            width:'100%', height:'100%', transform:'none', rotate:'0deg', zIndex:'19'
-          });
-        }
-      }
+      // …and also support data-pool="trade-centre"
+      const tradeByPool = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
+      if(tradeByPool) centerAndUpright(tradeByPool);
+
+      // Just in case the plugin creates a local backdrop near the trade modal, hide it
+      const cand = [];
+      if(tradeById) cand.push(tradeById);
+      if(tradeByPool) cand.push(tradeByPool);
+      cand.forEach(host=>{
+        const parent = host.parentNode || document;
+        parent.querySelectorAll('.backdrop').forEach(b=>{ b.style.display='none'; });
+      });
     }catch{} finally{
       fixingTrade=false;
-      if(fixTradeQueued){ fixTradeQueued=false; requestAnimationFrame(fixTradeCentreModal); }
+      if(fixTradeQueued){ fixTradeQueued=false; requestAnimationFrame(fixTradeCentrePopup); }
     }
   }
 
-  // Collect modal / popup candidates (INTENTIONALLY NOT selecting .backdrop)
+  // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
@@ -410,9 +397,9 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (includes bell + friends + trade centre)
+    // adopt any modals so they render upright (includes bell + friends + trade)
     adoptModals();
-    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentreModal(); });
+    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
 
     document.body.appendChild(stage);
   }
@@ -452,10 +439,10 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentreModal(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
   }
 
-  // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
+  // Observe DOM changes (fix dropdowns/popups whenever they appear/changes)
   const mo=new MutationObserver(()=>{
     if(!active){ keepFullVisible(); }
     if(active){
@@ -467,7 +454,7 @@
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentreModal(); });
+      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
