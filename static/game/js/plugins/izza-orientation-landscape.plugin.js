@@ -564,103 +564,137 @@ body:not([data-fakeland="1"]) #hospitalShop{
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
   }
 
-  // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
-  const mo=new MutationObserver(()=>{
-    if(!active){ keepFullVisible(); }
-    if(active){
-      const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
-        const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
-      });
-      const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
-      if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
+  // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
+let needsFix = false, rafId = 0;
 
-      // adopt bell/friends only; lobby stays in-place
-      adoptModals();
-
-      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
-
-      requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
-    }
+function scheduleFix(){
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = 0;
+    if (!active || !needsFix) return;
+    needsFix = false;
+    // run once per frame
+    adoptModals();
+    fixNotifDropdown();
+    fixFriendsPopup();
+    fixTradeCentrePopup();
+    placeFire();
+    pinFriendsUI();
   });
+}
 
-  // keep map closed when entering Full
-  function closeMapsOnEnter(){
-    const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
-    if(mini){ mini.style.display='none'; }
-  }
-  function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
+const mo = new MutationObserver((mutations)=>{
+  if (!active) { keepFullVisible(); return; }
 
-  // ---------- Joystick correction (UNCHANGED FEEL) + wall-stick guard ----------
-  let joyActive=false;
-  const markOn = ()=>{ joyActive=true; };
-  const markOff= ()=>{ joyActive=false; };
-  stickEl.addEventListener('touchstart',markOn,{passive:false});
-  stickEl.addEventListener('mousedown', markOn);
-  window.addEventListener('touchend',  markOff, {passive:true});
-  window.addEventListener('mouseup',   markOff, {passive:true});
-  window.addEventListener('touchcancel',markOff,{passive:true});
-
-  let prevX=null, prevY=null;
-  function fixJoystickDelta(){
-    if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
-    const p = IZZA.api.player;
-    if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
-    const dx = p.x - prevX, dy = p.y - prevY;
-    const mag = Math.abs(dx)+Math.abs(dy);
-
-    // wall-stick guard
-    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
-    if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
-
-    // Rotate -90°: (x',y') = ( y, -x )
-    const fx =  dy;
-    const fy = -dx;
-    p.x = prevX + fx;
-    p.y = prevY + fy;
-
-    prevX = p.x; prevY = p.y;
-  }
-
-  // ---------- enter / exit ----------
-  let fireTick=null, joyHooked=false;
-  function enter(){
-    if(active) return; active=true;
-    BODY.setAttribute('data-fakeland','1');
-    ensureFullButton(); fullBtn.textContent='Exit';
-    adopt(); applyLayout();
-    closeMapsOnEnter();
-
-    try{ mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','id']}); }catch{}
-
-    clearInterval(fireTick); fireTick=setInterval(placeFire,350);
-
-    if(!joyHooked && window.IZZA && IZZA.on){
-      IZZA.on('update-post', fixJoystickDelta);
-      joyHooked = true;
+  let sawChange = false;
+  for (const m of mutations){
+    if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
+      sawChange = true; break;
     }
-    prevX=null; prevY=null;
   }
-  function exit(){
-    if(!active) return; active=false;
-    BODY.removeAttribute('data-fakeland');
-    ensureFullButton(); fullBtn.textContent='Full';
-    mo.disconnect(); clearInterval(fireTick); fireTick=null;
-    restoreMiniOnExit();
-    restore();
-    stage.style.transform=''; canvas.style.width=canvas.style.height='';
-    try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
-    setTimeout(keepFullVisible, 0);
+  if (sawChange){
+    needsFix = true;
+    scheduleFix();
   }
+});
 
-  // boot: make sure button exists & is placed in normal view
-  ensureFullButton();
-  keepFullVisible();
+function startObserver(){
+  try{
+    mo.observe(document.body, { subtree:true, childList:true, attributes:false });
+  }catch{}
+}
+function stopObserver(){ try{ mo.disconnect(); }catch{} }
 
-  // keep scale right + keep button placed in normal view
-  const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
-  addEventListener('resize', onResize, {passive:true});
-  addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
+// --- PERF: pause when tab not visible ---
+document.addEventListener('visibilitychange', ()=>{
+  if (document.hidden){
+    stopObserver();
+    cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
+  } else if (active){
+    startObserver();
+    needsFix = true;
+    scheduleFix();
+  }
+}, {passive:true});
 
-  console.log('[IZZA land] ready');
+// keep map closed when entering Full
+function closeMapsOnEnter(){
+  const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
+  if(mini){ mini.style.display='none'; }
+}
+function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
+
+// ---------- Joystick correction (UNCHANGED FEEL) + wall-stick guard ----------
+let joyActive=false;
+const markOn = ()=>{ joyActive=true; };
+const markOff= ()=>{ joyActive=false; };
+stickEl.addEventListener('touchstart',markOn,{passive:false});
+stickEl.addEventListener('mousedown', markOn);
+window.addEventListener('touchend',  markOff, {passive:true});
+window.addEventListener('mouseup',   markOff, {passive:true});
+window.addEventListener('touchcancel',markOff,{passive:true});
+
+let prevX=null, prevY=null;
+function fixJoystickDelta(){
+  if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
+  const p = IZZA.api.player;
+  if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
+  const dx = p.x - prevX, dy = p.y - prevY;
+  const mag = Math.abs(dx)+Math.abs(dy);
+
+  const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
+  if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
+
+  // Rotate -90°: (x',y') = ( y, -x )
+  const fx =  dy;
+  const fy = -dx;
+  p.x = prevX + fx;
+  p.y = prevY + fy;
+
+  prevX = p.x; prevY = p.y;
+}
+
+// ---------- enter / exit ----------
+let fireTick=null, joyHooked=false;
+function enter(){
+  if(active) return; active=true;
+  BODY.setAttribute('data-fakeland','1');
+  ensureFullButton(); fullBtn.textContent='Exit';
+  adopt(); applyLayout();
+  closeMapsOnEnter();
+
+  startObserver();   // PERF
+
+  clearInterval(fireTick); fireTick=setInterval(placeFire,500);
+
+  if(!joyHooked && window.IZZA && IZZA.on){
+    IZZA.on('update-post', fixJoystickDelta);
+    joyHooked = true;
+  }
+  prevX=null; prevY=null;
+}
+function exit(){
+  if(!active) return; active=false;
+  BODY.removeAttribute('data-fakeland');
+  ensureFullButton(); fullBtn.textContent='Full';
+  stopObserver();
+  cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
+  clearInterval(fireTick); fireTick=null;
+  restoreMiniOnExit();
+  restore();
+  stage.style.transform=''; canvas.style.width=canvas.style.height='';
+  try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
+  setTimeout(keepFullVisible, 0);
+}
+
+// boot: make sure button exists & is placed in normal view
+ensureFullButton();
+keepFullVisible();
+
+// keep scale right + keep button placed in normal view
+const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
+addEventListener('resize', onResize, {passive:true});
+addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
+
+console.log('[IZZA land] ready');
 })();
