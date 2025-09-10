@@ -62,26 +62,42 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* -------- BELL DROPDOWN: container centered (unrotated), content rotated -------- */
+      /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) !important; margin:0 !important;
-        max-height:300px; z-index:9999 !important; overflow:visible !important; pointer-events:auto !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;
+        bottom:auto !important;
+        transform:translate(-50%, -50%) !important;
+        max-height:300px;
+        z-index:9999 !important;
+        overflow:visible !important;
+        pointer-events:auto !important;
+        margin:0 !important;
       }
       #izzaLandStage #mpNotifDropdown > .izza-upright{
-        transform:rotate(-90deg) !important; transform-origin:top left !important; writing-mode:horizontal-tb !important;
+        transform:rotate(-90deg) !important;
+        transform-origin:top left !important;
+        writing-mode: horizontal-tb !important;
       }
 
-      /* -------- FRIENDS POPUP: container centered (unrotated), content rotated -------- */
+      /* -------- FRIENDS POPUP: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpFriendsPopup{
         position:absolute !important;
-        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) !important; margin:0 !important;
-        z-index:9999 !important; overflow:visible !important; pointer-events:auto !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important; bottom:auto !important;
+        transform:translate(-50%, -50%) !important;
+        z-index:9999 !important;
+        overflow:visible !important;
+        pointer-events:auto !important;
+        margin:0 !important;
       }
       #izzaLandStage #mpFriendsPopup > .izza-upright{
-        transform:rotate(-90deg) !important; transform-origin:top left !important; writing-mode:horizontal-tb !important;
+        transform:rotate(-90deg) !important;
+        transform-origin:top left !important;
+        writing-mode: horizontal-tb !important;
       }
 
       /* Toggle button stays docked */
@@ -89,10 +105,15 @@
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
 
-      /* Normalize rotated content for bell + friends (descendants ONLY, not the wrapper) */
-      #izzaLandStage #mpNotifDropdown > .izza-upright * ,
-      #izzaLandStage #mpFriendsPopup > .izza-upright * {
-        rotate:0 !important; transform:none !important; writing-mode:horizontal-tb !important; position:static !important; text-orientation:mixed !important;
+      /* Normalize rotated content deeply so text can’t remain vertical/absolute */
+      #izzaLandStage #mpNotifDropdown > .izza-upright,
+      #izzaLandStage #mpFriendsPopup > .izza-upright,
+      #izzaLandStage #mpNotifDropdown > .izza-upright *,
+      #izzaLandStage #mpFriendsPopup > .izza-upright *{
+        rotate:0 !important;
+        transform:none !important;
+        writing-mode:horizontal-tb !important;
+        position:static !important;
       }
 
       /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
@@ -107,36 +128,38 @@
       #izzaLandStage #tutorialModal,
       #izzaLandStage #shopModal,
       #izzaLandStage #hospitalModal,
+      #izzaLandStage #tradeCentreModal,
       #izzaLandStage #bankModal,
       #izzaLandStage #mapModal,
       #izzaLandStage [data-pool="tutorial"],
       #izzaLandStage [data-pool="shop"],
       #izzaLandStage [data-pool="hospital"],
+      #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage [data-pool="bank"]{
         position:absolute !important; left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) rotate(-90deg) !important;
         transform-origin:center center !important; z-index:20 !important;
       }
 
-      /* ---------- TRADE CENTRE: container centered (unrotated), content rotated ---------- */
+      /* ---------- TRADE CENTRE: container forcibly centered; rotate CONTENT only ---------- */
       #izzaLandStage #tradeCentreModal,
       #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage .izza-trade-centre{
         position:absolute !important;
-        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) !important; margin:0 !important;
-        z-index:9999 !important; overflow:visible !important; pointer-events:auto !important;
+        left:50% !important; top:50% !important;
+        right:auto !important; bottom:auto !important;
+        transform:translate(-50%, -50%) !important;
+        margin:0 !important;
+        z-index:9999 !important;
+        overflow:visible !important;
+        pointer-events:auto !important;
       }
       #izzaLandStage #tradeCentreModal > .izza-upright,
       #izzaLandStage [data-pool="trade-centre"] > .izza-upright,
       #izzaLandStage .izza-trade-centre > .izza-upright{
-        transform:rotate(-90deg) !important; transform-origin:top left !important; writing-mode:horizontal-tb !important;
-      }
-      /* Deep normalization for Trade Centre DESCENDANTS (not the wrapper) */
-      #izzaLandStage #tradeCentreModal > .izza-upright * ,
-      #izzaLandStage [data-pool="trade-centre"] > .izza-upright * ,
-      #izzaLandStage .izza-trade-centre > .izza-upright * {
-        rotate:0 !important; transform:none !important; writing-mode:horizontal-tb !important; position:static !important; text-orientation:mixed !important;
+        transform:rotate(-90deg) !important;
+        transform-origin:top left !important;
+        writing-mode:horizontal-tb !important;
       }
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
@@ -221,17 +244,15 @@
       transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0'
     });
 
-    // Rotate wrapper (content) and normalize only its DESCENDANTS, not the wrapper
+    // Normalize + counter-rotate content
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
     wrapper.style.transform = 'rotate(-90deg)';
 
-    // descendant normalization (inline, to beat theme rules without touching wrapper)
     wrapper.querySelectorAll('*').forEach(el=>{
       el.style.rotate = '0';
       el.style.transform = 'none';
       el.style.writingMode = 'horizontal-tb';
-      el.style.textOrientation = 'mixed';
       if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
     });
 
@@ -278,10 +299,17 @@
     if(fixingTrade){ fixTradeQueued=true; return; }
     fixingTrade=true;
     try{
-      const t1 = byId('tradeCentreModal'); if(t1) centerAndUpright(t1);
-      const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]'); if(t2) centerAndUpright(t2);
+      // 1) explicit id
+      const t1 = byId('tradeCentreModal');
+      if(t1) centerAndUpright(t1);
+
+      // 2) data-pool version
+      const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
+      if(t2) centerAndUpright(t2);
+
+      // 3) fallback by contents
       const candidates = Array.from(document.querySelectorAll('.modal,[role="dialog"],[data-modal],[id$="Modal"]'))
-        .filter(el => (/trade\s*centre/i).test(el.innerText||''));
+        .filter(el => (/trade\\s*centre/i).test(el.innerText||''));
       candidates.forEach(centerAndUpright);
     }catch{} finally{
       fixingTrade=false;
@@ -294,7 +322,7 @@
     const sel = [
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
-      '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="bank"]',
+      '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
