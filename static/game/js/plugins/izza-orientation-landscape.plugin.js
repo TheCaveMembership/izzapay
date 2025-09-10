@@ -114,29 +114,44 @@
       }
 
       /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
-      /* The opaque rectangle over Trade Centre was the backdrop. In rotated mode we suppress all backdrops. */
+      /* The dark rectangle seen earlier was the .backdrop. Hide it in rotated mode. */
       body[data-fakeland="1"] .backdrop{ display:none !important; }
 
-      /* FIRE (tile-placed; scaled up) */
-      #izzaLandStage #btnFire,
-      #izzaLandStage #fireBtn,
-      #izzaLandStage .btn-fire,
-      #izzaLandStage button[data-role="fire"],
-      #izzaLandStage .fire{
-        position:absolute!important;transform:scale(1.35);transform-origin:center;
+      /* ---------- GENERIC MODALS (fallback) ---------- */
+      #izzaLandStage .modal,
+      #izzaLandStage [role="dialog"],
+      #izzaLandStage [data-modal],
+      #izzaLandStage [id$="Modal"],
+      #izzaLandStage #enterModal,
+      #izzaLandStage #tutorialModal,
+      #izzaLandStage #shopModal,
+      #izzaLandStage #hospitalModal,
+      #izzaLandStage #tradeCentreModal,
+      #izzaLandStage #bankModal,
+      #izzaLandStage #mapModal,
+      #izzaLandStage [data-pool="tutorial"],
+      #izzaLandStage [data-pool="shop"],
+      #izzaLandStage [data-pool="hospital"],
+      #izzaLandStage [data-pool="trade-centre"],
+      #izzaLandStage [data-pool="bank"]{
+        position:absolute !important; left:50% !important; top:50% !important;
+        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform-origin:center center !important; z-index:20 !important;
       }
 
-      /* Full/Exit button */
-      #izzaFullToggle{
-        position:fixed;z-index:10010;
-        display:inline-block; line-height:1; padding:8px 12px; border-radius:10px;
+      /* ---------- TRADE CENTRE: keep CONTAINER unrotated; rotate CONTENT only ---------- */
+      #izzaLandStage #tradeCentreModal,
+      #izzaLandStage [data-pool="trade-centre"],
+      #izzaLandStage .izza-trade-centre{
+        transform:translate(-50%, -50%) !important;   /* override the generic rotate */
       }
-      #izzaLandStage #izzaFullToggle{
-        position:absolute!important;right:14px!important;bottom:116px!important;
-        top:auto!important;left:auto!important;z-index:10010!important;
+      #izzaLandStage #tradeCentreModal > .izza-upright,
+      #izzaLandStage [data-pool="trade-centre"] > .izza-upright,
+      #izzaLandStage .izza-trade-centre > .izza-upright{
+        transform:rotate(-90deg) !important;
+        transform-origin:top left !important;
+        writing-mode:horizontal-tb !important;
       }
-
-      /* ---------- POPUP ORIENTATION FIX ---------- */
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
@@ -160,26 +175,23 @@
         transform:none !important; rotate:0deg !important;
       }
 
-      /* ROTATED VIEW: center/counter-rotate generic modals (EXCLUDES .backdrop now) */
-      #izzaLandStage .modal,
-      #izzaLandStage [role="dialog"],
-      #izzaLandStage [data-modal],
-      #izzaLandStage [id$="Modal"],
-      #izzaLandStage #enterModal,
-      #izzaLandStage #tutorialModal,
-      #izzaLandStage #shopModal,
-      #izzaLandStage #hospitalModal,
-      #izzaLandStage #tradeCentreModal,
-      #izzaLandStage #bankModal,
-      #izzaLandStage #mapModal,
-      #izzaLandStage [data-pool="tutorial"],
-      #izzaLandStage [data-pool="shop"],
-      #izzaLandStage [data-pool="hospital"],
-      #izzaLandStage [data-pool="trade-centre"],
-      #izzaLandStage [data-pool="bank"]{
-        position:absolute !important; left:50% !important; top:50% !important;
-        transform:translate(-50%, -50%) rotate(-90deg) !important;
-        transform-origin:center center !important; z-index:20 !important;
+      /* FIRE (tile-placed; scaled up) */
+      #izzaLandStage #btnFire,
+      #izzaLandStage #fireBtn,
+      #izzaLandStage .btn-fire,
+      #izzaLandStage button[data-role="fire"],
+      #izzaLandStage .fire{
+        position:absolute!important;transform:scale(1.35);transform-origin:center;
+      }
+
+      /* Full/Exit button */
+      #izzaFullToggle{
+        position:fixed;z-index:10010;
+        display:inline-block; line-height:1; padding:8px 12px; border-radius:10px;
+      }
+      #izzaLandStage #izzaFullToggle{
+        position:absolute!important;right:14px!important;bottom:116px!important;
+        top:auto!important;left:auto!important;z-index:10010!important;
       }
     `;
     const tag=document.createElement('style'); tag.id='izzaLandscapeCSS'; tag.textContent=css; document.head.appendChild(tag);
@@ -213,6 +225,9 @@
     }else{
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
+
+    // mark so CSS override applies even if it has no id/attr we expect
+    host.classList.add('izza-trade-centre');
 
     // Center host unrotated
     Object.assign(host.style, {
@@ -275,22 +290,21 @@
     if(fixingTrade){ fixTradeQueued=true; return; }
     fixingTrade=true;
     try{
-      // Try #tradeCentreModal first…
-      const tradeById = byId('tradeCentreModal');
-      if(tradeById) centerAndUpright(tradeById);
+      // Try explicit id
+      const t1 = byId('tradeCentreModal');
+      if(t1) centerAndUpright(t1);
 
-      // …and also support data-pool="trade-centre"
-      const tradeByPool = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
-      if(tradeByPool) centerAndUpright(tradeByPool);
+      // data-pool version (seen in some builds)
+      const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
+      if(t2) centerAndUpright(t2);
 
-      // Just in case the plugin creates a local backdrop near the trade modal, hide it
-      const cand = [];
-      if(tradeById) cand.push(tradeById);
-      if(tradeByPool) cand.push(tradeByPool);
-      cand.forEach(host=>{
-        const parent = host.parentNode || document;
-        parent.querySelectorAll('.backdrop').forEach(b=>{ b.style.display='none'; });
-      });
+      // Fallback: any visible modal/dialog whose text contains “Trade Centre”
+      const candidates = Array.from(document.querySelectorAll('.modal,[role="dialog"],[data-modal],[id$="Modal"]'))
+        .filter(el=>{
+          const txt=(el.innerText||'').toLowerCase();
+          return /trade\s*centre/.test(txt);
+        });
+      candidates.forEach(centerAndUpright);
     }catch{} finally{
       fixingTrade=false;
       if(fixTradeQueued){ fixTradeQueued=false; requestAnimationFrame(fixTradeCentrePopup); }
@@ -442,7 +456,7 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
   }
 
-  // Observe DOM changes (fix dropdowns/popups whenever they appear/changes)
+  // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
   const mo=new MutationObserver(()=>{
     if(!active){ keepFullVisible(); }
     if(active){
