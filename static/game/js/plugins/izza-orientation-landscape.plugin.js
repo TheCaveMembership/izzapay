@@ -62,19 +62,21 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* In rotated Full, dropdown is inside stage, offset in from the right */
+      /* In rotated Full, dropdown lives in the CENTER of the stage (container unrotated) */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        right:72px !important;   /* safely inside the game area */
-        top:64px !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;             /* clear right-based offsets */
+        transform:translate(-50%, -50%) !important; /* center container */
         max-height:300px;
-        z-index:20 !important;
-        overflow:visible !important; /* rotated child can extend */
+        z-index:9999 !important;
+        overflow:visible !important;       /* rotated child can extend */
       }
       /* Counter-rotate only the CONTENT, not the container */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
-        transform-origin:top right !important;
+        transform-origin:top left !important;
         writing-mode: horizontal-tb !important;
       }
 
@@ -164,7 +166,7 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated
+  // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated + centered
   let fixingNotif=false, fixNotifQueued=false;
   function fixNotifDropdown(){
     if(fixingNotif){ fixNotifQueued=true; return; }
@@ -180,7 +182,7 @@
         if(!ph[key]) keep(dd, key);
       }
 
-      // Ensure wrapper exists
+      // Ensure wrapper exists (content-only rotation)
       let wrapper = dd.querySelector(':scope > .izza-upright');
       if(!wrapper){
         wrapper = document.createElement('div');
@@ -190,40 +192,39 @@
       }
       // If new children were injected outside the wrapper, move them in
       const stray = Array.from(dd.childNodes).filter(n => n !== wrapper);
-      if(stray.length){
-        stray.forEach(n => wrapper.appendChild(n));
-      }
+      if(stray.length){ stray.forEach(n => wrapper.appendChild(n)); }
 
-      // Container placement (no rotation on container)
+      // Center container in stage (no rotation on container)
       dd.style.position = 'absolute';
-      dd.style.right = '72px';
-      dd.style.top = '64px';
-      dd.style.zIndex = '20';
+      dd.style.left = '50%';
+      dd.style.top  = '50%';
+      dd.style.right = 'auto';
+      dd.style.transform = 'translate(-50%, -50%)';
+      dd.style.zIndex = '9999';
       dd.style.overflow = 'visible';
 
-      // Force horizontal text flow on content
+      // Force horizontal text flow on content + counter-rotate
       wrapper.style.writingMode = 'horizontal-tb';
-      wrapper.style.transformOrigin = 'top right';
+      wrapper.style.transformOrigin = 'top left';
       if(!wrapper.style.transform) wrapper.style.transform = 'rotate(-90deg)';
 
-      // Only size when visible
+      // Size container to fit rotated content (prevents the “empty box” clipping)
       const cs = getComputedStyle(dd);
       const visible = dd.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
       if(visible){
-        // Temporarily unrotate to measure natural size
         const prev = wrapper.style.transform;
-        wrapper.style.transform = 'none';
+        wrapper.style.transform = 'none';      // measure natural size
         const w = wrapper.scrollWidth;
         const h = wrapper.scrollHeight;
         wrapper.style.transform = prev || 'rotate(-90deg)';
-        dd.style.width  = h + 'px';  // swap because child is rotated
+        dd.style.width  = h + 'px';            // swap because child is rotated
         dd.style.height = w + 'px';
       }else{
         dd.style.width = '';
         dd.style.height = '';
       }
     }catch(e){
-      /* no-op to avoid breaking flow */
+      /* swallow to avoid breaking gameplay */
     }finally{
       fixingNotif=false;
       if(fixNotifQueued){
