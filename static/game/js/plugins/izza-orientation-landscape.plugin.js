@@ -160,7 +160,7 @@ body[data-fakeland="1"] #shopModal .card{
 
 /* Optional: nudge the whole shop modal up a bit */
 body[data-fakeland="1"] #shopModal{
-  translate: 0 -2vh; /* tweak to taste: -4vh … -10vh */
+  translate: 0 -0vh; /* tweak to taste: -4vh … -10vh */
 }
 
 /* Fallback for older Safari that doesn't support the independent translate property */
