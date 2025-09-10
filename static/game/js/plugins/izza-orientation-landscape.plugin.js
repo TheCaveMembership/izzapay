@@ -194,7 +194,32 @@
         transform:none !important;
         rotate:0deg !important;
       }
+/* ===== MP LOBBY: kill overlay + ensure clicks land ===== */
+#izzaLandStage #mpLobby{
+  z-index:10020 !important;            /* above canvas */
+  background: transparent !important;  /* no tint */
+  backdrop-filter: none !important;    /* no blur glass */
+  pointer-events:auto !important;      /* host can receive events */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
 
+/* Hide common overlay/backdrop layers the lobby may inject */
+#izzaLandStage #mpLobby::before,
+#izzaLandStage #mpLobby::after,
+#izzaLandStage #mpLobby .backdrop,
+#izzaLandStage #mpLobby .overlay,
+#izzaLandStage #mpLobby [data-backdrop],
+#izzaLandStage #mpLobby [data-overlay]{
+  display:none !important;
+  pointer-events:none !important;
+}
+
+/* If you’re scaling the content wrapper, keep it fully clickable */
+#izzaLandStage #mpLobby > .izza-upright{
+  pointer-events:auto !important;
+  isolation:isolate; /* keep inner z-index above siblings */
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
