@@ -72,7 +72,7 @@
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
 
-      /* Trade Centre container: centered, unrotated (content will be rotated by JS) */
+      /* Trade Centre container: centered, unrotated (content rotated by JS) */
       #izzaLandStage #tradeCentreModal,
       #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage .izza-trade-centre{
@@ -110,8 +110,9 @@
   /**
    * Rotate CONTENT ONLY: keep host (container) unrotated + centered.
    * If measure=true, swap host width/height to match rotated content (useful for fixed cards like Trade Centre).
+   * If scrub=true, remove any existing rotate(...) transforms from inner nodes to prevent double-rotation.
    */
-  function rotateContentOnly(host, {measure=false}={}){
+  function rotateContentOnly(host, {measure=false, scrub=false}={}){
     if(!host) return;
 
     // Ensure wrapper for rotated content
@@ -130,20 +131,34 @@
       overflow:'visible',pointerEvents:'auto'
     });
 
-    // Counter-rotate content
+    // Optional: scrub inner rotate(...) to guarantee exactly-once rotation
+    if(scrub && !host.dataset.izzaScrubbed){
+      host.dataset.izzaScrubbed = '1';
+      wrapper.querySelectorAll('*').forEach(n=>{
+        const st = n.style && n.style.transform ? n.style.transform : '';
+        if(st && /rotate\(/i.test(st)){
+          // remove any rotate(...) but keep other transforms if present
+          n.style.transform = st.replace(/rotate\([^)]*\)/ig,'').trim() || 'none';
+        }
+        // some themes use the new 'rotate' shorthand
+        if(n.style && n.style.rotate){
+          n.style.rotate = '0deg';
+        }
+      });
+    }
+
+    // Counter-rotate content ONCE
     wrapper.style.transformOrigin='top left';
     wrapper.style.writingMode='horizontal-tb';
     wrapper.style.transform='rotate(-90deg)';
 
-    // DO NOT nuke descendant transforms/positions for Bell/Friends — they need their own layouts.
-    // Only measure for fixed cards if requested.
+    // Only measure for fixed cards
     if(measure){
       const prev = wrapper.style.transform;
       wrapper.style.transform='none';
       const w = wrapper.scrollWidth;
       const h = wrapper.scrollHeight;
       wrapper.style.transform=prev;
-      // host should size to rotated content bounding box (swap)
       host.style.width  = h + 'px';
       host.style.height = w + 'px';
     }else{
@@ -155,16 +170,15 @@
   function fixNotifDropdown(){
     const el = byId('mpNotifDropdown');
     if(!el) return;
-    // adopt into stage and rotate content only (NO measure)
     if(!stage.contains(el) && el.parentNode) keep(el,'mpNotifDropdown');
-    rotateContentOnly(el,{measure:false});
+    rotateContentOnly(el,{measure:false, scrub:false}); // Bell: no scrub/measure
   }
 
   function fixFriendsPopup(){
     const el = byId('mpFriendsPopup');
     if(!el) return;
     if(!stage.contains(el) && el.parentNode) keep(el,'mpFriendsPopup');
-    rotateContentOnly(el,{measure:false});
+    rotateContentOnly(el,{measure:false, scrub:false}); // Friends: no scrub/measure
   }
 
   function fixTradeCentrePopup(){
@@ -172,16 +186,19 @@
     const t1 = byId('tradeCentreModal');
     const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
     const els = [t1,t2].filter(Boolean);
+
     if(els.length===0){
-      // last-resort: any visible modal whose text includes "Trade Centre"
+      // last-resort: any visible modal whose text includes “Trade Centre”
       const cand = Array.from(document.querySelectorAll('.modal,[role="dialog"],[data-modal],[id$="Modal"]'))
         .filter(el => /trade\s*centre/i.test((el.innerText||'')));
       els.push(...cand);
     }
+
     els.forEach(el=>{
+      if(el.dataset.izzaRot1 === '1') return; // already fixed once
       if(!stage.contains(el) && el.parentNode) keep(el, el.id ? ('modal:'+el.id) : ('modal@trade:'+Date.now()));
-      // Trade Centre = rotate content, MEASURE to keep centered nicely
-      rotateContentOnly(el,{measure:true});
+      rotateContentOnly(el,{measure:true, scrub:true}); // Trade: scrub + measure
+      el.dataset.izzaRot1 = '1';
       // kill any local .backdrop near it
       (el.parentNode||document).querySelectorAll('.backdrop').forEach(b=>b.style.display='none');
     });
@@ -202,7 +219,6 @@
     const bell = byId('mpNotifDropdown'); if(bell) adoptOnce(bell,'mpNotifDropdown');
     const fr   = byId('mpFriendsPopup');  if(fr)   adoptOnce(fr,'mpFriendsPopup');
 
-    // Trade centre may appear later; handled by fixer + mutation observer
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
 
     document.body.appendChild(stage);
@@ -250,7 +266,6 @@
   // Mutation observer — only touch the three popups + keep button placement
   const mo=new MutationObserver(()=>{
     if(!active){ ensureFullButton(); placeFullButton(); return; }
-    // re-adopt new instances if they appear
     const bell = byId('mpNotifDropdown'); if(bell && !stage.contains(bell)) keep(bell,'mpNotifDropdown');
     const fr   = byId('mpFriendsPopup');  if(fr && !stage.contains(fr)) keep(fr,'mpFriendsPopup');
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); placeFire(); pinFriendsUI(); });
@@ -369,5 +384,5 @@
   addEventListener('resize', onResize, {passive:true});
   addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():placeFullButton(); },120); }, {passive:true});
 
-  console.log('[IZZA land] ready (rotate content only for Bell/Friends/Trade)');
+  console.log('[IZZA land] ready (rotate content only for Bell/Friends/Trade, single-rotate guard)');
 })();
