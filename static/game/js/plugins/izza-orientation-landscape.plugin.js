@@ -170,23 +170,27 @@
         rotate: 0 !important; transform: none !important; writing-mode: horizontal-tb !important;
       }
 
-      //* ===== MULTIPLAYER LOBBY (scaled to fit) ===== */
-#izzaLandStage #mpLobby{
-  position:absolute !important;
-  left:50% !important; 
-  top:50% !important; 
-  right:auto !important; 
-  bottom:auto !important;
-  transform:translate(-50%, -50%) rotate(360deg) scale(0.6) !important;
-  transform-origin:center center !important;
-  z-index:20 !important;
-}
-
-/* Reset in normal view */
-body:not([data-fakeland="1"]) #mpLobby{
-  transform:none !important; 
-  rotate:0deg !important;
-}
+      /* ===== MULTIPLAYER LOBBY (scaled to fit) ===== */
+      #izzaLandStage #mpLobby{
+        position:absolute !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;
+        bottom:auto !important;
+        transform:translate(-50%, -50%) rotate(360deg) !important;
+        transform-origin:center center !important;
+        z-index:20 !important;
+      }
+      /* Scale down only the contents of the lobby */
+      #izzaLandStage #mpLobby > .izza-upright{
+        transform: scale(0.75) !important;   /* tweak 0.75 → 0.7 or 0.65 until it fits */
+        transform-origin: center center !important;
+      }
+      /* Reset in normal view */
+      body:not([data-fakeland="1"]) #mpLobby{
+        transform:none !important;
+        rotate:0deg !important;
+      }
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
@@ -352,7 +356,18 @@ body:not([data-fakeland="1"]) #mpLobby{
     }
   }
 
-  /* NOTE: no mpLobby fixer on purpose — avoid double-rotation/normalization */
+  /* ---- Multiplayer Lobby: add inner wrapper ONLY (for scaling) ---- */
+  function wrapLobbyContents(){
+    const host = byId('mpLobby');
+    if(!host) return;
+    let wrapper = host.querySelector(':scope > .izza-upright');
+    if(!wrapper){
+      wrapper = document.createElement('div');
+      wrapper.className = 'izza-upright';
+      while(host.firstChild){ wrapper.appendChild(host.firstChild); }
+      host.appendChild(wrapper);
+    }
+  }
 
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
@@ -457,6 +472,9 @@ body:not([data-fakeland="1"]) #mpLobby{
 
     // adopt any modals so they render upright (bell + friends + lobby)
     adoptModals();
+    // ensure lobby has inner wrapper so CSS scale applies ONLY to contents
+    wrapLobbyContents();
+
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
 
     document.body.appendChild(stage);
@@ -512,6 +530,9 @@ body:not([data-fakeland="1"]) #mpLobby{
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
+      // ensure lobby wrapper exists even if lobby is dynamically inserted
+      wrapLobbyContents();
+
       requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
