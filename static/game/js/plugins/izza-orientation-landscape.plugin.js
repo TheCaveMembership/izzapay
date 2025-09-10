@@ -113,7 +113,6 @@
         rotate:0 !important;
         transform:none !important;
         writing-mode:horizontal-tb !important;
-        position:static !important;
       }
 
       /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
@@ -149,53 +148,29 @@
       }
       /* nudge the Trade modal up only in fake-landscape */
       body[data-fakeland="1"] #tradeModal{
-        /* uses the independent CSS "translate" property so we don't stomp any transforms */
-        translate: 0 -14vh;   /* tweak this value up/down if you want */
+        translate: 0 -14vh;
       }
       /* SHOP: rotate the card only (container/backdrop untouched) */
       body[data-fakeland="1"] #shopModal .card{
         transform: rotate(90deg) !important;
-        transform-origin: center center !important; /* keep it nicely centered in the flex modal */
+        transform-origin: center center !important;
       }
-
-      /* Optional: nudge the whole shop modal up a bit */
-      body[data-fakeland="1"] #shopModal{
-        translate: 0 -0vh; /* tweak to taste: -4vh … -10vh */
-      }
-
-      /* Fallback for older Safari that doesn't support the independent translate property */
+      body[data-fakeland="1"] #shopModal{ translate: 0 -0vh; }
       @supports not (translate: 0) {
-        body[data-fakeland="1"] #shopModal{
-          transform: translateY(-6vh) !important;
-        }
+        body[data-fakeland="1"] #shopModal{ transform: translateY(-6vh) !important; }
       }
-      /* BANK: rotate the inner panel only (leave backdrop/positioning alone) */
+      /* BANK */
       body[data-fakeland="1"] #bankUI > div{
         transform: rotate(90deg) !important;
         transform-origin: center center !important;
       }
-
-      /* Keep all text/elements upright inside the rotated panel */
       body[data-fakeland="1"] #bankUI > div *{
         rotate: 0 !important;
         transform: none !important;
         writing-mode: horizontal-tb !important;
       }
 
-      /* No nudge needed for bank */
-
-      /* ===== MULTIPLAYER LOBBY (fixed: container unrotated; wrapper rotates) ===== */
-      #izzaLandStage #mpLobby{
-        position:absolute !important;
-        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) !important; /* no rotate here */
-        transform-origin:center center !important;
-        z-index:9999 !important;
-      }
-      /* Normal view reset */
-      body:not([data-fakeland="1"]) #mpLobby{
-        transform:none !important; rotate:0deg !important;
-      }
+      /* NOTE: No CSS rotation for #mpLobby here to avoid double-rotate */
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
@@ -248,8 +223,9 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Wrap/center/upright helper (shared) — used by notif/friends/generic; unchanged
-  function centerAndUpright(container){
+  // Wrap/center/upright helper — now with options
+  function centerAndUpright(container, opts){
+    const o = Object.assign({ rotateDeg:-90, normalizeDeep:false }, opts||{});
     const host = (typeof container==='string') ? byId(container) : container;
     if(!host) return;
 
@@ -268,8 +244,6 @@
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
 
-    host.classList.add('izza-trade-centre');
-
     Object.assign(host.style, {
       position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
       transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0'
@@ -277,15 +251,18 @@
 
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
-    wrapper.style.transform = 'rotate(-90deg)';
+    wrapper.style.transform = `rotate(${o.rotateDeg}deg)`;
 
-    wrapper.querySelectorAll('*').forEach(el=>{
-      el.style.rotate = '0';
-      el.style.transform = 'none';
-      el.style.writingMode = 'horizontal-tb';
-      if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
-    });
+    if(o.normalizeDeep){
+      wrapper.querySelectorAll('*').forEach(el=>{
+        el.style.rotate = '0';
+        el.style.transform = 'none';
+        el.style.writingMode = 'horizontal-tb';
+        // IMPORTANT: do not change absolute -> static unless explicitly needed
+      });
+    }
 
+    // measure only if visible
     const cs = getComputedStyle(host);
     const visible = host.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
     if(visible){
@@ -320,7 +297,6 @@
     wrapper.style.transformOrigin = 'top left';
     wrapper.style.transform = 'rotate(90deg)';
 
-    // Normalize inner nodes so no nested rotate fights the transform
     wrapper.querySelectorAll('*').forEach(el=>{
       el.style.rotate = '0';
       el.style.transform = 'none';
@@ -333,7 +309,7 @@
   function fixNotifDropdown(){
     if(fixingNotif){ fixNotifQueued=true; return; }
     fixingNotif=true;
-    try{ centerAndUpright('mpNotifDropdown'); }catch{} finally{
+    try{ centerAndUpright('mpNotifDropdown', {normalizeDeep:true}); }catch{} finally{
       fixingNotif=false;
       if(fixNotifQueued){ fixNotifQueued=false; requestAnimationFrame(fixNotifDropdown); }
     }
@@ -343,7 +319,7 @@
   function fixFriendsPopup(){
     if(fixingFriends){ fixFriendsQueued=true; return; }
     fixingFriends=true;
-    try{ centerAndUpright('mpFriendsPopup'); }catch{} finally{
+    try{ centerAndUpright('mpFriendsPopup', {normalizeDeep:true}); }catch{} finally{
       fixingFriends=false;
       if(fixFriendsQueued){ fixFriendsQueued=false; requestAnimationFrame(fixFriendsPopup); }
     }
@@ -354,12 +330,9 @@
     if(fixingTrade){ fixTradeQueued=true; return; }
     fixingTrade=true;
     try{
-      // Keep existing support (when Trade Centre appears as a "modal" we adopt/rotate)
-      const t1 = byId('tradeCentreModal'); if(t1) centerAndUpright(t1);
+      const t1 = byId('tradeCentreModal'); if(t1) centerAndUpright(t1, {normalizeDeep:true});
       const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
-      if(t2) centerAndUpright(t2);
-
-      // Plus: rotate-only path for the blue prompt (#tradeModal) WITHOUT moving it
+      if(t2) centerAndUpright(t2, {normalizeDeep:true});
       rotateTradeModalContents();
     }catch{} finally{
       fixingTrade=false;
@@ -367,12 +340,12 @@
     }
   }
 
-  /* ---- Multiplayer Lobby fixer (new) ---- */
+  /* ---- Multiplayer Lobby fixer (no deep normalization) ---- */
   let fixingLobby=false, fixLobbyQueued=false;
   function fixMpLobby(){
     if(fixingLobby){ fixLobbyQueued=true; return; }
     fixingLobby=true;
-    try{ centerAndUpright('mpLobby'); }catch{} finally{
+    try{ centerAndUpright('mpLobby', {normalizeDeep:false}); }catch{} finally{
       fixingLobby=false;
       if(fixLobbyQueued){ fixLobbyQueued=false; requestAnimationFrame(fixMpLobby); }
     }
@@ -384,7 +357,7 @@
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      '#mpLobby',                /* <-- added */
+      '#mpLobby',
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
@@ -479,7 +452,7 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (bell + friends)
+    // adopt any modals so they render upright
     adoptModals();
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
 
