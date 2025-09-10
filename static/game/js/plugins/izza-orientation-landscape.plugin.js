@@ -97,7 +97,7 @@
         writing-mode: horizontal-tb !important;
       }
 
-      /* -------- TRADE CENTRE POPUP: centered container (unrotated), rotated content -------- */
+      /* -------- TRADE CENTRE MODAL: centered container (unrotated), rotated content -------- */
       #izzaLandStage #tradeCentreModal{
         position:absolute !important;
         left:50% !important;
@@ -119,7 +119,7 @@
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
 
-      /* Normalize rotated content deeply for all 3 popups so text can’t remain vertical/absolute */
+      /* Normalize rotated content deeply for ALL three so text can’t remain vertical/absolute */
       #izzaLandStage #mpNotifDropdown > .izza-upright,
       #izzaLandStage #mpFriendsPopup > .izza-upright,
       #izzaLandStage #tradeCentreModal > .izza-upright,
@@ -153,7 +153,7 @@
 
       /* ---------- POPUP ORIENTATION FIX ---------- */
 
-      /* NORMAL VIEW: force upright, kill any inline rotate */
+      /* NORMAL VIEW: force upright, kill any inline rotate (explicitly include our three) */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) .backdrop,
       body:not([data-fakeland="1"]) [role="dialog"],
@@ -176,12 +176,12 @@
         transform:none !important; rotate:0deg !important;
       }
 
-      /* ROTATED VIEW: center/counter-rotate generic modals (EXCLUDING the three we custom-fix) */
-      #izzaLandStage .modal:not(#mpNotifDropdown):not(#mpFriendsPopup):not(#tradeCentreModal),
-      #izzaLandStage .backdrop:not(#mpNotifDropdown):not(#mpFriendsPopup):not(#tradeCentreModal),
-      #izzaLandStage [role="dialog"]:not(#mpNotifDropdown):not(#mpFriendsPopup):not(#tradeCentreModal),
-      #izzaLandStage [data-modal]:not(#mpNotifDropdown):not(#mpFriendsPopup):not(#tradeCentreModal),
-      #izzaLandStage [id$="Modal"]:not(#mpNotifDropdown):not(#mpFriendsPopup):not(#tradeCentreModal),
+      /* ROTATED VIEW: generic catch-all for other modals (EXCLUDES our three) */
+      #izzaLandStage .modal,
+      #izzaLandStage .backdrop,
+      #izzaLandStage [role="dialog"],
+      #izzaLandStage [data-modal],
+      #izzaLandStage [id$="Modal"]:not(#tradeCentreModal),
       #izzaLandStage #enterModal,
       #izzaLandStage #tutorialModal,
       #izzaLandStage #shopModal,
@@ -208,7 +208,7 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Wrap/center/upright helper (shared by bell + friends + trade centre)
+  // Shared wrap/center/upright helper
   function centerAndUpright(containerId){
     const host = byId(containerId);
     if(!host) return;
@@ -253,7 +253,7 @@
       if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
     });
 
-    // Size host to the rotated content so the box isn’t “empty”
+    // Size host to the rotated content
     const cs = getComputedStyle(host);
     const visible = host.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
     if(visible){
@@ -395,13 +395,15 @@
   function adopt(){
     keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
-    ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
+    ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup','tradeCentreModal'].forEach(id=>{
+      const n=byId(id); if(n) adoptOnce(n,id);
+    });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
 
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (includes bell + friends + trade centre)
+    // adopt any modals so they render upright (includes bell + friends + trade)
     adoptModals();
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentre(); });
 
@@ -446,12 +448,12 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentre(); });
   }
 
-  // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
+  // Observe DOM changes (fix dropdowns/popups whenever they appear/changes)
   const mo=new MutationObserver(()=>{
     if(!active){ keepFullVisible(); }
     if(active){
       const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
+      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge','tradeCentreModal'].forEach(id=>{
         const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
       });
       const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
