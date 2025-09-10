@@ -177,7 +177,7 @@
   top:50% !important; 
   right:auto !important; 
   bottom:auto !important;
-  transform:translate(-50%, -50%) rotate(360deg) scale(0.70) !important;
+  transform:translate(-50%, -50%) rotate(360deg) scale(0.6) !important;
   transform-origin:center center !important;
   z-index:20 !important;
 }
