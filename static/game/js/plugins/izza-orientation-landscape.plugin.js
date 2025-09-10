@@ -67,17 +67,22 @@
         position:absolute !important;
         left:50% !important;
         top:50% !important;
-        right:auto !important;             /* clear right-based offsets */
-        transform:translate(-50%, -50%) !important; /* center container */
+        right:auto !important;
+        transform:translate(-50%, -50%) !important;
         max-height:300px;
         z-index:9999 !important;
-        overflow:visible !important;       /* rotated child can extend */
+        overflow:visible !important;
       }
       /* Counter-rotate only the CONTENT, not the container */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
         transform-origin:top left !important;
         writing-mode: horizontal-tb !important;
+      }
+      /* Any descendants OUTSIDE the wrapper must not have their own rotate/writing-mode */
+      #izzaLandStage #mpNotifDropdown :not(.izza-upright){
+        writing-mode: horizontal-tb !important;
+        transform: none !important;
       }
 
       #izzaLandStage #mpFriendsToggleGlobal{
@@ -190,9 +195,22 @@
         while(dd.firstChild){ wrapper.appendChild(dd.firstChild); }
         dd.appendChild(wrapper);
       }
+
       // If new children were injected outside the wrapper, move them in
       const stray = Array.from(dd.childNodes).filter(n => n !== wrapper);
       if(stray.length){ stray.forEach(n => wrapper.appendChild(n)); }
+
+      // Also scoop up likely sibling labels (e.g., the vertical "Notifications")
+      const siblings = [dd.previousElementSibling, dd.nextElementSibling].filter(Boolean);
+      siblings.forEach(sib=>{
+        const t=(sib.textContent||'').toLowerCase();
+        const looksLikeLabel = /notif/.test(t) || /notif/i.test(sib.id||'') || /notif/i.test(sib.className||'');
+        if(looksLikeLabel){ wrapper.appendChild(sib); }
+      });
+      // Common ARIA/target hooks pointing to the dropdown
+      document.querySelectorAll(
+        `[aria-controls="mpNotifDropdown"],[data-target="#mpNotifDropdown"],[data-controls="mpNotifDropdown"]`
+      ).forEach(el=>{ if(el!==wrapper && el!==dd && el.parentNode!==wrapper){ wrapper.appendChild(el); } });
 
       // Center container in stage (no rotation on container)
       dd.style.position = 'absolute';
@@ -213,11 +231,11 @@
       const visible = dd.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
       if(visible){
         const prev = wrapper.style.transform;
-        wrapper.style.transform = 'none';      // measure natural size
+        wrapper.style.transform = 'none';
         const w = wrapper.scrollWidth;
         const h = wrapper.scrollHeight;
         wrapper.style.transform = prev || 'rotate(-90deg)';
-        dd.style.width  = h + 'px';            // swap because child is rotated
+        dd.style.width  = h + 'px';
         dd.style.height = w + 'px';
       }else{
         dd.style.width = '';
