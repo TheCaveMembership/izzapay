@@ -65,36 +65,23 @@
       /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important;
+        left:50% !important; top:50% !important; right:auto !important;
         transform:translate(-50%, -50%) !important;
-        max-height:300px;
-        z-index:9999 !important;
-        overflow:visible !important;
-        pointer-events:auto !important;
+        max-height:300px; z-index:9999 !important; overflow:visible !important; pointer-events:auto !important;
       }
       #izzaLandStage #mpNotifDropdown > .izza-upright{
-        transform:rotate(-90deg) !important;
-        transform-origin:top left !important;
-        writing-mode: horizontal-tb !important;
+        transform:rotate(-90deg) !important; transform-origin:top left !important; writing-mode: horizontal-tb !important;
       }
 
       /* -------- FRIENDS POPUP: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpFriendsPopup{
         position:absolute !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important; bottom:auto !important;
+        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
         transform:translate(-50%, -50%) !important;
-        z-index:9999 !important;
-        overflow:visible !important;
-        pointer-events:auto !important;
+        z-index:9999 !important; overflow:visible !important; pointer-events:auto !important;
       }
       #izzaLandStage #mpFriendsPopup > .izza-upright{
-        transform:rotate(-90deg) !important;
-        transform-origin:top left !important;
-        writing-mode: horizontal-tb !important;
+        transform:rotate(-90deg) !important; transform-origin:top left !important; writing-mode: horizontal-tb !important;
       }
 
       /* Toggle button stays docked */
@@ -107,14 +94,12 @@
       #izzaLandStage #mpFriendsPopup > .izza-upright,
       #izzaLandStage #mpNotifDropdown > .izza-upright *,
       #izzaLandStage #mpFriendsPopup > .izza-upright *{
-        rotate:0 !important;
-        transform:none !important;
-        writing-mode:horizontal-tb !important;
+        rotate:0 !important; transform:none !important; writing-mode:horizontal-tb !important;
         position:static !important;
       }
 
       /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
-      /* The dark rectangle seen earlier was the .backdrop. Hide it in rotated mode. */
+      /* The dark rectangle seen earlier was a .backdrop. Hide it in rotated mode. */
       body[data-fakeland="1"] .backdrop{ display:none !important; }
 
       /* ---------- GENERIC MODALS (fallback) ---------- */
@@ -140,17 +125,24 @@
       }
 
       /* ---------- TRADE CENTRE: keep CONTAINER unrotated; rotate CONTENT only ---------- */
+      /* Kill the generic rotation for the Trade Centre container AND any inner .modal box */
       #izzaLandStage #tradeCentreModal,
       #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage .izza-trade-centre{
-        transform:translate(-50%, -50%) !important;   /* override the generic rotate */
+        position:absolute !important; left:50% !important; top:50% !important;
+        transform:translate(-50%, -50%) !important; /* no rotation on container */
+        transform-origin:center center !important; z-index:9999 !important;
+      }
+      #izzaLandStage #tradeCentreModal .modal,
+      #izzaLandStage [data-pool="trade-centre"] .modal,
+      #izzaLandStage .izza-trade-centre .modal{
+        position:static !important; left:auto !important; top:auto !important;
+        transform:none !important; /* neutralize generic .modal rotate */
       }
       #izzaLandStage #tradeCentreModal > .izza-upright,
       #izzaLandStage [data-pool="trade-centre"] > .izza-upright,
       #izzaLandStage .izza-trade-centre > .izza-upright{
-        transform:rotate(-90deg) !important;
-        transform-origin:top left !important;
-        writing-mode:horizontal-tb !important;
+        transform:rotate(-90deg) !important; transform-origin:top left !important; writing-mode:horizontal-tb !important;
       }
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
@@ -226,9 +218,6 @@
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
 
-    // mark so CSS override applies even if it has no id/attr we expect
-    host.classList.add('izza-trade-centre');
-
     // Center host unrotated
     Object.assign(host.style, {
       position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
@@ -292,19 +281,44 @@
     try{
       // Try explicit id
       const t1 = byId('tradeCentreModal');
-      if(t1) centerAndUpright(t1);
+      if(t1){
+        t1.classList.add('izza-trade-centre');
+        centerAndUpright(t1);
+        // Neutralize any inner .modal that may still carry generic rotation
+        t1.querySelectorAll('.modal').forEach(m=>{
+          m.style.setProperty('position','static','important');
+          m.style.setProperty('left','auto','important');
+          m.style.setProperty('top','auto','important');
+          m.style.setProperty('transform','none','important');
+        });
+      }
 
       // data-pool version (seen in some builds)
       const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
-      if(t2) centerAndUpright(t2);
+      if(t2){
+        t2.classList.add('izza-trade-centre');
+        centerAndUpright(t2);
+        t2.querySelectorAll('.modal').forEach(m=>{
+          m.style.setProperty('position','static','important');
+          m.style.setProperty('left','auto','important');
+          m.style.setProperty('top','auto','important');
+          m.style.setProperty('transform','none','important');
+        });
+      }
 
       // Fallback: any visible modal/dialog whose text contains “Trade Centre”
       const candidates = Array.from(document.querySelectorAll('.modal,[role="dialog"],[data-modal],[id$="Modal"]'))
-        .filter(el=>{
-          const txt=(el.innerText||'').toLowerCase();
-          return /trade\s*centre/.test(txt);
+        .filter(el=>/trade\s*centre/i.test(el.innerText||''));
+      candidates.forEach(host=>{
+        host.classList.add('izza-trade-centre');
+        centerAndUpright(host);
+        host.querySelectorAll('.modal').forEach(m=>{
+          m.style.setProperty('position','static','important');
+          m.style.setProperty('left','auto','important');
+          m.style.setProperty('top','auto','important');
+          m.style.setProperty('transform','none','important');
         });
-      candidates.forEach(centerAndUpright);
+      });
     }catch{} finally{
       fixingTrade=false;
       if(fixTradeQueued){ fixTradeQueued=false; requestAnimationFrame(fixTradeCentrePopup); }
