@@ -113,6 +113,7 @@
         rotate:0 !important;
         transform:none !important;
         writing-mode:horizontal-tb !important;
+        position:static !important;
       }
 
       /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
@@ -159,18 +160,27 @@
       @supports not (translate: 0) {
         body[data-fakeland="1"] #shopModal{ transform: translateY(-6vh) !important; }
       }
-      /* BANK */
+
+      /* BANK: rotate the inner panel only (leave backdrop/positioning alone) */
       body[data-fakeland="1"] #bankUI > div{
         transform: rotate(90deg) !important;
         transform-origin: center center !important;
       }
       body[data-fakeland="1"] #bankUI > div *{
-        rotate: 0 !important;
-        transform: none !important;
-        writing-mode: horizontal-tb !important;
+        rotate: 0 !important; transform: none !important; writing-mode: horizontal-tb !important;
       }
 
-      /* NOTE: No CSS rotation for #mpLobby here to avoid double-rotate */
+      /* ===== MULTIPLAYER LOBBY (counter-rotate by CSS only) ===== */
+      #izzaLandStage #mpLobby{
+        position:absolute !important;
+        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
+        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform-origin:center center !important;
+        z-index:20 !important;
+      }
+      body:not([data-fakeland="1"]) #mpLobby{
+        transform:none !important; rotate:0deg !important;
+      }
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
@@ -223,9 +233,8 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
-  // Wrap/center/upright helper — now with options
-  function centerAndUpright(container, opts){
-    const o = Object.assign({ rotateDeg:-90, normalizeDeep:false }, opts||{});
+  // Wrap/center/upright helper (shared) — used by notif/friends/generic; unchanged
+  function centerAndUpright(container){
     const host = (typeof container==='string') ? byId(container) : container;
     if(!host) return;
 
@@ -244,6 +253,8 @@
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
 
+    host.classList.add('izza-trade-centre');
+
     Object.assign(host.style, {
       position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
       transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0'
@@ -251,18 +262,15 @@
 
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
-    wrapper.style.transform = `rotate(${o.rotateDeg}deg)`;
+    wrapper.style.transform = 'rotate(-90deg)';
 
-    if(o.normalizeDeep){
-      wrapper.querySelectorAll('*').forEach(el=>{
-        el.style.rotate = '0';
-        el.style.transform = 'none';
-        el.style.writingMode = 'horizontal-tb';
-        // IMPORTANT: do not change absolute -> static unless explicitly needed
-      });
-    }
+    wrapper.querySelectorAll('*').forEach(el=>{
+      el.style.rotate = '0';
+      el.style.transform = 'none';
+      el.style.writingMode = 'horizontal-tb';
+      if(getComputedStyle(el).position === 'absolute'){ el.style.position='static'; }
+    });
 
-    // measure only if visible
     const cs = getComputedStyle(host);
     const visible = host.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
     if(visible){
@@ -282,10 +290,8 @@
   // ---------- NEW: rotate ONLY the contents of #tradeModal (no container changes) ----------
   function rotateTradeModalContents(){
     if(!BODY.hasAttribute('data-fakeland')) return;
-    const host = byId('tradeModal');
-    if(!host) return;
+    const host = byId('tradeModal'); if(!host) return;
 
-    // Do not touch host styles/position. Only ensure a content wrapper and rotate it.
     let wrapper = host.querySelector(':scope > .izza-upright');
     if(!wrapper){
       wrapper = document.createElement('div');
@@ -309,7 +315,7 @@
   function fixNotifDropdown(){
     if(fixingNotif){ fixNotifQueued=true; return; }
     fixingNotif=true;
-    try{ centerAndUpright('mpNotifDropdown', {normalizeDeep:true}); }catch{} finally{
+    try{ centerAndUpright('mpNotifDropdown'); }catch{} finally{
       fixingNotif=false;
       if(fixNotifQueued){ fixNotifQueued=false; requestAnimationFrame(fixNotifDropdown); }
     }
@@ -319,7 +325,7 @@
   function fixFriendsPopup(){
     if(fixingFriends){ fixFriendsQueued=true; return; }
     fixingFriends=true;
-    try{ centerAndUpright('mpFriendsPopup', {normalizeDeep:true}); }catch{} finally{
+    try{ centerAndUpright('mpFriendsPopup'); }catch{} finally{
       fixingFriends=false;
       if(fixFriendsQueued){ fixFriendsQueued=false; requestAnimationFrame(fixFriendsPopup); }
     }
@@ -330,9 +336,9 @@
     if(fixingTrade){ fixTradeQueued=true; return; }
     fixingTrade=true;
     try{
-      const t1 = byId('tradeCentreModal'); if(t1) centerAndUpright(t1, {normalizeDeep:true});
+      const t1 = byId('tradeCentreModal'); if(t1) centerAndUpright(t1);
       const t2 = document.querySelector('#izzaLandStage [data-pool="trade-centre"], [data-pool="trade-centre"]');
-      if(t2) centerAndUpright(t2, {normalizeDeep:true});
+      if(t2) centerAndUpright(t2);
       rotateTradeModalContents();
     }catch{} finally{
       fixingTrade=false;
@@ -340,16 +346,7 @@
     }
   }
 
-  /* ---- Multiplayer Lobby fixer (no deep normalization) ---- */
-  let fixingLobby=false, fixLobbyQueued=false;
-  function fixMpLobby(){
-    if(fixingLobby){ fixLobbyQueued=true; return; }
-    fixingLobby=true;
-    try{ centerAndUpright('mpLobby', {normalizeDeep:false}); }catch{} finally{
-      fixingLobby=false;
-      if(fixLobbyQueued){ fixLobbyQueued=false; requestAnimationFrame(fixMpLobby); }
-    }
-  }
+  /* NOTE: no mpLobby fixer on purpose — avoid double-rotation/normalization */
 
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
@@ -357,7 +354,7 @@
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      '#mpLobby',
+      '#mpLobby',                /* adopt lobby into stage, but don't centerAndUpright */
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
@@ -452,9 +449,9 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright
+    // adopt any modals so they render upright (bell + friends + lobby)
     adoptModals();
-    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
+    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
 
     document.body.appendChild(stage);
   }
@@ -494,7 +491,7 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
   }
 
   // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
@@ -509,7 +506,7 @@
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
+      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
