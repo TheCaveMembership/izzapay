@@ -204,64 +204,55 @@
         transform:none !important;
         rotate:0deg !important;
       }
+/* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
+body[data-fakeland="1"] #enterModal{
+  position:fixed !important;
+  left:50% !important;
+  top:50% !important;
+  right:auto !important;
+  bottom:auto !important;
+  transform:translate(-50%, -50%) !important;  /* container stays unrotated */
+  z-index:10030 !important;
+  pointer-events:auto !important;
+}
 
-      /* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
-      body[data-fakeland="1"] #enterModal{
-        position:fixed !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important;
-        bottom:auto !important;
-        transform:translate(-50%, -50%) !important;  /* container stays unrotated */
-        z-index:10030 !important;
-        pointer-events:auto !important;
-      }
-      body[data-fakeland="1"] #enterModal .card{
-        transform: rotate(90deg) !important;
-        transform-origin: center center !important;
-      }
-      body[data-fakeland="1"] #enterModal .card *{
-        rotate: 0 !important;
-        transform: none !important;
-        writing-mode: horizontal-tb !important;
-      }
+/* rotate the inner card so text reads left→right */
+body[data-fakeland="1"] #enterModal .card{
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
 
-      /* ===== HOSPITAL POPUP (rotate inner card only) ===== */
-      body[data-fakeland="1"] #hospitalShop{
-        position:fixed !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important;
-        bottom:auto !important;
-        transform:translate(-50%, -50%) !important;
-        transform-origin:center center !important;
-        z-index:10040 !important;
-        pointer-events:auto !important;
-      }
-      body[data-fakeland="1"] #hospitalShop .card{
-        transform:rotate(90deg) !important;
-        transform-origin:center center !important;
-      }
-      body[data-fakeland="1"] #hospitalShop .card *{
-        rotate:0 !important;
-        transform:none !important;
-        writing-mode:horizontal-tb !important;
-      }
-      body:not([data-fakeland="1"]) #hospitalShop,
-      body:not([data-fakeland="1"]) #hospitalShop .card{
-        transform:none !important;
-        rotate:0deg !important;
-      }
+/* normalize descendants so nothing keeps odd rotations */
+body[data-fakeland="1"] #enterModal .card *{
+  rotate: 0 !important;
+  transform: none !important;
+  writing-mode: horizontal-tb !important;
+}
+/* ===== HOSPITAL POPUP (rotate container directly) ===== */
+body[data-fakeland="1"] #hospitalShop{
+  position:fixed !important;
+  left:50% !important;
+  top:50% !important;
+  right:auto !important;
+  bottom:auto !important;
+  transform:translate(-50%, -50%) rotate(90deg) !important;
+  transform-origin:center center !important;
+  z-index:10040 !important;
+  pointer-events:auto !important;
+}
 
-      /* ===== INVENTORY PANEL (always over canvas in Full) ===== */
-      #izzaLandStage #invPanel{
-        position:absolute !important;
-        left:12px !important; right:12px !important;
-        top:74px !important;
-        z-index:10040 !important; /* above game & HUD widgets */
-        max-width:none !important; margin:0 !important;
-      }
+/* normalize descendants so text/buttons are upright and clickable */
+body[data-fakeland="1"] #hospitalShop *{
+  rotate:0 !important;
+  transform:none !important;
+  writing-mode:horizontal-tb !important;
+}
 
+/* reset in normal view */
+body:not([data-fakeland="1"]) #hospitalShop{
+  transform:none !important;
+  rotate:0deg !important;
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
@@ -426,40 +417,6 @@
     }
   }
 
-  // ======= PERFORMANCE THROTTLE FOR DOM MUTATIONS (no fire/joystick changes) =======
-  let scheduled = false;
-  function scheduleWork(){
-    if(scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(()=>{
-      scheduled = false;
-
-      if(!active){
-        // In normal view, just keep the Full button placed (throttled to rAF)
-        keepFullVisible();
-        return;
-      }
-
-      // In Full view, batch adoption and fixes once per frame — EXCLUDING fire & joystick.
-      const chat = findChatDock(); 
-      if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
-
-      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
-        const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
-      });
-
-      // adopt bell/friends only; lobby stays in-place
-      adoptModals();
-
-      // run fixers + layout nudges once this frame
-      fixNotifDropdown(); 
-      fixFriendsPopup(); 
-      fixTradeCentrePopup(); 
-      // NO placeFire() here, per instruction
-      pinFriendsUI();
-    });
-  }
-
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
@@ -564,11 +521,7 @@
     // adopt any modals so they render upright (bell + friends) — lobby stays in-place
     adoptModals();
 
-    requestAnimationFrame(()=>{
-      fixNotifDropdown(); 
-      fixFriendsPopup(); 
-      fixTradeCentrePopup(); 
-    });
+    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
 
     document.body.appendChild(stage);
   }
@@ -586,7 +539,7 @@
     try{ stage.remove(); }catch{}
   }
 
-  // FIRE placement + dash removal (UNCHANGED)
+  // FIRE placement + dash removal
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
@@ -608,17 +561,28 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{
-      placeFire();              // UNCHANGED
-      pinFriendsUI(); 
-      fixNotifDropdown(); 
-      fixFriendsPopup(); 
-      fixTradeCentrePopup();
-    });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
   }
 
-  // Observe DOM changes (now THROTTLED to rAF; excludes fire/joystick)
-  const mo=new MutationObserver(()=>{ scheduleWork(); });
+  // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
+  const mo=new MutationObserver(()=>{
+    if(!active){ keepFullVisible(); }
+    if(active){
+      const chat=findChatDock(); if(chat && !stage.contains(chat)) adoptOnce(chat,'chat');
+      ['mpFriendsToggleGlobal','mpFriendsPopup','mpNotifBell','mpNotifBadge'].forEach(id=>{
+        const n=byId(id); if(n && !stage.contains(n)) adoptOnce(n,id);
+      });
+      const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
+      if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
+
+      // adopt bell/friends only; lobby stays in-place
+      adoptModals();
+
+      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
+
+      requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
+    }
+  });
 
   // keep map closed when entering Full
   function closeMapsOnEnter(){
@@ -669,7 +633,7 @@
 
     try{ mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','id']}); }catch{}
 
-    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // UNCHANGED
+    clearInterval(fireTick); fireTick=setInterval(placeFire,350);
 
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
