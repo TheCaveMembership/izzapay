@@ -169,12 +169,14 @@ body[data-fakeland="1"] #shopModal{
     transform: translateY(-6vh) !important;
   }
 }
-/* BANK: rotate the visible content (not the backdrop) */
-body[data-fakeland="1"] #bankModal > :not(.backdrop),
-body[data-fakeland="1"] [data-pool="bank"] > :not(.backdrop){
+/* BANK: rotate the card only (container/backdrop untouched) */
+body[data-fakeland="1"] #bankModal .card,
+body[data-fakeland="1"] [data-pool="bank"] .card{
   transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
+
+/* no nudge for bank */
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
