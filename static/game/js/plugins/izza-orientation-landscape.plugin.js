@@ -204,7 +204,30 @@
         transform:none !important;
         rotate:0deg !important;
       }
+/* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
+body[data-fakeland="1"] #enterModal{
+  position:fixed !important;
+  left:50% !important;
+  top:50% !important;
+  right:auto !important;
+  bottom:auto !important;
+  transform:translate(-50%, -50%) !important;  /* container stays unrotated */
+  z-index:10030 !important;
+  pointer-events:auto !important;
+}
 
+/* rotate the inner card so text reads left→right */
+body[data-fakeland="1"] #enterModal .card{
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
+
+/* normalize descendants so nothing keeps odd rotations */
+body[data-fakeland="1"] #enterModal .card *{
+  rotate: 0 !important;
+  transform: none !important;
+  writing-mode: horizontal-tb !important;
+}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
