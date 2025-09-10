@@ -170,55 +170,39 @@
         rotate: 0 !important; transform: none !important; writing-mode: horizontal-tb !important;
       }
 
-      /* ===== MULTIPLAYER LOBBY (scaled to fit) ===== */
-      #izzaLandStage #mpLobby{
-        position:absolute !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important;
-        bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(360deg) !important;
-        transform-origin:center center !important;
-        z-index:10020 !important;               /* above canvas */
-        pointer-events:auto !important;         /* host captures events */
-      }
-      /* Scale down only the contents of the lobby */
-      #izzaLandStage #mpLobby > .izza-upright{
-        transform: scale(0.75) !important;      /* tweak 0.75 → 0.7 or 0.65 */
-        transform-origin: center center !important;
-        pointer-events:auto !important;         /* children clickable */
-      }
-
-      /* Reset in normal view */
-      body:not([data-fakeland="1"]) #mpLobby{
-        transform:none !important;
-        rotate:0deg !important;
-      }
-/* ===== MP LOBBY: kill overlay + ensure clicks land ===== */
-#izzaLandStage #mpLobby{
-  z-index:10020 !important;            /* above canvas */
-  background: transparent !important;  /* no tint */
-  backdrop-filter: none !important;    /* no blur glass */
-  pointer-events:auto !important;      /* host can receive events */
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+      /* ===== MULTIPLAYER LOBBY (scaled to fit; IN-PLACE, not adopted) ===== */
+body[data-fakeland="1"] #mpLobby{
+  position:fixed !important;
+  left:50% !important; 
+  top:50% !important; 
+  right:auto !important; 
+  bottom:auto !important;
+  transform:translate(-50%, -50%) rotate(360deg) scale(0.75) !important; /* adjust 0.75 → 0.7 etc */
+  transform-origin:center center !important;
+  z-index:10020 !important;        /* ensure above everything */
+  pointer-events:auto !important;  /* accept clicks */
+  touch-action:auto !important;    /* allow taps/focus */
+  will-change:transform;
 }
 
-/* Hide common overlay/backdrop layers the lobby may inject */
-#izzaLandStage #mpLobby::before,
-#izzaLandStage #mpLobby::after,
-#izzaLandStage #mpLobby .backdrop,
-#izzaLandStage #mpLobby .overlay,
-#izzaLandStage #mpLobby [data-backdrop],
-#izzaLandStage #mpLobby [data-overlay]{
-  display:none !important;
-  pointer-events:none !important;
-}
-
-/* If you’re scaling the content wrapper, keep it fully clickable */
-#izzaLandStage #mpLobby > .izza-upright{
+/* make sure children also receive events */
+body[data-fakeland="1"] #mpLobby, 
+body[data-fakeland="1"] #mpLobby *{
   pointer-events:auto !important;
-  isolation:isolate; /* keep inner z-index above siblings */
+}
+
+/* hide any backdrop siblings that might sit under/over the lobby */
+body[data-fakeland="1"] #mpLobby ~ .backdrop,
+body[data-fakeland="1"] #mpLobby ~ .modal-backdrop,
+body[data-fakeland="1"] #mpLobby ~ .overlay,
+body[data-fakeland="1"] #mpLobby ~ [data-backdrop]{
+  display:none !important;
+}
+
+/* Reset in normal view */
+body:not([data-fakeland="1"]) #mpLobby{
+  transform:none !important;
+  rotate:0deg !important;
 }
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
