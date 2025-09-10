@@ -58,18 +58,13 @@
       body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
       /* Hearts + bell/badge (inside stage in Full) */
-      #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
+      #izzaLandStage #heartsHud{
+        position:absolute!important;
+        right:14px!important; top:46px!important; left:auto!important;
+        z-index:10050!important; /* keep above canvas at all times */
+      }
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
-
-      /* --- Keep hearts visible and above everything in Full --- */
-      body[data-fakeland="1"] #heartsHud{
-        z-index:10060 !important;
-        display:block !important;
-        visibility:visible !important;
-        opacity:1 !important;
-        pointer-events:none !important;
-      }
 
       /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpNotifDropdown{
@@ -257,23 +252,13 @@
         rotate:0deg !important;
       }
 
-      /* ===== INVENTORY (ensure above canvas & upright) ===== */
-      body[data-fakeland="1"] #inventoryModal,
-      body[data-fakeland="1"] #inventory,
-      body[data-fakeland="1"] .inventory-modal,
-      body[data-fakeland="1"] [data-role="inventory"]{
+      /* ===== INVENTORY PANEL (always over canvas in Full) ===== */
+      #izzaLandStage #invPanel{
         position:absolute !important;
-        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(-90deg) !important;
-        transform-origin:center center !important;
-        z-index:10055 !important;
-        pointer-events:auto !important;
-      }
-      body[data-fakeland="1"] #inventoryModal *,
-      body[data-fakeland="1"] #inventory *,
-      body[data-fakeland="1"] .inventory-modal *,
-      body[data-fakeland="1"] [data-role="inventory"] *{
-        rotate:0 !important; transform:none !important; writing-mode:horizontal-tb !important;
+        left:12px !important; right:12px !important;
+        top:74px !important;
+        z-index:10040 !important; /* above game & HUD widgets */
+        max-width:none !important; margin:0 !important;
       }
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
@@ -326,7 +311,6 @@
   const ph={};
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
-  const ensureAdopt=(nodeOrId,key)=>{ const n=(typeof nodeOrId==='string')?byId(nodeOrId):nodeOrId; if(n && !stage.contains(n)) adoptOnce(n,key); };
 
   // Wrap/center/upright helper (shared)
   function centerAndUpright(container){
@@ -347,8 +331,6 @@
     }else{
       Array.from(host.childNodes).forEach(n=>{ if(n!==wrapper){ try{ wrapper.appendChild(n); }catch{} }});
     }
-
-    host.classList.add('izza-trade-centre');
 
     Object.assign(host.style, {
       position:'absolute', left:'50%', top:'50%', right:'auto', bottom:'auto',
@@ -382,7 +364,7 @@
     }
   }
 
-  // rotate ONLY the contents of #tradeModal (no container changes)
+  // ---------- NEW: rotate ONLY the contents of #tradeModal (no container changes) ----------
   function rotateTradeModalContents(){
     if(!BODY.hasAttribute('data-fakeland')) return;
     const host = byId('tradeModal'); if(!host) return;
@@ -447,8 +429,6 @@
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      /* inventory added */
-      '#inventoryModal','#inventory','.inventory-modal','[data-role="inventory"]',
       /* (intentionally NOT adopting #mpLobby to keep it in-place) */
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
@@ -539,6 +519,10 @@
     keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
+
+    // inventory panel should render above the canvas in Full
+    const inv = byId('invPanel'); if(inv) adoptOnce(inv, 'invPanel');
+
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
 
     // adopt Full button only in Full
@@ -565,36 +549,19 @@
     try{ stage.remove(); }catch{}
   }
 
-  // FIRE placement + dash removal (stable adoption + global find)
+  // FIRE placement + dash removal
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
-    // find it anywhere (not only inside #izzaLandStage)
-    const fire =
-      byId('btnFire') ||
-      byId('fireBtn') ||
-      byId('shootBtn') ||
-      document.querySelector('.btn-fire, .fire, button[data-role="fire"]');
-
+    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
     if(!fire) return;
-
-    // if not adopted, bring it into the stage once
-    if (!stage.contains(fire)) adoptOnce(fire, 'btnFire');
-
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
     const w=fire.offsetWidth||66, h=fire.offsetHeight||66;
-
-    fire.style.position='absolute';
     fire.style.left=(cx-w/2)+'px';
     fire.style.top =(cy-h/2)+'px';
-    fire.style.transform='scale(1.35)';
-    fire.style.transformOrigin='center';
-
-    // hide stray "-" siblings some UIs add
     const sibs=Array.from(fire.parentElement?fire.parentElement.children:[]);
     const dash=sibs.find(el=>el!==fire && (el.textContent||'').trim()==='-');
     if(dash) dash.style.display='none';
   }
-
   function pinFriendsUI(){
     const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
   }
@@ -616,17 +583,11 @@
       rafId = 0;
       if (!active || !needsFix) return;
       needsFix = false;
-
-      // ensure critical HUD is adopted if game rebuilt nodes
-      ensureAdopt('heartsHud','heartsHud');
-      ensureAdopt('mpFriendsToggleGlobal','mpFriendsToggleGlobal');
-
-      // run once per frame
+      // run once per frame (NOTE: fire placement excluded to avoid flicker)
       adoptModals();
       fixNotifDropdown();
       fixFriendsPopup();
       fixTradeCentrePopup();
-      placeFire();
       pinFriendsUI();
     });
   }
@@ -713,7 +674,7 @@
 
     startObserver();   // PERF
 
-    clearInterval(fireTick); fireTick=setInterval(placeFire,500);
+    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // restore original cadence
 
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
