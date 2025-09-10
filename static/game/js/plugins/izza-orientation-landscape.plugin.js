@@ -141,7 +141,7 @@
         transform-origin:center center !important; z-index:20 !important;
       }
 
-      /* ---------- TRADE CENTRE: container forcibly centered; rotate CONTENT only ---------- */
+      /* ---------- TRADE CENTRE: container centered; rotate CONTENT 90deg RIGHT ---------- */
       #izzaLandStage #tradeCentreModal,
       #izzaLandStage [data-pool="trade-centre"],
       #izzaLandStage .izza-trade-centre{
@@ -154,10 +154,11 @@
         overflow:visible !important;
         pointer-events:auto !important;
       }
+      /* rotate content +90deg (right) so it reads correctly in your rotated full mode */
       #izzaLandStage #tradeCentreModal > .izza-upright,
       #izzaLandStage [data-pool="trade-centre"] > .izza-upright,
       #izzaLandStage .izza-trade-centre > .izza-upright{
-        transform:rotate(-90deg) !important;
+        transform:rotate(90deg) !important;
         transform-origin:top left !important;
         writing-mode:horizontal-tb !important;
       }
@@ -244,10 +245,10 @@
       transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0'
     });
 
-    // Normalize + counter-rotate content
+    // Normalize + rotate content for Trade Centre specifically (+90deg)
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
-    wrapper.style.transform = 'rotate(-90deg)';
+    wrapper.style.transform = 'rotate(90deg)';
 
     wrapper.querySelectorAll('*').forEach(el=>{
       el.style.rotate = '0';
