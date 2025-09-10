@@ -549,39 +549,98 @@
     try{ stage.remove(); }catch{}
   }
 
-    // FIRE placement + dash removal
+      // FIRE + WEAPON PILL placement (adopt both and lock together)
+  const FIRE_SEL   = '#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn';
+  const WEAPON_SEL = [
+    '#weaponName','#weaponHud','#weaponHUD',
+    '.weapon','.hud-weapon','.weapon-pill','.weaponBadge',
+    '.gun','.ammo','.ammo-pill','.equipped','.equip',
+    '[data-role="weapon"]','[data-role="ammo"]'
+  ].join(',');
+
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
 
-  // Use transform only (no left/top) to avoid layout flashes
-  function placeFire(){
-    const fire = stage.querySelector('[data-izza-fire="1"]') ||
-                 document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn,#izzaLandStage #btnFire,#izzaLandStage #fireBtn');
+  function adoptIfNeeded(el, key){
+    if(!el) return null;
+    if(!ph[key]) keep(el, key); else if(!stage.contains(el)) try{ stage.appendChild(el); }catch{};
+    return el;
+  }
+
+  // find a likely weapon pill if there isn't an obvious selector match:
+  function guessWeaponPillFrom(fire){
+    if(!fire || !fire.parentElement) return null;
+    const sibs = Array.from(fire.parentElement.children).filter(n=>n!==fire && n.nodeType===1);
+    // heuristics: short label/pill-like thing that isn’t a control button
+    const bad = /^(map|friends|exit|full|a|b|i)$/i;
+    return sibs.find(n=>{
+      const t=(n.textContent||'').trim();
+      const isBtn = n.matches('button,.btn,[role="button"]');
+      const looksPill = n.matches('.pill,.badge,.label,.chip,.tag') || (t && t.length<=16);
+      return !isBtn && looksPill && !bad.test(t);
+    }) || null;
+  }
+
+  function ensureFireAndPill(){
+    // fire
+    const fireFresh = document.querySelector(FIRE_SEL);
+    if (fireFresh) adoptIfNeeded(fireFresh, 'btnFire');
+
+    // weapon/pill
+    let pill = document.querySelector(WEAPON_SEL);
+    if(!pill && fireFresh) pill = guessWeaponPillFrom(fireFresh);
+    if(pill) adoptIfNeeded(pill, 'weaponPill');
+
+    // normalize styles (keep them above canvas)
+    const fire = stage.querySelector(FIRE_SEL);
+    if(fire){
+      fire.style.position='absolute';
+      fire.style.zIndex='10060';
+      fire.style.transformOrigin='center';
+      // keep any scale already applied by CSS
+    }
+    const wpill = ph['weaponPill'] ? stage.querySelector(WEAPON_SEL) : null;
+    if(wpill){
+      wpill.style.position='absolute';
+      wpill.style.zIndex='10060';
+      wpill.style.transformOrigin='center';
+    }
+  }
+
+  function placeFireAndPill(){
+    const fire = stage.querySelector(FIRE_SEL);
     if(!fire) return;
 
-    // cache intrinsic size once to avoid reflow jitter
-    const w = fire._izzaW || (fire._izzaW = (fire.offsetWidth||66));
-    const h = fire._izzaH || (fire._izzaH = (fire.offsetHeight||66));
-
+    // place FIRE at our tile spot
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
-    const tx = Math.round(cx - w/2);
-    const ty = Math.round(cy - h/2);
+    const fw = fire.offsetWidth  || 66;
+    const fh = fire.offsetHeight || 66;
+    const left = (cx - fw/2);
+    const top  = (cy - fh/2);
+    fire.style.left = left + 'px';
+    fire.style.top  = top  + 'px';
 
-    fire.style.position = 'absolute';
-    fire.style.transformOrigin = 'center';
-    fire.style.transition = 'none';
-    fire.style.willChange = 'transform';
-    fire.style.zIndex = '10060';
-    // single composite transform (prevents flicker)
-    fire.style.transform = `translate3d(${tx}px,${ty}px,0) scale(1.35)`;
+    // hide any stray "-" separator that sometimes rides with the fire button
+    const parent = fire.parentElement;
+    if(parent){
+      const dash = Array.from(parent.children).find(el=>el!==fire && (el.textContent||'').trim()==='-');
+      if(dash) dash.style.display='none';
+    }
 
-    // ensure any decorative dash sibling is hidden
-    const sibs=Array.from(fire.parentElement?fire.parentElement.children:[]);
-    const dash=sibs.find(el=>el!==fire && (el.textContent||'').trim()==='-');
-    if(dash) dash.style.display='none';
+    // place WEAPON PILL locked to fire’s left side (center aligned)
+    const pill = stage.querySelector(WEAPON_SEL);
+    if(pill){
+      const pw = pill.offsetWidth  || 48;
+      const phh = pill.offsetHeight || 24;
+      const gap = 12; // space between pill and fire
+      pill.style.left = (left - pw - gap) + 'px';
+      pill.style.top  = (top + (fh - phh)/2) + 'px';
+      pill.style.display=''; // ensure visible when adopted
+    }
   }
 
   function pinFriendsUI(){
-    const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
+    const btn=byId('mpFriendsToggleGlobal');
+    if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
   }
 
   function applyLayout(){
@@ -589,58 +648,16 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
+    requestAnimationFrame(()=>{
+      ensureFireAndPill();
+      placeFireAndPill();
+      pinFriendsUI();
+      fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup();
+    });
   }
 
-  // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
+  // --- PERF: throttle general fixes; fire/pill handled immediately to avoid flicker
   let needsFix = false, rafId = 0;
-
-  // FIRE: handle outside the throttle (pre-throttle behavior)
-  const FIRE_SEL = '#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn';
-
-  // Adopt the FIRST real fire button and keep it forever; hide later duplicates.
-  function ensureFireInStage(){
-    const inStage = stage.querySelector('[data-izza-fire="1"]');
-    const fresh = document.querySelector(FIRE_SEL);
-    if (!fresh) return;
-
-    // If we already have one adopted, hide any newly spawned duplicates quietly
-    if (inStage && fresh !== inStage){
-      if (!fresh.hasAttribute('data-izza-fire-dupe')){
-        fresh.setAttribute('data-izza-fire-dupe','1');
-        fresh.setAttribute('aria-hidden','true');
-        Object.assign(fresh.style,{
-          visibility:'hidden',
-          pointerEvents:'none',
-          position:'absolute',
-          width:'0px', height:'0px',
-        });
-      }
-      requestAnimationFrame(placeFire);
-      return;
-    }
-
-    // No adopted button yet — adopt this one and lock it
-    if (!inStage){
-      if (!ph['btnFire']) {
-        keep(fresh, 'btnFire'); // move into stage with placeholder (once)
-      } else {
-        try{ stage.appendChild(fresh); }catch{}
-      }
-      fresh.setAttribute('data-izza-fire','1');
-      fresh.removeAttribute('data-izza-fire-dupe');
-      // harden styles to prevent flicker
-      Object.assign(fresh.style,{
-        position:'absolute',
-        transformOrigin:'center',
-        transition:'none',
-        willChange:'transform',
-        zIndex:'10060'
-      });
-      requestAnimationFrame(placeFire);
-      return;
-    }
-  }
 
   function scheduleFix(){
     if (rafId) return;
@@ -648,7 +665,6 @@
       rafId = 0;
       if (!active || !needsFix) return;
       needsFix = false;
-      // run once per frame (NOTE: fire placement excluded to avoid flicker)
       adoptModals();
       fixNotifDropdown();
       fixFriendsPopup();
@@ -661,39 +677,35 @@
     if (!active) { keepFullVisible(); return; }
 
     let sawChange = false;
-    let fireTouched = false;
+    let fireOrPillTouched = false;
 
     for (const m of mutations){
       if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
         sawChange = true;
         for (const n of [...m.addedNodes, ...m.removedNodes]){
-          if (n && n.nodeType === 1 && n.matches && n.matches(FIRE_SEL)){
-            fireTouched = true;
+          if (n && n.nodeType === 1 && n.matches && (n.matches(FIRE_SEL) || n.matches(WEAPON_SEL))){
+            fireOrPillTouched = true;
             break;
           }
         }
       }
-      if (m.type === 'attributes' && m.target && m.target.matches && m.target.matches(FIRE_SEL)){
-        // some frameworks mutate classes/styles on the same node → treat as touched
-        fireTouched = true;
-      }
-      if (fireTouched) break;
+      if (fireOrPillTouched) break;
     }
 
-    if (fireTouched){
-      ensureFireInStage();            // immediate (not throttled)
-      requestAnimationFrame(placeFire);
+    if (fireOrPillTouched){
+      ensureFireAndPill();                 // adopt immediately (no throttle)
+      requestAnimationFrame(placeFireAndPill);
     }
 
     if (sawChange){
-      needsFix = true;                // everything else stays throttled
+      needsFix = true;
       scheduleFix();
     }
   });
 
   function startObserver(){
     try{
-      mo.observe(document.body, { subtree:true, childList:true, attributes:true, attributeFilter:['class','style','id'] });
+      mo.observe(document.body, { subtree:true, childList:true, attributes:false });
     }catch{}
   }
   function stopObserver(){ try{ mo.disconnect(); }catch{} }
@@ -707,6 +719,8 @@
       startObserver();
       needsFix = true;
       scheduleFix();
+      // also re-lock fire/pill on return
+      requestAnimationFrame(()=>{ ensureFireAndPill(); placeFireAndPill(); });
     }
   }, {passive:true});
 
