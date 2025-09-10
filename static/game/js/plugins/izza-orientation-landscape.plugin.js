@@ -228,37 +228,28 @@ body[data-fakeland="1"] #enterModal .card *{
   transform: none !important;
   writing-mode: horizontal-tb !important;
 }
-/* ===== HOSPITAL POPUP (rotate inner card only) ===== */
+/* ===== HOSPITAL POPUP (rotate container directly) ===== */
 body[data-fakeland="1"] #hospitalShop{
   position:fixed !important;
   left:50% !important;
   top:50% !important;
   right:auto !important;
   bottom:auto !important;
-  transform:translate(-50%, -50%) !important;  /* container stays unrotated */
+  transform:translate(-50%, -50%) rotate(90deg) !important;
   transform-origin:center center !important;
   z-index:10040 !important;
   pointer-events:auto !important;
 }
 
-/* rotate the inner card so it reads correctly */
-body[data-fakeland="1"] #hospitalShop .card{
-  transform:rotate(90deg) !important;
-  transform-origin:center center !important;
-  /* optional: scale down a touch if needed */
-  /* transform:rotate(90deg) scale(0.9) !important; */
-}
-
 /* normalize descendants so text/buttons are upright and clickable */
-body[data-fakeland="1"] #hospitalShop .card *{
+body[data-fakeland="1"] #hospitalShop *{
   rotate:0 !important;
   transform:none !important;
   writing-mode:horizontal-tb !important;
 }
 
 /* reset in normal view */
-body:not([data-fakeland="1"]) #hospitalShop,
-body:not([data-fakeland="1"]) #hospitalShop .card{
+body:not([data-fakeland="1"]) #hospitalShop{
   transform:none !important;
   rotate:0deg !important;
 }
