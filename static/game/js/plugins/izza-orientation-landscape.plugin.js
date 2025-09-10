@@ -62,6 +62,15 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
+      /* --- Keep hearts visible and above everything in Full --- */
+      body[data-fakeland="1"] #heartsHud{
+        z-index:10060 !important;
+        display:block !important;
+        visibility:visible !important;
+        opacity:1 !important;
+        pointer-events:none !important;
+      }
+
       /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
@@ -204,55 +213,69 @@
         transform:none !important;
         rotate:0deg !important;
       }
-/* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
-body[data-fakeland="1"] #enterModal{
-  position:fixed !important;
-  left:50% !important;
-  top:50% !important;
-  right:auto !important;
-  bottom:auto !important;
-  transform:translate(-50%, -50%) !important;  /* container stays unrotated */
-  z-index:10030 !important;
-  pointer-events:auto !important;
-}
 
-/* rotate the inner card so text reads left→right */
-body[data-fakeland="1"] #enterModal .card{
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
-}
+      /* ===== TUTORIAL / ENTER MODAL (rotate card only) ===== */
+      body[data-fakeland="1"] #enterModal{
+        position:fixed !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;
+        bottom:auto !important;
+        transform:translate(-50%, -50%) !important;  /* container stays unrotated */
+        z-index:10030 !important;
+        pointer-events:auto !important;
+      }
+      body[data-fakeland="1"] #enterModal .card{
+        transform: rotate(90deg) !important;
+        transform-origin: center center !important;
+      }
+      body[data-fakeland="1"] #enterModal .card *{
+        rotate: 0 !important;
+        transform: none !important;
+        writing-mode: horizontal-tb !important;
+      }
 
-/* normalize descendants so nothing keeps odd rotations */
-body[data-fakeland="1"] #enterModal .card *{
-  rotate: 0 !important;
-  transform: none !important;
-  writing-mode: horizontal-tb !important;
-}
-/* ===== HOSPITAL POPUP (rotate container directly) ===== */
-body[data-fakeland="1"] #hospitalShop{
-  position:fixed !important;
-  left:50% !important;
-  top:50% !important;
-  right:auto !important;
-  bottom:auto !important;
-  transform:translate(-50%, -50%) rotate(90deg) !important;
-  transform-origin:center center !important;
-  z-index:10040 !important;
-  pointer-events:auto !important;
-}
+      /* ===== HOSPITAL POPUP (rotate container directly) ===== */
+      body[data-fakeland="1"] #hospitalShop{
+        position:fixed !important;
+        left:50% !important;
+        top:50% !important;
+        right:auto !important;
+        bottom:auto !important;
+        transform:translate(-50%, -50%) rotate(90deg) !important;
+        transform-origin:center center !important;
+        z-index:10040 !important;
+        pointer-events:auto !important;
+      }
+      body[data-fakeland="1"] #hospitalShop *{
+        rotate:0 !important;
+        transform:none !important;
+        writing-mode:horizontal-tb !important;
+      }
+      body:not([data-fakeland="1"]) #hospitalShop{
+        transform:none !important;
+        rotate:0deg !important;
+      }
 
-/* normalize descendants so text/buttons are upright and clickable */
-body[data-fakeland="1"] #hospitalShop *{
-  rotate:0 !important;
-  transform:none !important;
-  writing-mode:horizontal-tb !important;
-}
+      /* ===== INVENTORY (ensure above canvas & upright) ===== */
+      body[data-fakeland="1"] #inventoryModal,
+      body[data-fakeland="1"] #inventory,
+      body[data-fakeland="1"] .inventory-modal,
+      body[data-fakeland="1"] [data-role="inventory"]{
+        position:absolute !important;
+        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
+        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform-origin:center center !important;
+        z-index:10055 !important;
+        pointer-events:auto !important;
+      }
+      body[data-fakeland="1"] #inventoryModal *,
+      body[data-fakeland="1"] #inventory *,
+      body[data-fakeland="1"] .inventory-modal *,
+      body[data-fakeland="1"] [data-role="inventory"] *{
+        rotate:0 !important; transform:none !important; writing-mode:horizontal-tb !important;
+      }
 
-/* reset in normal view */
-body:not([data-fakeland="1"]) #hospitalShop{
-  transform:none !important;
-  rotate:0deg !important;
-}
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
@@ -303,8 +326,9 @@ body:not([data-fakeland="1"]) #hospitalShop{
   const ph={};
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
+  const ensureAdopt=(nodeOrId,key)=>{ const n=(typeof nodeOrId==='string')?byId(nodeOrId):nodeOrId; if(n && !stage.contains(n)) adoptOnce(n,key); };
 
-  // Wrap/center/upright helper (shared) — used by notif/friends/generic; unchanged
+  // Wrap/center/upright helper (shared)
   function centerAndUpright(container){
     const host = (typeof container==='string') ? byId(container) : container;
     if(!host) return;
@@ -358,7 +382,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
     }
   }
 
-  // ---------- NEW: rotate ONLY the contents of #tradeModal (no container changes) ----------
+  // rotate ONLY the contents of #tradeModal (no container changes)
   function rotateTradeModalContents(){
     if(!BODY.hasAttribute('data-fakeland')) return;
     const host = byId('tradeModal'); if(!host) return;
@@ -423,6 +447,8 @@ body:not([data-fakeland="1"]) #hospitalShop{
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
+      /* inventory added */
+      '#inventoryModal','#inventory','.inventory-modal','[data-role="inventory"]',
       /* (intentionally NOT adopting #mpLobby to keep it in-place) */
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
@@ -539,19 +565,36 @@ body:not([data-fakeland="1"]) #hospitalShop{
     try{ stage.remove(); }catch{}
   }
 
-  // FIRE placement + dash removal
+  // FIRE placement + dash removal (stable adoption + global find)
   const tileCenter=(tx,ty)=>({ x:(BASE_W/2)+tx*TILE, y:(BASE_H/2)+ty*TILE });
   function placeFire(){
-    const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('#izzaLandStage .btn-fire,#izzaLandStage .fire,#izzaLandStage button[data-role="fire"],#izzaLandStage #shootBtn');
+    // find it anywhere (not only inside #izzaLandStage)
+    const fire =
+      byId('btnFire') ||
+      byId('fireBtn') ||
+      byId('shootBtn') ||
+      document.querySelector('.btn-fire, .fire, button[data-role="fire"]');
+
     if(!fire) return;
+
+    // if not adopted, bring it into the stage once
+    if (!stage.contains(fire)) adoptOnce(fire, 'btnFire');
+
     const {x:cx,y:cy}=tileCenter(FIRE_TILES_RIGHT,FIRE_TILES_DOWN);
     const w=fire.offsetWidth||66, h=fire.offsetHeight||66;
+
+    fire.style.position='absolute';
     fire.style.left=(cx-w/2)+'px';
     fire.style.top =(cy-h/2)+'px';
+    fire.style.transform='scale(1.35)';
+    fire.style.transformOrigin='center';
+
+    // hide stray "-" siblings some UIs add
     const sibs=Array.from(fire.parentElement?fire.parentElement.children:[]);
     const dash=sibs.find(el=>el!==fire && (el.textContent||'').trim()==='-');
     if(dash) dash.style.display='none';
   }
+
   function pinFriendsUI(){
     const btn=byId('mpFriendsToggleGlobal'); if(btn){ btn.style.right='14px'; btn.style.bottom='72px'; btn.style.top=''; btn.style.left=''; }
   }
@@ -565,136 +608,141 @@ body:not([data-fakeland="1"]) #hospitalShop{
   }
 
   // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
-let needsFix = false, rafId = 0;
+  let needsFix = false, rafId = 0;
 
-function scheduleFix(){
-  if (rafId) return;
-  rafId = requestAnimationFrame(() => {
-    rafId = 0;
-    if (!active || !needsFix) return;
-    needsFix = false;
-    // run once per frame
-    adoptModals();
-    fixNotifDropdown();
-    fixFriendsPopup();
-    fixTradeCentrePopup();
-    placeFire();
-    pinFriendsUI();
-  });
-}
+  function scheduleFix(){
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      if (!active || !needsFix) return;
+      needsFix = false;
 
-const mo = new MutationObserver((mutations)=>{
-  if (!active) { keepFullVisible(); return; }
+      // ensure critical HUD is adopted if game rebuilt nodes
+      ensureAdopt('heartsHud','heartsHud');
+      ensureAdopt('mpFriendsToggleGlobal','mpFriendsToggleGlobal');
 
-  let sawChange = false;
-  for (const m of mutations){
-    if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
-      sawChange = true; break;
+      // run once per frame
+      adoptModals();
+      fixNotifDropdown();
+      fixFriendsPopup();
+      fixTradeCentrePopup();
+      placeFire();
+      pinFriendsUI();
+    });
+  }
+
+  const mo = new MutationObserver((mutations)=>{
+    if (!active) { keepFullVisible(); return; }
+
+    let sawChange = false;
+    for (const m of mutations){
+      if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
+        sawChange = true; break;
+      }
     }
-  }
-  if (sawChange){
-    needsFix = true;
-    scheduleFix();
-  }
-});
+    if (sawChange){
+      needsFix = true;
+      scheduleFix();
+    }
+  });
 
-function startObserver(){
-  try{
-    mo.observe(document.body, { subtree:true, childList:true, attributes:false });
-  }catch{}
-}
-function stopObserver(){ try{ mo.disconnect(); }catch{} }
+  function startObserver(){
+    try{
+      mo.observe(document.body, { subtree:true, childList:true, attributes:false });
+    }catch{}
+  }
+  function stopObserver(){ try{ mo.disconnect(); }catch{} }
 
-// --- PERF: pause when tab not visible ---
-document.addEventListener('visibilitychange', ()=>{
-  if (document.hidden){
+  // --- PERF: pause when tab not visible ---
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.hidden){
+      stopObserver();
+      cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
+    } else if (active){
+      startObserver();
+      needsFix = true;
+      scheduleFix();
+    }
+  }, {passive:true});
+
+  // keep map closed when entering Full
+  function closeMapsOnEnter(){
+    const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
+    if(mini){ mini.style.display='none'; }
+  }
+  function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
+
+  // ---------- Joystick correction (UNCHANGED FEEL) + wall-stick guard ----------
+  let joyActive=false;
+  const markOn = ()=>{ joyActive=true; };
+  const markOff= ()=>{ joyActive=false; };
+  stickEl.addEventListener('touchstart',markOn,{passive:false});
+  stickEl.addEventListener('mousedown', markOn);
+  window.addEventListener('touchend',  markOff, {passive:true});
+  window.addEventListener('mouseup',   markOff, {passive:true});
+  window.addEventListener('touchcancel',markOff,{passive:true});
+
+  let prevX=null, prevY=null;
+  function fixJoystickDelta(){
+    if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
+    const p = IZZA.api.player;
+    if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
+    const dx = p.x - prevX, dy = p.y - prevY;
+    const mag = Math.abs(dx)+Math.abs(dy);
+
+    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
+    if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
+
+    // Rotate -90°: (x',y') = ( y, -x )
+    const fx =  dy;
+    const fy = -dx;
+    p.x = prevX + fx;
+    p.y = prevY + fy;
+
+    prevX = p.x; prevY = p.y;
+  }
+
+  // ---------- enter / exit ----------
+  let fireTick=null, joyHooked=false;
+  function enter(){
+    if(active) return; active=true;
+    BODY.setAttribute('data-fakeland','1');
+    ensureFullButton(); fullBtn.textContent='Exit';
+    adopt(); applyLayout();
+    closeMapsOnEnter();
+
+    startObserver();   // PERF
+
+    clearInterval(fireTick); fireTick=setInterval(placeFire,500);
+
+    if(!joyHooked && window.IZZA && IZZA.on){
+      IZZA.on('update-post', fixJoystickDelta);
+      joyHooked = true;
+    }
+    prevX=null; prevY=null;
+  }
+  function exit(){
+    if(!active) return; active=false;
+    BODY.removeAttribute('data-fakeland');
+    ensureFullButton(); fullBtn.textContent='Full';
     stopObserver();
     cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
-  } else if (active){
-    startObserver();
-    needsFix = true;
-    scheduleFix();
+    clearInterval(fireTick); fireTick=null;
+    restoreMiniOnExit();
+    restore();
+    stage.style.transform=''; canvas.style.width=canvas.style.height='';
+    try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
+    setTimeout(keepFullVisible, 0);
   }
-}, {passive:true});
 
-// keep map closed when entering Full
-function closeMapsOnEnter(){
-  const big=byId('mapModal'); if(big && getComputedStyle(big).display!=='none') big.style.display='none';
-  if(mini){ mini.style.display='none'; }
-}
-function restoreMiniOnExit(){ if(mini){ mini.style.display=''; } }
+  // boot: make sure button exists & is placed in normal view
+  ensureFullButton();
+  keepFullVisible();
 
-// ---------- Joystick correction (UNCHANGED FEEL) + wall-stick guard ----------
-let joyActive=false;
-const markOn = ()=>{ joyActive=true; };
-const markOff= ()=>{ joyActive=false; };
-stickEl.addEventListener('touchstart',markOn,{passive:false});
-stickEl.addEventListener('mousedown', markOn);
-window.addEventListener('touchend',  markOff, {passive:true});
-window.addEventListener('mouseup',   markOff, {passive:true});
-window.addEventListener('touchcancel',markOff,{passive:true});
+  // keep scale right + keep button placed in normal view
+  const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
+  addEventListener('resize', onResize, {passive:true});
+  addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
 
-let prevX=null, prevY=null;
-function fixJoystickDelta(){
-  if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
-  const p = IZZA.api.player;
-  if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
-  const dx = p.x - prevX, dy = p.y - prevY;
-  const mag = Math.abs(dx)+Math.abs(dy);
-
-  const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
-  if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
-
-  // Rotate -90°: (x',y') = ( y, -x )
-  const fx =  dy;
-  const fy = -dx;
-  p.x = prevX + fx;
-  p.y = prevY + fy;
-
-  prevX = p.x; prevY = p.y;
-}
-
-// ---------- enter / exit ----------
-let fireTick=null, joyHooked=false;
-function enter(){
-  if(active) return; active=true;
-  BODY.setAttribute('data-fakeland','1');
-  ensureFullButton(); fullBtn.textContent='Exit';
-  adopt(); applyLayout();
-  closeMapsOnEnter();
-
-  startObserver();   // PERF
-
-  clearInterval(fireTick); fireTick=setInterval(placeFire,500);
-
-  if(!joyHooked && window.IZZA && IZZA.on){
-    IZZA.on('update-post', fixJoystickDelta);
-    joyHooked = true;
-  }
-  prevX=null; prevY=null;
-}
-function exit(){
-  if(!active) return; active=false;
-  BODY.removeAttribute('data-fakeland');
-  ensureFullButton(); fullBtn.textContent='Full';
-  stopObserver();
-  cancelAnimationFrame(rafId); rafId = 0; needsFix = false;
-  clearInterval(fireTick); fireTick=null;
-  restoreMiniOnExit();
-  restore();
-  stage.style.transform=''; canvas.style.width=canvas.style.height='';
-  try{ location.href='https://izzapay.onrender.com/signin'; }catch{}
-  setTimeout(keepFullVisible, 0);
-}
-
-// boot: make sure button exists & is placed in normal view
-ensureFullButton();
-keepFullVisible();
-
-// keep scale right + keep button placed in normal view
-const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
-addEventListener('resize', onResize, {passive:true});
-addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
-
-console.log('[IZZA land] ready');
+  console.log('[IZZA land] ready');
 })();
