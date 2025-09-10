@@ -574,8 +574,32 @@
     requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
   }
 
-  // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
+    // --- PERF: throttle popup fixes and only watch for added/removed nodes ---
   let needsFix = false, rafId = 0;
+
+  // FIRE: handle outside the throttle (pre-throttle behavior)
+  const FIRE_SEL = '#btnFire, #fireBtn, .btn-fire, .fire, button[data-role="fire"], #shootBtn';
+
+  function ensureFireInStage(){
+    const fresh = document.querySelector(FIRE_SEL);
+    if (!fresh) return;
+
+    if (stage.contains(fresh)){
+      requestAnimationFrame(placeFire);
+      return;
+    }
+
+    const existing = stage.querySelector(FIRE_SEL);
+    if (existing && existing !== fresh){ try{ existing.remove(); }catch{} }
+
+    if (!ph['btnFire']) {
+      keep(fresh, 'btnFire');
+    } else {
+      try{ stage.appendChild(fresh); }catch{}
+    }
+
+    requestAnimationFrame(placeFire);
+  }
 
   function scheduleFix(){
     if (rafId) return;
@@ -596,13 +620,28 @@
     if (!active) { keepFullVisible(); return; }
 
     let sawChange = false;
+    let fireTouched = false;
+
     for (const m of mutations){
       if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)){
-        sawChange = true; break;
+        sawChange = true;
+        for (const n of [...m.addedNodes, ...m.removedNodes]){
+          if (n && n.nodeType === 1 && n.matches && n.matches(FIRE_SEL)){
+            fireTouched = true;
+            break;
+          }
+        }
       }
+      if (fireTouched) break;
     }
+
+    if (fireTouched){
+      ensureFireInStage();            // immediate (not throttled)
+      requestAnimationFrame(placeFire);
+    }
+
     if (sawChange){
-      needsFix = true;
+      needsFix = true;                // everything else stays throttled
       scheduleFix();
     }
   });
@@ -674,7 +713,8 @@
 
     startObserver();   // PERF
 
-    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // restore original cadence
+    ensureFireInStage();                         // make sure fire is adopted immediately
+    clearInterval(fireTick); fireTick=setInterval(placeFire,350); // original cadence
 
     if(!joyHooked && window.IZZA && IZZA.on){
       IZZA.on('update-post', fixJoystickDelta);
