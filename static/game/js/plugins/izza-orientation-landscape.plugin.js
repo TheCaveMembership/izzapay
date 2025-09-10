@@ -62,7 +62,7 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* In rotated Full, dropdown lives in the CENTER of the stage (container unrotated) */
+      /* DROPDOWN: centered container (unrotated), rotated content */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
         left:50% !important;
@@ -72,17 +72,13 @@
         max-height:300px;
         z-index:9999 !important;
         overflow:visible !important;
+        pointer-events:auto !important;
       }
-      /* Counter-rotate only the CONTENT, not the container */
+      /* Rotate only the content wrapper */
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
         transform-origin:top left !important;
         writing-mode: horizontal-tb !important;
-      }
-      /* Any descendants OUTSIDE the wrapper must not have their own rotate/writing-mode */
-      #izzaLandStage #mpNotifDropdown :not(.izza-upright){
-        writing-mode: horizontal-tb !important;
-        transform: none !important;
       }
 
       #izzaLandStage #mpFriendsToggleGlobal{
@@ -171,6 +167,34 @@
   const keep=(el,key)=>{ ph[key]=document.createComment('ph-'+key); el.parentNode.insertBefore(ph[key],el); stage.appendChild(el); };
   const adoptOnce=(el,key)=>{ if(!el||ph[key]) return; keep(el,key); };
 
+  // Heuristic: move stray vertical notification labels into the wrapper
+  function stealNotifStrays(dd, wrapper){
+    try{
+      const isInside = (n)=> dd.contains(n);
+      const looksLikeText = (el)=>{
+        const t=(el.textContent||'').trim().toLowerCase();
+        return t && t.length<=40 && /notification/.test(t);
+      };
+      const looksVertical = (el)=>{
+        const cs = getComputedStyle(el);
+        return (cs.writingMode && cs.writingMode !== 'horizontal-tb') ||
+               (cs.transform && cs.transform !== 'none');
+      };
+
+      // Candidates: siblings first (common case)
+      const root = dd.parentNode || document;
+      const candidates = Array.from(root.querySelectorAll('div,span,p,h1,h2,h3,h4,h5,h6,li'));
+
+      candidates.forEach(el=>{
+        if(isInside(el)) return;
+        if(!looksLikeText(el)) return;
+        if(!looksVertical(el)) return;
+        // Move into the rotated wrapper
+        try{ wrapper.appendChild(el); }catch{}
+      });
+    }catch{}
+  }
+
   // Make sure the bell dropdown is inside the stage and its CONTENT is counter-rotated + centered
   let fixingNotif=false, fixNotifQueued=false;
   function fixNotifDropdown(){
@@ -197,20 +221,11 @@
       }
 
       // If new children were injected outside the wrapper, move them in
-      const stray = Array.from(dd.childNodes).filter(n => n !== wrapper);
-      if(stray.length){ stray.forEach(n => wrapper.appendChild(n)); }
+      const strayChildren = Array.from(dd.childNodes).filter(n => n !== wrapper);
+      if(strayChildren.length){ strayChildren.forEach(n => wrapper.appendChild(n)); }
 
-      // Also scoop up likely sibling labels (e.g., the vertical "Notifications")
-      const siblings = [dd.previousElementSibling, dd.nextElementSibling].filter(Boolean);
-      siblings.forEach(sib=>{
-        const t=(sib.textContent||'').toLowerCase();
-        const looksLikeLabel = /notif/.test(t) || /notif/i.test(sib.id||'') || /notif/i.test(sib.className||'');
-        if(looksLikeLabel){ wrapper.appendChild(sib); }
-      });
-      // Common ARIA/target hooks pointing to the dropdown
-      document.querySelectorAll(
-        `[aria-controls="mpNotifDropdown"],[data-target="#mpNotifDropdown"],[data-controls="mpNotifDropdown"]`
-      ).forEach(el=>{ if(el!==wrapper && el!==dd && el.parentNode!==wrapper){ wrapper.appendChild(el); } });
+      // Also scoop up typical vertical label elements
+      stealNotifStrays(dd, wrapper);
 
       // Center container in stage (no rotation on container)
       dd.style.position = 'absolute';
@@ -220,13 +235,14 @@
       dd.style.transform = 'translate(-50%, -50%)';
       dd.style.zIndex = '9999';
       dd.style.overflow = 'visible';
+      dd.style.pointerEvents = 'auto';
 
       // Force horizontal text flow on content + counter-rotate
       wrapper.style.writingMode = 'horizontal-tb';
       wrapper.style.transformOrigin = 'top left';
       if(!wrapper.style.transform) wrapper.style.transform = 'rotate(-90deg)';
 
-      // Size container to fit rotated content (prevents the “empty box” clipping)
+      // Size container to fit rotated content
       const cs = getComputedStyle(dd);
       const visible = dd.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
       if(visible){
