@@ -179,7 +179,7 @@
         bottom:auto !important;
         transform:translate(-50%, -50%) rotate(360deg) !important;
         transform-origin:center center !important;
-        z-index:10020 !important;               /* ↑ ensure it's above canvas */
+        z-index:10020 !important;               /* above canvas */
         pointer-events:auto !important;         /* host captures events */
       }
       /* Scale down only the contents of the lobby */
@@ -188,10 +188,7 @@
         transform-origin: center center !important;
         pointer-events:auto !important;         /* children clickable */
       }
-      /* While lobby is open, block the canvas from stealing taps */
-      #izzaLandStage #game.lobby-block{
-        pointer-events:none !important;
-      }
+
       /* Reset in normal view */
       body:not([data-fakeland="1"]) #mpLobby{
         transform:none !important;
@@ -375,18 +372,6 @@
     }
   }
 
-  /* ---- Multiplayer Lobby: pointer-event sync with canvas ---- */
-  function lobbyIsVisible(){
-    const el = document.getElementById('mpLobby');
-    if(!el) return false;
-    const cs = getComputedStyle(el);
-    return el.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
-  }
-  function syncCanvasPointerForLobby(){
-    if(lobbyIsVisible()){ canvas.classList.add('lobby-block'); }
-    else{ canvas.classList.remove('lobby-block'); }
-  }
-
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
@@ -492,8 +477,6 @@
     adoptModals();
     // ensure lobby has inner wrapper so CSS scale applies ONLY to contents
     wrapLobbyContents();
-    // sync canvas pointer-events against lobby visibility
-    syncCanvasPointerForLobby();
 
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
 
@@ -535,7 +518,7 @@
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ syncCanvasPointerForLobby(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
   }
 
   // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
@@ -552,8 +535,6 @@
       adoptModals();
       // ensure lobby wrapper exists even if lobby is dynamically inserted
       wrapLobbyContents();
-      // keep canvas pointer-events in sync with lobby visibility
-      syncCanvasPointerForLobby();
 
       requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
 
