@@ -147,42 +147,55 @@
         transform-origin:top left !important;
         writing-mode:horizontal-tb !important;
       }
-/* nudge the Trade modal up only in fake-landscape */
-body[data-fakeland="1"] #tradeModal{
-  /* uses the independent CSS "translate" property so we don't stomp any transforms */
-  translate: 0 -14vh;   /* tweak this value up/down if you want */
-}
-/* SHOP: rotate the card only (container/backdrop untouched) */
-body[data-fakeland="1"] #shopModal .card{
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important; /* keep it nicely centered in the flex modal */
-}
+      /* nudge the Trade modal up only in fake-landscape */
+      body[data-fakeland="1"] #tradeModal{
+        /* uses the independent CSS "translate" property so we don't stomp any transforms */
+        translate: 0 -14vh;   /* tweak this value up/down if you want */
+      }
+      /* SHOP: rotate the card only (container/backdrop untouched) */
+      body[data-fakeland="1"] #shopModal .card{
+        transform: rotate(90deg) !important;
+        transform-origin: center center !important; /* keep it nicely centered in the flex modal */
+      }
 
-/* Optional: nudge the whole shop modal up a bit */
-body[data-fakeland="1"] #shopModal{
-  translate: 0 -0vh; /* tweak to taste: -4vh … -10vh */
-}
+      /* Optional: nudge the whole shop modal up a bit */
+      body[data-fakeland="1"] #shopModal{
+        translate: 0 -0vh; /* tweak to taste: -4vh … -10vh */
+      }
 
-/* Fallback for older Safari that doesn't support the independent translate property */
-@supports not (translate: 0) {
-  body[data-fakeland="1"] #shopModal{
-    transform: translateY(-6vh) !important;
-  }
-}
-/* BANK: rotate the inner panel only (leave backdrop/positioning alone) */
-body[data-fakeland="1"] #bankUI > div{
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
-}
+      /* Fallback for older Safari that doesn't support the independent translate property */
+      @supports not (translate: 0) {
+        body[data-fakeland="1"] #shopModal{
+          transform: translateY(-6vh) !important;
+        }
+      }
+      /* BANK: rotate the inner panel only (leave backdrop/positioning alone) */
+      body[data-fakeland="1"] #bankUI > div{
+        transform: rotate(90deg) !important;
+        transform-origin: center center !important;
+      }
 
-/* Keep all text/elements upright inside the rotated panel */
-body[data-fakeland="1"] #bankUI > div *{
-  rotate: 0 !important;
-  transform: none !important;
-  writing-mode: horizontal-tb !important;
-}
+      /* Keep all text/elements upright inside the rotated panel */
+      body[data-fakeland="1"] #bankUI > div *{
+        rotate: 0 !important;
+        transform: none !important;
+        writing-mode: horizontal-tb !important;
+      }
 
-/* No nudge needed for bank */
+      /* No nudge needed for bank */
+
+      /* ===== MULTIPLAYER LOBBY (new) ===== */
+      #izzaLandStage #mpLobby{
+        position:absolute !important;
+        left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
+        transform:translate(-50%, -50%) rotate(-90deg) !important;
+        transform-origin:center center !important;
+        z-index:20 !important;
+      }
+      /* Reset in normal view */
+      body:not([data-fakeland="1"]) #mpLobby{
+        transform:none !important; rotate:0deg !important;
+      }
 
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
@@ -354,12 +367,24 @@ body[data-fakeland="1"] #bankUI > div *{
     }
   }
 
+  /* ---- Multiplayer Lobby fixer (new) ---- */
+  let fixingLobby=false, fixLobbyQueued=false;
+  function fixMpLobby(){
+    if(fixingLobby){ fixLobbyQueued=true; return; }
+    fixingLobby=true;
+    try{ centerAndUpright('mpLobby'); }catch{} finally{
+      fixingLobby=false;
+      if(fixLobbyQueued){ fixLobbyQueued=false; requestAnimationFrame(fixMpLobby); }
+    }
+  }
+
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
+      '#mpLobby',                /* <-- added */
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
@@ -456,7 +481,7 @@ body[data-fakeland="1"] #bankUI > div *{
 
     // adopt any modals so they render upright (bell + friends)
     adoptModals();
-    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
+    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
 
     document.body.appendChild(stage);
   }
@@ -496,7 +521,7 @@ body[data-fakeland="1"] #bankUI > div *{
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
   }
 
   // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
@@ -511,7 +536,7 @@ body[data-fakeland="1"] #bankUI > div *{
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       adoptModals();
-      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
+      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); fixMpLobby(); });
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
