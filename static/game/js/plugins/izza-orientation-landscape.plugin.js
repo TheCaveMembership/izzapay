@@ -228,34 +228,39 @@ body[data-fakeland="1"] #enterModal .card *{
   transform: none !important;
   writing-mode: horizontal-tb !important;
 }
-/* HOSPITAL popup — rotate the inner card only (keep backdrop/container normal) */
-body[data-fakeland="1"] #hospitalModal{
-  position:absolute !important;
-  left:50% !important; top:50% !important; right:auto !important; bottom:auto !important;
-  transform:translate(-50%, -50%) !important;           /* cancel any -90° on the container */
+/* ===== HOSPITAL POPUP (rotate inner card only) ===== */
+body[data-fakeland="1"] #hospitalShop{
+  position:fixed !important;
+  left:50% !important;
+  top:50% !important;
+  right:auto !important;
+  bottom:auto !important;
+  transform:translate(-50%, -50%) !important;  /* container stays unrotated */
   transform-origin:center center !important;
-  z-index:9999 !important;
+  z-index:10040 !important;
   pointer-events:auto !important;
 }
 
-/* If hospital renders as a .modal with a .card */
-body[data-fakeland="1"] #hospitalModal .card{
+/* rotate the inner card so it reads correctly */
+body[data-fakeland="1"] #hospitalShop .card{
   transform:rotate(90deg) !important;
   transform-origin:center center !important;
+  /* optional: scale down a touch if needed */
+  /* transform:rotate(90deg) scale(0.9) !important; */
 }
 
-/* If hospital renders as a custom #hospitalUI container */
-body[data-fakeland="1"] #hospitalUI > div{
-  transform:rotate(90deg) !important;
-  transform-origin:center center !important;
-}
-
-/* Normalize inside so text/buttons are upright and clickable */
-body[data-fakeland="1"] #hospitalModal .card *,
-body[data-fakeland="1"] #hospitalUI > div *{
+/* normalize descendants so text/buttons are upright and clickable */
+body[data-fakeland="1"] #hospitalShop .card *{
   rotate:0 !important;
   transform:none !important;
   writing-mode:horizontal-tb !important;
+}
+
+/* reset in normal view */
+body:not([data-fakeland="1"]) #hospitalShop,
+body:not([data-fakeland="1"]) #hospitalShop .card{
+  transform:none !important;
+  rotate:0deg !important;
 }
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
