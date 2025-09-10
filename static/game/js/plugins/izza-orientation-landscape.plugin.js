@@ -171,39 +171,40 @@
       }
 
       /* ===== MULTIPLAYER LOBBY (scaled to fit; IN-PLACE, not adopted) ===== */
-body[data-fakeland="1"] #mpLobby{
-  position:fixed !important;
-  left:50% !important; 
-  top:50% !important; 
-  right:auto !important; 
-  bottom:auto !important;
-  transform:translate(-50%, -50%) rotate(360deg) scale(0.75) !important; /* adjust 0.75 → 0.7 etc */
-  transform-origin:center center !important;
-  z-index:10020 !important;        /* ensure above everything */
-  pointer-events:auto !important;  /* accept clicks */
-  touch-action:auto !important;    /* allow taps/focus */
-  will-change:transform;
-}
+      body[data-fakeland="1"] #mpLobby{
+        position:fixed !important;
+        left:50% !important; 
+        top:50% !important; 
+        right:auto !important; 
+        bottom:auto !important;
+        transform:translate(-50%, -50%) rotate(360deg) scale(0.75) !important; /* adjust 0.75 → 0.7 etc */
+        transform-origin:center center !important;
+        z-index:10020 !important;        /* ensure above everything */
+        pointer-events:auto !important;  /* accept clicks */
+        touch-action:auto !important;    /* allow taps/focus */
+        will-change:transform;
+      }
 
-/* make sure children also receive events */
-body[data-fakeland="1"] #mpLobby, 
-body[data-fakeland="1"] #mpLobby *{
-  pointer-events:auto !important;
-}
+      /* make sure children also receive events */
+      body[data-fakeland="1"] #mpLobby, 
+      body[data-fakeland="1"] #mpLobby *{
+        pointer-events:auto !important;
+      }
 
-/* hide any backdrop siblings that might sit under/over the lobby */
-body[data-fakeland="1"] #mpLobby ~ .backdrop,
-body[data-fakeland="1"] #mpLobby ~ .modal-backdrop,
-body[data-fakeland="1"] #mpLobby ~ .overlay,
-body[data-fakeland="1"] #mpLobby ~ [data-backdrop]{
-  display:none !important;
-}
+      /* hide any backdrop siblings that might sit under/over the lobby */
+      body[data-fakeland="1"] #mpLobby ~ .backdrop,
+      body[data-fakeland="1"] #mpLobby ~ .modal-backdrop,
+      body[data-fakeland="1"] #mpLobby ~ .overlay,
+      body[data-fakeland="1"] #mpLobby ~ [data-backdrop]{
+        display:none !important;
+      }
 
-/* Reset in normal view */
-body:not([data-fakeland="1"]) #mpLobby{
-  transform:none !important;
-  rotate:0deg !important;
-}
+      /* Reset in normal view */
+      body:not([data-fakeland="1"]) #mpLobby{
+        transform:none !important;
+        rotate:0deg !important;
+      }
+
       /* NORMAL VIEW: force upright, kill any inline rotate */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
@@ -368,26 +369,13 @@ body:not([data-fakeland="1"]) #mpLobby{
     }
   }
 
-  /* ---- Multiplayer Lobby: add inner wrapper ONLY (for scaling) ---- */
-  function wrapLobbyContents(){
-    const host = byId('mpLobby');
-    if(!host) return;
-    let wrapper = host.querySelector(':scope > .izza-upright');
-    if(!wrapper){
-      wrapper = document.createElement('div');
-      wrapper.className = 'izza-upright';
-      while(host.firstChild){ wrapper.appendChild(host.firstChild); }
-      host.appendChild(wrapper);
-    }
-  }
-
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      '#mpLobby',                /* adopt lobby into stage, but don't centerAndUpright */
+      /* (intentionally NOT adopting #mpLobby to keep it in-place) */
       '#mpFriendsPopup','#mpNotifDropdown'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
@@ -482,12 +470,10 @@ body:not([data-fakeland="1"]) #mpLobby{
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (bell + friends + lobby)
+    // adopt any modals so they render upright (bell + friends) — lobby stays in-place
     adoptModals();
-    // ensure lobby has inner wrapper so CSS scale applies ONLY to contents
-    wrapLobbyContents();
 
-    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
+    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
 
     document.body.appendChild(stage);
   }
@@ -527,7 +513,7 @@ body:not([data-fakeland="1"]) #mpLobby{
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
+    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
   }
 
   // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
@@ -541,11 +527,10 @@ body:not([data-fakeland="1"]) #mpLobby{
       const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
+      // adopt bell/friends only; lobby stays in-place
       adoptModals();
-      // ensure lobby wrapper exists even if lobby is dynamically inserted
-      wrapLobbyContents();
 
-      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fixer */ });
+      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
