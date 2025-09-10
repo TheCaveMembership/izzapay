@@ -177,7 +177,7 @@
         top:50% !important; 
         right:auto !important; 
         bottom:auto !important;
-        transform:translate(-50%, -50%) rotate(90deg) scale(0.75) !important; /* adjust 0.75 → 0.7 etc */
+        transform:translate(-50%, -50%) rotate(90deg) scale(0.5) !important; /* adjust 0.75 → 0.7 etc */
         transform-origin:center center !important;
         z-index:10020 !important;        /* ensure above everything */
         pointer-events:auto !important;  /* accept clicks */
