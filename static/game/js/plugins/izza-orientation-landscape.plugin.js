@@ -62,19 +62,13 @@
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
-      /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
+      /* -------- BELL DROPDOWN -------- */
       #izzaLandStage #mpNotifDropdown{
         position:absolute !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important;
-        bottom:auto !important;
+        left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) !important;
-        max-height:300px;
-        z-index:9999 !important;
-        overflow:visible !important;
-        pointer-events:auto !important;
-        margin:0 !important;
+        max-height:300px; z-index:9999 !important; overflow:visible !important;
+        pointer-events:auto !important; margin:0 !important;
       }
       #izzaLandStage #mpNotifDropdown > .izza-upright{
         transform:rotate(-90deg) !important;
@@ -82,17 +76,13 @@
         writing-mode: horizontal-tb !important;
       }
 
-      /* -------- FRIENDS POPUP: centered container (unrotated), rotated content -------- */
+      /* -------- FRIENDS POPUP -------- */
       #izzaLandStage #mpFriendsPopup{
         position:absolute !important;
-        left:50% !important;
-        top:50% !important;
-        right:auto !important; bottom:auto !important;
+        left:50% !important; top:50% !important;
         transform:translate(-50%, -50%) !important;
-        z-index:9999 !important;
-        overflow:visible !important;
-        pointer-events:auto !important;
-        margin:0 !important;
+        z-index:9999 !important; overflow:visible !important;
+        pointer-events:auto !important; margin:0 !important;
       }
       #izzaLandStage #mpFriendsPopup > .izza-upright{
         transform:rotate(-90deg) !important;
@@ -105,15 +95,12 @@
         position:absolute!important;right:14px!important;bottom:72px!important;top:auto!important;left:auto!important;
       }
 
-      /* Normalize rotated content deeply so text can’t remain vertical/absolute */
+      /* Normalize rotated content deeply */
       #izzaLandStage #mpNotifDropdown > .izza-upright,
       #izzaLandStage #mpFriendsPopup > .izza-upright,
       #izzaLandStage #mpNotifDropdown > .izza-upright *,
       #izzaLandStage #mpFriendsPopup > .izza-upright *{
-        rotate:0 !important;
-        transform:none !important;
-        writing-mode:horizontal-tb !important;
-        position:static !important;
+        rotate:0 !important; transform:none !important; writing-mode:horizontal-tb !important; position:static !important;
       }
 
       /* ---------- BACKDROP HANDLING IN ROTATED MODE ---------- */
@@ -141,26 +128,29 @@
         transform-origin:center center !important; z-index:20 !important;
       }
 
-      /* ---------- TRADE CENTRE (GLOBAL in Full): if it isn't adopted into the stage ---------- */
+      /* ---------- TRADE CENTRE (GLOBAL fallback when not adopted into stage) ---------- */
       body[data-fakeland="1"] #tradeCentreModal,
       body[data-fakeland="1"] [data-pool="trade-centre"],
-      body[data-fakeland="1"] .izza-trade-centre-global{
-        position:fixed !important;
-        left:50% !important; top:50% !important;
+      body[data-fakeland="1"] .izza-trade-centre-global,
+      /* *** NEW: your page uses #tradeModal *** */
+      body[data-fakeland="1"] #tradeModal{
+        position:fixed !important; left:50% !important; top:50% !important;
         right:auto !important; bottom:auto !important;
         transform:translate(-50%,-50%) !important;
         z-index:10020 !important; margin:0 !important; pointer-events:auto !important; overflow:visible !important;
+        display:block !important; /* ensure it can be centered even if flex was set */
       }
       body[data-fakeland="1"] #tradeCentreModal > .izza-upright,
       body[data-fakeland="1"] [data-pool="trade-centre"] > .izza-upright,
-      body[data-fakeland="1"] .izza-trade-centre-global > .izza-upright{
-        /* rotate content +90° (to the right) so it reads correctly in rotated full mode */
+      body[data-fakeland="1"] .izza-trade-centre-global > .izza-upright,
+      /* rotate the card/content of #tradeModal specifically */
+      body[data-fakeland="1"] #tradeModal > .izza-upright{
         transform:rotate(90deg) !important;
         transform-origin:top left !important;
         writing-mode:horizontal-tb !important;
       }
 
-      /* NORMAL VIEW: force upright, kill any inline rotate */
+      /* NORMAL VIEW: force upright */
       body:not([data-fakeland="1"]) .modal,
       body:not([data-fakeland="1"]) [role="dialog"],
       body:not([data-fakeland="1"]) [data-modal],
@@ -242,10 +232,11 @@
     Object.assign(host.style, {
       position: (opts && opts.inPlace) ? 'fixed' : 'absolute',
       left:'50%', top:'50%', right:'auto', bottom:'auto',
-      transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0'
+      transform:'translate(-50%, -50%)', zIndex:'9999', overflow:'visible', pointerEvents:'auto', margin:'0',
+      display:'block' // if original used display:flex (play.html), ensure centering still works
     });
 
-    // Normalize + rotate content to +90deg (right)
+    // Rotate content +90deg (right)
     wrapper.style.writingMode = 'horizontal-tb';
     wrapper.style.transformOrigin = 'top left';
     wrapper.style.transform = 'rotate(90deg)';
@@ -300,6 +291,10 @@
     if(fixingTrade){ fixTradeQueued=true; return; }
     fixingTrade=true;
     try{
+      // 0) Your page uses #tradeModal (explicit)
+      const t0 = byId('tradeModal');
+      if(t0) centerAndUpright(t0, { inPlace:true });
+
       // 1) explicit id
       const t1 = byId('tradeCentreModal');
       if(t1) centerAndUpright(t1, { inPlace:true });
@@ -308,9 +303,9 @@
       const t2 = document.querySelector('[data-pool="trade-centre"]');
       if(t2) centerAndUpright(t2, { inPlace:true });
 
-      // 3) fallback by contents (any modal/dialog containing "Trade Centre")
+      // 3) fallback by contents
       const candidates = Array.from(document.querySelectorAll('.modal,[role="dialog"],[data-modal],[id$="Modal"]'))
-        .filter(el => (/trade\\s*centre/i).test(el.innerText||''));
+        .filter(el => (/trade\s*centre/i).test(el.innerText||''));
       candidates.forEach(el=>centerAndUpright(el, { inPlace:true }));
     }catch{} finally{
       fixingTrade=false;
@@ -324,7 +319,9 @@
       '.modal','[role="dialog"]','[data-modal]','[id$="Modal"]',
       '#enterModal','#tutorialModal','#shopModal','#hospitalModal','#tradeCentreModal','#bankModal','#mapModal',
       '[data-pool="tutorial"]','[data-pool="shop"]','[data-pool="hospital"]','[data-pool="trade-centre"]','[data-pool="bank"]',
-      '#mpFriendsPopup','#mpNotifDropdown'
+      '#mpFriendsPopup','#mpNotifDropdown',
+      /* NEW: adopt #tradeModal if present */
+      '#tradeModal'
     ].join(',');
     const nodes = document.querySelectorAll(sel);
     nodes.forEach((el,i)=>{
@@ -363,7 +360,6 @@
     return fullBtn;
   }
 
-  // Place Full relative to the Map button (above & a bit left; 8px gap).
   function placeFullButton(){
     if(active){ return; }
     const mapBtn =
@@ -418,7 +414,7 @@
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
-    // adopt any modals so they render upright (bell + friends); Trade handled in-place too
+    // adopt any modals so they render upright (bell + friends + trade)
     adoptModals();
     requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); });
 
@@ -556,7 +552,7 @@
 
   // keep scale right + keep button placed in normal view
   const onResize=()=>{ if(active) requestAnimationFrame(()=>requestAnimationFrame(applyLayout)); else keepFullVisible(); };
-  addEventListener('resize,', onResize, {passive:true});
+  addEventListener('resize', onResize, {passive:true});             /* fixed a stray comma from earlier */
   addEventListener('orientationchange', ()=>{ setTimeout(()=>{ active?onResize():keepFullVisible(); },120); }, {passive:true});
 
   console.log('[IZZA land] ready');
