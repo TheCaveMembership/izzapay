@@ -41,6 +41,14 @@
         left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;
         width:48px!important;height:48px!important;border-radius:24px!important;
       }
+      /* ===== INVENTORY PANEL (always over canvas in Full) ===== */
+      #izzaLandStage #invPanel{
+        position:absolute !important;
+        left:12px !important; right:12px !important;
+        top:74px !important;
+        z-index:10040 !important; /* above game & HUD widgets */
+        max-width:none !important; margin:0 !important;
+      }
 
       /* Minimap */
       #izzaLandStage #miniWrap{position:absolute;right:12px;top:74px;display:block;}
