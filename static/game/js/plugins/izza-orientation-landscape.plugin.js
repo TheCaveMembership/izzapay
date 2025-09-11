@@ -669,7 +669,43 @@ body:not([data-fakeland="1"]) #hospitalShop{
 
     prevX = p.x; prevY = p.y;
   }
+  // ===== AIM FIX (rotated view only) =====
+  // Cancels the 90° stage rotation for aim so directions feel natural:
+  // left→left, right→right, up→up, down→down.
+  function applyAimingCorrection(){
+    if (!window.IZZA || !IZZA.api || !IZZA.api.player) return;
+    if (!document.body.hasAttribute('data-fakeland')) return; // only in Full/rotated
+    const p = IZZA.api.player;
 
+    // Vector-style aim (most common)
+    if (typeof p.aimX === 'number' && typeof p.aimY === 'number') {
+      // rotate -90°: (x', y') = ( y, -x )
+      const x = p.aimX, y = p.aimY;
+      p.aimX = y; p.aimY = -x;
+    } else if (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') {
+      const x = p.aim.x, y = p.aim.y;
+      p.aim.x = y; p.aim.y = -x;
+    }
+
+    // Angle-style aim (fallback if your engine uses an angle)
+    if (typeof p.aimAngle === 'number') {
+      // Heuristic: degrees if larger than 2π
+      if (Math.abs(p.aimAngle) > Math.PI * 2) {
+        p.aimAngle = (p.aimAngle - 90) % 360;
+      } else {
+        p.aimAngle = p.aimAngle - Math.PI / 2;
+      }
+    }
+
+    // Some engines use a separate fireAngle — rotate that too if present
+    if (typeof p.fireAngle === 'number') {
+      if (Math.abs(p.fireAngle) > Math.PI * 2) {
+        p.fireAngle = (p.fireAngle - 90) % 360;
+      } else {
+        p.fireAngle = p.fireAngle - Math.PI / 2;
+      }
+    }
+  }
   // ---------- enter / exit ----------
   let fireTick=null, joyHooked=false;
   function enter(){
@@ -684,9 +720,10 @@ body:not([data-fakeland="1"]) #hospitalShop{
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
 
     if(!joyHooked && window.IZZA && IZZA.on){
-      IZZA.on('update-post', fixJoystickDelta);
-      joyHooked = true;
-    }
+  IZZA.on('update-post', fixJoystickDelta);
+  IZZA.on('update-post', applyAimingCorrection);   // <— AIM FIX hook
+  joyHooked = true;
+}
     prevX=null; prevY=null;
   }
   function exit(){
