@@ -666,8 +666,8 @@ body:not([data-fakeland="1"]) #hospitalShop{
     const mag = Math.abs(dx)+Math.abs(dy);
 
     // wall-stick guard
-    const singleAxis = (Math.abs(dx) < 0.10) ^ (Math.abs(dy) < 0.10);
-    if(mag < 0.10 || singleAxis){ prevX=p.x; prevY=p.y; return; }
+    const singleAxis = (Math.abs(dx) < 0.005) ^ (Math.abs(dy) < 0.005);
+    if(mag < 0.005 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
     // Rotate -90°: (x',y') = ( y, -x )
 const fx =  dy;
