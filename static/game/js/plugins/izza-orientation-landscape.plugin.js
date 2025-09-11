@@ -670,8 +670,8 @@ body:not([data-fakeland="1"]) #hospitalShop{
     prevX = p.x; prevY = p.y;
   }
   // ===== AIM FIX (rotated view only) =====
-// Cancels the 90° stage rotation for aim so directions feel natural.
-let _aimLastKey = null;  // <— add this just above the function
+// Cancels the stage rotation for aim so directions feel natural (using 180° flip).
+let _aimLastKey = null;
 
 function applyAimingCorrection(){
   if (!window.IZZA || !IZZA.api || !IZZA.api.player) return;
@@ -684,34 +684,33 @@ function applyAimingCorrection(){
     (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') ? `v2:${p.aim.x}|${p.aim.y}` :
     (typeof p.aimAngle === 'number') ? `a:${p.aimAngle}` :
     (typeof p.fireAngle === 'number') ? `f:${p.fireAngle}` : null;
-
-  if (k && k === _aimLastKey) return; // already rotated this exact input this tick
+  if (k && k === _aimLastKey) return;
   _aimLastKey = k;
 
-  // Vector-style aim
+  // Vector-style aim (180° flip: just invert both axes)
   if (typeof p.aimX === 'number' && typeof p.aimY === 'number') {
-    const x = p.aimX, y = p.aimY;
-    p.aimX = y; p.aimY = -x; // rotate -90°
+    p.aimX = -p.aimX;
+    p.aimY = -p.aimY;
   } else if (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') {
-    const x = p.aim.x, y = p.aim.y;
-    p.aim.x = y; p.aim.y = -x; // rotate -90°
+    p.aim.x = -p.aim.x;
+    p.aim.y = -p.aim.y;
   }
 
-  // Angle-style aim
+  // Angle-style aim (add 180°)
   if (typeof p.aimAngle === 'number') {
     if (Math.abs(p.aimAngle) > Math.PI * 2) {
-      p.aimAngle = (p.aimAngle - 90) % 360;
+      p.aimAngle = (p.aimAngle + 180) % 360;
     } else {
-      p.aimAngle = p.aimAngle - Math.PI / 2;
+      p.aimAngle = p.aimAngle + Math.PI;
     }
   }
 
   // fireAngle, if used
   if (typeof p.fireAngle === 'number') {
     if (Math.abs(p.fireAngle) > Math.PI * 2) {
-      p.fireAngle = (p.fireAngle - 90) % 360;
+      p.fireAngle = (p.fireAngle + 180) % 360;
     } else {
-      p.fireAngle = p.fireAngle - Math.PI / 2;
+      p.fireAngle = p.fireAngle + Math.PI;
     }
   }
 }
