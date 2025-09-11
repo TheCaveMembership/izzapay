@@ -1046,6 +1046,83 @@ def merchant_orders(slug):
         throttle_minutes=throttle_minutes,
         t=get_bearer_token_from_request(),
     )
+    # ---- DELETE STORE (archive 30 days, then redirect to /signin) ----
+@app.post("/merchant/<slug>/delete")
+def merchant_delete_store(slug):
+    # Must be owner
+    u, m = require_merchant_owner(slug)
+    if isinstance(u, Response):
+        return u
+
+    now = int(time.time())
+    THIRTY_DAYS = 30 * 24 * 3600
+
+    with conn() as cx:
+        # Ensure archive table exists
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_merchants(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              merchant_id INTEGER NOT NULL,
+              payload_json TEXT NOT NULL,
+              deleted_at INTEGER NOT NULL,
+              purge_after INTEGER NOT NULL
+            )
+        """)
+
+        # Snapshot live data
+        merch = dict(m)
+        items = [dict(r) for r in cx.execute(
+            "SELECT * FROM items WHERE merchant_id=?", (m["id"],)
+        ).fetchall()]
+        orders = [dict(r) for r in cx.execute(
+            "SELECT * FROM orders WHERE merchant_id=?", (m["id"],)
+        ).fetchall()]
+        sessions_rows = [dict(r) for r in cx.execute(
+            "SELECT * FROM sessions WHERE merchant_id=?", (m["id"],)
+        ).fetchall()]
+        carts = [dict(r) for r in cx.execute(
+            "SELECT * FROM carts WHERE merchant_id=?", (m["id"],)
+        ).fetchall()]
+        cart_items = []
+        if carts:
+            cart_ids = tuple(c["id"] for c in carts)
+            placeholders = ",".join("?" for _ in cart_ids)
+            cart_items = [dict(r) for r in cx.execute(
+                f"SELECT * FROM cart_items WHERE cart_id IN ({placeholders})", cart_ids
+            ).fetchall()]
+
+        snapshot = {
+            "merchant": merch,
+            "items": items,
+            "orders": orders,
+            "sessions": sessions_rows,
+            "carts": carts,
+            "cart_items": cart_items,
+        }
+
+        # Save snapshot for 30 days
+        cx.execute(
+            "INSERT INTO deleted_merchants(merchant_id, payload_json, deleted_at, purge_after) VALUES(?,?,?,?)",
+            (m["id"], json.dumps(snapshot, separators=(",", ":")), now, now + THIRTY_DAYS)
+        )
+
+        # Clean up live data
+        cx.execute("DELETE FROM cart_items WHERE cart_id IN (SELECT id FROM carts WHERE merchant_id=?)", (m["id"],))
+        cx.execute("DELETE FROM carts WHERE merchant_id=?", (m["id"],))
+        cx.execute("DELETE FROM sessions WHERE merchant_id=?", (m["id"],))
+        cx.execute("DELETE FROM items WHERE merchant_id=?", (m["id"],))
+        cx.execute("DELETE FROM merchants WHERE id=?", (m["id"],))
+
+        # Opportunistically purge any expired archives
+        cx.execute("DELETE FROM deleted_merchants WHERE purge_after < ?", (now,))
+
+    # Clear session and go to sign-in (pi_signin.html)
+    try:
+        session.clear()
+    except Exception:
+        pass
+
+    return redirect("/signin")
 
 # ----------------- STOREFRONT AUTH -----------------
 @app.get("/store/<slug>/signin")
