@@ -2,7 +2,7 @@
    - West, East, North fences around HQ & Shop at 0.5 tile offset
    - Shop WEST side: invisible (draw skipped) but still collides
    - Beefed-up mid-run collision (adds tangent slide + larger solid band + multi-pass)
-   - Stuck rescue → confirm → respawn to safe, dry sidewalk in front of HQ
+   - Stuck rescue → confirm → respawn to HQ door
 */
 (function(){
   if (!window.IZZA || typeof IZZA.on !== 'function') return;
@@ -48,9 +48,8 @@
     return { HQ, SH, hRoadY };
   }
 
-  // ---------- Safe respawn finder (avoid water) ----------
+  // ---------- Safe respawn finder (HQ door only) ----------
   function isWaterTile(api, tx, ty){
-    // Use engine helpers if available; otherwise assume not water
     try{
       if (api?.map?.isWaterTile) return !!api.map.isWaterTile(tx, ty);
       if (api?.isWaterTile)      return !!api.isWaterTile(tx, ty);
@@ -58,28 +57,22 @@
     return false;
   }
 
-  // Try several candidate points along the HQ front sidewalk line until a dry spot is found.
   function hqFrontSpawnPx(api){
-    const {HQ, hRoadY} = anchors(api);
+    const {HQ} = anchors(api);
     const t = api.TILE;
 
-    const baseY = hRoadY - 0.25;                 // sidewalk row in front of HQ
-    const centerX = (HQ.x0 + HQ.x1 + 1)/2;
+    // Door at the middle of the HQ south wall
+    const doorTx = (HQ.x0 + HQ.x1 + 1) / 2;
+    const doorTy = HQ.y1 + 0.50; // just outside the south wall, on the doorway
 
-    // sample offsets (in tiles) from doorway center
-    const offsets = [0, 0.7, -0.7, 1.4, -1.4, 2.1, -2.1];
-
-    for(const off of offsets){
-      const tx = centerX + off;
-      const ty = baseY;
-      if (!isWaterTile(api, Math.floor(tx), Math.floor(ty))){
-        const cx = tx * t, cy = ty * t;
-        return { x: Math.round(cx - 16), y: Math.round(cy - 16) };
-      }
+    // Prefer exact door
+    if (!isWaterTile(api, Math.floor(doorTx), Math.floor(doorTy))) {
+      const cx = doorTx * t, cy = doorTy * t;
+      return { x: Math.round(cx - 16), y: Math.round(cy - 16) };
     }
 
-    // Fallback: original center (should rarely happen)
-    const cx = centerX * t, cy = baseY * t;
+    // Final fallback: door center anyway
+    const cx = doorTx * t, cy = doorTy * t;
     return { x: Math.round(cx - 16), y: Math.round(cy - 16) };
   }
 
@@ -108,7 +101,6 @@
 
   // ---------- Collision helpers (stronger mid-run behavior) ----------
   function clampAgainstSeg(p, seg){
-    // p: player top-left; treat center for distances
     const cx = p.x + 16, cy = p.y + 16;
 
     if (seg.kind === 'v'){
@@ -116,19 +108,14 @@
       const insideY = cy >= seg.y0 && cy <= seg.y1;
       if (!insideY) return;
 
-      // Soft steer
       if (Math.abs(dx) < STEER_DIST){
         const dir = dx < 0 ? -1 : 1;
         p.x += (STEER_DIST - Math.abs(dx)) * 0.10 * dir;
       }
-      // Hard clamp zone
       if (Math.abs(dx) < SOLID_DIST){
-        // Lock outside the line
         if (dx < 0) p.x = seg.x - 16 - SOLID_DIST;
         else        p.x = seg.x - 16 + SOLID_DIST;
 
-        // Tangent slide to avoid "sticky middle": nudge along Y
-        // Push toward the nearer end to naturally slide off
         const midY = (seg.y0 + seg.y1)/2;
         const sign = (cy < midY) ? -1 : 1;
         p.y += TANGENT_PUSH * sign;
@@ -146,7 +133,6 @@
         if (dy < 0) p.y = seg.y - 16 - SOLID_DIST;
         else        p.y = seg.y - 16 + SOLID_DIST;
 
-        // Tangent slide along X to prevent sticking in the middle of the run
         const midX = (seg.x0 + seg.x1)/2;
         const sign = (cx < midX) ? -1 : 1;
         p.x += TANGENT_PUSH * sign;
@@ -180,7 +166,6 @@
     ctx.globalAlpha = 0.95;
 
     segs.forEach(seg=>{
-      // Skip drawing on Shop WEST fence to keep it invisible
       if (seg.b === 'SH' && seg.side === 'W') return;
 
       if (seg.kind === 'v'){
@@ -237,7 +222,6 @@
     }
   }
 
-  // Recompute on tier/orientation changes
   IZZA.on('map-tier-changed', ()=>{ _segs = null; });
   IZZA.on('orientation-changed', ()=>{ _segs = null; });
 
@@ -251,12 +235,10 @@
     const api = IZZA.api; if(!api?.ready || !_segs) return;
     const p = api.player; if(!p) return;
 
-    // Stronger collision: multi-pass + tangent slide
     for(let pass=0; pass<EXTRA_PASSES; pass++){
       for(const seg of _segs) clampAgainstSeg(p, seg);
     }
 
-    // Rescue: if center is inside HQ/Shop rect (with margin), offer reset
     const {HQ, SH} = anchors(api);
     const t = api.TILE;
     const hqPx = inflateRectPx(HQ, t, STUCK_MARGIN_TILES);
@@ -269,7 +251,7 @@
         (now - _lastPromptAt) > PROMPT_COOLDOWN_MS){
       _lastPromptAt = now;
       if (window.confirm('You look stuck. Reset spawn to the front of HQ?')){
-        const spawn = hqFrontSpawnPx(api);   // guaranteed dry if engine exposes water check
+        const spawn = hqFrontSpawnPx(api);
         p.x = spawn.x;
         p.y = spawn.y;
       }
