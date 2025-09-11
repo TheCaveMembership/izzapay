@@ -1129,8 +1129,8 @@ def merchant_delete_store(slug):
     except Exception:
         pass
 
--    return redirect("/signin")
-+    return render_template("pi_signin.html", app_base=APP_BASE_URL, sandbox=PI_SANDBOX)
+    # Show the home/sign-in page directly
+    return render_template("pi_signin.html", app_base=APP_BASE_URL, sandbox=PI_SANDBOX)
 
 # ----------------- STOREFRONT AUTH -----------------
 @app.get("/store/<slug>/signin")
