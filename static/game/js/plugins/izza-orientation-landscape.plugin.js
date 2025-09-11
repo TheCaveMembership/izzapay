@@ -8,7 +8,7 @@
   const stickEl=document.getElementById('stick');
   const ctrls=document.querySelector('.controls');
   const mini=document.getElementById('miniWrap');
-  // *** CHANGED: don't require stick/ctrls to exist to boot (prevents early exit that hides the Full button)
+  // *** CHANGED earlier: don't require stick/ctrls to exist to boot (prevents early exit that hides the Full button)
   if(!card||!canvas||!hud) return;
 
   // FIRE placement (bigger, a touch left)
@@ -556,7 +556,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
   // ---------- adopt/restore ----------
   function adopt(){
     keep(card,'card'); keep(hud,'hud');
-    // *** CHANGED: guard optional elements so we don't call keep() on nulls
+    // guard optional elements so we don't call keep() on nulls
     if (stickEl) keep(stickEl,'stick');
     if (ctrls) keep(ctrls,'ctrls');
     if(mini) keep(mini,'mini');
@@ -564,7 +564,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
     ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
 
-    // >>> NEW: adopt inventory if present (so it layers correctly within the stage)
+    // adopt inventory if present (so it layers correctly within the stage)
     const inv = document.getElementById('invPanel'); if (inv) adoptOnce(inv, 'invPanel');
 
     // adopt Full button only in Full
@@ -648,7 +648,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
   let joyActive=false;
   const markOn = ()=>{ joyActive=true; };
   const markOff= ()=>{ joyActive=false; };
-  // *** CHANGED: only attach listeners if stick exists
+  // only attach listeners if stick exists
   if (stickEl){
     stickEl.addEventListener('touchstart',markOn,{passive:false});
     stickEl.addEventListener('mousedown', markOn);
@@ -662,23 +662,21 @@ body:not([data-fakeland="1"]) #hospitalShop{
     if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
     const p = IZZA.api.player;
     if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
-    const dx = p.x - prevX, dy = p.y - prevY;
+
+    const dx = p.x - prevX;
+    const dy = p.y - prevY;
     const mag = Math.abs(dx)+Math.abs(dy);
 
     // wall-stick guard
     const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
     if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
-    // Rotate -90°: (x',y') = ( y, -x )
-    const fx =  dy;
-    const fy = -dx;
-
-    // apply rotated movement
-    p.x = prevX + fx;
-    p.y = prevY + fy;
-
-    // *** NEW: fix facing to match the rotated movement (Full view only) ***
+    // *** FACING ONLY (no position rewrite) ***
+    // For rotated view (-90°), map world deltas -> screen deltas:
+    // screen fx = dy, screen fy = -dx
     if (document.body.hasAttribute('data-fakeland')) {
+      const fx = dy;
+      const fy = -dx;
       const ax = Math.abs(fx), ay = Math.abs(fy);
       if (ax > 0.0001 || ay > 0.0001) {
         if (ax > ay) {
@@ -690,23 +688,28 @@ body:not([data-fakeland="1"]) #hospitalShop{
     }
 
     prevX = p.x; prevY = p.y;
-  } // *** CHANGED: close fixJoystickDelta properly
+  }
 
-  // ===== (Old) ROTATED-FULL AIM helpers (kept, but no longer used) =====
+  // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
+  // Single calibration knob: pick one of -90, 90, 180, or 0
   const ROT_AIM_DEG = 270;
+
   function _rotVecQuick(x, y, deg){
     switch(((deg % 360) + 360) % 360){
       case 0:   return {x,       y      };
-      case 90:  return {x: -y,   y:  x  };
+      case 90:  return {x: -y,   y:  x  }; // +90° CCW
       case 180: return {x: -x,   y: -y  };
-      case 270: return {x:  y,   y: -x  };
+      case 270: return {x:  y,   y: -x  }; // -90° CW
       default:  return {x, y};
     }
   }
+
   let _origAimOwner = null;
   let _origAimKey   = null;
   let _origAimFn    = null;
   let _aimFindTimer = null;
+
+  // Try common homes: IZZA.guns.aimVector, guns.aimVector, global aimVector
   function _findAimVector(){
     const paths = [
       ['IZZA','guns','aimVector'],
@@ -718,7 +721,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
       for (let i=0; i<path.length; i++){
         key = path[i];
         if (typeof obj[key] === 'undefined'){ obj = null; break; }
-        parent = (i < path.length-1) ? obj[key] : obj;
+        parent = (i < path.length-1) ? obj[key] : obj; // owner of final key
         obj = obj[key];
       }
       if (typeof obj === 'function'){
@@ -727,13 +730,19 @@ body:not([data-fakeland="1"]) #hospitalShop{
     }
     return null;
   }
+
   function _installRotatedAim(){
-    if (_origAimFn) return true;
+    if (_origAimFn) return true; // already installed
+
     const found = _findAimVector();
     if (!found) return false;
+
+    // Keep handles so we can restore exactly
     _origAimOwner = found.parent;
     _origAimKey   = found.key;
     _origAimFn    = found.fn;
+
+    // New Full-only aim that mirrors guns.js behavior then rotates result
     const rotatedAim = function(...args){
       const v = _origAimFn.apply(this, args);
       if (v && typeof v.x === 'number' && typeof v.y === 'number'){
@@ -741,11 +750,14 @@ body:not([data-fakeland="1"]) #hospitalShop{
       }
       return v;
     };
+
     try { _origAimOwner[_origAimKey] = rotatedAim; } catch {}
     return true;
   }
+
   function _ensureRotatedAimSoon(){
     if (_installRotatedAim()) return;
+    // guns.js may not be loaded yet; retry briefly
     if (_aimFindTimer) return;
     _aimFindTimer = setInterval(()=>{
       if (_installRotatedAim()){
@@ -754,6 +766,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
       }
     }, 200);
   }
+
   function _removeRotatedAim(){
     if (_aimFindTimer){ clearInterval(_aimFindTimer); _aimFindTimer = null; }
     if (_origAimOwner && _origAimKey && _origAimFn){
@@ -762,64 +775,12 @@ body:not([data-fakeland="1"]) #hospitalShop{
     _origAimOwner = _origAimKey = _origAimFn = null;
   }
 
-  // ===== NEW: Aiming shim (counter-rotate stick/nub rects in Full) =====
-  const _aimShim = { patched:false, save:new WeakMap() };
-  function _rotMinus90(x, y){ return { x: y, y: -x }; } // rotate point by -90°
-  function _wrapRectGetter(el){
-    if(!el || _aimShim.save.has(el)) return;
-    const orig = el.getBoundingClientRect.bind(el);
-    _aimShim.save.set(el, orig);
-    el.getBoundingClientRect = function(){
-      const r = orig();
-      const cx = r.left + r.width/2;
-      const cy = r.top  + r.height/2;
-      const p  = _rotMinus90(cx, cy);
-      const left = p.x - r.width/2;
-      const top  = p.y - r.height/2;
-      return {
-        x: left, y: top,
-        left, top,
-        width: r.width, height: r.height,
-        right: left + r.width,
-        bottom: top  + r.height
-      };
-    };
-  }
-  function _unwrapRectGetter(el){
-    const orig = _aimShim.save.get(el);
-    if(orig){
-      try{ el.getBoundingClientRect = orig; }catch{}
-      _aimShim.save.delete(el);
-    }
-  }
-  function enableAimShim(){
-    if(_aimShim.patched) return;
-    const base = document.getElementById('stick');
-    const nub  = document.getElementById('nub');
-    _wrapRectGetter(base);
-    _wrapRectGetter(nub);
-    _aimShim.patched = true;
-  }
-  function disableAimShim(){
-    if(!_aimShim.patched) return;
-    const base = document.getElementById('stick');
-    const nub  = document.getElementById('nub');
-    _unwrapRectGetter(base);
-    _unwrapRectGetter(nub);
-    _aimShim.patched = false;
-  }
-
   // ---------- enter / exit ----------
   let fireTick=null, joyHooked=false;
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
-
-    // enable Full-mode aiming shim (keeps guns.js untouched)
-    enableAimShim();
-
-    // _ensureRotatedAimSoon();   // no longer needed (left in file but unused)
-
+    _ensureRotatedAimSoon();   // << install Full-only aim override
     ensureFullButton(); fullBtn.textContent='Exit';
     adopt(); applyLayout();
     closeMapsOnEnter();
@@ -837,12 +798,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
-
-    // disable Full-mode aiming shim
-    disableAimShim();
-
-    // _removeRotatedAim();       // no longer needed (left in file but unused)
-
+    _removeRotatedAim();       // << restore the original guns.js aim
     ensureFullButton(); fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
     restoreMiniOnExit();
