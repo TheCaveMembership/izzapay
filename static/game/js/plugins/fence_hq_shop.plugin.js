@@ -1,27 +1,29 @@
-/* fence_hq_shop.plugin.js — WEST/EAST/NORTH fence with strong collision + stuck rescue
-   - Half-tile offset fences around HQ and Shop (west, east, back/north)
-   - Stronger clamp so players can’t ghost through in full-mode
-   - If player ends up stuck inside a building, prompt to reset to front of HQ
+/* fence_hq_shop.plugin.js — WEST/EAST/NORTH fence w/ stronger collision, invisible Shop-West wall, and safe respawn
+   - West, East, North fences around HQ & Shop at 0.5 tile offset
+   - Shop WEST side: invisible (draw skipped) but still collides
+   - Beefed-up mid-run collision (adds tangent slide + larger solid band + multi-pass)
+   - Stuck rescue → confirm → respawn to safe, dry sidewalk in front of HQ
 */
 (function(){
   if (!window.IZZA || typeof IZZA.on !== 'function') return;
 
   // ---------- Tunables ----------
-  const OFFSET_TILES          = 0.5;   // distance from building edges
-  const STEER_DIST            = 14;    // px pre-contact nudge
-  const SOLID_DIST            = 12;    // px hard boundary (beefed up for full mode)
-  const EXTRA_PASSES          = 2;     // run collision multiple times per frame to prevent tunneling
+  const OFFSET_TILES          = 0.5;   // fence offset from building
+  const STEER_DIST            = 16;    // pre-contact nudge zone (px)
+  const SOLID_DIST            = 16;    // hard boundary half-thickness (px) — stronger
+  const EXTRA_PASSES          = 3;     // multiple clamps to defeat tunneling
+  const TANGENT_PUSH          = 2.0;   // px of along-fence slide when hitting dead-on
 
   // “stuck inside building” detection and rescue
-  const STUCK_MARGIN_TILES    = 0.3;   // tolerance around building rect
-  const PROMPT_COOLDOWN_MS    = 6000;  // don’t spam the confirm box
+  const STUCK_MARGIN_TILES    = 0.3;
+  const PROMPT_COOLDOWN_MS    = 6000;
 
-  // Wood look
+  // Wood look (kept)
   const WOOD_RAIL   = '#7b5323';
   const WOOD_POST   = '#a8763e';
   const WOOD_GRAIN  = '#5f401b';
-  const RAIL_THICK  = 3;  // px
-  const POST_SIZE   = 6;  // px
+  const RAIL_THICK  = 3;   // px
+  const POST_SIZE   = 6;   // px
   const POST_SPACING_TILES = 1.0;
 
   // ---------- Geometry anchors (mirrors your map math) ----------
@@ -46,38 +48,65 @@
     return { HQ, SH, hRoadY };
   }
 
-  // Where to reset: front of HQ, centered on the doorway line, slightly into the sidewalk
+  // ---------- Safe respawn finder (avoid water) ----------
+  function isWaterTile(api, tx, ty){
+    // Use engine helpers if available; otherwise assume not water
+    try{
+      if (api?.map?.isWaterTile) return !!api.map.isWaterTile(tx, ty);
+      if (api?.isWaterTile)      return !!api.isWaterTile(tx, ty);
+    }catch(e){}
+    return false;
+  }
+
+  // Try several candidate points along the HQ front sidewalk line until a dry spot is found.
   function hqFrontSpawnPx(api){
     const {HQ, hRoadY} = anchors(api);
     const t = api.TILE;
-    const cxTiles = (HQ.x0 + HQ.x1 + 1) / 2;         // center across HQ width
-    const yTiles  = hRoadY - 0.25;                   // just above road center (on sidewalk)
-    const cx = cxTiles * t;
-    const cy = yTiles * t;
-    return { x: Math.round(cx - 16), y: Math.round(cy - 16) }; // top-left (sprite ~32x32)
+
+    const baseY = hRoadY - 0.25;                 // sidewalk row in front of HQ
+    const centerX = (HQ.x0 + HQ.x1 + 1)/2;
+
+    // sample offsets (in tiles) from doorway center
+    const offsets = [0, 0.7, -0.7, 1.4, -1.4, 2.1, -2.1];
+
+    for(const off of offsets){
+      const tx = centerX + off;
+      const ty = baseY;
+      if (!isWaterTile(api, Math.floor(tx), Math.floor(ty))){
+        const cx = tx * t, cy = ty * t;
+        return { x: Math.round(cx - 16), y: Math.round(cy - 16) };
+      }
+    }
+
+    // Fallback: original center (should rarely happen)
+    const cx = centerX * t, cy = baseY * t;
+    return { x: Math.round(cx - 16), y: Math.round(cy - 16) };
   }
 
-  // ---------- Fence segments (world px) ----------
+  // ---------- Fence segments (world px), tagged to allow “invisible” draw skip ----------
   function buildFenceSegments(api){
     const {HQ, SH} = anchors(api);
     const t = api.TILE;
     const out = [];
-    function addRectWestEastNorth(rect){
+
+    function addRectWestEastNorth(rect, bTag){
       const {x0,y0,x1,y1} = rect;
 
       // WEST
-      out.push({ kind:'v', x:(x0 - OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t });
+      out.push({ kind:'v', b:bTag, side:'W', x:(x0 - OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t });
       // EAST
-      out.push({ kind:'v', x:(x1+1 + OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t });
+      out.push({ kind:'v', b:bTag, side:'E', x:(x1+1 + OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t });
       // NORTH (back)
-      out.push({ kind:'h', y:(y0 - OFFSET_TILES)*t, x0:x0*t, x1:(x1+1)*t });
+      out.push({ kind:'h', b:bTag, side:'N', y:(y0 - OFFSET_TILES)*t, x0:x0*t, x1:(x1+1)*t });
     }
-    addRectWestEastNorth(HQ);
-    addRectWestEastNorth(SH);
+
+    addRectWestEastNorth(HQ, 'HQ');
+    addRectWestEastNorth(SH, 'SH');   // Shop
+
     return out;
   }
 
-  // ---------- Collision helpers ----------
+  // ---------- Collision helpers (stronger mid-run behavior) ----------
   function clampAgainstSeg(p, seg){
     // p: player top-left; treat center for distances
     const cx = p.x + 16, cy = p.y + 16;
@@ -90,27 +119,37 @@
       // Soft steer
       if (Math.abs(dx) < STEER_DIST){
         const dir = dx < 0 ? -1 : 1;
-        p.x += (STEER_DIST - Math.abs(dx)) * 0.08 * dir;
+        p.x += (STEER_DIST - Math.abs(dx)) * 0.10 * dir;
       }
-      // Hard clamp
+      // Hard clamp zone
       if (Math.abs(dx) < SOLID_DIST){
+        // Lock outside the line
         if (dx < 0) p.x = seg.x - 16 - SOLID_DIST;
         else        p.x = seg.x - 16 + SOLID_DIST;
+
+        // Tangent slide to avoid "sticky middle": nudge along Y
+        // Push toward the nearer end to naturally slide off
+        const midY = (seg.y0 + seg.y1)/2;
+        const sign = (cy < midY) ? -1 : 1;
+        p.y += TANGENT_PUSH * sign;
       }
     } else {
       const dy = cy - seg.y;
       const insideX = cx >= seg.x0 && cx <= seg.x1;
       if (!insideX) return;
 
-      // Soft steer
       if (Math.abs(dy) < STEER_DIST){
         const dir = dy < 0 ? -1 : 1;
-        p.y += (STEER_DIST - Math.abs(dy)) * 0.08 * dir;
+        p.y += (STEER_DIST - Math.abs(dy)) * 0.10 * dir;
       }
-      // Hard clamp
       if (Math.abs(dy) < SOLID_DIST){
         if (dy < 0) p.y = seg.y - 16 - SOLID_DIST;
         else        p.y = seg.y - 16 + SOLID_DIST;
+
+        // Tangent slide along X to prevent sticking in the middle of the run
+        const midX = (seg.x0 + seg.x1)/2;
+        const sign = (cx < midX) ? -1 : 1;
+        p.x += TANGENT_PUSH * sign;
       }
     }
   }
@@ -141,6 +180,9 @@
     ctx.globalAlpha = 0.95;
 
     segs.forEach(seg=>{
+      // Skip drawing on Shop WEST fence to keep it invisible
+      if (seg.b === 'SH' && seg.side === 'W') return;
+
       if (seg.kind === 'v'){
         const sx = (seg.x - api.camera.x) * scale;
         const sy = (seg.y0 - api.camera.y) * scale;
@@ -195,7 +237,7 @@
     }
   }
 
-  // Recompute on possible tier/orientation changes
+  // Recompute on tier/orientation changes
   IZZA.on('map-tier-changed', ()=>{ _segs = null; });
   IZZA.on('orientation-changed', ()=>{ _segs = null; });
 
@@ -209,12 +251,12 @@
     const api = IZZA.api; if(!api?.ready || !_segs) return;
     const p = api.player; if(!p) return;
 
-    // Stronger collision: run multiple passes to defeat high-speed or frame skips
+    // Stronger collision: multi-pass + tangent slide
     for(let pass=0; pass<EXTRA_PASSES; pass++){
       for(const seg of _segs) clampAgainstSeg(p, seg);
     }
 
-    // Rescue: if center is inside HQ/Shop rect (with small margin), offer reset
+    // Rescue: if center is inside HQ/Shop rect (with margin), offer reset
     const {HQ, SH} = anchors(api);
     const t = api.TILE;
     const hqPx = inflateRectPx(HQ, t, STUCK_MARGIN_TILES);
@@ -227,7 +269,7 @@
         (now - _lastPromptAt) > PROMPT_COOLDOWN_MS){
       _lastPromptAt = now;
       if (window.confirm('You look stuck. Reset spawn to the front of HQ?')){
-        const spawn = hqFrontSpawnPx(api);
+        const spawn = hqFrontSpawnPx(api);   // guaranteed dry if engine exposes water check
         p.x = spawn.x;
         p.y = spawn.y;
       }
