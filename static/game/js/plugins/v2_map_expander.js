@@ -276,9 +276,6 @@ window._redrawHeartsHud = _redrawHeartsHud;
   const hc = document.getElementById('hsCoins');
   if (hc) hc.textContent = `Coins: ${api.getCoins()} IC`;
 }
-    // refresh display
-    const hc=document.getElementById('hsCoins'); if(hc) hc.textContent=`Coins: ${api.getCoins()} IC`;
-  }
 
   // ---------- INPUT: Button B opens the hospital (boat toggle removed) ----------
   function onPressB(e){
