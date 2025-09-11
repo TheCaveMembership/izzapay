@@ -27,7 +27,7 @@ DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 # NEW: LibreTranslate endpoint for browser-safe proxying
 LIBRE_EP = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
 
-# Optional: estimated USD per π to display conversion on /orders (0 disables)
+# Optional: estimated USD per Ï to display conversion on /orders (0 disables)
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
 except Exception:
@@ -156,7 +156,7 @@ I18N_SNIPPET = r"""
 if(!window.__IZZA_I18N_BOOTED__){
   window.__IZZA_I18N_BOOTED__=true;
 
-  // Same-origin proxy — main app serves /api/translate
+  // Same-origin proxy â main app serves /api/translate
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
       const r = await fetch('/api/translate', {
@@ -176,11 +176,11 @@ if(!window.__IZZA_I18N_BOOTED__){
 
     // >>> ONLY RUN IF USER PICKED A LANGUAGE <<<
     const raw = localStorage.getItem(LANG_KEY);
-    if (!raw) return; // user hasn't chosen — do nothing
+    if (!raw) return; // user hasn't chosen â do nothing
 
     const to   = String(raw).slice(0,5);
     const from = (document.documentElement.getAttribute('lang')||'en').slice(0,5);
-    if (!to || to === from) return; // nothing to translate — do nothing
+    if (!to || to === from) return; // nothing to translate â do nothing
 
     if (typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
 
@@ -363,6 +363,11 @@ def ensure_schema():
         if "buyer_user_id" not in ocols:
             cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
 
+        # items.description (allow null)
+        icolz = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
+        if "description" not in icolz:
+            cx.execute("ALTER TABLE items ADD COLUMN description TEXT")
+
         # payout_requests throttle log (one row per request)
         cx.execute("""
             CREATE TABLE IF NOT EXISTS payout_requests(
@@ -373,6 +378,18 @@ def ensure_schema():
             )
         """)
         cx.execute("CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time ON payout_requests(merchant_id, requested_at)")
+
+        # archive for deleted stores (30-day retention via expire_at)
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_merchant_archive (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              merchant_id INTEGER,
+              slug TEXT,
+              data_json TEXT NOT NULL,
+              expire_at TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+        """)
 
 ensure_schema()
 
@@ -1489,7 +1506,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         line_html = "".join(
             f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
             f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
-            f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} Ï</td></tr>"
             for dr in display_rows
         )
         items_table = (
@@ -1502,7 +1519,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             f"<tbody>{line_html}</tbody>"
             "<tfoot>"
             f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-            f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
+            f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} Ï</strong></td></tr>"
             "</tfoot>"
             "</table>"
         )
@@ -1538,7 +1555,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
         suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
         subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}" if (subj_suffix := suffix) else f"Your order at {m['business_name']} is confirmed"
-        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} Ï){suffix}"
 
         if buyer_email:
             send_email(
@@ -1549,7 +1566,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     <p><strong>Store:</strong> {m['business_name']}</p>
                     {items_table}
                     <p style="margin-top:12px">
-                      You’ll receive updates from the merchant if anything changes.
+                      Youâll receive updates from the merchant if anything changes.
                     </p>
                 """,
                 reply_to=merchant_mail
@@ -1562,12 +1579,12 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 <h2>You received a new order</h2>
                 {items_table}
                 <p style="margin:10px 0 0">
-                  <small>Fees total: {fee_total:.7f} π • Net total: {net_total:.7f} π</small>
+                  <small>Fees total: {fee_total:.7f} Ï â¢ Net total: {net_total:.7f} Ï</small>
                 </p>
                 <h3 style="margin:16px 0 6px">Buyer</h3>
-                <div>{(buyer_name or '—')} ({(buyer_email or '—')})</div>
+                <div>{(buyer_name or 'â')} ({(buyer_email or 'â')})</div>
                 {shipping_html}
-                <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
+                <p style="margin-top:10px"><small>TX: {tx_hash or 'â'}</small></p>
             """
         )
 
@@ -1956,10 +1973,10 @@ def merchant_payout(slug):
         <p><strong>Merchant Wallet:</strong> {wallet}</p>
         <h3>Last 30 Days</h3>
         <ul>
-          <li>Gross: {gross_30:.7f} π</li>
-          <li>Pi Fee: {fee_30:.7f} π</li>
-          <li>App Fee (1%): {app_fee_30:.7f} π</li>
-          <li><strong>Net to pay:</strong> {net_30:.7f} π</li>
+          <li>Gross: {gross_30:.7f} Ï</li>
+          <li>Pi Fee: {fee_30:.7f} Ï</li>
+          <li>App Fee (1%): {app_fee_30:.7f} Ï</li>
+          <li><strong>Net to pay:</strong> {net_30:.7f} Ï</li>
         </ul>
         <p>Requested by @{u['pi_username']} (user_id {u['id']}).</p>
         <p><em>Note: Merchant UI informs payout may take up to 24 hours.</em></p>
@@ -1969,7 +1986,7 @@ def merchant_payout(slug):
     try:
         ok = send_email(
             DEFAULT_ADMIN_EMAIL,
-            f"[Payout] {m['business_name']} — {net_30:.7f} π",
+            f"[Payout] {m['business_name']} â {net_30:.7f} Ï",
             body,
             reply_to=(m["reply_to_email"] or None),
         )
@@ -1996,6 +2013,62 @@ def merchant_payout(slug):
         q += f"&t={tok}"
     return redirect(f"/merchant/{m['slug']}/orders{q}")
 
+from datetime import datetime, timedelta
+
+def _fetchall_dict(cur):
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+@app.post("/merchant/<slug>/delete")
+def merchant_delete(slug):
+    # local import to avoid changing global imports
+    import sqlite3
+    u, m = require_merchant_owner(slug)
+    if isinstance(u, Response): return u
+    dest = "/pi_signin.html"
+
+    with conn() as cx:
+        cx.row_factory = sqlite3.Row
+        cur = cx.cursor()
+
+        # Archive current merchant snapshot
+        cur.execute("SELECT * FROM items WHERE merchant_id=?", (m["id"],))
+        items = _fetchall_dict(cur)
+        cur.execute("SELECT * FROM orders WHERE merchant_id=?", (m["id"],))
+        orders = _fetchall_dict(cur)
+
+        archive_blob = {
+            "deleted_at": datetime.utcnow().isoformat() + "Z",
+            "merchant": dict(m),
+            "items": items,
+            "orders": orders,
+            "requested_by_user_id": u["id"],
+            "reason": "user_requested_delete"
+        }
+
+        expire_at = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+        now_iso   = datetime.utcnow().isoformat() + "Z"
+
+        cur.execute("""INSERT INTO deleted_merchant_archive
+                       (merchant_id, slug, data_json, expire_at, created_at)
+                       VALUES(?,?,?,?,?)""",
+                    (m["id"], m["slug"], json.dumps(archive_blob), expire_at, now_iso))
+
+        # Remove live data
+        cur.execute("DELETE FROM orders WHERE merchant_id=?", (m["id"],))
+        cur.execute("DELETE FROM items WHERE merchant_id=?", (m["id"],))
+        cur.execute("DELETE FROM carts WHERE merchant_id=?", (m["id"],))
+        cur.execute("DELETE FROM merchants WHERE id=?", (m["id"],))
+
+        try:
+            session.clear()
+        except Exception:
+            pass
+
+    if "application/json" in (request.headers.get("Accept") or "") or request.is_json:
+        return {"ok": True, "redirect": dest}, 200
+    return redirect(dest, code=303)
+
 # ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
 def buyer_status(token):
@@ -2014,4 +2087,4 @@ def success():
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(
