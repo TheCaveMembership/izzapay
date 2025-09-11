@@ -211,6 +211,23 @@ function lakeRects(a){
     localStorage.setItem(HEARTS_LS_KEY, String(seg));
     _redrawHeartsHud();
   }
+  // ---- keep hydrate snapshot in sync so reloads don't revert hearts ----
+try {
+  const u = (IZZA?.api?.user?.username || 'guest')
+              .toString().replace(/^@+/, '').toLowerCase();
+  const segs = _getSegs() | 0;
+
+  // namespaced LS (some parts of your stack read this)
+  localStorage.setItem(`${HEARTS_LS_KEY}_${u}`, String(segs));
+
+  // update the "lastGood" snapshot used by hydrate
+  const lgKey = `izzaBankLastGood_${u}`;
+  let lg = {};
+  try { lg = JSON.parse(localStorage.getItem(lgKey) || '{}') || {}; } catch {}
+  lg.player = lg.player || {};
+  lg.player.heartsSegs = segs;
+  localStorage.setItem(lgKey, JSON.stringify(lg));
+} catch {}
     function _syncHeartsFromStorageToPlayer(){
     // Just mirror LS → player once; no listeners/tickers in here
     try {
