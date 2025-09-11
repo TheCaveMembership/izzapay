@@ -77,7 +77,14 @@
       body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
       /* Hearts + bell/badge (inside stage in Full) */
-      #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px; z-index:10045 !important;}
+      #izzaLandStage #heartsHud{
+        position:absolute!important;
+        right:14px !important;
+        top:46px !important;
+        left:auto !important;
+        bottom:auto !important;
+        z-index:10045 !important;
+      }
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
@@ -416,7 +423,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
   function fixFriendsPopup(){
     if(fixingFriends){ fixFriendsQueued=true; return; }
     fixingFriends=true;
-    try{ centerAndUpright('mpFriendsPopup'); }catch{} finally{
+    try{ centerAndUpright('mpFriendsPopup'); }catch**/ finally{
       fixingFriends=false;
       if(fixFriendsQueued){ fixFriendsQueued=false; requestAnimationFrame(fixFriendsPopup); }
     }
