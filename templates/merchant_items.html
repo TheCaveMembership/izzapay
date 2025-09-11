@@ -324,30 +324,6 @@
         </form>
       </div>
 
-      <!-- DANGER ZONE: DELETE STORE -->
-      <div class="card" style="margin-bottom:12px">
-        <div class="h2" style="color:#ffb86b">Danger Zone</div>
-        <p class="muted" style="margin-top:-2px">
-          Deleting your store will permanently remove <strong>all store information and items</strong>.
-          This cannot be undone.
-        </p>
-        <ul class="muted" style="margin:6px 0 12px;padding-left:18px">
-          <li>Make sure you’ve <strong>processed delivery for any purchased physical items</strong>.</li>
-          <li>Confirm any open sales are completed or refunded as needed.</li>
-        </ul>
-        <form class="stack" method="post" action="/merchant/{{ m.slug }}/delete{% if t %}?t={{ t }}{% endif %}"
-              onsubmit="return confirm('Are you sure you want to delete this store? This will delete all store info and items. Make sure you have processed delivery of any purchased physical items. This cannot be undone.');">
-          <input type="hidden" name="t" value="{{ t or '' }}">
-          <label class="ip-label" style="display:flex;gap:8px;align-items:flex-start">
-            <input type="checkbox" name="acknowledge" value="1" required>
-            <span>I understand this action is permanent and I have cleaned current sales and processed delivery of any purchased physical items.</span>
-          </label>
-          <div class="row" style="justify-content:flex-end;margin-top:4px">
-            <button class="ip-btn danger" type="submit">Delete Store</button>
-          </div>
-        </form>
-      </div>
-
       <!-- STOREFRONT LINK -->
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Your Storefront</div>
@@ -389,7 +365,7 @@
             <input class="ip-input" id="itUrl" name="image_url" placeholder="https://… (or paste an image URL)">
           </div>
 
-          <!-- NEW: Item Description -->
+          <!-- Item Description -->
           <div class="field">
             <label class="ip-label">Item Description</label>
             <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item, condition, size, shipping notes, etc."></textarea>
@@ -492,7 +468,7 @@
                       <label class="ip-label">Image URL</label>
                       <input class="ip-input" name="image_url" value="{{ it.image_url or '' }}">
                     </div>
-                    <!-- NEW: Item Description (edit) -->
+                    <!-- Item Description (edit) -->
                     <div class="field">
                       <label class="ip-label">Item Description</label>
                       <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item…">{{ it.description or '' }}</textarea>
@@ -510,6 +486,31 @@
           </table>
         </div>
       </div>
+
+      <!-- DANGER ZONE: DELETE STORE (moved to the very bottom) -->
+      <div class="card" id="danger-zone" style="margin:12px 0 0 0;">
+        <div class="h2" style="color:#ffb86b">Danger Zone</div>
+        <p class="muted" style="margin-top:-2px">
+          Deleting your store will permanently remove <strong>all store information and items</strong>.
+          This cannot be undone.
+        </p>
+        <ul class="muted" style="margin:6px 0 12px;padding-left:18px">
+          <li>Make sure you’ve <strong>processed delivery for any purchased physical items</strong>.</li>
+          <li>Confirm any open sales are completed or refunded as needed.</li>
+        </ul>
+        <form class="stack" id="deleteStoreForm" method="post" action="/merchant/{{ m.slug }}/delete{% if t %}?t={{ t }}{% endif %}">
+          <input type="hidden" name="t" value="{{ t or '' }}">
+          <!-- where to go after successful deletion -->
+          <input type="hidden" name="redirect" value="/pi_signin.html">
+          <label class="ip-label" style="display:flex;gap:8px;align-items:flex-start">
+            <input type="checkbox" name="acknowledge" value="1" required>
+            <span>I understand this action is permanent and I have cleaned current sales and processed delivery of any purchased physical items.</span>
+          </label>
+          <div class="row" style="justify-content:flex-end;margin-top:4px">
+            <button class="ip-btn danger" type="submit">Delete Store</button>
+          </div>
+        </form>
+      </div>
     {% endif %}
   </div>
 
@@ -518,7 +519,6 @@
   function proxied(url){
     const v = (url || '').trim();
     if (!v) return '';
-    // NEW: treat site-relative & data/blob URLs as local (do NOT proxy)
     if (v.startsWith('/') || v.startsWith('data:') || v.startsWith('blob:')) return v;
     try {
       const u = new URL(v, location.origin);
@@ -534,7 +534,6 @@
     const img = document.createElement('img');
     img.src = url;
     img.onload = () => {
-      // if we used a temporary blob, free it
       if (url.startsWith('blob:')) try { URL.revokeObjectURL(url); } catch(_){}
     };
     el.appendChild(img);
@@ -622,8 +621,8 @@
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{
         const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url;                       // e.g., /uploads/abc.jpg
-        setThumb(thumbId, proxied(url));       // now shows the on-disk file
+        inp.value = url;
+        setThumb(thumbId, proxied(url));
       }catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
@@ -669,7 +668,6 @@
 
   // Slug helpers, guards, etc. (unchanged) ...
 
-  // Slug normalizer (setup + edit)
   function normalizeSlug(raw){
     let v = (raw || '').toLowerCase();
     v = v.trim();
@@ -709,15 +707,12 @@
     }
   })();
 
-  // Enable/guard slug editing (15-day rule UX)
   (function(){
     const btn = document.getElementById('enableSlugBtn');
     const input = document.getElementById('editSlugInput');
     const hint = document.getElementById('slugEditHint');
     if (!btn || !input || !hint) return;
-
     const allowed = btn.getAttribute('data-allowed') === '1';
-
     btn.addEventListener('click', ()=>{
       if (!allowed){
         hint.classList.add('warn');
@@ -733,7 +728,7 @@
     });
   })();
 
-  // Guard: simple client validation for price before "Add Item"
+  // Guard: price + title before Add Item
   (function(){
     const form = document.querySelector('#create-product form'); if(!form) return;
     form.addEventListener('submit', (e) => {
@@ -758,6 +753,43 @@
     const row = document.getElementById('edit-row-' + id); if(!row) return;
     row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
   });
+
+  // Progressive enhancement: delete store -> confirm -> POST -> redirect to /pi_signin.html
+  (function(){
+    const form = document.getElementById('deleteStoreForm');
+    if(!form) return;
+    form.addEventListener('submit', async (e)=>{
+      // native confirm for belt & suspenders
+      const ok = confirm('Are you sure you want to delete this store? This will delete all store info and items. Make sure you have processed delivery of any purchased physical items. This cannot be undone.');
+      if(!ok) { e.preventDefault(); return false; }
+
+      // Try JS fetch so we can guarantee redirect even if server returns 204/200 JSON
+      e.preventDefault();
+      const fd = new FormData(form);
+      try{
+        const r = await fetch(form.action, {
+          method: 'POST',
+          body: fd,
+          credentials: 'include'
+        });
+        // If server answers 200..299 we go home; if it replies JSON with redirect, honor it; else fallback path.
+        if(r.ok){
+          let dest = fd.get('redirect') || '/pi_signin.html';
+          try {
+            const j = await r.clone().json();
+            if(j && j.redirect) dest = j.redirect;
+          } catch(_) {}
+          location.replace(dest);
+        }else{
+          // If server returns a redirect, follow it by letting the browser handle a normal submit:
+          form.submit();
+        }
+      }catch(_){
+        // Network hiccup — fall back to normal form submit so server redirect can kick in
+        form.submit();
+      }
+    }, { passive:false });
+  })();
   </script>
 </body>
 </html>
