@@ -182,12 +182,27 @@ function lakeRects(a){
   const HEARTS_LS_KEY = 'izzaCurHeartSegments';
   function _heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
   function _getSegs(){
-    const p=IZZA.api?.player||{};
-    if(typeof p.heartSegs==='number') return p.heartSegs|0;
-    const max = _heartsMax()*3;
-    const raw = parseInt(localStorage.getItem(HEARTS_LS_KEY) || String(max), 10);
-    return Math.max(0, Math.min(max, isNaN(raw)? max : raw));
+  const max = _heartsMax() * 3;
+
+  // Read saved value FIRST
+  const raw = localStorage.getItem(HEARTS_LS_KEY);
+  if (raw != null && raw !== '') {
+    const seg = Math.max(0, Math.min(max, parseInt(raw, 10) || 0));
+    // Mirror to player so anything reading player sees the same number
+    const p = IZZA.api?.player || {};
+    p.heartSegs = seg;
+    return seg;
   }
+
+  // Fallback: if no LS yet, use whatever the engine has
+  const p = IZZA.api?.player || {};
+  if (typeof p.heartSegs === 'number') {
+    return Math.max(0, Math.min(max, p.heartSegs|0));
+  }
+
+  // Default: full
+  return max;
+}
   function _setSegs(v){
     const p=IZZA.api?.player||{};
     const max = _heartsMax()*3;
@@ -196,6 +211,20 @@ function lakeRects(a){
     localStorage.setItem(HEARTS_LS_KEY, String(seg));
     _redrawHeartsHud();
   }
+  function _syncHeartsFromStorageToPlayer(){
+  try {
+    const seg = _getSegs();            // LS-first now
+    const p = IZZA.api?.player || {};
+    p.heartSegs = seg;                 // mirror into engine’s player
+    _redrawHeartsHud?.();              // refresh HUD
+  } catch {}
+}
+
+// run once shortly after this script loads
+setTimeout(_syncHeartsFromStorageToPlayer, 0);
+
+// and every time hearts change (hospitalBuy already dispatches this)
+window.addEventListener('izza-hearts-changed', _syncHeartsFromStorageToPlayer);
   function _redrawHeartsHud(){
     const hud = document.getElementById('heartsHud'); if(!hud) return;
     const maxH=_heartsMax(), seg=_getSegs();
