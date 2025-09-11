@@ -250,34 +250,32 @@ window._redrawHeartsHud = _redrawHeartsHud;
     _shopOpen=false;
   }
   function hospitalBuy(){
-    const api = IZZA.api;
-    if(!api?.ready) return;
+  const api = IZZA.api;
+  if (!api?.ready) return;
 
-    const coins = api.getCoins();
-    if(coins < 100){ alert('Not enough IZZA Coins'); return; }
+  const coins = api.getCoins();
+  if (coins < 100){ alert('Not enough IZZA Coins'); return; }
 
-    const maxSegs = _heartsMax() * 3;
-    const curSegs = _getSegs();
-    if(curSegs >= maxSegs){ alert('Hearts are already full'); return; }
+  const maxSegs = _heartsMax() * 3;
+  const curSegs = _getSegs();
+  if (curSegs >= maxSegs){ alert('Hearts are already full'); return; }
 
-    // apply purchase
-    const gain = 3;
-    api.setCoins(coins - 100);
-    _setSegs(curSegs + gain);
+  // top off current heart first, else add up to a full heart (3 segs)
+  const remInCurrent = curSegs % 3;                 // 0..2
+  const topOff       = remInCurrent === 0 ? 0 : (3 - remInCurrent); // 0,1,2
+  const gain         = topOff > 0 ? topOff : Math.min(3, maxSegs - curSegs);
 
-    // NEW: ensure hearts persist immediately
-    window.dispatchEvent(new Event('izza-hearts-changed'));
+  api.setCoins(coins - 100);
+  _setSegs(curSegs + gain);
+
+  // persist hearts immediately so they survive reloads
+  window.dispatchEvent(new Event('izza-hearts-changed'));
+
+  // feedback + refresh the modal coins line
+  IZZA.toast?.(topOff > 0 ? 'Heart topped up!' : '+1 heart!');
+  const hc = document.getElementById('hsCoins');
+  if (hc) hc.textContent = `Coins: ${api.getCoins()} IC`;
 }
-
-    // top off current heart first, else add a full heart (3 segs)
-    const remInCurrent = curSegs % 3;                 // 0..2
-    const topOff = remInCurrent===0 ? 0 : (3-remInCurrent); // 0,1,2
-    const gain = topOff>0 ? topOff : Math.min(3, maxSegs - curSegs);
-
-    api.setCoins(coins - 100);
-    _setSegs(curSegs + gain);
-
-    IZZA.toast?.(topOff>0 ? 'Heart topped up!' : '+1 heart!');
     // refresh display
     const hc=document.getElementById('hsCoins'); if(hc) hc.textContent=`Coins: ${api.getCoins()} IC`;
   }
