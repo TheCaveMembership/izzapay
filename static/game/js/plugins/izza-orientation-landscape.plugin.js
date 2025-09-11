@@ -657,39 +657,67 @@ body:not([data-fakeland="1"]) #hospitalShop{
   window.addEventListener('mouseup',   markOff, {passive:true});
   window.addEventListener('touchcancel',markOff,{passive:true});
 
-  let prevX=null, prevY=null;
-  function fixJoystickDelta(){
-    if(!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) { prevX=null; prevY=null; return; }
-    const p = IZZA.api.player;
-    if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
+  let prevX = null, prevY = null;
+function fixJoystickDelta(){
+  if (!joyActive || !window.IZZA || !IZZA.api || !IZZA.api.player) {
+    prevX = null; prevY = null; 
+    return;
+  }
+  const p = IZZA.api.player;
 
-    const dx = p.x - prevX;
-    const dy = p.y - prevY;
-    const mag = Math.abs(dx)+Math.abs(dy);
-
-    // wall-stick guard
-    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
-    if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
-
-    // *** FACING ONLY (no position rewrite) ***
-    // For rotated view (-90°), map world deltas -> screen deltas:
-    // screen fx = dy, screen fy = -dx
-    if (document.body.hasAttribute('data-fakeland')) {
-      const fx = dy;
-      const fy = -dx;
-      const ax = Math.abs(fx), ay = Math.abs(fy);
-      if (ax > 0.0001 || ay > 0.0001) {
-        if (ax > ay) {
-          p.facing = (fx > 0) ? 'right' : 'left';
-        } else {
-          p.facing = (fy > 0) ? 'down' : 'up';
-        }
-      }
-    }
-
-    prevX = p.x; prevY = p.y;
+  // first frame after activate: seed previous pos
+  if (prevX == null || prevY == null) { 
+    prevX = p.x; prevY = p.y; 
+    return; 
   }
 
+  // world-space delta the game just applied
+  const dx = p.x - prevX;
+  const dy = p.y - prevY;
+
+  // tiny/no movement or pure single-axis → ignore (prevents wall-stick jitter)
+  const mag = Math.abs(dx) + Math.abs(dy);
+  const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
+  if (mag < 0.0001 || singleAxis) {
+    prevX = p.x; prevY = p.y;
+    return;
+  }
+
+  if (document.body.hasAttribute('data-fakeland')) {
+    // ===== ROTATED MODE: remap movement to match the rotated view =====
+    // Rotate the observed world delta by -90° (clockwise):
+    // (x', y') = ( dy, -dx )
+    const fx =  dy;
+    const fy = -dx;
+
+    // Apply remapped movement so "right/up/left/down" feel correct on screen
+    p.x = prevX + fx;
+    p.y = prevY + fy;
+
+    // Keep facing consistent with the remapped vector
+    const ax = Math.abs(fx), ay = Math.abs(fy);
+    if (ax > 0.0001 || ay > 0.0001) {
+      if (ax > ay) {
+        p.facing = (fx > 0) ? 'right' : 'left';
+      } else {
+        p.facing = (fy > 0) ? 'down' : 'up';
+      }
+    }
+  } else {
+    // ===== NORMAL MODE: leave movement alone; optionally update facing from dx,dy =====
+    const ax = Math.abs(dx), ay = Math.abs(dy);
+    if (ax > 0.0001 || ay > 0.0001) {
+      if (ax > ay) {
+        p.facing = (dx > 0) ? 'right' : 'left';
+      } else {
+        p.facing = (dy > 0) ? 'down' : 'up';
+      }
+    }
+  }
+
+  prevX = p.x; 
+  prevY = p.y;
+}
   // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
   // Single calibration knob: pick one of -90, 90, 180, or 0
   const ROT_AIM_DEG = 270;
