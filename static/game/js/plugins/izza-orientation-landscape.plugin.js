@@ -41,6 +41,17 @@
         left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;
         width:48px!important;height:48px!important;border-radius:24px!important;
       }
+
+      /* ===== INVENTORY (works even if NOT adopted) ===== */
+      body[data-fakeland="1"] #invPanel{
+        position:fixed !important;
+        left:12px !important; right:12px !important;
+        top:74px !important;
+        z-index:10050 !important;   /* higher than the stage */
+        max-width:none !important; margin:0 !important;
+        pointer-events:auto !important;
+      }
+
       /* ===== INVENTORY PANEL (always over canvas in Full) ===== */
       #izzaLandStage #invPanel{
         position:absolute !important;
@@ -66,7 +77,7 @@
       body[data-fakeland="1"] .land-chat-dock{ display:none !important; }
 
       /* Hearts + bell/badge (inside stage in Full) */
-      #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px;}
+      #izzaLandStage #heartsHud{position:absolute!important;right:14px;top:46px; z-index:10045 !important;}
       #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
       #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
 
@@ -540,6 +551,9 @@ body:not([data-fakeland="1"]) #hospitalShop{
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
+
+    // >>> NEW: adopt inventory if present (so it layers correctly within the stage)
+    const inv = document.getElementById('invPanel'); if (inv) adoptOnce(inv, 'invPanel');
 
     // adopt Full button only in Full
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
