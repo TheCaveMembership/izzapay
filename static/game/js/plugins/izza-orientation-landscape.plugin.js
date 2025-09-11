@@ -669,70 +669,98 @@ body:not([data-fakeland="1"]) #hospitalShop{
 
     prevX = p.x; prevY = p.y;
   }
-  // ===== AIM FIX (rotated view only) =====
-// Vector-only correction for rotated Full view.
-// Quick calibration knobs live here:
-const AIM_CAL = {
-  ROT: 180,      // Try: -90, 90, 180, 0
-  SWAP_XY: false,// true swaps x<->y before rotation
-  FLIP_X: false, // true inverts X after rotation
-  FLIP_Y: false  // true inverts Y after rotation
-};
+    // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
+  // Single calibration knob: pick one of -90, 90, 180, or 0
+  const ROT_AIM_DEG = -90;
 
-let _aimLastKey = null;
-
-// Apply a 2D rotation to a vector (x,y) by 0/±90/180 (fast, branchy; no trig)
-function _rot(x, y, deg){
-  switch(((deg % 360) + 360) % 360){ // normalize
-    case 0:   return {x,       y      };
-    case 90:  return {x: -y,   y:  x  }; // +90° (CCW)
-    case 180: return {x: -x,   y: -y  };
-    case 270: return {x:  y,   y: -x  }; // -90° (CW) == +270
-    default:  // if someone sets a weird value, fall back to 0
-      return {x, y};
+  function _rotVecQuick(x, y, deg){
+    switch(((deg % 360) + 360) % 360){
+      case 0:   return {x,       y      };
+      case 90:  return {x: -y,   y:  x  }; // +90° CCW
+      case 180: return {x: -x,   y: -y  };
+      case 270: return {x:  y,   y: -x  }; // -90° CW
+      default:  return {x, y};
+    }
   }
+
+  let _origAimOwner = null;
+  let _origAimKey   = null;
+  let _origAimFn    = null;
+  let _aimFindTimer = null;
+
+  // Try common homes: IZZA.guns.aimVector, guns.aimVector, global aimVector
+  function _findAimVector(){
+  const paths = [
+    ['IZZA','guns','aimVector'],
+    ['guns','aimVector'],
+    ['aimVector']
+  ];
+  for (const path of paths){
+    let obj = window, parent = null, key = null;
+    for (let i=0; i<path.length; i++){
+      key = path[i];
+      if (typeof obj[key] === 'undefined'){ obj = null; break; }
+      parent = (i < path.length-1) ? obj[key] : obj; // owner of final key
+      obj = obj[key];
+    }
+    if (typeof obj === 'function'){      // obj is the aimVector fn
+      return { parent, key, fn: obj };   // owner, property name, function
+    }
+  }
+  return null;
 }
 
-function applyAimingCorrection(){
-  if (!window.IZZA || !IZZA.api || !IZZA.api.player) return;
-  if (!document.body.hasAttribute('data-fakeland')) return; // only in Full/rotated
+  function _installRotatedAim(){
+    if (_origAimFn) return true; // already installed
 
-  const p = IZZA.api.player;
+    const found = _findAimVector();
+    if (!found) return false;
 
-  // --- detect vector aim state (we ONLY touch vectors; leave angles alone) ---
-  const hasFlat = (typeof p.aimX === 'number' && typeof p.aimY === 'number');
-  const hasObj  = (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number');
+    // Keep handles so we can restore exactly
+    _origAimOwner = found.parent;
+    _origAimKey   = found.key;
+    _origAimFn    = found.fn;
 
-  if (!hasFlat && !hasObj) return; // nothing to do (angle-based or none)
+    // New Full-only aim that mirrors guns.js behavior then rotates result
+    const rotatedAim = function(...args){
+      // call the real guns.js aim first
+      const v = _origAimFn.apply(this, args);
+      // expect {x,y}; rotate it for the rotated canvas
+      if (v && typeof v.x === 'number' && typeof v.y === 'number'){
+        return _rotVecQuick(v.x, v.y, ROT_AIM_DEG);
+      }
+      return v;
+    };
 
-  // Build a key so we only transform a *fresh* input (avoid double-rotation)
-  const k = hasFlat ? `v:${p.aimX}|${p.aimY}` : `v2:${p.aim.x}|${p.aim.y}`;
-  if (k && k === _aimLastKey) return;
-  _aimLastKey = k;
+    try { _origAimOwner[_origAimKey] = rotatedAim; } catch {}
+    return true;
+  }
 
-  // Read raw vector
-  let x = hasFlat ? p.aimX : p.aim.x;
-  let y = hasFlat ? p.aimY : p.aim.y;
+  function _ensureRotatedAimSoon(){
+    if (_installRotatedAim()) return;
+    // guns.js may not be loaded yet; retry briefly
+    if (_aimFindTimer) return;
+    _aimFindTimer = setInterval(()=>{
+      if (_installRotatedAim()){
+        clearInterval(_aimFindTimer);
+        _aimFindTimer = null;
+      }
+    }, 200);
+  }
 
-  // Optional pre-processing (some stacks prefer swap first)
-  if (AIM_CAL.SWAP_XY){ const tmp=x; x=y; y=tmp; }
-
-  // Core rotation (fast 0/±90/180)
-  const v = _rot(x, y, AIM_CAL.ROT);
-
-  // Optional flips (post-rotation)
-  if (AIM_CAL.FLIP_X) v.x = -v.x;
-  if (AIM_CAL.FLIP_Y) v.y = -v.y;
-
-  // Write back
-  if (hasFlat){ p.aimX = v.x; p.aimY = v.y; }
-  else { p.aim.x = v.x; p.aim.y = v.y; }
-}
+  function _removeRotatedAim(){
+    if (_aimFindTimer){ clearInterval(_aimFindTimer); _aimFindTimer = null; }
+    if (_origAimOwner && _origAimKey && _origAimFn){
+      try { _origAimOwner[_origAimKey] = _origAimFn; } catch {}
+    }
+    _origAimOwner = _origAimKey = _origAimFn = null;
+  }
   // ---------- enter / exit ----------
   let fireTick=null, joyHooked=false;
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
+        _ensureRotatedAimSoon();   // << install Full-only aim override
     ensureFullButton(); fullBtn.textContent='Exit';
     adopt(); applyLayout();
     closeMapsOnEnter();
@@ -743,7 +771,7 @@ function applyAimingCorrection(){
 
     if(!joyHooked && window.IZZA && IZZA.on){
   IZZA.on('update-post', fixJoystickDelta);
-  IZZA.on('update-post', applyAimingCorrection);   // <— AIM FIX hook
+  
   joyHooked = true;
 }
     prevX=null; prevY=null;
@@ -751,6 +779,7 @@ function applyAimingCorrection(){
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
+        _removeRotatedAim();       // << restore the original guns.js aim
     ensureFullButton(); fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
     restoreMiniOnExit();
