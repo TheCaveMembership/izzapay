@@ -1,29 +1,38 @@
-
 /* izza_land_wallguard_aim.plugin.js
    Full-mode (rotated) wall/corner anti-stick + aim-from-move-intent
    - Runs ONLY when <body data-fakeland="1">.
-   - Slips/pushes only with active stick intent; caps slip per stuck episode.
-   - Overrides aim while moving; falls back to original aim when stationary.
+   - Safer slip: stronger on side walls, bounded so it can’t drift through solids.
+   - Uses stick intent to aim while moving; stationary aim passes through unchanged.
 */
 (function(){
   if (!window.IZZA || typeof IZZA.on !== 'function') return;
 
-  // ---------------- Tunables ----------------
-  // Anti-stick
-  const WALL_EPS       = 0.22; // consider frame stuck if screen-delta smaller than this
-  const AXIS_EPS       = 0.12; // “axis nearly zero” threshold (screen space)
-  const SLIP_NUDGE     = 0.35; // slide strength along wall
-  const SIDE_BONUS     = 1.4;  // extra slide on side walls (x-blocked in screen space)
-  const PUSH_NORMAL    = 0.08; // tiny push off wall (screen space)
-  const ESCALATE_0     = 1.0;  // first stuck frame slip multiplier
-  const ESCALATE_ADD   = 0.5;  // add each consecutive stuck frame
-  const ESCALATE_CAP   = 2.0;  // cap escalation
+  // ---------------- TUNABLES (safe to tweak) ----------------
+  // Detect "stuck" and axis-block:
+  const WALL_EPS         = 0.22; // screen-delta below this → stuck
+  const AXIS_EPS         = 0.18; // ↑ was 0.12; larger = more likely to treat an axis as blocked
 
-  // New drift safety
-  const INTENT_EPS     = 0.15; // must have at least this stick intent to apply any slip
-  const MAX_STUCK_FRAMES = 6;  // stop correcting after this many consecutive stuck frames
-  const PUSH_FRAMES_MAX  = 2;  // only apply “push normal” on the first N stuck frames
-  const MAX_SLIP_PER_LOCK = 0.9; // maximum total slip (screen space) per stuck episode
+  // Slip strengths:
+  const SLIP_NUDGE       = 0.42; // ↑ was 0.35; base slide along the open axis
+  const SIDE_BONUS       = 1.9;  // ↑ was 1.4; extra help specifically for *side* walls (x blocked in screen space)
+
+  // Small push straight off the wall (limits drift risk):
+  const PUSH_NORMAL      = 0.06; // ↓ was 0.08; smaller push to avoid creep
+
+  // Stuck escalation & caps:
+  const ESCALATE_0       = 1.0;
+  const ESCALATE_ADD     = 0.5;
+  const ESCALATE_CAP     = 2.0;
+
+  // Episode safety caps (bound total correction so we don’t slide through):
+  const INTENT_EPS       = 0.15; // require this much stick intent to correct
+  const MAX_STUCK_FRAMES = 10;   // ↑ allow a few more frames to find a slide
+  const PUSH_FRAMES_MAX  = 2;    // only push for first N stuck frames
+  const MAX_SLIP_PER_LOCK= 1.20; // ↑ max total slip (screen units) per stuck episode
+
+  // Extra side-wall assistance:
+  const SIDE_LOCK_FRAMES = 2;    // after this many consecutive side-wall frames, bias vertical slip harder
+  const SIDE_HARD_SLIP   = 0.55; // vertical slip used when hard-bias triggers (screen units per frame)
 
   // ---------------- Helpers ----------------
   // world → screen mapping for -90° CW canvas:
