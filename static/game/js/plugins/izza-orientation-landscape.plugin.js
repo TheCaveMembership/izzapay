@@ -670,99 +670,82 @@ body:not([data-fakeland="1"]) #hospitalShop{
     if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
     // Rotate -90°: (x',y') = ( y, -x )
-const fx =  dy;
-const fy = -dx;
+    const fx =  dy;
+    const fy = -dx;
 
-// apply rotated movement
-p.x = prevX + fx;
-p.y = prevY + fy;
+    // apply rotated movement
+    p.x = prevX + fx;
+    p.y = prevY + fy;
 
-// *** NEW: fix facing to match the rotated movement (Full view only) ***
-if (document.body.hasAttribute('data-fakeland')) {
-  const ax = Math.abs(fx), ay = Math.abs(fy);
-  if (ax > 0.0001 || ay > 0.0001) {
-    if (ax > ay) {
-      p.facing = (fx > 0) ? 'right' : 'left';
-    } else {
-      p.facing = (fy > 0) ? 'down' : 'up';
+    // *** NEW: fix facing to match the rotated movement (Full view only) ***
+    if (document.body.hasAttribute('data-fakeland')) {
+      const ax = Math.abs(fx), ay = Math.abs(fy);
+      if (ax > 0.0001 || ay > 0.0001) {
+        if (ax > ay) {
+          p.facing = (fx > 0) ? 'right' : 'left';
+        } else {
+          p.facing = (fy > 0) ? 'down' : 'up';
+        }
+      }
     }
-  }
-}
 
-prevX = p.x; prevY = p.y;
+    prevX = p.x; prevY = p.y;
   } // *** CHANGED: close fixJoystickDelta properly
 
-    
-    // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
-  // Single calibration knob: pick one of -90, 90, 180, or 0
+  // ===== (Old) ROTATED-FULL AIM helpers (kept, but no longer used) =====
   const ROT_AIM_DEG = 270;
-
   function _rotVecQuick(x, y, deg){
     switch(((deg % 360) + 360) % 360){
       case 0:   return {x,       y      };
-      case 90:  return {x: -y,   y:  x  }; // +90° CCW
+      case 90:  return {x: -y,   y:  x  };
       case 180: return {x: -x,   y: -y  };
-      case 270: return {x:  y,   y: -x  }; // -90° CW
+      case 270: return {x:  y,   y: -x  };
       default:  return {x, y};
     }
   }
-
   let _origAimOwner = null;
   let _origAimKey   = null;
   let _origAimFn    = null;
   let _aimFindTimer = null;
-
-  // Try common homes: IZZA.guns.aimVector, guns.aimVector, global aimVector
   function _findAimVector(){
-  const paths = [
-    ['IZZA','guns','aimVector'],
-    ['guns','aimVector'],
-    ['aimVector']
-  ];
-  for (const path of paths){
-    let obj = window, parent = null, key = null;
-    for (let i=0; i<path.length; i++){
-      key = path[i];
-      if (typeof obj[key] === 'undefined'){ obj = null; break; }
-      parent = (i < path.length-1) ? obj[key] : obj; // owner of final key
-      obj = obj[key];
+    const paths = [
+      ['IZZA','guns','aimVector'],
+      ['guns','aimVector'],
+      ['aimVector']
+    ];
+    for (const path of paths){
+      let obj = window, parent = null, key = null;
+      for (let i=0; i<path.length; i++){
+        key = path[i];
+        if (typeof obj[key] === 'undefined'){ obj = null; break; }
+        parent = (i < path.length-1) ? obj[key] : obj;
+        obj = obj[key];
+      }
+      if (typeof obj === 'function'){
+        return { parent, key, fn: obj };
+      }
     }
-    if (typeof obj === 'function'){      // obj is the aimVector fn
-      return { parent, key, fn: obj };   // owner, property name, function
-    }
+    return null;
   }
-  return null;
-}
-
   function _installRotatedAim(){
-    if (_origAimFn) return true; // already installed
-
+    if (_origAimFn) return true;
     const found = _findAimVector();
     if (!found) return false;
-
-    // Keep handles so we can restore exactly
     _origAimOwner = found.parent;
     _origAimKey   = found.key;
     _origAimFn    = found.fn;
-
-    // New Full-only aim that mirrors guns.js behavior then rotates result
     const rotatedAim = function(...args){
-      // call the real guns.js aim first
       const v = _origAimFn.apply(this, args);
-      // expect {x,y}; rotate it for the rotated canvas
       if (v && typeof v.x === 'number' && typeof v.y === 'number'){
         return _rotVecQuick(v.x, v.y, ROT_AIM_DEG);
       }
       return v;
     };
-
     try { _origAimOwner[_origAimKey] = rotatedAim; } catch {}
     return true;
   }
-
   function _ensureRotatedAimSoon(){
     if (_installRotatedAim()) return;
-    // guns.js may not be loaded yet; retry briefly
     if (_aimFindTimer) return;
     _aimFindTimer = setInterval(()=>{
       if (_installRotatedAim()){
@@ -771,7 +754,6 @@ prevX = p.x; prevY = p.y;
       }
     }, 200);
   }
-
   function _removeRotatedAim(){
     if (_aimFindTimer){ clearInterval(_aimFindTimer); _aimFindTimer = null; }
     if (_origAimOwner && _origAimKey && _origAimFn){
@@ -779,12 +761,65 @@ prevX = p.x; prevY = p.y;
     }
     _origAimOwner = _origAimKey = _origAimFn = null;
   }
+
+  // ===== NEW: Aiming shim (counter-rotate stick/nub rects in Full) =====
+  const _aimShim = { patched:false, save:new WeakMap() };
+  function _rotMinus90(x, y){ return { x: y, y: -x }; } // rotate point by -90°
+  function _wrapRectGetter(el){
+    if(!el || _aimShim.save.has(el)) return;
+    const orig = el.getBoundingClientRect.bind(el);
+    _aimShim.save.set(el, orig);
+    el.getBoundingClientRect = function(){
+      const r = orig();
+      const cx = r.left + r.width/2;
+      const cy = r.top  + r.height/2;
+      const p  = _rotMinus90(cx, cy);
+      const left = p.x - r.width/2;
+      const top  = p.y - r.height/2;
+      return {
+        x: left, y: top,
+        left, top,
+        width: r.width, height: r.height,
+        right: left + r.width,
+        bottom: top  + r.height
+      };
+    };
+  }
+  function _unwrapRectGetter(el){
+    const orig = _aimShim.save.get(el);
+    if(orig){
+      try{ el.getBoundingClientRect = orig; }catch{}
+      _aimShim.save.delete(el);
+    }
+  }
+  function enableAimShim(){
+    if(_aimShim.patched) return;
+    const base = document.getElementById('stick');
+    const nub  = document.getElementById('nub');
+    _wrapRectGetter(base);
+    _wrapRectGetter(nub);
+    _aimShim.patched = true;
+  }
+  function disableAimShim(){
+    if(!_aimShim.patched) return;
+    const base = document.getElementById('stick');
+    const nub  = document.getElementById('nub');
+    _unwrapRectGetter(base);
+    _unwrapRectGetter(nub);
+    _aimShim.patched = false;
+  }
+
   // ---------- enter / exit ----------
   let fireTick=null, joyHooked=false;
   function enter(){
     if(active) return; active=true;
     BODY.setAttribute('data-fakeland','1');
-        _ensureRotatedAimSoon();   // << install Full-only aim override
+
+    // enable Full-mode aiming shim (keeps guns.js untouched)
+    enableAimShim();
+
+    // _ensureRotatedAimSoon();   // no longer needed (left in file but unused)
+
     ensureFullButton(); fullBtn.textContent='Exit';
     adopt(); applyLayout();
     closeMapsOnEnter();
@@ -794,16 +829,20 @@ prevX = p.x; prevY = p.y;
     clearInterval(fireTick); fireTick=setInterval(placeFire,350);
 
     if(!joyHooked && window.IZZA && IZZA.on){
-  IZZA.on('update-post', fixJoystickDelta);
-  
-  joyHooked = true;
-}
+      IZZA.on('update-post', fixJoystickDelta);
+      joyHooked = true;
+    }
     prevX=null; prevY=null;
   }
   function exit(){
     if(!active) return; active=false;
     BODY.removeAttribute('data-fakeland');
-        _removeRotatedAim();       // << restore the original guns.js aim
+
+    // disable Full-mode aiming shim
+    disableAimShim();
+
+    // _removeRotatedAim();       // no longer needed (left in file but unused)
+
     ensureFullButton(); fullBtn.textContent='Full';
     mo.disconnect(); clearInterval(fireTick); fireTick=null;
     restoreMiniOnExit();
