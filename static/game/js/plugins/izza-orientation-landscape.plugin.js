@@ -670,49 +670,63 @@ body:not([data-fakeland="1"]) #hospitalShop{
     prevX = p.x; prevY = p.y;
   }
   // ===== AIM FIX (rotated view only) =====
-// Cancels the stage rotation for aim so directions feel natural (using 180° flip).
+// Vector-only correction for rotated Full view.
+// Quick calibration knobs live here:
+const AIM_CAL = {
+  ROT: -90,      // Try: -90, 90, 180, 0
+  SWAP_XY: false,// true swaps x<->y before rotation
+  FLIP_X: false, // true inverts X after rotation
+  FLIP_Y: false  // true inverts Y after rotation
+};
+
 let _aimLastKey = null;
+
+// Apply a 2D rotation to a vector (x,y) by 0/±90/180 (fast, branchy; no trig)
+function _rot(x, y, deg){
+  switch(((deg % 360) + 360) % 360){ // normalize
+    case 0:   return {x,       y      };
+    case 90:  return {x: -y,   y:  x  }; // +90° (CCW)
+    case 180: return {x: -x,   y: -y  };
+    case 270: return {x:  y,   y: -x  }; // -90° (CW) == +270
+    default:  // if someone sets a weird value, fall back to 0
+      return {x, y};
+  }
+}
 
 function applyAimingCorrection(){
   if (!window.IZZA || !IZZA.api || !IZZA.api.player) return;
   if (!document.body.hasAttribute('data-fakeland')) return; // only in Full/rotated
+
   const p = IZZA.api.player;
 
-  // Build a key from the current raw aim state so we only rotate once per change
-  const k =
-    (typeof p.aimX === 'number' && typeof p.aimY === 'number') ? `v:${p.aimX}|${p.aimY}` :
-    (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') ? `v2:${p.aim.x}|${p.aim.y}` :
-    (typeof p.aimAngle === 'number') ? `a:${p.aimAngle}` :
-    (typeof p.fireAngle === 'number') ? `f:${p.fireAngle}` : null;
+  // --- detect vector aim state (we ONLY touch vectors; leave angles alone) ---
+  const hasFlat = (typeof p.aimX === 'number' && typeof p.aimY === 'number');
+  const hasObj  = (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number');
+
+  if (!hasFlat && !hasObj) return; // nothing to do (angle-based or none)
+
+  // Build a key so we only transform a *fresh* input (avoid double-rotation)
+  const k = hasFlat ? `v:${p.aimX}|${p.aimY}` : `v2:${p.aim.x}|${p.aim.y}`;
   if (k && k === _aimLastKey) return;
   _aimLastKey = k;
 
-  // Vector-style aim (180° flip: just invert both axes)
-  if (typeof p.aimX === 'number' && typeof p.aimY === 'number') {
-    p.aimX = -p.aimX;
-    p.aimY = -p.aimY;
-  } else if (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') {
-    p.aim.x = -p.aim.x;
-    p.aim.y = -p.aim.y;
-  }
+  // Read raw vector
+  let x = hasFlat ? p.aimX : p.aim.x;
+  let y = hasFlat ? p.aimY : p.aim.y;
 
-  // Angle-style aim (add 180°)
-  if (typeof p.aimAngle === 'number') {
-    if (Math.abs(p.aimAngle) > Math.PI * 2) {
-      p.aimAngle = (p.aimAngle - 90) % 360;
-    } else {
-      p.aimAngle = p.aimAngle + Math.PI;
-    }
-  }
+  // Optional pre-processing (some stacks prefer swap first)
+  if (AIM_CAL.SWAP_XY){ const tmp=x; x=y; y=tmp; }
 
-  // fireAngle, if used
-  if (typeof p.fireAngle === 'number') {
-    if (Math.abs(p.fireAngle) > Math.PI * 2) {
-      p.fireAngle = (p.fireAngle - 90) % 360;
-    } else {
-      p.fireAngle = p.fireAngle + Math.PI;
-    }
-  }
+  // Core rotation (fast 0/±90/180)
+  const v = _rot(x, y, AIM_CAL.ROT);
+
+  // Optional flips (post-rotation)
+  if (AIM_CAL.FLIP_X) v.x = -v.x;
+  if (AIM_CAL.FLIP_Y) v.y = -v.y;
+
+  // Write back
+  if (hasFlat){ p.aimX = v.x; p.aimY = v.y; }
+  else { p.aim.x = v.x; p.aim.y = v.y; }
 }
   // ---------- enter / exit ----------
   let fireTick=null, joyHooked=false;
