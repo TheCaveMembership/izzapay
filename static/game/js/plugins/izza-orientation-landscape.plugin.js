@@ -670,42 +670,51 @@ body:not([data-fakeland="1"]) #hospitalShop{
     prevX = p.x; prevY = p.y;
   }
   // ===== AIM FIX (rotated view only) =====
-  // Cancels the 90° stage rotation for aim so directions feel natural:
-  // left→left, right→right, up→up, down→down.
-  function applyAimingCorrection(){
-    if (!window.IZZA || !IZZA.api || !IZZA.api.player) return;
-    if (!document.body.hasAttribute('data-fakeland')) return; // only in Full/rotated
-    const p = IZZA.api.player;
+// Cancels the 90° stage rotation for aim so directions feel natural.
+let _aimLastKey = null;  // <— add this just above the function
 
-    // Vector-style aim (most common)
-    if (typeof p.aimX === 'number' && typeof p.aimY === 'number') {
-      // rotate -90°: (x', y') = ( y, -x )
-      const x = p.aimX, y = p.aimY;
-      p.aimX = y; p.aimY = -x;
-    } else if (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') {
-      const x = p.aim.x, y = p.aim.y;
-      p.aim.x = y; p.aim.y = -x;
-    }
+function applyAimingCorrection(){
+  if (!window.IZZA || !IZZA.api || !IZZA.api.player) return;
+  if (!document.body.hasAttribute('data-fakeland')) return; // only in Full/rotated
+  const p = IZZA.api.player;
 
-    // Angle-style aim (fallback if your engine uses an angle)
-    if (typeof p.aimAngle === 'number') {
-      // Heuristic: degrees if larger than 2π
-      if (Math.abs(p.aimAngle) > Math.PI * 2) {
-        p.aimAngle = (p.aimAngle - 90) % 360;
-      } else {
-        p.aimAngle = p.aimAngle - Math.PI / 2;
-      }
-    }
+  // Build a key from the current raw aim state so we only rotate once per change
+  const k =
+    (typeof p.aimX === 'number' && typeof p.aimY === 'number') ? `v:${p.aimX}|${p.aimY}` :
+    (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') ? `v2:${p.aim.x}|${p.aim.y}` :
+    (typeof p.aimAngle === 'number') ? `a:${p.aimAngle}` :
+    (typeof p.fireAngle === 'number') ? `f:${p.fireAngle}` : null;
 
-    // Some engines use a separate fireAngle — rotate that too if present
-    if (typeof p.fireAngle === 'number') {
-      if (Math.abs(p.fireAngle) > Math.PI * 2) {
-        p.fireAngle = (p.fireAngle - 90) % 360;
-      } else {
-        p.fireAngle = p.fireAngle - Math.PI / 2;
-      }
+  if (k && k === _aimLastKey) return; // already rotated this exact input this tick
+  _aimLastKey = k;
+
+  // Vector-style aim
+  if (typeof p.aimX === 'number' && typeof p.aimY === 'number') {
+    const x = p.aimX, y = p.aimY;
+    p.aimX = y; p.aimY = -x; // rotate -90°
+  } else if (p.aim && typeof p.aim.x === 'number' && typeof p.aim.y === 'number') {
+    const x = p.aim.x, y = p.aim.y;
+    p.aim.x = y; p.aim.y = -x; // rotate -90°
+  }
+
+  // Angle-style aim
+  if (typeof p.aimAngle === 'number') {
+    if (Math.abs(p.aimAngle) > Math.PI * 2) {
+      p.aimAngle = (p.aimAngle - 90) % 360;
+    } else {
+      p.aimAngle = p.aimAngle - Math.PI / 2;
     }
   }
+
+  // fireAngle, if used
+  if (typeof p.fireAngle === 'number') {
+    if (Math.abs(p.fireAngle) > Math.PI * 2) {
+      p.fireAngle = (p.fireAngle - 90) % 360;
+    } else {
+      p.fireAngle = p.fireAngle - Math.PI / 2;
+    }
+  }
+}
   // ---------- enter / exit ----------
   let fireTick=null, joyHooked=false;
   function enter(){
