@@ -1,38 +1,40 @@
 /* izza_land_wallguard_aim.plugin.js
    Full-mode (rotated) wall/corner anti-stick + aim-from-move-intent
    - Runs ONLY when <body data-fakeland="1">.
-   - Safer slip: stronger on side walls, bounded so it can’t drift through solids.
+   - Stronger side-wall handling + soft repulsion margin to avoid edge pinning.
    - Uses stick intent to aim while moving; stationary aim passes through unchanged.
 */
 (function(){
   if (!window.IZZA || typeof IZZA.on !== 'function') return;
 
   // ---------------- TUNABLES (safe to tweak) ----------------
-  // Detect "stuck" and axis-block:
+  // Detect "stuck" and axis-block (screen space, because the canvas is rotated -90°):
   const WALL_EPS         = 0.22; // screen-delta below this → stuck
-  const AXIS_EPS         = 0.18; // ↑ was 0.12; larger = more likely to treat an axis as blocked
+  const AXIS_EPS         = 0.24; // ↑ was 0.18 → treat “axis nearly zero” more aggressively
 
-  // Slip strengths:
-  const SLIP_NUDGE       = 0.42; // ↑ was 0.35; base slide along the open axis
-  const SIDE_BONUS       = 1.9;  // ↑ was 1.4; extra help specifically for *side* walls (x blocked in screen space)
+  // Slip strengths (slide along the unblocked axis):
+  const SLIP_NUDGE       = 0.48; // ↑ was 0.42
+  const SIDE_BONUS       = 2.30; // ↑ was 1.9 (extra for *side* walls where screen-x is blocked)
 
   // Small push straight off the wall (limits drift risk):
-  const PUSH_NORMAL      = 0.06; // ↓ was 0.08; smaller push to avoid creep
+  const PUSH_NORMAL      = 0.05; // ↓ was 0.06; a hair softer
 
   // Stuck escalation & caps:
   const ESCALATE_0       = 1.0;
-  const ESCALATE_ADD     = 0.5;
-  const ESCALATE_CAP     = 2.0;
+  const ESCALATE_ADD     = 0.45;
+  const ESCALATE_CAP     = 1.9;
 
-  // Episode safety caps (bound total correction so we don’t slide through):
-  const INTENT_EPS       = 0.15; // require this much stick intent to correct
-  const MAX_STUCK_FRAMES = 10;   // ↑ allow a few more frames to find a slide
-  const PUSH_FRAMES_MAX  = 2;    // only push for first N stuck frames
-  const MAX_SLIP_PER_LOCK= 1.20; // ↑ max total slip (screen units) per stuck episode
+  // Episode safety caps (bound total correction so we don’t slide through solids):
+  const INTENT_EPS       = 0.15;  // require this much stick intent to correct
+  const MAX_STUCK_FRAMES = 12;    // ↑ allow a bit more time to find a slide
+  const PUSH_FRAMES_MAX  = 2;     // only push for first N stuck frames
+  const MAX_SLIP_PER_LOCK= 1.15;  // total slip cap per stuck episode (screen units)
 
-  // Extra side-wall assistance:
-  const SIDE_LOCK_FRAMES = 2;    // after this many consecutive side-wall frames, bias vertical slip harder
-  const SIDE_HARD_SLIP   = 0.55; // vertical slip used when hard-bias triggers (screen units per frame)
+  // Soft “invisible margin” (repulsion) when you keep pressing into the face:
+  // This behaves like a half-tile buffer without editing map data.
+  const REPULSE_AFTER_FRAMES = 3;   // start repelling after this many stuck frames in a row
+  const REPULSE_STRENGTH     = 0.18; // per-frame repulsion along the wall normal (screen units)
+  const REPULSE_DECAY        = 0.92; // repulsion decays each frame once you stop being stuck
 
   // ---------------- Helpers ----------------
   // world → screen mapping for -90° CW canvas:
@@ -49,10 +51,14 @@
   let epSlipFx = 0, epSlipFy = 0;
   let epPushFramesLeft = 0;
 
+  // soft repulsion accumulator (screen space)
+  let repulseFx = 0, repulseFy = 0;
+
   function resetEpisode(){
     epSlipFx = 0; epSlipFy = 0;
     epPushFramesLeft = PUSH_FRAMES_MAX;
     stuckFrames = 0;
+    // let repulsion decay naturally; don't hard reset so it eases out
   }
 
   function rememberIntentFromScreen(fx, fy){
@@ -88,7 +94,7 @@
     const { fx, fy } = worldToScreen(dx, dy);
     const amag = Math.abs(fx) + Math.abs(fy);
 
-    // Current stick intent magnitude (screen space) from last known intent
+    // Current stick intent magnitude (screen space)
     const intentMag = Math.hypot(intentX, intentY);
 
     const xNearZero = Math.abs(fx) < AXIS_EPS;
@@ -101,35 +107,41 @@
       rememberIntentFromScreen(fx, fy);
       prevX = p.x; prevY = p.y;
       resetEpisode();
+
+      // decay repulsion gently so you don’t ping-pong
+      repulseFx *= REPULSE_DECAY;
+      repulseFy *= REPULSE_DECAY;
       return;
     }
 
     // ===== Stuck handling (Full mode) =====
     // Hard guards to prevent drift through geometry:
-    // 1) Only correct if the player is actively trying to move (has intent).
     if (intentMag <= INTENT_EPS){
-      // Don’t alter position if there’s no real intent; just sit tight.
+      // No active intent → do nothing special
       prevX = p.x; prevY = p.y;
       resetEpisode();
+      repulseFx *= REPULSE_DECAY;
+      repulseFy *= REPULSE_DECAY;
       return;
     }
 
-    // 2) Stop correcting after too many consecutive stuck frames in one episode.
     if (stuckFrames >= MAX_STUCK_FRAMES){
       prevX = p.x; prevY = p.y;
+      repulseFx *= REPULSE_DECAY;
+      repulseFy *= REPULSE_DECAY;
       return;
     }
 
-    // 3) Cap total slip distance per stuck episode (screen space).
     const usedSlip = Math.hypot(epSlipFx, epSlipFy);
     if (usedSlip >= MAX_SLIP_PER_LOCK){
       prevX = p.x; prevY = p.y;
+      repulseFx *= REPULSE_DECAY;
+      repulseFy *= REPULSE_DECAY;
       return;
     }
 
     // Progress episode
     if (stuckFrames === 0){
-      // New episode begins now
       epSlipFx = 0; epSlipFy = 0;
       epPushFramesLeft = PUSH_FRAMES_MAX;
     }
@@ -167,9 +179,29 @@
       epPushFramesLeft--;
     }
 
+    // Soft repulsion “margin” if you keep pressing into the face:
+    // Adds a constant small push *away from the wall* once you’ve been stuck for a few frames.
+    if (stuckFrames >= REPULSE_AFTER_FRAMES){
+      if (xNearZero && !yNearZero){
+        // screen-x is blocked → push in ±x away from the face
+        repulseFx += (intentX >= 0 ? -REPULSE_STRENGTH : REPULSE_STRENGTH);
+      } else if (yNearZero && !xNearZero){
+        // screen-y is blocked → push in ±y away from the face
+        repulseFy += (intentY >= 0 ? -REPULSE_STRENGTH : REPULSE_STRENGTH);
+      } else {
+        // corner → small diagonal repulse opposite of intent
+        repulseFx += (intentX >= 0 ? -REPULSE_STRENGTH*0.7 : REPULSE_STRENGTH*0.7);
+        repulseFy += (intentY >= 0 ? -REPULSE_STRENGTH*0.7 : REPULSE_STRENGTH*0.7);
+      }
+    } else {
+      // ramp-in: slight pre-repulse helps separate before full repulse starts
+      repulseFx *= REPULSE_DECAY;
+      repulseFy *= REPULSE_DECAY;
+    }
+
     // Sum in screen space
-    let totalFx = sfx + nfx;
-    let totalFy = sfy + nfy;
+    let totalFx = sfx + nfx + repulseFx;
+    let totalFy = sfy + nfy + repulseFy;
 
     // Clamp this frame’s slip so episode total won’t exceed MAX_SLIP_PER_LOCK
     const remaining = Math.max(0, MAX_SLIP_PER_LOCK - Math.hypot(epSlipFx, epSlipFy));
@@ -262,5 +294,5 @@
 
   ensureAimSoon();
 
-  console.log('[land-wallguard-aim] Full-mode anti-stick (drift-safe) + aim-from-intent ready');
+  console.log('[land-wallguard-aim] Full-mode anti-stick + soft repulsion + intent-aim ready');
 })();
