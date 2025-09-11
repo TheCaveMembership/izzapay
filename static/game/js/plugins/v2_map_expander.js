@@ -260,18 +260,19 @@ window._redrawHeartsHud = _redrawHeartsHud;
   const curSegs = _getSegs();
   if (curSegs >= maxSegs){ alert('Hearts are already full'); return; }
 
-  // top off current heart first, else add up to a full heart (3 segs)
-  const remInCurrent = curSegs % 3;                 // 0..2
+  // Top off current heart first; otherwise add up to a full heart (3 segs)
+  const remInCurrent = curSegs % 3;                         // 0..2
   const topOff       = remInCurrent === 0 ? 0 : (3 - remInCurrent); // 0,1,2
   const gain         = topOff > 0 ? topOff : Math.min(3, maxSegs - curSegs);
 
+  // Spend coins and apply heal
   api.setCoins(coins - 100);
   _setSegs(curSegs + gain);
 
-  // persist hearts immediately so they survive reloads
-  window.dispatchEvent(new Event('izza-hearts-changed'));
+  // Persist hearts immediately so they survive reloads
+  try { window.dispatchEvent(new Event('izza-hearts-changed')); } catch {}
 
-  // feedback + refresh the modal coins line
+  // Feedback + refresh the modal coins line
   IZZA.toast?.(topOff > 0 ? 'Heart topped up!' : '+1 heart!');
   const hc = document.getElementById('hsCoins');
   if (hc) hc.textContent = `Coins: ${api.getCoins()} IC`;
