@@ -423,7 +423,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
   function fixFriendsPopup(){
     if(fixingFriends){ fixFriendsQueued=true; return; }
     fixingFriends=true;
-    try{ centerAndUpright('mpFriendsPopup'); }catch**/ finally{
+    try{ centerAndUpright('mpFriendsPopup'); }catch{} finally{
       fixingFriends=false;
       if(fixFriendsQueued){ fixFriendsQueued=false; requestAnimationFrame(fixFriendsPopup); }
     }
