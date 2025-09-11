@@ -695,7 +695,7 @@ prevX = p.x; prevY = p.y;
     
     // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
   // Single calibration knob: pick one of -90, 90, 180, or 0
-  const ROT_AIM_DEG = 90;
+  const ROT_AIM_DEG = 270;
 
   function _rotVecQuick(x, y, deg){
     switch(((deg % 360) + 360) % 360){
