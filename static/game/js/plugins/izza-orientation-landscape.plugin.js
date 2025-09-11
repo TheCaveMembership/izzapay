@@ -663,22 +663,11 @@ body:not([data-fakeland="1"]) #hospitalShop{
     const p = IZZA.api.player;
     if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
     const dx = p.x - prevX, dy = p.y - prevY;
-    
+    const mag = Math.abs(dx)+Math.abs(dy);
 
-    // stronger wall-stick guard: ignore tiny or near-axis moves so we don't "slide" into walls
-const AXIS_EPS = 0.25;   // raise to be stricter (0.3–0.5)
-const MIN_MAG  = 0.35;   // raise to require more intent (0.4–0.6)
-
-const ax  = Math.abs(dx), ay = Math.abs(dy);
-const mag = ax + ay;
-
-// "near-axis" = one axis is tiny or vector is very skinny (ratio > 4:1)
-const nearAxis = (ax < AXIS_EPS) || (ay < AXIS_EPS) || (Math.max(ax, ay) > 4 * Math.min(ax, ay));
-
-if (mag < MIN_MAG || nearAxis) {
-  prevX = p.x; prevY = p.y;
-  return;
-}
+    // wall-stick guard
+    const singleAxis = (Math.abs(dx) < 0.0001) ^ (Math.abs(dy) < 0.0001);
+    if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
     // Rotate -90°: (x',y') = ( y, -x )
 const fx =  dy;
