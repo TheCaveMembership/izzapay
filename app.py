@@ -363,11 +363,6 @@ def ensure_schema():
         if "buyer_user_id" not in ocols:
             cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
 
-        # items.description (allow null)
-        icolz = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
-        if "description" not in icolz:
-            cx.execute("ALTER TABLE items ADD COLUMN description TEXT")
-
         # payout_requests throttle log (one row per request)
         cx.execute("""
             CREATE TABLE IF NOT EXISTS payout_requests(
@@ -378,18 +373,6 @@ def ensure_schema():
             )
         """)
         cx.execute("CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time ON payout_requests(merchant_id, requested_at)")
-
-        # archive for deleted stores (30-day retention via expire_at)
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS deleted_merchant_archive (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              merchant_id INTEGER,
-              slug TEXT,
-              data_json TEXT NOT NULL,
-              expire_at TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            )
-        """)
 
 ensure_schema()
 
@@ -1553,9 +1536,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
                 shipping_html = "".join(block)
 
-        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        subj_buyer    = f"Your order at {m['business_name']} is confirmed{subj_suffix}" if (subj_suffix := suffix) else f"Your order at {m['business_name']} is confirmed"
-        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} Ï){suffix}"
+        # Email subjects (no walrus / no fancy ternary inside f-strings)
+                # Email subjects (no walrus / no fancy ternary inside f-strings)
+                suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+                if suffix:
+                    subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
+                else:
+                    subj_buyer = f"Your order at {m['business_name']} is confirmed"
+                
+                subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} Ï){suffix}"
 
         if buyer_email:
             send_email(
@@ -2013,62 +2002,6 @@ def merchant_payout(slug):
         q += f"&t={tok}"
     return redirect(f"/merchant/{m['slug']}/orders{q}")
 
-from datetime import datetime, timedelta
-
-def _fetchall_dict(cur):
-    cols = [c[0] for c in cur.description]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
-
-@app.post("/merchant/<slug>/delete")
-def merchant_delete(slug):
-    # local import to avoid changing global imports
-    import sqlite3
-    u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
-    dest = "/pi_signin.html"
-
-    with conn() as cx:
-        cx.row_factory = sqlite3.Row
-        cur = cx.cursor()
-
-        # Archive current merchant snapshot
-        cur.execute("SELECT * FROM items WHERE merchant_id=?", (m["id"],))
-        items = _fetchall_dict(cur)
-        cur.execute("SELECT * FROM orders WHERE merchant_id=?", (m["id"],))
-        orders = _fetchall_dict(cur)
-
-        archive_blob = {
-            "deleted_at": datetime.utcnow().isoformat() + "Z",
-            "merchant": dict(m),
-            "items": items,
-            "orders": orders,
-            "requested_by_user_id": u["id"],
-            "reason": "user_requested_delete"
-        }
-
-        expire_at = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
-        now_iso   = datetime.utcnow().isoformat() + "Z"
-
-        cur.execute("""INSERT INTO deleted_merchant_archive
-                       (merchant_id, slug, data_json, expire_at, created_at)
-                       VALUES(?,?,?,?,?)""",
-                    (m["id"], m["slug"], json.dumps(archive_blob), expire_at, now_iso))
-
-        # Remove live data
-        cur.execute("DELETE FROM orders WHERE merchant_id=?", (m["id"],))
-        cur.execute("DELETE FROM items WHERE merchant_id=?", (m["id"],))
-        cur.execute("DELETE FROM carts WHERE merchant_id=?", (m["id"],))
-        cur.execute("DELETE FROM merchants WHERE id=?", (m["id"],))
-
-        try:
-            session.clear()
-        except Exception:
-            pass
-
-    if "application/json" in (request.headers.get("Accept") or "") or request.is_json:
-        return {"ok": True, "redirect": dest}, 200
-    return redirect(dest, code=303)
-
 # ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
 def buyer_status(token):
@@ -2087,4 +2020,4 @@ def success():
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
-    app.run(
+    app.run(host="0.0.0.0", port=port, debug=False)
