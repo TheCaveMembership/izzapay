@@ -1054,6 +1054,8 @@ def merchant_delete_store(slug):
     u, m = require_merchant_owner(slug)
     if isinstance(u, Response):
         return u
+    if not m:
+        abort(404)
 
     now = int(time.time())
     THIRTY_DAYS = 30 * 24 * 3600
@@ -1070,20 +1072,25 @@ def merchant_delete_store(slug):
             )
         """)
 
-        # Snapshot live data
+        # Snapshot live data (all inside the same transaction)
         merch = dict(m)
+
         items = [dict(r) for r in cx.execute(
             "SELECT * FROM items WHERE merchant_id=?", (m["id"],)
         ).fetchall()]
+
         orders = [dict(r) for r in cx.execute(
             "SELECT * FROM orders WHERE merchant_id=?", (m["id"],)
         ).fetchall()]
+
         sessions_rows = [dict(r) for r in cx.execute(
             "SELECT * FROM sessions WHERE merchant_id=?", (m["id"],)
         ).fetchall()]
+
         carts = [dict(r) for r in cx.execute(
             "SELECT * FROM carts WHERE merchant_id=?", (m["id"],)
         ).fetchall()]
+
         cart_items = []
         if carts:
             cart_ids = tuple(c["id"] for c in carts)
@@ -1107,29 +1114,24 @@ def merchant_delete_store(slug):
             (m["id"], json.dumps(snapshot, separators=(",", ":")), now, now + THIRTY_DAYS)
         )
 
-        # Clean up live data
+        # --- Hard delete all live rows tied to this merchant (order matters to avoid orphans) ---
         cx.execute("DELETE FROM cart_items WHERE cart_id IN (SELECT id FROM carts WHERE merchant_id=?)", (m["id"],))
         cx.execute("DELETE FROM carts WHERE merchant_id=?", (m["id"],))
         cx.execute("DELETE FROM sessions WHERE merchant_id=?", (m["id"],))
         cx.execute("DELETE FROM items WHERE merchant_id=?", (m["id"],))
+        cx.execute("DELETE FROM orders WHERE merchant_id=?", (m["id"],))
+        cx.execute("DELETE FROM payout_requests WHERE merchant_id=?", (m["id"],))  # harmless if none
         cx.execute("DELETE FROM merchants WHERE id=?", (m["id"],))
 
         # Opportunistically purge any expired archives
         cx.execute("DELETE FROM deleted_merchants WHERE purge_after < ?", (now,))
 
-    # Clear session and go to sign-in (pi_signin.html)
+    # Clear session and show sign-in (keeps your existing UX)
     try:
         session.clear()
     except Exception:
         pass
 
-        # Clear session and go to sign-in (pi_signin.html)
-    try:
-        session.clear()
-    except Exception:
-        pass
-
-    # Show the home/sign-in page directly
     return render_template("pi_signin.html", app_base=APP_BASE_URL, sandbox=PI_SANDBOX)
 
 # ----------------- STOREFRONT AUTH -----------------
