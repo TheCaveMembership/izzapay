@@ -250,14 +250,24 @@ window._redrawHeartsHud = _redrawHeartsHud;
     _shopOpen=false;
   }
   function hospitalBuy(){
-    const api=IZZA.api; if(!api?.ready) return;
+    const api = IZZA.api;
+    if(!api?.ready) return;
 
     const coins = api.getCoins();
     if(coins < 100){ alert('Not enough IZZA Coins'); return; }
 
-    const maxSegs = _heartsMax()*3;
+    const maxSegs = _heartsMax() * 3;
     const curSegs = _getSegs();
     if(curSegs >= maxSegs){ alert('Hearts are already full'); return; }
+
+    // apply purchase
+    const gain = 3;
+    api.setCoins(coins - 100);
+    _setSegs(curSegs + gain);
+
+    // NEW: ensure hearts persist immediately
+    window.dispatchEvent(new Event('izza-hearts-changed'));
+}
 
     // top off current heart first, else add a full heart (3 segs)
     const remInCurrent = curSegs % 3;                 // 0..2
