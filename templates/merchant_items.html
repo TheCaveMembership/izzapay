@@ -324,6 +324,30 @@
         </form>
       </div>
 
+      <!-- DANGER ZONE: DELETE STORE -->
+      <div class="card" style="margin-bottom:12px">
+        <div class="h2" style="color:#ffb86b">Danger Zone</div>
+        <p class="muted" style="margin-top:-2px">
+          Deleting your store will permanently remove <strong>all store information and items</strong>.
+          This cannot be undone.
+        </p>
+        <ul class="muted" style="margin:6px 0 12px;padding-left:18px">
+          <li>Make sure you’ve <strong>processed delivery for any purchased physical items</strong>.</li>
+          <li>Confirm any open sales are completed or refunded as needed.</li>
+        </ul>
+        <form class="stack" method="post" action="/merchant/{{ m.slug }}/delete{% if t %}?t={{ t }}{% endif %}"
+              onsubmit="return confirm('Are you sure you want to delete this store? This will delete all store info and items. Make sure you have processed delivery of any purchased physical items. This cannot be undone.');">
+          <input type="hidden" name="t" value="{{ t or '' }}">
+          <label class="ip-label" style="display:flex;gap:8px;align-items:flex-start">
+            <input type="checkbox" name="acknowledge" value="1" required>
+            <span>I understand this action is permanent and I have cleaned current sales and processed delivery of any purchased physical items.</span>
+          </label>
+          <div class="row" style="justify-content:flex-end;margin-top:4px">
+            <button class="ip-btn danger" type="submit">Delete Store</button>
+          </div>
+        </form>
+      </div>
+
       <!-- STOREFRONT LINK -->
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Your Storefront</div>
@@ -363,6 +387,13 @@
               <button type="button" class="ip-btn" id="itUploadBtn">Upload</button>
             </div>
             <input class="ip-input" id="itUrl" name="image_url" placeholder="https://… (or paste an image URL)">
+          </div>
+
+          <!-- NEW: Item Description -->
+          <div class="field">
+            <label class="ip-label">Item Description</label>
+            <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item, condition, size, shipping notes, etc."></textarea>
+            <small class="note">Shown on your product page.</small>
           </div>
 
           <div class="field-inline">
@@ -460,6 +491,12 @@
                     <div class="field">
                       <label class="ip-label">Image URL</label>
                       <input class="ip-input" name="image_url" value="{{ it.image_url or '' }}">
+                    </div>
+                    <!-- NEW: Item Description (edit) -->
+                    <div class="field">
+                      <label class="ip-label">Item Description</label>
+                      <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item…">{{ it.description or '' }}</textarea>
+                      <small class="note">Shown on your product page.</small>
                     </div>
                     <div class="row" style="justify-content:flex-end">
                       <button class="ip-btn ghost tiny" type="button" data-edit-toggle="{{ it.id }}">Cancel</button>
