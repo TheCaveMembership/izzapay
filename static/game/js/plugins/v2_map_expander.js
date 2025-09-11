@@ -212,6 +212,34 @@ function lakeRects(a){
     _redrawHeartsHud();
   }
   function _syncHeartsFromStorageToPlayer(){
+    // --- Enforce saved hearts for a short window during boot (beats late initializers)
+const HEARTS_ENFORCE_MS = 2000;
+let _heartsEnforceUntil = 0;
+
+function _startHeartsEnforceWindow(){
+  try { _heartsEnforceUntil = (performance.now?.() || Date.now()) + HEARTS_ENFORCE_MS; }
+  catch { _heartsEnforceUntil = Date.now() + HEARTS_ENFORCE_MS; }
+}
+
+// Start enforcement as soon as we load
+_startHeartsEnforceWindow();
+
+// Keep mirroring LS → player for a short period after load/changes
+IZZA.on?.('update-post', ()=>{
+  if (!IZZA?.api?.ready) return;
+  const now = performance.now?.() || Date.now();
+  if (now > _heartsEnforceUntil) return;
+
+  const want = _getSegs();            // LS-first
+  const p = IZZA.api?.player || {};
+  if ((p.heartSegs|0) !== (want|0)) {
+    p.heartSegs = want;
+    _redrawHeartsHud?.();
+  }
+});
+
+// When hearts change (e.g., hospitalBuy), extend the enforcement window
+window.addEventListener('izza-hearts-changed', ()=>{ _startHeartsEnforceWindow(); }, {capture:true});
   try {
     const seg = _getSegs();            // LS-first now
     const p = IZZA.api?.player || {};
