@@ -417,6 +417,23 @@ body:not([data-fakeland="1"]) #hospitalShop{
     }
   }
 
+  // ---------- NEW: tiny 80ms scheduler to batch modal adoption + fixers ----------
+  let modalFixTimer = null;
+  function scheduleModalFix(){
+    if(modalFixTimer) return;
+    modalFixTimer = setTimeout(()=>{
+      modalFixTimer = null;
+      try{
+        adoptModals();
+      }catch{}
+      try{
+        fixNotifDropdown();
+        fixFriendsPopup();
+        fixTradeCentrePopup();
+      }catch{}
+    }, 80);
+  }
+
   // Collect ALL modal / popup candidates so they counter-rotate in Full
   function adoptModals(){
     const sel = [
@@ -519,9 +536,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
     if(fullBtn && !stage.contains(fullBtn)) adoptOnce(fullBtn,'izzaFullToggle');
 
     // adopt any modals so they render upright (bell + friends) — lobby stays in-place
-    adoptModals();
-
-    requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
+    scheduleModalFix();
 
     document.body.appendChild(stage);
   }
@@ -561,7 +576,12 @@ body:not([data-fakeland="1"]) #hospitalShop{
     const scale=Math.min(vw/BASE_H, vh/BASE_W);
     stage.style.transform=`translate(-50%,-50%) rotate(90deg) scale(${scale})`;
     canvas.style.width=BASE_W+'px'; canvas.style.height=BASE_H+'px';
-    requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
+
+    requestAnimationFrame(()=>{
+      placeFire();
+      pinFriendsUI();
+      scheduleModalFix();
+    });
   }
 
   // Observe DOM changes (fix dropdowns/popups whenever they appear/change)
@@ -576,9 +596,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
 
       // adopt bell/friends only; lobby stays in-place
-      adoptModals();
-
-      requestAnimationFrame(()=>{ fixNotifDropdown(); fixFriendsPopup(); fixTradeCentrePopup(); /* no lobby fix */ });
+      scheduleModalFix();
 
       requestAnimationFrame(()=>{ placeFire(); pinFriendsUI(); });
     }
