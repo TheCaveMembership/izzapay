@@ -673,7 +673,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
 // Vector-only correction for rotated Full view.
 // Quick calibration knobs live here:
 const AIM_CAL = {
-  ROT: -90,      // Try: -90, 90, 180, 0
+  ROT: 90,      // Try: -90, 90, 180, 0
   SWAP_XY: false,// true swaps x<->y before rotation
   FLIP_X: false, // true inverts X after rotation
   FLIP_Y: false  // true inverts Y after rotation
