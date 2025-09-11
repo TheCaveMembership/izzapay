@@ -1126,13 +1126,27 @@ def merchant_delete_store(slug):
         # Opportunistically purge any expired archives
         cx.execute("DELETE FROM deleted_merchants WHERE purge_after < ?", (now,))
 
-    # Clear session and show sign-in (keeps your existing UX)
+        # Clear session
     try:
         session.clear()
     except Exception:
         pass
 
-    return render_template("pi_signin.html", app_base=APP_BASE_URL, sandbox=PI_SANDBOX)
+    # Redirect target after delete
+    target = "/signin?fresh=1"
+
+    # If request came from HTMX, instruct client to redirect
+    if request.headers.get("HX-Request") == "true":
+        resp = Response("", 200)
+        resp.headers["HX-Redirect"] = target
+        return resp
+
+    # If it's a fetch/AJAX expecting JSON, tell client to reload/redirect
+    if request.is_json or "application/json" in (request.headers.get("Accept") or ""):
+        return {"ok": True, "redirect": target}, 200
+
+    # Normal form POST → send a 303 so the browser follows with GET
+    return redirect(target, code=303)
 
 # ----------------- STOREFRONT AUTH -----------------
 @app.get("/store/<slug>/signin")
