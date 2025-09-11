@@ -8,7 +8,8 @@
   const stickEl=document.getElementById('stick');
   const ctrls=document.querySelector('.controls');
   const mini=document.getElementById('miniWrap');
-  if(!card||!canvas||!hud||!stickEl||!ctrls) return;
+  // *** CHANGED: don't require stick/ctrls to exist to boot (prevents early exit that hides the Full button)
+  if(!card||!canvas||!hud) return;
 
   // FIRE placement (bigger, a touch left)
   const FIRE_TILES_RIGHT = 6.0;
@@ -554,7 +555,11 @@ body:not([data-fakeland="1"]) #hospitalShop{
 
   // ---------- adopt/restore ----------
   function adopt(){
-    keep(card,'card'); keep(hud,'hud'); keep(stickEl,'stick'); keep(ctrls,'ctrls'); if(mini) keep(mini,'mini');
+    keep(card,'card'); keep(hud,'hud');
+    // *** CHANGED: guard optional elements so we don't call keep() on nulls
+    if (stickEl) keep(stickEl,'stick');
+    if (ctrls) keep(ctrls,'ctrls');
+    if(mini) keep(mini,'mini');
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
@@ -643,8 +648,11 @@ body:not([data-fakeland="1"]) #hospitalShop{
   let joyActive=false;
   const markOn = ()=>{ joyActive=true; };
   const markOff= ()=>{ joyActive=false; };
-  stickEl.addEventListener('touchstart',markOn,{passive:false});
-  stickEl.addEventListener('mousedown', markOn);
+  // *** CHANGED: only attach listeners if stick exists
+  if (stickEl){
+    stickEl.addEventListener('touchstart',markOn,{passive:false});
+    stickEl.addEventListener('mousedown', markOn);
+  }
   window.addEventListener('touchend',  markOff, {passive:true});
   window.addEventListener('mouseup',   markOff, {passive:true});
   window.addEventListener('touchcancel',markOff,{passive:true});
@@ -682,6 +690,7 @@ if (document.body.hasAttribute('data-fakeland')) {
 }
 
 prevX = p.x; prevY = p.y;
+  } // *** CHANGED: close fixJoystickDelta properly
 
     
     // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
