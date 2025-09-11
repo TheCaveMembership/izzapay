@@ -1045,7 +1045,7 @@ def merchant_orders(slug):
         payout_error=payout_error,
         throttle_minutes=throttle_minutes,
         t=get_bearer_token_from_request(),
-    )
+    
     # ---- DELETE STORE (archive 30 days, then redirect to /signin) ----
 @app.post("/merchant/<slug>/delete")
 def merchant_delete_store(slug):
