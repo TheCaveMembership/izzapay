@@ -699,7 +699,7 @@ function applyAimingCorrection(){
   // Angle-style aim (add 180°)
   if (typeof p.aimAngle === 'number') {
     if (Math.abs(p.aimAngle) > Math.PI * 2) {
-      p.aimAngle = (p.aimAngle + 90) % 360;
+      p.aimAngle = (p.aimAngle - 90) % 360;
     } else {
       p.aimAngle = p.aimAngle + Math.PI;
     }
@@ -708,7 +708,7 @@ function applyAimingCorrection(){
   // fireAngle, if used
   if (typeof p.fireAngle === 'number') {
     if (Math.abs(p.fireAngle) > Math.PI * 2) {
-      p.fireAngle = (p.fireAngle + 90) % 360;
+      p.fireAngle = (p.fireAngle - 90) % 360;
     } else {
       p.fireAngle = p.fireAngle + Math.PI;
     }
