@@ -211,8 +211,25 @@ function lakeRects(a){
     localStorage.setItem(HEARTS_LS_KEY, String(seg));
     _redrawHeartsHud();
   }
-  function _syncHeartsFromStorageToPlayer(){
-    // --- Enforce saved hearts for a short window during boot (beats late initializers)
+    function _syncHeartsFromStorageToPlayer(){
+    // Just mirror LS → player once; no listeners/tickers in here
+    try {
+      const seg = _getSegs();                 // LS-first
+      const p = IZZA.api?.player || {};
+      if ((p.heartSegs|0) !== (seg|0)) {
+        p.heartSegs = seg;
+        _redrawHeartsHud?.();
+      }
+    } catch {}
+  }
+
+// ---- moved OUTSIDE the function (singletons) ----
+
+// Throttle for the ongoing guard
+let _heartsGuardLastFix = 0;
+const HEARTS_GUARD_COOLDOWN_MS = 250; // at most 4 fixes/sec
+
+// Short boot enforcement window (beats late initializers)
 const HEARTS_ENFORCE_MS = 2000;
 let _heartsEnforceUntil = 0;
 
@@ -220,33 +237,41 @@ function _startHeartsEnforceWindow(){
   try { _heartsEnforceUntil = (performance.now?.() || Date.now()) + HEARTS_ENFORCE_MS; }
   catch { _heartsEnforceUntil = Date.now() + HEARTS_ENFORCE_MS; }
 }
-
-// Start enforcement as soon as we load
+// start enforcement as soon as this file loads
 _startHeartsEnforceWindow();
 
-// Keep mirroring LS → player for a short period after load/changes
+// Single per-tick guard (merged guard + enforcement)
 IZZA.on?.('update-post', ()=>{
   if (!IZZA?.api?.ready) return;
-  const now = performance.now?.() || Date.now();
-  if (now > _heartsEnforceUntil) return;
 
-  const want = _getSegs();            // LS-first
-  const p = IZZA.api?.player || {};
-  if ((p.heartSegs|0) !== (want|0)) {
+  const want = _getSegs()|0;           // LS-authoritative
+  const p = IZZA.api.player || {};
+
+  // Ongoing guard (throttled)
+  if ((p.heartSegs|0) !== want){
+    const now = performance.now?.() || Date.now();
+    if (now - _heartsGuardLastFix >= HEARTS_GUARD_COOLDOWN_MS){
+      p.heartSegs = want;
+      _redrawHeartsHud?.();
+      _heartsGuardLastFix = now;
+    }
+  }
+
+  // Boot enforcement window
+  const now2 = performance.now?.() || Date.now();
+  if (now2 <= _heartsEnforceUntil && (p.heartSegs|0) !== want){
     p.heartSegs = want;
     _redrawHeartsHud?.();
   }
 });
 
-// When hearts change (e.g., hospitalBuy), extend the enforcement window
+// Hearts changed → extend the enforcement window
 window.addEventListener('izza-hearts-changed', ()=>{ _startHeartsEnforceWindow(); }, {capture:true});
-  try {
-    const seg = _getSegs();            // LS-first now
-    const p = IZZA.api?.player || {};
-    p.heartSegs = seg;                 // mirror into engine’s player
-    _redrawHeartsHud?.();              // refresh HUD
-  } catch {}
-}
+
+// Cross-tab/devtools edits → resync LS→player once
+window.addEventListener('storage', e=>{
+  if (e.key === 'izzaCurHeartSegments') _syncHeartsFromStorageToPlayer();
+});
 
 // run once shortly after this script loads
 setTimeout(_syncHeartsFromStorageToPlayer, 0);
