@@ -1034,7 +1034,8 @@ def merchant_orders(slug):
     except ValueError:
         throttle_minutes = 0
 
-        return render_template(
+    # <<< dedented return so it always runs >>>
+    return render_template(
         "merchant_orders.html",
         m=m,
         orders=orders,
@@ -1045,7 +1046,7 @@ def merchant_orders(slug):
         payout_error=payout_error,
         throttle_minutes=throttle_minutes,
         t=get_bearer_token_from_request(),
-    )  # ← add this line
+    )
 # ---- DELETE STORE (archive 30 days, then redirect to /signin) ----
 @app.post("/merchant/<slug>/delete")
 def merchant_delete_store(slug):
