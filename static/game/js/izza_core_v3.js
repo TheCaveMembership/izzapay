@@ -364,7 +364,8 @@ function tintHairLayer(pack, hairColor){
     coins:      'izzaCoins',
     mission1:   'izzaMission1',
     missions:   'izzaMissions',
-    inventory:  'izzaInventory'
+    inventory:  'izzaInventory',
+    hearts: 'izzaHearts'
   };
   function getCoins(){
     const raw = localStorage.getItem(LS.coins);
@@ -380,6 +381,17 @@ function tintHairLayer(pack, hairColor){
 
   // NEW: let persist/sync know wallet changed
   try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+}
+function getHearts(){
+  const raw = localStorage.getItem(LS.hearts);
+  const n = raw==null ? 5 : (parseInt(raw,10)||5); // default 5
+  return Math.max(0,n);
+}
+function setHearts(n){
+  const v = Math.max(0, n|0);
+  localStorage.setItem(LS.hearts, String(v));
+  player.hp = v;
+  try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
 }
   function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
   function setMission1Done(){
@@ -476,7 +488,7 @@ function tintHairLayer(pack, hairColor){
     wanted: 0,
     facing: 'down', moving:false,
     animTime: 0,
-    hp: 5,
+    hp: getHearts(),  // was 5
     coins: 0
   };
 
@@ -1450,11 +1462,14 @@ Promise.all([
     // expose for plugins:
     getMissionCount,
     getInventory, setInventory,
+    getHearts, setHearts,
     hRoadY, vRoadX,
     ready: true
   };
   IZZA.emit('ready', IZZA.api);
 
+  setHearts(getHearts());
+  
   // If the map plugin exposed the HUD redraw, sync hearts from saved state now
   if (typeof window._redrawHeartsHud === 'function') { try{ window._redrawHeartsHud(); }catch{} }
 
