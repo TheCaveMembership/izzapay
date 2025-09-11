@@ -176,12 +176,12 @@ function lakeRects(a){
   }
 
   // ---------- HOSPITAL ----------
-  let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
+let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
 
-  // === Hearts/coins helpers wired to your existing plugins ===
-  const HEARTS_LS_KEY = 'izzaCurHeartSegments';
-  function _heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
-  function _getSegs(){
+// === Hearts/coins helpers wired to your existing plugins ===
+const HEARTS_LS_KEY = 'izzaCurHeartSegments';
+function _heartsMax(){ const p=IZZA.api?.player||{}; return p.maxHearts||p.heartsMax||3; }
+function _getSegs(){
   const max = _heartsMax() * 3;
 
   // Read saved value FIRST
@@ -203,15 +203,43 @@ function lakeRects(a){
   // Default: full
   return max;
 }
-  function _setSegs(v){
-    const p=IZZA.api?.player||{};
-    const max = _heartsMax()*3;
-    const seg = Math.max(0, Math.min(max, v|0));
-    p.heartSegs = seg;
-    localStorage.setItem(HEARTS_LS_KEY, String(seg));
-    _redrawHeartsHud();
-  }
-  // ---- keep hydrate snapshot in sync so reloads don't revert hearts ----
+
+// NEW: keep per-user mirrors/snapshot in sync whenever hearts change
+function _commitHeartsSnapshot(seg){
+  try{
+    const u = (IZZA?.api?.user?.username || 'guest')
+                .toString().replace(/^@+/, '').toLowerCase();
+
+    // namespaced LS (some parts of your stack read this)
+    localStorage.setItem(`${HEARTS_LS_KEY}_${u}`, String(seg));
+
+    // update the "lastGood" snapshot used by hydrate
+    const lgKey = `izzaBankLastGood_${u}`;
+    let lg = {};
+    try { lg = JSON.parse(localStorage.getItem(lgKey) || '{}') || {}; } catch {}
+    lg.player = lg.player || {};
+
+    // write both: correct key (singular) and compat duplicate
+    lg.player.heartSegs  = seg;
+    lg.player.heartsSegs = seg;
+
+    localStorage.setItem(lgKey, JSON.stringify(lg));
+  } catch {}
+}
+
+function _setSegs(v){
+  const p=IZZA.api?.player||{};
+  const max = _heartsMax()*3;
+  const seg = Math.max(0, Math.min(max, v|0));
+  p.heartSegs = seg;
+  localStorage.setItem(HEARTS_LS_KEY, String(seg));
+
+  _commitHeartsSnapshot(seg);                 // <-- ensure persistence across reloads
+  _redrawHeartsHud();
+  try { window.dispatchEvent(new Event('izza-hearts-changed')); } catch {}
+}
+
+// ---- keep hydrate snapshot in sync so reloads don't revert hearts ----
 try {
   const u = (IZZA?.api?.user?.username || 'guest')
               .toString().replace(/^@+/, '').toLowerCase();
@@ -225,20 +253,23 @@ try {
   let lg = {};
   try { lg = JSON.parse(localStorage.getItem(lgKey) || '{}') || {}; } catch {}
   lg.player = lg.player || {};
-  lg.player.heartsSegs = segs;
+  // write both keys here too (seed path)
+  lg.player.heartSegs  = segs;   // corrected field
+  lg.player.heartsSegs = segs;   // backward-compat
   localStorage.setItem(lgKey, JSON.stringify(lg));
 } catch {}
-    function _syncHeartsFromStorageToPlayer(){
-    // Just mirror LS → player once; no listeners/tickers in here
-    try {
-      const seg = _getSegs();                 // LS-first
-      const p = IZZA.api?.player || {};
-      if ((p.heartSegs|0) !== (seg|0)) {
-        p.heartSegs = seg;
-        _redrawHeartsHud?.();
-      }
-    } catch {}
-  }
+
+function _syncHeartsFromStorageToPlayer(){
+  // Just mirror LS → player once; no listeners/tickers in here
+  try {
+    const seg = _getSegs();                 // LS-first
+    const p = IZZA.api?.player || {};
+    if ((p.heartSegs|0) !== (seg|0)) {
+      p.heartSegs = seg;
+      _redrawHeartsHud?.();
+    }
+  } catch {}
+}
 
 // ---- moved OUTSIDE the function (singletons) ----
 
@@ -295,60 +326,62 @@ setTimeout(_syncHeartsFromStorageToPlayer, 0);
 
 // and every time hearts change (hospitalBuy already dispatches this)
 window.addEventListener('izza-hearts-changed', _syncHeartsFromStorageToPlayer);
-  function _redrawHeartsHud(){
-    const hud = document.getElementById('heartsHud'); if(!hud) return;
-    const maxH=_heartsMax(), seg=_getSegs();
-    const PATH='M12 21c-.5-.5-4.9-3.7-7.2-6C3 13.2 2 11.6 2 9.7 2 7.2 4 5 6.6 5c1.6 0 3 .8 3.8 2.1C11.2 5.8 12.6 5 14.2 5 16.8 5 19 7.2 19 9.7c0 1.9-1 3.5-2.8 5.3-2.3 2.3-6.7 5.5-7.2 6Z';
-    const NS='http://www.w3.org/2000/svg';
-    hud.innerHTML='';
-    for(let i=0;i<maxH;i++){
-      const s=Math.max(0,Math.min(3,seg - i*3)), ratio=s/3;
-      const svg=document.createElementNS(NS,'svg');
-      svg.setAttribute('viewBox','0 0 24 22'); svg.setAttribute('width','24'); svg.setAttribute('height','22');
-      const base=document.createElementNS(NS,'path'); base.setAttribute('d',PATH); base.setAttribute('fill','#3a3f4a'); svg.appendChild(base);
-      const cid='hclip_'+Math.random().toString(36).slice(2);
-      const clip=document.createElementNS(NS,'clipPath'); clip.setAttribute('id',cid);
-      const r=document.createElementNS(NS,'rect'); r.setAttribute('x','0'); r.setAttribute('y','0'); r.setAttribute('width',String(24*Math.max(0,Math.min(1,ratio)))); r.setAttribute('height','22');
-      clip.appendChild(r); svg.appendChild(clip);
-      const red=document.createElementNS(NS,'path'); red.setAttribute('d',PATH); red.setAttribute('fill','#ff5555'); red.setAttribute('clip-path',`url(#${cid})`);
-      svg.appendChild(red);
-      const wrap=document.createElement('div'); wrap.style.width='24px'; wrap.style.height='22px'; wrap.appendChild(svg); hud.appendChild(wrap);
-    }
+
+function _redrawHeartsHud(){
+  const hud = document.getElementById('heartsHud'); if(!hud) return;
+  const maxH=_heartsMax(), seg=_getSegs();
+  const PATH='M12 21c-.5-.5-4.9-3.7-7.2-6C3 13.2 2 11.6 2 9.7 2 7.2 4 5 6.6 5c1.6 0 3 .8 3.8 2.1C11.2 5.8 12.6 5 14.2 5 16.8 5 19 7.2 19 9.7c0 1.9-1 3.5-2.8 5.3-2.3 2.3-6.7 5.5-7.2 6Z';
+  const NS='http://www.w3.org/2000/svg';
+  hud.innerHTML='';
+  for(let i=0;i<maxH;i++){
+    const s=Math.max(0,Math.min(3,seg - i*3)), ratio=s/3;
+    const svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 24 22'); svg.setAttribute('width','24'); svg.setAttribute('height','22');
+    const base=document.createElementNS(NS,'path'); base.setAttribute('d',PATH); base.setAttribute('fill','#3a3f4a'); svg.appendChild(base);
+    const cid='hclip_'+Math.random().toString(36).slice(2);
+    const clip=document.createElementNS(NS,'clipPath'); clip.setAttribute('id',cid);
+    const r=document.createElementNS(NS,'rect'); r.setAttribute('x','0'); r.setAttribute('y','0'); r.setAttribute('width',String(24*Math.max(0,Math.min(1,ratio)))); r.setAttribute('height','22');
+    clip.appendChild(r); svg.appendChild(clip);
+    const red=document.createElementNS(NS,'path'); red.setAttribute('d',PATH); red.setAttribute('fill','#ff5555'); red.setAttribute('clip-path',`url(#${cid})`);
+    svg.appendChild(red);
+    const wrap=document.createElement('div'); wrap.style.width='24px'; wrap.style.height='22px'; wrap.appendChild(svg); hud.appendChild(wrap);
   }
+}
 window._redrawHeartsHud = _redrawHeartsHud;
-  // Create a simple popup the first time we need it
-  function ensureShopUI(){
-    if(document.getElementById('hospitalShop')) return;
-    const d=document.createElement('div');
-    d.id='hospitalShop';
-    d.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:50;';
-    d.innerHTML =
-      `<div style="min-width:260px;background:#111b29;border:1px solid #2b3b57;border-radius:10px;padding:14px;color:#e7eef7;box-shadow:0 10px 30px rgba(0,0,0,.5)">
-         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-           <strong style="font-size:16px">Hospital</strong>
-           <button id="hsClose" style="background:#263447;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
-         </div>
-         <div id="hsCoins" style="opacity:.85;margin-bottom:8px"></div>
-         <button id="hsBuy" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:600;cursor:pointer">
-           ❤️ Heart Refill — 100 IC
-         </button>
-       </div>`;
-    document.body.appendChild(d);
-    d.querySelector('#hsClose').onclick = ()=> hospitalClose();
-    d.querySelector('#hsBuy').onclick   = ()=> hospitalBuy();
-  }
-  function hospitalOpen(){
-    ensureShopUI();
-    const api=IZZA.api; if(!api?.ready) return;
-    document.getElementById('hsCoins').textContent = `Coins: ${api.getCoins()} IC`;
-    document.getElementById('hospitalShop').style.display='flex';
-    _shopOpen=true;
-  }
-  function hospitalClose(){
-    const el=document.getElementById('hospitalShop'); if(el) el.style.display='none';
-    _shopOpen=false;
-  }
-  function hospitalBuy(){
+
+// Create a simple popup the first time we need it
+function ensureShopUI(){
+  if(document.getElementById('hospitalShop')) return;
+  const d=document.createElement('div');
+  d.id='hospitalShop';
+  d.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:50;';
+  d.innerHTML =
+    `<div style="min-width:260px;background:#111b29;border:1px solid #2b3b57;border-radius:10px;padding:14px;color:#e7eef7;box-shadow:0 10px 30px rgba(0,0,0,.5)">
+       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+         <strong style="font-size:16px">Hospital</strong>
+         <button id="hsClose" style="background:#263447;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
+       </div>
+       <div id="hsCoins" style="opacity:.85;margin-bottom:8px"></div>
+       <button id="hsBuy" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:600;cursor:pointer">
+         ❤️ Heart Refill — 100 IC
+       </button>
+     </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#hsClose').onclick = ()=> hospitalClose();
+  d.querySelector('#hsBuy').onclick   = ()=> hospitalBuy();
+}
+function hospitalOpen(){
+  ensureShopUI();
+  const api=IZZA.api; if(!api?.ready) return;
+  document.getElementById('hsCoins').textContent = `Coins: ${api.getCoins()} IC`;
+  document.getElementById('hospitalShop').style.display='flex';
+  _shopOpen=true;
+}
+function hospitalClose(){
+  const el=document.getElementById('hospitalShop'); if(el) el.style.display='none';
+  _shopOpen=false;
+}
+function hospitalBuy(){
   const api = IZZA.api;
   if (!api?.ready) return;
 
@@ -368,7 +401,7 @@ window._redrawHeartsHud = _redrawHeartsHud;
   api.setCoins(coins - 100);
   _setSegs(curSegs + gain);
 
-  // Persist hearts immediately so they survive reloads
+  // Persist hearts immediately so they survive reloads (redundant but fine)
   try { window.dispatchEvent(new Event('izza-hearts-changed')); } catch {}
 
   // Feedback + refresh the modal coins line
@@ -377,22 +410,22 @@ window._redrawHeartsHud = _redrawHeartsHud;
   if (hc) hc.textContent = `Coins: ${api.getCoins()} IC`;
 }
 
-  // ---------- INPUT: Button B opens the hospital (boat toggle removed) ----------
-  function onPressB(e){
-    const api=IZZA.api; if(!api?.ready) return;
+// ---------- INPUT: Button B opens the hospital (boat toggle removed) ----------
+function onPressB(e){
+  const api=IZZA.api; if(!api?.ready) return;
 
-    if(_hospitalDoor){
-      const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
-      const near = Math.abs(gx-_hospitalDoor.x)<=1 && Math.abs(gy-_hospitalDoor.y)<=1;
-      if(near){
-        if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
-        hospitalOpen();
-      }
+  if(_hospitalDoor){
+    const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+    const near = Math.abs(gx-_hospitalDoor.x)<=1 && Math.abs(gy-_hospitalDoor.y)<=1;
+    if(near){
+      if(e){ e.preventDefault?.(); e.stopImmediatePropagation?.(); e.stopPropagation?.(); }
+      hospitalOpen();
     }
   }
-  // capture-phase so we can preempt other B handlers when near the door
-  document.getElementById('btnB')?.addEventListener('click', onPressB, true);
-  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e); }, true);
+}
+// capture-phase so we can preempt other B handlers when near the door
+document.getElementById('btnB')?.addEventListener('click', onPressB, true);
+window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e); }, true);
 
   // ---------- RENDER UNDER ----------
   IZZA.on('render-under', ()=>{
