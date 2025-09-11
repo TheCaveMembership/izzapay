@@ -85,8 +85,8 @@
         bottom:auto !important;
         z-index:10045 !important;
       }
-      #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:12px;}
-      #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:4px;}
+      #izzaLandStage #mpNotifBell{position:absolute!important;right:14px;top:20px;}
+      #izzaLandStage #mpNotifBadge{position:absolute!important;right:6px;top:12px;}
 
 
       /* -------- BELL DROPDOWN: centered container (unrotated), rotated content -------- */
