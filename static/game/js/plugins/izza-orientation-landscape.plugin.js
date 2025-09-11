@@ -683,8 +683,7 @@ if (document.body.hasAttribute('data-fakeland')) {
 
 prevX = p.x; prevY = p.y;
 
-    prevX = p.x; prevY = p.y;
-  }
+    
     // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
   // Single calibration knob: pick one of -90, 90, 180, or 0
   const ROT_AIM_DEG = 0;
