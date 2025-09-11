@@ -501,7 +501,7 @@
         <form class="stack" id="deleteStoreForm" method="post" action="/merchant/{{ m.slug }}/delete{% if t %}?t={{ t }}{% endif %}">
           <input type="hidden" name="t" value="{{ t or '' }}">
           <!-- where to go after successful deletion -->
-          <input type="hidden" name="redirect" value="/pi_signin.html">
+          <input type="hidden" name="redirect" value="/signin?fresh=1">
           <label class="ip-label" style="display:flex;gap:8px;align-items:flex-start">
             <input type="checkbox" name="acknowledge" value="1" required>
             <span>I understand this action is permanent and I have cleaned current sales and processed delivery of any purchased physical items.</span>
@@ -774,13 +774,15 @@
         });
         // If server answers 200..299 we go home; if it replies JSON with redirect, honor it; else fallback path.
         if(r.ok){
-          let dest = fd.get('redirect') || '/pi_signin.html';
-          try {
-            const j = await r.clone().json();
-            if(j && j.redirect) dest = j.redirect;
-          } catch(_) {}
-          location.replace(dest);
-        }else{
+  let dest = '/signin?fresh=1';
+  try {
+    const j = await r.clone().json();
+    if (j && j.redirect) dest = j.redirect;
+  } catch(_) {}
+  // fall back to the form’s hidden redirect if present
+  if (!dest) dest = fd.get('redirect') || '/signin?fresh=1';
+  location.replace(dest);
+}else{
           // If server returns a redirect, follow it by letting the browser handle a normal submit:
           form.submit();
         }
