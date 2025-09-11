@@ -662,16 +662,32 @@ body:not([data-fakeland="1"]) #hospitalShop{
     if(mag < 0.0001 || singleAxis){ prevX=p.x; prevY=p.y; return; }
 
     // Rotate -90°: (x',y') = ( y, -x )
-    const fx =  dy;
-    const fy = -dx;
-    p.x = prevX + fx;
-    p.y = prevY + fy;
+const fx =  dy;
+const fy = -dx;
+
+// apply rotated movement
+p.x = prevX + fx;
+p.y = prevY + fy;
+
+// *** NEW: fix facing to match the rotated movement (Full view only) ***
+if (document.body.hasAttribute('data-fakeland')) {
+  const ax = Math.abs(fx), ay = Math.abs(fy);
+  if (ax > 0.0001 || ay > 0.0001) {
+    if (ax > ay) {
+      p.facing = (fx > 0) ? 'right' : 'left';
+    } else {
+      p.facing = (fy > 0) ? 'down' : 'up';
+    }
+  }
+}
+
+prevX = p.x; prevY = p.y;
 
     prevX = p.x; prevY = p.y;
   }
     // ===== ROTATED-FULL AIM (Full-only override; guns.js stays untouched) =====
   // Single calibration knob: pick one of -90, 90, 180, or 0
-  const ROT_AIM_DEG = 180;
+  const ROT_AIM_DEG = 0;
 
   function _rotVecQuick(x, y, deg){
     switch(((deg % 360) + 360) % 360){
