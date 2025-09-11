@@ -663,7 +663,7 @@ body:not([data-fakeland="1"]) #hospitalShop{
     const p = IZZA.api.player;
     if(prevX==null || prevY==null){ prevX=p.x; prevY=p.y; return; }
     const dx = p.x - prevX, dy = p.y - prevY;
-    const mag = Math.abs(dx)+Math.abs(dy);
+    
 
     // stronger wall-stick guard: ignore tiny or near-axis moves so we don't "slide" into walls
 const AXIS_EPS = 0.25;   // raise to be stricter (0.3–0.5)
