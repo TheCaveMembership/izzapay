@@ -1,28 +1,25 @@
-// v1.14 — boats beside dock (south), board-to-water snap, hide boarded boat,
-//          boating clamped to LAKE rectangle, NO walking on water,
-//          dock is logically 3 tiles thick (y, y-1, y-2) so you can walk it,
-//          and (gx,gy) position marker.
+// v1.16 — Tier-2 boats beside dock (south), board-to-water snap, hide boarded boat,
+//          clamp boating to lake rect, forbid walking on water in Tier 2,
+//          docks are logically 3 tiles thick (y, y-1, y-2) to allow walking,
+//          SVG boat rendering via Path2D.
 (function(){
-  const BUILD='v1.14-boat-plugin+dock-3wide';
+  const BUILD='v1.16-boat-plugin+tier2+svg';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
-  const isTier2 = ()=> localStorage.getItem(TIER_KEY)==='2';
+  const isTier2 = ()=> (localStorage.getItem(TIER_KEY)==='2');
 
-  // debug label toggle
-  window._izzaShowPos = (window._izzaShowPos!==false);
-
-  // let layout skip water-collisions while boating
+  // Let layout/colliders know when we’re boating (your expander/layout can skip solids then)
   function setBoatFlag(on){ window._izzaBoatActive = !!on; }
 
   // --- local state ---
   let api=null;
   let inBoat=false;
-  let ghostBoat=null;
+  let ghostBoat=null;     // visual boat that follows player while inBoat
   let lastLand=null, lastWater=null;
-  let claimedDockId=null;
+  let claimedDockId=null; // which dock’s parked boat to hide after boarding
 
-  // ====== geometry ======
+  // ====== geometry, anchored to the same unlock rect as your expander ======
   function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
   function anchors(a){
     const tier=localStorage.getItem(TIER_KEY)||'1';
@@ -36,6 +33,7 @@
     return {un,bX,bY,bW,bH,hRoadY,sidewalkTopY,vRoadX};
   }
   function lakeRects(a){
+    // Match your Tier-2 expander’s lake placement
     const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
     const BEACH_X = LAKE.x0 - 1; // vertical beach column
     const DOCKS = [
@@ -107,20 +105,6 @@
     return DOCKS.find(d => Math.abs(y - d.y) <= 2) || null;
   }
 
-  // Which dock are we on/adjacent to? (returns its row Y as the ID)
-  function nearestDockIdToPlayer(){
-    const {gx,gy}=playerGrid();
-    const {DOCKS}=lakeRects(anchors(api));
-    for(const d of DOCKS){
-      const tipX = d.x0 + d.len - 1;
-      // inside the 3-wide band and within x-span
-      if(Math.abs(gy - d.y) <= 2 && gx>=d.x0 && gx<=tipX) return d.y;
-      // a tile immediately left/right of the band
-      if(Math.abs(gy - d.y) <= 2 && (gx===d.x0-1 || gx===tipX+1)) return d.y;
-    }
-    return null;
-  }
-
   // Best land tile to snap to when leaving the boat
   function nearestDisembarkSpot(){
     const a=anchors(api), {LAKE,BEACH_X}=lakeRects(a);
@@ -142,7 +126,7 @@
 
   // ====== boarding / leaving ======
   function canBoardHere(){
-    if(!isTier2() || !api?.ready) return false;
+    if(!api?.ready || !isTier2()) return false; // boats only exist in Tier 2 (lake exists only in T2)
     const {gx,gy}=playerGrid();
     const docks=dockCells();
     if(docks.has(gx+'|'+gy)) return true; // on dock
@@ -222,6 +206,7 @@
     }
   });
 
+  // Also clamp in update-post for extra safety with other plugins
   function postClamp(){
     if(!api?.ready || !isTier2()) return;
     const p=api.player;
@@ -240,40 +225,58 @@
   setTimeout(()=> IZZA.on('update-post', postClamp), 0);
 
   // ====== visuals ======
+  // SVG boat path (simple skiff with bow). Drawn with Path2D on canvas.
+  // Coordinates normalized in a ~100x60 box and scaled to tile size.
+  const BOAT_PATH_D = "M5,40 L25,18 L75,18 L95,40 L75,58 L25,58 Z M25,18 L35,8 L65,8 L75,18 Z";
+  let BOAT_PATH = null;
+
+  function ensureBoatPath(){
+    if (!BOAT_PATH) {
+      try {
+        BOAT_PATH = new Path2D(BOAT_PATH_D);
+      } catch (e) {
+        // Fallback: construct path via Canvas commands if Path2D SVG ctor not supported
+        const p = new Path2D();
+        p.moveTo(5,40); p.lineTo(25,18); p.lineTo(75,18); p.lineTo(95,40); p.lineTo(75,58); p.lineTo(25,58); p.closePath();
+        p.moveTo(25,18); p.lineTo(35,8); p.lineTo(65,8); p.lineTo(75,18); p.closePath();
+        BOAT_PATH = p;
+      }
+    }
+  }
+
+  function drawBoat(ctx, sx, sy, size){
+    // size ~ tile in screen px
+    ensureBoatPath();
+    ctx.save();
+    ctx.translate(sx, sy);
+    const scale = size / 64; // nice scale relative to tile
+    ctx.scale(scale, scale);
+    ctx.translate(-32, -32); // center path
+    // Hull
+    ctx.fillStyle = '#6b4a2f';
+    ctx.fill(BOAT_PATH);
+    // Rim / outline
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.stroke(BOAT_PATH);
+    // Deck highlight
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(20,22,60,10);
+    ctx.restore();
+  }
+
   function drawParkedDockBoats(ctx){
     const {DOCKS}=lakeRects(anchors(api));
     const S=api.DRAW, t=T();
 
-    ctx.save();
-    ctx.fillStyle='#7ca7c7';
     DOCKS.forEach(d=>{
       if(inBoat && claimedDockId===d.y) return; // hide the boat we took
       const spot = parkedSpotForDock(d);        // SOUTH (under plank)
-      const sx = (spot.gx*t - api.camera.x) * (S/t);
-      const sy = (spot.gy*t - api.camera.y) * (S/t);
-      ctx.fillRect(sx+S*0.18, sy+S*0.34, S*0.64, S*0.32);
+      const sx = (spot.gx*t - api.camera.x) * (S/t) + S*0.5;
+      const sy = (spot.gy*t - api.camera.y) * (S/t) + S*0.62;
+      drawBoat(ctx, sx, sy, S*0.90);
     });
-    ctx.restore();
-  }
-
-  function drawPlayerPosMarker(ctx){
-    if(!window._izzaShowPos) return;
-    const S=api.DRAW, t=T();
-    const gx=centerGX(), gy=centerGY();
-    const sx=(gx*t - api.camera.x)*(S/t);
-    const sy=(gy*t - api.camera.y)*(S/t);
-
-    ctx.save();
-    ctx.fillStyle='rgba(80,220,255,0.25)';
-    ctx.fillRect(sx+2, sy+2, S-4, S-4);
-    ctx.font='12px monospace';
-    ctx.fillStyle='#aef';
-    ctx.strokeStyle='rgba(0,0,0,0.6)';
-    ctx.lineWidth=3;
-    const label=`${gx},${gy}`;
-    ctx.strokeText(label, sx+S*0.10, sy-6);
-    ctx.fillText(label,   sx+S*0.10, sy-6);
-    ctx.restore();
   }
 
   IZZA.on('render-post', ()=>{
@@ -283,11 +286,11 @@
 
     if(inBoat && ghostBoat){
       const S=api.DRAW, t=T();
-      const sx=(ghostBoat.x - api.camera.x)*(S/t);
-      const sy=(ghostBoat.y - api.camera.y)*(S/t);
-      ctx.fillStyle='#7ca7c7';
-      ctx.fillRect(sx+S*0.18, sy+S*0.34, S*0.64, S*0.32);
+      const sx=(ghostBoat.x - api.camera.x)*(S/t) + S*0.5;
+      const sy=(ghostBoat.y - api.camera.y)*(S/t) + S*0.62;
+      drawBoat(ctx, sx, sy, S*0.90);
     }
+  });
 
   // ====== boot ======
   IZZA.on('ready', (a)=>{
