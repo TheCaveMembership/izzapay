@@ -1,186 +1,140 @@
-// safety_island_and_rescue.js
-// - Blocks the unwanted "B → city dock" warp when on/near island land
-// - Auto-teleports the player to HQ door if stuck/off-bounds/invisible
+// v3 — island docking shim + HQ rescue
 (function(){
-  const TIER_KEY = 'izzaMapTier';
+  const TAG='[island-dock+rescue]';
+  const log=(...a)=>{ try{ console.log(TAG, ...a);}catch{} };
 
-  function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
-  function anchors(api){
-    const tier = localStorage.getItem(TIER_KEY)||'1';
-    const un = unlockedRect(tier);
-    const bW=10,bH=6;
-    const bX = Math.floor((un.x0+un.x1)/2) - Math.floor(bW/2);
-    const bY = un.y0 + 5;
-    const hRoadY       = bY + bH + 1;
-    const sidewalkTopY = hRoadY - 1;
-    const vRoadX       = Math.min(un.x1-3, bX + bW + 6);
-    const door = { gx: bX + Math.floor(bW/2), gy: sidewalkTopY }; // HQ door (Tier-1)
-    return {un, door, vRoadX, hRoadY, sidewalkTopY};
-  }
+  const getAPI = ()=> (window.IZZA && IZZA.api && IZZA.api.ready) ? IZZA.api : null;
+  const gxOf = (api)=> ((api.player.x + 16)/api.TILE|0);
+  const gyOf = (api)=> ((api.player.y + 16)/api.TILE|0);
 
-  // --- Helper: get player grid coords quickly
-  function pg(api){
-    const t=api.TILE;
-    return {
-      gx: ((api.player.x+16)/t|0),
-      gy: ((api.player.y+16)/t|0)
-    };
-  }
+  // ---------- ISLAND EDGE TEST ----------
+  function nearIslandEdge(api){
+    const S = window._izzaIslandLand;
+    if(!S || !S.size) return null;
+    const gx=gxOf(api), gy=gyOf(api);
 
-  // --- 1) Stop the “B at island sometimes → city dock” mis-detection
-  // We capture B before other listeners. If you’re standing on island tiles
-  // (or adjacent), we swallow the event so no city-dock warp handler can run.
-  function nearIslandLand(api){
-    try{
-      if(!window._izzaIslandLand) return false;
-      const {gx,gy} = pg(api);
-      if (window._izzaIslandLand.has(gx+'|'+gy)) return true;
-      // also treat 4-neighborhood as "near island"
-      return (
-        window._izzaIslandLand.has((gx-1)+'|'+gy) ||
-        window._izzaIslandLand.has((gx+1)+'|'+gy) ||
-        window._izzaIslandLand.has(gx+'|'+(gy-1)) ||
-        window._izzaIslandLand.has(gx+'|'+(gy+1))
-      );
-    }catch{ return false; }
-  }
-
-  function swallowBIfOnIsland(e){
-    try{
-      const api = IZZA?.api;
-      if(!api?.ready) return;
-      if(nearIslandLand(api)){
-        // If some other plugin relies on B here, DO NOT run it; we only block
-        // the accidental city-dock handler by killing the event fully.
-        e?.preventDefault?.();
-        e?.stopImmediatePropagation?.();
-        e?.stopPropagation?.();
+    // if you're in water, check a 1-tile ring for land = a shoreline spot to drop onto
+    let target=null;
+    for(let dy=-1; dy<=1; dy++){
+      for(let dx=-1; dx<=1; dx++){
+        const key=(gx+dx)+'|'+(gy+dy);
+        if(S.has(key)){ target = {gx:gx+dx, gy:gy+dy}; break; }
       }
-    }catch{}
+      if(target) break;
+    }
+    return target; // null if not adjacent to island land
   }
 
-  // capture-phase → we beat everyone else
-  document.getElementById('btnB')?.addEventListener('click', swallowBIfOnIsland, true);
-  window.addEventListener('keydown', e=>{
-    if ((e.key||'').toLowerCase()==='b') swallowBIfOnIsland(e);
-  }, true);
+  // ---------- B INTERCEPTOR (capture) ----------
+  function onB(ev){
+    const api=getAPI(); if(!api) return;
+    // only care when boating
+    if(!window._izzaBoatActive) return;
 
-  // --- 2) Auto-rescue if player gets stuck/invisible/under-map
+    const t = nearIslandEdge(api);
+    if(!t) return;
 
-  // Config is conservative; tweak if needed.
-  const CHECK_MS        = 400;   // watchdog cadence
-  const STUCK_SECONDS   = 4.5;   // how long with no real movement → rescue
-  const MIN_MOVE_TILES  = 0.20;  // anything less is “not moving”
-  const OFF_BOUNDS_PAD  = 2;     // small pad outside unlocked rect counts off-bounds
+    // We are boating and adjacent to island land: undock here, not at city.
+    ev?.preventDefault?.(); ev?.stopImmediatePropagation?.(); ev?.stopPropagation?.();
 
-  // We track last *safe* spot (on-screen, in-bounds). If we go off-bounds or
-  // don’t move for STUCK_SECONDS we teleport to HQ door (in front of it).
-  let _lastPos   = { x:0, y:0, gx:0, gy:0, t:0 };
-  let _lastSafe  = null;
+    try{
+      // place the player cleanly on the target land tile
+      const T=api.TILE;
+      api.player.x = t.gx * T;
+      api.player.y = t.gy * T;
 
-  function now(){ return performance.now?.() || Date.now(); }
+      // turn boat OFF (your water collision guard uses this flag)
+      window._izzaBoatActive = false;
 
-  function inWorldBounds(a, gx, gy){
-    return gx >= (a.un.x0 - OFF_BOUNDS_PAD) &&
-           gx <= (a.un.x1 + OFF_BOUNDS_PAD) &&
-           gy >= (a.un.y0 - OFF_BOUNDS_PAD) &&
-           gy <= (a.un.y1 + OFF_BOUNDS_PAD);
+      // let anyone else know we docked locally
+      try{ window.dispatchEvent(new Event('izza-boat-off')); }catch{}
+
+      // small feedback
+      if(window.IZZA?.toast) IZZA.toast('Docked at island');
+      log('Docked at island @', t.gx, t.gy);
+    }catch(e){ log('dock fail',e); }
   }
 
-  function distanceTiles(ax, ay, bx, by, tile){
-    const dx = (ax - bx) / tile;
-    const dy = (ay - by) / tile;
-    return Math.hypot(dx, dy);
+  function armB(){
+    const btnB = document.getElementById('btnB');
+    if(btnB){
+      // capture so we preempt boat’s default B handler that would snap to city dock
+      btnB.addEventListener('click', onB, true);
+    }
+    window.addEventListener('keydown', e=>{
+      if((e.key||'').toLowerCase()==='b') onB(e);
+    }, true);
   }
 
-  function closeOverlays(){
-    // Best-effort: close common UIs that could be trapping input/visibility
-    ['hospitalShop','bankUI','bigmapWrap','tradeModal'].forEach(id=>{
-      const el = document.getElementById(id);
-      if (el && el.style) el.style.display = 'none';
-    });
-    IZZA.inputBlocked = false;
+  // ---------- STUCK RESCUE WATCHER ----------
+  // Teleport to HQ door if position is invalid/off-grid or motionless in a bad spot for >2s
+  function hqDoor(){
+    try{
+      const tier = localStorage.getItem('izzaMapTier')||'1';
+      const un=(tier!=='2')?{x0:18,y0:18,x1:72,y1:42}:{x0:10,y0:12,x1:80,y1:50};
+      const bW=10,bH=6;
+      const bX = Math.floor((un.x0+un.x1)/2)-Math.floor(bW/2);
+      const bY = un.y0 + 5;
+      const hRoadY = bY + bH + 1;
+      return { gx: bX + Math.floor(bW/2), gy: hRoadY - 1 };
+    }catch{ return {gx:45,gy:28}; }
   }
-
   function teleportToHQ(){
-    try{
-      const api = IZZA.api; if(!api?.ready) return;
-      const A = anchors(api);
-      const t = api.TILE;
-
-      // South of the HQ door so you’re on the sidewalk, not *inside* the door
-      const tx = (A.door.gx)*t;
-      const ty = (A.door.gy+1)*t - 1;
-
-      // Exit boat if somehow active
-      if (window._izzaBoatActive) window._izzaBoatActive = false;
-
-      // Restore player + camera; engine will reconcile camera on next tick anyway
-      api.player.x = tx;
-      api.player.y = ty;
-
-      closeOverlays();
-
-      // Toast + event hook for analytics if you want
-      IZZA.toast?.('Oops, you got stuck — teleported to HQ!');
-      try { window.dispatchEvent(new Event('izza-rescued')); } catch {}
-    }catch(e){ console.warn('[rescue] teleport failed', e); }
+    const api=getAPI(); if(!api) return;
+    const d=hqDoor(), T=api.TILE;
+    api.player.x = d.gx * T;
+    api.player.y = d.gy * T;
+    window._izzaBoatActive = false;
+    if(window.IZZA?.toast) IZZA.toast('Oops, you got stuck — back to HQ!');
+    try{ window.dispatchEvent(new Event('izza-rescued')); }catch{}
+    log('Rescued to HQ @', d.gx, d.gy);
   }
 
-  function watchdog(){
-    try{
-      const api = IZZA?.api; if(!api?.ready) return;
-      const t = api.TILE, A = anchors(api);
-      const {gx,gy} = pg(api);
+  let lastGood={x:0,y:0,t:0};
+  const WAIT_MS=2000;
 
-      // record lastSafe whenever squarely in world bounds
-      if (inWorldBounds(A, gx, gy)){
-        _lastSafe = { x: api.player.x, y: api.player.y, gx, gy, t: now() };
-      }
+  IZZA?.on?.('update-post', ()=>{
+    const api=getAPI(); if(!api) return;
+    const gx=gxOf(api), gy=gyOf(api);
 
-      // Disappeared / NaN guard
-      if (!isFinite(api.player.x) || !isFinite(api.player.y)){
-        teleportToHQ(); return;
-      }
+    // screen/world bounds (90×60 grid in your overlay painter)
+    const offGrid = (gx<0 || gx>89 || gy<0 || gy>59);
 
-      // Walked under map / off-bounds (common when collisions fail)
-      if (!inWorldBounds(A, gx, gy)){
-        teleportToHQ(); return;
-      }
+    // illegal water-on-foot: if not boating and standing on water (that’s never allowed by your rules)
+    const onWaterFoot = (!window._izzaBoatActive) && (function(){
+      // reuse your lake bounds if available
+      const L = (window.__IZZA_LAST_LAYOUT__ && window.__IZZA_LAST_LAYOUT__.LAKE) || null;
+      if(!L) return false;
+      const inLake = (gx>=L.x0 && gx<=L.x1 && gy>=L.y0 && gy<=L.y1);
+      if(!inLake) return false;
+      // island tiles are allowed (not water visually, but painted over water); treat island set as safe
+      if(window._izzaIslandLand && window._izzaIslandLand.has(gx+'|'+gy)) return false;
+      return true;
+    })();
 
-      // Invisible heuristic: DOM sprite hidden or tiny alpha (best effort)
-      const sprite = document.getElementById('playerSprite') || document.querySelector('[data-player-sprite]');
-      if (sprite && (sprite.style?.display==='none' || sprite.style?.visibility==='hidden' || Number(sprite.style?.opacity||'1') < 0.1)){
-        teleportToHQ(); return;
-      }
+    // motion check (don’t trigger while actually moving)
+    const px = api.player.x|0, py = api.player.y|0, now = performance.now?.()||Date.now();
+    const sameSpot = (px===lastGood.x && py===lastGood.y);
 
-      // Not moving for a while (but input isn’t blocked by our UIs)
-      const dTiles = distanceTiles(api.player.x, api.player.y, _lastPos.x, _lastPos.y, t);
-      const dt = now() - _lastPos.t;
-      const stale = (dTiles < MIN_MOVE_TILES) && (dt >= STUCK_SECONDS*1000);
+    if(!offGrid && !onWaterFoot && !sameSpot){
+      lastGood = {x:px, y:py, t:now};
+      return;
+    }
 
-      // If they’re “stale” or previously flagged bad, rescue
-      if (stale){
-        teleportToHQ(); return;
-      }
+    // wait a bit in a bad state, then rescue
+    const since = now - lastGood.t;
+    if(since >= WAIT_MS){
+      teleportToHQ();
+      lastGood = {x:api.player.x|0, y:api.player.y|0, t:performance.now?.()||Date.now()};
+    }
+  });
 
-      // advance lastPos
-      _lastPos = { x: api.player.x, y: api.player.y, gx, gy, t: now() };
-
-    }catch(e){ /* keep going next tick */ }
+  // Arm once DOM is ready enough to find B
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', armB, {once:true});
+  } else {
+    armB();
   }
 
-  // Seed baselines fast after boot
-  setTimeout(()=>{ try{
-    if(!IZZA?.api?.ready) return;
-    const {gx,gy} = pg(IZZA.api);
-    _lastPos = { x: IZZA.api.player.x, y: IZZA.api.player.y, gx, gy, t: now() };
-    _lastSafe = { x: IZZA.api.player.x, y: IZZA.api.player.y, gx, gy, t: now() };
-  }catch{} }, 0);
-
-  // Run watchdog on a timer (decoupled from render/update cadence)
-  setInterval(watchdog, CHECK_MS);
-
-  // Optional: expose manual rescue for QA
-  window.IZZA_RESCUE = teleportToHQ;
+  log('armed');
 })();
