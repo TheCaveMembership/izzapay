@@ -679,14 +679,53 @@ function setHearts(n){
   function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
 
-  function svgIcon(id, w=24, h=24){
-    if(id==='bat') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
-    if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
-    if(id==='pistol') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
-    if(id==='uzi') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
-    if(id==='grenade') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
-    return '';
+  function svgIcon(id, w, h){
+  if (id === 'pistol') {
+    return `<svg ...>...</svg>`;
   }
+  if (id === 'uzi') {
+    return `<svg ...>...</svg>`;
+  }
+  if (id === 'grenade') {
+    return `<svg ...>...</svg>`;
+  }
+
+  // --- NEW: Cardboard Box ---
+  if (id === 'cardboard_box') {
+    // compact 3D-ish cardboard box (looks good at 24–28px)
+    return `
+    <svg viewBox="0 0 48 48" width="${w||24}" height="${h||24}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="cb1" x1="0" x2="1">
+          <stop offset="0"  stop-color="#C79A5A"/>
+          <stop offset="1"  stop-color="#9B7441"/>
+        </linearGradient>
+        <linearGradient id="cb2" x1="0" x2="1">
+          <stop offset="0"  stop-color="#D4AF78"/>
+          <stop offset="1"  stop-color="#B3874E"/>
+        </linearGradient>
+      </defs>
+      <!-- bottom/front -->
+      <path d="M6 18 L24 10 L42 18 L24 26 Z" fill="url(#cb1)" />
+      <!-- left wall -->
+      <path d="M6 18 L6 30 L24 38 L24 26 Z" fill="#B5874C"/>
+      <!-- right wall -->
+      <path d="M42 18 L42 30 L24 38 L24 26 Z" fill="#A8793F"/>
+      <!-- flaps -->
+      <path d="M6 18 L24 10 L24 14 L6 22 Z" fill="url(#cb2)"/>
+      <path d="M42 18 L24 10 L24 14 L42 22 Z" fill="url(#cb2)"/>
+      <!-- tape -->
+      <rect x="22.8" y="10" width="2.4" height="28" fill="#E8DEB6" opacity="0.9"/>
+      <!-- tiny print -->
+      <g stroke="#6A4B24" stroke-width="1" opacity="0.85">
+        <path d="M14 27 l3 -3" />
+        <path d="M34 27 l-3 -3" />
+      </g>
+    </svg>`;
+  }
+
+  // ... other icons or a default ...
+}
 
   // Shop / Tutorial handlers (kept)
   function openShop(){
@@ -858,6 +897,11 @@ function setHearts(n){
     if(inv.grenade && (inv.grenade.count|0) > 0){
       rows.push(readOnlyRow('grenade','Grenades', `Count: ${inv.grenade.count|0}`));
     }
+    // --- Cardboard Box (stackable) ---
+if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
+  rows.push(readOnlyRow('cardboard_box', 'Cardboard Box',
+    `Count: ${inv.cardboard_box.count|0}`));
+}
 
     host.innerHTML = `
       <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
