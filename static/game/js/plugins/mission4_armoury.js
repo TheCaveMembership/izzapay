@@ -153,7 +153,12 @@
     try{ window._izzaBoat?.embarkFromLand?.('island'); }catch{}
     try{ IZZA.boat?.embarkFromLand?.('island'); }catch{}
   }
-
+// ---- box prompt shim (so B always works even if your main UI isn't loaded) ----
+function showBoxYesNo(fn){
+  if (typeof window.showBoxYesNo === 'function') return window.showBoxYesNo(fn);
+  // fallback prompt
+  if (window.confirm?.('Pick up the Cardboard Box?')) fn?.();
+}
   // ===== B actions =====
   function onB(e){
   if (!api?.ready) return;
@@ -165,7 +170,16 @@
   // Pull the island geometry & dock that the expander publishes
   const ISLAND = window.__IZZA_ARMOURY__?.island || null;
   const DOCK   = window.__IZZA_ISLAND_DOCK__   || null;
-  const DOOR   = window.__IZZA_ARMOURY__?.door   || null;
+  const DOOR   = window.__IZZA_ARMOURY__?.door || null;
+
+  // helper: snap the player to the dock's WATER tile before embarking
+  function snapPlayerToDockWater(){
+    const w = DOCK?.water || (ISLAND ? { x: ISLAND.x0-1, y: ((ISLAND.y0+ISLAND.y1)>>1) } : null);
+    if (!w) return;
+    // small bias so we're clearly inside that tile
+    api.player.x = w.x * t + 4;
+    api.player.y = w.y * t + 4;
+  }
 
   // (A) Allow embark ONLY at the island dock (sand, water, or adjacent to the water tile)
   if (DOCK) {
@@ -177,7 +191,9 @@
 
     if (onSand || onWater || adjToWater) {
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      localStorage.removeItem(RETURN_TO_BOAT_FLAG);       // clear one-shot if still set
+      // Fix: ensure boat spawns on WATER, not sand
+      snapPlayerToDockWater();
+      localStorage.removeItem(RETURN_TO_BOAT_FLAG); // clear one-shot if still set
       requestBoatEmbarkFromIsland();
       return;
     }
@@ -190,6 +206,8 @@
       gy >= ISLAND.y0 && gy <= ISLAND.y1;
     if (onIslandSand){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      // Fix: same snap so the boat isn't stuck in sand
+      snapPlayerToDockWater();
       localStorage.removeItem(RETURN_TO_BOAT_FLAG);
       requestBoatEmbarkFromIsland();
       return;
