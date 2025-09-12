@@ -11,6 +11,8 @@
 
   let api=null;
   const LS_KEYS = { mission4:'izzaMission4', armour:'izzaArmour' };
+  // NEW: persistence flag so the world box disappears after pickup
+  const BOX_TAKEN_KEY = 'izzaBoxTaken';
 
   // ===== geometry =====
   function unlockedRect(t){ return (t!=='2')?{x0:18,y0:18,x1:72,y1:42}:{x0:10,y0:12,x1:80,y1:50}; }
@@ -187,11 +189,14 @@
     // palm tree in NW corner of island
     drawPalm(ctx, sx(ISLAND.x0)+S*0.7, sy(ISLAND.y0)+S*0.9, S);
 
-    // cardboard box near HQ
-    const b=cardboardBoxGrid();
-    const bx=(b.x*t - api.camera.x)*(S/t) + S*0.5;
-    const by=(b.y*t - api.camera.y)*(S/t) + S*0.6;
-    draw3DBox(ctx, bx, by, S);
+    // cardboard box near HQ (only if not already taken)
+    const taken = localStorage.getItem(BOX_TAKEN_KEY) === '1';
+    if(!taken){
+      const b=cardboardBoxGrid();
+      const bx=(b.x*t - api.camera.x)*(S/t) + S*0.5;
+      const by=(b.y*t - api.camera.y)*(S/t) + S*0.6;
+      draw3DBox(ctx, bx, by, S);
+    }
 
     ctx.restore();
   }
@@ -235,16 +240,21 @@
     if(!api?.ready) return;
     const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
-    // Box pickup: dialog with Yes/No; adds to inventory on Yes
+    // Box pickup: dialog with Yes/No; adds to inventory on Yes; disappears afterward
     const box=cardboardBoxGrid();
-    if(gx===box.x && gy===box.y){
+    const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
+    if(boxStillThere && gx===box.x && gy===box.y){
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
       if(getM4()==='not-started') setM4('started');
       showBoxYesNo(()=>{
         const inv=getInv();
         addCount(inv,'cardboard_box',1);
         setInv(inv); // persists + inventory UI refresh
-        IZZA.toast?.('Picked up a Cardboard Box');
+
+        // make the world sprite disappear permanently (until you reset this flag)
+        localStorage.setItem(BOX_TAKEN_KEY, '1');
+
+        IZZA.toast?.('Cardboard Box added to Inventory');
       });
       return;
     }
