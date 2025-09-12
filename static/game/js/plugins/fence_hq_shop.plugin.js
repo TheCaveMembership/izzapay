@@ -93,11 +93,11 @@
       const {x0,y0,x1,y1} = rect;
 
       // WEST
-      out.push({ kind:'v', b:bTag, side:'W', x:(x0 - OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t });
+      out.push({ kind:'v', b:bTag, side:'W', x:(x0 - OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t, nx:-1, ny:0 });
       // EAST
-      out.push({ kind:'v', b:bTag, side:'E', x:(x1+1 + OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t });
+      out.push({ kind:'v', b:bTag, side:'E', x:(x1+1 + OFFSET_TILES)*t, y0:y0*t, y1:(y1+1)*t, nx:1, ny:0 });
       // NORTH (back)
-      out.push({ kind:'h', b:bTag, side:'N', y:(y0 - OFFSET_TILES)*t, x0:x0*t, x1:(x1+1)*t });
+      out.push({ kind:'h', b:bTag, side:'N', y:(y0 - OFFSET_TILES)*t, x0:x0*t, x1:(x1+1)*t, nx:0, ny:-1 });
     }
 
     addRectWestEastNorth(HQ, 'HQ');
@@ -168,6 +168,221 @@
     return px >= r.x0 && px <= r.x1 && py >= r.y0 && py <= r.y1;
   }
 
+  /* =========================
+     SEASONAL DECOR ADDITIONS
+     (drawn in the SAME pass, SAME ctx, SAME scale as the fence)
+     ========================= */
+
+  // -- season / rng
+  function __seasonTag(now=new Date()){
+    const m=now.getMonth()+1, d=now.getDate(), md=m*100+d;
+    if (md>=920 && md<=1031) return 'halloween';  // Sep 20–Oct 31
+    if (md>=1201 && md<=1226) return 'christmas'; // Dec 1–26
+    if (m===12||m===1||m===2) return 'winter';
+    if (m>=3&&m<=5) return 'spring';
+    if (m>=6&&m<=8) return 'summer';
+    return 'fall';
+  }
+  function __rng(seed){ let s=0; for(let i=0;i<seed.length;i++) s=(s*131+seed.charCodeAt(i))>>>0; return ()=> (s=(1103515245*s+12345)>>>0)/0xffffffff; }
+
+  // -- tiny vector sprites (sizes in SCREEN PX; we compute from api.DRAW)
+  function __leaf(ctx, sx, sy, size){
+    const s=size/24; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    const P=new Path2D('M0,-18 C10,-10 12,-2 0,14 C-12,-2 -10,-10 0,-18 Z');
+    ctx.fillStyle='#c96a1b'; ctx.fill(P);
+    ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(0,14); ctx.stroke();
+    ctx.restore();
+  }
+  function __mush(ctx, sx, sy, size){
+    const s=size/32; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.fillStyle='#c0392b'; ctx.beginPath(); ctx.ellipse(0,-6,16,10,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.fillRect(-6,-6,12,10);
+    [-8,0,8].forEach(dx=>{ ctx.beginPath(); ctx.arc(dx,-6,2.2,0,Math.PI*2); ctx.fill(); });
+    ctx.restore();
+  }
+  function __pump(ctx, sx, sy, size, face){
+    const s=size/28; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.fillStyle='#e66a00'; ctx.beginPath(); ctx.ellipse(0,0,14,10,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#ff8a1c'; ctx.beginPath(); ctx.ellipse(-6,0,8,10,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(6,0,8,10,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#3d6b2f'; ctx.fillRect(-2,-14,4,6);
+    if (face){
+      ctx.fillStyle='rgba(0,0,0,.88)';
+      ctx.beginPath(); ctx.moveTo(-8,-3); ctx.lineTo(-3,-8); ctx.lineTo(2,-3); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(8,-3); ctx.lineTo(3,-8); ctx.lineTo(-2,-3); ctx.fill();
+      ctx.fillRect(-8,3,16,2);
+    }
+    ctx.restore();
+  }
+  function __web(ctx, sx, sy, size){
+    const s=size/32; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineWidth=1.1;
+    for(let i=0;i<6;i++){ ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(16,0); ctx.stroke(); ctx.rotate(Math.PI/3); }
+    for(let r=5;r<=15;r+=4){ ctx.beginPath(); for(let i=0;i<=6;i++){ const a=i*(Math.PI/3); const nx=Math.cos(a)*r, ny=Math.sin(a)*r; if(i===0) ctx.moveTo(nx,ny); else ctx.lineTo(nx,ny);} ctx.stroke(); }
+    ctx.restore();
+  }
+  function __light(ctx, sx, sy, size){
+    const s=size/12; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.fillStyle='#ffd23f'; ctx.beginPath(); ctx.ellipse(0,0,4,6,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#556'; ctx.fillRect(-2,-8,4,3); ctx.beginPath(); ctx.moveTo(-3,-12); ctx.lineTo(3,-12); ctx.strokeStyle='#556'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.restore();
+  }
+  function __hay(ctx, sx, sy, size){
+    const s=size/44; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    const r=4; const p=new Path2D(); p.moveTo(-22+r,-12); p.lineTo(22-r,-12); p.arcTo(22,-12,22,-12+r,r); p.lineTo(22,12-r); p.arcTo(22,12,22-r,12,r); p.lineTo(-22+r,12); p.arcTo(-22,12,-22,12-r,r); p.lineTo(-22,-12+r); p.arcTo(-22,-12,-22+r,-12,r); p.closePath();
+    ctx.fillStyle='#e2c165'; ctx.strokeStyle='#b59642'; ctx.lineWidth=2; ctx.fill(p); ctx.stroke(p);
+    ctx.strokeStyle='rgba(150,120,50,.6)'; ctx.lineWidth=1; for(let i=-18;i<=18;i+=6){ ctx.beginPath(); ctx.moveTo(i,-10); ctx.lineTo(i,10); ctx.stroke(); }
+    ctx.strokeStyle='#8b6a2e'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(-22,-4); ctx.lineTo(22,-4); ctx.moveTo(-22,4); ctx.lineTo(22,4); ctx.stroke();
+    ctx.restore();
+  }
+  function __corn(ctx, sx, sy, size){
+    const s=size/18; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.strokeStyle='#6b8f3b'; ctx.lineWidth=2.2; ctx.beginPath(); ctx.moveTo(0,10); ctx.lineTo(0,-34); ctx.stroke();
+    ctx.strokeStyle='#7aa041'; ctx.lineWidth=1.6;
+    [[-14,-10],[14,-8],[-12,-18],[12,-20],[-10,-28]].forEach(([dx,dy])=>{ ctx.beginPath(); ctx.moveTo(0,dy); ctx.quadraticCurveTo(dx,dy-4,dx+(dx>0?-6:6),dy-2); ctx.stroke(); });
+    ctx.strokeStyle='#caa64a'; ctx.lineWidth=1.4; for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.moveTo(0,-36); ctx.lineTo(i*2,-40); ctx.stroke(); }
+    ctx.restore();
+  }
+  function __cornu(ctx, sx, sy, size){
+    const s=size/40; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.fillStyle='#7a5230'; ctx.beginPath();
+    ctx.moveTo(-18,6); ctx.quadraticCurveTo(-30,-2,-10,-12);
+    ctx.quadraticCurveTo(10,-20,18,-8); ctx.quadraticCurveTo(10,-6,4,-6); ctx.quadraticCurveTo(-2,-4,-6,0); ctx.lineTo(-18,6); ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(-10,-2,8,4,0,0,Math.PI*2); ctx.fill();
+    const fruit=(x,y,r,fill)=>{ ctx.fillStyle=fill; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); };
+    fruit(-2,4,4,'#d94c4c'); fruit(6,2,3,'#f0b429'); fruit(-8,2,3,'#8dbf2f');
+    ctx.fillStyle='#7e4cc9'; for(let gx=0; gx<3; gx++){ for(let gy=0; gy<2; gy++){ ctx.beginPath(); ctx.arc(10+gx*3,6+gy*3,1.6,0,Math.PI*2); ctx.fill(); } }
+    ctx.restore();
+  }
+  function __wreath(ctx, sx, sy, size){
+    const s=size/36; ctx.save(); ctx.translate(sx,sy); ctx.scale(s,s);
+    ctx.fillStyle='#2f6a3a'; ctx.beginPath(); ctx.arc(0,0,16,0,Math.PI*2); ctx.arc(0,0,10,0,Math.PI*2,true); ctx.fill();
+    ctx.fillStyle='#c02626'; for(let i=0;i<8;i++){ const a=i*(Math.PI/4); ctx.beginPath(); ctx.arc(Math.cos(a)*13,Math.sin(a)*13,2,0,Math.PI*2); ctx.fill(); }
+    ctx.fillStyle='#c53030'; ctx.beginPath(); ctx.moveTo(-6,6); ctx.lineTo(0,0); ctx.lineTo(6,6); ctx.lineTo(0,10); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // draw décor for a single fence segment using the SAME ctx/scale as fence draw
+  function __drawDecorForSeg(ctx, api, seg, scale){
+    // Respect invisibility: if the segment was skipped for drawing, skip décor too
+    if (seg.b === 'SH' && seg.side === 'W') return;
+
+    const TILE = api.TILE;
+    const tag  = __seasonTag();
+    const rs   = __rng(tag + (seg.kind==='h'?'H':'V') + (seg.x0||seg.x) + (seg.y0||seg.y));
+    const nx   = seg.nx||0, ny=seg.ny||0;
+
+    const len = (seg.kind==='h') ? (seg.x1 - seg.x0) : (seg.y1 - seg.y0);
+    if (len <= 0) return;
+
+    // outward offset from fence in world px
+    const off = 0.18 * TILE;
+
+    // density per 100 world px (kept modest)
+    const per100 = (tag==='halloween') ? 0.45 :
+                   (tag==='fall')      ? 0.38 :
+                   (tag==='christmas') ? 0.35 :
+                   (tag==='winter')    ? 0.30 :
+                   (tag==='spring')    ? 0.32 : 0.28;
+    const count = Math.max(1, Math.floor((len/100) * per100));
+
+    // size baseline (screen px): derived from api.DRAW so it matches tile rendering
+    const leafPX = Math.max(10, 0.22 * api.DRAW);
+    const mushPX = Math.max(12, 0.26 * api.DRAW);
+    const pumpPX = Math.max(14, 0.30 * api.DRAW);
+
+    // scatter
+    for(let i=0;i<count;i++){
+      const u = rs();
+      let wx, wy;
+      if (seg.kind==='h'){ wx = seg.x0 + u*(seg.x1-seg.x0); wy = seg.y; }
+      else               { wx = seg.x;  wy = seg.y0 + u*(seg.y1-seg.y0); }
+
+      wx += nx * off; wy += ny * off;
+
+      const sx = (wx - api.camera.x) * scale;
+      const sy = (wy - api.camera.y) * scale;
+
+      const r = rs();
+      if (tag==='halloween'){
+        if      (r < 0.50) __leaf(ctx, sx, sy, leafPX);
+        else if (r < 0.72) __pump(ctx, sx, sy, pumpPX, false);
+        else if (r < 0.88) __pump(ctx, sx, sy, pumpPX*1.05, true);
+        else if (r < 0.95) __web(ctx,  sx, sy, 0.42*api.DRAW);
+        else               __light(ctx,sx, sy, 0.20*api.DRAW);
+      } else if (tag==='fall'){
+        if      (r < 0.65) __leaf(ctx, sx, sy, leafPX);
+        else if (r < 0.82) __mush(ctx, sx, sy, mushPX);
+        else               __pump(ctx, sx, sy, pumpPX, false);
+      } else if (tag==='winter'){
+        if (r < 0.6){
+          // tiny snow puff
+          ctx.fillStyle='rgba(240,248,255,.96)';
+          const w=0.34*api.DRAW, h=0.16*api.DRAW;
+          ctx.beginPath(); ctx.ellipse(sx, sy, w*0.5, h*0.5, 0, 0, Math.PI*2); ctx.fill();
+        } else {
+          // twig
+          ctx.strokeStyle='rgba(180,180,200,.85)'; ctx.lineWidth=1;
+          ctx.beginPath(); ctx.moveTo(sx-6,sy+4); ctx.lineTo(sx+6,sy-4); ctx.stroke();
+        }
+      } else if (tag==='christmas'){
+        if (r < 0.25) __wreath(ctx, sx, sy, 0.44*api.DRAW);
+        else          __light(ctx,  sx, sy, 0.18*api.DRAW);
+      } else if (tag==='spring'){
+        // blossom
+        ctx.save(); ctx.fillStyle='#ffd1e8';
+        const petals=5, rad=0.18*api.DRAW;
+        for(let k=0;k<petals;k++){
+          const a=k*(2*Math.PI/petals);
+          ctx.beginPath(); ctx.ellipse(sx+Math.cos(a)*5, sy+Math.sin(a)*5, rad*0.16, rad*0.28, a, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.fillStyle='#ff7aa2'; ctx.beginPath(); ctx.arc(sx,sy,rad*0.12,0,Math.PI*2); ctx.fill(); ctx.restore();
+      } else { // summer
+        if (r < 0.6){
+          // little flower
+          ctx.save(); const rad=0.16*api.DRAW; ctx.fillStyle='#ffe48a';
+          for(let k=0;k<6;k++){ const a=k*(Math.PI/3); ctx.beginPath(); ctx.ellipse(sx+Math.cos(a)*4.5, sy+Math.sin(a)*4.5, rad*0.14, rad*0.24, a, 0, Math.PI*2); ctx.fill(); }
+          ctx.fillStyle='#ff9a00'; ctx.beginPath(); ctx.arc(sx,sy,rad*0.10,0,Math.PI*2); ctx.fill(); ctx.restore();
+        } else {
+          __leaf(ctx, sx, sy, leafPX*0.9);
+        }
+      }
+    }
+
+    // porch clusters (skip in winter for clean look)
+    if (tag==='winter') return;
+
+    function cluster(atU){
+      let wx, wy;
+      if (seg.kind==='h'){ wx = seg.x0 + atU*(seg.x1-seg.x0); wy = seg.y; }
+      else               { wx = seg.x;  wy = seg.y0 + atU*(seg.y1-seg.y0); }
+      wx += nx * (off + 0.25*TILE);
+      wy += ny * (off + 0.25*TILE);
+
+      const sx = (wx - api.camera.x) * scale;
+      const sy = (wy - api.camera.y) * scale;
+
+      const jx = (rs()-0.5), jy=(rs()-0.5);
+
+      if (tag==='christmas'){
+        __wreath(ctx, sx, sy, 0.48*api.DRAW);
+        for(let i=0;i<3;i++){ __light(ctx, sx + jx*0.40*api.DRAW, sy + jy*0.30*api.DRAW, 0.18*api.DRAW); }
+        return;
+      }
+
+      // fall / halloween clusters
+      __hay (ctx, sx + jx*0.12*api.DRAW, sy + jy*0.10*api.DRAW, 0.64*api.DRAW);
+      __corn(ctx, sx - nx*0.10*api.DRAW + jx*0.08*api.DRAW, sy - ny*0.10*api.DRAW + jy*0.08*api.DRAW, 0.68*api.DRAW);
+      __pump(ctx, sx + nx*0.12*api.DRAW + jx*0.10*api.DRAW, sy + ny*0.02*api.DRAW + jy*0.06*api.DRAW, 0.48*api.DRAW, false);
+      const jack = (tag==='halloween' && rs()<0.6);
+      __pump(ctx, sx + nx*0.04*api.DRAW + jx*0.08*api.DRAW, sy - ny*0.04*api.DRAW + jy*0.06*api.DRAW, 0.52*api.DRAW, jack);
+      if (tag==='fall' && rs()<0.5) __cornu(ctx, sx + nx*0.06*api.DRAW + jx*0.08*api.DRAW, sy + ny*0.08*api.DRAW + jy*0.08*api.DRAW, 0.54*api.DRAW);
+
+      // leaf sprinkle at base
+      for(let i=0;i<3;i++) __leaf(ctx, sx + (rs()-0.5)*0.28*api.DRAW, sy + (rs()-0.5)*0.22*api.DRAW, 0.22*api.DRAW);
+    }
+    cluster(0.25); cluster(0.50); cluster(0.75);
+  }
+
   // ---------- Draw (wood fence) ----------
   function drawFence(api, segs){
     if (!segs) return;
@@ -222,6 +437,9 @@
           ctx.fillRect(Math.floor(px - POST_SIZE/2), Math.floor(sy - POST_SIZE/2), POST_SIZE, POST_SIZE);
         }
       }
+
+      // NEW: draw seasonal decorations for THIS segment with the SAME ctx/scale
+      __drawDecorForSeg(ctx, api, seg, scale);
     });
 
     ctx.restore();
