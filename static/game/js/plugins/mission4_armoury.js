@@ -1,13 +1,17 @@
-// v1.0 — Mission 4: Island Armoury + Cardboard Box pickup
+// v1.2 — Mission 4: Island Armoury + Cardboard Box pickup
+// - Box pickup uses Yes/No dialog (adds to inventory only on "Yes")
+// - Smaller, clearer 3D cardboard box SVG
+// - Island draws cleanly over water (no stray dots)
+// - Damage reduction shim (uses izza-player-hit if your combat emits it)
 (function(){
-  const BUILD='v1.0-mission4-armoury';
+  const BUILD='v1.2-mission4-armoury';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- Local state
   let api=null;
   const LS_KEYS = {
     mission4: 'izzaMission4',          // 'not-started' | 'started' | 'crafted'
-    armour:   'izzaArmour'             // { type:'cardboard', reduction:0.08 } JSON
+    armour:   'izzaArmour'             // { type:'cardboard', reduction:Number } JSON
   };
 
   // ==== geometry helpers (mirror boat plugin) ====
@@ -41,24 +45,22 @@
     const BX=ISLAND.x0 + Math.floor((w-3)/2);
     const BY=ISLAND.y0 + Math.floor((h-2)/2);
     const BUILDING = { x0:BX, y0:BY, x1:BX+2, y1:BY+1 };
-    const DOOR = { x: BX+1, y: BUILDING.y1+1 }; // one tile south of building edge
+    const DOOR = { x: BX+1, y: BUILDING.y1+1 }; // door tile is one tile south of building edge
     return {ISLAND, BUILDING, DOOR};
   }
 
   // ---- HQ door → cardboard box spawn (Tier 1 & 2)
   function hqDoorGrid(){
-    // Core exposes a pixel spawn aligned to the HQ door; convert to grid
-    // (safe to round since spawn sits at tile origin in your core)  [oai_citation:1‡izza_core_v3.js](file-service://file-UA3JsTEHcTZC3gyi66Ym73)
     const t=api.TILE, d=api.doorSpawn;
     const gx=Math.round(d.x/t), gy=Math.round(d.y/t);
     return {gx,gy};
   }
   function cardboardBoxGrid(){
     const d=hqDoorGrid();
-    return { x: d.gx + 3, y: d.gy + 10 }; // 3 east, 10 south from HQ door (requested)
+    return { x: d.gx + 3, y: d.gy + 10 }; // 3 east, 10 south from HQ door
   }
 
-  // ---- Inventory helpers (use the public API or LS mirror)  [oai_citation:2‡izza_core_v3.js](file-service://file-UA3JsTEHcTZC3gyi66Ym73)
+  // ---- Inventory helpers (use the public API)
   function readInv(){ try{ return JSON.parse(JSON.stringify(api.getInventory()||{})); }catch{return {};}}
   function writeInv(inv){ try{ api.setInventory(inv); window.dispatchEvent(new Event('izza-inventory-changed')); }catch{} }
   function addInvCount(inv, key, n){
@@ -180,27 +182,45 @@
     const t=api.TILE;
     const gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
-    // 1) Cardboard box pickup / Mission 4 start
+    // 1) Cardboard box pickup / Mission 4 start (with Yes/No take)
     const box=cardboardBoxGrid();
     if(gx===box.x && gy===box.y){
-      // Give box item to inventory
-      const inv=readInv(); addInvCount(inv,'cardboard_box',1); writeInv(inv);
-      if(getM4()==='not-started'){
-        setM4('started');
-        showDialog([
-          `<i>This cardboard box could come in handy for crafting something…</i>`,
-          `Have you ever taken a <b>boat ride</b>?`
-        ]);
-      }else{
+      // Start mission the first time they inspect the box
+      if(getM4()==='not-started') setM4('started');
+
+      const m=document.createElement('div');
+      m.className='modal'; m.style.display='flex';
+      m.innerHTML = `
+        <div class="backdrop"></div>
+        <div class="card" style="min-width:300px;max-width:520px">
+          <h3>📦 Cardboard Box</h3>
+          <div style="line-height:1.5;margin-bottom:10px">
+            <i>This cardboard box could come in handy for crafting something…</i><br>
+            Have you ever taken a <b>boat ride</b>?<br><br>
+            <b>Take this cardboard box with you?</b>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="ghost" id="m4No">No</button>
+            <button class="ghost" id="m4Yes">Yes</button>
+          </div>
+        </div>`;
+      document.body.appendChild(m);
+      const close=()=>m.remove();
+      m.querySelector('.backdrop').addEventListener('click', close, {passive:true});
+      m.querySelector('#m4No').addEventListener('click', ()=>{ IZZA.toast?.('Left the box for now'); close(); }, {passive:true});
+      m.querySelector('#m4Yes').addEventListener('click', ()=>{
+        const inv=readInv(); addInvCount(inv,'cardboard_box',1); writeInv(inv);
         IZZA.toast?.('Picked up a Cardboard Box');
-      }
+        close();
+      }, {passive:true});
+
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
       return;
     }
 
     // 2) Armoury: stand on door tile and press B
     const {DOOR}=islandSpec();
-    if(gx===DOOR.x && gy===DOOR.y){
+    if(localStorage.getItem('izzaMapTier')==='2' && gx===DOOR.x && gy===DOOR.y){
       showDialog([`Welcome to the <b>Armoury</b>!`,
         `Here you can craft armour to reduce your opponents’ attacks on you.`]);
       // Open armoury crafting UI
@@ -213,84 +233,101 @@
   // ---- “Solids” for island/building (block walking into water gap & walls)
   function addIslandSolids(){
     if(!api?.ready) return [];
-    const a=anchors(api); const {LAKE}=lakeRects(a);
-    const {ISLAND, BUILDING}=islandSpec();
-    // Only in Tier 2 (lake exists there)
     if(localStorage.getItem('izzaMapTier')!=='2') return [];
+    const {BUILDING}=islandSpec();
 
-    // Island is *not* water (walkable sand), building is solid
-    // We just push building rect as solid so player can walk island & enter at the door edge.
+    // Island is walkable sand; building is solid.
     return [{x:BUILDING.x0,y:BUILDING.y0,w:(BUILDING.x1-BUILDING.x0+1),h:(BUILDING.y1-BUILDING.y0+1)}];
   }
 
-  // ---- Rendering (overlay): island + building + box sprite
+  // ---- Rendering (overlay): island + building + smaller box sprite
   function drawSVGBox(ctx, sx, sy, S){
-    // a cute corrugated box (top view-ish)
+    // smaller, more 3D cardboard box
     ctx.save();
     ctx.translate(sx, sy);
-    ctx.scale(S/32, S/32); // normalized to ~32px tile
+    ctx.scale(S/44, S/44);   // smaller overall than a tile
+    ctx.translate(-22, -22); // center
 
     // shadow
     ctx.fillStyle='rgba(0,0,0,0.18)';
-    ctx.beginPath(); ctx.ellipse(16,19,12,5,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(22,28,14,6,0,0,Math.PI*2); ctx.fill();
 
-    // base
-    const hull = new Path2D('M6,8 h20 v14 h-20 z');
-    ctx.fillStyle='#b68b4c'; ctx.fill(hull);
-    ctx.strokeStyle='#8a6a3a'; ctx.lineWidth=1; ctx.stroke(hull);
+    // body (isometric hex prism)
+    const body = new Path2D('M6,18 L22,10 L38,18 L38,34 L22,42 L6,34 Z');
+    ctx.fillStyle='#b98c4a';
+    ctx.fill(body);
+    ctx.strokeStyle='#7d5f2e'; ctx.lineWidth=1.3; ctx.stroke(body);
 
-    // flaps
-    const flapL = new Path2D('M6,8 l10,-6 l10,6 z');
-    const flapR = new Path2D('M6,22 l10,6 l10,-6 z');
-    ctx.fillStyle='#c99a5e'; ctx.fill(flapL); ctx.fill(flapR);
+    // top flaps
+    const flapL = new Path2D('M6,18 L22,26 L22,10 Z');
+    const flapR = new Path2D('M38,18 L22,26 L22,10 Z');
+    ctx.fillStyle='#cfa162'; ctx.fill(flapL); ctx.fill(flapR);
     ctx.stroke(flapL); ctx.stroke(flapR);
 
-    // tape
-    ctx.fillStyle='#e5d8a8'; ctx.fillRect(15,2,2,28);
+    // tape on top
+    ctx.fillStyle='#e9dfb1';
+    ctx.beginPath();
+    ctx.moveTo(21,10); ctx.lineTo(23,10); ctx.lineTo(23,26); ctx.lineTo(21,26); ctx.closePath();
+    ctx.fill();
 
-    // logo arrows
-    ctx.strokeStyle='#5c4524'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(10,16); ctx.lineTo(14,12); ctx.moveTo(22,16); ctx.lineTo(18,12); ctx.stroke();
+    // “up” arrows
+    ctx.strokeStyle='#5c4524'; ctx.lineWidth=1.1;
+    ctx.beginPath();
+    ctx.moveTo(14,30); ctx.lineTo(18,26); ctx.moveTo(30,30); ctx.lineTo(26,26);
+    ctx.stroke();
+
     ctx.restore();
   }
 
   function drawIsland(ctx){
     if(localStorage.getItem('izzaMapTier')!=='2') return;
-    const S=api.DRAW, t=api.TILE, A=anchors(api); const {LAKE}=lakeRects(A);
+    const S=api.DRAW, t=api.TILE;
     const {ISLAND, BUILDING, DOOR}=islandSpec();
 
-    // sand
+    const sx=(x)=> (x*t - api.camera.x)*(S/t);
+    const sy=(y)=> (y*t - api.camera.y)*(S/t);
+
     ctx.save();
-    const sx=(x)=> (x*t - api.camera.x)*(S/t), sy=(y)=> (y*t - api.camera.y)*(S/t);
+
+    // sand island (rounded corners so it reads clearly over water)
+    const px = sx(ISLAND.x0), py = sy(ISLAND.y0);
+    const pw = (ISLAND.x1-ISLAND.x0+1)*(S/t), ph=(ISLAND.y1-ISLAND.y0+1)*(S/t);
+    const r = Math.min(S*0.08, pw*0.12, ph*0.12);
+
     ctx.fillStyle='#d8c399';
-    ctx.fillRect(sx(ISLAND.x0), sy(ISLAND.y0), (ISLAND.x1-ISLAND.x0+1)*(S/t), (ISLAND.y1-ISLAND.y0+1)*(S/t));
+    ctx.beginPath();
+    ctx.moveTo(px+r,py);
+    ctx.arcTo(px+pw,py,px+pw,py+ph,r);
+    ctx.arcTo(px+pw,py+ph,px,py+ph,r);
+    ctx.arcTo(px,py+ph,px,py,r);
+    ctx.arcTo(px,py,px+pw,py,r);
+    ctx.closePath();
+    ctx.fill();
 
-    // building block
+    // building on island
     ctx.fillStyle='#6f87b3';
-    ctx.fillRect(sx(BUILDING.x0), sy(BUILDING.y0), (BUILDING.x1-BUILDING.x0+1)*(S/t), (BUILDING.y1-BUILDING.y0+1)*(S/t));
+    ctx.fillRect(sx(BUILDING.x0), sy(BUILDING.y0),
+                 (BUILDING.x1-BUILDING.x0+1)*(S/t), (BUILDING.y1-BUILDING.y0+1)*(S/t));
 
-    // door marker
-    ctx.fillStyle='#333';
-    ctx.fillRect(sx(DOOR.x), sy(DOOR.y), (S/t), (S/t));
+    // (No 1×1 door pixel; door still functions via B when the player stands on DOOR grid)
 
     // cardboard box pickup near HQ
     const box=cardboardBoxGrid();
     const bsx = (box.x*t - api.camera.x)*(S/t) + S*0.5;
-    const bsy = (box.y*t - api.camera.y)*(S/t) + S*0.6;
-    drawSVGBox(ctx, bsx, bsy, S*0.9);
+    const bsy = (box.y*t - api.camera.y)*(S/t) + S*0.58;
+    drawSVGBox(ctx, bsx, bsy, S*0.78); // smaller box
     ctx.restore();
   }
 
   // ---- Hook solids & render
   IZZA.on('render-post', ()=>{ if(api?.ready) drawIsland(document.getElementById('game').getContext('2d')); });
 
-  // Add building as a solid during map resolve (non-invasive). The expander gathers solids each tick,
-  // so piggyback after its push. It checks water vs solids and has guards for boating.  [oai_citation:3‡v2_map_expander.js](file-service://file-9xJzB57JiKUy5JVMT9HDsF)
+  // Add building as a solid during map resolve (non-invasive).
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
     const solids = addIslandSolids();
     if(!solids.length) return;
-    // Push a solid by nudging the player out if overlapping (same technique as map expander does)  [oai_citation:4‡v2_map_expander.js](file-service://file-9xJzB57JiKUy5JVMT9HDsF)
+    // Nudge player out if overlapping
     const p=api.player, t=api.TILE, gx=((p.x+16)/t|0), gy=((p.y+16)/t|0);
     solids.forEach(b=>{
       if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
@@ -303,14 +340,14 @@
   // ---- Boot
   IZZA.on('ready', (a)=>{
     api=a;
-    // B interactions (coexists with boat plugin — we early-return when not on our tiles)
+    // B interactions (coexists with boat plugin — early-returns elsewhere)
     const btnB=document.getElementById('btnB'); btnB?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
-    console.log('[mission4] ready');
+    console.log('[mission4] ready', BUILD);
   });
 
   // ---- (Optional) light damage reduction shim:
-  // If your combat system dispatches a 'izza-player-hit' CustomEvent({detail:{damage}})
+  // If your combat system dispatches 'izza-player-hit' CustomEvent({detail:{damage}}),
   // we scale it. If not present, this does nothing and is safe.
   window.addEventListener('izza-player-hit', (ev)=>{
     try{
