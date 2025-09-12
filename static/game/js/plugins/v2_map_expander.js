@@ -53,6 +53,46 @@ function lakeRects(a){
   const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
   const BEACH_X = LAKE.x0 - 1;
 
+  const DOCKS = [
+    { x0: BEACH_X, y: LAKE.y0+4,  len: 4 },
+    { x0: BEACH_X, y: LAKE.y0+12, len: 5 }
+  ];
+
+  const hotelTopY = LAKE.y0 - 5;
+  const HOTEL  = { x0: LAKE.x0+3, y0: hotelTopY, x1: LAKE.x0+9, y1: hotelTopY+3 };
+  const LOT    = { x0: HOTEL.x0,  y0: HOTEL.y1+1, x1: HOTEL.x1,  y1: HOTEL.y1+3 };
+
+  return { LAKE, BEACH_X, DOCKS, HOTEL, LOT };
+}
+
+// ===== Island helpers (TOP LEVEL) =====
+function islandSpec(a){
+  const { LAKE } = lakeRects(a);
+  const w=5, h=4;
+  const x1 = LAKE.x1 - 1, x0 = x1 - (w-1);
+  const yMid = (LAKE.y0 + LAKE.y1) >> 1;
+  const y0 = yMid - (h>>1), y1 = y0 + h - 1;
+  const ISLAND   = { x0: Math.max(LAKE.x0,x0), y0: Math.max(LAKE.y0,y0), x1, y1: Math.min(LAKE.y1,y1) };
+  const BX = ISLAND.x0 + Math.floor((w-2)/2);
+  const BY = ISLAND.y0 + Math.floor((h-1)/2);
+  const BUILDING = { x0: BX, y0: BY, x1: BX+1, y1: BY };
+  const DOOR     = { x: BX, y: BY+1 };
+  return { ISLAND, BUILDING, DOOR };
+}
+
+
+// Publish a Set of "gx|gy" for island land so physics/boat treat it as land
+function publishIslandLandFromExpander(a){
+  if ((localStorage.getItem('izzaMapTier') || '1') !== '2') { window._izzaIslandLand = null; return; }
+  const { ISLAND } = islandSpec(a);
+  const land = new Set();
+  for (let y = ISLAND.y0; y <= ISLAND.y1; y++){
+    for (let x = ISLAND.x0; x <= ISLAND.x1; x++){
+      land.add(x + '|' + y);
+    }
+  }
+  window._izzaIslandLand = land;
+}
   // Docks extend one tile onto the beach (start at BEACH_X), keeping their old water reach.
   const DOCKS = [
     { x0: BEACH_X, y: LAKE.y0+4,  len: 4 }, // previously x0: LAKE.x0, len: 3
@@ -568,7 +608,33 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
       const S=api.DRAW, sx=w2sX(api,d.x0*api.TILE), sy=w2sY(api,d.y*api.TILE);
       ctx.fillRect(sx,sy, d.len*S, S);
     });
+// --- ISLAND (rendered after water so it is visible)
+(function(){
+  if ((localStorage.getItem('izzaMapTier') || '1') !== '2') return;
+  const A2 = anchors(api);
+  const { ISLAND, BUILDING, DOOR } = islandSpec(A2);
 
+  // publish land set every render so boat/collisions are in sync
+  publishIslandLandFromExpander(A2);
+
+  // sand pad
+  for (let gy = ISLAND.y0; gy <= ISLAND.y1; gy++)
+    for (let gx = ISLAND.x0; gx <= ISLAND.x1; gx++)
+      fillTile(api, ctx, gx, gy, COL.sand);
+
+  // small armoury block (2×1)
+  for (let gy = BUILDING.y0; gy <= BUILDING.y1; gy++)
+    for (let gx = BUILDING.x0; gx <= BUILDING.x1; gx++)
+      fillTile(api, ctx, gx, gy, '#6f87b3');
+
+  // door highlight (blue → green when within 1 tile)
+  const t = api.TILE, pgx = ((api.player.x+16)/t|0), pgy = ((api.player.y+16)/t|0);
+  const near = Math.abs(pgx-DOOR.x) <= 1 && Math.abs(pgy-DOOR.y) <= 1;
+  fillTile(api, ctx, DOOR.x, DOOR.y, near ? '#d4a01e' : '#6e4a1e');
+
+  // export so your mission 4 “B” handler can reuse the exact door tile if it wants
+  window.__IZZA_ARMOURY__ = { rect: BUILDING, door: DOOR, island: ISLAND };
+})();
     // ====== MANUAL PATCHES & HOSPITAL ======
     const set = (x,y,color)=> fillTile(api,ctx,x,y,color);
     const lineH = (x0,x1,y,color)=>{ for(let x=x0; x<=x1; x++) set(x,y,color); };
@@ -736,12 +802,14 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
   });
 
   // ---------- Collisions & movement ----------
-  function rectW (r){ return r.x1-r.x0+1; }
-  function rectH (r){ return r.y1-r.y0+1; }
+IZZA.on('update-pre', ()=>{
+  if(!IZZA.api?.ready || !isTier2()) return;
 
-  IZZA.on('update-pre', ()=>{
-    if(!IZZA.api?.ready || !isTier2()) return;
-    const api=IZZA.api;
+  // publish island land set for physics/boat every tick
+  publishIslandLandFromExpander(anchors(IZZA.api));   // <-- add this line
+
+  const api = IZZA.api;
+  // cars bounce off new buildings …
 
     // cars bounce off new buildings
     if(_layout){
