@@ -262,165 +262,171 @@
   }
 
   // draw décor for a single fence segment using the SAME ctx/scale as fence draw
-  function __drawDecorForSeg(ctx, api, seg, scale){
-    // Respect invisibility: if the segment was skipped for drawing, skip décor too
-    if (seg.b === 'SH' && seg.side === 'W') return;
+function __drawDecorForSeg(ctx, api, seg, scale){
+  // Respect invisibility: if the segment was skipped for drawing, skip décor too
+  if (seg.b === 'SH' && seg.side === 'W') return;
 
-    const TILE = api.TILE;
-    const tag  = __seasonTag();
-    const rs   = __rng(tag + (seg.kind==='h'?'H':'V') + (seg.x0||seg.x) + (seg.y0||seg.y));
-    const nx   = seg.nx||0, ny=seg.ny||0;
+  const TILE = api.TILE;
+  const tag  = __seasonTag();
+  const rs   = __rng(tag + (seg.kind==='h'?'H':'V') + (seg.x0||seg.x) + (seg.y0||seg.y));
+  const nx   = seg.nx||0, ny=seg.ny||0;
 
-    const len = (seg.kind==='h') ? (seg.x1 - seg.x0) : (seg.y1 - seg.y0);
-    if (len <= 0) return;
+  const len = (seg.kind==='h') ? (seg.x1 - seg.x0) : (seg.y1 - seg.y0);
+  if (len <= 0) return;
 
-    // outward offset from fence in world px
-    const off = 0.18 * TILE;
+  // SPECIAL: back of HQ (north edge) → shrink & lighten density so it doesn't run under sidewalk
+  const isHQBack = (seg.b === 'HQ' && seg.side === 'N');
 
-    // density per 100 world px (kept modest)
-    const per100 = (tag==='halloween') ? 0.45 :
-                   (tag==='fall')      ? 0.38 :
-                   (tag==='christmas') ? 0.35 :
-                   (tag==='winter')    ? 0.30 :
-                   (tag==='spring')    ? 0.32 : 0.28;
-    const count = Math.max(1, Math.floor((len/100) * per100));
+  // global scale for all sprite sizes on this segment
+  const S = isHQBack ? 0.55 : 1.0;
 
-    // size baseline (screen px): derived from api.DRAW so it matches tile rendering
-    const leafPX = Math.max(10, 0.22 * api.DRAW);
-    const mushPX = Math.max(12, 0.26 * api.DRAW);
-    const pumpPX = Math.max(14, 0.30 * api.DRAW);
+  // outward offset from fence in world px (slightly tighter at HQ north)
+  const off = (isHQBack ? 0.10 : 0.18) * TILE;
 
-    // scatter
-    for(let i=0;i<count;i++){
-      const u = rs();
-      let wx, wy;
-      if (seg.kind==='h'){ wx = seg.x0 + u*(seg.x1-seg.x0); wy = seg.y; }
-      else               { wx = seg.x;  wy = seg.y0 + u*(seg.y1-seg.y0); }
+  // density per 100 world px (slightly reduced at HQ north)
+  const basePer100 = (tag==='halloween') ? 0.45 :
+                     (tag==='fall')      ? 0.38 :
+                     (tag==='christmas') ? 0.35 :
+                     (tag==='winter')    ? 0.30 :
+                     (tag==='spring')    ? 0.32 : 0.28;
+  const per100 = isHQBack ? basePer100 * 0.65 : basePer100;
+  const count = Math.max(1, Math.floor((len/100) * per100));
 
-      wx += nx * off; wy += ny * off;
+  // size baseline (screen px): derived from api.DRAW so it matches tile rendering, then scaled by S
+  const leafPX = Math.max(8,  0.22 * api.DRAW * S);
+  const mushPX = Math.max(9,  0.26 * api.DRAW * S);
+  const pumpPX = Math.max(10, 0.30 * api.DRAW * S);
 
-      const sx = (wx - api.camera.x) * scale;
-      const sy = (wy - api.camera.y) * scale;
+  // scatter
+  for (let i=0;i<count;i++){
+    const u = rs();
+    let wx, wy;
+    if (seg.kind==='h'){ wx = seg.x0 + u*(seg.x1-seg.x0); wy = seg.y; }
+    else               { wx = seg.x;  wy = seg.y0 + u*(seg.y1-seg.y0); }
 
-      const r = rs();
-      if (tag==='halloween'){
-        if      (r < 0.50) __leaf(ctx, sx, sy, leafPX);
-        else if (r < 0.72) __pump(ctx, sx, sy, pumpPX, false);
-        else if (r < 0.88) __pump(ctx, sx, sy, pumpPX*1.05, true);
-        else if (r < 0.95) __web(ctx,  sx, sy, 0.42*api.DRAW);
-        else               __light(ctx,sx, sy, 0.20*api.DRAW);
-      } else if (tag==='fall'){
-        if      (r < 0.65) __leaf(ctx, sx, sy, leafPX);
-        else if (r < 0.82) __mush(ctx, sx, sy, mushPX);
-        else               __pump(ctx, sx, sy, pumpPX, false);
-      } else if (tag==='winter'){
-        if (r < 0.6){
-          // tiny snow puff
-          ctx.fillStyle='rgba(240,248,255,.96)';
-          const w=0.34*api.DRAW, h=0.16*api.DRAW;
-          ctx.beginPath(); ctx.ellipse(sx, sy, w*0.5, h*0.5, 0, 0, Math.PI*2); ctx.fill();
-        } else {
-          // twig
-          ctx.strokeStyle='rgba(180,180,200,.85)'; ctx.lineWidth=1;
-          ctx.beginPath(); ctx.moveTo(sx-6,sy+4); ctx.lineTo(sx+6,sy-4); ctx.stroke();
-        }
-      } else if (tag==='christmas'){
-        if (r < 0.25) __wreath(ctx, sx, sy, 0.44*api.DRAW);
-        else          __light(ctx,  sx, sy, 0.18*api.DRAW);
-      } else if (tag==='spring'){
-        // blossom
-        ctx.save(); ctx.fillStyle='#ffd1e8';
-        const petals=5, rad=0.18*api.DRAW;
-        for(let k=0;k<petals;k++){
-          const a=k*(2*Math.PI/petals);
-          ctx.beginPath(); ctx.ellipse(sx+Math.cos(a)*5, sy+Math.sin(a)*5, rad*0.16, rad*0.28, a, 0, Math.PI*2); ctx.fill();
-        }
-        ctx.fillStyle='#ff7aa2'; ctx.beginPath(); ctx.arc(sx,sy,rad*0.12,0,Math.PI*2); ctx.fill(); ctx.restore();
-      } else { // summer
-        if (r < 0.6){
-          // little flower
-          ctx.save(); const rad=0.16*api.DRAW; ctx.fillStyle='#ffe48a';
-          for(let k=0;k<6;k++){ const a=k*(Math.PI/3); ctx.beginPath(); ctx.ellipse(sx+Math.cos(a)*4.5, sy+Math.sin(a)*4.5, rad*0.14, rad*0.24, a, 0, Math.PI*2); ctx.fill(); }
-          ctx.fillStyle='#ff9a00'; ctx.beginPath(); ctx.arc(sx,sy,rad*0.10,0,Math.PI*2); ctx.fill(); ctx.restore();
-        } else {
-          __leaf(ctx, sx, sy, leafPX*0.9);
-        }
+    wx += nx * off; wy += ny * off;
+
+    const sx = (wx - api.camera.x) * scale;
+    const sy = (wy - api.camera.y) * scale;
+
+    const r = rs();
+    if (tag==='halloween'){
+      if      (r < 0.50) __leaf(ctx, sx, sy, leafPX);
+      else if (r < 0.72) __pump(ctx, sx, sy, pumpPX, false);
+      else if (r < 0.88) __pump(ctx, sx, sy, pumpPX*1.05, true);
+      else if (r < 0.95) __web(ctx,  sx, sy, 0.42*api.DRAW * S);
+      else               __light(ctx,sx, sy, 0.20*api.DRAW * S);
+    } else if (tag==='fall'){
+      if      (r < 0.65) __leaf(ctx, sx, sy, leafPX);
+      else if (r < 0.82) __mush(ctx, sx, sy, mushPX);
+      else               __pump(ctx, sx, sy, pumpPX, false);
+    } else if (tag==='winter'){
+      if (r < 0.6){
+        // tiny snow puff
+        ctx.fillStyle='rgba(240,248,255,.96)';
+        const w=0.34*api.DRAW*S, h=0.16*api.DRAW*S;
+        ctx.beginPath(); ctx.ellipse(sx, sy, w*0.5, h*0.5, 0, 0, Math.PI*2); ctx.fill();
+      } else {
+        // twig
+        ctx.strokeStyle='rgba(180,180,200,.85)'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(sx-6*S, sy+4*S); ctx.lineTo(sx+6*S, sy-4*S); ctx.stroke();
+      }
+    } else if (tag==='christmas'){
+      if (r < 0.25) __wreath(ctx, sx, sy, 0.44*api.DRAW * S);
+      else          __light(ctx,  sx, sy, 0.18*api.DRAW * S);
+    } else if (tag==='spring'){
+      // blossom
+      ctx.save(); ctx.fillStyle='#ffd1e8';
+      const petals=5, rad=0.18*api.DRAW*S;
+      for(let k=0;k<petals;k++){
+        const a=k*(2*Math.PI/petals);
+        ctx.beginPath(); ctx.ellipse(sx+Math.cos(a)*5*S, sy+Math.sin(a)*5*S, rad*0.16, rad*0.28, a, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle='#ff7aa2'; ctx.beginPath(); ctx.arc(sx,sy,rad*0.12,0,Math.PI*2); ctx.fill(); ctx.restore();
+    } else { // summer
+      if (r < 0.6){
+        // little flower
+        ctx.save(); const rad=0.16*api.DRAW*S; ctx.fillStyle='#ffe48a';
+        for(let k=0;k<6;k++){ const a=k*(Math.PI/3); ctx.beginPath(); ctx.ellipse(sx+Math.cos(a)*4.5*S, sy+Math.sin(a)*4.5*S, rad*0.14, rad*0.24, a, 0, Math.PI*2); ctx.fill(); }
+        ctx.fillStyle='#ff9a00'; ctx.beginPath(); ctx.arc(sx,sy,rad*0.10,0,Math.PI*2); ctx.fill(); ctx.restore();
+      } else {
+        __leaf(ctx, sx, sy, leafPX*0.9);
       }
     }
+  }
 
-    // porch clusters (skip in winter for clean look)
-    if (tag==='winter') return;
+  // porch clusters (skip in winter for clean look)
+  if (tag==='winter') return;
 
-        function cluster(atU){
-      let wx, wy;
-      if (seg.kind==='h'){ wx = seg.x0 + atU*(seg.x1-seg.x0); wy = seg.y; }
-      else               { wx = seg.x;  wy = seg.y0 + atU*(seg.y1-seg.y0); }
-      wx += nx * (off + 0.25*TILE);
-      wy += ny * (off + 0.25*TILE);
+  function cluster(atU){
+    let wx, wy;
+    if (seg.kind==='h'){ wx = seg.x0 + atU*(seg.x1-seg.x0); wy = seg.y; }
+    else               { wx = seg.x;  wy = seg.y0 + atU*(seg.y1-seg.y0); }
+    wx += nx * (off + 0.25*TILE);
+    wy += ny * (off + 0.25*TILE);
 
-      const sx = (wx - api.camera.x) * scale;
-      const sy = (wy - api.camera.y) * scale;
+    const sx = (wx - api.camera.x) * scale;
+    const sy = (wy - api.camera.y) * scale;
 
-      const jx = (rs()-0.5), jy=(rs()-0.5);
+    const jx = (rs()-0.5), jy=(rs()-0.5);
 
-      if (tag==='christmas'){
-        __wreath(ctx, sx, sy, 0.48*api.DRAW);
-        for(let i=0;i<3;i++){ __light(ctx, sx + jx*0.40*api.DRAW, sy + jy*0.30*api.DRAW, 0.18*api.DRAW); }
-        return;
-      }
-
-      // fall / halloween clusters — place items BESIDE the hay, not on top
-      // base vectors: tangent (tx,ty) runs along the fence; normal (nx,ny) points outward
-      const D = api.DRAW;
-      const tx = -ny, ty = nx;           // tangent unit (perpendicular to fence normal)
-      const step = 0.28 * D;             // side spacing along the fence
-      const jitter = v => (rs()-0.5) * v;
-
-      // 1) hay bale = anchor (centered)
-      __hay(ctx, sx + jitter(0.08*D), sy + jitter(0.06*D), 0.64*D);
-
-      // 2) corn stalk = left side of hay (slightly behind fence)
-      {
-        const px = sx + tx * (-step + jitter(0.06*D)) + nx * (-0.08*D);
-        const py = sy + ty * (-step + jitter(0.06*D)) + ny * (-0.08*D);
-        __corn(ctx, px, py, 0.68*D);
-      }
-
-      // 3) pumpkin = right side of hay (slightly in front)
-      {
-        const px = sx + tx * ( step + jitter(0.06*D)) + nx * ( 0.02*D);
-        const py = sy + ty * ( step + jitter(0.06*D)) + ny * ( 0.02*D);
-        __pump(ctx, px, py, 0.50*D, false);
-      }
-
-      // 4) second pumpkin / jack near right side, a bit closer to center
-      {
-        const px = sx + tx * ( step*0.6 + jitter(0.05*D)) + nx * (-0.02*D);
-        const py = sy + ty * ( step*0.6 + jitter(0.05*D)) + ny * (-0.02*D);
-        const jack = (tag==='halloween' && rs()<0.6);
-        __pump(ctx, px, py, 0.52*D, jack);
-      }
-
-      // 5) optional cornucopia = left side near corn (slightly in front)
-      if (tag==='fall' && rs()<0.5){
-        const px = sx + tx * (-step*0.6 + jitter(0.05*D)) + nx * (0.05*D);
-        const py = sy + ty * (-step*0.6 + jitter(0.05*D)) + ny * (0.05*D);
-        __cornu(ctx, px, py, 0.54*D);
-      }
-
-      // leaf sprinkle around the base (avoid center of hay)
-      for(let i=0;i<3;i++){
-        const px = sx + tx*jitter(0.20*D) + nx*jitter(0.14*D);
-        const py = sy + ty*jitter(0.20*D) + ny*jitter(0.14*D);
-        __leaf(ctx, px, py, 0.22*D);
-      }
+    if (tag==='christmas'){
+      __wreath(ctx, sx, sy, 0.48*api.DRAW * S);
+      for(let i=0;i<3;i++){ __light(ctx, sx + jx*0.40*api.DRAW*S, sy + jy*0.30*api.DRAW*S, 0.18*api.DRAW * S); }
+      return;
     }
 
-    // spread clusters so they’re not crowded
-    cluster(0.20);
-    cluster(0.50);
-    cluster(0.80);
-  } // <-- closes __drawDecorForSeg
+    // fall / halloween clusters — place items BESIDE the hay, not on top
+    const D = api.DRAW * S;          // reduced on HQ north
+    const tx = -ny, ty = nx;         // tangent (perpendicular to fence normal)
+    const step = 0.28 * D;           // side spacing along the fence
+    const jitter = v => (rs()-0.5) * v;
+
+    // 1) hay bale = anchor (centered)
+    __hay(ctx, sx + jitter(0.08*D), sy + jitter(0.06*D), 0.64*D);
+
+    // 2) corn stalk = left side of hay (slightly behind fence)
+    {
+      const px = sx + tx * (-step + jitter(0.06*D)) + nx * (-0.08*D);
+      const py = sy + ty * (-step + jitter(0.06*D)) + ny * (-0.08*D);
+      __corn(ctx, px, py, 0.68*D);
+    }
+
+    // 3) pumpkin = right side of hay (slightly in front)
+    {
+      const px = sx + tx * ( step + jitter(0.06*D)) + nx * ( 0.02*D);
+      const py = sy + ty * ( step + jitter(0.06*D)) + ny * ( 0.02*D);
+      __pump(ctx, px, py, 0.50*D, false);
+    }
+
+    // 4) second pumpkin / jack near right side
+    {
+      const px = sx + tx * ( step*0.6 + jitter(0.05*D)) + nx * (-0.02*D);
+      const py = sy + ty * ( step*0.6 + jitter(0.05*D)) + ny * (-0.02*D);
+      const jack = (tag==='halloween' && rs()<0.6);
+      __pump(ctx, px, py, 0.52*D, jack);
+    }
+
+    // 5) optional cornucopia = left side near corn
+    if (tag==='fall' && rs()<0.5){
+      const px = sx + tx * (-step*0.6 + jitter(0.05*D)) + nx * (0.05*D);
+      const py = sy + ty * (-step*0.6 + jitter(0.05*D)) + ny * (0.05*D);
+      __cornu(ctx, px, py, 0.54*D);
+    }
+
+    // leaf sprinkle around the base (avoid center of hay)
+    for(let i=0;i<3;i++){
+      const px = sx + tx*jitter(0.20*D) + nx*jitter(0.14*D);
+      const py = sy + ty*jitter(0.20*D) + ny*jitter(0.14*D);
+      __leaf(ctx, px, py, 0.22*D);
+    }
+  }
+
+  // spread clusters so they’re not crowded
+  cluster(0.20);
+  cluster(0.50);
+  cluster(0.80);
+} // <-- closes __drawDecorForSeg
   // ---------- Draw (wood fence) ----------
   function drawFence(api, segs){
     if (!segs) return;
