@@ -1,16 +1,13 @@
 // v2.1 — Mission 4: Island Armoury + Cardboard Box + Beach Docking (no island dock)
-// - Dialog: original lines + "Take the cardboard box? Yes / No" (no OK button)
-// - Inventory: adds via core getInventory/setInventory + inventory panel refresh
-// - Island: 5×4 tiles at far east edge; 2×2 building; brown door glows gold when close
-// - Palm tree: arched trunk + ring bands, drooping fronds, coconuts
-// - Publishes island land tiles only (window._izzaIslandLand) so the boat plugin allows beach docking
+// Draw island in render-under so it appears above water (map) but below entities.
+// Publishes island land tiles (window._izzaIslandLand) during update-pre.
 (function(){
   const BUILD='v2.1-m4-armoury';
   console.log('[IZZA PLAY]', BUILD);
 
   let api=null;
   const LS_KEYS = { mission4:'izzaMission4', armour:'izzaArmour' };
-  const BOX_TAKEN_KEY = 'izzaBoxTaken'; // persist world pickup state
+  const BOX_TAKEN_KEY = 'izzaBoxTaken';
 
   // ===== geometry =====
   function unlockedRect(t){ return (t!=='2')?{x0:18,y0:18,x1:72,y1:42}:{x0:10,y0:12,x1:80,y1:50}; }
@@ -34,21 +31,15 @@
     const y1 = y0 + h - 1;
     const ISLAND = { x0:Math.max(LAKE.x0,x0), y0:Math.max(LAKE.y0,y0), x1, y1:Math.min(LAKE.y1,y1) };
 
-    // Building is 1 row tall and 2 tiles wide (west→east).
-    // Keep it centered horizontally like before.
-    const BX = ISLAND.x0 + Math.floor((w-2)/2);   // west tile (door is here)
-    const BY = ISLAND.y0 + Math.floor((h-1)/2);   // single row
-    const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY }; // width=2, height=1
+    // Building: 2 tiles wide × 1 tile tall, centered; west tile has the door
+    const BX = ISLAND.x0 + Math.floor((w-2)/2);
+    const BY = ISLAND.y0 + Math.floor((h-1)/2);
+    const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY };
 
     // Door grid: one tile south of the WEST building tile (press B here)
     const DOOR_GRID = { x: BX, y: BY+1 };
 
     return { ISLAND, BUILDING, DOOR_GRID };
-  }
-  function isIslandTile(gx,gy){
-    if(localStorage.getItem('izzaMapTier')!=='2') return false;
-    const {ISLAND}=islandSpec();
-    return (gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1);
   }
 
   // Publish island land for boat plugin (beach docking)
@@ -61,10 +52,10 @@
         land.add(x+'|'+y);
       }
     }
-    window._izzaIslandLand = land; // treated as NOT water by the boat plugin
+    window._izzaIslandLand = land; // NOT water for the boat plugin
   }
 
-  // Publish before physics each frame, and once at boot
+  // Keep the land set fresh before physics each frame, and once at boot
   IZZA.on('update-pre', publishIslandLand);
   IZZA.on('ready', ()=> publishIslandLand());
 
@@ -140,7 +131,6 @@
   }
 
   function drawPalm(ctx, sx, sy, S){
-    // stylized palm: arched, ringed trunk + drooping fronds + coconuts
     ctx.save();
     ctx.translate(sx, sy);
     ctx.scale(S/32, S/32);
@@ -171,27 +161,23 @@
     ctx.beginPath(); ctx.arc(22,10,2.2,0,Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(20,11.2,2.0,0,Math.PI*2); ctx.fill();
 
-    // fronds (drooping, glossy)
+    // fronds
     function frond(ax,ay,bx,by,cx,cy){
       ctx.beginPath();
       ctx.moveTo(ax,ay);
       ctx.quadraticCurveTo(bx,by,cx,cy);
       ctx.quadraticCurveTo(bx,by,ax,ay);
       ctx.closePath();
-      // gradient-ish fill
       const g = ctx.createLinearGradient(ax,ay,cx,cy);
-      g.addColorStop(0,'#2E8B57');
-      g.addColorStop(1,'#1E6B40');
-      ctx.fillStyle=g;
-      ctx.fill();
-      ctx.strokeStyle='rgba(0,0,0,0.2)';
-      ctx.lineWidth=0.8; ctx.stroke();
+      g.addColorStop(0,'#2E8B57'); g.addColorStop(1,'#1E6B40');
+      ctx.fillStyle=g; ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=0.8; ctx.stroke();
     }
-    frond(20,8,   6,0,    2,12);   // left
-    frond(20,8,   12,-3,  24,2);   // left-mid
-    frond(20,8,   28,0,   36,12);  // right
-    frond(20,8,   30,12,  30,22);  // right-down
-    frond(20,8,   10,12,  10,22);  // left-down
+    frond(20,8,   6,0,    2,12);
+    frond(20,8,   12,-3,  24,2);
+    frond(20,8,   28,0,   36,12);
+    frond(20,8,   30,12,  30,22);
+    frond(20,8,   10,12,  10,22);
     ctx.restore();
   }
 
@@ -207,7 +193,7 @@
     ctx.fillStyle='#d8c399';
     ctx.fillRect(sx(ISLAND.x0), sy(ISLAND.y0), (ISLAND.x1-ISLAND.x0+1)*S, (ISLAND.y1-ISLAND.y0+1)*S);
 
-    // building 2×2
+    // building 2×1
     ctx.fillStyle='#6f87b3';
     ctx.fillRect(sx(BUILDING.x0), sy(BUILDING.y0), (BUILDING.x1-BUILDING.x0+1)*S, (BUILDING.y1-BUILDING.y0+1)*S);
 
@@ -215,7 +201,7 @@
     const near = isPlayerNearGrid(DOOR_GRID.x, DOOR_GRID.y, 1.0);
     const doorW = S*0.45, doorH = S*0.55;
     const doorX = sx(DOOR_GRID.x) + (S-doorW)/2;
-    const doorY = sy(BUILDING.y1) + S - doorH; // inset into south face
+    const doorY = sy(BUILDING.y1) + S - doorH;
     ctx.fillStyle = near ? '#d4a01e' : '#6e4a1e';
     ctx.fillRect(doorX, doorY, doorW, doorH);
 
@@ -248,17 +234,15 @@
   }
 
   // ===== hooks =====
-  // IMPORTANT: draw island BEFORE entities so it doesn't cover the player
-  IZZA.on('render-pre', ()=>{
+  // Draw island between map tiles and entities so it’s above water but below the player.
+  IZZA.on('render-under', ()=>{
     if(!api?.ready) return;
-    publishIslandLand();     // keep land set fresh early for boat plugin
     const ctx=document.getElementById('game').getContext('2d');
     drawIsland(ctx);
   });
 
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
-
     // Keep the building solid
     const b=buildingSolid();
     if(b){
@@ -274,7 +258,7 @@
     if(!api?.ready) return;
     const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
-    // Box pickup: Yes adds to inventory + hides world box forever; No leaves it
+    // Box pickup
     const box=cardboardBoxGrid();
     const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
     if(boxStillThere && gx===box.x && gy===box.y){
@@ -283,14 +267,14 @@
       showBoxYesNo(()=>{
         const inv=getInv();
         addCount(inv,'cardboard_box',1);
-        setInv(inv); // persist + inventory UI refresh
-        localStorage.setItem(BOX_TAKEN_KEY, '1'); // hide world sprite
+        setInv(inv);
+        localStorage.setItem(BOX_TAKEN_KEY, '1');
         IZZA.toast?.('Cardboard Box added to Inventory');
       });
       return;
     }
 
-    // Armoury door: greet + explain
+    // Armoury door
     const {DOOR_GRID}=islandSpec();
     if(localStorage.getItem('izzaMapTier')==='2' && gx===DOOR_GRID.x && gy===DOOR_GRID.y){
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
