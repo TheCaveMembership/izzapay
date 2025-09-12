@@ -1512,7 +1512,7 @@ ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy,
     });
   }
 
-  // Keep the bigmap canvas fresh whenever the world renders
+  // While open, keep the bigmap canvas fresh each frame
   IZZA.on('render-post', ()=>{
     if (bigOpen) {
       window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
