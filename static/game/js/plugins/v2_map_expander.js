@@ -199,11 +199,17 @@ const rectH = R => (R.y1 - R.y0 + 1);
   // ---------- Lake helpers for collisions / overlay ----------
   // (kept: NO boat logic here)
   function dockCells(){
-    const api=IZZA.api, A=anchors(api), {DOCKS}=lakeRects(A);
-    const set=new Set();
-    DOCKS.forEach(d=>{ for(let i=0;i<d.len;i++) set.add((d.x0+i)+'|'+d.y); });
-    return set;
+  const api=IZZA.api, A=anchors(api), {DOCKS}=lakeRects(A);
+  const set=new Set();
+  // city docks
+  DOCKS.forEach(d=>{ for(let i=0;i<d.len;i++) set.add((d.x0+i)+'|'+d.y); });
+  // island dock (water half)
+  if (window.__IZZA_ISLAND_DOCK__?.water){
+    const w = window.__IZZA_ISLAND_DOCK__.water;
+    set.add(w.x+'|'+w.y);
   }
+  return set;
+}
 
   // ---------- HOSPITAL ----------
 let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
@@ -622,8 +628,18 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
   const near = Math.abs(pgx-DOOR.x) <= 1 && Math.abs(pgy-DOOR.y) <= 1;
   fillTile(api, ctx, DOOR.x, DOOR.y, near ? '#d4a01e' : '#6e4a1e');
 
-  // export so your mission 4 “B” handler can reuse the exact door tile if it wants
-  window.__IZZA_ARMOURY__ = { rect: BUILDING, door: DOOR, island: ISLAND };
+  // --- Island dock: 1 plank in water + 1 on sand (west edge, mid-height)
+  const dockY = (ISLAND.y0 + ISLAND.y1) >> 1;
+  const ISLAND_DOCK = {
+    water: { x: ISLAND.x0 - 1, y: dockY }, // in water
+    sand:  { x: ISLAND.x0,     y: dockY }  // on sand
+  };
+  fillTile(api, ctx, ISLAND_DOCK.water.x, ISLAND_DOCK.water.y, COL.wood);
+  fillTile(api, ctx, ISLAND_DOCK.sand .x, ISLAND_DOCK.sand .y, COL.wood);
+
+  // export so other systems can use exact tiles
+  window.__IZZA_ARMOURY__      = { rect: BUILDING, door: DOOR, island: ISLAND };
+  window.__IZZA_ISLAND_DOCK__  = ISLAND_DOCK;
 })();
     // ====== MANUAL PATCHES & HOSPITAL ======
     const set = (x,y,color)=> fillTile(api,ctx,x,y,color);
@@ -769,16 +785,72 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
       });
     });
     IZZA.on('update-post', ()=>{
-      if(!IZZA?.api?.ready || !window.__IZZA_TRADE__) return;
-      const p = IZZA.api.player, t=IZZA.api.TILE, gx=(p.x/t)|0, gy=(p.y/t)|0;
-      const R=window.__IZZA_TRADE__.rect;
-      if(gx>=R.x0 && gx<=R.x1 && gy>=R.y0 && gy<=R.y1){
-        // simple AABB resolve: push up if inside roofline
-        p.y = (R.y0-0.01)*t;
-      }
-    });
-  }catch(e){ console.warn('[TradeCentre] draw failed', e); }
-})();
+  if(!IZZA.api?.ready || !isTier2() || !_layout) return;
+  const api=IZZA.api, t=api.TILE, p=api.player;
+  const gx=(p.x/t)|0, gy=(p.y/t)|0;
+
+  const solids = [];
+  _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
+  solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
+  _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
+
+  // Hospital solid
+  if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
+
+  // ===== BANK solid (kept) =====
+  if(window.__IZZA_BANK__?.rect){
+    const B = window.__IZZA_BANK__.rect;
+    solids.push({x:B.x0,y:B.y0,w:rectW(B),h:rectH(B)});
+  }
+
+  // ===== ARMOURY solid (NEW) =====
+  if (window.__IZZA_ARMOURY__?.rect){
+    const R = window.__IZZA_ARMOURY__.rect;
+    solids.push({ x:R.x0, y:R.y0, w:(R.x1-R.x0+1), h:(R.y1-R.y0+1) });
+  }
+
+  // Manual solid house strips + singles
+  (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
+  (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
+
+  // Water is solid except beach & planks — BUT skip this while boating
+  const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
+  const waterIsSolid = (x,y)=>{
+    if(!_inRect(x,y,LAKE)) return false;
+
+    // island land is NOT water
+    if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false;
+
+    if(x===BEACH_X) return false;
+    if(dockCells().has(x+'|'+y)) return false; // includes island dock water tile
+    return true;
+  };
+
+  if (!window._izzaBoatActive) {
+    if (waterIsSolid(gx,gy)) {
+      solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
+    }
+  }
+
+  // Exclude walkable override areas (e.g., sidewalk 69..76,31)
+  const overrides = _layout.patches?.walkableOverride || [];
+  const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
+
+  // Simple AABB resolve
+  for(const b of solids){
+    if(isOverridden(gx,gy)) break;
+    if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+      const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
+      const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
+      const m=Math.min(dxL,dxR,dyT,dyB);
+      if(m===dxL) p.x=(b.x-0.01)*t;
+      else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
+      else if(m===dyT) p.y=(b.y-0.01)*t;
+      else             p.y=(b.y+b.h+0.01)*t;
+      break;
+    }
+  }
+});
 
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
@@ -813,68 +885,69 @@ IZZA.on('update-pre', ()=>{
   });
 
   IZZA.on('update-post', ()=>{
-    if(!IZZA.api?.ready || !isTier2() || !_layout) return;
-    const api=IZZA.api, t=api.TILE, p=api.player;
-    const gx=(p.x/t)|0, gy=(p.y/t)|0;
+  if(!IZZA.api?.ready || !isTier2() || !_layout) return;
+  const api=IZZA.api, t=api.TILE, p=api.player;
+  const gx=(p.x/t)|0, gy=(p.y/t)|0;
 
-    const solids = [];
-    _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
-    solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
-    _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
+  const solids = [];
+  // downtown buildings
+  _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
+  solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:(_layout.HOTEL.x1-_layout.HOTEL.x0+1),h:(_layout.HOTEL.y1-_layout.HOTEL.y0+1)});
+  _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:(h.x1-h.x0+1),h:(h.y1-h.y0+1)}));
 
-    // Hospital solid
-    if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
+  // hospital
+  if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:(_hospital.x1-_hospital.x0+1),h:(_hospital.y1-_hospital.y0+1)}); }
 
-    // ===== BANK solid (kept) =====
-    if(window.__IZZA_BANK__?.rect){
-      const B = window.__IZZA_BANK__.rect;
-      solids.push({x:B.x0,y:B.y0,w:rectW(B),h:rectH(B)});
-    }
-    // ============================
-
-    // Manual solid house strips + singles
-    (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
-    (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
-
-    // Water is solid except beach & planks — BUT skip this while boating
-const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
-const waterIsSolid = (x,y)=>{
-  if(!_inRect(x,y,LAKE)) return false;
-
-  // NEW: treat island land tiles as walkable (mission4 publishes a Set of "gx|gy")
-  if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false;
-
-  if(x===BEACH_X) return false;
-  if(dockCells().has(x+'|'+y)) return false;
-  return true;
-};
-
-if (!window._izzaBoatActive) {             // <— add this guard
-  if (waterIsSolid(gx,gy)) {
-    solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
+  // bank
+  if(window.__IZZA_BANK__?.rect){
+    const B = window.__IZZA_BANK__.rect;
+    solids.push({x:B.x0,y:B.y0,w:(B.x1-B.x0+1),h:(B.y1-B.y0+1)});
   }
-}
 
-    // Exclude walkable override areas (e.g., sidewalk 69..76,31)
-    const overrides = _layout.patches?.walkableOverride || [];
-    const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
+  // armoury (island)
+  if (window.__IZZA_ARMOURY__?.rect){
+    const R = window.__IZZA_ARMOURY__.rect;
+    solids.push({ x:R.x0, y:R.y0, w:(R.x1-R.x0+1), h:(R.y1-R.y0+1) });
+  }
 
-    // Simple AABB resolve
-    for(const b of solids){
-      if(isOverridden(gx,gy)) break;
-      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
-        const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
-        const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
-        const m=Math.min(dxL,dxR,dyT,dyB);
-        if(m===dxL) p.x=(b.x-0.01)*t;
-        else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
-        else if(m===dyT) p.y=(b.y-0.01)*t;
-        else             p.y=(b.y+b.h+0.01)*t;
-        break;
-      }
+  // manual solids
+  (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:(r.x1-r.x0+1),h:(r.y1-r.y0+1)}));
+  (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
+
+  // water (solid unless beach/docks/island land; and only when not boating)
+  const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
+  const waterIsSolid = (x,y)=>{
+    if(!_inRect(x,y,LAKE)) return false;
+    if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false; // island sand is land
+    if(x===BEACH_X) return false;                      // beach strip
+    if(dockCells().has(x+'|'+y)) return false;         // docks (incl. island dock water tile)
+    return true;
+  };
+  if (!window._izzaBoatActive) {
+    if (waterIsSolid(gx,gy)) {
+      solids.push({x:LAKE.x0,y:LAKE.y0,w:(LAKE.x1-LAKE.x0+1),h:(LAKE.y1-LAKE.y0+1)});
     }
-  });
+  }
 
+  // walkable overrides
+  const overrides = _layout.patches?.walkableOverride || [];
+  const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
+
+  // simple AABB resolve
+  for(const b of solids){
+    if(isOverridden(gx,gy)) break;
+    if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+      const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
+      const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
+      const m=Math.min(dxL,dxR,dyT,dyB);
+      if(m===dxL) p.x=(b.x-0.01)*t;
+      else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
+      else if(m===dyT) p.y=(b.y-0.01)*t;
+      else             p.y=(b.y+b.h+0.01)*t;
+      break;
+    }
+  }
+});
   // ---------- Hospital interaction (A still heals if you stand on the door)
   function tryHospitalHeal(){
     const api=IZZA.api; if(!_hospital || !_hospitalDoor || !api?.ready) return;
@@ -1237,7 +1310,39 @@ if (!window._izzaBoatActive) {             // <— add this guard
   }
   document.getElementById('btnB')?.addEventListener('click', _onPressBankB, true);
   window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') _onPressBankB(e); }, true);
+// ---------- ARMOURY UI ----------
+function _ensureArmouryUI(){
+  if (document.getElementById('armouryUI')) return;
+  const wrap=document.createElement('div');
+  wrap.id='armouryUI';
+  wrap.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:70;';
+  wrap.innerHTML = `
+    <div style="min-width:300px;background:#0f1624;border:1px solid #2b3b57;border-radius:12px;padding:14px;color:#e7eef7;box-shadow:0 14px 38px rgba(0,0,0,.55)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>🔧 Armoury</strong>
+        <button id="armouryClose" style="background:#263447;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
+      </div>
+      <div style="opacity:.85;margin-bottom:8px">(stub) Buy ammo &amp; upgrades here.</div>
+      <button id="armouryOk" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:700;cursor:pointer">OK</button>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.querySelector('#armouryClose').onclick = ()=> _armouryClose();
+  wrap.querySelector('#armouryOk').onclick    = ()=> _armouryClose();
+}
+function _armouryOpen(){ _ensureArmouryUI(); document.getElementById('armouryUI').style.display='flex'; }
+function _armouryClose(){ const el=document.getElementById('armouryUI'); if(el) el.style.display='none'; }
 
+// Press B near the island armoury door → open modal
+function _onPressArmouryB(e){
+  const d = window.__IZZA_ARMOURY__?.door; if(!d || !IZZA?.api?.ready) return;
+  const t=IZZA.api.TILE, gx=((IZZA.api.player.x+16)/t|0), gy=((IZZA.api.player.y+16)/t|0);
+  const near = Math.abs(gx-d.x)<=1 && Math.abs(gy-d.y)<=1;
+  if(!near) return;
+  e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+  _armouryOpen();
+}
+document.getElementById('btnB')?.addEventListener('click', _onPressArmouryB, true);
+window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressArmouryB(e); }, true);
   // ---------- Minimap / Bigmap overlay ----------
 function paintOverlay(id){
   if(!_layout) return;
