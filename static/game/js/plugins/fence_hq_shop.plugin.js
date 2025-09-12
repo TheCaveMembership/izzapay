@@ -380,7 +380,7 @@
       // leaf sprinkle at base
       for(let i=0;i<3;i++) __leaf(ctx, sx + (rs()-0.5)*0.28*api.DRAW, sy + (rs()-0.5)*0.22*api.DRAW, 0.22*api.DRAW);
     }
-    cluster(0.25); cluster(0.50); cluster(0.75);
+    cluster(0.20); cluster(0.50); cluster(0.80);
   }
 
   // ---------- Draw (wood fence) ----------
