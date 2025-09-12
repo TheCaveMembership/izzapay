@@ -167,54 +167,63 @@ function showBoxYesNo(fn){
   const gx = ((api.player.x+16)/t|0);
   const gy = ((api.player.y+16)/t|0);
 
-  // Pull the island geometry & dock that the expander publishes
+  // Pull the island geometry & perimeter dock published by the expander
   const ISLAND = window.__IZZA_ARMOURY__?.island || null;
   const DOCK   = window.__IZZA_ISLAND_DOCK__   || null;
   const DOOR   = window.__IZZA_ARMOURY__?.door || null;
 
-  // helper: snap the player to the dock's WATER tile before embarking
-  function snapPlayerToDockWater(){
-    const w = DOCK?.water || (ISLAND ? { x: ISLAND.x0-1, y: ((ISLAND.y0+ISLAND.y1)>>1) } : null);
-    if (!w) return;
-    // small bias so we're clearly inside that tile
-    api.player.x = w.x * t + 4;
-    api.player.y = w.y * t + 4;
-  }
+  // --- helpers for array/single compat ----
+  const toArr = v => (!v ? [] : Array.isArray(v) ? v : (typeof v.x==='number' && typeof v.y==='number') ? [v] : []);
+  const dockSand  = toArr(DOCK?.sand);
+  const dockWater = toArr(DOCK?.water);
+  const key = (x,y)=> x+'|'+y;
+  const sandSet  = new Set(dockSand.map(p=>key(p.x,p.y)));
+  const waterSet = new Set(dockWater.map(p=>key(p.x,p.y)));
 
-  // (A) Allow embark ONLY at the island dock (sand, water, or adjacent to the water tile)
-  if (DOCK) {
-    const onSand  = (gx === DOCK.sand?.x  && gy === DOCK.sand?.y);
-    const onWater = (gx === DOCK.water?.x && gy === DOCK.water?.y);
-    const adjToWater =
-      DOCK.water &&
-      (Math.abs(gx - DOCK.water.x) + Math.abs(gy - DOCK.water.y) === 1);
+  const isOnAnySandDock  = sandSet.has(key(gx,gy));
+  const isOnAnyWaterDock = waterSet.has(key(gx,gy));
+  const adjToAnyWaterDock =
+    dockWater.some(p => Math.abs(gx - p.x) + Math.abs(gy - p.y) === 1);
 
-    if (onSand || onWater || adjToWater) {
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      // Fix: ensure boat spawns on WATER, not sand
-      snapPlayerToDockWater();
-      localStorage.removeItem(RETURN_TO_BOAT_FLAG); // clear one-shot if still set
-      requestBoatEmbarkFromIsland();
-      return;
+  function snapPlayerToNearestDockWater(){
+    let best = null, bestD = 1e9;
+    const px = api.player.x/t, py = api.player.y/t;
+    (dockWater.length ? dockWater : (ISLAND ? [{x:ISLAND.x0-1,y:((ISLAND.y0+ISLAND.y1)>>1)}] : []))
+      .forEach(p=>{
+        const dx = (p.x - px), dy = (p.y - py);
+        const d2 = dx*dx + dy*dy;
+        if(d2 < bestD){ bestD = d2; best = p; }
+      });
+    if (best){
+      api.player.x = best.x*t + 4;   // small bias keeps us clearly in that tile
+      api.player.y = best.y*t + 4;
     }
   }
 
-  // (B) One-shot: after first armoury open, next B anywhere on ISLAND sand → embark
+  // (A) Embark anywhere along the island edge (on sand, on water, or 4-way adjacent to water)
+  if (DOCK && (isOnAnySandDock || isOnAnyWaterDock || adjToAnyWaterDock)) {
+    e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+    snapPlayerToNearestDockWater();              // guaranteed boat spawns on water
+    localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+    requestBoatEmbarkFromIsland();
+    return;
+  }
+
+  // (B) One-shot safety: after first armoury open, next B anywhere on ISLAND sand → embark
   if (ISLAND && localStorage.getItem(RETURN_TO_BOAT_FLAG) === '1'){
     const onIslandSand =
       gx >= ISLAND.x0 && gx <= ISLAND.x1 &&
       gy >= ISLAND.y0 && gy <= ISLAND.y1;
     if (onIslandSand){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      // Fix: same snap so the boat isn't stuck in sand
-      snapPlayerToDockWater();
+      snapPlayerToNearestDockWater();
       localStorage.removeItem(RETURN_TO_BOAT_FLAG);
       requestBoatEmbarkFromIsland();
       return;
     }
   }
 
-  // (C) Cardboard box pickup (near HQ, not on the island)
+  // (C) Cardboard box pickup (unchanged)
   const box = cardboardBoxGrid();
   const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
   if (boxStillThere && gx === box.x && gy === box.y){
@@ -230,12 +239,12 @@ function showBoxYesNo(fn){
     return;
   }
 
-  // (D) Armoury door → open your armoury UI (or fallback)
+  // (D) Armoury door open
   if (localStorage.getItem('izzaMapTier') === '2' && DOOR && gx === DOOR.x && gy === DOOR.y){
     e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
     if (typeof window.openArmoury === 'function') window.openArmoury();
     else openArmouryFallback();
-    localStorage.setItem(RETURN_TO_BOAT_FLAG, '1'); // arm one-shot embark for next B on sand
+    localStorage.setItem(RETURN_TO_BOAT_FLAG, '1');
     return;
   }
 }
