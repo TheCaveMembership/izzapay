@@ -224,74 +224,220 @@
   }
   setTimeout(()=> IZZA.on('update-post', postClamp), 0);
 
-  // ====== visuals ======
-  // SVG boat path (simple skiff with bow). Drawn with Path2D on canvas.
-  // Coordinates normalized in a ~100x60 box and scaled to tile size.
-  const BOAT_PATH_D = "M5,40 L25,18 L75,18 L95,40 L75,58 L25,58 Z M25,18 L35,8 L65,8 L75,18 Z";
-  let BOAT_PATH = null;
+  // ====== visuals (luxury speedboat) ======
+let prevBoatDraw = null;
+let lastWakeAt = 0;
 
-  function ensureBoatPath(){
-    if (!BOAT_PATH) {
-      try {
-        BOAT_PATH = new Path2D(BOAT_PATH_D);
-      } catch (e) {
-        // Fallback: construct path via Canvas commands if Path2D SVG ctor not supported
-        const p = new Path2D();
-        p.moveTo(5,40); p.lineTo(25,18); p.lineTo(75,18); p.lineTo(95,40); p.lineTo(75,58); p.lineTo(25,58); p.closePath();
-        p.moveTo(25,18); p.lineTo(35,8); p.lineTo(65,8); p.lineTo(75,18); p.closePath();
-        BOAT_PATH = p;
-      }
-    }
-  }
+// Build paths procedurally (broad support, no SVG ctor needed)
+function makeHullPath(){
+  const p = new Path2D();
+  // Outer hull profile (top view, pointed bow)
+  p.moveTo(6,38);
+  p.quadraticCurveTo(22,16,50,10);  // port sweep up to bow
+  p.quadraticCurveTo(78,16,94,38);  // starboard sweep down
+  p.quadraticCurveTo(78,60,50,66);  // starboard aft round
+  p.quadraticCurveTo(22,60,6,38);   // port aft round back to start
+  p.closePath();
+  return p;
+}
+function makeDeckInset(){
+  const p = new Path2D();
+  p.moveTo(16,38);
+  p.quadraticCurveTo(30,22,50,18);
+  p.quadraticCurveTo(70,22,84,38);
+  p.quadraticCurveTo(70,55,50,58);
+  p.quadraticCurveTo(30,55,16,38);
+  p.closePath();
+  return p;
+}
+function makeWindshield(){
+  const p = new Path2D();
+  p.moveTo(32,28);
+  p.quadraticCurveTo(50,20,68,28);
+  p.lineTo(66,32);
+  p.quadraticCurveTo(50,25,34,32);
+  p.closePath();
+  return p;
+}
+function makeStripe(){
+  const p = new Path2D();
+  p.moveTo(48,14); p.lineTo(52,14);
+  p.lineTo(78,22); p.lineTo(74,24);
+  p.lineTo(48,16); p.closePath();
+  return p;
+}
+function makeMotorCap(){
+  const p = new Path2D();
+  p.moveTo(40,60);
+  p.quadraticCurveTo(50,64,60,60);
+  p.quadraticCurveTo(50,62,40,60);
+  p.closePath();
+  return p;
+}
 
-  function drawBoat(ctx, sx, sy, size){
-    // size ~ tile in screen px
-    ensureBoatPath();
-    ctx.save();
-    ctx.translate(sx, sy);
-    const scale = size / 64; // nice scale relative to tile
-    ctx.scale(scale, scale);
-    ctx.translate(-32, -32); // center path
-    // Hull
-    ctx.fillStyle = '#6b4a2f';
-    ctx.fill(BOAT_PATH);
-    // Rim / outline
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.stroke(BOAT_PATH);
-    // Deck highlight
-    ctx.globalAlpha = 0.2;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(20,22,60,10);
-    ctx.restore();
-  }
+const HULL_PATH      = makeHullPath();
+const DECK_INSET     = makeDeckInset();
+const WINDSHIELD     = makeWindshield();
+const STRIPE         = makeStripe();
+const MOTOR_CAP      = makeMotorCap();
 
-  function drawParkedDockBoats(ctx){
-    const {DOCKS}=lakeRects(anchors(api));
-    const S=api.DRAW, t=T();
+function drawLuxuryBoat(ctx, sx, sy, size, moving){
+  // size ~ tile screen px; path space is ~100x76
+  ctx.save();
 
-    DOCKS.forEach(d=>{
-      if(inBoat && claimedDockId===d.y) return; // hide the boat we took
-      const spot = parkedSpotForDock(d);        // SOUTH (under plank)
-      const sx = (spot.gx*t - api.camera.x) * (S/t) + S*0.5;
-      const sy = (spot.gy*t - api.camera.y) * (S/t) + S*0.62;
-      drawBoat(ctx, sx, sy, S*0.90);
-    });
-  }
+  // Gentle bob so parked boats feel alive
+  const t = performance.now() * 0.001;
+  const bob = Math.sin(t * 2.4) * (moving ? 0.8 : 1.2);
+  ctx.translate(sx, sy + bob);
 
-  IZZA.on('render-post', ()=>{
-    if(!api?.ready || !isTier2()) return;
-    const ctx=document.getElementById('game').getContext('2d');
-    drawParkedDockBoats(ctx);
+  const scale = size / 72;         // tuned visually against your tile
+  ctx.scale(scale, scale);
+  ctx.translate(-50, -38);         // center the ~100x76 model on (sx,sy)
 
-    if(inBoat && ghostBoat){
-      const S=api.DRAW, t=T();
-      const sx=(ghostBoat.x - api.camera.x)*(S/t) + S*0.5;
-      const sy=(ghostBoat.y - api.camera.y)*(S/t) + S*0.62;
-      drawBoat(ctx, sx, sy, S*0.90);
-    }
+  // Soft shadow
+  ctx.save();
+  ctx.translate(2, 5);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.filter = 'blur(1.2px)';
+  ctx.fill(HULL_PATH);
+  ctx.restore();
+  ctx.filter = 'none';
+
+  // Hull gradient (deep paint)
+  const hullGrad = ctx.createLinearGradient(20,12,80,62);
+  hullGrad.addColorStop(0.0, '#263238');  // near-black blue gray
+  hullGrad.addColorStop(0.5, '#37474F');
+  hullGrad.addColorStop(1.0, '#212121');
+
+  ctx.fillStyle = hullGrad;
+  ctx.fill(HULL_PATH);
+  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; // subtle clear-coat highlight
+  ctx.stroke(HULL_PATH);
+
+  // Deck inset (lighter, premium)
+  const deckGrad = ctx.createLinearGradient(28,22,72,56);
+  deckGrad.addColorStop(0.0, '#8D6E63');   // warm luxury brown
+  deckGrad.addColorStop(1.0, '#5D4037');
+  ctx.fillStyle = deckGrad;
+  ctx.fill(DECK_INSET);
+
+  // Chrome rim around deck inset
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = '#B0BEC5';
+  ctx.stroke(DECK_INSET);
+
+  // Racing stripe (accent)
+  ctx.fillStyle = '#E53935'; // red
+  ctx.fill(STRIPE);
+  ctx.globalAlpha = 0.65;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(49,15,1.8,9);
+  ctx.globalAlpha = 1;
+
+  // Tinted windshield with chrome trim
+  const glassGrad = ctx.createLinearGradient(34,24,66,32);
+  glassGrad.addColorStop(0.0, 'rgba(180,220,255,0.55)');
+  glassGrad.addColorStop(1.0, 'rgba(70,120,160,0.85)');
+  ctx.fillStyle = glassGrad;
+  ctx.fill(WINDSHIELD);
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = '#CFD8DC';
+  ctx.stroke(WINDSHIELD);
+
+  // Motor cap / rear detail
+  const capGrad = ctx.createLinearGradient(40,58,60,64);
+  capGrad.addColorStop(0.0, '#424242');
+  capGrad.addColorStop(1.0, '#616161');
+  ctx.fillStyle = capGrad;
+  ctx.fill(MOTOR_CAP);
+
+  // Micro highlights to sell shape
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.ellipse(50, 20, 24, 6, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+}
+
+function drawWake(ctx, sx, sy, size, dirHintX, dirHintY){
+  // Simple V-wake behind the boat when moving; no rotation dependency
+  const s = size;
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+
+  // Offset wake slightly opposite to travel direction
+  const ox = -Math.sign(dirHintX||0) * s*0.12;
+  const oy = -Math.sign(dirHintY||1) * s*0.20; // default assume forward = down
+
+  ctx.translate(sx + ox, sy + oy);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.beginPath();
+  ctx.moveTo(-s*0.05,  s*0.10);
+  ctx.quadraticCurveTo(-s*0.30, s*0.35, -s*0.02, s*0.60);
+  ctx.quadraticCurveTo( 0,      s*0.55,  s*0.02, s*0.60);
+  ctx.quadraticCurveTo( s*0.30, s*0.35,  s*0.05, s*0.10);
+  ctx.closePath();
+  ctx.fill();
+
+  // trailing ripples
+  ctx.globalAlpha = 0.18;
+  ctx.beginPath();
+  ctx.ellipse(0, s*0.70, s*0.35, s*0.10, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawParkedDockBoats(ctx){
+  const {DOCKS}=lakeRects(anchors(api));
+  const S=api.DRAW, t=T();
+
+  DOCKS.forEach(d=>{
+    if(inBoat && claimedDockId===d.y) return; // hide the boat we took
+    const spot = parkedSpotForDock(d);        // SOUTH (under plank)
+    const sx = (spot.gx*t - api.camera.x) * (S/t) + S*0.50;
+    const sy = (spot.gy*t - api.camera.y) * (S/t) + S*0.62;
+    drawLuxuryBoat(ctx, sx, sy, S*0.92, /*moving*/ false);
   });
+}
 
+IZZA.on('render-post', ()=>{
+  if(!api?.ready || !isTier2()) return;
+  const ctx=document.getElementById('game').getContext('2d');
+
+  // parked boats
+  drawParkedDockBoats(ctx);
+
+  // the player’s boat ghost
+  if(inBoat && ghostBoat){
+    const S=api.DRAW, t=T();
+    const sx=(ghostBoat.x - api.camera.x)*(S/t) + S*0.50;
+    const sy=(ghostBoat.y - api.camera.y)*(S/t) + S*0.62;
+
+    // wake if moving enough
+    let moving=false, dx=0, dy=0;
+    if(prevBoatDraw){
+      dx = sx - prevBoatDraw.x;
+      dy = sy - prevBoatDraw.y;
+      const dist = Math.hypot(dx,dy);
+      moving = dist > 0.6; // screen px threshold
+    }
+    if(moving && performance.now() - lastWakeAt > 30){
+      drawWake(ctx, sx, sy, S*0.92, dx, dy);
+      lastWakeAt = performance.now();
+    }
+
+    drawLuxuryBoat(ctx, sx, sy, S*0.92, moving);
+    prevBoatDraw = {x:sx, y:sy};
+  } else {
+    prevBoatDraw = null;
+  }
+});
   // ====== boot ======
   IZZA.on('ready', (a)=>{
     api=a;
