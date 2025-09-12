@@ -1,13 +1,17 @@
-// v2.1 — Mission 4: Island Armoury + Cardboard Box + Beach Docking (no island dock)
+// v2.2 — Mission 4: Island Armoury + Cardboard Box + Beach Docking (no island dock)
 // Draw island in render-under so it appears above water (map) but below entities.
 // Publishes island land tiles (window._izzaIslandLand) during update-pre.
+// Exports ownership/geometry via window.__IZZA_ARMOURY__ so other files can defer to this.
 (function(){
-  const BUILD='v2.1-m4-armoury';
+  const BUILD='v2.2-m4-armoury';
   console.log('[IZZA PLAY]', BUILD);
 
   let api=null;
   const LS_KEYS = { mission4:'izzaMission4', armour:'izzaArmour' };
   const BOX_TAKEN_KEY = 'izzaBoxTaken';
+
+  // One-shot latch: after door interaction, next B on island sand boards the boat
+  let _queueReturnToBoat = false;
 
   // ===== geometry =====
   function unlockedRect(t){ return (t!=='2')?{x0:18,y0:18,x1:72,y1:42}:{x0:10,y0:12,x1:80,y1:50}; }
@@ -40,6 +44,39 @@
     const DOOR_GRID = { x: BX, y: BY+1 };
 
     return { ISLAND, BUILDING, DOOR_GRID };
+  }
+
+  // Small helpers the boat latch needs
+  function isOnIslandSand(gx, gy){
+    const { ISLAND } = islandSpec();
+    return gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1;
+  }
+
+  // Try to board the boat via integrations; otherwise do a safe fallback
+  function boardBoatFromIsland(){
+    try {
+      if (window.izzaBoat?.board) { window.izzaBoat.board(); return; }
+      if (typeof window.requestBoatBoard === 'function') { window.requestBoatBoard(); return; }
+    } catch {}
+    // Fallback: snap player to water just west of island midline and enable boat
+    if (!api?.ready) return;
+    const t=api.TILE, { ISLAND } = islandSpec();
+    const water = { x: ISLAND.x0 - 1, y: (ISLAND.y0 + ISLAND.y1) >> 1 };
+    api.player.x = water.x*t + 0.5*t;
+    api.player.y = water.y*t + 0.5*t;
+    try { window._izzaBoatActive = true; window.dispatchEvent(new Event('izza-boat-changed')); } catch {}
+    IZZA.toast?.('Boarded boat');
+  }
+
+  // Export ownership + geometry so other files (map expander) can defer visuals/door
+  function publishArmouryOwnership(){
+    const { ISLAND, BUILDING, DOOR_GRID } = islandSpec();
+    window.__IZZA_ARMOURY__ = {
+      owner: 'mission4',
+      island: ISLAND,
+      rect: { x0: BUILDING.x0, y0: BUILDING.y0, x1: BUILDING.x1, y1: BUILDING.y1 },
+      door: { x: DOOR_GRID.x, y: DOOR_GRID.y }
+    };
   }
 
   // Publish island land for boat plugin (beach docking)
@@ -258,6 +295,14 @@
     if(!api?.ready) return;
     const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
+    // One-shot: after armoury door interaction, next B while on island sand boards the boat
+    if (_queueReturnToBoat && isOnIslandSand(gx, gy)) {
+      e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
+      _queueReturnToBoat = false;
+      boardBoatFromIsland();
+      return;
+    }
+
     // Box pickup
     const box=cardboardBoxGrid();
     const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
@@ -274,7 +319,7 @@
       return;
     }
 
-    // Armoury door
+    // Armoury door (dialogue exactly as before)
     const {DOOR_GRID}=islandSpec();
     if(localStorage.getItem('izzaMapTier')==='2' && gx===DOOR_GRID.x && gy===DOOR_GRID.y){
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
@@ -289,7 +334,8 @@
           </div>
         </div>`;
       document.body.appendChild(m);
-      m.querySelector('.backdrop').addEventListener('click',()=>m.remove(),{passive:true});
+      const close = ()=> { try{ m.remove(); }finally{ _queueReturnToBoat = true; } }; // arm the one-shot when dialog closes
+      m.querySelector('.backdrop').addEventListener('click', close, {passive:true});
       return;
     }
   }
@@ -297,6 +343,8 @@
   // ===== boot =====
   IZZA.on('ready', (a)=>{
     api=a;
+    publishArmouryOwnership();           // <-- let other files know this file owns the island/door
+    publishIslandLand();                 // seed land set
     const btnB=document.getElementById('btnB'); btnB?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
     console.log('[mission4] ready', BUILD);
