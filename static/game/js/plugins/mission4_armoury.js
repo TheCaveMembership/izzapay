@@ -1,11 +1,11 @@
-// v2.5 — Mission 4 Armoury (logic/UI only; expander owns visuals)
-// - Robust island docking: supports single-tile or full-perimeter docks
-// - Geometry fallback: docks at closest island edge if arrays missing or out of range
-// - Snap radius widened (<=3) so B works even if slightly off-tile
+// v2.6 — Mission 4 Armoury (logic/UI only; expander owns visuals)
+// - FIX: City docks restored — island logic runs ONLY when near the island
+// - Robust island docking: single-tile or perimeter dock, with geometry fallback
+// - Snap radius widened (<=3) for mobile
 // - Keeps box pickup + armoury door + one-shot embark
 // - Republish island land to avoid edge slipping
 (function(){
-  const BUILD='v2.5-m4-armoury-logic';
+  const BUILD='v2.6-m4-armoury-logic';
   console.log('[IZZA PLAY]', BUILD);
 
   let api=null;
@@ -41,7 +41,7 @@
     const BUILDING = { x0:BX, y0:BY, x1:BX, y1:BY };
     const DOOR_GRID = { x: BX, y: BY+1 };
 
-    // legacy single dock (kept for compatibility)
+    // legacy single dock (compat only; the expander may export a full perimeter)
     const dockY = (ISLAND.y0 + ISLAND.y1) >> 1;
     const ISLAND_DOCK = {
       water: { x: ISLAND.x0 - 1, y: dockY },
@@ -154,7 +154,7 @@
     try{ IZZA.boat?.disembarkToLand?.('island', at); }catch{}
   }
 
-  // ---- dock normalization + geometry fallback ----
+  // ---- dock normalization + geometry helpers ----
   function _normalizeIslandDock(D){
     if (!D) return null;
     const toArr = v => Array.isArray(v)
@@ -181,9 +181,14 @@
   }
   function _manhattan(ax,ay,bx,by){ return Math.abs(ax-bx)+Math.abs(ay-by); }
 
-  // Build best water<->sand pair near (gx,gy) using:
-  //   1) Provided dock arrays (if any), within snapRadius
-  //   2) Pure geometry to the closest island edge (fallback)
+  // Distance from a point to a rectangle (Manhattan)
+  function _distToRect(gx,gy,R){
+    const cx = (gx < R.x0) ? R.x0 : (gx > R.x1 ? R.x1 : gx);
+    const cy = (gy < R.y0) ? R.y0 : (gy > R.y1 ? R.y1 : gy);
+    return _manhattan(gx,gy,cx,cy);
+  }
+
+  // Build best water<->sand pair near (gx,gy)
   function _bestIslandEdgePair(gx,gy){
     const ISLAND = window.__IZZA_ARMOURY__?.island;
     if (!ISLAND) return null;
@@ -191,48 +196,36 @@
     const RAW = window.__IZZA_ISLAND_DOCK__;
     const DOCK = _normalizeIslandDock(RAW) || {water:[], sand:[]};
     const snapRadius = 3;
-
     let best = null;
 
-    // 1) Try published water tiles → sand
+    // published water → sand
     for(const w of (DOCK.water||[])){
       const d = _manhattan(gx,gy,w.x,w.y);
       if (d <= snapRadius){
         const s = _sandBesideWater(w, ISLAND);
-        if (s){
-          if (!best || d < best.d) best = { water:w, sand:s, d };
-        }
+        if (s && (!best || d < best.d)) best = { water:w, sand:s, d };
       }
     }
-    // 2) Try published sand tiles → water
+    // published sand → water
     for(const s of (DOCK.sand||[])){
       const d = _manhattan(gx,gy,s.x,s.y);
       if (d <= snapRadius){
         const w = _waterBesideSand(s, ISLAND);
-        if (w){
-          if (!best || d < best.d) best = { water:w, sand:s, d };
-        }
+        if (w && (!best || d < best.d)) best = { water:w, sand:s, d };
       }
     }
 
-    // 3) Geometry fallback to nearest edge (if nothing matched)
+    // geometry fallback (nearest edge) — only used when already near island (see gate)
     if (!best){
-      // clamp player to island rectangle (extended by 1 to include the water ring)
       const cx = Math.min(ISLAND.x1+1, Math.max(ISLAND.x0-1, gx));
       const cy = Math.min(ISLAND.y1+1, Math.max(ISLAND.y0-1, gy));
-
-      // Compute four edge candidates and pick closest
       const candidates = [
-        // left edge
         { water:{x:ISLAND.x0-1, y:Math.min(ISLAND.y1, Math.max(ISLAND.y0, cy))},
           sand :{x:ISLAND.x0,   y:Math.min(ISLAND.y1, Math.max(ISLAND.y0, cy))} },
-        // right edge
         { water:{x:ISLAND.x1+1, y:Math.min(ISLAND.y1, Math.max(ISLAND.y0, cy))},
           sand :{x:ISLAND.x1,   y:Math.min(ISLAND.y1, Math.max(ISLAND.y0, cy))} },
-        // top edge
         { water:{x:Math.min(ISLAND.x1, Math.max(ISLAND.x0, cx)), y:ISLAND.y0-1},
           sand :{x:Math.min(ISLAND.x1, Math.max(ISLAND.x0, cx)), y:ISLAND.y0} },
-        // bottom edge
         { water:{x:Math.min(ISLAND.x1, Math.max(ISLAND.x0, cx)), y:ISLAND.y1+1},
           sand :{x:Math.min(ISLAND.x1, Math.max(ISLAND.x0, cx)), y:ISLAND.y1} }
       ];
@@ -244,7 +237,6 @@
         if (!best || d < best.d) best = { ...c, d };
       }
     }
-
     return best && { water:best.water, sand:best.sand } || null;
   }
 
@@ -259,40 +251,47 @@
     const ISLAND = window.__IZZA_ARMOURY__?.island || null;
     const DOOR   = window.__IZZA_ARMOURY__?.door   || null;
 
-    // ---------- Island boat logic ----------
+    // ---------- Island boat logic (NEAR-ISLAND-ONLY GATE) ----------
+    // We only handle B if the player is within a small radius of the island.
     if (ISLAND){
-      const pair = _bestIslandEdgePair(gx,gy);
+      const NEAR_ISLAND_RADIUS = 5; // tiles; bigger on mobile so it's forgiving
+      const nearIsland = _distToRect(gx,gy,ISLAND) <= NEAR_ISLAND_RADIUS;
 
-      if (window._izzaBoatActive){
-        // Boating → disembark onto island edge; boat stays in adjacent water
-        if (pair){
-          e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-          requestBoatDisembarkToIsland({ water:pair.water, land:pair.sand });
-          return;
-        }
-      } else {
-        // On foot → embark back into boat from island edge sand
-        if (pair && gx===pair.sand.x && gy===pair.sand.y){
-          e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-          localStorage.removeItem(RETURN_TO_BOAT_FLAG);
-          requestBoatEmbarkFromIsland({ water:pair.water, sand:pair.sand });
-          return;
-        }
+      if (nearIsland){
+        const pair = _bestIslandEdgePair(gx,gy);
 
-        // One-shot: anywhere on island sand after first armoury open
-        if (localStorage.getItem(RETURN_TO_BOAT_FLAG) === '1'){
-          const onIslandSand = gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1;
-          if (onIslandSand){
-            const p2 = _bestIslandEdgePair(gx,gy); // use same robust finder
-            if (p2){
-              e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-              localStorage.removeItem(RETURN_TO_BOAT_FLAG);
-              requestBoatEmbarkFromIsland({ water:p2.water, sand:p2.sand });
-              return;
+        if (window._izzaBoatActive){
+          // Boating → disembark onto island edge; boat stays in adjacent water
+          if (pair){
+            e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+            requestBoatDisembarkToIsland({ water:pair.water, land:pair.sand });
+            return;
+          }
+        } else {
+          // On foot → embark back into boat from island edge sand
+          if (pair && gx===pair.sand.x && gy===pair.sand.y){
+            e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+            localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+            requestBoatEmbarkFromIsland({ water:pair.water, sand:pair.sand });
+            return;
+          }
+
+          // One-shot: anywhere on island sand after first armoury open
+          if (localStorage.getItem(RETURN_TO_BOAT_FLAG) === '1'){
+            const onIslandSand = gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1;
+            if (onIslandSand){
+              const p2 = _bestIslandEdgePair(gx,gy);
+              if (p2){
+                e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+                localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+                requestBoatEmbarkFromIsland({ water:p2.water, sand:p2.sand });
+                return;
+              }
             }
           }
         }
       }
+      // If NOT near island: do nothing here → let normal (city) dock logic handle B.
     }
 
     // ---------- Cardboard box pickup ----------
