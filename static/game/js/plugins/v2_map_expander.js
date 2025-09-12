@@ -774,84 +774,73 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
     document.getElementById('btnB')?.addEventListener('click', _onPressTradeB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressTradeB(e); }, true);
 
-    // Add to overlay + collisions
-    IZZA.on('render-post', ()=>{
-      if(!window.__IZZA_TRADE__) return;
-      const cMini=document.getElementById('minimap'); const cBig=document.getElementById('bigmap');
-      [cMini,cBig].forEach(c=>{
-        if(!c) return; const ctx=c.getContext('2d'); const sx=c.width/90, sy=c.height/60;
-        const R=window.__IZZA_TRADE__.rect; ctx.fillStyle='#13b5a3';
-        ctx.fillRect(R.x0*sx, R.y0*sy, (R.x1-R.x0+1)*sx, (R.y1-R.y0+1)*sy);
-      });
-    });
+    // Collisions (this part stays)
     IZZA.on('update-post', ()=>{
-  if(!IZZA.api?.ready || !isTier2() || !_layout) return;
-  const api=IZZA.api, t=api.TILE, p=api.player;
-  const gx=(p.x/t)|0, gy=(p.y/t)|0;
+      if(!IZZA.api?.ready || !isTier2() || !_layout) return;
+      const api=IZZA.api, t=api.TILE, p=api.player;
+      const gx=(p.x/t)|0, gy=(p.y/t)|0;
 
-  const solids = [];
-  _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
-  solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
-  _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
+      const solids = [];
+      _layout.BUILDINGS?.forEach(b=> solids.push({x:b.x,y:b.y,w:b.w,h:b.h}));
+      solids.push({x:_layout.HOTEL.x0,y:_layout.HOTEL.y0,w:rectW(_layout.HOTEL),h:rectH(_layout.HOTEL)});
+      _layout.HOUSES.forEach(h=> solids.push({x:h.x0,y:h.y0,w:rectW(h),h:rectH(h)}));
 
-  // Hospital solid
-  if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
+      // Hospital solid
+      if(_hospital){ solids.push({x:_hospital.x0,y:_hospital.y0,w:rectW(_hospital),h:rectH(_hospital)}); }
 
-  // ===== BANK solid (kept) =====
-  if(window.__IZZA_BANK__?.rect){
-    const B = window.__IZZA_BANK__.rect;
-    solids.push({x:B.x0,y:B.y0,w:rectW(B),h:rectH(B)});
-  }
+      // BANK solid
+      if(window.__IZZA_BANK__?.rect){
+        const B = window.__IZZA_BANK__.rect;
+        solids.push({x:B.x0,y:B.y0,w:rectW(B),h:rectH(B)});
+      }
 
-  // ===== ARMOURY solid (NEW) =====
-  if (window.__IZZA_ARMOURY__?.rect){
-    const R = window.__IZZA_ARMOURY__.rect;
-    solids.push({ x:R.x0, y:R.y0, w:(R.x1-R.x0+1), h:(R.y1-R.y0+1) });
-  }
+      // ARMOURY solid (island)
+      if (window.__IZZA_ARMOURY__?.rect){
+        const R = window.__IZZA_ARMOURY__.rect;
+        solids.push({ x:R.x0, y:R.y0, w:(R.x1-R.x0+1), h:(R.y1-R.y0+1) });
+      }
 
-  // Manual solid house strips + singles
-  (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
-  (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
+      // Manual solids
+      (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:rectW(r),h:rectH(r)}));
+      (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
 
-  // Water is solid except beach & planks — BUT skip this while boating
-  const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
-  const waterIsSolid = (x,y)=>{
-    if(!_inRect(x,y,LAKE)) return false;
+      // Water (solid unless beach/docks/island land; and only when not boating)
+      const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
+      const waterIsSolid = (x,y)=>{
+        if(!_inRect(x,y,LAKE)) return false;
+        if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false;
+        if(x===BEACH_X) return false;
+        if(dockCells().has(x+'|'+y)) return false;
+        return true;
+      };
+      if (!window._izzaBoatActive) {
+        if (waterIsSolid(gx,gy)) {
+          solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
+        }
+      }
 
-    // island land is NOT water
-    if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false;
+      // Walkable overrides
+      const overrides = _layout.patches?.walkableOverride || [];
+      const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
 
-    if(x===BEACH_X) return false;
-    if(dockCells().has(x+'|'+y)) return false; // includes island dock water tile
-    return true;
-  };
+      // Simple AABB resolve
+      for(const b of solids){
+        if(isOverridden(gx,gy)) break;
+        if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+          const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
+          const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
+          const m=Math.min(dxL,dxR,dyT,dyB);
+          if(m===dxL) p.x=(b.x-0.01)*t;
+          else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
+          else if(m===dyT) p.y=(b.y-0.01)*t;
+          else             p.y=(b.y+b.h+0.01)*t;
+          break;
+        }
+      }
+    });
 
-  if (!window._izzaBoatActive) {
-    if (waterIsSolid(gx,gy)) {
-      solids.push({x:LAKE.x0,y:LAKE.y0,w:rectW(LAKE),h:rectH(LAKE)});
-    }
-  }
-
-  // Exclude walkable override areas (e.g., sidewalk 69..76,31)
-  const overrides = _layout.patches?.walkableOverride || [];
-  const isOverridden = (x,y)=> overrides.some(r=> x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1);
-
-  // Simple AABB resolve
-  for(const b of solids){
-    if(isOverridden(gx,gy)) break;
-    if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
-      const dxL=Math.abs(p.x-b.x*t), dxR=Math.abs((b.x+b.w)*t-p.x);
-      const dyT=Math.abs(p.y-b.y*t), dyB=Math.abs((b.y+b.h)*t-p.y);
-      const m=Math.min(dxL,dxR,dyT,dyB);
-      if(m===dxL) p.x=(b.x-0.01)*t;
-      else if(m===dxR) p.x=(b.x+b.w+0.01)*t;
-      else if(m===dyT) p.y=(b.y-0.01)*t;
-      else             p.y=(b.y+b.h+0.01)*t;
-      break;
-    }
-  }
-});
-
+  }catch(e){ /* swallow */ }
+})();
     _layout = {
       H_ROADS, V_ROADS, BUILDINGS, HOTEL, LOT, LAKE, HOOD, HOUSES, HOOD_PARK,
       patches:{
