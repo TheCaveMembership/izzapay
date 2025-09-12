@@ -207,7 +207,87 @@ function dockCells(){
   // IMPORTANT: do NOT include island water here (stays solid for on-foot players)
   return set;
 }
+// ===== ISLAND DOCKING (exact perimeter only) =====
+// Paste this RIGHT AFTER dockCells().
 
+(function islandDockingInit(){
+  // Return the paired perimeter tile (water <-> sand) ONLY if the player is
+  // standing exactly on an island edge tile. Otherwise return null.
+  function _islandDockPairAt(gx, gy){
+    const island = window.__IZZA_ARMOURY__?.island;
+    const D = window.__IZZA_ISLAND_DOCK__;
+    if (!island || !D) return null;
+
+    // Build O(1) membership sets for current perimeter rings
+    const mkSet = arr => {
+      const s = new Set();
+      (arr||[]).forEach(p => s.add(p.x+'|'+p.y));
+      return s;
+    };
+    const W = mkSet(D.water);
+    const S = mkSet(D.sand);
+    const k = gx+'|'+gy;
+
+    const withinX = x => x >= island.x0 && x <= island.x1;
+    const withinY = y => y >= island.y0 && y <= island.y1;
+
+    // If ON a water-edge tile → snap onto the adjacent sand (disembark)
+    if (W.has(k)){
+      if (withinY(gy) && gx === island.x0 - 1) return { to:{x:island.x0, y:gy}, dir:'water->sand' };
+      if (withinY(gy) && gx === island.x1 + 1) return { to:{x:island.x1, y:gy}, dir:'water->sand' };
+      if (withinX(gx) && gy === island.y0 - 1) return { to:{x:gx, y:island.y0}, dir:'water->sand' };
+      if (withinX(gx) && gy === island.y1 + 1) return { to:{x:gx, y:island.y1}, dir:'water->sand' };
+      return null;
+    }
+
+    // If ON a sand-edge tile → snap onto the adjacent water (embark)
+    if (S.has(k)){
+      if (withinY(gy) && gx === island.x0) return { to:{x:island.x0-1, y:gy}, dir:'sand->water' };
+      if (withinY(gy) && gx === island.x1) return { to:{x:island.x1+1, y:gy}, dir:'sand->water' };
+      if (withinX(gx) && gy === island.y0) return { to:{x:gx, y:island.y0-1}, dir:'sand->water' };
+      if (withinX(gx) && gy === island.y1) return { to:{x:gx, y:island.y1+1}, dir:'sand->water' };
+      return null;
+    }
+
+    // Not on the perimeter → no island docking here.
+    return null;
+  }
+
+  function _onPressIslandDockB(e){
+    const api = IZZA?.api;
+    if (!api?.ready || localStorage.getItem('izzaMapTier') !== '2') return;
+
+    const t  = api.TILE;
+    const gx = ((api.player.x + 16)/t | 0);
+    const gy = ((api.player.y + 16)/t | 0);
+
+    // STRICT: only when standing exactly on a water/sand edge tile
+    const pair = _islandDockPairAt(gx, gy);
+    if (!pair) return; // let other B handlers (city docks/doors) handle it
+
+    // We’re docking/embarking at island → claim the event
+    e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+
+    // Flip boat state & snap the player to the paired tile (tiny inset avoids AABB jitter)
+    const inset = 0.1;
+    api.player.x = (pair.to.x + inset) * t;
+    api.player.y = (pair.to.y + inset) * t;
+
+    if (pair.dir === 'water->sand'){
+      window._izzaBoatActive = false;  // disembark
+      IZZA.toast?.('Docked at the island');
+    } else {
+      window._izzaBoatActive = true;   // embark
+      IZZA.toast?.('Boat launched');
+    }
+  }
+
+  // Capture-phase so we preempt only when actually on the island edge tile
+  document.getElementById('btnB')?.addEventListener('click', _onPressIslandDockB, true);
+  window.addEventListener('keydown', e=>{
+    if ((e.key||'').toLowerCase() === 'b') _onPressIslandDockB(e);
+  }, true);
+})();
   // ---------- HOSPITAL ----------
 let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
 
