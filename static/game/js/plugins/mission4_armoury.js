@@ -156,33 +156,44 @@
 
   // ===== B actions =====
   function onB(e){
-    if(!api?.ready) return;
-    const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+  if(!api?.ready) return;
+  const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
-    const A = window.__IZZA_ARMOURY__ || {};
-    const D = A.door;           // {x,y}
-    const ISLAND = A.island;    // {x0,y0,x1,y1}
-    const DOCK   = window.__IZZA_ISLAND_DOCK__;
+  // Pull the island geometry & dock that the expander publishes
+  const ISLAND = window.__IZZA_ARMOURY__?.island || null;
+  const DOCK   = window.__IZZA_ISLAND_DOCK__   || null;
 
-    // (A) Always allow embark from the sand-dock tile (if present)
-    if (DOCK && ISLAND && gx===DOCK.sand?.x && gy===DOCK.sand?.y){
+  // (A) Allow embark ONLY at the island dock (sand, water, or adjacent to water)
+  if (DOCK) {
+    const onSand  = (gx === DOCK.sand?.x  && gy === DOCK.sand?.y);
+    const onWater = (gx === DOCK.water?.x && gy === DOCK.water?.y);
+    const adjToWater =
+      DOCK.water &&
+      (Math.abs(gx - DOCK.water.x) + Math.abs(gy - DOCK.water.y) === 1);
+
+    if (onSand || onWater || adjToWater) {
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      localStorage.removeItem(RETURN_TO_BOAT_FLAG);  // clear one-shot if still set
+      localStorage.removeItem(RETURN_TO_BOAT_FLAG);
       requestBoatEmbarkFromIsland();
       return;
     }
+  }
 
-    // (B) One-shot: after first Armoury open, next B anywhere on island sand → embark
-    if (ISLAND && localStorage.getItem(RETURN_TO_BOAT_FLAG)==='1'){
-      const onIslandSand = (gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1) &&
-                           !(D && gx===D.x && gy===D.y);
-      if (onIslandSand){
-        e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-        localStorage.removeItem(RETURN_TO_BOAT_FLAG);
-        requestBoatEmbarkFromIsland();
-        return;
-      }
+  // (B) One-shot: after first armoury open, next B anywhere on ISLAND sand → embark
+  if (ISLAND && localStorage.getItem(RETURN_TO_BOAT_FLAG)==='1'){
+    const onIslandSand =
+      gx>=ISLAND.x0 && gx<=ISLAND.x1 &&
+      gy>=ISLAND.y0 && gy<=ISLAND.y1;
+    if (onIslandSand){
+      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+      requestBoatEmbarkFromIsland();
+      return;
     }
+  }
+
+  // ...box pickup and door handling (unchanged)...
+}
 
     // (C) Box pickup near HQ
     const box=cardboardBoxGrid();
