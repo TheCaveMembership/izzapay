@@ -351,7 +351,7 @@
     // porch clusters (skip in winter for clean look)
     if (tag==='winter') return;
 
-    function cluster(atU){
+        function cluster(atU){
       let wx, wy;
       if (seg.kind==='h'){ wx = seg.x0 + atU*(seg.x1-seg.x0); wy = seg.y; }
       else               { wx = seg.x;  wy = seg.y0 + atU*(seg.y1-seg.y0); }
@@ -369,20 +369,58 @@
         return;
       }
 
-      // fall / halloween clusters
-      __hay (ctx, sx + jx*0.12*api.DRAW, sy + jy*0.10*api.DRAW, 0.64*api.DRAW);
-      __corn(ctx, sx - nx*0.10*api.DRAW + jx*0.08*api.DRAW, sy - ny*0.10*api.DRAW + jy*0.08*api.DRAW, 0.68*api.DRAW);
-      __pump(ctx, sx + nx*0.12*api.DRAW + jx*0.10*api.DRAW, sy + ny*0.02*api.DRAW + jy*0.06*api.DRAW, 0.48*api.DRAW, false);
-      const jack = (tag==='halloween' && rs()<0.6);
-      __pump(ctx, sx + nx*0.04*api.DRAW + jx*0.08*api.DRAW, sy - ny*0.04*api.DRAW + jy*0.06*api.DRAW, 0.52*api.DRAW, jack);
-      if (tag==='fall' && rs()<0.5) __cornu(ctx, sx + nx*0.06*api.DRAW + jx*0.08*api.DRAW, sy + ny*0.08*api.DRAW + jy*0.08*api.DRAW, 0.54*api.DRAW);
+      // fall / halloween clusters — place items BESIDE the hay, not on top
+      // base vectors: tangent (tx,ty) runs along the fence; normal (nx,ny) points outward
+      const D = api.DRAW;
+      const tx = -ny, ty = nx;           // tangent unit (perpendicular to fence normal)
+      const step = 0.28 * D;             // side spacing along the fence
+      const jitter = v => (rs()-0.5) * v;
 
-      // leaf sprinkle at base
-      for(let i=0;i<3;i++) __leaf(ctx, sx + (rs()-0.5)*0.28*api.DRAW, sy + (rs()-0.5)*0.22*api.DRAW, 0.22*api.DRAW);
+      // 1) hay bale = anchor (centered)
+      __hay(ctx, sx + jitter(0.08*D), sy + jitter(0.06*D), 0.64*D);
+
+      // 2) corn stalk = left side of hay (slightly behind fence)
+      {
+        const px = sx + tx * (-step + jitter(0.06*D)) + nx * (-0.08*D);
+        const py = sy + ty * (-step + jitter(0.06*D)) + ny * (-0.08*D);
+        __corn(ctx, px, py, 0.68*D);
+      }
+
+      // 3) pumpkin = right side of hay (slightly in front)
+      {
+        const px = sx + tx * ( step + jitter(0.06*D)) + nx * ( 0.02*D);
+        const py = sy + ty * ( step + jitter(0.06*D)) + ny * ( 0.02*D);
+        __pump(ctx, px, py, 0.50*D, false);
+      }
+
+      // 4) second pumpkin / jack near right side, a bit closer to center
+      {
+        const px = sx + tx * ( step*0.6 + jitter(0.05*D)) + nx * (-0.02*D);
+        const py = sy + ty * ( step*0.6 + jitter(0.05*D)) + ny * (-0.02*D);
+        const jack = (tag==='halloween' && rs()<0.6);
+        __pump(ctx, px, py, 0.52*D, jack);
+      }
+
+      // 5) optional cornucopia = left side near corn (slightly in front)
+      if (tag==='fall' && rs()<0.5){
+        const px = sx + tx * (-step*0.6 + jitter(0.05*D)) + nx * (0.05*D);
+        const py = sy + ty * (-step*0.6 + jitter(0.05*D)) + ny * (0.05*D);
+        __cornu(ctx, px, py, 0.54*D);
+      }
+
+      // leaf sprinkle around the base (avoid center of hay)
+      for(let i=0;i<3;i++){
+        const px = sx + tx*jitter(0.20*D) + nx*jitter(0.14*D);
+        const py = sy + ty*jitter(0.20*D) + ny*jitter(0.14*D);
+        __leaf(ctx, px, py, 0.22*D);
+      }
     }
-    cluster(0.20); cluster(0.50); cluster(0.80);
-  }
 
+    // spread clusters so they’re not crowded
+    cluster(0.20);
+    cluster(0.50);
+    cluster(0.80);
+  } // <-- closes __drawDecorForSeg
   // ---------- Draw (wood fence) ----------
   function drawFence(api, segs){
     if (!segs) return;
