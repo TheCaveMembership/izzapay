@@ -53,12 +53,14 @@ function lakeRects(a){
   const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
   const BEACH_X = LAKE.x0 - 1;
 
+  // Docks extend one tile onto the beach (start at BEACH_X), keeping their old water reach.
   const DOCKS = [
     { x0: BEACH_X, y: LAKE.y0+4,  len: 4 },
     { x0: BEACH_X, y: LAKE.y0+12, len: 5 }
   ];
 
-  const hotelTopY = LAKE.y0 - 5;
+  // Hotel pulled back behind sidewalk + lot
+  const hotelTopY = LAKE.y0 - 5; // 1 sidewalk + 3 lot + 1 buffer
   const HOTEL  = { x0: LAKE.x0+3, y0: hotelTopY, x1: LAKE.x0+9, y1: hotelTopY+3 };
   const LOT    = { x0: HOTEL.x0,  y0: HOTEL.y1+1, x1: HOTEL.x1,  y1: HOTEL.y1+3 };
 
@@ -80,7 +82,6 @@ function islandSpec(a){
   return { ISLAND, BUILDING, DOOR };
 }
 
-
 // Publish a Set of "gx|gy" for island land so physics/boat treat it as land
 function publishIslandLandFromExpander(a){
   if ((localStorage.getItem('izzaMapTier') || '1') !== '2') { window._izzaIslandLand = null; return; }
@@ -92,19 +93,6 @@ function publishIslandLandFromExpander(a){
     }
   }
   window._izzaIslandLand = land;
-}
-  // Docks extend one tile onto the beach (start at BEACH_X), keeping their old water reach.
-  const DOCKS = [
-    { x0: BEACH_X, y: LAKE.y0+4,  len: 4 }, // previously x0: LAKE.x0, len: 3
-    { x0: BEACH_X, y: LAKE.y0+12, len: 5 }  // previously x0: LAKE.x0, len: 4
-  ];
-
-  // Hotel pulled back behind sidewalk + lot
-  const hotelTopY = LAKE.y0 - 5; // 1 sidewalk + 3 lot + 1 buffer
-  const HOTEL  = { x0: LAKE.x0+3, y0: hotelTopY, x1: LAKE.x0+9, y1: hotelTopY+3 };
-  const LOT    = { x0: HOTEL.x0,  y0: HOTEL.y1+1, x1: HOTEL.x1,  y1: HOTEL.y1+3 };
-
-  return {LAKE, BEACH_X, DOCKS, HOTEL, LOT};
 }
 
   // ---------- Bottom-left neighborhood ----------
@@ -132,7 +120,9 @@ function publishIslandLandFromExpander(a){
     const S=api.DRAW, sx=w2sX(api,gx*api.TILE), sy=w2sY(api,gy*api.TILE);
     ctx.fillStyle=color; ctx.fillRect(sx,sy,S,S);
   }
-
+// ---- Geometry helpers ----
+const rectW = R => (R.x1 - R.x0 + 1);
+const rectH = R => (R.y1 - R.y0 + 1);
   // ---------- Protect the original Tier-1 tiles ----------
   function isOriginalTile(gx,gy,a){
     if (_inRect(gx,gy,{x0:a.HQ.x0-1,y0:a.HQ.y0-1,x1:a.HQ.x1+1,y1:a.HQ.y1+1})) return true;
@@ -1398,8 +1388,19 @@ ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy,
       .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
   }
   IZZA.on('render-post', ()=>{ if(isTier2()){ paintOverlay('minimap'); paintOverlay('bigmap'); } });
+  }
+    // export painter so the Bigmap overlay IIFE can reuse it
+  window.__izzaPaintOverlay = paintOverlay;
 
-})();// ===== Bigmap overlay: open on minimap tap, close on tap/Esc, block input safely =====
+  // Repaint ONLY the minimap each frame; bigmap is handled by the overlay IIFE when open
+  IZZA.on('render-post', ()=>{
+    if (isTier2()){
+      paintOverlay('minimap');
+    }
+  });
+})();
+
+// ===== Bigmap overlay: open on minimap tap, close on tap/Esc, block input safely =====
 (function initBigmapOverlay(){
   let bigOpen = false;
   let prevInputBlocked = false;
@@ -1475,7 +1476,9 @@ ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy,
     const wrap = document.getElementById('bigmapWrap');
     wrap.style.display = 'flex';
     bigOpen = true;
-    paintOverlay('bigmap');
+
+    // Paint once on open
+    window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
 
     // Optional: disable Map button highlight while open
     document.getElementById('btnMap')?.setAttribute('disabled','true');
@@ -1509,8 +1512,10 @@ ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy,
     });
   }
 
-  // Keep the bigmap canvas fresh when the world renders
+  // Keep the bigmap canvas fresh whenever the world renders
   IZZA.on('render-post', ()=>{
-    if (bigOpen) paintOverlay('bigmap');
+    if (bigOpen) {
+      window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
+    }
   });
 })();
