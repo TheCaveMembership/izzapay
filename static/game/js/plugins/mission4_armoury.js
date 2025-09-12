@@ -52,19 +52,22 @@ function islandSpec(){
   }
 
   // Publish island land for boat plugin (beach docking)
-  function publishIslandLand(){
-    if(localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandLand=null; return; }
-    const {ISLAND}=islandSpec();
-    const land=new Set();
-    for(let y=ISLAND.y0;y<=ISLAND.y1;y++){
-      for(let x=ISLAND.x0;x<=ISLAND.x1;x++){
-        land.add(x+'|'+y);
-      }
+  // replace your current publish hook(s)
+function publishIslandLand(){
+  if(localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandLand=null; return; }
+  const {ISLAND}=islandSpec();
+  const land=new Set();
+  for(let y=ISLAND.y0;y<=ISLAND.y1;y++){
+    for(let x=ISLAND.x0;x<=ISLAND.x1;x++){
+      land.add(x+'|'+y);
     }
-    window._izzaIslandLand = land; // treated as NOT water
   }
-  // convenience for older code paths
-  window._izzaLandAt = (gx,gy)=> isIslandTile(gx,gy);
+  window._izzaIslandLand = land; // treated as NOT water by the boat plugin
+}
+
+// NEW: publish before physics each frame, and once at boot
+IZZA.on('update-pre', publishIslandLand);
+IZZA.on('ready', ()=> publishIslandLand());
 
   // ===== HQ door → cardboard box position =====
   function hqDoorGrid(){ const t=api.TILE, d=api.doorSpawn; return { gx:Math.round(d.x/t), gy:Math.round(d.y/t) }; }
@@ -218,7 +221,7 @@ function islandSpec(){
     ctx.fillRect(doorX, doorY, doorW, doorH);
 
     // palm tree in NW corner of island
-    drawPalm(ctx, sx(ISLAND.x0)+S*0.7, sy(ISLAND.y0)+S*0.9, S);
+    drawPalm(ctx, sx(ISLAND.x0)+S*0.7, sy(ISLAND.y0)+S*1.9, S);
 
     // cardboard box near HQ (only if not already taken)
     const taken = localStorage.getItem(BOX_TAKEN_KEY) === '1';
