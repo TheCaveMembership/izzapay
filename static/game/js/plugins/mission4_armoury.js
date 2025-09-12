@@ -24,27 +24,27 @@
   }
 
   // ===== island (5×4) at far east edge, building 1×2 (west tile has the door) =====
-function islandSpec(){
-  const a=anchors(); const {LAKE}=lakeRects(a);
-  const w=5, h=4;
-  const x1 = LAKE.x1 - 1;            // hug east edge (leave 1 tile margin)
-  const x0 = x1 - (w-1);
-  const yMid = (LAKE.y0 + LAKE.y1) >> 1;
-  const y0 = yMid - (h>>1);
-  const y1 = y0 + h - 1;
-  const ISLAND = { x0:Math.max(LAKE.x0,x0), y0:Math.max(LAKE.y0,y0), x1, y1:Math.min(LAKE.y1,y1) };
+  function islandSpec(){
+    const a=anchors(); const {LAKE}=lakeRects(a);
+    const w=5, h=4;
+    const x1 = LAKE.x1 - 1;            // hug east edge (leave 1 tile margin)
+    const x0 = x1 - (w-1);
+    const yMid = (LAKE.y0 + LAKE.y1) >> 1;
+    const y0 = yMid - (h>>1);
+    const y1 = y0 + h - 1;
+    const ISLAND = { x0:Math.max(LAKE.x0,x0), y0:Math.max(LAKE.y0,y0), x1, y1:Math.min(LAKE.y1,y1) };
 
-  // Building is 1 row tall and 2 tiles wide (west→east).
-  // Keep it centered horizontally like before.
-  const BX = ISLAND.x0 + Math.floor((w-2)/2);   // west tile (door is here)
-  const BY = ISLAND.y0 + Math.floor((h-1)/2);   // single row
-  const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY }; // width=2, height=1
+    // Building is 1 row tall and 2 tiles wide (west→east).
+    // Keep it centered horizontally like before.
+    const BX = ISLAND.x0 + Math.floor((w-2)/2);   // west tile (door is here)
+    const BY = ISLAND.y0 + Math.floor((h-1)/2);   // single row
+    const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY }; // width=2, height=1
 
-  // Door grid: one tile south of the WEST building tile (press B here)
-  const DOOR_GRID = { x: BX, y: BY+1 };
+    // Door grid: one tile south of the WEST building tile (press B here)
+    const DOOR_GRID = { x: BX, y: BY+1 };
 
-  return { ISLAND, BUILDING, DOOR_GRID };
-}
+    return { ISLAND, BUILDING, DOOR_GRID };
+  }
   function isIslandTile(gx,gy){
     if(localStorage.getItem('izzaMapTier')!=='2') return false;
     const {ISLAND}=islandSpec();
@@ -52,22 +52,21 @@ function islandSpec(){
   }
 
   // Publish island land for boat plugin (beach docking)
-  // replace your current publish hook(s)
-function publishIslandLand(){
-  if(localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandLand=null; return; }
-  const {ISLAND}=islandSpec();
-  const land=new Set();
-  for(let y=ISLAND.y0;y<=ISLAND.y1;y++){
-    for(let x=ISLAND.x0;x<=ISLAND.x1;x++){
-      land.add(x+'|'+y);
+  function publishIslandLand(){
+    if(localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandLand=null; return; }
+    const {ISLAND}=islandSpec();
+    const land=new Set();
+    for(let y=ISLAND.y0;y<=ISLAND.y1;y++){
+      for(let x=ISLAND.x0;x<=ISLAND.x1;x++){
+        land.add(x+'|'+y);
+      }
     }
+    window._izzaIslandLand = land; // treated as NOT water by the boat plugin
   }
-  window._izzaIslandLand = land; // treated as NOT water by the boat plugin
-}
 
-// NEW: publish before physics each frame, and once at boot
-IZZA.on('update-pre', publishIslandLand);
-IZZA.on('ready', ()=> publishIslandLand());
+  // Publish before physics each frame, and once at boot
+  IZZA.on('update-pre', publishIslandLand);
+  IZZA.on('ready', ()=> publishIslandLand());
 
   // ===== HQ door → cardboard box position =====
   function hqDoorGrid(){ const t=api.TILE, d=api.doorSpawn; return { gx:Math.round(d.x/t), gy:Math.round(d.y/t) }; }
@@ -249,9 +248,10 @@ IZZA.on('ready', ()=> publishIslandLand());
   }
 
   // ===== hooks =====
-  IZZA.on('render-post', ()=>{
+  // IMPORTANT: draw island BEFORE entities so it doesn't cover the player
+  IZZA.on('render-pre', ()=>{
     if(!api?.ready) return;
-    publishIslandLand();     // keep land set fresh for boat plugin
+    publishIslandLand();     // keep land set fresh early for boat plugin
     const ctx=document.getElementById('game').getContext('2d');
     drawIsland(ctx);
   });
