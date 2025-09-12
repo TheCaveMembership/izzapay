@@ -302,7 +302,7 @@
     }
 
     // Armoury door → open your armoury UI (or fallback)
-    if(localStorage.getItem('izzaMapTier')==='2' && gx===DOOR_GRID.x && gy===DOOR_GRID.y){
+    if (localStorage.getItem('izzaMapTier')==='2' && gx===DOOR_GRID.x && gy===DOOR_GRID.y){
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
       if (typeof window.openArmoury === 'function') window.openArmoury();
       else openArmouryFallback();
@@ -311,11 +311,35 @@
     }
   }
 
-  // ===== boot =====
-  IZZA.on('ready', (a)=>{
-    api=a;
-    const btnB=document.getElementById('btnB'); btnB?.addEventListener('click', onB, true);
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
-    console.log('[mission4] ready', BUILD);
-  });
+// ===== hooks =====
+function _renderIslandLayer(){
+  if (!IZZA?.api?.ready) return;
+  const ctx = document.getElementById('game').getContext('2d');
+  drawIsland(ctx); // paints sand/building/door/palm/box
+}
+
+// Defer so we subscribe after the expander paints the lake (still below entities)
+setTimeout(()=> { IZZA.on('render-under', _renderIslandLayer); }, 0);
+
+// Single collision guard (keep)
+IZZA.on('update-post', ()=>{
+  if (!IZZA?.api?.ready) return;
+  const b = buildingSolid();
+  if (b){
+    const p = IZZA.api.player, t = IZZA.api.TILE;
+    const gx = ((p.x+16)/t|0), gy = ((p.y+16)/t|0);
+    if (gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+      p.y = (b.y + b.h + 0.01)*t;
+    }
+  }
+});
+
+// ===== boot =====
+IZZA.on('ready', (a)=>{
+  api = a;
+  const btnB = document.getElementById('btnB');
+  btnB?.addEventListener('click', onB, true);
+  window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
+  console.log('[mission4] ready', BUILD);
+});
 })();
