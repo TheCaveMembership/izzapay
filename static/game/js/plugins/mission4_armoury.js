@@ -147,83 +147,133 @@
   }
   IZZA.on('render-under', renderBoxOnly);
 
-  // ===== boat hook =====
-  function requestBoatEmbarkFromIsland(){
-    try{ window.dispatchEvent(new CustomEvent('izza-boat-request',{detail:{action:'embark-from-island'}})); }catch{}
-    try{ window._izzaBoat?.embarkFromLand?.('island'); }catch{}
-    try{ IZZA.boat?.embarkFromLand?.('island'); }catch{}
-  }
-// ---- box prompt shim (so B always works even if your main UI isn't loaded) ----
-function showBoxYesNo(fn){
-  if (typeof window.showBoxYesNo === 'function') return window.showBoxYesNo(fn);
-  // fallback prompt
-  if (window.confirm?.('Pick up the Cardboard Box?')) fn?.();
+  // ===== boat hooks (embark/disembark with explicit positions) =====
+function requestBoatEmbarkFromIsland(at){
+  // at = { water:{x,y}, sand:{x,y} }  (optional but preferred)
+  try{ window.dispatchEvent(new CustomEvent('izza-boat-request',{detail:{action:'embark-from-island', at}})); }catch{}
+  try{ window._izzaBoat?.embarkFromLand?.('island', at); }catch{}
+  try{ IZZA.boat?.embarkFromLand?.('island', at); }catch{}
 }
-  // ===== B actions =====
-  function onB(e){
+function requestBoatDisembarkToIsland(at){
+  // at = { water:{x,y}, land:{x,y} }  (required)
+  try{ window.dispatchEvent(new CustomEvent('izza-boat-request',{detail:{action:'disembark-to-island', at}})); }catch{}
+  try{ window._izzaBoat?.disembarkToLand?.('island', at); }catch{}
+  try{ IZZA.boat?.disembarkToLand?.('island', at); }catch{}
+}
+
+// ===== tiny helpers around island edge =====
+function _inRect(x,y,R){ return x>=R.x0 && x<=R.x1 && y>=R.y0 && y<=R.y1; }
+function _adj(a,b){ return Math.abs(a.x-b.x) + Math.abs(a.y-b.y) === 1; }
+
+// Given a water cell next to island, pick the matching sand cell inside the island
+function _sandBesideWater(w, ISLAND){
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  for (const [dx,dy] of dirs){
+    const sx = w.x+dx, sy = w.y+dy;
+    if (_inRect(sx,sy,ISLAND)) return {x:sx,y:sy};
+  }
+  return null;
+}
+// Given a sand cell on island edge, pick the matching outside water cell
+function _waterBesideSand(s, ISLAND){
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  for (const [dx,dy] of dirs){
+    const wx = s.x+dx, wy = s.y+dy;
+    if (!_inRect(wx,wy,ISLAND)) return {x:wx,y:wy};
+  }
+  return null;
+}
+
+// Find a usable water<->sand pair around the player grid
+function _nearestIslandEdgePair(gx,gy){
+  const ISLAND = window.__IZZA_ARMOURY__?.island;
+  const DOCK   = window.__IZZA_ISLAND_DOCK__; // {water:[{x,y}...], sand:[{x,y}...]}
+  if (!ISLAND || !DOCK) return null;
+
+  // If player is on water: snap to closest DOCK.water within 1 tile, then map to sand
+  const fromWater = (list)=>{
+    for(const w of list){
+      if (Math.abs(gx-w.x)+Math.abs(gy-w.y) <= 1){
+        const s = _sandBesideWater(w, ISLAND);
+        if (s) return { water:w, sand:s };
+      }
+    }
+    return null;
+  };
+  // If player is on sand: snap to closest DOCK.sand within 1 tile, then map to water
+  const fromSand = (list)=>{
+    for(const s of list){
+      if (Math.abs(gx-s.x)+Math.abs(gy-s.y) <= 1){
+        const w = _waterBesideSand(s, ISLAND);
+        if (w) return { water:w, sand:s };
+      }
+    }
+    return null;
+  };
+
+  // We’ll decide which list to use inside onB based on boat state / where the player stands.
+  return { tryFromWater:()=>fromWater(DOCK.water||[]), tryFromSand:()=>fromSand(DOCK.sand||[]) };
+}
+
+// ===== B actions (embark/disembark + box + armoury) =====
+function onB(e){
   if (!api?.ready) return;
 
   const t  = api.TILE;
   const gx = ((api.player.x+16)/t|0);
   const gy = ((api.player.y+16)/t|0);
 
-  // Pull the island geometry & perimeter dock published by the expander
+  // Pull island geometry & door/dock
   const ISLAND = window.__IZZA_ARMOURY__?.island || null;
   const DOCK   = window.__IZZA_ISLAND_DOCK__   || null;
   const DOOR   = window.__IZZA_ARMOURY__?.door || null;
 
-  // --- helpers for array/single compat ----
-  const toArr = v => (!v ? [] : Array.isArray(v) ? v : (typeof v.x==='number' && typeof v.y==='number') ? [v] : []);
-  const dockSand  = toArr(DOCK?.sand);
-  const dockWater = toArr(DOCK?.water);
-  const key = (x,y)=> x+'|'+y;
-  const sandSet  = new Set(dockSand.map(p=>key(p.x,p.y)));
-  const waterSet = new Set(dockWater.map(p=>key(p.x,p.y)));
+  // ---------- Island boat logic ----------
+  if (ISLAND && DOCK){
+    const pairFinder = _nearestIslandEdgePair(gx,gy);
 
-  const isOnAnySandDock  = sandSet.has(key(gx,gy));
-  const isOnAnyWaterDock = waterSet.has(key(gx,gy));
-  const adjToAnyWaterDock =
-    dockWater.some(p => Math.abs(gx - p.x) + Math.abs(gy - p.y) === 1);
+    // If boating: disembark to island edge (boat stays on water)
+    if (window._izzaBoatActive){
+      const pair = pairFinder?.tryFromWater();
+      if (pair){ // we’re at/next to a valid island water tile
+        e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+        // land cell must be inside the island; water is the outside neighbor
+        requestBoatDisembarkToIsland({ water:pair.water, land:pair.sand });
+        return;
+      }
+    } else {
+      // On foot: if standing on island edge sand (or adjacent), embark back into boat
+      const pair = pairFinder?.tryFromSand();
+      if (pair){
+        e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+        localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+        // steer boat spawn to the *adjacent water cell* we computed
+        requestBoatEmbarkFromIsland({ water:pair.water, sand:pair.sand });
+        return;
+      }
 
-  function snapPlayerToNearestDockWater(){
-    let best = null, bestD = 1e9;
-    const px = api.player.x/t, py = api.player.y/t;
-    (dockWater.length ? dockWater : (ISLAND ? [{x:ISLAND.x0-1,y:((ISLAND.y0+ISLAND.y1)>>1)}] : []))
-      .forEach(p=>{
-        const dx = (p.x - px), dy = (p.y - py);
-        const d2 = dx*dx + dy*dy;
-        if(d2 < bestD){ bestD = d2; best = p; }
-      });
-    if (best){
-      api.player.x = best.x*t + 4;   // small bias keeps us clearly in that tile
-      api.player.y = best.y*t + 4;
+      // One-shot: anywhere on island sand after opening armoury once
+      if (localStorage.getItem(RETURN_TO_BOAT_FLAG) === '1'){
+        const onIslandSand = gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1;
+        if (onIslandSand){
+          // pick the closest edge water to current position for a clean spawn
+          const best = (DOCK.water||[]).reduce((best,w)=>{
+            const d = Math.abs(gx-w.x)+Math.abs(gy-w.y);
+            return (!best || d<best.d) ? {w,d} : best;
+          }, null);
+          const sand = best ? _sandBesideWater(best.w, ISLAND) : null;
+          if (best && sand){
+            e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+            localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+            requestBoatEmbarkFromIsland({ water:best.w, sand });
+            return;
+          }
+        }
+      }
     }
   }
 
-  // (A) Embark anywhere along the island edge (on sand, on water, or 4-way adjacent to water)
-  if (DOCK && (isOnAnySandDock || isOnAnyWaterDock || adjToAnyWaterDock)) {
-    e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-    snapPlayerToNearestDockWater();              // guaranteed boat spawns on water
-    localStorage.removeItem(RETURN_TO_BOAT_FLAG);
-    requestBoatEmbarkFromIsland();
-    return;
-  }
-
-  // (B) One-shot safety: after first armoury open, next B anywhere on ISLAND sand → embark
-  if (ISLAND && localStorage.getItem(RETURN_TO_BOAT_FLAG) === '1'){
-    const onIslandSand =
-      gx >= ISLAND.x0 && gx <= ISLAND.x1 &&
-      gy >= ISLAND.y0 && gy <= ISLAND.y1;
-    if (onIslandSand){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      snapPlayerToNearestDockWater();
-      localStorage.removeItem(RETURN_TO_BOAT_FLAG);
-      requestBoatEmbarkFromIsland();
-      return;
-    }
-  }
-
-  // (C) Cardboard box pickup (unchanged)
+  // ---------- Cardboard box pickup (unchanged) ----------
   const box = cardboardBoxGrid();
   const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
   if (boxStillThere && gx === box.x && gy === box.y){
@@ -239,14 +289,15 @@ function showBoxYesNo(fn){
     return;
   }
 
-  // (D) Armoury door open
+  // ---------- Armoury door (unchanged) ----------
   if (localStorage.getItem('izzaMapTier') === '2' && DOOR && gx === DOOR.x && gy === DOOR.y){
     e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
     if (typeof window.openArmoury === 'function') window.openArmoury();
     else openArmouryFallback();
-    localStorage.setItem(RETURN_TO_BOAT_FLAG, '1');
+    localStorage.setItem(RETURN_TO_BOAT_FLAG, '1'); // arm one-shot embark for next B
     return;
   }
+}
 }
   // ===== boot =====
   IZZA.on('ready', (a)=>{
