@@ -63,6 +63,10 @@
         s.add(gx+'|'+(d.y-2));    // widen north again (3-wide)
       }
     });
+
+    // --- NEW: also treat mission island dock cells as dock-adjacent for boarding/disembark
+    if (window._izzaIslandDock) { window._izzaIslandDock.forEach(k=> s.add(k)); }
+
     return s;
   }
 
@@ -72,6 +76,10 @@
     const {LAKE}=lakeRects(a);
     const insideLake = (gx>=LAKE.x0 && gx<=LAKE.x1 && gy>=LAKE.y0 && gy<=LAKE.y1);
     if(!insideLake) return false;
+
+    // --- NEW: island land tiles published by mission plugin are NOT water
+    if (window._izzaIslandLand && window._izzaIslandLand.has(gx+'|'+gy)) return false;
+
     if(dockCells().has(gx+'|'+gy)) return false;
     return true;
   }
@@ -120,6 +128,15 @@
 
     // if already on dock somehow
     if(docks.has(gx+'|'+gy)) return {x:gx,y:gy};
+
+    // --- NEW: allow disembark onto the island south beach rim
+    if (window._izzaIslandBeachSouth) {
+      for (const p of n) { if (window._izzaIslandBeachSouth.has(p.x+'|'+p.y)) return p; }
+    }
+    // --- NEW: allow disembark while adjacent to the island's small dock cells
+    if (window._izzaIslandDock) {
+      for (const p of n) { if (window._izzaIslandDock.has(p.x+'|'+p.y)) return p; }
+    }
 
     return null;
   }
