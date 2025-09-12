@@ -156,14 +156,18 @@
 
   // ===== B actions =====
   function onB(e){
-  if(!api?.ready) return;
-  const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+  if (!api?.ready) return;
+
+  const t  = api.TILE;
+  const gx = ((api.player.x+16)/t|0);
+  const gy = ((api.player.y+16)/t|0);
 
   // Pull the island geometry & dock that the expander publishes
   const ISLAND = window.__IZZA_ARMOURY__?.island || null;
   const DOCK   = window.__IZZA_ISLAND_DOCK__   || null;
+  const DOOR   = window.__IZZA_ARMOURY__?.door   || null;
 
-  // (A) Allow embark ONLY at the island dock (sand, water, or adjacent to water)
+  // (A) Allow embark ONLY at the island dock (sand, water, or adjacent to the water tile)
   if (DOCK) {
     const onSand  = (gx === DOCK.sand?.x  && gy === DOCK.sand?.y);
     const onWater = (gx === DOCK.water?.x && gy === DOCK.water?.y);
@@ -173,17 +177,17 @@
 
     if (onSand || onWater || adjToWater) {
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+      localStorage.removeItem(RETURN_TO_BOAT_FLAG);       // clear one-shot if still set
       requestBoatEmbarkFromIsland();
       return;
     }
   }
 
   // (B) One-shot: after first armoury open, next B anywhere on ISLAND sand → embark
-  if (ISLAND && localStorage.getItem(RETURN_TO_BOAT_FLAG)==='1'){
+  if (ISLAND && localStorage.getItem(RETURN_TO_BOAT_FLAG) === '1'){
     const onIslandSand =
-      gx>=ISLAND.x0 && gx<=ISLAND.x1 &&
-      gy>=ISLAND.y0 && gy<=ISLAND.y1;
+      gx >= ISLAND.x0 && gx <= ISLAND.x1 &&
+      gy >= ISLAND.y0 && gy <= ISLAND.y1;
     if (onIslandSand){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
       localStorage.removeItem(RETURN_TO_BOAT_FLAG);
@@ -192,59 +196,31 @@
     }
   }
 
-  // ...box pickup and door handling (unchanged)...
-}
-
-    // (C) Box pickup near HQ
-    const box=cardboardBoxGrid();
-    const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
-    if(boxStillThere && gx===box.x && gy===box.y){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      if(getM4()==='not-started') setM4('started');
-      const onYes=()=>{
-        const inv=getInv();
-        addCount(inv,'cardboard_box',1);
-        setInv(inv);
-        localStorage.setItem(BOX_TAKEN_KEY, '1');
-        IZZA.toast?.('Cardboard Box added to Inventory');
-      };
-      // no modal stacking war: open synchronously
-      (function showBoxYesNo(onYes){
-        const m=document.createElement('div');
-        m.className='modal'; m.style.display='flex';
-        m.innerHTML=`
-          <div class="backdrop"></div>
-          <div class="card" style="min-width:300px;max-width:520px">
-            <h3>📦</h3>
-            <div style="line-height:1.5">
-              <i>This cardboard box could come in handy for crafting something…</i><br>
-              Have you ever taken a <b>boat ride</b>?<br><br>
-              <b>Take the cardboard box?</b>
-            </div>
-            <div class="row" style="margin-top:10px;gap:8px">
-              <button class="ghost" id="yes">Yes</button>
-              <button class="ghost" id="no">No</button>
-            </div>
-          </div>`;
-        document.body.appendChild(m);
-        const close=()=>m.remove();
-        m.querySelector('.backdrop').addEventListener('click', close, {passive:true});
-        m.querySelector('#no').addEventListener('click', close, {passive:true});
-        m.querySelector('#yes').addEventListener('click', ()=>{ try{ onYes?.(); }finally{ close(); } }, {passive:true});
-      })(onYes);
-      return;
-    }
-
-    // (D) Armoury door → your Armoury UI (or fallback)
-    if (D && localStorage.getItem('izzaMapTier')==='2' && gx===D.x && gy===D.y){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      if (typeof window.openArmoury === 'function') window.openArmoury();
-      else openArmouryFallback();
-      localStorage.setItem(RETURN_TO_BOAT_FLAG, '1'); // arm one-shot after first visit
-      return;
-    }
+  // (C) Cardboard box pickup (near HQ, not on the island)
+  const box = cardboardBoxGrid();
+  const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
+  if (boxStillThere && gx === box.x && gy === box.y){
+    e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+    if (getM4() === 'not-started') setM4('started');
+    showBoxYesNo(()=>{
+      const inv = getInv();
+      addCount(inv, 'cardboard_box', 1);
+      setInv(inv);
+      localStorage.setItem(BOX_TAKEN_KEY, '1');
+      IZZA.toast?.('Cardboard Box added to Inventory');
+    });
+    return;
   }
 
+  // (D) Armoury door → open your armoury UI (or fallback)
+  if (localStorage.getItem('izzaMapTier') === '2' && DOOR && gx === DOOR.x && gy === DOOR.y){
+    e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+    if (typeof window.openArmoury === 'function') window.openArmoury();
+    else openArmouryFallback();
+    localStorage.setItem(RETURN_TO_BOAT_FLAG, '1'); // arm one-shot embark for next B on sand
+    return;
+  }
+}
   // ===== boot =====
   IZZA.on('ready', (a)=>{
     api=a;
