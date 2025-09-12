@@ -782,6 +782,10 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
 const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
 const waterIsSolid = (x,y)=>{
   if(!_inRect(x,y,LAKE)) return false;
+
+  // NEW: treat island land tiles as walkable (mission4 publishes a Set of "gx|gy")
+  if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false;
+
   if(x===BEACH_X) return false;
   if(dockCells().has(x+'|'+y)) return false;
   return true;
