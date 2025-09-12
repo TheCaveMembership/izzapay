@@ -607,7 +607,6 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
 // --- ISLAND (rendered after water so it is visible)
 (function(){
   if ((localStorage.getItem('izzaMapTier') || '1') !== '2') return;
-  if (window.__IZZA_ARMOURY__?.owner === 'mission4') {
     // We still want visuals here because armoury file is logic-only now
     // so DO NOT early return based on owner; just proceed.
   }
@@ -1390,7 +1389,6 @@ function _armouryClose(){ const el=document.getElementById('armouryUI'); if(el) 
 
 // Press B near the island armoury door → open modal
 function _onPressArmouryB(e){
-  if (window.__IZZA_ARMOURY__?.owner === 'mission4') return;
   const d = window.__IZZA_ARMOURY__?.door; if(!d || !IZZA?.api?.ready) return;
   const t=IZZA.api.TILE, gx=((IZZA.api.player.x+16)/t|0), gy=((IZZA.api.player.y+16)/t|0);
   const near = Math.abs(gx-d.x)<=1 && Math.abs(gy-d.y)<=1;
