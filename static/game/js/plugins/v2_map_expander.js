@@ -607,9 +607,8 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
 // --- ISLAND (rendered after water so it is visible)
 (function(){
   if ((localStorage.getItem('izzaMapTier') || '1') !== '2') return;
-    // We still want visuals here because armoury file is logic-only now
-    // so DO NOT early return based on owner; just proceed.
-  }
+  // We still want visuals here because armoury file is logic-only now
+  // so DO NOT early return based on owner; just proceed.
 
   const A2 = anchors(api);
   const { LAKE } = lakeRects(A2);
@@ -621,7 +620,7 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
   const y0 = yMid - (h>>1), y1 = y0 + h - 1;
   const ISLAND   = { x0: Math.max(LAKE.x0,x0), y0: Math.max(LAKE.y0,y0), x1, y1: Math.min(LAKE.y1,y1) };
 
-  // single-tile building: door is the tile south of the block
+  // single-tile building; door is the tile south of the block
   const BX = ISLAND.x0 + Math.floor((w-1)/2);
   const BY = ISLAND.y0 + Math.floor((h-1)/2) - 1;
   const BUILDING = { x0:BX, y0:BY, x1:BX, y1:BY }; // single tile
@@ -634,7 +633,7 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
     sand:  { x: ISLAND.x0,     y: dockY }
   };
 
-  // publish land set every render so boat/collisions are in sync
+  // publish island land & dock every render so boat/collisions are in sync
   (function publishIslandLandFromExpander(){
     const land = new Set();
     for (let y = ISLAND.y0; y <= ISLAND.y1; y++)
@@ -642,18 +641,19 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
         land.add(x + '|' + y);
     window._izzaIslandLand = land;
   })();
+  window.__IZZA_ARMOURY__     = { rect: BUILDING, door: DOOR, island: ISLAND };
+  window.__IZZA_ISLAND_DOCK__ = ISLAND_DOCK;
 
   // SAND PAD
   for (let gy = ISLAND.y0; gy <= ISLAND.y1; gy++)
     for (let gx = ISLAND.x0; gx <= ISLAND.x1; gx++)
       fillTile(api, ctx, gx, gy, COL.sand);
 
-  // PALM (keep the same look/placement you had earlier)
+  // PALM
   (function drawPalmSimple(){
     const S=api.DRAW, t=api.TILE;
     const sx=(gx)=> (gx*t - api.camera.x)*(S/t);
     const sy=(gy)=> (gy*t - api.camera.y)*(S/t);
-    // simple stylized palm: use your existing palm routine if you prefer
     ctx.save();
     ctx.translate(sx(ISLAND.x0)+S*0.7, sy(ISLAND.y0)+S*1.9);
     ctx.scale(S/32, S/32);
@@ -663,12 +663,9 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
     ctx.beginPath(); ctx.moveTo(14,28); ctx.bezierCurveTo(16,24,18,18,20,8); ctx.stroke();
     ctx.lineWidth=1.4; ctx.strokeStyle='rgba(255,255,255,0.18)';
     for(let y=24;y>=10;y-=2.2){ ctx.beginPath(); ctx.moveTo(13,y); ctx.lineTo(18,y-1.2); ctx.stroke(); }
-    ctx.fillStyle='#5C3A1D';
-    ctx.beginPath(); ctx.arc(22,10,2.2,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(20,11.2,2.0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#5C3A1D'; ctx.beginPath(); ctx.arc(22,10,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(20,11.2,2.0,0,Math.PI*2); ctx.fill();
     function frond(ax,ay,bx,by,cx,cy){
-      ctx.beginPath();
-      ctx.moveTo(ax,ay); ctx.quadraticCurveTo(bx,by,cx,cy); ctx.quadraticCurveTo(bx,by,ax,ay); ctx.closePath();
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.quadraticCurveTo(bx,by,cx,cy); ctx.quadraticCurveTo(bx,by,ax,ay); ctx.closePath();
       const g = ctx.createLinearGradient(ax,ay,cx,cy);
       g.addColorStop(0,'#2E8B57'); g.addColorStop(1,'#1E6B40');
       ctx.fillStyle=g; ctx.fill();
@@ -678,21 +675,15 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
     ctx.restore();
   })();
 
-  // BUILDING as a **single door tile**: draw only the door tile with a small inset that glows gold when near
+  // BUILDING tile + door inset (gold when near)
   const t=api.TILE, pgx=((api.player.x+16)/t|0), pgy=((api.player.y+16)/t|0);
   const near = Math.abs(pgx-DOOR.x) <= 1 && Math.abs(pgy-DOOR.y) <= 1;
-
-  // base tile (a neutral building color)
   fillTile(api, ctx, BUILDING.x0, BUILDING.y0, '#6f87b3');
-
-  // draw the door tile (south of building) with a smaller inset rect, bronze vs gold on proximity
   (function drawInsetDoor(){
     const S=api.DRAW;
     const sx=(DOOR.x*t - api.camera.x)*(S/t);
-    const sy=((DOOR.y)*t - api.camera.y)*(S/t);
+    const sy=(DOOR.y*t - api.camera.y)*(S/t);
     ctx.save();
-    // tile base (sand already under it; optional to tint a bit)
-    // inset "door" rectangle
     const insetW = S*0.45, insetH = S*0.55;
     const dx = sx + (S-insetW)/2;
     const dy = sy + (S-insetH)/2;
@@ -701,11 +692,7 @@ window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='b') onPressB(e
     ctx.restore();
   })();
 
-  // export so other systems can use exact tiles
-  window.__IZZA_ARMOURY__      = { rect: BUILDING, door: DOOR, island: ISLAND };
-  window.__IZZA_ISLAND_DOCK__  = ISLAND_DOCK;
-
-  // NOTE: No visual dock drawing — invisible docks, functionality remains via __IZZA_ISLAND_DOCK__
+  // No visual dock drawing — functionality remains via __IZZA_ISLAND_DOCK__
 })();
     // ====== MANUAL PATCHES & HOSPITAL ======
     const set = (x,y,color)=> fillTile(api,ctx,x,y,color);
