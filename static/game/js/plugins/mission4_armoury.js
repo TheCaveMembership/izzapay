@@ -23,26 +23,28 @@
     return { LAKE };
   }
 
-  // ===== island (5×4) at far east edge, building 2×2 with south-facing door =====
-  function islandSpec(){
-    const a=anchors(); const {LAKE}=lakeRects(a);
-    const w=5, h=4;
-    const x1 = LAKE.x1 - 1;            // hug east edge (leave 1 tile margin)
-    const x0 = x1 - (w-1);
-    const yMid = (LAKE.y0 + LAKE.y1) >> 1;
-    const y0 = yMid - (h>>1);
-    const y1 = y0 + h - 1;
-    const ISLAND = { x0:Math.max(LAKE.x0,x0), y0:Math.max(LAKE.y0,y0), x1, y1:Math.min(LAKE.y1,y1) };
+  // ===== island (5×4) at far east edge, building 1×2 (west tile has the door) =====
+function islandSpec(){
+  const a=anchors(); const {LAKE}=lakeRects(a);
+  const w=5, h=4;
+  const x1 = LAKE.x1 - 1;            // hug east edge (leave 1 tile margin)
+  const x0 = x1 - (w-1);
+  const yMid = (LAKE.y0 + LAKE.y1) >> 1;
+  const y0 = yMid - (h>>1);
+  const y1 = y0 + h - 1;
+  const ISLAND = { x0:Math.max(LAKE.x0,x0), y0:Math.max(LAKE.y0,y0), x1, y1:Math.min(LAKE.y1,y1) };
 
-    // building 2×2 centered on island
-    const BX = ISLAND.x0 + Math.floor((w-2)/2);
-    const BY = ISLAND.y0 + Math.floor((h-2)/2);
-    const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY+1 };
+  // Building is 1 row tall and 2 tiles wide (west→east).
+  // Keep it centered horizontally like before.
+  const BX = ISLAND.x0 + Math.floor((w-2)/2);   // west tile (door is here)
+  const BY = ISLAND.y0 + Math.floor((h-1)/2);   // single row
+  const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY }; // width=2, height=1
 
-    // door grid (stand here and press B) — one tile south of the building
-    const DOOR_GRID = { x: BX, y: BUILDING.y1+1 };
-    return { ISLAND, BUILDING, DOOR_GRID };
-  }
+  // Door grid: one tile south of the WEST building tile (press B here)
+  const DOOR_GRID = { x: BX, y: BY+1 };
+
+  return { ISLAND, BUILDING, DOOR_GRID };
+}
   function isIslandTile(gx,gy){
     if(localStorage.getItem('izzaMapTier')!=='2') return false;
     const {ISLAND}=islandSpec();
