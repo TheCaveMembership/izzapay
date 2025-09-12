@@ -1,17 +1,18 @@
-// v2.2 — Mission 4: Island Armoury + Cardboard Box + Beach Docking (no island dock)
-// Draw island in render-under so it appears above water (map) but below entities.
-// Publishes island land tiles (window._izzaIslandLand) during update-pre.
-// Exports ownership/geometry via window.__IZZA_ARMOURY__ so other files can defer to this.
+// v2.3 — Mission 4 Armoury (owns island visuals + docking + B-handling)
 (function(){
-  const BUILD='v2.2-m4-armoury';
+  const BUILD='v2.3-m4-armoury';
   console.log('[IZZA PLAY]', BUILD);
 
   let api=null;
+
+  // ---- Keys / flags ----
   const LS_KEYS = { mission4:'izzaMission4', armour:'izzaArmour' };
   const BOX_TAKEN_KEY = 'izzaBoxTaken';
+  const RETURN_TO_BOAT_FLAG = 'izzaM4ReturnToBoatNextB'; // one-shot embark after first door use
 
-  // One-shot latch: after door interaction, next B on island sand boards the boat
-  let _queueReturnToBoat = false;
+  // ---- Declare ownership so map-expander defers visuals + B near door ----
+  window.__IZZA_ARMOURY__ = window.__IZZA_ARMOURY__ || {};
+  window.__IZZA_ARMOURY__.owner = 'mission4';
 
   // ===== geometry =====
   function unlockedRect(t){ return (t!=='2')?{x0:18,y0:18,x1:72,y1:42}:{x0:10,y0:12,x1:80,y1:50}; }
@@ -43,40 +44,14 @@
     // Door grid: one tile south of the WEST building tile (press B here)
     const DOOR_GRID = { x: BX, y: BY+1 };
 
-    return { ISLAND, BUILDING, DOOR_GRID };
-  }
-
-  // Small helpers the boat latch needs
-  function isOnIslandSand(gx, gy){
-    const { ISLAND } = islandSpec();
-    return gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1;
-  }
-
-  // Try to board the boat via integrations; otherwise do a safe fallback
-  function boardBoatFromIsland(){
-    try {
-      if (window.izzaBoat?.board) { window.izzaBoat.board(); return; }
-      if (typeof window.requestBoatBoard === 'function') { window.requestBoatBoard(); return; }
-    } catch {}
-    // Fallback: snap player to water just west of island midline and enable boat
-    if (!api?.ready) return;
-    const t=api.TILE, { ISLAND } = islandSpec();
-    const water = { x: ISLAND.x0 - 1, y: (ISLAND.y0 + ISLAND.y1) >> 1 };
-    api.player.x = water.x*t + 0.5*t;
-    api.player.y = water.y*t + 0.5*t;
-    try { window._izzaBoatActive = true; window.dispatchEvent(new Event('izza-boat-changed')); } catch {}
-    IZZA.toast?.('Boarded boat');
-  }
-
-  // Export ownership + geometry so other files (map expander) can defer visuals/door
-  function publishArmouryOwnership(){
-    const { ISLAND, BUILDING, DOOR_GRID } = islandSpec();
-    window.__IZZA_ARMOURY__ = {
-      owner: 'mission4',
-      island: ISLAND,
-      rect: { x0: BUILDING.x0, y0: BUILDING.y0, x1: BUILDING.x1, y1: BUILDING.y1 },
-      door: { x: DOOR_GRID.x, y: DOOR_GRID.y }
+    // Island dock (same semantics your expander used): 1 plank in water + 1 on sand
+    const dockY = (ISLAND.y0 + ISLAND.y1) >> 1;
+    const ISLAND_DOCK = {
+      water: { x: ISLAND.x0 - 1, y: dockY }, // water tile
+      sand:  { x: ISLAND.x0,     y: dockY }  // sand tile
     };
+
+    return { ISLAND, BUILDING, DOOR_GRID, ISLAND_DOCK };
   }
 
   // Publish island land for boat plugin (beach docking)
@@ -91,8 +66,6 @@
     }
     window._izzaIslandLand = land; // NOT water for the boat plugin
   }
-
-  // Keep the land set fresh before physics each frame, and once at boot
   IZZA.on('update-pre', publishIslandLand);
   IZZA.on('ready', ()=> publishIslandLand());
 
@@ -121,7 +94,7 @@
   function getArmour(){ try{ return JSON.parse(localStorage.getItem(LS_KEYS.armour)||'null'); }catch{return null;} }
   function setArmour(o){ localStorage.setItem(LS_KEYS.armour, JSON.stringify(o||null)); window.dispatchEvent(new Event('izza-armour-changed')); }
 
-  // ===== dialogs =====
+  // ===== dialogs (fallback UI) =====
   function showBoxYesNo(onYes){
     const m=document.createElement('div');
     m.className='modal'; m.style.display='flex';
@@ -146,23 +119,40 @@
     m.querySelector('#yes').addEventListener('click', ()=>{ try{ onYes?.(); }finally{ close(); } }, {passive:true});
   }
 
-  // ===== visuals =====
+  // Fallback armoury modal (if your main Armoury UI function doesn’t exist)
+  function openArmouryFallback(){
+    const m=document.createElement('div');
+    m.className='modal'; m.style.display='flex';
+    m.innerHTML=`
+      <div class="backdrop"></div>
+      <div class="card" style="min-width:300px;max-width:520px">
+        <h3>🛡️ Armoury</h3>
+        <div style="line-height:1.5">
+          Welcome to the <b>Armoury</b>! Here you can craft armour to reduce your opponents’ attacks on you.
+        </div>
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button class="ghost" id="ok">OK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    const close=()=>m.remove();
+    m.querySelector('.backdrop').addEventListener('click', close, {passive:true});
+    m.querySelector('#ok').addEventListener('click', close, {passive:true});
+  }
+
+  // ===== visuals (same look) =====
   function draw3DBox(ctx, sx, sy, S){
     ctx.save();
     ctx.translate(sx, sy);
     ctx.scale((S*0.68)/44, (S*0.68)/44);
     ctx.translate(-22, -22);
-    // soft shadow
     ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(22,28,14,6,0,0,Math.PI*2); ctx.fill();
-    // body
     const body = new Path2D('M6,18 L22,10 L38,18 L38,34 L22,42 L6,34 Z');
     ctx.fillStyle='#b98c4a'; ctx.fill(body);
     ctx.strokeStyle='#7d5f2e'; ctx.lineWidth=1.3; ctx.stroke(body);
-    // flaps
     const flapL = new Path2D('M6,18 L22,26 L22,10 Z');
     const flapR = new Path2D('M38,18 L22,26 L22,10 Z');
     ctx.fillStyle='#cfa162'; ctx.fill(flapL); ctx.fill(flapR); ctx.stroke(flapL); ctx.stroke(flapR);
-    // tape
     ctx.fillStyle='#e9dfb1'; ctx.fillRect(21,10,2,16);
     ctx.restore();
   }
@@ -171,59 +161,40 @@
     ctx.save();
     ctx.translate(sx, sy);
     ctx.scale(S/32, S/32);
-
-    // trunk shadow
     ctx.fillStyle='rgba(0,0,0,0.15)';
     ctx.beginPath(); ctx.ellipse(14,28,7,3,0,0,Math.PI*2); ctx.fill();
-
-    // trunk (arched)
-    ctx.lineWidth=4;
-    ctx.strokeStyle='#8B5A2B';
-    ctx.beginPath();
-    ctx.moveTo(14,28);
-    ctx.bezierCurveTo(16,24,18,18,20,8);
-    ctx.stroke();
-
-    // trunk rings
+    ctx.lineWidth=4; ctx.strokeStyle='#8B5A2B';
+    ctx.beginPath(); ctx.moveTo(14,28); ctx.bezierCurveTo(16,24,18,18,20,8); ctx.stroke();
     ctx.lineWidth=1.4; ctx.strokeStyle='rgba(255,255,255,0.18)';
-    for(let y=24;y>=10;y-=2.2){
-      ctx.beginPath();
-      ctx.moveTo(13,y);
-      ctx.lineTo(18,y-1.2);
-      ctx.stroke();
-    }
-
-    // coconuts
-    ctx.fillStyle='#5C3A1D';
-    ctx.beginPath(); ctx.arc(22,10,2.2,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(20,11.2,2.0,0,Math.PI*2); ctx.fill();
-
-    // fronds
+    for(let y=24;y>=10;y-=2.2){ ctx.beginPath(); ctx.moveTo(13,y); ctx.lineTo(18,y-1.2); ctx.stroke(); }
+    ctx.fillStyle='#5C3A1D'; ctx.beginPath(); ctx.arc(22,10,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(20,11.2,2.0,0,Math.PI*2); ctx.fill();
     function frond(ax,ay,bx,by,cx,cy){
-      ctx.beginPath();
-      ctx.moveTo(ax,ay);
-      ctx.quadraticCurveTo(bx,by,cx,cy);
-      ctx.quadraticCurveTo(bx,by,ax,ay);
-      ctx.closePath();
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.quadraticCurveTo(bx,by,cx,cy); ctx.quadraticCurveTo(bx,by,ax,ay); ctx.closePath();
       const g = ctx.createLinearGradient(ax,ay,cx,cy);
-      g.addColorStop(0,'#2E8B57'); g.addColorStop(1,'#1E6B40');
-      ctx.fillStyle=g; ctx.fill();
+      g.addColorStop(0,'#2E8B57'); g.addColorStop(1,'#1E6B40'); ctx.fillStyle=g; ctx.fill();
       ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=0.8; ctx.stroke();
     }
-    frond(20,8,   6,0,    2,12);
-    frond(20,8,   12,-3,  24,2);
-    frond(20,8,   28,0,   36,12);
-    frond(20,8,   30,12,  30,22);
-    frond(20,8,   10,12,  10,22);
+    frond(20,8,6,0,2,12); frond(20,8,12,-3,24,2); frond(20,8,28,0,36,12); frond(20,8,30,12,30,22); frond(20,8,10,12,10,22);
     ctx.restore();
+  }
+
+  function isPlayerNearGrid(gx,gy,maxDistTiles){
+    const t=api.TILE, px=((api.player.x+16)/t)|0, py=((api.player.y+16)/t)|0;
+    return Math.hypot(px-gx, py-gy) <= (maxDistTiles||1);
   }
 
   function drawIsland(ctx){
     if(localStorage.getItem('izzaMapTier')!=='2') return;
     const S=api.DRAW, t=api.TILE;
-    const {ISLAND, BUILDING, DOOR_GRID}=islandSpec();
+    const {ISLAND, BUILDING, DOOR_GRID, ISLAND_DOCK}=islandSpec();
     const sx=(x)=> (x*t - api.camera.x)*(S/t);
     const sy=(y)=> (y*t - api.camera.y)*(S/t);
+
+    // Export rect/door/island + DOCK so other systems (boat) can use them
+    window.__IZZA_ARMOURY__.rect   = { x:BUILDING.x0, y:BUILDING.y0, w:(BUILDING.x1-BUILDING.x0+1), h:(BUILDING.y1-BUILDING.y0+1) };
+    window.__IZZA_ARMOURY__.door   = { x:DOOR_GRID.x, y:DOOR_GRID.y };
+    window.__IZZA_ARMOURY__.island = ISLAND;
+    window.__IZZA_ISLAND_DOCK__    = ISLAND_DOCK; // <<— critical for docking
 
     ctx.save();
     // sand patch (5×4 tiles)
@@ -234,7 +205,7 @@
     ctx.fillStyle='#6f87b3';
     ctx.fillRect(sx(BUILDING.x0), sy(BUILDING.y0), (BUILDING.x1-BUILDING.x0+1)*S, (BUILDING.y1-BUILDING.y0+1)*S);
 
-    // door: small brown inset on the south face; glow gold if near
+    // door: small inset; glow gold if near
     const near = isPlayerNearGrid(DOOR_GRID.x, DOOR_GRID.y, 1.0);
     const doorW = S*0.45, doorH = S*0.55;
     const doorX = sx(DOOR_GRID.x) + (S-doorW)/2;
@@ -254,12 +225,12 @@
       draw3DBox(ctx, bx, by, S);
     }
 
-    ctx.restore();
-  }
+    // render tiny dock (visual only; the export above is what boat logic reads)
+    ctx.fillStyle='#6b4a2f';
+    ctx.fillRect(sx(ISLAND_DOCK.water.x), sy(ISLAND_DOCK.water.y), S, S); // water plank
+    ctx.fillRect(sx(ISLAND_DOCK.sand .x), sy(ISLAND_DOCK.sand .y),  S, S); // sand plank
 
-  function isPlayerNearGrid(gx,gy,maxDistTiles){
-    const t=api.TILE, px=((api.player.x+16)/t)|0, py=((api.player.y+16)/t)|0;
-    return Math.hypot(px-gx, py-gy) <= (maxDistTiles||1);
+    ctx.restore();
   }
 
   // ===== building collision =====
@@ -271,7 +242,6 @@
   }
 
   // ===== hooks =====
-  // Draw island between map tiles and entities so it’s above water but below the player.
   IZZA.on('render-under', ()=>{
     if(!api?.ready) return;
     const ctx=document.getElementById('game').getContext('2d');
@@ -280,7 +250,6 @@
 
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
-    // Keep the building solid
     const b=buildingSolid();
     if(b){
       const p=api.player, t=api.TILE, gx=((p.x+16)/t|0), gy=((p.y+16)/t|0);
@@ -290,17 +259,30 @@
     }
   });
 
+  // ===== boat hook =====
+  function requestBoatEmbarkFromIsland(){
+    try{ window.dispatchEvent(new CustomEvent('izza-boat-request',{detail:{action:'embark-from-island'}})); }catch{}
+    try{ window._izzaBoat?.embarkFromLand?.('island'); }catch{}
+    try{ IZZA.boat?.embarkFromLand?.('island'); }catch{}
+  }
+
   // ===== B actions =====
   function onB(e){
     if(!api?.ready) return;
     const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
-    // One-shot: after armoury door interaction, next B while on island sand boards the boat
-    if (_queueReturnToBoat && isOnIslandSand(gx, gy)) {
-      e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
-      _queueReturnToBoat = false;
-      boardBoatFromIsland();
-      return;
+    const {ISLAND, DOOR_GRID}=islandSpec();
+
+    // One-shot: after first armoury open, next B on island sand → embark
+    if (localStorage.getItem(RETURN_TO_BOAT_FLAG)==='1'){
+      const onIslandSand = (gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1) &&
+                           !(gx===DOOR_GRID.x && gy===DOOR_GRID.y);
+      if (onIslandSand){
+        e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
+        localStorage.removeItem(RETURN_TO_BOAT_FLAG);
+        requestBoatEmbarkFromIsland();
+        return;
+      }
     }
 
     // Box pickup
@@ -319,23 +301,12 @@
       return;
     }
 
-    // Armoury door (dialogue exactly as before)
-    const {DOOR_GRID}=islandSpec();
+    // Armoury door → open your armoury UI (or fallback)
     if(localStorage.getItem('izzaMapTier')==='2' && gx===DOOR_GRID.x && gy===DOOR_GRID.y){
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
-      const m=document.createElement('div');
-      m.className='modal'; m.style.display='flex';
-      m.innerHTML=`
-        <div class="backdrop"></div>
-        <div class="card" style="min-width:300px;max-width:520px">
-          <h3>🛡️ Armoury</h3>
-          <div style="line-height:1.5">
-            Welcome to the <b>Armoury</b>! Here you can craft armour to reduce your opponents’ attacks on you.
-          </div>
-        </div>`;
-      document.body.appendChild(m);
-      const close = ()=> { try{ m.remove(); }finally{ _queueReturnToBoat = true; } }; // arm the one-shot when dialog closes
-      m.querySelector('.backdrop').addEventListener('click', close, {passive:true});
+      if (typeof window.openArmoury === 'function') window.openArmoury();
+      else openArmouryFallback();
+      localStorage.setItem(RETURN_TO_BOAT_FLAG, '1'); // arm one-shot
       return;
     }
   }
@@ -343,8 +314,6 @@
   // ===== boot =====
   IZZA.on('ready', (a)=>{
     api=a;
-    publishArmouryOwnership();           // <-- let other files know this file owns the island/door
-    publishIslandLand();                 // seed land set
     const btnB=document.getElementById('btnB'); btnB?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
     console.log('[mission4] ready', BUILD);
