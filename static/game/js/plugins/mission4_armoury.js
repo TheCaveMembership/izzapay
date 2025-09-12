@@ -194,7 +194,7 @@
     window.__IZZA_ARMOURY__.rect   = { x:BUILDING.x0, y:BUILDING.y0, w:(BUILDING.x1-BUILDING.x0+1), h:(BUILDING.y1-BUILDING.y0+1) };
     window.__IZZA_ARMOURY__.door   = { x:DOOR_GRID.x, y:DOOR_GRID.y };
     window.__IZZA_ARMOURY__.island = ISLAND;
-    window.__IZZA_ISLAND_DOCK__    = ISLAND_DOCK; // <<— critical for docking
+    window.__IZZA_ISLAND_DOCK__    = ISLAND_DOCK; // critical for docking
 
     ctx.save();
     // sand patch (5×4 tiles)
@@ -225,7 +225,7 @@
       draw3DBox(ctx, bx, by, S);
     }
 
-    // render tiny dock (visual only; the export above is what boat logic reads)
+    // tiny dock (visual); the export above is what boat logic reads
     ctx.fillStyle='#6b4a2f';
     ctx.fillRect(sx(ISLAND_DOCK.water.x), sy(ISLAND_DOCK.water.y), S, S); // water plank
     ctx.fillRect(sx(ISLAND_DOCK.sand .x), sy(ISLAND_DOCK.sand .y),  S, S); // sand plank
@@ -240,24 +240,6 @@
     const {BUILDING}=islandSpec();
     return { x:BUILDING.x0, y:BUILDING.y0, w:(BUILDING.x1-BUILDING.x0+1), h:(BUILDING.y1-BUILDING.y0+1) };
   }
-
-  // ===== hooks =====
-  IZZA.on('render-under', ()=>{
-    if(!api?.ready) return;
-    const ctx=document.getElementById('game').getContext('2d');
-    drawIsland(ctx);
-  });
-
-  IZZA.on('update-post', ()=>{
-    if(!api?.ready) return;
-    const b=buildingSolid();
-    if(b){
-      const p=api.player, t=api.TILE, gx=((p.x+16)/t|0), gy=((p.y+16)/t|0);
-      if(gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
-        p.y = (b.y + b.h + 0.01)*t;
-      }
-    }
-  });
 
   // ===== boat hook =====
   function requestBoatEmbarkFromIsland(){
@@ -311,35 +293,35 @@
     }
   }
 
-// ===== hooks =====
-function _renderIslandLayer(){
-  if (!IZZA?.api?.ready) return;
-  const ctx = document.getElementById('game').getContext('2d');
-  drawIsland(ctx); // paints sand/building/door/palm/box
-}
+  // ===== hooks (render + collision) =====
 
-// Defer so we subscribe after the expander paints the lake (still below entities)
-setTimeout(()=> { IZZA.on('render-under', _renderIslandLayer); }, 0);
-
-// Single collision guard (keep)
-IZZA.on('update-post', ()=>{
-  if (!IZZA?.api?.ready) return;
-  const b = buildingSolid();
-  if (b){
-    const p = IZZA.api.player, t = IZZA.api.TILE;
-    const gx = ((p.x+16)/t|0), gy = ((p.y+16)/t|0);
-    if (gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
-      p.y = (b.y + b.h + 0.01)*t;
-    }
+  // Render after the expander’s water, still under entities
+  function _renderIslandLayer(){
+    if (!IZZA?.api?.ready) return;
+    const ctx = document.getElementById('game').getContext('2d');
+    drawIsland(ctx);
   }
-});
+  setTimeout(()=> { IZZA.on('render-under', _renderIslandLayer); }, 0);
 
-// ===== boot =====
-IZZA.on('ready', (a)=>{
-  api = a;
-  const btnB = document.getElementById('btnB');
-  btnB?.addEventListener('click', onB, true);
-  window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
-  console.log('[mission4] ready', BUILD);
-});
+  // Single collision guard
+  IZZA.on('update-post', ()=>{
+    if (!IZZA?.api?.ready) return;
+    const b = buildingSolid();
+    if (b){
+      const p = IZZA.api.player, t = IZZA.api.TILE;
+      const gx = ((p.x+16)/t|0), gy = ((p.y+16)/t|0);
+      if (gx>=b.x && gx<b.x+b.w && gy>=b.y && gy<b.y+b.h){
+        p.y = (b.y + b.h + 0.01)*t;
+      }
+    }
+  });
+
+  // ===== boot =====
+  IZZA.on('ready', (a)=>{
+    api = a;
+    const btnB = document.getElementById('btnB');
+    btnB?.addEventListener('click', onB, true);
+    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, {passive:false, capture:true});
+    console.log('[mission4] ready', BUILD);
+  });
 })();
