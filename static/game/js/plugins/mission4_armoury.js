@@ -1,22 +1,20 @@
-// v2.0 — Mission 4: Island Armoury + Cardboard Box + Island Docking
+// v2.1 — Mission 4: Island Armoury + Cardboard Box + Beach Docking (no island dock)
 // - Dialog: original lines + "Take the cardboard box? Yes / No" (no OK button)
-// - Inventory: adds via getInventory/setInventory + renderInventoryPanel refresh
+// - Inventory: adds via core getInventory/setInventory + inventory panel refresh
 // - Island: 5×4 tiles at far east edge; 2×2 building; brown door glows gold when close
-// - Palm tree with leafy canopy
-// - Publishes island land + dock cells so boat plugin allows docking/boarding here
-// - Beach landing supported (south edge of island counts as land for disembark)
+// - Palm tree: arched trunk + ring bands, drooping fronds, coconuts
+// - Publishes island land tiles only (window._izzaIslandLand) so the boat plugin allows beach docking
 (function(){
-  const BUILD='v2.0-m4-armoury';
+  const BUILD='v2.1-m4-armoury';
   console.log('[IZZA PLAY]', BUILD);
 
   let api=null;
   const LS_KEYS = { mission4:'izzaMission4', armour:'izzaArmour' };
-  // NEW: persistence flag so the world box disappears after pickup
-  const BOX_TAKEN_KEY = 'izzaBoxTaken';
+  const BOX_TAKEN_KEY = 'izzaBoxTaken'; // persist world pickup state
 
   // ===== geometry =====
   function unlockedRect(t){ return (t!=='2')?{x0:18,y0:18,x1:72,y1:42}:{x0:10,y0:12,x1:80,y1:50}; }
-  function anchors(a){
+  function anchors(){
     const tier=(localStorage.getItem('izzaMapTier')||'1');
     return { un: unlockedRect(tier) };
   }
@@ -25,9 +23,9 @@
     return { LAKE };
   }
 
-  // ===== island (5×4) at far east edge, building 2×2 with south door =====
+  // ===== island (5×4) at far east edge, building 2×2 with south-facing door =====
   function islandSpec(){
-    const a=anchors(api); const {LAKE}=lakeRects(a);
+    const a=anchors(); const {LAKE}=lakeRects(a);
     const w=5, h=4;
     const x1 = LAKE.x1 - 1;            // hug east edge (leave 1 tile margin)
     const x0 = x1 - (w-1);
@@ -41,8 +39,8 @@
     const BY = ISLAND.y0 + Math.floor((h-2)/2);
     const BUILDING = { x0:BX, y0:BY, x1:BX+1, y1:BY+1 };
 
-    // door 1 tile south of building center (smaller than a full tile)
-    const DOOR_GRID = { x: BX+0, y: BUILDING.y1+1 }; // grid to press B
+    // door grid (stand here and press B) — one tile south of the building
+    const DOOR_GRID = { x: BX, y: BUILDING.y1+1 };
     return { ISLAND, BUILDING, DOOR_GRID };
   }
   function isIslandTile(gx,gy){
@@ -51,36 +49,26 @@
     return (gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1);
   }
 
-  // Publish land & dock cells for boat plugin to respect
-  function publishIslandCells(){
-    if(localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandLand=null; window._izzaIslandDock=null; return; }
+  // Publish island land for boat plugin (beach docking)
+  function publishIslandLand(){
+    if(localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandLand=null; return; }
     const {ISLAND}=islandSpec();
     const land=new Set();
-    for(let y=ISLAND.y0;y<=ISLAND.y1;y++) for(let x=ISLAND.x0;x<=ISLAND.x1;x++) land.add(x+'|'+y);
-
-    // Small island dock: 1×2 planks protruding SOUTH from island center tile on south edge
-    const midX = ISLAND.x0 + Math.floor((ISLAND.x1-ISLAND.x0)/2);
-    const southY = ISLAND.y1;
-    const dock = new Set();
-    // Two water tiles immediately south of the island south edge
-    dock.add(midX+'|'+(southY+1));
-    dock.add(midX+'|'+(southY+2));
-
-    // Also expose "beach landing" cells (south edge of island) as acceptable disembark land-adjacent
-    const beach = new Set();
-    for(let x=ISLAND.x0;x<=ISLAND.x1;x++) beach.add(x+'|'+(southY)); // south rim itself is land
-
-    window._izzaIslandLand = land;          // treated as NOT water
-    window._izzaIslandDock = dock;          // treated like additional dock tiles (water)
-    window._izzaIslandBeachSouth = beach;   // candidates for disembark snapping
+    for(let y=ISLAND.y0;y<=ISLAND.y1;y++){
+      for(let x=ISLAND.x0;x<=ISLAND.x1;x++){
+        land.add(x+'|'+y);
+      }
+    }
+    window._izzaIslandLand = land; // treated as NOT water
   }
-  window._izzaLandAt = (gx,gy)=> isIslandTile(gx,gy); // extra convenience for older boat versions
+  // convenience for older code paths
+  window._izzaLandAt = (gx,gy)=> isIslandTile(gx,gy);
 
   // ===== HQ door → cardboard box position =====
   function hqDoorGrid(){ const t=api.TILE, d=api.doorSpawn; return { gx:Math.round(d.x/t), gy:Math.round(d.y/t) }; }
   function cardboardBoxGrid(){ const d=hqDoorGrid(); return { x:d.gx+3, y:d.gy+10 }; }
 
-  // ===== inventory helpers (matches store pattern) =====
+  // ===== inventory helpers (mirror core) =====
   function getInv(){ try{ return api.getInventory()||{}; }catch{return {};}}
   function setInv(inv){
     try{
@@ -89,7 +77,11 @@
       window.dispatchEvent(new Event('izza-inventory-changed'));
     }catch{}
   }
-  function addCount(inv,key,n){ inv[key]=inv[key]||{count:0}; inv[key].count=(inv[key].count|0)+n; if(inv[key].count<=0) delete inv[key]; }
+  function addCount(inv,key,n){
+    inv[key]=inv[key]||{count:0};
+    inv[key].count=(inv[key].count|0)+n;
+    if(inv[key].count<=0) delete inv[key];
+  }
 
   // ===== mission/armour state =====
   function getM4(){ return localStorage.getItem(LS_KEYS.mission4)||'not-started'; }
@@ -126,34 +118,76 @@
   function draw3DBox(ctx, sx, sy, S){
     ctx.save();
     ctx.translate(sx, sy);
-    ctx.scale((S*0.7)/44, (S*0.7)/44);
+    ctx.scale((S*0.68)/44, (S*0.68)/44);
     ctx.translate(-22, -22);
+    // soft shadow
     ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(22,28,14,6,0,0,Math.PI*2); ctx.fill();
+    // body
     const body = new Path2D('M6,18 L22,10 L38,18 L38,34 L22,42 L6,34 Z');
     ctx.fillStyle='#b98c4a'; ctx.fill(body);
     ctx.strokeStyle='#7d5f2e'; ctx.lineWidth=1.3; ctx.stroke(body);
+    // flaps
     const flapL = new Path2D('M6,18 L22,26 L22,10 Z');
     const flapR = new Path2D('M38,18 L22,26 L22,10 Z');
     ctx.fillStyle='#cfa162'; ctx.fill(flapL); ctx.fill(flapR); ctx.stroke(flapL); ctx.stroke(flapR);
+    // tape
     ctx.fillStyle='#e9dfb1'; ctx.fillRect(21,10,2,16);
     ctx.restore();
   }
 
   function drawPalm(ctx, sx, sy, S){
+    // stylized palm: arched, ringed trunk + drooping fronds + coconuts
     ctx.save();
     ctx.translate(sx, sy);
     ctx.scale(S/32, S/32);
-    // trunk
-    ctx.strokeStyle='#8b5a2b'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(16,28); ctx.bezierCurveTo(17,22,18,18,19,8); ctx.stroke();
-    // leafy canopy
-    ctx.fillStyle='#2e8b57';
-    const leaf=(ax,ay,bx,by,cx,cy)=>{ ctx.beginPath(); ctx.moveTo(ax,ay); ctx.quadraticCurveTo(bx,by,cx,cy); ctx.quadraticCurveTo(bx,by,ax,ay); ctx.fill(); };
-    leaf(19,8,  4,0,   0,12);
-    leaf(19,8,  12,-2, 24,2);
-    leaf(19,8,  30,0,  36,12);
-    leaf(19,8,  28,12, 28,20);
-    leaf(19,8,  8,12,  8,20);
+
+    // trunk shadow
+    ctx.fillStyle='rgba(0,0,0,0.15)';
+    ctx.beginPath(); ctx.ellipse(14,28,7,3,0,0,Math.PI*2); ctx.fill();
+
+    // trunk (arched)
+    ctx.lineWidth=4;
+    ctx.strokeStyle='#8B5A2B';
+    ctx.beginPath();
+    ctx.moveTo(14,28);
+    ctx.bezierCurveTo(16,24,18,18,20,8);
+    ctx.stroke();
+
+    // trunk rings
+    ctx.lineWidth=1.4; ctx.strokeStyle='rgba(255,255,255,0.18)';
+    for(let y=24;y>=10;y-=2.2){
+      ctx.beginPath();
+      ctx.moveTo(13,y);
+      ctx.lineTo(18,y-1.2);
+      ctx.stroke();
+    }
+
+    // coconuts
+    ctx.fillStyle='#5C3A1D';
+    ctx.beginPath(); ctx.arc(22,10,2.2,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(20,11.2,2.0,0,Math.PI*2); ctx.fill();
+
+    // fronds (drooping, glossy)
+    function frond(ax,ay,bx,by,cx,cy){
+      ctx.beginPath();
+      ctx.moveTo(ax,ay);
+      ctx.quadraticCurveTo(bx,by,cx,cy);
+      ctx.quadraticCurveTo(bx,by,ax,ay);
+      ctx.closePath();
+      // gradient-ish fill
+      const g = ctx.createLinearGradient(ax,ay,cx,cy);
+      g.addColorStop(0,'#2E8B57');
+      g.addColorStop(1,'#1E6B40');
+      ctx.fillStyle=g;
+      ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,0.2)';
+      ctx.lineWidth=0.8; ctx.stroke();
+    }
+    frond(20,8,   6,0,    2,12);   // left
+    frond(20,8,   12,-3,  24,2);   // left-mid
+    frond(20,8,   28,0,   36,12);  // right
+    frond(20,8,   30,12,  30,22);  // right-down
+    frond(20,8,   10,12,  10,22);  // left-down
     ctx.restore();
   }
 
@@ -168,11 +202,6 @@
     // sand patch (5×4 tiles)
     ctx.fillStyle='#d8c399';
     ctx.fillRect(sx(ISLAND.x0), sy(ISLAND.y0), (ISLAND.x1-ISLAND.x0+1)*S, (ISLAND.y1-ISLAND.y0+1)*S);
-
-    // small island dock (planks) 1×2 south of center
-    const midX = ISLAND.x0 + Math.floor((ISLAND.x1-ISLAND.x0)/2);
-    ctx.fillStyle='#8b6b3a';
-    ctx.fillRect(sx(midX), sy(ISLAND.y1+1), S, 2*S);
 
     // building 2×2
     ctx.fillStyle='#6f87b3';
@@ -217,7 +246,7 @@
   // ===== hooks =====
   IZZA.on('render-post', ()=>{
     if(!api?.ready) return;
-    publishIslandCells();     // keep land/dock sets fresh for boat plugin
+    publishIslandLand();     // keep land set fresh for boat plugin
     const ctx=document.getElementById('game').getContext('2d');
     drawIsland(ctx);
   });
@@ -240,7 +269,7 @@
     if(!api?.ready) return;
     const t=api.TILE, gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
 
-    // Box pickup: dialog with Yes/No; adds to inventory on Yes; disappears afterward
+    // Box pickup: Yes adds to inventory + hides world box forever; No leaves it
     const box=cardboardBoxGrid();
     const boxStillThere = localStorage.getItem(BOX_TAKEN_KEY) !== '1';
     if(boxStillThere && gx===box.x && gy===box.y){
@@ -249,21 +278,17 @@
       showBoxYesNo(()=>{
         const inv=getInv();
         addCount(inv,'cardboard_box',1);
-        setInv(inv); // persists + inventory UI refresh
-
-        // make the world sprite disappear permanently (until you reset this flag)
-        localStorage.setItem(BOX_TAKEN_KEY, '1');
-
+        setInv(inv); // persist + inventory UI refresh
+        localStorage.setItem(BOX_TAKEN_KEY, '1'); // hide world sprite
         IZZA.toast?.('Cardboard Box added to Inventory');
       });
       return;
     }
 
-    // Armoury door
+    // Armoury door: greet + explain
     const {DOOR_GRID}=islandSpec();
     if(localStorage.getItem('izzaMapTier')==='2' && gx===DOOR_GRID.x && gy===DOOR_GRID.y){
       e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.();
-      // small “welcome” modal w/o buttons (click outside to close)
       const m=document.createElement('div');
       m.className='modal'; m.style.display='flex';
       m.innerHTML=`
