@@ -77,6 +77,24 @@
   }
   const isLand = (gx,gy)=> !tileIsWater(gx,gy);
 
+  // === NEW: Island/shore helpers ===
+  function _islandSet(){ return (window._izzaIslandLand instanceof Set) ? window._izzaIslandLand : new Set(); }
+  function tileIsIslandLand(gx,gy){ return _islandSet().has(gx+'|'+gy); }
+  function nearIsland(gx,gy,r=2){
+    for(let dy=-r; dy<=r; dy++){
+      const xr=r - Math.abs(dy);
+      for(let dx=-xr; dx<=xr; dx++){
+        if (tileIsIslandLand(gx+dx, gy+dy)) return true;
+      }
+    }
+    return false;
+  }
+  function isShore(gx,gy){
+    if(!isLand(gx,gy)) return false;
+    return tileIsWater(gx+1,gy) || tileIsWater(gx-1,gy) || tileIsWater(gx,gy+1) || tileIsWater(gx,gy-1);
+  }
+  // === /helpers ===
+
   // corners
   function cornersGrid(){
     const t=T(), p=api.player;
@@ -104,35 +122,42 @@
     return DOCKS.find(d => Math.abs(y - d.y) <= 2) || null;
   }
 
-  // === generalized land-adjacent search for disembarking (with 1/2-tile snap) ===
-  function nearestDisembarkSpot(){
-    const {LAKE,BEACH_X}=lakeRects(anchors());
+  // === generalized land-adjacent search for disembarking (with 1/2-tile snap)
+  // === NEW: acceptFn allows us to force-island when near island; prefer shoreline
+  function nearestDisembarkSpot(halfTileSnap, acceptFn){
     const gx=centerGX(), gy=centerGY();
+    const ok = (x,y)=> (acceptFn ? acceptFn(x,y) : isLand(x,y));
 
-    // 1) direct neighbors (N/E/S/W) that are land
-    const primary = [{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
-    for(const p of primary){ if(isLand(p.x,p.y)) return p; }
+    const {LAKE,BEACH_X}=lakeRects(anchors());
 
-    // 2) diagonals as a fallback
-    const diag = [{x:gx+1,y:gy+1},{x:gx+1,y:gy-1},{x:gx-1,y:gy+1},{x:gx-1,y:gy-1}];
-    for(const p of diag){ if(isLand(p.x,p.y)) return p; }
+    // explicit city beach snap when hugging the beach column
+    if(halfTileSnap && gx >= BEACH_X-1 && gx <= BEACH_X+1 && gy >= LAKE.y0-1 && gy <= LAKE.y1+1){
+      if (ok(BEACH_X, gy)) return { x: BEACH_X, y: gy };
+    }
 
-    // 3) explicit city beach snap if right beside water at beach column
-    if(gx===BEACH_X+1 && gy>=LAKE.y0 && gy<=LAKE.y1) return {x:BEACH_X, y:gy};
-
-    // 4) 1/2-tile proximity ring up to 2 tiles
-    let best=null, bestD=1e9;
-    for(let dy=-2; dy<=2; dy++){
-      for(let dx=-2; dx<=2; dx++){
-        if(dx===0 && dy===0) continue;
-        const x=gx+dx, y=gy+dy;
-        if(isLand(x,y)){
-          const d = Math.max(Math.abs(dx), Math.abs(dy));
-          if(d < bestD){ bestD=d; best={x,y}; }
-        }
+    // ring candidates around player (up to r=4 to handle island east edge)
+    const cand=[];
+    for(let r=1; r<=4; r++){
+      for(let dx=-r; dx<=r; dx++){
+        cand.push({x:gx+dx, y:gy-r});
+        cand.push({x:gx+dx, y:gy+r});
+      }
+      for(let dy=-(r-1); dy<=(r-1); dy++){
+        cand.push({x:gx-r, y:gy+dy});
+        cand.push({x:gx+r, y:gy+dy});
       }
     }
-    return best; // might be null
+
+    const W=90, H=60;
+    const inB = p=> p.x>=0 && p.x<W && p.y>=0 && p.y<H;
+
+    // 1) shoreline of selected side
+    const shore = cand.find(p=> inB(p) && ok(p.x,p.y) && isShore(p.x,p.y));
+    if(shore) return shore;
+
+    // 2) any land of selected side
+    const any = cand.find(p=> inB(p) && ok(p.x,p.y));
+    return any || null;
   }
 
   // ====== boarding / leaving ======
@@ -180,11 +205,22 @@
 
   function tryDisembark(){
     if(!inBoat) return false;
-    const spot = nearestDisembarkSpot();
+
+    // NEW: if we are near the island, only accept island tiles (prevents city beach stealing the snap)
+    const pgx=centerGX(), pgy=centerGY();
+    const spot = nearestDisembarkSpot(
+      /*halfTileSnap=*/true,
+      nearIsland(pgx,pgy,2) ? tileIsIslandLand : undefined
+    );
     if(!spot) return false;
 
-    api.player.x = (spot.x*T()) + 1;
-    api.player.y = (spot.y*T()) + 1;
+    // NEW: clamp to world to avoid east-edge vanish
+    const W=90, H=60;
+    const gx = Math.max(0, Math.min(W-1, spot.x));
+    const gy = Math.max(0, Math.min(H-1, spot.y));
+
+    api.player.x = (gx*T()) + 1;
+    api.player.y = (gy*T()) + 1;
 
     inBoat=false;
     setBoatFlag(false);
@@ -319,6 +355,20 @@
     }
   }
   setTimeout(()=> IZZA.on('update-post', postClamp), 0);
+
+  // === NEW: Boot-time rescue if we spawn stuck or on water out-of-boat ===
+  setTimeout(()=>{
+    try{
+      if(!api?.ready || !isTier2()) return;
+      const gx=centerGX(), gy=centerGY();
+      const W=90, H=60;
+      const oob = (gx<0 || gx>=W || gy<0 || gy>=H);
+      const onWaterNoBoat = tileIsWater(gx,gy) && !inBoat;
+      if(oob || onWaterNoBoat){
+        showRescue(rescueToShore);
+      }
+    }catch{}
+  }, 0);
 
   // ====== visuals (unchanged) ======
   let prevBoatDraw = null;
