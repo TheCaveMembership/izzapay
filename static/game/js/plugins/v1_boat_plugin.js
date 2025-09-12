@@ -67,7 +67,7 @@
     const insideLake = (gx>=LAKE.x0 && gx<=LAKE.x1 && gy>=LAKE.y0 && gy<=LAKE.y1);
     if(!insideLake) return false;
 
-    // island land is NOT water (published by mission plugin)
+    // island land is NOT water (published by mission plugin on update-pre)
     if (window._izzaIslandLand && window._izzaIslandLand.has(gx+'|'+gy)) return false;
 
     // city docks (including widened rows) are not water for movement checks
@@ -104,8 +104,8 @@
     return DOCKS.find(d => Math.abs(y - d.y) <= 2) || null;
   }
 
-  // === NEW: generalized land-adjacent search for disembarking ===
-  function nearestDisembarkSpot(halfTileSnap=true){
+  // === generalized land-adjacent search for disembarking (with 1/2-tile snap) ===
+  function nearestDisembarkSpot(){
     const {LAKE,BEACH_X}=lakeRects(anchors());
     const gx=centerGX(), gy=centerGY();
 
@@ -113,23 +113,21 @@
     const primary = [{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
     for(const p of primary){ if(isLand(p.x,p.y)) return p; }
 
-    // 2) diagonals as a fallback (close enough to count as 1/2-tile proximity)
+    // 2) diagonals as a fallback
     const diag = [{x:gx+1,y:gy+1},{x:gx+1,y:gy-1},{x:gx-1,y:gy+1},{x:gx-1,y:gy-1}];
     for(const p of diag){ if(isLand(p.x,p.y)) return p; }
 
     // 3) explicit city beach snap if right beside water at beach column
     if(gx===BEACH_X+1 && gy>=LAKE.y0 && gy<=LAKE.y1) return {x:BEACH_X, y:gy};
 
-    if(!halfTileSnap) return null;
-
-    // 4) 1/2-tile proximity: look in a 2-tile Chebyshev ring for the closest land
+    // 4) 1/2-tile proximity ring up to 2 tiles
     let best=null, bestD=1e9;
     for(let dy=-2; dy<=2; dy++){
       for(let dx=-2; dx<=2; dx++){
         if(dx===0 && dy===0) continue;
         const x=gx+dx, y=gy+dy;
         if(isLand(x,y)){
-          const d = Math.max(Math.abs(dx), Math.abs(dy)); // Chebyshev
+          const d = Math.max(Math.abs(dx), Math.abs(dy));
           if(d < bestD){ bestD=d; best={x,y}; }
         }
       }
@@ -148,8 +146,7 @@
     if(docks.has((gx+1)+'|'+gy) || docks.has((gx-1)+'|'+gy) ||
        docks.has(gx+'|'+(gy+1)) || docks.has(gx+'|'+(gy-1))) return true;
 
-    // NEW: also allow boarding from any land next to lake water (beach edge or island sand)
-    // (standing on land and touching water)
+    // Also allow boarding from any land that's touching lake water (beach or island sand)
     if(!tileIsWater(gx,gy)){ // on land
       const n=[{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
       if(n.some(p=>tileIsWater(p.x,p.y))) return true;
@@ -183,8 +180,7 @@
 
   function tryDisembark(){
     if(!inBoat) return false;
-    // NEW: allow disembark against island sand or city beach/dock, with 1/2-tile snap
-    const spot = nearestDisembarkSpot(/*halfTileSnap=*/true);
+    const spot = nearestDisembarkSpot();
     if(!spot) return false;
 
     api.player.x = (spot.x*T()) + 1;
@@ -206,7 +202,7 @@
   function onB(e){
     if(!api?.ready || !isTier2()) return;
     const shouldHandle = inBoat || canBoardHere();
-    if(!shouldHandle) return; // pressing B in open water does nothing (by design)
+    if(!shouldHandle) return; // pressing B in open water does nothing
 
     const acted = inBoat ? tryDisembark() : tryBoard();
     if(acted){
@@ -234,13 +230,36 @@
     m.querySelector('.backdrop').addEventListener('click', close, {passive:true});
     m.querySelector('#ok').addEventListener('click', ()=>{ try{ cb?.(); }finally{ close(); } }, {passive:true});
   }
-  function rescueToShore(){
+
+  function nearestShoreTile(){
     const {LAKE,BEACH_X}=lakeRects(anchors());
-    let gy = centerGY();
-    gy = Math.max(LAKE.y0, Math.min(LAKE.y1, gy));
-    // Prefer city beach column
-    api.player.x = (BEACH_X*T()) + 1;
-    api.player.y = (gy*T()) + 1;
+    const gx=centerGX(), gy=centerGY();
+
+    // Prefer nearest island land in a small radius
+    if (window._izzaIslandLand){
+      for (let r=0; r<=3; r++){
+        for (let dx=-r; dx<=r; dx++){
+          const x1=gx+dx, y1=gy-r, y2=gy+r;
+          if (window._izzaIslandLand.has(x1+'|'+y1)) return {x:x1,y:y1};
+          if (window._izzaIslandLand.has(x1+'|'+y2)) return {x:x1,y:y2};
+        }
+        for (let dy=-r; dy<=r; dy++){
+          const y1=gy+dy, x1=gx-r, x2=gx+r;
+          if (window._izzaIslandLand.has(x1+'|'+y1)) return {x:x1,y:y1};
+          if (window._izzaIslandLand.has(x2+'|'+y1)) return {x:x2,y:y1};
+        }
+      }
+    }
+
+    // Otherwise city beach
+    const y = Math.max(LAKE.y0, Math.min(gy, LAKE.y1));
+    return { x: BEACH_X, y };
+  }
+
+  function rescueToShore(){
+    const s = nearestShoreTile();
+    api.player.x = (s.x*T()) + 1;
+    api.player.y = (s.y*T()) + 1;
     lastLand = { x: api.player.x, y: api.player.y };
     lastWater = null;
     IZZA.toast?.('Back on shore');
@@ -261,7 +280,7 @@
       // Land walking: block water
       if(anyCornerWater() && !centerOnDock()){
         if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; }
-        // Start/continue watchdog if somehow stuck in water (no valid lastLand)
+        // Start/continue watchdog if somehow in water with no valid lastLand
         if(!lastLand && allCornersWater()){
           if(!waterStrandSince) waterStrandSince = performance.now();
         }else{
@@ -272,8 +291,8 @@
         waterStrandSince = 0;
       }
 
-      // If really in water out of boat for >300ms, offer rescue
-      if(!inBoat && allCornersWater()){
+      // If in water out of boat for >300ms, offer rescue
+      if(allCornersWater()){
         if(!waterStrandSince) waterStrandSince = performance.now();
         const dt = performance.now() - waterStrandSince;
         if(dt > 300 && !rescueShown){
@@ -283,7 +302,7 @@
     }
   });
 
-  // Also clamp in update-post for extra safety
+  // Extra safety clamp
   function postClamp(){
     if(!api?.ready || !isTier2()) return;
     const p=api.player;
