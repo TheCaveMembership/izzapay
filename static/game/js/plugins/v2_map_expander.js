@@ -1571,25 +1571,42 @@ function pathVest(ctx){
   ctx.fillRect(-10, -3, 20, 6);
 }
 function pathLegs(ctx){
-  // --- metallic jet legs base (was cardboard) ---
-  const gradLeg = ctx.createLinearGradient(-7, 0, 7, 14);
-  gradLeg.addColorStop(0.0, "#c0c0c0");   // silver
-  gradLeg.addColorStop(0.5, "#e0e0e0");   // lighter sparkle mid
-  gradLeg.addColorStop(1.0, "#9a9a9a");   // darker steel base
+  // --- original cardboard legs, widened outward ---
+  ctx.fillStyle = C_BASE;
+  // left leg: pushed 1px further left, slightly wider
+  ctx.fillRect(-8, 0, 7, 14);
+  // right leg: kept gap, pushed 1px further right, slightly wider
+  ctx.fillRect( 1, 0, 7, 14);
 
-  ctx.fillStyle = gradLeg;
-  ctx.fillRect(-7, 0, 6, 14);
-  ctx.fillRect( 1, 0, 6, 14);
+  ctx.fillStyle = C_SHAD;
+  ctx.fillRect(-8, 4, 16, 3);  // widened shading band
 
-  // sparkle overlay
-  ctx.fillStyle = "rgba(255,255,255,0.25)";
-  ctx.fillRect(-7, 2, 6, 1);
-  ctx.fillRect( 1, 5, 6, 1);
+  // --- metallic jet mounts (very subtle silver sparkle) ---
+  (function drawMetalBands(){
+    const bands = [
+      { x:-8, y:10, w:7, h:3 }, // widened with leg
+      { x: 1, y:10, w:7, h:3 }
+    ];
+    bands.forEach(b=>{
+      const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+      g.addColorStop(0.0, 'rgba(200,210,222,0.75)');
+      g.addColorStop(1.0, 'rgba(135,145,158,0.75)');
+      ctx.fillStyle = g;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
 
-  ctx.fillStyle = "#7b7b7b";
-  ctx.fillRect(-7, 4, 14, 3);
+      const t = ((IZZA?.api?.player?.animTime)||0) * 0.015;
+      for (let i=0;i<3;i++){
+        const sx = b.x + 1 + (i*1.8) + Math.sin(t*7 + b.x*0.3 + i)*0.3;
+        const sy = b.y + 0.6 + (i*0.7) + Math.cos(t*9 + b.y*0.2 + i)*0.2;
+        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = '#e9eef7';
+        ctx.fillRect(sx, sy, 0.9, 0.9);
+      }
+      ctx.globalAlpha = 1.0;
+    });
+  })();
 
-  // --- rocket jets (flames + smoke) ---
+  // --- tiny rocket jets (flames + smoke), positioned at y=12 (down a little) ---
   const p = IZZA?.api?.player || {};
   const moving = !!p.moving;
   const t = ((p.animTime||0) * 0.02);
@@ -1605,13 +1622,12 @@ function pathLegs(ctx){
   ctx.save();
   ctx.globalAlpha *= _CB_JET_ALPHA;
 
-  const feet = [-4, 4];
+  const feet = [-5, 5]; // 🔹 widened jets to match widened legs
   feet.forEach((fx)=>{
     ctx.save();
-    ctx.translate(fx, 12);   // moved flames down (was 10 → now 12)
+    ctx.translate(fx, 12);
     ctx.scale(0.8, power);
 
-    // gradient flame (with blue tip)
     const grad = ctx.createLinearGradient(0,-7, 0,6);
     grad.addColorStop(0.00, "#6ac6ff");
     grad.addColorStop(0.30, "#fff7c4");
@@ -1620,7 +1636,6 @@ function pathLegs(ctx){
     ctx.fillStyle = grad;
     ctx.fill(_CB_FLAME_PATH);
 
-    // bright inner core
     ctx.globalAlpha *= 0.7;
     ctx.beginPath();
     ctx.ellipse(0, -2, 0.9, 2.0, 0, 0, Math.PI*2);
@@ -1629,7 +1644,6 @@ function pathLegs(ctx){
 
     ctx.restore();
 
-    // smoke trail (unchanged)
     ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
     for(let i=0;i<2;i++){
       ctx.beginPath();
