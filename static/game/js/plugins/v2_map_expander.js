@@ -663,7 +663,81 @@
         const { ISLAND, BUILDING, DOOR } = islandSpec(A2);
         return { ISLAND, BUILDING, DOOR };
       })();
+  // === NEW: Center 2x3 walk area + torches ===
+  // Compute the centered 2x3 inside the 5x4 island
+  const IW = (function makeIslandWalkRect() {
+    const w = 2, h = 3;
+    const iwX0 = ISLAND.x0 + Math.floor(( (ISLAND.x1-ISLAND.x0+1) - w )/2);
+    const iwY0 = ISLAND.y0 + Math.floor(( (ISLAND.y1-ISLAND.y0+1) - h )/2);
+    return { x0: iwX0, y0: iwY0, x1: iwX0 + w - 1, y1: iwY0 + h - 1 };
+  })();
+  // Export so physics can build the invisible fence
+  window.__IZZA_ISLAND_WALK__ = IW;
 
+  // Four torch world positions (grid corners of the walk area)
+  const TORCHS = [
+    {x: IW.x0, y: IW.y0},
+    {x: IW.x1, y: IW.y0},
+    {x: IW.x0, y: IW.y1},
+    {x: IW.x1, y: IW.y1}
+  ];
+  window.__IZZA_ISLAND_TORCHES__ = TORCHS;
+
+  // --- tiny helper to draw a torch on the game canvas (SVG path via Path2D)
+  const ctxTorch = document.getElementById('game').getContext('2d');
+  const tSize = IZZA.api.DRAW, tile = IZZA.api.TILE;
+
+  // Torch base (wood post + holder) as SVG path
+  // (simple, compact path – rendered through Path2D from SVG string)
+  const TORCH_BASE = new Path2D("M10 64 L22 64 L22 34 L18 34 L18 20 L14 20 L14 34 L10 34 Z M8 18 L24 18 L24 14 L8 14 Z");
+
+  function drawTorchAt(gx, gy) {
+    const S = tSize, T = tile;
+    const sx = (gx*T - IZZA.api.camera.x) * (S/T);
+    const sy = (gy*T - IZZA.api.camera.y) * (S/T);
+
+    // scale the vector so it fits comfortably within a tile
+    const scale = S/32;
+
+    ctxTorch.save();
+    ctxTorch.translate(sx + S*0.50, sy + S*0.60);
+    ctxTorch.scale(scale, scale);
+    ctxTorch.translate(-16, -22);
+
+    // post
+    ctxTorch.fillStyle = "#6b4a2f";
+    ctxTorch.fill(TORCH_BASE);
+    ctxTorch.lineWidth = 1.2;
+    ctxTorch.strokeStyle = "rgba(0,0,0,0.2)";
+    ctxTorch.stroke(TORCH_BASE);
+
+    // flame (animated tiny flicker)
+    const t = performance.now() * 0.001;
+    const flick = 1 + 0.08 * Math.sin(t*9 + gx*2 + gy*3);
+    const wobX = 0.9 * Math.sin(t*13 + gx);
+    const wobY = 0.7 * Math.cos(t*11 + gy);
+
+    ctxTorch.translate(16 + wobX, 4 + wobY);
+    ctxTorch.scale(flick, flick);
+
+    // inner flame
+    ctxTorch.beginPath();
+    ctxTorch.moveTo(0, -6);
+    ctxTorch.quadraticCurveTo(4, -2, 0, 4);
+    ctxTorch.quadraticCurveTo(-4, -2, 0, -6);
+    ctxTorch.closePath();
+    ctxTorch.fillStyle = "rgba(255,180,0,0.9)";
+    ctxTorch.fill();
+
+    // outer glow
+    ctxTorch.globalAlpha = 0.35;
+    ctxTorch.beginPath();
+    ctxTorch.ellipse(0, -1, 7, 9, 0, 0, Math.PI*2);
+    ctxTorch.fillStyle = "rgb(255, 230, 120)";
+    ctxTorch.fill();
+
+    ctxTorch.restore();
+  }
       // perimeter rings (sand & adjacent water)
       const sandEdge = [];
       const waterEdge = [];
@@ -710,6 +784,8 @@
         ctx.fillRect(dx, dy, insetW, insetH);
         ctx.restore();
       })();
+        // draw the four torches at the 2x3 corners
+  TORCHS.forEach(p => drawTorchAt(p.x, p.y));
     })();
 
     // ====== MANUAL PATCHES & HOSPITAL ======
@@ -897,7 +973,48 @@
       const R = window.__IZZA_ARMOURY__.rect;
       solids.push({ x:R.x0, y:R.y0, w:(R.x1-R.x0+1), h:(R.y1-R.y0+1) });
     }
+    // === NEW: Island invisible fence around the 2x3 walk area ===
+    // We build a thin collision "ring" (top, bottom, left, right) one tile thick
+    // that sits on sand, so the player cannot exit the 2x3.
+    if (window.__IZZA_ISLAND_WALK__ && window._izzaIslandLand){
+      const IW = window.__IZZA_ISLAND_WALK__;
+      const ring = [];
 
+      // Note: clamp ring segments so they remain inside the island sand area we published
+      const isSand = (x,y)=> window._izzaIslandLand.has(x+'|'+y);
+
+      // top row just above the walk area
+      for (let x=IW.x0; x<=IW.x1; x++){
+        const gx1 = x, gy1 = IW.y0-1;
+        if (isSand(gx1, gy1)) ring.push({x:gx1, y:gy1});
+      }
+      // bottom row just below the walk area
+      for (let x=IW.x0; x<=IW.x1; x++){
+        const gx1 = x, gy1 = IW.y1+1;
+        if (isSand(gx1, gy1)) ring.push({x:gx1, y:gy1});
+      }
+      // left column
+      for (let y=IW.y0; y<=IW.y1; y++){
+        const gx1 = IW.x0-1, gy1 = y;
+        if (isSand(gx1, gy1)) ring.push({x:gx1, y:gy1});
+      }
+      // right column
+      for (let y=IW.y0; y<=IW.y1; y++){
+        const gx1 = IW.x1+1, gy1 = y;
+        if (isSand(gx1, gy1)) ring.push({x:gx1, y:gy1});
+      }
+
+      // coalesce contiguous tiles into rects (horizontal first, then vertical singles)
+      ring.sort((a,b)=> a.y===b.y ? a.x-b.x : a.y-b.y);
+      let i=0;
+      while(i<ring.length){
+        const y = ring[i].y;
+        let x0 = ring[i].x, x1 = x0;
+        i++;
+        while(i<ring.length && ring[i].y===y && ring[i].x===x1+1){ x1=ring[i].x; i++; }
+        solids.push({x:x0, y:y, w:(x1-x0+1), h:1});
+      }
+    }
     // manual solids
     (_layout.patches?.solidHouses||[]).forEach(r=> solids.push({x:r.x0,y:r.y0,w:(r.x1-r.x0+1),h:(r.y1-r.y0+1)}));
     (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
