@@ -1887,43 +1887,66 @@ function _ensureArmouryUI(){
   });
 
   // ---- Cardboard craft: consume 1 cardboard box (any alias) and grant 4-piece set
-  document.getElementById('btnCraftCardboard').addEventListener('click', ()=>{
-    const inv = _invRead();
+document.getElementById('btnCraftCardboard').addEventListener('click', ()=>{
+  const inv = _invRead();
 
-    // consume 1 box (any alias)
-    let took = _invTake(inv, _BOX_KEYS, 1);
-    if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
+  // consume 1 box (any alias)
+  let took = _invTake(inv, _BOX_KEYS, 1);
+  if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
 
-    _ensureItem(inv, 'cardboardHelmet','Cardboard Helmet','head',  _CB_ICONS.helmet);
-    _ensureItem(inv, 'cardboardVest',  'Cardboard Vest',  'chest', _CB_ICONS.vest);
-    _ensureItem(inv, 'cardboardLegs',  'Cardboard Legs',  'legs',  _CB_ICONS.legs);
-    _ensureItem(inv, 'cardboardArms',  'Cardboard Arms',  'arms',  _CB_ICONS.arms);
+  _ensureItem(inv, 'cardboardHelmet','Cardboard Helmet','head',  _CB_ICONS.helmet);
+  _ensureItem(inv, 'cardboardVest',  'Cardboard Vest',  'chest', _CB_ICONS.vest);
+  _ensureItem(inv, 'cardboardLegs',  'Cardboard Legs',  'legs',  _CB_ICONS.legs);
+  _ensureItem(inv, 'cardboardArms',  'Cardboard Arms',  'arms',  _CB_ICONS.arms);
 
-    inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
-    inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
-    inv.cardboardLegs.count   = (inv.cardboardLegs.count|0) + 1;
-    inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
+  inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
+  inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
+  inv.cardboardLegs.count   = (inv.cardboardLegs.count|0) + 1;
+  inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
 
-    _invWrite(inv);
-    _writeArmor({ type:'Cardboard', dr:0.12 });
+  _invWrite(inv);
+  _writeArmor({ type:'Cardboard', dr:0.12 });
 
-    // ---- Mission 4 progression (show popup over Armoury UI) ----
+  // ===== Mission 4 -> advance + congratulations + Mission 5 spawn =====
+  (function afterCardboardMissionAdvance(){
+    // 1) Mark M4 complete using helper if available; otherwise write the LS key.
     let advanced = false;
     try { advanced = __ARM_MISSIONS__?.maybeComplete?.(4) === true; } catch {}
-    // Fallback: if user had crafted before logic existed, force advance if still < 4
-if (!advanced) {
-  const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0; // <- key fixed
-  if (cur < 4) {
-    localStorage.setItem('izzaMissions', '4');                                  // <- write it
-    try { IZZA?.emit?.('mission-complete', { id: 4 }); } catch {}
-    try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
-  }
-}
+    if (!advanced) {
+      const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
+      if (cur < 4) {
+        localStorage.setItem('izzaMissions', '4');
+        try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
+      }
+    }
 
-    IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
-    (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
-    window.dispatchEvent?.(new Event('izza-inventory-changed'));
-  });
+    // 2) Fire the global event(s) that show the congrats UI.
+    let popupShown = false;
+    try { IZZA?.emit?.('mission-complete', { id: 4 }); popupShown = true; } catch {}
+    try { window.dispatchEvent(new CustomEvent('mission-complete', { detail: { id: 4 } })); popupShown = true; } catch {}
+    if (!popupShown) IZZA.toast?.('Mission 4 complete! 🎉');
+
+    // 3) Mission 5: spawn Jack-o’-lantern unlock.
+    let spawned = false;
+    try { if (window.__ARM_MISSIONS__?.spawnM5) { __ARM_MISSIONS__.spawnM5(); spawned = true; } } catch {}
+    if (!spawned) {
+      try { IZZA?.emit?.('spawn-mission-5'); spawned = true; } catch {}
+    }
+    if (!spawned) {
+      // Fallback: grant to inventory so the player can continue
+      const inv2 = _invRead();
+      inv2.jack_o_lantern = inv2.jack_o_lantern || { count: 0, name: 'Jack-o’-lantern' };
+      inv2.jack_o_lantern.count = (inv2.jack_o_lantern.count|0) + 1;
+      _invWrite(inv2);
+      IZZA.toast?.('Mission 5 unlocked: Jack-o’-lantern granted to inventory');
+      try { window.dispatchEvent?.(new Event('izza-inventory-changed')); } catch {}
+    }
+  })();
+
+  IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
+  (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
+  window.dispatchEvent?.(new Event('izza-inventory-changed'));
+});
 
   // ---------- OPTIONAL: Pumpkin craft handler (safe if button not present) ----------
   // local helpers for single-key count/take without touching global helpers
