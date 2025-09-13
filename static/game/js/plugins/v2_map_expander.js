@@ -1546,59 +1546,118 @@ function _isEquipped(entry){
 
 /* ==== Render overlays for equipped cardboard pieces (no UI changes) ==== */
 (function _cardboardRenderOverlayInit(){
-  const drawPiece = (ctx, gx, gy, tile, drawScale, dx, dy, pathMaker)=>{
-    const S = IZZA.api.DRAW, T = tile;
-    const sx = (gx*T - IZZA.api.camera.x) * (S/T);
-    const sy = (gy*T - IZZA.api.camera.y) * (S/T);
-    ctx.save();
-    ctx.translate(sx + S*dx, sy + S*dy);
-    ctx.scale(drawScale, drawScale);
-    pathMaker(ctx);
-    ctx.restore();
-  };
-
-  // crude “cardboard” palette to match icons (kept minimal; not touching UI)
+  // palette to match your icons
   const C_BASE = '#caa468', C_SHAD = '#9b7b4f';
 
+  // simple shapes that read cleanly at 32×32 scale
   function pathHelmet(ctx){
     ctx.beginPath();
     ctx.fillStyle = C_BASE;
-    ctx.moveTo(-10,0); ctx.quadraticCurveTo(0,-12,10,0); ctx.lineTo(-10,0); ctx.fill();
-    ctx.fillStyle = C_SHAD; ctx.fillRect(-9,0,18,3);
+    ctx.moveTo(-12,2);
+    ctx.quadraticCurveTo(0,-14,12,2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-11, 2, 22, 3);
   }
   function pathVest(ctx){
-    ctx.fillStyle = C_BASE; ctx.fillRect(-9, -6, 18, 12);
-    ctx.fillStyle = C_SHAD; ctx.fillRect(-7, -2, 14, 4);
+    ctx.fillStyle = C_BASE;
+    ctx.fillRect(-12, -8, 24, 16);
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-10, -3, 20, 6);
   }
   function pathLegs(ctx){
-    ctx.fillStyle = C_BASE; ctx.fillRect(-6, 0, 5, 12); ctx.fillRect(1,0,5,12);
-    ctx.fillStyle = C_SHAD; ctx.fillRect(-6, 3, 12, 2);
+    ctx.fillStyle = C_BASE;
+    ctx.fillRect(-7, 0, 6, 14);
+    ctx.fillRect( 1, 0, 6, 14);
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-7, 4, 14, 3);
   }
   function pathArms(ctx){
-    ctx.fillStyle = C_BASE; ctx.fillRect(-14, -4, 6, 10); ctx.fillRect(8,-4,6,10);
-    ctx.fillStyle = C_SHAD; ctx.fillRect(-12, -2, 2, 6); ctx.fillRect(10,-2,2,6);
+    ctx.fillStyle = C_BASE;
+    ctx.fillRect(-16, -4, 7, 11);
+    ctx.fillRect(  9, -4, 7, 11);
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-13, -1, 3, 6);
+    ctx.fillRect( 12, -1, 3, 6);
+  }
+
+  // draw helper: anchor at player's true world position, center-based, pixel-locked
+  function drawPieceWorld(ctx, px, py, scale, ox, oy, pathFn){
+    const api = IZZA.api;
+    const S = api.DRAW, T = api.TILE;
+    // convert world → screen
+    const sx = (px - api.camera.x) * (S/T);
+    const sy = (py - api.camera.y) * (S/T);
+
+    // lock to whole pixels to prevent shimmer
+    const srx = Math.round(sx);
+    const sry = Math.round(sy);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    // anchor to the *center* of the 32×32 sprite
+    ctx.translate(srx + S*0.5, sry + S*0.5);
+    ctx.scale(scale, scale);
+    // offsets are specified in *sprite pixels*, so convert to canvas px after scale
+    ctx.translate(ox, oy);
+    pathFn(ctx);
+    ctx.restore();
   }
 
   function drawEquipped(){
     if (!IZZA?.api?.ready) return;
-    const inv = _invRead();
-    const p   = IZZA.api.player, T = IZZA.api.TILE;
-    const gx  = ((p.x+16)/T)|0, gy=((p.y+16)/T)|0;
+
+    const inv = (function readInv(){
+      try{
+        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+      }catch{ return {}; }
+    })();
+
+    const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
+
+    const p   = IZZA.api.player;
+    const px  = p.x;           // world top-left of 32×32 body
+    const py  = p.y;
+    const S   = IZZA.api.DRAW;
+
+    // tiny bob only while moving (≈1 px at default scale)
+    const bobAmp = p.moving ? (S * 0.010) : 0;
+    const t      = p.animTime * 0.012;   // tie to your walk clock
+    const bobY   = bobAmp * Math.sin(t);
+    const wobX   = bobAmp * 0.6 * Math.cos(t*1.3);
+
+    // per-facing micro shifts so pieces hug the body properly
+    const f = p.facing || 'down';
+    const facingShift = {
+      down:  { x: 0,        y: 0 },
+      up:    { x: 0,        y: -1 },
+      left:  { x: -1.5,     y: 0 },
+      right: { x:  1.5,     y: 0 }
+    }[f];
+
+    // Tuned scales & offsets (in sprite pixels) so each piece sits where it should
+    // All offsets are relative to the *center* of the 32×32 sprite.
+    const HELMET = { scale: 1.22, ox: (facingShift.x + wobX)*1.0, oy: -10 + bobY - (f==='up'?2:0) };
+    const VEST   = { scale: 1.18, ox: facingShift.x + wobX,       oy:  -1 + bobY };
+    const ARMS   = { scale: 1.16, ox: facingShift.x*1.3 + wobX,   oy:   2 + bobY };
+    const LEGS   = { scale: 1.15, ox: facingShift.x*0.6 + wobX,   oy:  10 + bobY };
 
     const ctx = document.getElementById('game')?.getContext('2d');
     if (!ctx) return;
 
-    // Only draw what is equipped
-    if (_isEquipped(inv?.cardboardHelmet)) drawPiece(ctx, gx, gy, T, 0.9, 0.50, 0.15, pathHelmet);
-    if (_isEquipped(inv?.cardboardVest))   drawPiece(ctx, gx, gy, T, 1.0, 0.50, 0.35, pathVest);
-    if (_isEquipped(inv?.cardboardLegs))   drawPiece(ctx, gx, gy, T, 1.0, 0.50, 0.62, pathLegs);
-    if (_isEquipped(inv?.cardboardArms))   drawPiece(ctx, gx, gy, T, 1.0, 0.50, 0.36, pathArms);
+    // draw in body order so layering feels natural over the base sprite
+    if (isOn(inv?.cardboardLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegs);
+    if (isOn(inv?.cardboardVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVest);
+    if (isOn(inv?.cardboardArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArms);
+    if (isOn(inv?.cardboardHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmet);
   }
 
-  // draw on top of player each frame; this does not change UI
+  // draw on top of player each frame
   IZZA.on?.('render-post', drawEquipped);
-  // refresh immediately after inventory changes
-  window.addEventListener('izza-inventory-changed', ()=>{ /* no-op: next render-post draws fresh */ });
+  // on inventory change, next render-post picks it up
+  window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
 })();
 
 /* ==== Armoury UI (unchanged look; fixed logic & wording) ==== */
