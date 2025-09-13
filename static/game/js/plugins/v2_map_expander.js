@@ -1568,7 +1568,9 @@ function pathVest(ctx){
   ctx.fillStyle = C_BASE;
   ctx.fillRect(-12, -8, 24, 16);
   ctx.fillStyle = C_SHAD;
-  ctx.fillRect(-10, -3, 20, 6);function pathLegs(ctx){
+  ctx.fillRect(-10, -3, 20, 6);
+}
+function pathLegs(ctx){
   // --- metallic jet legs base (was cardboard) ---
   const gradLeg = ctx.createLinearGradient(-7, 0, 7, 14);
   gradLeg.addColorStop(0.0, "#c0c0c0");   // silver
