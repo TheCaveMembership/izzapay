@@ -2045,6 +2045,75 @@ function _onPressArmouryB(e){
 // listeners (keep capture=true so other B-handlers don’t steal it)
 document.getElementById('btnB')?.addEventListener('click', _onPressArmouryB, true);
 window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressArmouryB(e); }, true);
+  // ===== Mission UI glue (popup + M5 spawn fallback idempotence) =====
+(function missionUiGlue(){
+  const LS_M4_SEEN = 'izzaM4CongratsSeen';
+  const LS_M5_GIVEN = 'izzaM5Granted';
+
+  function ensureCongratsUI(){
+    if (document.getElementById('missionCongrats')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'missionCongrats';
+    wrap.style.cssText = 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:140;';
+    wrap.innerHTML =
+      `<div style="min-width:280px;max-width:420px;background:#111b29;border:1px solid #2b3b57;border-radius:12px;padding:16px;color:#e7eef7;box-shadow:0 16px 44px rgba(0,0,0,.6)">
+         <div style="font-weight:800;font-size:18px;margin-bottom:6px">🎉 Mission Complete!</div>
+         <div id="missionCongratsBody" style="opacity:.9;margin-bottom:10px"></div>
+         <button id="missionCongratsOk" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:700;cursor:pointer">OK</button>
+       </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('#missionCongratsOk').onclick = ()=> wrap.style.display='none';
+  }
+
+  function showCongrats(text){
+    ensureCongratsUI();
+    const w = document.getElementById('missionCongrats');
+    const b = document.getElementById('missionCongratsBody');
+    if (b) b.textContent = text;
+    if (w) w.style.display = 'flex';
+  }
+
+  // Unified handler for both buses
+  function onMissionComplete(id){
+    if (id === 4 && localStorage.getItem(LS_M4_SEEN) !== '1'){
+      localStorage.setItem(LS_M4_SEEN, '1');
+      showCongrats('Mission 4 complete — Cardboard Armour crafted! Next: unlock the Jack-o’-lantern (Mission 5).');
+    }
+  }
+
+  // Listen on IZZA bus and DOM CustomEvent bus
+  try { IZZA?.on?.('mission-complete', (p)=> onMissionComplete(p?.id|0)); } catch {}
+  window.addEventListener('mission-complete', e=> onMissionComplete((e?.detail?.id|0) || 0));
+
+  // If your world doesn’t have a physical spawner wired, ensure the lantern exists once.
+  function grantM5Once(){
+    if (localStorage.getItem(LS_M5_GIVEN) === '1') return;
+    const inv = (function(){ try{
+      if (IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+      const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+    }catch{ return {}; } })();
+
+    inv.jack_o_lantern = inv.jack_o_lantern || { count: 0, name: 'Jack-o’-lantern' };
+    inv.jack_o_lantern.count = (inv.jack_o_lantern.count|0) + 1;
+
+    try{
+      if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+    }catch{}
+
+    localStorage.setItem(LS_M5_GIVEN, '1');
+    IZZA.toast?.('Mission 5 unlocked: Jack-o’-lantern added to your inventory');
+    try { window.dispatchEvent?.(new Event('izza-inventory-changed')); } catch {}
+  }
+
+  // Respond to your spawn signal (and call it once at boot if player already at ≥4)
+  try { IZZA?.on?.('spawn-mission-5', grantM5Once); } catch {}
+  window.addEventListener('spawn-mission-5', grantM5Once);
+
+  // Safety: if player already advanced to ≥4 (e.g., from an old save), ensure M5 is granted.
+  const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
+  if (cur >= 4) setTimeout(grantM5Once, 0);
+})();
   // ---------- Minimap / Bigmap overlay ----------
   function paintOverlay(id){
     if(!_layout) return;
