@@ -1606,77 +1606,76 @@ function _isEquipped(entry){
   }
 
   function drawEquipped(){
-    if (!IZZA?.api?.ready) return;
+  if (!IZZA?.api?.ready) return;
 
-    const inv = (function readInv(){
-      try{
-        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
-      }catch{ return {}; }
-    })();
+  const inv = (function readInv(){
+    try{
+      if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+      const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+    }catch{ return {}; }
+  })();
 
-    const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
+  const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
 
-    const p   = IZZA.api.player;
-    const px  = p.x;           // world top-left of 32×32 body
-    const py  = p.y;
-    const S   = IZZA.api.DRAW;
+  const p   = IZZA.api.player;
+  const px  = p.x;           // world top-left of 32×32 body
+  const py  = p.y;
+  const S   = IZZA.api.DRAW;
 
-    // tiny bob only while moving (≈1 px at default scale)
-    const bobAmp = p.moving ? (S * 0.010) : 0;
-    const t      = p.animTime * 0.012;   // tie to your walk clock
-    const bobY   = bobAmp * Math.sin(t);
-    const wobX   = bobAmp * 0.6 * Math.cos(t*1.3);
+  // === LOCK ARMOUR TO PLAYER ===
+  // No bob/wobble so pieces stay fixed while the player moves.
+  const bobAmp = 0;
+  const t      = p.animTime * 0.012;   // (kept; unused with bobAmp=0)
+  const bobY   = 0;
+  const wobX   = 0;
 
-    // per-facing micro shifts so pieces hug the body properly
-    const f = p.facing || 'down';
-    const facingShift = {
-      down:  { x: 0,        y: 0 },
-      up:    { x: 0,        y: -1 },
-      left:  { x: -1.5,     y: 0 },
-      right: { x:  1.5,     y: 0 }
-    }[f];
+  // Per-facing micro shifts so pieces hug the body properly
+  const f = p.facing || 'down';
+  const facingShift = {
+    down:  { x: 0,        y: 0 },
+    up:    { x: 0,        y: -1 },
+    left:  { x: -1.5,     y: 0 },
+    right: { x:  1.5,     y: 0 }
+  }[f];
 
-    // Tuned scales & offsets (in sprite pixels) so each piece sits where it should
-    // All offsets are relative to the *center* of the 32×32 sprite.
-    const HELMET = { 
-  scale: 2.22, 
-  ox: (facingShift.x + wobX)*1.0, 
-  oy: -14 + bobY - (f==='up'?2:0)   // moved up a little (was -10)
-};
+  // === Tuned scales & offsets (in sprite pixels) ===
+  // Helmet up a bit; Vest down a bit; Arms unchanged; Legs placement kept,
+  // (leg "widening" is handled inside pathLegs; this call just positions the piece)
+  const HELMET = {
+    scale: 2.22,
+    ox: (facingShift.x + wobX)*1.0,
+    oy: -14 + bobY - (f==='up'?2:0)   // moved up from -10
+  };
+  const VEST = {
+    scale: 2.18,
+    ox: facingShift.x + wobX,
+    oy:  3 + bobY                    // moved down from -1
+  };
+  const ARMS = {
+    scale: 2.16,
+    ox: facingShift.x*1.3 + wobX,
+    oy:  2 + bobY                    // unchanged
+  };
+  const LEGS = {
+    scale: 2.15,
+    ox: facingShift.x*1.2 + wobX,    // subtle outward bias; shape widening is in pathLegs
+    oy: 10 + bobY
+  };
 
-const VEST = { 
-  scale: 2.18, 
-  ox: facingShift.x + wobX,       
-  oy:  3 + bobY                   // moved down a little (was -1)
-};
+  const ctx = document.getElementById('game')?.getContext('2d');
+  if (!ctx) return;
 
-const ARMS = { 
-  scale: 2.16, 
-  ox: facingShift.x*1.3 + wobX,   
-  oy:  2 + bobY                   // unchanged
-};
+  // draw in body order so layering feels natural over the base sprite
+  if (isOn(inv?.cardboardLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegs);
+  if (isOn(inv?.cardboardVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVest);
+  if (isOn(inv?.cardboardArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArms);
+  if (isOn(inv?.cardboardHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmet);
+}
 
-const LEGS = { 
-  scale: 2.15, 
-  ox: facingShift.x*1.2 + wobX,   // widened outward (was *0.6)
-  oy:  10 + bobY 
-};
-
-    const ctx = document.getElementById('game')?.getContext('2d');
-    if (!ctx) return;
-
-    // draw in body order so layering feels natural over the base sprite
-    if (isOn(inv?.cardboardLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegs);
-    if (isOn(inv?.cardboardVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVest);
-    if (isOn(inv?.cardboardArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArms);
-    if (isOn(inv?.cardboardHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmet);
-  }
-
-  // draw on top of player each frame
-  IZZA.on?.('render-post', drawEquipped);
-  // on inventory change, next render-post picks it up
-  window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
+// draw on top of player each frame
+IZZA.on?.('render-post', drawEquipped);
+// on inventory change, next render-post picks it up
+window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
 })();
 
 /* ==== Armoury UI (unchanged look; fixed logic & wording) ==== */
