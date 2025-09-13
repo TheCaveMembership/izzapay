@@ -210,9 +210,8 @@
     return set;
   }
 
-  // ===== ISLAND + CITY DOCKS DOCKING (only island perimeter or city docks) =====
+  // ===== ISLAND DOCKING (spawn inside pad; launch from inside pad) =====
 (function islandDockingInit(){
-  // ---- island helpers (unchanged) ----
   function _islandDockPairAt(gx, gy){
     const island = window.__IZZA_ARMOURY__?.island;
     const D = window.__IZZA_ISLAND_DOCK__;
@@ -264,140 +263,60 @@
     return best;
   }
 
-  // ---- city docks helpers (NEW) ----
-  const _dockSet = ()=> {
-    const set=new Set();
-    (function build(){
-      const api=IZZA?.api; if(!api) return;
-      const A=(function anchorsLite(){
-        const tier = localStorage.getItem('izzaMapTier')||'1';
-        const un = (tier!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50};
-        const bW=10,bH=6;
-        const bX = Math.floor((un.x0+un.x1)/2) - Math.floor(bW/2);
-        const bY = un.y0 + 5;
-        const hRoadY       = bY + bH + 1;
-        const sidewalkTopY = hRoadY - 1;
-        const vRoadX       = Math.min(un.x1-3, bX + bW + 6);
-        const shop = { w:8, h:5, x:vRoadX+1+1, y: sidewalkTopY-5 };
-        const HQ  = {x0:bX, y0:bY, x1:bX+bW-1, y1:bY+bH-1};
-        return {un, vRoadX, hRoadY, sidewalkTopY, shop, HQ};
-      })();
-      // must match your lakeRects() DOCKS to stay in sync
-      const LAKE = { x0: A.un.x1-14, y0: A.un.y0+23, x1: A.un.x1, y1: A.un.y1 };
-      const BEACH_X = LAKE.x0 - 1;
-      const DOCKS = [
-        { x0: BEACH_X, y: LAKE.y0+4,  len: 4 },
-        { x0: BEACH_X, y: LAKE.y0+12, len: 5 }
-      ];
-      DOCKS.forEach(d=>{ for(let i=0;i<d.len;i++) set.add((d.x0+i)+'|'+d.y); });
-    })();
-    return set;
-  };
-
-  const _isDock = (gx,gy)=> _dockSet().has(gx+'|'+gy);
-
-  function _adjacentWaterFromDock(gx,gy){
-    // 4-neighbors only; beach tiles are sand, so we’ll only pick actual lake water
-    const n = [{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
-    const LAKE = (IZZA && IZZA.api && (function(){ // quick lake bounds like lakeRects()
-      const TIER_KEY='izzaMapTier';
-      const tier = localStorage.getItem(TIER_KEY)||'1';
-      const un = (tier!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50};
-      const A = { un, vRoadX: Math.min(un.x1-3, Math.floor((un.x0+un.x1)/2) - Math.floor(10/2) + 10 + 6) };
-      return { x0: un.x1-14, y0: un.y0+23, x1: un.x1, y1: un.y1 };
-    })()) || null;
-
-    for (const p of n){
-      if (!LAKE) continue;
-      if (p.x>=LAKE.x0 && p.x<=LAKE.x1 && p.y>=LAKE.y0 && p.y<=LAKE.y1) return p;
-    }
-    return null;
-  }
-
-  function _adjacentDockFromWater(gx,gy){
-    const n = [{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
-    for (const p of n){ if (_isDock(p.x,p.y)) return p; }
-    return null;
-  }
-
   function _onPressIslandDockB(e){
     const api = IZZA?.api; if (!api?.ready || localStorage.getItem('izzaMapTier') !== '2') return;
 
     const t  = api.TILE;
     const gx = ((api.player.x + 16)/t | 0);
     const gy = ((api.player.y + 16)/t | 0);
+// --- let the Armoury door handler take precedence on the door tile
+const dArm = window.__IZZA_ARMOURY__?.door;
+const onArmDoor = dArm && gx===dArm.x && gy===dArm.y;
+if (onArmDoor) return; // don't consume B here; armoury handler will open the modal
+    const IW = window.__IZZA_ISLAND_WALK__;
+    const island = window.__IZZA_ARMOURY__?.island;
 
-    // --- armoury door gets first dibs (don’t steal B) ---
-    const dArm = window.__IZZA_ARMOURY__?.door;
-    const onArmDoor = dArm && gx===dArm.x && gy===dArm.y;
-    if (onArmDoor) return;
-
+    // Helper to move in world units with a small inset
     const warpTo = (gx, gy) => {
-      const inset = 0.1;                        // keeps you inside the tile visually
+      const inset = 0.1;
       api.player.x = (gx + inset) * t;
       api.player.y = (gy + inset) * t;
     };
 
-    // -------- City docks logic (ONLY docks; no beach) --------
-    const onDock = _isDock(gx,gy);
-    const waterAdjDock = _adjacentDockFromWater(gx,gy);
-    const dockAdjWater = onDock ? _adjacentWaterFromDock(gx,gy) : null;
-
-    // (1) If you are standing on a DOCK tile and not boating -> launch to adjacent water
-    if (onDock && !window._izzaBoatActive && dockAdjWater){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      window._izzaBoatActive = true;
-      warpTo(dockAdjWater.x, dockAdjWater.y);
-      IZZA.toast?.('Boat launched from dock');
-      return;
-    }
-
-    // (2) If you are in WATER and adjacent to a DOCK -> dock onto the dock
-    if (waterAdjDock && window._izzaBoatActive){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      window._izzaBoatActive = false;            // water solid again
-      warpTo(waterAdjDock.x, waterAdjDock.y);
-      IZZA.toast?.('Docked at city docks');
-      return;
-    }
-
-    // -------- Island perimeter docking (pad in/out) --------
-    const IW = window.__IZZA_ISLAND_WALK__;
+    // 1) If you are on a water/sand perimeter pair tile, keep the legacy behavior
     const pair = _islandDockPairAt(gx, gy);
 
-    // (3) If you’re in WATER at the island edge -> disembark INSIDE the pad
+    // 2) If you’re in WATER and near island edge -> disembark INSIDE pad
     if (pair && pair.dir === 'water->sand'){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      const c = _padCenter() || pair.to;         // safe center
-      window._izzaBoatActive = false;
-      warpTo(c.x, c.y);
+      const c = _padCenter() || pair.to;           // fall back just in case
+      window._izzaBoatActive = false;               // water becomes solid again
+      warpTo(c.x, c.y);                             // guaranteed inside fence
       IZZA.toast?.('Docked at the island');
       return;
     }
 
-    // (4) If you’re inside the pad -> LAUNCH to nearest island-perimeter water
+    // 3) If you’re inside the pad, pressing B should LAUNCH to nearest water
     if (IW && gx>=IW.x0 && gx<=IW.x1 && gy>=IW.y0 && gy<=IW.y1){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      const targetWater = _nearestIslandWater({x:gx,y:gy});
+      const c = {x:gx, y:gy};
+      const targetWater = _nearestIslandWater(c);
       if (targetWater){
-        window._izzaBoatActive = true;
+        window._izzaBoatActive = true;             // disable water-solid before warping
         warpTo(targetWater.x, targetWater.y);
         IZZA.toast?.('Boat launched');
       }
       return;
     }
 
-    // (5) Exact island sand/water pair toggle (no beach, no city shoreline)
+    // 4) Otherwise: allow vanilla edge toggle (sand<->water) if on exact pair
     if (pair){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
       const goWater = (pair.dir === 'sand->water');
       window._izzaBoatActive = !!goWater;
       warpTo(pair.to.x, pair.to.y);
       IZZA.toast?.(goWater ? 'Boat launched' : 'Docked at the island');
-      return;
     }
-
-    // Else: do nothing (no generic beach/water toggles anywhere).
   }
 
   document.getElementById('btnB')?.addEventListener('click', _onPressIslandDockB, true);
