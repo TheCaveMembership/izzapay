@@ -2,7 +2,7 @@
    IZZA Mission 5 — “Night of the Lantern”
    - Robustly detects M4 completion by inventory (cardboard Helmet/Vest/Arms/Legs)
    - Bumps localStorage izzaMissions to 4 and shows agent popup (over/after armoury)
-   - Places jack-o’-lantern at HQ door +5E, -4N (3× box size) with HA HA HA streamer
+   - Places jack-o’-lantern at HQ door +3E (3× box size) with HA HA HA streamer
    - Interact with [B] to start a 5m night mission; pumpkins spawn at exact offsets
    - Werewolf spawns every 30s while moving at night; A to fight (hooks bus if present)
    - Craft Pumpkin Armour (4 pieces) from 1 jack-o’-lantern + 3 pumpkin pieces
@@ -83,8 +83,8 @@
   }
   function jackLanternGrid(){
     const d = hqDoorGrid();
-    // your requested offset: +5E, -4N
-    return { x: d.gx + 5, y: d.gy - 4 };
+    // NEW: exactly 3 tiles EAST (no N/S change)
+    return { x: d.gx + 3, y: d.gy };
   }
 
   // ---------- world→screen (canvas) ----------
