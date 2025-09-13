@@ -1,10 +1,10 @@
-// v1.18c — Boat plugin (surgical island fixes only):
-//  1) Island edge clamp: snapping back to island sand if you touch water on foot.
-//  2) Leave boat parked in water at island when disembarking (visible ghost boat).
-//  3) Press B near parked island boat snaps you onto boat (water), not onto land.
-//  (City docks, rescue flow, visuals unchanged; dock geometry synced to Expander.)
+// v1.19 — Boat plugin (surgical):
+//  • Island parked boat persists & is rendered
+//  • B near island snaps onto parked boat when within ≤1.5 tiles (Euclidean), not 3
+//  • City dock has exactly one boat (no duplicates) via occupiedDockId
+//  • Keeps existing controls, speeds, wake, visuals unchanged
 (function(){
-  const BUILD='v1.18c-boat-plugin+island-solid+parked-boat-snap';
+  const BUILD='v1.19-boat-plugin+island-parked+snap1p5+single-city-boat';
   console.log('[IZZA PLAY]', BUILD);
 
   const TIER_KEY='izzaMapTier';
@@ -15,11 +15,19 @@
   // --- local state ---
   let api=null;
   let inBoat=false;
-  let ghostBoat=null;     // parked-boat world coords (pixels), used both at city docks & island
+  let ghostBoat=null;
   let lastLand=null, lastWater=null;
+
+  // parked boat at island (grid coords)
+  let islandBoatPos = null; // {gx,gy} or null
+
+  // which city dock our boat occupies (by its y band). null while at island.
+  let occupiedDockId = null; // number|null
+
+  // For motion/wake
   let claimedDockId=null;
-  let waterStrandSince = 0;   // ms timestamp when we noticed being in water out of boat
-  let rescueShown = false;    // gate rescue dialog
+  let waterStrandSince = 0;
+  let rescueShown = false;
 
   // ====== geometry ======
   function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
@@ -35,14 +43,11 @@
     return {un,bX,bY,bW,bH,hRoadY,sidewalkTopY,vRoadX};
   }
   function lakeRects(a){
-    // City lake placement (must match Map Expander)
-    const LAKE    = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
-    const BEACH_X = LAKE.x0 - 1; // vertical beach column (city side)
-
-    // Map Expander docks: start at BEACH_X and extend into water
+    const LAKE = { x0: a.un.x1-14, y0: a.un.y0+23, x1: a.un.x1, y1: a.un.y1 };
+    const BEACH_X = LAKE.x0 - 1;
     const DOCKS = [
-      { x0: BEACH_X, y: LAKE.y0+4,  len: 4 },
-      { x0: BEACH_X, y: LAKE.y0+12, len: 5 }
+      { x0: LAKE.x0, y: LAKE.y0+4,  len: 3 },
+      { x0: LAKE.x0, y: LAKE.y0+12, len: 4 }
     ];
     return {LAKE, BEACH_X, DOCKS};
   }
@@ -51,9 +56,6 @@
   const centerGX = ()=> ((api.player.x+16)/T()|0);
   const centerGY = ()=> ((api.player.y+16)/T()|0);
 
-  // Grid helpers
-  const gk = (x,y)=> x+'|'+y;
-
   function dockCells(){
     if(!api?.ready) return new Set();
     const {DOCKS}=lakeRects(anchors());
@@ -61,34 +63,28 @@
     DOCKS.forEach(d=>{
       for(let i=0;i<d.len;i++){
         const gx = d.x0+i;
-        // plank row + forgiving row above so boarding is easy on mobile
-        s.add(gk(gx, d.y));
-        s.add(gk(gx, d.y-1));
+        s.add(gx+'|'+(d.y));
+        s.add(gx+'|'+(d.y-1));
+        s.add(gx+'|'+(d.y-2));
       }
     });
     return s;
   }
 
-  // Treat only LAKE interior (minus docks and any published island land) as water
   function tileIsWater(gx,gy){
     const {LAKE}=lakeRects(anchors());
     const insideLake = (gx>=LAKE.x0 && gx<=LAKE.x1 && gy>=LAKE.y0 && gy<=LAKE.y1);
     if(!insideLake) return false;
-
-    // island land is NOT water (published by expander/mission)
-    if (window._izzaIslandLand && window._izzaIslandLand.has(gk(gx,gy))) return false;
-
-    // city docks are not water for movement checks
-    if (dockCells().has(gk(gx,gy))) return false;
-
+    if (window._izzaIslandLand && window._izzaIslandLand.has(gx+'|'+gy)) return false;
+    if (dockCells().has(gx+'|'+gy)) return false;
     return true;
   }
   const isLand = (gx,gy)=> !tileIsWater(gx,gy);
 
-  // === Island helpers ===
-  const islandSet = ()=> (window._izzaIslandLand instanceof Set) ? window._izzaIslandLand : new Set();
-  const tileIsIslandLand = (gx,gy)=> islandSet().has(gk(gx,gy));
-  function nearIsland(gx,gy,r=2){
+  // === Island/shore helpers ===
+  function _islandSet(){ return (window._izzaIslandLand instanceof Set) ? window._izzaIslandLand : new Set(); }
+  function tileIsIslandLand(gx,gy){ return _islandSet().has(gx+'|'+gy); }
+  function nearIsland(gx,gy,r=3){
     for(let dy=-r; dy<=r; dy++){
       const xr=r - Math.abs(dy);
       for(let dx=-xr; dx<=xr; dx++){
@@ -97,23 +93,6 @@
     }
     return false;
   }
-  function nearestIslandTile(gx,gy,rad=3){
-    const S=islandSet(); if(!S.size) return null;
-    for(let r=0;r<=rad;r++){
-      for(let dx=-r; dx<=r; dx++){
-        const x1=gx+dx, y1=gy-r, y2=gy+r;
-        if(S.has(gk(x1,y1))) return {x:x1,y:y1};
-        if(S.has(gk(x1,y2))) return {x:x1,y:y2};
-      }
-      for(let dy=-r; dy<=r; dy++){
-        const y1=gy+dy, x1=gx-r, x2=gx+r;
-        if(S.has(gk(x1,y1))) return {x:x1,y:y1};
-        if(S.has(gk(x2,y1))) return {x:x2,y:y1};
-      }
-    }
-    return null;
-  }
-
   function isShore(gx,gy){
     if(!isLand(gx,gy)) return false;
     return tileIsWater(gx+1,gy) || tileIsWater(gx-1,gy) || tileIsWater(gx,gy+1) || tileIsWater(gx,gy-1);
@@ -129,14 +108,14 @@
       {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
     ];
   }
-  const allCornersWater = ()=> cornersGrid().every(c=> tileIsWater(c.x,c.y));
-  const anyCornerWater  = ()=> cornersGrid().some (c=> tileIsWater(c.x,c.y));
-  const centerOnDock = ()=>{
+  function allCornersWater(){ return cornersGrid().every(c=> tileIsWater(c.x,c.y)); }
+  function anyCornerWater(){  return cornersGrid().some(c => tileIsWater(c.x,c.y)); }
+  function centerOnDock(){
     const gx=centerGX(), gy=centerGY();
-    return dockCells().has(gk(gx,gy));
-  };
+    return dockCells().has(gx+'|'+gy);
+  }
 
-  // city parked spot helper
+  // city dock helpers
   function parkedSpotForDock(d){
     const mid = d.x0 + Math.max(1, Math.floor(d.len/2));
     return { gx: mid, gy: d.y + 1 };
@@ -146,21 +125,11 @@
     return DOCKS.find(d => Math.abs(y - d.y) <= 2) || null;
   }
 
-  // Find the water neighbor of a given island-sand landing tile
-  function waterBesideIslandSand(sx,sy){
-    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
-    for(const [dx,dy] of dirs){
-      const wx=sx+dx, wy=sy+dy;
-      if(tileIsWater(wx,wy)) return {x:wx,y:wy};
-    }
-    return null;
-  }
-
-  // === generalized land-adjacent search for disembarking (with 1/2-tile snap)
-  // === acceptFn allows us to force-island when near island; prefer shoreline
+  // generalized land-adjacent search for disembarking
   function nearestDisembarkSpot(halfTileSnap, acceptFn){
     const gx=centerGX(), gy=centerGY();
     const ok = (x,y)=> (acceptFn ? acceptFn(x,y) : isLand(x,y));
+
     const {LAKE,BEACH_X}=lakeRects(anchors());
 
     // explicit city beach snap when hugging the beach column
@@ -168,7 +137,7 @@
       if (ok(BEACH_X, gy)) return { x: BEACH_X, y: gy };
     }
 
-    // ring candidates around player (up to r=4 to handle island east edge)
+    // ring candidates around player (up to r=4)
     const cand=[];
     for(let r=1; r<=4; r++){
       for(let dx=-r; dx<=r; dx++){
@@ -184,11 +153,9 @@
     const W=90, H=60;
     const inB = p=> p.x>=0 && p.x<W && p.y>=0 && p.y<H;
 
-    // 1) shoreline of selected side
     const shore = cand.find(p=> inB(p) && ok(p.x,p.y) && isShore(p.x,p.y));
     if(shore) return shore;
 
-    // 2) any land of selected side
     const any = cand.find(p=> inB(p) && ok(p.x,p.y));
     return any || null;
   }
@@ -200,48 +167,49 @@
     const docks=dockCells();
 
     // On a dock or adjacent to one → OK
-    if(docks.has(gk(gx,gy))) return true;
-    if(docks.has(gk(gx+1,gy)) || docks.has(gk(gx-1,gy)) ||
-       docks.has(gk(gx,gy+1)) || docks.has(gk(gx,gy-1))) return true;
+    if(docks.has(gx+'|'+gy)) return true;
+    if(docks.has((gx+1)+'|'+gy) || docks.has((gx-1)+'|'+gy) ||
+       docks.has(gx+'|'+(gy+1)) || docks.has(gx+'|'+(gy-1))) return true;
 
-    // NEW: if a parked island boat exists, allow boarding when standing on island sand
-    // within 1 tile of its water tile.
-    if(ghostBoat){
-      const wx=(ghostBoat.x/T())|0, wy=(ghostBoat.y/T())|0;
-      if(isLand(gx,gy) && Math.abs(gx-wx)+Math.abs(gy-wy) <= 1) return true;
-    }
-
-    // Also allow boarding from any land that's touching lake water (beach or island sand)
-    if(!tileIsWater(gx,gy)){ // on land
+    // Land touching lake water (beach or island sand) → OK
+    if(!tileIsWater(gx,gy)){
       const n=[{x:gx+1,y:gy},{x:gx-1,y:gy},{x:gx,y:gy+1},{x:gx,y:gy-1}];
       if(n.some(p=>tileIsWater(p.x,p.y))) return true;
     }
     return false;
   }
 
+  // BOARD from island parked boat if within ≤1.5 tiles (Euclidean)
+  function tryBoardFromIslandIfParked(){
+    if(!islandBoatPos) return false;
+    const gx=centerGX(), gy=centerGY();
+    const dx = gx - islandBoatPos.gx, dy = gy - islandBoatPos.gy;
+    const dist = Math.hypot(dx, dy);
+    if(dist > 1.5) return false; // tighter range per request
+
+    // Snap onto the parked boat (water)
+    api.player.x = islandBoatPos.gx * T() + 1;
+    api.player.y = islandBoatPos.gy * T() + 1;
+
+    lastWater = { x: api.player.x, y: api.player.y };
+    ghostBoat = { x: api.player.x, y: api.player.y };
+    inBoat = true; setBoatFlag(true);
+    api.player.speed = 120;
+
+    // We left the island → city docks should show nothing until we come back
+    occupiedDockId = null;
+    islandBoatPos = null; // we’re on it now
+    IZZA.toast?.('Boarded boat');
+    return true;
+  }
+
   function tryBoard(){
     if(inBoat || !isTier2() || !canBoardHere()) return false;
 
-    const gx=centerGX(), gy=centerGY();
+    // Prefer the island parked boat if present/near (≤1.5 tiles)
+    if (tryBoardFromIslandIfParked()) return true;
 
-    // If a parked island boat exists and we are next to it → SNAP TO BOAT WATER TILE
-    if(ghostBoat){
-      const wx=(ghostBoat.x/T())|0, wy=(ghostBoat.y/T())|0;
-      if(Math.abs(gx-wx)+Math.abs(gy-wy) <= 1){
-        api.player.x = ghostBoat.x;   // place exactly on boat (water) before enabling boat
-        api.player.y = ghostBoat.y;
-        lastWater = { x: api.player.x, y: api.player.y };
-        claimedDockId = null; // island boat not tied to city dock id
-        inBoat = true;
-        setBoatFlag(true);
-        // keep ghostBoat following while inBoat
-        api.player.speed = 120;
-        IZZA.toast?.('Boarded boat');
-        return true;
-      }
-    }
-
-    // Else: city dock flow
+    // City path: if by a dock, snap to the parked spot and remember that dock
     const d = dockByYBand(centerGY());
     if(d){
       const spot = parkedSpotForDock(d);
@@ -249,9 +217,12 @@
       api.player.y = (spot.gy*T()) + 1;
       lastWater = { x: api.player.x, y: api.player.y };
       claimedDockId = d.y;
+      occupiedDockId = d.y;      // our boat now occupies this dock
+      islandBoatPos = null;      // definitely not at island
     }else{
       claimedDockId = null;
       lastWater = { x: api.player.x, y: api.player.y };
+      occupiedDockId = null;     // beach board (no specific dock)
     }
 
     inBoat = true;
@@ -265,45 +236,42 @@
   function tryDisembark(){
     if(!inBoat) return false;
 
-    // If we are near the island, only accept island tiles (prevents city beach stealing the snap)
     const pgx=centerGX(), pgy=centerGY();
+    const nearIsl = nearIsland(pgx,pgy,3);
+
+    // If we are near the island, force island tiles and PARK THE BOAT in water
     const spot = nearestDisembarkSpot(
       /*halfTileSnap=*/true,
-      nearIsland(pgx,pgy,2) ? tileIsIslandLand : undefined
+      nearIsl ? tileIsIslandLand : undefined
     );
     if(!spot) return false;
 
-    // clamp to world to avoid east-edge vanish
     const W=90, H=60;
     const gx = Math.max(0, Math.min(W-1, spot.x));
     const gy = Math.max(0, Math.min(H-1, spot.y));
 
-    // Move player onto land first
     api.player.x = (gx*T()) + 1;
     api.player.y = (gy*T()) + 1;
 
-    // NEW: If this is island sand, park the boat in the adjacent water and KEEP ghostBoat
-    let parked = false;
-    if (tileIsIslandLand(gx,gy)){
-      const w = waterBesideIslandSand(gx,gy);
-      if(w){
-        ghostBoat = { x: (w.x*T()) + 1, y: (w.y*T()) + 1 }; // keep rendered at water
-        parked = true;
-      }
-    }
-    if(!parked){
-      // City or no adjacent-water found → keep ghost following current pos (prior behavior)
-      ghostBoat = { x: api.player.x, y: api.player.y };
+    // Leave the boat where it was (water tile just off land)
+    if (nearIsl){
+      const lwx = (lastWater?.x||api.player.x), lwy = (lastWater?.y||api.player.y);
+      islandBoatPos = { gx: ((lwx/T())|0), gy: ((lwy/T())|0) };
+      occupiedDockId = null;      // hide city dock boats while we're at the island
+    }else{
+      islandBoatPos = null;
+      // If we disembarked on a city dock shoreline, mark that dock as occupied so only one shows
+      const d = dockByYBand(gy);
+      occupiedDockId = d ? d.y : occupiedDockId;
     }
 
     inBoat=false;
     setBoatFlag(false);
+    ghostBoat=null;
     api.player.speed = 90;
     claimedDockId=null;
     IZZA.toast?.('Disembarked');
-    // reset water strand watchdog
-    waterStrandSince = 0;
-    rescueShown = false;
+    waterStrandSince = 0; rescueShown = false;
     return true;
   }
 
@@ -311,7 +279,7 @@
   function onB(e){
     if(!api?.ready || !isTier2()) return;
     const shouldHandle = inBoat || canBoardHere();
-    if(!shouldHandle) return; // pressing B in open water does nothing
+    if(!shouldHandle) return;
 
     const acted = inBoat ? tryDisembark() : tryBoard();
     if(acted){
@@ -319,7 +287,7 @@
     }
   }
 
-  // ====== RESCUE if stranded in water out of boat ======
+  // ====== RESCUE if stranded in water out of boat (unchanged) ======
   function showRescue(cb){
     if(rescueShown) return;
     rescueShown = true;
@@ -344,23 +312,21 @@
     const {LAKE,BEACH_X}=lakeRects(anchors());
     const gx=centerGX(), gy=centerGY();
 
-    // Prefer nearest island land in a small radius
     if (window._izzaIslandLand){
       for (let r=0; r<=3; r++){
         for (let dx=-r; dx<=r; dx++){
           const x1=gx+dx, y1=gy-r, y2=gy+r;
-          if (window._izzaIslandLand.has(gk(x1,y1))) return {x:x1,y:y1};
-          if (window._izzaIslandLand.has(gk(x1,y2))) return {x:x1,y:y2};
+          if (window._izzaIslandLand.has(x1+'|'+y1)) return {x:x1,y:y1};
+          if (window._izzaIslandLand.has(x1+'|'+y2)) return {x:x1,y:y2};
         }
         for (let dy=-r; dy<=r; dy++){
           const y1=gy+dy, x1=gx-r, x2=gx+r;
-          if (window._izzaIslandLand.has(gk(x1,y1))) return {x:x1,y:y1};
-          if (window._izzaIslandLand.has(gk(x2,y1))) return {x:x2,y:y1};
+          if (window._izzaIslandLand.has(x1+'|'+y1)) return {x:x1,y:y1};
+          if (window._izzaIslandLand.has(x2+'|'+y1)) return {x:x2,y:y1};
         }
       }
     }
 
-    // Otherwise city beach
     const y = Math.max(LAKE.y0, Math.min(gy, LAKE.y1));
     return { x: BEACH_X, y };
   }
@@ -374,37 +340,19 @@
     IZZA.toast?.('Back on shore');
   }
 
-  // ====== movement clamps ======
+  // ====== movement clamps (unchanged) ======
   IZZA.on('update-pre', ()=>{
     if(!api?.ready || !isTier2()) return;
     const p=api.player;
-    const gx=centerGX(), gy=centerGY();
 
     if(inBoat){
       if(allCornersWater()){ lastWater={x:p.x,y:p.y}; }
       else if(lastWater){ p.x=lastWater.x; p.y=lastWater.y; }
-      if(ghostBoat){ ghostBoat.x=p.x; ghostBoat.y=p.y; } // boat follows while boating
-      // when boating, no rescue timer
+      if(ghostBoat){ ghostBoat.x=p.x; ghostBoat.y=p.y; }
       waterStrandSince = 0;
     }else{
-      // Land walking: block water
       if(anyCornerWater() && !centerOnDock()){
-        // NEW: If near island, snap back onto nearest island tile (hard edge).
-        if (nearIsland(gx,gy,3)){
-          const s = nearestIslandTile(gx,gy,3);
-          if(s){
-            p.x = (s.x*T()) + 1;
-            p.y = (s.y*T()) + 1;
-            lastLand = { x: p.x, y: p.y };
-            waterStrandSince = 0;
-          }else if(lastLand){
-            p.x=lastLand.x; p.y=lastLand.y;
-          }
-        }else if(lastLand){
-          p.x=lastLand.x; p.y=lastLand.y;
-        }
-
-        // Start/continue watchdog if somehow still in water with no valid lastLand
+        if(lastLand){ p.x=lastLand.x; p.y=lastLand.y; }
         if(!lastLand && allCornersWater()){
           if(!waterStrandSince) waterStrandSince = performance.now();
         }else{
@@ -415,7 +363,6 @@
         waterStrandSince = 0;
       }
 
-      // If in water out of boat for >300ms, offer rescue
       if(allCornersWater()){
         if(!waterStrandSince) waterStrandSince = performance.now();
         const dt = performance.now() - waterStrandSince;
@@ -426,7 +373,7 @@
     }
   });
 
-  // Extra safety clamp
+  // Extra safety clamp (unchanged)
   function postClamp(){
     if(!api?.ready || !isTier2()) return;
     const p=api.player;
@@ -444,7 +391,7 @@
   }
   setTimeout(()=> IZZA.on('update-post', postClamp), 0);
 
-  // Boot-time rescue if we spawn stuck or on water out-of-boat
+  // Boot-time rescue (unchanged)
   setTimeout(()=>{
     try{
       if(!api?.ready || !isTier2()) return;
@@ -458,7 +405,7 @@
     }catch{}
   }, 0);
 
-  // ====== visuals (unchanged, plus draw parked island boat if any) ======
+  // ====== visuals ======
   let prevBoatDraw = null;
   let lastWakeAt = 0;
   function makeHullPath(){ const p=new Path2D(); p.moveTo(6,38); p.quadraticCurveTo(22,16,50,10); p.quadraticCurveTo(78,16,94,38); p.quadraticCurveTo(78,60,50,66); p.quadraticCurveTo(22,60,6,38); p.closePath(); return p; }
@@ -504,6 +451,14 @@
     ctx.restore();
   }
 
+  // Render one boat at a given grid (gx,gy) water location
+  function drawBoatAtGrid(ctx, gx, gy, moving=false){
+    const S=api.DRAW, t=T();
+    const sx = (gx*t - api.camera.x) * (S/t) + S*0.50;
+    const sy = (gy*t - api.camera.y) * (S/t) + S*0.62;
+    drawLuxuryBoat(ctx, sx, sy, S*0.92, moving);
+  }
+
   function drawWake(ctx, sx, sy, size, dx, dy){
     const s = size;
     ctx.save();
@@ -528,10 +483,20 @@
 
   function drawParkedDockBoats(ctx){
     const {DOCKS}=lakeRects(anchors());
+    // If we're at the island (island boat present) → show NO city boats
+    if (islandBoatPos) return;
+
     const S=api.DRAW, t=T();
     DOCKS.forEach(d=>{
-      // If we're currently using that dock, don't draw its parked boat
-      if(inBoat && claimedDockId===d.y) return;
+      // Render rules:
+      //  - While inBoat: hide the dock we started from (claimedDockId) so you don't see two boats
+      //  - While NOT inBoat: render only the occupied dock if we have one; otherwise render all
+      if (inBoat){
+        if (claimedDockId===d.y) return;
+      }else{
+        if (occupiedDockId!=null && occupiedDockId!==d.y) return; // show only our boat
+      }
+
       const spot = parkedSpotForDock(d);
       const sx = (spot.gx*t - api.camera.x) * (S/t) + S*0.50;
       const sy = (spot.gy*t - api.camera.y) * (S/t) + S*0.62;
@@ -542,20 +507,18 @@
   IZZA.on('render-post', ()=>{
     if(!api?.ready || !isTier2()) return;
     const ctx=document.getElementById('game').getContext('2d');
-    const S=api.DRAW, t=T();
 
-    // City dock parked boats
+    // 1) City docked boats (respect occupiedDockId)
     drawParkedDockBoats(ctx);
 
-    // NEW: Draw parked island boat (ghostBoat) when not in the boat
-    if(!inBoat && ghostBoat){
-      const sx=(ghostBoat.x - api.camera.x)*(S/t) + S*0.50;
-      const sy=(ghostBoat.y - api.camera.y)*(S/t) + S*0.62;
-      drawLuxuryBoat(ctx, sx, sy, S*0.92, false);
+    // 2) Island parked boat (if any and not currently in boat)
+    if (!inBoat && islandBoatPos){
+      drawBoatAtGrid(ctx, islandBoatPos.gx, islandBoatPos.gy, false);
     }
 
-    // Player boat (when inBoat)
+    // 3) Active boat (ghost following player)
     if(inBoat && ghostBoat){
+      const S=api.DRAW, t=T();
       const sx=(ghostBoat.x - api.camera.x)*(S/t) + S*0.50;
       const sy=(ghostBoat.y - api.camera.y)*(S/t) + S*0.62;
 
