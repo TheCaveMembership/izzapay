@@ -1639,45 +1639,68 @@ function _isEquipped(entry){
 
     // Tuned scales & offsets (in sprite pixels) so each piece sits where it should
     // All offsets are relative to the *center* of the 32×32 sprite.
-    const HELMET = { 
-  scale: 2.22, 
-  ox: (facingShift.x + wobX)*1.0, 
-  oy: -14 + bobY - (f==='up'?2:0)   // moved up a little (was -10)
-};
+    // === LOCKED-TO-PLAYER OVERLAY (drop-in over your block) ===
+const p   = IZZA.api.player;
+const api = IZZA.api;
+const S   = api.DRAW;
 
-const VEST = { 
-  scale: 2.18, 
-  ox: facingShift.x + wobX,       
-  oy:  3 + bobY                   // moved down a little (was -1)
-};
+// Player screen position (no grid snap — stays glued to sprite)
+const sx = w2sX(api, p.x);
+const sy = w2sY(api, p.y);
 
-const ARMS = { 
-  scale: 2.16, 
-  ox: facingShift.x*1.3 + wobX,   
-  oy:  2 + bobY                   // unchanged
-};
+// Keep your tuned scales
+const HELMET = { scale: 2.22 };
+const VEST   = { scale: 2.18 };
+const ARMS   = { scale: 2.16 };
+const LEGS   = { scale: 2.15 };
 
-const LEGS = { 
-  scale: 2.15, 
-  ox: facingShift.x*1.2 + wobX,   // widened outward (was *0.6)
-  oy:  10 + bobY 
-};
-
-    const ctx = document.getElementById('game')?.getContext('2d');
-    if (!ctx) return;
-
-    // draw in body order so layering feels natural over the base sprite
-    if (isOn(inv?.cardboardLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegs);
-    if (isOn(inv?.cardboardVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVest);
-    if (isOn(inv?.cardboardArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArms);
-    if (isOn(inv?.cardboardHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmet);
+// Fixed, per-facing pixel offsets (no wobble/bob)
+// Helmet a bit higher; Vest a bit lower; Arms unchanged; Legs centered
+const f = p.facing || 'down';
+const OFF = {
+  down: {
+    helm: { ox: S*0.50, oy: -S*0.12 },
+    vest: { ox: S*0.50, oy:  S*0.10 },
+    arms: { ox: S*0.50, oy:  S*0.07 },
+    legs: { ox: S*0.50, oy:  S*0.38 }
+  },
+  up: {
+    helm: { ox: S*0.50, oy: -S*0.18 },
+    vest: { ox: S*0.50, oy:  S*0.08 },
+    arms: { ox: S*0.50, oy:  S*0.06 },
+    legs: { ox: S*0.50, oy:  S*0.36 }
+  },
+  left: {
+    helm: { ox: S*0.50, oy: -S*0.10 },
+    vest: { ox: S*0.50, oy:  S*0.10 },
+    arms: { ox: S*0.50, oy:  S*0.07 },
+    legs: { ox: S*0.50, oy:  S*0.38 }
+  },
+  right: {
+    helm: { ox: S*0.50, oy: -S*0.10 },
+    vest: { ox: S*0.50, oy:  S*0.10 },
+    arms: { ox: S*0.50, oy:  S*0.07 },
+    legs: { ox: S*0.50, oy:  S*0.38 }
   }
+};
+const ofs = OFF[f];
 
-  // draw on top of player each frame
-  IZZA.on?.('render-post', drawEquipped);
-  // on inventory change, next render-post picks it up
-  window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
-})();
+const ctx = document.getElementById('game')?.getContext('2d');
+if (!ctx) return;
+
+function drawAt(cfg, pathFn){
+  ctx.save();
+  ctx.translate(sx + cfg.ox, sy + cfg.oy);
+  ctx.scale(cfg.scale, cfg.scale);
+  pathFn(ctx);
+  ctx.restore();
+}
+
+// draw in body order so layering feels natural over the base sprite
+if (_isEquipped(inv?.cardboardLegs))   drawAt({ ...LEGS,   ...ofs.legs }, pathLegs);
+if (_isEquipped(inv?.cardboardVest))   drawAt({ ...VEST,   ...ofs.vest }, pathVest);
+if (_isEquipped(inv?.cardboardArms))   drawAt({ ...ARMS,   ...ofs.arms }, pathArms);
+if (_isEquipped(inv?.cardboardHelmet)) drawAt({ ...HELMET, ...ofs.helm }, pathHelmet);
 
 /* ==== Armoury UI (unchanged look; fixed logic & wording) ==== */
 function _ensureArmouryUI(){
