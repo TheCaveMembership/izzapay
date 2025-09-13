@@ -1549,39 +1549,103 @@ function _isEquipped(entry){
   // palette to match your icons
   const C_BASE = '#caa468', C_SHAD = '#9b7b4f';
 
-  // simple shapes that read cleanly at 32×32 scale
-  function pathHelmet(ctx){
-    ctx.beginPath();
-    ctx.fillStyle = C_BASE;
-    ctx.moveTo(-12,2);
-    ctx.quadraticCurveTo(0,-14,12,2);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = C_SHAD;
-    ctx.fillRect(-11, 2, 22, 3);
-  }
-  function pathVest(ctx){
-    ctx.fillStyle = C_BASE;
-    ctx.fillRect(-12, -8, 24, 16);
-    ctx.fillStyle = C_SHAD;
-    ctx.fillRect(-10, -3, 20, 6);
-  }
-  function pathLegs(ctx){
-    ctx.fillStyle = C_BASE;
-    ctx.fillRect(-7, 0, 6, 14);
-    ctx.fillRect( 1, 0, 6, 14);
-    ctx.fillStyle = C_SHAD;
-    ctx.fillRect(-7, 4, 14, 3);
-  }
-  function pathArms(ctx){
-    ctx.fillStyle = C_BASE;
-    ctx.fillRect(-16, -4, 7, 11);
-    ctx.fillRect(  9, -4, 7, 11);
-    ctx.fillStyle = C_SHAD;
-    ctx.fillRect(-13, -1, 3, 6);
-    ctx.fillRect( 12, -1, 3, 6);
-  }
+  // --- jets state (smooth fade when stopping) + SVG flame path ---
+let _CB_JET_ALPHA = 0; // eased 0→1 while moving, 1→0 when idle
+const _CB_FLAME_PATH = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
 
+// simple shapes that read cleanly at 32×32 scale
+function pathHelmet(ctx){
+  ctx.beginPath();
+  ctx.fillStyle = C_BASE;
+  ctx.moveTo(-12,2);
+  ctx.quadraticCurveTo(0,-14,12,2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = C_SHAD;
+  ctx.fillRect(-11, 2, 22, 3);
+}
+function pathVest(ctx){
+  ctx.fillStyle = C_BASE;
+  ctx.fillRect(-12, -8, 24, 16);
+  ctx.fillStyle = C_SHAD;
+  ctx.fillRect(-10, -3, 20, 6);
+}
+function pathLegs(ctx){
+  // --- original cardboard legs ---
+  ctx.fillStyle = C_BASE;
+  ctx.fillRect(-7, 0, 6, 14);
+  ctx.fillRect( 1, 0, 6, 14);
+  ctx.fillStyle = C_SHAD;
+  ctx.fillRect(-7, 4, 14, 3);
+
+  // --- tiny rocket jets (SVG flames + smoke), leg-local coords ---
+  const p = IZZA?.api?.player || {};
+  const moving = !!p.moving;
+  const t = ((p.animTime||0) * 0.02);     // tie to your walk clock
+
+  // ease alpha toward 1 when moving, toward 0 when not
+  const target = moving ? 1 : 0;
+  const ease   = 0.18;                    // smoothing factor (higher = snappier)
+  _CB_JET_ALPHA += (target - _CB_JET_ALPHA) * ease;
+
+  if (_CB_JET_ALPHA <= 0.02) return;      // nothing visible
+
+  const power  = 1 + 0.30 * Math.sin(t*20);  // subtle length wobble
+  const jitter = 0.50 * Math.sin(t*27);      // tiny side jitter for smoke
+
+  ctx.save();
+  ctx.globalAlpha *= _CB_JET_ALPHA;
+
+  // left & right jets at bottoms of legs (feet end ~ y=14)
+  const feet = [-4, 4];
+  feet.forEach((fx)=>{
+    ctx.save();
+    ctx.translate(fx, 14);
+    ctx.scale(1, power);
+
+    // gradient flame fill (SVG path via Path2D)
+    const grad = ctx.createLinearGradient(0,-9, 0,7);
+    grad.addColorStop(0.00, "#fff7c4");
+    grad.addColorStop(0.50, "#ffb400");
+    grad.addColorStop(1.00, "rgba(255,80,0,0.82)");
+    ctx.fillStyle = grad;
+    ctx.fill(_CB_FLAME_PATH);
+
+    // bright inner core
+    ctx.globalAlpha *= 0.7;
+    ctx.beginPath();
+    ctx.ellipse(0, -2, 1.2, 2.6, 0, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fill();
+
+    ctx.restore();
+
+    // smoke trail puffs just below flame
+    ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
+    for(let i=0;i<3;i++){
+      ctx.beginPath();
+      ctx.ellipse(
+        fx + jitter*0.4,
+        18 + i*4,
+        2.2 + i*0.5,
+        1.6 + i*0.4,
+        0, 0, Math.PI*2
+      );
+      ctx.fillStyle = "#d0d7e1";
+      ctx.fill();
+    }
+  });
+
+  ctx.restore();
+}
+function pathArms(ctx){
+  ctx.fillStyle = C_BASE;
+  ctx.fillRect(-16, -4, 7, 11);
+  ctx.fillRect(  9, -4, 7, 11);
+  ctx.fillStyle = C_SHAD;
+  ctx.fillRect(-13, -1, 3, 6);
+  ctx.fillRect( 12, -1, 3, 6);
+}
   // draw helper: anchor at player's true world position, center-based, pixel-locked
   function drawPieceWorld(ctx, px, py, scale, ox, oy, pathFn){
     const api = IZZA.api;
