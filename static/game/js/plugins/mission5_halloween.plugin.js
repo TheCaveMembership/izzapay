@@ -158,7 +158,7 @@ setTimeout(() => {
   function ensureJack(){
     if (jackPlaced) return;
     const hq=hqDoorTile();
-    jackTile = { tx:hq.tx+5, ty:hq.ty-4 };
+    jackTile = { tx:hq.tx+8, ty:hq.ty-2 };
     jackImg  = svgToImage(svgJack(), TILE*3.0, TILE*3.0);
     jackPlaced=true;
     // soft SFX loop hook every 2.5s (optional)
