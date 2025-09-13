@@ -1911,15 +1911,14 @@ function _ensureArmouryUI(){
     let advanced = false;
     try { advanced = __ARM_MISSIONS__?.maybeComplete?.(4) === true; } catch {}
     // Fallback: if user had crafted before logic existed, force advance if still < 4
-    if (!advanced) {
-      const cur = parseInt(localStorage.getItem('izzaMissionsCompleted')||'0',10) || 0;
-      if (cur < 4) {
-        try {
-          __ARM_MISSIONS__?.set?.(4);
-          IZZA?.emit?.('mission-complete', { id:4 });
-        } catch {}
-      }
-    }
+if (!advanced) {
+  const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0; // <- key fixed
+  if (cur < 4) {
+    localStorage.setItem('izzaMissions', '4');                                  // <- write it
+    try { IZZA?.emit?.('mission-complete', { id: 4 }); } catch {}
+    try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
+  }
+}
 
     IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
     (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
@@ -1981,16 +1980,14 @@ function _ensureArmouryUI(){
       let advanced = false;
       try { advanced = __ARM_MISSIONS__?.maybeComplete?.(5) === true; } catch {}
       if (!advanced) {
-        const cur = parseInt(localStorage.getItem('izzaMissionsCompleted')||'0',10) || 0;
-        if (cur < 5) {
-          try {
-            __ARM_MISSIONS__?.set?.(5);
-            IZZA?.emit?.('mission-complete', { id:5 });
-          } catch {}
-        }
-      }
-      try { IZZA?.emit?.('gear-crafted', { kind:'pumpkin' }); } catch {}
-
+  const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
+  if (cur < 5) {
+    localStorage.setItem('izzaMissions', '5');
+    try { IZZA?.emit?.('mission-complete', { id: 5 }); } catch {}
+    try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
+  }
+}
+      
       IZZA.toast?.('Crafted Pumpkin Set: Helmet, Vest, Legs, Arms');
       (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
       window.dispatchEvent?.(new Event('izza-inventory-changed'));
