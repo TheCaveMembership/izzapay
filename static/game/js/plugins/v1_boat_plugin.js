@@ -550,3 +550,125 @@
     console.log('[boat] ready', BUILD);
   });
 })();
+/* =========================
+ *  ISLAND FENCE (3×2) + TIKI TORCHES
+ *  — Drop-in patch for v1_boat_plugin.js
+ * ========================= */
+
+// --- geometry helpers (reuse your existing anchors/lakeRects) ---
+function _getIslandRect() {
+  // Prefer expander-published island rect; fallback to geometry
+  const pub = window.__IZZA_ARMOURY__?.island;
+  if (pub) return pub;
+
+  const a = anchors();
+  const { LAKE } = lakeRects(a);
+  const w = 5, h = 4;
+  const x1 = LAKE.x1 - 1, x0 = x1 - (w - 1);
+  const yMid = (LAKE.y0 + LAKE.y1) >> 1;
+  const y0 = yMid - (h >> 1), y1 = y0 + h - 1;
+  return {
+    x0: Math.max(LAKE.x0, x0),
+    y0: Math.max(LAKE.y0, y0),
+    x1,
+    y1: Math.min(LAKE.y1, y1)
+  };
+}
+
+// Centered 3×2 “allowed” area inside island
+function _getIslandAllowedRect() {
+  const I = _getIslandRect();
+  const iw = (I.x1 - I.x0 + 1); // 5
+  const ih = (I.y1 - I.y0 + 1); // 4
+  const aw = 3, ah = 2;
+  const ax0 = I.x0 + Math.floor((iw - aw) / 2); // centered -> I.x0 + 1
+  const ay0 = I.y0 + Math.floor((ih - ah) / 2); // centered -> I.y0 + 1
+  return { x0: ax0, y0: ay0, x1: ax0 + (aw - 1), y1: ay0 + (ah - 1) };
+}
+function _inRect(x, y, R) { return x >= R.x0 && x <= R.x1 && y >= R.y0 && y <= R.y1; }
+function _isIslandTile(gx, gy) {
+  // land set is already maintained by your code
+  return !!(window._izzaIslandLand && window._izzaIslandLand.has(gx + '|' + gy));
+}
+
+// --- fence enforcement (runs both pre & post to be extra safe) ---
+function _enforceIslandFence() {
+  if (!api?.ready || !isTier2() || inBoat) return;
+  const t = T(), p = api.player;
+  const gx = ((p.x + 16) / t) | 0;
+  const gy = ((p.y + 16) / t) | 0;
+
+  // Only act if we’re on the island
+  if (!_isIslandTile(gx, gy)) return;
+
+  const A = _getIslandAllowedRect();
+  if (_inRect(gx, gy, A)) return; // already inside
+
+  // Clamp to nearest point inside the 3×2 area
+  const nx = Math.min(Math.max(gx, A.x0), A.x1);
+  const ny = Math.min(Math.max(gy, A.y0), A.y1);
+  p.x = (nx * t) + 1;
+  p.y = (ny * t) + 1;
+}
+
+// Register guards (tiny & cheap)
+IZZA.on('update-pre',  _enforceIslandFence);
+IZZA.on('update-post', _enforceIslandFence);
+
+// --- tiki torches at the four fence corners (visual only) ---
+function _drawTikiTorch(ctx, gx, gy) {
+  // Convert grid→screen
+  const S = api.DRAW, t = T();
+  const sx = (gx * t - api.camera.x) * (S / t);
+  const sy = (gy * t - api.camera.y) * (S / t);
+
+  ctx.save();
+  // pole (centered on tile bottom)
+  ctx.translate(sx + S * 0.5, sy + S * 0.80);
+  ctx.fillStyle = '#6b4a2f';
+  ctx.fillRect(-S * 0.045, -S * 0.35, S * 0.09, S * 0.35);
+  // holder
+  ctx.fillStyle = '#3a2a1c';
+  ctx.fillRect(-S * 0.08, -S * 0.40, S * 0.16, S * 0.06);
+
+  // flame (simple flicker)
+  const tNow = performance.now() * 0.001;
+  const flick = 1 + 0.10 * Math.sin(tNow * 8 + gx * 3 + gy * 5);
+  const h = S * 0.22 * flick;
+  const w = S * 0.14 * flick;
+
+  // outer glow
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = '#ffb300';
+  ctx.beginPath(); ctx.ellipse(0, -S * 0.46, w * 1.5, h * 1.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // inner flame
+  const grd = ctx.createRadialGradient(0, -S * 0.48, 0, 0, -S * 0.48, w);
+  grd.addColorStop(0, '#ffe082');
+  grd.addColorStop(0.6, '#ff9800');
+  grd.addColorStop(1, 'rgba(255,87,34,0.0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.ellipse(0, -S * 0.48, w, h, 0, 0, Math.PI * 2); ctx.fill();
+
+  ctx.restore();
+}
+
+function _drawIslandTorches() {
+  if (!api?.ready || !isTier2()) return;
+  const I = _getIslandRect(); if (!I) return;
+  const ctx = document.getElementById('game').getContext('2d');
+  const A = _getIslandAllowedRect();
+
+  // Four corners of the allowed 3×2 area
+  const pts = [
+    { x: A.x0, y: A.y0 },
+    { x: A.x1, y: A.y0 },
+    { x: A.x0, y: A.y1 },
+    { x: A.x1, y: A.y1 }
+  ];
+  pts.forEach(p => _drawTikiTorch(ctx, p.x, p.y));
+}
+
+// draw torches after the world each frame
+IZZA.on('render-post', _drawIslandTorches);
