@@ -1,7 +1,6 @@
 /* mission5_halloween.plugin.js
    IZZA Mission 5 — “Night of the Lantern”
-   - Robustly detects M4 completion by inventory (cardboard Helmet/Vest/Arms/Legs)
-   - Bumps localStorage izzaMissions to 4 and shows agent popup (over/after armoury)
+   - Shows jack-o’-lantern only when missionsCompleted === 4 (inventory meta preferred; falls back to localStorage)
    - Places jack-o’-lantern at HQ door +3E (3× box size) with HA HA HA streamer
    - Interact with [B] to start a 5m night mission; pumpkins spawn at exact offsets
    - Werewolf spawns every 30s while moving at night; A to fight (hooks bus if present)
@@ -30,7 +29,7 @@
   // If we load into a save that's already at 4, ensure the jack exists
   setTimeout(() => { if (missionsIsFour()) ensureJack(); }, 0);
 
-  // ---------- Core helpers (align with izza_core_v3.js) ----------
+  // ---------- Core helpers ----------
   function _lsGet(k, d){ try{ const v = localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
   function _lsSet(k, v){ try{ localStorage.setItem(k, v); }catch{} }
 
@@ -62,7 +61,7 @@
     try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
   }
 
-  // --- read missionsCompleted EXACTLY like you asked: prefer inventory meta, fall back to localStorage
+  // --- missionsCompleted: prefer inventory meta, fallback to localStorage
   function missionsCompletedMeta(){
     try{
       if (IZZA?.api?.inventory?.getMeta){
@@ -81,9 +80,9 @@
     const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
+  // EXACTLY 3 tiles EAST of the HQ door
   function jackLanternGrid(){
     const d = hqDoorGrid();
-    // NEW: exactly 3 tiles EAST (no N/S change)
     return { x: d.gx + 3, y: d.gy };
   }
 
@@ -105,7 +104,7 @@
     setTimeout(()=>{ el.remove(); }, t);
   }
 
-  // ---------- SVG → Image cache (so we can draw in render-under) ----------
+  // ---------- SVG → Image cache ----------
   const _imgCache = new Map();
   function svgToImage(svg, pxW, pxH){
     const key=svg+'|'+pxW+'x'+pxH;
@@ -209,7 +208,7 @@
     }
   }
 
-  // ---------- Render (camera-relative; M4-style; Tier 2 gate) ----------
+  // ---------- Render (camera-relative; M4 style; Tier 2 gate) ----------
   function renderUnder(){
     try{
       if (!api?.ready) return;
@@ -218,17 +217,15 @@
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
       const S=api.DRAW, t=api.TILE||TILE;
 
-      // draw jack only when missionsCompleted == 4
+      // jack (only when missionsCompleted == 4)
       if (missionsIsFour() && jackPlaced && jackGrid && jackImg && jackImg.complete){
-        // center like M4’s offset (+S*0.5, +S*0.6)
         const wx = jackGrid.x * t, wy = jackGrid.y * t;
         const scr = worldToScreen(wx, wy);
-        const sx = scr.sx + S*0.5;
+        const sx = scr.sx + S*0.5;   // same centering offsets as M4
         const sy = scr.sy + S*0.6;
 
         ctx.save();
-        // jack is 3× tile; draw centered on (sx, sy)
-        const w = (t*3)*(S/t), h = w;
+        const w = (t*3)*(S/t), h = w; // 3× tile
         ctx.drawImage(jackImg, sx - w/2, sy - h/2, w, h);
         ctx.restore();
       }
@@ -363,57 +360,6 @@
     return true;
   }
 
-  // ---------- Detect Mission 4 (inventory-based) & place jack ----------
-  function hasCardboardSet(inv){
-    return (inv.cardboardHelmet?.count|0)>0 &&
-           (inv.cardboardVest?.count|0)>0 &&
-           (inv.cardboardArms?.count|0)>0 &&
-           (inv.cardboardLegs?.count|0)>0;
-  }
-
-  function maybeFinishM4AndPlaceJack(){
-    const inv=_getInv();
-    if (missionsIsFour()){
-      ensureJack(); // ensure jack exists so player can start M5
-      return;
-    }
-    if (_missions() >= 4){
-      ensureJack(); // fallback if localStorage says 4
-      return;
-    }
-    if (!hasCardboardSet(inv)) return;
-
-    const ui=document.getElementById('armouryUI');
-    const doPopupAndBump=()=>{
-      _setMissions(4);
-      agentPopup('Mission Completed', 'You’ve completed mission 4.');
-      try{ IZZA.emit('mission-complete',{id:4,name:'Armoury: Cardboard'}); }catch{}
-      if (missionsIsFour() || _missions()===4) ensureJack();
-    };
-
-    if (ui && window.getComputedStyle(ui).display!=='none'){
-      const once=()=>{ ui.removeEventListener('click', onClose, true); window.removeEventListener('keydown', onEsc, true); doPopupAndBump(); };
-      const onClose=(e)=>{ const btn=e.target && e.target.closest('#armouryClose'); if(btn){ e.preventDefault(); setTimeout(once, 0); } };
-      const onEsc=(e)=>{ if((e.key||'').toLowerCase()==='escape'){ setTimeout(once, 0); } };
-      ui.addEventListener('click', onClose, true);
-      window.addEventListener('keydown', onEsc, true);
-    } else {
-      doPopupAndBump();
-    }
-  }
-
-  // Also: if user clicks the Craft button again later, we’ll still catch it
-  function wireArmouryCraftButtonWatcher(){
-    const mo = new MutationObserver(()=>{
-      const btn = document.getElementById('btnCraftCardboard');
-      if(!btn || btn._m5_wired) return;
-      btn._m5_wired=true;
-      btn.addEventListener('click', ()=> setTimeout(maybeFinishM4AndPlaceJack, 0), true);
-    });
-    mo.observe(document.body, { childList:true, subtree:true });
-    setTimeout(maybeFinishM4AndPlaceJack, 300);
-  }
-
   // ---------- Update tick ----------
   function onUpdatePost({ now }){
     if (mission5Active){
@@ -458,14 +404,13 @@
     IZZA.on('update-post', onUpdatePost);
 
     wireB();
-    wireArmouryCraftButtonWatcher();
 
-    // initial M4 check (handles “I crafted cardboard long ago”)
-    setTimeout(maybeFinishM4AndPlaceJack, 50);
+    // initial check (handles “I crafted cardboard long ago”)
+    setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 50);
   });
 
   // Also catch generic inventory change (e.g., crafting via other flows)
-  window.addEventListener('izza-inventory-changed', ()=> setTimeout(maybeFinishM4AndPlaceJack, 0));
+  window.addEventListener('izza-inventory-changed', ()=> setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0));
 
   // Fallback: if page resumes and missions == 4, ensure jack exists
   IZZA.on('resume', ()=>{ if (missionsIsFour()) ensureJack(); });
