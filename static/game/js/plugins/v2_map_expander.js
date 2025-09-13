@@ -1568,16 +1568,26 @@ function pathVest(ctx){
   ctx.fillStyle = C_BASE;
   ctx.fillRect(-12, -8, 24, 16);
   ctx.fillStyle = C_SHAD;
-  ctx.fillRect(-10, -3, 20, 6);
-function pathLegs(ctx){
-  // --- original cardboard legs ---
-  ctx.fillStyle = C_BASE;
+  ctx.fillRect(-10, -3, 20, 6);function pathLegs(ctx){
+  // --- metallic jet legs base (was cardboard) ---
+  const gradLeg = ctx.createLinearGradient(-7, 0, 7, 14);
+  gradLeg.addColorStop(0.0, "#c0c0c0");   // silver
+  gradLeg.addColorStop(0.5, "#e0e0e0");   // lighter sparkle mid
+  gradLeg.addColorStop(1.0, "#9a9a9a");   // darker steel base
+
+  ctx.fillStyle = gradLeg;
   ctx.fillRect(-7, 0, 6, 14);
   ctx.fillRect( 1, 0, 6, 14);
-  ctx.fillStyle = C_SHAD;
+
+  // sparkle overlay
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.fillRect(-7, 2, 6, 1);
+  ctx.fillRect( 1, 5, 6, 1);
+
+  ctx.fillStyle = "#7b7b7b";
   ctx.fillRect(-7, 4, 14, 3);
 
-  // --- tiny rocket jets (flames + smoke) ---
+  // --- rocket jets (flames + smoke) ---
   const p = IZZA?.api?.player || {};
   const moving = !!p.moving;
   const t = ((p.animTime||0) * 0.02);
@@ -1587,22 +1597,21 @@ function pathLegs(ctx){
   _CB_JET_ALPHA += (target - _CB_JET_ALPHA) * ease;
   if (_CB_JET_ALPHA <= 0.02) return;
 
-  const power  = 0.8 + 0.20 * Math.sin(t*18);   // flame flicker
-  const jitter = 0.35 * Math.sin(t*23);         // smoke jitter
+  const power  = 0.8 + 0.20 * Math.sin(t*18);
+  const jitter = 0.35 * Math.sin(t*23);
 
   ctx.save();
   ctx.globalAlpha *= _CB_JET_ALPHA;
 
-  // jets now slightly lower (~y=12 instead of y=10)
   const feet = [-4, 4];
   feet.forEach((fx)=>{
     ctx.save();
-    ctx.translate(fx, 12);   // moved flame lower down the leg
+    ctx.translate(fx, 12);   // moved flames down (was 10 → now 12)
     ctx.scale(0.8, power);
 
-    // gradient flame (with blue glow at top)
+    // gradient flame (with blue tip)
     const grad = ctx.createLinearGradient(0,-7, 0,6);
-    grad.addColorStop(0.00, "#6ac6ff");      // blue glow
+    grad.addColorStop(0.00, "#6ac6ff");
     grad.addColorStop(0.30, "#fff7c4");
     grad.addColorStop(0.65, "#ffb400");
     grad.addColorStop(1.00, "rgba(255,80,0,0.82)");
@@ -1618,7 +1627,7 @@ function pathLegs(ctx){
 
     ctx.restore();
 
-    // smoke trail (unchanged, still starts at y=14)
+    // smoke trail (unchanged)
     ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
     for(let i=0;i<2;i++){
       ctx.beginPath();
