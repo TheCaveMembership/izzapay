@@ -1644,7 +1644,7 @@ function _isEquipped(entry){
   const HELMET = {
     scale: 2.80,
     ox: (facingShift.x + wobX)*0.05,
-    oy: -14 + bobY - (f==='up'?2:0)   // moved up from -10
+    oy: -12 + bobY - (f==='up'?2:0)   // moved up from -10
   };
   const VEST = {
     scale: 2.4,
