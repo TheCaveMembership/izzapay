@@ -389,19 +389,48 @@
     }
     // else let other B handlers run
   }
-// ---------- Mission 4 completion on cardboard armour craft ----------
+// ---------- Mission 4 completion (requires full cardboard set: helm, vest, arms, legs) ----------
 (function(){
   const M4_DONE_KEY = 'izzaMission4_done';
+  const SET_IDS = [
+    'armor_cardboard_helm',
+    'armor_cardboard_vest',
+    'armor_cardboard_arms',
+    'armor_cardboard_legs'
+  ];
+  // backwards-compat aliases if older ids were used
+  const ALIAS = {
+    cardboard_helm:  'armor_cardboard_helm',
+    cardboard_chest: 'armor_cardboard_vest',
+    cardboard_arms:  'armor_cardboard_arms',
+    cardboard_legs:  'armor_cardboard_legs'
+  };
+
+  function invCount(id){
+    try{
+      if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
+      const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+      if (inv[id]?.count) return inv[id].count|0;
+      return 0;
+    }catch{ return 0; }
+  }
+
+  function hasFullCardboardSet(){
+    // check canonical ids and alias ids
+    return SET_IDS.every(id=>{
+      const ok = invCount(id) > 0;
+      if (ok) return true;
+      // see if any alias is present
+      const alias = Object.keys(ALIAS).find(k => ALIAS[k]===id);
+      return alias ? invCount(alias) > 0 : false;
+    });
+  }
 
   function mission4AgentPopup(){
     try{
-      // Use your global UI popup if present
-      if (IZZA?.api?.UI?.popup) {
-        IZZA.api.UI.popup({ style:'agent', title:'Mission Completed', body:'You’ve completed mission 4.', timeout:2000 });
-        return;
-      }
+      IZZA?.api?.UI?.popup?.({ style:'agent', title:'Mission Completed', body:'You’ve completed mission 4.', timeout:2000 });
+      return;
     }catch{}
-    // Lightweight fallback
     const el = document.createElement('div');
     el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);' +
                        'background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;' +
@@ -413,22 +442,31 @@
 
   function completeMission4Once(){
     if (localStorage.getItem(M4_DONE_KEY) === '1') return;
-    try { localStorage.setItem(M4_DONE_KEY, '1'); } catch {}
-    // bump missionsCompleted meta → 4 (if your inventory meta is available)
-    try { IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); } catch {}
-    // tell the world (Mission 5 listens for this)
-    try { IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); } catch {}
+    try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+    // bump inv meta & UI counter from 3 -> 4
+    try{ IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); }catch{}
+    try{ IZZA.emit?.('missions-updated', { completed: 4 }); }catch{}
+    try{ IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); }catch{}
     mission4AgentPopup();
   }
 
-  // Listen for either event name your crafting code uses
-  IZZA.on?.('gear-crafted',  ({kind})=>{ if (kind === 'cardboard') completeMission4Once(); });
-  IZZA.on?.('armor-crafted', ({kind})=>{ if (kind === 'cardboard') completeMission4Once(); });
+  function maybeCompleteM4(){
+    if (hasFullCardboardSet()) completeMission4Once();
+  }
 
-  // In case the player reloads right after crafting, re-show state on resume
-  IZZA.on?.('resume', ({ inventoryMeta })=>{
-    const m = (inventoryMeta && inventoryMeta.missionsCompleted) || 0;
-    if (m >= 4) { try { localStorage.setItem(M4_DONE_KEY, '1'); } catch {} }
+  // common craft event names we’ve used
+  IZZA.on?.('gear-crafted',  ({kind,set})=>{ if (kind==='cardboard'||set==='cardboard') maybeCompleteM4(); });
+  IZZA.on?.('armor-crafted', ({kind,set})=>{ if (kind==='cardboard'||set==='cardboard') maybeCompleteM4(); });
+  IZZA.on?.('inventory-changed', ()=> maybeCompleteM4()); // safety net after UI actions
+
+  // resume safety (if the player reloads after crafting)
+  IZZA.on?.('resume', ({inventoryMeta})=>{
+    if ((inventoryMeta?.missionsCompleted|0) >= 4) {
+      try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+    } else {
+      // try to auto-complete if the set is already owned
+      maybeCompleteM4();
+    }
   });
 })();
   // ---------- hook up ----------
