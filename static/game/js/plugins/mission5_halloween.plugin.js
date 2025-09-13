@@ -16,7 +16,24 @@
 
   let api = null;
   let TILE = 60;
+// --- Early hooks so M5 works even if 'ready' never fires immediately
+try {
+  IZZA.on('render-under', renderUnder);
+  IZZA.on('update-post', onUpdatePost);
+} catch {}
 
+// When Mission 4 completes, place the jack right away (listen on both buses)
+try { IZZA.on('mission-complete', p => { if ((p?.id|0) === 4) setTimeout(ensureJack, 0); }); } catch {}
+window.addEventListener('mission-complete', e => {
+  const id = (e?.detail?.id|0) || 0;
+  if (id === 4) setTimeout(ensureJack, 0);
+});
+
+// If we load into a save that's already ≥4, ensure the jack exists
+setTimeout(() => {
+  const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
+  if (cur >= 4) ensureJack();
+}, 0);
   // ---------- Core helpers (align with izza_core_v3.js) ----------
   function _lsGet(k, d){ try{ const v = localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
   function _lsSet(k, v){ try{ localStorage.setItem(k, v); }catch{} }
@@ -194,7 +211,7 @@
   function renderUnder(){
     try{
       if (!api?.ready) return;
-      if (localStorage.getItem('izzaMapTier')!=='2') return;
+// draw jack/pumpkins regardless of tier (jack sits by HQ which is visible in T1)
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
       const S=api.DRAW, T=TILE;
 
