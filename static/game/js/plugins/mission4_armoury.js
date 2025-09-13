@@ -269,8 +269,8 @@
         `<div style="transform:rotate(-0.4deg)">
           Hmmm… should I grab it or walk away?<br>
           Feels simple, but something about this choice hits different 📦 🤔 💭<br>
-          <br><br>
-          Could change the path I'm on, could shape what's next. There are some boats by the docks? I wonder what they could lead to? 🏝️ 🚤<br><br>
+          <br>
+          Could change the path I'm on, could shape what's next. There are some boats by the docks? I wonder what they could lead to? 🏝️<br><br>
           <strong>Take it… or leave it? ☠️ ⚓️</strong>
         </div>`;
 
