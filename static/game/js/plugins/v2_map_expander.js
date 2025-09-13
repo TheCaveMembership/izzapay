@@ -1067,19 +1067,49 @@ if (window.__IZZA_ISLAND_WALK__) {
     (_layout.patches?.solidSingles||[]).forEach(c=> solids.push({x:c.x,y:c.y,w:1,h:1}));
 
     // water (solid unless beach/docks/island sand; and only when not boating)
-    const LAKE=_layout.LAKE, BEACH_X=lakeRects(anchors(api)).BEACH_X;
-    const waterIsSolid = (x,y)=>{
-      if(!_inRect(x,y,LAKE)) return false;
-      if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false; // island sand is land
-      if(x===BEACH_X) return false;                      // beach strip
-      if(dockCells().has(x+'|'+y)) return false;         // city docks
-      return true;
-    };
-    if (!window._izzaBoatActive) {
-      if (waterIsSolid(gx,gy)) {
-        solids.push({x:LAKE.x0,y:LAKE.y0,w:(LAKE.x1-LAKE.x0+1),h:(LAKE.y1-LAKE.y0+1)});
-      }
+const LAKE = _layout.LAKE;
+const BEACH_X = lakeRects(anchors(api)).BEACH_X;
+const island = window.__IZZA_ARMOURY__?.island || null;
+
+const waterIsSolid = (x,y)=>{
+  if(!_inRect(x,y,LAKE)) return false;
+  // treat island sand as land
+  if (window._izzaIslandLand && window._izzaIslandLand.has(x+'|'+y)) return false;
+  if (x===BEACH_X) return false;                        // beach strip
+  if (dockCells().has(x+'|'+y)) return false;           // city docks
+  return true;
+};
+
+// if standing on island sand, auto-disable boat so you don't drift off corners
+if (island) {
+  const onIslandSand = (gx>=island.x0 && gx<=island.x1 && gy>=island.y0 && gy<=island.y1);
+  if (onIslandSand) window._izzaBoatActive = false;
+}
+
+if (!window._izzaBoatActive) {
+  if (waterIsSolid(gx,gy)) {
+    // Near the island edge? snap back onto the closest island tile (prevents corner fall-through)
+    if (island &&
+        gx>=island.x0-1 && gx<=island.x1+1 &&
+        gy>=island.y0-1 && gy<=island.y1+1 &&
+        !(gx>=island.x0 && gx<=island.x1 && gy>=island.y0 && gy<=island.y1)) {
+
+      const tx = Math.max(island.x0, Math.min(gx, island.x1));
+      const ty = Math.max(island.y0, Math.min(gy, island.y1));
+      const inset = 0.10;
+      api.player.x = (tx + inset) * api.TILE;
+      api.player.y = (ty + inset) * api.TILE;
+      // handled resolution; don't push the big lake rect
+    } else {
+      // elsewhere: keep the fast single-rect lake collision
+      solids.push({
+        x: LAKE.x0, y: LAKE.y0,
+        w: (LAKE.x1 - LAKE.x0 + 1),
+        h: (LAKE.y1 - LAKE.y0 + 1)
+      });
     }
+  }
+}
 
     // walkable overrides
     const overrides = _layout.patches?.walkableOverride || [];
