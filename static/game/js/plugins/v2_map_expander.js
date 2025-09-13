@@ -1461,6 +1461,147 @@ function _writeArmor(a){
   }catch{}
 }
 
+/* ==== Inventory helpers (alias Mission 4 key + legacy) ==== */
+function _invRead(){
+  try{
+    if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+    const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+  }catch{ return {}; }
+}
+function _invWrite(inv){
+  try{
+    if(IZZA?.api?.setInventory){ IZZA.api.setInventory(inv); }
+    else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+  }catch{}
+}
+// Treat these keys as the same pickup
+const _BOX_KEYS = ['cardboard_box','cardboardBox'];
+function _invGetCount(inv, keys){
+  for (const k of keys){
+    const v = inv?.[k];
+    if (v && typeof v==='object' && typeof v.count==='number') return v.count|0;
+  }
+  return 0;
+}
+function _invTake(inv, keys, n=1){
+  for (const k of keys){
+    const v = inv?.[k];
+    if (v && typeof v.count==='number' && v.count>0){
+      const take = Math.min(n, v.count|0);
+      v.count -= take;
+      if (v.count < 0) v.count = 0;
+      return take;
+    }
+  }
+  return 0;
+}
+function _plural(n, one, many){ return n===1 ? one : many; }
+
+/* ==== Cardboard Set item metadata (SVG icons; no UI changes) ==== */
+const _CB_ICONS = {
+  helmet:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="#caa468"/>
+       <path d="M6 18h20v3H6z" fill="#9b7b4f"/>
+     </svg>`,
+  vest:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="#caa468"/>
+       <rect x="8" y="12" width="16" height="10" fill="#9b7b4f"/>
+     </svg>`,
+  legs:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="#caa468"/>
+       <rect x="9" y="14" width="14" height="3" fill="#9b7b4f"/>
+     </svg>`,
+  arms:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <rect x="2" y="10" width="8" height="12" rx="3" fill="#caa468"/>
+       <rect x="22" y="10" width="8" height="12" rx="3" fill="#caa468"/>
+       <rect x="4" y="13" width="4" height="6" fill="#9b7b4f"/>
+       <rect x="24" y="13" width="4" height="6" fill="#9b7b4f"/>
+     </svg>`
+};
+
+// ensure a single equippable item entry exists; increment count on repeated crafts
+function _ensureItem(inv, key, pretty, slot, svg){
+  inv[key] = inv[key] || { count: 0, name: pretty, type: 'armor', slot, equippable: true, iconSvg: svg };
+  // keep metadata stable if it existed but was partial (no UI change)
+  inv[key].name = pretty;
+  inv[key].type = 'armor';
+  inv[key].slot = slot;
+  inv[key].equippable = true;
+  if (!inv[key].iconSvg) inv[key].iconSvg = svg;
+}
+
+/* ==== Simple equipped-state probe (compatible with common patterns) ==== */
+function _isEquipped(entry){
+  if (!entry) return false;
+  if (entry.equipped === true) return true;
+  if (entry.equip === true) return true;
+  // Some UIs track active count vs total; treat >0 equippedCount as equipped
+  if (typeof entry.equippedCount === 'number' && entry.equippedCount > 0) return true;
+  return false;
+}
+
+/* ==== Render overlays for equipped cardboard pieces (no UI changes) ==== */
+(function _cardboardRenderOverlayInit(){
+  const drawPiece = (ctx, gx, gy, tile, drawScale, dx, dy, pathMaker)=>{
+    const S = IZZA.api.DRAW, T = tile;
+    const sx = (gx*T - IZZA.api.camera.x) * (S/T);
+    const sy = (gy*T - IZZA.api.camera.y) * (S/T);
+    ctx.save();
+    ctx.translate(sx + S*dx, sy + S*dy);
+    ctx.scale(drawScale, drawScale);
+    pathMaker(ctx);
+    ctx.restore();
+  };
+
+  // crude “cardboard” palette to match icons (kept minimal; not touching UI)
+  const C_BASE = '#caa468', C_SHAD = '#9b7b4f';
+
+  function pathHelmet(ctx){
+    ctx.beginPath();
+    ctx.fillStyle = C_BASE;
+    ctx.moveTo(-10,0); ctx.quadraticCurveTo(0,-12,10,0); ctx.lineTo(-10,0); ctx.fill();
+    ctx.fillStyle = C_SHAD; ctx.fillRect(-9,0,18,3);
+  }
+  function pathVest(ctx){
+    ctx.fillStyle = C_BASE; ctx.fillRect(-9, -6, 18, 12);
+    ctx.fillStyle = C_SHAD; ctx.fillRect(-7, -2, 14, 4);
+  }
+  function pathLegs(ctx){
+    ctx.fillStyle = C_BASE; ctx.fillRect(-6, 0, 5, 12); ctx.fillRect(1,0,5,12);
+    ctx.fillStyle = C_SHAD; ctx.fillRect(-6, 3, 12, 2);
+  }
+  function pathArms(ctx){
+    ctx.fillStyle = C_BASE; ctx.fillRect(-14, -4, 6, 10); ctx.fillRect(8,-4,6,10);
+    ctx.fillStyle = C_SHAD; ctx.fillRect(-12, -2, 2, 6); ctx.fillRect(10,-2,2,6);
+  }
+
+  function drawEquipped(){
+    if (!IZZA?.api?.ready) return;
+    const inv = _invRead();
+    const p   = IZZA.api.player, T = IZZA.api.TILE;
+    const gx  = ((p.x+16)/T)|0, gy=((p.y+16)/T)|0;
+
+    const ctx = document.getElementById('game')?.getContext('2d');
+    if (!ctx) return;
+
+    // Only draw what is equipped
+    if (_isEquipped(inv?.cardboardHelmet)) drawPiece(ctx, gx, gy, T, 0.9, 0.50, 0.15, pathHelmet);
+    if (_isEquipped(inv?.cardboardVest))   drawPiece(ctx, gx, gy, T, 1.0, 0.50, 0.35, pathVest);
+    if (_isEquipped(inv?.cardboardLegs))   drawPiece(ctx, gx, gy, T, 1.0, 0.50, 0.62, pathLegs);
+    if (_isEquipped(inv?.cardboardArms))   drawPiece(ctx, gx, gy, T, 1.0, 0.50, 0.36, pathArms);
+  }
+
+  // draw on top of player each frame; this does not change UI
+  IZZA.on?.('render-post', drawEquipped);
+  // refresh immediately after inventory changes
+  window.addEventListener('izza-inventory-changed', ()=>{ /* no-op: next render-post draws fresh */ });
+})();
+
+/* ==== Armoury UI (unchanged look; fixed logic & wording) ==== */
 function _ensureArmouryUI(){
   if (document.getElementById('armouryUI')) return;
 
@@ -1528,16 +1669,13 @@ function _ensureArmouryUI(){
   const $ = sel => wrap.querySelector(sel);
 
   function _renderArmoury(){
-    const inv = (function(){
-      try{
-        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
-      }catch{ return {}; }
-    })();
+    const inv   = _invRead();
     const armor = _readArmor();
-    const boxes = inv?.cardboardBox?.count|0;
+    const boxes = _invGetCount(inv, _BOX_KEYS);
 
-    $('#ccHint').textContent = `You have ${boxes} × Cardboard Box`;
+    // wording fix (no visual style changes)
+    $('#ccHint').textContent = `You have ${boxes} × ${_plural(boxes, 'Cardboard Box', 'Cardboard Boxes')}`;
+
     const s = [];
     if (armor?.type){
       const pct = Math.round((armor.dr||0)*100);
@@ -1553,34 +1691,31 @@ function _ensureArmouryUI(){
     $('#craftArea').style.display = e.target.checked ? 'block' : 'none';
   });
 
+  // Craft: consume exactly 1 cardboard box (any alias), then add 4-piece set
   $('#btnCraftCardboard').addEventListener('click', ()=>{
-    const inv = (function(){
-      try{
-        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
-      }catch{ return {}; }
-    })();
+    const inv = _invRead();
 
-    const boxes = inv?.cardboardBox?.count|0;
-    if (boxes<=0){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
+    const took = _invTake(inv, _BOX_KEYS, 1);
+    if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
 
-    // consume 1 cardboard box
-    inv.cardboardBox = inv.cardboardBox || {count:0};
-    inv.cardboardBox.count = Math.max(0, (inv.cardboardBox.count|0) - 1);
+    // Ensure item entries exist & add one of each piece
+    _ensureItem(inv, 'cardboardHelmet', 'Cardboard Helmet', 'head',  _CB_ICONS.helmet);
+    _ensureItem(inv, 'cardboardVest',   'Cardboard Vest',   'chest', _CB_ICONS.vest);
+    _ensureItem(inv, 'cardboardLegs',   'Cardboard Legs',   'legs',  _CB_ICONS.legs);
+    _ensureItem(inv, 'cardboardArms',   'Cardboard Arms',   'arms',  _CB_ICONS.arms);
 
-    // grant & equip cardboard armour
-    inv.cardboardArmour = inv.cardboardArmour || {count:0};
-    inv.cardboardArmour.count = (inv.cardboardArmour.count|0) + 1;
+    inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
+    inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
+    inv.cardboardLegs.count   = (inv.cardboardLegs.count|0) + 1;
+    inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
 
-    try{
-      if(IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
-      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
-    }catch{}
+    _invWrite(inv);
 
+    // Keep the simple global DR you already had (unchanged UI + behavior)
     const dr = 0.12; // 12% damage reduction
     _writeArmor({ type:'Cardboard', dr });
 
-    IZZA.toast?.('Crafted & equipped Cardboard Armour (DR 12%)');
+    IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
     _renderArmoury();
     window.dispatchEvent?.(new Event('izza-inventory-changed'));
   });
