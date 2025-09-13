@@ -462,7 +462,7 @@ function setHearts(n){
           break;
         }
           
-        case 'pistol': {
+                case 'pistol': {
           const inv = getInventory();
           const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
           cur.owned = true;
@@ -474,6 +474,11 @@ function setHearts(n){
           refreshInvPanel();
           break;
         }
+      } // <-- end switch(kind)
+    }catch(err){
+      console.error('[loot-picked] handler error', err);
+    }
+  }); // <-- end IZZA.on('loot-picked', ...)
           
   // ===== Player / anim =====
   const player = {
