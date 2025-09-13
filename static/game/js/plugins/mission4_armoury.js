@@ -5,8 +5,9 @@
 // - Plays nice with v2_map_expander.js (which handles island door & docking).
 
 (function(){
-  const BOX_TAKEN_KEY = 'izzaBoxTaken';
-  const M4_KEY        = 'izzaMission4'; // 'started' / 'not-started'
+  const BOX_TAKEN_KEY  = 'izzaBoxTaken';
+  const M4_KEY         = 'izzaMission4'; // 'started' / 'not-started'
+  const BOX_SPENT_KEY  = 'izzaBoxSpentForCardboardSet'; // guard so we only spend once
 
   let api = null;
 
@@ -30,6 +31,7 @@
     inv[key].count = (inv[key].count|0) + n;
     if (inv[key].count <= 0) delete inv[key];
   }
+  function getCount(inv, key){ return (inv?.[key]?.count|0) || 0; }
 
   function setM4(v){ try{ localStorage.setItem(M4_KEY, v); }catch{} }
 
@@ -67,7 +69,6 @@
 
       // particle system (life × ~1.8 for longer, plus longer run window)
       const particles = [];
-      const bursts = 3;
       const GOLD = ['#ffd23f','#ffcc33','#ffe680'];
       const SILV = ['#cfd8dc','#e0e0e0','#f5f7f9'];
       const NEON = ['#00e5ff','#ff00ff','#39ff14'];
@@ -81,7 +82,7 @@
           particles.push({
             x:cx, y:cy,
             vx:Math.cos(ang)*v, vy:Math.sin(ang)*v - 0.45,
-            life: 110 + (Math.random()*30|0),   // ↑ was ~60–80
+            life: 110 + (Math.random()*30|0),
             age: 0,
             r: 1.6 + Math.random()*1.4,
             colTop: topCol,
@@ -96,7 +97,7 @@
           particles.push({
             x:cx, y:cy,
             vx:Math.cos(a)*v, vy:Math.sin(a)*v - 0.35,
-            life: 90 + (Math.random()*30|0),    // ↑ was ~45–60
+            life: 90 + (Math.random()*30|0),
             age: 0,
             r: 1.2 + Math.random()*1.0,
             colTop: GOLD[(Math.random()*GOLD.length)|0],
@@ -105,8 +106,7 @@
         }
       }
 
-      // stronger pulsing skull watermark behind particles
-      const skullPath = new Path2D("M16 3c-3.9 0-7 3.1-7 7v2c0 2 1 3 2 4v4c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-2h4v2c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-4c1-1 2-2 2-4V10c0-3.9-3.1-7-7-7Zm-3 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm6 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z");
+      const skullPath = new Path2D("M16 3c-3.9 0-7 3.1-7 7v2c0 2 1 3 2 4v4c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-4c1-1 2-2 2-4V10c0-3.9-3.1-7-7-7Zm-3 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm6 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z");
 
       addBurst(sx, sy, 80, 5.0, true);
       addBurst(sx+12, sy-8, 60, 4.4, true);
@@ -115,24 +115,24 @@
       addSpray(sx, sy+6, Math.PI*0.47 + Math.PI, 50, 5.5);
 
       let frame = 0;
-      const maxFrames = 220; // ↑ doubled (~4s at ~55–60fps)
+      const maxFrames = 220;
       (function tick(){
         frame++;
         ctx.clearRect(0,0,canvas.width, canvas.height);
 
-        // mystical backdrop (more visible)
+        // mystical backdrop
         ctx.save();
         const rg = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(canvas.width, canvas.height)*0.55);
-        rg.addColorStop(0, 'rgba(255,215,64,0.28)');  // ↑ from 0.18
+        rg.addColorStop(0, 'rgba(255,215,64,0.28)');
         rg.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = rg;
         ctx.fillRect(0,0,canvas.width,canvas.height);
 
-        // pulsing skull behind the burst (brighter & bigger)
+        // pulsing skull
         ctx.globalAlpha = 0.18 + 0.10*Math.sin(frame*0.18);
         ctx.translate(sx, sy);
-        ctx.scale(3.6, 3.6);                        // ↑ scale
-        ctx.fillStyle = 'rgba(200,200,220,0.55)';   // ↑ opacity
+        ctx.scale(3.6, 3.6);
+        ctx.fillStyle = 'rgba(200,200,220,0.55)';
         ctx.fill(skullPath);
         ctx.restore();
 
@@ -147,10 +147,9 @@
           p.y  += p.vy;
 
           const k = p.age / p.life;
-          const useNeon = (k > 0.65); // neon later in life
+          const useNeon = (k > 0.65);
           const col = useNeon ? p.colNeon : p.colTop;
 
-          // gold glow (keep mostly gold/silver look)
           if (!useNeon){
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.r*2.8, 0, Math.PI*2);
@@ -158,13 +157,11 @@
             ctx.fill();
           }
 
-          // core
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
           ctx.fillStyle = col;
           ctx.fill();
 
-          // graffiti spark line
           if ((p.age % 9) === 0){
             ctx.save();
             ctx.globalAlpha = 0.4;
@@ -181,7 +178,6 @@
         if (frame < maxFrames && particles.length){
           requestAnimationFrame(tick);
         } else {
-          // slower fade
           let fade = 0.35;
           (function fadeOut(){
             fade -= 0.03;
@@ -198,7 +194,6 @@
   // ---------- tiny, safe confirm (custom popup with wood title; darker navy body) ----------
   function confirmPickup(cb){
     try{
-      // wood grain SVG data-uri for title text fill (dark driftwood)
       const woodTex = encodeURIComponent(`
         <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
           <defs>
@@ -217,7 +212,6 @@
         </svg>
       `);
 
-      // subtle repeating skull wallpaper (more visible)
       const skullBG = encodeURIComponent(`
         <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
           <g opacity="0.12" fill="#cfd8dc">
@@ -250,7 +244,6 @@
         'filter:blur(3px);transform:skewX(-12deg);opacity:.7;';
       card.appendChild(spray);
 
-      // ---- Title (dark wood grain) ----
       const title = document.createElement('div');
       title.style.cssText =
         'font-size:22px;font-weight:900;letter-spacing:1px;margin-bottom:8px;' +
@@ -259,17 +252,14 @@
         'text-shadow:0 1px 0 rgba(0,0,0,0.65), 0 2px 0 rgba(0,0,0,0.45);';
       title.textContent = 'A cardboard box?';
 
-      // ---- Body (navy, darker; stands out more) ----
       const rhyme = document.createElement('div');
       rhyme.style.cssText =
-        'margin:10px 0 14px;font-weight:900;line-height:1.35;' +
-        'color:#0b1935;' + // dark navy
+        'margin:10px 0 14px;font-weight:900;line-height:1.35;color:#0b1935;' +
         'text-shadow:0 1px 0 rgba(255,255,255,0.06), 0 2px 0 rgba(0,0,0,0.45);';
       rhyme.innerHTML =
         `<div style="transform:rotate(-0.4deg)">
           Hmmm… should I grab it or walk away?<br>
-          Feels simple, but something about this choice hits different 📦 🤔 💭<br>
-          <br>
+          Feels simple, but something about this choice hits different 📦 🤔 💭<br><br>
           Could change the path I'm on, could shape what's next. There are some boats by the docks? I wonder what they could lead to? 🏝️<br><br>
           <strong>Take it… or leave it? ☠️ ⚓️</strong>
         </div>`;
@@ -389,86 +379,108 @@
     }
     // else let other B handlers run
   }
-// ---------- Mission 4 completion (requires full cardboard set: helm, vest, arms, legs) ----------
-(function(){
-  const M4_DONE_KEY = 'izzaMission4_done';
-  const SET_IDS = [
-    'armor_cardboard_helm',
-    'armor_cardboard_vest',
-    'armor_cardboard_arms',
-    'armor_cardboard_legs'
-  ];
-  // backwards-compat aliases if older ids were used
-  const ALIAS = {
-    cardboard_helm:  'armor_cardboard_helm',
-    cardboard_chest: 'armor_cardboard_vest',
-    cardboard_arms:  'armor_cardboard_arms',
-    cardboard_legs:  'armor_cardboard_legs'
-  };
 
-  function invCount(id){
-    try{
-      if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
-      const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
-      if (inv[id]?.count) return inv[id].count|0;
-      return 0;
-    }catch{ return 0; }
-  }
+  // ---------- Mission 4 completion (requires full cardboard set: helm, vest, arms, legs) ----------
+  (function(){
+    const M4_DONE_KEY = 'izzaMission4_done';
+    const SET_IDS = [
+      'armor_cardboard_helm',
+      'armor_cardboard_vest',
+      'armor_cardboard_arms',
+      'armor_cardboard_legs'
+    ];
+    // backwards-compat aliases if older ids were used
+    const ALIAS = {
+      cardboard_helm:  'armor_cardboard_helm',
+      cardboard_chest: 'armor_cardboard_vest',
+      cardboard_arms:  'armor_cardboard_arms',
+      cardboard_legs:  'armor_cardboard_legs'
+    };
 
-  function hasFullCardboardSet(){
-    // check canonical ids and alias ids
-    return SET_IDS.every(id=>{
-      const ok = invCount(id) > 0;
-      if (ok) return true;
-      // see if any alias is present
-      const alias = Object.keys(ALIAS).find(k => ALIAS[k]===id);
-      return alias ? invCount(alias) > 0 : false;
-    });
-  }
-
-  function mission4AgentPopup(){
-    try{
-      IZZA?.api?.UI?.popup?.({ style:'agent', title:'Mission Completed', body:'You’ve completed mission 4.', timeout:2000 });
-      return;
-    }catch{}
-    const el = document.createElement('div');
-    el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);' +
-                       'background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;' +
-                       'border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
-    el.innerHTML = '<strong>Mission Completed</strong><div>You’ve completed mission 4.</div>';
-    (document.getElementById('gameCard')||document.body).appendChild(el);
-    setTimeout(()=>{ el.remove(); }, 2000);
-  }
-
-  function completeMission4Once(){
-    if (localStorage.getItem(M4_DONE_KEY) === '1') return;
-    try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
-    // bump inv meta & UI counter from 3 -> 4
-    try{ IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); }catch{}
-    try{ IZZA.emit?.('missions-updated', { completed: 4 }); }catch{}
-    try{ IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); }catch{}
-    mission4AgentPopup();
-  }
-
-  function maybeCompleteM4(){
-    if (hasFullCardboardSet()) completeMission4Once();
-  }
-
-  // common craft event names we’ve used
-  IZZA.on?.('gear-crafted',  ({kind,set})=>{ if (kind==='cardboard'||set==='cardboard') maybeCompleteM4(); });
-  IZZA.on?.('armor-crafted', ({kind,set})=>{ if (kind==='cardboard'||set==='cardboard') maybeCompleteM4(); });
-  IZZA.on?.('inventory-changed', ()=> maybeCompleteM4()); // safety net after UI actions
-
-  // resume safety (if the player reloads after crafting)
-  IZZA.on?.('resume', ({inventoryMeta})=>{
-    if ((inventoryMeta?.missionsCompleted|0) >= 4) {
-      try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
-    } else {
-      // try to auto-complete if the set is already owned
-      maybeCompleteM4();
+    function invCount(id){
+      try{
+        if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
+        const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+        if (inv[id]?.count) return inv[id].count|0;
+        return 0;
+      }catch{ return 0; }
     }
-  });
-})();
+
+    function hasFullCardboardSet(){
+      // check canonical ids and alias ids
+      return SET_IDS.every(id=>{
+        const ok = invCount(id) > 0;
+        if (ok) return true;
+        const alias = Object.keys(ALIAS).find(k => ALIAS[k]===id);
+        return alias ? invCount(alias) > 0 : false;
+      });
+    }
+
+    function mission4AgentPopup(){
+      try{
+        IZZA?.api?.UI?.popup?.({ style:'agent', title:'Mission Completed', body:'You’ve completed mission 4.', timeout:2000 });
+        return;
+      }catch{}
+      const el = document.createElement('div');
+      el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);' +
+                         'background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;' +
+                         'border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
+      el.innerHTML = '<strong>Mission Completed</strong><div>You’ve completed mission 4.</div>';
+      (document.getElementById('gameCard')||document.body).appendChild(el);
+      setTimeout(()=>{ el.remove(); }, 2000);
+    }
+
+    function completeMission4Once(){
+      if (localStorage.getItem(M4_DONE_KEY) === '1') return;
+      try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+      // bump inv meta & UI counter from 3 -> 4
+      try{ IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); }catch{}
+      try{ IZZA.emit?.('missions-updated', { completed: 4 }); }catch{}
+      try{ IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); }catch{}
+      mission4AgentPopup();
+    }
+
+    // ---- NEW: spend one cardboard box once the full set exists ----
+    function spendCardboardBoxOnceIfReady(){
+      if (localStorage.getItem(BOX_SPENT_KEY) === '1') return;      // already spent
+      if (!hasFullCardboardSet()) return;                            // only after set is complete
+      const inv = readInv();
+      const c = getCount(inv, 'cardboard_box') || getCount(inv, 'box_cardboard'); // legacy alias check
+      if (c > 0){
+        if (getCount(inv, 'cardboard_box') > 0) addCount(inv, 'cardboard_box', -1);
+        else                                     addCount(inv, 'box_cardboard', -1);
+        writeInv(inv);
+        try{ localStorage.setItem(BOX_SPENT_KEY, '1'); }catch{}
+        try{ IZZA.toast?.('Used 1 Cardboard Box to complete the set'); }catch{}
+      }
+    }
+
+    function maybeCompleteM4(){
+      if (hasFullCardboardSet()){
+        completeMission4Once();
+        spendCardboardBoxOnceIfReady();
+      }
+    }
+
+    // craft & inventory events
+    IZZA.on?.('gear-crafted',  ({kind,set})=>{
+      if (kind==='cardboard'||set==='cardboard'){ maybeCompleteM4(); }
+    });
+    IZZA.on?.('armor-crafted', ({kind,set})=>{
+      if (kind==='cardboard'||set==='cardboard'){ maybeCompleteM4(); }
+    });
+    IZZA.on?.('inventory-changed', ()=> maybeCompleteM4()); // safety net after UI actions
+
+    // resume safety (retroactive)
+    IZZA.on?.('resume', ({inventoryMeta})=>{
+      if ((inventoryMeta?.missionsCompleted|0) >= 4) {
+        try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+      }
+      // In either case, if the set is owned and we haven’t spent the box yet, spend it.
+      spendCardboardBoxOnceIfReady();
+    });
+  })();
+
   // ---------- hook up ----------
   IZZA.on?.('ready', (a)=>{
     api = a;
