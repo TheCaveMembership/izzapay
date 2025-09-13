@@ -1569,7 +1569,7 @@ function pathVest(ctx){
   ctx.fillRect(-12, -8, 24, 16);
   ctx.fillStyle = C_SHAD;
   ctx.fillRect(-10, -3, 20, 6);
-}function pathLegs(ctx){
+function pathLegs(ctx){
   // --- original cardboard legs ---
   ctx.fillStyle = C_BASE;
   ctx.fillRect(-7, 0, 6, 14);
@@ -1577,7 +1577,7 @@ function pathVest(ctx){
   ctx.fillStyle = C_SHAD;
   ctx.fillRect(-7, 4, 14, 3);
 
-  // --- tiny rocket jets (flames + smoke), placed higher & smaller ---
+  // --- tiny rocket jets (flames + smoke) ---
   const p = IZZA?.api?.player || {};
   const moving = !!p.moving;
   const t = ((p.animTime||0) * 0.02);
@@ -1587,22 +1587,22 @@ function pathVest(ctx){
   _CB_JET_ALPHA += (target - _CB_JET_ALPHA) * ease;
   if (_CB_JET_ALPHA <= 0.02) return;
 
-  const power  = 0.8 + 0.20 * Math.sin(t*18);   // shorter flames
-  const jitter = 0.35 * Math.sin(t*23);         // smaller smoke jitter
+  const power  = 0.8 + 0.20 * Math.sin(t*18);   // flame flicker
+  const jitter = 0.35 * Math.sin(t*23);         // smoke jitter
 
   ctx.save();
   ctx.globalAlpha *= _CB_JET_ALPHA;
 
-  // jets now mid-leg (~y=10 instead of foot y=14)
+  // jets now slightly lower (~y=12 instead of y=10)
   const feet = [-4, 4];
   feet.forEach((fx)=>{
     ctx.save();
-    ctx.translate(fx, 10);   // higher placement
-    ctx.scale(0.8, power);   // smaller flames
+    ctx.translate(fx, 12);   // moved flame lower down the leg
+    ctx.scale(0.8, power);
 
-    // gradient flame (with blue at top → hot core)
+    // gradient flame (with blue glow at top)
     const grad = ctx.createLinearGradient(0,-7, 0,6);
-    grad.addColorStop(0.00, "#6ac6ff");      // blue glow at tip
+    grad.addColorStop(0.00, "#6ac6ff");      // blue glow
     grad.addColorStop(0.30, "#fff7c4");
     grad.addColorStop(0.65, "#ffb400");
     grad.addColorStop(1.00, "rgba(255,80,0,0.82)");
@@ -1618,14 +1618,14 @@ function pathVest(ctx){
 
     ctx.restore();
 
-    // smoke trail, closer + smaller
+    // smoke trail (unchanged, still starts at y=14)
     ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
     for(let i=0;i<2;i++){
       ctx.beginPath();
       ctx.ellipse(
         fx + jitter*0.3,
-        14 + i*3,               // higher smoke start
-        1.8 + i*0.4,            // smaller puffs
+        14 + i*3,
+        1.8 + i*0.4,
         1.2 + i*0.3,
         0, 0, Math.PI*2
       );
