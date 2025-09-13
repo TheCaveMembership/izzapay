@@ -977,12 +977,17 @@ if (window.__IZZA_ISLAND_WALK__ && window._izzaIslandLand){
   const IW = window.__IZZA_ISLAND_WALK__;
   const ring = [];
 
-  // Note: clamp ring segments so they remain inside the island sand area we published
+  // authoritative island rect published in render-under
+  const ISLAND = (window.__IZZA_ARMOURY__ && window.__IZZA_ARMOURY__.island) || null;
+
+  // only fence tiles that are inside our published sand set
   const isSand = (x,y)=> window._izzaIslandLand.has(x+'|'+y);
 
   // keep fence off the outer island tiles so docking doesn't collide
-  const onIslandEdge = (x,y) =>
-    x === ISLAND.x0 || x === ISLAND.x1 || y === ISLAND.y0 || y === ISLAND.y1;
+  const onIslandEdge = (x,y) => {
+    if (!ISLAND) return false; // be safe if not ready yet
+    return (x === ISLAND.x0 || x === ISLAND.x1 || y === ISLAND.y0 || y === ISLAND.y1);
+  };
 
   // top row just above the walk area
   for (let x=IW.x0; x<=IW.x1; x++){
@@ -1005,7 +1010,7 @@ if (window.__IZZA_ISLAND_WALK__ && window._izzaIslandLand){
     if (isSand(gx1, gy1) && !onIslandEdge(gx1, gy1)) ring.push({x:gx1, y:gy1});
   }
 
-  // coalesce contiguous tiles into rects (horizontal first, then vertical singles)
+  // coalesce contiguous tiles into rects
   ring.sort((a,b)=> a.y===b.y ? a.x-b.x : a.y-b.y);
   let i=0;
   while(i<ring.length){
