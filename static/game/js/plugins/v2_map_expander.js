@@ -1466,13 +1466,13 @@ if (window.__IZZA_ISLAND_WALK__) {
 
   // Press B near the island armoury door → open modal
   function _onPressArmouryB(e){
-    const d = window.__IZZA_ARMOURY__?.door; if(!d || !IZZA?.api?.ready) return;
-    const t=IZZA.api.TILE, gx=((IZZA.api.player.x+16)/t|0), gy=((IZZA.api.player.y+16)/t|0);
-    const near = Math.abs(gx-d.x)<=1 && Math.abs(gy-d.y)<=1;
-    if(!near) return;
-    e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-    _armouryOpen();
-  }
+  const d = window.__IZZA_ARMOURY__?.door; if(!d || !IZZA?.api?.ready) return;
+  const t=IZZA.api.TILE, gx=((IZZA.api.player.x+16)/t|0), gy=((IZZA.api.player.y+16)/t|0);
+  const onDoor = (gx===d.x && gy===d.y);   // exact tile only
+  if(!onDoor) return;
+  e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+  _armouryOpen();
+}
   document.getElementById('btnB')?.addEventListener('click', _onPressArmouryB, true);
   window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressArmouryB(e); }, true);
 
