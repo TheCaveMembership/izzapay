@@ -1606,102 +1606,85 @@ function _isEquipped(entry){
   }
 
   function drawEquipped(){
-    if (!IZZA?.api?.ready) return;
+  if (!IZZA?.api?.ready) return;
 
-    const inv = (function readInv(){
-      try{
-        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
-      }catch{ return {}; }
-    })();
+  // read inventory (keeps your existing pattern)
+  const inv = (function readInv(){
+    try{
+      if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+      const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+    }catch{ return {}; }
+  })();
 
-    const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
+  const p   = IZZA.api.player;
+  const api = IZZA.api;
+  const S   = api.DRAW;
 
-    const p   = IZZA.api.player;
-    const px  = p.x;           // world top-left of 32×32 body
-    const py  = p.y;
-    const S   = IZZA.api.DRAW;
+  // screen position of player; locks pieces to the sprite (no wobble/bob drift)
+  const sx = (p.x - api.camera.x) * (S / api.TILE);
+  const sy = (p.y - api.camera.y) * (S / api.TILE);
 
-    // tiny bob only while moving (≈1 px at default scale)
-    const bobAmp = p.moving ? (S * 0.010) : 0;
-    const t      = p.animTime * 0.012;   // tie to your walk clock
-    const bobY   = bobAmp * Math.sin(t);
-    const wobX   = bobAmp * 0.6 * Math.cos(t*1.3);
+  // keep your tuned scales
+  const HELMET = { scale: 2.22 };
+  const VEST   = { scale: 2.18 };
+  const ARMS   = { scale: 2.16 };
+  const LEGS   = { scale: 2.15 };
 
-    // per-facing micro shifts so pieces hug the body properly
-    const f = p.facing || 'down';
-    const facingShift = {
-      down:  { x: 0,        y: 0 },
-      up:    { x: 0,        y: -1 },
-      left:  { x: -1.5,     y: 0 },
-      right: { x:  1.5,     y: 0 }
-    }[f];
+  // fixed per-facing pixel offsets (relative to player’s top-left on canvas)
+  const f = p.facing || 'down';
+  const OFF = {
+    down: {
+      helm: { ox: S*0.50, oy: -S*0.12 },
+      vest: { ox: S*0.50, oy:  S*0.10 },
+      arms: { ox: S*0.50, oy:  S*0.07 },
+      legs: { ox: S*0.50, oy:  S*0.38 }
+    },
+    up: {
+      helm: { ox: S*0.50, oy: -S*0.18 },
+      vest: { ox: S*0.50, oy:  S*0.08 },
+      arms: { ox: S*0.50, oy:  S*0.06 },
+      legs: { ox: S*0.50, oy:  S*0.36 }
+    },
+    left: {
+      helm: { ox: S*0.50, oy: -S*0.10 },
+      vest: { ox: S*0.50, oy:  S*0.10 },
+      arms: { ox: S*0.50, oy:  S*0.07 },
+      legs: { ox: S*0.50, oy:  S*0.38 }
+    },
+    right: {
+      helm: { ox: S*0.50, oy: -S*0.10 },
+      vest: { ox: S*0.50, oy:  S*0.10 },
+      arms: { ox: S*0.50, oy:  S*0.07 },
+      legs: { ox: S*0.50, oy:  S*0.38 }
+    }
+  };
+  const ofs = OFF[f];
 
-    // Tuned scales & offsets (in sprite pixels) so each piece sits where it should
-    // All offsets are relative to the *center* of the 32×32 sprite.
-    // === LOCKED-TO-PLAYER OVERLAY (drop-in over your block) ===
-const p   = IZZA.api.player;
-const api = IZZA.api;
-const S   = api.DRAW;
+  const ctx = document.getElementById('game')?.getContext('2d');
+  if (!ctx) return;
 
-// Player screen position (no grid snap — stays glued to sprite)
-const sx = w2sX(api, p.x);
-const sy = w2sY(api, p.y);
-
-// Keep your tuned scales
-const HELMET = { scale: 2.22 };
-const VEST   = { scale: 2.18 };
-const ARMS   = { scale: 2.16 };
-const LEGS   = { scale: 2.15 };
-
-// Fixed, per-facing pixel offsets (no wobble/bob)
-// Helmet a bit higher; Vest a bit lower; Arms unchanged; Legs centered
-const f = p.facing || 'down';
-const OFF = {
-  down: {
-    helm: { ox: S*0.50, oy: -S*0.12 },
-    vest: { ox: S*0.50, oy:  S*0.10 },
-    arms: { ox: S*0.50, oy:  S*0.07 },
-    legs: { ox: S*0.50, oy:  S*0.38 }
-  },
-  up: {
-    helm: { ox: S*0.50, oy: -S*0.18 },
-    vest: { ox: S*0.50, oy:  S*0.08 },
-    arms: { ox: S*0.50, oy:  S*0.06 },
-    legs: { ox: S*0.50, oy:  S*0.36 }
-  },
-  left: {
-    helm: { ox: S*0.50, oy: -S*0.10 },
-    vest: { ox: S*0.50, oy:  S*0.10 },
-    arms: { ox: S*0.50, oy:  S*0.07 },
-    legs: { ox: S*0.50, oy:  S*0.38 }
-  },
-  right: {
-    helm: { ox: S*0.50, oy: -S*0.10 },
-    vest: { ox: S*0.50, oy:  S*0.10 },
-    arms: { ox: S*0.50, oy:  S*0.07 },
-    legs: { ox: S*0.50, oy:  S*0.38 }
+  function drawAt(cfg, pathFn){
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    // anchor to player top-left + per-piece offset, then scale & draw
+    ctx.translate(Math.round(sx) + cfg.ox, Math.round(sy) + cfg.oy);
+    ctx.scale(cfg.scale, cfg.scale);
+    pathFn(ctx);
+    ctx.restore();
   }
-};
-const ofs = OFF[f];
 
-const ctx = document.getElementById('game')?.getContext('2d');
-if (!ctx) return;
-
-function drawAt(cfg, pathFn){
-  ctx.save();
-  ctx.translate(sx + cfg.ox, sy + cfg.oy);
-  ctx.scale(cfg.scale, cfg.scale);
-  pathFn(ctx);
-  ctx.restore();
+  // draw in body order so layering feels natural over the base sprite
+  if (_isEquipped(inv?.cardboardLegs))   drawAt({ ...LEGS,   ...ofs.legs }, pathLegs);
+  if (_isEquipped(inv?.cardboardVest))   drawAt({ ...VEST,   ...ofs.vest }, pathVest);
+  if (_isEquipped(inv?.cardboardArms))   drawAt({ ...ARMS,   ...ofs.arms }, pathArms);
+  if (_isEquipped(inv?.cardboardHelmet)) drawAt({ ...HELMET, ...ofs.helm }, pathHelmet);
 }
 
-// draw in body order so layering feels natural over the base sprite
-if (_isEquipped(inv?.cardboardLegs))   drawAt({ ...LEGS,   ...ofs.legs }, pathLegs);
-if (_isEquipped(inv?.cardboardVest))   drawAt({ ...VEST,   ...ofs.vest }, pathVest);
-if (_isEquipped(inv?.cardboardArms))   drawAt({ ...ARMS,   ...ofs.arms }, pathArms);
-if (_isEquipped(inv?.cardboardHelmet)) drawAt({ ...HELMET, ...ofs.helm }, pathHelmet);
-
+// draw on top of player each frame
+IZZA.on?.('render-post', drawEquipped);
+// inventory changes are picked up next frame
+  
+window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
 /* ==== Armoury UI (unchanged look; fixed logic & wording) ==== */
 function _ensureArmouryUI(){
   if (document.getElementById('armouryUI')) return;
