@@ -389,7 +389,48 @@
     }
     // else let other B handlers run
   }
+// ---------- Mission 4 completion on cardboard armour craft ----------
+(function(){
+  const M4_DONE_KEY = 'izzaMission4_done';
 
+  function mission4AgentPopup(){
+    try{
+      // Use your global UI popup if present
+      if (IZZA?.api?.UI?.popup) {
+        IZZA.api.UI.popup({ style:'agent', title:'Mission Completed', body:'You’ve completed mission 4.', timeout:2000 });
+        return;
+      }
+    }catch{}
+    // Lightweight fallback
+    const el = document.createElement('div');
+    el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);' +
+                       'background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;' +
+                       'border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
+    el.innerHTML = '<strong>Mission Completed</strong><div>You’ve completed mission 4.</div>';
+    (document.getElementById('gameCard')||document.body).appendChild(el);
+    setTimeout(()=>{ el.remove(); }, 2000);
+  }
+
+  function completeMission4Once(){
+    if (localStorage.getItem(M4_DONE_KEY) === '1') return;
+    try { localStorage.setItem(M4_DONE_KEY, '1'); } catch {}
+    // bump missionsCompleted meta → 4 (if your inventory meta is available)
+    try { IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); } catch {}
+    // tell the world (Mission 5 listens for this)
+    try { IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); } catch {}
+    mission4AgentPopup();
+  }
+
+  // Listen for either event name your crafting code uses
+  IZZA.on?.('gear-crafted',  ({kind})=>{ if (kind === 'cardboard') completeMission4Once(); });
+  IZZA.on?.('armor-crafted', ({kind})=>{ if (kind === 'cardboard') completeMission4Once(); });
+
+  // In case the player reloads right after crafting, re-show state on resume
+  IZZA.on?.('resume', ({ inventoryMeta })=>{
+    const m = (inventoryMeta && inventoryMeta.missionsCompleted) || 0;
+    if (m >= 4) { try { localStorage.setItem(M4_DONE_KEY, '1'); } catch {} }
+  });
+})();
   // ---------- hook up ----------
   IZZA.on?.('ready', (a)=>{
     api = a;
