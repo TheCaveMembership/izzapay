@@ -1569,8 +1569,7 @@ function pathVest(ctx){
   ctx.fillRect(-12, -8, 24, 16);
   ctx.fillStyle = C_SHAD;
   ctx.fillRect(-10, -3, 20, 6);
-}
-function pathLegs(ctx){
+}function pathLegs(ctx){
   // --- original cardboard legs ---
   ctx.fillStyle = C_BASE;
   ctx.fillRect(-7, 0, 6, 14);
@@ -1578,35 +1577,34 @@ function pathLegs(ctx){
   ctx.fillStyle = C_SHAD;
   ctx.fillRect(-7, 4, 14, 3);
 
-  // --- tiny rocket jets (SVG flames + smoke), leg-local coords ---
+  // --- tiny rocket jets (flames + smoke), placed higher & smaller ---
   const p = IZZA?.api?.player || {};
   const moving = !!p.moving;
-  const t = ((p.animTime||0) * 0.02);     // tie to your walk clock
+  const t = ((p.animTime||0) * 0.02);
 
-  // ease alpha toward 1 when moving, toward 0 when not
   const target = moving ? 1 : 0;
-  const ease   = 0.18;                    // smoothing factor (higher = snappier)
+  const ease   = 0.18;
   _CB_JET_ALPHA += (target - _CB_JET_ALPHA) * ease;
+  if (_CB_JET_ALPHA <= 0.02) return;
 
-  if (_CB_JET_ALPHA <= 0.02) return;      // nothing visible
-
-  const power  = 1 + 0.30 * Math.sin(t*20);  // subtle length wobble
-  const jitter = 0.50 * Math.sin(t*27);      // tiny side jitter for smoke
+  const power  = 0.8 + 0.20 * Math.sin(t*18);   // shorter flames
+  const jitter = 0.35 * Math.sin(t*23);         // smaller smoke jitter
 
   ctx.save();
   ctx.globalAlpha *= _CB_JET_ALPHA;
 
-  // left & right jets at bottoms of legs (feet end ~ y=14)
+  // jets now mid-leg (~y=10 instead of foot y=14)
   const feet = [-4, 4];
   feet.forEach((fx)=>{
     ctx.save();
-    ctx.translate(fx, 14);
-    ctx.scale(1, power);
+    ctx.translate(fx, 10);   // higher placement
+    ctx.scale(0.8, power);   // smaller flames
 
-    // gradient flame fill (SVG path via Path2D)
-    const grad = ctx.createLinearGradient(0,-9, 0,7);
-    grad.addColorStop(0.00, "#fff7c4");
-    grad.addColorStop(0.50, "#ffb400");
+    // gradient flame (with blue at top → hot core)
+    const grad = ctx.createLinearGradient(0,-7, 0,6);
+    grad.addColorStop(0.00, "#6ac6ff");      // blue glow at tip
+    grad.addColorStop(0.30, "#fff7c4");
+    grad.addColorStop(0.65, "#ffb400");
     grad.addColorStop(1.00, "rgba(255,80,0,0.82)");
     ctx.fillStyle = grad;
     ctx.fill(_CB_FLAME_PATH);
@@ -1614,21 +1612,21 @@ function pathLegs(ctx){
     // bright inner core
     ctx.globalAlpha *= 0.7;
     ctx.beginPath();
-    ctx.ellipse(0, -2, 1.2, 2.6, 0, 0, Math.PI*2);
+    ctx.ellipse(0, -2, 0.9, 2.0, 0, 0, Math.PI*2);
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.fill();
 
     ctx.restore();
 
-    // smoke trail puffs just below flame
+    // smoke trail, closer + smaller
     ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
-    for(let i=0;i<3;i++){
+    for(let i=0;i<2;i++){
       ctx.beginPath();
       ctx.ellipse(
-        fx + jitter*0.4,
-        18 + i*4,
-        2.2 + i*0.5,
-        1.6 + i*0.4,
+        fx + jitter*0.3,
+        14 + i*3,               // higher smoke start
+        1.8 + i*0.4,            // smaller puffs
+        1.2 + i*0.3,
         0, 0, Math.PI*2
       );
       ctx.fillStyle = "#d0d7e1";
