@@ -1,98 +1,90 @@
-// safety_island_and_rescue.js
-// - Invisible collision border around island (prevents falling off edges)
-// - Rescue if player ends up in invalid water
-// - Dock/embark at island only when within 1 tile of perimeter
+// v1.1 — Island edge clamp + post-physics water guard (surgical, no other changes)
+// Purpose:
+//  - Prevent "one more step → fall under map" at island edges
+//  - Do NOT change rendering or other game logic
+//  - Runs as a last-line safety net after your existing physics
 
 (function(){
-  const RESCUE_KEY = 'izzaRescueLast'; // timestamp throttle
-  let api = null;
+  const TIER_KEY = 'izzaMapTier';
+  const isTier2 = ()=> localStorage.getItem(TIER_KEY) === '2';
 
-  // ---- build island border cells ----
-  function computeIslandBorder(){
-    const ISLAND = window.__IZZA_ARMOURY__?.island;
-    if (!ISLAND) return new Set();
-
-    const set = new Set();
-    for (let y=ISLAND.y0-1; y<=ISLAND.y1+1; y++){
-      set.add((ISLAND.x0-1)+'|'+y);
-      set.add((ISLAND.x1+1)+'|'+y);
-    }
-    for (let x=ISLAND.x0-1; x<=ISLAND.x1+1; x++){
-      set.add(x+'|'+(ISLAND.y0-1));
-      set.add(x+'|'+(ISLAND.y1+1));
-    }
-    return set;
+  // Minimal geometry mirrors (same math as expander/boat)
+  function unlockedRect(t){ return (t!=='2') ? {x0:18,y0:18,x1:72,y1:42} : {x0:10,y0:12,x1:80,y1:50}; }
+  function anchors(api){
+    const tier = localStorage.getItem(TIER_KEY)||'1';
+    return { un: unlockedRect(tier) };
+  }
+  function lakeRects(a){
+    const LAKE  = { x0:a.un.x1-14, y0:a.un.y0+23, x1:a.un.x1, y1:a.un.y1 };
+    const BEACH_X = LAKE.x0 - 1;
+    return { LAKE, BEACH_X };
   }
 
-  // ---- mark border each frame ----
-  function publishBorder(){
-    if (localStorage.getItem('izzaMapTier')!=='2'){ window._izzaIslandBorder=null; return; }
-    window._izzaIslandBorder = computeIslandBorder();
+  // City dock tiles (match boat plugin widened bands)
+  function dockCells(){
+    try{
+      const api = IZZA.api; if(!api) return new Set();
+      const {un} = anchors(api);
+      const LAKE  = { x0: un.x1-14, y0: un.y0+23, x1: un.x1,   y1: un.y1 };
+      const DOCKS = [ { x0: LAKE.x0, y: LAKE.y0+4, len:3 }, { x0: LAKE.x0, y: LAKE.y0+12, len:4 } ];
+      const s=new Set();
+      DOCKS.forEach(d=>{
+        for(let i=0;i<d.len;i++){
+          const gx=d.x0+i;
+          s.add(gx+'|'+d.y); s.add(gx+'|'+(d.y-1)); s.add(gx+'|'+(d.y-2));
+        }
+      });
+      return s;
+    }catch{ return new Set(); }
   }
 
-  // ---- rescue logic ----
-  function rescueIfNeeded(){
-    if (!api?.ready) return;
-    const gx=((api.player.x+16)/api.TILE|0);
-    const gy=((api.player.y+16)/api.TILE|0);
-
-    const ISLAND = window.__IZZA_ARMOURY__?.island;
-    if (!ISLAND) return;
-
-    const inside = gx>=ISLAND.x0 && gx<=ISLAND.x1 && gy>=ISLAND.y0 && gy<=ISLAND.y1;
-    const border = window._izzaIslandBorder;
-    if (inside || (border && border.has(gx+'|'+gy))) return;
-
-    // player slipped into bad water → rescue to island sand
-    const now = Date.now();
-    const last = +(localStorage.getItem(RESCUE_KEY)||0);
-    if (now - last < 2000) return; // throttle
-
-    localStorage.setItem(RESCUE_KEY, now.toString());
-    const midX = (ISLAND.x0+ISLAND.x1)>>1;
-    const midY = (ISLAND.y0+ISLAND.y1)>>1;
-    api.player.x = midX*api.TILE;
-    api.player.y = midY*api.TILE;
-    IZZA.toast?.("You were rescued back onto the island!");
+  // Water test that respects island land + docks (authoritative island from expander/mission)
+  function tileIsWater(gx,gy){
+    try{
+      const api=IZZA.api; const {LAKE}=lakeRects(anchors(api));
+      const inside = gx>=LAKE.x0 && gx<=LAKE.x1 && gy>=LAKE.y0 && gy<=LAKE.y1;
+      if(!inside) return false;
+      if (window._izzaIslandLand && window._izzaIslandLand.has(gx+'|'+gy)) return false; // island sand is land
+      if (dockCells().has(gx+'|'+gy)) return false;                                      // city docks are walkable
+      return true;
+    }catch{ return false; }
   }
 
-  // ---- override boat docking radius ----
-  function nearestDockPair(gx,gy){
-    const ISLAND = window.__IZZA_ARMOURY__?.island;
-    const RAW    = window.__IZZA_ISLAND_DOCK__;
-    if (!ISLAND || !RAW) return null;
+  function anyCornerInWater(p){
+    try{
+      const api=IZZA.api, t=api.TILE;
+      const c = [
+        {x:((p.x+1)/t)|0,  y:((p.y+1)/t)|0},
+        {x:((p.x+31)/t)|0, y:((p.y+1)/t)|0},
+        {x:((p.x+1)/t)|0,  y:((p.y+31)/t)|0},
+        {x:((p.x+31)/t)|0, y:((p.y+31)/t)|0}
+      ];
+      return c.some(k => tileIsWater(k.x,k.y));
+    }catch{ return false; }
+  }
 
-    const toArr = v => Array.isArray(v)?v:[v];
-    const waters = toArr(RAW.water);
-    const sands  = toArr(RAW.sand);
+  // If we somehow end the frame overlapping lake water (not in boat), snap out safely.
+  function rescueFromEdge(){
+    if(!IZZA?.api?.ready || !isTier2()) return;
+    if (window._izzaBoatActive) return; // ignore while boating
 
-    // within 1 tile only
-    for (const w of waters){
-      if (Math.abs(gx-w.x)+Math.abs(gy-w.y) <= 1){
-        const sx = (w.x>ISLAND.x1?ISLAND.x1:w.x<ISLAND.x0?ISLAND.x0:w.x);
-        const sy = (w.y>ISLAND.y1?ISLAND.y1:w.y<ISLAND.y0?ISLAND.y0:w.y);
-        return { water:w, sand:{x:sx,y:sy} };
-      }
+    const p = IZZA.api.player;
+    if (!anyCornerInWater(p)) return;
+
+    // Try one-tile step toward nearest island/beach tile
+    const t = IZZA.api.TILE, gx=((p.x+16)/t|0), gy=((p.y+16)/t|0);
+    const cand = [
+      {x:gx+1,y:gy}, {x:gx-1,y:gy}, {x:gx,y:gy+1}, {x:gx,y:gy-1},
+      {x:gx+1,y:gy+1}, {x:gx-1,y:gy-1}, {x:gx+1,y:gy-1}, {x:gx-1,y:gy+1}
+    ];
+    const ok = c => !tileIsWater(c.x,c.y);
+    const to = cand.find(ok);
+    if(to){
+      p.x = to.x * t + 1;
+      p.y = to.y * t + 1;
     }
-    for (const s of sands){
-      if (Math.abs(gx-s.x)+Math.abs(gy-s.y) <= 1){
-        const wx = (s.x===ISLAND.x0? s.x-1 : (s.x===ISLAND.x1? s.x+1 : s.x));
-        const wy = (s.y===ISLAND.y0? s.y-1 : (s.y===ISLAND.y1? s.y+1 : s.y));
-        return { water:{x:wx,y:wy}, sand:s };
-      }
-    }
-    return null;
   }
-  window._izzaNearestDockPair = nearestDockPair;
 
-  // ---- hooks ----
-  IZZA.on('ready', a=>{
-    api=a;
-    publishBorder();
-    IZZA.on('update-pre', ()=>{
-      publishBorder();
-      rescueIfNeeded();
-    });
-  });
-
+  // Run AFTER everyone else
+  IZZA.on('update-post', rescueFromEdge);
 })();
