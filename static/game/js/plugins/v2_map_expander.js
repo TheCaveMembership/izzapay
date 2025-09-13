@@ -1639,10 +1639,29 @@ function _isEquipped(entry){
 
     // Tuned scales & offsets (in sprite pixels) so each piece sits where it should
     // All offsets are relative to the *center* of the 32×32 sprite.
-    const HELMET = { scale: 2.22, ox: (facingShift.x + wobX)*1.0, oy: -10 + bobY - (f==='up'?2:0) };
-    const VEST   = { scale: 2.18, ox: facingShift.x + wobX,       oy:  -1 + bobY };
-    const ARMS   = { scale: 2.16, ox: facingShift.x*1.3 + wobX,   oy:   2 + bobY };
-    const LEGS   = { scale: 2.15, ox: facingShift.x*0.6 + wobX,   oy:  10 + bobY };
+    const HELMET = { 
+  scale: 2.22, 
+  ox: (facingShift.x + wobX)*1.0, 
+  oy: -14 + bobY - (f==='up'?2:0)   // moved up a little (was -10)
+};
+
+const VEST = { 
+  scale: 2.18, 
+  ox: facingShift.x + wobX,       
+  oy:  3 + bobY                   // moved down a little (was -1)
+};
+
+const ARMS = { 
+  scale: 2.16, 
+  ox: facingShift.x*1.3 + wobX,   
+  oy:  2 + bobY                   // unchanged
+};
+
+const LEGS = { 
+  scale: 2.15, 
+  ox: facingShift.x*1.2 + wobX,   // widened outward (was *0.6)
+  oy:  10 + bobY 
+};
 
     const ctx = document.getElementById('game')?.getContext('2d');
     if (!ctx) return;
