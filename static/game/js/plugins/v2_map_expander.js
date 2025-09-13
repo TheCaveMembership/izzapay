@@ -1642,23 +1642,23 @@ function _isEquipped(entry){
   // Helmet up a bit; Vest down a bit; Arms unchanged; Legs placement kept,
   // (leg "widening" is handled inside pathLegs; this call just positions the piece)
   const HELMET = {
-    scale: 2.22,
-    ox: (facingShift.x + wobX)*1.0,
+    scale: 2.80,
+    ox: (facingShift.x + wobX)*0.05,
     oy: -14 + bobY - (f==='up'?2:0)   // moved up from -10
   };
   const VEST = {
-    scale: 2.18,
+    scale: 2.4,
     ox: facingShift.x + wobX,
     oy:  3 + bobY                    // moved down from -1
   };
   const ARMS = {
-    scale: 2.16,
-    ox: facingShift.x*1.3 + wobX,
+    scale: 2.60,
+    ox: facingShift.x*0.3 + wobX,
     oy:  2 + bobY                    // unchanged
   };
   const LEGS = {
-    scale: 2.15,
-    ox: facingShift.x*1.2 + wobX,    // subtle outward bias; shape widening is in pathLegs
+    scale: 2.45,
+    ox: facingShift.x*0.2 + wobX,    // subtle outward bias; shape widening is in pathLegs
     oy: 10 + bobY
   };
 
