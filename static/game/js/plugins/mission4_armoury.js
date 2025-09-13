@@ -1,476 +1,480 @@
-/* mission5_halloween.plugin.js
-   IZZA Mission 5 — “Night of the Lantern”
-   - Robustly detects M4 completion by inventory (cardboard Helmet/Vest/Arms/Legs)
-   - Bumps localStorage izzaMissions to 4 and shows agent popup (over/after armoury)
-   - Places jack-o’-lantern at HQ door +3E (3× box size) with HA HA HA streamer
-   - Interact with [B] to start a 5m night mission; pumpkins spawn at exact offsets
-   - Werewolf spawns every 30s while moving at night; A to fight (hooks bus if present)
-   - Craft Pumpkin Armour (4 pieces) from 1 jack-o’-lantern + 3 pumpkin pieces
-   - Set bonus: 20% damage reduction; Legs grant fast run (near car speed)
-   - All art authored as SVG then rasterized for canvas (keeps SVG source inline)
-*/
+// mission4_armoury.js — Mission 4 minimal (NO shop UI)
+// - Draws a cardboard box near HQ.
+// - Press B ON the box to pick it up (confirm), updates inventory.
+// - Does NOT add any armoury/shop items or override island docking.
+// - Plays nice with v2_map_expander.js (which handles island door & docking).
+
 (function(){
-  if (!window.IZZA) window.IZZA = {};
-  if (typeof IZZA.on !== 'function') IZZA.on = function(){};
-  if (typeof IZZA.emit !== 'function') IZZA.emit = function(){};
+  const BOX_TAKEN_KEY = 'izzaBoxTaken';
+  const M4_KEY        = 'izzaMission4'; // 'started' / 'not-started'
 
   let api = null;
-  let TILE = 60;
 
-  // --- Early hooks so M5 works even if 'ready' never fires immediately
-  try { IZZA.on('render-under', renderUnder); IZZA.on('update-post', onUpdatePost); } catch {}
-
-  // When Mission 4 completes, place the jack right away (listen on both buses)
-  try { IZZA.on('mission-complete', p => { if ((p?.id|0) === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0); }); } catch {}
-  window.addEventListener('mission-complete', e => {
-    const id = (e?.detail?.id|0) || 0;
-    if (id === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
-  });
-
-  // If we load into a save that's already at 4, ensure the jack exists
-  setTimeout(() => { if (missionsIsFour()) ensureJack(); }, 0);
-
-  // ---------- Core helpers (align with izza_core_v3.js) ----------
-  function _lsGet(k, d){ try{ const v = localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
-  function _lsSet(k, v){ try{ localStorage.setItem(k, v); }catch{} }
-
-  function _getInv(){
+  // ---------- helpers: inventory (wallet untouched) ----------
+  function readInv(){
     try{
       if (IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-      const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+      const raw = localStorage.getItem('izzaInventory');
+      return raw ? JSON.parse(raw) : {};
     }catch{ return {}; }
   }
-  function _setInv(inv){
+  function writeInv(inv){
     try{
       if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
-      else localStorage.setItem('izzaInventory', JSON.stringify(inv||{}));
-      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+      try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
     }catch{}
   }
-  function _inc(inv, key, n=1){ inv[key] = inv[key]||{count:0}; inv[key].count=(inv[key].count|0)+n; return inv; }
-  function _dec(inv, key, n=1){
-    if(!inv[key]) return inv;
-    inv[key].count = Math.max(0,(inv[key].count|0)-n);
-    if((inv[key].count|0)<=0) delete inv[key];
-    return inv;
+  function addCount(inv, key, n){
+    inv[key] = inv[key] || { count: 0 };
+    inv[key].count = (inv[key].count|0) + n;
+    if (inv[key].count <= 0) delete inv[key];
   }
 
-  function _missions(){ return parseInt(_lsGet('izzaMissions', '0'), 10) || 0; }
-  function _setMissions(n){
-    const cur=_missions();
-    if(n>cur) _lsSet('izzaMissions', String(n));
-    try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-  }
+  function setM4(v){ try{ localStorage.setItem(M4_KEY, v); }catch{} }
 
-  // --- read missionsCompleted EXACTLY like you asked: prefer inventory meta, fall back to localStorage
-  function missionsCompletedMeta(){
-    try{
-      if (IZZA?.api?.inventory?.getMeta){
-        const m = IZZA.api.inventory.getMeta('missionsCompleted');
-        const n = (m|0);
-        if (Number.isFinite(n)) return n;
-      }
-    }catch{}
-    return _missions();
-  }
-  function missionsIsFour(){ return missionsCompletedMeta() === 4; }
-
-  // ---------- HQ door grid (mirror mission4 approach) ----------
+  // ---------- HQ door → box position ----------
   function hqDoorGrid(){
-    const t = api?.TILE || TILE;
-    const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
+    const t = api.TILE;
+    const d = api.doorSpawn || { x: api.player?.x||0, y: api.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
-  function jackLanternGrid(){
+  // same offsets as your original mission script
+  function cardboardBoxGrid(){
     const d = hqDoorGrid();
-    // NEW: exactly 3 tiles EAST (no N/S change)
-    return { x: d.gx + 3, y: d.gy };
+    return { x: d.gx + 3, y: d.gy + 10 };
   }
 
-  // ---------- world→screen (canvas) ----------
+  // ---------- fireworks: gold/silver with neon bottoms ----------
   function worldToScreen(wx, wy){
-    const S = api?.DRAW || TILE, T = api?.TILE || TILE;
-    const sx = (wx - (api?.camera?.x||0)) * (S/T);
-    const sy = (wy - (api?.camera?.y||0)) * (S/T);
+    const S = api.DRAW, T = api.TILE;
+    const sx = (wx - api.camera.x) * (S/T);
+    const sy = (wy - api.camera.y) * (S/T);
     return { sx, sy };
   }
 
-  // ---------- tiny agent popup ----------
-  function agentPopup(title, body, t=2000){
-    if (api?.UI?.popup) { api.UI.popup({ style:'agent', title, body, timeout:t }); return; }
-    const el=document.createElement('div');
-    el.style.cssText='position:absolute;left:50%;top:18%;transform:translateX(-50%);background:rgba(10,12,20,.92);color:#b6ffec;padding:14px 18px;border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
-    el.innerHTML=`<div style="font-weight:800">${title}</div><div>${body||''}</div>`;
-    (document.getElementById('gameCard')||document.body).appendChild(el);
-    setTimeout(()=>{ el.remove(); }, t);
-  }
-
-  // ---------- SVG → Image cache (so we can draw in render-under) ----------
-  const _imgCache = new Map();
-  function svgToImage(svg, pxW, pxH){
-    const key=svg+'|'+pxW+'x'+pxH;
-    if(_imgCache.has(key)) return _imgCache.get(key);
-    const url='data:image/svg+xml;utf8,'+encodeURIComponent(svg);
-    const img=new Image(); img.width=pxW; img.height=pxH; img.src=url;
-    _imgCache.set(key, img);
-    return img;
-  }
-
-  // ---------- Art (SVG) ----------
-  function svgJack(){
-    return `
-<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
- <defs>
-   <radialGradient id="g" cx="50%" cy="50%" r="60%">
-     <stop offset="0%"   stop-color="#ffb347"/>
-     <stop offset="60%"  stop-color="#ff7b00"/>
-     <stop offset="100%" stop-color="#792900"/>
-   </radialGradient>
-   <linearGradient id="stem" x1="0" y1="0" x2="0" y2="1">
-     <stop offset="0%" stop-color="#3b7a2a"/><stop offset="100%" stop-color="#1f4419"/>
-   </linearGradient>
-   <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <ellipse cx="100" cy="110" rx="78" ry="70" fill="url(#g)" stroke="#552200" stroke-width="6"/>
-  <rect x="92" y="30" width="16" height="28" rx="6" fill="url(#stem)"/>
-  <polygon points="60,90 85,110 35,110" fill="#ffd23f" filter="url(#glow)"/>
-  <polygon points="140,90 165,110 115,110" fill="#ffd23f" filter="url(#glow)"/>
-  <path d="M45 140 Q100 175 155 140 Q140 150 100 155 Q60 150 45 140 Z" fill="#ffd23f" filter="url(#glow)"/>
-  <g id="haha" opacity="0.95">
-    <text x="100" y="80" text-anchor="middle" font-size="22" fill="#ffd23f" style="font-family:monospace">HA HA HA</text>
-  </g>
-  <animate xlink:href="#haha" attributeName="transform" type="translate" from="0,0" to="0,-40" dur="2.5s" repeatCount="indefinite"/>
-  <animate xlink:href="#haha" attributeName="opacity" from="0.15" to="1" dur="0.25s" begin="0s" fill="freeze"/>
-</svg>`;
-  }
-  function svgPumpkinSmall(){
-    return `
-<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
- <defs><radialGradient id="gp" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#ffb347"/><stop offset="60%" stop-color="#ff7b00"/><stop offset="100%" stop-color="#7a2f00"/></radialGradient></defs>
- <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#552200" stroke-width="4"/>
- <rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
-</svg>`;
-  }
-
-  // ---------- Mission state ----------
-  let jackGrid=null, jackImg=null, jackPlaced=false;
-  let pumpkins = []; // [{tx,ty, collected:false, img}]
-  let mission5Active=false, mission5Start=0, M5_MS=5*60*1000;
-  let nightOn=false, werewolfNext=0, lastPos=null;
-
-  // ---------- Placement (M4-style grid logic) ----------
-  function ensureJack(){
-    if (jackPlaced) return;
-    jackGrid = jackLanternGrid();
-    jackImg  = svgToImage(svgJack(), TILE*3.0, TILE*3.0);
-    jackPlaced=true;
-    if(!ensureJack._t){ ensureJack._t=setInterval(()=>{ try{ IZZA.emit('sfx',{kind:'jack-HA',vol:0.6}); }catch{} }, 2500); }
-  }
-  function clearJack(){
-    if(ensureJack._t){ clearInterval(ensureJack._t); ensureJack._t=null; }
-    jackPlaced=false; jackGrid=null; jackImg=null;
-  }
-
-  function computePumpkinTiles(){
-    const d=hqDoorGrid();
-    const p1={ tx:d.gx-15, ty:d.gy+10 };
-    const p2={ tx:p1.tx-20, ty:p1.ty+13 };
-    const p3={ tx:d.gx+8,  ty:d.gy-13 };
-    return [p1,p2,p3];
-  }
-  function placePumpkins(){
-    pumpkins.length=0;
-    const tiles=computePumpkinTiles();
-    for(const t of tiles){
-      pumpkins.push({ tx:t.tx, ty:t.ty, collected:false, img: svgToImage(svgPumpkinSmall(), TILE*1.6, TILE*1.6) });
-    }
-  }
-  function clearPumpkins(){ pumpkins.length=0; }
-
-  // ---------- Night overlay ----------
-  function setNight(on){
-    if(on===nightOn) return;
-    nightOn=on;
-    const id='m5-night-overlay';
-    let el=document.getElementById(id);
-    if(on){
-      if(!el){
-        el=document.createElement('div');
-        el.id=id;
-        el.style.cssText='position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.25) 0%, rgba(0,0,0,.8) 70%);mix-blend-mode:multiply;z-index:5000';
-        (document.getElementById('gameCard')||document.body).appendChild(el);
-        const blue=document.createElement('div');
-        blue.id=id+'-b';
-        blue.style.cssText='position:absolute;inset:0;pointer-events:none;background:rgba(30,60,120,.15);mix-blend-mode:screen;z-index:5001';
-        el.appendChild(blue);
-      }
-    }else{
-      el?.remove();
-    }
-  }
-
-  // ---------- Render (camera-relative; M4-style; Tier 2 gate) ----------
-  function renderUnder(){
+  function spawnFireworksAt(sx, sy){
     try{
-      if (!api?.ready) return;
-      if (localStorage.getItem('izzaMapTier') !== '2') return;
+      // overlay canvas (raise z-index to beat floating chips)
+      let canvas = document.createElement('canvas');
+      const game = document.getElementById('game');
+      canvas.width  = game.width;
+      canvas.height = game.height;
+      canvas.style.cssText = 'position:absolute;inset:0;margin:auto;z-index:10000;pointer-events:none;';
+      canvas.id = 'm4FireworksOverlay';
+      document.body.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
 
-      const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
-      const S=api.DRAW, t=api.TILE||TILE;
+      // particle system (life × ~1.8 for longer, plus longer run window)
+      const particles = [];
+      const bursts = 3;
+      const GOLD = ['#ffd23f','#ffcc33','#ffe680'];
+      const SILV = ['#cfd8dc','#e0e0e0','#f5f7f9'];
+      const NEON = ['#00e5ff','#ff00ff','#39ff14'];
 
-      // draw jack only when missionsCompleted == 4
-      if (missionsIsFour() && jackPlaced && jackGrid && jackImg && jackImg.complete){
-        // center like M4’s offset (+S*0.5, +S*0.6)
-        const wx = jackGrid.x * t, wy = jackGrid.y * t;
-        const scr = worldToScreen(wx, wy);
-        const sx = scr.sx + S*0.5;
-        const sy = scr.sy + S*0.6;
-
-        ctx.save();
-        // jack is 3× tile; draw centered on (sx, sy)
-        const w = (t*3)*(S/t), h = w;
-        ctx.drawImage(jackImg, sx - w/2, sy - h/2, w, h);
-        ctx.restore();
-      }
-
-      // pumpkins
-      if (pumpkins.length){
-        for(const p of pumpkins){
-          if(p.collected || !p.img || !p.img.complete) continue;
-          const wx = p.tx * t, wy = p.ty * t;
-          const scr = worldToScreen(wx, wy);
-          const sx = scr.sx + S*0.5;
-          const sy = scr.sy + S*0.58;
-          const w = (t*1.6)*(S/t), h = w;
-          ctx.save();
-          ctx.drawImage(p.img, sx - w/2, sy - h/2, w, h);
-          ctx.restore();
+      function addBurst(cx, cy, n, speed, neonBottom){
+        for(let i=0;i<n;i++){
+          const ang = (Math.PI*2)*(i/n) + Math.random()*0.3;
+          const v   = speed*(0.7 + Math.random()*0.6);
+          const topCol = Math.random() < 0.7 ? GOLD[(Math.random()*GOLD.length)|0] : SILV[(Math.random()*SILV.length)|0];
+          const neonCol= NEON[(Math.random()*NEON.length)|0];
+          particles.push({
+            x:cx, y:cy,
+            vx:Math.cos(ang)*v, vy:Math.sin(ang)*v - 0.45,
+            life: 110 + (Math.random()*30|0),   // ↑ was ~60–80
+            age: 0,
+            r: 1.6 + Math.random()*1.4,
+            colTop: topCol,
+            colNeon: neonBottom ? neonCol : topCol,
+          });
         }
       }
+      function addSpray(cx, cy, dir, n, speed){
+        for(let i=0;i<n;i++){
+          const a = dir + (Math.random()-0.5)*0.4;
+          const v = speed*(0.6+Math.random()*0.8);
+          particles.push({
+            x:cx, y:cy,
+            vx:Math.cos(a)*v, vy:Math.sin(a)*v - 0.35,
+            life: 90 + (Math.random()*30|0),    // ↑ was ~45–60
+            age: 0,
+            r: 1.2 + Math.random()*1.0,
+            colTop: GOLD[(Math.random()*GOLD.length)|0],
+            colNeon: NEON[(Math.random()*NEON.length)|0],
+          });
+        }
+      }
+
+      // stronger pulsing skull watermark behind particles
+      const skullPath = new Path2D("M16 3c-3.9 0-7 3.1-7 7v2c0 2 1 3 2 4v4c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-2h4v2c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-4c1-1 2-2 2-4V10c0-3.9-3.1-7-7-7Zm-3 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm6 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z");
+
+      addBurst(sx, sy, 80, 5.0, true);
+      addBurst(sx+12, sy-8, 60, 4.4, true);
+      addBurst(sx-14, sy-12, 50, 4.0, false);
+      addSpray(sx, sy+6, Math.PI*0.53, 50, 5.5);
+      addSpray(sx, sy+6, Math.PI*0.47 + Math.PI, 50, 5.5);
+
+      let frame = 0;
+      const maxFrames = 220; // ↑ doubled (~4s at ~55–60fps)
+      (function tick(){
+        frame++;
+        ctx.clearRect(0,0,canvas.width, canvas.height);
+
+        // mystical backdrop (more visible)
+        ctx.save();
+        const rg = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(canvas.width, canvas.height)*0.55);
+        rg.addColorStop(0, 'rgba(255,215,64,0.28)');  // ↑ from 0.18
+        rg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = rg;
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+
+        // pulsing skull behind the burst (brighter & bigger)
+        ctx.globalAlpha = 0.18 + 0.10*Math.sin(frame*0.18);
+        ctx.translate(sx, sy);
+        ctx.scale(3.6, 3.6);                        // ↑ scale
+        ctx.fillStyle = 'rgba(200,200,220,0.55)';   // ↑ opacity
+        ctx.fill(skullPath);
+        ctx.restore();
+
+        // particles
+        for (let i=particles.length-1; i>=0; i--){
+          const p = particles[i];
+          p.age++;
+          if (p.age >= p.life){ particles.splice(i,1); continue; }
+          p.vy += 0.055;
+          p.vx *= 0.995;
+          p.x  += p.vx;
+          p.y  += p.vy;
+
+          const k = p.age / p.life;
+          const useNeon = (k > 0.65); // neon later in life
+          const col = useNeon ? p.colNeon : p.colTop;
+
+          // gold glow (keep mostly gold/silver look)
+          if (!useNeon){
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r*2.8, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(255,230,120,0.24)';
+            ctx.fill();
+          }
+
+          // core
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+          ctx.fillStyle = col;
+          ctx.fill();
+
+          // graffiti spark line
+          if ((p.age % 9) === 0){
+            ctx.save();
+            ctx.globalAlpha = 0.4;
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x - p.vx*2.4, p.y - p.vy*2.4);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        if (frame < maxFrames && particles.length){
+          requestAnimationFrame(tick);
+        } else {
+          // slower fade
+          let fade = 0.35;
+          (function fadeOut(){
+            fade -= 0.03;
+            if (fade <= 0){ canvas.remove(); return; }
+            ctx.fillStyle = `rgba(0,0,0,0.04)`;
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+            requestAnimationFrame(fadeOut);
+          })();
+        }
+      })();
     }catch{}
   }
 
-  // ---------- Input (B) ----------
-  function isNearGrid(gx,gy, rPx){
-    const t=api?.TILE||TILE;
-    const px = (api?.player?.x||0)+16, py=(api?.player?.y||0)+16;
-    const cx = gx*t + t/2, cy = gy*t + t/2;
-    return Math.hypot(px-cx, py-cy) <= (rPx||t*0.9);
-  }
+  // ---------- tiny, safe confirm (custom popup with wood title; darker navy body) ----------
+  function confirmPickup(cb){
+    try{
+      // wood grain SVG data-uri for title text fill (dark driftwood)
+      const woodTex = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
+          <defs>
+            <linearGradient id="g" x1="0" x2="1">
+              <stop offset="0" stop-color="#3b2a1a"/>
+              <stop offset="0.5" stop-color="#5a4330"/>
+              <stop offset="1" stop-color="#2a1a10"/>
+            </linearGradient>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#g)"/>
+          <g opacity="0.45" stroke="#1a110b" stroke-width="2" fill="none">
+            <path d="M0,18 C30,8 60,26 120,14"/>
+            <path d="M0,42 C25,30 70,48 120,34"/>
+            <path d="M10,10 L20,20 M40,5 L44,15 M80,25 L92,40"/>
+          </g>
+        </svg>
+      `);
 
-  function onB(e){
-    if(!api?.ready) return;
+      // subtle repeating skull wallpaper (more visible)
+      const skullBG = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
+          <g opacity="0.12" fill="#cfd8dc">
+            <path d="M40 10c-9 0-16 7-16 16v5c0 5 3 7 6 9v8c0 1 .8 2 2 2h2c1 0 2-.9 2-2v-4h8v4c0 1 .9 2 2 2h2c1 0 2-.9 2-2v-8c3-2 6-4 6-9v-5c0-9-7-16-16-16zM30 28a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm20 0a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+          </g>
+        </svg>
+      `);
 
-    // on jack → show intro (only when visible state is correct)
-    if (missionsIsFour() && jackPlaced && jackGrid && isNearGrid(jackGrid.x, jackGrid.y, (api?.TILE||TILE)*0.9)){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
-      showNightIntro();
+      let wrap = document.createElement('div');
+      wrap.id = 'm4BoxConfirm';
+      wrap.style.cssText =
+        'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;' +
+        'background:rgba(0,0,0,.55);z-index:10000;';
+
+      const card = document.createElement('div');
+      card.style.cssText =
+        'position:relative;min-width:320px;max-width:560px;padding:18px 16px 14px;border-radius:14px;' +
+        'border:2px solid #6a4c1e;box-shadow:0 16px 44px rgba(0,0,0,.6), inset 0 0 40px rgba(255,215,64,.15);' +
+        'color:#0c0a08;overflow:hidden;' +
+        `background:
+           radial-gradient(120% 90% at -10% -10%, rgba(255,215,64,.20), rgba(0,0,0,0) 60%),
+           radial-gradient(130% 80% at 110% 110%, rgba(192,192,192,.22), rgba(0,0,0,0) 60%),
+           linear-gradient(135deg, #ffe7a4 0%, #ffd56a 35%, #f2b84a 60%, #e0a83f 100%),
+           url("data:image/svg+xml,${skullBG}") repeat`;
+
+      const spray = document.createElement('div');
+      spray.style.cssText =
+        'position:absolute;left:-10%;right:-10%;top:54px;height:14px;' +
+        'background:linear-gradient(90deg, rgba(0,229,255,.35), rgba(255,0,255,.35), rgba(57,255,20,.35));' +
+        'filter:blur(3px);transform:skewX(-12deg);opacity:.7;';
+      card.appendChild(spray);
+
+      // ---- Title (dark wood grain) ----
+      const title = document.createElement('div');
+      title.style.cssText =
+        'font-size:22px;font-weight:900;letter-spacing:1px;margin-bottom:8px;' +
+        'transform:skewX(-2deg) rotate(-0.4deg);' +
+        `background-image:url("data:image/svg+xml,${woodTex}"); -webkit-background-clip:text; background-clip:text; color:transparent;` +
+        'text-shadow:0 1px 0 rgba(0,0,0,0.65), 0 2px 0 rgba(0,0,0,0.45);';
+      title.textContent = 'A cardboard box?';
+
+      // ---- Body (navy, darker; stands out more) ----
+      const rhyme = document.createElement('div');
+      rhyme.style.cssText =
+        'margin:10px 0 14px;font-weight:900;line-height:1.35;' +
+        'color:#0b1935;' + // dark navy
+        'text-shadow:0 1px 0 rgba(255,255,255,0.06), 0 2px 0 rgba(0,0,0,0.45);';
+      rhyme.innerHTML =
+        `<div style="transform:rotate(-0.4deg)">
+          Hmmm… should I grab it or walk away?<br>
+          Feels simple, but something about this choice hits different 📦 🤔 💭<br>
+          <br>
+          Could change the path I'm on, could shape what's next. There are some boats by the docks? I wonder what they could lead to? 🏝️<br><br>
+          <strong>Take it… or leave it? ☠️ ⚓️</strong>
+        </div>`;
+
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;align-items:center;';
+
+      const noBtn = document.createElement('button');
+      noBtn.textContent = 'Leave it';
+      noBtn.style.cssText =
+        'background:#263447;color:#cfe3ff;border:0;border-radius:8px;padding:8px 12px;font-weight:800;cursor:pointer;';
+
+      const yesBtn = document.createElement('button');
+      yesBtn.textContent = 'Take the Box';
+      yesBtn.style.cssText =
+        'background:#1f6feb;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:900;cursor:pointer;' +
+        'box-shadow:0 0 0 0 rgba(255,210,63,.0);';
+      let pulse = 0;
+      (function pulseBtn(){
+        if (!wrap.parentNode) return;
+        pulse += 0.12;
+        const glow = (Math.sin(pulse)*0.5+0.5)*18 + 12;
+        yesBtn.style.boxShadow = `0 0 ${glow}px ${Math.round(glow*0.06)}px rgba(255,210,63,.7)`;
+        requestAnimationFrame(pulseBtn);
+      })();
+
+      btnRow.appendChild(noBtn);
+      btnRow.appendChild(yesBtn);
+
+      card.appendChild(title);
+      card.appendChild(rhyme);
+      card.appendChild(btnRow);
+      wrap.appendChild(card);
+      document.body.appendChild(wrap);
+
+      function close(){ wrap.remove(); }
+
+      noBtn.addEventListener('click', close, {capture:true});
+      wrap.addEventListener('click', (e)=>{ if(e.target===wrap) close(); }, {capture:true});
+      window.addEventListener('keydown', (e)=>{ if((e.key||'').toLowerCase()==='escape') close(); }, {capture:true});
+
+      yesBtn.addEventListener('click', ()=>{
+        try{ cb?.(); }catch{}
+        try{
+          const px = api.player.x + 16;
+          const py = api.player.y + 16;
+          const scr = worldToScreen(px, py);
+          spawnFireworksAt(scr.sx, scr.sy - 10);
+        }catch{
+          const gc = document.getElementById('game');
+          spawnFireworksAt(gc.width/2, gc.height/2);
+        }
+        close();
+      }, {capture:true});
+
       return;
-    }
+    }catch{}
 
-    // on pumpkin → collect
-    for(const p of pumpkins){
-      if(!p.collected && isNearGrid(p.tx, p.ty, (api?.TILE||TILE)*0.9)){
-        p.collected=true;
-        const inv=_getInv();
-        _inc(inv, 'pumpkin_piece', 1); _setInv(inv);
-        IZZA.toast?.('+1 Pumpkin');
-        return;
-      }
-    }
+    // fallback confirm
+    if (window.confirm('Pick up the cardboard box?')) cb?.();
   }
 
-  // also hook direct DOM (your core doesn’t emit button-B)
-  function wireB(){
+  // ---------- draw: simple 3D-looking box ----------
+  function draw3DBox(ctx, sx, sy, S){
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.scale((S*0.68)/44, (S*0.68)/44);
+    ctx.translate(-22, -22);
+    ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(22,28,14,6,0,0,Math.PI*2); ctx.fill();
+    const body = new Path2D('M6,18 L22,10 L38,18 L38,34 L22,42 L6,34 Z');
+    ctx.fillStyle='#b98c4a'; ctx.fill(body);
+    ctx.strokeStyle='#7d5f2e'; ctx.lineWidth=1.3; ctx.stroke(body);
+    const flapL = new Path2D('M6,18 L22,26 L22,10 Z');
+    const flapR = new Path2D('M38,18 L22,26 L22,10 Z');
+    ctx.fillStyle='#cfa162'; ctx.fill(flapL); ctx.fill(flapR); ctx.stroke(flapL); ctx.stroke(flapR);
+    ctx.fillStyle='#e9dfb1'; ctx.fillRect(21,10,2,16);
+    ctx.restore();
+  }
+
+  // ---------- render-under: show box if not taken ----------
+  function renderBox(){
+    try{
+      if (!api?.ready) return;
+      if (localStorage.getItem('izzaMapTier') !== '2') return;
+      if (localStorage.getItem(BOX_TAKEN_KEY) === '1') return;
+
+      const S=api.DRAW, t=api.TILE, b=cardboardBoxGrid();
+      const bx=(b.x*t - api.camera.x)*(S/t) + S*0.5;
+      const by=(b.y*t - api.camera.y)*(S/t) + S*0.6;
+      const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
+      draw3DBox(ctx, bx, by, S);
+    }catch{}
+  }
+
+  // ---------- B: pick up box ONLY when standing on it ----------
+  function onB(e){
+    if (!api?.ready) return;
+    if (localStorage.getItem('izzaMapTier') !== '2') return;
+    if (localStorage.getItem(BOX_TAKEN_KEY) === '1') return;
+
+    const t=api.TILE;
+    const gx=((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
+    const box = cardboardBoxGrid();
+
+    if (gx === box.x && gy === box.y){
+      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      confirmPickup(()=>{
+        const inv = readInv();
+        addCount(inv, 'cardboard_box', 1);
+        writeInv(inv);
+        try{
+          localStorage.setItem(BOX_TAKEN_KEY, '1');
+          if ((localStorage.getItem(M4_KEY)||'not-started') === 'not-started') setM4('started');
+        }catch{}
+        try{ IZZA.toast?.('Cardboard Box added to Inventory'); }catch{}
+      });
+    }
+    // else let other B handlers run
+  }
+// ---------- Mission 4 completion (requires full cardboard set: helm, vest, arms, legs) ----------
+(function(){
+  const M4_DONE_KEY = 'izzaMission4_done';
+  const SET_IDS = [
+    'armor_cardboard_helm',
+    'armor_cardboard_vest',
+    'armor_cardboard_arms',
+    'armor_cardboard_legs'
+  ];
+  // backwards-compat aliases if older ids were used
+  const ALIAS = {
+    cardboard_helm:  'armor_cardboard_helm',
+    cardboard_chest: 'armor_cardboard_vest',
+    cardboard_arms:  'armor_cardboard_arms',
+    cardboard_legs:  'armor_cardboard_legs'
+  };
+
+  function invCount(id){
+    try{
+      if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
+      const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+      if (inv[id]?.count) return inv[id].count|0;
+      return 0;
+    }catch{ return 0; }
+  }
+
+  function hasFullCardboardSet(){
+    // check canonical ids and alias ids
+    return SET_IDS.every(id=>{
+      const ok = invCount(id) > 0;
+      if (ok) return true;
+      // see if any alias is present
+      const alias = Object.keys(ALIAS).find(k => ALIAS[k]===id);
+      return alias ? invCount(alias) > 0 : false;
+    });
+  }
+
+  function mission4AgentPopup(){
+    try{
+      IZZA?.api?.UI?.popup?.({ style:'agent', title:'Mission Completed', body:'You’ve completed mission 4.', timeout:2000 });
+      return;
+    }catch{}
+    const el = document.createElement('div');
+    el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);' +
+                       'background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;' +
+                       'border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
+    el.innerHTML = '<strong>Mission Completed</strong><div>You’ve completed mission 4.</div>';
+    (document.getElementById('gameCard')||document.body).appendChild(el);
+    setTimeout(()=>{ el.remove(); }, 2000);
+  }
+
+  function completeMission4Once(){
+    if (localStorage.getItem(M4_DONE_KEY) === '1') return;
+    try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+    // bump inv meta & UI counter from 3 -> 4
+    try{ IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); }catch{}
+    try{ IZZA.emit?.('missions-updated', { completed: 4 }); }catch{}
+    try{ IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); }catch{}
+    mission4AgentPopup();
+  }
+
+  function maybeCompleteM4(){
+    if (hasFullCardboardSet()) completeMission4Once();
+  }
+
+  // common craft event names we’ve used
+  IZZA.on?.('gear-crafted',  ({kind,set})=>{ if (kind==='cardboard'||set==='cardboard') maybeCompleteM4(); });
+  IZZA.on?.('armor-crafted', ({kind,set})=>{ if (kind==='cardboard'||set==='cardboard') maybeCompleteM4(); });
+  IZZA.on?.('inventory-changed', ()=> maybeCompleteM4()); // safety net after UI actions
+
+  // resume safety (if the player reloads after crafting)
+  IZZA.on?.('resume', ({inventoryMeta})=>{
+    if ((inventoryMeta?.missionsCompleted|0) >= 4) {
+      try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+    } else {
+      // try to auto-complete if the set is already owned
+      maybeCompleteM4();
+    }
+  });
+})();
+  // ---------- hook up ----------
+  IZZA.on?.('ready', (a)=>{
+    api = a;
+    IZZA.on?.('render-under', renderBox);
     document.getElementById('btnB')?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
-  }
-
-  // ---------- Night intro ----------
-  function showNightIntro(){
-    const title='WELCOME TO IZZA CITY AT NIGHT';
-    const body='Avoid the riff raft at night around these parts. Collect all 3 pumpkins within 5 minutes and bring them to the armoury to craft Pumpkin Armour!';
-    const take=()=>acceptNightMission();
-    if (api?.UI?.choice){
-      api.UI.choice({
-        spooky:true, title, body,
-        options:[{id:'take',label:'Take Jack-o’-Lantern'},{id:'leave',label:'Leave it'}],
-        onChoose:(id)=>{ if(id==='take') take(); }
-      });
-    } else {
-      if (confirm(title+'\n\n'+body+'\n\nStart mission 5?')) take();
-    }
-  }
-
-  function acceptNightMission(){
-    const inv=_getInv();
-    _inc(inv,'jack_o_lantern',1); _setInv(inv);
-    try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
-    setNight(true);
-    mission5Active=true; mission5Start=performance.now(); werewolfNext=mission5Start+500;
-    ensureJack(); // ensure exists before removing in case race
-    clearJack();
-    placePumpkins();
-    IZZA.toast?.('Mission 5 started: collect 3 pumpkins and craft Pumpkin Armour!');
-  }
-
-  // ---------- Werewolf (simple hook points) ----------
-  function isMoving(){
-    const p={x:api?.player?.x||0, y:api?.player?.y||0};
-    if(!lastPos){ lastPos=p; return false; }
-    const d=Math.hypot(p.x-lastPos.x,p.y-lastPos.y); lastPos=p; return d>((api?.TILE||TILE)*0.35);
-  }
-  function spawnWerewolf(){
-    try{ IZZA.emit('npc-spawn',{kind:'werewolf', host:'mission5'}); }catch{}
-    try{ IZZA.emit('sfx',{kind:'werewolf-spawn',vol:0.9}); }catch{}
-  }
-
-  // ---------- Crafting: Pumpkin Armour ----------
-  function playerInArmoury(){
-    if(api?.inZone) return api.inZone('armoury')===true;
-    const d = window.__IZZA_ARMOURY__?.door;
-    if(!d) return false;
-    const me={x:(api?.player?.x||0)/(api?.TILE||TILE)|0, y:(api?.player?.y||0)/(api?.TILE||TILE)|0};
-    return (Math.abs(me.x-d.x)+Math.abs(me.y-d.y))<=1;
-  }
-
-  function tryCraftPumpkin(){
-    if(!mission5Active) return false;
-    if(!playerInArmoury()) return false;
-    const inv=_getInv();
-    const haveJack = !!(inv.jack_o_lantern && (inv.jack_o_lantern.count|0)>0);
-    const pumpkinsC = (inv.pumpkin_piece && (inv.pumpkin_piece.count|0)) || 0;
-    if(!haveJack || pumpkinsC<3) return false;
-
-    _dec(inv,'jack_o_lantern',1);
-    _dec(inv,'pumpkin_piece',3);
-
-    _inc(inv,'pumpkinHelmet',1);
-    _inc(inv,'pumpkinVest',1);
-    _inc(inv,'pumpkinArms',1);
-    _inc(inv,'pumpkinLegs',1);
-    inv.pumpkinLegs.meta = { speed: 0.28 };
-    inv._pumpkinSetMeta   = { setDR: 0.20 };
-
-    _setInv(inv);
-    IZZA.toast?.('Crafted Pumpkin Armour (4 pcs) — set bonus active');
-
-    mission5Active=false; setNight(false); clearPumpkins();
-    _setMissions(5);
-    agentPopup('Mission Completed', 'You’ve completed mission 5.');
-    try{ IZZA.emit('mission-complete',{id:5,name:'Night of the Lantern'}); }catch{}
-
-    return true;
-  }
-
-  // ---------- Detect Mission 4 (inventory-based) & place jack ----------
-  function hasCardboardSet(inv){
-    return (inv.cardboardHelmet?.count|0)>0 &&
-           (inv.cardboardVest?.count|0)>0 &&
-           (inv.cardboardArms?.count|0)>0 &&
-           (inv.cardboardLegs?.count|0)>0;
-  }
-
-  function maybeFinishM4AndPlaceJack(){
-    const inv=_getInv();
-    if (missionsIsFour()){
-      ensureJack(); // ensure jack exists so player can start M5
-      return;
-    }
-    if (_missions() >= 4){
-      ensureJack(); // fallback if localStorage says 4
-      return;
-    }
-    if (!hasCardboardSet(inv)) return;
-
-    const ui=document.getElementById('armouryUI');
-    const doPopupAndBump=()=>{
-      _setMissions(4);
-      agentPopup('Mission Completed', 'You’ve completed mission 4.');
-      try{ IZZA.emit('mission-complete',{id:4,name:'Armoury: Cardboard'}); }catch{}
-      if (missionsIsFour() || _missions()===4) ensureJack();
-    };
-
-    if (ui && window.getComputedStyle(ui).display!=='none'){
-      const once=()=>{ ui.removeEventListener('click', onClose, true); window.removeEventListener('keydown', onEsc, true); doPopupAndBump(); };
-      const onClose=(e)=>{ const btn=e.target && e.target.closest('#armouryClose'); if(btn){ e.preventDefault(); setTimeout(once, 0); } };
-      const onEsc=(e)=>{ if((e.key||'').toLowerCase()==='escape'){ setTimeout(once, 0); } };
-      ui.addEventListener('click', onClose, true);
-      window.addEventListener('keydown', onEsc, true);
-    } else {
-      doPopupAndBump();
-    }
-  }
-
-  // Also: if user clicks the Craft button again later, we’ll still catch it
-  function wireArmouryCraftButtonWatcher(){
-    const mo = new MutationObserver(()=>{
-      const btn = document.getElementById('btnCraftCardboard');
-      if(!btn || btn._m5_wired) return;
-      btn._m5_wired=true;
-      btn.addEventListener('click', ()=> setTimeout(maybeFinishM4AndPlaceJack, 0), true);
-    });
-    mo.observe(document.body, { childList:true, subtree:true });
-    setTimeout(maybeFinishM4AndPlaceJack, 300);
-  }
-
-  // ---------- Update tick ----------
-  function onUpdatePost({ now }){
-    if (mission5Active){
-      if ((now - mission5Start) > M5_MS){
-        mission5Active=false; setNight(false); clearPumpkins();
-        IZZA.toast?.('Mission 5 failed — time expired.');
-        setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 800);
-      }
-      if (now >= werewolfNext){
-        if (isMoving()) spawnWerewolf();
-        werewolfNext = now + 30000;
-      }
-      tryCraftPumpkin();
-    }
-  }
-
-  // ---------- “extensible crafting” template for future sets ----------
-  function registerCraftableSet(def){
-    const { setKey, display, pieces, recipe, onEquipMeta, missionCompleteTo } = def;
-    def.tryCraft = function(){
-      if(!playerInArmoury()) return false;
-      const inv=_getInv();
-      for(const r of recipe){ if(!inv[r.id] || (inv[r.id].count|0) < r.qty) return false; }
-      for(const r of recipe){ _dec(inv, r.id, r.qty); }
-      for(const p of pieces){ _inc(inv, `${setKey}${p}`, 1); }
-      if(onEquipMeta){ inv[`_${setKey}SetMeta`] = onEquipMeta; }
-      _setInv(inv);
-      IZZA.toast?.(`Crafted ${display}`);
-      if (missionCompleteTo){ _setMissions(missionCompleteTo); agentPopup('Mission Completed', `You’ve completed mission ${missionCompleteTo}.`); }
-      return true;
-    };
-    return def;
-  }
-  window.IZZA_M5_registerCraftableSet = registerCraftableSet;
-
-  // ---------- Wiring ----------
-  IZZA.on('ready', ({ api:__api })=>{
-    api = __api||api||{};
-    TILE = api?.TILE || TILE;
-
-    IZZA.on('render-under', renderUnder);
-    IZZA.on('update-post', onUpdatePost);
-
-    wireB();
-    wireArmouryCraftButtonWatcher();
-
-    // initial M4 check (handles “I crafted cardboard long ago”)
-    setTimeout(maybeFinishM4AndPlaceJack, 50);
   });
-
-  // Also catch generic inventory change (e.g., crafting via other flows)
-  window.addEventListener('izza-inventory-changed', ()=> setTimeout(maybeFinishM4AndPlaceJack, 0));
-
-  // Fallback: if page resumes and missions == 4, ensure jack exists
-  IZZA.on('resume', ()=>{ if (missionsIsFour()) ensureJack(); });
-
-  // Clean up
-  IZZA.on('shutdown', ()=>{ clearJack(); clearPumpkins(); setNight(false); });
 
 })();
