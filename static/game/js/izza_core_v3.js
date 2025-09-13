@@ -461,6 +461,7 @@ function setHearts(n){
           refreshInvPanel();
           break;
         }
+          
         case 'pistol': {
           const inv = getInventory();
           const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
@@ -473,13 +474,7 @@ function setHearts(n){
           refreshInvPanel();
           break;
         }
-        default: break;
-      }
-    }catch(err){
-      console.error('[loot-picked] handler error', err);
-    }
-  });
-
+          
   // ===== Player / anim =====
   const player = {
     x: door.gx*TILE + (TILE/2 - 8),
@@ -519,7 +514,39 @@ function setHearts(n){
   const DIR_INDEX = { down:0, left:2, right:1, up:3 };
   const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
   function currentFrame(cols, moving, t){ if(cols<=1) return 0; if(!moving) return 1%cols; return Math.floor(t/WALK_MS)%cols; }
+// --- Armor equip helpers (new; minimal, matches current UI flow) ---
+const ARMOR_SLOTS = { head:'head', chest:'chest', legs:'legs', arms:'arms' };
 
+// Toggle helpers write back to inventory and emit the same “inventory changed” refresh you already use
+function setArmorEquipped(pieceId, slot, on){
+  const inv = getInventory();
+  // ensure key exists
+  const entry = inv[pieceId];
+  if(!entry){ return; }
+
+  // per-slot exclusivity: if something else in this slot is equipped, turn it off
+  if(on){
+    Object.keys(inv).forEach(k=>{
+      const e = inv[k];
+      if(!e || typeof e!=='object') return;
+      if(e.slot === slot && e.equipped){
+        e.equipped = false;
+      }
+    });
+  }
+  entry.equipped = !!on;
+  setInventory(inv);
+  try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+}
+function unequipArmorSlot(slot){
+  const inv = getInventory();
+  Object.keys(inv).forEach(k=>{
+    const e = inv[k];
+    if(e && e.slot === slot) e.equipped = false;
+  });
+  setInventory(inv);
+  try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+}
   // ===== Input / UI (kept) =====
   const keys = Object.create(null);
   const btnA = document.getElementById('btnA');
@@ -723,7 +750,19 @@ function setHearts(n){
       </g>
     </svg>`;
   }
-
+  // --- NEW: Cardboard Armor piece icons ---
+  if (id === 'cardboardHelmet') {
+    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="#caa468"/><path d="M6 18h20v3H6z" fill="#9b7b4f"/></svg>`;
+  }
+  if (id === 'cardboardVest') {
+    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="#caa468"/><rect x="8" y="12" width="16" height="10" fill="#9b7b4f"/></svg>`;
+  }
+  if (id === 'cardboardLegs') {
+    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="#caa468"/><rect x="9" y="14" width="14" height="3" fill="#9b7b4f"/></svg>`;
+  }
+  if (id === 'cardboardArms') {
+    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><rect x="2" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="22" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="4" y="13" width="4" height="6" fill="#9b7b4f"/><rect x="24" y="13" width="4" height="6" fill="#9b7b4f"/></svg>`;
+  }
   // ... other icons or a default ...
 }
 
@@ -902,7 +941,34 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
   rows.push(readOnlyRow('cardboard_box', 'Cardboard Box',
     `Count: ${inv.cardboard_box.count|0}`));
 }
+// Armor section (Cardboard set)
+const armorRows = [];
+function armorRow(id,label,slotKey){
+  const e = inv[id];
+  if(!e || (e.count|0)<=0) return;
+  const isOn = !!e.equipped;
+  const btnHTML = isOn
+    ? `<button data-armor-off="${id}" data-slot="${slotKey}" style="margin-left:auto">Unequip</button>`
+    : `<button data-armor-on="${id}"  data-slot="${slotKey}" style="margin-left:auto">Equip</button>`;
+  armorRows.push(`
+    <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:14px;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
+      <div style="width:28px;height:28px">${svgIcon(id,28,28)}</div>
+      <div style="font-weight:600">${label}</div>
+      <div style="margin-left:12px;opacity:.85;font-size:12px">
+        Count: ${(e.count|0)} · Slot: ${slotKey}${isOn?' · <b>Equipped</b>':''}
+      </div>
+      ${btnHTML}
+    </div>`);
+}
+armorRow('cardboardHelmet','Cardboard Helmet','head');
+armorRow('cardboardVest','Cardboard Vest','chest');
+armorRow('cardboardLegs','Cardboard Legs','legs');
+armorRow('cardboardArms','Cardboard Arms','arms');
 
+if(armorRows.length){
+  rows.push(`<div style="margin-top:2px;margin-bottom:-4px;opacity:.75;font-size:12px;padding-left:4px">Armor</div>`);
+  rows.push(...armorRows);
+}
     host.innerHTML = `
       <div style="background:#121827;border:1px solid #2a3550;border-radius:14px;padding:12px">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
@@ -929,6 +995,25 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
         renderInventoryPanel();
       });
     });
+    // Armor equip/unequip
+host.querySelectorAll('[data-armor-on]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const id = btn.getAttribute('data-armor-on');
+    const slot = btn.getAttribute('data-slot') || '';
+    setArmorEquipped(id, slot, true);
+    toast(`Equipped ${id}`);
+    renderInventoryPanel();
+  });
+});
+host.querySelectorAll('[data-armor-off]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const id = btn.getAttribute('data-armor-off');
+    const slot = btn.getAttribute('data-slot') || '';
+    setArmorEquipped(id, slot, false);
+    toast(`Unequipped ${id}`);
+    renderInventoryPanel();
+  });
+});
     host.querySelectorAll('[data-unequip]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         unequipWeapon();
