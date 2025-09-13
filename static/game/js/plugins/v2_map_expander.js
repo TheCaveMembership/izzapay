@@ -269,7 +269,10 @@
     const t  = api.TILE;
     const gx = ((api.player.x + 16)/t | 0);
     const gy = ((api.player.y + 16)/t | 0);
-
+// --- let the Armoury door handler take precedence on the door tile
+const dArm = window.__IZZA_ARMOURY__?.door;
+const onArmDoor = dArm && gx===dArm.x && gy===dArm.y;
+if (onArmDoor) return; // don't consume B here; armoury handler will open the modal
     const IW = window.__IZZA_ISLAND_WALK__;
     const island = window.__IZZA_ARMOURY__?.island;
 
@@ -1443,39 +1446,173 @@ if (window.__IZZA_ISLAND_WALK__) {
   window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressBankB(e); }, true);
 
   // ---------- ARMOURY UI ----------
-  function _ensureArmouryUI(){
-    if (document.getElementById('armouryUI')) return;
-    const wrap=document.createElement('div');
-    wrap.id='armouryUI';
-    wrap.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:70;';
-    wrap.innerHTML = `
-      <div style="min-width:300px;background:#0f1624;border:1px solid #2b3b57;border-radius:12px;padding:14px;color:#e7eef7;box-shadow:0 14px 38px rgba(0,0,0,.55)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <strong>🔧 Armoury</strong>
-          <button id="armouryClose" style="background:#263447;color:#cfe3ff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">Close</button>
-        </div>
-        <div style="opacity:.85;margin-bottom:8px">(stub) Buy ammo &amp; upgrades here.</div>
-        <button id="armouryOk" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1f6feb;color:#fff;font-weight:700;cursor:pointer">OK</button>
-      </div>`;
-    document.body.appendChild(wrap);
-    wrap.querySelector('#armouryClose').onclick = ()=> _armouryClose();
-    wrap.querySelector('#armouryOk').onclick    = ()=> _armouryClose();
-  }
-  function _armouryOpen(){ _ensureArmouryUI(); document.getElementById('armouryUI').style.display='flex'; }
-  function _armouryClose(){ const el=document.getElementById('armouryUI'); if(el) el.style.display='none'; }
+function _armorKey(){
+  const u = (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase();
+  return 'izzaArmor_'+u;
+}
+function _readArmor(){
+  try{ return JSON.parse(localStorage.getItem(_armorKey())||'{}')||{}; }catch{ return {}; }
+}
+function _writeArmor(a){
+  try{
+    localStorage.setItem(_armorKey(), JSON.stringify(a||{}));
+    const p = IZZA?.api?.player; if (p){ p.armorDR = a?.dr||0; p.armorType = a?.type||null; }
+    try{ window.dispatchEvent(new Event('izza-armor-changed')); }catch{}
+  }catch{}
+}
 
-  // Press B near the island armoury door → open modal
-  function _onPressArmouryB(e){
+function _ensureArmouryUI(){
+  if (document.getElementById('armouryUI')) return;
+
+  const wrap=document.createElement('div');
+  wrap.id='armouryUI';
+  wrap.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:70;';
+  wrap.innerHTML = `
+    <div id="armCard" style="
+      position:relative;min-width:320px;max-width:640px;
+      color:#2a1a0d;
+      padding:18px 16px 14px;
+      transform:rotate(-0.4deg);
+      background:
+        radial-gradient(120% 80% at 10% 0%, rgba(255,255,200,.12), rgba(0,0,0,0) 60%),
+        radial-gradient(110% 90% at 100% 100%, rgba(120,70,20,.12), rgba(0,0,0,0) 60%),
+        linear-gradient(180deg, #f2e0b6, #e7d29f 40%, #e2cc94 60%, #d9c184);
+      border:2px solid #7b5a2b;border-radius:14px;
+      box-shadow:0 16px 40px rgba(0,0,0,.6), inset 0 0 35px rgba(60,30,10,.18);
+    ">
+      <div style="position:absolute;inset:auto 10px -8px 10px;height:12px;
+                  background:radial-gradient(20px 8px at 50% 100%, rgba(0,0,0,.25), rgba(0,0,0,0));"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="
+          font-size:20px;font-weight:900;letter-spacing:2px;
+          color:#2b1607;text-shadow:0 1px 0 #f9ebc4, 0 2px 0 #f2dfb0, 0 3px 0 rgba(0,0,0,.08);
+          transform:rotate(-1.2deg);">
+          WELCOME TO ARMOURY ISLAND
+        </div>
+        <button id="armouryClose" style="background:#402c17;color:#f6e7c7;border:0;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer">
+          Close ✕
+        </button>
+      </div>
+
+      <div style="margin:-2px 0 10px; font-style:italic; opacity:.85">
+        <span style="display:inline-block; transform:rotate(0.8deg)">— “Beware, matey… steel be scarce, but wit be plenty.”</span>
+      </div>
+
+      <div id="armouryStatus" style="margin:8px 0 12px;padding:10px;border:1px dashed #8d6a34;border-radius:10px;background:rgba(255,255,255,.28)"></div>
+
+      <div style="margin:6px 0 8px;font-weight:700;">Crafting Bench</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;user-select:none;cursor:pointer">
+        <input id="armStartToggle" type="checkbox">
+        <span>Start crafting</span>
+      </label>
+
+      <div id="craftArea" style="display:none">
+        <div style="padding:10px;border:1px solid #7b5a2b;border-radius:10px;background:rgba(255,255,255,.35);margin-bottom:10px">
+          <div style="font-weight:700;margin-bottom:6px">Cardboard Armour (Set)</div>
+          <div style="opacity:.85;margin-bottom:8px">
+            A humble start. Reduces damage a little compared to the real stuff you’ll forge here later.
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button id="btnCraftCardboard" style="background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer">
+              Craft from 1 × Cardboard Box
+            </button>
+            <div id="ccHint" style="opacity:.8"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
+
+  const $ = sel => wrap.querySelector(sel);
+
+  function _renderArmoury(){
+    const inv = (function(){
+      try{
+        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+      }catch{ return {}; }
+    })();
+    const armor = _readArmor();
+    const boxes = inv?.cardboardBox?.count|0;
+
+    $('#ccHint').textContent = `You have ${boxes} × Cardboard Box`;
+    const s = [];
+    if (armor?.type){
+      const pct = Math.round((armor.dr||0)*100);
+      s.push(`Equipped: <strong>${armor.type}</strong> (Damage Reduction: ${pct}%)`);
+    } else {
+      s.push('No armour equipped.');
+    }
+    s.push('Tip: store better materials and unlock stronger sets later.');
+    $('#armouryStatus').innerHTML = s.join('<br>');
+  }
+
+  $('#armStartToggle').addEventListener('change', e=>{
+    $('#craftArea').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  $('#btnCraftCardboard').addEventListener('click', ()=>{
+    const inv = (function(){
+      try{
+        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+      }catch{ return {}; }
+    })();
+
+    const boxes = inv?.cardboardBox?.count|0;
+    if (boxes<=0){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
+
+    // consume 1 cardboard box
+    inv.cardboardBox = inv.cardboardBox || {count:0};
+    inv.cardboardBox.count = Math.max(0, (inv.cardboardBox.count|0) - 1);
+
+    // grant & equip cardboard armour
+    inv.cardboardArmour = inv.cardboardArmour || {count:0};
+    inv.cardboardArmour.count = (inv.cardboardArmour.count|0) + 1;
+
+    try{
+      if(IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+    }catch{}
+
+    const dr = 0.12; // 12% damage reduction
+    _writeArmor({ type:'Cardboard', dr });
+
+    IZZA.toast?.('Crafted & equipped Cardboard Armour (DR 12%)');
+    _renderArmoury();
+    window.dispatchEvent?.(new Event('izza-inventory-changed'));
+  });
+
+  $('#armouryClose').onclick = ()=> _armouryClose();
+
+  // close on backdrop / Esc
+  wrap.addEventListener('click', e=>{ if (e.target === wrap) _armouryClose(); });
+  window.addEventListener('keydown', e=>{ if ((e.key||'').toLowerCase()==='escape') _armouryClose(); });
+
+  _renderArmoury();
+}
+
+function _armouryOpen(){
+  _ensureArmouryUI();
+  document.getElementById('armouryUI').style.display='flex';
+}
+function _armouryClose(){
+  const el=document.getElementById('armouryUI'); if(el) el.style.display='none';
+}
+function _onPressArmouryB(e){
   const d = window.__IZZA_ARMOURY__?.door; if(!d || !IZZA?.api?.ready) return;
   const t=IZZA.api.TILE, gx=((IZZA.api.player.x+16)/t|0), gy=((IZZA.api.player.y+16)/t|0);
-  const onDoor = (gx===d.x && gy===d.y);   // exact tile only
+  const onDoor = (gx===d.x && gy===d.y);
   if(!onDoor) return;
   e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
   _armouryOpen();
 }
-  document.getElementById('btnB')?.addEventListener('click', _onPressArmouryB, true);
-  window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressArmouryB(e); }, true);
 
+// listeners (keep capture=true so other B-handlers don’t steal it)
+document.getElementById('btnB')?.addEventListener('click', _onPressArmouryB, true);
+window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressArmouryB(e); }, true);
   // ---------- Minimap / Bigmap overlay ----------
   function paintOverlay(id){
     if(!_layout) return;
