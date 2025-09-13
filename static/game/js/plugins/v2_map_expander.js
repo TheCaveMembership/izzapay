@@ -1855,6 +1855,7 @@ function _ensureArmouryUI(){
             <div id="ccHint" style="opacity:.8"></div>
           </div>
         </div>
+        <!-- (Optional) If you later add a Pumpkin panel, keep its button id as btnCraftPumpkin -->
       </div>
     </div>
   `;
@@ -1885,90 +1886,18 @@ function _ensureArmouryUI(){
     $('#craftArea').style.display = e.target.checked ? 'block' : 'none';
   });
 
-  // Craft: consume exactly 1 cardboard box (any alias), then add 4-piece set
+  // ---- Cardboard craft: consume 1 cardboard box (any alias) and grant 4-piece set
   document.getElementById('btnCraftCardboard').addEventListener('click', ()=>{
-  const inv = _invRead();
+    const inv = _invRead();
 
-  // consume 1 box (any alias)
-  let took = 0;
-  for (const k of _BOX_KEYS){ took += _take(inv, k, 1); if (took) break; }
-  if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
+    // consume 1 box (any alias)
+    let took = _invTake(inv, _BOX_KEYS, 1);
+    if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
 
-  _ensureItem(inv, 'cardboardHelmet','Cardboard Helmet','head',  _ICON.cb_helm);
-  _ensureItem(inv, 'cardboardVest',  'Cardboard Vest',  'chest', _ICON.cb_vest);
-  _ensureItem(inv, 'cardboardLegs',  'Cardboard Legs',  'legs',  _ICON.cb_legs);
-  _ensureItem(inv, 'cardboardArms',  'Cardboard Arms',  'arms',  _ICON.cb_arms);
-
-  inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
-  inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
-  inv.cardboardLegs.count   = (inv.cardboardLegs.count|0) + 1;
-  inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
-
-  _invWrite(inv);
-  _writeArmor({ type:'Cardboard', dr:0.12 });
-
-  // ---- Mission 4 progression (show popup over Armoury UI) ----
-  let advanced = false;
-  try { advanced = __ARM_MISSIONS__?.maybeComplete?.(4) === true; } catch {}
-  // Fallback: if user had crafted before logic existed, force advance if still < 4
-  if (!advanced) {
-    const cur = parseInt(localStorage.getItem('izzaMissionsCompleted')||'0',10) || 0;
-    if (cur < 4) {
-      try {
-        __ARM_MISSIONS__?.set?.(4);
-        IZZA?.emit?.('mission-complete', { id:4 });
-      } catch {}
-    }
-  }
-
-  IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
-  (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
-});
-document.getElementById('btnCraftPumpkin').addEventListener('click', ()=>{
-  const inv = _invRead();
-  if ((_stack(inv,'jack_o_lantern')|0) < 1 || (_stack(inv,'pumpkin_piece')|0) < 3){
-    IZZA.toast?.('Need 1 Lantern + 3 Pumpkins'); return;
-  }
-
-  _take(inv,'jack_o_lantern',1);
-  _take(inv,'pumpkin_piece',3);
-
-  _ensureItem(inv, 'pumpkinHelmet','Pumpkin Helmet','head',  _ICON.pk_helm);
-  _ensureItem(inv, 'pumpkinVest',  'Pumpkin Vest',  'chest', _ICON.pk_vest);
-  _ensureItem(inv, 'pumpkinLegs',  'Pumpkin Legs',  'legs',  _ICON.pk_legs);
-  _ensureItem(inv, 'pumpkinArms',  'Pumpkin Arms',  'arms',  _ICON.pk_arms);
-
-  inv.pumpkinHelmet.count = (inv.pumpkinHelmet.count|0) + 1;
-  inv.pumpkinVest.count   = (inv.pumpkinVest.count|0) + 1;
-  inv.pumpkinLegs.count   = (inv.pumpkinLegs.count|0) + 1;
-  inv.pumpkinArms.count   = (inv.pumpkinArms.count|0) + 1;
-
-  _invWrite(inv);
-  _writeArmor({ type:'Pumpkin', dr:0.20 });
-
-  // ---- Mission 5 progression (popup + signal to your M5 plugin) ----
-  let advanced = false;
-  try { advanced = __ARM_MISSIONS__?.maybeComplete?.(5) === true; } catch {}
-  if (!advanced) {
-    const cur = parseInt(localStorage.getItem('izzaMissionsCompleted')||'0',10) || 0;
-    if (cur < 5) {
-      try {
-        __ARM_MISSIONS__?.set?.(5);
-        IZZA?.emit?.('mission-complete', { id:5 });
-      } catch {}
-    }
-  }
-  // Useful hint for your Mission 5 script if it listens to gear-crafted
-  try { IZZA?.emit?.('gear-crafted', { kind:'pumpkin' }); } catch {}
-
-  IZZA.toast?.('Crafted Pumpkin Set: Helmet, Vest, Legs, Arms');
-  (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
-});
-    // Ensure item entries exist & add one of each piece
-    _ensureItem(inv, 'cardboardHelmet', 'Cardboard Helmet', 'head',  _CB_ICONS.helmet);
-    _ensureItem(inv, 'cardboardVest',   'Cardboard Vest',   'chest', _CB_ICONS.vest);
-    _ensureItem(inv, 'cardboardLegs',   'Cardboard Legs',   'legs',  _CB_ICONS.legs);
-    _ensureItem(inv, 'cardboardArms',   'Cardboard Arms',   'arms',  _CB_ICONS.arms);
+    _ensureItem(inv, 'cardboardHelmet','Cardboard Helmet','head',  _CB_ICONS.helmet);
+    _ensureItem(inv, 'cardboardVest',  'Cardboard Vest',  'chest', _CB_ICONS.vest);
+    _ensureItem(inv, 'cardboardLegs',  'Cardboard Legs',  'legs',  _CB_ICONS.legs);
+    _ensureItem(inv, 'cardboardArms',  'Cardboard Arms',  'arms',  _CB_ICONS.arms);
 
     inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
     inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
@@ -1976,15 +1905,97 @@ document.getElementById('btnCraftPumpkin').addEventListener('click', ()=>{
     inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
 
     _invWrite(inv);
+    _writeArmor({ type:'Cardboard', dr:0.12 });
 
-    // Keep the simple global DR you already had (unchanged UI + behavior)
-    const dr = 0.12; // 12% damage reduction
-    _writeArmor({ type:'Cardboard', dr });
+    // ---- Mission 4 progression (show popup over Armoury UI) ----
+    let advanced = false;
+    try { advanced = __ARM_MISSIONS__?.maybeComplete?.(4) === true; } catch {}
+    // Fallback: if user had crafted before logic existed, force advance if still < 4
+    if (!advanced) {
+      const cur = parseInt(localStorage.getItem('izzaMissionsCompleted')||'0',10) || 0;
+      if (cur < 4) {
+        try {
+          __ARM_MISSIONS__?.set?.(4);
+          IZZA?.emit?.('mission-complete', { id:4 });
+        } catch {}
+      }
+    }
 
     IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
-    _renderArmoury();
+    (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
     window.dispatchEvent?.(new Event('izza-inventory-changed'));
   });
+
+  // ---------- OPTIONAL: Pumpkin craft handler (safe if button not present) ----------
+  // local helpers for single-key count/take without touching global helpers
+  function _countKey(inv, key){ return (inv?.[key]?.count|0) || (inv?.[key]|0) || 0; }
+  function _takeKey(inv, key, n=1){
+    if (!inv) return 0;
+    if (inv[key] && typeof inv[key].count === 'number'){
+      const take = Math.min(n, inv[key].count|0);
+      inv[key].count = Math.max(0, (inv[key].count|0) - take);
+      return take;
+    }
+    // tolerate “flat number” stacks too
+    if (typeof inv[key] === 'number'){
+      const take = Math.min(n, inv[key]|0);
+      inv[key] = Math.max(0, (inv[key]|0) - take);
+      return take;
+    }
+    return 0;
+  }
+
+  (function wirePumpkinIfPresent(){
+    const btn = document.getElementById('btnCraftPumpkin');
+    if (!btn) return; // no UI for pumpkin -> nothing to do (prevents errors)
+
+    btn.addEventListener('click', ()=>{
+      const inv = _invRead();
+
+      // require 1 jack_o_lantern + 3 pumpkin_piece
+      const haveLantern = _countKey(inv,'jack_o_lantern');
+      const havePieces  = _countKey(inv,'pumpkin_piece');
+
+      if (haveLantern < 1 || havePieces < 3){
+        IZZA.toast?.('Need 1 Lantern + 3 Pumpkins'); return;
+      }
+
+      _takeKey(inv,'jack_o_lantern',1);
+      _takeKey(inv,'pumpkin_piece',3);
+
+      // ensure items exist (icons for pumpkin are optional; omit iconSvg to keep UI unchanged)
+      _ensureItem(inv, 'pumpkinHelmet','Pumpkin Helmet','head',  null);
+      _ensureItem(inv, 'pumpkinVest',  'Pumpkin Vest',  'chest', null);
+      _ensureItem(inv, 'pumpkinLegs',  'Pumpkin Legs',  'legs',  null);
+      _ensureItem(inv, 'pumpkinArms',  'Pumpkin Arms',  'arms',  null);
+
+      inv.pumpkinHelmet.count = (inv.pumpkinHelmet.count|0) + 1;
+      inv.pumpkinVest.count   = (inv.pumpkinVest.count|0) + 1;
+      inv.pumpkinLegs.count   = (inv.pumpkinLegs.count|0) + 1;
+      inv.pumpkinArms.count   = (inv.pumpkinArms.count|0) + 1;
+
+      _invWrite(inv);
+      _writeArmor({ type:'Pumpkin', dr:0.20 });
+
+      // ---- Mission 5 progression (popup + signal to your M5 plugin) ----
+      let advanced = false;
+      try { advanced = __ARM_MISSIONS__?.maybeComplete?.(5) === true; } catch {}
+      if (!advanced) {
+        const cur = parseInt(localStorage.getItem('izzaMissionsCompleted')||'0',10) || 0;
+        if (cur < 5) {
+          try {
+            __ARM_MISSIONS__?.set?.(5);
+            IZZA?.emit?.('mission-complete', { id:5 });
+          } catch {}
+        }
+      }
+      try { IZZA?.emit?.('gear-crafted', { kind:'pumpkin' }); } catch {}
+
+      IZZA.toast?.('Crafted Pumpkin Set: Helmet, Vest, Legs, Arms');
+      (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
+      window.dispatchEvent?.(new Event('izza-inventory-changed'));
+    });
+  })();
 
   $('#armouryClose').onclick = ()=> _armouryClose();
 
