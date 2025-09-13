@@ -210,76 +210,118 @@
     return set;
   }
 
-  // ===== ISLAND DOCKING (perimeter docking pair check) =====
-  (function islandDockingInit(){
-    // Return the paired perimeter tile (water <-> sand) ONLY if the player is exactly on an island edge tile.
-    function _islandDockPairAt(gx, gy){
-      const island = window.__IZZA_ARMOURY__?.island;
-      const D = window.__IZZA_ISLAND_DOCK__;
-      if (!island || !D) return null;
+  // ===== ISLAND DOCKING (spawn inside pad; launch from inside pad) =====
+(function islandDockingInit(){
+  function _islandDockPairAt(gx, gy){
+    const island = window.__IZZA_ARMOURY__?.island;
+    const D = window.__IZZA_ISLAND_DOCK__;
+    if (!island || !D) return null;
 
-      const mkSet = arr => {
-        const s = new Set();
-        (arr||[]).forEach(p => s.add(p.x+'|'+p.y));
-        return s;
-      };
-      const W = mkSet(D.water);
-      const S = mkSet(D.sand);
-      const k = gx+'|'+gy;
+    const mkSet = arr => { const s=new Set(); (arr||[]).forEach(p=>s.add(p.x+'|'+p.y)); return s; };
+    const W = mkSet(D.water), S = mkSet(D.sand);
+    const k = gx+'|'+gy;
 
-      const withinX = x => x >= island.x0 && x <= island.x1;
-      const withinY = y => y >= island.y0 && y <= island.y1;
+    const withinX = x => x >= island.x0 && x <= island.x1;
+    const withinY = y => y >= island.y0 && y <= island.y1;
 
-      if (W.has(k)){
-        if (withinY(gy) && gx === island.x0 - 1) return { to:{x:island.x0, y:gy}, dir:'water->sand' };
-        if (withinY(gy) && gx === island.x1 + 1) return { to:{x:island.x1, y:gy}, dir:'water->sand' };
-        if (withinX(gx) && gy === island.y0 - 1) return { to:{x:gx, y:island.y0}, dir:'water->sand' };
-        if (withinX(gx) && gy === island.y1 + 1) return { to:{x:gx, y:island.y1}, dir:'water->sand' };
-        return null;
-      }
-
-      if (S.has(k)){
-        if (withinY(gy) && gx === island.x0) return { to:{x:island.x0-1, y:gy}, dir:'sand->water' };
-        if (withinY(gy) && gx === island.x1) return { to:{x:island.x1+1, y:gy}, dir:'sand->water' };
-        if (withinX(gx) && gy === island.y0) return { to:{x:gx, y:island.y0-1}, dir:'sand->water' };
-        if (withinX(gx) && gy === island.y1) return { to:{x:gx, y:island.y1+1}, dir:'sand->water' };
-        return null;
-      }
+    if (W.has(k)){
+      if (withinY(gy) && gx === island.x0 - 1) return { to:{x:island.x0, y:gy}, dir:'water->sand' };
+      if (withinY(gy) && gx === island.x1 + 1) return { to:{x:island.x1, y:gy}, dir:'water->sand' };
+      if (withinX(gx) && gy === island.y0 - 1) return { to:{x:gx, y:island.y0}, dir:'water->sand' };
+      if (withinX(gx) && gy === island.y1 + 1) return { to:{x:gx, y:island.y1}, dir:'water->sand' };
       return null;
     }
+    if (S.has(k)){
+      if (withinY(gy) && gx === island.x0) return { to:{x:island.x0-1, y:gy}, dir:'sand->water' };
+      if (withinY(gy) && gx === island.x1) return { to:{x:island.x1+1, y:gy}, dir:'sand->water' };
+      if (withinX(gx) && gy === island.y0) return { to:{x:gx, y:island.y0-1}, dir:'sand->water' };
+      if (withinX(gx) && gy === island.y1) return { to:{x:gx, y:island.y1+1}, dir:'sand->water' };
+      return null;
+    }
+    return null;
+  }
 
-    function _onPressIslandDockB(e){
-      const api = IZZA?.api;
-      if (!api?.ready || localStorage.getItem(TIER_KEY) !== '2') return;
+  // center of the 3×2 pad (grid coords)
+  function _padCenter(){
+    const IW = window.__IZZA_ISLAND_WALK__;
+    if(!IW) return null;
+    const cx = Math.floor((IW.x0 + IW.x1)/2);
+    const cy = Math.floor((IW.y0 + IW.y1)/2);
+    return {x:cx, y:cy};
+  }
 
-      const t  = api.TILE;
-      const gx = ((api.player.x + 16)/t | 0);
-      const gy = ((api.player.y + 16)/t | 0);
+  // nearest water tile on island perimeter (D.water) to a given grid point
+  function _nearestIslandWater(from){
+    const D = window.__IZZA_ISLAND_DOCK__;
+    if (!D?.water || !D.water.length) return null;
+    let best = null, bestD = 1e9;
+    for (const p of D.water){
+      const dx = p.x - from.x, dy = p.y - from.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD){ bestD = d2; best = p; }
+    }
+    return best;
+  }
 
-      const pair = _islandDockPairAt(gx, gy);
-      if (!pair) return; // let other B handlers (city docks/doors) handle it
+  function _onPressIslandDockB(e){
+    const api = IZZA?.api; if (!api?.ready || localStorage.getItem('izzaMapTier') !== '2') return;
 
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+    const t  = api.TILE;
+    const gx = ((api.player.x + 16)/t | 0);
+    const gy = ((api.player.y + 16)/t | 0);
 
+    const IW = window.__IZZA_ISLAND_WALK__;
+    const island = window.__IZZA_ARMOURY__?.island;
+
+    // Helper to move in world units with a small inset
+    const warpTo = (gx, gy) => {
       const inset = 0.1;
-      api.player.x = (pair.to.x + inset) * t;
-      api.player.y = (pair.to.y + inset) * t;
+      api.player.x = (gx + inset) * t;
+      api.player.y = (gy + inset) * t;
+    };
 
-      if (pair.dir === 'water->sand'){
-        window._izzaBoatActive = false;  // disembark
-        IZZA.toast?.('Docked at the island');
-      } else {
-        window._izzaBoatActive = true;   // embark
-        IZZA.toast?.('Boat launched');
-      }
+    // 1) If you are on a water/sand perimeter pair tile, keep the legacy behavior
+    const pair = _islandDockPairAt(gx, gy);
+
+    // 2) If you’re in WATER and near island edge -> disembark INSIDE pad
+    if (pair && pair.dir === 'water->sand'){
+      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      const c = _padCenter() || pair.to;           // fall back just in case
+      window._izzaBoatActive = false;               // water becomes solid again
+      warpTo(c.x, c.y);                             // guaranteed inside fence
+      IZZA.toast?.('Docked at the island');
+      return;
     }
 
-    document.getElementById('btnB')?.addEventListener('click', _onPressIslandDockB, true);
-    window.addEventListener('keydown', e=>{
-      if ((e.key||'').toLowerCase() === 'b') _onPressIslandDockB(e);
-    }, true);
-  })();
+    // 3) If you’re inside the pad, pressing B should LAUNCH to nearest water
+    if (IW && gx>=IW.x0 && gx<=IW.x1 && gy>=IW.y0 && gy<=IW.y1){
+      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      const c = {x:gx, y:gy};
+      const targetWater = _nearestIslandWater(c);
+      if (targetWater){
+        window._izzaBoatActive = true;             // disable water-solid before warping
+        warpTo(targetWater.x, targetWater.y);
+        IZZA.toast?.('Boat launched');
+      }
+      return;
+    }
 
+    // 4) Otherwise: allow vanilla edge toggle (sand<->water) if on exact pair
+    if (pair){
+      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+      const goWater = (pair.dir === 'sand->water');
+      window._izzaBoatActive = !!goWater;
+      warpTo(pair.to.x, pair.to.y);
+      IZZA.toast?.(goWater ? 'Boat launched' : 'Docked at the island');
+    }
+  }
+
+  document.getElementById('btnB')?.addEventListener('click', _onPressIslandDockB, true);
+  window.addEventListener('keydown', e=>{
+    if ((e.key||'').toLowerCase() === 'b') _onPressIslandDockB(e);
+  }, true);
+})();
+  
   // ---------- HOSPITAL ----------
   let _layout=null, _hospital=null, _hospitalDoor=null, _shopOpen=false;
 
@@ -972,53 +1014,49 @@ window.__IZZA_ISLAND_WALK__ = IW;
       const R = window.__IZZA_ARMOURY__.rect;
       solids.push({ x:R.x0, y:R.y0, w:(R.x1-R.x0+1), h:(R.y1-R.y0+1) });
     }
-    // === NEW: Island invisible fence around the 2x3 walk area ===
-if (window.__IZZA_ISLAND_WALK__ && window._izzaIslandLand){
+    // === Island invisible fence around the 3×2 walk area ===
+if (window.__IZZA_ISLAND_WALK__) {
   const IW = window.__IZZA_ISLAND_WALK__;
+  const ISLAND = window.__IZZA_ARMOURY__?.island || null;
+
+  const insideIsland = (x,y) =>
+    !ISLAND || (x>=ISLAND.x0 && x<=ISLAND.x1 && y>=ISLAND.y0 && y<=ISLAND.y1);
+
+  // keep fence off outer island edge so docking tiles stay free
+  const onIslandEdge = (x,y) =>
+    ISLAND && (x===ISLAND.x0 || x===ISLAND.x1 || y===ISLAND.y0 || y===ISLAND.y1);
+
   const ring = [];
 
-  // authoritative island rect published in render-under
-  const ISLAND = (window.__IZZA_ARMOURY__ && window.__IZZA_ARMOURY__.island) || null;
-
-  // only fence tiles that are inside our published sand set
-  const isSand = (x,y)=> window._izzaIslandLand.has(x+'|'+y);
-
-  // keep fence off the outer island tiles so docking doesn't collide
-  const onIslandEdge = (x,y) => {
-    if (!ISLAND) return false; // be safe if not ready yet
-    return (x === ISLAND.x0 || x === ISLAND.x1 || y === ISLAND.y0 || y === ISLAND.y1);
-  };
-
-  // top row just above the walk area
+  // top strip
   for (let x=IW.x0; x<=IW.x1; x++){
-    const gx1 = x, gy1 = IW.y0-1;
-    if (isSand(gx1, gy1) && !onIslandEdge(gx1, gy1)) ring.push({x:gx1, y:gy1});
+    const gx=x, gy=IW.y0-1;
+    if (insideIsland(gx,gy) && !onIslandEdge(gx,gy)) ring.push({x:gx,y:gy});
   }
-  // bottom row just below the walk area
+  // bottom strip
   for (let x=IW.x0; x<=IW.x1; x++){
-    const gx1 = x, gy1 = IW.y1+1;
-    if (isSand(gx1, gy1) && !onIslandEdge(gx1, gy1)) ring.push({x:gx1, y:gy1});
+    const gx=x, gy=IW.y1+1;
+    if (insideIsland(gx,gy) && !onIslandEdge(gx,gy)) ring.push({x:gx,y:gy});
   }
-  // left column
+  // left strip
   for (let y=IW.y0; y<=IW.y1; y++){
-    const gx1 = IW.x0-1, gy1 = y;
-    if (isSand(gx1, gy1) && !onIslandEdge(gx1, gy1)) ring.push({x:gx1, y:gy1});
+    const gx=IW.x0-1, gy=y;
+    if (insideIsland(gx,gy) && !onIslandEdge(gx,gy)) ring.push({x:gx,y:gy});
   }
-  // right column
+  // right strip
   for (let y=IW.y0; y<=IW.y1; y++){
-    const gx1 = IW.x1+1, gy1 = y;
-    if (isSand(gx1, gy1) && !onIslandEdge(gx1, gy1)) ring.push({x:gx1, y:gy1});
+    const gx=IW.x1+1, gy=y;
+    if (insideIsland(gx,gy) && !onIslandEdge(gx,gy)) ring.push({x:gx,y:gy});
   }
 
-  // coalesce contiguous tiles into rects
+  // coalesce contiguous horizontals to fewer rects
   ring.sort((a,b)=> a.y===b.y ? a.x-b.x : a.y-b.y);
-  let i=0;
-  while(i<ring.length){
+  for (let i=0; i<ring.length; ){
     const y = ring[i].y;
     let x0 = ring[i].x, x1 = x0;
     i++;
-    while(i<ring.length && ring[i].y===y && ring[i].x===x1+1){ x1=ring[i].x; i++; }
-    solids.push({x:x0, y:y, w:(x1-x0+1), h:1});
+    while (i<ring.length && ring[i].y===y && ring[i].x===x1+1){ x1 = ring[i].x; i++; }
+    solids.push({ x:x0, y:y, w:(x1-x0+1), h:1 });
   }
 }
     // manual solids
