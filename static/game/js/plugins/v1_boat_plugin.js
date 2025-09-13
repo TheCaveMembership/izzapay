@@ -518,14 +518,14 @@
   }
 
   // ---------- Boot ----------
-  IZZA.on?.('ready', (a)=>{
-    api=a;
+IZZA.on?.('ready', (a)=>{
+  api = a;
 
-    // Input (capture so we can preempt default when we actually act)
-    document.getElementById('btnB')?.addEventListener('click', onB, true);
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
+  // Input (capture so we can preempt default when we actually act)
+  document.getElementById('btnB')?.addEventListener('click', onB, true);
+  window.addEventListener('keydown', e=>{ if ((e.key||'').toLowerCase()==='b') onB(e); }, true);
 
-    // Visible boat sprite
-    IZZA.on?.('render-over', drawBoat);
-  });
-})();
+  // Visible boat sprite — draw after everything else so it’s never hidden
+  IZZA.on?.('render-post', drawBoat);  // <- main hook (always fires in your build)
+  IZZA.on?.('render-over', drawBoat);  // <- optional: if your engine emits it
+});
