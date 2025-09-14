@@ -1,6 +1,6 @@
-// v1_store_items_plugin.js — extend shop stock + icon repair + BUY/SELL tabs + inventory pricebook
+// v1_store_items_plugin.js — extend shop stock + icon repair + BUY/SELL tabs + search + inventory pricebook
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix-5+buy-sell+pricebook';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-5+buy-sell+search+pricebook';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -12,15 +12,16 @@
   }
   function writePriceBook(pb){ try{ localStorage.setItem(PRICE_BOOK_KEY, JSON.stringify(pb||{})); }catch{} }
 
-  function svgToDataURL(svg){ return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); }
-  function iconImgHTML(svg, w=24, h=24){
-    const src = svgToDataURL(svg);
-    return `<img src="${src}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
+  const isDataUrl = s => typeof s==='string' && /^data:image\/svg\+xml/i.test(s);
+  function svgToDataURL(svg){
+    if(!svg) return '';
+    if(isDataUrl(svg)) return svg;                    // already encoded
+    if(/^\s*</.test(svg)) return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); // raw <svg>
+    return svg;                                       // URL or something else => leave
   }
-  function ensureIconSrc(strOrSvg){
-    if(!strOrSvg) return '';
-    const s = String(strOrSvg).trim();
-    return s.startsWith('<svg') ? svgToDataURL(s) : s;
+  function iconImgHTMLFromAny(svgOrData, w=24, h=24){
+    const src = svgToDataURL(svgOrData||'');
+    return `<img src="${src}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
   }
 
   // (UNCHANGED) inline SVGs used for shop icons and as fallbacks for inventory icons
@@ -34,7 +35,19 @@
     return '';
   }
 
-  // ---------- BUY/SELL TABS UI (non-invasive; wraps existing #shopList) ----------
+  // quick name→id resolver for legacy rows
+  function guessLegacyIdFromName(name){
+    const n=(name||'').toLowerCase();
+    if(/\bknuckle/.test(n)) return 'knuckles';
+    if(/\bbat\b/.test(n)) return 'bat';
+    if(/\buzi\b/.test(n)) return 'uzi';
+    if(/\bpistol\b/.test(n) && !/ammo/.test(n)) return 'pistol';
+    if(/\bgrenade\b/.test(n)) return 'grenade';
+    if(/\bammo\b/.test(n)) return 'pistol_ammo';
+    return '';
+  }
+
+  // ---------- BUY/SELL TABS + SEARCH UI ----------
   let tabsWired = false;
   function ensureTabs(){
     const modal = document.getElementById('shopModal');
@@ -45,6 +58,7 @@
     const card = modal.querySelector('.card');
     if(!card) return;
 
+    // styles
     if(!document.getElementById('shop-tabs-css')){
       const css = document.createElement('style');
       css.id = 'shop-tabs-css';
@@ -52,37 +66,44 @@
       #shopTabs{display:flex;gap:6px;margin:0 0 8px}
       #shopTabs .tab{flex:0 0 auto;padding:6px 10px;border-radius:10px;border:1px solid #2a3550;background:#162134;color:#cfe0ff;font-weight:700;cursor:pointer}
       #shopTabs .tab.on{background:#1f6feb;border-color:#2f6feb;color:#fff}
-      .shop-scroll{max-height:min(60vh,480px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
-      .shop-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; }
+      #shopSearch{width:100%;margin:0 0 8px;padding:8px 12px;border-radius:12px;border:1px solid #2a3550;background:#0e1524;color:#cfe0ff;font-weight:650}
+      .shop-scroll{max-height:min(60vh,520px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
+      .shop-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;background:#0f1522;border:1px solid #2a3550;border-radius:10px}
       .shop-item .buy, .shop-item .sell { background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
       .shop-note{opacity:.8;font-size:12px;margin-top:6px}
       `;
       document.head.appendChild(css);
     }
 
+    // tabs
     const tabs = document.createElement('div');
     tabs.id='shopTabs';
     tabs.innerHTML = `<button class="tab on" data-tab="buy">Buy</button><button class="tab" data-tab="sell">Sell</button>`;
 
-    const buyList = document.createElement('div');
-    buyList.id = 'shopBuyList';
-    buyList.className = 'shop-list shop-scroll';
+    // search
+    const search = document.createElement('input');
+    search.id='shopSearch';
+    search.placeholder='Search shop & inventory…';
+    search.autocomplete='off';
 
-    const sellList = document.createElement('div');
-    sellList.id = 'shopSellList';
-    sellList.className = 'shop-list shop-scroll';
-    sellList.style.display='none';
+    const buyList  = document.createElement('div'); buyList.id='shopBuyList';  buyList.className='shop-list shop-scroll';
+    const sellList = document.createElement('div'); sellList.id='shopSellList'; sellList.className='shop-list shop-scroll'; sellList.style.display='none';
 
+    // move existing children (core rows) into buyList
     while(host.firstChild) buyList.appendChild(host.firstChild);
     host.dataset.tabs='1';
-    host.replaceChildren();
+    host.replaceChildren(); // clear
 
+    // slot UI
     card.insertBefore(tabs, card.children[1] || card.firstChild);
-    card.insertBefore(buyList, tabs.nextSibling);
+    card.insertBefore(search, tabs.nextSibling);
+    card.insertBefore(buyList, search.nextSibling);
     card.insertBefore(sellList, buyList.nextSibling);
 
+    // wire once
     if(!tabsWired){
       tabsWired = true;
+
       card.addEventListener('click', (ev)=>{
         const b=ev.target && ev.target.closest('#shopTabs .tab');
         if(!b) return;
@@ -90,12 +111,31 @@
         card.querySelectorAll('#shopTabs .tab').forEach(t=>t.classList.toggle('on', t===b));
         buyList.style.display = (mode==='buy')?'':'none';
         sellList.style.display = (mode==='sell')?'':'none';
-        if(mode==='sell') renderSellList();
+        if(mode==='sell') renderSellList(search.value.trim());
+        if(mode==='buy')  filterBuyList(search.value.trim());
       }, true);
+
+      // live search
+      search.addEventListener('input', ()=>{
+        const q=search.value.trim();
+        const buying = card.querySelector('#shopTabs .tab.on')?.dataset.tab!=='sell';
+        if(buying){ filterBuyList(q); } else { renderSellList(q); }
+      });
     }
   }
 
-  // ---------- BUY rows ----------
+  // filter for existing BUY rows (non-invasive)
+  function filterBuyList(q){
+    const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
+    if(!list) return;
+    const needle = q.toLowerCase();
+    list.querySelectorAll('.shop-item').forEach(row=>{
+      const txt = (row.textContent||'').toLowerCase();
+      row.style.display = (!needle || txt.includes(needle)) ? '' : 'none';
+    });
+  }
+
+  // ---------- BUY rows (keeps your existing behavior) ----------
   function addShopRow(list, it){
     const row = document.createElement('div');
     row.className='shop-item';
@@ -105,7 +145,7 @@
     meta.className='meta';
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
-        <div>${iconImgHTML(svgIcon(it.id))}</div>
+        <div data-icon>${svgIcon(it.id)}</div>
         <div>
           <div class="name">${it.name}</div>
           ${it.sub? `<div class="sub" style="opacity:.85">${it.sub}</div>`:''}
@@ -130,21 +170,20 @@
     const inv = api.getInventory ? api.getInventory() : {};
     const pb  = readPriceBook();
 
+    // Known items (unchanged)
     if(it.id==='uzi'){
       const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
       cur.owned = true; cur.ammo = (cur.ammo|0) + 50;
       cur.name='Uzi'; cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('uzi',24,24));
       inv.uzi = cur;
-      IZZA.emit?.('toast', {text:'Purchased Uzi (+50 ammo)'});
-      pb['uzi'] = { lastPaid: it.price, name:'Uzi' };
+      IZZA.emit?.('toast', {text:'Purchased Uzi (+50 ammo)'}); pb['uzi'] = { lastPaid: it.price, name:'Uzi' };
 
     }else if(it.id==='grenade'){
       const cur = inv.grenade || { count:0, name:'Grenade' };
       cur.count = (cur.count|0) + 1;
       cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('grenade',24,24));
       inv.grenade = cur;
-      IZZA.emit?.('toast', {text:'Purchased Grenade'});
-      pb['grenade'] = { lastPaid: it.price, name:'Grenade' };
+      IZZA.emit?.('toast', {text:'Purchased Grenade'}); pb['grenade'] = { lastPaid: it.price, name:'Grenade' };
 
     }else if(it.id==='pistol_ammo'){
       const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
@@ -152,25 +191,28 @@
       cur.name = cur.name || 'Pistol';
       cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('pistol',24,24));
       inv.pistol = cur;
-      IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'});
+      IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'}); // no pricebook
 
     } else {
+      // Generic purchase: supports armour + misc
       const key = it.invKey || it.id;
       const pretty = it.name || key;
 
       function addArmorPiece(slotGuess){
-        const valid = new Set(['helmet','vest','arms','legs']);
-        const slot = (it.slot||slotGuess||'').toLowerCase();
-        const resolvedSlot = valid.has(slot) ? slot :
-          (/helmet|head/i.test(pretty)?'helmet' :
-           /vest|chest|body/i.test(pretty)?'vest' :
-           /arms|glove|gaunt/i.test(pretty)?'arms' : 'legs');
+        const valid = new Set(['helmet','vest','arms','legs','head','chest']); // tolerate both vocabularies
+        let slot = (it.slot||slotGuess||'').toLowerCase();
+        if(!valid.has(slot)){
+          slot =
+            (/helmet|head/i.test(pretty)?'head' :
+             /vest|chest|body/i.test(pretty)?'chest' :
+             /arms|glove|gaunt/i.test(pretty)?'arms' : 'legs');
+        }
 
         const entry = inv[key] || { count:0 };
         entry.count = (entry.count|0) + 1;
         entry.name  = pretty;
         entry.type  = 'armor';
-        entry.slot  = resolvedSlot;
+        entry.slot  = slot;
         entry.equippable = true;
         entry.iconSvg = entry.iconSvg || it.iconSvg || svgToDataURL(svgIcon(it.id,24,24));
         inv[key] = entry;
@@ -209,24 +251,28 @@
   }
 
   // ---------- SELL tab ----------
-  function getSellPrice(key, entry){
+  function getSellPrice(key){
     const pb = readPriceBook();
     const last = pb[key]?.lastPaid;
     const base = (typeof last === 'number' && last>0) ? last : 25;
     return Math.max(1, Math.ceil(base * 0.40));
   }
 
-  function inferIconForKey(key){
-    if(/knuck/i.test(key)) return svgToDataURL(svgIcon('knuckles',24,24));
-    if(/\bbat\b/i.test(key)) return svgToDataURL(svgIcon('bat',24,24));
-    if(/pistol/i.test(key) && !/ammo/i.test(key)) return svgToDataURL(svgIcon('pistol',24,24));
-    if(/ammo|mag/i.test(key)) return svgToDataURL(svgIcon('pistol_ammo',24,24));
-    if(/grenade/i.test(key)) return svgToDataURL(svgIcon('grenade',24,24));
-    if(/uzi/i.test(key)) return svgToDataURL(svgIcon('uzi',24,24));
+  // normalize icon source from any inventory entry
+  function iconForInv(key, entry){
+    // prefer entry.iconSvg (but encode if raw)
+    if(entry?.iconSvg){
+      return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
+    }
+    // legacy weapons/consumables
+    const id = guessLegacyIdFromName(entry?.name || key) ||
+               ({pistol:'pistol', uzi:'uzi', grenade:'grenade'}[key] || '');
+    if(id) return iconImgHTMLFromAny(svgIcon(id,24,24), 24, 24);
+    // nothing
     return '';
   }
 
-  function renderSellList(){
+  function renderSellList(qText){
     const modal = document.getElementById('shopModal');
     if(!modal) return;
     const list = modal.querySelector('#shopSellList');
@@ -235,6 +281,7 @@
     let inv = {};
     try{ inv = api.getInventory ? api.getInventory() : {}; }catch{}
 
+    const needle = (qText||'').toLowerCase();
     list.replaceChildren();
 
     Object.keys(inv).forEach(key=>{
@@ -242,22 +289,19 @@
       if(!e) return;
       const count = (e.count|0) + (e.owned?1:0);
       if(count<=0) return;
-      if(/jack_o_lantern|pumpkin_piece/i.test(key)) return; // don’t sell mission bits
+      if(/jack_o_lantern|pumpkin_piece/i.test(key)) return; // prevent selling quest bits
 
       const pretty = e.name || key;
-      const price  = getSellPrice(key, e);
+      if(needle && !pretty.toLowerCase().includes(needle)) return;
 
-      // normalize icon: accept data URLs OR inline SVG strings
-      let src = '';
-      if(e.iconSvg) src = ensureIconSrc(e.iconSvg);
-      if(!src) src = inferIconForKey(key);
-
+      const price  = getSellPrice(key);
       const row = document.createElement('div'); row.className='shop-item';
       const meta = document.createElement('div'); meta.className='meta';
-      const icon = src ? `<img src="${src}" width="24" height="24" style="image-rendering:pixelated;display:block">` : '<div style="width:24px;height:24px;opacity:.6">?</div>';
+
+      const iconHTML = iconForInv(key, e);
       meta.innerHTML = `
         <div style="display:flex; align-items:center; gap:8px">
-          <div>${icon}</div>
+          <div data-icon>${iconHTML}</div>
           <div>
             <div class="name">${pretty}</div>
             <div class="sub" style="opacity:.85">You own: ${count}</div>
@@ -269,7 +313,7 @@
       btn.textContent = `Sell ${price} IC`;
       btn.addEventListener('click', ()=>{
         doSell(key, e, price);
-        renderSellList();
+        renderSellList(needle); // refresh list counts
       });
 
       row.appendChild(meta);
@@ -280,7 +324,7 @@
     if(!list.children.length){
       const empty = document.createElement('div');
       empty.className='shop-note';
-      empty.textContent = 'No sellable items.';
+      empty.textContent = needle ? 'No matches.' : 'No sellable items.';
       list.appendChild(empty);
     }
   }
@@ -314,16 +358,7 @@
     }catch(e){ console.warn('[shop] sell failed', e); }
   }
 
-  // ---------- Robust icon repair for legacy rows (BUY list only) ----------
-  function isWeakIconHTML(html){
-    if(!html) return true;
-    const s = html.toLowerCase();
-    // weak if: no svg/img OR contains common placeholder emoji or ? badge
-    if(!s.includes('<svg') && !s.includes('<img')) return true;
-    if(s.includes('⭐') || s.includes('placeholder') || s.includes('?')) return true;
-    return false;
-  }
-
+  // ---------- Robust icon repair for legacy rows (BUY & SELL) ----------
   function repairMissingIcons(){
     try{
       const modal = document.getElementById('shopModal');
@@ -331,32 +366,26 @@
       const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex');
       if(!open) return;
 
-      const list = modal.querySelector('#shopBuyList') || document.getElementById('shopList');
-      if(!list) return;
+      const lists = [
+        modal.querySelector('#shopBuyList') || document.getElementById('shopList'),
+        modal.querySelector('#shopSellList')
+      ].filter(Boolean);
 
-      list.querySelectorAll('.shop-item .meta').forEach(meta=>{
-        const iconHolder = meta.querySelector(':scope > div > div:first-child');
-        const nameEl     = meta.querySelector('.name');
-        const subEl      = meta.querySelector('.sub');
-        if(!iconHolder || !nameEl) return;
+      lists.forEach(list=>{
+        list.querySelectorAll('.shop-item .meta').forEach(meta=>{
+          const iconHolder = meta.querySelector('[data-icon]') || meta.querySelector(':scope > div:first-child');
+          const nameEl     = meta.querySelector('.name');
+          if(!iconHolder || !nameEl) return;
+          const pretty = (nameEl.textContent||'').trim();
+          const id = guessLegacyIdFromName(pretty);
+          const html = (iconHolder.innerHTML||'').trim();
 
-        const currentName = (nameEl.textContent||'').trim();
-        const subTxt = (subEl?.textContent||'').trim().toLowerCase();
-        const html = (iconHolder.innerHTML||'').trim();
-
-        // Identify by name OR sub-text (for rows with missing names/icons)
-        let isBat = /\bbat\b/i.test(currentName) || subTxt.includes('classic melee');
-        let isKnuckles = /\bknuckles\b/i.test(currentName) || subTxt.includes('heavy hits');
-
-        if(isBat || isKnuckles || isWeakIconHTML(html)){
-          if(isKnuckles){
-            iconHolder.innerHTML = iconImgHTML(svgIcon('knuckles'));
-            if(!currentName) nameEl.textContent = 'Brass Knuckles';
-          }else if(isBat){
-            iconHolder.innerHTML = iconImgHTML(svgIcon('bat'));
-            if(!currentName) nameEl.textContent = 'Bat';
+          // replace if: empty, placeholder star/question, or raw text that begins with a quote (broken HTML dump)
+          const looksBroken = !html || html==='?' || /⭐/.test(html) || /^"&/.test(html) || /^&quot;/.test(html) || /^" width=/.test(html);
+          if(looksBroken && id){
+            iconHolder.innerHTML = iconImgHTMLFromAny(svgIcon(id,24,24));
           }
-        }
+        });
       });
     }catch(e){
       console.warn('[store extender] icon repair failed:', e);
@@ -371,15 +400,16 @@
       const modal = document.getElementById('shopModal');
       if(!modal) return;
 
-      const open = (modal.style.display === 'flex') ||
-                   (getComputedStyle(modal).display === 'flex');
+      const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex');
       if(!open) return;
 
       ensureTabs();
 
+      // Choose the BUY list as our target
       const buyList = document.getElementById('shopBuyList') || document.getElementById('shopList');
       if(!buyList) return;
 
+      // Extend stock (only once per open)
       if(!buyList.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
@@ -389,8 +419,11 @@
         }
       }
 
-      // Always do a pass to stabilize bat/knuckles rows coming from core
+      // After DOM settles, heal any placeholder icons
       repairMissingIcons();
+      // And apply current search filter (if user typed)
+      const q = (document.getElementById('shopSearch')?.value||'').trim();
+      if(q) filterBuyList(q);
     }catch(e){
       console.warn('[store extender] patch failed:', e);
     }
@@ -399,5 +432,4 @@
   // ---------- boot ----------
   IZZA.on('ready', a=>{ api=a; });
   IZZA.on('render-post', patchShopStock);
-
 })();
