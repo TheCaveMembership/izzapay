@@ -782,143 +782,100 @@ function unequipArmorSlot(slot){
   function openEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='flex'; }
   function closeEnter(){ const m=document.getElementById('enterModal'); if(m) m.style.display='none'; }
 
-  function svgIcon(id, w, h){
-  if (id === 'pistol') {
-    return `<svg ...>...</svg>`;
-  }
-  if (id === 'uzi') {
-    return `<svg ...>...</svg>`;
-  }
-  if (id === 'grenade') {
-    return `<svg ...>...</svg>`;
-  }
+  // Replace ONLY this function in izza_core_v3.js
+function svgIcon(id, w, h){
+  const W = String(w || 24), H = String(h || 24);
 
-  // --- NEW: Cardboard Box ---
-  if (id === 'cardboard_box') {
-    // compact 3D-ish cardboard box (looks good at 24–28px)
-    return `
-    <svg viewBox="0 0 48 48" width="${w||24}" height="${h||24}" xmlns="http://www.w3.org/2000/svg">
+  if(id==='bat') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${W}" height="${H}">
+    <rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/>
+    <rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
+
+  if(id==='knuckles') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${W}" height="${H}">
+    <circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/>
+    <circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/>
+    <circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/>
+    <rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
+
+  if(id==='pistol') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${W}" height="${H}">
+    <rect x="14" y="26" width="30" height="8" fill="#202833"/>
+    <rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
+
+  if(id==='uzi') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${W}" height="${H}">
+    <rect x="12" y="28" width="34" height="8" fill="#0b0e14"/>
+    <rect x="36" y="22" width="12" height="6" fill="#0b0e14"/>
+    <rect x="30" y="36" width="6" height="12" fill="#0b0e14"/>
+    <rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
+
+  if(id==='grenade') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${W}" height="${H}">
+    <rect x="28" y="22" width="8" height="5" fill="#5b7d61"/>
+    <rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/>
+    <rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
+
+  // Cardboard Box (stackable)
+  if(id==='cardboard_box') return `
+    <svg viewBox="0 0 48 48" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <linearGradient id="cb1" x1="0" x2="1">
-          <stop offset="0"  stop-color="#C79A5A"/>
-          <stop offset="1"  stop-color="#9B7441"/>
-        </linearGradient>
-        <linearGradient id="cb2" x1="0" x2="1">
-          <stop offset="0"  stop-color="#D4AF78"/>
-          <stop offset="1"  stop-color="#B3874E"/>
-        </linearGradient>
+        <linearGradient id="cb1" x1="0" x2="1"><stop offset="0" stop-color="#C79A5A"/><stop offset="1" stop-color="#9B7441"/></linearGradient>
+        <linearGradient id="cb2" x1="0" x2="1"><stop offset="0" stop-color="#D4AF78"/><stop offset="1" stop-color="#B3874E"/></linearGradient>
       </defs>
-      <!-- bottom/front -->
-      <path d="M6 18 L24 10 L42 18 L24 26 Z" fill="url(#cb1)" />
-      <!-- left wall -->
+      <path d="M6 18 L24 10 L42 18 L24 26 Z" fill="url(#cb1)"/>
       <path d="M6 18 L6 30 L24 38 L24 26 Z" fill="#B5874C"/>
-      <!-- right wall -->
       <path d="M42 18 L42 30 L24 38 L24 26 Z" fill="#A8793F"/>
-      <!-- flaps -->
       <path d="M6 18 L24 10 L24 14 L6 22 Z" fill="url(#cb2)"/>
       <path d="M42 18 L24 10 L24 14 L42 22 Z" fill="url(#cb2)"/>
-      <!-- tape -->
-      <rect x="22.8" y="10" width="2.4" height="28" fill="#E8DEB6" opacity="0.9"/>
-      <!-- tiny print -->
-      <g stroke="#6A4B24" stroke-width="1" opacity="0.85">
-        <path d="M14 27 l3 -3" />
-        <path d="M34 27 l-3 -3" />
-      </g>
-    </svg>`;
-  }
-      // --- NEW: Halloween items ---
-  // Jack-o'-lantern (supports alias "jacklantern")
-  if (id === 'jack_o_lantern' || id === 'jacklantern') {
-    return `
-    <svg viewBox="0 0 48 48" width="${w||28}" height="${h||28}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="m5glow" cx="50%" cy="55%" r="60%">
-          <stop offset="0%"  stop-color="#ffd27a"/>
-          <stop offset="55%" stop-color="#ff9320"/>
-          <stop offset="100%" stop-color="#5a1e00"/>
-        </radialGradient>
-      </defs>
-      <!-- body -->
+      <rect x="22.8" y="10" width="2.4" height="28" fill="#E8DEB6" opacity="0.9"/></svg>`;
+
+  // Mission 5 bits
+  if(id==='jack_o_lantern' || id==='jacklantern') return `
+    <svg viewBox="0 0 48 48" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <defs><radialGradient id="m5glow" cx="50%" cy="55%" r="60%">
+        <stop offset="0%" stop-color="#ffd27a"/><stop offset="55%" stop-color="#ff9320"/><stop offset="100%" stop-color="#5a1e00"/></radialGradient></defs>
       <ellipse cx="24" cy="26" rx="17" ry="15" fill="url(#m5glow)" stroke="#3a1400" stroke-width="2"/>
-      <!-- stem -->
       <rect x="22" y="11" width="4" height="6" rx="1.5" fill="#2f6a22"/>
-      <!-- angry eyes -->
       <polygon points="13,22 23,19 19,26 13,24" fill="#120800"/>
       <polygon points="25,19 35,22 35,24 29,26" fill="#120800"/>
-      <!-- jagged mouth -->
-      <path d="M10 31 Q24 38 38 31 L35 34 L31 33 L27 35 L23 33 L19 35 L15 33 L12 34 Z" fill="#120800"/>
-    </svg>`;
-  }
+      <path d="M10 31 Q24 38 38 31 L35 34 L31 33 L27 35 L23 33 L19 35 L15 33 L12 34 Z" fill="#120800"/></svg>`;
 
-  // Pumpkin piece (supports alias "pumpkin")
-  if (id === 'pumpkin_piece' || id === 'pumpkin') {
-    return `
-    <svg viewBox="0 0 48 48" width="${w||28}" height="${h||28}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="pk" cx="50%" cy="55%" r="60%">
-          <stop offset="0%"  stop-color="#ffcf7a"/>
-          <stop offset="60%" stop-color="#ff8412"/>
-          <stop offset="100%" stop-color="#6a2500"/>
-        </radialGradient>
-      </defs>
-      <!-- a wedge-like piece -->
-      <path d="M10 30 C11 20 20 14 31 16 C35 17 37 19 39 22
-               C35 31 26 36 16 35 Z" fill="url(#pk)" stroke="#572200" stroke-width="2"/>
+  if(id==='pumpkin_piece' || id==='pumpkin') return `
+    <svg viewBox="0 0 48 48" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <defs><radialGradient id="pk" cx="50%" cy="55%" r="60%">
+        <stop offset="0%" stop-color="#ffcf7a"/><stop offset="60%" stop-color="#ff8412"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
+      <path d="M10 30 C11 20 20 14 31 16 C35 17 37 19 39 22 C35 31 26 36 16 35 Z"
+            fill="url(#pk)" stroke="#572200" stroke-width="2"/>
       <rect x="28" y="16" width="4" height="5" rx="1.5" fill="#2c5e22" transform="rotate(-18 30 18)"/>
-      <!-- cut face edge -->
-      <path d="M22 20 L30 27" stroke="#6a2a00" stroke-width="2" opacity=".65"/>
-    </svg>`;
-  }
-  // --- NEW: Cardboard Armor piece icons ---
-  if (id === 'cardboardHelmet') {
-    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="#caa468"/><path d="M6 18h20v3H6z" fill="#9b7b4f"/></svg>`;
-  }
-  if (id === 'cardboardVest') {
-    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="#caa468"/><rect x="8" y="12" width="16" height="10" fill="#9b7b4f"/></svg>`;
-  }
-  if (id === 'cardboardLegs') {
-    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="#caa468"/><rect x="9" y="14" width="14" height="3" fill="#9b7b4f"/></svg>`;
-  }
-  if (id === 'cardboardArms') {
-    return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><rect x="2" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="22" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="4" y="13" width="4" height="6" fill="#9b7b4f"/><rect x="24" y="13" width="4" height="6" fill="#9b7b4f"/></svg>`;
-  }
-    
-// --- NEW: Pumpkin Armour piece icons ---
-if (id === 'pumpkinHelmet') {
-  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+      <path d="M22 20 L30 27" stroke="#6a2a00" stroke-width="2" opacity=".65"/></svg>`;
+
+  // Cardboard armour UI icons
+  if(id==='cardboardHelmet') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
+    <path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="#caa468"/><path d="M6 18h20v3H6z" fill="#9b7b4f"/></svg>`;
+  if(id==='cardboardVest') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
+    <path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="#caa468"/><rect x="8" y="12" width="16" height="10" fill="#9b7b4f"/></svg>`;
+  if(id==='cardboardLegs') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
+    <path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="#caa468"/><rect x="9" y="14" width="14" height="3" fill="#9b7b4f"/></svg>`;
+  if(id==='cardboardArms') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
+    <rect x="2" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="22" y="10" width="8" height="12" rx="3" fill="#caa468"/>
+    <rect x="4" y="13" width="4" height="6" fill="#9b7b4f"/><rect x="24" y="13" width="4" height="6" fill="#9b7b4f"/></svg>`;
+
+  // Pumpkin armour UI icons
+  if(id==='pumpkinHelmet') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
     <defs><radialGradient id="pg" cx="50%" cy="55%" r="60%">
-      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
-    </radialGradient></defs>
-    <path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="url(#pg)"/>
-    <rect x="14" y="6" width="4" height="5" rx="1.5" fill="#2f6a22"/>
-  </svg>`;
-}
-if (id === 'pumpkinVest') {
-  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
+    <path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="url(#pg)"/><rect x="14" y="6" width="4" height="5" rx="1.5" fill="#2f6a22"/></svg>`;
+  if(id==='pumpkinVest') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
     <defs><radialGradient id="pg2" cx="50%" cy="55%" r="60%">
-      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
-    </radialGradient></defs>
-    <path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="url(#pg2)"/>
-  </svg>`;
-}
-if (id === 'pumpkinLegs') {
-  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
+    <path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="url(#pg2)"/></svg>`;
+  if(id==='pumpkinLegs') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
     <defs><radialGradient id="pg3" cx="50%" cy="55%" r="60%">
-      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
-    </radialGradient></defs>
-    <path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="url(#pg3)"/>
-  </svg>`;
-}
-if (id === 'pumpkinArms') {
-  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
+    <path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="url(#pg3)"/></svg>`;
+  if(id==='pumpkinArms') return `<svg viewBox="0 0 32 32" width="${W}" height="${H}">
     <defs><radialGradient id="pg4" cx="50%" cy="55%" r="60%">
-      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
-    </radialGradient></defs>
-    <rect x="2" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/>
-    <rect x="22" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/>
-  </svg>`;
-}
-  // ... other icons or a default ...
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
+    <rect x="2" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/><rect x="22" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/></svg>`;
+
+  // default: no icon
+  return '';
 }
   // Shop / Tutorial handlers (kept)
   function openShop(){
