@@ -1,15 +1,7 @@
 // armour_packs_plugin.js — Self-contained armour shop + overlays + equip rules
 // Adds 10 shop sets (40 items), data-driven, no edits to existing files.
-// Works with current inventory & equips, and draws on top of the player.
-//
-// Requirements it uses from your world (already present in your codebase):
-// - IZZA.on('ready'/'render-post'/'update-post'), IZZA.api.{getCoins,setCoins,getInventory,setInventory}
-// - Shop modal DOM (#shopModal, #shopList) — same structure your store plugin uses
-// - Your equip UI/buttons already toggle .equipped (or .equip / .equippedCount). We normalize conflicts here.
-// - Renders like Cardboard/Pumpkin: same placement constants; minimal stylish variants per set.
-// --------------------------------------------------------------------------------------------
 (function(){
-  const BUILD = 'armour-packs-plugin/v1';
+  const BUILD = 'armour-packs-plugin/v1.1 (buyList-aware)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -28,7 +20,6 @@
       try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
     }catch{}
   }
-  function _plural(n, one, many){ return n===1? one : many; }
   function _isEquipped(entry){
     if(!entry) return false;
     if(entry.equipped===true || entry.equip===true) return true;
@@ -42,60 +33,18 @@
     if(typeof entry.equippedCount === 'number') entry.equippedCount = on ? 1 : 0;
   }
 
-  // ---- Data model for sets (easy to extend) ----
-  // Tier order = increasing fanciness + price (per piece)
-  // Style cue: hip/urban-medieval with our “gangster/trendy/savage” twist.
+  // ---- Data model for sets ----
   const SETS = [
-    {
-      id:'bronze_street',   name:'Bronze Street',   price:50,
-      colors:{ base:'#b07a43', shade:'#6a4826', trim:'#2a2a2a', glow:'#ff4a2a' },
-      tags:{melee:true}
-    },
-    {
-      id:'iron_hustle',     name:'Iron Hustle',     price:80,
-      colors:{ base:'#8d949b', shade:'#595f67', trim:'#1f1f1f', glow:'#ff5e2a' },
-      tags:{melee:true,tank:true}
-    },
-    {
-      id:'steel_block',     name:'Steel Block',     price:120,
-      colors:{ base:'#b9c5cf', shade:'#7b8893', trim:'#222c39', glow:'#ff6a3a' },
-      tags:{melee:true}
-    },
-    {
-      id:'cobalt_crew',     name:'Cobalt Crew',     price:180,
-      colors:{ base:'#315caa', shade:'#213c74', trim:'#101b33', glow:'#3dd1ff' },
-      tags:{hybrid:true}
-    },
-    {
-      id:'obsidian_syndicate', name:'Obsidian Syndicate', price:250,
-      colors:{ base:'#242427', shade:'#0f0f12', trim:'#5d5d65', glow:'#ff3d3d' },
-      tags:{tank:true}
-    },
-    {
-      id:'serpent_scale',   name:'Serpent Scale',   price:350,
-      colors:{ base:'#3e8d60', shade:'#2b5f42', trim:'#0e1f17', glow:'#7cff48' },
-      tags:{ranged:true}
-    },
-    {
-      id:'neon_mystic',     name:'Neon Mystic',     price:500,
-      colors:{ base:'#5b3cff', shade:'#2c1f7a', trim:'#0e072e', glow:'#cfa7ff' },
-      tags:{magic:true}
-    },
-    {
-      id:'phantom_drip',    name:'Phantom Drip',    price:650,
-      colors:{ base:'#6a6f88', shade:'#3a3e54', trim:'#131420', glow:'#8be7ff' },
-      tags:{hybrid:true}
-    },
-    {
-      id:'apex_titan',      name:'Apex Titan',      price:800,
-      colors:{ base:'#d4d7db', shade:'#7d838c', trim:'#2a3038', glow:'#ffd866' },
-      tags:{tank:true}
-    },
-    {
-      id:'royal_savage',    name:'Royal Savage',    price:1000,
-      colors:{ base:'#d6a740', shade:'#8c6a1f', trim:'#2e220c', glow:'#ffe17a' },
-      tags:{hybrid:true, prestige:true}
-    }
+    { id:'bronze_street',   name:'Bronze Street',   price:50,   colors:{ base:'#b07a43', shade:'#6a4826', trim:'#2a2a2a', glow:'#ff4a2a' }, tags:{melee:true} },
+    { id:'iron_hustle',     name:'Iron Hustle',     price:80,   colors:{ base:'#8d949b', shade:'#595f67', trim:'#1f1f1f', glow:'#ff5e2a' }, tags:{melee:true,tank:true} },
+    { id:'steel_block',     name:'Steel Block',     price:120,  colors:{ base:'#b9c5cf', shade:'#7b8893', trim:'#222c39', glow:'#ff6a3a' }, tags:{melee:true} },
+    { id:'cobalt_crew',     name:'Cobalt Crew',     price:180,  colors:{ base:'#315caa', shade:'#213c74', trim:'#101b33', glow:'#3dd1ff' }, tags:{hybrid:true} },
+    { id:'obsidian_syndicate', name:'Obsidian Syndicate', price:250, colors:{ base:'#242427', shade:'#0f0f12', trim:'#5d5d65', glow:'#ff3d3d' }, tags:{tank:true} },
+    { id:'serpent_scale',   name:'Serpent Scale',   price:350,  colors:{ base:'#3e8d60', shade:'#2b5f42', trim:'#0e1f17', glow:'#7cff48' }, tags:{ranged:true} },
+    { id:'neon_mystic',     name:'Neon Mystic',     price:500,  colors:{ base:'#5b3cff', shade:'#2c1f7a', trim:'#0e072e', glow:'#cfa7ff' }, tags:{magic:true} },
+    { id:'phantom_drip',    name:'Phantom Drip',    price:650,  colors:{ base:'#6a6f88', shade:'#3a3e54', trim:'#131420', glow:'#8be7ff' }, tags:{hybrid:true} },
+    { id:'apex_titan',      name:'Apex Titan',      price:800,  colors:{ base:'#d4d7db', shade:'#7d838c', trim:'#2a3038', glow:'#ffd866' }, tags:{tank:true} },
+    { id:'royal_savage',    name:'Royal Savage',    price:1000, colors:{ base:'#d6a740', shade:'#8c6a1f', trim:'#2e220c', glow:'#ffe17a' }, tags:{hybrid:true, prestige:true} }
   ];
 
   const PIECES = [
@@ -105,10 +54,9 @@
     { slot:'arms',  key:'arms',   pretty:'Arms'   },
   ];
 
-  // ---- Shop glue (no change to your store file) ----
+  // ---- Shop glue ----
   function svgIconArmor(set, piece, w=24, h=24){
     const c=set.colors;
-    // tiny 24×24 icon: simple plate + trim stripe; change shape by slot
     const body = piece.key==='helmet'
       ? `<rect x="6" y="3" width="12" height="10" rx="3" fill="${c.base}"/>
          <rect x="6" y="11" width="12" height="3" fill="${c.shade}"/>
@@ -157,9 +105,8 @@
       if(coins < price){ alert('Not enough IZZA Coins'); return; }
       api.setCoins(coins - price);
 
-      // grant/ensure in inventory
       const inv = _invRead();
-      const invKey = id; // keep simple & unique
+      const invKey = id;
       inv[invKey] = inv[invKey] || { count:0, name, type:'armor', slot:piece.slot, equippable:true, iconSvg:svgIconArmor(set, piece) };
       inv[invKey].count = (inv[invKey].count|0) + 1;
       _invWrite(inv);
@@ -179,44 +126,41 @@
       if(!modal) return;
       const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex');
       if(!open) return;
-      const list = document.getElementById('shopList');
+
+      // prefer the Buy list if your store plugin has created tabs
+      const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
       if(!list) return;
 
       if(list.querySelector('[data-armor-pack]')) return; // only once per open
-      // Add all sets (40 rows)
+
+      // Add all sets (40 rows) — use a fragment for speed when hundreds of items exist
+      const frag = document.createDocumentFragment();
       SETS.forEach(set=>{
-        PIECES.forEach(piece=> addShopArmorRow(list, set, piece));
+        PIECES.forEach(piece=> addShopArmorRow(frag, set, piece));
       });
+      list.appendChild(frag);
     }catch(e){ console.warn('[armour-packs] shop patch failed', e); }
   }
 
-  // ---- Equip normalization: ensure 1 piece per slot across *all* armour items ----
+  // ---- Equip normalization: ensure 1 piece per slot across all armour items ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
-    const slots = { head:null, chest:null, legs:null, arms:null };
+    const lock = { head:null, chest:null, legs:null, arms:null };
 
-    // Prefer most-recently equipped in each slot (first winner keeps, rest off)
-    const keys = Object.keys(inv);
-    keys.forEach(k=>{
+    Object.keys(inv).forEach(k=>{
       const it = inv[k];
       if(!it || it.type!=='armor' || !it.slot) return;
+      const slot = it.slot; // head/chest/legs/arms (store file maps head/helmet & chest/vest)
       if(_isEquipped(it)){
-        if(!slots[it.slot]) slots[it.slot] = k;
-        else {
-          _setEquipped(it,false);
-          changed=true;
-        }
+        if(lock[slot]==null) lock[slot]=k;
+        else { _setEquipped(it,false); changed=true; }
       }
     });
 
     if(changed) _invWrite(inv);
   }
 
-  // Also, if a user equips one of our pieces while another set piece is on the same slot,
-  // the above guard will switch the older one off—no UI changes needed.
-
-  // ---- Overlays (simple, tidy variants; same placement as Cardboard/Pumpkin) ----
-  // Param-driven draw functions: each piece draws with set palette.
+  // ---- Overlays (draw on top of player) ----
   function drawPieceWorld(ctx, px, py, scale, ox, oy, fn){
     const api=IZZA.api, S=api.DRAW, T=api.TILE;
     const sx=(px - api.camera.x)*(S/T), sy=(py - api.camera.y)*(S/T);
@@ -228,9 +172,7 @@
     ctx.restore();
   }
 
-  // Common shapes
   function mkHelmetPath(c){ return function(ctx){
-    // dome + brow + subtle eyes
     ctx.fillStyle = c.base;
     ctx.beginPath(); ctx.moveTo(-12,2); ctx.quadraticCurveTo(0,-10,12,2); ctx.lineTo(12,7); ctx.lineTo(-12,7); ctx.closePath(); ctx.fill();
     ctx.fillStyle = c.shade; ctx.fillRect(-11,5,22,2.6);
@@ -243,7 +185,6 @@
   function mkVestPath(c){ return function(ctx){
     ctx.fillStyle = c.base; ctx.fillRect(-12,-8,24,16);
     ctx.fillStyle = c.shade; ctx.fillRect(-10,-3,20,6);
-    // tiny shoulder studs for style
     ctx.fillStyle = c.trim; ctx.fillRect(-12,-9,4,2); ctx.fillRect(8,-9,4,2);
   };}
 
@@ -260,11 +201,9 @@
       ctx.fillStyle=c.base;
       ctx.fillRect(-8,0,7,14); ctx.fillRect(1,0,7,14);
       ctx.fillStyle=c.shade; ctx.fillRect(-8,4,16,3);
-      // cuffs
       ctx.fillStyle=c.trim; ctx.fillRect(-8,10,7,2); ctx.fillRect(1,10,7,2);
 
       if(!withFlames) return;
-      // modest thrusters for upper tiers
       const p=IZZA.api.player||{}, moving=!!p.moving, t=((p.animTime||0)*0.02);
       const target = moving?1:0; mkLegsPath._a = (mkLegsPath._a||0) + (target-(mkLegsPath._a||0))*0.18;
       if((mkLegsPath._a||0) < 0.02) return;
@@ -281,13 +220,11 @@
     };
   }
 
-  // Per-frame draw: render whichever armour pieces are equipped (any mix of sets)
   function drawEquippedArmour(){
     if(!api?.ready) return;
     const inv=_invRead();
     const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
 
-    // placement as cardboard
     const p=api.player, px=p.x, py=p.y, f=p.facing||'down';
     const facingShift = { down:{x:0,y:0}, up:{x:0,y:-1}, left:{x:-1.5,y:0}, right:{x:1.5,y:0} }[f];
     const HELMET={ scale:2.80, ox:(facingShift.x)*0.05, oy:-12 - (f==='up'?2:0) };
@@ -295,7 +232,6 @@
     const ARMS  ={ scale:2.60, ox:facingShift.x*0.3,     oy: 2 };
     const LEGS  ={ scale:2.45, ox:facingShift.x*0.2,     oy:10 };
 
-    // Find an equipped item for each slot and draw it with its set palette
     function pieceFor(slot){
       for(const k in inv){
         const it=inv[k]; if(!it || it.type!=='armor' || it.slot!==slot) continue;
@@ -304,7 +240,6 @@
       return null;
     }
     function setColorsFromKey(k){
-      // expect keys like "<setid>_helmet"
       const sid = (k||'').split('_').slice(0,-1).join('_');
       const s = SETS.find(x=> x.id===sid);
       return s ? s.colors : { base:'#999', shade:'#666', trim:'#222', glow:'#fff' };
@@ -333,7 +268,7 @@
     }
   }
 
-  // ---- Speed bump for the “royal_savage” legs (top-tier flair) ----
+  // ---- Speed bump for the “royal_savage” legs (unchanged) ----
   (function speedBoostTopTier(){
     let base=null;
     IZZA.on?.('update-post', ()=>{
@@ -360,8 +295,6 @@
   IZZA.on('ready', a=>{ api=a; });
   IZZA.on('render-post', tryPatchShop);
   IZZA.on('render-post', drawEquippedArmour);
-  // Whenever inventory changes, ensure only one per slot is equipped
   window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
-  // Also run a periodic guard just in case
   IZZA.on('update-post', normalizeEquipSlots);
 })();
