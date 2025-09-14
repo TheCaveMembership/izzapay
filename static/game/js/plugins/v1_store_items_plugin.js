@@ -174,6 +174,18 @@
       cur.name = cur.name || 'Pistol';
       cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('pistol',24,24));
       inv.pistol = cur; IZZA.emit?.('toast',{text:'Purchased Pistol Ammo (+17)'});
+    } else if (it.id==='bat') {
+      const cur = inv.bat || { count:0, hitsLeftOnCurrent:0, equipped:false, name:'Baseball Bat' };
+      cur.count += 1;
+      if (cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = 20; // matches core
+      cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('bat',24,24));
+      inv.bat = cur; IZZA.emit?.('toast',{text:'Purchased Baseball Bat'}); pb['bat']={lastPaid:it.price,name:'Baseball Bat'};
+    } else if (it.id==='knuckles') {
+      const cur = inv.knuckles || { count:0, hitsLeftOnCurrent:0, equipped:false, name:'Brass Knuckles' };
+      cur.count += 1;
+      if (cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = 50; // matches core
+      cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('knuckles',24,24));
+      inv.knuckles = cur; IZZA.emit?.('toast',{text:'Purchased Brass Knuckles'}); pb['knuckles']={lastPaid:it.price,name:'Brass Knuckles'};
     } else {
       // Generic (armour + misc)
       const key = it.invKey || it.id;
@@ -234,11 +246,24 @@
   }
 
   function iconForInv(key, entry){
-    if(entry?.iconSvg) return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
-    const id = guessLegacyIdFromName(entry?.name || key) ||
-               // ensure legacy keys map (added bat/knuckles)
-               ({pistol:'pistol', uzi:'uzi', grenade:'grenade', bat:'bat', knuckles:'knuckles'}[key] || '');
-    if(id) return iconImgHTMLFromAny(svgIcon(id,24,24), 24, 24);
+    if (entry?.iconSvg) return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
+
+    // Prefer your global UI icon set if present
+    if (window.svgIcon) {
+      const prettyId = (entry?.name || key || '').toLowerCase();
+      const idGuess =
+        /knuckle/.test(prettyId) ? 'knuckles' :
+        /\bbat\b/.test(prettyId) ? 'bat' :
+        /\buzi\b/.test(prettyId) ? 'uzi' :
+        (/\bpistol\b/.test(prettyId) && !/ammo/.test(prettyId)) ? 'pistol' :
+        /\bgrenade\b/.test(prettyId) ? 'grenade' : '';
+      const svg = idGuess ? window.svgIcon(idGuess, 24, 24) : '';
+      if (svg) return iconImgHTMLFromAny(svg, 24, 24);
+    }
+
+    // Final fallback: local guesser
+    const id = guessLegacyIdFromName(entry?.name || key);
+    if (id) return iconImgHTMLFromAny(svgIcon(id,24,24), 24, 24);
     return '';
   }
 
@@ -362,6 +387,10 @@
       if(!buyList) return;
 
       if(!buyList.querySelector('[data-store-ext]')){
+        // NEW: Bat & Knuckles from plugin (always visible)
+        addShopRow(buyList, { id:'bat',       name:'Baseball Bat',   price:150, sub:'Heavy hits, light weight.' });
+        addShopRow(buyList, { id:'knuckles',  name:'Brass Knuckles', price:200, sub:'Classic melee. Crowd pleaser.' });
+
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
           addShopRow(buyList, { id:'uzi',          name:'Uzi (w/ +50 ammo)',       price:350, sub:'Compact SMG. +50 ammo.' });
