@@ -1,7 +1,7 @@
 /* mission5_halloween.plugin.js
    IZZA Mission 5 — “Night of the Lantern”
    - Spawns jack-o’-lantern when missionsCompleted == 4 (listens to M4 completion)
-   - Places jack-o’-lantern at HQ door +3E (exactly 1× tile)
+   - Places jack-o’-lantern at HQ door +2E, +10S (exactly 1× tile) — one tile west of M4 box
    - Interact with [B] to start a 5m night mission; pumpkins spawn at exact offsets
    - Werewolf spawns every 30s while moving at night; A to fight
    - Craft Pumpkin Armour (4 pieces) from 1 jack-o’-lantern + 3 pumpkin pieces
@@ -82,8 +82,10 @@
   }
   function jackLanternGrid(){
     const d = hqDoorGrid();
-    // EXACTLY +3 tiles East of the door (sidewalk), no N/S change
-    return { x: d.gx + 3, y: d.gy };
+    // EXACT same sidewalk logic/offsets as the cardboard box, but 1 tile WEST of it.
+    // M4 box is: { x: d.gx + 3, y: d.gy + 10 }
+    // Jack goes to: { x: d.gx + 2, y: d.gy + 10 }
+    return { x: d.gx + 2, y: d.gy + 10 };
   }
 
   // ---------- world→screen ----------
@@ -156,7 +158,7 @@
   function ensureJack(){
     if (jackPlaced) return;
     jackGrid = jackLanternGrid();
-    // SIZE CHANGE: 1× tile (was 3×)
+    // SIZE: 1× tile
     jackImg  = svgToImage(svgJack(), TILE*1.0, TILE*1.0);
     jackPlaced=true;
     if(!ensureJack._t){ ensureJack._t=setInterval(()=>{ try{ IZZA.emit('sfx',{kind:'jack-HA',vol:0.6}); }catch{} }, 2500); }
