@@ -1580,125 +1580,125 @@ function _isEquipped(entry){
   const C_BASE = '#caa468', C_SHAD = '#9b7b4f';
 
   // --- jets state (smooth fade when stopping) + SVG flame path ---
-let _CB_JET_ALPHA = 0; // eased 0→1 while moving, 1→0 when idle
-const _CB_FLAME_PATH = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
+  let _CB_JET_ALPHA = 0; // eased 0→1 while moving, 1→0 when idle
+  const _CB_FLAME_PATH = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
 
-// simple shapes that read cleanly at 32×32 scale
-function pathHelmet(ctx){
-  ctx.beginPath();
-  ctx.fillStyle = C_BASE;
-  ctx.moveTo(-12,2);
-  ctx.quadraticCurveTo(0,-14,12,2);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = C_SHAD;
-  ctx.fillRect(-11, 2, 22, 3);
-}
-function pathVest(ctx){
-  ctx.fillStyle = C_BASE;
-  ctx.fillRect(-12, -8, 24, 16);
-  ctx.fillStyle = C_SHAD;
-  ctx.fillRect(-10, -3, 20, 6);
-}
-function pathLegs(ctx){
-  // --- original cardboard legs, widened outward ---
-  ctx.fillStyle = C_BASE;
-  // left leg: pushed 1px further left, slightly wider
-  ctx.fillRect(-8, 0, 7, 14);
-  // right leg: kept gap, pushed 1px further right, slightly wider
-  ctx.fillRect( 1, 0, 7, 14);
-
-  ctx.fillStyle = C_SHAD;
-  ctx.fillRect(-8, 4, 16, 3);  // widened shading band
-
-  // --- metallic jet mounts (very subtle silver sparkle) ---
-  (function drawMetalBands(){
-    const bands = [
-      { x:-8, y:10, w:7, h:3 }, // widened with leg
-      { x: 1, y:10, w:7, h:3 }
-    ];
-    bands.forEach(b=>{
-      const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-      g.addColorStop(0.0, 'rgba(200,210,222,0.75)');
-      g.addColorStop(1.0, 'rgba(135,145,158,0.75)');
-      ctx.fillStyle = g;
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-
-      const t = ((IZZA?.api?.player?.animTime)||0) * 0.015;
-      for (let i=0;i<3;i++){
-        const sx = b.x + 1 + (i*1.8) + Math.sin(t*7 + b.x*0.3 + i)*0.3;
-        const sy = b.y + 0.6 + (i*0.7) + Math.cos(t*9 + b.y*0.2 + i)*0.2;
-        ctx.globalAlpha = 0.22;
-        ctx.fillStyle = '#e9eef7';
-        ctx.fillRect(sx, sy, 0.9, 0.9);
-      }
-      ctx.globalAlpha = 1.0;
-    });
-  })();
-
-  // --- tiny rocket jets (flames + smoke), positioned at y=12 (down a little) ---
-  const p = IZZA?.api?.player || {};
-  const moving = !!p.moving;
-  const t = ((p.animTime||0) * 0.02);
-
-  const target = moving ? 1 : 0;
-  const ease   = 0.18;
-  _CB_JET_ALPHA += (target - _CB_JET_ALPHA) * ease;
-  if (_CB_JET_ALPHA <= 0.02) return;
-
-  const power  = 0.8 + 0.20 * Math.sin(t*18);
-  const jitter = 0.35 * Math.sin(t*23);
-
-  ctx.save();
-  ctx.globalAlpha *= _CB_JET_ALPHA;
-
-  const feet = [-5, 5]; // 🔹 widened jets to match widened legs
-  feet.forEach((fx)=>{
-    ctx.save();
-    ctx.translate(fx, 12);
-    ctx.scale(0.8, power);
-
-    const grad = ctx.createLinearGradient(0,-7, 0,6);
-    grad.addColorStop(0.00, "#6ac6ff");
-    grad.addColorStop(0.30, "#fff7c4");
-    grad.addColorStop(0.65, "#ffb400");
-    grad.addColorStop(1.00, "rgba(255,80,0,0.82)");
-    ctx.fillStyle = grad;
-    ctx.fill(_CB_FLAME_PATH);
-
-    ctx.globalAlpha *= 0.7;
+  // simple shapes that read cleanly at 32×32 scale
+  function pathHelmet(ctx){
     ctx.beginPath();
-    ctx.ellipse(0, -2, 0.9, 2.0, 0, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillStyle = C_BASE;
+    ctx.moveTo(-12,2);
+    ctx.quadraticCurveTo(0,-14,12,2);
+    ctx.closePath();
     ctx.fill();
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-11, 2, 22, 3);
+  }
+  function pathVest(ctx){
+    ctx.fillStyle = C_BASE;
+    ctx.fillRect(-12, -8, 24, 16);
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-10, -3, 20, 6);
+  }
+  function pathLegs(ctx){
+    // --- original cardboard legs, widened outward ---
+    ctx.fillStyle = C_BASE;
+    // left leg: pushed 1px further left, slightly wider
+    ctx.fillRect(-8, 0, 7, 14);
+    // right leg: kept gap, pushed 1px further right, slightly wider
+    ctx.fillRect( 1, 0, 7, 14);
+
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-8, 4, 16, 3);  // widened shading band
+
+    // --- metallic jet mounts (very subtle silver sparkle) ---
+    (function drawMetalBands(){
+      const bands = [
+        { x:-8, y:10, w:7, h:3 }, // widened with leg
+        { x: 1, y:10, w:7, h:3 }
+      ];
+      bands.forEach(b=>{
+        const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+        g.addColorStop(0.0, 'rgba(200,210,222,0.75)');
+        g.addColorStop(1.0, 'rgba(135,145,158,0.75)');
+        ctx.fillStyle = g;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+
+        const t = ((IZZA?.api?.player?.animTime)||0) * 0.015;
+        for (let i=0;i<3;i++){
+          const sx = b.x + 1 + (i*1.8) + Math.sin(t*7 + b.x*0.3 + i)*0.3;
+          const sy = b.y + 0.6 + (i*0.7) + Math.cos(t*9 + b.y*0.2 + i)*0.2;
+          ctx.globalAlpha = 0.22;
+          ctx.fillStyle = '#e9eef7';
+          ctx.fillRect(sx, sy, 0.9, 0.9);
+        }
+        ctx.globalAlpha = 1.0;
+      });
+    })();
+
+    // --- tiny rocket jets (flames + smoke), positioned at y=12 (down a little) ---
+    const p = IZZA?.api?.player || {};
+    const moving = !!p.moving;
+    const t = ((p.animTime||0) * 0.02);
+
+    const target = moving ? 1 : 0;
+    const ease   = 0.18;
+    _CB_JET_ALPHA += (target - _CB_JET_ALPHA) * ease;
+    if (_CB_JET_ALPHA <= 0.02) return;
+
+    const power  = 0.8 + 0.20 * Math.sin(t*18);
+    const jitter = 0.35 * Math.sin(t*23);
+
+    ctx.save();
+    ctx.globalAlpha *= _CB_JET_ALPHA;
+
+    const feet = [-5, 5]; // 🔹 widened jets to match widened legs
+    feet.forEach((fx)=>{
+      ctx.save();
+      ctx.translate(fx, 12);
+      ctx.scale(0.8, power);
+
+      const grad = ctx.createLinearGradient(0,-7, 0,6);
+      grad.addColorStop(0.00, "#6ac6ff");
+      grad.addColorStop(0.30, "#fff7c4");
+      grad.addColorStop(0.65, "#ffb400");
+      grad.addColorStop(1.00, "rgba(255,80,0,0.82)");
+      ctx.fillStyle = grad;
+      ctx.fill(_CB_FLAME_PATH);
+
+      ctx.globalAlpha *= 0.7;
+      ctx.beginPath();
+      ctx.ellipse(0, -2, 0.9, 2.0, 0, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fill();
+
+      ctx.restore();
+
+      ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
+      for(let i=0;i<2;i++){
+        ctx.beginPath();
+        ctx.ellipse(
+          fx + jitter*0.3,
+          14 + i*3,
+          1.8 + i*0.4,
+          1.2 + i*0.3,
+          0, 0, Math.PI*2
+        );
+        ctx.fillStyle = "#d0d7e1";
+        ctx.fill();
+      }
+    });
 
     ctx.restore();
-
-    ctx.globalAlpha = _CB_JET_ALPHA * 0.35;
-    for(let i=0;i<2;i++){
-      ctx.beginPath();
-      ctx.ellipse(
-        fx + jitter*0.3,
-        14 + i*3,
-        1.8 + i*0.4,
-        1.2 + i*0.3,
-        0, 0, Math.PI*2
-      );
-      ctx.fillStyle = "#d0d7e1";
-      ctx.fill();
-    }
-  });
-
-  ctx.restore();
-}
-function pathArms(ctx){
-  ctx.fillStyle = C_BASE;
-  ctx.fillRect(-16, -4, 7, 11);
-  ctx.fillRect(  9, -4, 7, 11);
-  ctx.fillStyle = C_SHAD;
-  ctx.fillRect(-13, -1, 3, 6);
-  ctx.fillRect( 12, -1, 3, 6);
-}
+  }
+  function pathArms(ctx){
+    ctx.fillStyle = C_BASE;
+    ctx.fillRect(-16, -4, 7, 11);
+    ctx.fillRect(  9, -4, 7, 11);
+    ctx.fillStyle = C_SHAD;
+    ctx.fillRect(-13, -1, 3, 6);
+    ctx.fillRect( 12, -1, 3, 6);
+  }
   // draw helper: anchor at player's true world position, center-based, pixel-locked
   function drawPieceWorld(ctx, px, py, scale, ox, oy, pathFn){
     const api = IZZA.api;
@@ -1723,85 +1723,230 @@ function pathArms(ctx){
   }
 
   function drawEquipped(){
-  if (!IZZA?.api?.ready) return;
+    if (!IZZA?.api?.ready) return;
 
-  const inv = (function readInv(){
-    try{
-      if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-      const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
-    }catch{ return {}; }
-  })();
+    const inv = (function readInv(){
+      try{
+        if(IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+        const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+      }catch{ return {}; }
+    })();
 
-  const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
+    const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
 
-  const p   = IZZA.api.player;
-  const px  = p.x;           // world top-left of 32×32 body
-  const py  = p.y;
-  const S   = IZZA.api.DRAW;
+    const p   = IZZA.api.player;
+    const px  = p.x;           // world top-left of 32×32 body
+    const py  = p.y;
+    const S   = IZZA.api.DRAW;
 
-  // === LOCK ARMOUR TO PLAYER ===
-  // No bob/wobble so pieces stay fixed while the player moves.
-  const bobAmp = 0;
-  const t      = p.animTime * 0.012;   // (kept; unused with bobAmp=0)
-  const bobY   = 0;
-  const wobX   = 0;
+    // === LOCK ARMOUR TO PLAYER ===
+    // No bob/wobble so pieces stay fixed while the player moves.
+    const bobAmp = 0;
+    const t      = p.animTime * 0.012;   // (kept; unused with bobAmp=0)
+    const bobY   = 0;
+    const wobX   = 0;
 
-  // Per-facing micro shifts so pieces hug the body properly
-  const f = p.facing || 'down';
-  const facingShift = {
-    down:  { x: 0,        y: 0 },
-    up:    { x: 0,        y: -1 },
-    left:  { x: -1.5,     y: 0 },
-    right: { x:  1.5,     y: 0 }
-  }[f];
+    // Per-facing micro shifts so pieces hug the body properly
+    const f = p.facing || 'down';
+    const facingShift = {
+      down:  { x: 0,        y: 0 },
+      up:    { x: 0,        y: -1 },
+      left:  { x: -1.5,     y: 0 },
+      right: { x:  1.5,     y: 0 }
+    }[f];
 
-  // === Tuned scales & offsets (in sprite pixels) ===
-  // Helmet up a bit; Vest down a bit; Arms unchanged; Legs placement kept,
-  // (leg "widening" is handled inside pathLegs; this call just positions the piece)
-  const HELMET = {
-    scale: 2.80,
-    ox: (facingShift.x + wobX)*0.05,
-    oy: -12 + bobY - (f==='up'?2:0)   // moved up from -10
-  };
-  const VEST = {
-    scale: 2.4,
-    ox: facingShift.x + wobX,
-    oy:  3 + bobY                    // moved down from -1
-  };
-  const ARMS = {
-    scale: 2.60,
-    ox: facingShift.x*0.3 + wobX,
-    oy:  2 + bobY                    // unchanged
-  };
-  const LEGS = {
-    scale: 2.45,
-    ox: facingShift.x*0.2 + wobX,    // subtle outward bias; shape widening is in pathLegs
-    oy: 10 + bobY
-  };
+    // === Tuned scales & offsets (in sprite pixels) ===
+    // Helmet up a bit; Vest down a bit; Arms unchanged; Legs placement kept,
+    // (leg "widening" is handled inside pathLegs; this call just positions the piece)
+    const HELMET = {
+      scale: 2.80,
+      ox: (facingShift.x + wobX)*0.05,
+      oy: -12 + bobY - (f==='up'?2:0)   // moved up from -10
+    };
+    const VEST = {
+      scale: 2.4,
+      ox: facingShift.x + wobX,
+      oy:  3 + bobY                    // moved down from -1
+    };
+    const ARMS = {
+      scale: 2.60,
+      ox: facingShift.x*0.3 + wobX,
+      oy:  2 + bobY                    // unchanged
+    };
+    const LEGS = {
+      scale: 2.45,
+      ox: facingShift.x*0.2 + wobX,    // subtle outward bias; shape widening is in pathLegs
+      oy: 10 + bobY
+    };
 
-  const ctx = document.getElementById('game')?.getContext('2d');
-  if (!ctx) return;
+    const ctx = document.getElementById('game')?.getContext('2d');
+    if (!ctx) return;
 
-  // draw in body order so layering feels natural over the base sprite
-  if (isOn(inv?.cardboardLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegs);
-  if (isOn(inv?.cardboardVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVest);
-  if (isOn(inv?.cardboardArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArms);
-  if (isOn(inv?.cardboardHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmet);
-}
+    // draw in body order so layering feels natural over the base sprite
+    if (isOn(inv?.cardboardLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegs);
+    if (isOn(inv?.cardboardVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVest);
+    if (isOn(inv?.cardboardArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArms);
+    if (isOn(inv?.cardboardHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmet);
+  }
 
-// draw on top of player each frame
-IZZA.on?.('render-post', drawEquipped);
-// on inventory change, next render-post picks it up
-window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
+  // draw on top of player each frame
+  IZZA.on?.('render-post', drawEquipped);
+  // on inventory change, next render-post picks it up
+  window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
 })();
 
-/* ==== Armoury UI (unchanged look; fixed logic & wording) ==== */
+/* ==== Armoury Recipe API (dynamic list for missions) ==== */
+(function initArmouryAPI(){
+  const BUS_EVT = 'izza-armoury-recipes-changed';
+  const REG = (window.__ARM_RECIPES__ = window.__ARM_RECIPES__ || []);
+
+  function _ensureDynHost(){
+    return document.getElementById('recipesDyn') || null;
+  }
+  function render(){
+    const host = _ensureDynHost(); if (!host) return;
+    const inv  = _invRead();
+    host.innerHTML = '';
+
+    REG.forEach(r=>{
+      let can = false;
+      try { can = !!r.need?.(inv); } catch {}
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:10px;border:1px solid #7b5a2b;border-radius:10px;background:rgba(255,255,255,.35);margin-bottom:10px';
+
+      const title = document.createElement('div');
+      title.style.cssText = 'font-weight:700;margin-bottom:6px';
+      title.textContent = r.label || r.id || 'Recipe';
+      row.appendChild(title);
+
+      const bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+
+      const btn = document.createElement('button');
+      btn.id = 'btn_'+r.id;
+      btn.textContent = r.buttonText || 'Craft';
+      btn.disabled = !can;
+      btn.style.cssText = `background:${can?'#2ea043':'#243248'};color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:${can?'pointer':'default'}`;
+      bar.appendChild(btn);
+
+      const hint = document.createElement('div');
+      hint.style.cssText = 'opacity:.8';
+      hint.textContent = can ? (r.readyText||'Ready to craft') : (r.disabledText||'Missing ingredients');
+      bar.appendChild(hint);
+
+      row.appendChild(bar);
+      host.appendChild(row);
+
+      btn.addEventListener('click', ()=>{
+        if (!can) return;
+        try { r.craft?.(); } finally {
+          try { IZZA?.api?.armoury?.render?.(); } catch {}
+          try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+        }
+      });
+    });
+  }
+  function registerRecipe(r){
+    if (!r || !r.id) return;
+    if ((window.__ARM_RECIPES__||[]).some(x=> x.id===r.id)) return; // idempotent
+    REG.push(r);
+    try { window.dispatchEvent(new Event(BUS_EVT)); } catch {}
+  }
+  function clear(){ REG.splice(0, REG.length); try { window.dispatchEvent(new Event(BUS_EVT)); } catch {} }
+
+  // expose
+  IZZA.api = IZZA.api || {};
+  IZZA.api.armoury = IZZA.api.armoury || {};
+  IZZA.api.armoury.registerRecipe = registerRecipe;
+  IZZA.api.armoury.clear = clear;
+  IZZA.api.armoury.render = render;
+
+  // live re-render when recipes or inventory change (only if modal is open)
+  window.addEventListener(BUS_EVT, ()=>{ if (document.getElementById('armouryUI')?.style.display==='flex') render(); });
+  window.addEventListener('izza-inventory-changed', ()=>{ if (document.getElementById('armouryUI')?.style.display==='flex') render(); });
+})();
+
+/* ==== Mission 5: register "Pumpkin Armour (Set)" dynamic recipe ==== */
+(function registerM5PumpkinRecipe(){
+  const ID = 'm5_pumpkin_set';
+
+  // tolerant counts (supports {count} stacks or flat numbers)
+  function count(inv, key){ return (inv?.[key]?.count|0) || (typeof inv?.[key]==='number' ? (inv[key]|0) : 0); }
+  function take(inv, key, n){
+    if (!n) return;
+    if (inv[key] && typeof inv[key].count==='number'){
+      inv[key].count = Math.max(0, (inv[key].count|0) - n);
+    } else if (typeof inv[key] === 'number'){
+      inv[key] = Math.max(0, (inv[key]|0) - n);
+    }
+  }
+
+  function need(inv){
+    // Accept both lantern keys and both pumpkin keys (aliases)
+    const haveLantern = count(inv,'jack_o_lantern') + count(inv,'jacklantern') >= 1;
+    const pumpkins    = count(inv,'pumpkin_piece') + count(inv,'pumpkin');
+    return haveLantern && pumpkins >= 3;
+  }
+
+  function craft(){
+    const inv = _invRead();
+
+    // spend lantern (prefer canonical)
+    if (count(inv,'jack_o_lantern') > 0) take(inv,'jack_o_lantern',1);
+    else if (count(inv,'jacklantern') > 0) take(inv,'jacklantern',1);
+
+    // spend 3 pumpkins across canonical + alias
+    let need3 = 3;
+    const can = count(inv,'pumpkin_piece');
+    const useCan = Math.min(need3, can);
+    if (useCan) { take(inv,'pumpkin_piece', useCan); need3 -= useCan; }
+    if (need3)  { take(inv,'pumpkin', need3); }
+
+    // ensure items exist (icons optional to keep your current look)
+    _ensureItem(inv, 'pumpkinHelmet','Pumpkin Helmet','head',  null);
+    _ensureItem(inv, 'pumpkinVest',  'Pumpkin Vest',  'chest', null);
+    _ensureItem(inv, 'pumpkinLegs',  'Pumpkin Legs',  'legs',  null);
+    _ensureItem(inv, 'pumpkinArms',  'Pumpkin Arms',  'arms',  null);
+
+    inv.pumpkinHelmet.count = (inv.pumpkinHelmet.count|0) + 1;
+    inv.pumpkinVest.count   = (inv.pumpkinVest.count|0) + 1;
+    inv.pumpkinLegs.count   = (inv.pumpkinLegs.count|0) + 1;
+    inv.pumpkinArms.count   = (inv.pumpkinArms.count|0) + 1;
+
+    // set effects as per mission 5
+    inv.pumpkinLegs.meta = { speed: 0.28 };
+    inv._pumpkinSetMeta   = { setDR: 0.20 };
+
+    _invWrite(inv);
+    _writeArmor({ type:'Pumpkin', dr:0.20 });
+
+    // mission-complete (safe if already emitted)
+    try { IZZA?.emit?.('mission-complete', { id: 5 }); } catch {}
+    try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
+
+    IZZA.toast?.('Crafted Pumpkin Set: Helmet, Vest, Legs, Arms');
+    try { document.getElementById('armouryUI') && (_armouryClose?.(), 0); } catch {}
+  }
+
+  if ((window.__ARM_RECIPES__||[]).some(r=> r.id === ID)) return;
+
+  IZZA.api?.armoury?.registerRecipe?.({
+    id: ID,
+    label: 'Pumpkin Armour (Set)',
+    buttonText: 'Craft from 1 × Jack-o’-lantern + 3 × Pumpkins',
+    disabledText: 'Need 1 Lantern + 3 Pumpkins',
+    need, craft
+  });
+})();
+
+/* ==== Armoury UI (unchanged look; fixed logic & wording; dynamic recipes) ==== */
 function _ensureArmouryUI(){
   if (document.getElementById('armouryUI')) return;
 
   const wrap=document.createElement('div');
   wrap.id='armouryUI';
-  wrap.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:70;';
+  // put armoury above any mission dimmers/night overlays
+  wrap.style.cssText='position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:10050;';
   wrap.innerHTML = `
     <div id="armCard" style="
       position:relative;min-width:320px;max-width:640px;
@@ -1843,6 +1988,10 @@ function _ensureArmouryUI(){
       </label>
 
       <div id="craftArea" style="display:none">
+        <!-- Dynamic recipes (Mission 5 pumpkin shows here) -->
+        <div id="recipesDyn"></div>
+
+        <!-- Static Cardboard recipe stays as-is -->
         <div style="padding:10px;border:1px solid #7b5a2b;border-radius:10px;background:rgba(255,255,255,.35);margin-bottom:10px">
           <div style="font-weight:700;margin-bottom:6px">Cardboard Armour (Set)</div>
           <div style="opacity:.85;margin-bottom:8px">
@@ -1855,7 +2004,6 @@ function _ensureArmouryUI(){
             <div id="ccHint" style="opacity:.8"></div>
           </div>
         </div>
-        <!-- (Optional) If you later add a Pumpkin panel, keep its button id as btnCraftPumpkin -->
       </div>
     </div>
   `;
@@ -1884,138 +2032,71 @@ function _ensureArmouryUI(){
 
   $('#armStartToggle').addEventListener('change', e=>{
     $('#craftArea').style.display = e.target.checked ? 'block' : 'none';
+    if (e.target.checked){ try { IZZA?.api?.armoury?.render?.(); } catch {} }
   });
 
   // ---- Cardboard craft: consume 1 cardboard box (any alias) and grant 4-piece set
-document.getElementById('btnCraftCardboard').addEventListener('click', ()=>{
-  const inv = _invRead();
+  document.getElementById('btnCraftCardboard').addEventListener('click', ()=>{
+    const inv = _invRead();
 
-  // consume 1 box (any alias)
-  let took = _invTake(inv, _BOX_KEYS, 1);
-  if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
+    // consume 1 box (any alias)
+    let took = _invTake(inv, _BOX_KEYS, 1);
+    if (!took){ IZZA.toast?.('You need 1 × Cardboard Box'); return; }
 
-  _ensureItem(inv, 'cardboardHelmet','Cardboard Helmet','head',  _CB_ICONS.helmet);
-  _ensureItem(inv, 'cardboardVest',  'Cardboard Vest',  'chest', _CB_ICONS.vest);
-  _ensureItem(inv, 'cardboardLegs',  'Cardboard Legs',  'legs',  _CB_ICONS.legs);
-  _ensureItem(inv, 'cardboardArms',  'Cardboard Arms',  'arms',  _CB_ICONS.arms);
+    _ensureItem(inv, 'cardboardHelmet','Cardboard Helmet','head',  _CB_ICONS.helmet);
+    _ensureItem(inv, 'cardboardVest',  'Cardboard Vest',  'chest', _CB_ICONS.vest);
+    _ensureItem(inv, 'cardboardLegs',  'Cardboard Legs',  'legs',  _CB_ICONS.legs);
+    _ensureItem(inv, 'cardboardArms',  'Cardboard Arms',  'arms',  _CB_ICONS.arms);
 
-  inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
-  inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
-  inv.cardboardLegs.count   = (inv.cardboardLegs.count|0) + 1;
-  inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
+    inv.cardboardHelmet.count = (inv.cardboardHelmet.count|0) + 1;
+    inv.cardboardVest.count   = (inv.cardboardVest.count|0) + 1;
+    inv.cardboardLegs.count   = (inv.cardboardLegs.count|0) + 1;
+    inv.cardboardArms.count   = (inv.cardboardArms.count|0) + 1;
 
-  _invWrite(inv);
-  _writeArmor({ type:'Cardboard', dr:0.12 });
+    _invWrite(inv);
+    _writeArmor({ type:'Cardboard', dr:0.12 });
 
-  // ===== Mission 4 -> advance + congratulations + Mission 5 spawn =====
-  (function afterCardboardMissionAdvance(){
-    // 1) Mark M4 complete using helper if available; otherwise write the LS key.
-    let advanced = false;
-    try { advanced = __ARM_MISSIONS__?.maybeComplete?.(4) === true; } catch {}
-    if (!advanced) {
-      const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
-      if (cur < 4) {
-        localStorage.setItem('izzaMissions', '4');
-        try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
-      }
-    }
-
-    // 2) Fire the global event(s) that show the congrats UI.
-    let popupShown = false;
-    try { IZZA?.emit?.('mission-complete', { id: 4 }); popupShown = true; } catch {}
-    try { window.dispatchEvent(new CustomEvent('mission-complete', { detail: { id: 4 } })); popupShown = true; } catch {}
-    if (!popupShown) IZZA.toast?.('Mission 4 complete! 🎉');
-
-    // 3) Mission 5: spawn Jack-o’-lantern unlock.
-    let spawned = false;
-    try { if (window.__ARM_MISSIONS__?.spawnM5) { __ARM_MISSIONS__.spawnM5(); spawned = true; } } catch {}
-    if (!spawned) {
-      try { IZZA?.emit?.('spawn-mission-5'); spawned = true; } catch {}
-    }
-    if (!spawned) {
-      // Fallback: grant to inventory so the player can continue
-      const inv2 = _invRead();
-      inv2.jack_o_lantern = inv2.jack_o_lantern || { count: 0, name: 'Jack-o’-lantern' };
-      inv2.jack_o_lantern.count = (inv2.jack_o_lantern.count|0) + 1;
-      _invWrite(inv2);
-      IZZA.toast?.('Mission 5 unlocked: Jack-o’-lantern granted to inventory');
-      try { window.dispatchEvent?.(new Event('izza-inventory-changed')); } catch {}
-    }
-  })();
-
-  IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
-  (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
-  window.dispatchEvent?.(new Event('izza-inventory-changed'));
-});
-
-  // ---------- OPTIONAL: Pumpkin craft handler (safe if button not present) ----------
-  // local helpers for single-key count/take without touching global helpers
-  function _countKey(inv, key){ return (inv?.[key]?.count|0) || (inv?.[key]|0) || 0; }
-  function _takeKey(inv, key, n=1){
-    if (!inv) return 0;
-    if (inv[key] && typeof inv[key].count === 'number'){
-      const take = Math.min(n, inv[key].count|0);
-      inv[key].count = Math.max(0, (inv[key].count|0) - take);
-      return take;
-    }
-    // tolerate “flat number” stacks too
-    if (typeof inv[key] === 'number'){
-      const take = Math.min(n, inv[key]|0);
-      inv[key] = Math.max(0, (inv[key]|0) - take);
-      return take;
-    }
-    return 0;
-  }
-
-  (function wirePumpkinIfPresent(){
-    const btn = document.getElementById('btnCraftPumpkin');
-    if (!btn) return; // no UI for pumpkin -> nothing to do (prevents errors)
-
-    btn.addEventListener('click', ()=>{
-      const inv = _invRead();
-
-      // require 1 jack_o_lantern + 3 pumpkin_piece
-      const haveLantern = _countKey(inv,'jack_o_lantern');
-      const havePieces  = _countKey(inv,'pumpkin_piece');
-
-      if (haveLantern < 1 || havePieces < 3){
-        IZZA.toast?.('Need 1 Lantern + 3 Pumpkins'); return;
-      }
-
-      _takeKey(inv,'jack_o_lantern',1);
-      _takeKey(inv,'pumpkin_piece',3);
-
-      // ensure items exist (icons for pumpkin are optional; omit iconSvg to keep UI unchanged)
-      _ensureItem(inv, 'pumpkinHelmet','Pumpkin Helmet','head',  null);
-      _ensureItem(inv, 'pumpkinVest',  'Pumpkin Vest',  'chest', null);
-      _ensureItem(inv, 'pumpkinLegs',  'Pumpkin Legs',  'legs',  null);
-      _ensureItem(inv, 'pumpkinArms',  'Pumpkin Arms',  'arms',  null);
-
-      inv.pumpkinHelmet.count = (inv.pumpkinHelmet.count|0) + 1;
-      inv.pumpkinVest.count   = (inv.pumpkinVest.count|0) + 1;
-      inv.pumpkinLegs.count   = (inv.pumpkinLegs.count|0) + 1;
-      inv.pumpkinArms.count   = (inv.pumpkinArms.count|0) + 1;
-
-      _invWrite(inv);
-      _writeArmor({ type:'Pumpkin', dr:0.20 });
-
-      // ---- Mission 5 progression (popup + signal to your M5 plugin) ----
+    // ===== Mission 4 -> advance + congratulations + Mission 5 spawn =====
+    (function afterCardboardMissionAdvance(){
+      // 1) Mark M4 complete using helper if available; otherwise write the LS key.
       let advanced = false;
-      try { advanced = __ARM_MISSIONS__?.maybeComplete?.(5) === true; } catch {}
+      try { advanced = __ARM_MISSIONS__?.maybeComplete?.(4) === true; } catch {}
       if (!advanced) {
-  const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
-  if (cur < 5) {
-    localStorage.setItem('izzaMissions', '5');
-    try { IZZA?.emit?.('mission-complete', { id: 5 }); } catch {}
-    try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
-  }
-}
-      
-      IZZA.toast?.('Crafted Pumpkin Set: Helmet, Vest, Legs, Arms');
-      (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
-      window.dispatchEvent?.(new Event('izza-inventory-changed'));
-    });
-  })();
+        const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
+        if (cur < 4) {
+          localStorage.setItem('izzaMissions', '4');
+          try { window.dispatchEvent?.(new Event('izza-missions-changed')); } catch {}
+        }
+      }
+
+      // 2) Fire the global event(s) that show the congrats UI.
+      let popupShown = false;
+      try { IZZA?.emit?.('mission-complete', { id: 4 }); popupShown = true; } catch {}
+      try { window.dispatchEvent(new CustomEvent('mission-complete', { detail: { id: 4 } })); popupShown = true; } catch {}
+      if (!popupShown) IZZA.toast?.('Mission 4 complete! 🎉');
+
+      // 3) Mission 5: spawn Jack-o’-lantern unlock.
+      let spawned = false;
+      try { if (window.__ARM_MISSIONS__?.spawnM5) { __ARM_MISSIONS__.spawnM5(); spawned = true; } } catch {}
+      if (!spawned) {
+        try { IZZA?.emit?.('spawn-mission-5'); spawned = true; } catch {}
+      }
+      if (!spawned) {
+        // Fallback: grant to inventory so the player can continue
+        const inv2 = _invRead();
+        inv2.jack_o_lantern = inv2.jack_o_lantern || { count: 0, name: 'Jack-o’-lantern' };
+        inv2.jack_o_lantern.count = (inv2.jack_o_lantern.count|0) + 1;
+        _invWrite(inv2);
+        IZZA.toast?.('Mission 5 unlocked: Jack-o’-lantern granted to inventory');
+        try { window.dispatchEvent?.(new Event('izza-inventory-changed')); } catch {}
+      }
+    })();
+
+    IZZA.toast?.('Crafted Cardboard Set: Helmet, Vest, Legs, Arms');
+    (window._armouryRender||_renderArmoury||function(){})(); // refresh header number
+    window.dispatchEvent?.(new Event('izza-inventory-changed'));
+    try { IZZA?.api?.armoury?.render?.(); } catch {}
+  });
 
   $('#armouryClose').onclick = ()=> _armouryClose();
 
@@ -2024,11 +2105,13 @@ document.getElementById('btnCraftCardboard').addEventListener('click', ()=>{
   window.addEventListener('keydown', e=>{ if ((e.key||'').toLowerCase()==='escape') _armouryClose(); });
 
   _renderArmoury();
+  try { IZZA?.api?.armoury?.render?.(); } catch {}
 }
 
 function _armouryOpen(){
   _ensureArmouryUI();
   document.getElementById('armouryUI').style.display='flex';
+  try { IZZA?.api?.armoury?.render?.(); } catch {}
 }
 function _armouryClose(){
   const el=document.getElementById('armouryUI'); if(el) el.style.display='none';
@@ -2045,7 +2128,8 @@ function _onPressArmouryB(e){
 // listeners (keep capture=true so other B-handlers don’t steal it)
 document.getElementById('btnB')?.addEventListener('click', _onPressArmouryB, true);
 window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onPressArmouryB(e); }, true);
-  // ===== Mission UI glue (popup + M5 spawn fallback idempotence) =====
+
+// ===== Mission UI glue (popup + M5 spawn fallback idempotence) =====
 (function missionUiGlue(){
   const LS_M4_SEEN = 'izzaM4CongratsSeen';
   const LS_M5_GIVEN = 'izzaM5Granted';
@@ -2114,258 +2198,258 @@ window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') _onP
   const cur = parseInt(localStorage.getItem('izzaMissions') || '0', 10) || 0;
   if (cur >= 4) setTimeout(grantM5Once, 0);
 })();
-  // ---------- Minimap / Bigmap overlay ----------
-  function paintOverlay(id){
-    if(!_layout) return;
-    const c=document.getElementById(id); if(!c) return;
-    const ctx=c.getContext('2d');
-    const sx=c.width/90, sy=c.height/60;
 
-    const api = IZZA.api;
-    const A   = anchors(api);
-    const {LAKE, BEACH_X, HOTEL, LOT} = lakeRects(A);
-    const {HOOD, HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(A);
+/* ---------- Minimap / Bigmap overlay ---------- */
+function paintOverlay(id){
+  if(!_layout) return;
+  const c=document.getElementById(id); if(!c) return;
+  const ctx=c.getContext('2d');
+  const sx=c.width/90, sy=c.height/60;
 
-    const FORBID = [
-      {x0:LAKE.x0,y0:LAKE.y0,x1:LAKE.x1,y1:LAKE.y1},
-      {x0:A.HQ.x0-1,y0:A.HQ.y0-1,x1:A.HQ.x1+1,y1:A.HQ.y1+1},
-      {x0:A.SH.x0-1,y0:A.SH.y0-1,x1:A.SH.x1+1,y1:A.SH.y1+1}
-    ];
-    const {H,V} = (function desiredRoadGridLocal(a){
-      const H = [ a.hRoadY - 10, a.hRoadY, a.hRoadY + 6 ];
-      const V = [ a.vRoadX - 12, a.vRoadX + 10 ];
-      return {H,V};
-    })(A);
+  const api = IZZA.api;
+  const A   = anchors(api);
+  const {LAKE, BEACH_X, HOTEL, LOT} = lakeRects(A);
+  const {HOOD, HOOD_H, HOOD_V, HOUSES, HOOD_PARK} = hoodRects(A);
 
-    let H_ROADS = [];
-    let V_ROADS = [];
-    H.forEach(y=>{
-      const segs = clipHRow(y, A.un.x0, A.un.x1, FORBID);
-      segs.forEach(s=>{
-        const shaved = shaveDeadEndsH({y:s.y,x0:s.x0,x1:s.x1}, FORBID);
-        if(shaved) H_ROADS.push(shaved);
-      });
+  const FORBID = [
+    {x0:LAKE.x0,y0:LAKE.y0,x1:LAKE.x1,y1:LAKE.y1},
+    {x0:A.HQ.x0-1,y0:A.HQ.y0-1,x1:A.HQ.x1+1,y1:A.HQ.y1+1},
+    {x0:A.SH.x0-1,y0:A.SH.y0-1,x1:A.SH.x1+1,y1:A.SH.y1+1}
+  ];
+  const {H,V} = (function desiredRoadGridLocal(a){
+    const H = [ a.hRoadY - 10, a.hRoadY, a.hRoadY + 6 ];
+    const V = [ a.vRoadX - 12, a.vRoadX + 10 ];
+    return {H,V};
+  })(A);
+
+  let H_ROADS = [];
+  let V_ROADS = [];
+  H.forEach(y=>{
+    const segs = clipHRow(y, A.un.x0, A.un.x1, FORBID);
+    segs.forEach(s=>{
+      const shaved = shaveDeadEndsH({y:s.y,x0:s.x0,x1:s.x1}, FORBID);
+      if(shaved) H_ROADS.push(shaved);
     });
-    V.forEach(x=>{
-      const segs = clipVCol(x, A.un.y0, A.un.y1, FORBID);
-      segs.forEach(s=>{
-        const shaved = shaveDeadEndsV({x:s.x,y0:s.y0,y1:s.y1}, FORBID);
-        if(shaved) V_ROADS.push(shaved);
-      });
+  });
+  V.forEach(x=>{
+    const segs = clipVCol(x, A.un.y0, A.un.y1, FORBID);
+    segs.forEach(s=>{
+      const shaved = shaveDeadEndsV({x:s.x,y0:s.y0,y1:s.y1}, FORBID);
+      if(shaved) V_ROADS.push(shaved);
     });
+  });
 
-    const H_ROWS_ALL = new Set([...H_ROADS.map(r=>r.y), ...HOOD_H]);
-    const V_COLS_ALL = new Set([...V_ROADS.map(r=>r.x), ...HOOD_V]);
-    const isTier1Y = y => (y===A.hRoadY || y===A.sidewalkTopY || y===A.sidewalkBotY);
+  const H_ROWS_ALL = new Set([...H_ROADS.map(r=>r.y), ...HOOD_H]);
+  const V_COLS_ALL = new Set([...V_ROADS.map(r=>r.x), ...HOOD_V]);
+  const isTier1Y = y => (y===A.hRoadY || y===A.sidewalkTopY || y===A.sidewalkBotY);
 
-    // ---- Draw order: water & blocks → sidewalks → roads → buildings → patches/POIs ----
+  // ---- Draw order: water & blocks → sidewalks → roads → buildings → patches/POIs ----
 
-    // Lake + beach + lot + hotel footprints
-    ctx.fillStyle = COL.water;
-    ctx.fillRect(LAKE.x0*sx, LAKE.y0*sy, (LAKE.x1-LAKE.x0+1)*sx, (LAKE.y1-LAKE.y0+1)*sy);
-    ctx.fillStyle = COL.sand;
-    ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
-    ctx.fillStyle = COL.lot;
-    ctx.fillRect(LOT.x0*sx, LOT.y0*sy, (LOT.x1-LOT.x0+1)*sx, (LOT.y1-LOT.y0+1)*sy);
-    ctx.fillStyle = COL.hotel;
-    ctx.fillRect(HOTEL.x0*sx, HOTEL.y0*sy, (HOTEL.x1-HOTEL.x0+1)*sx, (HOTEL.y1-HOTEL.y0+1)*sy);
+  // Lake + beach + lot + hotel footprints
+  ctx.fillStyle = COL.water;
+  ctx.fillRect(LAKE.x0*sx, LAKE.y0*sy, (LAKE.x1-LAKE.x0+1)*sx, (LAKE.y1-LAKE.y0+1)*sy);
+  ctx.fillStyle = COL.sand;
+  ctx.fillRect(BEACH_X*sx, LAKE.y0*sy, 1*sx, (LAKE.y1-LAKE.y0+1)*sy);
+  ctx.fillStyle = COL.lot;
+  ctx.fillRect(LOT.x0*sx, LOT.y0*sy, (LOT.x1-LOT.x0+1)*sx, (LOT.y1-LOT.y0+1)*sy);
+  ctx.fillStyle = COL.hotel;
+  ctx.fillRect(HOTEL.x0*sx, HOTEL.y0*sy, (HOTEL.x1-HOTEL.x0+1)*sx, (HOTEL.y1-HOTEL.y0+1)*sy);
 
-    // Hood park & houses
-    ctx.fillStyle = COL.hoodPark;
-    ctx.fillRect(HOOD_PARK.x0*sx, HOOD_PARK.y0*sy, (HOOD_PARK.x1-HOOD_PARK.x0+1)*sx, (HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
-    ctx.fillStyle = COL.house;
-    HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
+  // Hood park & houses
+  ctx.fillStyle = COL.hoodPark;
+  ctx.fillRect(HOOD_PARK.x0*sx, HOOD_PARK.y0*sy, (HOOD_PARK.x1-HOOD_PARK.x0+1)*sx, (HOOD_PARK.y1-HOOD_PARK.y0+1)*sy);
+  ctx.fillStyle = COL.house;
+  HOUSES.forEach(h=> ctx.fillRect(h.x0*sx,h.y0*sy,(h.x1-h.x0+1)*sx,(h.y1-h.y0+1)*sy));
 
-    // Sidewalks around the new road grid
-    ctx.fillStyle = '#a1a6b0';
-    H_ROADS.forEach(r=>{
-      for(let x=r.x0;x<=r.x1;x++){
-        if(!V_COLS_ALL.has(x)){
-          if(!isOriginalTile(x, r.y-1, A)) ctx.fillRect(x*sx, (r.y-1)*sy, 1*sx, 1*sy);
-          if(!isOriginalTile(x, r.y+1, A)) ctx.fillRect(x*sx, (r.y+1)*sy, 1*sx, 1*sy);
-        }
+  // Sidewalks around the new road grid
+  ctx.fillStyle = '#a1a6b0';
+  H_ROADS.forEach(r=>{
+    for(let x=r.x0;x<=r.x1;x++){
+      if(!V_COLS_ALL.has(x)){
+        if(!isOriginalTile(x, r.y-1, A)) ctx.fillRect(x*sx, (r.y-1)*sy, 1*sx, 1*sy);
+        if(!isOriginalTile(x, r.y+1, A)) ctx.fillRect(x*sx, (r.y+1)*sy, 1*sx, 1*sy);
       }
-    });
-    V_ROADS.forEach(r=>{
-      for(let y=r.y0;y<=r.y1;y++){
-        if(H_ROWS_ALL.has(y) || isTier1Y(y)) continue;
-        if(!isOriginalTile(r.x-1, y, A)) ctx.fillRect((r.x-1)*sx, y*sy, 1*sx, 1*sy);
-        if(!isOriginalTile(r.x+1, y, A)) ctx.fillRect((r.x+1)*sx, y*sy, 1*sx, 1*sy);
-      }
-    });
-
-    // Roads
-    ctx.fillStyle = '#8a90a0';
-    H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
-    V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
-
-    // Hood grid
-    HOOD_H.forEach(y=>{
-      const segs = clipHRow(y, A.un.x0, A.un.x1, [HOOD_PARK]);
-      segs.forEach(s=> ctx.fillRect(s.x0*sx, y*sy, (s.x1-s.x0+1)*sx, 1.2*sy));
-    });
-    HOOD_V.forEach(x=>{
-      const segs = clipVCol(x, A.un.y0, A.un.y1, [HOOD_PARK]);
-      segs.forEach(s=> ctx.fillRect(x*sx, s.y0*sy, 1.2*sx, (s.y1-s.y0+1)*sy));
-    });
-
-    // Downtown blocks
-    ctx.fillStyle = '#6f87b3';
-    (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
-
-    // Hospital
-    if(_hospital){
-      ctx.fillStyle = COL.hospital;
-      ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,( (_hospital.x1-_hospital.x0+1) )*sx,( (_hospital.y1-_hospital.y0+1) )*sy);
     }
-
-    // BANK
-    if(window.__IZZA_BANK__?.rect){
-      const B = window.__IZZA_BANK__.rect;
-      ctx.fillStyle = '#e7c14a';
-      ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
-    }
-
-    // Tier-1 HQ & Shop
-    ctx.fillStyle = COL.civic;
-    ctx.fillRect(A.HQ.x0*sx, A.HQ.y0*sy, (A.HQ.x1 - A.HQ.x0 + 1)*sx, (A.HQ.y1 - A.HQ.y0 + 1)*sy);
-    ctx.fillStyle = COL.shop;
-    ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy, (A.SH.x1 - A.SH.x0 + 1)*sx, (A.SH.y1 - A.SH.y0 + 1)*sy);
-
-    // Docks
-    ctx.fillStyle = COL.wood;
-    lakeRects(A).DOCKS.forEach(d=>{
-      ctx.fillRect(d.x0*sx, d.y*sy, d.len*sx, 1*sy);
-    });
-
-    // Manual patches
-    ctx.fillStyle='#8a90a0';
-    [
-      {x:27,y:24},{x:29,y:24},
-      {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
-      {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
-      {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
-      {x:66,y:34}
-    ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
-    ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
-
-    ctx.fillStyle='#a1a6b0';
-    ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
-    ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
-    [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
-      .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
-  }
-
-  window.__izzaPaintOverlay = paintOverlay;
-
-  IZZA.on('render-post', ()=>{
-    if (isTier2()){
-      paintOverlay('minimap');
+  });
+  V_ROADS.forEach(r=>{
+    for(let y=r.y0;y<=r.y1;y++){
+      if(H_ROWS_ALL.has(y) || isTier1Y(y)) continue;
+      if(!isOriginalTile(r.x-1, y, A)) ctx.fillRect((r.x-1)*sx, y*sy, 1*sx, 1*sy);
+      if(!isOriginalTile(r.x+1, y, A)) ctx.fillRect((r.x+1)*sx, y*sy, 1*sx, 1*sy);
     }
   });
 
-  // ===== Bigmap overlay: open on minimap tap, close on tap/Esc, block input safely =====
-  (function initBigmapOverlay(){
-    let bigOpen = false;
-    let prevInputBlocked = false;
+  // Roads
+  ctx.fillStyle = '#8a90a0';
+  H_ROADS.forEach(r=> ctx.fillRect(r.x0*sx, r.y*sy, (r.x1-r.x0+1)*sx, 1.2*sy));
+  V_ROADS.forEach(r=> ctx.fillRect(r.x*sx, r.y0*sy, 1.2*sx, (r.y1-r.y0+1)*sy));
 
-    function ensureBigmapUI(){
-      if (document.getElementById('bigmapWrap')) return;
+  // Hood grid
+  HOOD_H.forEach(y=>{
+    const segs = clipHRow(y, A.un.x0, A.un.x1, [HOOD_PARK]);
+    segs.forEach(s=> ctx.fillRect(s.x0*sx, y*sy, (s.x1-s.x0+1)*sx, 1.2*sy));
+  });
+  HOOD_V.forEach(x=>{
+    const segs = clipVCol(x, A.un.y0, A.un.y1, [HOOD_PARK]);
+    segs.forEach(s=> ctx.fillRect(x*sx, s.y0*sy, 1.2*sx, (s.y1-s.y0+1)*sy));
+  });
 
-      const wrap = document.createElement('div');
-      wrap.id = 'bigmapWrap';
-      wrap.style.cssText =
-        'position:absolute;inset:0;display:none;align-items:center;justify-content:center;' +
-        'background:rgba(0,0,0,.55);z-index:120;';
-      wrap.style.touchAction = 'none';
+  // Downtown blocks
+  ctx.fillStyle = '#6f87b3';
+  (_layout.BUILDINGS||[]).forEach(b=> ctx.fillRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy));
 
-      const closeBtn = document.createElement('button');
-      closeBtn.id = 'bigmapClose';
-      closeBtn.textContent = 'Close ✕';
-      closeBtn.style.cssText =
-        'position:absolute;top:10px;right:12px;background:#263447;color:#cfe3ff;' +
-        'border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;z-index:2;';
-      wrap.appendChild(closeBtn);
+  // Hospital
+  if(_hospital){
+    ctx.fillStyle = COL.hospital;
+    ctx.fillRect(_hospital.x0*sx,_hospital.y0*sy,( (_hospital.x1-_hospital.x0+1) )*sx,( (_hospital.y1-_hospital.y0+1) )*sy);
+  }
 
-      const c = document.createElement('canvas');
-      c.id = 'bigmap';
-      const W = Math.min(window.innerWidth * 0.9, 900);
-      const H = Math.min(window.innerHeight * 0.8, 600);
-      c.width  = 900;
-      c.height = 600;
-      c.style.width  = Math.round(W) + 'px';
-      c.style.height = Math.round(H) + 'px';
-      c.style.background = '#0b1220';
-      c.style.borderRadius = '14px';
-      c.style.boxShadow = '0 14px 44px rgba(0,0,0,.6)';
+  // BANK
+  if(window.__IZZA_BANK__?.rect){
+    const B = window.__IZZA_BANK__.rect;
+    ctx.fillStyle = '#e7c14a';
+    ctx.fillRect(B.x0*sx,B.y0*sy,(B.x1-B.x0+1)*sx,(B.y1-B.y0+1)*sy);
+  }
 
-      const hint = document.createElement('div');
-      hint.textContent = 'Tap anywhere or press Esc to close';
-      hint.style.cssText = 'margin-top:10px;color:#cfe3ff;opacity:.8;font-size:12px';
+  // Tier-1 HQ & Shop
+  ctx.fillStyle = COL.civic;
+  ctx.fillRect(A.HQ.x0*sx, A.HQ.y0*sy, (A.HQ.x1 - A.HQ.x0 + 1)*sx, (A.HQ.y1 - A.HQ.y0 + 1)*sy);
+  ctx.fillStyle = COL.shop;
+  ctx.fillRect(A.SH.x0*sx, A.SH.y0*sy, (A.SH.x1 - A.SH.x0 + 1)*sx, (A.SH.y1 - A.SH.y0 + 1)*sy);
 
-      const inner = document.createElement('div');
-      inner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px';
-      inner.appendChild(c); inner.appendChild(hint);
+  // Docks
+  ctx.fillStyle = COL.wood;
+  lakeRects(A).DOCKS.forEach(d=>{
+    ctx.fillRect(d.x0*sx, d.y*sy, d.len*sx, 1*sy);
+  });
 
-      wrap.appendChild(inner);
-      document.body.appendChild(wrap);
+  // Manual patches
+  ctx.fillStyle='#8a90a0';
+  [
+    {x:27,y:24},{x:29,y:24},
+    {x:29,y:14},{x:27,y:14},{x:21,y:14},{x:19,y:14},
+    {x:21,y:24},{x:19,y:24},{x:19,y:30},{x:21,y:30},{x:27,y:30},{x:29,y:30},
+    {x:44,y:26},{x:44,y:27},{x:56,y:49},{x:56,y:47},{x:56,y:45},{x:56,y:43},
+    {x:66,y:34}
+  ].forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+  ctx.fillRect(69*sx,30*sy,(76-69+1)*sx,1.2*sy);
 
-      const closeOnDown = e => { e.preventDefault(); e.stopImmediatePropagation(); closeBigmap(); };
-      closeBtn.addEventListener('pointerdown', closeOnDown, {capture:true});
-      closeBtn.addEventListener('touchstart',  closeOnDown, {capture:true, passive:false});
-      wrap.addEventListener('pointerdown', closeOnDown, {capture:true});
-      wrap.addEventListener('touchstart',  closeOnDown, {capture:true, passive:false});
+  ctx.fillStyle='#a1a6b0';
+  ctx.fillRect(69*sx,31*sy,(76-69+1)*sx,1.2*sy);
+  ctx.fillRect(66*sx,15*sy,(72-66+1)*sx,1.2*sy);
+  [ {x:44,y:15},{x:43,y:26},{x:43,y:27},{x:65,y:34},{x:67,y:34} ]
+    .forEach(p=> ctx.fillRect(p.x*sx,p.y*sy,1*sx,1.2*sy));
+}
 
-      window.addEventListener('keydown', e=>{
-        if (!bigOpen) return;
-        if ((e.key||'').toLowerCase()==='escape') { e.preventDefault(); closeBigmap(); }
-      }, true);
-    }
+window.__izzaPaintOverlay = paintOverlay;
 
-    function openBigmap(ev){
-      if (ev){ ev.preventDefault?.(); ev.stopImmediatePropagation?.(); ev.stopPropagation?.(); }
-      if (!IZZA?.api?.ready) return;
-      ensureBigmapUI();
+IZZA.on('render-post', ()=>{
+  if (isTier2()){
+    paintOverlay('minimap');
+  }
+});
 
-      prevInputBlocked = !!IZZA.inputBlocked;
-      IZZA.inputBlocked = true;
+// ===== Bigmap overlay: open on minimap tap, close on tap/Esc, block input safely =====
+(function initBigmapOverlay(){
+  let bigOpen = false;
+  let prevInputBlocked = false;
 
-      const wrap = document.getElementById('bigmapWrap');
-      wrap.style.display = 'flex';
-      bigOpen = true;
+  function ensureBigmapUI(){
+    if (document.getElementById('bigmapWrap')) return;
 
-      window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
+    const wrap = document.createElement('div');
+    wrap.id = 'bigmapWrap';
+    wrap.style.cssText =
+      'position:absolute;inset:0;display:none;align-items:center;justify-content:center;' +
+      'background:rgba(0,0,0,.55);z-index:120;';
+    wrap.style.touchAction = 'none';
 
-      document.getElementById('btnMap')?.setAttribute('disabled','true');
-      const stick = document.getElementById('stickZone');
-      if (stick && stick.style) stick.style.visibility = 'hidden';
-    }
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'bigmapClose';
+    closeBtn.textContent = 'Close ✕';
+    closeBtn.style.cssText =
+      'position:absolute;top:10px;right:12px;background:#263447;color:#cfe3ff;' +
+      'border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;z-index:2;';
+    wrap.appendChild(closeBtn);
 
-    function closeBigmap(){
+    const c = document.createElement('canvas');
+    c.id = 'bigmap';
+    const W = Math.min(window.innerWidth * 0.9, 900);
+    const H = Math.min(window.innerHeight * 0.8, 600);
+    c.width  = 900;
+    c.height = 600;
+    c.style.width  = Math.round(W) + 'px';
+    c.style.height = Math.round(H) + 'px';
+    c.style.background = '#0b1220';
+    c.style.borderRadius = '14px';
+    c.style.boxShadow = '0 14px 44px rgba(0,0,0,.6)';
+
+    const hint = document.createElement('div');
+    hint.textContent = 'Tap anywhere or press Esc to close';
+    hint.style.cssText = 'margin-top:10px;color:#cfe3ff;opacity:.8;font-size:12px';
+
+    const inner = document.createElement('div');
+    inner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px';
+    inner.appendChild(c); inner.appendChild(hint);
+
+    wrap.appendChild(inner);
+    document.body.appendChild(wrap);
+
+    const closeOnDown = e => { e.preventDefault(); e.stopImmediatePropagation(); closeBigmap(); };
+    closeBtn.addEventListener('pointerdown', closeOnDown, {capture:true});
+    closeBtn.addEventListener('touchstart',  closeOnDown, {capture:true, passive:false});
+    wrap.addEventListener('pointerdown', closeOnDown, {capture:true});
+    wrap.addEventListener('touchstart',  closeOnDown, {capture:true, passive:false});
+
+    window.addEventListener('keydown', e=>{
       if (!bigOpen) return;
-      const wrap = document.getElementById('bigmapWrap');
-      if (wrap) wrap.style.display = 'none';
-      bigOpen = false;
+      if ((e.key||'').toLowerCase()==='escape') { e.preventDefault(); closeBigmap(); }
+    }, true);
+  }
 
-      IZZA.inputBlocked = prevInputBlocked ? true : false;
+  function openBigmap(ev){
+    if (ev){ ev.preventDefault?.(); ev.stopImmediatePropagation?.(); ev.stopPropagation?.(); }
+    if (!IZZA?.api?.ready) return;
+    ensureBigmapUI();
 
-      const stick = document.getElementById('stickZone');
-      if (stick && stick.style) stick.style.visibility = 'visible';
-      document.getElementById('btnMap')?.removeAttribute('disabled');
-    }
+    prevInputBlocked = !!IZZA.inputBlocked;
+    IZZA.inputBlocked = true;
 
-    const mini = document.getElementById('minimap');
-    if (mini){
-      const openAndStop = e => { openBigmap(e); };
-      ['pointerdown','touchstart','click'].forEach(evt=>{
-        mini.addEventListener(evt, openAndStop, {capture:true, passive: evt==='touchstart' ? false : undefined});
-      });
-    }
+    const wrap = document.getElementById('bigmapWrap');
+    wrap.style.display = 'flex';
+    bigOpen = true;
 
-    IZZA.on('render-post', ()=>{
-      if (bigOpen) {
-        window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
-      }
+    window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
+
+    document.getElementById('btnMap')?.setAttribute('disabled','true');
+    const stick = document.getElementById('stickZone');
+    if (stick && stick.style) stick.style.visibility = 'hidden';
+  }
+
+  function closeBigmap(){
+    if (!bigOpen) return;
+    const wrap = document.getElementById('bigmapWrap');
+    if (wrap) wrap.style.display = 'none';
+    bigOpen = false;
+
+    IZZA.inputBlocked = prevInputBlocked ? true : false;
+
+    const stick = document.getElementById('stickZone');
+    if (stick && stick.style) stick.style.visibility = 'visible';
+    document.getElementById('btnMap')?.removeAttribute('disabled');
+  }
+
+  const mini = document.getElementById('minimap');
+  if (mini){
+    const openAndStop = e => { openBigmap(e); };
+    ['pointerdown','touchstart','click'].forEach(evt=>{
+      mini.addEventListener(evt, openAndStop, {capture:true, passive: evt==='touchstart' ? false : undefined});
     });
-  })();
+  }
+
+  IZZA.on('render-post', ()=>{
+    if (bigOpen) {
+      window.__izzaPaintOverlay && window.__izzaPaintOverlay('bigmap');
+    }
+  });
 })();
