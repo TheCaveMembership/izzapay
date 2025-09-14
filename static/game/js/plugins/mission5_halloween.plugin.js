@@ -1,5 +1,5 @@
 /* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run) — finalized
-   - Werewolf self-rendered (smaller, faster, black, red eye glow, dripping “drool”).
+   - Werewolf self-rendered (smaller, faster, black, red eye glow, drool).
    - On craft: night off, timer cleared, M5 complete popup, missions meta bumped, unlock signal for M6.
    - Adds ready hook to re-check state (onInvChangeCheckM5).
 */
@@ -12,6 +12,7 @@
   let api = null;
 
   const JACK_TAKEN_KEY = 'izzaJackTaken';
+  const M5_DONE_KEY    = 'izzaMission5_done';
   const M5_MS = 5 * 60 * 1000;
 
   // ---------------- state ----------------
@@ -82,20 +83,24 @@
     const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
+  // JACK at +8E, +3N
   function jackGrid(){ const d=hqDoorGrid(); return { x:d.gx+8, y:d.gy-3 }; }
 
+  // pumpkins: keep 2 as-is; move #3 to +8E +7N
   function computePumpkinTiles(){
     const d=hqDoorGrid();
     const p1={ tx:d.gx-15, ty:d.gy+10 };
     const p2={ tx:p1.tx-20, ty:p1.ty+13 };
-    const p3={ tx:d.gx+8,  ty:d.gy-7 };
+    const p3={ tx:d.gx+8,  ty:d.gy-7 }; // updated location
     return [p1,p2,p3];
   }
 
   // ---------------- screen math ----------------
   function worldToScreen(wx, wy){
     const S = api.DRAW, T = api.TILE;
-    return { sx: (wx - api.camera.x) * (S/T), sy: (wy - api.camera.y) * (S/T) };
+    const sx = (wx - api.camera.x) * (S/T);
+    const sy = (wy - api.camera.y) * (S/T);
+    return { sx, sy };
   }
 
   // ---------------- art ----------------
@@ -109,55 +114,64 @@
     return img;
   }
 
-  function svgJack(){ return `
+  function svgJack(){
+    return `
 <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
  <defs>
   <radialGradient id="g" cx="50%" cy="50%" r="60%">
-    <stop offset="0%" stop-color="#ffe39d"/><stop offset="55%" stop-color="#ff9820"/><stop offset="100%" stop-color="#5a1e00"/>
+    <stop offset="0%" stop-color="#ffe39d"/>
+    <stop offset="55%" stop-color="#ff9820"/>
+    <stop offset="100%" stop-color="#5a1e00"/>
   </radialGradient>
-  <linearGradient id="stem" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2f6a22"/><stop offset="100%" stop-color="#173715"/></linearGradient>
+  <linearGradient id="stem" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#2f6a22"/><stop offset="100%" stop-color="#173715"/>
+  </linearGradient>
  </defs>
  <ellipse cx="100" cy="110" rx="78" ry="70" fill="url(#g)" stroke="#3a1400" stroke-width="8"/>
  <rect x="92" y="30" width="16" height="28" rx="5" fill="url(#stem)"/>
  <polygon points="48,98 88,86 72,116 48,110" fill="#120800"/>
  <polygon points="112,86 152,98 152,110 128,116" fill="#120800"/>
  <path d="M38 138 Q100 170 162 138 L154 146 L138 142 L124 150 L108 142 L94 152 L78 142 L64 150 L50 142 Z" fill="#120800"/>
-</svg>`;}
+</svg>`;
+  }
   const JACK_MULT = 1.5;
 
-  function svgPumpkinSmall(){ return `
+  function svgPumpkinSmall(){
+    return `
 <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
- <defs><radialGradient id="gp" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#ffcf7a"/><stop offset="60%" stop-color="#ff8412"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
- <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/><rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
-</svg>`;}
+ <defs><radialGradient id="gp" cx="50%" cy="50%" r="60%">
+   <stop offset="0%" stop-color="#ffcf7a"/><stop offset="60%" stop-color="#ff8412"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
+ <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/>
+ <rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
+</svg>`;
+  }
 
-  // Black haunted werewolf (smaller/faster + red eyes + drool)
-  function svgWerewolf(){ return `
-<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  // Black haunted werewolf (quadruped silhouette, red eyes, smaller/faster, drool)
+  function svgWerewolf(){
+    return `
+<svg viewBox="0 0 140 110" xmlns="http://www.w3.org/2000/svg">
  <defs>
   <radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3d3d"/><stop offset="100%" stop-color="#5a0000"/></radialGradient>
  </defs>
- <!-- body (all fours silhouette) -->
- <g fill="#0b0b0b" stroke="#070707" stroke-width="3">
-   <!-- back + shoulders -->
-   <path d="M18,82 C16,68 28,54 40,50 C49,48 58,48 70,50 C82,52 96,54 102,68 C108,82 100,92 86,96 C72,100 44,98 30,92 C22,88 20,88 18,82 Z"/>
-   <!-- forelegs -->
-   <path d="M48,86 C42,92 40,100 42,106 C46,108 52,106 54,100 C56,94 56,88 56,86 Z"/>
-   <path d="M68,86 C62,92 60,100 62,106 C66,108 72,106 74,100 C76,94 76,88 76,86 Z"/>
-   <!-- hindlegs -->
-   <path d="M26,86 C20,94 20,104 24,108 C28,110 34,108 36,102 C38,96 38,90 38,88 Z"/>
-   <path d="M84,88 C78,96 78,104 82,108 C86,110 92,108 94,102 C96,96 96,90 96,88 Z"/>
-   <!-- head / muzzle -->
-   <path d="M22,72 C26,66 34,62 42,60 C50,58 56,60 60,64 C56,66 50,68 44,70 C36,72 28,74 22,72 Z"/>
-   <path d="M60,64 C64,66 66,70 66,74 C62,74 56,72 52,70 C54,68 58,66 60,64 Z"/>
+ <!-- body on all fours -->
+ <g fill="#0a0a0a" stroke="#070707" stroke-width="2">
+   <path d="M18,78 C26,68 34,62 48,60 66,57 86,60 104,66 116,70 122,76 124,82 126,86 120,90 114,88 98,84 84,82 66,82 52,82 36,84 24,86 18,86 14,82 18,78 Z"/>
+   <!-- head + ears -->
+   <path d="M92,56 C96,50 102,46 110,46 116,46 124,50 126,56 128,62 124,68 118,70 110,72 100,68 92,56 Z"/>
+   <path d="M108,46 l6,-10 6,10" fill="#0a0a0a"/>
+   <!-- legs (simple) -->
+   <path d="M40,80 l-4,16" />
+   <path d="M60,80 l-5,16" />
+   <path d="M86,80 l6,16" />
+   <path d="M104,80 l8,16" />
+   <!-- tail -->
+   <path d="M20,76 q-10,4 -8,12 q8,-2 14,-8" />
  </g>
- <!-- eyes + drool hint -->
- <g>
-  <ellipse cx="48" cy="66" rx="4.8" ry="3.6" fill="url(#eye)"/>
-  <ellipse cx="56" cy="66" rx="4.8" ry="3.6" fill="url(#eye)"/>
-  <path d="M54 74 Q55 82 52 88" stroke="#7a0000" stroke-width="2" fill="none"/>
- </g>
-</svg>`;}
+ <!-- eyes -->
+ <ellipse cx="114" cy="58" rx="4.6" ry="3.2" fill="url(#eye)"/>
+ <ellipse cx="106" cy="58" rx="4.6" ry="3.2" fill="url(#eye)"/>
+</svg>`;
+  }
 
   // ---------------- pumpkins ----------------
   function placePumpkins(){
@@ -179,6 +193,7 @@
       if(!el){
         el=document.createElement('div');
         el.id=id;
+        // LOWER z-index so Armoury UI sits on top (core armoury typically >3000)
         el.style.cssText='position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.28) 0%, rgba(0,0,0,.86) 70%);mix-blend-mode:multiply;z-index:1200';
         (document.getElementById('gameCard')||document.body).appendChild(el);
         const blue=document.createElement('div');
@@ -191,7 +206,7 @@
 
   // ---------------- HA smoke ----------------
   let lastHa = 0;
-  const HA_LIST = []; // drool particles for wolves
+  const HA_DRIPS = []; // drool dots from wolves
   function spawnHA(sx, sy){
     const t = performance.now();
     if (t - lastHa < 2400) return;
@@ -216,9 +231,9 @@
     ctx.restore();
   }
 
-  // ---------------- wolves (smaller & faster; render over map) ----------------
+  // ---------------- wolves (smaller & faster; render OVER map) ----------------
   let wolfImg = null;
-  function ensureWolfImg(){ if (!wolfImg) wolfImg = svgToImage(svgWerewolf(), (api?.TILE||60)*1.0, (api?.TILE||60)*1.0); }
+  function ensureWolfImg(){ if (!wolfImg) wolfImg = svgToImage(svgWerewolf(), (api?.TILE||60)*1.15, (api?.TILE||60)*0.95); }
   function spawnWerewolf(){
     ensureWolfImg();
     const p = api?.player||{x:0,y:0};
@@ -233,8 +248,8 @@
     for (let i=WOLVES.length-1;i>=0;i--){
       const w=WOLVES[i];
       w.age += dt;
-      const k = Math.min(1, w.age/900);
-      const sp = 0.080 + 0.050*Math.sin((w.phase+w.age)*0.003); // quicker, chasing pace
+      const k = Math.min(1, w.age/800);
+      const sp = 0.078 + 0.045*Math.sin((w.phase+w.age)*0.003); // fast lope
       const dx = p.x - w.x, dy = p.y - w.y;
       const d  = Math.hypot(dx,dy)||1;
       const ux = dx/d, uy = dy/d;
@@ -243,60 +258,60 @@
       w.x += w.vx * dt;
       w.y += w.vy * dt;
 
-      // dripping “drool”
-      if ((w.age|0) % 200 < 14) {
-        HA_LIST.push({x:w.x+6, y:w.y+8, vx:(Math.random()*0.05-0.025), vy:0.06, age:0, life:520});
+      // drool drips from mouth while chasing
+      if ((w.age|0) % 190 < 14) {
+        HA_DRIPS.push({x:w.x+6, y:w.y+6, vx:(Math.random()*0.05-0.025), vy:0.055, age:0, life:520});
       }
 
       if (w.age > w.life) WOLVES.splice(i,1);
     }
     // drool update
-    for (let i=HA_LIST.length-1;i>=0;i--){
-      const p0=HA_LIST[i]; p0.age+=dt; p0.x+=p0.vx*dt; p0.y+=p0.vy*dt; p0.vy+=0.0004*dt;
-      if (p0.age>p0.life) HA_LIST.splice(i,1);
+    for (let i=HA_DRIPS.length-1;i>=0;i--){
+      const p0=HA_DRIPS[i]; p0.age+=dt; p0.x+=p0.vx*dt; p0.y+=p0.vy*dt; p0.vy+=0.00042*dt;
+      if (p0.age>p0.life) HA_DRIPS.splice(i,1);
     }
   }
   function drawWolves(ctx){
-    if (!WOLVES.length && !HA_LIST.length) return;
-    const S=api.DRAW, T=api.TILE, px = S/T, py = S/T, tnow = performance.now();
+    if (!WOLVES.length && !HA_DRIPS.length) return;
+    const S=api.DRAW, T=api.TILE, px = S/T, tnow = performance.now();
     for (const w of WOLVES){
       const sx=(w.x - api.camera.x)*px;
-      const sy=(w.y - api.camera.y)*py;
+      const sy=(w.y - api.camera.y)*px;
       const s  = 1 + 0.03*Math.sin((w.phase+tnow)*0.006);
       const flick = 0.45 + 0.35*Math.abs(Math.sin((w.phase+tnow)*0.012));
       if (wolfImg?.complete){
         ctx.save(); // shadow
         ctx.globalAlpha = 0.32;
-        ctx.beginPath(); ctx.ellipse(sx, sy+12, 12, 5, 0, 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(sx, sy+12, 13, 5.5, 0, 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill();
         ctx.restore();
 
         ctx.save(); // body
         ctx.translate(sx, sy);
         ctx.scale(s, s);
-        ctx.drawImage(wolfImg, -36, -44);
+        ctx.drawImage(wolfImg, -48, -42);
         ctx.restore();
 
         ctx.save(); // eye glow
         ctx.globalCompositeOperation='lighter';
         ctx.globalAlpha = flick;
         ctx.fillStyle = 'rgba(255,45,45,0.9)';
-        ctx.beginPath(); ctx.arc(sx-12, sy-10, 4.0, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(sx-4,  sy-10, 4.0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx+12, sy-12, 4.2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx+20, sy-12, 4.2, 0, Math.PI*2); ctx.fill();
         ctx.restore();
       }
     }
     // drool dots
     ctx.save();
-    for(const p0 of HA_LIST){
-      const sx=(p0.x - api.camera.x)*px, sy=(p0.y - api.camera.y)*py;
+    for(const p0 of HA_DRIPS){
+      const sx=(p0.x - api.camera.x)*px, sy=(p0.y - api.camera.y)*px;
       const k = 1 - Math.min(1, p0.age/p0.life);
-      ctx.globalAlpha = 0.38*k;
+      ctx.globalAlpha = 0.35*k;
       ctx.beginPath(); ctx.arc(sx, sy, 2.2, 0, Math.PI*2); ctx.fillStyle='#6a0000'; ctx.fill();
     }
     ctx.restore();
   }
 
-  // ---------------- spooky choice (fallback if no core UI) ----------------
+  // ---------------- spooky choice ----------------
   function showSpookyChoice(onAccept){
     if (IZZA?.api?.UI?.choice){
       IZZA.api.UI.choice({
@@ -350,16 +365,19 @@
       const S=api.DRAW, t=api.TILE;
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
 
-      // Draw JACK
+      // Draw JACK when allowed
       if ((!mission5Active || force) && (!taken || force) && ((tier2 && m4done) || force)){
         const g=jackGrid();
         const sx=(g.x*t - api.camera.x)*(S/t) + S*0.5;
         const sy=(g.y*t - api.camera.y)*(S/t) + S*0.6;
+
         if (!jackImg) jackImg = svgToImage(svgJack(), (api.TILE*JACK_MULT)|0, (api.TILE*JACK_MULT)|0);
         if (jackImg.complete){
           const jig = Math.sin(performance.now()*0.007) * (S*0.007);
           const w = (api.TILE*JACK_MULT) * (S/api.TILE);
           const h = w;
+
+          // glow
           ctx.save();
           const grd = ctx.createRadialGradient(sx, sy, w*0.05, sx, sy, w*0.55);
           grd.addColorStop(0, `rgba(255,190,70,${0.35 + 0.08*Math.sin(performance.now()*0.02)})`);
@@ -367,12 +385,14 @@
           ctx.globalCompositeOperation='lighter';
           ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(sx, sy, w*0.55, 0, Math.PI*2); ctx.fill();
           ctx.restore();
+
+          // body + HA smoke from mouth
           ctx.drawImage(jackImg, sx - w/2 + jig, sy - h/2 - jig*0.6, w, h);
           spawnHA(sx + w*0.05, sy + h*0.1);
         }
       }
 
-      // pumpkins
+      // pumpkins (during mission)
       if (pumpkins.length){
         for(const p of pumpkins){
           if(p.collected || !p.img || !p.img.complete) continue;
@@ -418,6 +438,7 @@
     const gx = ((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
     const g  = jackGrid();
 
+    // JACK tile → spooky accept dialog → take + start mission
     if ((!taken || force) && (!mission5Active || force) && (gx===g.x && gy===g.y)){
       if (force || (tierOK && isMission4Done())){
         e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
@@ -433,6 +454,7 @@
       }
     }
 
+    // pumpkin collection
     for(const p of pumpkins){
       if(!p.collected && isNearGrid(p.tx, p.ty, (api?.TILE||60)*0.85)){
         p.collected=true;
@@ -484,9 +506,9 @@
   }
 
   function bumpMission5UI(){
-    _setMissions(5);
+    _setMissions(5); // for Inventory panel "Missions Completed: #"
     try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', 5); }catch{}
-    try{ localStorage.setItem('izzaMission5_done','1'); }catch{}
+    try{ localStorage.setItem(M5_DONE_KEY,'1'); }catch{}
     try{ IZZA.emit('missions-updated',{completed:5}); }catch{}
     try{ IZZA.emit('mission-complete',{id:5,name:'Night of the Lantern'}); }catch{}
     try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
@@ -495,7 +517,7 @@
     try{ localStorage.setItem('izzaMission6_unlocked','1'); }catch{}
     try{ IZZA.emit('mission-available',{id:6,name:'Mission 6'}); }catch{}
     try{ IZZA.emit('m6-unlocked'); }catch{}
-    try{ IZZA.emit('mission6-unlock'); }catch{}
+    try{ IZZA.emit('mission6-unlock'); }catch{} // extra alias, in case M6 listens to this name
   }
 
   function finishMission5(){
@@ -538,7 +560,7 @@
       }
       if (now >= werewolfNext){
         if (isMoving()) spawnWerewolf();
-        werewolfNext = now + 28000; // a touch quicker cadence
+        werewolfNext = now + 26000; // brisk cadence
       }
       updateTimer(now);
     }
@@ -556,15 +578,22 @@
     IZZA.on?.('render-post',  renderM5Over);
     IZZA.on?.('update-post',  onUpdate);
     wireB();
-    onInvChangeCheckM5(); // <— ready hook to reconcile state on load
+    onInvChangeCheckM5(); // <— your requested ready hook
   });
 
+  // Safety: if player already has the full set (e.g. crafted via Armoury UI), mark complete & clean up UI/night.
   function onInvChangeCheckM5(){
-    // If mission active and the set is already present (e.g., crafted via Armoury UI), finish immediately.
-    if (!mission5Active) return;
     const inv = invRead();
-    if (inv.pumpkinHelmet && inv.pumpkinVest && inv.pumpkinArms && inv.pumpkinLegs){
-      finishMission5();
+    const hasSet = !!(inv.pumpkinHelmet && inv.pumpkinVest && inv.pumpkinArms && inv.pumpkinLegs);
+    const done = localStorage.getItem(M5_DONE_KEY) === '1';
+    if (hasSet && !done){
+      finishMission5(); // handles UI bump, night/timer off, unlock M6, popup
+    }else if (hasSet && done){
+      // ensure UI clean if reloading mid-night
+      mission5Active=false; setNight(false); clearTimer(); WOLVES.length=0; clearPumpkins();
+      _setMissions(Math.max(5,_missions()));
+      try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', Math.max(5, missionsCompletedMeta())); }catch{}
+      try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
     }
   }
 
@@ -575,6 +604,4 @@
 
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
 
-  // (Optional) expose tryCraftPumpkin if your Armoury calls into mission plugins
-  try{ IZZA.tryCraftPumpkin = tryCraftPumpkin; }catch{}
 })();
