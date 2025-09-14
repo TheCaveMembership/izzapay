@@ -463,22 +463,32 @@
   }
 
   // ---------------- Armoury craft UI (register + fallback injector) ---------
-  function registerPumpkinArmourRecipeUI(){
-    // If an Armoury API exists, register like the cardboard recipe does:
-    try{
-      if (IZZA?.api?.armoury?.registerRecipe){
-        IZZA.api.armoury.registerRecipe({
-          id: 'pumpkin_set',
-          label: 'Craft Pumpkin Armour',
-          needs: [{id:'jack_o_lantern',count:1},{id:'pumpkin_piece',count:3}],
-          gives: [{id:'pumpkinHelmet',count:1},{id:'pumpkinVest',count:1},{id:'pumpkinArms',count:1},{id:'pumpkinLegs',count:1}],
-          onCraft: ()=>tryCraftPumpkin()
-        });
-        return;
-      }
-    }catch{}
+  // Replace your current registerPumpkinArmourRecipeUI with this:
+function registerPumpkinArmourRecipeUI(){
+  // prevent duplicate registration if update-post calls this repeatedly
+  if (window.__M5_PK_RECIPE__) return;
 
-    
+  try{
+    if (IZZA?.api?.armoury?.registerRecipe){
+      IZZA.api.armoury.registerRecipe({
+        id: 'pumpkin_set',
+        label: 'Craft Pumpkin Armour',
+        needs: [
+          { id:'jack_o_lantern', count:1 },
+          { id:'pumpkin_piece',  count:3 }
+        ],
+        gives: [
+          { id:'pumpkinHelmet', count:1 },
+          { id:'pumpkinVest',   count:1 },
+          { id:'pumpkinArms',   count:1 },
+          { id:'pumpkinLegs',   count:1 }
+        ],
+        onCraft: ()=>tryCraftPumpkin()
+      });
+      window.__M5_PK_RECIPE__ = true;
+    }
+  }catch{}
+}
 
   // ---------------- update ----------------
   function onUpdate({ now }){
