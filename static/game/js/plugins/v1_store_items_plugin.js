@@ -1,6 +1,6 @@
 // v1_store_items_plugin.js — extend shop stock + icon repair + BUY/SELL tabs + search + inventory pricebook
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix-6+buy-sell+search+pricebook+scroll';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-7+buy-sell+search+pricebook+scroll-fix';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -15,16 +15,16 @@
   const isDataUrl = s => typeof s==='string' && /^data:image\/svg\+xml/i.test(s);
   function svgToDataURL(svg){
     if(!svg) return '';
-    if(isDataUrl(svg)) return svg;                               // already encoded
-    if(/^\s*</.test(svg)) return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); // raw <svg>
-    return svg;                                                  // external URL -> leave as-is
+    if(isDataUrl(svg)) return svg;
+    if(/^\s*</.test(svg)) return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    return svg;
   }
   function iconImgHTMLFromAny(svgOrData, w=24, h=24){
     const src = svgToDataURL(svgOrData||'');
     return `<img src="${src}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
   }
 
-  // ---------- tiny SVGs (UI icons only; NOT for on-character overlays) ----------
+  // ---------- tiny SVGs (UI icons only) ----------
   function svgIcon(id, w=24, h=24){
     if(id==='bat')      return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
     if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
@@ -34,7 +34,6 @@
     if(id==='pistol_ammo') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="18" width="8" height="28" fill="#c9a24c"/><rect x="28" y="44" width="8" height="6" fill="#6f5a1d"/></svg>`;
     return '';
   }
-  // simple generic armor icon if an armor entry is missing iconSvg
   function svgIconArmorGeneric(slot, w=24, h=24){
     const base='#2a2f3f', shade='#121826';
     const body = slot==='head'
@@ -47,7 +46,7 @@
     return `<svg viewBox="0 0 24 24" width="${w}" height="${h}"><rect x="2" y="2" width="20" height="20" rx="4" fill="#0e1524"/>${body}</svg>`;
   }
 
-  // quick name→id resolver for legacy rows
+  // legacy name→id
   function guessLegacyIdFromName(name){
     const n=(name||'').toLowerCase();
     if(/\bknuckle/.test(n)) return 'knuckles';
@@ -58,7 +57,6 @@
     if(/\bammo\b/.test(n)) return 'pistol_ammo';
     return '';
   }
-  // normalize armor slots on input
   function normSlot(s){
     const v=(s||'').toLowerCase();
     if(v==='helmet' || v==='head') return 'head';
@@ -67,7 +65,7 @@
     return 'legs';
   }
 
-  // ---------- BUY/SELL TABS + SEARCH UI ----------
+  // ---------- BUY/SELL TABS + SEARCH UI (+ SCROLL FIX) ----------
   let tabsWired = false, shopObs = null;
   function ensureTabs(){
     const modal = document.getElementById('shopModal');
@@ -78,17 +76,19 @@
     const card = modal.querySelector('.card');
     if(!card) return;
 
-    // styles (add momentum scroll on iOS and ensure card is column)
+    // SCROLL/STYLES — the important bits are flex column + min-height:0 for lists
     if(!document.getElementById('shop-tabs-css')){
       const css = document.createElement('style');
       css.id = 'shop-tabs-css';
       css.textContent = `
-      #shopModal .card{display:flex;flex-direction:column}
-      #shopTabs{display:flex;gap:6px;margin:0 0 8px}
+      #shopModal{align-items:center;justify-content:center}
+      #shopModal .card{display:flex;flex-direction:column;max-height:min(90vh,720px);width:min(92vw,560px)}
+      #shopTabs{display:flex;gap:6px;margin:0 0 8px;flex:0 0 auto}
       #shopTabs .tab{flex:0 0 auto;padding:6px 10px;border-radius:10px;border:1px solid #2a3550;background:#162134;color:#cfe0ff;font-weight:700;cursor:pointer}
       #shopTabs .tab.on{background:#1f6feb;border-color:#2f6feb;color:#fff}
-      #shopSearch{width:100%;margin:0 0 8px;padding:8px 12px;border-radius:12px;border:1px solid #2a3550;background:#0e1524;color:#cfe0ff;font-weight:650}
-      .shop-scroll{max-height:min(60vh,520px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;-webkit-overflow-scrolling:touch}
+      #shopSearch{width:100%;margin:0 0 8px;padding:8px 12px;border-radius:12px;border:1px solid #2a3550;background:#0e1524;color:#cfe0ff;font-weight:650;flex:0 0 auto}
+      .shop-list{flex:1 1 auto;min-height:0} /* <- THIS UNLOCKS SCROLLING */
+      .shop-scroll{overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;-webkit-overflow-scrolling:touch}
       .shop-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;background:#0f1522;border:1px solid #2a3550;border-radius:10px}
       .shop-item .buy, .shop-item .sell { background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
       .shop-note{opacity:.8;font-size:12px;margin-top:6px}
@@ -107,14 +107,14 @@
     search.placeholder='Search shop & inventory…';
     search.autocomplete='off';
 
-    // lists
+    // lists (NOTE: no fixed max-height here; flex handles it)
     const buyList  = document.createElement('div'); buyList.id='shopBuyList';  buyList.className='shop-list shop-scroll';
     const sellList = document.createElement('div'); sellList.id='shopSellList'; sellList.className='shop-list shop-scroll'; sellList.style.display='none';
 
-    // move Core’s existing rows into BUY list (no dup sections)
+    // move Core rows into BUY list
     while(host.firstChild) buyList.appendChild(host.firstChild);
     host.dataset.tabs='1';
-    host.replaceChildren(); // clear host (we'll not use host directly anymore)
+    host.replaceChildren();
 
     // slot UI
     card.insertBefore(tabs, card.children[1] || card.firstChild);
@@ -122,11 +122,24 @@
     card.insertBefore(buyList, search.nextSibling);
     card.insertBefore(sellList, buyList.nextSibling);
 
+    // Fallback sizing (in case parent constraints fight us): compute available height
+    function sizeLists(){
+      // ensure the card never overflows viewport; compute list room
+      const rect = card.getBoundingClientRect();
+      const maxCard = Math.min(window.innerHeight*0.9, 720);
+      card.style.maxHeight = maxCard+'px';
+      // let flex do most work; but if something upstream prevents flex, set an explicit max
+      const used = (tabs.offsetHeight||0) + (search.offsetHeight||0) + 24; // +padding
+      const avail = Math.max(240, maxCard - used);
+      buyList.style.maxHeight  = avail+'px';
+      sellList.style.maxHeight = avail+'px';
+    }
+    sizeLists();
+    window.addEventListener('resize', sizeLists);
+
     // Observe future DOM changes (Core may inject rows later); keep icons healthy
     if(!shopObs){
-      shopObs = new MutationObserver(()=> {
-        repairMissingIcons();
-      });
+      shopObs = new MutationObserver(()=> { repairMissingIcons(); });
       shopObs.observe(card, { childList:true, subtree:true });
     }
 
@@ -143,6 +156,7 @@
         sellList.style.display = (mode==='sell')?'':'none';
         if(mode==='sell') renderSellList(search.value.trim());
         if(mode==='buy')  filterBuyList(search.value.trim());
+        sizeLists();
       }, true);
 
       // live search
@@ -156,13 +170,12 @@
       window.addEventListener('izza-inventory-changed', ()=>{
         const selling = card.querySelector('#shopTabs .tab.on')?.dataset.tab==='sell';
         if(selling) renderSellList(search.value.trim());
-        // also repair any icons that may have just appeared
         repairMissingIcons();
       });
     }
   }
 
-  // filter for existing BUY rows (non-invasive)
+  // filter for existing BUY rows
   function filterBuyList(q){
     const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
     if(!list) return;
@@ -173,7 +186,7 @@
     });
   }
 
-  // ---------- BUY rows (adds our extra items without duplicating Core) ----------
+  // ---------- BUY rows ----------
   function addShopRow(list, it){
     const row = document.createElement('div');
     row.className='shop-item';
@@ -208,7 +221,6 @@
     const inv = api.getInventory ? api.getInventory() : {};
     const pb  = readPriceBook();
 
-    // Known items (legacy weapons/consumables & ammo)
     if(it.id==='uzi'){
       const cur = inv.uzi || { owned:true, ammo:0, equipped:false, type:'weapon', name:'Uzi' };
       cur.owned = true; cur.ammo = (cur.ammo|0) + 50;
@@ -231,10 +243,9 @@
       cur.name = cur.name || 'Pistol'; cur.type='weapon';
       cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('pistol',24,24));
       inv.pistol = cur;
-      IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'}); // no pricebook entry
+      IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'});
 
     } else {
-      // Generic purchase: supports armour + misc
       const key = it.invKey || it.id;
       const pretty = it.name || key;
 
@@ -290,22 +301,17 @@
     return Math.max(1, Math.ceil(base * 0.40));
   }
 
-  // normalize icon source from any inventory entry
   function iconForInv(key, entry){
-    // prefer entry.iconSvg (but encode if raw)
     if(entry?.iconSvg){
       return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
     }
-    // armor with missing icon → generic
     if(entry?.type==='armor'){
       const slot = normSlot(entry.slot||'');
       return iconImgHTMLFromAny(svgIconArmorGeneric(slot,24,24),24,24);
     }
-    // legacy weapons/consumables
     const id = guessLegacyIdFromName(entry?.name || key) ||
                ({pistol:'pistol', uzi:'uzi', grenade:'grenade', bat:'bat', knuckles:'knuckles'}[key] || '');
     if(id) return iconImgHTMLFromAny(svgIcon(id,24,24), 24, 24);
-    // nothing
     return '';
   }
 
@@ -326,7 +332,6 @@
       if(!e) return;
       const count = (e.count|0) + (e.owned?1:0);
       if(count<=0) return;
-      // prevent selling quest bits (and any obvious mission-only)
       if(/jack_o_lantern|pumpkin_piece/i.test(key)) return;
 
       const pretty = e.name || key;
@@ -351,7 +356,7 @@
       btn.textContent = `Sell ${price} IC`;
       btn.addEventListener('click', ()=>{
         doSell(key, e, price);
-        renderSellList(needle); // refresh list counts
+        renderSellList(needle);
       });
 
       row.appendChild(meta);
@@ -396,7 +401,7 @@
     }catch(e){ console.warn('[shop] sell failed', e); }
   }
 
-  // ---------- Robust icon repair for legacy rows (BUY & SELL) ----------
+  // ---------- Icon repair (BUY & SELL) ----------
   function repairMissingIcons(){
     try{
       const modal = document.getElementById('shopModal');
@@ -418,7 +423,6 @@
           const id = guessLegacyIdFromName(pretty);
           const html = (iconHolder.innerHTML||'').trim();
 
-          // replace if: empty, '?' or '⭐', obvious broken HTML, or raw text instead of an <img>/<svg>
           const looksBroken = !html || html==='?' || /⭐/.test(html) ||
                               /^"&/.test(html) || /^&quot;/.test(html) ||
                               /^" width=/.test(html) ||
@@ -433,7 +437,7 @@
     }
   }
 
-  // ---------- Stock patcher (BUY list) ----------
+  // ---------- Stock patcher ----------
   function patchShopStock(){
     try{
       if(!api) return;
@@ -446,11 +450,9 @@
 
       ensureTabs();
 
-      // Choose the BUY list as our target
       const buyList = document.getElementById('shopBuyList') || document.getElementById('shopList');
       if(!buyList) return;
 
-      // Extend stock (only once per open)
       if(!buyList.querySelector('[data-store-ext]')){
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
@@ -460,9 +462,7 @@
         }
       }
 
-      // Heal placeholders / stars for all rows (including Core’s)
       repairMissingIcons();
-      // Apply current search (if user typed)
       const q = (document.getElementById('shopSearch')?.value||'').trim();
       if(q) filterBuyList(q);
     }catch(e){
