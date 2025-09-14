@@ -360,31 +360,36 @@ function tintHairLayer(pack, hairColor){
   }
 }
   // ===== Coins & Progress (persist) =====
-  const LS = {
-    coins:      'izzaCoins',
-    mission1:   'izzaMission1',
-    missions:   'izzaMissions',
-    inventory:  'izzaInventory',
-    hearts: 'izzaHearts'
-  };
-  function getCoins(){
-    const raw = localStorage.getItem(LS.coins);
-    const n = raw==null ? 0 : (parseInt(raw,10)||0);
-    return Math.max(0,n);
-  }
-  function setCoins(n){
+const LS = {
+  coins:         'izzaCoins',
+  hearts:        'izzaHearts',
+  inventory:     'izzaInventory',
+
+  // legacy keys we keep backward-compatible:
+  mission1:      'izzaMission1',
+  missionsCount: 'izzaMissions',
+
+  // NEW: full mission state (JSON)
+  missionsJSON:  'izzaMissionState'
+};
+
+function getCoins(){
+  const raw = localStorage.getItem(LS.coins);
+  const n = raw==null ? 0 : (parseInt(raw,10)||0);
+  return Math.max(0,n);
+}
+function setCoins(n){
   const v = Math.max(0, n|0);
   localStorage.setItem(LS.coins, String(v));
   const el = document.getElementById('coinPill') || document.querySelector('.pill.coins');
   if(el) el.textContent = `Wallet: ${v} IC`;
   player.coins = v;
-
-  // NEW: let persist/sync know wallet changed
   try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
 }
+
 function getHearts(){
   const raw = localStorage.getItem(LS.hearts);
-  const n = raw==null ? 5 : (parseInt(raw,10)||5); // default 5
+  const n = raw==null ? 5 : (parseInt(raw,10)||5);
   return Math.max(0,n);
 }
 function setHearts(n){
@@ -393,29 +398,95 @@ function setHearts(n){
   player.hp = v;
   try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
 }
-  function getMission1Done(){ return localStorage.getItem(LS.mission1)==='done'; }
-  function setMission1Done(){
-    localStorage.setItem(LS.mission1,'done');
-    const cur = parseInt(localStorage.getItem(LS.missions)||'0',10);
-    if(cur<1) localStorage.setItem(LS.missions,'1');
-  }
-  function getMissionCount(){ return parseInt(localStorage.getItem(LS.missions)|| (getMission1Done()? '1':'0'), 10); }
 
-  // ---- Inventory storage helpers (kept) ----
-  function _migrateInventory(v){
-    if (Array.isArray(v)) {
-      const inv = {};
-      v.forEach(k => { inv[k] = (k==='pistol' ? {owned:true, ammo:0, equipped:false} : {count:1, equipped:false}); });
-      return inv;
-    }
-    return v && typeof v==='object' ? v : {};
-  }
-  function getInventory(){
-    try{ return _migrateInventory(JSON.parse(localStorage.getItem(LS.inventory) || '{}')); }
-    catch{ return {}; }
-  }
-  function setInventory(obj){ localStorage.setItem(LS.inventory, JSON.stringify(obj||{})); }
+/* ========= NEW: mission persistence (generalized) =========
+   Shape stored in localStorage[izzaMissionState], e.g.:
+   {
+     "mission1": { step:"hitCop", done:true, updated: 1736450000000 },
+     "mission3": { step:"deliver-car", done:false, updated: ... },
+     "mission5": { step:"boss", done:true, updated: ... }
+   }
+*/
+function _readMissions(){
+  try{ return JSON.parse(localStorage.getItem(LS.missionsJSON)||'{}') || {}; }
+  catch{ return {}; }
+}
+function _writeMissions(obj){
+  try{
+    localStorage.setItem(LS.missionsJSON, JSON.stringify(obj||{}));
+    try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
+    // If your server persist layer is present, ask it to save too
+    try{ if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function') IZZA_PERSIST.save(); }catch{}
+  }catch{}
+}
 
+/** public helpers for plugins **/
+function getMissionState(){ return _readMissions(); }                // whole map
+function getMissionEntry(id){ return _readMissions()[id] || null; }  // one mission
+
+function setMissionEntry(id, patch){
+  if(!id) return;
+  const all = _readMissions();
+  const cur = all[id] || {};
+  all[id] = Object.assign({}, cur, patch || {}, { updated: Date.now() });
+  _writeMissions(all);
+  IZZA.emit?.('mission-changed', { id, state: all[id] });
+
+  // keep legacy counter in sync for old unlock checks (e.g., shop)
+  const doneCount = Object.values(all).reduce((n,m)=> n + (m && m.done ? 1 : 0), 0);
+  const prev = parseInt(localStorage.getItem(LS.missionsCount)||'0', 10) || 0;
+  if (doneCount !== prev) localStorage.setItem(LS.missionsCount, String(doneCount));
+}
+
+function markMissionDone(id){
+  setMissionEntry(id, { done:true });
+}
+function setMissionStep(id, step){
+  setMissionEntry(id, { step: String(step||'') });
+}
+
+/** Back-compat for existing calls in your core and early missions **/
+function getMission1Done(){ 
+  // prefer new store, fall back to legacy boolean
+  const m = getMissionEntry('mission1');
+  if (m && m.done) return true;
+  return localStorage.getItem(LS.mission1)==='done';
+}
+function setMission1Done(){
+  // write both places to remain 100% compatible
+  localStorage.setItem(LS.mission1,'done');
+  markMissionDone('mission1');
+}
+
+/** This is what your shop/unlocks already use */
+function getMissionCount(){
+  // prefer generalized store; but stay backward compatible
+  const all = _readMissions();
+  const count = Object.values(all).reduce((n,m)=> n + (m && m.done ? 1 : 0), 0);
+  if (count>0) return count;
+
+  // legacy fallback
+  const legacy = parseInt(localStorage.getItem(LS.missionsCount) || (getMission1Done() ? '1':'0'), 10);
+  return legacy || 0;
+}
+
+/* ========= Inventory helpers (unchanged, kept for context) ========= */
+function _migrateInventory(v){
+  if (Array.isArray(v)) {
+    const inv = {};
+    v.forEach(k => { inv[k] = (k==='pistol' ? {owned:true, ammo:0, equipped:false} : {count:1, equipped:false}); });
+    return inv;
+  }
+  return v && typeof v==='object' ? v : {};
+}
+function getInventory(){
+  try{ return _migrateInventory(JSON.parse(localStorage.getItem(LS.inventory) || '{}')); }
+  catch{ return {}; }
+}
+function setInventory(obj){
+  localStorage.setItem(LS.inventory, JSON.stringify(obj||{}));
+  try{ if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function') IZZA_PERSIST.save(); }catch{}
+}
   // ===== Loot pickup integration (kept) =====
   IZZA.on('loot-picked', (payload)=>{
     try{
