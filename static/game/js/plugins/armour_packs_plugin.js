@@ -1,7 +1,6 @@
 // armour_packs_plugin.js — Self-contained armour shop + overlays + equip rules
-// Adds 10 shop sets (40 items), data-driven, no edits to existing files.
 (function(){
-  const BUILD = 'armour-packs-plugin/v1.1 (buyList-aware)';
+  const BUILD = 'armour-packs-plugin/v1.1 (icon data-urls)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -20,6 +19,10 @@
       try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
     }catch{}
   }
+  const isDataUrl = s => typeof s==='string' && /^data:image\/svg\+xml/i.test(s);
+  const svgToDataURL = s => (isDataUrl(s) ? s : 'data:image/svg+xml;utf8,'+encodeURIComponent(s));
+
+  function _plural(n, one, many){ return n===1? one : many; }
   function _isEquipped(entry){
     if(!entry) return false;
     if(entry.equipped===true || entry.equip===true) return true;
@@ -33,18 +36,18 @@
     if(typeof entry.equippedCount === 'number') entry.equippedCount = on ? 1 : 0;
   }
 
-  // ---- Data model for sets ----
+  // ---- Data model (unchanged sets) ----
   const SETS = [
-    { id:'bronze_street',   name:'Bronze Street',   price:50,   colors:{ base:'#b07a43', shade:'#6a4826', trim:'#2a2a2a', glow:'#ff4a2a' }, tags:{melee:true} },
-    { id:'iron_hustle',     name:'Iron Hustle',     price:80,   colors:{ base:'#8d949b', shade:'#595f67', trim:'#1f1f1f', glow:'#ff5e2a' }, tags:{melee:true,tank:true} },
-    { id:'steel_block',     name:'Steel Block',     price:120,  colors:{ base:'#b9c5cf', shade:'#7b8893', trim:'#222c39', glow:'#ff6a3a' }, tags:{melee:true} },
-    { id:'cobalt_crew',     name:'Cobalt Crew',     price:180,  colors:{ base:'#315caa', shade:'#213c74', trim:'#101b33', glow:'#3dd1ff' }, tags:{hybrid:true} },
+    { id:'bronze_street',   name:'Bronze Street',   price:50,  colors:{ base:'#b07a43', shade:'#6a4826', trim:'#2a2a2a', glow:'#ff4a2a' }, tags:{melee:true} },
+    { id:'iron_hustle',     name:'Iron Hustle',     price:80,  colors:{ base:'#8d949b', shade:'#595f67', trim:'#1f1f1f', glow:'#ff5e2a' }, tags:{melee:true,tank:true} },
+    { id:'steel_block',     name:'Steel Block',     price:120, colors:{ base:'#b9c5cf', shade:'#7b8893', trim:'#222c39', glow:'#ff6a3a' }, tags:{melee:true} },
+    { id:'cobalt_crew',     name:'Cobalt Crew',     price:180, colors:{ base:'#315caa', shade:'#213c74', trim:'#101b33', glow:'#3dd1ff' }, tags:{hybrid:true} },
     { id:'obsidian_syndicate', name:'Obsidian Syndicate', price:250, colors:{ base:'#242427', shade:'#0f0f12', trim:'#5d5d65', glow:'#ff3d3d' }, tags:{tank:true} },
-    { id:'serpent_scale',   name:'Serpent Scale',   price:350,  colors:{ base:'#3e8d60', shade:'#2b5f42', trim:'#0e1f17', glow:'#7cff48' }, tags:{ranged:true} },
-    { id:'neon_mystic',     name:'Neon Mystic',     price:500,  colors:{ base:'#5b3cff', shade:'#2c1f7a', trim:'#0e072e', glow:'#cfa7ff' }, tags:{magic:true} },
-    { id:'phantom_drip',    name:'Phantom Drip',    price:650,  colors:{ base:'#6a6f88', shade:'#3a3e54', trim:'#131420', glow:'#8be7ff' }, tags:{hybrid:true} },
-    { id:'apex_titan',      name:'Apex Titan',      price:800,  colors:{ base:'#d4d7db', shade:'#7d838c', trim:'#2a3038', glow:'#ffd866' }, tags:{tank:true} },
-    { id:'royal_savage',    name:'Royal Savage',    price:1000, colors:{ base:'#d6a740', shade:'#8c6a1f', trim:'#2e220c', glow:'#ffe17a' }, tags:{hybrid:true, prestige:true} }
+    { id:'serpent_scale',   name:'Serpent Scale',   price:350, colors:{ base:'#3e8d60', shade:'#2b5f42', trim:'#0e1f17', glow:'#7cff48' }, tags:{ranged:true} },
+    { id:'neon_mystic',     name:'Neon Mystic',     price:500, colors:{ base:'#5b3cff', shade:'#2c1f7a', trim:'#0e072e', glow:'#cfa7ff' }, tags:{magic:true} },
+    { id:'phantom_drip',    name:'Phantom Drip',    price:650, colors:{ base:'#6a6f88', shade:'#3a3e54', trim:'#131420', glow:'#8be7ff' }, tags:{hybrid:true} },
+    { id:'apex_titan',      name:'Apex Titan',      price:800, colors:{ base:'#d4d7db', shade:'#7d838c', trim:'#2a3038', glow:'#ffd866' }, tags:{tank:true} },
+    { id:'royal_savage',    name:'Royal Savage',    price:1000,colors:{ base:'#d6a740', shade:'#8c6a1f', trim:'#2e220c', glow:'#ffe17a' }, tags:{hybrid:true, prestige:true} },
   ];
 
   const PIECES = [
@@ -90,7 +93,7 @@
     meta.className='meta';
     meta.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px">
-        <div>${svgIconArmor(set, piece)}</div>
+        <div data-icon><img src="${svgToDataURL(svgIconArmor(set,piece))}" width="24" height="24" style="image-rendering:pixelated;display:block"></div>
         <div>
           <div class="name">${name}</div>
           <div class="sub" style="opacity:.85">Armour · ${piece.pretty}</div>
@@ -107,10 +110,13 @@
 
       const inv = _invRead();
       const invKey = id;
-      inv[invKey] = inv[invKey] || { count:0, name, type:'armor', slot:piece.slot, equippable:true, iconSvg:svgIconArmor(set, piece) };
+      const iconData = svgToDataURL(svgIconArmor(set, piece));
+      inv[invKey] = inv[invKey] || { count:0, name, type:'armor', slot:piece.slot, equippable:true, iconSvg:iconData };
       inv[invKey].count = (inv[invKey].count|0) + 1;
-      _invWrite(inv);
+      // ensure we persist data-URL for Sell tab
+      inv[invKey].iconSvg = iconData;
 
+      _invWrite(inv);
       IZZA.toast?.(`Purchased ${name}`);
     });
 
@@ -122,92 +128,67 @@
   function tryPatchShop(){
     try{
       if(!api?.ready) return;
-      const modal = document.getElementById('shopModal');
-      if(!modal) return;
-      const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex');
-      if(!open) return;
-
-      // prefer the Buy list if your store plugin has created tabs
-      const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
-      if(!list) return;
+      const modal = document.getElementById('shopModal'); if(!modal) return;
+      const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex'); if(!open) return;
+      const list = document.getElementById('shopList') || document.getElementById('shopBuyList'); if(!list) return;
 
       if(list.querySelector('[data-armor-pack]')) return; // only once per open
-
-      // Add all sets (40 rows) — use a fragment for speed when hundreds of items exist
-      const frag = document.createDocumentFragment();
-      SETS.forEach(set=>{
-        PIECES.forEach(piece=> addShopArmorRow(frag, set, piece));
-      });
-      list.appendChild(frag);
+      SETS.forEach(set=>{ ['helmet','vest','legs','arms'].forEach(k=>{
+        const piece = PIECES.find(p=>p.key===k); addShopArmorRow(list, set, piece);
+      });});
     }catch(e){ console.warn('[armour-packs] shop patch failed', e); }
   }
 
-  // ---- Equip normalization: ensure 1 piece per slot across all armour items ----
+  // ---- Equip normalization (unchanged) ----
+  function _isEquippedAny(it){ return _isEquipped(it); }
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
-    const lock = { head:null, chest:null, legs:null, arms:null };
-
+    const slots = { head:null, chest:null, legs:null, arms:null };
     Object.keys(inv).forEach(k=>{
-      const it = inv[k];
-      if(!it || it.type!=='armor' || !it.slot) return;
-      const slot = it.slot; // head/chest/legs/arms (store file maps head/helmet & chest/vest)
-      if(_isEquipped(it)){
-        if(lock[slot]==null) lock[slot]=k;
+      const it = inv[k]; if(!it || it.type!=='armor' || !it.slot) return;
+      if(_isEquippedAny(it)){
+        if(!slots[it.slot]) slots[it.slot] = k;
         else { _setEquipped(it,false); changed=true; }
       }
     });
-
     if(changed) _invWrite(inv);
   }
 
-  // ---- Overlays (draw on top of player) ----
+  // ---- Overlays (unchanged drawing code) ----
   function drawPieceWorld(ctx, px, py, scale, ox, oy, fn){
     const api=IZZA.api, S=api.DRAW, T=api.TILE;
     const sx=(px - api.camera.x)*(S/T), sy=(py - api.camera.y)*(S/T);
     ctx.save(); ctx.imageSmoothingEnabled=false;
     ctx.translate(Math.round(sx)+S*0.5, Math.round(sy)+S*0.5);
-    ctx.scale(scale, scale);
-    ctx.translate(ox, oy);
-    fn(ctx);
-    ctx.restore();
+    ctx.scale(scale, scale); ctx.translate(ox, oy); fn(ctx); ctx.restore();
   }
-
   function mkHelmetPath(c){ return function(ctx){
-    ctx.fillStyle = c.base;
-    ctx.beginPath(); ctx.moveTo(-12,2); ctx.quadraticCurveTo(0,-10,12,2); ctx.lineTo(12,7); ctx.lineTo(-12,7); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c.base; ctx.beginPath(); ctx.moveTo(-12,2); ctx.quadraticCurveTo(0,-10,12,2); ctx.lineTo(12,7); ctx.lineTo(-12,7); ctx.closePath(); ctx.fill();
     ctx.fillStyle = c.shade; ctx.fillRect(-11,5,22,2.6);
     ctx.fillStyle = c.glow; ctx.globalAlpha=0.85;
     ctx.beginPath(); ctx.ellipse(-5.2,7.5,1.6,1.2,0,0,Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.ellipse( 5.2,7.5,1.6,1.2,0,0,Math.PI*2); ctx.fill();
     ctx.globalAlpha=1;
-  };}
-
+  }; }
   function mkVestPath(c){ return function(ctx){
     ctx.fillStyle = c.base; ctx.fillRect(-12,-8,24,16);
     ctx.fillStyle = c.shade; ctx.fillRect(-10,-3,20,6);
     ctx.fillStyle = c.trim; ctx.fillRect(-12,-9,4,2); ctx.fillRect(8,-9,4,2);
-  };}
-
+  }; }
   function mkArmsPath(c){ return function(ctx){
-    ctx.fillStyle = c.base;
-    ctx.fillRect(-16,-4,7,11); ctx.fillRect(9,-4,7,11);
-    ctx.fillStyle = c.shade;
-    ctx.fillRect(-13,-1,3,6); ctx.fillRect(12,-1,3,6);
-  };}
-
-  function mkLegsPath(c, withFlames=false){ 
+    ctx.fillStyle = c.base; ctx.fillRect(-16,-4,7,11); ctx.fillRect(9,-4,7,11);
+    ctx.fillStyle = c.shade; ctx.fillRect(-13,-1,3,6); ctx.fillRect(12,-1,3,6);
+  }; }
+  function mkLegsPath(c, withFlames=false){
     const FL = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
     return function(ctx){
-      ctx.fillStyle=c.base;
-      ctx.fillRect(-8,0,7,14); ctx.fillRect(1,0,7,14);
+      ctx.fillStyle=c.base; ctx.fillRect(-8,0,7,14); ctx.fillRect(1,0,7,14);
       ctx.fillStyle=c.shade; ctx.fillRect(-8,4,16,3);
       ctx.fillStyle=c.trim; ctx.fillRect(-8,10,7,2); ctx.fillRect(1,10,7,2);
-
       if(!withFlames) return;
       const p=IZZA.api.player||{}, moving=!!p.moving, t=((p.animTime||0)*0.02);
       const target = moving?1:0; mkLegsPath._a = (mkLegsPath._a||0) + (target-(mkLegsPath._a||0))*0.18;
       if((mkLegsPath._a||0) < 0.02) return;
-
       const power=0.8+0.18*Math.sin(t*18);
       ctx.save(); ctx.globalAlpha *= mkLegsPath._a||0;
       [-5,5].forEach(fx=>{
@@ -232,43 +213,18 @@
     const ARMS  ={ scale:2.60, ox:facingShift.x*0.3,     oy: 2 };
     const LEGS  ={ scale:2.45, ox:facingShift.x*0.2,     oy:10 };
 
-    function pieceFor(slot){
-      for(const k in inv){
-        const it=inv[k]; if(!it || it.type!=='armor' || it.slot!==slot) continue;
-        if(_isEquipped(it)) return {key:k, it};
-      }
-      return null;
-    }
-    function setColorsFromKey(k){
-      const sid = (k||'').split('_').slice(0,-1).join('_');
-      const s = SETS.find(x=> x.id===sid);
-      return s ? s.colors : { base:'#999', shade:'#666', trim:'#222', glow:'#fff' };
-    }
-    const head = pieceFor('head');
-    const chest= pieceFor('chest');
-    const legs = pieceFor('legs');
-    const arms = pieceFor('arms');
+    function pieceFor(slot){ for(const k in inv){ const it=inv[k]; if(it && it.type==='armor' && it.slot===slot && _isEquipped(it)) return {key:k,it}; } return null; }
+    function setColorsFromKey(k){ const sid=(k||'').split('_').slice(0,-1).join('_'); const s=SETS.find(x=>x.id===sid); return s? s.colors : { base:'#999', shade:'#666', trim:'#222', glow:'#fff' }; }
 
-    if(legs){
-      const c=setColorsFromKey(legs.key);
-      const withFlames = /apex_titan|royal_savage|neon_mystic|phantom_drip/.test(legs.key);
-      drawPieceWorld(ctx, px, py, LEGS.scale, LEGS.ox, LEGS.oy, mkLegsPath(c, withFlames));
-    }
-    if(chest){
-      const c=setColorsFromKey(chest.key);
-      drawPieceWorld(ctx, px, py, VEST.scale, VEST.ox, VEST.oy, mkVestPath(c));
-    }
-    if(arms){
-      const c=setColorsFromKey(arms.key);
-      drawPieceWorld(ctx, px, py, ARMS.scale, ARMS.ox, ARMS.oy, mkArmsPath(c));
-    }
-    if(head){
-      const c=setColorsFromKey(head.key);
-      drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, mkHelmetPath(c));
-    }
+    const head = pieceFor('head'); const chest=pieceFor('chest'); const legs = pieceFor('legs'); const arms = pieceFor('arms');
+
+    if(legs){ const c=setColorsFromKey(legs.key); const withFlames=/apex_titan|royal_savage|neon_mystic|phantom_drip/.test(legs.key); drawPieceWorld(ctx, px, py, LEGS.scale, LEGS.ox, LEGS.oy, mkLegsPath(c, withFlames)); }
+    if(chest){ const c=setColorsFromKey(chest.key); drawPieceWorld(ctx, px, py, VEST.scale, VEST.ox, VEST.oy, mkVestPath(c)); }
+    if(arms){ const c=setColorsFromKey(arms.key); drawPieceWorld(ctx, px, py, ARMS.scale, ARMS.ox, ARMS.oy, mkArmsPath(c)); }
+    if(head){ const c=setColorsFromKey(head.key); drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, mkHelmetPath(c)); }
   }
 
-  // ---- Speed bump for the “royal_savage” legs (unchanged) ----
+  // ---- Speed bump (unchanged) ----
   (function speedBoostTopTier(){
     let base=null;
     IZZA.on?.('update-post', ()=>{
