@@ -21,6 +21,7 @@
   // ---------------- state ----------------
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
+  const werewolves = []; // {x,y,age,life,img,mode}
   const HA = [];       // smoke glyphs {x,y,vx,vy,age,life,rot}
   let jackImg = null, timerEl = null;
 
@@ -67,6 +68,19 @@
     inv[key].count=Math.max(0,(inv[key].count|0)-n);
     if(inv[key].count<=0) delete inv[key];
     return inv;
+  }
+
+  // Mission-complete detector (craft via Armoury plugin OR any other path)
+  function hasPumpkinSet(inv){
+    return (inv.pumpkinHelmet?.count|0) > 0 &&
+           (inv.pumpkinVest?.count|0)   > 0 &&
+           (inv.pumpkinArms?.count|0)   > 0 &&
+           (inv.pumpkinLegs?.count|0)   > 0;
+  }
+  function onInvChangeCheckM5(){
+    if (!mission5Active) return;
+    const inv = invRead();
+    if (hasPumpkinSet(inv)) finishMission5(); // ends night, updates missions, triggers M6 hook
   }
 
   // ---- Canonical inventory adders + one-time alias cleanup (prevents double-counting)
@@ -170,6 +184,22 @@
    <stop offset="0%" stop-color="#ffcf7a"/><stop offset="60%" stop-color="#ff8412"/><stop offset="100%" stop-color="#6a2500"/></radialGradient></defs>
  <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/>
  <rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
+</svg>`;
+  }
+
+  // tiny, stylized werewolf (SVG) with glowing red eyes
+  function svgWerewolf(){
+    return `
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+ <defs>
+  <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#4b4d57"/><stop offset="100%" stop-color="#232630"/>
+  </linearGradient>
+ </defs>
+ <path d="M8 44 L20 30 L16 18 L28 22 L36 8 L44 22 L56 18 L52 30 L60 44 L34 52 Z" fill="url(#fur)" stroke="#101218" stroke-width="2"/>
+ <circle cx="28" cy="26" r="2.4" fill="#ff2a2a"/>
+ <circle cx="36" cy="26" r="2.4" fill="#ff2a2a"/>
+ <path d="M24 34 Q32 38 40 34" stroke="#0e0f13" stroke-width="2" fill="none"/>
 </svg>`;
   }
 
@@ -278,6 +308,87 @@
   }
   function clearTimer(){ timerEl?.remove(); timerEl=null; }
 
+  // ---------------- werewolf (spawn + update + draw) ---------------
+  function spawnWerewolf(){
+    if (!api?.ready) return;
+    const t = api.TILE||60, S=api.DRAW||60;
+    const px = api.player.x, py = api.player.y;
+
+    // spawn ~6–8 tiles away in a random quadrant
+    const dist = (6 + Math.floor(Math.random()*3)) * t;
+    const ang  = Math.random()*Math.PI*2;
+    const wx   = px + Math.cos(ang)*dist;
+    const wy   = py + Math.sin(ang)*dist;
+
+    const img = svgToImage(svgWerewolf(), (t*1.2)|0, (t*1.2)|0);
+    werewolves.push({
+      x: wx, y: wy, age: 0, life: 18000 + (Math.random()*6000|0), img,
+      mode: 'stalk' // 'stalk' → chases slowly; could add 'howl' if needed
+    });
+
+    try{ IZZA.emit('sfx',{kind:'werewolf-spawn',vol:0.9}); }catch{}
+  }
+
+  function updateWerewolves(dt){
+    if (!werewolves.length || !api?.ready) return;
+    const p = api.player, t = api.TILE||60;
+    for (let i=werewolves.length-1;i>=0;i--){
+      const w = werewolves[i];
+      w.age += dt;
+      // chase player lightly
+      const dx = (p.x+16) - w.x;
+      const dy = (p.y+16) - w.y;
+      const d  = Math.hypot(dx,dy) || 1;
+      const sp = 0.045 * (t); // world units per ms (gentle)
+      const vx = (dx/d) * sp * dt;
+      const vy = (dy/d) * sp * dt;
+      w.x += vx;
+      w.y += vy;
+
+      // despawn if life over or mission ended
+      if (w.age > w.life || !mission5Active || !nightOn) {
+        werewolves.splice(i,1);
+      }
+    }
+  }
+
+  function drawWerewolves(ctx){
+    if (!werewolves.length || !api?.ready) return;
+    const S=api.DRAW, T=api.TILE;
+    const pulse = 0.5 + 0.5*Math.sin(performance.now()*0.006);
+    for (const w of werewolves){
+      const sx = (w.x - api.camera.x) * (S/T);
+      const sy = (w.y - api.camera.y) * (S/T);
+      const img = w.img;
+      if (!img || !img.complete) continue;
+      const wpx = (T*1.2)*(S/T);
+      const hpx = wpx;
+      // subtle ground shadow
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(sx + S*0.5, sy + S*0.92, wpx*0.35, hpx*0.18, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+
+      // main sprite (slight bob)
+      const bob = Math.sin((performance.now()+w.x*0.2)*0.009)*2;
+      ctx.drawImage(img, sx + S*0.1, sy + S*0.1 + bob, wpx, hpx);
+
+      // eye glow (pulsing)
+      ctx.save();
+      ctx.globalCompositeOperation='lighter';
+      ctx.globalAlpha = 0.35 + 0.4*pulse;
+      ctx.fillStyle = '#ff2a2a';
+      ctx.beginPath();
+      ctx.ellipse(sx + S*0.48, sy + S*0.46 + bob, 6, 4, 0, 0, Math.PI*2);
+      ctx.ellipse(sx + S*0.60, sy + S*0.46 + bob, 6, 4, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // ---------------- render ----------------
   function renderM5(){
     try{
@@ -287,7 +398,7 @@
       const m4done = isMission4Done();
       const taken = localStorage.getItem(JACK_TAKEN_KEY) === '1';
 
-      hud(`M5 • tier2:${tier2} • m4:${m4done} • taken:${taken} • active:${mission5Active} • pumpkins:${pumpkins.length} • night:${nightOn}`);
+      hud(`M5 • tier2:${tier2} • m4:${m4done} • taken:${taken} • active:${mission5Active} • pumpkins:${pumpkins.length} • night:${nightOn} • wolves:${werewolves.length}`);
 
       const S=api.DRAW, t=api.TILE;
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
@@ -332,9 +443,10 @@
         }
       }
 
-      // smoke glyphs
+      // smoke glyphs + werewolves
       updateHA();
       drawHA(ctx);
+      drawWerewolves(ctx);
     }catch{}
   }
 
@@ -402,18 +514,9 @@
     ensureTimer();
     try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour!');
-    // Try to (re)register the craft action in Armoury
-    registerPumpkinArmourRecipeUI();
   }
 
-  function playerInArmoury(){
-    if(api?.inZone) return api.inZone('armoury')===true;
-    const d = window.__IZZA_ARMOURY__?.door;
-    if(!d) return false;
-    const me={x:(api?.player?.x||0)/(api?.TILE||60)|0, y:(api?.player?.y||0)/(api?.TILE||60)|0};
-    return (Math.abs(me.x-d.x)+Math.abs(me.y-d.y))<=1;
-  }
-
+  // If you still call this directly somewhere (ok); the detector will also finish M5.
   function tryCraftPumpkin(){
     const inv=invRead();
     const haveJack = (inv.jack_o_lantern?.count|0) > 0; // canonical only
@@ -438,17 +541,29 @@
   function finishMission5(){
     mission5Active=false; setNight(false); clearPumpkins(); clearTimer();
     _setMissions(5);
+    try{ localStorage.setItem('izzaMission5_done','1'); }catch{}
     try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', 5); }catch{}
     try{ IZZA.emit('missions-updated',{completed:5}); }catch{}
     try{ IZZA.emit('mission-complete',{id:5,name:'Night of the Lantern'}); }catch{}
+
+    // Spawn Mission 6 hook
+    try{ localStorage.setItem('izzaMission6_hook','1'); }catch{}
+    try{ IZZA.emit('mission6-hook', { from:5 }); }catch{}
+
+    // Congrats popup
     try{
-      IZZA?.api?.UI?.popup?.({style:'agent',title:'Mission Completed',body:'Pumpkin Armour crafted. Set bonus active!',timeout:2200});
+      IZZA?.api?.UI?.popup?.({
+        style:'agent',
+        title:'Mission 5 Complete',
+        body:'Pumpkin Armour crafted. Set bonus active!',
+        timeout:2600
+      });
     }catch{
       const el=document.createElement('div');
       el.style.cssText='position:absolute;left:50%;top:18%;transform:translateX(-50%);background:rgba(10,12,20,.92);color:#b6ffec;padding:14px 18px;border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
-      el.innerHTML='<strong>Mission Completed</strong><div>Pumpkin Armour crafted. Set bonus active!</div>';
+      el.innerHTML='<strong>Mission 5 Complete</strong><div>Pumpkin Armour crafted. Set bonus active!</div>';
       (document.getElementById('gameCard')||document.body).appendChild(el);
-      setTimeout(()=>el.remove(),2000);
+      setTimeout(()=>el.remove(),2400);
     }
   }
 
@@ -457,44 +572,13 @@
     if(!lastPos){ lastPos=p; return false; }
     const d=Math.hypot(p.x-lastPos.x,p.y-lastPos.y); lastPos=p; return d>((api?.TILE||60)*0.35);
   }
-  function spawnWerewolf(){
-    try{ IZZA.emit('npc-spawn',{kind:'werewolf', host:'mission5'}); }catch{}
-    try{ IZZA.emit('sfx',{kind:'werewolf-spawn',vol:0.9}); }catch{}
-  }
-
-  // ---------------- Armoury craft UI (register + fallback injector) ---------
-  // Replace your current registerPumpkinArmourRecipeUI with this:
-function registerPumpkinArmourRecipeUI(){
-  // prevent duplicate registration if update-post calls this repeatedly
-  if (window.__M5_PK_RECIPE__) return;
-
-  try{
-    if (IZZA?.api?.armoury?.registerRecipe){
-      IZZA.api.armoury.registerRecipe({
-        id: 'pumpkin_set',
-        label: 'Craft Pumpkin Armour',
-        needs: [
-          { id:'jack_o_lantern', count:1 },
-          { id:'pumpkin_piece',  count:3 }
-        ],
-        gives: [
-          { id:'pumpkinHelmet', count:1 },
-          { id:'pumpkinVest',   count:1 },
-          { id:'pumpkinArms',   count:1 },
-          { id:'pumpkinLegs',   count:1 }
-        ],
-        onCraft: ()=>tryCraftPumpkin()
-      });
-      window.__M5_PK_RECIPE__ = true;
-    }
-  }catch{}
-}
 
   // ---------------- update ----------------
-  function onUpdate({ now }){
+  function onUpdate({ now, dt=16 }){
     if (mission5Active){
       if ((now - mission5Start) > M5_MS){
         mission5Active=false; setNight(false); clearPumpkins(); clearTimer();
+        werewolves.length = 0;
         try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{} // respawn jack on fail
         IZZA.toast?.('Mission 5 failed — time expired.');
       }
@@ -503,10 +587,9 @@ function registerPumpkinArmourRecipeUI(){
         werewolfNext = now + 30000;
       }
       updateTimer(now);
-
-      // If player opens armoury during mission, make sure craft option shows
-      registerPumpkinArmourRecipeUI();
     }
+    // wolves keep updating while active
+    if (mission5Active) updateWerewolves(dt);
   }
 
   // ---------------- wire up ----------------
@@ -517,10 +600,16 @@ function registerPumpkinArmourRecipeUI(){
     IZZA.on?.('render-under', renderM5);
     IZZA.on?.('update-post', onUpdate);
     wireB();
-    // Pre-register craft button in case player runs to armoury immediately
-    registerPumpkinArmourRecipeUI();
+    // *As requested*: check inventory immediately on boot
+    onInvChangeCheckM5();
   });
-  window.addEventListener('izza-inventory-changed', ()=>{ try{ IZZA.emit?.('render-under'); }catch{} });
-  IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); });
+
+  // Re-render when inventory changes (and check completion)
+  window.addEventListener('izza-inventory-changed', ()=>{
+    try{ IZZA.emit?.('render-under'); }catch{}
+    onInvChangeCheckM5();
+  });
+
+  IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); werewolves.length=0; });
 
 })();
