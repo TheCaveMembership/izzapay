@@ -1,6 +1,6 @@
-// v1_store_items_plugin.js — extend shop stock + icon repair + BUY/SELL tabs + inventory pricebook
+// v1_store_items_plugin.js — extend shop stock + icon repair + BUY/SELL tabs + inventory pricebook + search
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix-4+buy-sell+pricebook';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-5+buy-sell+pricebook+search';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -29,40 +29,47 @@
     return '';
   }
 
-  // ---------- BUY/SELL TABS UI (non-invasive; wraps existing #shopList) ----------
+  // ---------- BUY/SELL TABS + SEARCH (non-invasive; wraps existing #shopList) ----------
   let tabsWired = false;
+  let currentFilter = ''; // search text
+
   function ensureTabs(){
     const modal = document.getElementById('shopModal');
     if(!modal) return;
     const host  = modal.querySelector('#shopList');
     if(!host || host.dataset.tabs==='1') return;
 
-    // wrap existing list in a tab container
     const card = modal.querySelector('.card');
     if(!card) return;
 
-    // styles (scrollable lists)
     if(!document.getElementById('shop-tabs-css')){
       const css = document.createElement('style');
       css.id = 'shop-tabs-css';
       css.textContent = `
-      #shopTabs{display:flex;gap:6px;margin:0 0 8px}
+      #shopTabs{display:flex;gap:6px;margin:0 0 8px;align-items:center}
       #shopTabs .tab{flex:0 0 auto;padding:6px 10px;border-radius:10px;border:1px solid #2a3550;background:#162134;color:#cfe0ff;font-weight:700;cursor:pointer}
       #shopTabs .tab.on{background:#1f6feb;border-color:#2f6feb;color:#fff}
-      .shop-scroll{max-height:min(60vh,480px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
+      #shopSearch{flex:1 1 auto;margin-left:auto}
+      #shopSearch input{width:100%;padding:6px 10px;border-radius:10px;border:1px solid #2a3550;background:#0e1728;color:#cfe0ff;font-weight:700}
+      .shop-scroll{max-height:min(60vh,520px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
       .shop-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; }
-      .shop-item .buy, .shop-item .sell { background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
+      .shop-item .buy, .shop-item .sell { background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px; cursor:pointer }
       .shop-note{opacity:.8;font-size:12px;margin-top:6px}
       `;
       document.head.appendChild(css);
     }
 
-    // tabs
+    // tabs + search
     const tabs = document.createElement('div');
     tabs.id='shopTabs';
-    tabs.innerHTML = `<button class="tab on" data-tab="buy">Buy</button><button class="tab" data-tab="sell">Sell</button>`;
+    tabs.innerHTML = `
+      <button class="tab on" data-tab="buy">Buy</button>
+      <button class="tab" data-tab="sell">Sell</button>
+      <div id="shopSearch" title="Search items">
+        <input type="text" id="shopSearchInput" placeholder="Search shop & inventory...">
+      </div>`;
 
-    // new lists
+    // lists
     const buyList = document.createElement('div');
     buyList.id = 'shopBuyList';
     buyList.className = 'shop-list shop-scroll';
@@ -72,17 +79,17 @@
     sellList.className = 'shop-list shop-scroll';
     sellList.style.display='none';
 
-    // move existing children (if any) to buyList
+    // move existing children to buyList
     while(host.firstChild) buyList.appendChild(host.firstChild);
     host.dataset.tabs='1';
-    host.replaceChildren(); // clear
+    host.replaceChildren(); // clear original
 
     // slot in our UI
     card.insertBefore(tabs, card.children[1] || card.firstChild);
     card.insertBefore(buyList, tabs.nextSibling);
     card.insertBefore(sellList, buyList.nextSibling);
 
-    // wire tab switches once
+    // wire tab switches
     if(!tabsWired){
       tabsWired = true;
       card.addEventListener('click', (ev)=>{
@@ -92,9 +99,38 @@
         card.querySelectorAll('#shopTabs .tab').forEach(t=>t.classList.toggle('on', t===b));
         buyList.style.display = (mode==='buy')?'':'none';
         sellList.style.display = (mode==='sell')?'':'none';
-        if(mode==='sell') renderSellList();  // refresh on show
+        if(mode==='sell') renderSellList(); else filterBuyList();
       }, true);
+
+      // search (debounced)
+      const input = tabs.querySelector('#shopSearchInput');
+      let tm=null;
+      input.addEventListener('input', ()=>{
+        currentFilter = (input.value||'').trim().toLowerCase();
+        clearTimeout(tm);
+        tm = setTimeout(()=>{
+          const sellVisible = sellList.style.display !== 'none';
+          if(sellVisible) renderSellList(); else filterBuyList();
+        }, 90);
+      });
     }
+  }
+
+  // Filter BUY list by currentFilter (text in name/sub)
+  function filterBuyList(){
+    const list = document.getElementById('shopBuyList');
+    if(!list) return;
+    const q = currentFilter;
+    if(!q){
+      Array.from(list.children).forEach(ch=> ch.style.display='');
+      return;
+    }
+    Array.from(list.children).forEach(ch=>{
+      if(!ch.classList || !ch.classList.contains('shop-item')) return;
+      const meta = ch.querySelector('.meta');
+      const t = (meta?.textContent||'').toLowerCase();
+      ch.style.display = t.includes(q) ? '' : 'none';
+    });
   }
 
   // ---------- BUY rows (keeps your existing behavior) ----------
@@ -132,7 +168,7 @@
     const inv = api.getInventory ? api.getInventory() : {};
     const pb  = readPriceBook();
 
-    // Known items (unchanged)
+    // Known items
     if(it.id==='uzi'){
       const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
       cur.owned = true; cur.ammo = (cur.ammo|0) + 50;
@@ -157,7 +193,7 @@
       cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('pistol',24,24));
       inv.pistol = cur;
       IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'});
-      // ammo sell-back generally disabled; no pricebook entry
+      // ammo not price-booked for selling
 
     } else {
       // Generic purchase: supports armour + misc
@@ -165,18 +201,18 @@
       const pretty = it.name || key;
 
       function addArmorPiece(slotGuess){
-        const valid = new Set(['helmet','vest','arms','legs']);
-        const slot = (it.slot||slotGuess||'').toLowerCase();
-        const resolvedSlot = valid.has(slot) ? slot :
-          (/helmet|head/i.test(pretty)?'helmet' :
-           /vest|chest|body/i.test(pretty)?'vest' :
+        const valid = new Set(['helmet','vest','arms','legs','head','chest']); // accept both slot vocab
+        const slotIn = (it.slot||slotGuess||'').toLowerCase();
+        let slot = valid.has(slotIn) ? slotIn :
+          (/helmet|head/i.test(pretty)?'head' :
+           /vest|chest|body/i.test(pretty)?'chest' :
            /arms|glove|gaunt/i.test(pretty)?'arms' : 'legs');
 
         const entry = inv[key] || { count:0 };
         entry.count = (entry.count|0) + 1;
         entry.name  = pretty;
         entry.type  = 'armor';
-        entry.slot  = resolvedSlot;
+        entry.slot  = slot;
         entry.equippable = true;
         entry.iconSvg = entry.iconSvg || it.iconSvg || svgToDataURL(svgIcon(it.id,24,24));
         inv[key] = entry;
@@ -216,10 +252,9 @@
   }
 
   // ---------- SELL tab ----------
-  function getSellPrice(key, entry){
+  function getSellPrice(key){
     const pb = readPriceBook();
     const last = pb[key]?.lastPaid;
-    // default: 40% of last paid (rounded up). If unknown, guess 25.
     const base = (typeof last === 'number' && last>0) ? last : 25;
     return Math.max(1, Math.ceil(base * 0.40));
   }
@@ -236,19 +271,40 @@
 
     list.replaceChildren();
 
+    // collect to array for stable filtering/sorting
+    const rows = [];
     Object.keys(inv).forEach(key=>{
       const e = inv[key];
-      // skip null-ish / unequippable ammo entry
       if(!e) return;
-      const count = (e.count|0) + (e.owned?1:0); // owned weapons count as 1
+      const count = (e.count|0) + (e.owned?1:0);
       if(count<=0) return;
 
-      // you may choose to forbid selling quest items etc:
+      // forbid selling mission-critical items
       if(/jack_o_lantern|pumpkin_piece/i.test(key)) return;
 
       const pretty = e.name || key;
-      const price  = getSellPrice(key, e);
+      const price  = getSellPrice(key);
 
+      // text filter
+      const q = currentFilter;
+      if(q){
+        const blob = `${pretty} ${key}`.toLowerCase();
+        if(!blob.includes(q)) return;
+      }
+
+      rows.push({key, e, pretty, price, count});
+    });
+
+    if(!rows.length){
+      const empty = document.createElement('div');
+      empty.className='shop-note';
+      empty.textContent = 'No sellable items.';
+      list.appendChild(empty);
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    rows.forEach(({key, e, pretty, price, count})=>{
       const row = document.createElement('div'); row.className='shop-item';
       const meta = document.createElement('div'); meta.className='meta';
       const icon = e.iconSvg ? `<img src="${e.iconSvg}" width="24" height="24" style="image-rendering:pixelated;display:block">` : '';
@@ -266,20 +322,14 @@
       btn.textContent = `Sell ${price} IC`;
       btn.addEventListener('click', ()=>{
         doSell(key, e, price);
-        renderSellList(); // refresh list counts
+        renderSellList(); // refresh list counts after sale
       });
 
       row.appendChild(meta);
       row.appendChild(btn);
-      list.appendChild(row);
+      frag.appendChild(row);
     });
-
-    if(!list.children.length){
-      const empty = document.createElement('div');
-      empty.className='shop-note';
-      empty.textContent = 'No sellable items.';
-      list.appendChild(empty);
-    }
+    list.appendChild(frag);
   }
 
   function doSell(key, entry, price){
@@ -291,9 +341,8 @@
       if(inv[key]){
         if (typeof inv[key].count === 'number' && inv[key].count>0){
           inv[key].count -= 1;
-          if(inv[key].count<=0 && !inv[key].owned) delete inv[key];
+          if(inv[key].count<=0 && !inv[key].owned && !inv[key].equipped) delete inv[key];
         }else if(inv[key].owned){
-          // one-off owned item (like a weapon) — convert to not owned
           inv[key].owned = false;
           if(!inv[key].count && !inv[key].equipped) delete inv[key];
         }else{
@@ -311,7 +360,6 @@
       IZZA.toast?.(`Sold for ${price} IC`);
       try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
       try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
-      // live update buy tab icons/names if needed
     }catch(e){ console.warn('[shop] sell failed', e); }
   }
 
@@ -323,8 +371,7 @@
       const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex');
       if(!open) return;
 
-      // repair legacy “core” rows in the BUY list only
-      const list = modal.querySelector('#shopBuyList') || document.getElementById('shopList');
+      const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
       if(!list) return;
 
       list.querySelectorAll('.shop-item .meta').forEach(meta=>{
@@ -373,7 +420,6 @@
 
       ensureTabs();
 
-      // Choose the BUY list as our target
       const buyList = document.getElementById('shopBuyList') || document.getElementById('shopList');
       if(!buyList) return;
 
@@ -388,6 +434,7 @@
       }
 
       repairMissingIcons();
+      filterBuyList(); // apply current search instantly
     }catch(e){
       console.warn('[store extender] patch failed:', e);
     }
