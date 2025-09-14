@@ -18,7 +18,7 @@
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
   const HA = [];       // smoke glyphs
-  const WOLVES = [];   // [{x,y,vx,vy,age,life,phase,spit}]
+  const WOLVES = [];   // [{x,y,vx,vy,age,life,phase}]
   let jackImg = null, timerEl = null;
 
   // ---------------- helpers ----------------
@@ -137,17 +137,26 @@
  <defs>
   <radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3d3d"/><stop offset="100%" stop-color="#5a0000"/></radialGradient>
  </defs>
- <g stroke="#070707" stroke-width="3" fill="#0b0b0b">
-  <path d="M18,80 Q8,60 20,46 Q14,34 26,26 Q42,12 60,16 Q78,12 94,26 Q106,34 100,46 Q112,60 102,78 Q84,92 60,98 Q36,92 18,80 Z"/>
-  <path d="M32,42 Q38,30 50,30" fill="none"/>
-  <path d="M88,42 Q82,30 70,30" fill="none"/>
-  <path d="M30,74 Q60,66 90,74" fill="none"/>
+ <!-- body (all fours silhouette) -->
+ <g fill="#0b0b0b" stroke="#070707" stroke-width="3">
+   <!-- back + shoulders -->
+   <path d="M18,82 C16,68 28,54 40,50 C49,48 58,48 70,50 C82,52 96,54 102,68 C108,82 100,92 86,96 C72,100 44,98 30,92 C22,88 20,88 18,82 Z"/>
+   <!-- forelegs -->
+   <path d="M48,86 C42,92 40,100 42,106 C46,108 52,106 54,100 C56,94 56,88 56,86 Z"/>
+   <path d="M68,86 C62,92 60,100 62,106 C66,108 72,106 74,100 C76,94 76,88 76,86 Z"/>
+   <!-- hindlegs -->
+   <path d="M26,86 C20,94 20,104 24,108 C28,110 34,108 36,102 C38,96 38,90 38,88 Z"/>
+   <path d="M84,88 C78,96 78,104 82,108 C86,110 92,108 94,102 C96,96 96,90 96,88 Z"/>
+   <!-- head / muzzle -->
+   <path d="M22,72 C26,66 34,62 42,60 C50,58 56,60 60,64 C56,66 50,68 44,70 C36,72 28,74 22,72 Z"/>
+   <path d="M60,64 C64,66 66,70 66,74 C62,74 56,72 52,70 C54,68 58,66 60,64 Z"/>
  </g>
+ <!-- eyes + drool hint -->
  <g>
-  <ellipse cx="46" cy="54" rx="7" ry="5" fill="url(#eye)"/>
-  <ellipse cx="74" cy="54" rx="7" ry="5" fill="url(#eye)"/>
-  <path d="M58 70 Q60 82 56 92" stroke="#7a0000" stroke-width="2" fill="none"/>
-</g>
+  <ellipse cx="48" cy="66" rx="4.8" ry="3.6" fill="url(#eye)"/>
+  <ellipse cx="56" cy="66" rx="4.8" ry="3.6" fill="url(#eye)"/>
+  <path d="M54 74 Q55 82 52 88" stroke="#7a0000" stroke-width="2" fill="none"/>
+ </g>
 </svg>`;}
 
   // ---------------- pumpkins ----------------
@@ -182,7 +191,7 @@
 
   // ---------------- HA smoke ----------------
   let lastHa = 0;
-  const HA_LIST = []; // render positions
+  const HA_LIST = []; // drool particles for wolves
   function spawnHA(sx, sy){
     const t = performance.now();
     if (t - lastHa < 2400) return;
@@ -207,9 +216,9 @@
     ctx.restore();
   }
 
-  // ---------------- wolves (smaller & faster) ----------------
+  // ---------------- wolves (smaller & faster; render over map) ----------------
   let wolfImg = null;
-  function ensureWolfImg(){ if (!wolfImg) wolfImg = svgToImage(svgWerewolf(), (api?.TILE||60)*1.2, (api?.TILE||60)*1.2); }
+  function ensureWolfImg(){ if (!wolfImg) wolfImg = svgToImage(svgWerewolf(), (api?.TILE||60)*1.0, (api?.TILE||60)*1.0); }
   function spawnWerewolf(){
     ensureWolfImg();
     const p = api?.player||{x:0,y:0};
@@ -217,7 +226,7 @@
     const ang = Math.random()*Math.PI*2;
     const x = p.x + Math.cos(ang)*off;
     const y = p.y + Math.sin(ang)*off;
-    WOLVES.push({ x, y, vx:0, vy:0, age:0, life: 12000 + ((Math.random()*2500)|0), phase: Math.random()*1000, spit: 0 });
+    WOLVES.push({ x, y, vx:0, vy:0, age:0, life: 11000 + ((Math.random()*2500)|0), phase: Math.random()*1000 });
   }
   function updateWolves(dt){
     const p = api?.player||{x:0,y:0};
@@ -225,18 +234,18 @@
       const w=WOLVES[i];
       w.age += dt;
       const k = Math.min(1, w.age/900);
-      const sp = 0.065 + 0.040*Math.sin((w.phase+w.age)*0.003); // quicker shambling
+      const sp = 0.080 + 0.050*Math.sin((w.phase+w.age)*0.003); // quicker, chasing pace
       const dx = p.x - w.x, dy = p.y - w.y;
       const d  = Math.hypot(dx,dy)||1;
       const ux = dx/d, uy = dy/d;
-      w.vx = w.vx*0.90 + ux*sp*k;
-      w.vy = w.vy*0.90 + uy*sp*k;
+      w.vx = w.vx*0.88 + ux*sp*k;
+      w.vy = w.vy*0.88 + uy*sp*k;
       w.x += w.vx * dt;
       w.y += w.vy * dt;
 
-      // dripping “drool” particles from mouth (simple)
-      if ((w.age|0) % 220 < 16) { // periodic
-        HA_LIST.push({x:w.x, y:w.y+8, vx:(Math.random()*0.05-0.025), vy:0.06, age:0, life:500});
+      // dripping “drool”
+      if ((w.age|0) % 200 < 14) {
+        HA_LIST.push({x:w.x+6, y:w.y+8, vx:(Math.random()*0.05-0.025), vy:0.06, age:0, life:520});
       }
 
       if (w.age > w.life) WOLVES.splice(i,1);
@@ -258,21 +267,21 @@
       if (wolfImg?.complete){
         ctx.save(); // shadow
         ctx.globalAlpha = 0.32;
-        ctx.beginPath(); ctx.ellipse(sx, sy+14, 14, 6, 0, 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(sx, sy+12, 12, 5, 0, 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill();
         ctx.restore();
 
         ctx.save(); // body
         ctx.translate(sx, sy);
         ctx.scale(s, s);
-        ctx.drawImage(wolfImg, -40, -48);
+        ctx.drawImage(wolfImg, -36, -44);
         ctx.restore();
 
         ctx.save(); // eye glow
         ctx.globalCompositeOperation='lighter';
         ctx.globalAlpha = flick;
         ctx.fillStyle = 'rgba(255,45,45,0.9)';
-        ctx.beginPath(); ctx.arc(sx-10, sy-6, 4.8, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(sx+10, sy-6, 4.8, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx-12, sy-10, 4.0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx-4,  sy-10, 4.0, 0, Math.PI*2); ctx.fill();
         ctx.restore();
       }
     }
@@ -281,10 +290,35 @@
     for(const p0 of HA_LIST){
       const sx=(p0.x - api.camera.x)*px, sy=(p0.y - api.camera.y)*py;
       const k = 1 - Math.min(1, p0.age/p0.life);
-      ctx.globalAlpha = 0.35*k;
-      ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, Math.PI*2); ctx.fillStyle='#6a0000'; ctx.fill();
+      ctx.globalAlpha = 0.38*k;
+      ctx.beginPath(); ctx.arc(sx, sy, 2.2, 0, Math.PI*2); ctx.fillStyle='#6a0000'; ctx.fill();
     }
     ctx.restore();
+  }
+
+  // ---------------- spooky choice (fallback if no core UI) ----------------
+  function showSpookyChoice(onAccept){
+    if (IZZA?.api?.UI?.choice){
+      IZZA.api.UI.choice({
+        spooky:true,
+        title:'WELCOME TO IZZA CITY AT NIGHT',
+        body:'Take the jack-o’-lantern to begin a 5-minute night run. Collect 3 pumpkins and craft Pumpkin Armour.',
+        options:[{id:'go',label:'Take Jack-o’-Lantern'},{id:'no',label:'Leave'}],
+        onChoose:(id)=>{ if(id==='go') onAccept?.(); }
+      });
+      return;
+    }
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:9000;background:rgba(0,0,0,.6)';
+    const card=document.createElement('div');
+    card.style.cssText='min-width:300px;max-width:560px;padding:16px;border-radius:14px;background:#0b0f1a;color:#cfe0ff;border:1px solid #2a3550';
+    card.innerHTML='<div style="font-weight:900;font-size:18px;margin-bottom:6px">WELCOME TO IZZA CITY AT NIGHT</div><div style="opacity:.9;margin-bottom:10px">Take the jack-o’-lantern to begin a 5-minute night run. Collect 3 pumpkins and craft Pumpkin Armour.</div>';
+    const row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;justify-content:flex-end';
+    const bNo=document.createElement('button'); bNo.textContent='Leave'; bNo.style.cssText='padding:8px 12px;border-radius:8px;border:0;background:#263447;color:#cfe3ff;font-weight:800;cursor:pointer';
+    const bGo=document.createElement('button'); bGo.textContent='Take Jack-o’-Lantern'; bGo.style.cssText='padding:10px 14px;border-radius:10px;border:0;background:#1f6feb;color:#fff;font-weight:900;cursor:pointer';
+    row.appendChild(bNo); row.appendChild(bGo); card.appendChild(row); wrap.appendChild(card); (document.getElementById('gameCard')||document.body).appendChild(wrap);
+    bNo.onclick=()=>wrap.remove();
+    bGo.onclick=()=>{ try{ onAccept?.(); }finally{ wrap.remove(); } };
   }
 
   // ---------------- timer HUD ----------------
@@ -416,31 +450,6 @@
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
   }
 
-  // ---------------- spooky choice (simple fallback) ----------------
-  function showSpookyChoice(onAccept){
-    if (IZZA?.api?.UI?.choice){
-      IZZA.api.UI.choice({
-        spooky:true,
-        title:'WELCOME TO IZZA CITY AT NIGHT',
-        body:'Take the jack-o’-lantern to begin a 5-minute night run. Collect 3 pumpkins and craft Pumpkin Armour.',
-        options:[{id:'go',label:'Take Jack-o’-Lantern'},{id:'no',label:'Leave'}],
-        onChoose:(id)=>{ if(id==='go') onAccept?.(); }
-      });
-      return;
-    }
-    const wrap=document.createElement('div');
-    wrap.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:9000;background:rgba(0,0,0,.6)';
-    const card=document.createElement('div');
-    card.style.cssText='min-width:300px;max-width:560px;padding:16px;border-radius:14px;background:#0b0f1a;color:#cfe0ff;border:1px solid #2a3550';
-    card.innerHTML='<div style="font-weight:900;font-size:18px;margin-bottom:6px">WELCOME TO IZZA CITY AT NIGHT</div><div style="opacity:.9;margin-bottom:10px">Take the jack-o’-lantern to begin a 5-minute night run. Collect 3 pumpkins and craft Pumpkin Armour.</div>';
-    const row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;justify-content:flex-end';
-    const bNo=document.createElement('button'); bNo.textContent='Leave'; bNo.style.cssText='padding:8px 12px;border-radius:8px;border:0;background:#263447;color:#cfe3ff;font-weight:800;cursor:pointer';
-    const bGo=document.createElement('button'); bGo.textContent='Take Jack-o’-Lantern'; bGo.style.cssText='padding:10px 14px;border-radius:10px;border:0;background:#1f6feb;color:#fff;font-weight:900;cursor:pointer';
-    row.appendChild(bNo); row.appendChild(bGo); card.appendChild(row); wrap.appendChild(card); (document.getElementById('gameCard')||document.body).appendChild(wrap);
-    bNo.onclick=()=>wrap.remove();
-    bGo.onclick=()=>{ try{ onAccept?.(); }finally{ wrap.remove(); } };
-  }
-
   // ---------------- mission flow ----------------
   function startNightMission(){
     setNight(true);
@@ -486,6 +495,7 @@
     try{ localStorage.setItem('izzaMission6_unlocked','1'); }catch{}
     try{ IZZA.emit('mission-available',{id:6,name:'Mission 6'}); }catch{}
     try{ IZZA.emit('m6-unlocked'); }catch{}
+    try{ IZZA.emit('mission6-unlock'); }catch{}
   }
 
   function finishMission5(){
@@ -546,12 +556,11 @@
     IZZA.on?.('render-post',  renderM5Over);
     IZZA.on?.('update-post',  onUpdate);
     wireB();
-    onInvChangeCheckM5(); // <— your requested ready hook
+    onInvChangeCheckM5(); // <— ready hook to reconcile state on load
   });
 
   function onInvChangeCheckM5(){
-    // kept simple; crafting path already calls finishMission5(),
-    // but if the inventory somehow already contains the full set, mark complete:
+    // If mission active and the set is already present (e.g., crafted via Armoury UI), finish immediately.
     if (!mission5Active) return;
     const inv = invRead();
     if (inv.pumpkinHelmet && inv.pumpkinVest && inv.pumpkinArms && inv.pumpkinLegs){
@@ -566,4 +575,6 @@
 
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
 
+  // (Optional) expose tryCraftPumpkin if your Armoury calls into mission plugins
+  try{ IZZA.tryCraftPumpkin = tryCraftPumpkin; }catch{}
 })();
