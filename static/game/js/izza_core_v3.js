@@ -755,6 +755,49 @@ function unequipArmorSlot(slot){
       </g>
     </svg>`;
   }
+      // --- NEW: Halloween items ---
+  // Jack-o'-lantern (supports alias "jacklantern")
+  if (id === 'jack_o_lantern' || id === 'jacklantern') {
+    return `
+    <svg viewBox="0 0 48 48" width="${w||28}" height="${h||28}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="m5glow" cx="50%" cy="55%" r="60%">
+          <stop offset="0%"  stop-color="#ffd27a"/>
+          <stop offset="55%" stop-color="#ff9320"/>
+          <stop offset="100%" stop-color="#5a1e00"/>
+        </radialGradient>
+      </defs>
+      <!-- body -->
+      <ellipse cx="24" cy="26" rx="17" ry="15" fill="url(#m5glow)" stroke="#3a1400" stroke-width="2"/>
+      <!-- stem -->
+      <rect x="22" y="11" width="4" height="6" rx="1.5" fill="#2f6a22"/>
+      <!-- angry eyes -->
+      <polygon points="13,22 23,19 19,26 13,24" fill="#120800"/>
+      <polygon points="25,19 35,22 35,24 29,26" fill="#120800"/>
+      <!-- jagged mouth -->
+      <path d="M10 31 Q24 38 38 31 L35 34 L31 33 L27 35 L23 33 L19 35 L15 33 L12 34 Z" fill="#120800"/>
+    </svg>`;
+  }
+
+  // Pumpkin piece (supports alias "pumpkin")
+  if (id === 'pumpkin_piece' || id === 'pumpkin') {
+    return `
+    <svg viewBox="0 0 48 48" width="${w||28}" height="${h||28}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="pk" cx="50%" cy="55%" r="60%">
+          <stop offset="0%"  stop-color="#ffcf7a"/>
+          <stop offset="60%" stop-color="#ff8412"/>
+          <stop offset="100%" stop-color="#6a2500"/>
+        </radialGradient>
+      </defs>
+      <!-- a wedge-like piece -->
+      <path d="M10 30 C11 20 20 14 31 16 C35 17 37 19 39 22
+               C35 31 26 36 16 35 Z" fill="url(#pk)" stroke="#572200" stroke-width="2"/>
+      <rect x="28" y="16" width="4" height="5" rx="1.5" fill="#2c5e22" transform="rotate(-18 30 18)"/>
+      <!-- cut face edge -->
+      <path d="M22 20 L30 27" stroke="#6a2a00" stroke-width="2" opacity=".65"/>
+    </svg>`;
+  }
   // --- NEW: Cardboard Armor piece icons ---
   if (id === 'cardboardHelmet') {
     return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="#caa468"/><path d="M6 18h20v3H6z" fill="#9b7b4f"/></svg>`;
@@ -946,6 +989,21 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
   rows.push(readOnlyRow('cardboard_box', 'Cardboard Box',
     `Count: ${inv.cardboard_box.count|0}`));
 }
+    // --- Jack-o’-Lantern (stackable) ---
+{
+  const c = (inv.jack_o_lantern?.count|0) + (inv.jacklantern?.count|0); // support legacy alias
+  if (c > 0) {
+    rows.push(readOnlyRow('jack_o_lantern', 'Jack-o’-Lantern', `Count: ${c}`));
+  }
+}
+
+// --- Pumpkin piece (stackable) ---
+{
+  const c = (inv.pumpkin_piece?.count|0) + (inv.pumpkin?.count|0); // support legacy alias
+  if (c > 0) {
+    rows.push(readOnlyRow('pumpkin_piece', 'Pumpkin', `Count: ${c}`));
+  }
+}
 // Armor section (Cardboard set)
 const armorRows = [];
 function armorRow(id,label,slotKey){
@@ -1037,6 +1095,13 @@ host.querySelectorAll('[data-armor-off]').forEach(btn=>{
 
   // Refresh inventory UI if it's open when bank contents change
 window.addEventListener('izza-bank-changed', ()=>{
+  const host = document.getElementById('invPanel');
+  if(host && host.style.display!=='none'){
+    try{ renderInventoryPanel(); }catch(e){ console.error(e); }
+  }
+});
+  // Refresh inventory UI if it's open when inventory contents change
+window.addEventListener('izza-inventory-changed', ()=>{
   const host = document.getElementById('invPanel');
   if(host && host.style.display!=='none'){
     try{ renderInventoryPanel(); }catch(e){ console.error(e); }
