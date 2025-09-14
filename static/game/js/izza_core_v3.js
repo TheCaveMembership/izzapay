@@ -813,7 +813,41 @@ function unequipArmorSlot(slot){
   }
   // ... other icons or a default ...
 }
-
+// --- NEW: Pumpkin Armour piece icons ---
+if (id === 'pumpkinHelmet') {
+  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+    <defs><radialGradient id="pg" cx="50%" cy="55%" r="60%">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
+    </radialGradient></defs>
+    <path d="M4 18c0-6 5-11 12-11s12 5 12 11H4z" fill="url(#pg)"/>
+    <rect x="14" y="6" width="4" height="5" rx="1.5" fill="#2f6a22"/>
+  </svg>`;
+}
+if (id === 'pumpkinVest') {
+  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+    <defs><radialGradient id="pg2" cx="50%" cy="55%" r="60%">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
+    </radialGradient></defs>
+    <path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="url(#pg2)"/>
+  </svg>`;
+}
+if (id === 'pumpkinLegs') {
+  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+    <defs><radialGradient id="pg3" cx="50%" cy="55%" r="60%">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
+    </radialGradient></defs>
+    <path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="url(#pg3)"/>
+  </svg>`;
+}
+if (id === 'pumpkinArms') {
+  return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
+    <defs><radialGradient id="pg4" cx="50%" cy="55%" r="60%">
+      <stop offset="0%" stop-color="#ffd27a"/><stop offset="60%" stop-color="#ff9320"/><stop offset="100%" stop-color="#6a2500"/>
+    </radialGradient></defs>
+    <rect x="2" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/>
+    <rect x="22" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/>
+  </svg>`;
+}
   // Shop / Tutorial handlers (kept)
   function openShop(){
     const m=document.getElementById('shopModal'); if(!m) return;
@@ -1027,7 +1061,11 @@ armorRow('cardboardHelmet','Cardboard Helmet','head');
 armorRow('cardboardVest','Cardboard Vest','chest');
 armorRow('cardboardLegs','Cardboard Legs','legs');
 armorRow('cardboardArms','Cardboard Arms','arms');
-
+// NEW: Pumpkin set rows (crafted by mission 5 plugin / map expander)
+armorRow('pumpkinHelmet','Pumpkin Helmet','head');
+armorRow('pumpkinVest','Pumpkin Vest','chest');
+armorRow('pumpkinLegs','Pumpkin Legs','legs');
+armorRow('pumpkinArms','Pumpkin Arms','arms');
 if(armorRows.length){
   rows.push(`<div style="margin-top:2px;margin-bottom:-4px;opacity:.75;font-size:12px;padding-left:4px">Armor</div>`);
   rows.push(...armorRows);
