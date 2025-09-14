@@ -1,6 +1,6 @@
 // v1_store_items_plugin.js — extend shop stock + icon repair + BUY/SELL tabs + search + inventory pricebook
 (function(){
-  const BUILD = 'v1-store-items+stock-extender+icon-fix-5+buy-sell+search+pricebook';
+  const BUILD = 'v1-store-items+stock-extender+icon-fix-6+buy-sell+search+pricebook+sell-live+armor-fallback';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -15,23 +15,23 @@
   const isDataUrl = s => typeof s==='string' && /^data:image\/svg\+xml/i.test(s);
   function svgToDataURL(svg){
     if(!svg) return '';
-    if(isDataUrl(svg)) return svg;                    // already encoded
+    if(isDataUrl(svg)) return svg;                                 // already encoded
     if(/^\s*</.test(svg)) return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); // raw <svg>
-    return svg;                                       // URL or something else => leave
+    return svg;                                                    // URL or something else => leave
   }
   function iconImgHTMLFromAny(svgOrData, w=24, h=24){
     const src = svgToDataURL(svgOrData||'');
     return `<img src="${src}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
   }
 
-  // (UNCHANGED) inline SVGs used for shop icons and as fallbacks for inventory icons
+  // Tiny, reliable UI icons (NOT used for on-character overlays)
   function svgIcon(id, w=24, h=24){
-    if(id==='bat')      return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
-    if(id==='knuckles') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
-    if(id==='pistol')   return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
-    if(id==='uzi')      return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
-    if(id==='grenade')  return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
-    if(id==='pistol_ammo') return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="18" width="8" height="28" fill="#c9a24c"/><rect x="28" y="44" width="8" height="6" fill="#6f5a1d"/></svg>`;
+    if(id==='bat')         return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
+    if(id==='knuckles')    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
+    if(id==='pistol')      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="14" y="26" width="30" height="8" fill="#202833"/><rect x="22" y="34" width="8" height="12" fill="#444c5a"/></svg>`;
+    if(id==='uzi')         return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="12" y="28" width="34" height="8" fill="#0b0e14"/><rect x="36" y="22" width="12" height="6" fill="#0b0e14"/><rect x="30" y="36" width="6" height="12" fill="#0b0e14"/><rect x="18" y="36" width="6" height="10" fill="#0b0e14"/></svg>`;
+    if(id==='grenade')     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="22" width="8" height="5" fill="#5b7d61"/><rect x="31" y="19" width="2" height="2" fill="#c3c9cc"/><rect x="26" y="27" width="12" height="14" fill="#264a2b"/></svg>`;
+    if(id==='pistol_ammo') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="28" y="18" width="8" height="28" fill="#c9a24c"/><rect x="28" y="44" width="8" height="6" fill="#6f5a1d"/></svg>`;
     return '';
   }
 
@@ -45,6 +45,25 @@
     if(/\bgrenade\b/.test(n)) return 'grenade';
     if(/\bammo\b/.test(n)) return 'pistol_ammo';
     return '';
+  }
+
+  // Generic, guaranteed armour UI icon (used only if entry.iconSvg is missing)
+  function svgArmorFallback(slot, w=24, h=24){
+    const base='#2a2f3f', shade='#1a1f2b', trim='#48536d';
+    if(slot==='head')  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${w}" height="${h}"><rect x="2" y="2" width="20" height="20" rx="4" fill="${trim}"/><rect x="6" y="5" width="12" height="9" rx="3" fill="${base}"/><rect x="6" y="12" width="12" height="2" fill="${shade}"/></svg>`;
+    if(slot==='chest') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${w}" height="${h}"><rect x="2" y="2" width="20" height="20" rx="4" fill="${trim}"/><rect x="5" y="6" width="14" height="12" rx="2" fill="${base}"/><rect x="6" y="12" width="12" height="3" fill="${shade}"/></svg>`;
+    if(slot==='legs')  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${w}" height="${h}"><rect x="2" y="2" width="20" height="20" rx="4" fill="${trim}"/><rect x="6" y="6" width="4" height="12" fill="${base}"/><rect x="14" y="6" width="4" height="12" fill="${base}"/><rect x="6" y="14" width="12" height="2" fill="${shade}"/></svg>`;
+    // arms
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${w}" height="${h}"><rect x="2" y="2" width="20" height="20" rx="4" fill="${trim}"/><rect x="4" y="8" width="5" height="8" rx="2" fill="${base}"/><rect x="15" y="8" width="5" height="8" rx="2" fill="${base}"/><rect x="5" y="10" width="3" height="3" fill="${shade}"/><rect x="16" y="10" width="3" height="3" fill="${shade}"/></svg>`;
+  }
+
+  // Normalize armour slot strings from any vocabulary → canonical
+  function normalizeSlot(s){
+    const x=(s||'').toLowerCase();
+    if(x==='helmet' || x==='head') return 'head';
+    if(x==='vest'   || x==='chest'|| x==='body') return 'chest';
+    if(x==='arms'   || x==='arm'  || x==='gloves' || x==='gauntlets') return 'arms';
+    return 'legs';
   }
 
   // ---------- BUY/SELL TABS + SEARCH UI ----------
@@ -67,7 +86,7 @@
       #shopTabs .tab{flex:0 0 auto;padding:6px 10px;border-radius:10px;border:1px solid #2a3550;background:#162134;color:#cfe0ff;font-weight:700;cursor:pointer}
       #shopTabs .tab.on{background:#1f6feb;border-color:#2f6feb;color:#fff}
       #shopSearch{width:100%;margin:0 0 8px;padding:8px 12px;border-radius:12px;border:1px solid #2a3550;background:#0e1524;color:#cfe0ff;font-weight:650}
-      .shop-scroll{max-height:min(60vh,520px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
+      .shop-scroll{max-height:min(60vh,520px);overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
       .shop-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;background:#0f1522;border:1px solid #2a3550;border-radius:10px}
       .shop-item .buy, .shop-item .sell { background:#1f2a3f; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 10px }
       .shop-note{opacity:.8;font-size:12px;margin-top:6px}
@@ -100,6 +119,9 @@
     card.insertBefore(buyList, search.nextSibling);
     card.insertBefore(sellList, buyList.nextSibling);
 
+    // Immediately heal legacy icons that core added before our plugin ran
+    setTimeout(repairMissingIcons, 0);
+
     // wire once
     if(!tabsWired){
       tabsWired = true;
@@ -121,6 +143,12 @@
         const buying = card.querySelector('#shopTabs .tab.on')?.dataset.tab!=='sell';
         if(buying){ filterBuyList(q); } else { renderSellList(q); }
       });
+
+      // if inventory changes while SELL tab is visible, live refresh it
+      window.addEventListener('izza-inventory-changed', ()=>{
+        const mode = card.querySelector('#shopTabs .tab.on')?.dataset.tab || 'buy';
+        if(mode==='sell'){ renderSellList(search.value.trim()); }
+      });
     }
   }
 
@@ -128,7 +156,7 @@
   function filterBuyList(q){
     const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
     if(!list) return;
-    const needle = q.toLowerCase();
+    const needle = (q||'').toLowerCase();
     list.querySelectorAll('.shop-item').forEach(row=>{
       const txt = (row.textContent||'').toLowerCase();
       row.style.display = (!needle || txt.includes(needle)) ? '' : 'none';
@@ -191,7 +219,7 @@
       cur.name = cur.name || 'Pistol';
       cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('pistol',24,24));
       inv.pistol = cur;
-      IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'}); // no pricebook
+      IZZA.emit?.('toast', {text:'Purchased Pistol Ammo (+17)'}); // no pricebook entry
 
     } else {
       // Generic purchase: supports armour + misc
@@ -199,15 +227,7 @@
       const pretty = it.name || key;
 
       function addArmorPiece(slotGuess){
-        const valid = new Set(['helmet','vest','arms','legs','head','chest']); // tolerate both vocabularies
-        let slot = (it.slot||slotGuess||'').toLowerCase();
-        if(!valid.has(slot)){
-          slot =
-            (/helmet|head/i.test(pretty)?'head' :
-             /vest|chest|body/i.test(pretty)?'chest' :
-             /arms|glove|gaunt/i.test(pretty)?'arms' : 'legs');
-        }
-
+        let slot = normalizeSlot(it.slot||slotGuess||pretty);
         const entry = inv[key] || { count:0 };
         entry.count = (entry.count|0) + 1;
         entry.name  = pretty;
@@ -260,9 +280,12 @@
 
   // normalize icon source from any inventory entry
   function iconForInv(key, entry){
-    // prefer entry.iconSvg (but encode if raw)
-    if(entry?.iconSvg){
-      return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
+    // prefer entry.iconSvg (encode if raw)
+    if(entry?.iconSvg){ return iconImgHTMLFromAny(entry.iconSvg, 24, 24); }
+    // armour fallback if missing icon (covers Cardboard/Pumpkin/etc when created elsewhere)
+    if((entry?.type||'')==='armor'){
+      const slot = normalizeSlot(entry.slot||'');
+      return iconImgHTMLFromAny(svgArmorFallback(slot,24,24), 24, 24);
     }
     // legacy weapons/consumables
     const id = guessLegacyIdFromName(entry?.name || key) ||
@@ -292,7 +315,7 @@
       if(/jack_o_lantern|pumpkin_piece/i.test(key)) return; // prevent selling quest bits
 
       const pretty = e.name || key;
-      if(needle && !pretty.toLowerCase().includes(needle)) return;
+      if(needle && !(`${key} ${pretty}`.toLowerCase()).includes(needle)) return;
 
       const price  = getSellPrice(key);
       const row = document.createElement('div'); row.className='shop-item';
@@ -377,13 +400,20 @@
           const nameEl     = meta.querySelector('.name');
           if(!iconHolder || !nameEl) return;
           const pretty = (nameEl.textContent||'').trim();
-          const id = guessLegacyIdFromName(pretty);
+          const idByName = guessLegacyIdFromName(pretty);
           const html = (iconHolder.innerHTML||'').trim();
 
-          // replace if: empty, placeholder star/question, or raw text that begins with a quote (broken HTML dump)
+          // replace if: empty, placeholder star/question, or broken raw dump
           const looksBroken = !html || html==='?' || /⭐/.test(html) || /^"&/.test(html) || /^&quot;/.test(html) || /^" width=/.test(html);
-          if(looksBroken && id){
-            iconHolder.innerHTML = iconImgHTMLFromAny(svgIcon(id,24,24));
+          if(looksBroken){
+            // 1) legacy weapons by name
+            if(idByName){ iconHolder.innerHTML = iconImgHTMLFromAny(svgIcon(idByName,24,24)); return; }
+            // 2) armour rows: use neutral fallback by slot if we can find it in the text
+            const txt=(meta.textContent||'').toLowerCase();
+            const slot = /helmet|head/.test(txt) ? 'head' :
+                         /vest|chest|body/.test(txt) ? 'chest' :
+                         /arms|arm|gaunt|glove/.test(txt) ? 'arms' : /legs/.test(txt) ? 'legs' : '';
+            if(slot){ iconHolder.innerHTML = iconImgHTMLFromAny(svgArmorFallback(slot,24,24)); }
           }
         });
       });
@@ -432,4 +462,5 @@
   // ---------- boot ----------
   IZZA.on('ready', a=>{ api=a; });
   IZZA.on('render-post', patchShopStock);
+
 })();
