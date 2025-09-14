@@ -1,132 +1,103 @@
-/* mission5_halloween.plugin.js — Minimal
-   Goal: ONLY show a 1-tile jack-o’-lantern when Mission 4 is complete.
-   - M4 complete if ANY is true:
-       • inventory meta missionsCompleted >= 4
-       • localStorage izzaMissions >= 4
-       • localStorage izzaMission4_done === '1' (set by M4 file)
-   - Placement: EXACTLY one tile west of the M4 cardboard box.
-     Box: {gx+3, gy+10} → Jack: {gx+2, gy+10}
-   - Draw style/offsets match Mission 4 box (+S*0.5, +S*0.6).
+/* mission5_halloween.plugin.js — “Show a pumpkin exactly like M4’s box”
+   - Draws a pumpkin near HQ using the EXACT SAME placement & canvas math as Mission 4’s box
+   - Box is at {gx+3, gy+10}; this draws at ONE TILE WEST: {gx+2, gy+10}
+   - Same render-under hook, same +S*0.5 / +S*0.6 screen offsets, same izzaMapTier=='2' gate
+   - No inputs, missions, inventory, or UI. Pure visual to verify placement.
 */
+
 (function(){
-  if (!window.IZZA) window.IZZA = {};
-  if (typeof IZZA.on !== 'function') IZZA.on = function(){};
-  if (typeof IZZA.emit !== 'function') IZZA.emit = function(){};
-
   let api = null;
-  let TILE = 60;
 
-  // ---------- Helpers ----------
-  function _lsGet(k, d){ try{ const v = localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
-  function _missions(){ return parseInt(_lsGet('izzaMissions', '0'), 10) || 0; }
-
-  function missionsCompletedMeta(){
-    try{
-      if (IZZA?.api?.inventory?.getMeta){
-        const m = IZZA.api.inventory.getMeta('missionsCompleted');
-        const n = (m|0);
-        if (Number.isFinite(n)) return n;
-      }
-    }catch{}
-    return _missions();
-  }
-
-  function isM4Complete(){
-    try { if ((missionsCompletedMeta()|0) >= 4) return true; }catch{}
-    try { if ((_missions()|0) >= 4) return true; }catch{}
-    try { if (localStorage.getItem('izzaMission4_done') === '1') return true; }catch{}
-    return false;
-  }
-
-  // ---------- Positioning (MATCH Mission 4 logic) ----------
+  // ---------- HQ door → pumpkin position (copied from M4 with x-1) ----------
   function hqDoorGrid(){
-    const t = api?.TILE || TILE;
-    const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
+    const t = api.TILE;
+    const d = api.doorSpawn || { x: api.player?.x||0, y: api.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
-  // Box: {gx+3, gy+10} → Jack one tile WEST: {gx+2, gy+10}
-  function jackGrid(){
+  // M4 box: {gx+3, gy+10}. Pumpkin: one tile WEST → {gx+2, gy+10}.
+  function pumpkinGrid(){
     const d = hqDoorGrid();
     return { x: d.gx + 2, y: d.gy + 10 };
   }
 
-  // ---------- Screen math (MATCH M4) ----------
+  // ---------- world→screen (identical to M4) ----------
   function worldToScreen(wx, wy){
-    const S = api?.DRAW || TILE, T = api?.TILE || TILE;
-    const sx = (wx - (api?.camera?.x||0)) * (S/T);
-    const sy = (wy - (api?.camera?.y||0)) * (S/T);
+    const S = api.DRAW, T = api.TILE;
+    const sx = (wx - api.camera.x) * (S/T);
+    const sy = (wy - api.camera.y) * (S/T);
     return { sx, sy };
   }
 
-  // ---------- Simple SVG -> Image (iOS-safe) ----------
-  const _imgCache = new Map();
-  function svgToImage(svg, pxW, pxH){
-    const key=svg+'|'+pxW+'x'+pxH;
-    if(_imgCache.has(key)) return _imgCache.get(key);
-    const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
-    const img=new Image(); img.width=pxW; img.height=pxH;
-    img._ready=false; img.onload=()=>{ img._ready=true; try{ img.decode?.(); }catch{} };
-    img.src=url;
-    _imgCache.set(key, img);
-    return img;
+  // ---------- draw: simple 3D-ish pumpkin (same scale as box draw) ----------
+  function drawPumpkin(ctx, sx, sy, S){
+    // Match M4’s sizing approach: scale artwork relative to tile using S*0.68
+    // We’ll draw in a 44x44 local space like the box function does.
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.scale((S*0.68)/44, (S*0.68)/44);
+    ctx.translate(-22, -22);
+
+    // shadow (match box’s ellipse)
+    ctx.fillStyle='rgba(0,0,0,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(22, 28, 14, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // pumpkin body (simple segments)
+    const body = new Path2D();
+    // center oval
+    body.addPath(new Path2D('M6,22 C6,12 38,12 38,22 C38,34 6,34 6,22 Z'));
+    ctx.fillStyle='#ff8a00';
+    ctx.fill(body);
+    ctx.strokeStyle='#7a3d00';
+    ctx.lineWidth=1.3;
+    ctx.stroke(body);
+
+    // side segments
+    ctx.beginPath();
+    ctx.moveTo(14,16); ctx.bezierCurveTo(10,22,10,26,14,32);
+    ctx.moveTo(30,16); ctx.bezierCurveTo(34,22,34,26,30,32);
+    ctx.strokeStyle='#a45200';
+    ctx.stroke();
+
+    // stem
+    ctx.fillStyle='#2c5e22';
+    ctx.beginPath();
+    ctx.roundRect(20, 12, 4, 6, 2);
+    ctx.fill();
+
+    // face (triangle eyes + smile)
+    ctx.fillStyle='#ffd23f';
+    ctx.beginPath(); ctx.moveTo(14,20); ctx.lineTo(18,22); ctx.lineTo(10,22); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(30,20); ctx.lineTo(34,22); ctx.lineTo(26,22); ctx.closePath(); ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(12,28);
+    ctx.quadraticCurveTo(22,32,32,28);
+    ctx.quadraticCurveTo(22,30,12,28);
+    ctx.fill();
+
+    ctx.restore();
   }
 
-  // ---------- Simple jack art (1 tile) ----------
-  function svgJack(){
-    return `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <radialGradient id="g" cx="50%" cy="50%" r="60%">
-      <stop offset="0%" stop-color="#ffb347"/>
-      <stop offset="60%" stop-color="#ff7b00"/>
-      <stop offset="100%" stop-color="#7a2f00"/>
-    </radialGradient>
-  </defs>
-  <ellipse cx="32" cy="36" rx="24" ry="20" fill="url(#g)" stroke="#552200" stroke-width="3"/>
-  <rect x="29" y="14" width="6" height="8" rx="2" fill="#2c5e22"/>
-  <polygon points="22,28 28,32 16,32" fill="#ffd23f"/>
-  <polygon points="42,28 48,32 36,32" fill="#ffd23f"/>
-  <path d="M18 44 Q32 52 46 44 Q42 46 32 48 Q22 46 18 44 Z" fill="#ffd23f"/>
-</svg>`;
-  }
-
-  let jackImg = null;
-
-  // ---------- Render ----------
-  function renderUnder(){
+  // ---------- render-under: show pumpkin (copied structure from M4) ----------
+  function renderPumpkin(){
     try{
       if (!api?.ready) return;
-      // Match M4 visibility gate
       if (localStorage.getItem('izzaMapTier') !== '2') return;
-      if (!isM4Complete()) return;
 
+      const S=api.DRAW, t=api.TILE, g=pumpkinGrid();
+      const px=(g.x*t - api.camera.x)*(S/t) + S*0.5;  // EXACT offsets like M4 box
+      const py=(g.y*t - api.camera.y)*(S/t) + S*0.6;
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
-      const S=api.DRAW, t=api.TILE||TILE;
-
-      // lazy-create image
-      if (!jackImg) jackImg = svgToImage(svgJack(), t*1.0, t*1.0);
-
-      const g = jackGrid();
-      const wx = g.x * t, wy = g.y * t;
-      const scr = worldToScreen(wx, wy);
-
-      // EXACT same offsets as the cardboard box draw: +S*0.5, +S*0.6
-      const sx = scr.sx + S*0.5;
-      const sy = scr.sy + S*0.6;
-
-      const w = (t*1.0)*(S/t), h = w; // 1× tile
-      try{ ctx.drawImage(jackImg, sx - w/2, sy - h/2, w, h); }catch{}
+      drawPumpkin(ctx, px, py, S);
     }catch{}
   }
 
-  // ---------- Wire up ----------
-  IZZA.on('ready', ({ api:__api })=>{
-    api = __api||api||{};
-    TILE = api?.TILE || TILE;
-    IZZA.on('render-under', renderUnder);
+  // ---------- hook up (same lifecycle as M4) ----------
+  IZZA.on?.('ready', (a)=>{
+    api = a;
+    IZZA.on?.('render-under', renderPumpkin);
   });
-
-  // Also paint if the game resumes and the art didn't render yet
-  IZZA.on?.('resume', ()=>{ /* no-op; renderUnder will run each frame */ });
 
 })();
