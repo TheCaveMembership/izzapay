@@ -85,49 +85,55 @@
     setTimeout(()=>{ el.remove(); }, t);
   }
 
-  // ---------- SVG cache ----------
+  // ---------- SVG cache (iOS-safe: ready flag set on onload) ----------
   const _imgCache = new Map();
   function svgToImage(svg, pxW, pxH){
     const key=svg+'|'+pxW+'x'+pxH;
     if(_imgCache.has(key)) return _imgCache.get(key);
-    const url='data:image/svg+xml;utf8,'+encodeURIComponent(svg);
-    const img=new Image(); img.width=pxW; img.height=pxH; img.src=url;
+    const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+    const img=new Image(); img.width=pxW; img.height=pxH;
+    img._ready = false;
+    img.onload = ()=>{ img._ready = true; try{ img.decode?.(); }catch{} };
+    img.src=url;
     _imgCache.set(key, img);
     return img;
   }
 
-  // ---------- Art ----------
+  // ---------- Art (simple, filter-free SVG) ----------
   function svgJack(){
     return `
-<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
- <defs>
-   <radialGradient id="g" cx="50%" cy="50%" r="60%">
-     <stop offset="0%"   stop-color="#ffb347"/>
-     <stop offset="60%"  stop-color="#ff7b00"/>
-     <stop offset="100%" stop-color="#792900"/>
-   </radialGradient>
-   <linearGradient id="stem" x1="0" y1="0" x2="0" y2="1">
-     <stop offset="0%" stop-color="#3b7a2a"/><stop offset="100%" stop-color="#1f4419"/>
-   </linearGradient>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#ffb347"/>
+      <stop offset="60%" stop-color="#ff7b00"/>
+      <stop offset="100%" stop-color="#7a2f00"/>
+    </radialGradient>
   </defs>
-  <ellipse cx="100" cy="110" rx="78" ry="70" fill="url(#g)" stroke="#552200" stroke-width="6"/>
-  <rect x="92" y="30" width="16" height="28" rx="6" fill="url(#stem)"/>
-  <polygon points="60,90 85,110 35,110" fill="#ffd23f"/>
-  <polygon points="140,90 165,110 115,110" fill="#ffd23f"/>
-  <path d="M45 140 Q100 175 155 140 Q140 150 100 155 Q60 150 45 140 Z" fill="#ffd23f"/>
+  <ellipse cx="32" cy="36" rx="24" ry="20" fill="url(#g)" stroke="#552200" stroke-width="3"/>
+  <rect x="29" y="14" width="6" height="8" rx="2" fill="#2c5e22"/>
+  <polygon points="22,28 28,32 16,32" fill="#ffd23f"/>
+  <polygon points="42,28 48,32 36,32" fill="#ffd23f"/>
+  <path d="M18 44 Q32 52 46 44 Q42 46 32 48 Q22 46 18 44 Z" fill="#ffd23f"/>
 </svg>`;
   }
   function svgPumpkinSmall(){
     return `
-<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
- <defs><radialGradient id="gp" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#ffb347"/><stop offset="60%" stop-color="#ff7b00"/><stop offset="100%" stop-color="#7a2f00"/></radialGradient></defs>
- <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#552200" stroke-width="4"/>
- <rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+  <defs>
+    <radialGradient id="gp" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#ffb347"/>
+      <stop offset="60%" stop-color="#ff7b00"/>
+      <stop offset="100%" stop-color="#7a2f00"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#552200" stroke-width="4"/>
+  <rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
 </svg>`;
   }
 
   // ---------- Mission state ----------
-  let jackGrid=null, jackImg=null, jackPlaced=false;
+  let jackGrid=null, jackImg=null, jackPlaced=false, jackReady=false;
   let pumpkins = [];
   let mission5Active=false, mission5Start=0, M5_MS=5*60*1000;
   let nightOn=false, werewolfNext=0, lastPos=null;
@@ -138,9 +144,12 @@
     jackGrid = jackLanternGrid();
     jackImg  = svgToImage(svgJack(), TILE*1.0, TILE*1.0); // EXACTLY 1 tile
     jackPlaced=true;
+    // mirror ready flag
+    jackReady = !!jackImg._ready;
+    if (!jackReady) jackImg.onload = ()=>{ jackReady = true; };
   }
   function ensureJackIfM4Done(){ if (isM4Complete()) ensureJack(); }
-  function clearJack(){ jackPlaced=false; jackGrid=null; jackImg=null; }
+  function clearJack(){ jackPlaced=false; jackGrid=null; jackImg=null; jackReady=false; }
 
   // ---------- Pumpkins ----------
   function computePumpkinTiles(){
@@ -194,26 +203,27 @@
       const S=api.DRAW, t=api.TILE||TILE;
 
       // draw jack only when M4 is complete (simple rule)
-      if (isM4Complete() && jackPlaced && jackGrid && jackImg && jackImg.complete){
+      if (isM4Complete() && jackPlaced && jackGrid && jackImg){
         // EXACT same center offsets as Mission 4 box draw (+S*0.5, +S*0.6)
         const wx = jackGrid.x * t, wy = jackGrid.y * t;
         const scr = worldToScreen(wx, wy);
         const sx = scr.sx + S*0.5;
         const sy = scr.sy + S*0.6;
         const w = (t*1.0)*(S/t), h = w; // 1× tile
-        ctx.drawImage(jackImg, sx - w/2, sy - h/2, w, h);
+        // Even if image isn't fully decoded yet, repeated frames will paint once ready
+        try{ ctx.drawImage(jackImg, sx - w/2, sy - h/2, w, h); }catch{}
       }
 
       // pumpkins
       if (pumpkins.length){
         for(const p of pumpkins){
-          if(p.collected || !p.img || !p.img.complete) continue;
+          if(p.collected || !p.img) continue;
           const wx = p.tx * t, wy = p.ty * t;
           const scr = worldToScreen(wx, wy);
           const sx = scr.sx + S*0.5;
           const sy = scr.sy + S*0.58;
           const w = (t*1.6)*(S/t), h = w;
-          ctx.drawImage(p.img, sx - w/2, sy - h/2, w, h);
+          try{ ctx.drawImage(p.img, sx - w/2, sy - h/2, w, h); }catch{}
         }
       }
     }catch{}
