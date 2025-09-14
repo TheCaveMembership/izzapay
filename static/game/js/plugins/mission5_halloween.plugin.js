@@ -1,6 +1,6 @@
 /* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
    - JACK shows at HQ +8E, +3N when M4 is complete and not yet taken.
-   - Press B on JACK → spooky accept UI → +1 jack to inventory (with alias), start 5m night, spawn pumpkins.
+   - Press B on JACK → spooky accept UI → +1 jack to inventory, start 5m night, spawn pumpkins.
    - 3 pumpkin pieces (two original, third moved to +8E, +7N). Werewolf spawns every 30s while moving.
    - Timer HUD during mission. Armoury popup renders OVER night dimmer. On timeout: jack respawns.
    - Craft in armoury with 1 jack + 3 pieces; grants 4 pumpkin armour pieces with set DR and legs speed.
@@ -69,10 +69,32 @@
     return inv;
   }
 
+  // ---- Canonical inventory adders + one-time alias cleanup (prevents double-counting)
+  function _addOne(inv, canonicalKey, displayName){
+    inv[canonicalKey] = inv[canonicalKey] || { count: 0, name: displayName || canonicalKey };
+    inv[canonicalKey].count = (inv[canonicalKey].count|0) + 1;
+  }
+  (function _aliasCleanupOnce(){
+    const inv = invRead();
+    // Merge pumpkin alias -> canonical
+    if (inv.pumpkin) {
+      inv.pumpkin_piece = inv.pumpkin_piece || { count: 0, name: 'Pumpkin' };
+      inv.pumpkin_piece.count = (inv.pumpkin_piece.count|0) + (inv.pumpkin.count|0);
+      delete inv.pumpkin;
+    }
+    // Merge jack alias -> canonical
+    if (inv.jacklantern) {
+      inv.jack_o_lantern = inv.jack_o_lantern || { count: 0, name: 'Jack-o’-Lantern' };
+      inv.jack_o_lantern.count = (inv.jack_o_lantern.count|0) + (inv.jacklantern.count|0);
+      delete inv.jacklantern;
+    }
+    invWrite(inv);
+  })();
+
   // ---------------- grid ----------------
   function hqDoorGrid(){
-    const t = api.TILE;
-    const d = api.doorSpawn || { x: api.player?.x||0, y: api.player?.y||0 };
+    const t = api?.TILE || 32;
+    const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
   // JACK at +8E, +3N
@@ -83,7 +105,7 @@
     const d=hqDoorGrid();
     const p1={ tx:d.gx-15, ty:d.gy+10 };
     const p2={ tx:p1.tx-20, ty:p1.ty+13 };
-    const p3={ tx:d.gx+8,  ty:d.gy-7 }; // ⇐ updated location
+    const p3={ tx:d.gx+8,  ty:d.gy-7 }; // updated location
     return [p1,p2,p3];
   }
 
@@ -119,7 +141,7 @@
     return img;
   }
 
-  function svgJack(){ // same evil face you approved
+  function svgJack(){
     return `
 <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
  <defs>
@@ -139,7 +161,7 @@
  <path d="M38 138 Q100 170 162 138 L154 146 L138 142 L124 150 L108 142 L94 152 L78 142 L64 150 L50 142 Z" fill="#120800"/>
 </svg>`;
   }
-  const JACK_MULT = 1.5; // ~1.5× tile (visual)
+  const JACK_MULT = 1.5;
 
   function svgPumpkinSmall(){
     return `
@@ -171,12 +193,12 @@
       if(!el){
         el=document.createElement('div');
         el.id=id;
-        // keep look; just ensure under armoury UI
-        el.style.cssText='position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.28) 0%, rgba(0,0,0,.86) 70%);mix-blend-mode:multiply;z-index:3500';
+        // LOWER z-index so Armoury UI sits on top (core armoury typically >3000)
+        el.style.cssText='position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.28) 0%, rgba(0,0,0,.86) 70%);mix-blend-mode:multiply;z-index:1200';
         (document.getElementById('gameCard')||document.body).appendChild(el);
         const blue=document.createElement('div');
         blue.id=id+'-b';
-        blue.style.cssText='position:absolute;inset:0;pointer-events:none;background:rgba(24,48,110,.12);mix-blend-mode:screen;z-index:3501';
+        blue.style.cssText='position:absolute;inset:0;pointer-events:none;background:rgba(24,48,110,.12);mix-blend-mode:screen;z-index:1201';
         el.appendChild(blue);
       }
     }else{ el?.remove(); }
@@ -186,7 +208,7 @@
   let lastHa = 0;
   function spawnHA(sx, sy){
     const t = performance.now();
-    if (t - lastHa < 2400) return; // ~2.5s
+    if (t - lastHa < 2400) return;
     lastHa = t;
     for (let i=0;i<3;i++){
       HA.push({
@@ -206,7 +228,7 @@
       ctx.globalAlpha = Math.max(0, 0.75 - k);
       ctx.translate(h.x, h.y);
       ctx.rotate(h.rot * k);
-      ctx.font = `${(48 + 20*(1-k))|0}px monospace`; // 4× larger
+      ctx.font = `${(48 + 20*(1-k))|0}px monospace`;
       ctx.fillStyle = `rgba(255,255,255,${0.9 - k*0.8})`;
       ctx.fillText('HA', 0, 0);
       ctx.setTransform(1,0,0,1,0,0);
@@ -216,7 +238,6 @@
 
   // ---------------- spooky choice ----------------
   function showSpookyChoice(onAccept){
-    // Prefer engine UI if present
     if (IZZA?.api?.UI?.choice){
       IZZA.api.UI.choice({
         spooky:true,
@@ -227,7 +248,6 @@
       });
       return;
     }
-    // Fallback bespoke spooky popup
     const wrap=document.createElement('div');
     wrap.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:9000;background:rgba(0,0,0,.6)';
     const card=document.createElement('div');
@@ -272,7 +292,7 @@
       const S=api.DRAW, t=api.TILE;
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
 
-      // Draw JACK when allowed (if mission not active and not yet taken)
+      // Draw JACK when allowed
       if ((!mission5Active || force) && (!taken || force) && ((tier2 && m4done) || force)){
         const g=jackGrid();
         const sx=(g.x*t - api.camera.x)*(S/t) + S*0.5;
@@ -343,9 +363,8 @@
         e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
         showSpookyChoice(()=> {
           const inv = invRead();
-          // write both canonical id and alias so UI can see it
-          invInc(inv,'jack_o_lantern',1);
-          invInc(inv,'jacklantern',1);
+          // ONLY canonical key (prevents double counting)
+          _addOne(inv, 'jack_o_lantern', 'Jack-o’-Lantern');
           invWrite(inv);
           try{ localStorage.setItem(JACK_TAKEN_KEY, '1'); }catch{}
           IZZA.toast?.('Jack-o’-Lantern added to Inventory');
@@ -355,13 +374,12 @@
       }
     }
 
-    // pumpkin collection
+    // pumpkin collection → ONLY canonical key
     for(const p of pumpkins){
       if(!p.collected && isNearGrid(p.tx, p.ty, (api?.TILE||60)*0.85)){
         p.collected=true;
         const inv=invRead();
-        invInc(inv,'pumpkin_piece',1);
-        invInc(inv,'pumpkin',1); // alias
+        _addOne(inv, 'pumpkin_piece', 'Pumpkin');
         invWrite(inv);
         IZZA.toast?.('+1 Pumpkin');
         return;
@@ -384,6 +402,8 @@
     ensureTimer();
     try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour!');
+    // Try to (re)register the craft action in Armoury
+    registerPumpkinArmourRecipeUI();
   }
 
   function playerInArmoury(){
@@ -395,19 +415,13 @@
   }
 
   function tryCraftPumpkin(){
-    if(!mission5Active) return false;
-    if(!playerInArmoury()) return false;
     const inv=invRead();
-    const haveJack = (inv.jack_o_lantern?.count|0) > 0 || (inv.jacklantern?.count|0) > 0;
-    const pumpkinsC = (inv.pumpkin_piece?.count|0) + (inv.pumpkin?.count|0);
+    const haveJack = (inv.jack_o_lantern?.count|0) > 0; // canonical only
+    const pumpkinsC = (inv.pumpkin_piece?.count|0);      // canonical only
     if(!haveJack || pumpkinsC<3) return false;
 
-    // spend from canonical first, then alias
-    if ((inv.jack_o_lantern?.count|0)>0) invDec(inv,'jack_o_lantern',1); else invDec(inv,'jacklantern',1);
-    let need=3;
-    const pcan=inv.pumpkin_piece?.count|0; const pal=inv.pumpkin?.count|0;
-    if (pcan>=need){ invDec(inv,'pumpkin_piece',need); need=0; }
-    else { if(pcan>0){ invDec(inv,'pumpkin_piece',pcan); need-=pcan; } if(need>0) invDec(inv,'pumpkin',need); }
+    invDec(inv,'jack_o_lantern',1);
+    invDec(inv,'pumpkin_piece',3);
 
     invInc(inv,'pumpkinHelmet',1);
     invInc(inv,'pumpkinVest',1);
@@ -448,6 +462,69 @@
     try{ IZZA.emit('sfx',{kind:'werewolf-spawn',vol:0.9}); }catch{}
   }
 
+  // ---------------- Armoury craft UI (register + fallback injector) ---------
+  function registerPumpkinArmourRecipeUI(){
+    // If an Armoury API exists, register like the cardboard recipe does:
+    try{
+      if (IZZA?.api?.armoury?.registerRecipe){
+        IZZA.api.armoury.registerRecipe({
+          id: 'pumpkin_set',
+          label: 'Craft Pumpkin Armour',
+          needs: [{id:'jack_o_lantern',count:1},{id:'pumpkin_piece',count:3}],
+          gives: [{id:'pumpkinHelmet',count:1},{id:'pumpkinVest',count:1},{id:'pumpkinArms',count:1},{id:'pumpkinLegs',count:1}],
+          onCraft: ()=>tryCraftPumpkin()
+        });
+        return;
+      }
+    }catch{}
+
+    // Fallback DOM injector (makes a button inside the Armoury modal/actions)
+    const ensureBtn = ()=>{
+      const modal = document.getElementById('armouryModal') || document.querySelector('.armoury-modal,.armory-modal');
+      if(!modal) return;
+      if (modal.querySelector('#m5CraftPumpkin')) return;
+
+      // Create button
+      const btn = document.createElement('button');
+      btn.id = 'm5CraftPumpkin';
+      btn.textContent = 'Craft Pumpkin Armour';
+      btn.style.cssText = 'margin-left:auto;padding:8px 12px;border-radius:10px;border:1px solid #2a3550;background:#1f6feb;color:#fff;font-weight:900;cursor:pointer;z-index:9001';
+
+      const actions = modal.querySelector('.actions,.footer,.buttons') || modal;
+      actions.appendChild(btn);
+
+      const refreshState = ()=>{
+        const inv=invRead();
+        const ok = (inv.jack_o_lantern?.count|0)>=1 && (inv.pumpkin_piece?.count|0)>=3;
+        btn.disabled = !ok;
+        btn.style.opacity = ok ? '1' : '0.6';
+        btn.title = ok ? '' : 'Requires 1 Jack-o’-Lantern + 3 Pumpkins';
+      };
+      refreshState();
+
+      btn.addEventListener('click', ()=>{
+        if (tryCraftPumpkin()){
+          try{ modal.querySelector('.close,.x,[data-close]')?.click(); }catch{}
+          try{ IZZA.toast?.('Pumpkin Armour crafted!'); }catch{}
+        }else{
+          try{ IZZA.toast?.('Need 1 Jack-o’-Lantern + 3 Pumpkins'); }catch{}
+        }
+      });
+
+      // Keep button state in sync while modal open
+      const obs = new MutationObserver(refreshState);
+      obs.observe(modal, { subtree:true, childList:true, attributes:true, attributeFilter:['style','class'] });
+    };
+
+    // Try right now, and also when the Armoury opens
+    ensureBtn();
+    // If your Armoury emits an event, hook it:
+    try{ window.addEventListener('armoury-opened', ensureBtn); }catch{}
+    // As a safety, poll briefly after mission starts:
+    setTimeout(ensureBtn, 300);
+    setTimeout(ensureBtn, 1200);
+  }
+
   // ---------------- update ----------------
   function onUpdate({ now }){
     if (mission5Active){
@@ -461,7 +538,9 @@
         werewolfNext = now + 30000;
       }
       updateTimer(now);
-      tryCraftPumpkin();
+
+      // If player opens armoury during mission, make sure craft option shows
+      registerPumpkinArmourRecipeUI();
     }
   }
 
@@ -473,6 +552,8 @@
     IZZA.on?.('render-under', renderM5);
     IZZA.on?.('update-post', onUpdate);
     wireB();
+    // Pre-register craft button in case player runs to armoury immediately
+    registerPumpkinArmourRecipeUI();
   });
   window.addEventListener('izza-inventory-changed', ()=>{ try{ IZZA.emit?.('render-under'); }catch{} });
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); });
