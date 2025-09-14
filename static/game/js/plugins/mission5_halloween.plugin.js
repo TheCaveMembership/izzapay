@@ -15,6 +15,7 @@
 
   let api = null;
   let TILE = 60;
+  let ensureRetryTimer = null, ensureRetryStopAt = 0;
 
   // Early hooks (safety if 'ready' is late)
   try { IZZA.on('render-under', renderUnder); IZZA.on('update-post', onUpdatePost); } catch {}
@@ -28,7 +29,7 @@
     if (id === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
   });
 
-  // If we load into a save that's already showing 4, ensure the jack exists
+  // If we load into a save that's already showing 4, ensure the jack exists (first attempt)
   setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
 
   // ---------- Core helpers ----------
@@ -130,13 +131,12 @@
    <linearGradient id="stem" x1="0" y1="0" x2="0" y2="1">
      <stop offset="0%" stop-color="#3b7a2a"/><stop offset="100%" stop-color="#1f4419"/>
    </linearGradient>
-   <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
   </defs>
   <ellipse cx="100" cy="110" rx="78" ry="70" fill="url(#g)" stroke="#552200" stroke-width="6"/>
   <rect x="92" y="30" width="16" height="28" rx="6" fill="url(#stem)"/>
-  <polygon points="60,90 85,110 35,110" fill="#ffd23f" filter="url(#glow)"/>
-  <polygon points="140,90 165,110 115,110" fill="#ffd23f" filter="url(#glow)"/>
-  <path d="M45 140 Q100 175 155 140 Q140 150 100 155 Q60 150 45 140 Z" fill="#ffd23f" filter="url(#glow)"/>
+  <polygon points="60,90 85,110 35,110" fill="#ffd23f"/>
+  <polygon points="140,90 165,110 115,110" fill="#ffd23f"/>
+  <path d="M45 140 Q100 175 155 140 Q140 150 100 155 Q60 150 45 140 Z" fill="#ffd23f"/>
 </svg>`;
   }
   function svgPumpkinSmall(){
@@ -211,6 +211,9 @@
     try{
       if (!api?.ready) return;
       if (localStorage.getItem('izzaMapTier') !== '2') return;
+
+      // Lazy placement: if M4 is done and jack isn't placed yet, place it now.
+      if (missionsIsFour() && !jackPlaced) ensureJack();
 
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
       const S=api.DRAW, t=api.TILE||TILE;
@@ -402,7 +405,16 @@
     wireB();
 
     // initial M4 check (handles “I crafted cardboard long ago”)
-    setTimeout(maybeFinishM4AndPlaceJack, 50);
+    if (missionsIsFour()) {
+      ensureJack();
+    } else {
+      // If inventory meta isn't ready yet, retry for a short window
+      ensureRetryStopAt = Date.now() + 5000; // ~5s
+      ensureRetryTimer = setInterval(()=>{
+        if (missionsIsFour()){ ensureJack(); clearInterval(ensureRetryTimer); ensureRetryTimer=null; }
+        if (Date.now() > ensureRetryStopAt && ensureRetryTimer){ clearInterval(ensureRetryTimer); ensureRetryTimer=null; }
+      }, 200);
+    }
   });
 
   // Also catch generic inventory change (e.g., crafting via other flows)
@@ -424,7 +436,13 @@
     }
   }
 
+  // Fallback: place after resume if already at 4
+  IZZA.on?.('resume', ()=>{ if (missionsIsFour()) ensureJack(); });
+
   // Clean up
-  IZZA.on('shutdown', ()=>{ clearJack(); clearPumpkins(); setNight(false); });
+  IZZA.on('shutdown', ()=>{
+    if (ensureRetryTimer){ clearInterval(ensureRetryTimer); ensureRetryTimer=null; }
+    clearJack(); clearPumpkins(); setNight(false);
+  });
 
 })();
