@@ -1,7 +1,7 @@
 // v1_store_items_plugin.js — stock extender + icon repair + BUY/SELL + search + pricebook
 // + Inventory panel extender for ALL armor pieces (no Core edits)
 (function(){
-  const BUILD = 'v1.1-store-items+inv-ext-armor';
+  const BUILD = 'v1.1.1-store-items+inv-ext-armor (icon-fix)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -23,6 +23,7 @@
     return `<img src="${src}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
   }
 
+  // tiny UI icons (NOT overlays)
   function svgIcon(id, w=24, h=24){
     if(id==='bat')         return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><rect x="22" y="8" width="8" height="40" fill="#8b5a2b"/><rect x="20" y="48" width="12" height="8" fill="#6f4320"/></svg>`;
     if(id==='knuckles')    return `<svg viewBox="0 0 64 64" width="${w}" height="${h}"><circle cx="20" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="32" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><circle cx="44" cy="28" r="6" stroke="#cfcfcf" fill="none" stroke-width="4"/><rect x="16" y="34" width="32" height="8" fill="#cfcfcf"/></svg>`;
@@ -218,7 +219,6 @@
     writePriceBook(pb);
 
     try{
-      // Always refresh inventory panel (visible or not) so DOM stays in sync
       if(typeof window.renderInventoryPanel==='function'){ window.renderInventoryPanel(); }
     }catch{}
     try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
@@ -236,7 +236,8 @@
   function iconForInv(key, entry){
     if(entry?.iconSvg) return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
     const id = guessLegacyIdFromName(entry?.name || key) ||
-               ({pistol:'pistol', uzi:'uzi', grenade:'grenade'}[key] || '');
+               // ensure legacy keys map (added bat/knuckles)
+               ({pistol:'pistol', uzi:'uzi', grenade:'grenade', bat:'bat', knuckles:'knuckles'}[key] || '');
     if(id) return iconImgHTMLFromAny(svgIcon(id,24,24), 24, 24);
     return '';
   }
@@ -324,11 +325,14 @@
         const iconHolder = meta.querySelector('[data-icon]') || meta.querySelector(':scope > div:first-child');
         const nameEl     = meta.querySelector('.name');
         if(!iconHolder || !nameEl) return;
+
         const pretty = (nameEl.textContent||'').trim();
         const id = guessLegacyIdFromName(pretty);
         const html = (iconHolder.innerHTML||'').trim();
-        const broken = !html || html==='?' || /⭐/.test(html) || /^"&/.test(html) || /^&quot;/.test(html) || /^" width=/.test(html);
-        if(broken && id){
+
+        // BROAD: replace if the holder doesn't already contain an <svg> or <img> or data: URL
+        const looksBroken = !/(<svg|<img|data:image\/svg\+xml)/i.test(html);
+        if(looksBroken && id){
           iconHolder.innerHTML = iconImgHTMLFromAny(svgIcon(id,24,24));
         }
       });
