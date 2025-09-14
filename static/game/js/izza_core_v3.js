@@ -891,8 +891,6 @@ function svgIcon(id, w, h){
       if(note) note.textContent = "";
       const missions = getMissionCount();
       const stock = [
-        {id:'bat',       name:'Baseball Bat',     price:100, desc:'Starter melee'},
-        {id:'knuckles',  name:'Brass Knuckles',   price:150, desc:'+1 damage'},
         {id:'pistol',    name:'Pistol',           price:300, desc:'Basic firearm', reqMissions:2},
       ];
       if(list){
