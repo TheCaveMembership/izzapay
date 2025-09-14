@@ -1,11 +1,12 @@
-/* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
+/* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run) — refreshed
    - JACK shows at HQ +8E, +3N when M4 is complete and not yet taken.
-   - Press B on JACK → spooky accept UI → +1 jack to inventory, start 5m night, spawn pumpkins.
-   - 3 pumpkin pieces (two original, third moved to +8E, +7N). Werewolf spawns every 30s while moving.
-   - Timer HUD during mission. Armoury popup renders OVER night dimmer. On timeout: jack respawns.
+   - Accept → +1 jack to inventory, start 5m night, spawn pumpkins.
+   - Werewolf now SELF-RENDERED in render-post (always above map); creepy sketch look w/ eye glow.
+   - Timer HUD during mission. Armoury popup renders OVER night dimmer.
    - Craft in armoury with 1 jack + 3 pieces; grants 4 pumpkin armour pieces with set DR and legs speed.
-   - HA “smoke” floats from mouth every ~2.5s (4× larger text).
-   - Debug: localStorage.izzaM5Debug='1' (HUD chip), localStorage.izzaForceM5='1' (force show)
+   - On craft: Mission 5 marked complete (UI bumps), night off, timer cleared, unlock signal for Mission 6.
+   - HA “smoke” floats from mouth every ~2.5s.
+   - Debug: localStorage.izzaM5Debug='1', localStorage.izzaForceM5='1'
 */
 (function(){
   window.__M5_LOADED__ = true;
@@ -21,8 +22,8 @@
   // ---------------- state ----------------
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
-  const werewolves = []; // {x,y,age,life,img,mode}
   const HA = [];       // smoke glyphs {x,y,vx,vy,age,life,rot}
+  const WOLVES = [];   // self-rendered wolves [{x,y,vx,vy,age,life,phase}]
   let jackImg = null, timerEl = null;
 
   // ---------------- helpers ----------------
@@ -70,33 +71,18 @@
     return inv;
   }
 
-  // Mission-complete detector (craft via Armoury plugin OR any other path)
-  function hasPumpkinSet(inv){
-    return (inv.pumpkinHelmet?.count|0) > 0 &&
-           (inv.pumpkinVest?.count|0)   > 0 &&
-           (inv.pumpkinArms?.count|0)   > 0 &&
-           (inv.pumpkinLegs?.count|0)   > 0;
-  }
-  function onInvChangeCheckM5(){
-    if (!mission5Active) return;
-    const inv = invRead();
-    if (hasPumpkinSet(inv)) finishMission5(); // ends night, updates missions, triggers M6 hook
-  }
-
-  // ---- Canonical inventory adders + one-time alias cleanup (prevents double-counting)
+  // ---- Canonical inventory adders + one-time alias cleanup
   function _addOne(inv, canonicalKey, displayName){
     inv[canonicalKey] = inv[canonicalKey] || { count: 0, name: displayName || canonicalKey };
     inv[canonicalKey].count = (inv[canonicalKey].count|0) + 1;
   }
   (function _aliasCleanupOnce(){
     const inv = invRead();
-    // Merge pumpkin alias -> canonical
     if (inv.pumpkin) {
       inv.pumpkin_piece = inv.pumpkin_piece || { count: 0, name: 'Pumpkin' };
       inv.pumpkin_piece.count = (inv.pumpkin_piece.count|0) + (inv.pumpkin.count|0);
       delete inv.pumpkin;
     }
-    // Merge jack alias -> canonical
     if (inv.jacklantern) {
       inv.jack_o_lantern = inv.jack_o_lantern || { count: 0, name: 'Jack-o’-Lantern' };
       inv.jack_o_lantern.count = (inv.jack_o_lantern.count|0) + (inv.jacklantern.count|0);
@@ -111,15 +97,13 @@
     const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
-  // JACK at +8E, +3N
   function jackGrid(){ const d=hqDoorGrid(); return { x:d.gx+8, y:d.gy-3 }; }
 
-  // pumpkins: keep 2 as-is; move #3 to +8E +7N
   function computePumpkinTiles(){
     const d=hqDoorGrid();
     const p1={ tx:d.gx-15, ty:d.gy+10 };
     const p2={ tx:p1.tx-20, ty:p1.ty+13 };
-    const p3={ tx:d.gx+8,  ty:d.gy-7 }; // updated location
+    const p3={ tx:d.gx+8,  ty:d.gy-7 };
     return [p1,p2,p3];
   }
 
@@ -187,19 +171,26 @@
 </svg>`;
   }
 
-  // tiny, stylized werewolf (SVG) with glowing red eyes
+  // Sketchy haunted werewolf (inked outlines, glowing eyes)
   function svgWerewolf(){
     return `
-<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
  <defs>
-  <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0%" stop-color="#4b4d57"/><stop offset="100%" stop-color="#232630"/>
-  </linearGradient>
+  <filter id="fuzz"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="1" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="1"/></filter>
+  <radialGradient id="eye" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#ff3d3d"/><stop offset="100%" stop-color="#5a0000"/>
+  </radialGradient>
  </defs>
- <path d="M8 44 L20 30 L16 18 L28 22 L36 8 L44 22 L56 18 L52 30 L60 44 L34 52 Z" fill="url(#fur)" stroke="#101218" stroke-width="2"/>
- <circle cx="28" cy="26" r="2.4" fill="#ff2a2a"/>
- <circle cx="36" cy="26" r="2.4" fill="#ff2a2a"/>
- <path d="M24 34 Q32 38 40 34" stroke="#0e0f13" stroke-width="2" fill="none"/>
+ <g filter="url(#fuzz)" stroke="#0b0b0b" stroke-width="3" fill="#161616">
+  <path d="M16,78 Q6,60 18,46 Q12,34 24,26 Q40,10 60,16 Q80,10 96,26 Q108,34 102,46 Q114,60 104,78 Q86,92 60,100 Q34,92 16,78 Z" />
+  <path d="M32,42 Q38,30 50,30 Q40,36 38,48" fill="none"/>
+  <path d="M88,42 Q82,30 70,30 Q80,36 82,48" fill="none"/>
+  <path d="M30,74 Q60,66 90,74" fill="none"/>
+ </g>
+ <g>
+  <ellipse cx="46" cy="54" rx="7" ry="5" fill="url(#eye)"/>
+  <ellipse cx="74" cy="54" rx="7" ry="5" fill="url(#eye)"/>
+ </g>
 </svg>`;
   }
 
@@ -213,7 +204,7 @@
   }
   function clearPumpkins(){ pumpkins.length=0; }
 
-  // ---------------- night overlay (z-index below armoury UI) ----------------
+  // ---------------- night overlay ----------------
   function setNight(on){
     if(on===nightOn) return;
     nightOn=on;
@@ -223,7 +214,6 @@
       if(!el){
         el=document.createElement('div');
         el.id=id;
-        // LOWER z-index so Armoury UI sits on top (core armoury typically >3000)
         el.style.cssText='position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.28) 0%, rgba(0,0,0,.86) 70%);mix-blend-mode:multiply;z-index:1200';
         (document.getElementById('gameCard')||document.body).appendChild(el);
         const blue=document.createElement('div');
@@ -308,89 +298,76 @@
   }
   function clearTimer(){ timerEl?.remove(); timerEl=null; }
 
-  // ---------------- werewolf (spawn + update + draw) ---------------
-  function spawnWerewolf(){
-    if (!api?.ready) return;
-    const t = api.TILE||60, S=api.DRAW||60;
-    const px = api.player.x, py = api.player.y;
-
-    // spawn ~6–8 tiles away in a random quadrant
-    const dist = (6 + Math.floor(Math.random()*3)) * t;
-    const ang  = Math.random()*Math.PI*2;
-    const wx   = px + Math.cos(ang)*dist;
-    const wy   = py + Math.sin(ang)*dist;
-
-    const img = svgToImage(svgWerewolf(), (t*1.2)|0, (t*1.2)|0);
-    werewolves.push({
-      x: wx, y: wy, age: 0, life: 18000 + (Math.random()*6000|0), img,
-      mode: 'stalk' // 'stalk' → chases slowly; could add 'howl' if needed
-    });
-
-    try{ IZZA.emit('sfx',{kind:'werewolf-spawn',vol:0.9}); }catch{}
+  // ---------------- WEREWOLF (self-rendered) ----------------
+  let wolfImg = null;
+  function ensureWolfImg(){
+    if (!wolfImg) wolfImg = svgToImage(svgWerewolf(), (api?.TILE||60)*1.6, (api?.TILE||60)*1.6);
   }
-
-  function updateWerewolves(dt){
-    if (!werewolves.length || !api?.ready) return;
-    const p = api.player, t = api.TILE||60;
-    for (let i=werewolves.length-1;i>=0;i--){
-      const w = werewolves[i];
+  function spawnWerewolf(){
+    ensureWolfImg();
+    const p = api?.player||{x:0,y:0};
+    // spawn slightly off-screen so it "enters" the play area
+    const off = (api?.TILE||60) * (2.5 + Math.random()*1.5);
+    const ang = Math.random()*Math.PI*2;
+    const x = p.x + Math.cos(ang)*off;
+    const y = p.y + Math.sin(ang)*off;
+    WOLVES.push({ x, y, vx:0, vy:0, age:0, life: 14000 + ((Math.random()*3000)|0), phase: Math.random()*1000 });
+  }
+  function updateWolves(dt){
+    const p = api?.player||{x:0,y:0};
+    for (let i=WOLVES.length-1;i>=0;i--){
+      const w=WOLVES[i];
       w.age += dt;
-      // chase player lightly
-      const dx = (p.x+16) - w.x;
-      const dy = (p.y+16) - w.y;
-      const d  = Math.hypot(dx,dy) || 1;
-      const sp = 0.045 * (t); // world units per ms (gentle)
-      const vx = (dx/d) * sp * dt;
-      const vy = (dy/d) * sp * dt;
-      w.x += vx;
-      w.y += vy;
+      const k = Math.min(1, w.age/1200);
+      const sp = 0.045 + 0.035*Math.sin((w.phase+w.age)*0.002); // shambling
+      const dx = p.x - w.x, dy = p.y - w.y;
+      const d  = Math.hypot(dx,dy)||1;
+      const ux = dx/d, uy = dy/d;
+      w.vx = w.vx*0.92 + ux*sp*k;
+      w.vy = w.vy*0.92 + uy*sp*k;
+      w.x += w.vx * dt;
+      w.y += w.vy * dt;
+      if (w.age > w.life) WOLVES.splice(i,1);
+    }
+  }
+  function drawWolves(ctx){
+    if (!WOLVES.length) return;
+    const S=api.DRAW, T=api.TILE;
+    const px = S/T, py = S/T;
+    const tnow = performance.now();
+    for (const w of WOLVES){
+      const sx=(w.x - api.camera.x)*px;
+      const sy=(w.y - api.camera.y)*py;
+      const s  = 1 + 0.04*Math.sin((w.phase+tnow)*0.006);
+      const flick = 0.35 + 0.3*Math.abs(Math.sin((w.phase+tnow)*0.01));
+      if (wolfImg?.complete){
+        // shadow
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath(); ctx.ellipse(sx, sy+18, 18, 7, 0, 0, Math.PI*2); ctx.fillStyle='#000'; ctx.fill();
+        ctx.restore();
 
-      // despawn if life over or mission ended
-      if (w.age > w.life || !mission5Active || !nightOn) {
-        werewolves.splice(i,1);
+        // body
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.scale(s, s);
+        ctx.drawImage(wolfImg, -48, -56);
+        ctx.restore();
+
+        // eye glow (overdraw)
+        ctx.save();
+        ctx.globalCompositeOperation='lighter';
+        ctx.globalAlpha = flick;
+        ctx.fillStyle = 'rgba(255,45,45,0.8)';
+        ctx.beginPath(); ctx.arc(sx-12, sy-6, 5.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx+12, sy-6, 5.5, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
       }
     }
   }
 
-  function drawWerewolves(ctx){
-    if (!werewolves.length || !api?.ready) return;
-    const S=api.DRAW, T=api.TILE;
-    const pulse = 0.5 + 0.5*Math.sin(performance.now()*0.006);
-    for (const w of werewolves){
-      const sx = (w.x - api.camera.x) * (S/T);
-      const sy = (w.y - api.camera.y) * (S/T);
-      const img = w.img;
-      if (!img || !img.complete) continue;
-      const wpx = (T*1.2)*(S/T);
-      const hpx = wpx;
-      // subtle ground shadow
-      ctx.save();
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.ellipse(sx + S*0.5, sy + S*0.92, wpx*0.35, hpx*0.18, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.restore();
-
-      // main sprite (slight bob)
-      const bob = Math.sin((performance.now()+w.x*0.2)*0.009)*2;
-      ctx.drawImage(img, sx + S*0.1, sy + S*0.1 + bob, wpx, hpx);
-
-      // eye glow (pulsing)
-      ctx.save();
-      ctx.globalCompositeOperation='lighter';
-      ctx.globalAlpha = 0.35 + 0.4*pulse;
-      ctx.fillStyle = '#ff2a2a';
-      ctx.beginPath();
-      ctx.ellipse(sx + S*0.48, sy + S*0.46 + bob, 6, 4, 0, 0, Math.PI*2);
-      ctx.ellipse(sx + S*0.60, sy + S*0.46 + bob, 6, 4, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
   // ---------------- render ----------------
-  function renderM5(){
+  function renderM5Under(){ // map-level bits
     try{
       if (!api?.ready) return;
       const force = localStorage.getItem('izzaForceM5') === '1';
@@ -398,7 +375,7 @@
       const m4done = isMission4Done();
       const taken = localStorage.getItem(JACK_TAKEN_KEY) === '1';
 
-      hud(`M5 • tier2:${tier2} • m4:${m4done} • taken:${taken} • active:${mission5Active} • pumpkins:${pumpkins.length} • night:${nightOn} • wolves:${werewolves.length}`);
+      hud(`M5 • active:${mission5Active} • night:${nightOn} • pumpkins:${pumpkins.length} • wolves:${WOLVES.length}`);
 
       const S=api.DRAW, t=api.TILE;
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
@@ -430,7 +407,7 @@
         }
       }
 
-      // pumpkins (during mission)
+      // pumpkins
       if (pumpkins.length){
         for(const p of pumpkins){
           if(p.collected || !p.img || !p.img.complete) continue;
@@ -443,10 +420,17 @@
         }
       }
 
-      // smoke glyphs + werewolves
+      // smoke glyphs (underlay)
       updateHA();
       drawHA(ctx);
-      drawWerewolves(ctx);
+    }catch{}
+  }
+
+  function renderM5Over(){ // overlays above map/player
+    try{
+      if (!api?.ready) return;
+      const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
+      drawWolves(ctx);
     }catch{}
   }
 
@@ -469,13 +453,12 @@
     const gx = ((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
     const g  = jackGrid();
 
-    // JACK tile → spooky accept dialog → take + start mission
+    // JACK tile → spooky accept dialog
     if ((!taken || force) && (!mission5Active || force) && (gx===g.x && gy===g.y)){
       if (force || (tierOK && isMission4Done())){
         e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
         showSpookyChoice(()=> {
           const inv = invRead();
-          // ONLY canonical key (prevents double counting)
           _addOne(inv, 'jack_o_lantern', 'Jack-o’-Lantern');
           invWrite(inv);
           try{ localStorage.setItem(JACK_TAKEN_KEY, '1'); }catch{}
@@ -486,7 +469,7 @@
       }
     }
 
-    // pumpkin collection → ONLY canonical key
+    // collect pumpkins
     for(const p of pumpkins){
       if(!p.collected && isNearGrid(p.tx, p.ty, (api?.TILE||60)*0.85)){
         p.collected=true;
@@ -516,11 +499,10 @@
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour!');
   }
 
-  // If you still call this directly somewhere (ok); the detector will also finish M5.
   function tryCraftPumpkin(){
     const inv=invRead();
-    const haveJack = (inv.jack_o_lantern?.count|0) > 0; // canonical only
-    const pumpkinsC = (inv.pumpkin_piece?.count|0);      // canonical only
+    const haveJack = (inv.jack_o_lantern?.count|0) > 0;
+    const pumpkinsC = (inv.pumpkin_piece?.count|0);
     if(!haveJack || pumpkinsC<3) return false;
 
     invDec(inv,'jack_o_lantern',1);
@@ -538,32 +520,44 @@
     return true;
   }
 
-  function finishMission5(){
-    mission5Active=false; setNight(false); clearPumpkins(); clearTimer();
+  // Ensure mission UI/HUD flips to 5 immediately + unlock M6
+  function bumpMission5UI(){
     _setMissions(5);
-    try{ localStorage.setItem('izzaMission5_done','1'); }catch{}
     try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', 5); }catch{}
+    try{ localStorage.setItem('izzaMission5_done','1'); }catch{}
+    // nudge common HUD/indicators if present
     try{ IZZA.emit('missions-updated',{completed:5}); }catch{}
     try{ IZZA.emit('mission-complete',{id:5,name:'Night of the Lantern'}); }catch{}
+    try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
+    try{ if (typeof window.updateStars==='function') window.updateStars(5); }catch{}
+    try{ if (IZZA?.api?.UI?.refresh) IZZA.api.UI.refresh(); }catch{}
+  }
 
-    // Spawn Mission 6 hook
-    try{ localStorage.setItem('izzaMission6_hook','1'); }catch{}
-    try{ IZZA.emit('mission6-hook', { from:5 }); }catch{}
+  // Clean unlock signal for Mission 6 (what to look for)
+  function unlockMission6(){
+    try{ localStorage.setItem('izzaMission6_unlocked','1'); }catch{}
+    try{ IZZA.emit('mission-available',{id:6,name:'Mission 6'}); }catch{}
+    try{ IZZA.emit('m6-unlocked'); }catch{}
+  }
 
-    // Congrats popup
+  function finishMission5(){
+    mission5Active=false;
+    setNight(false);
+    clearPumpkins();
+    clearTimer();
+    WOLVES.length = 0; // clear any remaining wolves
+
+    bumpMission5UI();
+    unlockMission6();
+
     try{
-      IZZA?.api?.UI?.popup?.({
-        style:'agent',
-        title:'Mission 5 Complete',
-        body:'Pumpkin Armour crafted. Set bonus active!',
-        timeout:2600
-      });
+      IZZA?.api?.UI?.popup?.({style:'agent',title:'Mission Completed',body:'Pumpkin Armour crafted. Set bonus active!',timeout:2200});
     }catch{
       const el=document.createElement('div');
       el.style.cssText='position:absolute;left:50%;top:18%;transform:translateX(-50%);background:rgba(10,12,20,.92);color:#b6ffec;padding:14px 18px;border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
-      el.innerHTML='<strong>Mission 5 Complete</strong><div>Pumpkin Armour crafted. Set bonus active!</div>';
+      el.innerHTML='<strong>Mission Completed</strong><div>Pumpkin Armour crafted. Set bonus active!</div>';
       (document.getElementById('gameCard')||document.body).appendChild(el);
-      setTimeout(()=>el.remove(),2400);
+      setTimeout(()=>el.remove(),2000);
     }
   }
 
@@ -574,42 +568,54 @@
   }
 
   // ---------------- update ----------------
-  function onUpdate({ now, dt=16 }){
+  let _lastTick = performance.now();
+  function onUpdate({ now }){
+    const dt = Math.max(16, now - (_lastTick||now));
+    _lastTick = now;
+
     if (mission5Active){
       if ((now - mission5Start) > M5_MS){
-        mission5Active=false; setNight(false); clearPumpkins(); clearTimer();
-        werewolves.length = 0;
-        try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{} // respawn jack on fail
+        mission5Active=false; setNight(false); clearPumpkins(); clearTimer(); WOLVES.length=0;
+        try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{}
         IZZA.toast?.('Mission 5 failed — time expired.');
       }
       if (now >= werewolfNext){
-        if (isMoving()) spawnWerewolf();
-        werewolfNext = now + 30000;
+        if (isMoving()) spawnWerewolf();   // spawn only if you’re moving to keep tension
+        werewolfNext = now + 30000;        // every ~30s window
       }
       updateTimer(now);
     }
-    // wolves keep updating while active
-    if (mission5Active) updateWerewolves(dt);
+
+    // update wolves regardless so they fade out nicely after mission ends
+    updateWolves(dt*0.06); // scale to game movement speeds
   }
 
+  // ---------------- Armoury recipe registration ----------------
+  // NOTE: leave registration to your Armoury plugin; M5 no longer injects DOM buttons.
+
   // ---------------- wire up ----------------
-  try { IZZA.on('render-under', renderM5); } catch {}
+  try { IZZA.on('render-under', renderM5Under); } catch {}
+  try { IZZA.on('render-post', renderM5Over); } catch {}
   try { IZZA.on('update-post', onUpdate); } catch {}
+
   IZZA.on?.('ready', (a)=>{
     api = a;
-    IZZA.on?.('render-under', renderM5);
-    IZZA.on?.('update-post', onUpdate);
+    IZZA.on?.('render-under', renderM5Under);
+    IZZA.on?.('render-post',  renderM5Over);
+    IZZA.on?.('update-post',  onUpdate);
     wireB();
-    // *As requested*: check inventory immediately on boot
-    onInvChangeCheckM5();
   });
 
-  // Re-render when inventory changes (and check completion)
+  // Optional: if your inventory system toggles things that should end M5, check here
+  function onInvChangeCheckM5(){
+    if (!mission5Active) return;
+    // (kept simple — crafting path already calls finishMission5)
+  }
   window.addEventListener('izza-inventory-changed', ()=>{
     try{ IZZA.emit?.('render-under'); }catch{}
     onInvChangeCheckM5();
   });
 
-  IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); werewolves.length=0; });
+  IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
 
 })();
