@@ -811,8 +811,7 @@ function unequipArmorSlot(slot){
   if (id === 'cardboardArms') {
     return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}"><rect x="2" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="22" y="10" width="8" height="12" rx="3" fill="#caa468"/><rect x="4" y="13" width="4" height="6" fill="#9b7b4f"/><rect x="24" y="13" width="4" height="6" fill="#9b7b4f"/></svg>`;
   }
-  // ... other icons or a default ...
-}
+    
 // --- NEW: Pumpkin Armour piece icons ---
 if (id === 'pumpkinHelmet') {
   return `<svg viewBox="0 0 32 32" width="${w||24}" height="${h||24}">
@@ -847,6 +846,8 @@ if (id === 'pumpkinArms') {
     <rect x="2" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/>
     <rect x="22" y="10" width="8" height="12" rx="3" fill="url(#pg4)"/>
   </svg>`;
+}
+  // ... other icons or a default ...
 }
   // Shop / Tutorial handlers (kept)
   function openShop(){
