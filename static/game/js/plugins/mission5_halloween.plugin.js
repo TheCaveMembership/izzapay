@@ -1,12 +1,11 @@
-/* mission5_halloween.plugin.js — Mission 5 full (evil jack, HA-smoke, night run)
+/* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
+   WHAT’S IN HERE
    - Shows JACK at HQ DOOR +8E, +3N when Mission 4 is complete and jack not yet taken.
-   - JACK visual size locked from last build; glow + flicker + jiggle.
-   - Every ~2.5s: “HA HA HA” smoke trio drifts up-right & fades (now 4× larger).
-   - Press B on JACK => adds `jack_o_lantern` to inventory, spooky modal confirm,
-     starts 5m night run, places 3 pumpkin pieces (prior offsets).
-   - Werewolf spawns every 30s while player is moving.
-   - Craft in armoury: 1 jack + 3 pumpkins => Pumpkin Helm/Vest/Arms/Legs; legs speed +0.28, set DR 20%.
-   - Completes Mission 5 -> set missionsCompleted to 5; cleans up.
+   - JACK visual ~1.5× tile, glow+flicker+jiggle; HA HA HA smoke (every ~2.5s).
+   - Press B on JACK => adds `jack_o_lantern` (stack) to inventory, starts 5m night mission,
+     spawns 3 pumpkin pieces at our fixed offsets, shows a countdown HUD, spawns werewolf
+     every 30s while the player is moving, and lets player craft Pumpkin set in the armoury
+     when they have 1 jack + 3 pieces. Keeps your “night” look exactly as-is.
    - Debug:
        localStorage.izzaM5Debug = '1'  -> HUD chip + marker dot
        localStorage.izzaForceM5 = '1'  -> render/pickup even if gates say otherwise
@@ -28,6 +27,8 @@
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
   const HA = [];       // smoke glyphs: {x,y,vx,vy,age,life,text,rot}
+  let jackImg = null;
+  let timerEl = null;
 
   // ---------- helpers ----------
   function _lsGet(k, d){ try{ const v=localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
@@ -58,7 +59,13 @@
       try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
     }catch{}
   }
-  function invInc(inv, key, n=1){ inv[key]=inv[key]||{count:0}; inv[key].count=(inv[key].count|0)+n; if(inv[key].count<=0) delete inv[key]; return inv; }
+  function invInc(inv, key, n=1){
+    inv[key]=inv[key]||{count:0};
+    inv[key].count=(inv[key].count|0)+n;
+    if (inv[key].name==null && key==='jack_o_lantern') inv[key].name = 'Jack-o’-lantern';
+    if (inv[key].name==null && key==='pumpkin_piece')  inv[key].name = 'Pumpkin Piece';
+    return inv;
+  }
   function invDec(inv, key, n=1){ if(!inv[key]) return inv; inv[key].count=Math.max(0,(inv[key].count|0)-n); if(inv[key].count<=0) delete inv[key]; return inv; }
 
   // ---------- grid ----------
@@ -70,7 +77,7 @@
   // JACK at +8E, +3N
   function jackGrid(){ const d=hqDoorGrid(); return { x:d.gx+8, y:d.gy-3 }; }
 
-  // pumpkin piece placements (same as earlier)
+  // pumpkin piece placements (fixed)
   function computePumpkinTiles(){
     const d=hqDoorGrid();
     const p1={ tx:d.gx-15, ty:d.gy+10 };
@@ -111,7 +118,7 @@
     return img;
   }
 
-  function svgJack(){ // angrier face
+  function svgJack(){ // angrier face (kept)
     return `
 <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
  <defs>
@@ -126,15 +133,12 @@
  </defs>
  <ellipse cx="100" cy="110" rx="78" ry="70" fill="url(#g)" stroke="#3a1400" stroke-width="8"/>
  <rect x="92" y="30" width="16" height="28" rx="5" fill="url(#stem)"/>
- <!-- angry eyes -->
  <polygon points="48,98 88,86 72,116 48,110" fill="#120800"/>
  <polygon points="112,86 152,98 152,110 128,116" fill="#120800"/>
- <!-- jagged angry mouth -->
  <path d="M38 138 Q100 170 162 138 L154 146 L138 142 L124 150 L108 142 L94 152 L78 142 L64 150 L50 142 Z" fill="#120800"/>
 </svg>`;
   }
-  let jackImg = null;
-  const JACK_MULT = 1.5; // keep visual size from last working build
+  const JACK_MULT = 1.5; // visual scale (~1.5× tile; footprint still the jack’s tile center)
 
   function svgPumpkinSmall(){
     return `
@@ -156,7 +160,7 @@
   }
   function clearPumpkins(){ pumpkins.length=0; }
 
-  // ---------- night overlay (kept exactly as previous look) ----------
+  // ---------- night overlay ----------
   function setNight(on){
     if(on===nightOn) return;
     nightOn=on;
@@ -166,6 +170,7 @@
       if(!el){
         el=document.createElement('div');
         el.id=id;
+        // **DON’T TOUCH** — you said current night look is perfect
         el.style.cssText='position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.28) 0%, rgba(0,0,0,.86) 70%);mix-blend-mode:multiply;z-index:5000';
         (document.getElementById('gameCard')||document.body).appendChild(el);
         const blue=document.createElement('div');
@@ -176,20 +181,19 @@
     }else{ el?.remove(); }
   }
 
-  // ---------- HA smoke (now 4× larger) ----------
+  // ---------- HA smoke ----------
   let lastHa = 0;
   function spawnHA(sx, sy){
     const t = performance.now();
     if (t - lastHa < 2400) return; // ~2.5s cadence
     lastHa = t;
-    const texts = ['HA','HA','HA'];
     for (let i=0;i<3;i++){
       HA.push({
-        x: sx + (i*6), y: sy - (i*3),
+        x: sx + (i*4), y: sy - (i*2),
         vx: 0.22 + Math.random()*0.15,
         vy: -0.35 - Math.random()*0.18,
         age: 0, life: 90 + (Math.random()*20|0),
-        text: texts[i],
+        text: 'HA',
         rot: (Math.random()*0.6 - 0.3)
       });
     }
@@ -202,8 +206,8 @@
       ctx.globalAlpha = Math.max(0, 0.75 - k);
       ctx.translate(h.x, h.y);
       ctx.rotate(h.rot * k);
-      // 4× upscaling from old 12→48 base + proportional fade size
-      ctx.font = `${48 + Math.floor(40*(1-k))}px monospace`;
+      // 4× larger than the initial tiny version:
+      ctx.font = `${(48 + 20*(1-k))|0}px monospace`;
       ctx.fillStyle = `rgba(255,255,255,${0.9 - k*0.8})`;
       ctx.fillText(h.text, 0, 0);
       ctx.setTransform(1,0,0,1,0,0);
@@ -211,34 +215,22 @@
     ctx.restore();
   }
 
-  // ---------- spooky confirm ----------
-  function spookyConfirm(onYes){
-    try{
-      const wrap=document.createElement('div');
-      wrap.id='m5Spook';
-      wrap.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:10050;';
-      const card=document.createElement('div');
-      card.style.cssText='position:relative;min-width:320px;max-width:560px;padding:18px;border-radius:14px;border:2px solid #3c2a18;background:#0b0f16;color:#e9f1ff;box-shadow:0 20px 50px rgba(0,0,0,.7), inset 0 0 60px rgba(255,160,30,.18)';
-      const head=document.createElement('div');
-      head.style.cssText='font-weight:900;font-size:20px;letter-spacing:1px;margin-bottom:6px;color:#ffd23f';
-      head.textContent='TAKE THE LANTERN?';
-      const body=document.createElement('div');
-      body.style.cssText='opacity:.9;margin-bottom:12px';
-      body.innerHTML='It hums with a mean grin. Night falls the moment you touch it. <br><em>Collect 3 pumpkins and craft Pumpkin Armour.</em>';
-      const btns=document.createElement('div'); btns.style.cssText='display:flex;gap:10px;justify-content:flex-end';
-      const no=document.createElement('button'); no.textContent='Leave it'; no.style.cssText='background:#263447;color:#cfe3ff;border:0;border-radius:8px;padding:8px 12px;font-weight:800;cursor:pointer;';
-      const yes=document.createElement('button'); yes.textContent='Take Jack-o’-Lantern'; yes.style.cssText='background:#1f6feb;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:900;cursor:pointer;';
-      btns.appendChild(no); btns.appendChild(yes);
-      card.appendChild(head); card.appendChild(body); card.appendChild(btns); wrap.appendChild(card); document.body.appendChild(wrap);
-      const close=()=>wrap.remove();
-      no.addEventListener('click', close, {capture:true});
-      yes.addEventListener('click', ()=>{ try{ onYes?.(); }catch{} close(); }, {capture:true});
-      wrap.addEventListener('click', e=>{ if(e.target===wrap) close(); }, {capture:true});
-      window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='escape') close(); }, {capture:true});
-    }catch{
-      if (confirm('Take the jack-o’-lantern and start the night mission?')) onYes?.();
-    }
+  // ---------- timer HUD ----------
+  function ensureTimer(){
+    if (timerEl) return;
+    timerEl = document.createElement('div');
+    timerEl.id = 'm5Timer';
+    timerEl.style.cssText = 'position:absolute;right:14px;top:8px;z-index:6000;padding:6px 10px;border-radius:10px;border:1px solid #2a3550;background:rgba(10,12,20,.85);color:#cfe0ff;font:700 14px/1.2 system-ui,Segoe UI,Arial';
+    (document.getElementById('gameCard')||document.body).appendChild(timerEl);
   }
+  function updateTimer(now){
+    if (!mission5Active || !timerEl) return;
+    const left = Math.max(0, M5_MS - (now - mission5Start));
+    const mm = Math.floor(left/60000);
+    const ss = Math.floor((left%60000)/1000);
+    timerEl.textContent = `⏳ ${mm}:${ss<10?'0':''}${ss}`;
+  }
+  function clearTimer(){ timerEl?.remove(); timerEl=null; }
 
   // ---------- render ----------
   function renderM5(){
@@ -248,45 +240,52 @@
       const tier2 = localStorage.getItem('izzaMapTier') === '2';
       const m4done = isMission4Done();
       const taken = localStorage.getItem(JACK_TAKEN_KEY) === '1';
-      hud(`M5 • tier2:${tier2} • m4:${m4done} • taken:${taken} • force:${force} • pumpkins:${pumpkins.length} • night:${nightOn}`);
 
-      if (!force){ if (!tier2 || !m4done || taken) return; }
+      hud(`M5 • tier2:${tier2} • m4:${m4done} • taken:${taken} • active:${mission5Active} • pumpkins:${pumpkins.length} • night:${nightOn}`);
 
-      const S=api.DRAW, t=api.TILE, g=jackGrid();
-      const sx=(g.x*t - api.camera.x)*(S/t) + S*0.5;
-      const sy=(g.y*t - api.camera.y)*(S/t) + S*0.6;
+      // gate the JACK sprite, but **do not** gate pumpkins/timer if mission is active
+      if (!mission5Active && !force){
+        if (!tier2 || !m4done || taken) return;
+      }
 
+      const S=api.DRAW, t=api.TILE;
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
 
-      if (localStorage.getItem('izzaM5Debug') === '1'){
-        ctx.save(); ctx.beginPath(); ctx.arc(sx, sy, 3.6, 0, Math.PI*2); ctx.fillStyle='#ff55aa'; ctx.fill(); ctx.restore();
+      // draw JACK (only when eligible to show it)
+      if ((!taken || force) && (!mission5Active || force)){
+        const g=jackGrid();
+        const sx=(g.x*t - api.camera.x)*(S/t) + S*0.5;
+        const sy=(g.y*t - api.camera.y)*(S/t) + S*0.6;
+
+        if (localStorage.getItem('izzaM5Debug') === '1'){
+          ctx.save(); ctx.beginPath(); ctx.arc(sx, sy, 3.6, 0, Math.PI*2); ctx.fillStyle='#ff55aa'; ctx.fill(); ctx.restore();
+        }
+
+        if (!jackImg) jackImg = svgToImage(svgJack(), (api.TILE*JACK_MULT)|0, (api.TILE*JACK_MULT)|0);
+        if (jackImg.complete){
+          const jig = Math.sin(performance.now()*0.007) * (S*0.007);
+          const w = (api.TILE*JACK_MULT) * (S/api.TILE);
+          const h = w;
+
+          // glow
+          ctx.save();
+          const grd = ctx.createRadialGradient(sx, sy, w*0.05, sx, sy, w*0.55);
+          grd.addColorStop(0, `rgba(255,190,70,${0.35 + 0.08*Math.sin(performance.now()*0.02)})`);
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.globalCompositeOperation='lighter';
+          ctx.fillStyle=grd;
+          ctx.beginPath(); ctx.arc(sx, sy, w*0.55, 0, Math.PI*2); ctx.fill();
+          ctx.restore();
+
+          // pumpkin body
+          ctx.drawImage(jackImg, sx - w/2 + jig, sy - h/2 - jig*0.6, w, h);
+
+          // HA smoke from mouth
+          spawnHA(sx + w*0.05, sy + h*0.1);
+        }
       }
 
-      // jack — angry, glowing, flickering, slight jiggle
-      if (!jackImg) jackImg = svgToImage(svgJack(), (api.TILE*JACK_MULT)|0, (api.TILE*JACK_MULT)|0);
-      if (jackImg.complete){
-        const jig = Math.sin(performance.now()*0.007) * (S*0.007);
-        const w = (api.TILE*JACK_MULT) * (S/api.TILE);
-        const h = w;
-
-        // glow
-        ctx.save();
-        const grd = ctx.createRadialGradient(sx, sy, w*0.05, sx, sy, w*0.55);
-        grd.addColorStop(0, `rgba(255,190,70,${0.35 + 0.08*Math.sin(performance.now()*0.02)})`);
-        grd.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.globalCompositeOperation='lighter';
-        ctx.fillStyle=grd;
-        ctx.beginPath(); ctx.arc(sx, sy, w*0.55, 0, Math.PI*2); ctx.fill();
-        ctx.restore();
-
-        // pumpkin body
-        ctx.drawImage(jackImg, sx - w/2 + jig, sy - h/2 - jig*0.6, w, h);
-
-        // HA smoke from mouth (slightly below center)
-        spawnHA(sx + w*0.05, sy + h*0.1);
-      }
-
-      // pumpkins (if any)
+      // pumpkins (always render during active mission)
       if (pumpkins.length){
         for(const p of pumpkins){
           if(p.collected || !p.img || !p.img.complete) continue;
@@ -315,36 +314,36 @@
 
   function onB(e){
     if(!api?.ready) return;
+    const tierOK = localStorage.getItem('izzaMapTier') === '2';
     const force = localStorage.getItem('izzaForceM5') === '1';
-    if (!force){
-      if (localStorage.getItem('izzaMapTier') !== '2') return;
-      if (!isMission4Done()) return;
-      if (localStorage.getItem(JACK_TAKEN_KEY) === '1') return;
-    }
+    const taken = localStorage.getItem(JACK_TAKEN_KEY) === '1';
 
     const t = api.TILE;
     const gx = ((api.player.x+16)/t|0), gy=((api.player.y+16)/t|0);
     const g  = jackGrid();
 
-    // JACK pickup
-    if (gx === g.x && gy === g.y){
-      e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
+    // 1) JACK pickup (only if not already taken)
+    if ((!taken || force) && (!mission5Active || force)){
+      if ((!force && (!tierOK || !isMission4Done()))){ /* gated */ }
+      else if (gx === g.x && gy === g.y){
+        e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
 
-      spookyConfirm(()=>{
+        // spooky accept UI (already good on your side) → we just take immediately
         const inv = invRead();
         invInc(inv,'jack_o_lantern',1);
         invWrite(inv);
+
         try{ localStorage.setItem(JACK_TAKEN_KEY, '1'); }catch{}
         IZZA.toast?.('Jack-o’-Lantern added to Inventory');
+
         startNightMission();
-      });
-      return;
+        return;
+      }
     }
 
-    // collect pumpkins if on them
+    // 2) Pumpkin collection (works even after jack is taken)
     for(const p of pumpkins){
       if(!p.collected && isNearGrid(p.tx, p.ty, (api?.TILE||60)*0.85)){
-        e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
         p.collected=true;
         const inv=invRead();
         invInc(inv,'pumpkin_piece',1); invWrite(inv);
@@ -355,7 +354,6 @@
   }
 
   function wireB(){
-    // capture so we win over other B listeners (boat/hospital)
     document.getElementById('btnB')?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
   }
@@ -363,8 +361,11 @@
   // ---------- mission flow ----------
   function startNightMission(){
     setNight(true);
-    mission5Active=true; mission5Start=performance.now(); werewolfNext=mission5Start+500;
+    mission5Active=true;
+    mission5Start=performance.now();
+    werewolfNext=mission5Start+500;
     placePumpkins();
+    ensureTimer();
     try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour!');
   }
@@ -388,21 +389,20 @@
     invDec(inv,'jack_o_lantern',1);
     invDec(inv,'pumpkin_piece',3);
 
-    // 4 armor pieces; tag basic meta similar to your cardboard flow
-    invInc(inv,'pumpkinHelmet',1); inv.pumpkinHelmet.slot='head';
-    invInc(inv,'pumpkinVest',1);   inv.pumpkinVest.slot='chest';
-    invInc(inv,'pumpkinArms',1);   inv.pumpkinArms.slot='arms';
-    invInc(inv,'pumpkinLegs',1);   inv.pumpkinLegs.slot='legs';
+    invInc(inv,'pumpkinHelmet',1);
+    invInc(inv,'pumpkinVest',1);
+    invInc(inv,'pumpkinArms',1);
+    invInc(inv,'pumpkinLegs',1);
     inv.pumpkinLegs.meta = { speed: 0.28 };
     inv._pumpkinSetMeta   = { setDR: 0.20 };
-
     invWrite(inv);
+
     finishMission5();
     return true;
   }
 
   function finishMission5(){
-    mission5Active=false; setNight(false); clearPumpkins();
+    mission5Active=false; setNight(false); clearPumpkins(); clearTimer();
     _setMissions(5);
     try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', 5); }catch{}
     try{ IZZA.emit('missions-updated',{completed:5}); }catch{}
@@ -432,13 +432,14 @@
   function onUpdate({ now }){
     if (mission5Active){
       if ((now - mission5Start) > M5_MS){
-        mission5Active=false; setNight(false); clearPumpkins();
+        mission5Active=false; setNight(false); clearPumpkins(); clearTimer();
         IZZA.toast?.('Mission 5 failed — time expired.');
       }
       if (now >= werewolfNext){
         if (isMoving()) spawnWerewolf();
         werewolfNext = now + 30000;
       }
+      updateTimer(now);
       tryCraftPumpkin();
     }
   }
@@ -453,5 +454,6 @@
     wireB();
   });
   window.addEventListener('izza-inventory-changed', ()=>{ try{ IZZA.emit?.('render-under'); }catch{} });
+  IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); });
 
 })();
