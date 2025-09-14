@@ -1,7 +1,11 @@
 /* mission5_halloween.plugin.js
    IZZA Mission 5 — “Night of the Lantern”
-   - Spawns jack-o’-lantern when missionsCompleted == 4 (listens to M4 completion)
-   - Places jack-o’-lantern at HQ door +2E, +10S (exactly 1× tile) — one tile west of M4 box
+   - SHOW THE JACK whenever Mission 4 is completed (simple & robust):
+       • inventory meta missionsCompleted >= 4  OR
+       • localStorage izzaMissions >= 4         OR
+       • localStorage izzaMission4_done === '1' (set by M4 file)
+   - Places jack-o’-lantern at HQ door +2E, +10S (exactly 1× tile)
+     (this is EXACTLY one tile west of the Mission 4 cardboard box at +3E,+10S)
    - Interact with [B] to start a 5m night mission; pumpkins spawn at exact offsets
    - Werewolf spawns every 30s while moving at night; A to fight
    - Craft Pumpkin Armour (4 pieces) from 1 jack-o’-lantern + 3 pumpkin pieces
@@ -15,54 +19,23 @@
 
   let api = null;
   let TILE = 60;
-  let ensureRetryTimer = null, ensureRetryStopAt = 0;
 
-  // Early hooks (safety if 'ready' is late)
+  // ---- early hooks (safe if 'ready' is late) ----
   try { IZZA.on('render-under', renderUnder); IZZA.on('update-post', onUpdatePost); } catch {}
 
-  // When Mission 4 completes, place the jack if missionsCompleted == 4
-  try {
-    IZZA.on('mission-complete', p => { if ((p?.id|0) === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0); });
-  } catch {}
-  window.addEventListener('mission-complete', e => {
-    const id = (e?.detail?.id|0) || 0;
-    if (id === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
-  });
+  // Place jack as soon as M4 is declared complete
+  try { IZZA.on('mission-complete', p => { if ((p?.id|0) === 4) setTimeout(ensureJackIfM4Done, 0); }); } catch {}
+  try { IZZA.on('missions-updated',  p => { if (((p?.completed|0) >= 4)) setTimeout(ensureJackIfM4Done, 0); }); } catch {}
+  window.addEventListener('izza-inventory-changed', ()=> setTimeout(ensureJackIfM4Done, 0));
 
-  // If we load into a save that's already showing 4, ensure the jack exists (first attempt)
-  setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
+  // Also check shortly after load (covers reloads)
+  setTimeout(ensureJackIfM4Done, 0);
 
   // ---------- Core helpers ----------
   function _lsGet(k, d){ try{ const v = localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
   function _lsSet(k, v){ try{ localStorage.setItem(k, v); }catch{} }
-  function _getInv(){
-    try{
-      if (IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
-      const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
-    }catch{ return {}; }
-  }
-  function _setInv(inv){
-    try{
-      if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
-      else localStorage.setItem('izzaInventory', JSON.stringify(inv||{}));
-      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-    }catch{}
-  }
-  function _inc(inv, key, n=1){ inv[key] = inv[key]||{count:0}; inv[key].count=(inv[key].count|0)+n; return inv; }
-  function _dec(inv, key, n=1){
-    if(!inv[key]) return inv;
-    inv[key].count = Math.max(0,(inv[key].count|0)-n);
-    if((inv[key].count|0)<=0) delete inv[key];
-    return inv;
-  }
   function _missions(){ return parseInt(_lsGet('izzaMissions', '0'), 10) || 0; }
-  function _setMissions(n){
-    const cur=_missions();
-    if(n>cur) _lsSet('izzaMissions', String(n));
-    try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-  }
 
-  // Prefer inventory meta, fall back to localStorage
   function missionsCompletedMeta(){
     try{
       if (IZZA?.api?.inventory?.getMeta){
@@ -73,19 +46,24 @@
     }catch{}
     return _missions();
   }
-  function missionsIsFour(){ return missionsCompletedMeta() === 4; }
 
-  // ---------- HQ door grid (same logic as Mission 4) ----------
+  // SINGLE truthy check for “M4 is done”
+  function isM4Complete(){
+    try { if ((missionsCompletedMeta()|0) >= 4) return true; }catch{}
+    try { if ((_missions()|0) >= 4) return true; }catch{}
+    try { if (localStorage.getItem('izzaMission4_done') === '1') return true; }catch{}
+    return false;
+  }
+
+  // ---------- HQ door grid (MATCH Mission 4) ----------
   function hqDoorGrid(){
     const t = api?.TILE || TILE;
     const d = api?.doorSpawn || { x: api?.player?.x||0, y: api?.player?.y||0 };
     return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
   }
+  // Box is at {gx+3, gy+10}. Jack is one tile WEST of that: {gx+2, gy+10}.
   function jackLanternGrid(){
     const d = hqDoorGrid();
-    // EXACT same sidewalk logic/offsets as the cardboard box, but 1 tile WEST of it.
-    // M4 box is: { x: d.gx + 3, y: d.gy + 10 }
-    // Jack goes to: { x: d.gx + 2, y: d.gy + 10 }
     return { x: d.gx + 2, y: d.gy + 10 };
   }
 
@@ -150,7 +128,7 @@
 
   // ---------- Mission state ----------
   let jackGrid=null, jackImg=null, jackPlaced=false;
-  let pumpkins = []; // [{tx,ty, collected:false, img}]
+  let pumpkins = [];
   let mission5Active=false, mission5Start=0, M5_MS=5*60*1000;
   let nightOn=false, werewolfNext=0, lastPos=null;
 
@@ -158,16 +136,13 @@
   function ensureJack(){
     if (jackPlaced) return;
     jackGrid = jackLanternGrid();
-    // SIZE: 1× tile
-    jackImg  = svgToImage(svgJack(), TILE*1.0, TILE*1.0);
+    jackImg  = svgToImage(svgJack(), TILE*1.0, TILE*1.0); // EXACTLY 1 tile
     jackPlaced=true;
-    if(!ensureJack._t){ ensureJack._t=setInterval(()=>{ try{ IZZA.emit('sfx',{kind:'jack-HA',vol:0.6}); }catch{} }, 2500); }
   }
-  function clearJack(){
-    if(ensureJack._t){ clearInterval(ensureJack._t); ensureJack._t=null; }
-    jackPlaced=false; jackGrid=null; jackImg=null;
-  }
+  function ensureJackIfM4Done(){ if (isM4Complete()) ensureJack(); }
+  function clearJack(){ jackPlaced=false; jackGrid=null; jackImg=null; }
 
+  // ---------- Pumpkins ----------
   function computePumpkinTiles(){
     const d=hqDoorGrid();
     const p1={ tx:d.gx-15, ty:d.gy+10 };
@@ -206,31 +181,27 @@
     }
   }
 
-  // ---------- Render (camera-relative; M4-style; Tier 2 gate) ----------
+  // ---------- Render (MATCH M4 offsets; Tier 2) ----------
   function renderUnder(){
     try{
       if (!api?.ready) return;
       if (localStorage.getItem('izzaMapTier') !== '2') return;
 
-      // Lazy placement: if M4 is done and jack isn't placed yet, place it now.
-      if (missionsIsFour() && !jackPlaced) ensureJack();
+      // Lazy placement just in case: if M4 is done and jack isn't placed, place now.
+      if (isM4Complete() && !jackPlaced) ensureJack();
 
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
       const S=api.DRAW, t=api.TILE||TILE;
 
-      // draw jack only when missionsCompleted == 4
-      if (missionsIsFour() && jackPlaced && jackGrid && jackImg && jackImg.complete){
-        // center like M4’s box (+S*0.5, +S*0.6)
+      // draw jack only when M4 is complete (simple rule)
+      if (isM4Complete() && jackPlaced && jackGrid && jackImg && jackImg.complete){
+        // EXACT same center offsets as Mission 4 box draw (+S*0.5, +S*0.6)
         const wx = jackGrid.x * t, wy = jackGrid.y * t;
         const scr = worldToScreen(wx, wy);
         const sx = scr.sx + S*0.5;
         const sy = scr.sy + S*0.6;
-
-        ctx.save();
-        // SIZE: 1× tile
-        const w = (t*1.0)*(S/t), h = w;
+        const w = (t*1.0)*(S/t), h = w; // 1× tile
         ctx.drawImage(jackImg, sx - w/2, sy - h/2, w, h);
-        ctx.restore();
       }
 
       // pumpkins
@@ -242,9 +213,7 @@
           const sx = scr.sx + S*0.5;
           const sy = scr.sy + S*0.58;
           const w = (t*1.6)*(S/t), h = w;
-          ctx.save();
           ctx.drawImage(p.img, sx - w/2, sy - h/2, w, h);
-          ctx.restore();
         }
       }
     }catch{}
@@ -262,7 +231,7 @@
     if(!api?.ready) return;
 
     // on jack → show intro (only when visible state is correct)
-    if (missionsIsFour() && jackPlaced && jackGrid && isNearGrid(jackGrid.x, jackGrid.y, (api?.TILE||TILE)*0.9)){
+    if (isM4Complete() && jackPlaced && jackGrid && isNearGrid(jackGrid.x, jackGrid.y, (api?.TILE||TILE)*0.9)){
       e?.preventDefault?.(); e?.stopImmediatePropagation?.(); e?.stopPropagation?.();
       showNightIntro();
       return;
@@ -272,15 +241,20 @@
     for(const p of pumpkins){
       if(!p.collected && isNearGrid(p.tx, p.ty, (api?.TILE||TILE)*0.9)){
         p.collected=true;
-        const inv=_getInv();
-        _inc(inv, 'pumpkin_piece', 1); _setInv(inv);
+        try{
+          const inv = IZZA?.api?.getInventory ? JSON.parse(JSON.stringify(IZZA.api.getInventory()||{})) : JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+          inv.pumpkin_piece = inv.pumpkin_piece || {count:0};
+          inv.pumpkin_piece.count = (inv.pumpkin_piece.count|0)+1;
+          if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+          else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+          try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+        }catch{}
         IZZA.toast?.('+1 Pumpkin');
         return;
       }
     }
   }
 
-  // also hook direct DOM (your core doesn’t emit button-B)
   function wireB(){
     document.getElementById('btnB')?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
@@ -303,12 +277,18 @@
   }
 
   function acceptNightMission(){
-    const inv=_getInv();
-    _inc(inv,'jack_o_lantern',1); _setInv(inv);
+    try{
+      const inv = IZZA?.api?.getInventory ? JSON.parse(JSON.stringify(IZZA.api.getInventory()||{})) : JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+      inv.jack_o_lantern = inv.jack_o_lantern || {count:0};
+      inv.jack_o_lantern.count = (inv.jack_o_lantern.count|0)+1;
+      if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+    }catch{}
     try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
     setNight(true);
     mission5Active=true; mission5Start=performance.now(); werewolfNext=mission5Start+500;
-    ensureJack(); // ensure exists before removing in case race
+    ensureJack(); // exists before removing
     clearJack();
     placePumpkins();
     IZZA.toast?.('Mission 5 started: collect 3 pumpkins and craft Pumpkin Armour!');
@@ -337,61 +317,39 @@
   function tryCraftPumpkin(){
     if(!mission5Active) return false;
     if(!playerInArmoury()) return false;
-    const inv=_getInv();
+
+    // read/write inventory
+    let inv={};
+    try{ inv = IZZA?.api?.getInventory ? JSON.parse(JSON.stringify(IZZA.api.getInventory()||{})) : JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch{}
     const haveJack = !!(inv.jack_o_lantern && (inv.jack_o_lantern.count|0)>0);
     const pumpkinsC = (inv.pumpkin_piece && (inv.pumpkin_piece.count|0)) || 0;
     if(!haveJack || pumpkinsC<3) return false;
 
-    _dec(inv,'jack_o_lantern',1);
-    _dec(inv,'pumpkin_piece',3);
+    inv.jack_o_lantern.count = (inv.jack_o_lantern.count|0)-1;
+    if (inv.jack_o_lantern.count <= 0) delete inv.jack_o_lantern;
+    inv.pumpkin_piece.count = (pumpkinsC-3);
+    if (inv.pumpkin_piece.count <= 0) delete inv.pumpkin_piece;
 
-    _inc(inv,'pumpkinHelmet',1);
-    _inc(inv,'pumpkinVest',1);
-    _inc(inv,'pumpkinArms',1);
-    _inc(inv,'pumpkinLegs',1);
-    inv.pumpkinLegs.meta = { speed: 0.28 };
-    inv._pumpkinSetMeta   = { setDR: 0.20 };
+    inv.pumpkinHelmet = {count: ((inv.pumpkinHelmet?.count|0)+1) };
+    inv.pumpkinVest   = {count: ((inv.pumpkinVest?.count|0)+1) };
+    inv.pumpkinArms   = {count: ((inv.pumpkinArms?.count|0)+1) };
+    inv.pumpkinLegs   = {count: ((inv.pumpkinLegs?.count|0)+1), meta:{ speed:0.28 } };
+    inv._pumpkinSetMeta = { setDR: 0.20 };
 
-    _setInv(inv);
+    try{
+      if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+    }catch{}
+
     IZZA.toast?.('Crafted Pumpkin Armour (4 pcs) — set bonus active');
 
     mission5Active=false; setNight(false); clearPumpkins();
-    _setMissions(5);
+    try{ _lsSet('izzaMissions', String(Math.max(5, _missions()))); }catch{}
     agentPopup('Mission Completed', 'You’ve completed mission 5.');
     try{ IZZA.emit('mission-complete',{id:5,name:'Night of the Lantern'}); }catch{}
 
     return true;
-  }
-
-  // ---------- M4 completion assist (if needed) ----------
-  function hasCardboardSet(inv){
-    return (inv.cardboardHelmet?.count|0)>0 &&
-           (inv.cardboardVest?.count|0)>0 &&
-           (inv.cardboardArms?.count|0)>0 &&
-           (inv.cardboardLegs?.count|0)>0;
-  }
-  function maybeFinishM4AndPlaceJack(){
-    const inv=_getInv();
-    if (missionsIsFour()){ ensureJack(); return; }
-    if (_missions() >= 4){ ensureJack(); return; }
-    if (!hasCardboardSet(inv)) return;
-
-    const ui=document.getElementById('armouryUI');
-    const doPopupAndBump=()=>{
-      _setMissions(4);
-      agentPopup('Mission Completed', 'You’ve completed mission 4.');
-      try{ IZZA.emit('mission-complete',{id:4,name:'Armoury: Cardboard'}); }catch{}
-      if (missionsIsFour() || _missions()===4) ensureJack();
-    };
-    if (ui && window.getComputedStyle(ui).display!=='none'){
-      const once=()=>{ ui.removeEventListener('click', onClose, true); window.removeEventListener('keydown', onEsc, true); doPopupAndBump(); };
-      const onClose=(e)=>{ const btn=e.target && e.target.closest('#armouryClose'); if(btn){ e.preventDefault(); setTimeout(once, 0); } };
-      const onEsc=(e)=>{ if((e.key||'').toLowerCase()==='escape'){ setTimeout(once, 0); } };
-      ui.addEventListener('click', onClose, true);
-      window.addEventListener('keydown', onEsc, true);
-    } else {
-      doPopupAndBump();
-    }
   }
 
   // ---------- Wiring ----------
@@ -404,21 +362,9 @@
 
     wireB();
 
-    // initial M4 check (handles “I crafted cardboard long ago”)
-    if (missionsIsFour()) {
-      ensureJack();
-    } else {
-      // If inventory meta isn't ready yet, retry for a short window
-      ensureRetryStopAt = Date.now() + 5000; // ~5s
-      ensureRetryTimer = setInterval(()=>{
-        if (missionsIsFour()){ ensureJack(); clearInterval(ensureRetryTimer); ensureRetryTimer=null; }
-        if (Date.now() > ensureRetryStopAt && ensureRetryTimer){ clearInterval(ensureRetryTimer); ensureRetryTimer=null; }
-      }, 200);
-    }
+    // initial check (covers the “I just finished M4” case)
+    ensureJackIfM4Done();
   });
-
-  // Also catch generic inventory change (e.g., crafting via other flows)
-  window.addEventListener('izza-inventory-changed', ()=> setTimeout(maybeFinishM4AndPlaceJack, 0));
 
   // Update tick
   function onUpdatePost({ now }){
@@ -426,7 +372,7 @@
       if ((now - mission5Start) > M5_MS){
         mission5Active=false; setNight(false); clearPumpkins();
         IZZA.toast?.('Mission 5 failed — time expired.');
-        setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 800);
+        setTimeout(ensureJackIfM4Done, 800);
       }
       if (now >= werewolfNext){
         if (isMoving()) spawnWerewolf();
@@ -436,13 +382,9 @@
     }
   }
 
-  // Fallback: place after resume if already at 4
-  IZZA.on?.('resume', ()=>{ if (missionsIsFour()) ensureJack(); });
+  IZZA.on?.('resume', ()=>{ ensureJackIfM4Done(); });
 
   // Clean up
-  IZZA.on('shutdown', ()=>{
-    if (ensureRetryTimer){ clearInterval(ensureRetryTimer); ensureRetryTimer=null; }
-    clearJack(); clearPumpkins(); setNight(false);
-  });
+  IZZA.on('shutdown', ()=>{ clearJack(); clearPumpkins(); setNight(false); });
 
 })();
