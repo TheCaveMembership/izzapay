@@ -1,6 +1,6 @@
 /* mission5_halloween.plugin.js
    IZZA Mission 5 — “Night of the Lantern”
-   - Spawns jack-o’-lantern when missionsCompleted == 4 (listens to M4 completion)
+   - Spawns jack-o’-lantern when missionsCompleted >= 4 (listens to M4 completion)
    - Places jack-o’-lantern at HQ door +2E, +10S (exactly 1× tile) — one tile west of M4 box
    - Interact with [B] to start a 5m night mission; pumpkins spawn at exact offsets
    - Werewolf spawns every 30s while moving at night; A to fight
@@ -9,6 +9,10 @@
    - All art as inline SVG rasterized to canvas
 */
 (function(){
+  // --- loader flag & quick console ping (remove later if you want) ---
+  window.__M5_LOADED__ = true;
+  try { console.log('[M5] mission5_halloween.plugin.js loaded'); } catch {}
+
   if (!window.IZZA) window.IZZA = {};
   if (typeof IZZA.on !== 'function') IZZA.on = function(){};
   if (typeof IZZA.emit !== 'function') IZZA.emit = function(){};
@@ -19,7 +23,7 @@
   // Early hooks (safety if 'ready' is late)
   try { IZZA.on('render-under', renderUnder); IZZA.on('update-post', onUpdatePost); } catch {}
 
-  // When Mission 4 completes, place the jack if missionsCompleted == 4
+  // When Mission 4 completes, place the jack if missionsCompleted >= 4
   try {
     IZZA.on('mission-complete', p => { if ((p?.id|0) === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0); });
   } catch {}
@@ -28,7 +32,7 @@
     if (id === 4) setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
   });
 
-  // If we load into a save that's already showing 4, ensure the jack exists
+  // If we load into a save that's already showing >= 4, ensure the jack exists
   setTimeout(()=>{ if (missionsIsFour()) ensureJack(); }, 0);
 
   // ---------- Core helpers ----------
@@ -72,7 +76,8 @@
     }catch{}
     return _missions();
   }
-  function missionsIsFour(){ return missionsCompletedMeta() === 4; }
+  // Improvement: allow >= 4 to show jack (not exactly 4)
+  function missionsIsFour(){ return missionsCompletedMeta() >= 4; }
 
   // ---------- HQ door grid (same logic as Mission 4) ----------
   function hqDoorGrid(){
@@ -212,10 +217,13 @@
       if (!api?.ready) return;
       if (localStorage.getItem('izzaMapTier') !== '2') return;
 
+      // Safety: if M4 is done and jack isn't placed yet, place now
+      if (missionsIsFour() && !jackPlaced) ensureJack();
+
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
       const S=api.DRAW, t=api.TILE||TILE;
 
-      // draw jack only when missionsCompleted == 4
+      // draw jack only when missionsCompleted >= 4
       if (missionsIsFour() && jackPlaced && jackGrid && jackImg && jackImg.complete){
         // center like M4’s box (+S*0.5, +S*0.6)
         const wx = jackGrid.x * t, wy = jackGrid.y * t;
