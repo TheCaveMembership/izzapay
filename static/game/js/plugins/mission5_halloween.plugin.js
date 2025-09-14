@@ -478,52 +478,7 @@
       }
     }catch{}
 
-    // Fallback DOM injector (makes a button inside the Armoury modal/actions)
-    const ensureBtn = ()=>{
-      const modal = document.getElementById('armouryModal') || document.querySelector('.armoury-modal,.armory-modal');
-      if(!modal) return;
-      if (modal.querySelector('#m5CraftPumpkin')) return;
-
-      // Create button
-      const btn = document.createElement('button');
-      btn.id = 'm5CraftPumpkin';
-      btn.textContent = 'Craft Pumpkin Armour';
-      btn.style.cssText = 'margin-left:auto;padding:8px 12px;border-radius:10px;border:1px solid #2a3550;background:#1f6feb;color:#fff;font-weight:900;cursor:pointer;z-index:9001';
-
-      const actions = modal.querySelector('.actions,.footer,.buttons') || modal;
-      actions.appendChild(btn);
-
-      const refreshState = ()=>{
-        const inv=invRead();
-        const ok = (inv.jack_o_lantern?.count|0)>=1 && (inv.pumpkin_piece?.count|0)>=3;
-        btn.disabled = !ok;
-        btn.style.opacity = ok ? '1' : '0.6';
-        btn.title = ok ? '' : 'Requires 1 Jack-o’-Lantern + 3 Pumpkins';
-      };
-      refreshState();
-
-      btn.addEventListener('click', ()=>{
-        if (tryCraftPumpkin()){
-          try{ modal.querySelector('.close,.x,[data-close]')?.click(); }catch{}
-          try{ IZZA.toast?.('Pumpkin Armour crafted!'); }catch{}
-        }else{
-          try{ IZZA.toast?.('Need 1 Jack-o’-Lantern + 3 Pumpkins'); }catch{}
-        }
-      });
-
-      // Keep button state in sync while modal open
-      const obs = new MutationObserver(refreshState);
-      obs.observe(modal, { subtree:true, childList:true, attributes:true, attributeFilter:['style','class'] });
-    };
-
-    // Try right now, and also when the Armoury opens
-    ensureBtn();
-    // If your Armoury emits an event, hook it:
-    try{ window.addEventListener('armoury-opened', ensureBtn); }catch{}
-    // As a safety, poll briefly after mission starts:
-    setTimeout(ensureBtn, 300);
-    setTimeout(ensureBtn, 1200);
-  }
+    
 
   // ---------------- update ----------------
   function onUpdate({ now }){
