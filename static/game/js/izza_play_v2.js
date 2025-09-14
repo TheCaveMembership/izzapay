@@ -367,12 +367,17 @@
   function itemOwned(id){ return player.inventory.includes(id); }
 
   function openShop(){
-    const modal = document.getElementById('shopModal');
-    const list  = document.getElementById('shopList');
-    const note  = document.getElementById('shopNote');
-    list.innerHTML = '';
+  const modal = document.getElementById('shopModal');
+  const list  = document.getElementById('shopList');
+  const note  = document.getElementById('shopNote');
+  list.innerHTML = '';
 
-    SHOP_ITEMS.forEach(item=>{
+  // ⬇️ NEW: hide the two items we now render via the plugin
+  const HIDE_IDS = new Set(['bat','knuckles']);
+
+  SHOP_ITEMS
+    .filter(item => !HIDE_IDS.has(item.id))   // ⬅️ skip v2 bat/knuckles
+    .forEach(item=>{
       const locked = player.missionsCompleted < item.minMissions;
       const owned  = itemOwned(item.id);
       const li = document.createElement('div');
@@ -387,10 +392,10 @@
       list.appendChild(li);
     });
 
-    note.textContent = `Missions completed: ${player.missionsCompleted}`;
-    updateCoinUI();
-    modal.style.display='flex';
-  }
+  note.textContent = `Missions completed: ${player.missionsCompleted}`;
+  updateCoinUI();
+  modal.style.display='flex';
+}
 
   function updateShopNote(){
     const note  = document.getElementById('shopNote');
