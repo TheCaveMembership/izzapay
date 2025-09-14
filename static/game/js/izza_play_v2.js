@@ -356,8 +356,6 @@
 
   // ---------- SHOP ----------
   const SHOP_ITEMS = [
-    { id:'bat',       name:'Baseball Bat',     price:50,   minMissions:0,  type:'weapon' },
-    { id:'knuckles',  name:'Brass Knuckles',   price:75,   minMissions:0,  type:'weapon' },
     { id:'pistol',    name:'Pistol',           price:200,  minMissions:2,  type:'weapon' },
     { id:'ak',        name:'AK-47',            price:1000, minMissions:5,  type:'weapon' },
     { id:'bazooka',   name:'Bazooka',          price:2500, minMissions:8,  type:'weapon' },
