@@ -1911,7 +1911,7 @@ const _PK_ICONS = {
   const _FLAME_PATH = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
 
   function pathHelmetPK(ctx){
-    // pumpkin crown & brow that drops over eyes; leave middle open; draw glowing eyes
+    // pumpkin crown & brow; devil horns; glowing eyes (slow pulse)
     ctx.save();
     // crown
     ctx.beginPath();
@@ -1920,25 +1920,41 @@ const _PK_ICONS = {
     ctx.quadraticCurveTo(0,-14,12,1);
     ctx.lineTo(12,6); ctx.lineTo(-12,6);
     ctx.closePath(); ctx.fill();
-    // ribbing
-    ctx.strokeStyle = ORNG_D; ctx.lineWidth = 1.2;
-    for(let i=-8;i<=8;i+=4){ ctx.beginPath(); ctx.moveTo(i,0); ctx.quadraticCurveTo(i*0.6,-6,i,-10); ctx.stroke(); }
+
+    // devil horns (replace ribbing)
+    ctx.fillStyle = ORNG_D;
+    // left horn
+    ctx.beginPath();
+    ctx.moveTo(-7,-2);
+    ctx.lineTo(-3,-12);
+    ctx.lineTo(-1,-2);
+    ctx.closePath(); ctx.fill();
+    // right horn
+    ctx.beginPath();
+    ctx.moveTo(7,-2);
+    ctx.lineTo(3,-12);
+    ctx.lineTo(1,-2);
+    ctx.closePath(); ctx.fill();
 
     // brow band over eyes
     ctx.fillStyle = ORNG_D;
     ctx.fillRect(-11, 4, 22, 3);
 
-    // eyes (glow)
+    // eyes (glow + slow pulse)
+    const t = (performance.now?.()||Date.now()) * 0.001;
+    const pulse = 0.85 + 0.15 * (0.5 + 0.5*Math.sin(t*2.2)); // gentle ~0.35Hz
     function eye(x){
       ctx.save();
       ctx.translate(x,6);
+      // inner eye
       ctx.fillStyle = EYE;
       ctx.beginPath();
-      ctx.ellipse(0,0,2.2,1.6,0,0,Math.PI*2);
+      ctx.ellipse(0,0,2.2*pulse,1.6*pulse,0,0,Math.PI*2);
       ctx.fill();
-      ctx.globalAlpha = 0.45;
+      // outer glow
+      ctx.globalAlpha = 0.45 * pulse;
       ctx.beginPath();
-      ctx.ellipse(0,0,3.6,2.6,0,0,Math.PI*2);
+      ctx.ellipse(0,0,3.6*pulse,2.6*pulse,0,0,Math.PI*2);
       ctx.fill();
       ctx.restore();
     }
@@ -1991,8 +2007,12 @@ const _PK_ICONS = {
     _PK_JET_ALPHA += (target - _PK_JET_ALPHA) * ease;
     if (_PK_JET_ALPHA <= 0.02) return;
 
-    const power  = 0.9 + 0.22 * Math.sin(t*20);
+    const power  = 0.85 + 0.18 * Math.sin(t*20);
     const jitter = 0.35 * Math.sin(t*23);
+
+    // match vest directional shift
+    const f = p.facing || 'down';
+    const facingShift = { down:{x:0,y:0}, up:{x:0,y:-1}, left:{x:-1.5,y:0}, right:{x:1.5,y:0} }[f];
 
     ctx.save();
     ctx.globalAlpha *= _PK_JET_ALPHA;
@@ -2000,8 +2020,9 @@ const _PK_ICONS = {
     const feet = [-5, 5];
     feet.forEach((fx)=>{
       ctx.save();
-      ctx.translate(fx, 12);
-      ctx.scale(0.85, power);
+      // moved slightly lower (+1.5) and follow facing shift subtly
+      ctx.translate(fx + facingShift.x*0.2, 13.5 + facingShift.y*0.2);
+      ctx.scale(0.75, power); // smaller flame
 
       // hotter flame
       const grad = ctx.createLinearGradient(0,-7, 0,6);
@@ -2014,23 +2035,23 @@ const _PK_ICONS = {
 
       ctx.restore();
 
-      // Floating mini jack-o’-lantern “smoke”
+      // Floating mini jack-o’-lantern “smoke” (also follow facing shift; spawned lower)
       for(let i=0;i<2;i++){
-        const px = fx + jitter*0.3 + (i?1.4:-1.4);
-        const py = 14 + i*3;
+        const px = fx + facingShift.x*0.2 + jitter*0.3 + (i?1.3:-1.3);
+        const py = 15.5 + facingShift.y*0.2 + i*3;
         ctx.save();
         ctx.translate(px, py);
-        const s = 0.9 + 0.2*Math.sin(t*13 + i);
+        const s = 0.85 + 0.18*Math.sin(t*13 + i);
         ctx.scale(s, s);
         // pumpkin circle
-        ctx.beginPath(); ctx.arc(0,0,1.4,0,Math.PI*2);
+        ctx.beginPath(); ctx.arc(0,0,1.3,0,Math.PI*2);
         ctx.fillStyle = "#ff9a2a"; ctx.fill();
         // eyes & stem (tiny)
         ctx.fillStyle = "#6a2a00";
-        ctx.fillRect(-0.2,-2.1,0.4,0.6);
+        ctx.fillRect(-0.2,-2.0,0.4,0.55);
         ctx.fillStyle = "#4d1c00";
-        ctx.fillRect(-0.8,-0.4,0.6,0.4);
-        ctx.fillRect( 0.2,-0.4,0.6,0.4);
+        ctx.fillRect(-0.75,-0.4,0.6,0.4);
+        ctx.fillRect( 0.15,-0.4,0.6,0.4);
         ctx.restore();
       }
     });
@@ -2060,10 +2081,10 @@ const _PK_ICONS = {
     const p   = IZZA.api.player;
     const px  = p.x, py = p.y;
 
-    // same placement constants as cardboard
+    // same placement constants as cardboard (helmet slightly smaller)
     const f = p.facing || 'down';
     const facingShift = { down:{x:0,y:0}, up:{x:0,y:-1}, left:{x:-1.5,y:0}, right:{x:1.5,y:0} }[f];
-    const HELMET = { scale:2.80, ox:(facingShift.x)*0.05, oy:-12 - (f==='up'?2:0) };
+    const HELMET = { scale:2.68, ox:(facingShift.x)*0.05, oy:-12 - (f==='up'?2:0) }; // ↓ a tiny bit smaller
     const VEST   = { scale:2.40, ox:facingShift.x,         oy: 3 };
     const ARMS   = { scale:2.60, ox:facingShift.x*0.3,     oy: 2 };
     const LEGS   = { scale:2.45, ox:facingShift.x*0.2,     oy:10 };
@@ -2114,7 +2135,6 @@ const _PK_ICONS = {
     setTimeout(tick,0);
   })();
 })();
-
 /* ==== Armoury Recipe API (dynamic list for missions) ==== */
 (function initArmouryAPI(){
   const BUS_EVT = 'izza-armoury-recipes-changed';
