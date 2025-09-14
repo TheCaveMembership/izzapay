@@ -1794,6 +1794,326 @@ function _isEquipped(entry){
   // on inventory change, next render-post picks it up
   window.addEventListener('izza-inventory-changed', ()=>{ /* no-op */ });
 })();
+  /* ==== Pumpkin Armour: icons (for inventory rows) ==== */
+const _PK_ICONS = {
+  helmet:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <path d="M4 18c0-6 6-11 12-11s12 5 12 11H4z" fill="#ff7a00"/>
+       <path d="M8 18h16v3H8z" fill="#a94a00"/>
+       <path d="M10 14c1.5-2 10.5-2 12 0" stroke="#a94a00" stroke-width="1.5" fill="none"/>
+       <circle cx="13" cy="15" r="1.4" fill="#ff2a2a"/>
+       <circle cx="19" cy="15" r="1.4" fill="#ff2a2a"/>
+     </svg>`,
+  vest:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <path d="M10 4l-3 4v18h18V8l-3-4-3 2h-6z" fill="#ff7a00"/>
+       <rect x="8" y="12" width="16" height="10" rx="1.5" fill="#a94a00"/>
+       <circle cx="9" cy="10" r="3" fill="#ff7a00"/><circle cx="23" cy="10" r="3" fill="#ff7a00"/>
+       <path d="M6 6l3 4M26 6l-3 4" stroke="#30c659" stroke-width="2" />
+     </svg>`,
+  legs:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <path d="M10 6v10l-2 10h6l2-10 2 10h6l-2-10V6z" fill="#ff7a00"/>
+       <rect x="9" y="20" width="14" height="4" fill="#7a3cff"/>
+     </svg>`,
+  arms:
+    `<svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+       <rect x="2" y="10" width="8" height="12" rx="3" fill="#7a3cff"/>
+       <rect x="22" y="10" width="8" height="12" rx="3" fill="#7a3cff"/>
+       <rect x="3" y="12" width="6" height="2" fill="#ff7a00"/>
+       <rect x="3" y="16" width="6" height="2" fill="#ff7a00"/>
+       <rect x="23" y="12" width="6" height="2" fill="#ff7a00"/>
+       <rect x="23" y="16" width="6" height="2" fill="#ff7a00"/>
+     </svg>`
+};
+
+/* ensure pumpkin items have icons/metadata if not set already */
+(function ensurePumpkinMeta(){
+  const inv = _invRead();
+  _ensureItem(inv, 'pumpkinHelmet','Pumpkin Helmet','head',  _PK_ICONS.helmet);
+  _ensureItem(inv, 'pumpkinVest',  'Pumpkin Vest',  'chest', _PK_ICONS.vest);
+  _ensureItem(inv, 'pumpkinLegs',  'Pumpkin Legs',  'legs',  _PK_ICONS.legs);
+  _ensureItem(inv, 'pumpkinArms',  'Pumpkin Arms',  'arms',  _PK_ICONS.arms);
+  _invWrite(inv);
+})();
+
+/* ==== Slot-exclusive equip guard (auto-unequip same-slot items) ==== */
+(function exclusiveEquipGuard(){
+  const KEY_TS = (()=>{ // namespaced per user
+    const u = (IZZA?.api?.user?.username || 'guest').toString().replace(/^@+/,'').toLowerCase();
+    return 'izzaEquipTs_'+u;
+  })();
+  function readTs(){ try{ return JSON.parse(localStorage.getItem(KEY_TS)||'{}')||{}; }catch{ return {}; } }
+  function writeTs(ts){ try{ localStorage.setItem(KEY_TS, JSON.stringify(ts||{})); }catch{} }
+
+  let _lastFixAt = 0;
+  const COOLDOWN = 120; // ms
+
+  function enforce(){
+    const api = IZZA?.api; if(!api?.ready) return;
+    const now = performance.now?.()||Date.now();
+    if (now - _lastFixAt < COOLDOWN) return;
+
+    const inv = _invRead();
+    const ts  = readTs();
+
+    // Detect newly toggled equips & record timestamps; clear when unequipped
+    Object.entries(inv).forEach(([k,v])=>{
+      if (!v || v.type!=='armor' || !v.equippable) return;
+      const on = _isEquipped(v);
+      if (on && !ts[k]) ts[k] = Date.now();
+      if (!on && ts[k]) delete ts[k];
+    });
+
+    // Group by slot and ensure only one stays equipped (the most recently toggled one)
+    const bySlot = {};
+    Object.entries(inv).forEach(([k,v])=>{
+      if (!v || v.type!=='armor' || !v.equippable) return;
+      if (!_isEquipped(v)) return;
+      const slot = v.slot || 'misc';
+      bySlot[slot] = bySlot[slot] || [];
+      bySlot[slot].push(k);
+    });
+
+    let changed = false;
+    Object.entries(bySlot).forEach(([slot, keys])=>{
+      if (keys.length <= 1) return;
+      // pick winner = highest ts; fallback to first if missing
+      let winner = keys[0], best = ts[keys[0]]||0;
+      keys.slice(1).forEach(k=>{ const t = ts[k]||0; if (t >= best){ best=t; winner=k; } });
+      keys.forEach(k=>{
+        if (k===winner) return;
+        const v = inv[k];
+        if (v?.equipped || v?.equip || (v?.equippedCount>0)){
+          if ('equipped' in v) v.equipped = false;
+          if ('equip' in v) v.equip = false;
+          if (typeof v.equippedCount==='number') v.equippedCount = 0;
+          changed = true;
+        }
+      });
+    });
+
+    if (changed){ _invWrite(inv); try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{} }
+    writeTs(ts);
+    _lastFixAt = now;
+  }
+
+  // Run on inventory changes and periodically
+  window.addEventListener('izza-inventory-changed', enforce, {capture:true});
+  window.IZZA?.on?.('update-post', enforce);
+  setTimeout(enforce, 0);
+})();
+
+/* ==== Pumpkin armour overlays (same placement as cardboard) ==== */
+(function _pumpkinRenderOverlayInit(){
+  const ORANGE = '#ff7a00', ORNG_D = '#a94a00', PURPLE='#7a3cff', GREEN='#30c659', EYE='#ff2a2a';
+  let _PK_JET_ALPHA = 0;
+  const _FLAME_PATH = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
+
+  function pathHelmetPK(ctx){
+    // pumpkin crown & brow that drops over eyes; leave middle open; draw glowing eyes
+    ctx.save();
+    // crown
+    ctx.beginPath();
+    ctx.fillStyle = ORANGE;
+    ctx.moveTo(-12,1);
+    ctx.quadraticCurveTo(0,-14,12,1);
+    ctx.lineTo(12,6); ctx.lineTo(-12,6);
+    ctx.closePath(); ctx.fill();
+    // ribbing
+    ctx.strokeStyle = ORNG_D; ctx.lineWidth = 1.2;
+    for(let i=-8;i<=8;i+=4){ ctx.beginPath(); ctx.moveTo(i,0); ctx.quadraticCurveTo(i*0.6,-6,i,-10); ctx.stroke(); }
+
+    // brow band over eyes
+    ctx.fillStyle = ORNG_D;
+    ctx.fillRect(-11, 4, 22, 3);
+
+    // eyes (glow)
+    function eye(x){
+      ctx.save();
+      ctx.translate(x,6);
+      ctx.fillStyle = EYE;
+      ctx.beginPath();
+      ctx.ellipse(0,0,2.2,1.6,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      ctx.ellipse(0,0,3.6,2.6,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+    eye(-5.2); eye(5.2);
+    ctx.restore();
+  }
+
+  function pathVestPK(ctx){
+    // torso plate
+    ctx.fillStyle = ORANGE;
+    ctx.fillRect(-12, -8, 24, 16);
+    ctx.fillStyle = ORNG_D;
+    ctx.fillRect(-10, -3, 20, 6);
+    // shoulder pumpkins
+    ctx.fillStyle = ORANGE;
+    ctx.beginPath(); ctx.arc(-12, -8, 4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 12, -8, 4, 0, Math.PI*2); ctx.fill();
+    // green horn-like blades
+    ctx.strokeStyle = GREEN; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(-12,-12); ctx.lineTo(-9,-18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 12,-12); ctx.lineTo( 9,-18); ctx.stroke();
+  }
+
+  function pathArmsPK(ctx){
+    ctx.fillStyle = PURPLE;
+    ctx.fillRect(-16, -4, 7, 11);
+    ctx.fillRect(  9, -4, 7, 11);
+    // faint orange stripes
+    ctx.fillStyle = 'rgba(255,122,0,.85)';
+    [-13,-11,-9].forEach(x=> ctx.fillRect(x, -1, 3, 1.2));
+    [ 12, 14, 16].forEach(x=> ctx.fillRect(x, -1, 3, 1.2));
+  }
+
+  function pathLegsPK(ctx){
+    // bright orange legs with purple cuffs
+    ctx.fillStyle = ORANGE;
+    ctx.fillRect(-8, 0, 7, 14);
+    ctx.fillRect( 1, 0, 7, 14);
+    ctx.fillStyle = PURPLE;
+    ctx.fillRect(-8, 10, 7, 3);
+    ctx.fillRect( 1, 10, 7, 3);
+
+    // jets like cardboard but pumpkin-y particles when moving
+    const p = IZZA?.api?.player || {};
+    const moving = !!p.moving;
+    const t = ((p.animTime||0) * 0.02);
+
+    const target = moving ? 1 : 0;
+    const ease   = 0.18;
+    _PK_JET_ALPHA += (target - _PK_JET_ALPHA) * ease;
+    if (_PK_JET_ALPHA <= 0.02) return;
+
+    const power  = 0.9 + 0.22 * Math.sin(t*20);
+    const jitter = 0.35 * Math.sin(t*23);
+
+    ctx.save();
+    ctx.globalAlpha *= _PK_JET_ALPHA;
+
+    const feet = [-5, 5];
+    feet.forEach((fx)=>{
+      ctx.save();
+      ctx.translate(fx, 12);
+      ctx.scale(0.85, power);
+
+      // hotter flame
+      const grad = ctx.createLinearGradient(0,-7, 0,6);
+      grad.addColorStop(0.00, "#fff1a6");
+      grad.addColorStop(0.25, "#ffd24a");
+      grad.addColorStop(0.60, "#ff7a00");
+      grad.addColorStop(1.00, "rgba(210,60,0,0.9)");
+      ctx.fillStyle = grad;
+      ctx.fill(_FLAME_PATH);
+
+      ctx.restore();
+
+      // Floating mini jack-o’-lantern “smoke”
+      for(let i=0;i<2;i++){
+        const px = fx + jitter*0.3 + (i?1.4:-1.4);
+        const py = 14 + i*3;
+        ctx.save();
+        ctx.translate(px, py);
+        const s = 0.9 + 0.2*Math.sin(t*13 + i);
+        ctx.scale(s, s);
+        // pumpkin circle
+        ctx.beginPath(); ctx.arc(0,0,1.4,0,Math.PI*2);
+        ctx.fillStyle = "#ff9a2a"; ctx.fill();
+        // eyes & stem (tiny)
+        ctx.fillStyle = "#6a2a00";
+        ctx.fillRect(-0.2,-2.1,0.4,0.6);
+        ctx.fillStyle = "#4d1c00";
+        ctx.fillRect(-0.8,-0.4,0.6,0.4);
+        ctx.fillRect( 0.2,-0.4,0.6,0.4);
+        ctx.restore();
+      }
+    });
+
+    ctx.restore();
+  }
+
+  // draw helper (same as cardboard)
+  function drawPieceWorld(ctx, px, py, scale, ox, oy, pathFn){
+    const api = IZZA.api;
+    const S = api.DRAW, T = api.TILE;
+    const sx = (px - api.camera.x) * (S/T);
+    const sy = (py - api.camera.y) * (S/T);
+    const srx = Math.round(sx), sry = Math.round(sy);
+    ctx.save(); ctx.imageSmoothingEnabled = false;
+    ctx.translate(srx + S*0.5, sry + S*0.5);
+    ctx.scale(scale, scale);
+    ctx.translate(ox, oy);
+    pathFn(ctx);
+    ctx.restore();
+  }
+
+  function drawPumpkinIfEquipped(){
+    if (!IZZA?.api?.ready) return;
+    const inv = _invRead();
+    const isOn = e => !!(e && (e.equipped || e.equip || (typeof e.equippedCount==='number' && e.equippedCount>0)));
+    const p   = IZZA.api.player;
+    const px  = p.x, py = p.y;
+
+    // same placement constants as cardboard
+    const f = p.facing || 'down';
+    const facingShift = { down:{x:0,y:0}, up:{x:0,y:-1}, left:{x:-1.5,y:0}, right:{x:1.5,y:0} }[f];
+    const HELMET = { scale:2.80, ox:(facingShift.x)*0.05, oy:-12 - (f==='up'?2:0) };
+    const VEST   = { scale:2.40, ox:facingShift.x,         oy: 3 };
+    const ARMS   = { scale:2.60, ox:facingShift.x*0.3,     oy: 2 };
+    const LEGS   = { scale:2.45, ox:facingShift.x*0.2,     oy:10 };
+
+    const ctx = document.getElementById('game')?.getContext('2d'); if (!ctx) return;
+
+    // order: legs -> vest -> arms -> helmet
+    if (isOn(inv?.pumpkinLegs))   drawPieceWorld(ctx, px, py, LEGS.scale,   LEGS.ox,   LEGS.oy,   pathLegsPK);
+    if (isOn(inv?.pumpkinVest))   drawPieceWorld(ctx, px, py, VEST.scale,   VEST.ox,   VEST.oy,   pathVestPK);
+    if (isOn(inv?.pumpkinArms))   drawPieceWorld(ctx, px, py, ARMS.scale,   ARMS.ox,   ARMS.oy,   pathArmsPK);
+    if (isOn(inv?.pumpkinHelmet)) drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, pathHelmetPK);
+  }
+
+  // render on top of player
+  window.IZZA?.on?.('render-post', drawPumpkinIfEquipped);
+
+  // ===== Speed boost while Pumpkin Legs equipped =====
+  (function speedBoost(){
+    let base = null; // captured once
+    function tick(){
+      if (!IZZA?.api?.ready) return;
+      const p = IZZA.api.player || {};
+      if (!base){
+        base = {
+          speed:     p.speed,
+          moveSpeed: p.moveSpeed,
+          maxSpeed:  p.maxSpeed,
+          maxVel:    p.maxVel
+        };
+      }
+      const inv = _invRead();
+      const legsOn = !!(inv?.pumpkinLegs && _isEquipped(inv.pumpkinLegs));
+      const boost = 1.85; // ≈ car speed feel
+
+      if (legsOn){
+        if (typeof p.speed     === 'number' && typeof base.speed     === 'number') p.speed     = Math.max(base.speed,     base.speed*boost);
+        if (typeof p.moveSpeed === 'number' && typeof base.moveSpeed === 'number') p.moveSpeed = Math.max(base.moveSpeed, base.moveSpeed*boost);
+        if (typeof p.maxSpeed  === 'number' && typeof base.maxSpeed  === 'number') p.maxSpeed  = Math.max(base.maxSpeed,  base.maxSpeed*boost);
+        if (typeof p.maxVel    === 'number' && typeof base.maxVel    === 'number') p.maxVel    = Math.max(base.maxVel,    base.maxVel*boost);
+      }else if (base){
+        if (typeof p.speed     === 'number' && typeof base.speed     === 'number') p.speed     = base.speed;
+        if (typeof p.moveSpeed === 'number' && typeof base.moveSpeed === 'number') p.moveSpeed = base.moveSpeed;
+        if (typeof p.maxSpeed  === 'number' && typeof base.maxSpeed  === 'number') p.maxSpeed  = base.maxSpeed;
+        if (typeof p.maxVel    === 'number' && typeof base.maxVel    === 'number') p.maxVel    = base.maxVel;
+      }
+    }
+    window.IZZA?.on?.('update-post', tick);
+    setTimeout(tick,0);
+  })();
+})();
 
 /* ==== Armoury Recipe API (dynamic list for missions) ==== */
 (function initArmouryAPI(){
