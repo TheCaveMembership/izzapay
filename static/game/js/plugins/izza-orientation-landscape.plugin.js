@@ -168,7 +168,37 @@
         transform:translate(-50%, -50%) rotate(-90deg) !important;
         transform-origin:center center !important; z-index:20 !important;
       }
+/* Craft button placement inside rotated stage */
+#izzaLandStage #btnCraft{
+  position:absolute !important;
+  right:14px !important;
+  bottom:158px !important;   /* sits ABOVE the Full button (Full is ~116px) */
+  z-index:10012 !important;
+  transform:none !important;
+}
+/* CRAFTING MODAL — like enter/shop: rotate the card only */
+body[data-fakeland="1"] #craftingModal{
+  position:fixed !important;
+  left:50% !important;
+  top:50% !important;
+  right:auto !important;
+  bottom:auto !important;
+  transform:translate(-50%, -50%) !important; /* DO NOT rotate the container */
+  z-index:10055 !important;                   /* above friends/bell/fire */
+  pointer-events:auto !important;
+}
 
+body[data-fakeland="1"] #craftingModal .card{
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
+
+/* normalize descendants so nothing stays sideways */
+body[data-fakeland="1"] #craftingModal .card *{
+  rotate:0 !important;
+  transform:none !important;
+  writing-mode:horizontal-tb !important;
+}
       /* ---------- TRADE MODAL: rotate CONTENT ONLY (leave container positioning alone) ---------- */
       body[data-fakeland="1"] #tradeModal > .izza-upright{
         transform:rotate(90deg) !important;
@@ -563,7 +593,8 @@ body:not([data-fakeland="1"]) #hospitalShop{
     const chat=findChatDock(); if(chat) adoptOnce(chat,'chat');
     ['heartsHud','mpNotifBell','mpNotifBadge','mpFriendsToggleGlobal','mpFriendsPopup'].forEach(id=>{ const n=byId(id); if(n) adoptOnce(n,id); });
     const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn'); if(fire) adoptOnce(fire,'btnFire');
-
+const craftBtn = document.getElementById('btnCraft'); 
+if (craftBtn) adoptOnce(craftBtn, 'btnCraft');
     // >>> NEW: adopt inventory if present (so it layers correctly within the stage)
     const inv = document.getElementById('invPanel'); if (inv) adoptOnce(inv, 'invPanel');
 
@@ -629,7 +660,8 @@ body:not([data-fakeland="1"]) #hospitalShop{
       });
       const fire=byId('btnFire')||byId('fireBtn')||document.querySelector('.btn-fire,.fire,button[data-role="fire"],#shootBtn');
       if(fire && !stage.contains(fire)) adoptOnce(fire,'btnFire');
-
+const craftBtn = document.getElementById('btnCraft');
+if (craftBtn && !stage.contains(craftBtn)) adoptOnce(craftBtn,'btnCraft');
       // adopt bell/friends only; lobby stays in-place
       scheduleModalFix();
 
