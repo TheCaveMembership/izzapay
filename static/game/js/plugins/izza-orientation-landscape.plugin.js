@@ -188,8 +188,8 @@ body[data-fakeland="1"] #craftingModal{
   pointer-events:auto !important;
 }
 
-body[data-fakeland="1"] #craftingModal .card{
-  transform: rotate(180deg) !important;
+body[data-fakeland="1"] #craftingModal .card {
+  transform: rotate(0deg) scale(0.8) !important;
   transform-origin: center center !important;
 }
 
