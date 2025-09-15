@@ -121,6 +121,8 @@
     });
     setLS('izzaMissions', String(missions));
 
+try { IZZA?.api?.inventory?.setMeta?.('missionsCompleted', missions|0); } catch {}
+     
     // Hearts — write BOTH keys so v4_hearts.js (global key) sees it
     if (snap.player && typeof snap.player.heartsSegs === 'number'){
       const segs = Math.max(0, snap.player.heartsSegs|0);
