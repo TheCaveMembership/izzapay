@@ -91,17 +91,17 @@ const missionState = IZZA?.api?.getMissionState
     : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
 
     // WALLET ONLY lives in snapshot.coins
-    return {
-  version: 1,
-  player: { x: pos.x|0, y: pos.y|0, heartsSegs },
-  coins: onHand|0,                           // WALLET ONLY
-  missions: missions|0,                      // legacy numeric count
-  missionState: missionState || {},          // full structured state
-  inventory: inv || {},
-  bank: bank || { coins:0, items:{}, ammo:{} },
-  timestamp: Date.now()
-};
-+}
+      return {
+    version: 1,
+    player: { x: pos.x|0, y: pos.y|0, heartsSegs },
+    coins: onHand|0,
+    missions: missions|0,
+    missionState: missionState || {},
+    inventory: inv || {},
+    bank: bank || { coins:0, items:{}, ammo:{} },
+    timestamp: Date.now()
+  };
+} // end buildSnapshot
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   // “blank” means: ... (we don't want this anymore)
 function looksEmpty(_s){
