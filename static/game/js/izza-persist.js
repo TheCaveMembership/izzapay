@@ -104,6 +104,53 @@ const missionState = IZZA?.api?.getMissionState
 } // end buildSnapshot
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   // “blank” means: ... (we don't want this anymore)
+  // ---- hydrate missions from server + keep all counters in sync
+function applyServerMissions(seed){
+  try{
+    if (!seed) return;
+
+    // 1) Apply the structured missionState
+    const ms = seed.missionState && typeof seed.missionState === 'object' ? seed.missionState : {};
+    if (Object.keys(ms).length){
+      if (IZZA?.api?.setMissionState){
+        IZZA.api.setMissionState(ms);
+      } else if (window.setMissionEntry){
+        for (const [id, state] of Object.entries(ms)){
+          try{ setMissionEntry(id, state); }catch{}
+        }
+      } else {
+        localStorage.setItem('izzaMissionState', JSON.stringify(ms));
+      }
+    }
+
+    // 2) Figure out the numeric "missions completed" count
+    let count = Number(seed.missions)|0;
+    if (!count){
+      // fallback: infer from missionState
+      try{
+        count = Object.values(ms)
+          .filter(v => v === true || v === 'done' || v?.done === true || v?.status === 'done')
+          .length | 0;
+      }catch{ count = 0; }
+    }
+
+    // 3) Push to both the meta and the legacy localStorage key
+    try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', count); }catch{}
+    try{ localStorage.setItem('izzaMissions', String(count)); }catch{}
+
+    // 4) Convenience flags (so M4/M5 scripts “see” past completions on fresh load)
+    try{ if (count >= 4) localStorage.setItem('izzaMission4_done','1'); }catch{}
+    try{ if (count >= 5) localStorage.setItem('izzaMission5_done','1'); }catch{}
+
+    // 5) Nudge any listeners and the saver
+    try{ IZZA.emit?.('missions-updated', { hydrated:true, completed: count }); }catch{}
+    try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
+
+    console.log('[persist] missions hydrated →', { count, msKeys:Object.keys(ms).length });
+  }catch(e){
+    console.warn('[persist] applyServerMissions failed', e);
+  }
+}
 function looksEmpty(_s){
   // We no longer block any snapshot as "blank".
   // Even 0 coins / empty inv / only missionState should still save.
@@ -143,43 +190,43 @@ function looksEmpty(_s){
 
   // wait for core ready
   if (window.IZZA?.on) {
-    IZZA.on('ready', ()=>{ ready=true; armOnce(); });
-  } else {
-    // fallback in case plugin loads after ready
-    setTimeout(()=>{ ready=true; armOnce(); }, 2500);
-  }
-  // also give ample grace after any tier reloads
-  setTimeout(()=>{ armOnce(); }, 7000);
-
-  (async function init(){
-    const res = await Persist.load();
-    if(res.ok) serverSeed = res.data;
-    if (serverSeed?.missionState && Object.keys(serverSeed.missionState).length) {
-  try {
-    if (IZZA?.api?.setMissionState) {
-      // If your core exposes a bulk setter
-      IZZA.api.setMissionState(serverSeed.missionState);
-    } else if (window.setMissionEntry) {
-      // Fall back: push each entry through setMissionEntry
-      for (const [id, state] of Object.entries(serverSeed.missionState)) {
-        try { setMissionEntry(id, state); } catch {}
-      }
-    } else {
-      // Legacy: write directly
-      localStorage.setItem('izzaMissionState', JSON.stringify(serverSeed.missionState));
-    }
-    console.log('[persist] hydrated missionState from server', serverSeed.missionState);
-  } catch(e) {
-    console.warn('[persist] failed to hydrate missionState', e);
-  }
+  IZZA.on('ready', ()=>{
+    ready = true;
+    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+    armOnce();
+    tryKick('post-hydrate'); // push merged state back to server
+  });
+} else {
+  setTimeout(()=>{
+    ready = true;
+    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+    armOnce();
+    tryKick('post-hydrate-fallback');
+  }, 2500);
 }
-    loaded=true;
-    if (serverSeed && !looksEmpty(serverSeed)) {
-      console.log('[persist] server has non-empty snapshot; blank overwrites disabled');
-    } else {
-      console.log('[persist] server empty or missing; waiting for first non-blank local save');
-    }
-  })();
+// also give ample grace after any tier reloads
+setTimeout(()=>{ armOnce(); }, 7000);
+  (async function init(){
+  const res = await Persist.load();
+  if (res.ok) serverSeed = res.data;
+  loaded = true;
+
+  if (serverSeed) {
+    console.log('[persist] seed fetched', serverSeed);
+  }
+
+  if (serverSeed && !looksEmpty(serverSeed)) {
+    console.log('[persist] server has non-empty snapshot; blank overwrites disabled');
+  } else {
+    console.log('[persist] server empty or missing; waiting for first non-blank local save');
+  }
+    // If the core is already ready by the time load completes, hydrate now too.
+if (ready) {
+  try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+  armOnce();
+  tryKick('post-hydrate-init');
+}
+})();
 
   async function tryKick(reason){
     if(!loaded || !armed || !ready) return;
