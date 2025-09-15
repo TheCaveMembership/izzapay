@@ -337,143 +337,144 @@
   }
 
   function bindInside(){
-    const root = STATE.root;
-    if(!root) return;
+  const root = STATE.root;
+  if(!root) return;
 
-    // Packages tab
-    root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        const id = btn.dataset.buyPackage;
-        // Pi-only purchase for packages
-        const res = await payWithPi(50, `Package:${id}`);
-        if(res.ok){
-          // Normally fetch package credits from server
-          STATE.packageCredits = { id, items:3, featuresIncluded:true };
-          alert('Package unlocked — start creating!');
-        }
-        // Create sub-tabs (phones)
-STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    STATE.createSub = b.dataset.sub === 'visuals' ? 'visuals' : 'setup';
-    const host = STATE.root.querySelector('#craftTabs');
-    const saveScroll = host ? host.scrollTop : 0;
-    if (host){
+  /* ---------- Sub-tabs for Create Item (phones) ---------- */
+  // Wire this every render of the Create tab so "Setup/Visuals" always works
+  STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
+      const host = STATE.root.querySelector('#craftTabs');
+      if (!host) return;
+      const saveScroll = host.scrollTop;
       host.innerHTML = renderCreate();
       bindInside();
       host.scrollTop = saveScroll;
+    }, { passive:true });
+  });
+
+  /* ---------- Packages tab ---------- */
+  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.buyPackage;
+      // Pi-only purchase for packages
+      const res = await payWithPi(50, `Package:${id}`);
+      if(res.ok){
+        STATE.packageCredits = { id, items:3, featuresIncluded:true };
+        alert('Package unlocked — start creating!');
+      }
+    }, { passive:true });
+  });
+
+  root.querySelectorAll('[data-buy-single]').forEach(btn=>{
+    btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
+  });
+
+  /* ---------- Create tab: payments ---------- */
+  const payPi = root.querySelector('#payPi');
+  const payIC = root.querySelector('#payIC');
+  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
+  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
+
+  /* ---------- Create tab: form state ---------- */
+  const itemName = root.querySelector('#itemName');
+  itemName && itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; }, { passive:true });
+
+  root.querySelectorAll('[data-ff]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      STATE.featureFlags[cb.dataset.ff] = cb.checked;
+      const host = root.querySelector('#craftTabs');
+      if (!host) return;
+      const saveScroll = host.scrollTop;
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = saveScroll;
+    });
+  });
+
+  const catSel  = root.querySelector('#catSel');
+  const partSel = root.querySelector('#partSel');
+  catSel  && catSel.addEventListener('change', e=> STATE.currentCategory = e.target.value, { passive:true });
+  partSel && partSel.addEventListener('change', e=> STATE.currentPart     = e.target.value, { passive:true });
+
+  const aiLeft = ()=> {
+    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+  };
+
+  /* ---------- Create tab: visuals ---------- */
+  const btnAI    = root.querySelector('#btnAI');
+  const aiPrompt = root.querySelector('#aiPrompt');
+  const svgIn    = root.querySelector('#svgIn');
+  const btnPrev  = root.querySelector('#btnPreview');
+  const btnCraft = root.querySelector('#btnCraft');
+  const prevHost = root.querySelector('#svgPreview');
+  const craftStatus = root.querySelector('#craftStatus');
+
+  btnAI && btnAI.addEventListener('click', async ()=>{
+    try{
+      const prompt = String(aiPrompt.value||'').trim();
+      if (!prompt) return;
+      const svg = await aiToSVG(prompt);
+      svgIn.value = svg;
+      prevHost.innerHTML = svg;
+      STATE.currentSVG = svg;
+      aiLeft();
+    }catch(e){
+      alert('AI failed: '+e.message);
     }
   });
-});
-      });
-    });
-    root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-      btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle));
-    });
 
-    // Create tab
-    const payPi   = root.querySelector('#payPi');
-    const payIC   = root.querySelector('#payIC');
-    payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'));
-    payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'));
+  btnPrev && btnPrev.addEventListener('click', ()=>{
+    const cleaned = sanitizeSVG(svgIn.value);
+    if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
+    prevHost.innerHTML = cleaned;
+    STATE.currentSVG = cleaned;
+  });
 
-    const itemName = root.querySelector('#itemName');
-    itemName && itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; });
+  btnCraft && btnCraft.addEventListener('click', async ()=>{
+    craftStatus.textContent = '';
 
-    root.querySelectorAll('[data-ff]').forEach(cb=>{
-      cb.addEventListener('change', e=>{
-        STATE.featureFlags[cb.dataset.ff] = cb.checked;
-        // re-render cost line quickly
-        const host = root.querySelector('#craftTabs');
-        if (host) {
-          const saveScroll = host.scrollTop;
-          host.innerHTML = renderCreate();
-          bindInside();
-          host.scrollTop = saveScroll;
-        }
-      });
-    });
+    // name moderation
+    const nm = moderateName(STATE.currentName);
+    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-    const catSel  = root.querySelector('#catSel');
-    const partSel = root.querySelector('#partSel');
-    catSel && catSel.addEventListener('change', e=> STATE.currentCategory = e.target.value);
-    partSel && partSel.addEventListener('change', e=> STATE.currentPart     = e.target.value);
+    // ensure paid (or package credit)
+    if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits){
+      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+      return;
+    }
+    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-    const aiLeft = ()=> {
-      const a = document.getElementById('aiLeft'); if (a) a.textContent = STATE.aiAttemptsLeft;
-      const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
-    };
+    // shop price
+    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+    const priceIC    = Math.max(
+      COSTS.SHOP_MIN_IC,
+      Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100)
+    );
 
-    const btnAI   = root.querySelector('#btnAI');
-    const aiPrompt= root.querySelector('#aiPrompt');
-    const svgIn   = root.querySelector('#svgIn');
-    const btnPrev = root.querySelector('#btnPreview');
-    const btnCraft= root.querySelector('#btnCraft');
-    const prevHost= root.querySelector('#svgPreview');
-    const craftStatus = root.querySelector('#craftStatus');
-
-    btnAI && btnAI.addEventListener('click', async ()=>{
-      try{
-        const prompt = String(aiPrompt.value||'').trim();
-        if (!prompt) return;
-        const svg = await aiToSVG(prompt);
-        svgIn.value = svg;
-        // show preview
-        prevHost.innerHTML = svg;
-        STATE.currentSVG = svg;
-        aiLeft();
-      }catch(e){
-        alert('AI failed: '+e.message);
+    try{
+      const payload = {
+        name: STATE.currentName,
+        category: STATE.currentCategory,
+        part: STATE.currentPart,
+        svg: STATE.currentSVG,
+        features: STATE.featureFlags,
+        sellInShop, sellInPi, priceIC
+      };
+      const res = await serverJSON('/api/crafting/mint', { method:'POST', body:JSON.stringify(payload) });
+      if (res && res.ok){
+        craftStatus.textContent = 'Crafted ✓';
+        STATE.hasPaidForCurrentItem = false; // consume payment/credit
+      }else{
+        craftStatus.textContent = 'Server rejected the item';
       }
-    });
-
-    btnPrev && btnPrev.addEventListener('click', ()=>{
-      const cleaned = sanitizeSVG(svgIn.value);
-      if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
-      prevHost.innerHTML = cleaned;
-      STATE.currentSVG = cleaned;
-    });
-
-    btnCraft && btnCraft.addEventListener('click', async ()=>{
-      craftStatus.textContent = '';
-      // name moderation
-      const nm = moderateName(STATE.currentName);
-      if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
-
-      // ensure paid (or package credit)
-      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits){
-        craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-        return;
-      }
-      if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
-
-      // shop price
-      const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-      const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
-      const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
-
-      // Send to server for final moderation & minting
-      try{
-        const payload = {
-          name: STATE.currentName,
-          category: STATE.currentCategory,
-          part: STATE.currentPart,
-          svg: STATE.currentSVG,
-          features: STATE.featureFlags,
-          sellInShop, sellInPi, priceIC
-        };
-        const res = await serverJSON('/api/crafting/mint', { method:'POST', body:JSON.stringify(payload) });
-        if (res && res.ok){
-          craftStatus.textContent = 'Crafted ✓';
-          STATE.hasPaidForCurrentItem = false; // consume payment/credit
-          // refresh "My Creations"
-        }else{
-          craftStatus.textContent = 'Server rejected the item';
-        }
-      }catch(e){
-        craftStatus.textContent = 'Error crafting: '+e.message;
-      }
-    });
-  }
-
+    }catch(e){
+      craftStatus.textContent = 'Error crafting: '+e.message;
+    }
+  });
+}
   window.CraftingUI = { mount, unmount };
 })();
