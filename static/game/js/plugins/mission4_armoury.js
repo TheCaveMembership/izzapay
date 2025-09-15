@@ -436,9 +436,24 @@
   // mark done (local guard)
   try { localStorage.setItem(M4_DONE_KEY, '1'); } catch {}
 
-  // NEW: keep all three paths in sync
+  // keep legacy count paths in sync
   try { IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); } catch {}
-  try { localStorage.setItem('izzaMissions', String(Math.max(4, parseInt(localStorage.getItem('izzaMissions')||'0',10)||0))); } catch {}
+  try {
+    const prev = parseInt(localStorage.getItem('izzaMissions')||'0',10)||0;
+    localStorage.setItem('izzaMissions', String(Math.max(4, prev)));
+  } catch {}
+
+  // --- NEW: write into structured missionState ---
+  try {
+    if (IZZA?.api?.setMissionEntry) {
+      IZZA.api.setMissionEntry('4', { done:true, ts: Date.now() });
+    } else {
+      // fallback direct localStorage
+      const st = JSON.parse(localStorage.getItem('izzaMissionState')||'{}');
+      st['4'] = { done:true, ts: Date.now() };
+      localStorage.setItem('izzaMissionState', JSON.stringify(st));
+    }
+  } catch(e) { console.warn('[m4] failed to set missionState', e); }
 
   // Notify both the IZZA bus and the DOM so the saver runs immediately
   try { IZZA.emit?.('missions-updated', { completed: 4 }); } catch {}
@@ -448,7 +463,6 @@
 
   mission4AgentPopup();
 }
-
     // ---- NEW: spend one cardboard box once the full set exists ----
     function spendCardboardBoxOnceIfReady(){
       if (localStorage.getItem(BOX_SPENT_KEY) === '1') return;      // already spent
