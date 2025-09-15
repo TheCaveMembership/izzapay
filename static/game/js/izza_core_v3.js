@@ -993,6 +993,88 @@ function svgIcon(id, w, h){
       renderInventoryPanel();
     }
   }
+  // --- Dynamic armour renderer (for plugin-added sets) ---
+function _armorKeysAlreadyShown(host){
+  const s = new Set();
+  host.querySelectorAll('[data-armor-on],[data-armor-off]').forEach(btn=>{
+    const id = btn.getAttribute('data-armor-on') || btn.getAttribute('data-armor-off');
+    if(id) s.add(id);
+  });
+  return s;
+}
+
+function _injectDynamicArmorRows(){
+  const host = document.getElementById('invPanel'); if(!host) return;
+  const body = host.querySelector('.inv-body') || host; // <— fallback to host if no .inv-body
+
+  // remove previous dynamic rows
+  body.querySelectorAll('[data-dynarmor="1"]').forEach(n=>n.remove());
+
+  const inv = getInventory();
+  const already = _armorKeysAlreadyShown(body);
+
+  // pick any inventory entry that looks like armour
+  const items = Object.entries(inv).filter(([k,v])=>{
+    return v && v.type === 'armor' && (v.count|0) > 0 && !already.has(k);
+  });
+
+  if(!items.length) return;
+
+  // ensure an "Armor" section header exists (if your UI doesn’t already have one)
+  const hasHeader = Array.from(body.children).some(n=>/Armor/i.test(n.textContent||''));
+  if(!hasHeader){
+    const h = document.createElement('div');
+    h.setAttribute('data-dynarmor','1');
+    h.style.cssText='margin-top:2px;margin-bottom:-4px;opacity:.75;font-size:12px;padding-left:4px';
+    h.textContent='Armor';
+    body.appendChild(h);
+  }
+
+  items.forEach(([key,e])=>{
+    const row = document.createElement('div');
+    row.setAttribute('data-dynarmor','1');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;background:#101626;border:1px solid #2a3550;border-radius:12px;padding:10px';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px">
+        <div data-icon>${(typeof e.iconSvg==='string' && e.iconSvg.trim()) || ''}</div>
+        <div>
+          <div class="name">${e.name || key}</div>
+          <div class="sub" style="opacity:.85">Count: ${(e.count|0)} · Slot: ${(e.slot||'–')}</div>
+        </div>
+      </div>`;
+
+    const btn = document.createElement('button');
+    btn.className='ghost';
+    const equipped = !!(e.equipped || e.equip || (e.equippedCount|0) > 0);
+    btn.setAttribute(equipped ? 'data-armor-off' : 'data-armor-on', key);
+    btn.setAttribute('data-slot', (e.slot||''));
+    btn.textContent = equipped ? 'Unequip' : 'Equip';
+
+    row.appendChild(meta); row.appendChild(btn);
+    body.appendChild(row);
+  });
+
+  // wire buttons like Core’s built-ins
+  body.querySelectorAll('[data-armor-on]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.getAttribute('data-armor-on');
+      const slot = btn.getAttribute('data-slot')||'';
+      try{ window.setArmorEquipped(id, slot, true); }catch{}
+      try{ renderInventoryPanel(); }catch{}
+    }, {once:true});
+  });
+  body.querySelectorAll('[data-armor-off]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.getAttribute('data-armor-off');
+      const slot = btn.getAttribute('data-slot')||'';
+      try{ window.setArmorEquipped(id, slot, false); }catch{}
+      try{ renderInventoryPanel(); }catch{}
+    }, {once:true});
+  });
+}
   function renderInventoryPanel(){
     const host = ensureInvHost();
     const inv  = getInventory();
@@ -1113,7 +1195,7 @@ if(armorRows.length){
         </div>
       </div>
     `;
-
+try{ _injectDynamicArmorRows(); }catch(e){ console.warn('dyn armor inject failed', e); }
     host.querySelectorAll('[data-equip]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const id = btn.getAttribute('data-equip');
