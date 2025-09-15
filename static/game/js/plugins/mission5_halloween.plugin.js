@@ -22,6 +22,9 @@
   const WOLVES = [];   // [{x,y,vx,vy,age,life,phase,spit}]
   let jackImg = null, timerEl = null;
 
+  // Congrats popup guard (so we don't double-pop)
+  let _m5CongratsShown = false;
+
   // ---------------- helpers ----------------
   function _lsGet(k, d){ try{ const v=localStorage.getItem(k); return v==null? d : v; }catch{ return d; } }
   function _lsSet(k, v){ try{ localStorage.setItem(k, v); }catch{} }
@@ -138,24 +141,52 @@
  <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/><rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
 </svg>`;}
 
-  // Black haunted werewolf (smaller/faster + red eyes + drool)
+  // ---------------- NEW werewolf (sleeker silhouette, fur accents, glowing red eyes) ----------------
   function svgWerewolf(){ return `
-<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
- <defs>
-  <radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3d3d"/><stop offset="100%" stop-color="#5a0000"/></radialGradient>
- </defs>
- <g stroke="#070707" stroke-width="3" fill="#0b0b0b">
-  <!-- hunched, on-all-fours silhouette -->
-  <path d="M18,80 Q8,60 20,46 Q14,34 26,26 Q42,12 60,16 Q78,12 94,26 Q106,34 100,46 Q112,60 102,78 Q84,92 60,98 Q36,92 18,80 Z"/>
-  <path d="M32,42 Q38,30 50,30" fill="none"/>
-  <path d="M88,42 Q82,30 70,30" fill="none"/>
-  <path d="M30,74 Q60,66 90,74" fill="none"/>
- </g>
- <g>
-  <ellipse cx="46" cy="54" rx="7" ry="5" fill="url(#eye)"/>
-  <ellipse cx="74" cy="54" rx="7" ry="5" fill="url(#eye)"/>
-  <path d="M58 70 Q60 82 56 92" stroke="#7a0000" stroke-width="2" fill="none"/>
-</g>
+<svg viewBox="0 0 160 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="glowR" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/>
+    </radialGradient>
+  </defs>
+  <!-- body silhouette with fur slashes (no background) -->
+  <g fill="#0a0a0a" stroke="#060606" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <!-- long, low stalking pose -->
+    <path d="M18,86
+             C26,72 34,60 52,54
+             C70,48 90,48 112,52
+             C128,55 142,58 148,64
+             C144,70 138,76 128,80
+             C120,84 110,86 94,88
+             C80,90 66,92 52,90
+             C40,88 30,88 22,90
+             Z"/>
+    <!-- head + snout + ear spikes -->
+    <path d="M116,54
+             C124,48 132,44 138,44
+             C146,44 150,48 150,52
+             C150,56 146,60 140,62
+             L132,64
+             C130,62 126,58 122,56
+             Z"/>
+    <path d="M118,48 L126,38 L134,46" />
+    <!-- chest/shoulder spikes -->
+    <path d="M72,60 L66,52 M78,62 L74,54 M84,62 L82,54" />
+    <!-- back fur slashes -->
+    <path d="M42,66 L36,58 M48,64 L44,56 M56,62 L52,54" />
+    <!-- legs silhouettes -->
+    <path d="M54,88 C52,100 44,110 40,116 L32,116 C36,108 36,100 34,90 Z"/>
+    <path d="M92,88 C92,100 86,110 84,116 L76,116 C78,108 78,100 76,90 Z"/>
+    <path d="M126,82 C128,94 124,106 122,114 L114,114 C116,106 116,96 114,86 Z"/>
+    <path d="M28,88 C22,98 20,108 18,114 L10,114 C14,104 16,94 16,86 Z"/>
+    <!-- claws hints -->
+    <path d="M30,116 L34,118 M38,116 L42,118 M78,116 L82,118 M86,116 L90,118 M116,114 L120,116" />
+  </g>
+  <!-- eye sockets + glow -->
+  <g>
+    <ellipse cx="128" cy="58" rx="5.8" ry="4.2" fill="url(#glowR)"/>
+    <ellipse cx="116" cy="58" rx="5.8" ry="4.2" fill="url(#glowR)"/>
+  </g>
 </svg>`;}
 
   // ---------------- pumpkins ----------------
@@ -272,15 +303,15 @@
         ctx.save(); // body
         ctx.translate(sx, sy);
         ctx.scale(s, s);
-        ctx.drawImage(wolfImg, -40, -48);
+        ctx.drawImage(wolfImg, -44, -50);
         ctx.restore();
 
         ctx.save(); // eye glow
         ctx.globalCompositeOperation='lighter';
         ctx.globalAlpha = flick;
         ctx.fillStyle = 'rgba(255,45,45,0.9)';
-        ctx.beginPath(); ctx.arc(sx-10, sy-6, 4.8, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(sx+10, sy-6, 4.8, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx+10, sy-8, 4.8, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx+22, sy-8, 4.8, 0, Math.PI*2); ctx.fill();
         ctx.restore();
       }
     }
@@ -457,6 +488,7 @@
     werewolfNext=mission5Start+500;
     placePumpkins();
     ensureTimer();
+    _m5CongratsShown = false; // reset each run
     try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour in the Armoury!');
   }
@@ -476,6 +508,29 @@
     try{ localStorage.setItem('izzaMission6_unlocked','1'); }catch{}
     try{ IZZA.emit('mission-available',{id:6,name:'Mission 6'}); }catch{}
     try{ IZZA.emit('m6-unlocked'); }catch{}
+  }
+
+  // ---------- NEW: explicit Congratulations popup right when Pumpkin Armour is crafted ----------
+  function showPumpkinCraftCongrats(){
+    if (_m5CongratsShown) return;
+    _m5CongratsShown = true;
+    try{
+      IZZA?.api?.UI?.popup?.({
+        style:'agent',
+        title:'🎉 Congratulations!',
+        body:'Pumpkin Armour crafted — Mission 5 Completed!',
+        timeout:2400
+      });
+      return;
+    }catch{}
+    const el=document.createElement('div');
+    el.style.cssText='position:absolute;left:50%;top:16%;transform:translateX(-50%);' +
+                     'background:rgba(10,12,20,.95);color:#b6ffec;padding:16px 20px;' +
+                     'border:2px solid #36f;border-radius:10px;font-family:system-ui,Segoe UI,Arial;z-index:9999;' +
+                     'box-shadow:0 10px 40px rgba(0,0,0,.5)';
+    el.innerHTML='<strong style="font-size:16px">🎉 Congratulations!</strong><div>Pumpkin Armour crafted — Mission 5 Completed!</div>';
+    (document.getElementById('gameCard')||document.body).appendChild(el);
+    setTimeout(()=>el.remove(),2300);
   }
 
   function finishMission5(){
@@ -566,6 +621,7 @@
     // Only finish during an active night run (prevents retro “free” completes)
     if (!mission5Active) return;
     if (hasFullPumpkinSet()){
+      showPumpkinCraftCongrats();  // NEW: show congrats at the craft/add moment
       finishMission5();
     }
   }
@@ -578,10 +634,16 @@
 
   // Armoury craft clicks are the preferred finish trigger (when they’re emitted):
   IZZA.on?.('gear-crafted',  ({kind,set})=>{
-    if(kind==='pumpkin' || set==='pumpkin'){ finishMission5(); }
+    if(kind==='pumpkin' || set==='pumpkin'){
+      showPumpkinCraftCongrats();  // NEW
+      finishMission5();
+    }
   });
   IZZA.on?.('armor-crafted', ({kind,set})=>{
-    if(kind==='pumpkin' || set==='pumpkin'){ finishMission5(); }
+    if(kind==='pumpkin' || set==='pumpkin'){
+      showPumpkinCraftCongrats();  // NEW
+      finishMission5();
+    }
   });
 
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
