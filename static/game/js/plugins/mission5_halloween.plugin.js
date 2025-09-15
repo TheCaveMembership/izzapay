@@ -19,7 +19,7 @@
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
   const HA = [];       // smoke glyphs
-  const WOLVES = [];   // [{x,y,vx,vy,age,life,mode,runPhase,attackMouth,damageCd}]
+  const WOLVES = [];   // [{x,y,vx,vy,age,life,mode,runPhase,attackMouth,damageTick}]
   let jackImg = null, timerEl = null;
 
   // Congrats popup guard (so we don't double-pop)
@@ -141,78 +141,75 @@
  <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/><rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
 </svg>`;}
 
-  // ---------------- WOLF ART (4-run frames + attack) ----------------
-  function svgWerewolfRunFrame(shift){  // shift ∈ [-1, -0.33, 0.33, 1]
-    const legA = 6*shift, legB = -6*shift;
+  // ---------------- NEW werewolf (run cycle, one glowing eye; bi-pedal attack with giant mouth) ----------------
+  function svgWerewolfRunFrame(ahead){ // ahead: -1 / +1 leg offset
+    // simplified silhouette with slight leg offsets for a “run” cycle
+    const legShift = ahead * 4;
     return `
-<svg viewBox="0 0 170 120" xmlns="http://www.w3.org/2000/svg">
-  <defs><radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/></radialGradient></defs>
+<svg viewBox="0 0 160 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="eye" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/>
+    </radialGradient>
+  </defs>
   <g fill="#0b0b0b" stroke="#060606" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
-    <!-- low, long body with extra jagged fur -->
-    <path d="M14,88 C28,64 42,54 66,50 C96,46 124,50 154,60
-             C154,74 136,86 106,92 C74,98 44,96 20,92 Z"/>
+    <!-- long low body -->
+    <path d="M16,86 C28,66 40,56 62,52 C88,48 110,50 140,58 C144,70 130,82 102,88 C72,94 44,92 24,90 Z"/>
     <!-- head + ear -->
-    <path d="M122,56 C134,48 148,46 156,48 C160,52 158,60 148,64 L134,66 C130,62 126,60 122,58 Z"/>
-    <path d="M124,48 L134,36 L142,48"/>
-    <!-- nasty fur slashes -->
-    <path d="M44,64 L36,54 M52,62 L46,52 M60,60 L56,50 M72,58 L68,48 M84,58 L80,48 M94,60 L90,50" />
-    <!-- legs (offsets for run cycle) -->
-    <path d="M60,92 C56,104 50,114 48,118 L40,118 C42,108 42,100 40,90 Z" transform="translate(${legA},0)"/>
-    <path d="M96,92 C94,104 90,114 88,118 L80,118 C82,110 82,100 80,92 Z" transform="translate(${legB},0)"/>
-    <path d="M132,86 C134,98 130,110 128,116 L120,116 C122,108 122,98 120,88 Z" />
-    <path d="M28,90 C22,100 20,110 18,116 L10,116 C14,106 16,96 16,88 Z" />
+    <path d="M118,54 C128,48 140,46 148,48 C152,52 150,58 142,62 L130,64 C126,60 122,58 118,56 Z"/>
+    <path d="M120,46 L128,36 L136,46"/>
+    <!-- legs (front/back offset) -->
+    <path d="M58,88 C56,100 50,110 48,116 L40,116 C42,108 42,100 40,90 Z" transform="translate(${legShift},0)"/>
+    <path d="M92,88 C92,100 86,110 84,116 L76,116 C78,108 78,100 76,90 Z" transform="translate(${-legShift},0)"/>
+    <path d="M126,82 C128,94 124,106 122,114 L114,114 C116,106 116,96 114,86 Z" />
+    <path d="M28,88 C22,98 20,108 18,114 L10,114 C14,104 16,94 16,86 Z" />
   </g>
-  <!-- ONE glowing eye -->
-  <ellipse cx="128" cy="60" rx="6.2" ry="4.6" fill="url(#eye)"/>
+  <!-- single eye -->
+  <ellipse cx="126" cy="58" rx="6" ry="4.4" fill="url(#eye)"/>
 </svg>`;
   }
-  function svgWerewolfAttack(){ // huge mouth, bi-pedal
+  function svgWerewolfAttack(){ // standing bi-pedal with huge mouth
     return `
-<svg viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
-  <defs><radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/></radialGradient></defs>
-  <g fill="#0b0b0b" stroke="#060606" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M76,50 C92,32 122,34 134,58 C144,80 140,116 124,134 C110,150 86,152 72,134 C58,116 56,80 66,60 Z"/>
-    <path d="M86,134 C86,150 80,164 78,170 L66,170 C70,156 70,142 68,130 Z"/>
-    <path d="M118,132 C122,148 118,164 116,170 L104,170 C106,156 106,142 104,128 Z"/>
-    <path d="M70,84 L50,66 L44,74 L66,98"/>
-    <path d="M130,82 L154,62 L162,70 L136,102"/>
+<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="eye" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/>
+    </radialGradient>
+  </defs>
+  <g fill="#0b0b0b" stroke="#060606" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <!-- torso standing -->
+    <path d="M72,48 C84,34 112,34 124,52 C134,68 132,98 120,116 C108,134 88,140 74,126 C60,112 54,80 60,64 Z"/>
+    <!-- legs -->
+    <path d="M84,116 C84,132 78,146 76,152 L66,152 C70,140 70,128 68,114 Z"/>
+    <path d="M112,114 C116,130 112,146 110,152 L100,152 C102,140 102,126 100,112 Z"/>
+    <!-- arms up -->
+    <path d="M68,76 L54,60 L48,68 L64,90"/>
+    <path d="M122,76 L138,58 L146,66 L126,92"/>
   </g>
-  <ellipse cx="118" cy="70" rx="6.4" ry="4.8" fill="url(#eye)"/>
-  <!-- colossal mouth cavity -->
-  <g id="jaw">
-    <path d="M60,90 C94,112 130,112 158,90
-             C154,130 94,158 64,134 Z"
-          fill="#120000" stroke="#3a0000" stroke-width="2.2"/>
-    <!-- upper & lower teeth -->
-    <g fill="#eaeaea" stroke="#6a0000" stroke-width="1">
-      <path d="M72,98 L76,112 L80,98 Z"/>
-      <path d="M86,102 L90,116 L94,102 Z"/>
-      <path d="M100,104 L104,120 L108,104 Z"/>
-      <path d="M114,102 L118,116 L122,102 Z"/>
-      <path d="M128,98 L132,110 L136,98 Z"/>
-      <!-- lower row -->
-      <path d="M78,126 L82,114 L86,126 Z"/>
-      <path d="M92,132 L96,118 L100,132 Z"/>
-      <path d="M106,134 L110,120 L114,134 Z"/>
-      <path d="M120,130 L124,116 L128,130 Z"/>
+  <!-- one glowing eye -->
+  <ellipse cx="112" cy="64" rx="6.2" ry="4.6" fill="url(#eye)"/>
+  <!-- ENORMOUS mouth (nearly full body) -->
+  <g>
+    <path d="M60,78 C86,94 116,94 138,78
+             C135,110 86,132 62,110 Z"
+          fill="#160000" stroke="#3a0000" stroke-width="2"/>
+    <!-- teeth -->
+    <g fill="#e6e6e6" stroke="#6a0000" stroke-width="1">
+      <path d="M70,86 L74,96 L78,86 Z"/>
+      <path d="M82,88 L86,100 L90,88 Z"/>
+      <path d="M94,90 L98,102 L102,90 Z"/>
+      <path d="M106,88 L110,100 L114,88 Z"/>
+      <path d="M118,86 L122,96 L126,86 Z"/>
     </g>
   </g>
 </svg>`;
   }
 
-  // cache wolf frames
-  let wolfRunFrames = [];
-  let wolfAttackImg = null;
+  let wolfRunImgA=null, wolfRunImgB=null, wolfAttackImg=null;
   function ensureWolfImgs(){
-    if (!wolfRunFrames.length){
-      const shifts = [-1, -0.33, 0.33, 1];
-      for (const s of shifts){
-        wolfRunFrames.push( svgToImage(svgWerewolfRunFrame(s), (api?.TILE||60)*1.35, (api?.TILE||60)*1.05) );
-      }
-    }
-    if (!wolfAttackImg){
-      wolfAttackImg = svgToImage(svgWerewolfAttack(), (api?.TILE||60)*1.6, (api?.TILE||60)*1.6);
-    }
+    if (!wolfRunImgA) wolfRunImgA = svgToImage(svgWerewolfRunFrame(-1), (api?.TILE||60)*1.3, (api?.TILE||60)*1.0);
+    if (!wolfRunImgB) wolfRunImgB = svgToImage(svgWerewolfRunFrame(+1), (api?.TILE||60)*1.3, (api?.TILE||60)*1.0);
+    if (!wolfAttackImg) wolfAttackImg = svgToImage(svgWerewolfAttack(), (api?.TILE||60)*1.4, (api?.TILE||60)*1.4);
   }
 
   // ---------------- pumpkins ----------------
@@ -272,7 +269,7 @@
     ctx.restore();
   }
 
-  // ---------------- wolves (4-frame run + huge mouth attack + proper damage) ----------------
+  // ---------------- wolves (run cycle + attack) ----------------
   function spawnWerewolf(){
     ensureWolfImgs();
     const p = api?.player||{x:0,y:0};
@@ -283,11 +280,22 @@
     WOLVES.push({
       x, y, vx:0, vy:0, age:0,
       life: 12000 + ((Math.random()*2500)|0),
-      mode: 'run',                 // 'run' -> 'attack'
-      runPhase: Math.random(),     // 0..1 loop
-      attackMouth: 0,              // 0..1 open
-      damageCd: 0                  // ms cooldown for dmg ticks
+      mode: 'run',            // 'run' -> 'attack' when close
+      runPhase: Math.random()*1.0, // 0..1 loop
+      attackMouth: 0,         // 0..1 open
+      damageTick: 0
     });
+  }
+
+  // slow heart drain helper (best-effort; tries multiple hooks)
+  function wolfDamagePlayer(amount){
+    try{ IZZA.emit?.('player-damage', { source:'werewolf', amount }); }catch{}
+    try{ IZZA.api?.player?.damage?.(amount); }catch{}
+    try{
+      // naive local hearts fallback
+      const k='izzaHearts'; const cur=parseFloat(localStorage.getItem(k)||'0')||0;
+      if (cur>0){ localStorage.setItem(k, String(Math.max(0, cur-amount))); IZZA.emit?.('hearts-updated',{hearts:Math.max(0,cur-amount)}); }
+    }catch{}
   }
 
   function updateWolves(dt){
@@ -296,27 +304,28 @@
       const w=WOLVES[i];
       w.age += dt;
 
+      // basic seek
       const dx = p.x - w.x, dy = p.y - w.y;
       const d  = Math.hypot(dx,dy)||1;
       const ux = dx/d, uy = dy/d;
 
-      const baseSp = 0.09;  // quick sprint
-      const atkSp  = 0.065; // slower stalk while biting
-      const biteRange = (api?.TILE||60) * 0.95;
+      // speeds (no vertical bobbing)
+      const baseSp = 0.085; // a bit faster
+      const atkSp  = 0.060;
 
-      if (d < biteRange){ w.mode='attack'; }
+      if (d < (api?.TILE||60)*1.2){ w.mode='attack'; }
       if (w.mode==='run'){
         w.vx = w.vx*0.90 + ux*baseSp;
         w.vy = w.vy*0.90 + uy*baseSp;
-        w.runPhase = (w.runPhase + dt*0.0042) % 1;  // faster, visible leg cycle
+        w.runPhase = (w.runPhase + (dt*0.0035)) % 1; // 2-frame swapper
       }else{
         w.vx = w.vx*0.90 + ux*atkSp;
         w.vy = w.vy*0.90 + uy*atkSp;
-        w.attackMouth = Math.min(1, w.attackMouth + dt*0.004); // snap open
-        w.damageCd += dt;
-        if (w.damageCd >= 400){ // ~2.5 segs/second while inside the maw
-          w.damageCd = 0;
-          try{ IZZA.emit?.('player-hit', { by: 'werewolf', dmg: 1 }); }catch{}
+        w.attackMouth = Math.min(1, w.attackMouth + dt*0.003); // open quickly
+        w.damageTick += dt;
+        if (w.damageTick > 500){ // ~2 damage/sec at 0.5 each tick
+          w.damageTick = 0;
+          wolfDamagePlayer(0.5);
         }
       }
 
@@ -327,34 +336,9 @@
     }
   }
 
-  function drawGiantMouth(ctx, sx, sy, k){
-    // k = 0..1 mouth openness; draw an oversized mouth overlay to “swallow” space
-    const r = 26 + 34*k; // grows huge
-    ctx.save();
-    ctx.globalCompositeOperation='source-over';
-    // dark inner ellipse
-    ctx.beginPath(); ctx.ellipse(sx+6, sy-10, r*1.2, r*0.9, 0, 0, Math.PI*2);
-    ctx.fillStyle = '#100000'; ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = '#3a0000'; ctx.stroke();
-
-    // simple tooth ring
-    ctx.fillStyle = '#e8e8e8'; ctx.strokeStyle='#6a0000'; ctx.lineWidth=1;
-    const teeth = 11;
-    for(let i=0;i<teeth;i++){
-      const ang = (i/teeth)*Math.PI*2;
-      const tx = sx+6 + Math.cos(ang)*(r*1.05);
-      const ty = sy-10 + Math.sin(ang)*(r*0.8);
-      ctx.beginPath(); ctx.moveTo(tx,ty);
-      ctx.lineTo(tx + Math.cos(ang)*10, ty + Math.sin(ang)*8);
-      ctx.lineTo(tx + Math.cos(ang+0.2)*6, ty + Math.sin(ang+0.2)*5);
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-    }
-    ctx.restore();
-  }
-
   function drawWolves(ctx){
     if (!WOLVES.length && !HA.length) return;
-    const S=api.DRAW, T=api.TILE, px=S/T, now=performance.now();
+    const S=api.DRAW, T=api.TILE, px=S/T;
     for (const w of WOLVES){
       const sx=(w.x - api.camera.x)*px;
       const sy=(w.y - api.camera.y)*px;
@@ -366,31 +350,32 @@
       ctx.restore();
 
       if (w.mode==='run'){
-        const idx = (w.runPhase < 0.25) ? 0 : (w.runPhase < 0.5) ? 1 : (w.runPhase < 0.75) ? 2 : 3;
-        const img = wolfRunFrames[idx];
-        if (img?.complete) ctx.drawImage(img, sx-48, sy-52);
+        const frame = (w.runPhase < 0.5 ? wolfRunImgA : wolfRunImgB);
+        if (frame?.complete){
+          ctx.drawImage(frame, sx-44, sy-50);
+        }
       }else{
-        // attack: stand + overlaid huge mouth that grows enough to cover the player
         if (wolfAttackImg?.complete){
-          const m = 1.25 + 0.45*w.attackMouth; // scales up a lot
+          // mouth scale as it opens
+          const m = 1 + 0.15*w.attackMouth;
           ctx.save();
-          ctx.translate(sx, sy-6);
+          ctx.translate(sx, sy-8);
           ctx.scale(m, m);
-          ctx.drawImage(wolfAttackImg, -56, -78);
+          ctx.drawImage(wolfAttackImg, -50, -70);
           ctx.restore();
-          drawGiantMouth(ctx, sx+4, sy-6, w.attackMouth);
         }
       }
 
-      // single eye glow
+      // single eye glow (no back dots)
       ctx.save();
       ctx.globalCompositeOperation='lighter';
-      const flick = 0.58 + 0.32*Math.abs(Math.sin(now*0.012));
+      const flick = 0.55 + 0.30*Math.abs(Math.sin(performance.now()*0.012));
       ctx.globalAlpha = flick;
       ctx.fillStyle='rgba(255,45,45,0.95)';
-      const ex = w.mode==='run' ? sx+22 : sx+18;
-      const ey = w.mode==='run' ? sy-12 : sy-24;
-      ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI*2); ctx.fill();
+      // position near head for both modes
+      const ex = w.mode==='run' ? sx+18 : sx+14;
+      const ey = w.mode==='run' ? sy-10 : sy-22;
+      ctx.beginPath(); ctx.arc(ex, ey, 4.8, 0, Math.PI*2); ctx.fill();
       ctx.restore();
     }
   }
@@ -512,6 +497,7 @@
         _addOne(inv, 'pumpkin_piece', 'Pumpkin');
         invWrite(inv);
         IZZA.toast?.('+1 Pumpkin');
+        // IMPORTANT: do NOT auto-craft or end here anymore.
         return;
       }
     }
@@ -560,6 +546,7 @@
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour in the Armoury!');
   }
 
+  // NOTE: No auto-crafting here. Crafting & completion come from armoury or inv checks.
   function tryCraftPumpkin(){ return false; }
 
   function bumpMission5UI(){
@@ -609,6 +596,7 @@
     bumpMission5UI();
     unlockMission6();
 
+    // keep existing small completion popup too
     try{
       IZZA?.api?.UI?.popup?.({style:'agent',title:'Mission Completed',body:'Pumpkin Armour crafted. Set bonus active!',timeout:2200});
     }catch{
@@ -639,7 +627,7 @@
       }
       if (now >= werewolfNext){
         if (isMoving()) spawnWerewolf();
-        werewolfNext = now + 24000; // slightly quicker cadence
+        werewolfNext = now + 28000; // quicker cadence
       }
       updateTimer(now);
     }
@@ -657,11 +645,22 @@
     IZZA.on?.('render-post',  renderM5Over);
     IZZA.on?.('update-post',  onUpdate);
     wireB();
+    // no auto-crafting on ready
   });
 
-  // ---------- Mission 5 completion via inventory check ----------
-  const PUMPKIN_SET_IDS = ['pumpkinHelmet','pumpkinVest','pumpkinArms','pumpkinLegs'];
-  const PUMPKIN_ALIAS = { pumpkin_helm:'pumpkinHelmet', pumpkin_chest:'pumpkinVest', pumpkin_arms:'pumpkinArms', pumpkin_legs:'pumpkinLegs' };
+  // ---------- Mission 5 completion via inventory check (like Mission 4) ----------
+  const PUMPKIN_SET_IDS = [
+    'pumpkinHelmet',
+    'pumpkinVest',
+    'pumpkinArms',
+    'pumpkinLegs'
+  ];
+  const PUMPKIN_ALIAS = {
+    pumpkin_helm: 'pumpkinHelmet',
+    pumpkin_chest: 'pumpkinVest',
+    pumpkin_arms: 'pumpkinArms',
+    pumpkin_legs: 'pumpkinLegs'
+  };
 
   function hasFullPumpkinSet(){
     return PUMPKIN_SET_IDS.every(id=>{
@@ -680,11 +679,13 @@
     }
   }
 
+  // Inventory changes during the run: mirror M4 — complete once the full set exists
   window.addEventListener('izza-inventory-changed', ()=>{
     try{ IZZA.emit?.('render-under'); }catch{}
     maybeFinishM5();
   });
 
+  // Armoury craft clicks are the preferred finish trigger (when they’re emitted):
   IZZA.on?.('gear-crafted',  ({kind,set})=>{
     if(kind==='pumpkin' || set==='pumpkin'){
       if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
