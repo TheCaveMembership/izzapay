@@ -151,6 +151,68 @@ function applyServerMissions(seed){
     console.warn('[persist] applyServerMissions failed', e);
   }
 }
+  // ---- hydrate inventory/coins/bank/hearts/position from server
+function applyServerCore(seed){
+  try{
+    if (!seed) return;
+
+    // INVENTORY
+    if (seed.inventory && typeof seed.inventory === 'object'){
+      try{
+        if (IZZA?.api?.setInventory) IZZA.api.setInventory(seed.inventory);
+        else localStorage.setItem('izzaInventory', JSON.stringify(seed.inventory));
+        try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+      }catch(e){ console.warn('[persist] inv hydrate failed', e); }
+    }
+
+    // WALLET COINS (on-hand)
+    if (Number.isFinite(seed.coins)){
+      try{
+        if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
+        else localStorage.setItem('izzaCoins', String(seed.coins|0));
+        try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+      }catch(e){ console.warn('[persist] coins hydrate failed', e); }
+    }
+
+    // BANK (per-user key)
+    if (seed.bank && typeof seed.bank === 'object'){
+      try{
+        const u = userKey();
+        localStorage.setItem('izzaBank_'+u, JSON.stringify({
+          coins: (seed.bank.coins|0)||0,
+          items: seed.bank.items||{},
+          ammo:  seed.bank.ammo||{}
+        }));
+        try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
+      }catch(e){ console.warn('[persist] bank hydrate failed', e); }
+    }
+
+    // HEARTS (segments)
+    if (seed.player && seed.player.heartsSegs!=null){
+      try{
+        const u = userKey();
+        localStorage.setItem('izzaCurHeartSegments_'+u, String(seed.player.heartsSegs|0));
+        try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+      }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
+    }
+
+    // PLAYER POSITION (best-effort)
+    if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
+      try{
+        if (IZZA?.api?.teleport) {
+          IZZA.api.teleport(seed.player.x|0, seed.player.y|0);
+        } else {
+          // legacy hint some plugins read
+          localStorage.setItem('izzaMission3Pos', JSON.stringify({x:seed.player.x|0, y:seed.player.y|0}));
+        }
+      }catch(e){ console.warn('[persist] pos hydrate failed', e); }
+    }
+
+    console.log('[persist] core hydrated');
+  }catch(e){
+    console.warn('[persist] applyServerCore failed', e);
+  }
+}
 function looksEmpty(_s){
   // We no longer block any snapshot as "blank".
   // Even 0 coins / empty inv / only missionState should still save.
@@ -193,13 +255,15 @@ function looksEmpty(_s){
   IZZA.on('ready', ()=>{
     ready = true;
     try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
     armOnce();
-    tryKick('post-hydrate'); // push merged state back to server
+    tryKick('post-hydrate');
   });
 } else {
   setTimeout(()=>{
     ready = true;
     try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
     armOnce();
     tryKick('post-hydrate-fallback');
   }, 2500);
@@ -223,6 +287,7 @@ setTimeout(()=>{ armOnce(); }, 7000);
     // If the core is already ready by the time load completes, hydrate now too.
 if (ready) {
   try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
   armOnce();
   tryKick('post-hydrate-init');
 }
