@@ -1,7 +1,7 @@
 // v1_store_items_plugin.js — stock extender + icon repair + BUY/SELL + search + pricebook
 // + Inventory panel extender for ALL armor pieces (no Core edits)
 (function(){
-  const BUILD = 'v1.1.2-store-items+inv-ext-armor (sell-icons-use-inventory-svg)';
+  const BUILD = 'v1.1.3-store-items+inv-ext-armor (buy->inventory armor inject + raw svg)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -205,7 +205,15 @@
         entry.type  = 'armor';
         entry.slot  = slot==='helmet'?'head':(slot==='vest'?'chest':slot);
         entry.equippable = true;
-        entry.iconSvg = entry.iconSvg || it.iconSvg || svgIcon(it.id,24,24);
+
+        // 🔸 Use the SAME inventory injection technique: preserve raw SVG string on iconSvg.
+        // Prefer incoming it.iconSvg (raw svg string) or keep existing entry.iconSvg. No data URLs.
+        if (typeof entry.iconSvg !== 'string' || !entry.iconSvg) {
+          if (typeof it.iconSvg === 'string' && it.iconSvg.trim()) {
+            entry.iconSvg = it.iconSvg.trim();
+          }
+        }
+
         inv[key] = entry;
         pb[key] = { lastPaid: it.price, name: pretty };
         IZZA.emit?.('toast', {text:`Purchased ${pretty}`});
@@ -217,10 +225,20 @@
         const parts = key.split(':'); const piece = parts[2]||'';
         addArmorPiece(piece); handled=true;
       }
+      // 🔸 New: treat name-matched items as armor (so Bronze Helmet, etc., show up in inventory)
+      else if (/\b(helmet|vest|arms|legs|head|chest)\b/i.test(pretty)) {
+        addArmorPiece(''); handled=true;
+      }
+
       if(!handled){
         const e = inv[key] || { count:0, name:pretty };
         e.count = (e.count|0) + 1;
-        e.iconSvg = e.iconSvg || it.iconSvg || '';
+        // Non-armor generics: leave iconSvg untouched unless store provides a raw SVG
+        if (typeof e.iconSvg !== 'string' || !e.iconSvg) {
+          if (typeof it.iconSvg === 'string' && it.iconSvg.trim()) {
+            e.iconSvg = it.iconSvg.trim();
+          }
+        }
         inv[key] = e;
         pb[key] = { lastPaid: it.price, name: pretty };
         IZZA.emit?.('toast', {text:`Purchased ${pretty}`});
@@ -245,14 +263,12 @@
     return Math.max(1, Math.ceil(base * 0.40));
   }
 
-  // IMPORTANT CHANGE:
-  // Use the SAME approach as armoury/inventory: if the inventory entry carries an SVG string
-  // in `iconSvg`, inject that SVG markup directly (no guessing, no data URLs).
+  // Use the SAME approach as armoury/inventory for SELL: inject raw SVG if present
   function iconForInv(key, entry){
     const svg = (entry && typeof entry.iconSvg === 'string') ? entry.iconSvg.trim() : '';
-    if (svg) return svg; // inject the stored SVG exactly as created by the armoury flow
+    if (svg) return svg;
 
-    // Non-armour (weapons/consumables) keep their tiny icons:
+    // Non-armour (weapons/consumables) keep their tiny icons when possible
     if (window.svgIcon) {
       const prettyId = (entry?.name || key || '').toLowerCase();
       const idGuess =
