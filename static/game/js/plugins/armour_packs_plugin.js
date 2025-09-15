@@ -1,5 +1,3 @@
-
-
 // armour_packs_plugin.js — Self-contained armour shop + overlays + equip rules
 // Adds 10 shop sets (40 items), data-driven, no edits to existing files.
 // Works with current inventory & equips, and draws on top of the player.
@@ -10,7 +8,7 @@
 // - Your equip UI/buttons already toggle .equipped (or .equip / .equippedCount)
 // --------------------------------------------------------------------------------------------
 (function(){
-  const BUILD = 'armour-packs-plugin/v1.1-iconDataUrl';
+  const BUILD = 'armour-packs-plugin/v1.2-inlineSVG+incremental';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -41,15 +39,6 @@
     entry.equipped = !!on;
     if('equip' in entry) entry.equip = !!on;
     if(typeof entry.equippedCount === 'number') entry.equippedCount = on ? 1 : 0;
-  }
-
-  // Encode any inline SVG to a data URL so Inventory <img src> can render it
-  const _isDataUrl = s => typeof s==='string' && /^data:image\/svg\+xml/i.test(s);
-  function _svgToDataURL(svg){
-    if(!svg) return '';
-    if(_isDataUrl(svg)) return svg;
-    if(/^\s*</.test(svg)) return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-    return svg;
   }
 
   // ---- Data model for sets (easy to extend) ----
@@ -124,13 +113,13 @@
       if(coins < price){ alert('Not enough IZZA Coins'); return; }
       api.setCoins(coins - price);
 
-      // grant/ensure in inventory (IMPORTANT: icon as DATA URL for Inventory UI)
+      // grant/ensure in inventory (IMPORTANT: INLINE SVG + INCREMENTAL COUNT)
       const inv = _invRead();
       const invKey = id; // unique + stable
-      const uiIcon = _svgToDataURL(svgIconArmor(set, piece)); // <-- fix
-      inv[invKey] = inv[invKey] || { count:0, name, type:'armor', slot:piece.slot, equippable:true, iconSvg:uiIcon };
+      const inlineSvg = svgIconArmor(set, piece); // <-- inline SVG (same style as armoury)
+      inv[invKey] = inv[invKey] || { count:0, name, type:'armor', slot:piece.slot, equippable:true, iconSvg:inlineSvg };
       inv[invKey].count = (inv[invKey].count|0) + 1;
-      inv[invKey].iconSvg = inv[invKey].iconSvg || uiIcon;
+      if (!inv[invKey].iconSvg) inv[invKey].iconSvg = inlineSvg;  // keep inline svg
 
       _invWrite(inv);
 
@@ -189,6 +178,71 @@
     });
 
     if(changed) _invWrite(inv);
+  }
+
+  // ---- One-time migration: convert any old armour-pack items to count+inline SVG ----
+  let _migratedOnce = false;
+  function migrateArmorPackItems(){
+    if(_migratedOnce) return;
+    const inv = _invRead(); let changed=false;
+
+    // quick lookup for set ids
+    const setIds = new Set(SETS.map(s=> s.id));
+    function pieceSlotFromKey(k){
+      if(/_helmet$/.test(k)) return 'head';
+      if(/_vest$/.test(k))   return 'chest';
+      if(/_legs$/.test(k))   return 'legs';
+      if(/_arms$/.test(k))   return 'arms';
+      return null;
+    }
+    function nameFromKey(k){
+      const sid = k.replace(/_(helmet|vest|legs|arms)$/,'');
+      const set = SETS.find(s=> s.id===sid);
+      const piece = /helmet$/.test(k)?'Helmet': /vest$/.test(k)?'Vest': /legs$/.test(k)?'Legs':'Arms';
+      return set ? `${set.name} ${piece}` : k;
+    }
+    function inlineSvgForKey(k){
+      const sid = k.replace(/_(helmet|vest|legs|arms)$/,'');
+      const set = SETS.find(s=> s.id===sid);
+      const pieceKey = /helmet$/.test(k)?'helmet': /vest$/.test(k)?'vest': /legs$/.test(k)?'legs':'arms';
+      if(!set) return '';
+      return svgIconArmor(set, {key:pieceKey, pretty:''});
+    }
+
+    Object.keys(inv).forEach(k=>{
+      const it = inv[k];
+      if(!it || typeof it!=='object') return;
+      const sid = k.split('_').slice(0,-1).join('_');
+      if(!setIds.has(sid)) return; // not ours
+
+      // ensure armor metadata
+      const slot = pieceSlotFromKey(k);
+      if(slot){ it.slot = it.slot || slot; }
+      it.type = 'armor';
+      it.equippable = true;
+      it.name = it.name || nameFromKey(k);
+
+      // normalize to incremental count
+      const prevCount = (it.count|0);
+      if(typeof it.count!=='number' || it.count<0) it.count = 0;
+      if(it.owned === true){ it.count = Math.max(it.count, 1); delete it.owned; }
+
+      // if both are zero, keep zero (no phantom items). Otherwise ensure >=1.
+      if(prevCount===0 && !('owned' in it) && it.count===0){
+        // leave as is
+      }
+
+      // unify SVG to inline style
+      const raw = (typeof it.iconSvg==='string' ? it.iconSvg : '').trim();
+      if(!raw || /^data:image\/svg\+xml/i.test(raw)){
+        it.iconSvg = inlineSvgForKey(k);
+      }
+
+      changed=true;
+    });
+
+    if(changed) _invWrite(inv);
+    _migratedOnce = true;
   }
 
   // ---- Overlays (draw over player) ----
@@ -323,10 +377,9 @@
   })();
 
   // ---- Wire up
-  IZZA.on('ready', a=>{ api=a; });
+  IZZA.on('ready', a=>{ api=a; migrateArmorPackItems(); });
   IZZA.on('render-post', tryPatchShop);
   IZZA.on('render-post', drawEquippedArmour);
   window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
   IZZA.on('update-post', normalizeEquipSlots);
 })();
-
