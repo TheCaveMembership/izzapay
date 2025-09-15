@@ -67,21 +67,30 @@
     padding:10px 12px;
     font-size:14px;
   }
-  /* Fullscreen Crafting Land look */
-  #craftingModal .card {
-    width:min(1100px,96vw);
-    height:min(680px,88vh);
-    padding:0;
-    overflow:hidden;
-    display:flex;
-    flex-direction:column;
-  }
-  #craftingRoot {
-    flex:1;
-    min-height:0;
-    background:#0b0f17;
-    display:flex;
-  }
+  /* Crafting modal: wide + not-too-tall, no horizontal scroll */
+#craftingModal .card{
+  width: min(1200px, 96vw);  /* wider */
+  height: min(540px, 72vh);  /* shorter */
+  padding: 0;
+  overflow: hidden;          /* kill side scroll at container */
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+#craftingRoot{
+  flex: 1;
+  min-height: 0;             /* lets inner panes scroll instead of the card */
+  overflow: hidden;          /* prevents horizontal scroll bleed */
+}
+  /* optional, if your CraftingUI uses these class names; safe as generic selectors */
+#craftingRoot > * { min-width: 0; }
+#craftingRoot .pane, 
+#craftingRoot .panel, 
+#craftingRoot .col { 
+  min-width: 0; 
+  overflow-y: auto; 
+  overflow-x: hidden; 
+}
 </style>
   <style>
   /* Raise all modals above any floating UI (bells, friends, full, auth dock, etc.) */
