@@ -156,6 +156,25 @@ const missionState = IZZA?.api?.getMissionState
   (async function init(){
     const res = await Persist.load();
     if(res.ok) serverSeed = res.data;
+    if (serverSeed?.missionState && Object.keys(serverSeed.missionState).length) {
+  try {
+    if (IZZA?.api?.setMissionState) {
+      // If your core exposes a bulk setter
+      IZZA.api.setMissionState(serverSeed.missionState);
+    } else if (window.setMissionEntry) {
+      // Fall back: push each entry through setMissionEntry
+      for (const [id, state] of Object.entries(serverSeed.missionState)) {
+        try { setMissionEntry(id, state); } catch {}
+      }
+    } else {
+      // Legacy: write directly
+      localStorage.setItem('izzaMissionState', JSON.stringify(serverSeed.missionState));
+    }
+    console.log('[persist] hydrated missionState from server', serverSeed.missionState);
+  } catch(e) {
+    console.warn('[persist] failed to hydrate missionState', e);
+  }
+}
     loaded=true;
     if (serverSeed && !looksEmpty(serverSeed)) {
       console.log('[persist] server has non-empty snapshot; blank overwrites disabled');
