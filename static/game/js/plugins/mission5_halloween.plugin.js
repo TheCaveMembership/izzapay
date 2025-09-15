@@ -1,6 +1,7 @@
 /* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
-   CHANGE: Night/timer/end state now trigger ONLY when the player clicks “Craft Pumpkin Armour”
-           in the Armoury UI (emits `gear-crafted`/`armor-crafted` with kind/set==='pumpkin').
+   CHANGE: Night/timer/end state now trigger ONLY when the player crafts Pumpkin Armour.
+           We finish either (a) on Armoury craft events OR (b) when inventory shows the full set
+           after an inventory change (mirrors Mission 4’s logic).
    Kept: Werewolf (all fours, smaller/faster, black, red eye glow, drool), timer, HA smoke, M6 unlock, UI bump.
 */
 (function(){
@@ -55,6 +56,13 @@
     _bcastInvChanged();
   }
   function invInc(inv, key, n=1){ inv[key]=inv[key]||{count:0}; inv[key].count=(inv[key].count|0)+n; return inv; }
+  function invCount(id){
+    try{
+      if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
+      const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+      return (inv?.[id]?.count|0) || 0;
+    }catch{ return 0; }
+  }
 
   function _addOne(inv, canonicalKey, displayName){
     inv[canonicalKey] = inv[canonicalKey] || { count: 0, name: displayName || canonicalKey };
@@ -453,11 +461,8 @@
     IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour in the Armoury!');
   }
 
-  // NOTE: This function is intentionally a NO-OP now to prevent auto-crafting.
-  // Crafting & mission completion must come ONLY from Armoury UI events.
-  function tryCraftPumpkin(){
-    return false;
-  }
+  // NOTE: No auto-crafting here. Crafting & completion come from armoury or inv checks.
+  function tryCraftPumpkin(){ return false; }
 
   function bumpMission5UI(){
     _setMissions(5);
@@ -531,22 +536,47 @@
     IZZA.on?.('render-post',  renderM5Over);
     IZZA.on?.('update-post',  onUpdate);
     wireB();
-
-    // IMPORTANT: do NOT auto-craft on ready anymore.
-    // if (mission5Active) tryCraftPumpkin(); // removed
+    // no auto-crafting on ready
   });
 
-  // Inventory changes during the run: DO NOT auto-craft anymore.
-  function onInvChangeCheckM5(){
-    // intentionally empty (kept for future signals if needed)
+  // ---------- Mission 5 completion via inventory check (like Mission 4) ----------
+  const PUMPKIN_SET_IDS = [
+    'pumpkinHelmet',
+    'pumpkinVest',
+    'pumpkinArms',
+    'pumpkinLegs'
+  ];
+  // aliases (in case legacy ids ever appear)
+  const PUMPKIN_ALIAS = {
+    pumpkin_helm: 'pumpkinHelmet',
+    pumpkin_chest: 'pumpkinVest',
+    pumpkin_arms: 'pumpkinArms',
+    pumpkin_legs: 'pumpkinLegs'
+  };
+
+  function hasFullPumpkinSet(){
+    return PUMPKIN_SET_IDS.every(id=>{
+      if (invCount(id) > 0) return true;
+      const alias = Object.keys(PUMPKIN_ALIAS).find(k => PUMPKIN_ALIAS[k]===id);
+      return alias ? (invCount(alias) > 0) : false;
+    });
   }
 
+  function maybeFinishM5(){
+    // Only finish during an active night run (prevents retro “free” completes)
+    if (!mission5Active) return;
+    if (hasFullPumpkinSet()){
+      finishMission5();
+    }
+  }
+
+  // Inventory changes during the run: mirror M4 — complete once the full set exists
   window.addEventListener('izza-inventory-changed', ()=>{
     try{ IZZA.emit?.('render-under'); }catch{}
-    onInvChangeCheckM5(); // no-op
+    maybeFinishM5();
   });
 
-  // Armoury craft clicks are the ONLY finish trigger now:
+  // Armoury craft clicks are the preferred finish trigger (when they’re emitted):
   IZZA.on?.('gear-crafted',  ({kind,set})=>{
     if(kind==='pumpkin' || set==='pumpkin'){ finishMission5(); }
   });
