@@ -213,10 +213,20 @@ function applyServerCore(seed){
     console.warn('[persist] applyServerCore failed', e);
   }
 }
-function looksEmpty(_s){
-  // We no longer block any snapshot as "blank".
-  // Even 0 coins / empty inv / only missionState should still save.
-  return false;
+// “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
+function looksEmpty(s){
+  try{
+    if (!s || typeof s!=='object') return true;
+    const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
+    const bankEmpty = !s.bank || (
+      ((s.bank.coins|0)===0) &&
+      (!s.bank.items || !Object.keys(s.bank.items).length) &&
+      (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
+    );
+    const walletZero = (s.coins|0)===0;
+    const heartsUnknown = (s.player?.heartsSegs==null); // hearts plugin mirrors later
+    return walletZero && bankEmpty && invEmpty && heartsUnknown;
+  }catch{ return true; }
 }
 
   const Persist = {
@@ -246,7 +256,8 @@ function looksEmpty(_s){
 
   // ----- boot & save orchestration -----
   let serverSeed=null, loaded=false, ready=false, armed=false;
-  let saveBusy=false, needLater=false, lastGood=null;
+let saveBusy=false, needLater=false, lastGood=null;
+let freezeUntil=0; // <-- ADD (hold off saves temporarily)
 
   function armOnce(){ if(armed) return; armed=true; tryKick('armed'); }
 
@@ -267,6 +278,11 @@ function looksEmpty(_s){
     armOnce();
     tryKick('post-hydrate-fallback');
   }, 2500);
+}
+  // freeze saves for 5s after death so we don't capture the in-between state
+if (window.IZZA?.on){
+  IZZA.on('player-died', ()=>{ freezeUntil = Date.now() + 5000; });   // <-- ADD
+  IZZA.on('player-respawn', ()=>{ freezeUntil = Math.max(freezeUntil, Date.now()+1200); }); // small post-respawn settle  <-- ADD
 }
 // also give ample grace after any tier reloads
 setTimeout(()=>{ armOnce(); }, 7000);
@@ -294,9 +310,17 @@ if (ready) {
 })();
 
   async function tryKick(reason){
-    if(!loaded || !armed || !ready) return;
+  if(!loaded || !armed || !ready) return;
 
-    const snap = buildSnapshot();
+  // hold while death/respawn is stabilizing
+  if (Date.now() < freezeUntil) { 
+    // optional: console.log('[persist] freeze', reason);
+    return; 
+  }
+
+  const snap = buildSnapshot();
+  ...
+}
     // never push blank over a non-empty server
     if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
       console.log('[persist] skip blank (server already has data)', reason); return;
