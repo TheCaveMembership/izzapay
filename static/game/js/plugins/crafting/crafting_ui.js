@@ -288,12 +288,16 @@
         <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
         <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
   <button class="ghost" id="btnPreview">Preview</button>
-  <button class="ghost" id="btnCraft" title="Mint this item into the game!">Mint</button>
+  <!-- Hidden until a valid preview is rendered -->
+  <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
   <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
 </div>
-        <div id="svgPreview" style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; min-height:160px; display:flex; align-items:center; justify-content:center">
-          <div style="opacity:.6; font-size:12px">Preview appears here</div>
-        </div>
+
+<div id="svgPreview"
+     style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
+            min-height:220px; max-height:60vh; overflow:auto; display:flex; align-items:center; justify-content:center">
+  <div style="opacity:.6; font-size:12px">Preview appears here</div>
+</div>
       </div>
     </div>
   `;
@@ -492,49 +496,64 @@
     const btnAI    = root.querySelector('#btnAI');
     const aiPrompt = root.querySelector('#aiPrompt');
     const svgIn    = root.querySelector('#svgIn');
-    const btnPrev  = root.querySelector('#btnPreview');
-    const btnCraft = root.querySelector('#btnCraft');
-    const prevHost = root.querySelector('#svgPreview');
-    const craftStatus = root.querySelector('#craftStatus');
+    const btnPrev   = root.querySelector('#btnPreview');
+const btnMint   = root.querySelector('#btnMint');
+const prevHost  = root.querySelector('#svgPreview');
+const craftStatus = root.querySelector('#craftStatus');
 
     // restore SVG textarea + preview from draft, if any
     if (svgIn && STATE.currentSVG){ svgIn.value = STATE.currentSVG; prevHost && (prevHost.innerHTML = STATE.currentSVG); }
 
     btnAI && btnAI.addEventListener('click', async ()=>{
-      try{
-        const prompt = String(aiPrompt?.value||'').trim();
-        if (!prompt) return;
-        const svg = await aiToSVG(prompt);
-        if (svgIn) svgIn.value = svg;
-        if (prevHost) prevHost.innerHTML = svg;
-        STATE.currentSVG = svg;
-        saveDraft();
-        aiLeft();
-      }catch(e){
-        alert('AI failed: '+e.message);
-      }
-    });
+  try{
+    const prompt = String(aiPrompt?.value||'').trim();
+    if (!prompt) return;
+    const svg = await aiToSVG(prompt);
+    if (svgIn) svgIn.value = svg;
+    if (prevHost) {
+      prevHost.innerHTML = svg;
+      // scale nicely in the box
+      const s = prevHost.querySelector('svg');
+      if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; display='block'; }
+    }
+    STATE.currentSVG = svg;
+    saveDraft();
+    // show Mint button
+    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+    aiLeft();
+  }catch(e){
+    alert('AI failed: '+e.message);
+  }
+});
 
     btnPrev && btnPrev.addEventListener('click', ()=>{
-      const cleaned = sanitizeSVG(svgIn?.value);
-      if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
-      if (prevHost) prevHost.innerHTML = cleaned;
-      STATE.currentSVG = cleaned;
-      saveDraft();
-    });
+  const cleaned = sanitizeSVG(svgIn?.value);
+  if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
+  if (prevHost) {
+    prevHost.innerHTML = cleaned;
+    const s = prevHost.querySelector('svg');
+    if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
+  }
+  STATE.currentSVG = cleaned;
+  saveDraft();
+  // reveal Mint after a good preview
+  const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+});
 
-    btnCraft && btnCraft.addEventListener('click', async ()=>{
+    btnMint && btnMint.addEventListener('click', async ()=>{
       craftStatus.textContent = '';
 
       // name moderation
       const nm = moderateName(STATE.currentName);
       if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-      // ensure paid (or package credit)
-      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits){
-        craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-        return;
-      }
+      // allow free test if PER_ITEM_IC is 0 and no add-ons
+const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
+
+if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
+  craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+  return;
+}
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
       // shop price
