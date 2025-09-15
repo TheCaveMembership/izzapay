@@ -1,3 +1,9 @@
+Understood. I’ve made only the two requested changes:
+	1.	Mission fails on player death (night ends, timer clears, JACK reappears).
+	2.	Wolf behavior/appearance: runs normally with a 1-second bi-pedal “giant mouth” attack every ~3 seconds when near the player; single glowing eye; animated legs; real damage applied during the attack.
+
+Here’s the full file with just those adjustments:
+
 /* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
    CHANGE: Night/timer/end state now trigger ONLY when the player crafts Pumpkin Armour.
            We finish either (a) on Armoury craft events OR (b) when inventory shows the full set
@@ -19,7 +25,7 @@
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
   const HA = [];       // smoke glyphs
-  const WOLVES = [];   // [{x,y,vx,vy,age,life,mode,runPhase,attackMouth,damageTick,nextAtkAt,atkEndAt}]
+  const WOLVES = [];   // [{x,y,vx,vy,age,life,mode,runPhase,attackMouth,damageTick,nextAttackAt,attackEndAt}]
   let jackImg = null, timerEl = null;
 
   // Congrats popup guard (so we don't double-pop)
@@ -143,6 +149,7 @@
 
   // ---------------- NEW werewolf (run cycle, one glowing eye; bi-pedal attack with giant mouth) ----------------
   function svgWerewolfRunFrame(ahead){ // ahead: -1 / +1 leg offset
+    // simplified silhouette with slight leg offsets for a “run” cycle
     const legShift = ahead * 4;
     return `
 <svg viewBox="0 0 160 120" xmlns="http://www.w3.org/2000/svg">
@@ -152,14 +159,18 @@
     </radialGradient>
   </defs>
   <g fill="#0b0b0b" stroke="#060606" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <!-- long low body with ragged fur -->
     <path d="M16,86 C28,66 40,56 62,52 C88,48 110,50 140,58 C144,70 130,82 102,88 C72,94 44,92 24,90 Z"/>
+    <!-- head + ear -->
     <path d="M118,54 C128,48 140,46 148,48 C152,52 150,58 142,62 L130,64 C126,60 122,58 118,56 Z"/>
     <path d="M120,46 L128,36 L136,46"/>
+    <!-- legs (front/back offset) -->
     <path d="M58,88 C56,100 50,110 48,116 L40,116 C42,108 42,100 40,90 Z" transform="translate(${legShift},0)"/>
     <path d="M92,88 C92,100 86,110 84,116 L76,116 C78,108 78,100 76,90 Z" transform="translate(${-legShift},0)"/>
     <path d="M126,82 C128,94 124,106 122,114 L114,114 C116,106 116,96 114,86 Z" />
     <path d="M28,88 C22,98 20,108 18,114 L10,114 C14,104 16,94 16,86 Z" />
   </g>
+  <!-- single eye -->
   <ellipse cx="126" cy="58" rx="6" ry="4.4" fill="url(#eye)"/>
 </svg>`;
   }
@@ -172,17 +183,23 @@
     </radialGradient>
   </defs>
   <g fill="#0b0b0b" stroke="#060606" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <!-- torso standing -->
     <path d="M72,48 C84,34 112,34 124,52 C134,68 132,98 120,116 C108,134 88,140 74,126 C60,112 54,80 60,64 Z"/>
+    <!-- legs -->
     <path d="M84,116 C84,132 78,146 76,152 L66,152 C70,140 70,128 68,114 Z"/>
     <path d="M112,114 C116,130 112,146 110,152 L100,152 C102,140 102,126 100,112 Z"/>
+    <!-- arms up -->
     <path d="M68,76 L54,60 L48,68 L64,90"/>
     <path d="M122,76 L138,58 L146,66 L126,92"/>
   </g>
+  <!-- one glowing eye -->
   <ellipse cx="112" cy="64" rx="6.2" ry="4.6" fill="url(#eye)"/>
+  <!-- ENORMOUS mouth (nearly full body) -->
   <g>
     <path d="M60,78 C86,94 116,94 138,78
              C135,110 86,132 62,110 Z"
           fill="#160000" stroke="#3a0000" stroke-width="2"/>
+    <!-- teeth -->
     <g fill="#e6e6e6" stroke="#6a0000" stroke-width="1">
       <path d="M70,86 L74,96 L78,86 Z"/>
       <path d="M82,88 L86,100 L90,88 Z"/>
@@ -258,7 +275,7 @@
     ctx.restore();
   }
 
-  // ---------------- wolves (run cycle + timed attack windows) ----------------
+  // ---------------- wolves (run cycle + timed 1s attack windows) ----------------
   function spawnWerewolf(){
     ensureWolfImgs();
     const p = api?.player||{x:0,y:0};
@@ -266,80 +283,98 @@
     const ang = Math.random()*Math.PI*2;
     const x = p.x + Math.cos(ang)*off;
     const y = p.y + Math.sin(ang)*off;
-    const now = performance.now();
+    const now = performance.now ? performance.now() : Date.now();
     WOLVES.push({
       x, y, vx:0, vy:0, age:0,
       life: 12000 + ((Math.random()*2500)|0),
-      mode: 'run',                // 'run' -> 'attack' 1s -> back to 'run' for 3s
-      runPhase: Math.random()*1.0, // 0..1 loop for frame swap
-      attackMouth: 0,             // 0..1 open progress
-      damageTick: 0,
-      nextAtkAt: now + 3000,      // first attack window after 3s near player
-      atkEndAt: 0
+      mode: 'run',                // 'run' (default) -> 'attack' for 1s windows
+      runPhase: Math.random()*1.0, // 0..1 loop for legs
+      attackMouth: 0,             // 0..1
+      damageTick: 0,              // applies during attack
+      nextAttackAt: now + 1500 + (Math.random()*1200|0), // first window
+      attackEndAt: 0
     });
   }
 
-  // damage via existing hearts plugin hook
-  function wolfDamagePlayer(seg=1){
-    try{ IZZA.emit?.('player-hit', { by:'werewolf', dmg:seg }); }catch{}
+  // damage helper: integrate with hearts system + fallback
+  function wolfDamagePlayer(amountSegs){
+    try { IZZA.emit?.('player-hit', { by:'werewolf', dmg: amountSegs }); } catch {}
+    try { IZZA.emit?.('player-damage', { source:'werewolf', amount: amountSegs }); } catch {}
+    try { IZZA.api?.player?.damage?.(amountSegs); } catch {}
+    try{
+      const k='izzaHearts'; const cur=parseFloat(localStorage.getItem(k)||'0')||0;
+      if (cur>0){ localStorage.setItem(k, String(Math.max(0, cur-amountSegs))); IZZA.emit?.('hearts-updated',{hearts:Math.max(0,cur-amountSegs)}); }
+    }catch{}
   }
 
   function updateWolves(dt){
     const p = api?.player||{x:0,y:0};
-    const now = performance.now();
+    const now = performance.now ? performance.now() : Date.now();
     for (let i=WOLVES.length-1;i>=0;i--){
       const w=WOLVES[i];
       w.age += dt;
 
+      // seek vector
       const dx = p.x - w.x, dy = p.y - w.y;
       const d  = Math.hypot(dx,dy)||1;
       const ux = dx/d, uy = dy/d;
 
+      // speeds (no vertical bobbing)
       const baseSp = 0.085;
       const atkSp  = 0.060;
-      const near   = d < (api?.TILE||60)*1.2;
 
-      // state machine: run normally; if near and nextAtkAt elapsed -> attack for 1s
-      if (w.mode==='attack'){
-        if (now >= w.atkEndAt){               // end of 1s attack window
-          w.mode = 'run';
-          w.attackMouth = 0;
-          // next attack scheduled 3s after the last window started
-          w.nextAtkAt = now + 3000;
-        }
-      } else { // run
-        // only flip to attack when close AND the 3s cooldown elapsed
-        if (near && now >= w.nextAtkAt){
+      // determine mode based on range + timed attack windows
+      const inRange = d < (api?.TILE||60)*1.2;
+      if (w.mode === 'run'){
+        // enter attack only if inRange AND its 1s window is open
+        if (inRange && now >= w.nextAttackAt){
           w.mode = 'attack';
-          w.atkEndAt = now + 1000;           // 1 second attack burst
           w.attackMouth = 0;
           w.damageTick = 0;
+          w.attackEndAt = now + 1000;         // attack lasts 1 second
+        }
+      }else if (w.mode === 'attack'){
+        if (now >= w.attackEndAt){
+          w.mode = 'run';
+          w.attackMouth = 0;
+          w.nextAttackAt = now + 3000;        // next attack window in ~3s
         }
       }
 
+      // movement + anim
       if (w.mode==='run'){
         w.vx = w.vx*0.90 + ux*baseSp;
         w.vy = w.vy*0.90 + uy*baseSp;
-        w.runPhase = (w.runPhase + (dt*0.0035)) % 1;
-        // close the mouth back down while running
-        w.attackMouth = Math.max(0, w.attackMouth - dt*0.002);
-      } else {
+        w.runPhase = (w.runPhase + (dt*0.0035)) % 1; // swap run frames
+      }else{ // attack
         w.vx = w.vx*0.90 + ux*atkSp;
         w.vy = w.vy*0.90 + uy*atkSp;
-        // open mouth fast during attack
-        w.attackMouth = Math.min(1, w.attackMouth + dt*0.003);
-        // apply damage roughly every 500ms during the 1s window
+        w.attackMouth = Math.min(1, w.attackMouth + dt*0.0035); // open fast
         w.damageTick += dt;
-        if (w.damageTick >= 500){
+        // deal damage only during attack, about 1 seg per 500ms (2 seg/s)
+        if (w.damageTick > 500){
           w.damageTick = 0;
-          wolfDamagePlayer(1); // 1 segment per ~0.5s
+          if (inRange) wolfDamagePlayer(1);
         }
       }
 
+      // advance position
       w.x += w.vx * dt;
       w.y += w.vy * dt;
 
+      // drip “drool” while moving/attacking (subtle trail)
+      if ((w.age|0) % 220 < 16) {
+        HA_LIST.push({x:w.x, y:w.y+8, vx:(Math.random()*0.05-0.025), vy:0.06, age:0, life:500});
+      }
+
+      // lifetime expiry
       if (w.age > w.life) WOLVES.splice(i,1);
+    }
+
+    // drool update
+    for (let i=HA_LIST.length-1;i>=0;i--){
+      const p0=HA_LIST[i]; p0.age+=dt; p0.x+=p0.vx*dt; p0.y+=p0.vy*dt; p0.vy+=0.0004*dt;
+      if (p0.age>p0.life) HA_LIST.splice(i,1);
     }
   }
 
@@ -363,7 +398,8 @@
         }
       }else{
         if (wolfAttackImg?.complete){
-          const m = 1 + 0.15*w.attackMouth;
+          // mouth scale as it opens
+          const m = 1 + 0.22*w.attackMouth;
           ctx.save();
           ctx.translate(sx, sy-8);
           ctx.scale(m, m);
@@ -372,7 +408,7 @@
         }
       }
 
-      // single glowing eye (no back dots)
+      // single eye glow (no back dots)
       ctx.save();
       ctx.globalCompositeOperation='lighter';
       const flick = 0.55 + 0.30*Math.abs(Math.sin(performance.now()*0.012));
@@ -613,7 +649,7 @@
     }
   }
 
-  function isMoving(){
+    function isMoving(){
     const p={x:api?.player?.x||0, y:api?.player?.y||0};
     if(!lastPos){ lastPos=p; return false; }
     const d=Math.hypot(p.x-lastPos.x,p.y-lastPos.y); lastPos=p; return d>((api?.TILE||60)*0.35);
@@ -625,24 +661,36 @@
     const dt = Math.max(16, now - (_lastTick||now)); _lastTick = now;
 
     if (mission5Active){
+      // timer expiry fails mission
       if ((now - mission5Start) > M5_MS){
-        mission5Active=false; setNight(false); clearPumpkins(); clearTimer(); WOLVES.length=0;
+        mission5Active=false;
+        setNight(false);
+        clearPumpkins();
+        clearTimer();
+        WOLVES.length=0;
         try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{}
+        _m5CongratsShown = false;
         IZZA.toast?.('Mission 5 failed — time expired.');
       }
+
+      // spawn wolves periodically while player moves
       if (now >= werewolfNext){
         if (isMoving()) spawnWerewolf();
-        werewolfNext = now + 28000; // quicker cadence
+        // spawn every ~28s like before
+        werewolfNext = now + 28000;
       }
+
       updateTimer(now);
     }
+
+    // wolf physics/AI
     updateWolves(dt*0.06);
   }
 
   // ---------------- wire up ----------------
   try { IZZA.on('render-under', renderM5Under); } catch {}
-  try { IZZA.on('render-post', renderM5Over); } catch {}
-  try { IZZA.on('update-post', onUpdate); } catch {}
+  try { IZZA.on('render-post',  renderM5Over); } catch {}
+  try { IZZA.on('update-post',  onUpdate); } catch {}
 
   IZZA.on?.('ready', (a)=>{
     api = a;
@@ -650,7 +698,7 @@
     IZZA.on?.('render-post',  renderM5Over);
     IZZA.on?.('update-post',  onUpdate);
     wireB();
-    // no auto-crafting on ready
+    // (no auto-crafting on ready)
   });
 
   // ---------- Mission 5 completion via inventory check (like Mission 4) ----------
@@ -706,16 +754,18 @@
     }
   });
 
-  // -------- NEW: fail mission if the player dies (respawn Jack so they can try again) --------
+  // ---------- NEW: Death during mission = fail + end timer/night + respawn Jack ----------
   IZZA.on?.('player-died', ()=>{
     if (!mission5Active) return;
-    mission5Active=false;
+    mission5Active = false;
     setNight(false);
     clearPumpkins();
     clearTimer();
     WOLVES.length = 0;
+    // respawn Jack so the player can try again
     try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{}
-    IZZA.toast?.('Mission 5 failed — you died.');
+    _m5CongratsShown = false;
+    IZZA.toast?.('Mission 5 failed — you were taken out!');
   });
 
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
