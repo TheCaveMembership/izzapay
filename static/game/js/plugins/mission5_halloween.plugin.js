@@ -675,47 +675,97 @@
     wireB();
   });
 
-  // ---------- Mission 5 completion via inventory check ----------
-  const PUMPKIN_SET_IDS = ['pumpkinHelmet','pumpkinVest','pumpkinArms','pumpkinLegs'];
-  const PUMPKIN_ALIAS = { pumpkin_helm:'pumpkinHelmet', pumpkin_chest:'pumpkinVest', pumpkin_arms:'pumpkinArms', pumpkin_legs:'pumpkinLegs' };
+  // ---------- Mission 5 completion via inventory check (canonical armour IDs used by Shop) ----------
+const PUMPKIN_SET_IDS = [
+  'armor_pumpkin_helm',
+  'armor_pumpkin_vest',
+  'armor_pumpkin_arms',
+  'armor_pumpkin_legs'
+];
+// legacy/alt keys we might have created earlier
+const PUMPKIN_ALIAS = {
+  pumpkinHelmet: 'armor_pumpkin_helm',
+  pumpkinVest:   'armor_pumpkin_vest',
+  pumpkinArms:   'armor_pumpkin_arms',
+  pumpkinLegs:   'armor_pumpkin_legs',
+  pumpkin_helm:  'armor_pumpkin_helm',
+  pumpkin_chest: 'armor_pumpkin_vest',
+  pumpkin_arms:  'armor_pumpkin_arms',
+  pumpkin_legs:  'armor_pumpkin_legs'
+};
 
-  function hasFullPumpkinSet(){
-    return PUMPKIN_SET_IDS.every(id=>{
-      if (invCount(id) > 0) return true;
-      const alias = Object.keys(PUMPKIN_ALIAS).find(k => PUMPKIN_ALIAS[k]===id);
-      return alias ? (invCount(alias) > 0) : false;
-    });
+// migrate any alt keys -> canonical (so Shop SELL icons show up)
+function normalizePumpkinArmorIds(){
+  try{
+    const inv = (IZZA?.api?.getInventory ? IZZA.api.getInventory() : JSON.parse(localStorage.getItem('izzaInventory')||'{}')) || {};
+    let changed = false;
+    for (const [from, to] of Object.entries(PUMPKIN_ALIAS)){
+      if (inv[from]?.count > 0){
+        const n = inv[from].count|0;
+        delete inv[from];
+        inv[to] = inv[to] || { count: 0, name: inv[to]?.name || inv[from]?.name || to };
+        inv[to].count = (inv[to].count|0) + n;
+        changed = true;
+      }
+    }
+    if (changed){
+      if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+      try{ IZZA.emit?.('inventory-changed'); }catch{}
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+    }
+  }catch{}
+}
+
+function invCount(id){
+  try{
+    if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
+    const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+    return (inv?.[id]?.count|0) || 0;
+  }catch{ return 0; }
+}
+
+function hasFullPumpkinSet(){
+  return PUMPKIN_SET_IDS.every(id => invCount(id) > 0);
+}
+
+function maybeFinishM5(){
+  if (!mission5Active) return;
+  normalizePumpkinArmorIds(); // ensure shop-friendly IDs before we check
+  if (hasFullPumpkinSet()){
+    if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
+    _m5CongratsShown = true;
+    finishMission5();
   }
+}
 
-  function maybeFinishM5(){
-    if (!mission5Active) return;
-    if (hasFullPumpkinSet()){
-      if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
-      _m5CongratsShown = true;
-      finishMission5();
-    }
+// keep listening as before, but normalize first so SELL icons render
+window.addEventListener('izza-inventory-changed', ()=>{
+  try{ IZZA.emit?.('render-under'); }catch{}
+  normalizePumpkinArmorIds();
+  maybeFinishM5();
+});
+
+// also normalize on ready so existing saves get fixed immediately
+IZZA.on?.('ready', ()=>{ normalizePumpkinArmorIds(); });
+
+// Armoury craft clicks (unchanged), but normalize to be safe:
+IZZA.on?.('gear-crafted',  ({kind,set})=>{
+  if(kind==='pumpkin' || set==='pumpkin'){
+    normalizePumpkinArmorIds();
+    if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
+    _m5CongratsShown = true;
+    finishMission5();
   }
-
-  window.addEventListener('izza-inventory-changed', ()=>{
-    try{ IZZA.emit?.('render-under'); }catch{}
-    maybeFinishM5();
-  });
-
-  IZZA.on?.('gear-crafted',  ({kind,set})=>{
-    if(kind==='pumpkin' || set==='pumpkin'){
-      if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
-      _m5CongratsShown = true;
-      finishMission5();
-    }
-  });
-  IZZA.on?.('armor-crafted', ({kind,set})=>{
-    if(kind==='pumpkin' || set==='pumpkin'){
-      if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
-      _m5CongratsShown = true;
-      finishMission5();
-    }
-  });
-
+});
+IZZA.on?.('armor-crafted', ({kind,set})=>{
+  if(kind==='pumpkin' || set==='pumpkin'){
+    normalizePumpkinArmorIds();
+    if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
+    _m5CongratsShown = true;
+    finishMission5();
+  }
+});
   // ---------- NEW: Fail the mission if the player dies ----------
   IZZA.on?.('player-died', ()=>{
     if (!mission5Active) return;
