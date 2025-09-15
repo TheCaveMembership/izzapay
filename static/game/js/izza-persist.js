@@ -40,21 +40,16 @@
     }catch{ return 0; }
   }
   function readMissions(){
-  try{
-    // 1) Primary: api.getMissionCount if your core exposes it
-    if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
-
-    // 2) Fallback: inventory meta
-    const meta = window.IZZA?.api?.inventory?.getMeta?.('missionsCompleted');
-    if (Number.isFinite(meta)) return meta|0;
-
-    // 3) Legacy fallback: localStorage key
-    const raw = localStorage.getItem('izzaMissions');
-    return raw ? (parseInt(raw,10)||0) : 0;
-  }catch{
-    return 0;
+    try{
+      if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
+      const meta = window.IZZA?.api?.inventory?.getMeta?.('missionsCompleted');
+      if (Number.isFinite(meta)) return meta|0;
+      const raw = localStorage.getItem('izzaMissions');
+      return raw ? (parseInt(raw,10)||0) : 0;
+    }catch{
+      return 0;
+    }
   }
-}
   function readHeartsSegs(){
     const u=userKey();
     const a = localStorage.getItem('izzaCurHeartSegments_'+u);
@@ -85,149 +80,153 @@
     const pos    = readPlayerXY();
     const heartsSegs = readHeartsSegs();
     const missions   = readMissions();
-    // capture the full mission state object (core v3)
-const missionState = IZZA?.api?.getMissionState
-    ? IZZA.api.getMissionState()
-    : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
+    const missionState = IZZA?.api?.getMissionState
+      ? IZZA.api.getMissionState()
+      : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
 
-    // WALLET ONLY lives in snapshot.coins
-      return {
-    version: 1,
-    player: { x: pos.x|0, y: pos.y|0, heartsSegs },
-    coins: onHand|0,
-    missions: missions|0,
-    missionState: missionState || {},
-    inventory: inv || {},
-    bank: bank || { coins:0, items:{}, ammo:{} },
-    timestamp: Date.now()
-  };
-} // end buildSnapshot
-  // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
-  // “blank” means: ... (we don't want this anymore)
+    return {
+      version: 1,
+      player: { x: pos.x|0, y: pos.y|0, heartsSegs },
+      coins: onHand|0,             // WALLET ONLY lives here
+      missions: missions|0,
+      missionState: missionState || {},
+      inventory: inv || {},
+      bank: bank || { coins:0, items:{}, ammo:{} },
+      timestamp: Date.now()
+    };
+  } // end buildSnapshot
+
   // ---- hydrate missions from server + keep all counters in sync
-function applyServerMissions(seed){
-  try{
-    if (!seed) return;
+  function applyServerMissions(seed){
+    try{
+      if (!seed) return;
 
-    // 1) Apply the structured missionState
-    const ms = seed.missionState && typeof seed.missionState === 'object' ? seed.missionState : {};
-    if (Object.keys(ms).length){
-      if (IZZA?.api?.setMissionState){
-        IZZA.api.setMissionState(ms);
-      } else if (window.setMissionEntry){
-        for (const [id, state] of Object.entries(ms)){
-          try{ setMissionEntry(id, state); }catch{}
-        }
-      } else {
-        localStorage.setItem('izzaMissionState', JSON.stringify(ms));
-      }
-    }
-
-    // 2) Figure out the numeric "missions completed" count
-    let count = Number(seed.missions)|0;
-    if (!count){
-      // fallback: infer from missionState
-      try{
-        count = Object.values(ms)
-          .filter(v => v === true || v === 'done' || v?.done === true || v?.status === 'done')
-          .length | 0;
-      }catch{ count = 0; }
-    }
-
-    // 3) Push to both the meta and the legacy localStorage key
-    try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', count); }catch{}
-    try{ localStorage.setItem('izzaMissions', String(count)); }catch{}
-
-    // 4) Convenience flags (so M4/M5 scripts “see” past completions on fresh load)
-    try{ if (count >= 4) localStorage.setItem('izzaMission4_done','1'); }catch{}
-    try{ if (count >= 5) localStorage.setItem('izzaMission5_done','1'); }catch{}
-
-    // 5) Nudge any listeners and the saver
-    try{ IZZA.emit?.('missions-updated', { hydrated:true, completed: count }); }catch{}
-    try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
-
-    console.log('[persist] missions hydrated →', { count, msKeys:Object.keys(ms).length });
-  }catch(e){
-    console.warn('[persist] applyServerMissions failed', e);
-  }
-}
-  // ---- hydrate inventory/coins/bank/hearts/position from server
-function applyServerCore(seed){
-  try{
-    if (!seed) return;
-
-    // INVENTORY
-    if (seed.inventory && typeof seed.inventory === 'object'){
-      try{
-        if (IZZA?.api?.setInventory) IZZA.api.setInventory(seed.inventory);
-        else localStorage.setItem('izzaInventory', JSON.stringify(seed.inventory));
-        try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-      }catch(e){ console.warn('[persist] inv hydrate failed', e); }
-    }
-
-    // WALLET COINS (on-hand)
-    if (Number.isFinite(seed.coins)){
-      try{
-        if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
-        else localStorage.setItem('izzaCoins', String(seed.coins|0));
-        try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
-      }catch(e){ console.warn('[persist] coins hydrate failed', e); }
-    }
-
-    // BANK (per-user key)
-    if (seed.bank && typeof seed.bank === 'object'){
-      try{
-        const u = userKey();
-        localStorage.setItem('izzaBank_'+u, JSON.stringify({
-          coins: (seed.bank.coins|0)||0,
-          items: seed.bank.items||{},
-          ammo:  seed.bank.ammo||{}
-        }));
-        try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
-      }catch(e){ console.warn('[persist] bank hydrate failed', e); }
-    }
-
-    // HEARTS (segments)
-    if (seed.player && seed.player.heartsSegs!=null){
-      try{
-        const u = userKey();
-        localStorage.setItem('izzaCurHeartSegments_'+u, String(seed.player.heartsSegs|0));
-        try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
-      }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
-    }
-
-    // PLAYER POSITION (best-effort)
-    if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
-      try{
-        if (IZZA?.api?.teleport) {
-          IZZA.api.teleport(seed.player.x|0, seed.player.y|0);
+      const ms = seed.missionState && typeof seed.missionState === 'object' ? seed.missionState : {};
+      if (Object.keys(ms).length){
+        if (IZZA?.api?.setMissionState){
+          IZZA.api.setMissionState(ms);
+        } else if (window.setMissionEntry){
+          for (const [id, state] of Object.entries(ms)){
+            try{ setMissionEntry(id, state); }catch{}
+          }
         } else {
-          // legacy hint some plugins read
-          localStorage.setItem('izzaMission3Pos', JSON.stringify({x:seed.player.x|0, y:seed.player.y|0}));
+          localStorage.setItem('izzaMissionState', JSON.stringify(ms));
         }
-      }catch(e){ console.warn('[persist] pos hydrate failed', e); }
-    }
+      }
 
-    console.log('[persist] core hydrated');
-  }catch(e){
-    console.warn('[persist] applyServerCore failed', e);
+      let count = Number(seed.missions)|0;
+      if (!count){
+        try{
+          count = Object.values(ms)
+            .filter(v => v === true || v === 'done' || v?.done === true || v?.status === 'done')
+            .length | 0;
+        }catch{ count = 0; }
+      }
+
+      try{ IZZA?.api?.inventory?.setMeta?.('missionsCompleted', count); }catch{}
+      try{ localStorage.setItem('izzaMissions', String(count)); }catch{}
+      try{ if (count >= 4) localStorage.setItem('izzaMission4_done','1'); }catch{}
+      try{ if (count >= 5) localStorage.setItem('izzaMission5_done','1'); }catch{}
+      try{ IZZA.emit?.('missions-updated', { hydrated:true, completed: count }); }catch{}
+      try{ window.dispatchEvent(new Event('izza-missions-changed')); }catch{}
+
+      console.log('[persist] missions hydrated →', { count, msKeys:Object.keys(ms).length });
+    }catch(e){
+      console.warn('[persist] applyServerMissions failed', e);
+    }
   }
-}
-// “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
-function looksEmpty(s){
-  try{
-    if (!s || typeof s!=='object') return true;
-    const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
-    const bankEmpty = !s.bank || (
-      ((s.bank.coins|0)===0) &&
-      (!s.bank.items || !Object.keys(s.bank.items).length) &&
-      (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
-    );
-    const walletZero = (s.coins|0)===0;
-    const heartsUnknown = (s.player?.heartsSegs==null); // hearts plugin mirrors later
-    return walletZero && bankEmpty && invEmpty && heartsUnknown;
-  }catch{ return true; }
-}
+
+  // ---- hydrate inventory/coins/bank/hearts/position from server
+  function applyServerCore(seed){
+    try{
+      if (!seed) return;
+
+      // INVENTORY
+      if (seed.inventory && typeof seed.inventory === 'object'){
+        try{
+          if (IZZA?.api?.setInventory) IZZA.api.setInventory(seed.inventory);
+          else localStorage.setItem('izzaInventory', JSON.stringify(seed.inventory));
+          try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+        }catch(e){ console.warn('[persist] inv hydrate failed', e); }
+      }
+
+      // WALLET COINS (on-hand)
+      if (Number.isFinite(seed.coins)){
+        try{
+          if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
+          else localStorage.setItem('izzaCoins', String(seed.coins|0));
+          try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+        }catch(e){ console.warn('[persist] coins hydrate failed', e); }
+      }
+
+      // BANK (per-user key)
+      if (seed.bank && typeof seed.bank === 'object'){
+        try{
+          const u = userKey();
+          localStorage.setItem('izzaBank_'+u, JSON.stringify({
+            coins: (seed.bank.coins|0)||0,
+            items: seed.bank.items||{},
+            ammo:  seed.bank.ammo||{}
+          }));
+          try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
+        }catch(e){ console.warn('[persist] bank hydrate failed', e); }
+      }
+
+      // HEARTS (segments) — write BOTH keys (namespaced + global) to beat other plugins
+      if (seed.player && seed.player.heartsSegs != null){
+        try{
+          const segs = seed.player.heartsSegs|0;
+          const u = userKey();
+          localStorage.setItem('izzaCurHeartSegments_'+u, String(segs));
+          localStorage.setItem('izzaCurHeartSegments',    String(segs));
+          try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+          try{ if (typeof window._redrawHeartsHud === 'function') window._redrawHeartsHud(); }catch{}
+        }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
+      }
+
+      // PLAYER POSITION (best-effort) — set player + camera, then teleport if available
+      if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
+        const tx = seed.player.x|0, ty = seed.player.y|0;
+        try{
+          if (IZZA?.api?.player) {
+            IZZA.api.player.x = tx;
+            IZZA.api.player.y = ty;
+            try {
+              if (IZZA.api.camera) {
+                IZZA.api.camera.x = IZZA.api.player.x - 200;
+                IZZA.api.camera.y = IZZA.api.player.y - 120;
+              }
+            } catch {}
+          }
+          if (IZZA?.api?.teleport) {
+            IZZA.api.teleport(tx, ty);
+          } else {
+            localStorage.setItem('izzaMission3Pos', JSON.stringify({x:tx, y:ty}));
+          }
+        }catch(e){ console.warn('[persist] pos hydrate failed', e); }
+      }
+
+      console.log('[persist] core hydrated');
+    }catch(e){
+      console.warn('[persist] applyServerCore failed', e);
+    }
+  }
+
+  // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
+  function looksEmpty(s){
+    try{
+      if (!s || typeof s!=='object') return true;
+      const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
+      const bankEmpty = !s.bank || (
+        ((s.bank.coins|0)===0) &&
+        (!s.bank.items || !Object.keys(s.bank.items).length) &&
+        (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
+      );
+      const walletZero = (s.coins|0)===0;
+      const heartsUnknown = (s.player?.heartsSegs==null);
+      return walletZero && bankEmpty && invEmpty && heartsUnknown;
+    }catch{ return true; }
+  }
 
   const Persist = {
     async load(){
@@ -256,153 +255,159 @@ function looksEmpty(s){
 
   // ----- boot & save orchestration -----
   let serverSeed=null, loaded=false, ready=false, armed=false;
-let saveBusy=false, needLater=false, lastGood=null;
-let freezeUntil=0; // <-- ADD (hold off saves temporarily)
+  let saveBusy=false, needLater=false, lastGood=null;
+  let freezeUntil=0; // hold off saves temporarily
 
   function armOnce(){ if(armed) return; armed=true; tryKick('armed'); }
 
   // wait for core ready
   if (window.IZZA?.on) {
-  IZZA.on('ready', ()=>{
-  ready = true;
-  try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
-  startEnforceFromSeed(8000); // <-- ADD
-  armOnce();
-  tryKick('post-hydrate');
-});
-} else {
-  setTimeout(()=>{
-    ready = true;
-    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
-    armOnce();
-    tryKick('post-hydrate-fallback');
-  }, 2500);
-}
-  // freeze saves for 5s after death so we don't capture the in-between state
-if (window.IZZA?.on){
-  IZZA.on('player-died', ()=>{ freezeUntil = Date.now() + 5000; });   // <-- ADD
-  IZZA.on('player-respawn', ()=>{ freezeUntil = Math.max(freezeUntil, Date.now()+1200); }); // small post-respawn settle  <-- ADD
-}
+    IZZA.on('ready', ()=>{
+      ready = true;
+      try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+      try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
+      startEnforceFromSeed(8000); // enforce hearts/pos briefly to beat late resets
+      armOnce();
+      tryKick('post-hydrate');
+    });
+  } else {
+    setTimeout(()=>{
+      ready = true;
+      try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+      try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
+      armOnce();
+      tryKick('post-hydrate-fallback');
+    }, 2500);
+  }
+
+  // freeze saves for 5s after death + short settle after respawn
+  if (window.IZZA?.on){
+    IZZA.on('player-died',   ()=>{ freezeUntil = Date.now() + 5000; });
+    IZZA.on('player-respawn',()=>{ freezeUntil = Math.max(freezeUntil, Date.now()+1200); });
+  }
+
   // --- enforce hearts & position for a short window after hydrate (to beat late resets)
-let _enforceTimer = 0;
-function startEnforceFromSeed(ms=8000){
-  if (_enforceTimer) { clearInterval(_enforceTimer); _enforceTimer = 0; }
-  const until = Date.now() + ms;
-  _enforceTimer = setInterval(()=>{
-    // stop after time window
-    if (Date.now() > until) { clearInterval(_enforceTimer); _enforceTimer = 0; return; }
-    // don't fight while death/respawn freeze is active
+  let _enforceTimer = 0;
+  function startEnforceFromSeed(ms=8000){
+    if (_enforceTimer) { clearInterval(_enforceTimer); _enforceTimer = 0; }
+    const until = Date.now() + ms;
+    _enforceTimer = setInterval(()=>{
+      if (Date.now() > until) { clearInterval(_enforceTimer); _enforceTimer = 0; return; }
+      if (Date.now() < freezeUntil) return;
+
+      try{
+        const seed = serverSeed;
+        if (!seed || !seed.player) return;
+
+        // Hearts enforcement
+        const targetH = (seed.player?.heartsSegs != null) ? (seed.player.heartsSegs|0) : null;
+        if (targetH != null){
+          const curH = readHeartsSegs();
+          if (curH == null || (curH|0) !== targetH){
+            const u = userKey();
+            try{
+              localStorage.setItem('izzaCurHeartSegments_'+u, String(targetH));
+              localStorage.setItem('izzaCurHeartSegments',    String(targetH));
+              try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+              try{ if (typeof window._redrawHeartsHud === 'function') window._redrawHeartsHud(); }catch{}
+            }catch(e){ console.warn('[persist] enforce hearts failed', e); }
+          }
+        }
+
+        // Position enforcement
+        const tx = Number.isFinite(seed.player.x) ? (seed.player.x|0) : null;
+        const ty = Number.isFinite(seed.player.y) ? (seed.player.y|0) : null;
+        if (tx!=null && ty!=null){
+          const cur = readPlayerXY();
+          if ((cur.x|0)!==tx || (cur.y|0)!==ty){
+            try{
+              if (IZZA?.api?.teleport) IZZA.api.teleport(tx, ty);
+              else localStorage.setItem('izzaMission3Pos', JSON.stringify({x:tx, y:ty}));
+            }catch(e){ console.warn('[persist] enforce pos failed', e); }
+          }
+        }
+      }catch(e){
+        console.warn('[persist] enforce loop err', e);
+      }
+    }, 300);
+  }
+
+  // also give ample grace after any tier reloads
+  setTimeout(()=>{ armOnce(); }, 7000);
+
+  (async function init(){
+    const res = await Persist.load();
+    if (res.ok) serverSeed = res.data;
+    loaded = true;
+
+    if (serverSeed) {
+      console.log('[persist] seed fetched', serverSeed);
+    }
+
+    if (serverSeed && !looksEmpty(serverSeed)) {
+      console.log('[persist] server has non-empty snapshot; blank overwrites disabled');
+    } else {
+      console.log('[persist] server empty or missing; waiting for first non-blank local save');
+    }
+
+    // If the core is already ready by the time load completes, hydrate now too.
+    if (ready) {
+      try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+      try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
+      startEnforceFromSeed(8000);
+      armOnce();
+      tryKick('post-hydrate-init');
+    }
+  })(); // <-- closes ONLY the inner async init IIFE
+
+  // === keep tryKick at top level (not inside init) ===
+  async function tryKick(reason){
+    if (!loaded || !armed || !ready) return;
+
+    // hold while death/respawn is stabilizing
     if (Date.now() < freezeUntil) return;
 
-    try{
-      const seed = serverSeed;
-      if (!seed || !seed.player) return;
+    const snap = buildSnapshot();
 
-      // Hearts enforcement
-      const targetH = (seed.player.heartsSegs!=null) ? (seed.player.heartsSegs|0) : null;
-      if (targetH!=null){
-        const curH = readHeartsSegs();
-        if (curH==null || (curH|0)!==targetH){
-          const u = userKey();
-          try{
-            localStorage.setItem('izzaCurHeartSegments_'+u, String(targetH));
-            try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
-          }catch(e){ console.warn('[persist] enforce hearts failed', e); }
-        }
-      }
-
-      // Position enforcement
-      const tx = Number.isFinite(seed.player.x) ? (seed.player.x|0) : null;
-      const ty = Number.isFinite(seed.player.y) ? (seed.player.y|0) : null;
-      if (tx!=null && ty!=null){
-        const cur = readPlayerXY();
-        if ((cur.x|0)!==tx || (cur.y|0)!==ty){
-          try{
-            if (IZZA?.api?.teleport) IZZA.api.teleport(tx, ty);
-            else localStorage.setItem('izzaMission3Pos', JSON.stringify({x:tx, y:ty}));
-          }catch(e){ console.warn('[persist] enforce pos failed', e); }
-        }
-      }
-    }catch(e){
-      console.warn('[persist] enforce loop err', e);
+    // never push blank over a non-empty server
+    if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
+      console.log('[persist] skip blank (server already has data)', reason);
+      return;
     }
-  }, 300);
-}
-// also give ample grace after any tier reloads
-setTimeout(()=>{ armOnce(); }, 7000);
-  (async function init(){
-  const res = await Persist.load();
-  if (res.ok) serverSeed = res.data;
-  loaded = true;
+    // if still blank, just wait
+    if (looksEmpty(snap)) {
+      console.log('[persist] still blank', reason);
+      return;
+    }
 
-  if (serverSeed) {
-    console.log('[persist] seed fetched', serverSeed);
+    lastGood = snap;
+
+    if (saveBusy){ needLater = true; return; }
+    saveBusy = true;
+    const r = await Persist.save(snap);
+    saveBusy = false;
+
+    if (r.ok) {
+      console.log('[persist] saved', reason, snap);
+      serverSeed = snap; // from now on, blank overwrites are blocked
+      toast('Saved!');
+    } else if (needLater) {
+      needLater = false; tryKick('retry');
+    } else {
+      toast('Save failed');
+    }
   }
 
-  if (serverSeed && !looksEmpty(serverSeed)) {
-    console.log('[persist] server has non-empty snapshot; blank overwrites disabled');
-  } else {
-    console.log('[persist] server empty or missing; waiting for first non-blank local save');
-  }
-    // If the core is already ready by the time load completes, hydrate now too.
-if (ready) {
-  try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
-  startEnforceFromSeed(8000); // <-- ADD
-  armOnce();
-  tryKick('post-hydrate-init');
-}
-})();
-  async function tryKick(reason){
-  if (!loaded || !armed || !ready) return;
-
-  // hold while death/respawn is stabilizing
-  if (Date.now() < freezeUntil) return;
-
-  const snap = buildSnapshot();
-
-  // never push blank over a non-empty server
-  if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
-    console.log('[persist] skip blank (server already has data)', reason);
-    return;
-  }
-  // if still blank, just wait
-  if (looksEmpty(snap)) {
-    console.log('[persist] still blank', reason);
-    return;
-  }
-
-  lastGood = snap;
-
-  if (saveBusy){ needLater = true; return; }
-  saveBusy = true;
-  const r = await Persist.save(snap);
-  saveBusy = false;
-
-  if (r.ok) {
-    console.log('[persist] saved', reason, snap);
-    serverSeed = snap; // from now on, blank overwrites are blocked
-    toast('Saved!');
-  } else if (needLater) {
-    needLater = false; tryKick('retry');
-  } else {
-    toast('Save failed');
-  }
-}
-;
   // ---- event-driven saves (bank/coins/inventory/hearts) ----
   window.addEventListener('izza-bank-changed',     ()=> tryKick('bank'));
   window.addEventListener('izza-coins-changed',    ()=> tryKick('coins'));
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
-  window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));  // <-- listens if your hearts plugin emits
-// Persist when missions change
-window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
-if (window.IZZA?.on) {
-  // If your mission plugins also emit on the IZZA bus
-  IZZA.on('missions-updated', ()=> tryKick('missions'));
-}
+  window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
+  window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
+  if (window.IZZA?.on) {
+    IZZA.on('missions-updated', ()=> tryKick('missions'));
+  }
+
   // ---- hearts watcher (works even if no event is emitted) ----
   let _lastHearts = readHeartsSegs();
   setInterval(()=>{
