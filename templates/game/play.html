@@ -126,7 +126,28 @@
     overflow-y:auto;
     overflow-x:hidden;              /* never side-scroll */
   }
+/* --- Visuals pane quality-of-life --- */
+.cl-preview{
+  overflow-y:auto;
+  overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+}
 
+/* Keep the Preview/Craft buttons always reachable */
+.cl-actions{
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: linear-gradient(to top, rgba(15,21,34,.98), rgba(15,21,34,.8) 40%, rgba(15,21,34,0));
+  backdrop-filter: blur(2px);
+}
+
+/* The preview box won't grow taller than half the screen; it can scroll internally if needed */
+#svgPreview{
+  min-height: 220px;
+  max-height: 50vh;
+  overflow: auto;
+}
   /* Sub-tabs shown on phones to flip between panes */
   .cl-subtabs{ display:none; }
   @media (max-width: 680px){
