@@ -1,7 +1,7 @@
 // v1_store_items_plugin.js — stock extender + icon repair + BUY/SELL + search + pricebook
 // + Inventory panel extender for ALL armor pieces (no Core edits)
 (function(){
-  const BUILD = 'v1.1.4-store-items+inv-ext-armor (inline-svg OR data-url icons everywhere)';
+  const BUILD = 'v1.1.5-store-items+inv-ext-armor (owned-or-count>0 inventory visibility)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -446,7 +446,7 @@
 
     // gather dynamic armor items
     const items = Object.entries(inv)
-      .filter(([k,v])=> v && v.type==='armor' && (v.count|0)>0 && !already.has(k));
+      .filter(([k,v])=> v && v.type==='armor' && (((v.count|0) + (v.owned?1:0))>0) && !already.has(k));
 
     if(!items.length) return;
 
