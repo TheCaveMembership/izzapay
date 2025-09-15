@@ -103,14 +103,12 @@ const missionState = IZZA?.api?.getMissionState
 };
 
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
-  function looksEmpty(s){
-    const bankEmpty = !s.bank || (((s.bank.coins|0)===0) && !Object.keys(s.bank.items||{}).length && !Object.keys(s.bank.ammo||{}).length);
-    const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
-    const coinsZero = (s.coins|0)===0; // s.coins is WALLET
-    const heartsKnown = !!(s.player && s.player.heartsSegs!=null);   // <-- NEW: hearts-only is meaningful
-    const missionsKnown = ((s.missions|0) > 0) || ((s.missionsCompleted|0) > 0); // <— NEW
-    return bankEmpty && invEmpty && coinsZero && !heartsKnown;
-  }
+  // “blank” means: ... (we don't want this anymore)
+function looksEmpty(_s){
+  // We no longer block any snapshot as "blank".
+  // Even 0 coins / empty inv / only missionState should still save.
+  return false;
+}
 
   const Persist = {
     async load(){
