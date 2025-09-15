@@ -54,8 +54,8 @@
     #authPanel .close{ margin-left:auto }
   </style>
 <style>
-  /* NEW: Craft button styling/placement (just above the control buttons) */
-  #btnCraft {
+  /* Floating launcher (hides while crafting is open) */
+  #btnCraft{
     position:fixed;
     right:12px;
     bottom:160px;
@@ -67,118 +67,109 @@
     padding:10px 12px;
     font-size:14px;
   }
+  body.crafting-open #btnCraft{ display:none !important; }
 
-  /* Crafting modal: wide + short; container never side-scrolls */
+  /* Crafting modal container: taller + never side-scrolls */
   #craftingModal .card{
     width: min(1200px, 96vw);
-    height: min(86vh, 760px);     /* ↑ taller than before but still fits phones */
+    height: min(92vh, 820px);      /* more room so Setup reaches the bottom */
     padding: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    overscroll-behavior: contain;  /* stop background scroll chaining */
+    overscroll-behavior: contain;   /* stop background scroll chaining */
   }
 
-  /* Make the root a vertical flex container so tabs area can size itself */
-#craftingRoot{
-  flex: 1;
-  display:flex;              /* add this */
-  flex-direction: column;    /* add this */
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* The content area under the tab buttons should fill remaining height */
-#craftTabs{
-  flex: 1;                   /* add this */
-  min-height: 0;             /* add this */
-  overflow: hidden;          /* add this */
-}
-
-/* Create Item layout: two columns, left scrolls vertically */
-.cl-body{
-  display:grid;
-  grid-template-columns: minmax(320px,1.2fr) 1fr;
-  gap:12px;
-  height:100%;               /* fill the craftTabs area */
-  padding:14px;
-  overflow:hidden;           /* no sideways scroll */
-}
-
-.cl-pane{
-  background:#0f1522;
-  border:1px solid #2a3550;
-  border-radius:12px;
-  padding:12px;
-  min-width:0;
-  overflow-x:hidden;
-}
-
-.cl-form{                     /* LEFT column (form) */
-  overflow-y:auto;            /* vertical scroll */
-  -webkit-overflow-scrolling:touch;
-}
-
-.cl-preview{                  /* RIGHT column (visuals/preview) */
-  overflow:auto;
-}
-/* Hide the floating Craft button while Crafting is open */
-body.crafting-open #btnCraft{
-  display:none !important;
-}
-
-/* Right pane: no sideways scroll */
-.cl-preview{
-  overflow-y:auto;
-  overflow-x:hidden;   /* was overflow:auto */
-}
-
-/* Phone layout: stack columns (no side scroll) */
-@media (max-width: 680px){
-  .cl-body{ grid-template-columns: 1fr; }
-}
-
-/* Sub-tabs for Create Item (only show one pane at a time on small screens) */
-.cl-subtabs{ display:none; }
-@media (max-width: 680px){
-  .cl-subtabs{
+  /* Root & tabs area sizing so inner panes scroll, not the card */
+  #craftingRoot{
+    flex: 1;
     display:flex;
-    gap:8px;
-    padding:8px 14px;
-    border-bottom:1px solid #2a3550;
-    background:#0f1624;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
   }
-  .cl-subtabs button{
-    border:1px solid #2a3550;
+  #craftTabs{
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Create Item layout: two columns on wide; stacked on phones */
+  .cl-body{
+    display:grid;
+    grid-template-columns: minmax(320px,1.2fr) 1fr;
+    gap:12px;
+    height:100%;
+    padding:14px;
+    overflow:hidden;                /* kill any horizontal scroll */
+  }
+
+  .cl-pane{
     background:#0f1522;
-    color:#cfe0ff;
-    border-radius:10px;
-    padding:8px 12px;
+    border:1px solid #2a3550;
+    border-radius:12px;
+    padding:12px;
+    min-width:0;
+    overflow-x:hidden;
+    box-sizing:border-box;          /* important to prevent side scroll */
   }
-  .cl-subtabs button.on{
-    background:#1f2a3f;
+
+  .cl-form{
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    /* keep last controls above iOS home bar / keyboard */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
   }
-  .cl-body.setup  .cl-preview{ display:none; }  /* show only the left pane */
-  .cl-body.visuals .cl-form{   display:none; }  /* show only the right pane */
-}
-  /* Small niceties for dense forms */
+
+  .cl-preview{
+    overflow-y:auto;
+    overflow-x:hidden;              /* never side-scroll */
+  }
+
+  /* Sub-tabs shown on phones to flip between panes */
+  .cl-subtabs{ display:none; }
+  @media (max-width: 680px){
+    .cl-body{ grid-template-columns: 1fr; }
+
+    .cl-subtabs{
+      display:flex;
+      gap:8px;
+      padding:8px 14px;
+      border-bottom:1px solid #2a3550;
+      background:#0f1624;
+    }
+    .cl-subtabs button{
+      border:1px solid #2a3550;
+      background:#0f1522;
+      color:#cfe0ff;
+      border-radius:10px;
+      padding:8px 12px;
+    }
+    .cl-subtabs button.on{ background:#1f2a3f; }
+
+    /* show only one pane at a time on phones */
+    .cl-body.setup  .cl-preview{ display:none; }
+    .cl-body.visuals .cl-form{   display:none; }
+  }
+
+  /* small form niceties */
   .cl-form .row,
   .cl-form .field{ margin-bottom:10px; }
   .cl-form input[type="text"]{ width:100%; }
-  .cl-form .feature-list{ display:grid; grid-template-columns: 1fr; row-gap:8px; }
+  .cl-form .feature-list{ display:grid; grid-template-columns:1fr; row-gap:8px; }
   @media (min-width:560px){
     .cl-form .feature-list{ grid-template-columns: repeat(2, 1fr); }
   }
 
-  /* Keep your existing generic fallbacks — harmless if CraftingUI uses other classnames */
-  #craftingRoot > * { min-width: 0; }
+  /* generic fallbacks (safe if classnames change later) */
+  #craftingRoot > * { min-width:0; }
   #craftingRoot .pane,
   #craftingRoot .panel,
   #craftingRoot .col {
-    min-width: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    min-width:0;
+    overflow-y:auto;
+    overflow-x:hidden;
   }
 </style>
   <style>
