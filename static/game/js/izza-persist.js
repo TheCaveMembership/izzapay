@@ -188,69 +188,35 @@ function applyServerCore(seed){
     }
 
     // HEARTS (segments)
-if (seed.player && seed.player.heartsSegs != null){
-  try{
-    const u = userKey();
-    const v = seed.player.heartsSegs | 0;
+    if (seed.player && seed.player.heartsSegs!=null){
+      try{
+        const u = userKey();
+        localStorage.setItem('izzaCurHeartSegments_'+u, String(seed.player.heartsSegs|0));
+        try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+      }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
+    }
 
-    // Write BOTH keys so any hearts code sees it
-    localStorage.setItem('izzaCurHeartSegments', String(v));             // global
-    localStorage.setItem('izzaCurHeartSegments_' + u, String(v));        // user-scoped
-
-    // Nudge listeners (your hearts plugin redraws on this)
-    try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
-
-    console.log('[persist] hearts hydrated →', v);
-  }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
-}
-
-    // PLAYER POSITION (resilient)
-if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
-  try{
-    const px = seed.player.x | 0, py = seed.player.y | 0;
-
-    const doTeleport = ()=>{
+    // PLAYER POSITION (best-effort)
+    if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
       try{
         if (IZZA?.api?.teleport) {
-          IZZA.api.teleport(px, py);
+          IZZA.api.teleport(seed.player.x|0, seed.player.y|0);
         } else {
           // legacy hint some plugins read
-          localStorage.setItem('izzaMission3Pos', JSON.stringify({ x: px, y: py }));
+          localStorage.setItem('izzaMission3Pos', JSON.stringify({x:seed.player.x|0, y:seed.player.y|0}));
         }
-        // Optional: announce for any custom listeners
-        try{ window.dispatchEvent(new CustomEvent('izza-pos-hydrated', { detail:{ x:px, y:py } })); }catch{}
-      }catch(e){ console.warn('[persist] pos hydrate apply failed', e); }
-    };
+      }catch(e){ console.warn('[persist] pos hydrate failed', e); }
+    }
 
-    // Apply now…
-    doTeleport();
-
-    // …and again shortly to win over late re-spawns / door warps
-    try{ requestAnimationFrame(()=> doTeleport()); }catch{}
-    setTimeout(()=> doTeleport(), 60);
-
-    // …and once when the core “resumes” a session
-    try{ IZZA.on?.('resume', ()=> doTeleport()); }catch{}
-
-    console.log('[persist] position hydrated →', { x:px, y:py });
-  }catch(e){ console.warn('[persist] pos hydrate failed', e); }
+    console.log('[persist] core hydrated');
+  }catch(e){
+    console.warn('[persist] applyServerCore failed', e);
+  }
 }
-function looksEmpty(snap){
-  if (!snap) return true;
-
-  // Check coins, missions, bank, inventory, hearts, missionState
-  const noCoins    = !snap.coins || snap.coins === 0;
-  const noMissions = !snap.missions || snap.missions === 0;
-  const noBank     = !snap.bank || (
-    (!snap.bank.coins || snap.bank.coins === 0) &&
-    Object.keys(snap.bank.items||{}).length === 0 &&
-    Object.keys(snap.bank.ammo||{}).length === 0
-  );
-  const noInv      = !snap.inventory || Object.keys(snap.inventory).length === 0;
-  const noHearts   = snap.player?.heartsSegs == null || snap.player.heartsSegs <= 0;
-  const noMissionState = !snap.missionState || Object.keys(snap.missionState).length === 0;
-
-  return noCoins && noMissions && noBank && noInv && noHearts && noMissionState;
+function looksEmpty(_s){
+  // We no longer block any snapshot as "blank".
+  // Even 0 coins / empty inv / only missionState should still save.
+  return false;
 }
 
   const Persist = {
@@ -286,37 +252,24 @@ function looksEmpty(snap){
 
   // wait for core ready
   if (window.IZZA?.on) {
-    IZZA.on('ready', ()=>{
-      ready = true;
-      const hasServerData = serverSeed && !looksEmpty(serverSeed);
-      if (hasServerData) {
-        try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-        try { applyServerCore(serverSeed); }   catch(e){ console.warn(e); }
-        tryKick('post-hydrate');
-      } else {
-        console.log('[persist] skip hydrate (server empty), letting local state win');
-        tryKick('local-wins-initial');
-      }
-      armOnce();
-    });
-  } else {
-    setTimeout(()=>{
-      ready = true;
-      const hasServerData = serverSeed && !looksEmpty(serverSeed);
-      if (hasServerData) {
-        try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-        try { applyServerCore(serverSeed); }   catch(e){ console.warn(e); }
-        tryKick('post-hydrate-fallback');
-      } else {
-        console.log('[persist] skip hydrate (server empty - fallback), letting local state win');
-        tryKick('local-wins-initial-fallback');
-      }
-      armOnce();
-    }, 2500);
-  }
-  // also give ample grace after any tier reloads
-  setTimeout(()=>{ armOnce(); }, 7000);
-
+  IZZA.on('ready', ()=>{
+    ready = true;
+    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
+    armOnce();
+    tryKick('post-hydrate');
+  });
+} else {
+  setTimeout(()=>{
+    ready = true;
+    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
+    armOnce();
+    tryKick('post-hydrate-fallback');
+  }, 2500);
+}
+// also give ample grace after any tier reloads
+setTimeout(()=>{ armOnce(); }, 7000);
   (async function init(){
   const res = await Persist.load();
   if (res.ok) serverSeed = res.data;
@@ -332,18 +285,12 @@ function looksEmpty(snap){
     console.log('[persist] server empty or missing; waiting for first non-blank local save');
   }
     // If the core is already ready by the time load completes, hydrate now too.
-  if (ready) {
-    const hasServerData = serverSeed && !looksEmpty(serverSeed);
-    if (hasServerData) {
-      try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-      try { applyServerCore(serverSeed); }   catch(e){ console.warn(e); }
-      tryKick('post-hydrate-init');
-    } else {
-      console.log('[persist] skip hydrate (server empty @init), letting local state win');
-      tryKick('local-wins-init');
-    }
-    armOnce();
-  }
+if (ready) {
+  try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
+  armOnce();
+  tryKick('post-hydrate-init');
+}
 })();
 
   async function tryKick(reason){
