@@ -58,7 +58,7 @@
   #btnCraft {
     position:fixed;
     right:12px;
-    bottom:160px;    /* sits above the bottom controls row */
+    bottom:160px;
     z-index:9001;
     background:#162134;
     color:#cfe0ff;
@@ -67,30 +67,69 @@
     padding:10px 12px;
     font-size:14px;
   }
-  /* Crafting modal: wide + not-too-tall, no horizontal scroll */
-#craftingModal .card{
-  width: min(1200px, 96vw);  /* wider */
-  height: min(540px, 72vh);  /* shorter */
-  padding: 0;
-  overflow: hidden;          /* kill side scroll at container */
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-#craftingRoot{
-  flex: 1;
-  min-height: 0;             /* lets inner panes scroll instead of the card */
-  overflow: hidden;          /* prevents horizontal scroll bleed */
-}
-  /* optional, if your CraftingUI uses these class names; safe as generic selectors */
-#craftingRoot > * { min-width: 0; }
-#craftingRoot .pane, 
-#craftingRoot .panel, 
-#craftingRoot .col { 
-  min-width: 0; 
-  overflow-y: auto; 
-  overflow-x: hidden; 
-}
+
+  /* Crafting modal: wide + short; container never side-scrolls */
+  #craftingModal .card{
+    width: min(1200px, 96vw);
+    height: min(86vh, 760px);     /* ↑ taller than before but still fits phones */
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overscroll-behavior: contain;  /* stop background scroll chaining */
+  }
+
+  #craftingRoot{
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;              /* panes manage their own scroll */
+  }
+
+  /* === Create Item layout: left form scrolls vertically === */
+  .cl-body{
+    display:grid;
+    grid-template-columns: minmax(300px, 1.25fr) minmax(260px, 1fr);
+    gap:12px;
+    height: calc(100% - 112px);    /* header (~64) + tabs (~48) */
+    padding: 8px 10px 12px;
+    overflow:hidden;
+  }
+  .cl-pane{
+    background:#0f1522;
+    border:1px solid #2a3550;
+    border-radius:12px;
+    padding:12px;
+    min-width:0;                   /* prevent horizontal overflow */
+    overflow-x:hidden;             /* no sideways scroll anywhere */
+  }
+  .cl-form{                        /* LEFT column */
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-gutter: stable both-edges;
+  }
+  .cl-preview{                     /* RIGHT column */
+    overflow:auto;
+  }
+
+  /* Small niceties for dense forms */
+  .cl-form .row,
+  .cl-form .field{ margin-bottom:10px; }
+  .cl-form input[type="text"]{ width:100%; }
+  .cl-form .feature-list{ display:grid; grid-template-columns: 1fr; row-gap:8px; }
+  @media (min-width:560px){
+    .cl-form .feature-list{ grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* Keep your existing generic fallbacks — harmless if CraftingUI uses other classnames */
+  #craftingRoot > * { min-width: 0; }
+  #craftingRoot .pane,
+  #craftingRoot .panel,
+  #craftingRoot .col {
+    min-width: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
 </style>
   <style>
   /* Raise all modals above any floating UI (bells, friends, full, auth dock, etc.) */
