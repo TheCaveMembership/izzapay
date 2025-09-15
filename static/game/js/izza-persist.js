@@ -354,7 +354,7 @@ if (ready) {
   armOnce();
   tryKick('post-hydrate-init');
 }
-
+})();
   async function tryKick(reason){
   if (!loaded || !armed || !ready) return;
 
