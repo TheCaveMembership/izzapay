@@ -83,6 +83,34 @@
     display:flex;
   }
 </style>
+  <style>
+  /* Raise all modals above any floating UI (bells, friends, full, auth dock, etc.) */
+  .modal{ z-index:10050; }
+  #craftingModal{ z-index:10060; } /* highest of the bunch */
+  #craftingModal .backdrop{ z-index:0; }
+  #craftingModal .card{ z-index:1; }
+
+  /* While Crafting is open, disable clicks to the game UI and dim it a bit */
+  body.crafting-open .wrap,
+  body.crafting-open .mini,
+  body.crafting-open .controls,
+  body.crafting-open .stick,
+  body.crafting-open #authDock,
+  body.crafting-open #btnCraft {
+    pointer-events:none !important;
+    filter:saturate(.6) opacity(.7);
+  }
+
+  /* Ensure the crafting modal still receives interactions */
+  body.crafting-open #craftingModal,
+  body.crafting-open #craftingModal * {
+    pointer-events:auto !important;
+    filter:none;
+  }
+
+  /* Optional: stop background scroll on iOS while modal is up */
+  body.crafting-open { overscroll-behavior:none; touch-action:none; }
+</style>
   <!-- Pi SDK -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -275,6 +303,7 @@
   if(!modal) return;
 
   function openCraft(){
+    document.body.classList.add('crafting-open');
     modal.style.display='flex';
     // lazy-load UI only once
     if (!window.CraftingUI && !document.getElementById('crafting-ui-script')) {
@@ -289,6 +318,7 @@
   }
   function closeCraft(){
     modal.style.display='none';
+    document.body.classList.remove('crafting-open');
     try { window.CraftingUI && CraftingUI.unmount && CraftingUI.unmount('#craftingRoot'); } catch {}
     try { window.IZZA && IZZA.emit && IZZA.emit('crafting-closed'); } catch {}
   }
