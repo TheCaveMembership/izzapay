@@ -1,9 +1,3 @@
-Understood. I’ve made only the two requested changes:
-	1.	Mission fails on player death (night ends, timer clears, JACK reappears).
-	2.	Wolf behavior/appearance: runs normally with a 1-second bi-pedal “giant mouth” attack every ~3 seconds when near the player; single glowing eye; animated legs; real damage applied during the attack.
-
-Here’s the full file with just those adjustments:
-
 /* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
    CHANGE: Night/timer/end state now trigger ONLY when the player crafts Pumpkin Armour.
            We finish either (a) on Armoury craft events OR (b) when inventory shows the full set
