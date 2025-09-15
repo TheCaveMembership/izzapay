@@ -152,6 +152,133 @@
   })();
   </script>
 
+  <!-- UPDATED: full shop modal markup -->
+  <div class="modal" id="shopModal">
+    <div class="backdrop"></div>
+    <div class="card">
+      <h3>Shop</h3>
+      <div id="shopList" class="shop-list"></div>
+      <div class="shop-note">Tap an item to purchase.</div>
+      <div class="row"><button class="ghost" id="shopClose" type="button">Close</button></div>
+    </div>
+  </div>
+  <script>
+(function(){
+  const modal = document.getElementById('shopModal');
+  if (!modal) return;
+
+  function closeShop(){
+    modal.style.display = 'none';
+    try { window.IZZA && IZZA.emit && IZZA.emit('shop-closed'); } catch {}
+  }
+  const backdrop = modal.querySelector('.backdrop');
+  backdrop && backdrop.addEventListener('click', closeShop, { passive:true });
+
+  document.addEventListener('click', function(ev){
+    const btn = ev.target && ev.target.closest('#shopClose');
+    if (!btn) return;
+    if (modal.style.display === 'none') return;
+    ev.stopPropagation();
+    ev.preventDefault();
+    closeShop();
+  }, true);
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && modal.style.display !== 'none') closeShop();
+  }, { passive:true });
+
+  /* ==== Shop extras: add Bat + Brass Knuckles without touching your plugin ==== */
+  const EXTRA_ITEMS = [
+    { key:'bat',      name:'Bat',             price:200, sub:'Classic melee. Crowd pleaser.' },
+    { key:'brass',    name:'Brass Knuckles',  price:150, sub:'Heavy hits, light weight.' }
+  ];
+  let injectedOnce = false;
+
+  function getInv(){
+    try{
+      if (window.IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
+      const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+    }catch{ return {}; }
+  }
+  function setInv(inv){
+    try{
+      if (window.IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+    }catch{}
+  }
+
+  function addItemToInv(key){
+    const inv = getInv();
+    // store as stackable count
+    inv[key] = inv[key] || {count:0};
+    if (typeof inv[key].count !== 'number') inv[key].count = 0;
+    inv[key].count += 1;
+    setInv(inv);
+    try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+  }
+
+  function buy(key, price){
+    try{
+      const api = window.IZZA?.api;
+      if (!api || !api.getCoins || !api.setCoins) { alert('Store not ready'); return; }
+      const coins = api.getCoins();
+      if (coins < price) { alert('Not enough IZZA Coins'); return; }
+      api.setCoins(coins - price);
+      addItemToInv(key);
+      if (window.IZZA?.toast) IZZA.toast(`Purchased ${key} for ${price} IC`);
+      try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
+    }catch(e){ console.warn('[shop extras] buy failed', e); }
+  }
+
+  function injectExtras(){
+    if (injectedOnce) return;
+    const list = document.getElementById('shopList');
+    if (!list) return;
+
+    // Insert at the top as their own rows
+    EXTRA_ITEMS.forEach(it=>{
+      if (list.querySelector('[data-extra="'+it.key+'"]')) return;
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      row.setAttribute('data-extra', it.key);
+      row.innerHTML = `
+        <div class="meta">
+          <div class="name">⭐ ${it.name}</div>
+          <div class="sub">${it.sub}</div>
+        </div>
+        <button class="buy" data-buy="${it.key}" data-price="${it.price}">${it.price} IC</button>
+      `;
+      list.prepend(row);
+    });
+
+    injectedOnce = true;
+  }
+
+  // Robust: whenever the modal opens (display != none), inject once
+  const mo = new MutationObserver(()=>{
+    const style = window.getComputedStyle(modal).display;
+    if (style !== 'none') {
+      // reset coin button states if needed
+      injectedOnce = false;
+      // allow the plugin to build its list first, then inject
+      setTimeout(injectExtras, 0);
+    }
+  });
+  mo.observe(modal, { attributes:true, attributeFilter:['style','class'] });
+
+  // Delegate buying
+  document.addEventListener('click', function(ev){
+    const btn = ev.target && ev.target.closest('button.buy[data-buy]');
+    if (!btn) return;
+    const key = btn.getAttribute('data-buy');
+    const price = parseInt(btn.getAttribute('data-price')||'0', 10);
+    if (!key || !price) return;
+    ev.preventDefault(); ev.stopPropagation();
+    buy(key, price);
+  }, true);
+})();
+</script>
+
   <!-- Trade Centre confirm -->
 <div class="modal" id="tradeModal" style="display:none">
   <div class="backdrop"></div>
