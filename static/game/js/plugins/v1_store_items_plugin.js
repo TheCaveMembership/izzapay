@@ -388,8 +388,6 @@
 
       if(!buyList.querySelector('[data-store-ext]')){
         // NEW: Bat & Knuckles from plugin (always visible)
-        addShopRow(buyList, { id:'bat',       name:'Baseball Bat',   price:150, sub:'Heavy hits, light weight.' });
-        addShopRow(buyList, { id:'knuckles',  name:'Brass Knuckles', price:200, sub:'Classic melee. Crowd pleaser.' });
 
         const missions = (api.getMissionCount && api.getMissionCount()) || 0;
         if(missions >= 3){
