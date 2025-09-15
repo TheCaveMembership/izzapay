@@ -138,89 +138,24 @@
  <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/><rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
 </svg>`;}
 
-  // Black haunted werewolf (sleeker, sharper + red eye glow)
-// Drop-in replacement for svgWerewolf()
-function svgWerewolf(){ return `
-<svg viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <!-- eyes glow -->
-    <radialGradient id="eyeR" cx="50%" cy="50%" r="55%">
-      <stop offset="0%" stop-color="#ff5a5a"/>
-      <stop offset="55%" stop-color="#ff2a2a"/>
-      <stop offset="100%" stop-color="#5a0000"/>
-    </radialGradient>
-    <!-- subtle edge sheen used on a few strokes -->
-    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1a1a1a" />
-      <stop offset="100%" stop-color="#0b0b0b" />
-    </linearGradient>
-    <!-- silhouette color -->
-    <style>
-      .fur{ fill:#0b0b0b; stroke:#050505; stroke-width:3; }
-      .cut{ fill:#0a0a0a; }
-      .claw{ fill:#070707; }
-      .shine{ stroke:url(#sheen); stroke-width:3; fill:none; opacity:.35; }
-    </style>
-  </defs>
-
-  <!-- main body: crouched, forward prowl -->
-  <path class="fur" d="
-    M20,120
-    C10,100 18,86 36,78
-    C28,66 40,52 58,46
-    C80,36 110,34 132,46
-    C154,38 176,46 188,60
-    C198,70 196,84 184,94
-    C204,110 202,128 184,138
-    C160,150 124,154 92,146
-    C72,146 50,140 34,130
-    Z" />
-
-  <!-- neck + back spikes -->
-  <path class="cut" d="
-    M72,54 L62,44 L74,42 L66,34 L82,36 L74,26 L92,30 L86,20
-    L104,28 L100,18 L116,26 L114,16 L128,26
-    " />
-
-  <!-- head + snout -->
-  <path class="fur" d="
-    M120,52
-    C142,44 160,46 176,60
-    C184,68 190,76 192,84
-    C176,82 164,84 150,90
-    C140,80 132,72 120,68
-    Z" />
-
-  <!-- open mouth / teeth hints -->
-  <path d="M150,90 C158,92 166,96 176,100 L172,108 L164,106 L156,110 L152,104 Z" fill="#0a0a0a"/>
-  <path d="M156,104 l4,6 l6,-2 l-5,-7 z" fill="#d9d9d9" opacity=".8"/>
-  <path d="M167,106 l5,6 l6,-2 l-5,-6 z" fill="#d9d9d9" opacity=".75"/>
-
-  <!-- legs (front right extended, rear coiled) -->
-  <path class="fur" d="M88,138 C96,126 104,120 118,116 C128,116 132,120 134,128 C130,136 122,142 110,146 Z"/>
-  <path class="fur" d="M58,138 C60,126 68,116 80,112 C90,112 94,118 96,126 C92,134 84,140 72,144 Z"/>
-  <path class="fur" d="M148,136 C156,124 164,118 176,114 C186,114 190,118 192,126 C188,134 180,140 168,144 Z"/>
-
-  <!-- claws -->
-  <path class="claw" d="M104,146 l6,8 l8,-2 l-6,-9 z"/>
-  <path class="claw" d="M72,144 l6,7 l8,-2 l-6,-8 z"/>
-  <path class="claw" d="M168,144 l6,8 l8,-2 l-6,-9 z"/>
-
-  <!-- subtle sheen lines to give the “inked” highlights like the reference -->
-  <path class="shine" d="M54,92 C70,78 98,70 126,74"/>
-  <path class="shine" d="M134,66 C148,64 162,70 174,82"/>
-
-  <!-- eye sockets (dark base) -->
-  <ellipse cx="144" cy="78" rx="8" ry="6" fill="#050505"/>
-  <ellipse cx="162" cy="78" rx="8" ry="6" fill="#050505"/>
-
-  <!-- glowing eyes -->
-  <ellipse cx="144" cy="78" rx="6.2" ry="4.6" fill="url(#eyeR)"/>
-  <ellipse cx="162" cy="78" rx="6.2" ry="4.6" fill="url(#eyeR)"/>
-
-  <!-- nose ridge -->
-  <path d="M148,88 C152,88 160,88 168,92" stroke="#111" stroke-width="3" fill="none" opacity=".6"/>
-
+  // Black haunted werewolf (smaller/faster + red eyes + drool)
+  function svgWerewolf(){ return `
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+ <defs>
+  <radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3d3d"/><stop offset="100%" stop-color="#5a0000"/></radialGradient>
+ </defs>
+ <g stroke="#070707" stroke-width="3" fill="#0b0b0b">
+  <!-- hunched, on-all-fours silhouette -->
+  <path d="M18,80 Q8,60 20,46 Q14,34 26,26 Q42,12 60,16 Q78,12 94,26 Q106,34 100,46 Q112,60 102,78 Q84,92 60,98 Q36,92 18,80 Z"/>
+  <path d="M32,42 Q38,30 50,30" fill="none"/>
+  <path d="M88,42 Q82,30 70,30" fill="none"/>
+  <path d="M30,74 Q60,66 90,74" fill="none"/>
+ </g>
+ <g>
+  <ellipse cx="46" cy="54" rx="7" ry="5" fill="url(#eye)"/>
+  <ellipse cx="74" cy="54" rx="7" ry="5" fill="url(#eye)"/>
+  <path d="M58 70 Q60 82 56 92" stroke="#7a0000" stroke-width="2" fill="none"/>
+</g>
 </svg>`;}
 
   // ---------------- pumpkins ----------------
