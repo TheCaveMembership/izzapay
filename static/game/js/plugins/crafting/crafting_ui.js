@@ -185,87 +185,87 @@
   }
 
   function renderCreate(){
-    const totalPi = calcTotalCost({ usePi:true });
-    const totalIC = calcTotalCost({ usePi:false });
-    return `
-      <div style="display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:14px">
-        <div>
-          <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
-          <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
-          <select id="catSel">
-            <option value="armour">Armour</option>
-            <option value="weapon">Weapon</option>
-            <option value="apparel">Apparel</option>
-            <option value="merch">Merch/Collectible</option>
-          </select>
+  const totalPi = calcTotalCost({ usePi:true });
+  const totalIC = calcTotalCost({ usePi:false });
+  return `
+    <div class="cl-body">
+      <div class="cl-pane cl-form">
+        <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
+        <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
+        <select id="catSel">
+          <option value="armour">Armour</option>
+          <option value="weapon">Weapon</option>
+          <option value="apparel">Apparel</option>
+          <option value="merch">Merch/Collectible</option>
+        </select>
 
-          <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
-          <select id="partSel">
-            <option value="helmet">Helmet</option>
-            <option value="vest">Vest</option>
-            <option value="arms">Arms</option>
-            <option value="legs">Legs</option>
-            <option value="gun">Gun</option>
-            <option value="melee">Melee</option>
-          </select>
+        <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
+        <select id="partSel">
+          <option value="helmet">Helmet</option>
+          <option value="vest">Vest</option>
+          <option value="arms">Arms</option>
+          <option value="legs">Legs</option>
+          <option value="gun">Gun</option>
+          <option value="melee">Melee</option>
+        </select>
 
-          <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
-          <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
+        <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
+        <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
 
-          <div style="margin-top:10px;font-weight:700">Optional Features</div>
-          <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
-          <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
-          <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
-          <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
-          <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
-          <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
+        <div style="margin-top:10px;font-weight:700">Optional Features</div>
+        <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
+        <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
+        <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
+        <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
+        <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
+        <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
 
-          <div style="margin-top:10px; font-size:13px; opacity:.85">
-            Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
-          </div>
-
-          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-            <button class="ghost" id="payPi">Pay Pi</button>
-            <button class="ghost" id="payIC">Pay IC</button>
-            <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-          </div>
-
-          <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-            <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-            <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-            <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-            <div style="margin-top:6px">
-              <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
-            </div>
-            <div style="margin-top:4px">
-              <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
-            </div>
-          </div>
+        <div style="margin-top:10px; font-size:13px; opacity:.85">
+          Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
         </div>
 
-        <div>
-          <div style="display:flex; gap:10px; align-items:center">
-            <div style="font-weight:700">Visuals</div>
-            <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+          <button class="ghost" id="payPi">Pay Pi</button>
+          <button class="ghost" id="payIC">Pay IC</button>
+          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+        </div>
+
+        <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
+          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+          <div style="margin-top:6px">
+            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
           </div>
-          <div style="display:flex; gap:10px; margin-top:6px">
-            <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
-            <button class="ghost" id="btnAI">AI → SVG</button>
-          </div>
-          <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
-          <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
-          <div style="margin-top:8px; display:flex; gap:8px">
-            <button class="ghost" id="btnPreview">Preview</button>
-            <button class="ghost" id="btnCraft" title="Consumes your paid slot if not already paid">Craft</button>
-            <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
-          </div>
-          <div id="svgPreview" style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; min-height:160px; display:flex; align-items:center; justify-content:center">
-            <div style="opacity:.6; font-size:12px">Preview appears here</div>
+          <div style="margin-top:4px">
+            <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
           </div>
         </div>
       </div>
-    `;
-  }
+
+      <div class="cl-pane cl-preview">
+        <div style="display:flex; gap:10px; align-items:center">
+          <div style="font-weight:700">Visuals</div>
+          <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:6px">
+          <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
+          <button class="ghost" id="btnAI">AI → SVG</button>
+        </div>
+        <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
+        <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
+        <div style="margin-top:8px; display:flex; gap:8px">
+          <button class="ghost" id="btnPreview">Preview</button>
+          <button class="ghost" id="btnCraft" title="Consumes your paid slot if not already paid">Craft</button>
+          <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
+        </div>
+        <div id="svgPreview" style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; min-height:160px; display:flex; align-items:center; justify-content:center">
+          <div style="opacity:.6; font-size:12px">Preview appears here</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
   function renderMine(){
     return `
