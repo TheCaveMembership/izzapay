@@ -1,7 +1,7 @@
 // v1_store_items_plugin.js — stock extender + icon repair + BUY/SELL + search + pricebook
 // + Inventory panel extender for ALL armor pieces (no Core edits)
 (function(){
-  const BUILD = 'v1.1.2-store-items+inv-ext-armor (sell-icons from slot)';
+  const BUILD = 'v1.1.2-store-items+inv-ext-armor (sell-icons-use-inventory-svg)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -43,37 +43,6 @@
     if(/\bgrenade\b/.test(n)) return 'grenade';
     if(/\bammo\b/.test(n)) return 'pistol_ammo';
     return '';
-  }
-
-  // --- armor icon helpers (match inventory/map-expander approach) ---
-  function normalizeSlot(s){
-    const n = (s||'').toLowerCase();
-    if (n==='helmet') return 'head';
-    if (n==='vest')   return 'chest';
-    if (/head|helmet/.test(n))  return 'head';
-    if (/chest|vest|body/.test(n)) return 'chest';
-    if (/arm|glove|gaunt/.test(n)) return 'arms';
-    return 'legs';
-  }
-
-  function svgArmorFallback(slot='head', w=24, h=24){
-    const s = normalizeSlot(slot);
-    const W=String(w), H=String(h);
-    if (s==='head')  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
-      <rect x="4" y="6" width="24" height="20" rx="6" fill="#2a3550"/>
-      <rect x="8" y="10" width="16" height="8" rx="2" fill="#9fb3d9"/></svg>`;
-    if (s==='chest') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
-      <rect x="5" y="7" width="22" height="18" rx="4" fill="#2a3550"/>
-      <rect x="8" y="10" width="16" height="12" rx="2" fill="#9fb3d9"/></svg>`;
-    if (s==='arms')  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
-      <rect x="4" y="10" width="8" height="12" rx="2" fill="#9fb3d9"/>
-      <rect x="20" y="10" width="8" height="12" rx="2" fill="#9fb3d9"/>
-      <rect x="4" y="8" width="24" height="16" rx="5" fill="#2a3550"/></svg>`;
-    // legs
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
-      <rect x="6" y="8" width="20" height="16" rx="4" fill="#2a3550"/>
-      <rect x="8" y="10" width="6" height="12" rx="2" fill="#9fb3d9"/>
-      <rect x="18" y="10" width="6" height="12" rx="2" fill="#9fb3d9"/></svg>`;
   }
 
   // ---------- BUY/SELL TABS + SEARCH UI ----------
@@ -192,30 +161,30 @@
     if(it.id==='uzi'){
       const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
       cur.owned = true; cur.ammo = (cur.ammo|0) + 50;
-      cur.name='Uzi'; cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('uzi',24,24));
+      cur.name='Uzi'; cur.iconSvg = cur.iconSvg || svgIcon('uzi',24,24);
       inv.uzi = cur; IZZA.emit?.('toast',{text:'Purchased Uzi (+50 ammo)'}); pb['uzi']={lastPaid:it.price,name:'Uzi'};
     }else if(it.id==='grenade'){
       const cur = inv.grenade || { count:0, name:'Grenade' };
       cur.count = (cur.count|0) + 1;
-      cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('grenade',24,24));
+      cur.iconSvg = cur.iconSvg || svgIcon('grenade',24,24);
       inv.grenade = cur; IZZA.emit?.('toast',{text:'Purchased Grenade'}); pb['grenade']={lastPaid:it.price,name:'Grenade'};
     }else if(it.id==='pistol_ammo'){
       const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
       cur.owned = true; cur.ammo = (cur.ammo|0) + 17;
       cur.name = cur.name || 'Pistol';
-      cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('pistol',24,24));
+      cur.iconSvg = cur.iconSvg || svgIcon('pistol',24,24);
       inv.pistol = cur; IZZA.emit?.('toast',{text:'Purchased Pistol Ammo (+17)'});
     } else if (it.id==='bat') {
       const cur = inv.bat || { count:0, hitsLeftOnCurrent:0, equipped:false, name:'Baseball Bat' };
       cur.count += 1;
       if (cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = 20; // matches core
-      cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('bat',24,24));
+      cur.iconSvg = cur.iconSvg || svgIcon('bat',24,24);
       inv.bat = cur; IZZA.emit?.('toast',{text:'Purchased Baseball Bat'}); pb['bat']={lastPaid:it.price,name:'Baseball Bat'};
     } else if (it.id==='knuckles') {
       const cur = inv.knuckles || { count:0, hitsLeftOnCurrent:0, equipped:false, name:'Brass Knuckles' };
       cur.count += 1;
       if (cur.hitsLeftOnCurrent<=0) cur.hitsLeftOnCurrent = 50; // matches core
-      cur.iconSvg = cur.iconSvg || svgToDataURL(svgIcon('knuckles',24,24));
+      cur.iconSvg = cur.iconSvg || svgIcon('knuckles',24,24);
       inv.knuckles = cur; IZZA.emit?.('toast',{text:'Purchased Brass Knuckles'}); pb['knuckles']={lastPaid:it.price,name:'Brass Knuckles'};
     } else {
       // Generic (armour + misc)
@@ -236,7 +205,7 @@
         entry.type  = 'armor';
         entry.slot  = slot==='helmet'?'head':(slot==='vest'?'chest':slot);
         entry.equippable = true;
-        entry.iconSvg = entry.iconSvg || it.iconSvg || svgToDataURL(svgIcon(it.id,24,24));
+        entry.iconSvg = entry.iconSvg || it.iconSvg || svgIcon(it.id,24,24);
         inv[key] = entry;
         pb[key] = { lastPaid: it.price, name: pretty };
         IZZA.emit?.('toast', {text:`Purchased ${pretty}`});
@@ -276,24 +245,27 @@
     return Math.max(1, Math.ceil(base * 0.40));
   }
 
-  // normalize icon source from any inventory entry (SELL list)
+  // IMPORTANT CHANGE:
+  // Use the SAME approach as armoury/inventory: if the inventory entry carries an SVG string
+  // in `iconSvg`, inject that SVG markup directly (no guessing, no data URLs).
   function iconForInv(key, entry){
-    // 1) If the item already carries an icon, use it.
-    if (entry?.iconSvg) return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
+    const svg = (entry && typeof entry.iconSvg === 'string') ? entry.iconSvg.trim() : '';
+    if (svg) return svg; // inject the stored SVG exactly as created by the armoury flow
 
-    // 2) Armor items are slot-based – generate same SVG the inventory uses.
-    if ((entry?.type||'') === 'armor') {
-      const slot = normalizeSlot(entry.slot||'');
-      return iconImgHTMLFromAny(svgArmorFallback(slot, 24, 24), 24, 24);
+    // Non-armour (weapons/consumables) keep their tiny icons:
+    if (window.svgIcon) {
+      const prettyId = (entry?.name || key || '').toLowerCase();
+      const idGuess =
+        /knuckle/.test(prettyId) ? 'knuckles' :
+        /\bbat\b/.test(prettyId) ? 'bat' :
+        /\buzi\b/.test(prettyId) ? 'uzi' :
+        (/\bpistol\b/.test(prettyId) && !/ammo/.test(prettyId)) ? 'pistol' :
+        /\bgrenade\b/.test(prettyId) ? 'grenade' : '';
+      if (idGuess) return window.svgIcon(idGuess, 24, 24);
     }
 
-    // 3) Legacy weapons/consumables by name/key.
-    const id =
-      guessLegacyIdFromName(entry?.name || key) ||
-      ({ pistol:'pistol', uzi:'uzi', grenade:'grenade' }[key] || '');
-    if (id) return iconImgHTMLFromAny(svgIcon(id, 24, 24), 24, 24);
-
-    // 4) Nothing known → no icon.
+    const id = guessLegacyIdFromName(entry?.name || key);
+    if (id) return svgIcon(id,24,24);
     return '';
   }
 
@@ -388,7 +360,7 @@
         // BROAD: replace if the holder doesn't already contain an <svg> or <img> or data: URL
         const looksBroken = !/(<svg|<img|data:image\/svg\+xml)/i.test(html);
         if(looksBroken && id){
-          iconHolder.innerHTML = iconImgHTMLFromAny(svgIcon(id,24,24));
+          iconHolder.innerHTML = svgIcon(id,24,24);
         }
       });
     }catch(e){ console.warn('[store extender] icon repair failed:', e); }
@@ -484,7 +456,7 @@
       meta.className = 'meta';
       meta.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px">
-          <div data-icon>${iconImgHTMLFromAny(e.iconSvg||'',24,24)}</div>
+          <div data-icon>${(typeof e.iconSvg==='string' && e.iconSvg.trim()) || ''}</div>
           <div>
             <div class="name">${e.name||key}</div>
             <div class="sub" style="opacity:.85">Count: ${(e.count|0)} · Slot: ${slot||'–'}${equipped?' · <b>Equipped</b>':''}</div>
