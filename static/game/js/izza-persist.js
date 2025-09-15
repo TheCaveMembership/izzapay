@@ -235,10 +235,22 @@ if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player
     console.log('[persist] position hydrated →', { x:px, y:py });
   }catch(e){ console.warn('[persist] pos hydrate failed', e); }
 }
-function looksEmpty(_s){
-  // We no longer block any snapshot as "blank".
-  // Even 0 coins / empty inv / only missionState should still save.
-  return false;
+function looksEmpty(snap){
+  if (!snap) return true;
+
+  // Check coins, missions, bank, inventory, hearts, missionState
+  const noCoins    = !snap.coins || snap.coins === 0;
+  const noMissions = !snap.missions || snap.missions === 0;
+  const noBank     = !snap.bank || (
+    (!snap.bank.coins || snap.bank.coins === 0) &&
+    Object.keys(snap.bank.items||{}).length === 0 &&
+    Object.keys(snap.bank.ammo||{}).length === 0
+  );
+  const noInv      = !snap.inventory || Object.keys(snap.inventory).length === 0;
+  const noHearts   = snap.player?.heartsSegs == null || snap.player.heartsSegs <= 0;
+  const noMissionState = !snap.missionState || Object.keys(snap.missionState).length === 0;
+
+  return noCoins && noMissions && noBank && noInv && noHearts && noMissionState;
 }
 
   const Persist = {
@@ -274,24 +286,37 @@ function looksEmpty(_s){
 
   // wait for core ready
   if (window.IZZA?.on) {
-  IZZA.on('ready', ()=>{
-    ready = true;
-    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
-    armOnce();
-    tryKick('post-hydrate');
-  });
-} else {
-  setTimeout(()=>{
-    ready = true;
-    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
-    armOnce();
-    tryKick('post-hydrate-fallback');
-  }, 2500);
-}
-// also give ample grace after any tier reloads
-setTimeout(()=>{ armOnce(); }, 7000);
+    IZZA.on('ready', ()=>{
+      ready = true;
+      const hasServerData = serverSeed && !looksEmpty(serverSeed);
+      if (hasServerData) {
+        try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+        try { applyServerCore(serverSeed); }   catch(e){ console.warn(e); }
+        tryKick('post-hydrate');
+      } else {
+        console.log('[persist] skip hydrate (server empty), letting local state win');
+        tryKick('local-wins-initial');
+      }
+      armOnce();
+    });
+  } else {
+    setTimeout(()=>{
+      ready = true;
+      const hasServerData = serverSeed && !looksEmpty(serverSeed);
+      if (hasServerData) {
+        try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+        try { applyServerCore(serverSeed); }   catch(e){ console.warn(e); }
+        tryKick('post-hydrate-fallback');
+      } else {
+        console.log('[persist] skip hydrate (server empty - fallback), letting local state win');
+        tryKick('local-wins-initial-fallback');
+      }
+      armOnce();
+    }, 2500);
+  }
+  // also give ample grace after any tier reloads
+  setTimeout(()=>{ armOnce(); }, 7000);
+
   (async function init(){
   const res = await Persist.load();
   if (res.ok) serverSeed = res.data;
@@ -307,12 +332,18 @@ setTimeout(()=>{ armOnce(); }, 7000);
     console.log('[persist] server empty or missing; waiting for first non-blank local save');
   }
     // If the core is already ready by the time load completes, hydrate now too.
-if (ready) {
-  try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
-  armOnce();
-  tryKick('post-hydrate-init');
-}
+  if (ready) {
+    const hasServerData = serverSeed && !looksEmpty(serverSeed);
+    if (hasServerData) {
+      try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+      try { applyServerCore(serverSeed); }   catch(e){ console.warn(e); }
+      tryKick('post-hydrate-init');
+    } else {
+      console.log('[persist] skip hydrate (server empty @init), letting local state win');
+      tryKick('local-wins-init');
+    }
+    armOnce();
+  }
 })();
 
   async function tryKick(reason){
