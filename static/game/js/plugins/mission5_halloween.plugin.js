@@ -141,75 +141,71 @@
  <ellipse cx="40" cy="44" rx="28" ry="24" fill="url(#gp)" stroke="#572200" stroke-width="4"/><rect x="35" y="18" width="8" height="10" rx="3" fill="#2c5e22"/>
 </svg>`;}
 
-  // ---------------- NEW werewolf (run cycle, one glowing eye; bi-pedal attack with giant mouth) ----------------
-  function svgWerewolfRunFrame(ahead){ // ahead: -1 / +1 leg offset
-    // simplified silhouette with slight leg offsets for a “run” cycle
-    const legShift = ahead * 4;
+  // ---------------- WOLF ART (4-run frames + attack) ----------------
+  function svgWerewolfRunFrame(shift){
+    const legA = 6*shift, legB = -6*shift;
     return `
-<svg viewBox="0 0 160 120" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="eye" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/>
-    </radialGradient>
-  </defs>
+<svg viewBox="0 0 170 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/></radialGradient></defs>
   <g fill="#0b0b0b" stroke="#060606" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
-    <!-- long low body with ragged fur -->
-    <path d="M16,86 C28,66 40,56 62,52 C88,48 110,50 140,58 C144,70 130,82 102,88 C72,94 44,92 24,90 Z"/>
-    <!-- head + ear -->
-    <path d="M118,54 C128,48 140,46 148,48 C152,52 150,58 142,62 L130,64 C126,60 122,58 118,56 Z"/>
-    <path d="M120,46 L128,36 L136,46"/>
-    <!-- legs (front/back offset) -->
-    <path d="M58,88 C56,100 50,110 48,116 L40,116 C42,108 42,100 40,90 Z" transform="translate(${legShift},0)"/>
-    <path d="M92,88 C92,100 86,110 84,116 L76,116 C78,108 78,100 76,90 Z" transform="translate(${-legShift},0)"/>
-    <path d="M126,82 C128,94 124,106 122,114 L114,114 C116,106 116,96 114,86 Z" />
-    <path d="M28,88 C22,98 20,108 18,114 L10,114 C14,104 16,94 16,86 Z" />
+    <path d="M14,88 C28,64 42,54 66,50 C96,46 124,50 154,60
+             C154,74 136,86 106,92 C74,98 44,96 20,92 Z"/>
+    <path d="M122,56 C134,48 148,46 156,48 C160,52 158,60 148,64 L134,66 C130,62 126,60 122,58 Z"/>
+    <path d="M124,48 L134,36 L142,48"/>
+    <path d="M44,64 L36,54 M52,62 L46,52 M60,60 L56,50 M72,58 L68,48 M84,58 L80,48 M94,60 L90,50" />
+    <path d="M60,92 C56,104 50,114 48,118 L40,118 C42,108 42,100 40,90 Z" transform="translate(${legA},0)"/>
+    <path d="M96,92 C94,104 90,114 88,118 L80,118 C82,110 82,100 80,92 Z" transform="translate(${legB},0)"/>
+    <path d="M132,86 C134,98 130,110 128,116 L120,116 C122,108 122,98 120,88 Z" />
+    <path d="M28,90 C22,100 20,110 18,116 L10,116 C14,106 16,96 16,88 Z" />
   </g>
-  <!-- single eye -->
-  <ellipse cx="126" cy="58" rx="6" ry="4.4" fill="url(#eye)"/>
+  <!-- ONE glowing eye -->
+  <ellipse cx="128" cy="60" rx="6.2" ry="4.6" fill="url(#eye)"/>
 </svg>`;
   }
-  function svgWerewolfAttack(){ // standing bi-pedal with huge mouth
+  function svgWerewolfAttack(){
     return `
-<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="eye" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/>
-    </radialGradient>
-  </defs>
-  <g fill="#0b0b0b" stroke="#060606" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
-    <!-- torso standing -->
-    <path d="M72,48 C84,34 112,34 124,52 C134,68 132,98 120,116 C108,134 88,140 74,126 C60,112 54,80 60,64 Z"/>
-    <!-- legs -->
-    <path d="M84,116 C84,132 78,146 76,152 L66,152 C70,140 70,128 68,114 Z"/>
-    <path d="M112,114 C116,130 112,146 110,152 L100,152 C102,140 102,126 100,112 Z"/>
-    <!-- arms up -->
-    <path d="M68,76 L54,60 L48,68 L64,90"/>
-    <path d="M122,76 L138,58 L146,66 L126,92"/>
+<svg viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/></radialGradient></defs>
+  <g fill="#0b0b0b" stroke="#060606" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M76,50 C92,32 122,34 134,58 C144,80 140,116 124,134 C110,150 86,152 72,134 C58,116 56,80 66,60 Z"/>
+    <path d="M86,134 C86,150 80,164 78,170 L66,170 C70,156 70,142 68,130 Z"/>
+    <path d="M118,132 C122,148 118,164 116,170 L104,170 C106,156 106,142 104,128 Z"/>
+    <path d="M70,84 L50,66 L44,74 L66,98"/>
+    <path d="M130,82 L154,62 L162,70 L136,102"/>
   </g>
-  <!-- one glowing eye -->
-  <ellipse cx="112" cy="64" rx="6.2" ry="4.6" fill="url(#eye)"/>
-  <!-- ENORMOUS mouth (nearly full body) -->
-  <g>
-    <path d="M60,78 C86,94 116,94 138,78
-             C135,110 86,132 62,110 Z"
-          fill="#160000" stroke="#3a0000" stroke-width="2"/>
-    <!-- teeth -->
-    <g fill="#e6e6e6" stroke="#6a0000" stroke-width="1">
-      <path d="M70,86 L74,96 L78,86 Z"/>
-      <path d="M82,88 L86,100 L90,88 Z"/>
-      <path d="M94,90 L98,102 L102,90 Z"/>
-      <path d="M106,88 L110,100 L114,88 Z"/>
-      <path d="M118,86 L122,96 L126,86 Z"/>
+  <ellipse cx="118" cy="70" rx="6.4" ry="4.8" fill="url(#eye)"/>
+  <g id="jaw">
+    <path d="M60,90 C94,112 130,112 158,90
+             C154,130 94,158 64,134 Z"
+          fill="#120000" stroke="#3a0000" stroke-width="2.2"/>
+    <g fill="#eaeaea" stroke="#6a0000" stroke-width="1">
+      <path d="M72,98 L76,112 L80,98 Z"/>
+      <path d="M86,102 L90,116 L94,102 Z"/>
+      <path d="M100,104 L104,120 L108,104 Z"/>
+      <path d="M114,102 L118,116 L122,102 Z"/>
+      <path d="M128,98 L132,110 L136,98 Z"/>
+      <path d="M78,126 L82,114 L86,126 Z"/>
+      <path d="M92,132 L96,118 L100,132 Z"/>
+      <path d="M106,134 L110,120 L114,134 Z"/>
+      <path d="M120,130 L124,116 L128,130 Z"/>
     </g>
   </g>
 </svg>`;
   }
 
-  let wolfRunImgA=null, wolfRunImgB=null, wolfAttackImg=null;
+  // cache wolf frames
+  let wolfRunFrames = [];
+  let wolfAttackImg = null;
   function ensureWolfImgs(){
-    if (!wolfRunImgA) wolfRunImgA = svgToImage(svgWerewolfRunFrame(-1), (api?.TILE||60)*1.3, (api?.TILE||60)*1.0);
-    if (!wolfRunImgB) wolfRunImgB = svgToImage(svgWerewolfRunFrame(+1), (api?.TILE||60)*1.3, (api?.TILE||60)*1.0);
-    if (!wolfAttackImg) wolfAttackImg = svgToImage(svgWerewolfAttack(), (api?.TILE||60)*1.4, (api?.TILE||60)*1.4);
+    if (!wolfRunFrames.length){
+      const shifts = [-1, -0.33, 0.33, 1];
+      for (const s of shifts){
+        wolfRunFrames.push( svgToImage(svgWerewolfRunFrame(s), (api?.TILE||60)*1.35, (api?.TILE||60)*1.05) );
+      }
+    }
+    if (!wolfAttackImg){
+      wolfAttackImg = svgToImage(svgWerewolfAttack(), (api?.TILE||60)*1.6, (api?.TILE||60)*1.6);
+    }
   }
 
   // ---------------- pumpkins ----------------
@@ -269,7 +265,7 @@
     ctx.restore();
   }
 
-  // ---------------- wolves (run cycle + timed 1s attack windows) ----------------
+  // ---------------- wolves (cadenced attack windows + proper damage) ----------------
   function spawnWerewolf(){
     ensureWolfImgs();
     const p = api?.player||{x:0,y:0};
@@ -277,104 +273,104 @@
     const ang = Math.random()*Math.PI*2;
     const x = p.x + Math.cos(ang)*off;
     const y = p.y + Math.sin(ang)*off;
-    const now = performance.now ? performance.now() : Date.now();
+    const now = performance.now();
     WOLVES.push({
       x, y, vx:0, vy:0, age:0,
       life: 12000 + ((Math.random()*2500)|0),
-      mode: 'run',                // 'run' (default) -> 'attack' for 1s windows
-      runPhase: Math.random()*1.0, // 0..1 loop for legs
-      attackMouth: 0,             // 0..1
-      damageTick: 0,              // applies during attack
-      nextAttackAt: now + 1500 + (Math.random()*1200|0), // first window
+      mode: 'run',                 // 'run' -> 'attack' (1s) -> 'run' (3s) -> repeat when near player
+      runPhase: Math.random(),     // 0..1 loop
+      attackMouth: 0,              // 0..1 open
+      damageCd: 0,                 // ms cooldown for dmg ticks
+      nextAttackAt: now + 600,     // first lunge slightly after spawn (if in range)
       attackEndAt: 0
     });
   }
 
-  // damage helper: integrate with hearts system + fallback
-  function wolfDamagePlayer(amountSegs){
-    try { IZZA.emit?.('player-hit', { by:'werewolf', dmg: amountSegs }); } catch {}
-    try { IZZA.emit?.('player-damage', { source:'werewolf', amount: amountSegs }); } catch {}
-    try { IZZA.api?.player?.damage?.(amountSegs); } catch {}
-    try{
-      const k='izzaHearts'; const cur=parseFloat(localStorage.getItem(k)||'0')||0;
-      if (cur>0){ localStorage.setItem(k, String(Math.max(0, cur-amountSegs))); IZZA.emit?.('hearts-updated',{hearts:Math.max(0,cur-amountSegs)}); }
-    }catch{}
-  }
-
   function updateWolves(dt){
     const p = api?.player||{x:0,y:0};
-    const now = performance.now ? performance.now() : Date.now();
+    const now = performance.now();
     for (let i=WOLVES.length-1;i>=0;i--){
       const w=WOLVES[i];
       w.age += dt;
 
-      // seek vector
       const dx = p.x - w.x, dy = p.y - w.y;
       const d  = Math.hypot(dx,dy)||1;
       const ux = dx/d, uy = dy/d;
 
-      // speeds (no vertical bobbing)
-      const baseSp = 0.085;
-      const atkSp  = 0.060;
+      const baseSp = 0.09;  // quick sprint
+      const atkSp  = 0.065; // slower stalk while biting
+      const engageRange = (api?.TILE||60) * 1.15; // must be close to show attack window
+      const biteRange   = (api?.TILE||60) * 0.95;
 
-      // determine mode based on range + timed attack windows
-      const inRange = d < (api?.TILE||60)*1.2;
+      // cadence: only enter attack for ~1s, then ~3s run, repeat while close
       if (w.mode === 'run'){
-        // enter attack only if inRange AND its 1s window is open
-        if (inRange && now >= w.nextAttackAt){
+        if (d < engageRange && now >= (w.nextAttackAt||0)){
           w.mode = 'attack';
-          w.attackMouth = 0;
-          w.damageTick = 0;
-          w.attackEndAt = now + 1000;         // attack lasts 1 second
+          w.attackEndAt = now + 1000;   // 1s attack window
+          w.nextAttackAt = now + 4000;  // next lunge after 3s run (1s attack + 3s pause)
         }
-      }else if (w.mode === 'attack'){
+      } else if (w.mode === 'attack'){
         if (now >= w.attackEndAt){
           w.mode = 'run';
-          w.attackMouth = 0;
-          w.nextAttackAt = now + 3000;        // next attack window in ~3s
         }
       }
 
-      // movement + anim
       if (w.mode==='run'){
         w.vx = w.vx*0.90 + ux*baseSp;
         w.vy = w.vy*0.90 + uy*baseSp;
-        w.runPhase = (w.runPhase + (dt*0.0035)) % 1; // swap run frames
+        w.runPhase = (w.runPhase + dt*0.0042) % 1;  // visible leg cycle
+        // mouth relax
+        w.attackMouth = Math.max(0, w.attackMouth - dt*0.003);
       }else{ // attack
         w.vx = w.vx*0.90 + ux*atkSp;
         w.vy = w.vy*0.90 + uy*atkSp;
-        w.attackMouth = Math.min(1, w.attackMouth + dt*0.0035); // open fast
-        w.damageTick += dt;
-        // deal damage only during attack, about 1 seg per 500ms (2 seg/s)
-        if (w.damageTick > 500){
-          w.damageTick = 0;
-          if (inRange) wolfDamagePlayer(1);
+        // snap mouth open based on remaining time fraction
+        const k = 1 - Math.max(0, Math.min(1, (w.attackEndAt - now)/1000));
+        w.attackMouth = Math.min(1, Math.max(w.attackMouth, k));
+        // damage ticks while inside bite range
+        if (d < biteRange){
+          w.damageCd += dt;
+          if (w.damageCd >= 400){
+            w.damageCd = 0;
+            try{ IZZA.emit?.('player-hit', { by: 'werewolf', dmg: 1 }); }catch{}
+          }
+        }else{
+          w.damageCd = 0;
         }
       }
 
-      // advance position
       w.x += w.vx * dt;
       w.y += w.vy * dt;
 
-      // drip “drool” while moving/attacking (subtle trail)
-      if ((w.age|0) % 220 < 16) {
-        HA_LIST.push({x:w.x, y:w.y+8, vx:(Math.random()*0.05-0.025), vy:0.06, age:0, life:500});
-      }
-
-      // lifetime expiry
       if (w.age > w.life) WOLVES.splice(i,1);
     }
+  }
 
-    // drool update
-    for (let i=HA_LIST.length-1;i>=0;i--){
-      const p0=HA_LIST[i]; p0.age+=dt; p0.x+=p0.vx*dt; p0.y+=p0.vy*dt; p0.vy+=0.0004*dt;
-      if (p0.age>p0.life) HA_LIST.splice(i,1);
+  function drawGiantMouth(ctx, sx, sy, k){
+    const r = 26 + 34*k; // grows huge
+    ctx.save();
+    ctx.globalCompositeOperation='source-over';
+    ctx.beginPath(); ctx.ellipse(sx+6, sy-10, r*1.2, r*0.9, 0, 0, Math.PI*2);
+    ctx.fillStyle = '#100000'; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#3a0000'; ctx.stroke();
+
+    ctx.fillStyle = '#e8e8e8'; ctx.strokeStyle='#6a0000'; ctx.lineWidth=1;
+    const teeth = 11;
+    for(let i=0;i<teeth;i++){
+      const ang = (i/teeth)*Math.PI*2;
+      const tx = sx+6 + Math.cos(ang)*(r*1.05);
+      const ty = sy-10 + Math.sin(ang)*(r*0.8);
+      ctx.beginPath(); ctx.moveTo(tx,ty);
+      ctx.lineTo(tx + Math.cos(ang)*10, ty + Math.sin(ang)*8);
+      ctx.lineTo(tx + Math.cos(ang+0.2)*6, ty + Math.sin(ang+0.2)*5);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
     }
+    ctx.restore();
   }
 
   function drawWolves(ctx){
     if (!WOLVES.length && !HA.length) return;
-    const S=api.DRAW, T=api.TILE, px=S/T;
+    const S=api.DRAW, T=api.TILE, px=S/T, now=performance.now();
     for (const w of WOLVES){
       const sx=(w.x - api.camera.x)*px;
       const sy=(w.y - api.camera.y)*px;
@@ -386,31 +382,30 @@
       ctx.restore();
 
       if (w.mode==='run'){
-        const frame = (w.runPhase < 0.5 ? wolfRunImgA : wolfRunImgB);
-        if (frame?.complete){
-          ctx.drawImage(frame, sx-44, sy-50);
-        }
+        const idx = (w.runPhase < 0.25) ? 0 : (w.runPhase < 0.5) ? 1 : (w.runPhase < 0.75) ? 2 : 3;
+        const img = wolfRunFrames[idx];
+        if (img?.complete) ctx.drawImage(img, sx-48, sy-52);
       }else{
         if (wolfAttackImg?.complete){
-          // mouth scale as it opens
-          const m = 1 + 0.22*w.attackMouth;
+          const m = 1.25 + 0.45*w.attackMouth; // scales up during attack
           ctx.save();
-          ctx.translate(sx, sy-8);
+          ctx.translate(sx, sy-6);
           ctx.scale(m, m);
-          ctx.drawImage(wolfAttackImg, -50, -70);
+          ctx.drawImage(wolfAttackImg, -56, -78);
           ctx.restore();
+          drawGiantMouth(ctx, sx+4, sy-6, w.attackMouth);
         }
       }
 
-      // single eye glow (no back dots)
+      // single glowing eye
       ctx.save();
       ctx.globalCompositeOperation='lighter';
-      const flick = 0.55 + 0.30*Math.abs(Math.sin(performance.now()*0.012));
+      const flick = 0.58 + 0.32*Math.abs(Math.sin(now*0.012));
       ctx.globalAlpha = flick;
       ctx.fillStyle='rgba(255,45,45,0.95)';
-      const ex = w.mode==='run' ? sx+18 : sx+14;
-      const ey = w.mode==='run' ? sy-10 : sy-22;
-      ctx.beginPath(); ctx.arc(ex, ey, 4.8, 0, Math.PI*2); ctx.fill();
+      const ex = w.mode==='run' ? sx+22 : sx+18;
+      const ey = w.mode==='run' ? sy-12 : sy-24;
+      ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI*2); ctx.fill();
       ctx.restore();
     }
   }
