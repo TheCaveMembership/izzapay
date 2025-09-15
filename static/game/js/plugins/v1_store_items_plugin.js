@@ -1,7 +1,7 @@
 // v1_store_items_plugin.js — stock extender + icon repair + BUY/SELL + search + pricebook
 // + Inventory panel extender for ALL armor pieces (no Core edits)
 (function(){
-  const BUILD = 'v1.1.1-store-items+inv-ext-armor (icon-fix)';
+  const BUILD = 'v1.1.2-store-items+inv-ext-armor (sell-icons from slot)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -43,6 +43,37 @@
     if(/\bgrenade\b/.test(n)) return 'grenade';
     if(/\bammo\b/.test(n)) return 'pistol_ammo';
     return '';
+  }
+
+  // --- armor icon helpers (match inventory/map-expander approach) ---
+  function normalizeSlot(s){
+    const n = (s||'').toLowerCase();
+    if (n==='helmet') return 'head';
+    if (n==='vest')   return 'chest';
+    if (/head|helmet/.test(n))  return 'head';
+    if (/chest|vest|body/.test(n)) return 'chest';
+    if (/arm|glove|gaunt/.test(n)) return 'arms';
+    return 'legs';
+  }
+
+  function svgArmorFallback(slot='head', w=24, h=24){
+    const s = normalizeSlot(slot);
+    const W=String(w), H=String(h);
+    if (s==='head')  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
+      <rect x="4" y="6" width="24" height="20" rx="6" fill="#2a3550"/>
+      <rect x="8" y="10" width="16" height="8" rx="2" fill="#9fb3d9"/></svg>`;
+    if (s==='chest') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
+      <rect x="5" y="7" width="22" height="18" rx="4" fill="#2a3550"/>
+      <rect x="8" y="10" width="16" height="12" rx="2" fill="#9fb3d9"/></svg>`;
+    if (s==='arms')  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
+      <rect x="4" y="10" width="8" height="12" rx="2" fill="#9fb3d9"/>
+      <rect x="20" y="10" width="8" height="12" rx="2" fill="#9fb3d9"/>
+      <rect x="4" y="8" width="24" height="16" rx="5" fill="#2a3550"/></svg>`;
+    // legs
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${W}" height="${H}">
+      <rect x="6" y="8" width="20" height="16" rx="4" fill="#2a3550"/>
+      <rect x="8" y="10" width="6" height="12" rx="2" fill="#9fb3d9"/>
+      <rect x="18" y="10" width="6" height="12" rx="2" fill="#9fb3d9"/></svg>`;
   }
 
   // ---------- BUY/SELL TABS + SEARCH UI ----------
@@ -245,25 +276,24 @@
     return Math.max(1, Math.ceil(base * 0.40));
   }
 
+  // normalize icon source from any inventory entry (SELL list)
   function iconForInv(key, entry){
+    // 1) If the item already carries an icon, use it.
     if (entry?.iconSvg) return iconImgHTMLFromAny(entry.iconSvg, 24, 24);
 
-    // Prefer your global UI icon set if present
-    if (window.svgIcon) {
-      const prettyId = (entry?.name || key || '').toLowerCase();
-      const idGuess =
-        /knuckle/.test(prettyId) ? 'knuckles' :
-        /\bbat\b/.test(prettyId) ? 'bat' :
-        /\buzi\b/.test(prettyId) ? 'uzi' :
-        (/\bpistol\b/.test(prettyId) && !/ammo/.test(prettyId)) ? 'pistol' :
-        /\bgrenade\b/.test(prettyId) ? 'grenade' : '';
-      const svg = idGuess ? window.svgIcon(idGuess, 24, 24) : '';
-      if (svg) return iconImgHTMLFromAny(svg, 24, 24);
+    // 2) Armor items are slot-based – generate same SVG the inventory uses.
+    if ((entry?.type||'') === 'armor') {
+      const slot = normalizeSlot(entry.slot||'');
+      return iconImgHTMLFromAny(svgArmorFallback(slot, 24, 24), 24, 24);
     }
 
-    // Final fallback: local guesser
-    const id = guessLegacyIdFromName(entry?.name || key);
-    if (id) return iconImgHTMLFromAny(svgIcon(id,24,24), 24, 24);
+    // 3) Legacy weapons/consumables by name/key.
+    const id =
+      guessLegacyIdFromName(entry?.name || key) ||
+      ({ pistol:'pistol', uzi:'uzi', grenade:'grenade' }[key] || '');
+    if (id) return iconImgHTMLFromAny(svgIcon(id, 24, 24), 24, 24);
+
+    // 4) Nothing known → no icon.
     return '';
   }
 
