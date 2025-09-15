@@ -188,30 +188,52 @@ function applyServerCore(seed){
     }
 
     // HEARTS (segments)
-    if (seed.player && seed.player.heartsSegs!=null){
-      try{
-        const u = userKey();
-        localStorage.setItem('izzaCurHeartSegments_'+u, String(seed.player.heartsSegs|0));
-        try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
-      }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
-    }
+if (seed.player && seed.player.heartsSegs != null){
+  try{
+    const u = userKey();
+    const v = seed.player.heartsSegs | 0;
 
-    // PLAYER POSITION (best-effort)
-    if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
+    // Write BOTH keys so any hearts code sees it
+    localStorage.setItem('izzaCurHeartSegments', String(v));             // global
+    localStorage.setItem('izzaCurHeartSegments_' + u, String(v));        // user-scoped
+
+    // Nudge listeners (your hearts plugin redraws on this)
+    try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+
+    console.log('[persist] hearts hydrated →', v);
+  }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
+}
+
+    // PLAYER POSITION (resilient)
+if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
+  try{
+    const px = seed.player.x | 0, py = seed.player.y | 0;
+
+    const doTeleport = ()=>{
       try{
         if (IZZA?.api?.teleport) {
-          IZZA.api.teleport(seed.player.x|0, seed.player.y|0);
+          IZZA.api.teleport(px, py);
         } else {
           // legacy hint some plugins read
-          localStorage.setItem('izzaMission3Pos', JSON.stringify({x:seed.player.x|0, y:seed.player.y|0}));
+          localStorage.setItem('izzaMission3Pos', JSON.stringify({ x: px, y: py }));
         }
-      }catch(e){ console.warn('[persist] pos hydrate failed', e); }
-    }
+        // Optional: announce for any custom listeners
+        try{ window.dispatchEvent(new CustomEvent('izza-pos-hydrated', { detail:{ x:px, y:py } })); }catch{}
+      }catch(e){ console.warn('[persist] pos hydrate apply failed', e); }
+    };
 
-    console.log('[persist] core hydrated');
-  }catch(e){
-    console.warn('[persist] applyServerCore failed', e);
-  }
+    // Apply now…
+    doTeleport();
+
+    // …and again shortly to win over late re-spawns / door warps
+    try{ requestAnimationFrame(()=> doTeleport()); }catch{}
+    setTimeout(()=> doTeleport(), 60);
+
+    // …and once when the core “resumes” a session
+    try{ IZZA.on?.('resume', ()=> doTeleport()); }catch{}
+
+    console.log('[persist] position hydrated →', { x:px, y:py });
+  }catch(e){ console.warn('[persist] pos hydrate failed', e); }
 }
 function looksEmpty(_s){
   // We no longer block any snapshot as "blank".
