@@ -101,7 +101,7 @@ const missionState = IZZA?.api?.getMissionState
   bank: bank || { coins:0, items:{}, ammo:{} },
   timestamp: Date.now()
 };
-
++}
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   // “blank” means: ... (we don't want this anymore)
 function looksEmpty(_s){
