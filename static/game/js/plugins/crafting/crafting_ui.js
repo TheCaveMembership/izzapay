@@ -30,6 +30,7 @@
     fireRateRequested: 0,
     dmgHearts: 0.5,
     packageCredits: null, // if the user purchased a package this session
+    createSub: 'setup',   // 'setup' | 'visuals'
   };
 
   // ---------- UTIL: moderation ----------
@@ -187,8 +188,16 @@
   function renderCreate(){
   const totalPi = calcTotalCost({ usePi:true });
   const totalIC = calcTotalCost({ usePi:false });
+
+  const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
+
   return `
-    <div class="cl-body">
+    <div class="cl-subtabs">
+      <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
+      <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
+    </div>
+
+    <div class="cl-body ${sub}">
       <div class="cl-pane cl-form">
         <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
         <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
@@ -254,7 +263,7 @@
         </div>
         <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
         <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
-        <div style="margin-top:8px; display:flex; gap:8px">
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
           <button class="ghost" id="btnPreview">Preview</button>
           <button class="ghost" id="btnCraft" title="Consumes your paid slot if not already paid">Craft</button>
           <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
@@ -342,6 +351,19 @@
           STATE.packageCredits = { id, items:3, featuresIncluded:true };
           alert('Package unlocked — start creating!');
         }
+        // Create sub-tabs (phones)
+STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    STATE.createSub = b.dataset.sub === 'visuals' ? 'visuals' : 'setup';
+    const host = STATE.root.querySelector('#craftTabs');
+    const saveScroll = host ? host.scrollTop : 0;
+    if (host){
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = saveScroll;
+    }
+  });
+});
       });
     });
     root.querySelectorAll('[data-buy-single]').forEach(btn=>{
