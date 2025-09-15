@@ -1,7 +1,7 @@
-/* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run) — fixed
-   - FIX: Night/timer no longer end on first pumpkin pickup if the player already owns a Pumpkin set.
-          We now finish ONLY on an actual craft (consumes jack + 3 pumpkins) or craft events.
-   - Keeps: Werewolf (all fours, smaller/faster, black, red eye glow, drool), timer, HA smoke, M6 unlock, UI bump.
+/* mission5_halloween.plugin.js — Mission 5 (evil jack, HA-smoke, night run)
+   CHANGE: Night/timer/end state now trigger ONLY when the player clicks “Craft Pumpkin Armour”
+           in the Armoury UI (emits `gear-crafted`/`armor-crafted` with kind/set==='pumpkin').
+   Kept: Werewolf (all fours, smaller/faster, black, red eye glow, drool), timer, HA smoke, M6 unlock, UI bump.
 */
 (function(){
   window.__M5_LOADED__ = true;
@@ -55,7 +55,6 @@
     _bcastInvChanged();
   }
   function invInc(inv, key, n=1){ inv[key]=inv[key]||{count:0}; inv[key].count=(inv[key].count|0)+n; return inv; }
-  function invDec(inv, key, n=1){ if(!inv[key]) return inv; inv[key].count=Math.max(0,(inv[key].count|0)-n); if(inv[key].count<=0) delete inv[key]; return inv; }
 
   function _addOne(inv, canonicalKey, displayName){
     inv[canonicalKey] = inv[canonicalKey] || { count: 0, name: displayName || canonicalKey };
@@ -406,8 +405,7 @@
         _addOne(inv, 'pumpkin_piece', 'Pumpkin');
         invWrite(inv);
         IZZA.toast?.('+1 Pumpkin');
-        // attempt auto-craft ONLY if player now meets the recipe (will safely no-op)
-        tryCraftPumpkin();
+        // IMPORTANT: do NOT auto-craft or end here anymore.
         return;
       }
     }
@@ -452,29 +450,13 @@
     placePumpkins();
     ensureTimer();
     try{ IZZA.emit('celebrate',{style:'spray-skull'}); }catch{}
-    IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour!');
+    IZZA.toast?.('Night Mission started — collect 3 pumpkins, then craft Pumpkin Armour in the Armoury!');
   }
 
+  // NOTE: This function is intentionally a NO-OP now to prevent auto-crafting.
+  // Crafting & mission completion must come ONLY from Armoury UI events.
   function tryCraftPumpkin(){
-    const inv=invRead();
-    const haveJack = (inv.jack_o_lantern?.count|0) > 0;
-    const pumpkinsC = (inv.pumpkin_piece?.count|0);
-    if(!haveJack || pumpkinsC<3) return false;
-
-    // consume & grant set
-    invDec(inv,'jack_o_lantern',1);
-    invDec(inv,'pumpkin_piece',3);
-
-    invInc(inv,'pumpkinHelmet',1);
-    invInc(inv,'pumpkinVest',1);
-    invInc(inv,'pumpkinArms',1);
-    invInc(inv,'pumpkinLegs',1);
-    inv.pumpkinLegs.meta = { speed: 0.28 };
-    inv._pumpkinSetMeta   = { setDR: 0.20 };
-    invWrite(inv);
-
-    finishMission5();
-    return true;
+    return false;
   }
 
   function bumpMission5UI(){
@@ -550,23 +532,21 @@
     IZZA.on?.('update-post',  onUpdate);
     wireB();
 
-    // NOTE: On ready, do NOT auto-finish based on pre-owned set.
-    // Only attempt an auto-craft if the player already has jack+3 pumpkins on boot.
-    if (mission5Active) tryCraftPumpkin();
+    // IMPORTANT: do NOT auto-craft on ready anymore.
+    // if (mission5Active) tryCraftPumpkin(); // removed
   });
 
-  // Inventory changes during the run: only attempt to craft (safe no-op otherwise)
+  // Inventory changes during the run: DO NOT auto-craft anymore.
   function onInvChangeCheckM5(){
-    if (!mission5Active) return;
-    tryCraftPumpkin(); // only finishes if jack+3 pumpkins were just collected and consumed
+    // intentionally empty (kept for future signals if needed)
   }
 
   window.addEventListener('izza-inventory-changed', ()=>{
     try{ IZZA.emit?.('render-under'); }catch{}
-    onInvChangeCheckM5();
+    onInvChangeCheckM5(); // no-op
   });
 
-  // Mirror Mission 4 behavior: react to explicit craft events from your Armoury UI
+  // Armoury craft clicks are the ONLY finish trigger now:
   IZZA.on?.('gear-crafted',  ({kind,set})=>{
     if(kind==='pumpkin' || set==='pumpkin'){ finishMission5(); }
   });
