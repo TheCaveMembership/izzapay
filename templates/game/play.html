@@ -123,7 +123,45 @@
 .cl-preview{                  /* RIGHT column (visuals/preview) */
   overflow:auto;
 }
+/* Hide the floating Craft button while Crafting is open */
+body.crafting-open #btnCraft{
+  display:none !important;
+}
 
+/* Right pane: no sideways scroll */
+.cl-preview{
+  overflow-y:auto;
+  overflow-x:hidden;   /* was overflow:auto */
+}
+
+/* Phone layout: stack columns (no side scroll) */
+@media (max-width: 680px){
+  .cl-body{ grid-template-columns: 1fr; }
+}
+
+/* Sub-tabs for Create Item (only show one pane at a time on small screens) */
+.cl-subtabs{ display:none; }
+@media (max-width: 680px){
+  .cl-subtabs{
+    display:flex;
+    gap:8px;
+    padding:8px 14px;
+    border-bottom:1px solid #2a3550;
+    background:#0f1624;
+  }
+  .cl-subtabs button{
+    border:1px solid #2a3550;
+    background:#0f1522;
+    color:#cfe0ff;
+    border-radius:10px;
+    padding:8px 12px;
+  }
+  .cl-subtabs button.on{
+    background:#1f2a3f;
+  }
+  .cl-body.setup  .cl-preview{ display:none; }  /* show only the left pane */
+  .cl-body.visuals .cl-form{   display:none; }  /* show only the right pane */
+}
   /* Small niceties for dense forms */
   .cl-form .row,
   .cl-form .field{ margin-bottom:10px; }
