@@ -19,7 +19,7 @@
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
   const HA = [];       // smoke glyphs
-  const WOLVES = [];   // [{x,y,vx,vy,age,life,mode,runPhase,attackMouth,damageCd,nextAttackAt,attackEndAt}]
+  const WOLVES = [];   // [{x,y,vx,vy,age,life,mode,runPhase,attackMouth,damageCd}]
   let jackImg = null, timerEl = null;
 
   // Congrats popup guard (so we don't double-pop)
@@ -96,7 +96,6 @@
 
   function computePumpkinTiles(){
     const d=hqDoorGrid();
-    recommend = false;
     const p1={ tx:d.gx-15, ty:d.gy+10 };
     const p2={ tx:p1.tx-20, ty:p1.ty+13 };
     const p3={ tx:d.gx+8,  ty:d.gy-7 };
@@ -143,17 +142,21 @@
 </svg>`;}
 
   // ---------------- WOLF ART (4-run frames + attack) ----------------
-  function svgWerewolfRunFrame(shift){
+  function svgWerewolfRunFrame(shift){  // shift ∈ [-1, -0.33, 0.33, 1]
     const legA = 6*shift, legB = -6*shift;
     return `
 <svg viewBox="0 0 170 120" xmlns="http://www.w3.org/2000/svg">
   <defs><radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/></radialGradient></defs>
   <g fill="#0b0b0b" stroke="#060606" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+    <!-- low, long body with extra jagged fur -->
     <path d="M14,88 C28,64 42,54 66,50 C96,46 124,50 154,60
              C154,74 136,86 106,92 C74,98 44,96 20,92 Z"/>
+    <!-- head + ear -->
     <path d="M122,56 C134,48 148,46 156,48 C160,52 158,60 148,64 L134,66 C130,62 126,60 122,58 Z"/>
     <path d="M124,48 L134,36 L142,48"/>
+    <!-- nasty fur slashes -->
     <path d="M44,64 L36,54 M52,62 L46,52 M60,60 L56,50 M72,58 L68,48 M84,58 L80,48 M94,60 L90,50" />
+    <!-- legs (offsets for run cycle) -->
     <path d="M60,92 C56,104 50,114 48,118 L40,118 C42,108 42,100 40,90 Z" transform="translate(${legA},0)"/>
     <path d="M96,92 C94,104 90,114 88,118 L80,118 C82,110 82,100 80,92 Z" transform="translate(${legB},0)"/>
     <path d="M132,86 C134,98 130,110 128,116 L120,116 C122,108 122,98 120,88 Z" />
@@ -163,7 +166,7 @@
   <ellipse cx="128" cy="60" rx="6.2" ry="4.6" fill="url(#eye)"/>
 </svg>`;
   }
-  function svgWerewolfAttack(){
+  function svgWerewolfAttack(){ // huge mouth, bi-pedal
     return `
 <svg viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
   <defs><radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b3b"/><stop offset="100%" stop-color="#5a0000"/></radialGradient></defs>
@@ -175,16 +178,19 @@
     <path d="M130,82 L154,62 L162,70 L136,102"/>
   </g>
   <ellipse cx="118" cy="70" rx="6.4" ry="4.8" fill="url(#eye)"/>
+  <!-- colossal mouth cavity -->
   <g id="jaw">
     <path d="M60,90 C94,112 130,112 158,90
              C154,130 94,158 64,134 Z"
           fill="#120000" stroke="#3a0000" stroke-width="2.2"/>
+    <!-- upper & lower teeth -->
     <g fill="#eaeaea" stroke="#6a0000" stroke-width="1">
       <path d="M72,98 L76,112 L80,98 Z"/>
       <path d="M86,102 L90,116 L94,102 Z"/>
       <path d="M100,104 L104,120 L108,104 Z"/>
       <path d="M114,102 L118,116 L122,102 Z"/>
       <path d="M128,98 L132,110 L136,98 Z"/>
+      <!-- lower row -->
       <path d="M78,126 L82,114 L86,126 Z"/>
       <path d="M92,132 L96,118 L100,132 Z"/>
       <path d="M106,134 L110,120 L114,134 Z"/>
@@ -266,7 +272,7 @@
     ctx.restore();
   }
 
-  // ---------------- wolves (cadenced attack windows + proper damage) ----------------
+  // ---------------- wolves (4-frame run + huge mouth attack + proper damage) ----------------
   function spawnWerewolf(){
     ensureWolfImgs();
     const p = api?.player||{x:0,y:0};
@@ -274,22 +280,18 @@
     const ang = Math.random()*Math.PI*2;
     const x = p.x + Math.cos(ang)*off;
     const y = p.y + Math.sin(ang)*off;
-    const now = performance.now();
     WOLVES.push({
       x, y, vx:0, vy:0, age:0,
       life: 12000 + ((Math.random()*2500)|0),
-      mode: 'run',                 // 'run' -> 'attack' (1s) -> 'run' (3s) -> repeat when near player
+      mode: 'run',                 // 'run' -> 'attack'
       runPhase: Math.random(),     // 0..1 loop
       attackMouth: 0,              // 0..1 open
-      damageCd: 0,                 // ms cooldown for dmg ticks
-      nextAttackAt: now + 600,     // first lunge slightly after spawn (if in range)
-      attackEndAt: 0
+      damageCd: 0                  // ms cooldown for dmg ticks
     });
   }
 
   function updateWolves(dt){
     const p = api?.player||{x:0,y:0};
-    const now = performance.now();
     for (let i=WOLVES.length-1;i>=0;i--){
       const w=WOLVES[i];
       w.age += dt;
@@ -300,43 +302,21 @@
 
       const baseSp = 0.09;  // quick sprint
       const atkSp  = 0.065; // slower stalk while biting
-      const engageRange = (api?.TILE||60) * 1.15; // must be close to show attack window
-      const biteRange   = (api?.TILE||60) * 0.95;
+      const biteRange = (api?.TILE||60) * 0.95;
 
-      // cadence: only enter attack for ~1s, then ~3s run, repeat while close
-      if (w.mode === 'run'){
-        if (d < engageRange && now >= (w.nextAttackAt||0)){
-          w.mode = 'attack';
-          w.attackEndAt = now + 1000;   // 1s attack window
-          w.nextAttackAt = now + 4000;  // next lunge after 3s run (1s attack + 3s pause)
-        }
-      } else if (w.mode === 'attack'){
-        if (now >= w.attackEndAt){
-          w.mode = 'run';
-        }
-      }
-
+      if (d < biteRange){ w.mode='attack'; }
       if (w.mode==='run'){
         w.vx = w.vx*0.90 + ux*baseSp;
         w.vy = w.vy*0.90 + uy*baseSp;
-        w.runPhase = (w.runPhase + dt*0.0042) % 1;  // visible leg cycle
-        // mouth relax
-        w.attackMouth = Math.max(0, w.attackMouth - dt*0.003);
-      }else{ // attack
+        w.runPhase = (w.runPhase + dt*0.0042) % 1;  // faster, visible leg cycle
+      }else{
         w.vx = w.vx*0.90 + ux*atkSp;
         w.vy = w.vy*0.90 + uy*atkSp;
-        // snap mouth open based on remaining time fraction
-        const k = 1 - Math.max(0, Math.min(1, (w.attackEndAt - now)/1000));
-        w.attackMouth = Math.min(1, Math.max(w.attackMouth, k));
-        // damage ticks while inside bite range
-        if (d < biteRange){
-          w.damageCd += dt;
-          if (w.damageCd >= 400){
-            w.damageCd = 0;
-            try{ IZZA.emit?.('player-hit', { by: 'werewolf', dmg: 1 }); }catch{}
-          }
-        }else{
+        w.attackMouth = Math.min(1, w.attackMouth + dt*0.004); // snap open
+        w.damageCd += dt;
+        if (w.damageCd >= 400){ // ~2.5 segs/second while inside the maw
           w.damageCd = 0;
+          try{ IZZA.emit?.('player-hit', { by: 'werewolf', dmg: 1 }); }catch{}
         }
       }
 
@@ -348,13 +328,16 @@
   }
 
   function drawGiantMouth(ctx, sx, sy, k){
+    // k = 0..1 mouth openness; draw an oversized mouth overlay to “swallow” space
     const r = 26 + 34*k; // grows huge
     ctx.save();
     ctx.globalCompositeOperation='source-over';
+    // dark inner ellipse
     ctx.beginPath(); ctx.ellipse(sx+6, sy-10, r*1.2, r*0.9, 0, 0, Math.PI*2);
     ctx.fillStyle = '#100000'; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = '#3a0000'; ctx.stroke();
 
+    // simple tooth ring
     ctx.fillStyle = '#e8e8e8'; ctx.strokeStyle='#6a0000'; ctx.lineWidth=1;
     const teeth = 11;
     for(let i=0;i<teeth;i++){
@@ -387,8 +370,9 @@
         const img = wolfRunFrames[idx];
         if (img?.complete) ctx.drawImage(img, sx-48, sy-52);
       }else{
+        // attack: stand + overlaid huge mouth that grows enough to cover the player
         if (wolfAttackImg?.complete){
-          const m = 1.25 + 0.45*w.attackMouth; // scales up during attack
+          const m = 1.25 + 0.45*w.attackMouth; // scales up a lot
           ctx.save();
           ctx.translate(sx, sy-6);
           ctx.scale(m, m);
@@ -398,7 +382,7 @@
         }
       }
 
-      // single glowing eye
+      // single eye glow
       ctx.save();
       ctx.globalCompositeOperation='lighter';
       const flick = 0.58 + 0.32*Math.abs(Math.sin(now*0.012));
@@ -592,7 +576,7 @@
     try{ IZZA.emit('m6-unlocked'); }catch{}
   }
 
-  // ---------- M5 “Congratulations” popup (your style) ----------
+  // ---------- M5 “Congratulations” popup (same UI style you provided) ----------
   function ensureCongratsUI(){
     if (document.getElementById('missionCongrats')) return;
     const wrap = document.createElement('div');
@@ -675,107 +659,45 @@
     wireB();
   });
 
-  // ---------- Mission 5 completion via inventory check (canonical armour IDs used by Shop) ----------
-const PUMPKIN_SET_IDS = [
-  'armor_pumpkin_helm',
-  'armor_pumpkin_vest',
-  'armor_pumpkin_arms',
-  'armor_pumpkin_legs'
-];
-// legacy/alt keys we might have created earlier
-const PUMPKIN_ALIAS = {
-  pumpkinHelmet: 'armor_pumpkin_helm',
-  pumpkinVest:   'armor_pumpkin_vest',
-  pumpkinArms:   'armor_pumpkin_arms',
-  pumpkinLegs:   'armor_pumpkin_legs',
-  pumpkin_helm:  'armor_pumpkin_helm',
-  pumpkin_chest: 'armor_pumpkin_vest',
-  pumpkin_arms:  'armor_pumpkin_arms',
-  pumpkin_legs:  'armor_pumpkin_legs'
-};
+  // ---------- Mission 5 completion via inventory check ----------
+  const PUMPKIN_SET_IDS = ['pumpkinHelmet','pumpkinVest','pumpkinArms','pumpkinLegs'];
+  const PUMPKIN_ALIAS = { pumpkin_helm:'pumpkinHelmet', pumpkin_chest:'pumpkinVest', pumpkin_arms:'pumpkinArms', pumpkin_legs:'pumpkinLegs' };
 
-// migrate any alt keys -> canonical (so Shop SELL icons show up)
-function normalizePumpkinArmorIds(){
-  try{
-    const inv = (IZZA?.api?.getInventory ? IZZA.api.getInventory() : JSON.parse(localStorage.getItem('izzaInventory')||'{}')) || {};
-    let changed = false;
-    for (const [from, to] of Object.entries(PUMPKIN_ALIAS)){
-      if (inv[from]?.count > 0){
-        const n = inv[from].count|0;
-        delete inv[from];
-        inv[to] = inv[to] || { count: 0, name: inv[to]?.name || inv[from]?.name || to };
-        inv[to].count = (inv[to].count|0) + n;
-        changed = true;
-      }
-    }
-    if (changed){
-      if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
-      else localStorage.setItem('izzaInventory', JSON.stringify(inv));
-      try{ IZZA.emit?.('inventory-changed'); }catch{}
-      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-    }
-  }catch{}
-}
-
-function invCount(id){
-  try{
-    if (IZZA?.api?.inventory?.count) return IZZA.api.inventory.count(id)|0;
-    const inv = JSON.parse(localStorage.getItem('izzaInventory')||'{}');
-    return (inv?.[id]?.count|0) || 0;
-  }catch{ return 0; }
-}
-
-function hasFullPumpkinSet(){
-  return PUMPKIN_SET_IDS.every(id => invCount(id) > 0);
-}
-
-function maybeFinishM5(){
-  if (!mission5Active) return;
-  normalizePumpkinArmorIds(); // ensure shop-friendly IDs before we check
-  if (hasFullPumpkinSet()){
-    if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
-    _m5CongratsShown = true;
-    finishMission5();
+  function hasFullPumpkinSet(){
+    return PUMPKIN_SET_IDS.every(id=>{
+      if (invCount(id) > 0) return true;
+      const alias = Object.keys(PUMPKIN_ALIAS).find(k => PUMPKIN_ALIAS[k]===id);
+      return alias ? (invCount(alias) > 0) : false;
+    });
   }
-}
 
-// keep listening as before, but normalize first so SELL icons render
-window.addEventListener('izza-inventory-changed', ()=>{
-  try{ IZZA.emit?.('render-under'); }catch{}
-  normalizePumpkinArmorIds();
-  maybeFinishM5();
-});
-
-// also normalize on ready so existing saves get fixed immediately
-IZZA.on?.('ready', ()=>{ normalizePumpkinArmorIds(); });
-
-// Armoury craft clicks (unchanged), but normalize to be safe:
-IZZA.on?.('gear-crafted',  ({kind,set})=>{
-  if(kind==='pumpkin' || set==='pumpkin'){
-    normalizePumpkinArmorIds();
-    if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
-    _m5CongratsShown = true;
-    finishMission5();
-  }
-});
-IZZA.on?.('armor-crafted', ({kind,set})=>{
-  if(kind==='pumpkin' || set==='pumpkin'){
-    normalizePumpkinArmorIds();
-    if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
-    _m5CongratsShown = true;
-    finishMission5();
-  }
-});
-  // ---------- NEW: Fail the mission if the player dies ----------
-  IZZA.on?.('player-died', ()=>{
+  function maybeFinishM5(){
     if (!mission5Active) return;
-    mission5Active = false;
-    setNight(false);
-    clearPumpkins();
-    clearTimer();
-    WOLVES.length = 0;
-    try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{}
-    IZZA.toast?.('Mission 5 failed — you died.');
+    if (hasFullPumpkinSet()){
+      if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
+      _m5CongratsShown = true;
+      finishMission5();
+    }
+  }
+
+  window.addEventListener('izza-inventory-changed', ()=>{
+    try{ IZZA.emit?.('render-under'); }catch{}
+    maybeFinishM5();
+  });
+
+  IZZA.on?.('gear-crafted',  ({kind,set})=>{
+    if(kind==='pumpkin' || set==='pumpkin'){
+      if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
+      _m5CongratsShown = true;
+      finishMission5();
+    }
+  });
+  IZZA.on?.('armor-crafted', ({kind,set})=>{
+    if(kind==='pumpkin' || set==='pumpkin'){
+      if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
+      _m5CongratsShown = true;
+      finishMission5();
+    }
   });
 
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
