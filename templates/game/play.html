@@ -80,37 +80,49 @@
     overscroll-behavior: contain;  /* stop background scroll chaining */
   }
 
-  #craftingRoot{
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;              /* panes manage their own scroll */
-  }
+  /* Make the root a vertical flex container so tabs area can size itself */
+#craftingRoot{
+  flex: 1;
+  display:flex;              /* add this */
+  flex-direction: column;    /* add this */
+  min-height: 0;
+  overflow: hidden;
+}
 
-  /* === Create Item layout: left form scrolls vertically === */
-  .cl-body{
-    display:grid;
-    grid-template-columns: minmax(300px, 1.25fr) minmax(260px, 1fr);
-    gap:12px;
-    height: calc(100% - 112px);    /* header (~64) + tabs (~48) */
-    padding: 8px 10px 12px;
-    overflow:hidden;
-  }
-  .cl-pane{
-    background:#0f1522;
-    border:1px solid #2a3550;
-    border-radius:12px;
-    padding:12px;
-    min-width:0;                   /* prevent horizontal overflow */
-    overflow-x:hidden;             /* no sideways scroll anywhere */
-  }
-  .cl-form{                        /* LEFT column */
-    overflow-y:auto;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-gutter: stable both-edges;
-  }
-  .cl-preview{                     /* RIGHT column */
-    overflow:auto;
-  }
+/* The content area under the tab buttons should fill remaining height */
+#craftTabs{
+  flex: 1;                   /* add this */
+  min-height: 0;             /* add this */
+  overflow: hidden;          /* add this */
+}
+
+/* Create Item layout: two columns, left scrolls vertically */
+.cl-body{
+  display:grid;
+  grid-template-columns: minmax(320px,1.2fr) 1fr;
+  gap:12px;
+  height:100%;               /* fill the craftTabs area */
+  padding:14px;
+  overflow:hidden;           /* no sideways scroll */
+}
+
+.cl-pane{
+  background:#0f1522;
+  border:1px solid #2a3550;
+  border-radius:12px;
+  padding:12px;
+  min-width:0;
+  overflow-x:hidden;
+}
+
+.cl-form{                     /* LEFT column (form) */
+  overflow-y:auto;            /* vertical scroll */
+  -webkit-overflow-scrolling:touch;
+}
+
+.cl-preview{                  /* RIGHT column (visuals/preview) */
+  overflow:auto;
+}
 
   /* Small niceties for dense forms */
   .cl-form .row,
