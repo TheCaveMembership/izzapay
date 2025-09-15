@@ -264,12 +264,13 @@ let freezeUntil=0; // <-- ADD (hold off saves temporarily)
   // wait for core ready
   if (window.IZZA?.on) {
   IZZA.on('ready', ()=>{
-    ready = true;
-    try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-    try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
-    armOnce();
-    tryKick('post-hydrate');
-  });
+  ready = true;
+  try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
+  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
+  startEnforceFromSeed(8000); // <-- ADD
+  armOnce();
+  tryKick('post-hydrate');
+});
 } else {
   setTimeout(()=>{
     ready = true;
@@ -283,6 +284,51 @@ let freezeUntil=0; // <-- ADD (hold off saves temporarily)
 if (window.IZZA?.on){
   IZZA.on('player-died', ()=>{ freezeUntil = Date.now() + 5000; });   // <-- ADD
   IZZA.on('player-respawn', ()=>{ freezeUntil = Math.max(freezeUntil, Date.now()+1200); }); // small post-respawn settle  <-- ADD
+}
+  // --- enforce hearts & position for a short window after hydrate (to beat late resets)
+let _enforceTimer = 0;
+function startEnforceFromSeed(ms=8000){
+  if (_enforceTimer) { clearInterval(_enforceTimer); _enforceTimer = 0; }
+  const until = Date.now() + ms;
+  _enforceTimer = setInterval(()=>{
+    // stop after time window
+    if (Date.now() > until) { clearInterval(_enforceTimer); _enforceTimer = 0; return; }
+    // don't fight while death/respawn freeze is active
+    if (Date.now() < freezeUntil) return;
+
+    try{
+      const seed = serverSeed;
+      if (!seed || !seed.player) return;
+
+      // Hearts enforcement
+      const targetH = (seed.player.heartsSegs!=null) ? (seed.player.heartsSegs|0) : null;
+      if (targetH!=null){
+        const curH = readHeartsSegs();
+        if (curH==null || (curH|0)!==targetH){
+          const u = userKey();
+          try{
+            localStorage.setItem('izzaCurHeartSegments_'+u, String(targetH));
+            try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
+          }catch(e){ console.warn('[persist] enforce hearts failed', e); }
+        }
+      }
+
+      // Position enforcement
+      const tx = Number.isFinite(seed.player.x) ? (seed.player.x|0) : null;
+      const ty = Number.isFinite(seed.player.y) ? (seed.player.y|0) : null;
+      if (tx!=null && ty!=null){
+        const cur = readPlayerXY();
+        if ((cur.x|0)!==tx || (cur.y|0)!==ty){
+          try{
+            if (IZZA?.api?.teleport) IZZA.api.teleport(tx, ty);
+            else localStorage.setItem('izzaMission3Pos', JSON.stringify({x:tx, y:ty}));
+          }catch(e){ console.warn('[persist] enforce pos failed', e); }
+        }
+      }
+    }catch(e){
+      console.warn('[persist] enforce loop err', e);
+    }
+  }, 300);
 }
 // also give ample grace after any tier reloads
 setTimeout(()=>{ armOnce(); }, 7000);
@@ -303,11 +349,11 @@ setTimeout(()=>{ armOnce(); }, 7000);
     // If the core is already ready by the time load completes, hydrate now too.
 if (ready) {
   try { applyServerMissions(serverSeed); } catch(e){ console.warn(e); }
-  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); } // <-- ADD
+  try { applyServerCore(serverSeed); }      catch(e){ console.warn(e); }
+  startEnforceFromSeed(8000); // <-- ADD
   armOnce();
   tryKick('post-hydrate-init');
 }
-})();
 
   async function tryKick(reason){
   if (!loaded || !armed || !ready) return;
