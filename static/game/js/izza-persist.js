@@ -40,11 +40,21 @@
     }catch{ return 0; }
   }
   function readMissions(){
-    try{
-      if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
-      const raw = localStorage.getItem('izzaMissions'); return raw? (parseInt(raw,10)||0) : 0;
-    }catch{ return 0; }
+  try{
+    // 1) Primary: api.getMissionCount if your core exposes it
+    if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
+
+    // 2) Fallback: inventory meta
+    const meta = window.IZZA?.api?.inventory?.getMeta?.('missionsCompleted');
+    if (Number.isFinite(meta)) return meta|0;
+
+    // 3) Legacy fallback: localStorage key
+    const raw = localStorage.getItem('izzaMissions');
+    return raw ? (parseInt(raw,10)||0) : 0;
+  }catch{
+    return 0;
   }
+}
   function readHeartsSegs(){
     const u=userKey();
     const a = localStorage.getItem('izzaCurHeartSegments_'+u);
@@ -183,7 +193,12 @@
   window.addEventListener('izza-coins-changed',    ()=> tryKick('coins'));
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
   window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));  // <-- listens if your hearts plugin emits
-
+// Persist when missions change
+window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
+if (window.IZZA?.on) {
+  // If your mission plugins also emit on the IZZA bus
+  IZZA.on('missions-updated', ()=> tryKick('missions'));
+}
   // ---- hearts watcher (works even if no event is emitted) ----
   let _lastHearts = readHeartsSegs();
   setInterval(()=>{
