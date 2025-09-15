@@ -431,14 +431,23 @@
     }
 
     function completeMission4Once(){
-      if (localStorage.getItem(M4_DONE_KEY) === '1') return;
-      try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
-      // bump inv meta & UI counter from 3 -> 4
-      try{ IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); }catch{}
-      try{ IZZA.emit?.('missions-updated', { completed: 4 }); }catch{}
-      try{ IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); }catch{}
-      mission4AgentPopup();
-    }
+  if (localStorage.getItem(M4_DONE_KEY) === '1') return;
+
+  // mark done (local guard)
+  try { localStorage.setItem(M4_DONE_KEY, '1'); } catch {}
+
+  // NEW: keep all three paths in sync
+  try { IZZA.api?.inventory?.setMeta?.('missionsCompleted', 4); } catch {}
+  try { localStorage.setItem('izzaMissions', String(Math.max(4, parseInt(localStorage.getItem('izzaMissions')||'0',10)||0))); } catch {}
+
+  // Notify both the IZZA bus and the DOM so the saver runs immediately
+  try { IZZA.emit?.('missions-updated', { completed: 4 }); } catch {}
+  try { window.dispatchEvent(new Event('izza-missions-changed')); } catch {}
+
+  try { IZZA.emit?.('mission-complete', { id:4, name:'Armoury — Cardboard Set' }); } catch {}
+
+  mission4AgentPopup();
+}
 
     // ---- NEW: spend one cardboard box once the full set exists ----
     function spendCardboardBoxOnceIfReady(){
