@@ -189,7 +189,7 @@ body[data-fakeland="1"] #craftingModal{
 }
 
 body[data-fakeland="1"] #craftingModal .card {
-  transform: rotate(0deg) scale(0.8) !important;
+  transform: rotate(0deg) scale(0.8) translateX(30px) !important;
   transform-origin: center center !important;
 }
 
