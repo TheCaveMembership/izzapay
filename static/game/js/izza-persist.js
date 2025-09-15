@@ -310,42 +310,42 @@ if (ready) {
 })();
 
   async function tryKick(reason){
-  if(!loaded || !armed || !ready) return;
+  if (!loaded || !armed || !ready) return;
 
   // hold while death/respawn is stabilizing
-  if (Date.now() < freezeUntil) { 
-    // optional: console.log('[persist] freeze', reason);
-    return; 
-  }
+  if (Date.now() < freezeUntil) return;
 
   const snap = buildSnapshot();
-  ...
-}
-    // never push blank over a non-empty server
-    if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
-      console.log('[persist] skip blank (server already has data)', reason); return;
-    }
-    // if still blank, just wait
-    if (looksEmpty(snap)) { console.log('[persist] still blank', reason); return; }
 
-    lastGood = snap;
-
-    if (saveBusy){ needLater=true; return; }
-    saveBusy=true;
-    const r = await Persist.save(snap);
-    saveBusy=false;
-
-    if (r.ok) {
-      console.log('[persist] saved', reason, snap);
-      serverSeed = snap; // from now on, blank overwrites are blocked
-      toast('Saved!');
-    } else if (needLater) {
-      needLater=false; tryKick('retry');
-    } else {
-      toast('Save failed');
-    }
+  // never push blank over a non-empty server
+  if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
+    console.log('[persist] skip blank (server already has data)', reason);
+    return;
+  }
+  // if still blank, just wait
+  if (looksEmpty(snap)) {
+    console.log('[persist] still blank', reason);
+    return;
   }
 
+  lastGood = snap;
+
+  if (saveBusy){ needLater = true; return; }
+  saveBusy = true;
+  const r = await Persist.save(snap);
+  saveBusy = false;
+
+  if (r.ok) {
+    console.log('[persist] saved', reason, snap);
+    serverSeed = snap; // from now on, blank overwrites are blocked
+    toast('Saved!');
+  } else if (needLater) {
+    needLater = false; tryKick('retry');
+  } else {
+    toast('Save failed');
+  }
+}
+;
   // ---- event-driven saves (bank/coins/inventory/hearts) ----
   window.addEventListener('izza-bank-changed',     ()=> tryKick('bank'));
   window.addEventListener('izza-coins-changed',    ()=> tryKick('coins'));
