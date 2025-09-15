@@ -1,7 +1,7 @@
 // v1_store_items_plugin.js — stock extender + icon repair + BUY/SELL + search + pricebook
 // + Inventory panel extender for ALL armor pieces (no Core edits)
 (function(){
-  const BUILD = 'v1.1.3-store-items+inv-ext-armor (buy->inventory armor inject + raw svg)';
+  const BUILD = 'v1.1.4-store-items+inv-ext-armor (inline-svg OR data-url icons everywhere)';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -19,8 +19,10 @@
     return svg;
   }
   function iconImgHTMLFromAny(svgOrData, w=24, h=24){
-    const src = svgToDataURL(svgOrData||'');
-    return `<img src="${src}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
+    if(!svgOrData) return '';
+    const s = String(svgOrData).trim();
+    if (/^</.test(s)) return s; // inline <svg> markup → inject directly
+    return `<img src="${s}" width="${w}" height="${h}" alt="" decoding="async" style="image-rendering:pixelated;display:block">`;
   }
 
   // tiny UI icons (NOT overlays)
@@ -206,8 +208,7 @@
         entry.slot  = slot==='helmet'?'head':(slot==='vest'?'chest':slot);
         entry.equippable = true;
 
-        // 🔸 Use the SAME inventory injection technique: preserve raw SVG string on iconSvg.
-        // Prefer incoming it.iconSvg (raw svg string) or keep existing entry.iconSvg. No data URLs.
+        // Preserve raw iconSvg string (inline or data URL) if provided
         if (typeof entry.iconSvg !== 'string' || !entry.iconSvg) {
           if (typeof it.iconSvg === 'string' && it.iconSvg.trim()) {
             entry.iconSvg = it.iconSvg.trim();
@@ -224,16 +225,13 @@
       else if(typeof key === 'string' && key.startsWith('armor:')){
         const parts = key.split(':'); const piece = parts[2]||'';
         addArmorPiece(piece); handled=true;
-      }
-      // 🔸 New: treat name-matched items as armor (so Bronze Helmet, etc., show up in inventory)
-      else if (/\b(helmet|vest|arms|legs|head|chest)\b/i.test(pretty)) {
+      } else if (/\b(helmet|vest|arms|legs|head|chest)\b/i.test(pretty)) {
         addArmorPiece(''); handled=true;
       }
 
       if(!handled){
         const e = inv[key] || { count:0, name:pretty };
         e.count = (e.count|0) + 1;
-        // Non-armor generics: leave iconSvg untouched unless store provides a raw SVG
         if (typeof e.iconSvg !== 'string' || !e.iconSvg) {
           if (typeof it.iconSvg === 'string' && it.iconSvg.trim()) {
             e.iconSvg = it.iconSvg.trim();
@@ -263,10 +261,12 @@
     return Math.max(1, Math.ceil(base * 0.40));
   }
 
-  // Use the SAME approach as armoury/inventory for SELL: inject raw SVG if present
+  // Render inventory icons: inline <svg> OR data URL (as <img>)
   function iconForInv(key, entry){
-    const svg = (entry && typeof entry.iconSvg === 'string') ? entry.iconSvg.trim() : '';
-    if (svg) return svg;
+    const raw = (entry && typeof entry.iconSvg === 'string') ? entry.iconSvg.trim() : '';
+    if (raw){
+      return iconImgHTMLFromAny(raw, 24, 24);
+    }
 
     // Non-armour (weapons/consumables) keep their tiny icons when possible
     if (window.svgIcon) {
@@ -468,11 +468,14 @@
       row.setAttribute('data-dynarmor','1');
       row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;background:#101626;border:1px solid #2a3550;border-radius:12px;padding:10px';
 
+      const raw = (typeof e.iconSvg==='string' && e.iconSvg.trim()) || '';
+      const iconHtml = iconImgHTMLFromAny(raw, 24, 24);
+
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px">
-          <div data-icon>${(typeof e.iconSvg==='string' && e.iconSvg.trim()) || ''}</div>
+          <div data-icon>${iconHtml}</div>
           <div>
             <div class="name">${e.name||key}</div>
             <div class="sub" style="opacity:.85">Count: ${(e.count|0)} · Slot: ${slot||'–'}${equipped?' · <b>Equipped</b>':''}</div>
