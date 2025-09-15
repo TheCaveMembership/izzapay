@@ -1,7 +1,7 @@
 // /static/game/js/plugins/crafting/crafting_ui.js
 (function(){
   const COSTS = Object.freeze({
-    PER_ITEM_IC:   5000,
+    PER_ITEM_IC:   0,
     PER_ITEM_PI:   5,
     ADDON_IC:      1000,
     ADDON_PI:      1,
