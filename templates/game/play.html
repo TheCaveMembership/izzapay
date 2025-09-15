@@ -53,7 +53,36 @@
     #authPanel button{ background:#162134; color:#cfe0ff; border:1px solid #2a3550; border-radius:8px; padding:6px 8px; font-size:12px; }
     #authPanel .close{ margin-left:auto }
   </style>
-
+<style>
+  /* NEW: Craft button styling/placement (just above the control buttons) */
+  #btnCraft {
+    position:fixed;
+    right:12px;
+    bottom:160px;    /* sits above the bottom controls row */
+    z-index:9001;
+    background:#162134;
+    color:#cfe0ff;
+    border:1px solid #2a3550;
+    border-radius:10px;
+    padding:10px 12px;
+    font-size:14px;
+  }
+  /* Fullscreen Crafting Land look */
+  #craftingModal .card {
+    width:min(1100px,96vw);
+    height:min(680px,88vh);
+    padding:0;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  #craftingRoot {
+    flex:1;
+    min-height:0;
+    background:#0b0f17;
+    display:flex;
+  }
+</style>
   <!-- Pi SDK -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -221,7 +250,61 @@
   }, {passive:false});
 })();
 </script>
+<!-- NEW: Crafting Land modal -->
+<div class="modal" id="craftingModal" style="display:none">
+  <div class="backdrop"></div>
+  <div class="card">
+    <div style="padding:12px 14px; border-bottom:1px solid #2a3550; display:flex; align-items:center; gap:8px; background:#0f1624">
+      <div style="font-weight:700">🛠️ Crafting Land</div>
+      <div style="margin-left:auto; display:flex; gap:8px">
+        <button class="ghost" id="craftClose">Close</button>
+      </div>
+    </div>
+    <div id="craftingRoot" data-no-i18n="1">
+      <!-- Crafting UI mounts here -->
+      <div style="margin:auto; opacity:.8; padding:16px; text-align:center">
+        <div style="font-size:16px; margin-bottom:6px">Loading Crafting Land…</div>
+        <div style="font-size:12px">Please wait</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const modal = document.getElementById('craftingModal');
+  if(!modal) return;
 
+  function openCraft(){
+    modal.style.display='flex';
+    // lazy-load UI only once
+    if (!window.CraftingUI && !document.getElementById('crafting-ui-script')) {
+      const s = document.createElement('script');
+      s.id = 'crafting-ui-script';
+      s.src = '/static/game/js/plugins/crafting/crafting_ui.js';
+      s.onload = function(){ try { window.CraftingUI && CraftingUI.mount('#craftingRoot'); } catch(e){} };
+      document.head.appendChild(s);
+    } else {
+      try { window.CraftingUI && CraftingUI.mount('#craftingRoot'); } catch(e){}
+    }
+  }
+  function closeCraft(){
+    modal.style.display='none';
+    try { window.CraftingUI && CraftingUI.unmount && CraftingUI.unmount('#craftingRoot'); } catch {}
+    try { window.IZZA && IZZA.emit && IZZA.emit('crafting-closed'); } catch {}
+  }
+
+  // public entrypoint for the game bus
+  window.__openCraftingLand = openCraft;
+
+  // close wiring
+  const backdrop = modal.querySelector('.backdrop');
+  backdrop && backdrop.addEventListener('click', closeCraft, {passive:true});
+  document.getElementById('craftClose').addEventListener('click', closeCraft, {passive:true});
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && modal.style.display !== 'none') closeCraft();
+  }, { passive:true });
+})();
+</script>
   <!-- Profile + token -->
   <script>window.__IZZA_PROFILE__ = {{ profile|tojson|safe }};</script>
   <script>window.__IZZA_T__ = {{ t|tojson|safe }};</script>
@@ -449,7 +532,49 @@
     }
   })();
   </script>
+<!-- NEW: Craft button + open wiring -->
+<script>
+(function(){
+  function mountBtn(){
+    if (document.getElementById('btnCraft')) return;
+    const btn = document.createElement('button');
+    btn.id = 'btnCraft';
+    btn.type = 'button';
+    btn.textContent = 'Craft';
+    btn.title = 'Open Crafting Land';
+    btn.addEventListener('click', function(){
+      // prefer bus if core is up; fall back to direct open
+      try { window.IZZA && IZZA.emit && IZZA.emit('izza-open-crafting'); } catch {}
+      if (typeof window.__openCraftingLand === 'function') window.__openCraftingLand();
+    }, {passive:true});
+    document.body.appendChild(btn);
+  }
 
+  // mount ASAP (safe both before/after DOMContentLoaded)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mountBtn, { once:true });
+  } else {
+    mountBtn();
+  }
+
+  // listen on the game bus too
+  (window.IZZA = window.IZZA || {});
+  if (typeof IZZA.on === 'function') {
+    IZZA.on('izza-open-crafting', ()=> {
+      if (typeof window.__openCraftingLand === 'function') window.__openCraftingLand();
+    });
+  } else {
+    // if bus attaches later, try once more after ready
+    document.addEventListener('izza-core-ready', ()=> {
+      if (typeof IZZA.on === 'function') {
+        IZZA.on('izza-open-crafting', ()=> {
+          if (typeof window.__openCraftingLand === 'function') window.__openCraftingLand();
+        });
+      }
+    }, { once:true });
+  }
+})();
+</script>
   <!-- Auth Debug Dock (unchanged) -->
   <div id="authDock">…</div>
   <script>…</script>
