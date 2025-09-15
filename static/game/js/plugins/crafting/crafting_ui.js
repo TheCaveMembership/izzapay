@@ -288,7 +288,7 @@
         <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
         <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
   <button class="ghost" id="btnPreview">Preview</button>
-  <button class="ghost" id="btnCraft" title="Consumes your paid slot if not already paid">Craft</button>
+  <button class="ghost" id="btnCraft" title="Mint this item into the game!">Mint</button>
   <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
 </div>
         <div id="svgPreview" style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; min-height:160px; display:flex; align-items:center; justify-content:center">
