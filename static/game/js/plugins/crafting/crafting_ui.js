@@ -1,29 +1,63 @@
-// --- AI prompt guidance (keeps creativity, but ensures slot-aware SVG with no bg) ---
+// --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
-  helmet: "Design an overlay that reads as a helmet from a top-down 3/4 view. Keep within a square slot; avoid covering torso/legs area.",
-  vest:   "Design a chest/torso overlay (vest/armor plate) for a top-down 3/4 view. Keep within chest slot bounds.",
-  legs:   "Design leg armor overlay for a top-down 3/4 view. Two legs, leave space between as needed.",
-  arms:   "Design arm/gauntlet overlay for a top-down 3/4 view. Represent left/right forearms/hands along the sides; leave body center clear.",
-  gun:    "Design a handheld gun overlay sized for the hands slot; readable top-down 3/4, no full character.",
-  melee:  "Design a handheld melee weapon overlay sized for the hands slot; readable top-down 3/4."
+  helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
+  vest:   "Chest/torso armor plate from a top-down 3/4 view. Keep shoulders within bounds.",
+  arms:   "Left/right forearms/gauntlets along the sides; leave body center clear. Two distinct sides.",
+  legs:   "Two leg elements (thigh-to-shin). Balanced spacing between left and right.",
+  hands:  "Weapon overlay (horizontal composition). Reads at 28px. No full character.",
+  gun:    "Handheld gun (treat as hands slot; horizontal composition).",
+  melee:  "Handheld melee blade/club (treat as hands slot; horizontal composition)."
 };
 
-function composeAIPrompt(userPrompt, part){
-  const guide = SLOT_GUIDE[part] || "";
-  const realism = /\b(realistic|photo|photoreal|photorealistic)\b/i.test(userPrompt)
-    ? "Aim for realistic rendering with shading and detail."
-    : "Vector-friendly detail is fine; avoid childish cartoon shapes unless asked.";
+// Map UI part to the server's slot keys
+function mapPartForServer(part){
+  const p = String(part||'').toLowerCase();
+  if (p==='gun' || p==='melee') return 'hands';
+  if (p==='helmet' || p==='vest' || p==='arms' || p==='legs' || p==='hands') return p;
+  return 'helmet';
+}
 
-  // We explicitly tell it to fill the slot area (not a centered circle), and to keep bg transparent.
+// Slot-specific viewBoxes (what the server expects)
+const SLOT_VB = {
+  helmet: '0 0 128 128',
+  vest:   '0 0 128 128',
+  arms:   '0 0 160 120',
+  legs:   '0 0 140 140',
+  hands:  '0 0 160 100',
+};
+
+// Compose the UX prompt shown to the model (keeps constraints tight)
+function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } = {}){
+  const guide = SLOT_GUIDE[part] || '';
+  const slot  = mapPartForServer(part);
+  const vb    = SLOT_VB[slot] || '0 0 128 128';
+
+  const styleLine = (String(style).toLowerCase()==='cartoon' || String(style).toLowerCase()==='stylized')
+    ? "STYLE: Stylized/cartoon allowed, but still layered: gradients + soft shadows. Avoid flat emoji."
+    : "STYLE: Realistic materials (chrome, glass, brushed steel, leather). Subtle AO and specular highlights.";
+
+  const animLine = animate
+    ? "ANIMATION: Allowed. Use lightweight loop via <animate>/<animateTransform> or CSS @keyframes. 1–2 effects max (glow pulse, flame lick). No JS."
+    : "ANIMATION: Not required. Ensure static silhouette reads clearly.";
+
+  // Hard constraints (these mirror your server SYSTEM_PROMPT)
+  const constraints = [
+    `Item part: ${slot}`,
+    `Use viewBox="${vb}". Fit art tightly with 0–2px padding; center visually.`,
+    "Transparent background. Do NOT draw any full-bleed background rects.",
+    "Vector only: <path>, <rect>, <circle>, <polygon>, <g>, <defs>, gradients, filters (feGaussianBlur, feDropShadow). No <image>, no <foreignObject>.",
+    "Must read at ~28px inventory size. Clean silhouette + controlled detail.",
+    (slot==='arms'||slot==='legs') ? "Structure: two distinct side elements (no single central blob)." : null,
+    (slot==='hands') ? "Structure: horizontal weapon composition." : null,
+    styleLine,
+    animLine
+  ].filter(Boolean).join(' ');
+
   return [
     userPrompt,
     guide,
-    "Output pure SVG markup sized to a 128x128 viewBox.",
-    "Transparent background only; do not draw any full-bleed background rectangles.",
-    "Use <path>/<polygon>/<circle>/<rect> etc.; no raster <image> tags.",
-    "Fill the available slot area proportionally (not just a single centered icon).",
-    realism
-  ].filter(Boolean).join(" ");
+    constraints
+  ].filter(Boolean).join(' ');
 }
 // /static/game/js/plugins/crafting/crafting_ui.js
 (function(){
@@ -38,28 +72,29 @@ function composeAIPrompt(userPrompt, part){
   });
 
   const STATE = {
-    root: null,
-    mounted: false,
-    aiAttemptsLeft: COSTS.AI_ATTEMPTS,
-    hasPaidForCurrentItem: false,
-    currentSVG: '',
-    currentName: '',
-    featureFlags: {
-      dmgBoost: false,
-      fireRate: false,
-      speedBoost: false,
-      dmgReduction: false,
-      tracerFx: false,
-      swingFx: false
-    },
-    currentCategory: 'armour',
-    currentPart: 'helmet',
-    fireRateRequested: 0,
-    dmgHearts: 0.5,
-    packageCredits: null,
-    createSub: 'setup',
-  };
-
+  root: null,
+  mounted: false,
+  aiAttemptsLeft: COSTS.AI_ATTEMPTS,
+  hasPaidForCurrentItem: false,
+  currentSVG: '',
+  currentName: '',
+  featureFlags: {
+    dmgBoost: false,
+    fireRate: false,
+    speedBoost: false,
+    dmgReduction: false,
+    tracerFx: false,
+    swingFx: false
+  },
+  aiStyle: 'realistic',      // 'realistic' | 'cartoon' (aka 'stylized')
+  wantAnimation: false,      // creator can toggle animation
+  currentCategory: 'armour',
+  currentPart: 'helmet',
+  fireRateRequested: 0,
+  dmgHearts: 0.5,
+  packageCredits: null,
+  createSub: 'setup',
+};
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
@@ -208,13 +243,22 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
 async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
-  // 1) Try the real AI endpoint on your Node server
   try{
     const j = await serverJSON(api('/api/crafting/ai_svg'), {
       method:'POST',
       body: JSON.stringify({
-        prompt: composeAIPrompt(prompt, STATE.currentPart),
-        meta: { part: STATE.currentPart, category: STATE.currentCategory, name: STATE.currentName }
+        prompt: composeAIPrompt(prompt, STATE.currentPart, {
+          style: STATE.aiStyle,
+          animate: STATE.wantAnimation
+        }),
+        meta: {
+          part: mapPartForServer(STATE.currentPart),   // hands for gun/melee
+          category: STATE.currentCategory,
+          name: STATE.currentName,
+          style: STATE.aiStyle,         // <-- new
+          animate: STATE.wantAnimation, // <-- new
+          animationPaid: false          // UI will set true after purchase when you wire the upsell
+        }
       })
     });
 
@@ -224,15 +268,13 @@ async function aiToSVG(prompt){
       STATE.aiAttemptsLeft -= 1;
       return cleaned;
     } else if (j && !j.ok) {
-      // Show server reason (helps debug on iPhone)
       alert('AI server error: ' + (j.reason || 'unknown'));
     }
   }catch(e){
-    // Network / 5xx, etc.
     alert('AI server error: ' + (e?.message || e || 'unknown'));
   }
 
-  // 2) Minimal fallback (basic blueprint so it’s obvious it’s not the AI)
+  // fallback blueprint
   const raw = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">
       <rect x="8" y="8" width="112" height="112" rx="14" fill="#0f1522" stroke="#2a3550" stroke-width="2"/>
@@ -313,98 +355,111 @@ async function aiToSVG(prompt){
   }
 
   function renderCreate(){
-    const totalPi = calcTotalCost({ usePi:true });
-    const totalIC = calcTotalCost({ usePi:false });
-    const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
+  const totalPi = calcTotalCost({ usePi:true });
+  const totalIC = calcTotalCost({ usePi:false });
+  const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
 
-    return `
-      <div class="cl-subtabs">
-        <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
-        <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
+  return `
+    <div class="cl-subtabs">
+      <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
+      <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
+    </div>
+
+    <div class="cl-body ${sub}">
+      <div class="cl-pane cl-form">
+        <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
+        <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
+        <select id="catSel">
+          <option value="armour">Armour</option>
+          <option value="weapon">Weapon</option>
+          <option value="apparel">Apparel</option>
+          <option value="merch">Merch/Collectible</option>
+        </select>
+
+        <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
+        <select id="partSel">
+          <option value="helmet">Helmet</option>
+          <option value="vest">Vest</option>
+          <option value="arms">Arms</option>
+          <option value="legs">Legs</option>
+          <option value="gun">Gun</option>
+          <option value="melee">Melee</option>
+        </select>
+
+        <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
+        <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
+
+        <div style="margin-top:10px;font-weight:700">Optional Features</div>
+        <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
+        <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
+        <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
+        <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
+        <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
+        <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
+
+        <div style="margin-top:10px; font-size:13px; opacity:.85">
+          Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+          <button class="ghost" id="payPi">Pay Pi</button>
+          <button class="ghost" id="payIC">Pay IC</button>
+          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+        </div>
+
+        <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
+          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+          <div style="margin-top:6px">
+            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
+          </div>
+          <div style="margin-top:4px">
+            <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
+          </div>
+        </div>
       </div>
 
-      <div class="cl-body ${sub}">
-        <div class="cl-pane cl-form">
-          <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
-          <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
-          <select id="catSel">
-            <option value="armour">Armour</option>
-            <option value="weapon">Weapon</option>
-            <option value="apparel">Apparel</option>
-            <option value="merch">Merch/Collectible</option>
-          </select>
+      <div class="cl-pane cl-preview">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+          <div style="font-weight:700">Visuals</div>
+          <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
 
-          <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
-          <select id="partSel">
-            <option value="helmet">Helmet</option>
-            <option value="vest">Vest</option>
-            <option value="arms">Arms</option>
-            <option value="legs">Legs</option>
-            <option value="gun">Gun</option>
-            <option value="melee">Melee</option>
-          </select>
-
-          <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
-          <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
-
-          <div style="margin-top:10px;font-weight:700">Optional Features</div>
-          <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
-          <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
-          <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
-          <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
-          <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
-          <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
-
-          <div style="margin-top:10px; font-size:13px; opacity:.85">
-            Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
-          </div>
-
-          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-            <button class="ghost" id="payPi">Pay Pi</button>
-            <button class="ghost" id="payIC">Pay IC</button>
-            <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-          </div>
-
-          <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-            <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-            <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-            <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-            <div style="margin-top:6px">
-              <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
-            </div>
-            <div style="margin-top:4px">
-              <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
-            </div>
+          <!-- Style / Animation controls -->
+          <div style="display:flex; gap:8px; align-items:center; margin-left:auto">
+            <label style="font-size:12px; opacity:.8">Style</label>
+            <select id="aiStyleSel">
+              <option value="realistic">Realistic</option>
+              <option value="cartoon">Cartoon / Stylized</option>
+            </select>
+            <label style="font-size:12px; opacity:.8; margin-left:12px">
+              <input type="checkbox" id="aiAnimChk"/> Add animation (premium)
+            </label>
           </div>
         </div>
 
-        <div class="cl-pane cl-preview">
-          <div style="display:flex; gap:10px; align-items:center">
-            <div style="font-weight:700">Visuals</div>
-            <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
-          </div>
-          <div style="display:flex; gap:10px; margin-top:6px">
-            <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
-            <button class="ghost" id="btnAI">AI → SVG</button>
-          </div>
-          <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
-          <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
-
-          <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
-            <button class="ghost" id="btnPreview">Preview</button>
-            <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
-            <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
-          </div>
-
-          <div id="svgPreview"
-               style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
-                      min-height:220px; max-height:min(60vh,520px); overflow:auto;
-                      display:flex; align-items:center; justify-content:center">
-            <div style="opacity:.6; font-size:12px">Preview appears here</div>
-          </div>
+        <div style="display:flex; gap:10px; margin-top:6px">
+          <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
+          <button class="ghost" id="btnAI">AI → SVG</button>
         </div>
-      </div>`;
-  }
+        <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
+        <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
+
+        <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+          <button class="ghost" id="btnPreview">Preview</button>
+          <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
+          <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
+        </div>
+
+        <div id="svgPreview"
+             style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
+                    min-height:220px; max-height:min(60vh,520px); overflow:auto;
+                    display:flex; align-items:center; justify-content:center">
+          <div style="opacity:.6; font-size:12px">Preview appears here</div>
+        </div>
+      </div>
+    </div>`;
+}
 
   function renderMine(){
     return `
@@ -547,7 +602,10 @@ async function aiToSVG(prompt){
       itemName.value = STATE.currentName || '';
       itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
     }
-
+const aiStyleSel = root.querySelector('#aiStyleSel');
+const aiAnimChk  = root.querySelector('#aiAnimChk');
+if (aiStyleSel){ aiStyleSel.value = STATE.aiStyle; aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); }); }
+if (aiAnimChk){  aiAnimChk.checked = !!STATE.wantAnimation; aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); }); }
     root.querySelectorAll('[data-ff]').forEach(cb=>{
       const key = cb.dataset.ff;
       if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
