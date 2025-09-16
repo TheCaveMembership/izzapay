@@ -391,11 +391,29 @@ async function aiToSVG(prompt){
       });
     });
     host.querySelectorAll('[data-equip]').forEach(b=>{
-      b.addEventListener('click', ()=>{
-        try{ window.IZZA && IZZA.emit && IZZA.emit('equip-crafted', b.dataset.equip); }catch{}
+  b.addEventListener('click', ()=>{
+    const id = b.dataset.equip;
+    const it = items.find(x=>x.id===id);
+    if (!it) return;
+
+    // Persist for overlay bootstrap
+    try {
+      localStorage.setItem('izzaLastEquipped', JSON.stringify({
+        id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
+      }));
+    } catch {}
+
+    // Legacy event (id only)
+    try { window.IZZA && IZZA.emit && IZZA.emit('equip-crafted', id); } catch{}
+
+    // New event (full payload)
+    try {
+      window.IZZA && IZZA.emit && IZZA.emit('equip-crafted-v2', {
+        id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
       });
-    });
-  }
+    } catch{}
+  });
+});
 
   function mount(rootSel){
     const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
