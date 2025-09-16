@@ -461,7 +461,11 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
 
   const w = Math.max(8, box.w|0);
   const h = Math.max(8, box.h|0);
+ // >>> NEW: detect crafted item (minted by creator)
+  const isCrafted = /^craft_/.test(String(slotPiece?.key||'')) || !!it?.meta?.crafted;
 
+  // >>> NEW: apply 50% reduction only for crafted items (does NOT affect inventory/shop)
+  const scale = isCrafted ? (conf.scale * CRAFTED_SHRINK) : conf.scale;
   drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
     // bitmap draw centered on slot, using crafted-only box
     try{ c.drawImage(img, -w/2, -h/2, w, h); }catch{}
