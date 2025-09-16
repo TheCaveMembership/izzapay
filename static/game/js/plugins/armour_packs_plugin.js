@@ -18,6 +18,8 @@
     legs:  { w: 40, h: 30 },
     hands: { w: 36, h: 36 }   // weapons in "hands"
   });
+  // crafted overlays render smaller on the player (no change to shop/inventory icons)
+const CRAFTED_SHRINK = 0.50; // 50% reduction
   // ---- Small helpers ----
   function _invRead(){
     try{
