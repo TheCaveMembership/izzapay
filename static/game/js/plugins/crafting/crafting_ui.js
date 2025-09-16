@@ -111,46 +111,54 @@
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
   // *** CHANGE 2: server-first, fallback is now a tiny basic blueprint icon ***
-  async function aiToSVG(prompt){
-    if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
+  // --- AI prompt: server first, then minimal fallback ---
+async function aiToSVG(prompt){
+  if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
-    // 1) Try the server (real AI)
-    try{
-      const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({
+  try{
+    const j = await serverJSON(api('/api/crafting/ai_svg'), {
+      method:'POST',
+      body: JSON.stringify({
         prompt,
         meta: { part: STATE.currentPart, category: STATE.currentCategory, name: STATE.currentName }
-      }) });
-      if (j && j.ok && j.svg){
-        const cleaned = sanitizeSVG(j.svg);
-        if (!cleaned) throw new Error('SVG rejected');
-        STATE.aiAttemptsLeft -= 1;
-        return cleaned;
-      }
-    }catch(e){
-      // swallow + fall back
+      })
+    });
+
+    if (j && j.ok && j.svg){
+      const cleaned = sanitizeSVG(j.svg);
+      if (!cleaned) throw new Error('SVG rejected');
+      STATE.aiAttemptsLeft -= 1;
+      return cleaned;
+    } else if (j && !j.ok) {
+      // Surface server reason to the user so we know why it fell back
+      alert('AI server error: ' + (j.reason || 'unknown'));
     }
-
-    // 2) Minimal fallback (basic blueprint; no fancy generator)
-    const raw = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">
-        <rect x="8" y="8" width="112" height="112" rx="14" fill="#0f1522" stroke="#2a3550" stroke-width="2"/>
-        <g fill="none" stroke="#2a3550" stroke-width="1">
-          <path d="M16 32 H112" opacity="0.6"/>
-          <path d="M16 56 H112" opacity="0.5"/>
-          <path d="M16 80 H112" opacity="0.4"/>
-          <path d="M16 104 H112" opacity="0.3"/>
-        </g>
-        <g opacity="0.9">
-          <circle cx="64" cy="64" r="22" fill="#1e2a45"/>
-          <path d="M48 64 Q64 48 80 64" fill="none" stroke="#3a4a72" stroke-width="3"/>
-          <path d="M48 72 Q64 56 80 72" fill="none" stroke="#3a4a72" stroke-width="2" opacity="0.8"/>
-        </g>
-      </svg>
-    `.trim();
-
-    STATE.aiAttemptsLeft -= 1;
-    return sanitizeSVG(raw);
+  }catch(e){
+    // also show network/HTTP errors
+    alert('AI server error: ' + (e?.message || e || 'unknown'));
   }
+
+  // Minimal fallback (basic blueprint)
+  const raw = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">
+      <rect x="8" y="8" width="112" height="112" rx="14" fill="#0f1522" stroke="#2a3550" stroke-width="2"/>
+      <g fill="none" stroke="#2a3550" stroke-width="1">
+        <path d="M16 32 H112" opacity="0.6"/>
+        <path d="M16 56 H112" opacity="0.5"/>
+        <path d="M16 80 H112" opacity="0.4"/>
+        <path d="M16 104 H112" opacity="0.3"/>
+      </g>
+      <g opacity="0.9">
+        <circle cx="64" cy="64" r="22" fill="#1e2a45"/>
+        <path d="M48 64 Q64 48 80 64" fill="none" stroke="#3a4a72" stroke-width="3"/>
+        <path d="M48 72 Q64 56 80 72" fill="none" stroke="#3a4a72" stroke-width="2" opacity="0.8"/>
+      </g>
+    </svg>
+  `.trim();
+
+  STATE.aiAttemptsLeft -= 1;
+  return sanitizeSVG(raw);
+}
 
   const DRAFT_KEY = 'izzaCraftDraft';
   function saveDraft(){
