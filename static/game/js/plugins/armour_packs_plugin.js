@@ -22,7 +22,6 @@
 const CRAFTED_ARMOUR_SHRINK = 0.80;  // armour (head/chest/arms/legs) → make smaller
 const CRAFTED_WEAPON_BOOST  = 3.00;  // crafted weapons (hands) → make bigger
   // crafted overlays render smaller on the player (no change to shop/inventory icons)
-const CRAFTED_SHRINK = 0.10; // 50% reduction
   // ---- Small helpers ----
   function _invRead(){
     try{
@@ -583,7 +582,8 @@ function drawCraftedWeaponOverlay(){
 
   // crafted-only shrink (kept consistent with armor overlays)
   const isCrafted = /^craft_/.test(String(key||'')) || !!weapon?.meta?.crafted;
-  const scale     = isCrafted ? (HANDS_RENDER.scale * CRAFTED_SHRINK) : HANDS_RENDER.scale;
+  const perItemScale = (typeof weapon.overlayScale === 'number' && isFinite(weapon.overlayScale)) ? weapon.overlayScale : 1;
+const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perItemScale;
 
   // draw in world
   const px = p.x, py = p.y;
