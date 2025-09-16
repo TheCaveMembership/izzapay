@@ -126,11 +126,14 @@ app.post('/api/state/:username', async (req,res)=>{
 });
 
 // ---------------------------------------------------------------------------
-// ADDED: Real AI SVG endpoint  (DROP-IN REPLACEMENT)
+// ADDED: Real AI SVG endpoint  (WITH OPTIONAL ANIMATION + PAYWALL)
 // ---------------------------------------------------------------------------
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const SVG_MODEL_ID   = process.env.SVG_MODEL_ID   || 'gpt-4.1-mini';
+
+// Animation add-on price (client can show/charge this; server only strips/keeps anim)
+const ANIM_PRICE_IC  = parseInt(process.env.ANIM_PRICE_IC || '150', 10);
 
 // Tight SVG sanitizer — keeps only safe, inline <svg>
 function sanitizeSVG(svg) {
@@ -152,7 +155,21 @@ function sanitizeSVG(svg) {
   } catch { return ''; }
 }
 
-// ===== SYSTEM PROMPT (global) ==============================================
+// Remove animation if creator hasn’t paid yet
+function stripAnimations(svg) {
+  let t = String(svg || '');
+  // Remove SMIL animation elements
+  t = t.replace(/<\s*animate(?:Transform|Motion)?\b[^>]*>(?:[\s\S]*?<\/\s*animate(?:Transform|Motion)?\s*>|)/gi, '');
+  // Remove CSS keyframes blocks
+  t = t.replace(/@keyframes[\s\S]*?}\s*}/gi, '');
+  // Remove animation-* CSS properties (basic strip; keeps other styles)
+  t = t.replace(/animation\s*:[^;"]*;?/gi, '')
+       .replace(/animation-(name|duration|timing-function|delay|iteration-count|direction|fill-mode|play-state)\s*:[^;"]*;?/gi, '');
+  // Remove data-anim flags if present
+  t = t.replace(/\sdata-anim="[^"]*"/gi, '');
+  return t;
+}
+
 const SYSTEM_PROMPT = `
 You are generating SVG for a 2D game overlay in IZZA — a hip hop, streetwear, neon-mystic vibe. Go bold and on-trend by default. Respect user realism when asked.
 
@@ -174,14 +191,14 @@ SLOTS (select by "part"):
 - legs:        viewBox="0 0 140 140". Two leg elements (thigh-to-shin). Balanced left/right.
 - hands (weapon): viewBox="0 0 160 100". Horizontal weapon/blade/gun composition.
 
-IN-GAME SIZING & PLACEMENT TARGETS (to match overlay draw in engine):
+IN-GAME SIZING & PLACEMENT TARGETS (to match engine overlay draw):
 • Crafted overlay boxes (px) — center your design for these:
   head 38×38, chest 40×40, arms 38×38, legs 40×40, hands 36×36.
-• World transforms where the engine draws pieces (approx):
-  helmet scale≈2.80, offset (ox≈0,  oy≈-12)
-  vest   scale≈2.40, offset (ox≈0,  oy≈  3)
-  arms   scale≈2.60, offset (ox≈0.3,oy≈  2)
-  legs   scale≈2.45, offset (ox≈0.2,oy≈ 10)
+• Engine world transforms (approx):
+  helmet scale≈2.80 (ox≈0,   oy≈-12)
+  vest   scale≈2.40 (ox≈0,   oy≈  3)
+  arms   scale≈2.60 (ox≈0.3, oy≈  2)
+  legs   scale≈2.45 (ox≈0.2, oy≈ 10)
 
 STYLE GUIDANCE:
 • Default tone: bright, creative, luxury-street “gangster” with occult/illuminati hints. Metals, glass, leather, chrome, gem glow.
@@ -191,15 +208,16 @@ STYLE GUIDANCE:
 METADATA ON ROOT:
 • Add data-slot="helmet|vest|arms|legs|hands".
 • If effects used, add data-fx="glow", "flame", "energy", etc.
+• If animation is present, add data-anim="1".
 
 VALIDATION CHECKLIST (self-verify before final):
-• Exactly one <svg> root; includes correct viewBox for the chosen slot.
+• Exactly one <svg> root; correct viewBox for the slot.
 • No full-canvas background shapes.
-• Artwork centered, fits tightly (0–2px padding).
+• Artwork centered, tight fit (0–2px padding).
 • Only allowed elements/filters used.
 `;
 
-// Route: AI SVG generator
+// Route: AI SVG generator (animation optional)
 app.post('/api/crafting/ai_svg', async (req, res) => {
   try {
     const body   = (typeof req.body === 'string') ? JSON.parse(req.body) : (req.body || {});
@@ -207,11 +225,12 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     const meta   = body.meta || {};
     const part   = String(meta.part || 'helmet').toLowerCase().slice(0, 16);   // helmet|vest|arms|legs|hands
     const name   = String(meta.name || '').slice(0, 64);
+    const wantAnim = !!meta.animate;            // creator toggled "Add animation"
+    const animPaid = !!meta.animationPaid;      // client sets true after purchase
 
     if (!prompt) return res.status(400).json({ ok:false, reason:'empty-prompt' });
     if (!OPENAI_API_KEY) return res.status(503).json({ ok:false, reason:'no-api-key' });
 
-    // Provide slot-specific constraints to the model
     const slotInfo = {
       helmet: { viewBox: '0 0 128 128', box: {w:38,h:38} },
       vest:   { viewBox: '0 0 128 128', box: {w:40,h:40} },
@@ -223,12 +242,22 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     const svb  = slotInfo[slot].viewBox;
     const box  = slotInfo[slot].box;
 
+    // Extra instructions when animation is requested
+    const animHint = wantAnim ? `
+ANIMATION (required):
+• Use lightweight, looped vector animation directly in the SVG. Prefer CSS @keyframes on groups or attributes, or SMIL <animate>/<animateTransform>.
+• Keep it subtle and performant (1–2 running animations, 0.8–1.5s loops). No JS. No external refs.
+• Examples: pulsing glow around edges, slow flame lick with blur, gentle rotate/slide for charms.
+• Ensure the static silhouette still reads at 28px if animation is paused.
+` : '';
+
     const userMessage = [
       `Part: ${slot}`,
       name ? `Name: ${name}` : null,
       `Prompt: ${prompt}`,
       `Use viewBox="${svb}" and center within a tight ${box.w}x${box.h} overlay box (no background).`,
-      `Remember: two distinct side elements for arms/legs; horizontal layout for hands.`
+      `Remember: two distinct side elements for arms/legs; horizontal layout for hands.`,
+      animHint
     ].filter(Boolean).join('\n');
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -240,7 +269,7 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
       body: JSON.stringify({
         model: SVG_MODEL_ID,
         temperature: 0.9,
-        max_tokens: 1600,
+        max_tokens: 1800,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user',   content: userMessage }
@@ -256,14 +285,28 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
 
     const data = await resp.json().catch(()=> ({}));
     const raw  = data?.choices?.[0]?.message?.content?.trim() || '';
-    const svg  = sanitizeSVG(raw);
-
+    let svg    = sanitizeSVG(raw);
     if (!svg) {
       console.error('[ai_svg] sanitize fail; raw length=', raw.length);
       return res.status(422).json({ ok:false, reason:'sanitize-fail' });
     }
 
-    res.json({ ok:true, svg });
+    // If animation requested but not paid, strip it and signal to the client
+    let animationStripped = false;
+    if (wantAnim && !animPaid) {
+      const before = svg;
+      const after  = stripAnimations(svg);
+      if (after !== before) animationStripped = true;
+      svg = after;
+    }
+
+    res.json({
+      ok: true,
+      svg,
+      animated: wantAnim && animPaid,          // true only when allowed to keep animation
+      animationStripped,                       // client can show upsell if true
+      priceIC: ANIM_PRICE_IC                   // expose current add-on price to UI
+    });
   } catch (e) {
     console.error('ai_svg error', e);
     res.status(500).json({ ok:false, reason:'server-error' });
