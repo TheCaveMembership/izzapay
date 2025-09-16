@@ -386,7 +386,6 @@ async function aiToSVG(prompt){
         } catch{}
       });
     });
-    }
   function mount(rootSel){
     const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
     if (!root) return;
