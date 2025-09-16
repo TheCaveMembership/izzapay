@@ -1889,50 +1889,29 @@ window.addEventListener('izza-inventory-changed', ()=>{
     drawMini();
   }
 
-// ===== Boot (robust) =====
-function ok(v, fallback){ return (v && v.status==='fulfilled') ? v.value : fallback; }
+// ===== Boot =====
+Promise.all([
+  loadLayer('body', RESOLVED.body),
+  (RESOLVED.outfit ? loadLayer('outfit', RESOLVED.outfit) : Promise.resolve(emptyLayer())),
+  // IMPORTANT: only ask for base hair file; we'll tint it (no colored files on disk)
+  loadLayer('hair', hairStyle),
+  loadNPCSheets(),
+  loadVehicleSheets()
+]).then(([bodyRaw, outfitRaw, hairRaw, npcs, vehicles])=>{
+  NPC_SHEETS = npcs;
+  VEHICLE_SHEETS = vehicles;
 
-Promise.allSettled([
-  loadLayer('body', RESOLVED.body),                               // 0
-  (RESOLVED.outfit ? loadLayer('outfit', RESOLVED.outfit) : null),// 1 (may be null)
-  loadLayer('hair', hairStyle),                                    // 2
-  loadNPCSheets(),                                                 // 3 (always resolves)
-  loadVehicleSheets()                                              // 4 (always resolves)
-]).then(results=>{
-  // Fallbacks if any layer failed
-  const bodyRaw   = ok(results[0], { img: document.createElement('canvas'), cols: 1 });
-  const outfitRaw = RESOLVED.outfit ? ok(results[1], emptyLayer()) : emptyLayer();
-  const hairRaw   = ok(results[2], { img: document.createElement('canvas'), cols: 1 });
-
-  // Make sure the placeholder canvases are at least 32x32 so drawImage works
-  [bodyRaw, outfitRaw, hairRaw].forEach(pack=>{
-    if (pack.img.width === 0) { pack.img.width = 32; pack.img.height = 32; }
-  });
-
-  NPC_SHEETS     = ok(results[3], {});
-  VEHICLE_SHEETS = ok(results[4], {});
-
-  // Apply tints to match the creator choices; if tinting throws, keep raw
+  // Apply tints to match the creator choices
   const isFemale = (bodyType === 'female');
-  let tintedBody = bodyRaw;
-  try {
-    tintedBody = tintBodyLayer(
-      bodyRaw,
-      (AP.skin_tone || 'light'),
-      isFemale,
-      (AP.female_outfit_color || 'blue')
-    );
-  } catch {}
-  let tintedHair = hairRaw;
-  try { tintedHair = tintHairLayer(hairRaw, (hairColor || 'black')); } catch {}
+  const tintedBody = tintBodyLayer(
+    bodyRaw,
+    (AP.skin_tone || 'light'),
+    isFemale,
+    (AP.female_outfit_color || 'blue')
+  );
+  const tintedHair = tintHairLayer(hairRaw, (hairColor || 'black'));
 
   const imgs = { body: tintedBody, outfit: outfitRaw, hair: tintedHair };
-
-  // ——— sanity guard: canvas must exist ———
-  if (!cvs || !ctx) {
-    bootMsg('Canvas #game missing or 2D context unavailable', '#ff6b6b');
-    return; // nothing else to do
-  }
 
   const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
   IZZA.api = {
@@ -1941,6 +1920,7 @@ Promise.allSettled([
     TILE, DRAW, camera,
     doorSpawn,
     user: { username: (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || 'guest' },
+
     // expose for plugins:
     getMissionCount,
     getInventory, setInventory,
@@ -1951,12 +1931,12 @@ Promise.allSettled([
   IZZA.emit('ready', IZZA.api);
 
   setHearts(getHearts());
+  
+  // If the map plugin exposed the HUD redraw, sync hearts from saved state now
   if (typeof window._redrawHeartsHud === 'function') { try{ window._redrawHeartsHud(); }catch{} }
+
   setCoins(getCoins());
   centerCamera();
-
-  // surface runtime errors to your on-screen toast
-  window.addEventListener('error', e => { try{ bootMsg('JS error: ' + e.message, '#ff6b6b'); }catch{} });
 
   let last = performance.now();
   (function loop(now){
@@ -1973,7 +1953,7 @@ Promise.allSettled([
     requestAnimationFrame(loop);
   })(last + 16);
 }).catch(err=>{
-  // This should basically never fire now, but keep it anyway
-  console.error('Boot failed', err);
-  bootMsg('Boot failed: ' + (err && err.message ? err.message : err), '#ff6b6b');
+  console.error('Sprite load failed', err);
+  bootMsg('Sprite load failed: ' + (err && err.message ? err.message : err), '#ff6b6b');
 });
+})();
