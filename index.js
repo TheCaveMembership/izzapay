@@ -229,7 +229,13 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     res.status(500).json({ ok:false, reason:'server-error' });
   }
 });
-
+app.get('/api/crafting/ai_info', (_req, res) => {
+  res.json({
+    ok: true,
+    hasKey: !!OPENAI_API_KEY,
+    model: SVG_MODEL_ID
+  });
+});
 // ---------------------------------------------------------------------------
 
 const PORT = process.env.PORT || 10000;
