@@ -296,7 +296,64 @@ function svgToImage(svg){
     if(changed) _invWrite(inv);
     _migratedOnce = true;
   }
+// --- Crafted equip helpers (listen to UI, equip in inventory, persist) ---
+function __partToSlot(part){
+  const p = String(part||'').toLowerCase();
+  if (p==='helmet') return 'head';
+  if (p==='vest')   return 'chest';
+  if (p==='legs')   return 'legs';
+  if (p==='arms')   return 'arms';
+  if (p==='gun' || p==='melee') return 'hands';
+  return 'chest';
+}
 
+function __equipById(id, fallbackPayload){
+  const inv = _invRead();
+  const it  = inv[id];
+
+  // If the inventory item doesn’t exist (e.g. first session after mint),
+  // create a minimal record from the payload so we can equip & draw.
+  if (!it && fallbackPayload){
+    const slot = __partToSlot(fallbackPayload.part);
+    inv[id] = {
+      name: fallbackPayload.name || id,
+      type: (slot==='hands' ? 'weapon' : 'armor'),
+      slot,
+      equippable: true,
+      iconSvg: fallbackPayload.svg || '',
+      overlaySvg: fallbackPayload.svg || '',
+      count: 1
+    };
+  }
+  const item = inv[id];
+  if (!item) return false;
+
+  // One-per-slot: unequip others in that slot
+  const slot = item.slot || 'chest';
+  Object.keys(inv).forEach(k=>{
+    if (inv[k] && inv[k].slot===slot) _setEquipped(inv[k], false);
+  });
+
+  // Make sure overlay art is present
+  if (!item.overlaySvg && item.iconSvg) item.overlaySvg = item.iconSvg;
+
+  // Equip this one
+  _setEquipped(item, true);
+  _invWrite(inv);
+
+  // Persist for next load
+  try {
+    localStorage.setItem('izzaLastEquipped', JSON.stringify({
+      id, name: item.name, category: item.type==='armor'?'armour':'weapon',
+      part: fallbackPayload?.part || slot, svg: item.overlaySvg || item.iconSvg || ''
+    }));
+  } catch {}
+
+  // Let other systems know
+  try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+  IZZA?.toast?.(`Equipped ${item.name || id}`);
+  return true;
+}
   // ---- Overlays (draw over player) ----
   function drawPieceWorld(ctx, px, py, scale, ox, oy, fn){
     const api=IZZA.api, S=api.DRAW, T=api.TILE;
@@ -533,14 +590,31 @@ if (type === 'weapon') {
 
   // ---- Safe boot/wire-up ----
   function __armourPacksBoot(){
-    if (!window.IZZA || typeof IZZA.on!=='function') return false;
-    IZZA.on('ready', a=>{ api=a; migrateArmorPackItems(); });
-    IZZA.on('render-post', tryPatchShop);
-    IZZA.on('render-post', drawEquippedArmour);
-    window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
-    IZZA.on('update-post', normalizeEquipSlots);
-    return true;
-  }
+  if (!window.IZZA || typeof IZZA.on!=='function') return false;
+
+  IZZA.on('ready', a=>{
+    api = a;
+    migrateArmorPackItems();
+
+    // (A) Restore last equipped crafted item on load
+    try {
+      const last = JSON.parse(localStorage.getItem('izzaLastEquipped') || 'null');
+      if (last && last.id) {
+        __equipById(last.id, last);
+      }
+    } catch {}
+  });
+
+  // (B) Listen for crafting UI "equip" events
+  IZZA.on('equip-crafted', (id)=>{ __equipById(id, null); });
+  IZZA.on('equip-crafted-v2', (payload)=>{ if (payload?.id) __equipById(payload.id, payload); });
+
+  IZZA.on('render-post', tryPatchShop);
+  IZZA.on('render-post', drawEquippedArmour);
+  window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
+  IZZA.on('update-post', normalizeEquipSlots);
+  return true;
+}
   if (!__armourPacksBoot()){
     document.addEventListener('izza-core-ready', __armourPacksBoot, { once:true });
     let tries = 12;
