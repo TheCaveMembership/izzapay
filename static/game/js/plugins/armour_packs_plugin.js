@@ -226,7 +226,7 @@
     return img;
   }
 // --- Size (in pixels) for player-created overlays only ---
-const CRAFTED_OVERLAY_PX = { head: 38, chest: 40, arms: 38, legs: 40, hands: 36 };
+const CRAFTED_OVERLAY_PX = { head: 17, chest: 40, arms: 38, legs: 28, hands: 36 };
   // ---- Equip normalization ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
