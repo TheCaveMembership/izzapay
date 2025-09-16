@@ -32,7 +32,164 @@
     packageCredits: null,
     createSub: 'setup',
   };
+// === High-Variety Icon/Overlay Generator ==============================
+// Deterministic variety using seed(name+prompt+attempt). Produces 128x128 SVGs.
+// Uses gradients, masks, glows, decals, and part-aware silhouettes.
+(function(){
+  function hash32(str){
+    let h = 2166136261 >>> 0;
+    for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function rng(seed){ let x = seed||123456789; return ()=>((x^=x<<13,x^=x>>>17,x^=x<<5)>>>0)/4294967296; }
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const pick=(r,arr)=>arr[(r()*arr.length)|0];
 
+  // 16 curated palettes (trim/background, base, shade, accent/glow)
+  const PALETTES = [
+    ["#0b1020","#7b3cff","#4321a1","#ff66ff"],
+    ["#0f172a","#00c2a8","#0a7a6c","#8affec"],
+    ["#1f2937","#ff6a3a","#9c3e1e","#ffd0a6"],
+    ["#111111","#d6a740","#8c6a1f","#ffe17a"],
+    ["#151016","#c13b8a","#7b2458","#ff9ed3"],
+    ["#081421","#50b0ff","#215e96","#a8ddff"],
+    ["#131a12","#6bd67b","#2c6b37","#ccffd8"],
+    ["#1a1113","#ff6b9a","#953457","#ffd0e1"],
+    ["#0d141b","#7cf2ff","#256c73","#e3ffff"],
+    ["#1a1a26","#b4b8ff","#4f52a6","#e0e2ff"],
+    ["#0d0b0f","#ff9f3b","#83420e","#ffd6a8"],
+    ["#0b0f14","#78ffbd","#2f7358","#d6ffe9"],
+    ["#16130f","#ffc95a","#7f5620","#ffe5a0"],
+    ["#0e1220","#a45bff","#4e2a91","#e3c7ff"],
+    ["#091311","#7ff4cf","#2f7062","#d5fff2"],
+    ["#0a0a12","#ff5f5f","#8a2e2e","#ffc4c4"],
+  ];
+
+  // Decals to overlay (runes, chevrons, stars, grid, bolt, fangs)
+  function decals(r, col){
+    const op = (x)=>clamp(0.6 + r()*0.35, 0.55, 0.95);
+    const k = (r()*6)|0;
+    switch(k){
+      case 0: return `<path d="M64 40 L74 64 L64 88 L54 64 Z" fill="${col}" opacity="${op()}"/>`;
+      case 1: return `<path d="M28 74 L64 88 L100 74 L100 82 L64 96 L28 82Z" fill="${col}" opacity="${op()}"/>`;
+      case 2: return `<g opacity="${op()}">${Array.from({length:5},(_,i)=>`<rect x="${30+i*16}" y="56" width="6" height="6" fill="${col}"/>`).join('')}</g>`;
+      case 3: return `<path d="M64 36 L82 76 L46 56 L82 56 L46 76Z" fill="${col}" opacity="${op()}"/>`;
+      case 4: return `<path d="M62 44 L70 44 L64 66 L84 66 L48 96 L58 74 L44 74Z" fill="${col}" opacity="${op()}"/>`;
+      default:return `<path d="M48 84 c8 2 10 8 16 8 c6 0 8-6 16-8" stroke="${col}" stroke-width="5" fill="none" opacity="${op()}"/>`;
+    }
+  }
+
+  // Silhouettes per part
+  function shellHelmet(base,shade){
+    return `
+      <path d="M20 62c0-24 22-40 40-44c6-1 10-2 20 0c18 3 40 20 40 44v20c0 8-6 14-14 14H34c-8 0-14-6-14-14V62z" fill="${base}"/>
+      <rect x="28" y="78" width="72" height="12" rx="6" fill="${shade}"/>`;
+  }
+  function shellVest(base,shade){
+    return `
+      <path d="M30 36h68c8 0 14 6 14 14v44c0 8-6 14-14 14H30c-8 0-14-6-14-14V50c0-8 6-14 14-14z" fill="${base}"/>
+      <rect x="34" y="56" width="60" height="14" rx="6" fill="${shade}"/>`;
+  }
+  function shellArms(base,shade){
+    return `
+      <rect x="18" y="52" width="22" height="36" rx="8" fill="${base}"/>
+      <rect x="88" y="52" width="22" height="36" rx="8" fill="${base}"/>
+      <rect x="22" y="66" width="14" height="12" rx="4" fill="${shade}"/>
+      <rect x="92" y="66" width="14" height="12" rx="4" fill="${shade}"/>`;
+  }
+  function shellLegs(base,shade){
+    return `
+      <rect x="36" y="54" width="20" height="46" rx="6" fill="${base}"/>
+      <rect x="72" y="54" width="20" height="46" rx="6" fill="${base}"/>
+      <rect x="36" y="74" width="56" height="8" rx="4" fill="${shade}"/>`;
+  }
+  function shellGun(base,shade){
+    return `
+      <rect x="20" y="54" width="74" height="18" rx="4" fill="${base}"/>
+      <rect x="76" y="72" width="12" height="24" rx="2" fill="${shade}"/>
+      <rect x="96" y="58" width="12" height="6" fill="${base}"/>`;
+  }
+  function shellMelee(base,shade){
+    return `
+      <rect x="60" y="22" width="8" height="64" rx="2" fill="${base}"/>
+      <rect x="48" y="78" width="32" height="10" rx="5" fill="${shade}"/>`;
+  }
+
+  // Horn/crest add-ons (mostly for helmets)
+  function horns(r, base, shade){
+    const t = (r()*3)|0;
+    if (t===0) return '';
+    if (t===1) return `<path d="M40 30c-8 6-12 16-12 28c8-6 18-6 26-2c0-12-4-20-14-26z" fill="${base}"/>
+                       <path d="M88 30c8 6 12 16 12 28c-8-6-18-6-26-2c0-12 4-20 14-26z" fill="${base}"/>`;
+    return `<path d="M34 46c-6 0-8 8-2 12c2 1 4 1 6 0c2-2 3-6 1-9c-1-2-3-3-5-3z" fill="${shade}"/>
+            <path d="M94 46c6 0 8 8 2 12c-2 1-4 1-6 0c-2-2-3-6-1-9c1-2 3-3 5-3z" fill="${shade}"/>`;
+  }
+
+  // One generator to rule them all
+  function genSVG({ name="", prompt="", part="helmet", seedExtra=0 } = {}){
+    const seed = hash32(`${name}::${prompt}::${part}::${seedExtra}`);
+    const r = rng(seed);
+    const [trim, base, shade, glow] = pick(r, PALETTES);
+    const bgRad = 48 + (r()*20|0);
+    const useGrid = r() > 0.6;
+    const useMask = r() > 0.5;
+    const glowBlur = 2 + (r()*3|0);
+
+    // choose shell by part
+    const shell =
+      part==="helmet" ? shellHelmet(base,shade) :
+      part==="vest"   ? shellVest(base,shade)   :
+      part==="arms"   ? shellArms(base,shade)   :
+      part==="legs"   ? shellLegs(base,shade)   :
+      part==="gun"    ? shellGun(base,shade)    :
+      part==="melee"  ? shellMelee(base,shade)  :
+                        shellVest(base,shade);
+
+    // hero overlay (decal + optional horns if helmet)
+    const overlay =
+      (part==="helmet" ? horns(r,base,shade) : '') +
+      decals(r, glow);
+
+    // subtle grid or vignette
+    const bg = useGrid
+      ? Array.from({length:6},(_,i)=>`<rect x="${16+i*18}" y="16" width="2" height="96" fill="${trim}" opacity="0.18"/>`).join('')
+      : `<radialGradient id="g${seed}" cx="50%" cy="40%" r="60%"><stop offset="0%" stop-color="${trim}" stop-opacity="1"/><stop offset="100%" stop-color="${trim}" stop-opacity="0.6"/></radialGradient><rect x="4" y="4" width="120" height="120" rx="14" fill="url(#g${seed})"/>`;
+
+    // fancy mask ring
+    const mask = useMask
+      ? `<mask id="m${seed}">
+           <rect x="0" y="0" width="128" height="128" fill="black"/>
+           <circle cx="64" cy="${bgRad}" r="${bgRad}" fill="white"/>
+         </mask>`
+      : '';
+
+    // glow filter
+    const filter = `<filter id="f${seed}" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="${glowBlur}" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>`;
+
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    ${filter}
+    ${mask}
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="14" fill="${trim}"/>
+  ${bg}
+  <g ${useMask ? `mask="url(#m${seed})"` : ''}>
+    <g filter="url(#f${seed})">
+      ${shell}
+      ${overlay}
+    </g>
+  </g>
+  <path d="M28 40 Q64 ${36+((r()*10)|0)} 100 40" stroke="#fff" stroke-opacity="${0.08 + r()*0.1}" stroke-width="${2 + (r()*2|0)}" fill="none"/>
+</svg>`;
+  }
+
+  // Expose globally
+  window.IzzaArtGen = { genSVG };
+})();
   const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   const api = (p)=> (API_BASE ? API_BASE + p : p);
 
@@ -133,47 +290,38 @@
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
   // --- AI prompt: server first, then local fallback (keywords -> SVG) ---
+    // --- AI prompt: server first, then local high-variety generator ---
   async function aiToSVG(prompt){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
-    // try server
+    // 1) Try server (unchanged)
     try{
-      const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({ prompt }) });
+      const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({
+        prompt,
+        // Helpful hints for your server model (optional):
+        meta: {
+          part: STATE.currentPart,
+          category: STATE.currentCategory,
+          name: STATE.currentName
+        }
+      }) });
       if (j && j.ok && j.svg){
-        const cleaned = sanitizeSVG(j.svg); if (!cleaned) throw new Error('SVG rejected');
+        const cleaned = sanitizeSVG(j.svg);
+        if (!cleaned) throw new Error('SVG rejected');
         STATE.aiAttemptsLeft -= 1;
         return cleaned;
       }
     }catch{}
 
-    // fallback: lightweight local generator
-    const p = String(prompt||'').toLowerCase();
-    let svg = '';
-    if (/sword|blade|katana|melee|knife|dagger/.test(p)){
-      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-        <rect x="58" y="16" width="12" height="72" fill="#cfcfd4"/><rect x="54" y="20" width="4" height="64" fill="#b0b0b8"/>
-        <rect x="44" y="80" width="40" height="8" fill="#997a3b"/>
-        <rect x="58" y="88" width="12" height="24" rx="4" fill="#6e5a2a"/>
-      </svg>`;
-    } else if (/gun|pistol|uzi|rifle|blaster/.test(p)){
-      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-        <rect x="16" y="46" width="84" height="20" rx="4" fill="#333a49"/><rect x="20" y="50" width="76" height="12" fill="#4d5a6b"/>
-        <rect x="74" y="66" width="10" height="26" fill="#2b3240"/><rect x="72" y="82" width="24" height="8" fill="#6e5a2a"/>
-        <rect x="100" y="52" width="12" height="8" fill="#222831"/>
-      </svg>`;
-    } else if (/shield|armor|armour/.test(p)){
-      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-        <path d="M64 16 L104 28 L104 56 C104 84 86 102 64 112 C42 102 24 84 24 56 L24 28 Z" fill="#61738a" stroke="#262f3a" stroke-width="3"/>
-        <path d="M64 24 L96 34 L96 54 C96 76 82 92 64 100 C46 92 32 76 32 54 L32 34 Z" fill="#7f91a7"/>
-      </svg>`;
-    } else {
-      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-        <rect x="16" y="28" width="96" height="72" rx="10" fill="#2c3750"/><circle cx="64" cy="64" r="22" fill="#cfe0ff"/>
-      </svg>`;
-    }
+    // 2) Local fallback: generate a "high-end" SVG with tons of variety
+    // Seed with name + prompt + remaining attempts to guarantee change each click
+    const seedExtra = (COSTS.AI_ATTEMPTS - STATE.aiAttemptsLeft) + Math.floor(performance.now()%1000);
+    const raw = (window.IzzaArtGen && IzzaArtGen.genSVG)
+      ? IzzaArtGen.genSVG({ name: STATE.currentName||'', prompt: String(prompt||''), part: STATE.currentPart||'helmet', seedExtra })
+      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect x="16" y="28" width="96" height="72" rx="10" fill="#2c3750"/><circle cx="64" cy="64" r="22" fill="#cfe0ff"/></svg>`;
 
     STATE.aiAttemptsLeft -= 1;
-    return sanitizeSVG(svg);
+    return sanitizeSVG(raw);
   }
 
   function renderTabs(){
