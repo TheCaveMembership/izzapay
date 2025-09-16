@@ -191,10 +191,10 @@
                   if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
                   if (inv2[add.key].subtype==='gun'){
                     // starter ammo for new guns  (fixed bracket target)
-                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add.key].ammo = 60;
+                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add[key]].ammo = 60;
                   }
                 }
-                if (inv2[add.key].count!=null){ inv2[add.key].count = (inv2[add.key].count|0) + 1; } else { inv2[add.key].owned = true; }
+                if (inv2[add.key].count!=null){ inv2[add.key].count = (inv2[add.key].count|0) + 1; } else { inv2[add[key]].owned = true; }
                 _invWrite(inv2);
 
                 // --- Record lastPaid so Sell tab shows 40% (not 10 IC default) ---
@@ -220,7 +220,7 @@
     const img = new Image();
     img.decoding = 'async';
     img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-    // Prompt a redraw when the image finishes so overlay appears ASAP
+    // ensure overlays pop in as soon as the image is ready
     img.onload = ()=>{ try { IZZA?.requestRender?.(); } catch {} };
     _svgImgCache.set(svg, img);
     return img;
@@ -346,6 +346,9 @@
     _setEquipped(item, true);
     _invWrite(inv);
 
+    // nudge a redraw so the overlay appears right away
+    try { IZZA?.requestRender?.(); } catch {}
+
     // Persist for next load
     try {
       localStorage.setItem('izzaLastEquipped', JSON.stringify({
@@ -395,7 +398,7 @@
     ctx.fillRect(-13,-1,3,6); ctx.fillRect(12,-1,3,6);
   };}
 
-  function mkLegsPath(c, withFlames=false){ 
+  function mkLegsPath(c, withFlames=false){
     const FL = new Path2D("M0,-9 C3,-6 3,-1 0,7 C-3,-1 -3,-6 0,-9 Z");
     return function(ctx){
       ctx.fillStyle=c.base;
@@ -430,7 +433,6 @@
 
     drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
       // Draw the creator’s SVG as a 48x48 bitmap centered on the slot.
-      // (You can tweak the -24/48 numbers per-slot if you want tighter framing.)
       try{ c.drawImage(img, -24, -24, 48, 48); }catch{}
     });
     return true;
@@ -451,7 +453,8 @@
     function pieceFor(slot){
       for(const k in inv){
         const it=inv[k]; if(!it || !it.slot) continue;
-        if(_isEquipped(it) && it.slot===slot && it.type==='armor') return {key:k, it};
+        // DO NOT require type==='armor' — crafted items may be 'armour' or unset.
+        if(_isEquipped(it) && it.slot===slot) return {key:k, it};
       }
       return null;
     }
@@ -546,35 +549,37 @@
         const slot = map.slot;
         const type = map.type;
         const subtype = map.subtype || null;
-        const inlineSvg = ensureSvgWrap(input?.svg||'');
+
+        // Use the raw (sanitized by crafting UI) SVG for overlay, and the wrapped icon for inventory
+        const rawOverlaySvg = String(input?.svg||'');
+        const inlineSvg = ensureSvgWrap(rawOverlaySvg);
         const price = Math.max(50, Math.min(250, parseInt(input?.priceIC||'100',10)||100));
         const ff = input?.featureFlags || {};
 
         // ---- inventory grant (creator minted copy) ----
         const inv = _invRead();
         inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
-        inv[key].overlaySvg = inlineSvg;   // draw this on the player in-world
-        inv[key].subtype = subtype;        // <-- persist subtype for weapon behavior
+        inv[key].overlaySvg = rawOverlaySvg || inlineSvg; // <-- raw for world overlay (matches other items)
+        inv[key].subtype = subtype;
         if (type === 'weapon') {
-          // remember what the creator picked: 'gun' or 'melee'
           inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
         }
         inv[key].count = (inv[key].count|0) + 1;
         if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
 
         // creator copy rules:
-        inv[key].nonSell = true;          // creator cannot sell their minted copy
-        inv[key].listPriceIC = price;     // remember creator list price
-        // optional creator gun defaults so it “just works” with guns.js
+        inv[key].nonSell = true;
+        inv[key].listPriceIC = price;
         if (type==='weapon' && subtype==='gun'){
           if (typeof inv[key].ammo!=='number') inv[key].ammo = 60;
-          if (typeof inv[key].fireIntervalMs!=='number' && ff.fireRate) inv[key].fireIntervalMs = 140; // faster if chosen
+          if (typeof inv[key].fireIntervalMs!=='number' && ff.fireRate) inv[key].fireIntervalMs = 140;
           if (typeof inv[key].bulletSpeedMul!=='number' && ff.tracerFx) inv[key].bulletSpeedMul = 1.1;
         }
         _invWrite(inv);
 
         try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
         try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+        try { IZZA?.requestRender?.(); } catch {}
 
         // ---- optional: add to shop list (BUY tab) this session ----
         const sellInShop = !!input?.sellInShop;
