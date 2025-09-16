@@ -190,8 +190,8 @@
                 if (add.type==='weapon'){
                   if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
                   if (inv2[add.key].subtype==='gun'){
-                    // starter ammo for new guns
-                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add[key]].ammo = 60;
+                    // starter ammo for new guns  (fixed bracket target)
+                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add.key].ammo = 60;
                   }
                 }
                 if (inv2[add.key].count!=null){ inv2[add.key].count = (inv2[add.key].count|0) + 1; } else { inv2[add.key].owned = true; }
@@ -211,17 +211,21 @@
       }
     }catch(e){ console.warn('[armour-packs] shop patch failed', e); }
   }
-// --- SVG -> <img> cache for fast overlay drawing ---
-const _svgImgCache = new Map();
-function svgToImage(svg){
-  if (!svg) return null;
-  if (_svgImgCache.has(svg)) return _svgImgCache.get(svg);
-  const img = new Image();
-  img.decoding = 'async';
-  img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-  _svgImgCache.set(svg, img);
-  return img;
-}
+
+  // --- SVG -> <img> cache for fast overlay drawing ---
+  const _svgImgCache = new Map();
+  function svgToImage(svg){
+    if (!svg) return null;
+    if (_svgImgCache.has(svg)) return _svgImgCache.get(svg);
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    // Prompt a redraw when the image finishes so overlay appears ASAP
+    img.onload = ()=>{ try { IZZA?.requestRender?.(); } catch {} };
+    _svgImgCache.set(svg, img);
+    return img;
+  }
+
   // ---- Equip normalization ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
@@ -296,64 +300,66 @@ function svgToImage(svg){
     if(changed) _invWrite(inv);
     _migratedOnce = true;
   }
-// --- Crafted equip helpers (listen to UI, equip in inventory, persist) ---
-function __partToSlot(part){
-  const p = String(part||'').toLowerCase();
-  if (p==='helmet') return 'head';
-  if (p==='vest')   return 'chest';
-  if (p==='legs')   return 'legs';
-  if (p==='arms')   return 'arms';
-  if (p==='gun' || p==='melee') return 'hands';
-  return 'chest';
-}
 
-function __equipById(id, fallbackPayload){
-  const inv = _invRead();
-  const it  = inv[id];
-
-  // If the inventory item doesn’t exist (e.g. first session after mint),
-  // create a minimal record from the payload so we can equip & draw.
-  if (!it && fallbackPayload){
-    const slot = __partToSlot(fallbackPayload.part);
-    inv[id] = {
-      name: fallbackPayload.name || id,
-      type: (slot==='hands' ? 'weapon' : 'armor'),
-      slot,
-      equippable: true,
-      iconSvg: fallbackPayload.svg || '',
-      overlaySvg: fallbackPayload.svg || '',
-      count: 1
-    };
+  // --- Crafted equip helpers (listen to UI, equip in inventory, persist) ---
+  function __partToSlot(part){
+    const p = String(part||'').toLowerCase();
+    if (p==='helmet') return 'head';
+    if (p==='vest')   return 'chest';
+    if (p==='legs')   return 'legs';
+    if (p==='arms')   return 'arms';
+    if (p==='gun' || p==='melee') return 'hands';
+    return 'chest';
   }
-  const item = inv[id];
-  if (!item) return false;
 
-  // One-per-slot: unequip others in that slot
-  const slot = item.slot || 'chest';
-  Object.keys(inv).forEach(k=>{
-    if (inv[k] && inv[k].slot===slot) _setEquipped(inv[k], false);
-  });
+  function __equipById(id, fallbackPayload){
+    const inv = _invRead();
+    const it  = inv[id];
 
-  // Make sure overlay art is present
-  if (!item.overlaySvg && item.iconSvg) item.overlaySvg = item.iconSvg;
+    // If the inventory item doesn’t exist (e.g. first session after mint),
+    // create a minimal record from the payload so we can equip & draw.
+    if (!it && fallbackPayload){
+      const slot = __partToSlot(fallbackPayload.part);
+      inv[id] = {
+        name: fallbackPayload.name || id,
+        type: (slot==='hands' ? 'weapon' : 'armor'),
+        slot,
+        equippable: true,
+        iconSvg: fallbackPayload.svg || '',
+        overlaySvg: fallbackPayload.svg || '',
+        count: 1
+      };
+    }
+    const item = inv[id];
+    if (!item) return false;
 
-  // Equip this one
-  _setEquipped(item, true);
-  _invWrite(inv);
+    // One-per-slot: unequip others in that slot
+    const slot = item.slot || 'chest';
+    Object.keys(inv).forEach(k=>{
+      if (inv[k] && inv[k].slot===slot) _setEquipped(inv[k], false);
+    });
 
-  // Persist for next load
-  try {
-    localStorage.setItem('izzaLastEquipped', JSON.stringify({
-      id, name: item.name, category: item.type==='armor'?'armour':'weapon',
-      part: fallbackPayload?.part || slot, svg: item.overlaySvg || item.iconSvg || ''
-    }));
-  } catch {}
+    // Make sure overlay art is present
+    if (!item.overlaySvg && item.iconSvg) item.overlaySvg = item.iconSvg;
 
-  // Let other systems know
-  try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
-  IZZA?.toast?.(`Equipped ${item.name || id}`);
-  return true;
-}
+    // Equip this one
+    _setEquipped(item, true);
+    _invWrite(inv);
+
+    // Persist for next load
+    try {
+      localStorage.setItem('izzaLastEquipped', JSON.stringify({
+        id, name: item.name, category: item.type==='armor'?'armour':'weapon',
+        part: fallbackPayload?.part || slot, svg: item.overlaySvg || item.iconSvg || ''
+      }));
+    } catch {}
+
+    // Let other systems know
+    try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+    IZZA?.toast?.(`Equipped ${item.name || id}`);
+    return true;
+  }
+
   // ---- Overlays (draw over player) ----
   function drawPieceWorld(ctx, px, py, scale, ox, oy, fn){
     const api=IZZA.api, S=api.DRAW, T=api.TILE;
@@ -413,21 +419,23 @@ function __equipById(id, fallbackPayload){
       ctx.restore();
     };
   }
-// Try to draw a custom overlay for an equipped slot.
-// Returns true if drawn, false if no overlay or image not ready.
-function drawCustomOverlay(ctx, px, py, slotPiece, conf){
-  const sv = slotPiece?.it?.overlaySvg || slotPiece?.it?.iconSvg;
-  if (!sv) return false;
-  const img = svgToImage(sv);
-  if (!img || !img.complete) return false;
 
-  drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
-    // Draw the creator’s SVG as a 48x48 bitmap centered on the slot.
-    // (You can tweak the -24/48 numbers per-slot if you want tighter framing.)
-    try{ c.drawImage(img, -24, -24, 48, 48); }catch{}
-  });
-  return true;
-}
+  // Try to draw a custom overlay for an equipped slot.
+  // Returns true if drawn, false if no overlay or image not ready.
+  function drawCustomOverlay(ctx, px, py, slotPiece, conf){
+    const sv = slotPiece?.it?.overlaySvg || slotPiece?.it?.iconSvg;
+    if (!sv) return false;
+    const img = svgToImage(sv);
+    if (!img || !img.complete) return false;
+
+    drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
+      // Draw the creator’s SVG as a 48x48 bitmap centered on the slot.
+      // (You can tweak the -24/48 numbers per-slot if you want tighter framing.)
+      try{ c.drawImage(img, -24, -24, 48, 48); }catch{}
+    });
+    return true;
+  }
+
   function drawEquippedArmour(){
     if(!api?.ready) return;
     const inv=_invRead();
@@ -458,22 +466,22 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
     const arms = pieceFor('arms');
 
     if (legs && !drawCustomOverlay(ctx, px, py, legs, LEGS)) {
-  const c=setColorsFromKey(legs.key);
-  const withFlames = /apex_titan|royal_savage|neon_mystic|phantom_drip/.test(legs.key);
-  drawPieceWorld(ctx, px, py, LEGS.scale, LEGS.ox, LEGS.oy, mkLegsPath(c, withFlames));
-}
-if (chest && !drawCustomOverlay(ctx, px, py, chest, VEST)) {
-  const c=setColorsFromKey(chest.key);
-  drawPieceWorld(ctx, px, py, VEST.scale, VEST.ox, VEST.oy, mkVestPath(c));
-}
-if (arms && !drawCustomOverlay(ctx, px, py, arms, ARMS)) {
-  const c=setColorsFromKey(arms.key);
-  drawPieceWorld(ctx, px, py, ARMS.scale, ARMS.ox, ARMS.oy, mkArmsPath(c));
-}
-if (head && !drawCustomOverlay(ctx, px, py, head, HELMET)) {
-  const c=setColorsFromKey(head.key);
-  drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, mkHelmetPath(c));
-}
+      const c=setColorsFromKey(legs.key);
+      const withFlames = /apex_titan|royal_savage|neon_mystic|phantom_drip/.test(legs.key);
+      drawPieceWorld(ctx, px, py, LEGS.scale, LEGS.ox, LEGS.oy, mkLegsPath(c, withFlames));
+    }
+    if (chest && !drawCustomOverlay(ctx, px, py, chest, VEST)) {
+      const c=setColorsFromKey(chest.key);
+      drawPieceWorld(ctx, px, py, VEST.scale, VEST.ox, VEST.oy, mkVestPath(c));
+    }
+    if (arms && !drawCustomOverlay(ctx, px, py, arms, ARMS)) {
+      const c=setColorsFromKey(arms.key);
+      drawPieceWorld(ctx, px, py, ARMS.scale, ARMS.ox, ARMS.oy, mkArmsPath(c));
+    }
+    if (head && !drawCustomOverlay(ctx, px, py, head, HELMET)) {
+      const c=setColorsFromKey(head.key);
+      drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, mkHelmetPath(c));
+    }
     // NOTE: crafted weapons (type:'weapon', slot:'hands') are **not** drawn here.
     // They should be picked up by your existing weapon/gun system in guns.js.
   }
@@ -546,10 +554,11 @@ if (head && !drawCustomOverlay(ctx, px, py, head, HELMET)) {
         const inv = _invRead();
         inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
         inv[key].overlaySvg = inlineSvg;   // draw this on the player in-world
-if (type === 'weapon') {
-  // remember what the creator picked: 'gun' or 'melee'
-  inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
-}
+        inv[key].subtype = subtype;        // <-- persist subtype for weapon behavior
+        if (type === 'weapon') {
+          // remember what the creator picked: 'gun' or 'melee'
+          inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
+        }
         inv[key].count = (inv[key].count|0) + 1;
         if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
 
@@ -590,31 +599,31 @@ if (type === 'weapon') {
 
   // ---- Safe boot/wire-up ----
   function __armourPacksBoot(){
-  if (!window.IZZA || typeof IZZA.on!=='function') return false;
+    if (!window.IZZA || typeof IZZA.on!=='function') return false;
 
-  IZZA.on('ready', a=>{
-    api = a;
-    migrateArmorPackItems();
+    IZZA.on('ready', a=>{
+      api = a;
+      migrateArmorPackItems();
 
-    // (A) Restore last equipped crafted item on load
-    try {
-      const last = JSON.parse(localStorage.getItem('izzaLastEquipped') || 'null');
-      if (last && last.id) {
-        __equipById(last.id, last);
-      }
-    } catch {}
-  });
+      // (A) Restore last equipped crafted item on load
+      try {
+        const last = JSON.parse(localStorage.getItem('izzaLastEquipped') || 'null');
+        if (last && last.id) {
+          __equipById(last.id, last);
+        }
+      } catch {}
+    });
 
-  // (B) Listen for crafting UI "equip" events
-  IZZA.on('equip-crafted', (id)=>{ __equipById(id, null); });
-  IZZA.on('equip-crafted-v2', (payload)=>{ if (payload?.id) __equipById(payload.id, payload); });
+    // (B) Listen for crafting UI "equip" events
+    IZZA.on('equip-crafted', (id)=>{ __equipById(id, null); });
+    IZZA.on('equip-crafted-v2', (payload)=>{ if (payload?.id) __equipById(payload.id, payload); });
 
-  IZZA.on('render-post', tryPatchShop);
-  IZZA.on('render-post', drawEquippedArmour);
-  window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
-  IZZA.on('update-post', normalizeEquipSlots);
-  return true;
-}
+    IZZA.on('render-post', tryPatchShop);
+    IZZA.on('render-post', drawEquippedArmour);
+    window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
+    IZZA.on('update-post', normalizeEquipSlots);
+    return true;
+  }
   if (!__armourPacksBoot()){
     document.addEventListener('izza-core-ready', __armourPacksBoot, { once:true });
     let tries = 12;
