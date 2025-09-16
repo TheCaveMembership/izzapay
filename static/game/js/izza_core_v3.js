@@ -1232,14 +1232,43 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
                   }
                 });
               }
-              it.equipped=true; if('equip' in it) it.equip=true;
-              if(typeof it.equippedCount==='number') it.equippedCount=1;
+                    it.equipped = true; if ('equip' in it) it.equip = true;
+      if (typeof it.equippedCount === 'number') it.equippedCount = 1;
 
-              writeInv(inv2);
-              if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
-            }catch(e){}
-          }, {passive:true});
-        });
+      // ---- NEW: bridge crafted → active combat weapon ----
+      try {
+        // Determine kind: prefer explicit tag; otherwise infer
+        var kind = (it.weaponKind || '').toLowerCase();
+        if (!kind && it.type === 'weapon') {
+          // Heuristic fallback
+          if (/\bgun|pistol|uzi|rifle|blaster/i.test(it.name||'')) kind = 'gun';
+          else kind = 'melee';
+        }
+
+        if (it.type === 'weapon') {
+          if (kind === 'melee') {
+            // Use existing melee pipeline (bat rules/animation/damage)
+            if (typeof window.setEquippedWeapon === 'function') {
+              window.setEquippedWeapon('bat');
+            } else {
+              // ultra-safe fallback
+              try { equipped.weapon = 'bat'; } catch {}
+            }
+          } else if (kind === 'gun') {
+            // Treat creator guns like pistol by default (fires with guns.js)
+            if (typeof window.setEquippedWeapon === 'function') {
+              window.setEquippedWeapon('pistol');
+            } else {
+              try { equipped.weapon = 'pistol'; } catch {}
+            }
+            // Optional: if you later add custom ammo on the crafted item,
+            // you can sync inv.pistol.ammo here.
+          }
+        }
+      } catch(e) { /* never break equip flow */ }
+
+      writeInv(inv2);
+      if (typeof window.renderInventoryPanel === 'function') window.renderInventoryPanel();
 
         // UNEQUIP
         host.querySelectorAll('[data-craft-unequip]').forEach(function(btn){
