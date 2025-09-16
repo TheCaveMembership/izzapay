@@ -44,21 +44,58 @@
   }
 
   function sanitizeSVG(svg){
-    try{
-      const txt = String(svg||'');
-      if (txt.length > 200_000) throw new Error('SVG too large');
-      if (/script|onload|onerror|foreignObject|iframe/i.test(txt)) throw new Error('Disallowed elements/attrs');
-      const cleaned = txt
-        .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
-        .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
-        .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
-        .replace(/(javascript:|data:)/gi,'')
-        .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
-        .replace(/<!DOCTYPE[^>]*>/gi,'')
-        .replace(/<\?xml[\s\S]*?\?>/gi,'');
-      return cleaned;
-    }catch(e){ return ''; }
-  }
+  try{
+    const txt = String(svg||'');
+    if (txt.length > 200_000) throw new Error('SVG too large');
+    if (/script|onload|onerror|foreignObject|iframe/i.test(txt)) throw new Error('Disallowed elements/attrs');
+
+    // base clean
+    let cleaned = txt
+      .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
+      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
+      .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
+      .replace(/(javascript:|data:)/gi,'')
+      .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
+      .replace(/<!DOCTYPE[^>]*>/gi,'')
+      .replace(/<\?xml[\s\S]*?\?>/gi,'');
+
+    // --- NEW: strip obvious "background" fills so overlays are transparent ---
+    // 1) Remove inline CSS background on the <svg> tag
+    cleaned = cleaned.replace(
+      /(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i,
+      (_, pre)=> pre
+    );
+
+    // 2) Kill <rect> that clearly cover the whole canvas (100% x 100%)
+    cleaned = cleaned.replace(
+      /<rect\b[^>]*width\s*=\s*["']\s*100%\s*["'][^>]*height\s*=\s*["']\s*100%\s*["'][^>]*\/?>/gi,
+      ''
+    );
+
+    // 3) Kill full-bleed <rect x="0" y="0" width=VBW height=VBH> (common sizes)
+    const vb = /viewBox\s*=\s*["'][^"']*?(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/i.exec(cleaned);
+    if (vb){
+      const w = String(parseFloat(vb[3]));
+      const h = String(parseFloat(vb[4]));
+      const fullRectRe = new RegExp(
+        `<rect\\b[^>]*x\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*y\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*width\\s*=\\s*['"]?(?:${w}|${Math.round(+w)})['"]?[^>]*height\\s*=\\s*['"]?(?:${h}|${Math.round(+h)})['"]?[^>]*\\/?>`,
+        'gi'
+      );
+      cleaned = cleaned.replace(fullRectRe, '');
+    } else {
+      // fallback for common canvases
+      cleaned = cleaned.replace(
+        /<rect\b[^>]*x\s*=\s*["']?0(?:\.0+)?["']?[^>]*y\s*=\s*["']?0(?:\.0+)?["']?[^>]*width\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*height\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*\/?>/gi,
+        ''
+      );
+    }
+
+    // 4) Remove <rect> marked as background via id/class
+    cleaned = cleaned.replace(/<rect\b[^>]*(id|class)\s*=\s*["'][^"']*(?:\bbg\b|\bbackground\b|\bbackdrop\b)[^"']*["'][^>]*\/?>/gi,'');
+
+    return cleaned;
+  }catch(e){ return ''; }
+}
 // --- UI helpers for AI wait state ---
 const MIN_AI_WAIT_MS = 10_000;
 const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
