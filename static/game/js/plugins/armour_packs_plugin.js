@@ -20,7 +20,7 @@
   });
   // crafted overlays render differently on the player (no change to shop/inventory icons)
 const CRAFTED_ARMOUR_SHRINK = 0.80;  // armour (head/chest/arms/legs) → make smaller
-const CRAFTED_WEAPON_BOOST  = 3.00;  // crafted weapons (hands) → make bigger
+const CRAFTED_WEAPON_BOOST  = 0.60;  // crafted weapons (hands) → make bigger
   // crafted overlays render smaller on the player (no change to shop/inventory icons)
   // ---- Small helpers ----
   function _invRead(){
