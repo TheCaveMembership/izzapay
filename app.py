@@ -2117,7 +2117,114 @@ def buyer_status(token):
 @app.get("/success")
 def success():
     return render_template("success.html")
+# ==== Crafting Land minimal shims (additive; safe to append) =================
+# Requires: from flask import request, jsonify already in your app.py
+import time
+from decimal import Decimal
 
+# In-memory scratch (swap with DB later if you want)
+_PENDING_PI = {}       # paymentId -> {status, txid, ts}
+_IC_LEDGER  = []       # audit of IC debits
+_USER_ITEMS = {}       # user_id -> [items]
+
+def _current_user_id():
+    # If you already have auth/session, adapt this to your user id
+    return request.headers.get("X-User-ID", "anon")
+
+@app.post("/api/crafting/pi/approve")
+def crafting_pi_approve():
+    data = request.get_json(silent=True) or {}
+    payment_id = str(data.get("paymentId") or "")
+    if not payment_id:
+        return jsonify({"ok": False, "reason": "missing-paymentId"}), 400
+    _PENDING_PI[payment_id] = {"status": "approved", "txid": None, "ts": time.time()}
+    return jsonify({"ok": True})
+
+@app.post("/api/crafting/pi/complete")
+def crafting_pi_complete():
+    data = request.get_json(silent=True) or {}
+    payment_id = str(data.get("paymentId") or "")
+    txid       = str(data.get("txid") or "")
+    if not payment_id or not txid:
+        return jsonify({"ok": False, "reason": "missing-fields"}), 400
+
+    # Forward to your existing Pi verification logic
+    try:
+        # If you track expected amounts per payment_id, pass it here
+        ok = verify_pi_tx(txid, expected_amount=Decimal("0"))
+    except Exception as e:
+        ok = False
+    if not ok:
+        return jsonify({"ok": False, "reason": "verification-failed"}), 400
+
+    rec = _PENDING_PI.get(payment_id, {"ts": time.time()})
+    rec["status"] = "complete"
+    rec["txid"] = txid
+    _PENDING_PI[payment_id] = rec
+    return jsonify({"ok": True})
+
+@app.post("/api/crafting/ic/debit")
+def crafting_ic_debit():
+    data = request.get_json(silent=True) or {}
+    try:
+        amount = int(data.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount < 0:
+        return jsonify({"ok": False, "reason": "bad-amount"}), 400
+
+    _IC_LEDGER.append({
+        "user": _current_user_id(),
+        "amount": amount,
+        "memo": str(data.get("memo") or "crafting"),
+        "ts": time.time()
+    })
+    return jsonify({"ok": True})
+
+@app.post("/api/crafting/ai_svg")
+def crafting_ai_svg():
+    """
+    Front-end asks for an SVG. If you have a real generator, call it here.
+    For now we return a small slot-correct SVG so the UI keeps functioning.
+    """
+    data = request.get_json(silent=True) or {}
+    meta = data.get("meta") or {}
+    part = str(meta.get("part") or "helmet").lower()
+
+    slot_map = {
+        "gun": "hands", "melee": "hands",
+        "helmet": "helmet", "vest": "vest", "arms": "arms", "legs": "legs", "hands": "hands"
+    }
+    vb = {
+        "helmet": "0 0 128 128",
+        "vest":   "0 0 128 128",
+        "arms":   "0 0 160 120",
+        "legs":   "0 0 140 140",
+        "hands":  "0 0 160 100",
+    }
+    slot = slot_map.get(part, "helmet")
+    viewbox = vb.get(slot, "0 0 128 128")
+
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{viewbox}" preserveAspectRatio="xMidYMid meet">
+  <rect x="6" y="6" width="94%" height="94%" rx="10" fill="#0f1522" stroke="#2a3550" stroke-width="2"/>
+  <g fill="none" stroke="#2a3550" stroke-width="1">
+    <path d="M10 28 H118" opacity="0.6"/>
+    <path d="M10 56 H118" opacity="0.5"/>
+    <path d="M10 84 H118" opacity="0.4"/>
+  </g>
+  <g opacity="0.9">
+    <circle cx="50%" cy="52%" r="18" fill="#1e2a45"/>
+    <path d="M35 64 Q50 48 65 64" fill="none" stroke="#3a4a72" stroke-width="3"/>
+    <path d="M35 72 Q50 56 65 72" fill="none" stroke="#3a4a72" stroke-width="2" opacity="0.8"/>
+  </g>
+</svg>'''
+    return jsonify({"ok": True, "svg": svg})
+
+@app.get("/api/crafting/mine")
+def crafting_mine():
+    user = _current_user_id()
+    return jsonify({"ok": True, "items": _USER_ITEMS.get(user, [])})
+# =========================================================================== #
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
