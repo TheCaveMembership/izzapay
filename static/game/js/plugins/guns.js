@@ -1,5 +1,9 @@
-// IZZA Guns — v5.3
-// pistols + uzi + grenades, resilient FIRE button/HUD, inventory patching, cops balance
+// IZZA Guns — v6.0 (extends v5.3 non-destructively)
+// pistols + uzi + grenades  ➕ crafted guns + crafted melee (swing)
+// - Works alongside armour packs; melee does NOT occupy/remove the "arms" armour slot.
+// - Crafted weapons are detected in inventory entries shaped like:
+//     { name, type:'weapon', subtype:'gun'|'melee', equipped:true, iconSvg?:string, ammo?:number }
+//   (This is what Crafting Land should inject via ArmourPacks.injectCraftedItem for weapons.)
 (function(){
   // ---- tunables / layout ----
   const TUNE = {
@@ -16,7 +20,16 @@
     grenadeThrowSpd: 210,
     grenadeFuseMs: 900,
     grenadeBlastR: 64,
-    grenadeShockMs: 220
+    grenadeShockMs: 220,
+
+    // crafted gun defaults
+    craftedGunDelayMs: 160,      // between shots (if no per-item override)
+    craftedGunBulletLifeMs: 900, // same as default
+
+    // melee
+    meleeSwingMs: 240,           // duration of one swing
+    meleeReach: 34,              // how far in front the hit happens
+    meleeArcDeg: 85              // swing arc (visual + hit sampling)
   };
 
   const POINT_BLANK_R = 24;
@@ -26,9 +39,10 @@
   const bullets  = []; // {x,y,vx,vy,born}
   const grenades = []; // {x,y,vx,vy,born}
   const blasts   = []; // {x,y,born}
+  const swings   = []; // {born, dir:{x,y}}  // transient melee swing FX
   const copHits  = new WeakMap();
 
-  let lastPistolAt = 0, uziTimer = null;
+  let lastPistolAt = 0, lastCraftGunAt = 0, uziTimer = null;
   let fireBtn=null, ammoPill=null, visInterval=null, placeInterval=null, hidePoller=null;
 
   const now = ()=>performance.now();
@@ -48,22 +62,61 @@
     try{
       if(apiReady()) IZZA.api.setInventory(inv);
       else localStorage.setItem('izzaInventory', JSON.stringify(inv));
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
     }catch{}
   }
 
+  // vanilla weapons
   const pistolEquipped = ()=> !!(readInv().pistol && readInv().pistol.equipped);
   const uziEquipped    = ()=> !!(readInv().uzi && readInv().uzi.equipped);
   const grenadeEquipped= ()=> !!(readInv().grenade && readInv().grenade.equipped);
 
-  const equippedKind   = ()=> uziEquipped()? 'uzi'
-                               : pistolEquipped()? 'pistol'
-                               : grenadeEquipped()? 'grenade'
-                               : null;
+  // ----- crafted weapons (from Crafting Land / ArmourPacks.injectCraftedItem) -----
+  function listCrafted(kind){ // kind: 'gun' | 'melee'
+    const inv = readInv();
+    const out=[];
+    for(const k in inv){
+      const it = inv[k];
+      if(!it || typeof it!=='object') continue;
+      // allow subtype OR kind field; be permissive
+      const t = (it.type||'').toLowerCase();
+      const sub = (it.subtype||it.kind||'').toLowerCase();
+      if(t==='weapon' && sub===kind) out.push({key:k, it});
+    }
+    return out;
+  }
+  function equippedCrafted(kind){
+    const L = listCrafted(kind);
+    for(const e of L){ if(e.it.equipped) return e; }
+    return null;
+  }
+  const craftedGunEquipped   = ()=> equippedCrafted('gun');   // {key,it} | null
+  const craftedMeleeEquipped = ()=> equippedCrafted('melee'); // {key,it} | null
+
+  const anyCraftedEquipped   = ()=> craftedGunEquipped() || craftedMeleeEquipped();
+
+  // unified "what’s in the player’s hands"
+  function equippedKind(){
+    // custom crafted takes precedence over stock (your UX likely equips one at a time)
+    if(craftedGunEquipped())   return 'cgun';
+    if(pistolEquipped())       return 'pistol';
+    if(uziEquipped())          return 'uzi';
+    if(grenadeEquipped())      return 'grenade';
+    if(craftedMeleeEquipped()) return 'melee';
+    return null;
+  }
 
   function ammoFor(kind){
     const inv = readInv();
     if(kind==='grenade'){
       const g=inv.grenade; return (g && (g.count|0)) || 0;
+    }
+    if(kind==='cgun'){
+      const cg = craftedGunEquipped();
+      if(!cg) return 0;
+      // default “infinite” (display  ∞ ), unless a numeric ammo is present
+      const a = cg.it.ammo;
+      return (typeof a==='number') ? Math.max(0, a|0) : Infinity;
     }
     const s=inv[kind]; return (s && (s.ammo|0)) || 0;
   }
@@ -77,6 +130,15 @@
       updateAmmoHUD(); patchInventoryGrenadeCount(inv.grenade.count);
       return true;
     }
+    if(kind==='cgun'){
+      const cg = craftedGunEquipped(); if(!cg) return false;
+      // if ammo undefined => infinite shots (no decrement)
+      if(typeof cg.it.ammo!=='number'){ updateAmmoHUD(); return true; }
+      const n=cg.it.ammo|0; if(n<=0) return false;
+      cg.it.ammo = n-1; inv[cg.key]=cg.it; writeInv(inv);
+      updateAmmoHUD(); patchInventoryCraftedAmmo(cg.key, cg.it.ammo);
+      return true;
+    }
     const slot = inv[kind]; if(!slot) return false;
     const n = (slot.ammo|0); if(n<=0) return false;
     slot.ammo = n-1; writeInv(inv);
@@ -84,6 +146,7 @@
     return true;
   }
 
+  // ----- inventory label patchers (best-effort, only when panel is open) -----
   function patchInventoryAmmo(kind, value){
     try{
       const host = document.getElementById('invPanel');
@@ -96,6 +159,19 @@
               m.textContent = m.textContent.replace(/Ammo:\s*\d+/, `Ammo: ${value}`);
             }
           });
+        }
+      });
+    }catch{}
+  }
+  function patchInventoryCraftedAmmo(invKey, value){
+    try{
+      const host = document.getElementById('invPanel');
+      if(!host || host.style.display==='none') return;
+      const row = [...host.querySelectorAll('.inv-item')].find(r => r.dataset?.key===invKey);
+      if(!row) return;
+      row.querySelectorAll('div').forEach(m=>{
+        if(/Ammo:\s*\d+/.test(m.textContent)){
+          m.textContent = m.textContent.replace(/Ammo:\s*\d+/, `Ammo: ${value}`);
         }
       });
     }catch{}
@@ -138,7 +214,12 @@
       btn.onclick = ()=>{
         const i=readInv(); i.grenade = i.grenade || {equipped:false,count:(i.grenade?.count|0)};
         i.grenade.equipped = !i.grenade.equipped;
-        if(i.grenade.equipped){ if(i.pistol) i.pistol.equipped=false; if(i.uzi) i.uzi.equipped=false; }
+        // equipping grenades just unequips firearms (NOT armour arms pieces)
+        if(i.grenade.equipped){
+          if(i.pistol) i.pistol.equipped=false;
+          if(i.uzi) i.uzi.equipped=false;
+          const cg = craftedGunEquipped(); if(cg) i[cg.key].equipped=false;
+        }
         writeInv(i);
         btn.textContent = i.grenade.equipped ? 'Unequip' : 'Equip';
         syncFireBtn();
@@ -273,6 +354,22 @@
     });
   }
 
+  // ---------- crafted gun & melee actions ----------
+  function fireCraftedGun(){
+    const t=now();
+    const cg = craftedGunEquipped(); if(!cg) return;
+    const delay = Math.max(80, cg.it.fireDelayMs|0 || TUNE.craftedGunDelayMs);
+    if(t-lastCraftGunAt < delay) return;
+    if(!takeAmmo('cgun')){ lastCraftGunAt=t; return; }
+    spawnBulletOrPointBlank(); lastCraftGunAt=t;
+  }
+
+  function startMeleeSwing(){
+    const m = craftedMeleeEquipped(); if(!m) return;
+    // start a swing; damage is applied during update tick by sampling along arc
+    swings.push({ born: now(), dir: aimVector() });
+  }
+
   // ---------- firing ----------
   function firePistol(){
     const t=now();
@@ -319,6 +416,8 @@
       if(k==='uzi'){ uziStart(); }
       else if(k==='pistol'){ firePistol(); }
       else if(k==='grenade'){ throwGrenade(); }
+      else if(k==='cgun'){ fireCraftedGun(); }
+      else if(k==='melee'){ startMeleeSwing(); }
     };
     const up  =(ev)=>{ ev.preventDefault(); ev.stopPropagation(); uziStop(); };
     fireBtn.addEventListener('pointerdown',down,{passive:false});
@@ -358,7 +457,12 @@
     const ek=equippedKind();
     if(!ek){ ammoPill.textContent='—'; ammoPill.style.opacity='0.6'; return; }
     const n=ammoFor(ek);
-    ammoPill.textContent = (ek==='uzi'?'Uzi ': ek==='pistol'?'Pstl ':'Grnd ') + n;
+    const label = ek==='uzi'    ? 'Uzi '
+                : ek==='pistol' ? 'Pstl '
+                : ek==='grenade'? 'Grnd '
+                : ek==='cgun'   ? 'Gun  '
+                :                 'Mlee ';
+    ammoPill.textContent = (n===Infinity) ? (label+'∞') : (label + n);
     ammoPill.style.opacity='1';
   }
   function syncFireBtn(){
@@ -397,6 +501,8 @@
       if(ek==='uzi'){ if(!uziTimer) uziStart(); }
       else if(ek==='pistol'){ firePistol(); }
       else if(ek==='grenade'){ throwGrenade(); }
+      else if(ek==='cgun'){ fireCraftedGun(); }
+      else if(ek==='melee'){ startMeleeSwing(); }
     };
     const onUpCapture = (e)=>{
       const k=(e.key||'').toLowerCase(); if(k!=='a') return;
@@ -422,7 +528,7 @@
       for(let i=bullets.length-1;i>=0;i--){
         const b=bullets[i];
         b.x+=b.vx*dtSec; b.y+=b.vy*dtSec;
-        if(now()-b.born > TUNE.lifeMs){ bullets.splice(i,1); continue; }
+        if(now()-b.born > (b.lifeMs||TUNE.lifeMs)){ bullets.splice(i,1); continue; }
 
         let hit=false;
         for(const p of IZZA.api.pedestrians){
@@ -485,9 +591,26 @@
       for(let i=blasts.length-1;i>=0;i--){
         if(now()-blasts[i].born > TUNE.grenadeShockMs) blasts.splice(i,1);
       }
+
+      // melee swings: apply hit samples along an arc in front of player
+      for(let i=swings.length-1;i>=0;i--){
+        const s = swings[i];
+        const age = now()-s.born;
+        if(age > TUNE.meleeSwingMs){ swings.splice(i,1); continue; }
+
+        const p=IZZA.api.player;
+        const baseAngle = Math.atan2(s.dir.y, s.dir.x);
+        const prog = age / TUNE.meleeSwingMs; // 0..1
+        const swingAngle = baseAngle + (prog-0.5) * (TUNE.meleeArcDeg*Math.PI/180);
+        const px = p.x+16 + Math.cos(swingAngle) * TUNE.meleeReach;
+        const py = p.y+16 + Math.sin(swingAngle) * TUNE.meleeReach;
+
+        // apply impact at sample point (same damage rules as point-blank)
+        applyImpactAt(px, py);
+      }
     });
 
-    // Render
+    // Render (keeps your existing bullet/grenade FX and shows a faint swing arc)
     IZZA.on('render-post', ()=>{
       const cvs=document.getElementById('game'); if(!cvs) return;
       const ctx=cvs.getContext('2d'); ctx.save(); ctx.imageSmoothingEnabled=false;
@@ -505,6 +628,22 @@
         ctx.strokeStyle=`rgba(255,230,130,${a})`;
         ctx.lineWidth=2;
         ctx.beginPath(); ctx.arc(sx,sy, TUNE.grenadeBlastR*SCALE(), 0, Math.PI*2); ctx.stroke();
+      }
+
+      // draw melee swing arc (visual cue; does NOT touch armour overlays)
+      for(const s of swings){
+        const p=IZZA.api.player;
+        const baseAngle = Math.atan2(s.dir.y, s.dir.x);
+        const age = now()-s.born, prog=Math.min(1,age/TUNE.meleeSwingMs);
+        const ang = baseAngle + (prog-0.5) * (TUNE.meleeArcDeg*Math.PI/180);
+        const cx = p.x+16, cy=p.y+16;
+        const {sx,sy}=w2s(cx,cy);
+        ctx.strokeStyle='rgba(230,230,255,0.35)';
+        ctx.lineWidth=3;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + Math.cos(ang)*TUNE.meleeReach*SCALE(), sy + Math.sin(ang)*TUNE.meleeReach*SCALE());
+        ctx.stroke();
       }
 
       ctx.restore();
