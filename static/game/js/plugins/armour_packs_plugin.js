@@ -19,7 +19,7 @@
     hands: { w: 36, h: 36 }   // weapons in "hands"
   });
   // crafted overlays render smaller on the player (no change to shop/inventory icons)
-const CRAFTED_SHRINK = 0.50; // 50% reduction
+const CRAFTED_SHRINK = 0.80; // 50% reduction
   // ---- Small helpers ----
   function _invRead(){
     try{
@@ -523,7 +523,67 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
     // NOTE: crafted weapons (type:'weapon', slot:'hands') are **not** drawn here.
     // They should be picked up by your existing weapon/gun system in guns.js.
   }
+// Offsets for a weapon held in hands, per facing (relative to player center)
+const HANDS_RENDER = {
+  scale: 2.45, // same family as your other slots
+  pos: {
+    down:  { ox: +6,  oy: +10, flip: false },
+    up:    { ox: -6,  oy: -8,  flip: false },
+    left:  { ox: -8,  oy: +10, flip: true  },
+    right: { ox: +10, oy: +10, flip: false }
+  }
+};
 
+// Draw the overlaySvg/iconSvg for an equipped crafted weapon (slot:'hands')
+function drawCraftedWeaponOverlay(){
+  if(!api?.ready) return false;
+
+  const inv  = _invRead();
+  const ctx  = document.getElementById('game')?.getContext('2d');
+  if(!ctx) return false;
+
+  // find equipped item in slot:'hands'
+  let weapon = null, key = null;
+  for (const k in inv){
+    const it = inv[k];
+    if (!it || it.slot!=='hands') continue;
+    if (_isEquipped(it)) { weapon = it; key = k; break; }
+  }
+  if(!weapon) return false;
+
+  const sv = weapon.overlaySvg || weapon.iconSvg;
+  if(!sv) return false;
+
+  const img = svgToImage(sv);
+  if(!img || !img.complete) return false;
+
+  const p  = api.player || {};
+  const f  = p.facing || 'down';
+  const cfg = HANDS_RENDER.pos[f] || HANDS_RENDER.pos.down;
+
+  // “hands” default box (can be overridden per item via overlayBox)
+  const defBox = CRAFTED_OVERLAY_BOX.hands || { w:36, h:36 };
+  const box    = (weapon.overlayBox && Number(weapon.overlayBox.w) && Number(weapon.overlayBox.h))
+                ? weapon.overlayBox : defBox;
+
+  const w = Math.max(8, box.w|0);
+  const h = Math.max(8, box.h|0);
+
+  // crafted-only shrink (kept consistent with armor overlays)
+  const isCrafted = /^craft_/.test(String(key||'')) || !!weapon?.meta?.crafted;
+  const scale     = isCrafted ? (HANDS_RENDER.scale * CRAFTED_SHRINK) : HANDS_RENDER.scale;
+
+  // draw in world
+  const px = p.x, py = p.y;
+  drawPieceWorld(ctx, px, py, scale, cfg.ox, cfg.oy, (c)=>{
+    c.save();
+    if (cfg.flip) { c.scale(-1, 1); }
+    try { c.drawImage(img, -w/2, -h/2, w, h); } catch {}
+    c.restore();
+  });
+
+  return true;
+}
   // ---- Speed bump for the “royal_savage” legs (top-tier flair) ----
   (function speedBoostTopTier(){
     let base=null;
@@ -670,6 +730,7 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
 
     IZZA.on('render-post', tryPatchShop);
     IZZA.on('render-post', drawEquippedArmour);
+IZZA.on('render-post', drawCraftedWeaponOverlay); // <-- add this line
     window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
     IZZA.on('update-post', normalizeEquipSlots);
     return true;
