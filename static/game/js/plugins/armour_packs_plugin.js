@@ -18,6 +18,9 @@
     legs:  { w: 40, h: 30 },
     hands: { w: 36, h: 36 }   // weapons in "hands"
   });
+  // crafted overlays render differently on the player (no change to shop/inventory icons)
+const CRAFTED_ARMOUR_SHRINK = 0.10;  // armour (head/chest/arms/legs) → make smaller
+const CRAFTED_WEAPON_BOOST  = 1.60;  // crafted weapons (hands) → make bigger
   // crafted overlays render smaller on the player (no change to shop/inventory icons)
 const CRAFTED_SHRINK = 0.10; // 50% reduction
   // ---- Small helpers ----
@@ -452,8 +455,9 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
   const img = svgToImage(sv);
   if (!img || !img.complete) return false;
 
-  // Per-item override (inventory entry) OR per-slot defaults
-  const slot = String(it?.slot || 'chest');
+  const slot = String(it?.slot || 'chest'); // 'head','chest','legs','arms','hands'
+
+  // --- per-item or default overlay box size (pixels on canvas) ---
   const def  = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
   const box  = it?.overlayBox && typeof it.overlayBox.w === 'number' && typeof it.overlayBox.h === 'number'
     ? it.overlayBox
@@ -461,13 +465,21 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
 
   const w = Math.max(8, box.w|0);
   const h = Math.max(8, box.h|0);
- // >>> NEW: detect crafted item (minted by creator)
-  const isCrafted = /^craft_/.test(String(slotPiece?.key||'')) || !!it?.meta?.crafted;
 
-  // >>> NEW: apply 50% reduction only for crafted items (does NOT affect inventory/shop)
-  const scale = isCrafted ? (conf.scale * CRAFTED_SHRINK) : conf.scale;
-  drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
-    // bitmap draw centered on slot, using crafted-only box
+  // --- detect "crafted" (your crafted keys start with "craft_") ---
+  const isCrafted = (slotPiece?.key || '').startsWith('craft_');
+
+  // --- allow a per-item override if you ever add it to inventory entries ---
+  const perItemScale = (typeof it.overlayScale === 'number' && isFinite(it.overlayScale)) ? it.overlayScale : 1;
+
+  // --- apply crafted-only multipliers (armour shrink vs weapon boost) ---
+  const craftedMul =
+    !isCrafted ? 1 :
+    (slot === 'hands' ? CRAFTED_WEAPON_BOOST : CRAFTED_ARMOUR_SHRINK);
+
+  const finalScale = (conf.scale || 1) * craftedMul * perItemScale;
+
+  drawPieceWorld(ctx, px, py, finalScale, conf.ox, conf.oy, (c)=>{
     try{ c.drawImage(img, -w/2, -h/2, w, h); }catch{}
   });
   return true;
