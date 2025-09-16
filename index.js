@@ -7,12 +7,14 @@
 //     GET  /api/state/:username?prefer=lastGood
 //     POST /api/state/:username
 //     POST /api/crafting/ai_svg          <-- ADDED (real AI SVG endpoint)
+//     GET  /api/crafting/ai_info         <-- model/key check
 
 import express from 'express';
 import morgan from 'morgan';
 import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
+import fetch from 'node-fetch';             // <--- ADD THIS LINE
 
 // ---------- storage config ----------
 const ROOT = process.env.DATA_DIR || '/var/data/izza/players';
@@ -127,8 +129,8 @@ app.post('/api/state/:username', async (req,res)=>{
 // ADDED: Real AI SVG endpoint
 // ---------------------------------------------------------------------------
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';         // set this!
-const SVG_MODEL_ID   = process.env.SVG_MODEL_ID   || 'gpt-4.1-mini'; // pick your model
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const SVG_MODEL_ID   = process.env.SVG_MODEL_ID   || 'gpt-4.1-mini';
 
 function sanitizeSVG(svg) {
   try {
@@ -136,27 +138,18 @@ function sanitizeSVG(svg) {
     let t = String(svg || '').trim();
     if (!t) return '';
     if (t.length > max) t = t.slice(0, max);
-
-    // Disallow dangerous constructs & external links
     if (/(<!DOCTYPE|<script|\son\w+=|<iframe|<foreignObject)/i.test(t)) return '';
-    if (/\b(xlink:href|href)\s*=\s*['"](?!#)/i.test(t)) return ''; // external
-
-    // Must be a single <svg>…</svg>
+    if (/\b(xlink:href|href)\s*=\s*['"](?!#)/i.test(t)) return '';
     if (!/^<svg\b[^>]*>[\s\S]*<\/svg>\s*$/i.test(t)) return '';
-
-    // Normalize: ensure viewBox + preserveAspectRatio
     if (!/viewBox=/.test(t)) {
       t = t.replace(/<svg\b([^>]*)>/i,
         (m, attrs)=> `<svg ${attrs} viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">`);
     }
-
-    // Strip headers/metadata
     t = t
       .replace(/<\?xml[\s\S]*?\?>/gi, '')
       .replace(/<!DOCTYPE[^>]*>/gi, '')
       .replace(/<metadata[\s\S]*?<\/metadata>/gi, '')
       .replace(/\s+xmlns:xlink="[^"]*"/i, '');
-
     return t;
   } catch {
     return '';
@@ -194,8 +187,6 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
       'Output: a single <svg>…</svg> that fits the brief.'
     ].filter(Boolean).join('\n');
 
-    // If you’re on Node ≤16, replace with:
-    // import fetch from 'node-fetch'; and use that here.
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -215,13 +206,17 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
 
     if (!resp.ok) {
       const txt = await resp.text().catch(()=> '');
+      console.error('[ai_svg] upstream error', resp.status, txt.slice(0, 400));   // <--- log upstream
       return res.status(502).json({ ok:false, reason:'llm-upstream', raw: txt.slice(0, 400) });
     }
 
     const data = await resp.json().catch(()=> ({}));
     const raw = data?.choices?.[0]?.message?.content?.trim() || '';
     const svg = sanitizeSVG(raw);
-    if (!svg) return res.status(422).json({ ok:false, reason:'sanitize-fail' });
+    if (!svg) {
+      console.error('[ai_svg] sanitize fail; raw length=', raw.length);        // <--- log sanitize issues
+      return res.status(422).json({ ok:false, reason:'sanitize-fail' });
+    }
 
     res.json({ ok:true, svg });
   } catch (e) {
@@ -229,6 +224,8 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     res.status(500).json({ ok:false, reason:'server-error' });
   }
 });
+
+// Show current model/key presence (for iPhone quick check)
 app.get('/api/crafting/ai_info', (_req, res) => {
   res.json({
     ok: true,
@@ -236,6 +233,7 @@ app.get('/api/crafting/ai_info', (_req, res) => {
     model: SVG_MODEL_ID
   });
 });
+
 // ---------------------------------------------------------------------------
 
 const PORT = process.env.PORT || 10000;
