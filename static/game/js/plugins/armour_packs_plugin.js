@@ -225,7 +225,8 @@
     _svgImgCache.set(svg, img);
     return img;
   }
-
+// --- Size (in pixels) for player-created overlays only ---
+const CRAFTED_OVERLAY_PX = { head: 38, chest: 40, arms: 38, legs: 40, hands: 36 };
   // ---- Equip normalization ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
@@ -424,19 +425,24 @@
   }
 
   // Try to draw a custom overlay for an equipped slot.
-  // Returns true if drawn, false if no overlay or image not ready.
-  function drawCustomOverlay(ctx, px, py, slotPiece, conf){
-    const sv = slotPiece?.it?.overlaySvg || slotPiece?.it?.iconSvg;
-    if (!sv) return false;
-    const img = svgToImage(sv);
-    if (!img || !img.complete) return false;
+// Returns true if drawn, false if no overlay or image not ready.
+function drawCustomOverlay(ctx, px, py, slotPiece, conf){
+  const sv = slotPiece?.it?.overlaySvg || slotPiece?.it?.iconSvg;
+  if (!sv) return false;
+  const img = svgToImage(sv);
+  if (!img || !(img.complete || img.naturalWidth)) return false;
 
-    drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
-      // Draw the creator’s SVG as a 48x48 bitmap centered on the slot.
-      try{ c.drawImage(img, -24, -24, 48, 48); }catch{}
-    });
-    return true;
-  }
+  // crafted detection (key prefix or explicit flag)
+  const slot   = (slotPiece?.it?.slot || 'chest');
+  const isCraft= /^craft_/i.test(slotPiece?.key||'') || !!slotPiece?.it?.isCrafted;
+  const size   = isCraft ? (CRAFTED_OVERLAY_PX[slot] || 40) : 48;   // armour-pack art stays 48
+  const half   = size / 2;
+
+  drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
+    try{ c.drawImage(img, -half, -half, size, size); }catch{}
+  });
+  return true;
+}
 
   function drawEquippedArmour(){
     if(!api?.ready) return;
