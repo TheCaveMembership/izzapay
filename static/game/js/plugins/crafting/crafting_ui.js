@@ -59,7 +59,33 @@
       return cleaned;
     }catch(e){ return ''; }
   }
+// --- UI helpers for AI wait state ---
+const MIN_AI_WAIT_MS = 10_000;
+const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
 
+function showWait(text){
+  const el = document.createElement('div');
+  el.id = 'izza-ai-wait';
+  el.style.cssText = `
+    position:fixed; inset:0; z-index:99999;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.45); backdrop-filter:saturate(120%) blur(2px);
+  `;
+  el.innerHTML = `
+    <div style="
+      background:#0f1522; color:#e7ecff; border:1px solid #2a3550;
+      border-radius:12px; padding:14px 16px; font-size:14px;
+      min-width:220px; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.35);
+    ">
+      <div style="font-weight:700; margin-bottom:6px">Generating…</div>
+      <div style="opacity:.85">${text||'Please wait while we create your preview.'}</div>
+    </div>`;
+  document.body.appendChild(el);
+  return el;
+}
+function hideWait(node){
+  try{ node && node.parentNode && node.parentNode.removeChild(node); }catch{}
+}
   function getIC(){
     try{ return parseInt(localStorage.getItem('izzaCoins')||'0',10)||0; }catch{ return 0; }
   }
@@ -487,24 +513,52 @@ async function aiToSVG(prompt){
     }
 
     btnAI && btnAI.addEventListener('click', async ()=>{
-      try{
-        const prompt = String(aiPrompt?.value||'').trim();
-        if (!prompt) return;
-        const svg = await aiToSVG(prompt);
-        if (svgIn) svgIn.value = svg;
-        if (prevHost) {
-          prevHost.innerHTML = svg;
-          const s = prevHost.querySelector('svg');
-          if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
-          prevHost.scrollTop = prevHost.scrollHeight;
-          prevHost.scrollIntoView({block:'nearest'});
-        }
-        STATE.currentSVG = svg;
-        saveDraft();
-        const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-        aiLeft();
-      }catch(e){ alert('AI failed: '+e.message); }
-    });
+  if (!btnAI) return;
+  const prompt = String(aiPrompt?.value||'').trim();
+  if (!prompt) return;
+
+  // lock UI + overlay
+  btnAI.disabled = true;
+  btnAI.setAttribute('aria-busy','true');
+  btnAI.textContent = 'Generating…';
+  const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+
+  try{
+    // Ensure at least 10s passes before we unlock/hide overlay
+    const [svg] = await Promise.all([
+      aiToSVG(prompt),
+      sleep(MIN_AI_WAIT_MS)
+    ]);
+
+    if (svgIn) svgIn.value = svg;
+    if (prevHost) {
+      prevHost.innerHTML = svg;
+      const s = prevHost.querySelector('svg');
+      if (s) {
+        s.setAttribute('preserveAspectRatio','xMidYMid meet');
+        s.style.maxWidth='100%';
+        s.style.height='auto';
+        s.style.display='block';
+      }
+      prevHost.scrollTop = prevHost.scrollHeight;
+      prevHost.scrollIntoView({block:'nearest'});
+    }
+    STATE.currentSVG = svg;
+    saveDraft();
+    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+    (function aiLeftUpdate(){
+      const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+      const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+    })();
+  }catch(e){
+    alert('AI failed: ' + (e?.message || e));
+  }finally{
+    hideWait(waitEl);
+    btnAI.disabled = false;
+    btnAI.removeAttribute('aria-busy');
+    btnAI.textContent = 'AI → SVG';
+  }
+});
 
     btnPrev && btnPrev.addEventListener('click', ()=>{
       const cleaned = sanitizeSVG(svgIn?.value);
