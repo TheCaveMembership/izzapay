@@ -9,7 +9,17 @@
 
   // ---------- Pending crafted items for shop (NEW) ----------
   const _pendingCraftShopAdds = []; // rows to inject when shop opens
+  // ---------- Pending crafted items for shop (NEW) ----------
+  const _pendingCraftShopAdds = []; // rows to inject when shop opens
 
+  // --- crafted-only overlay box sizes (px); DOES NOT affect built-in armour sets ---
+  const CRAFTED_OVERLAY_BOX = Object.freeze({
+    head:  { w: 38, h: 38 },
+    chest: { w: 40, h: 40 },
+    arms:  { w: 38, h: 38 },
+    legs:  { w: 40, h: 40 },
+    hands: { w: 36, h: 36 }   // weapons in "hands"
+  });
   // ---- Small helpers ----
   function _invRead(){
     try{
@@ -427,19 +437,26 @@ const CRAFTED_OVERLAY_PX = { head: 17, chest: 40, arms: 38, legs: 28, hands: 36 
   // Try to draw a custom overlay for an equipped slot.
 // Returns true if drawn, false if no overlay or image not ready.
 function drawCustomOverlay(ctx, px, py, slotPiece, conf){
-  const sv = slotPiece?.it?.overlaySvg || slotPiece?.it?.iconSvg;
+  const it = slotPiece?.it;
+  const sv = it?.overlaySvg || it?.iconSvg;
   if (!sv) return false;
-  const img = svgToImage(sv);
-  if (!img || !(img.complete || img.naturalWidth)) return false;
 
-  // crafted detection (key prefix or explicit flag)
-  const slot   = (slotPiece?.it?.slot || 'chest');
-  const isCraft= /^craft_/i.test(slotPiece?.key||'') || !!slotPiece?.it?.isCrafted;
-  const size   = isCraft ? (CRAFTED_OVERLAY_PX[slot] || 40) : 48;   // armour-pack art stays 48
-  const half   = size / 2;
+  const img = svgToImage(sv);
+  if (!img || !img.complete) return false;
+
+  // Per-item override (inventory entry) OR per-slot defaults
+  const slot = String(it?.slot || 'chest');
+  const def  = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
+  const box  = it?.overlayBox && typeof it.overlayBox.w === 'number' && typeof it.overlayBox.h === 'number'
+    ? it.overlayBox
+    : def;
+
+  const w = Math.max(8, box.w|0);
+  const h = Math.max(8, box.h|0);
 
   drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
-    try{ c.drawImage(img, -half, -half, size, size); }catch{}
+    // bitmap draw centered on slot, using crafted-only box
+    try{ c.drawImage(img, -w/2, -h/2, w, h); }catch{}
   });
   return true;
 }
@@ -566,6 +583,16 @@ function drawCustomOverlay(ctx, px, py, slotPiece, conf){
         const inv = _invRead();
         inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
         inv[key].overlaySvg = rawOverlaySvg || inlineSvg; // <-- raw for world overlay (matches other items)
+        // default crafted overlay box per slot (can be overridden)
+{
+  const def = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
+  const wIn = parseInt(input?.overlayW, 10);
+  const hIn = parseInt(input?.overlayH, 10);
+  inv[key].overlayBox = {
+    w: Number.isFinite(wIn) && wIn > 0 ? wIn : def.w,
+    h: Number.isFinite(hIn) && hIn > 0 ? hIn : def.h
+  };
+}
         inv[key].subtype = subtype;
         if (type === 'weapon') {
           inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
