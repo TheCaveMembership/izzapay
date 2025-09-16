@@ -1,3 +1,30 @@
+// --- AI prompt guidance (keeps creativity, but ensures slot-aware SVG with no bg) ---
+const SLOT_GUIDE = {
+  helmet: "Design an overlay that reads as a helmet from a top-down 3/4 view. Keep within a square slot; avoid covering torso/legs area.",
+  vest:   "Design a chest/torso overlay (vest/armor plate) for a top-down 3/4 view. Keep within chest slot bounds.",
+  legs:   "Design leg armor overlay for a top-down 3/4 view. Two legs, leave space between as needed.",
+  arms:   "Design arm/gauntlet overlay for a top-down 3/4 view. Represent left/right forearms/hands along the sides; leave body center clear.",
+  gun:    "Design a handheld gun overlay sized for the hands slot; readable top-down 3/4, no full character.",
+  melee:  "Design a handheld melee weapon overlay sized for the hands slot; readable top-down 3/4."
+};
+
+function composeAIPrompt(userPrompt, part){
+  const guide = SLOT_GUIDE[part] || "";
+  const realism = /\b(realistic|photo|photoreal|photorealistic)\b/i.test(userPrompt)
+    ? "Aim for realistic rendering with shading and detail."
+    : "Vector-friendly detail is fine; avoid childish cartoon shapes unless asked.";
+
+  // We explicitly tell it to fill the slot area (not a centered circle), and to keep bg transparent.
+  return [
+    userPrompt,
+    guide,
+    "Output pure SVG markup sized to a 128x128 viewBox.",
+    "Transparent background only; do not draw any full-bleed background rectangles.",
+    "Use <path>/<polygon>/<circle>/<rect> etc.; no raster <image> tags.",
+    "Fill the available slot area proportionally (not just a single centered icon).",
+    realism
+  ].filter(Boolean).join(" ");
+}
 // /static/game/js/plugins/crafting/crafting_ui.js
 (function(){
   const COSTS = Object.freeze({
@@ -186,7 +213,7 @@ async function aiToSVG(prompt){
     const j = await serverJSON(api('/api/crafting/ai_svg'), {
       method:'POST',
       body: JSON.stringify({
-        prompt,
+        prompt: composeAIPrompt(prompt, STATE.currentPart),
         meta: { part: STATE.currentPart, category: STATE.currentCategory, name: STATE.currentName }
       })
     });
