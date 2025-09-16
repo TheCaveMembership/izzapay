@@ -216,7 +216,7 @@
 
   function renderCreate(){
     const totalPi = calcTotalCost({ usePi:true });
-    const totalIC = calcTotalCost({ usePi:false });
+    the totalIC = calcTotalCost({ usePi:false });
 
     const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
 
