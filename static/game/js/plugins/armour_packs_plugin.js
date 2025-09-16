@@ -2,7 +2,7 @@
 // Adds 10 shop sets (40 items), data-driven, no edits to existing files.
 // Works with current inventory & equips, and draws on top of the player.
 (function(){
-  const BUILD = 'armour-packs-plugin/v1.3-inlineSVG+incremental+crafted-queue';
+  const BUILD = 'armour-packs-plugin/v1.4-crafted-weapons+pricebook';
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
@@ -36,6 +36,14 @@
     entry.equipped = !!on;
     if('equip' in entry) entry.equip = !!on;
     if(typeof entry.equippedCount === 'number') entry.equippedCount = on ? 1 : 0;
+  }
+  function _writePriceBookLastPaid(key, price){
+    try{
+      const PB_KEY='izzaPriceBook';
+      const pb = JSON.parse(localStorage.getItem(PB_KEY)||'{}');
+      pb[key] = { lastPaid: price|0 };
+      localStorage.setItem(PB_KEY, JSON.stringify(pb));
+    }catch{}
   }
 
   // ---- Data model for sets (easy to extend) ----
@@ -173,10 +181,24 @@
                 const coins = IZZA?.api?.getCoins ? IZZA.api.getCoins() : (IZZA?.api?.player?.coins|0);
                 if ((coins|0) < add.price){ alert('Not enough IZZA Coins'); return; }
                 IZZA?.api?.setCoins && IZZA.api.setCoins((coins|0) - add.price);
+
+                // --- Add to buyer's inventory ---
                 const inv2 = _invRead();
                 inv2[add.key] = inv2[add.key] || { count:0, name:add.name, type:add.type, slot:add.slot, equippable:true, iconSvg:add.svg };
+                // normalize subtype for weapons so guns.js treats correctly
+                if (add.type==='weapon'){
+                  if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
+                  if (inv2[add.key].subtype==='gun'){
+                    // starter ammo for new guns
+                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add[key]].ammo = 60;
+                  }
+                }
                 if (inv2[add.key].count!=null){ inv2[add.key].count = (inv2[add.key].count|0) + 1; } else { inv2[add.key].owned = true; }
                 _invWrite(inv2);
+
+                // --- Record lastPaid so Sell tab shows 40% (not 10 IC default) ---
+                _writePriceBookLastPaid(add.key, add.price);
+
                 try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
                 IZZA?.toast?.(`Purchased ${add.name}`);
                 try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
@@ -192,6 +214,7 @@
   // ---- Equip normalization ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
+    // include hands (weapons) but DO NOT touch arms (armour)
     const slots = { head:null, chest:null, legs:null, arms:null, hands:null };
 
     Object.keys(inv).forEach(k=>{
@@ -401,12 +424,13 @@
   (function(){
     function partToSlotAndType(part){
       const p = String(part||'').toLowerCase();
-      if (p==='helmet') return { slot:'head',  type:'armor' };
-      if (p==='vest')   return { slot:'chest', type:'armor' };
-      if (p==='legs')   return { slot:'legs',  type:'armor' };
-      if (p==='arms')   return { slot:'arms',  type:'armor' };
-      if (p==='gun' || p==='melee') return { slot:'hands', type:'weapon' }; // <— NEW
-      return { slot:'chest', type:'armor' };
+      if (p==='helmet') return { slot:'head',  type:'armor',  subtype:null };
+      if (p==='vest')   return { slot:'chest', type:'armor',  subtype:null };
+      if (p==='legs')   return { slot:'legs',  type:'armor',  subtype:null };
+      if (p==='arms')   return { slot:'arms',  type:'armor',  subtype:null };
+      if (p==='gun')    return { slot:'hands', type:'weapon', subtype:'gun'   };
+      if (p==='melee')  return { slot:'hands', type:'weapon', subtype:'melee' };
+      return { slot:'chest', type:'armor', subtype:null };
     }
     function makeKey(name){
       const base = (String(name||'untitled').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'item');
@@ -416,7 +440,6 @@
       const inner = String(svg||'').trim();
       // Force inventory-safe size
       if (/<svg/i.test(inner)) {
-        // inject size + aspect fix if missing
         return inner.replace(
           /<svg\b([^>]*)>/i,
           (m, attrs)=> `<svg ${attrs} width="28" height="28" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%;height:auto">`
@@ -433,13 +456,26 @@
         const map  = partToSlotAndType(input?.part);
         const slot = map.slot;
         const type = map.type;
+        const subtype = map.subtype || null;
         const inlineSvg = ensureSvgWrap(input?.svg||'');
+        const price = Math.max(50, Math.min(250, parseInt(input?.priceIC||'100',10)||100));
+        const ff = input?.featureFlags || {};
 
-        // ---- inventory grant ----
+        // ---- inventory grant (creator minted copy) ----
         const inv = _invRead();
-        inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
-        if (inv[key].count!=null){ inv[key].count = (inv[key].count|0) + 1; } else { inv[key].owned = true; }
+        inv[key] = inv[key] || { count:0, name, type, subtype, slot, equippable:true, iconSvg:inlineSvg };
+        inv[key].count = (inv[key].count|0) + 1;
         if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
+
+        // creator copy rules:
+        inv[key].nonSell = true;          // creator cannot sell their minted copy
+        inv[key].listPriceIC = price;     // remember creator list price
+        // optional creator gun defaults so it “just works” with guns.js
+        if (type==='weapon' && subtype==='gun'){
+          if (typeof inv[key].ammo!=='number') inv[key].ammo = 60;
+          if (typeof inv[key].fireIntervalMs!=='number' && ff.fireRate) inv[key].fireIntervalMs = 140; // faster if chosen
+          if (typeof inv[key].bulletSpeedMul!=='number' && ff.tracerFx) inv[key].bulletSpeedMul = 1.1;
+        }
         _invWrite(inv);
 
         try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
@@ -447,10 +483,9 @@
 
         // ---- optional: add to shop list (BUY tab) this session ----
         const sellInShop = !!input?.sellInShop;
-        const price = Math.max(50, Math.min(250, parseInt(input?.priceIC||'100',10)||100));
         if (sellInShop){
           const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
-          const entry = { key, name, svg:inlineSvg, price, slot, type };
+          const entry = { key, name, svg:inlineSvg, price, slot, type, part:input?.part };
           if (list && !list.querySelector(`[data-craft-item="${key}"]`)){
             _pendingCraftShopAdds.push(entry); // queue then flush immediately if shop open
             tryPatchShop();
