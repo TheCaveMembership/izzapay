@@ -32,6 +32,11 @@
     packageCredits: null, // if the user purchased a package this session
     createSub: 'setup',   // 'setup' | 'visuals'
   };
+
+  // ---- API base helper: use the host you expose in play.html ----
+  const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,''); // e.g. https://izzagame.onrender.com
+  const api = (p)=> (API_BASE ? API_BASE + p : p);
+
   // ---------- DRAFT PERSISTENCE (keep progress across reloads) ----------
   const DRAFT_KEY = 'izzaCraftDraft';
   function saveDraft(){
@@ -56,6 +61,7 @@
       STATE.currentSVG       = j.svg  ?? STATE.currentSVG;
     }catch{}
   }
+
   // ---------- UTIL: moderation ----------
   const BAD_WORDS = ['badword1','badword2','slur1','slur2']; // replace with your list
   function moderateName(name){
@@ -120,10 +126,10 @@
       };
       const res = await window.Pi.createPayment(paymentData, {
         onReadyForServerApproval: async (paymentId) => {
-          await serverJSON('/api/crafting/pi/approve', { method:'POST', body:JSON.stringify({ paymentId }) });
+          await serverJSON(api('/api/crafting/pi/approve'), { method:'POST', body:JSON.stringify({ paymentId }) });
         },
         onReadyForServerCompletion: async (paymentId, txid) => {
-          await serverJSON('/api/crafting/pi/complete', { method:'POST', body:JSON.stringify({ paymentId, txid }) });
+          await serverJSON(api('/api/crafting/pi/complete'), { method:'POST', body:JSON.stringify({ paymentId, txid }) });
         }
       });
       // res.status === 'COMPLETED' usually; treat as success if so
@@ -141,7 +147,7 @@
     if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
     setIC(cur - amountIC);
     // optional: hit server to record spend
-    try{ await serverJSON('/api/crafting/ic/debit', { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
+    try{ await serverJSON(api('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
     return { ok:true };
   }
 
@@ -159,7 +165,7 @@
   async function aiToSVG(prompt){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
     // call your real endpoint here
-    const j = await serverJSON('/api/crafting/ai_svg', { method:'POST', body:JSON.stringify({ prompt }) });
+    const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({ prompt }) });
     if (!j || !j.ok || !j.svg) throw new Error('AI failed');
     // only decrement if we can render (cheap check)
     const cleaned = sanitizeSVG(j.svg);
@@ -209,99 +215,100 @@
   }
 
   function renderCreate(){
-  const totalPi = calcTotalCost({ usePi:true });
-  const totalIC = calcTotalCost({ usePi:false });
+    const totalPi = calcTotalCost({ usePi:true });
+    const totalIC = calcTotalCost({ usePi:false });
 
-  const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
+    const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
 
-  return `
-    <div class="cl-subtabs">
-      <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
-      <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
-    </div>
+    return `
+      <div class="cl-subtabs">
+        <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
+        <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
+      </div>
 
-    <div class="cl-body ${sub}">
-      <div class="cl-pane cl-form">
-        <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
-        <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
-        <select id="catSel">
-          <option value="armour">Armour</option>
-          <option value="weapon">Weapon</option>
-          <option value="apparel">Apparel</option>
-          <option value="merch">Merch/Collectible</option>
-        </select>
+      <div class="cl-body ${sub}">
+        <div class="cl-pane cl-form">
+          <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
+          <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
+          <select id="catSel">
+            <option value="armour">Armour</option>
+            <option value="weapon">Weapon</option>
+            <option value="apparel">Apparel</option>
+            <option value="merch">Merch/Collectible</option>
+          </select>
 
-        <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
-        <select id="partSel">
-          <option value="helmet">Helmet</option>
-          <option value="vest">Vest</option>
-          <option value="arms">Arms</option>
-          <option value="legs">Legs</option>
-          <option value="gun">Gun</option>
-          <option value="melee">Melee</option>
-        </select>
+          <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
+          <select id="partSel">
+            <option value="helmet">Helmet</option>
+            <option value="vest">Vest</option>
+            <option value="arms">Arms</option>
+            <option value="legs">Legs</option>
+            <option value="gun">Gun</option>
+            <option value="melee">Melee</option>
+          </select>
 
-        <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
-        <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
+          <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
+          <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
 
-        <div style="margin-top:10px;font-weight:700">Optional Features</div>
-        <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
-        <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
-        <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
-        <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
-        <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
-        <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
+          <div style="margin-top:10px;font-weight:700">Optional Features</div>
+          <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
+          <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
+          <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
+          <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
+          <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
+          <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
 
-        <div style="margin-top:10px; font-size:13px; opacity:.85">
-          Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
-        </div>
-
-        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-          <button class="ghost" id="payPi">Pay Pi</button>
-          <button class="ghost" id="payIC">Pay IC</button>
-          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-        </div>
-
-        <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-          <div style="margin-top:6px">
-            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
+          <div style="margin-top:10px; font-size:13px; opacity:.85">
+            Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
           </div>
-          <div style="margin-top:4px">
-            <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
+
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+            <button class="ghost" id="payPi">Pay Pi</button>
+            <button class="ghost" id="payIC">Pay IC</button>
+            <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+          </div>
+
+          <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
+            <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+            <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+            <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+            <div style="margin-top:6px">
+              <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
+            </div>
+            <div style="margin-top:4px">
+              <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="cl-pane cl-preview">
+          <div style="display:flex; gap:10px; align-items:center">
+            <div style="font-weight:700">Visuals</div>
+            <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:6px">
+            <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
+            <button class="ghost" id="btnAI">AI → SVG</button>
+          </div>
+          <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
+          <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
+
+          <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+            <button class="ghost" id="btnPreview">Preview</button>
+            <!-- Hidden until a valid preview is rendered -->
+            <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
+            <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
+          </div>
+
+          <div id="svgPreview"
+               style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
+                      min-height:220px; max-height:60vh; overflow:auto; display:flex; align-items:center; justify-content:center">
+            <div style="opacity:.6; font-size:12px">Preview appears here</div>
           </div>
         </div>
       </div>
-
-      <div class="cl-pane cl-preview">
-        <div style="display:flex; gap:10px; align-items:center">
-          <div style="font-weight:700">Visuals</div>
-          <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
-        </div>
-        <div style="display:flex; gap:10px; margin-top:6px">
-          <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
-          <button class="ghost" id="btnAI">AI → SVG</button>
-        </div>
-        <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
-        <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
-        <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
-  <button class="ghost" id="btnPreview">Preview</button>
-  <!-- Hidden until a valid preview is rendered -->
-  <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
-  <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
-</div>
-
-<div id="svgPreview"
-     style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
-            min-height:220px; max-height:60vh; overflow:auto; display:flex; align-items:center; justify-content:center">
-  <div style="opacity:.6; font-size:12px">Preview appears here</div>
-</div>
-      </div>
-    </div>
-  `;
-}
+    `;
+  }
 
   function renderMine(){
     return `
@@ -311,10 +318,11 @@
       </div>
     `;
   }
+
   // ---------- "My Creations" data + renderer ----------
   async function fetchMine(){
     try{
-      const j = await serverJSON('/api/crafting/mine');
+      const j = await serverJSON(api('/api/crafting/mine'));
       return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
     }catch{ return []; }
   }
@@ -360,7 +368,8 @@
       });
     });
   }
-    // ---------- wire up ----------
+
+  // ---------- wire up ----------
   function mount(rootSel){
     const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
     if (!root) return;
@@ -418,7 +427,7 @@
     }
   }
 
-    function bindInside(){
+  function bindInside(){
     const root = STATE.root;
     if(!root) return;
 
@@ -496,49 +505,49 @@
     const btnAI    = root.querySelector('#btnAI');
     const aiPrompt = root.querySelector('#aiPrompt');
     const svgIn    = root.querySelector('#svgIn');
-    const btnPrev   = root.querySelector('#btnPreview');
-const btnMint   = root.querySelector('#btnMint');
-const prevHost  = root.querySelector('#svgPreview');
-const craftStatus = root.querySelector('#craftStatus');
+    const btnPrev  = root.querySelector('#btnPreview');
+    const btnMint  = root.querySelector('#btnMint');
+    const prevHost = root.querySelector('#svgPreview');
+    const craftStatus = root.querySelector('#craftStatus');
 
     // restore SVG textarea + preview from draft, if any
     if (svgIn && STATE.currentSVG){ svgIn.value = STATE.currentSVG; prevHost && (prevHost.innerHTML = STATE.currentSVG); }
 
     btnAI && btnAI.addEventListener('click', async ()=>{
-  try{
-    const prompt = String(aiPrompt?.value||'').trim();
-    if (!prompt) return;
-    const svg = await aiToSVG(prompt);
-    if (svgIn) svgIn.value = svg;
-    if (prevHost) {
-      prevHost.innerHTML = svg;
-      // scale nicely in the box
-      const s = prevHost.querySelector('svg');
-      if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; display='block'; }
-    }
-    STATE.currentSVG = svg;
-    saveDraft();
-    // show Mint button
-    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-    aiLeft();
-  }catch(e){
-    alert('AI failed: '+e.message);
-  }
-});
+      try{
+        const prompt = String(aiPrompt?.value||'').trim();
+        if (!prompt) return;
+        const svg = await aiToSVG(prompt);
+        if (svgIn) svgIn.value = svg;
+        if (prevHost) {
+          prevHost.innerHTML = svg;
+          // scale nicely in the box
+          const s = prevHost.querySelector('svg');
+          if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
+        }
+        STATE.currentSVG = svg;
+        saveDraft();
+        // show Mint button
+        const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+        aiLeft();
+      }catch(e){
+        alert('AI failed: '+e.message);
+      }
+    });
 
     btnPrev && btnPrev.addEventListener('click', ()=>{
-  const cleaned = sanitizeSVG(svgIn?.value);
-  if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
-  if (prevHost) {
-    prevHost.innerHTML = cleaned;
-    const s = prevHost.querySelector('svg');
-    if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
-  }
-  STATE.currentSVG = cleaned;
-  saveDraft();
-  // reveal Mint after a good preview
-  const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-});
+      const cleaned = sanitizeSVG(svgIn?.value);
+      if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
+      if (prevHost) {
+        prevHost.innerHTML = cleaned;
+        const s = prevHost.querySelector('svg');
+        if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
+      }
+      STATE.currentSVG = cleaned;
+      saveDraft();
+      // reveal Mint after a good preview
+      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+    });
 
     btnMint && btnMint.addEventListener('click', async ()=>{
       craftStatus.textContent = '';
@@ -548,12 +557,11 @@ const craftStatus = root.querySelector('#craftStatus');
       if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
       // allow free test if PER_ITEM_IC is 0 and no add-ons
-const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
-
-if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-  craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-  return;
-}
+      const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
+      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
+        craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+        return;
+      }
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
       // shop price
@@ -573,7 +581,7 @@ if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
           features: STATE.featureFlags,
           sellInShop, sellInPi, priceIC
         };
-        const res = await serverJSON('/api/crafting/mint', { method:'POST', body:JSON.stringify(payload) });
+        const res = await serverJSON(api('/api/crafting/mint'), { method:'POST', body:JSON.stringify(payload) });
         if (res && res.ok){
           craftStatus.textContent = 'Crafted ✓';
           STATE.hasPaidForCurrentItem = false; // consume payment/credit
@@ -592,5 +600,6 @@ if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
       }
     });
   }
+
   window.CraftingUI = { mount, unmount };
 })();
