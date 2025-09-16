@@ -9,8 +9,6 @@
 
   // ---------- Pending crafted items for shop (NEW) ----------
   const _pendingCraftShopAdds = []; // rows to inject when shop opens
-  // ---------- Pending crafted items for shop (NEW) ----------
-  const _pendingCraftShopAdds = []; // rows to inject when shop opens
 
   // --- crafted-only overlay box sizes (px); DOES NOT affect built-in armour sets ---
   const CRAFTED_OVERLAY_BOX = Object.freeze({
@@ -186,7 +184,7 @@
                 </div>
               </div>`;
             const btn = document.createElement('button'); btn.className='buy'; btn.textContent = `${add.price} IC`;
-            btn.addEventListener('click', ()=>{
+                        btn.addEventListener('click', ()=>{
               try{
                 const coins = IZZA?.api?.getCoins ? IZZA.api.getCoins() : (IZZA?.api?.player?.coins|0);
                 if ((coins|0) < add.price){ alert('Not enough IZZA Coins'); return; }
@@ -196,15 +194,22 @@
                 const inv2 = _invRead();
                 inv2[add.key] = inv2[add.key] || { count:0, name:add.name, type:add.type, slot:add.slot, equippable:true, iconSvg:add.svg };
                 inv2[add.key].overlaySvg = add.svg;  // ensure buyers also get the in-world overlay art
+
                 // normalize subtype for weapons so guns.js treats correctly
                 if (add.type==='weapon'){
                   if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
                   if (inv2[add.key].subtype==='gun'){
-                    // starter ammo for new guns  (fixed bracket target)
-                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add[key]].ammo = 60;
+                    // starter ammo for new guns  (FIXED: add.key, not add[key])
+                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add.key].ammo = 60;
                   }
                 }
-                if (inv2[add.key].count!=null){ inv2[add.key].count = (inv2[add.key].count|0) + 1; } else { inv2[add[key]].owned = true; }
+
+                if (inv2[add.key].count!=null){
+                  inv2[add.key].count = (inv2[add.key].count|0) + 1;
+                } else {
+                  // FIXED: add.key, not add[key]
+                  inv2[add.key].owned = true;
+                }
                 _invWrite(inv2);
 
                 // --- Record lastPaid so Sell tab shows 40% (not 10 IC default) ---
@@ -215,13 +220,15 @@
                 try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
               }catch(e){ console.warn('[craft shop] buy failed', e); }
             });
-            row.appendChild(meta); row.appendChild(btn); list.appendChild(row);
+
+            row.appendChild(meta);
+            row.appendChild(btn);
+            list.appendChild(row);
           }
         });
       }
     }catch(e){ console.warn('[armour-packs] shop patch failed', e); }
   }
-
   // --- SVG -> <img> cache for fast overlay drawing ---
   const _svgImgCache = new Map();
   function svgToImage(svg){
@@ -235,8 +242,7 @@
     _svgImgCache.set(svg, img);
     return img;
   }
-// --- Size (in pixels) for player-created overlays only ---
-const CRAFTED_OVERLAY_PX = { head: 17, chest: 40, arms: 38, legs: 28, hands: 36 };
+
   // ---- Equip normalization ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
