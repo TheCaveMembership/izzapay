@@ -148,7 +148,8 @@
       if(!api?.ready) return;
       const modal = document.getElementById('shopModal');
       if(!modal) return;
-      const open = (modal.style.display === 'flex') || (getComputedStyle(modal).display === 'flex');
+      // replace with this
+const open = getComputedStyle(modal).display !== 'none';
       if(!open) return;
 
       const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
