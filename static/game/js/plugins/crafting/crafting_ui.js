@@ -71,8 +71,10 @@
   }
 
   // *** CHANGE 1: force default API base to your Node service ***
-  const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
-  const api = (p)=> (API_BASE ? API_BASE + p : p);
+  // Force default API base to the Node service on Render.
+// You can still override with window.IZZA_PERSIST_BASE if you ever need to.
+const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
+const api = (p)=> (API_BASE ? API_BASE + p : p);
 
   async function serverJSON(url, opts={}){
     const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
@@ -112,9 +114,11 @@
 
   // *** CHANGE 2: server-first, fallback is now a tiny basic blueprint icon ***
   // --- AI prompt: server first, then minimal fallback ---
+// Server-first AI; minimal fallback (simple blueprint) if the server fails.
 async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
+  // 1) Try the real AI endpoint on your Node server
   try{
     const j = await serverJSON(api('/api/crafting/ai_svg'), {
       method:'POST',
@@ -130,15 +134,15 @@ async function aiToSVG(prompt){
       STATE.aiAttemptsLeft -= 1;
       return cleaned;
     } else if (j && !j.ok) {
-      // Surface server reason to the user so we know why it fell back
+      // Show server reason (helps debug on iPhone)
       alert('AI server error: ' + (j.reason || 'unknown'));
     }
   }catch(e){
-    // also show network/HTTP errors
+    // Network / 5xx, etc.
     alert('AI server error: ' + (e?.message || e || 'unknown'));
   }
 
-  // Minimal fallback (basic blueprint)
+  // 2) Minimal fallback (basic blueprint so it’s obvious it’s not the AI)
   const raw = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">
       <rect x="8" y="8" width="112" height="112" rx="14" fill="#0f1522" stroke="#2a3550" stroke-width="2"/>
