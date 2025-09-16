@@ -12,10 +12,10 @@
 
   // --- crafted-only overlay box sizes (px); DOES NOT affect built-in armour sets ---
   const CRAFTED_OVERLAY_BOX = Object.freeze({
-    head:  { w: 38, h: 38 },
-    chest: { w: 40, h: 40 },
-    arms:  { w: 38, h: 38 },
-    legs:  { w: 40, h: 40 },
+    head:  { w: 27, h: 33 },
+    chest: { w: 30, h: 35 },
+    arms:  { w: 33, h: 40 },
+    legs:  { w: 40, h: 30 },
     hands: { w: 36, h: 36 }   // weapons in "hands"
   });
   // ---- Small helpers ----
