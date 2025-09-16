@@ -1206,89 +1206,77 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
     }
 
     // wire equip/unequip after panel inserts DOM
-    setTimeout(function(){
-      try{
-        var host = document.getElementById('invPanel'); if(!host) return;
+setTimeout(function(){
+  try{
+    var host = document.getElementById('invPanel'); if(!host) return;
 
-        function writeInv(newInv){ try{ apiObj.setInventory && apiObj.setInventory(newInv); }catch(e){} }
+    function writeInv(newInv){ try{ apiObj.setInventory && apiObj.setInventory(newInv); }catch(e){} }
 
-        // EQUIP
-        host.querySelectorAll('[data-craft-equip]').forEach(function(btn){
-          btn.addEventListener('click', function(){
-            try{
-              var id = btn.getAttribute('data-craft-equip');
-              var inv2 = apiObj.getInventory() || {};
-              var it = inv2[id]; if(!it) return;
+    // ========== EQUIP ==========
+    host.querySelectorAll('[data-craft-equip]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        try{
+          var id = btn.getAttribute('data-craft-equip');
+          var inv2 = apiObj.getInventory() || {};
+          var it = inv2[id]; if(!it) return;
 
-              // respect item slot; only clear other items in the SAME slot
-              var slot = it.slot || null;
-              if (slot){
-                Object.keys(inv2).forEach(function(otherKey){
-                  if (otherKey===id) return;
-                  var o = inv2[otherKey];
-                  if (o && o.slot===slot){
-                    o.equipped=false; if('equip' in o) o.equip=false;
-                    if(typeof o.equippedCount==='number') o.equippedCount=0;
-                  }
-                });
+          // respect item slot; only clear other items in the SAME slot
+          var slot = it.slot || null;
+          if (slot){
+            Object.keys(inv2).forEach(function(otherKey){
+              if (otherKey===id) return;
+              var o = inv2[otherKey];
+              if (o && o.slot===slot){
+                o.equipped=false; if('equip' in o) o.equip=false;
+                if(typeof o.equippedCount==='number') o.equippedCount=0;
               }
-                    it.equipped = true; if ('equip' in it) it.equip = true;
-      if (typeof it.equippedCount === 'number') it.equippedCount = 1;
-
-      // ---- NEW: bridge crafted → active combat weapon ----
-      try {
-        // Determine kind: prefer explicit tag; otherwise infer
-        var kind = (it.weaponKind || '').toLowerCase();
-        if (!kind && it.type === 'weapon') {
-          // Heuristic fallback
-          if (/\bgun|pistol|uzi|rifle|blaster/i.test(it.name||'')) kind = 'gun';
-          else kind = 'melee';
-        }
-
-        if (it.type === 'weapon') {
-          if (kind === 'melee') {
-            // Use existing melee pipeline (bat rules/animation/damage)
-            if (typeof window.setEquippedWeapon === 'function') {
-              window.setEquippedWeapon('bat');
-            } else {
-              // ultra-safe fallback
-              try { equipped.weapon = 'bat'; } catch {}
-            }
-          } else if (kind === 'gun') {
-            // Treat creator guns like pistol by default (fires with guns.js)
-            if (typeof window.setEquippedWeapon === 'function') {
-              window.setEquippedWeapon('pistol');
-            } else {
-              try { equipped.weapon = 'pistol'; } catch {}
-            }
-            // Optional: if you later add custom ammo on the crafted item,
-            // you can sync inv.pistol.ammo here.
+            });
           }
-        }
-      } catch(e) { /* never break equip flow */ }
 
-      writeInv(inv2);
-      if (typeof window.renderInventoryPanel === 'function') window.renderInventoryPanel();
+          it.equipped = true; if ('equip' in it) it.equip = true;
+          if (typeof it.equippedCount === 'number') it.equippedCount = 1;
 
-        // UNEQUIP
-        host.querySelectorAll('[data-craft-unequip]').forEach(function(btn){
-          btn.addEventListener('click', function(){
-            try{
-              var id = btn.getAttribute('data-craft-unequip');
-              var inv2 = apiObj.getInventory() || {};
-              var it = inv2[id]; if(!it) return;
-              it.equipped=false; if('equip' in it) it.equip=false;
-              if(typeof it.equippedCount==='number') it.equippedCount=0;
-              writeInv(inv2);
-              if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
-            }catch(e){}
-          }, {passive:true});
-        });
+          // ---- bridge crafted → active combat weapon ----
+          try {
+            var kind = (it.weaponKind || '').toLowerCase();
+            if (!kind && it.type === 'weapon') {
+              if (/\bgun|pistol|uzi|rifle|blaster/i.test(it.name||'')) kind = 'gun';
+              else kind = 'melee';
+            }
+            if (it.type === 'weapon') {
+              if (kind === 'melee') {
+                if (typeof window.setEquippedWeapon === 'function') window.setEquippedWeapon('bat');
+                else try { equipped.weapon = 'bat'; } catch {}
+              } else if (kind === 'gun') {
+                if (typeof window.setEquippedWeapon === 'function') window.setEquippedWeapon('pistol');
+                else try { equipped.weapon = 'pistol'; } catch {}
+              }
+            }
+          } catch(e) { /* never break equip flow */ }
 
-      }catch(e){}
-    }, 0);
+          writeInv(inv2);
+          if (typeof window.renderInventoryPanel === 'function') window.renderInventoryPanel();
+        }catch(e){}
+      }, {passive:true});
+    });
 
-  }catch(e){
+    // ========== UNEQUIP ==========
+    host.querySelectorAll('[data-craft-unequip]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        try{
+          var id = btn.getAttribute('data-craft-unequip');
+          var inv2 = apiObj.getInventory() || {};
+          var it = inv2[id]; if(!it) return;
+          it.equipped=false; if('equip' in it) it.equip=false;
+          if(typeof it.equippedCount==='number') it.equippedCount=0;
+          writeInv(inv2);
+          if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
+        }catch(e){}
+      }, {passive:true});
+    });
+
+  }catch(e){}
+}, 0);
     // swallow — never let crafted-block kill the panel
   }
 })();
