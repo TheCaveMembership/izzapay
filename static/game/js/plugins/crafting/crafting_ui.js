@@ -110,7 +110,7 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 (function(){
   const COSTS = Object.freeze({
   // Single visual item mint (no extras)
-  PER_ITEM_IC:   2000,   // 2000 IZZA Coins
+  PER_ITEM_IC:   0,   // 2000 IZZA Coins
   PER_ITEM_PI:   1,      // 1 Pi
 
   // Add-on feature costs (still available for Armour/Weapon only)
