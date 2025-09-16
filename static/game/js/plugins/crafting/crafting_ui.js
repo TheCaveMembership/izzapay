@@ -132,14 +132,48 @@
   function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
+  // --- AI prompt: server first, then local fallback (keywords -> SVG) ---
   async function aiToSVG(prompt){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
-    const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({ prompt }) });
-    if (!j || !j.ok || !j.svg) throw new Error('AI failed');
-    const cleaned = sanitizeSVG(j.svg);
-    if (!cleaned) throw new Error('SVG rejected by sanitizer');
+
+    // try server
+    try{
+      const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({ prompt }) });
+      if (j && j.ok && j.svg){
+        const cleaned = sanitizeSVG(j.svg); if (!cleaned) throw new Error('SVG rejected');
+        STATE.aiAttemptsLeft -= 1;
+        return cleaned;
+      }
+    }catch{}
+
+    // fallback: lightweight local generator
+    const p = String(prompt||'').toLowerCase();
+    let svg = '';
+    if (/sword|blade|katana|melee|knife|dagger/.test(p)){
+      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+        <rect x="58" y="16" width="12" height="72" fill="#cfcfd4"/><rect x="54" y="20" width="4" height="64" fill="#b0b0b8"/>
+        <rect x="44" y="80" width="40" height="8" fill="#997a3b"/>
+        <rect x="58" y="88" width="12" height="24" rx="4" fill="#6e5a2a"/>
+      </svg>`;
+    } else if (/gun|pistol|uzi|rifle|blaster/.test(p)){
+      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+        <rect x="16" y="46" width="84" height="20" rx="4" fill="#333a49"/><rect x="20" y="50" width="76" height="12" fill="#4d5a6b"/>
+        <rect x="74" y="66" width="10" height="26" fill="#2b3240"/><rect x="72" y="82" width="24" height="8" fill="#6e5a2a"/>
+        <rect x="100" y="52" width="12" height="8" fill="#222831"/>
+      </svg>`;
+    } else if (/shield|armor|armour/.test(p)){
+      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+        <path d="M64 16 L104 28 L104 56 C104 84 86 102 64 112 C42 102 24 84 24 56 L24 28 Z" fill="#61738a" stroke="#262f3a" stroke-width="3"/>
+        <path d="M64 24 L96 34 L96 54 C96 76 82 92 64 100 C46 92 32 76 32 54 L32 34 Z" fill="#7f91a7"/>
+      </svg>`;
+    } else {
+      svg = `<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+        <rect x="16" y="28" width="96" height="72" rx="10" fill="#2c3750"/><circle cx="64" cy="64" r="22" fill="#cfe0ff"/>
+      </svg>`;
+    }
+
     STATE.aiAttemptsLeft -= 1;
-    return cleaned;
+    return sanitizeSVG(svg);
   }
 
   function renderTabs(){
@@ -501,7 +535,8 @@
               svg: STATE.currentSVG,
               priceIC,
               sellInShop,
-              sellInPi
+              sellInPi,
+              featureFlags: STATE.featureFlags   // <— pass through for guns.js-friendly hints
             })
           : { ok:false, reason:'armour-packs-hook-missing' };
 
