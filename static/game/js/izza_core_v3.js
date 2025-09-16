@@ -1206,58 +1206,122 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
     }
 
     // wire equip/unequip after panel inserts DOM
-    setTimeout(function(){
-      try{
-        var host = document.getElementById('invPanel'); if(!host) return;
+setTimeout(function(){
+  try{
+    var host  = document.getElementById('invPanel'); if(!host) return;
+    var apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    if (!apiObj || typeof apiObj.getInventory!=='function') return;
 
-        function writeInv(newInv){ try{ apiObj.setInventory && apiObj.setInventory(newInv); }catch(e){} }
+    function writeInv(newInv){
+      try{ apiObj.setInventory && apiObj.setInventory(newInv); }catch(e){}
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch(e){}
+    }
+    function refresh(){ if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); }
 
-        // EQUIP
-        host.querySelectorAll('[data-craft-equip]').forEach(function(btn){
-          btn.addEventListener('click', function(){
-            try{
-              var id = btn.getAttribute('data-craft-equip');
-              var inv2 = apiObj.getInventory() || {};
-              var it = inv2[id]; if(!it) return;
+    // Map a crafted weapon to core weapon id (so HUD/attacks reflect equip)
+    function mapCraftToCoreWeapon(it){
+      if(!it || it.type!=='weapon') return null;
+      if (typeof it.coreWeapon === 'string' && it.coreWeapon) return it.coreWeapon; // explicit override
 
-              // respect item slot; only clear other items in the SAME slot
+      var name = String(it.name||'');
+      var kind = String(it.weaponKind||'').toLowerCase();
+
+      // simple heuristics
+      if (kind==='gun' || /gun|pistol|uzi|rifle|blaster/i.test(name)) return 'pistol';
+      if (kind==='melee' || /bat|blade|club|sword|knuckle|machete|axe/i.test(name)) return 'bat';
+      return null;
+    }
+
+    // ========== EQUIP ==========
+    host.querySelectorAll('[data-craft-equip]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        try{
+          var id = btn.getAttribute('data-craft-equip');
+          var inv2 = apiObj.getInventory() || {};
+          var it = inv2[id]; if(!it) return;
+
+          // Slot exclusivity: disable other items in the SAME slot only
+          var slot = it.slot || null;
+          if (slot){
+            Object.keys(inv2).forEach(function(otherKey){
+              if (otherKey===id) return;
+              var o = inv2[otherKey];
+              if (o && o.slot===slot){
+                o.equipped=false; if('equip' in o) o.equip=false;
+                if(typeof o.equippedCount==='number') o.equippedCount=0;
+              }
+            });
+          }
+
+          // Mark this crafted item equipped
+          it.equipped=true; if('equip' in it) it.equip=true;
+          if(typeof it.equippedCount==='number') it.equippedCount=1;
+
+          // Bridge to core weapons (so combat + HUD reflect the craft)
+          try{
+            var core = mapCraftToCoreWeapon(it);
+            if (core){
+              // respect mission locks for pistol/uzi (your core function)
+              if (typeof window.missionsOKToUse==='function' && !missionsOKToUse(core)){
+                // revert the flag changes and notify
+                it.equipped=false; if('equip' in it) it.equip=false;
+                if(typeof it.equippedCount==='number') it.equippedCount=0;
+                try{ toast('Locked until mission 3'); }catch(e){}
+                writeInv(inv2); refresh();
+                return;
+              }
+              if (typeof window.setEquippedWeapon==='function') window.setEquippedWeapon(core);
+            }
+          }catch(e){}
+
+          writeInv(inv2);
+          refresh();
+        }catch(e){}
+      }, {passive:true});
+    });
+
+    // ========== UNEQUIP ==========
+    host.querySelectorAll('[data-craft-unequip]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        try{
+          var id = btn.getAttribute('data-craft-unequip');
+          var inv2 = apiObj.getInventory() || {};
+          var it = inv2[id]; if(!it) return;
+
+          // If this crafted item mapped to a core weapon and it's currently active, switch to fists
+          try{
+            var core = mapCraftToCoreWeapon(it);
+            if (core && typeof window.setEquippedWeapon==='function'){
+              // Only unequip core if no other crafted item in same slot will remain equipped
               var slot = it.slot || null;
+              var willHaveAlt = false;
               if (slot){
-                Object.keys(inv2).forEach(function(otherKey){
-                  if (otherKey===id) return;
-                  var o = inv2[otherKey];
-                  if (o && o.slot===slot){
-                    o.equipped=false; if('equip' in o) o.equip=false;
-                    if(typeof o.equippedCount==='number') o.equippedCount=0;
+                Object.keys(inv2).forEach(function(k){
+                  if (k===id) return;
+                  var o = inv2[k];
+                  if (o && o.slot===slot && (o.equipped || o.equip || (o.equippedCount|0)>0)){
+                    willHaveAlt = true;
                   }
                 });
               }
-              it.equipped=true; if('equip' in it) it.equip=true;
-              if(typeof it.equippedCount==='number') it.equippedCount=1;
+              if (!willHaveAlt){
+                // revert to hands so overlay + damage reflect unequip
+                window.setEquippedWeapon('fists');
+              }
+            }
+          }catch(e){}
 
-              writeInv(inv2);
-              if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
-            }catch(e){}
-          }, {passive:true});
-        });
+          it.equipped=false; if('equip' in it) it.equip=false;
+          if(typeof it.equippedCount==='number') it.equippedCount=0;
 
-        // UNEQUIP
-        host.querySelectorAll('[data-craft-unequip]').forEach(function(btn){
-          btn.addEventListener('click', function(){
-            try{
-              var id = btn.getAttribute('data-craft-unequip');
-              var inv2 = apiObj.getInventory() || {};
-              var it = inv2[id]; if(!it) return;
-              it.equipped=false; if('equip' in it) it.equip=false;
-              if(typeof it.equippedCount==='number') it.equippedCount=0;
-              writeInv(inv2);
-              if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
-            }catch(e){}
-          }, {passive:true});
-        });
+          writeInv(inv2);
+          refresh();
+        }catch(e){}
+      }, {passive:true});
+    });
 
-      }catch(e){}
-    }, 0);
+  }catch(e){}
+}, 0);
 
   }catch(e){
     // swallow — never let crafted-block kill the panel
