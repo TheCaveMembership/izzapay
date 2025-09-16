@@ -185,6 +185,7 @@
                 // --- Add to buyer's inventory ---
                 const inv2 = _invRead();
                 inv2[add.key] = inv2[add.key] || { count:0, name:add.name, type:add.type, slot:add.slot, equippable:true, iconSvg:add.svg };
+                inv2[add.key].overlaySvg = add.svg;  // ensure buyers also get the in-world overlay art
                 // normalize subtype for weapons so guns.js treats correctly
                 if (add.type==='weapon'){
                   if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
@@ -210,7 +211,17 @@
       }
     }catch(e){ console.warn('[armour-packs] shop patch failed', e); }
   }
-
+// --- SVG -> <img> cache for fast overlay drawing ---
+const _svgImgCache = new Map();
+function svgToImage(svg){
+  if (!svg) return null;
+  if (_svgImgCache.has(svg)) return _svgImgCache.get(svg);
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  _svgImgCache.set(svg, img);
+  return img;
+}
   // ---- Equip normalization ----
   function normalizeEquipSlots(){
     const inv = _invRead(); let changed=false;
@@ -345,7 +356,21 @@
       ctx.restore();
     };
   }
+// Try to draw a custom overlay for an equipped slot.
+// Returns true if drawn, false if no overlay or image not ready.
+function drawCustomOverlay(ctx, px, py, slotPiece, conf){
+  const sv = slotPiece?.it?.overlaySvg || slotPiece?.it?.iconSvg;
+  if (!sv) return false;
+  const img = svgToImage(sv);
+  if (!img || !img.complete) return false;
 
+  drawPieceWorld(ctx, px, py, conf.scale, conf.ox, conf.oy, (c)=>{
+    // Draw the creator’s SVG as a 48x48 bitmap centered on the slot.
+    // (You can tweak the -24/48 numbers per-slot if you want tighter framing.)
+    try{ c.drawImage(img, -24, -24, 48, 48); }catch{}
+  });
+  return true;
+}
   function drawEquippedArmour(){
     if(!api?.ready) return;
     const inv=_invRead();
@@ -375,24 +400,23 @@
     const legs = pieceFor('legs');
     const arms = pieceFor('arms');
 
-    if(legs){
-      const c=setColorsFromKey(legs.key);
-      const withFlames = /apex_titan|royal_savage|neon_mystic|phantom_drip/.test(legs.key);
-      drawPieceWorld(ctx, px, py, LEGS.scale, LEGS.ox, LEGS.oy, mkLegsPath(c, withFlames));
-    }
-    if(chest){
-      const c=setColorsFromKey(chest.key);
-      drawPieceWorld(ctx, px, py, VEST.scale, VEST.ox, VEST.oy, mkVestPath(c));
-    }
-    if(arms){
-      const c=setColorsFromKey(arms.key);
-      drawPieceWorld(ctx, px, py, ARMS.scale, ARMS.ox, ARMS.oy, mkArmsPath(c));
-    }
-    if(head){
-      const c=setColorsFromKey(head.key);
-      drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, mkHelmetPath(c));
-    }
-
+    if (legs && !drawCustomOverlay(ctx, px, py, legs, LEGS)) {
+  const c=setColorsFromKey(legs.key);
+  const withFlames = /apex_titan|royal_savage|neon_mystic|phantom_drip/.test(legs.key);
+  drawPieceWorld(ctx, px, py, LEGS.scale, LEGS.ox, LEGS.oy, mkLegsPath(c, withFlames));
+}
+if (chest && !drawCustomOverlay(ctx, px, py, chest, VEST)) {
+  const c=setColorsFromKey(chest.key);
+  drawPieceWorld(ctx, px, py, VEST.scale, VEST.ox, VEST.oy, mkVestPath(c));
+}
+if (arms && !drawCustomOverlay(ctx, px, py, arms, ARMS)) {
+  const c=setColorsFromKey(arms.key);
+  drawPieceWorld(ctx, px, py, ARMS.scale, ARMS.ox, ARMS.oy, mkArmsPath(c));
+}
+if (head && !drawCustomOverlay(ctx, px, py, head, HELMET)) {
+  const c=setColorsFromKey(head.key);
+  drawPieceWorld(ctx, px, py, HELMET.scale, HELMET.ox, HELMET.oy, mkHelmetPath(c));
+}
     // NOTE: crafted weapons (type:'weapon', slot:'hands') are **not** drawn here.
     // They should be picked up by your existing weapon/gun system in guns.js.
   }
@@ -464,6 +488,7 @@
         // ---- inventory grant (creator minted copy) ----
         const inv = _invRead();
         inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
+        inv[key].overlaySvg = inlineSvg;   // draw this on the player in-world
 if (type === 'weapon') {
   // remember what the creator picked: 'gun' or 'melee'
   inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
