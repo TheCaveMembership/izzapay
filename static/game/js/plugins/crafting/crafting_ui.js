@@ -25,19 +25,17 @@
       tracerFx: false,
       swingFx: false
     },
-    currentCategory: 'armour',   // armour | weapon | apparel | merch
-    currentPart: 'helmet',       // helmet | vest | arms | legs || (weapon subtypes)
+    currentCategory: 'armour',
+    currentPart: 'helmet',
     fireRateRequested: 0,
     dmgHearts: 0.5,
     packageCredits: null,
-    createSub: 'setup',   // 'setup' | 'visuals'
+    createSub: 'setup',
   };
 
-  // ---- API base helper (kept) ----
   const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   const api = (p)=> (API_BASE ? API_BASE + p : p);
 
-  // ---------- DRAFT ----------
   const DRAFT_KEY = 'izzaCraftDraft';
   function saveDraft(){
     try{
@@ -62,7 +60,6 @@
     }catch{}
   }
 
-  // ---------- moderation ----------
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
     const s = String(name||'').trim();
@@ -86,12 +83,9 @@
         .replace(/<!DOCTYPE[^>]*>/gi,'')
         .replace(/<\?xml[\s\S]*?\?>/gi,'');
       return cleaned;
-    }catch(e){
-      return '';
-    }
+    }catch(e){ return ''; }
   }
 
-  // ---------- coins ----------
   function getIC(){
     try{ return parseInt(localStorage.getItem('izzaCoins')||'0',10)||0; }catch{ return 0; }
   }
@@ -108,17 +102,12 @@
     return await r.json().catch(()=> ({}));
   }
 
-  // ---------- Pi (kept) ----------
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
     }
     try{
-      const paymentData = {
-        amount: String(amountPi),
-        memo: memo || 'IZZA Crafting',
-        metadata: { kind:'crafting', memo }
-      };
+      const paymentData = { amount: String(amountPi), memo: memo || 'IZZA Crafting', metadata: { kind:'crafting', memo } };
       const res = await window.Pi.createPayment(paymentData, {
         onReadyForServerApproval: async (paymentId) => {
           await serverJSON(api('/api/crafting/pi/approve'), { method:'POST', body:JSON.stringify({ paymentId }) });
@@ -129,13 +118,9 @@
       });
       if (res && res.status && /complete/i.test(res.status)) return { ok:true, receipt:res };
       return { ok:false, reason:'pi-not-complete', raw:res };
-    }catch(e){
-      console.warn('[craft] Pi pay failed', e);
-      return { ok:false, reason:String(e) };
-    }
+    }catch(e){ console.warn('[craft] Pi pay failed', e); return { ok:false, reason:String(e) }; }
   }
 
-  // ---------- IZZA Coin payment (kept) ----------
   async function payWithIC(amountIC){
     const cur = getIC();
     if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
@@ -144,16 +129,9 @@
     return { ok:true };
   }
 
-  function selectedAddOnCount(){
-    return Object.values(STATE.featureFlags).filter(Boolean).length;
-  }
-  function calcTotalCost({ usePi }){
-    const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC;
-    const addon = usePi ? COSTS.ADDON_PI   : COSTS.ADDON_IC;
-    return base + addon * selectedAddOnCount();
-  }
+  function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
+  function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
-  // ---------- AI (kept stub) ----------
   async function aiToSVG(prompt){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
     const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({ prompt }) });
@@ -171,8 +149,7 @@
         <button class="ghost" data-tab="create">Create Item</button>
         <button class="ghost" data-tab="mine">My Creations</button>
         <div style="margin-left:auto; opacity:.7; font-size:12px">AI attempts left: <b id="aiLeft">${STATE.aiAttemptsLeft}</b></div>
-      </div>
-    `;
+      </div>`;
   }
 
   function renderPackages(){
@@ -181,8 +158,7 @@
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
           <div style="opacity:.85;font-size:13px;line-height:1.4">
-            2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>
-            Includes features & listing rights.
+            2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
           </div>
           <div style="margin-top:8px;font-weight:700">Cost: 50 Pi</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
@@ -197,8 +173,7 @@
             <button class="ghost" data-buy-single="ic">Pay 5000 IC</button>
           </div>
         </div>
-      </div>
-    `;
+      </div>`;
   }
 
   function renderCreate(){
@@ -281,7 +256,6 @@
 
           <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
             <button class="ghost" id="btnPreview">Preview</button>
-            <!-- Hidden until a valid preview is rendered -->
             <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
             <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
           </div>
@@ -293,8 +267,7 @@
             <div style="opacity:.6; font-size:12px">Preview appears here</div>
           </div>
         </div>
-      </div>
-    `;
+      </div>`;
   }
 
   function renderMine(){
@@ -302,11 +275,9 @@
       <div style="padding:14px">
         <div style="font-weight:700;margin-bottom:6px">My Creations</div>
         <div id="mineList" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px"></div>
-      </div>
-    `;
+      </div>`;
   }
 
-  // ---------- "My Creations" ----------
   async function fetchMine(){
     try{
       const j = await serverJSON(api('/api/crafting/mine'));
@@ -327,8 +298,7 @@
           <button class="ghost" data-copy="${it.id}">Copy SVG</button>
           <button class="ghost" data-equip="${it.id}">Equip</button>
         </div>
-      </div>
-    `;
+      </div>`;
   }
 
   async function hydrateMine(){
@@ -355,20 +325,14 @@
     });
   }
 
-  // ---------- wire up ----------
   function mount(rootSel){
     const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
     if (!root) return;
     STATE.root = root;
     STATE.mounted = true;
-
     loadDraft();
 
-    root.innerHTML = `
-      ${renderTabs()}
-      <div id="craftTabs"></div>
-    `;
-
+    root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
     const tabsHost = root.querySelector('#craftTabs');
 
     const setTab = (name)=>{
@@ -386,34 +350,23 @@
     setTab('packages');
   }
 
-  function unmount(){
-    if(!STATE.root) return;
-    STATE.root.innerHTML = '';
-    STATE.mounted = false;
-  }
+  function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
   async function handleBuySingle(kind){
     const usePi = (kind==='pi');
     const total = calcTotalCost({ usePi });
-
     let res;
     if (usePi) res = await payWithPi(total, 'Craft Single Item');
     else       res = await payWithIC(total);
-
     const status = document.getElementById('payStatus');
-    if (res && res.ok){
-      STATE.hasPaidForCurrentItem = true;
-      status && (status.textContent = 'Paid ✓ — you can craft now.');
-    }else{
-      status && (status.textContent = 'Payment failed.');
-    }
+    if (res && res.ok){ STATE.hasPaidForCurrentItem = true; status && (status.textContent='Paid ✓ — you can craft now.'); }
+    else { status && (status.textContent='Payment failed.'); }
   }
 
   function bindInside(){
     const root = STATE.root;
     if(!root) return;
 
-    /* ---------- Sub-tabs ---------- */
     STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
       b.addEventListener('click', ()=>{
         STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
@@ -426,15 +379,11 @@
       }, { passive:true });
     });
 
-    /* ---------- Packages ---------- */
     root.querySelectorAll('[data-buy-package]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = btn.dataset.buyPackage;
         const res = await payWithPi(50, `Package:${id}`);
-        if(res.ok){
-          STATE.packageCredits = { id, items:3, featuresIncluded:true };
-          alert('Package unlocked — start creating!');
-        }
+        if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
       }, { passive:true });
     });
 
@@ -442,13 +391,11 @@
       btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
     });
 
-    /* ---------- payments ---------- */
     const payPi = root.querySelector('#payPi');
     const payIC = root.querySelector('#payIC');
     payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
     payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
 
-    /* ---------- form state ---------- */
     const itemName = root.querySelector('#itemName');
     if (itemName){
       itemName.value = STATE.currentName || '';
@@ -480,7 +427,6 @@
       const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
     };
 
-    /* ---------- visuals ---------- */
     const btnAI    = root.querySelector('#btnAI');
     const aiPrompt = root.querySelector('#aiPrompt');
     const svgIn    = root.querySelector('#svgIn');
@@ -504,16 +450,14 @@
           prevHost.innerHTML = svg;
           const s = prevHost.querySelector('svg');
           if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
-          prevHost.scrollTop = prevHost.scrollHeight; // ensure fully visible
+          prevHost.scrollTop = prevHost.scrollHeight;
           prevHost.scrollIntoView({block:'nearest'});
         }
         STATE.currentSVG = svg;
         saveDraft();
         const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
         aiLeft();
-      }catch(e){
-        alert('AI failed: '+e.message);
-      }
+      }catch(e){ alert('AI failed: '+e.message); }
     });
 
     btnPrev && btnPrev.addEventListener('click', ()=>{
@@ -523,7 +467,7 @@
         prevHost.innerHTML = cleaned;
         const s = prevHost.querySelector('svg');
         if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
-        prevHost.scrollTop = prevHost.scrollHeight; // show bottom if tall
+        prevHost.scrollTop = prevHost.scrollHeight;
         prevHost.scrollIntoView({block:'nearest'});
       }
       STATE.currentSVG = cleaned;
@@ -544,16 +488,11 @@
       }
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-      // computed shop flags
       const sellInShop = !!root.querySelector('#sellInShop')?.checked;
       const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
-      const priceIC    = Math.max(
-        COSTS.SHOP_MIN_IC,
-        Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100)
-      );
+      const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
 
       try{
-        // ---- NEW: inject into armoury path (no extra API) ----
         const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
           ? window.ArmourPacks.injectCraftedItem({
               name: STATE.currentName,
@@ -577,9 +516,7 @@
         }else{
           craftStatus.textContent = 'Mint failed: '+(injected?.reason||'armour hook missing');
         }
-      }catch(e){
-        craftStatus.textContent = 'Error crafting: '+e.message;
-      }
+      }catch(e){ craftStatus.textContent = 'Error crafting: '+e.message; }
     });
   }
 
