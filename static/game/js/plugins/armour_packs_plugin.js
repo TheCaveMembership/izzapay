@@ -463,7 +463,11 @@
 
         // ---- inventory grant (creator minted copy) ----
         const inv = _invRead();
-        inv[key] = inv[key] || { count:0, name, type, subtype, slot, equippable:true, iconSvg:inlineSvg };
+        inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
+if (type === 'weapon') {
+  // remember what the creator picked: 'gun' or 'melee'
+  inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
+}
         inv[key].count = (inv[key].count|0) + 1;
         if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
 
