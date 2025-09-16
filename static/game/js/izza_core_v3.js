@@ -1147,108 +1147,121 @@ if (inv.cardboard_box && (inv.cardboard_box.count|0) > 0) {
     rows.push(readOnlyRow('pumpkin_piece', 'Pumpkin', `Count: ${c}`));
   }
 }
-    // --- CRAFTED ITEMS (generic) -----------------------------------------------
-// shows anything injected by armour_packs_plugin with keys like "craft_..."
-(function addCraftedItems(){
-  const inv = api.getInventory ? (api.getInventory() || {}) : {};
-  // Small helpers that match your current itemRow UX
-  function craftedRow(id, label, metaHTML, iconSvg, equipKey){
-    const isEquipped = !!(inv[id] && (inv[id].equipped===true || inv[id].equip===true || (inv[id].equippedCount|0)>0));
-    const btnHTML = inv[id]?.equippable
-      ? (isEquipped
-          ? `<button data-craft-unequip="${id}" style="margin-left:auto">Unequip</button>`
-          : `<button data-craft-equip="${id}" style="margin-left:auto">Equip</button>`
-        )
-      : '';
-    const iconHTML = iconSvg
-      ? `<div style="width:28px;height:28px">${iconSvg}</div>`
-      : `<div style="width:28px;height:28px">${svgIcon('unknown',28,28)}</div>`;
-    return `
-      <div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:8px 10px;margin:4px 0;background:#0f1522;border:1px solid #2a3550;border-radius:10px">
-        ${iconHTML}
-        <div style="font-weight:600">${label}</div>
-        <div style="margin-left:12px;opacity:.85;font-size:12px">${metaHTML||''}</div>
-        ${btnHTML}
-      </div>`;
-  }
+    // --- CRAFTED ITEMS (generic, safe) -----------------------------------------
+(function addCraftedItemsSafe(){
+  try{
+    var apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    if (!apiObj || typeof apiObj.getInventory!=='function') return;
 
-  // Gather craft_* entries
-  const craftKeys = Object.keys(inv).filter(k => k.indexOf('craft_') === 0 && inv[k] && typeof inv[k]==='object');
+    var inv = apiObj.getInventory() || {};
+    var rowsHere = [];
 
-  // Nothing to add
-  if (!craftKeys.length) return;
+    // tiny built-in fallback icon (no external helpers)
+    function fallbackIconSvg(){
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%;height:auto"><rect x="2" y="2" width="24" height="24" rx="4" fill="#1a2235" stroke="#2a3550" stroke-width="2"/></svg>';
+    }
 
-  // Build crafted rows (we’ll keep them right above the armor section)
-  const craftedRows = [];
-  for (const k of craftKeys){
-    const it = inv[k];
-    const name = String(it.name || k).slice(0,48);
-    const count = (it.count|0) || (it.owned?1:0);
+    function isEquipped(it){
+      if(!it) return false;
+      if(it.equipped===true || it.equip===true) return true;
+      if(typeof it.equippedCount==='number' && it.equippedCount>0) return true;
+      return false;
+    }
 
-    // meta line (count/ammo/etc.)
-    let meta = '';
-    if (typeof it.count === 'number') meta = `Count: ${count}`;
-    if (it.type === 'weapon' && typeof it.ammo === 'number') meta = `${meta ? meta + ' · ' : ''}Ammo: ${it.ammo}`;
+    function craftedRowHTML(id, label, metaHTML, iconSvg, equippable, equipped){
+      var btnHTML = equippable
+        ? (equipped
+            ? '<button data-craft-unequip="'+id+'" style="margin-left:auto">Unequip</button>'
+            : '<button data-craft-equip="'+id+'" style="margin-left:auto">Equip</button>')
+        : '';
+      var iconHTML = '<div style="width:28px;height:28px">'+(iconSvg||fallbackIconSvg())+'</div>';
+      return (
+        '<div class="inv-item" style="display:flex;align-items:center;gap:10px;padding:8px 10px;margin:4px 0;background:#0f1522;border:1px solid #2a3550;border-radius:10px">'
+        + iconHTML +
+        '<div style="font-weight:600">'+label+'</div>' +
+        (metaHTML ? '<div style="margin-left:12px;opacity:.85;font-size:12px">'+metaHTML+'</div>' : '') +
+        btnHTML +
+        '</div>'
+      );
+    }
 
-    craftedRows.push(
-      craftedRow(k, name, meta, it.iconSvg||'', k)
-    );
-  }
+    // find craft_* entries
+    var craftKeys = Object.keys(inv).filter(function(k){ return k.indexOf('craft_')===0 && inv[k] && typeof inv[k]==='object'; });
+    if (!craftKeys.length) return;
 
-  if (craftedRows.length){
-    rows.push(`<div style="margin-top:2px;margin-bottom:-4px;opacity:.75;font-size:12px">Crafted</div>`);
-    rows.push(...craftedRows);
-  }
-
-  // Equip/Unequip wiring for crafted items
-  setTimeout(()=>{
-    const host = document.getElementById('invPanel');
-    if(!host) return;
-
-    // Equip
-    host.querySelectorAll('[data-craft-equip]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.getAttribute('data-craft-equip');
-        const i = api.getInventory ? (api.getInventory() || {}) : {};
-        const it = i[id]; if(!it) return;
-
-        // normalize: if it's a weapon, do not unequip arms armor; use slot metadata provided by the plugin
-        // respect .slot (e.g. "hands")—ONLY clear same-slot items
-        const slot = it.slot || null;
-        if (slot){
-          for (const k in i){
-            if (k===id) continue;
-            const other = i[k];
-            if (other && other.slot===slot){
-              other.equipped = false;
-              if ('equip' in other) other.equip=false;
-              if (typeof other.equippedCount==='number') other.equippedCount=0;
-            }
-          }
-        }
-        it.equipped = true;
-        if ('equip' in it) it.equip = true;
-        if (typeof it.equippedCount==='number') it.equippedCount = 1;
-
-        api.setInventory && api.setInventory(i);
-        renderInventoryPanel();
-      }, {passive:true});
+    craftKeys.forEach(function(k){
+      var it = inv[k] || {};
+      var name  = String(it.name || k).slice(0,48);
+      var count = (it.count|0) || (it.owned?1:0);
+      var meta  = (typeof it.count==='number') ? ('Count: '+count) : '';
+      if (it.type==='weapon' && typeof it.ammo==='number'){
+        meta = meta ? (meta+' · Ammo: '+it.ammo) : ('Ammo: '+it.ammo);
+      }
+      rowsHere.push(craftedRowHTML(k, name, meta, it.iconSvg||'', !!it.equippable, isEquipped(it)));
     });
 
-    // Unequip
-    host.querySelectorAll('[data-craft-unequip]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.getAttribute('data-craft-unequip');
-        const i = api.getInventory ? (api.getInventory() || {}) : {};
-        const it = i[id]; if(!it) return;
-        it.equipped = false;
-        if ('equip' in it) it.equip = false;
-        if (typeof it.equippedCount==='number') it.equippedCount = 0;
-        api.setInventory && api.setInventory(i);
-        renderInventoryPanel();
-      }, {passive:true});
-    });
-  }, 0);
+    if (rowsHere.length){
+      rows.push('<div style="margin-top:2px;margin-bottom:-4px;opacity:.75;font-size:12px">Crafted</div>');
+      for (var i=0;i<rowsHere.length;i++) rows.push(rowsHere[i]);
+    }
+
+    // wire equip/unequip after panel inserts DOM
+    setTimeout(function(){
+      try{
+        var host = document.getElementById('invPanel'); if(!host) return;
+
+        function writeInv(newInv){ try{ apiObj.setInventory && apiObj.setInventory(newInv); }catch(e){} }
+
+        // EQUIP
+        host.querySelectorAll('[data-craft-equip]').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            try{
+              var id = btn.getAttribute('data-craft-equip');
+              var inv2 = apiObj.getInventory() || {};
+              var it = inv2[id]; if(!it) return;
+
+              // respect item slot; only clear other items in the SAME slot
+              var slot = it.slot || null;
+              if (slot){
+                Object.keys(inv2).forEach(function(otherKey){
+                  if (otherKey===id) return;
+                  var o = inv2[otherKey];
+                  if (o && o.slot===slot){
+                    o.equipped=false; if('equip' in o) o.equip=false;
+                    if(typeof o.equippedCount==='number') o.equippedCount=0;
+                  }
+                });
+              }
+              it.equipped=true; if('equip' in it) it.equip=true;
+              if(typeof it.equippedCount==='number') it.equippedCount=1;
+
+              writeInv(inv2);
+              if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
+            }catch(e){}
+          }, {passive:true});
+        });
+
+        // UNEQUIP
+        host.querySelectorAll('[data-craft-unequip]').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            try{
+              var id = btn.getAttribute('data-craft-unequip');
+              var inv2 = apiObj.getInventory() || {};
+              var it = inv2[id]; if(!it) return;
+              it.equipped=false; if('equip' in it) it.equip=false;
+              if(typeof it.equippedCount==='number') it.equippedCount=0;
+              writeInv(inv2);
+              if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel();
+            }catch(e){}
+          }, {passive:true});
+        });
+
+      }catch(e){}
+    }, 0);
+
+  }catch(e){
+    // swallow — never let crafted-block kill the panel
+  }
 })();
 // Armor section (Cardboard set)
 const armorRows = [];
