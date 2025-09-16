@@ -26,6 +26,42 @@ const SLOT_VB = {
   hands:  '0 0 160 100',
 };
 
+/* ---------- NEW (minimal + additive): category-aware part options ---------- */
+const PART_OPTIONS = {
+  armour: [
+    { v:'helmet', t:'Helmet' },
+    { v:'vest',   t:'Vest'   },
+    { v:'arms',   t:'Arms'   },
+    { v:'legs',   t:'Legs'   },
+  ],
+  weapon: [
+    { v:'gun',    t:'Gun'    },
+    { v:'melee',  t:'Melee'  },
+  ],
+  // Keep these listed but they behave just like before (no feature logic changed)
+  apparel: [
+    { v:'helmet', t:'Helmet' },
+    { v:'vest',   t:'Vest'   },
+    { v:'arms',   t:'Arms'   },
+    { v:'legs',   t:'Legs'   },
+  ],
+  merch: [
+    { v:'helmet', t:'Helmet' },
+    { v:'vest',   t:'Vest'   },
+    { v:'arms',   t:'Arms'   },
+    { v:'legs',   t:'Legs'   },
+  ]
+};
+
+function repopulatePartOptions(catSelEl, partSelEl){
+  const cat  = (catSelEl?.value || 'armour');
+  const opts = PART_OPTIONS[cat] || PART_OPTIONS.armour;
+  const prev = partSelEl?.value;
+  partSelEl.innerHTML = opts.map(o=> `<option value="${o.v}">${o.t}</option>`).join('');
+  partSelEl.value = opts.some(o=>o.v===prev) ? prev : opts[0].v;
+}
+/* ------------------------------------------------------------------------- */
+
 // Compose the UX prompt shown to the model (keeps constraints tight)
 function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } = {}){
   const guide = SLOT_GUIDE[part] || '';
@@ -464,7 +500,8 @@ function normalizeSvgForSlot(svgText, part){
           <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
             <button class="ghost" data-buy-single="pi">Pay 5 Pi</button>
-            <button class="ghost" data-buy-single="ic">Pay 5000 IC</button>
+            <!-- label now reflects actual cost (PER_ITEM_IC = 0 keeps free testing intact) -->
+            <button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC} IC</button>
           </div>
         </div>
       </div>`;
@@ -493,14 +530,8 @@ function normalizeSvgForSlot(svgText, part){
         </select>
 
         <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
-        <select id="partSel">
-          <option value="helmet">Helmet</option>
-          <option value="vest">Vest</option>
-          <option value="arms">Arms</option>
-          <option value="legs">Legs</option>
-          <option value="gun">Gun</option>
-          <option value="melee">Melee</option>
-        </select>
+        <!-- options are populated dynamically to keep Weapon => Gun/Melee only -->
+        <select id="partSel"></select>
 
         <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
         <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
@@ -739,8 +770,26 @@ if (aiAnimChk){  aiAnimChk.checked = !!STATE.wantAnimation; aiAnimChk.addEventLi
 
     const catSel  = root.querySelector('#catSel');
     const partSel = root.querySelector('#partSel');
-    if (catSel){  catSel.value = STATE.currentCategory; catSel.addEventListener('change', e=>{ STATE.currentCategory = e.target.value; saveDraft(); }, { passive:true }); }
-    if (partSel){ partSel.value = STATE.currentPart;     partSel.addEventListener('change', e=>{ STATE.currentPart     = e.target.value; saveDraft(); }, { passive:true }); }
+
+    if (catSel && partSel){
+      // Initial population so Weapon shows only Gun/Melee
+      catSel.value = STATE.currentCategory;
+      repopulatePartOptions(catSel, partSel);
+
+      catSel.addEventListener('change', e=>{
+        STATE.currentCategory = e.target.value;
+        repopulatePartOptions(catSel, partSel);
+        saveDraft();
+      }, { passive:true });
+    }
+
+    if (partSel){
+      partSel.value = STATE.currentPart;
+      partSel.addEventListener('change', e=>{
+        STATE.currentPart = e.target.value;
+        saveDraft();
+      }, { passive:true });
+    }
 
     const aiLeft = ()=> {
       const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
