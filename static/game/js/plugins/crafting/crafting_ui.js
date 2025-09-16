@@ -295,7 +295,123 @@ async function aiToSVG(prompt){
   STATE.aiAttemptsLeft -= 1;
   return sanitizeSVG(raw);
 }
+// --- Slot viewBoxes used by the engine (same as server) ---
+const TARGET_VB = {
+  helmet: '0 0 128 128',
+  vest:   '0 0 128 128',
+  arms:   '0 0 160 120',
+  legs:   '0 0 140 140',
+  hands:  '0 0 160 100'
+};
 
+// Gun/melee map to "hands" for slot fitting
+function _mapPartToSlot(p){
+  p = String(p||'').toLowerCase();
+  if (p==='gun' || p==='melee') return 'hands';
+  return (p==='helmet'||p==='vest'||p==='arms'||p==='legs'||p==='hands') ? p : 'helmet';
+}
+
+function _parseVB(vbStr){
+  if (!vbStr) return null;
+  const m = String(vbStr).trim().split(/\s+/).map(Number);
+  if (m.length !== 4 || m.some(n=>!Number.isFinite(n))) return null;
+  return { x:m[0], y:m[1], w:m[2], h:m[3] };
+}
+
+function _ensureMeasureHost(){
+  let host = document.getElementById('izza-svg-measure-host');
+  if (host) return host;
+  host = document.createElement('div');
+  host.id = 'izza-svg-measure-host';
+  host.style.cssText = 'position:absolute;left:-99999px;top:-99999px;width:0;height:0;overflow:hidden;pointer-events:none';
+  document.body.appendChild(host);
+  return host;
+}
+
+/**
+ * normalizeSvgForSlot(svgText, part)
+ *  - Sanitize -> measure tight bbox -> scale & center into the target slot viewBox
+ *  - Transparent background preserved
+ *  - Adds data-slot + data-anim (if present)
+ */
+function normalizeSvgForSlot(svgText, part){
+  const safe = sanitizeSVG(svgText);
+  if (!safe) return '';
+  const slot = _mapPartToSlot(part);
+  const targetVBStr = TARGET_VB[slot] || '0 0 128 128';
+  const targetVB = _parseVB(targetVBStr);
+
+  const measureHost = _ensureMeasureHost();
+  const container = document.createElement('div');
+  container.innerHTML = safe;
+  const svgIn = container.querySelector('svg');
+  if (!svgIn) return '';
+
+  // Strip any background from root style
+  if (svgIn.hasAttribute('style')) {
+    svgIn.setAttribute('style', svgIn.getAttribute('style').replace(/background(-color)?\s*:[^;]+;?/gi,''));
+  }
+
+  // Copy visible nodes (skip defs/title/desc/style)
+  const defs = svgIn.querySelector('defs');
+  const gfx = document.createElementNS('http://www.w3.org/2000/svg','g');
+  Array.from(svgIn.childNodes).forEach(n=>{
+    if (n.nodeType!==1) return;
+    const t = n.tagName.toLowerCase();
+    if (t==='defs'||t==='metadata'||t==='title'||t==='desc'||t==='style') return;
+    gfx.appendChild(n.cloneNode(true));
+  });
+
+  // Measure tight bbox
+  const vbIn = _parseVB(svgIn.getAttribute('viewBox')) || _parseVB(targetVBStr) || {x:0,y:0,w:128,h:128};
+  const meas = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  meas.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  meas.setAttribute('viewBox', `${vbIn.x} ${vbIn.y} ${vbIn.w} ${vbIn.h}`);
+  if (defs) meas.appendChild(defs.cloneNode(true));
+  meas.appendChild(gfx);
+  measureHost.appendChild(meas);
+
+  let bbox;
+  try { bbox = gfx.getBBox(); } catch { bbox = null; }
+  if (!bbox || bbox.width<=0 || bbox.height<=0){
+    bbox = { x: vbIn.x, y: vbIn.y, width: vbIn.w, height: vbIn.h };
+  }
+
+  // Fit with tiny padding
+  const pad = 1.5;
+  const availW = targetVB.w - pad*2, availH = targetVB.h - pad*2;
+  const s = Math.min(availW / bbox.width, availH / bbox.height);
+  const scaledW = bbox.width*s, scaledH = bbox.height*s;
+  const tx = (targetVB.x + pad) + (availW - scaledW)/2 - bbox.x*s;
+  const ty = (targetVB.y + pad) + (availH - scaledH)/2 - bbox.y*s;
+
+  // Build output
+  const out = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  out.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  out.setAttribute('viewBox', `${targetVB.x} ${targetVB.y} ${targetVB.w} ${targetVB.h}`);
+  out.setAttribute('preserveAspectRatio','xMidYMid meet');
+  out.setAttribute('data-slot', slot);
+
+  const hasAnim = /<animate(?:Transform|Motion)?\b|@keyframes/i.test(safe);
+  if (hasAnim) out.setAttribute('data-anim','1');
+
+  if (defs) out.appendChild(defs.cloneNode(true));
+  const style = svgIn.querySelector('style'); if (style) out.appendChild(style.cloneNode(true));
+
+  const wrap = document.createElementNS('http://www.w3.org/2000/svg','g');
+  wrap.setAttribute('transform', `translate(${tx.toFixed(3)} ${ty.toFixed(3)}) scale(${s.toFixed(5)})`);
+
+  // Append original visible nodes (from original svg, not measured clones)
+  Array.from(container.querySelectorAll('svg > *')).forEach(n=>{
+    const t = n.tagName?.toLowerCase?.();
+    if (!t || t==='defs'||t==='metadata'||t==='title'||t==='desc'||t==='style') return;
+    wrap.appendChild(n);
+  });
+  out.appendChild(wrap);
+
+  try { measureHost.removeChild(meas); } catch {}
+  return out.outerHTML.replace(/\s{2,}/g,' ').replace(/\s+>/g,'>');
+}
   const DRAFT_KEY = 'izzaCraftDraft';
   function saveDraft(){
     try{
@@ -725,18 +841,21 @@ if (aiAnimChk){  aiAnimChk.checked = !!STATE.wantAnimation; aiAnimChk.addEventLi
       const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
 
       try{
-        const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-          ? window.ArmourPacks.injectCraftedItem({
-              name: STATE.currentName,
-              category: STATE.currentCategory,
-              part: STATE.currentPart,
-              svg: STATE.currentSVG,
-              priceIC,
-              sellInShop,
-              sellInPi,
-              featureFlags: STATE.featureFlags
-            })
-          : { ok:false, reason:'armour-packs-hook-missing' };
+        // Keep the player’s preview untouched; only normalize at mint time
+const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+
+const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+  ? window.ArmourPacks.injectCraftedItem({
+      name: STATE.currentName,
+      category: STATE.currentCategory,
+      part: STATE.currentPart,
+      svg: normalizedForSlot,          // <-- normalized version goes into the game
+      priceIC,
+      sellInShop,
+      sellInPi,
+      featureFlags: STATE.featureFlags
+    })
+  : { ok:false, reason:'armour-packs-hook-missing' };
 
         if (injected && injected.ok){
           craftStatus.textContent = 'Crafted ✓';
