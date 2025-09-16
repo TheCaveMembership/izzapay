@@ -190,7 +190,7 @@
                   if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
                   if (inv2[add.key].subtype==='gun'){
                     // starter ammo for new guns
-                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add[key]].ammo = 60;
+                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add.key].ammo = 60;
                   }
                 }
                 if (inv2[add.key].count!=null){ inv2[add.key].count = (inv2[add.key].count|0) + 1; } else { inv2[add.key].owned = true; }
@@ -230,61 +230,64 @@
     if(changed) _invWrite(inv);
   }
 
-  // ---- One-time migration ----
-  let _migratedOnce = false;
-  function migrateArmorPackItems(){
-    if(_migratedOnce) return;
-    const inv = _invRead(); let changed=false;
+  // ---- Migration: normalize any legacy armour entries *every time* inventory changes
+function migrateArmorPackItems(){
+  const inv = _invRead(); let changed = false;
 
-    const setIds = new Set(SETS.map(s=> s.id));
-    function pieceSlotFromKey(k){
-      if(/_helmet$/.test(k)) return 'head';
-      if(/_vest$/.test(k))   return 'chest';
-      if(/_legs$/.test(k))   return 'legs';
-      if(/_arms$/.test(k))   return 'arms';
-      return null;
-    }
-    function nameFromKey(k){
-      const sid = k.replace(/_(helmet|vest|legs|arms)$/,'');
-      const set = SETS.find(s=> s.id===sid);
-      const piece = /helmet$/.test(k)?'Helmet': /vest$/.test(k)?'Vest': /legs$/.test(k)?'Legs':'Arms';
-      return set ? `${set.name} ${piece}` : k;
-    }
-    function inlineSvgForKey(k){
-      const sid = k.replace(/_(helmet|vest|legs|arms)$/,'');
-      const set = SETS.find(s=> s.id===sid);
-      const pieceKey = /helmet$/.test(k)?'helmet': /vest$/.test(k)?'vest': /legs$/.test(k)?'legs':'arms';
-      if(!set) return '';
-      return svgIconArmor(set, {key:pieceKey, pretty:''});
-    }
+  const setIds = new Set(SETS.map(s => s.id));
 
-    Object.keys(inv).forEach(k=>{
-      const it = inv[k];
-      if(!it || typeof it!=='object') return;
-      const sid = k.split('_').slice(0,-1).join('_');
-      if(!setIds.has(sid)) return;
-
-      const slot = pieceSlotFromKey(k);
-      if(slot){ it.slot = it.slot || slot; }
-      it.type = it.type || 'armor';
-      it.equippable = true;
-      it.name = it.name || nameFromKey(k);
-
-      const prevCount = (it.count|0);
-      if(typeof it.count!=='number' || it.count<0) it.count = 0;
-      if(it.owned === true){ it.count = Math.max(it.count, 1); delete it.owned; }
-
-      const raw = (typeof it.iconSvg==='string' ? it.iconSvg : '').trim();
-      if(!raw || /^data:image\/svg\+xml/i.test(raw)){
-        it.iconSvg = inlineSvgForKey(k);
-      }
-
-      changed=true;
-    });
-
-    if(changed) _invWrite(inv);
-    _migratedOnce = true;
+  function pieceSlotFromKey(k){
+    if(/_helmet$/.test(k)) return 'head';
+    if(/_vest$/.test(k))   return 'chest';
+    if(/_legs$/.test(k))   return 'legs';
+    if(/_arms$/.test(k))   return 'arms';
+    return null;
   }
+  function nameFromKey(k){
+    const sid = k.replace(/_(helmet|vest|legs|arms)$/,'');
+    const set = SETS.find(s=> s.id===sid);
+    const piece = /helmet$/.test(k)?'Helmet': /vest$/.test(k)?'Vest': /legs$/.test(k)?'Legs':'Arms';
+    return set ? `${set.name} ${piece}` : k.replace(/_/g,' ');
+  }
+  function inlineSvgForKey(k){
+    const sid = k.replace(/_(helmet|vest|legs|arms)$/,'');
+    const set = SETS.find(s=> s.id===sid);
+    const pieceKey = /helmet$/.test(k)?'helmet': /vest$/.test(k)?'vest': /legs$/.test(k)?'legs':'arms';
+    return set ? svgIconArmor(set, { key:pieceKey, pretty:'' }) : '';
+  }
+
+  Object.keys(inv).forEach(k=>{
+    const it = inv[k];
+    if(!it || typeof it !== 'object') return;
+
+    // Only touch our armour-pack pieces
+    const sid = k.split('_').slice(0,-1).join('_');
+    if(!setIds.has(sid)) return;
+
+    const slot = pieceSlotFromKey(k);
+    if(slot && !it.slot){ it.slot = slot; changed = true; }
+
+    if(it.type !== 'armor'){ it.type = 'armor'; changed = true; }
+    if(it.equippable !== true){ it.equippable = true; changed = true; }
+    if(!it.name){ it.name = nameFromKey(k); changed = true; }
+
+    // Convert legacy owned:true to count:1 (and ensure numeric count)
+    if(typeof it.count !== 'number' || it.count < 0){
+      it.count = (it.owned === true ? 1 : (it.count|0));
+      delete it.owned;
+      changed = true;
+    }
+
+    // Ensure we have a sane-size inline SVG
+    const raw = (typeof it.iconSvg === 'string' ? it.iconSvg : '').trim();
+    if(!raw){
+      it.iconSvg = inlineSvgForKey(k);
+      changed = true;
+    }
+  });
+
+  if(changed) _invWrite(inv);
+}
 
   // ---- Overlays (draw over player) ----
   function drawPieceWorld(ctx, px, py, scale, ox, oy, fn){
@@ -507,21 +510,33 @@ if (type === 'weapon') {
   })();
 
   // ---- Safe boot/wire-up ----
-  function __armourPacksBoot(){
-    if (!window.IZZA || typeof IZZA.on!=='function') return false;
-    IZZA.on('ready', a=>{ api=a; migrateArmorPackItems(); });
-    IZZA.on('render-post', tryPatchShop);
-    IZZA.on('render-post', drawEquippedArmour);
-    window.addEventListener('izza-inventory-changed', normalizeEquipSlots);
-    IZZA.on('update-post', normalizeEquipSlots);
-    return true;
-  }
-  if (!__armourPacksBoot()){
-    document.addEventListener('izza-core-ready', __armourPacksBoot, { once:true });
-    let tries = 12;
-    const t = setInterval(()=>{
-      if (__armourPacksBoot()) clearInterval(t);
-      if (--tries <= 0) clearInterval(t);
-    }, 150);
-  }
-})();
+function __armourPacksBoot(){
+  if (!window.IZZA || typeof IZZA.on!=='function') return false;
+
+  IZZA.on('ready', a=>{ 
+    api = a; 
+    migrateArmorPackItems();       // fix existing saves at boot
+    normalizeEquipSlots();
+  });
+
+  IZZA.on('render-post', tryPatchShop);
+  IZZA.on('render-post', drawEquippedArmour);
+
+  // Re-run migration whenever inventory changes (covers legacy items you buy/open later)
+  window.addEventListener('izza-inventory-changed', ()=>{
+    migrateArmorPackItems();
+    normalizeEquipSlots();
+  });
+
+  // Keep equip state sane
+  IZZA.on('update-post', normalizeEquipSlots);
+  return true;
+}
+if (!__armourPacksBoot()){
+  document.addEventListener('izza-core-ready', __armourPacksBoot, { once:true });
+  let tries = 12;
+  const t = setInterval(()=>{
+    if (__armourPacksBoot()) clearInterval(t);
+    if (--tries <= 0) clearInterval(t);
+  }, 150);
+}
