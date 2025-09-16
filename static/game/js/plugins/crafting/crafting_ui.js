@@ -32,164 +32,219 @@
     packageCredits: null,
     createSub: 'setup',
   };
-// === High-Variety Icon/Overlay Generator ==============================
-// Deterministic variety using seed(name+prompt+attempt). Produces 128x128 SVGs.
-// Uses gradients, masks, glows, decals, and part-aware silhouettes.
-(function(){
-  function hash32(str){
-    let h = 2166136261 >>> 0;
-    for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-    return h >>> 0;
-  }
-  function rng(seed){ let x = seed||123456789; return ()=>((x^=x<<13,x^=x>>>17,x^=x<<5)>>>0)/4294967296; }
-  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const pick=(r,arr)=>arr[(r()*arr.length)|0];
 
-  // 16 curated palettes (trim/background, base, shade, accent/glow)
-  const PALETTES = [
-    ["#0b1020","#7b3cff","#4321a1","#ff66ff"],
-    ["#0f172a","#00c2a8","#0a7a6c","#8affec"],
-    ["#1f2937","#ff6a3a","#9c3e1e","#ffd0a6"],
-    ["#111111","#d6a740","#8c6a1f","#ffe17a"],
-    ["#151016","#c13b8a","#7b2458","#ff9ed3"],
-    ["#081421","#50b0ff","#215e96","#a8ddff"],
-    ["#131a12","#6bd67b","#2c6b37","#ccffd8"],
-    ["#1a1113","#ff6b9a","#953457","#ffd0e1"],
-    ["#0d141b","#7cf2ff","#256c73","#e3ffff"],
-    ["#1a1a26","#b4b8ff","#4f52a6","#e0e2ff"],
-    ["#0d0b0f","#ff9f3b","#83420e","#ffd6a8"],
-    ["#0b0f14","#78ffbd","#2f7358","#d6ffe9"],
-    ["#16130f","#ffc95a","#7f5620","#ffe5a0"],
-    ["#0e1220","#a45bff","#4e2a91","#e3c7ff"],
-    ["#091311","#7ff4cf","#2f7062","#d5fff2"],
-    ["#0a0a12","#ff5f5f","#8a2e2e","#ffc4c4"],
-  ];
+  // === Prompt→Concept Icon Engine (general-purpose, composite, rotating) ===
+  (function(){
+    // --- utils --------------------------------------------------------------
+    function hash32(str){ let h=2166136261>>>0; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+    function rng(seed){ let x=seed||123456789; return ()=>((x^=x<<13,x^=x>>>17,x^=x<<5)>>>0)/4294967296; }
+    const pick=(r,a)=>a[(r()*a.length)|0], clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+    const lc=s=>String(s||'').toLowerCase();
 
-  // Decals to overlay (runes, chevrons, stars, grid, bolt, fangs)
-  function decals(r, col){
-    const op = (x)=>clamp(0.6 + r()*0.35, 0.55, 0.95);
-    const k = (r()*6)|0;
-    switch(k){
-      case 0: return `<path d="M64 40 L74 64 L64 88 L54 64 Z" fill="${col}" opacity="${op()}"/>`;
-      case 1: return `<path d="M28 74 L64 88 L100 74 L100 82 L64 96 L28 82Z" fill="${col}" opacity="${op()}"/>`;
-      case 2: return `<g opacity="${op()}">${Array.from({length:5},(_,i)=>`<rect x="${30+i*16}" y="56" width="6" height="6" fill="${col}"/>`).join('')}</g>`;
-      case 3: return `<path d="M64 36 L82 76 L46 56 L82 56 L46 76Z" fill="${col}" opacity="${op()}"/>`;
-      case 4: return `<path d="M62 44 L70 44 L64 66 L84 66 L48 96 L58 74 L44 74Z" fill="${col}" opacity="${op()}"/>`;
-      default:return `<path d="M48 84 c8 2 10 8 16 8 c6 0 8-6 16-8" stroke="${col}" stroke-width="5" fill="none" opacity="${op()}"/>`;
+    // --- palettes + bias ----------------------------------------------------
+    const PALETTES = [
+      ["#0f1624","#7b3cff","#4321a1","#ff66ff"],["#0f172a","#00c2a8","#0a7a6c","#8affec"],
+      ["#1f2937","#ff6a3a","#9c3e1e","#ffd0a6"],["#101014","#d6a740","#8c6a1f","#ffe17a"],
+      ["#120e1a","#ff6b9a","#953457","#ffd0e1"],["#0a121a","#50b0ff","#215e96","#a8ddff"],
+      ["#11160f","#6bd67b","#2c6b37","#ccffd8"],["#0d141b","#7cf2ff","#256c73","#e3ffff"]
+    ];
+    function biasPalette(prompt, r){
+      const p=lc(prompt);
+      if(/gold|royal/.test(p))  return ["#0e0a0a","#d6a740","#8c6a1f","#ffe17a"];
+      if(/red|scarlet/.test(p)) return ["#0a0a12","#ff5f5f","#8a2e2e","#ffb3b3"];
+      if(/purple|violet/.test(p)) return ["#0f1624","#7b3cff","#4321a1","#ff66ff"];
+      if(/emerald|green/.test(p)) return ["#11160f","#6bd67b","#2c6b37","#ccffd8"];
+      if(/aqua|cyan|teal/.test(p)) return ["#0f172a","#00c2a8","#0a7a6c","#8affec"];
+      return pick(r, PALETTES);
     }
-  }
 
-  // Silhouettes per part
-  function shellHelmet(base,shade){
-    return `
-      <path d="M20 62c0-24 22-40 40-44c6-1 10-2 20 0c18 3 40 20 40 44v20c0 8-6 14-14 14H34c-8 0-14-6-14-14V62z" fill="${base}"/>
-      <rect x="28" y="78" width="72" height="12" rx="6" fill="${shade}"/>`;
-  }
-  function shellVest(base,shade){
-    return `
-      <path d="M30 36h68c8 0 14 6 14 14v44c0 8-6 14-14 14H30c-8 0-14-6-14-14V50c0-8 6-14 14-14z" fill="${base}"/>
-      <rect x="34" y="56" width="60" height="14" rx="6" fill="${shade}"/>`;
-  }
-  function shellArms(base,shade){
-    return `
-      <rect x="18" y="52" width="22" height="36" rx="8" fill="${base}"/>
-      <rect x="88" y="52" width="22" height="36" rx="8" fill="${base}"/>
-      <rect x="22" y="66" width="14" height="12" rx="4" fill="${shade}"/>
-      <rect x="92" y="66" width="14" height="12" rx="4" fill="${shade}"/>`;
-  }
-  function shellLegs(base,shade){
-    return `
-      <rect x="36" y="54" width="20" height="46" rx="6" fill="${base}"/>
-      <rect x="72" y="54" width="20" height="46" rx="6" fill="${base}"/>
-      <rect x="36" y="74" width="56" height="8" rx="4" fill="${shade}"/>`;
-  }
-  function shellGun(base,shade){
-    return `
-      <rect x="20" y="54" width="74" height="18" rx="4" fill="${base}"/>
-      <rect x="76" y="72" width="12" height="24" rx="2" fill="${shade}"/>
-      <rect x="96" y="58" width="12" height="6" fill="${base}"/>`;
-  }
-  function shellMelee(base,shade){
-    return `
-      <rect x="60" y="22" width="8" height="64" rx="2" fill="${base}"/>
-      <rect x="48" y="78" width="32" height="10" rx="5" fill="${shade}"/>`;
-  }
+    // --- prompt → tags ------------------------------------------------------
+    const LEX = {
+      weapon: /(gun|pistol|rifle|blaster|uzi|melee|sword|blade|dagger|katana|spear)\b/,
+      ride: /\b(ride|riding|mounted|on top of)\b/,
+      face: /\b(face|mask|skull|head|clown|smile|angry|happy)\b/,
+      animal: /\b(dinosaur|dragon|t-rex|trex|raptor|cat|dog|wolf|lion|tiger|bird)\b/,
+      decor: /\b(wing|crown|flame|flames|star|halo|rune|sigil|crest|skull|heart|lightning)\b/,
+      style: /\b(retro|pixel|neon|cyber|steampunk|tribal|graffiti|glow|shiny)\b/
+    };
+    function parsePrompt(prompt){
+      const p=lc(prompt);
+      const tags=new Set();
+      const m=(re,tag)=>{ if(re.test(p)) tags.add(tag); };
+      // high-level
+      if(LEX.weapon.test(p)) tags.add("weapon");
+      if(LEX.ride.test(p)) tags.add("ride");
+      if(LEX.face.test(p)) tags.add("face");
+      if(LEX.animal.test(p)) tags.add("animal");
+      if(LEX.decor.test(p)) tags.add("decor");
+      if(LEX.style.test(p)) tags.add("style");
+      // specific nouns we want to keep literally for fallback glyphs
+      (p.match(/[a-z0-9]+/g)||[]).forEach(t=>{
+        if(["a","the","and","of","on","with"].includes(t)) return;
+        if(t.length>2) tags.add("kw:"+t);
+      });
+      // detail nouns
+      if(/\bclown\b/.test(p)) tags.add("clown");
+      if(/\bdino(saur)?|t-?rex|raptor\b/.test(p)) tags.add("dino");
+      if(/\bgun|pistol|rifle|blaster|uzi\b/.test(p)) tags.add("gun");
+      if(/\bmelee|sword|blade|dagger|katana|spear\b/.test(p)) tags.add("melee");
+      return Array.from(tags);
+    }
 
-  // Horn/crest add-ons (mostly for helmets)
-  function horns(r, base, shade){
-    const t = (r()*3)|0;
-    if (t===0) return '';
-    if (t===1) return `<path d="M40 30c-8 6-12 16-12 28c8-6 18-6 26-2c0-12-4-20-14-26z" fill="${base}"/>
-                       <path d="M88 30c8 6 12 16 12 28c-8-6-18-6-26-2c0-12 4-20 14-26z" fill="${base}"/>`;
-    return `<path d="M34 46c-6 0-8 8-2 12c2 1 4 1 6 0c2-2 3-6 1-9c-1-2-3-3-5-3z" fill="${shade}"/>
-            <path d="M94 46c6 0 8 8 2 12c-2 1-4 1-6 0c-2-2-3-6-1-9c1-2 3-3 5-3z" fill="${shade}"/>`;
-  }
+    // --- defs (glow + optional gold gradient + vignette) --------------------
+    function defsFx(seed, glow, wantGold){
+      const gid=`g${seed}`, fid=`f${seed}`, bid=`b${seed}`;
+      const gold = wantGold ? `
+        <linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fff4c4"/><stop offset="40%" stop-color="#ffd36e"/>
+          <stop offset="70%" stop-color="#d6a740"/><stop offset="100%" stop-color="#8c6a1f"/>
+        </linearGradient>` : '';
+      return `
+        <filter id="${fid}" x="-25%" y="-25%" width="150%" height="150%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <radialGradient id="${bid}" cx="50%" cy="45%" r="62%">
+          <stop offset="0%" stop-color="${glow}" stop-opacity="0.30"/>
+          <stop offset="100%" stop-color="${glow}" stop-opacity="0"/>
+        </radialGradient>
+        ${gold}
+      `;
+    }
 
-  // One generator to rule them all
-  function genSVG({ name="", prompt="", part="helmet", seedExtra=0 } = {}){
-    const seed = hash32(`${name}::${prompt}::${part}::${seedExtra}`);
-    const r = rng(seed);
-    const [trim, base, shade, glow] = pick(r, PALETTES);
-    const bgRad = 48 + (r()*20|0);
-    const useGrid = r() > 0.6;
-    const useMask = r() > 0.5;
-    const glowBlur = 2 + (r()*3|0);
+    // --- primitives ---------------------------------------------------------
+    const rect=(x,y,w,h,rx,f,op=1,tr="")=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx||0}" fill="${f}" opacity="${op}" ${tr?`transform="${tr}"`:''}/>`;
+    const circ=(cx,cy,r,f,op=1,tr="")=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${f}" opacity="${op}" ${tr?`transform="${tr}"`:''}/>`;
+    const path=(d,f,sw=0,sc="none",op=1,tr="")=>`<path d="${d}" fill="${f}" stroke="${sc}" stroke-width="${sw}" opacity="${op}" ${tr?`transform="${tr}"`:''}/>`;
+    const ell =(cx,cy,rx,ry,f,op=1,tr="")=>`<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${f}" opacity="${op}" ${tr?`transform="${tr}"`:''}/>`;
+    const line=(x1,y1,x2,y2,sw,sc,op=1)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"/>`;
 
-    // choose shell by part
-    const shell =
-      part==="helmet" ? shellHelmet(base,shade) :
-      part==="vest"   ? shellVest(base,shade)   :
-      part==="arms"   ? shellArms(base,shade)   :
-      part==="legs"   ? shellLegs(base,shade)   :
-      part==="gun"    ? shellGun(base,shade)    :
-      part==="melee"  ? shellMelee(base,shade)  :
-                        shellVest(base,shade);
+    // --- frames -------------------------------------------------------------
+    function frameGun(base,shade,trim){
+      return `
+        ${rect(18,52,78,18,4,base)}
+        ${rect(74,70,12,22,2,shade)}
+        ${rect(96,56,12,6,base)}
+        ${rect(44,40,24,8,2,trim,0.7)}
+      `;
+    }
+    function frameMelee(base,shade){
+      return `${rect(60,22,8,58,3,base)}${rect(48,78,32,10,5,shade)}`;
+    }
+    function crestShell(part,base,shade){
+      if(part==="helmet") return `${path("M24,60 C24,38 42,22 64,18 C86,22 104,38 104,60 v20 c0,8 -6,14 -14,14 H38 c-8,0 -14,-6 -14,-14 z", base)}${rect(30,78,68,10,6,shade)}`;
+      if(part==="vest")   return `${rect(26,40,76,58,10,base)}${rect(34,60,60,12,6,shade)}`;
+      if(part==="arms")   return `${rect(18,54,22,34,8,base)}${rect(88,54,22,34,8,base)}${rect(24,66,10,10,3,shade)}${rect(94,66,10,10,3,shade)}`;
+      if(part==="legs")   return `${rect(36,56,20,44,6,base)}${rect(72,56,20,44,6,base)}${rect(36,76,56,8,4,shade)}`;
+      return `${rect(26,40,76,58,10,base)}${rect(34,60,60,12,6,shade)}`;
+    }
 
-    // hero overlay (decal + optional horns if helmet)
-    const overlay =
-      (part==="helmet" ? horns(r,base,shade) : '') +
-      decals(r, glow);
+    // --- motifs (faces, animals, props) ------------------------------------
+    function clownFace(r, base, glow){
+      const hat = path("M40,40 L88,40 L64,20 Z", glow, 0, "none", 1, "");
+      const face= ell(64,64,20,18,"#ffe6cc");
+      const eyes= `${circ(56,60,3,"#222")}${circ(72,60,3,"#222")}`;
+      const nose= circ(64,66,4,"#ff4a4a");
+      const smile= path("M52,72 Q64,82 76,72","none",3,"#222",1);
+      return `<g>${hat}${face}${eyes}${nose}${smile}</g>`;
+    }
+    function dinoBody(r, base, shade, glow){
+      const body = path("M36,86 C36,64 60,52 78,56 C98,60 110,70 110,86 Z", base);
+      const belly= path("M42,86 C44,74 60,64 78,68 C92,71 102,78 104,86 Z", shade,0,"none",0.9);
+      const eye  = circ(92,72,2,"#111");
+      const back = line(46,68,86,60,3,glow,0.4);
+      return `<g>${body}${belly}${eye}${back}</g>`;
+    }
+    function crown(glow){ return path("M36,46 L48,36 L60,46 L72,36 L84,46 L84,50 L36,50 Z", "url(#bkg)", 2, glow, 0.9); }
+    function wings(glow){ return `<g opacity="0.7">${path("M26,70 C26,56 40,52 50,60 C44,66 40,72 36,78 Z","none",2,glow)}${path("M102,70 C102,56 88,52 78,60 C84,66 88,72 92,78 Z","none",2,glow)}</g>`; }
+    function flames(glow){ return `<g opacity="0.75">${path("M64,96 C58,90 60,80 64,74 C68,80 70,90 64,96 Z", glow)}${path("M72,96 C66,90 68,80 72,74 C76,80 78,90 72,96 Z", glow,0,"none",0.8)}</g>`; }
 
-    // subtle grid or vignette
-    const bg = useGrid
-      ? Array.from({length:6},(_,i)=>`<rect x="${16+i*18}" y="16" width="2" height="96" fill="${trim}" opacity="0.18"/>`).join('')
-      : `<radialGradient id="g${seed}" cx="50%" cy="40%" r="60%"><stop offset="0%" stop-color="${trim}" stop-opacity="1"/><stop offset="100%" stop-color="${trim}" stop-opacity="0.6"/></radialGradient><rect x="4" y="4" width="120" height="120" rx="14" fill="url(#g${seed})"/>`;
+    // Fallback glyph stack when noun is unknown
+    function abstractGlyphs(r, glow, trim){
+      const n=4+(r()*4|0); let g='';
+      for(let i=0;i<n;i++){
+        const x=24+(r()*80|0), y=24+(r()*80|0), s=6+(r()*16|0), rot=(r()*360|0);
+        g += rect(x,y,s,s,2,glow,0.25+0.35*r(),`rotate(${rot} ${x+s/2} ${y+s/2})`);
+      }
+      g += circ(64,64,22,glow,0.15);
+      g += rect(30,30,68,68,12,trim,0.12);
+      return `<g filter="url(#fX)">${g}</g>`;
+    }
 
-    // fancy mask ring
-    const mask = useMask
-      ? `<mask id="m${seed}">
-           <rect x="0" y="0" width="128" height="128" fill="black"/>
-           <circle cx="64" cy="${bgRad}" r="${bgRad}" fill="white"/>
-         </mask>`
-      : '';
+    // --- layout: ride composition ------------------------------------------
+    function composeRide(r, rider, mount, extras){
+      // slight vertical stack with jitter & rotation
+      return `
+        <g transform="translate(0,-6) rotate(${(r()*6-3)|0} 64 64)">
+          ${mount}
+          <g transform="translate(0,-18)">${rider}</g>
+          ${extras||''}
+        </g>`;
+    }
 
-    // glow filter
-    const filter = `<filter id="f${seed}" x="-20%" y="-20%" width="140%" height="140%">
-        <feGaussianBlur stdDeviation="${glowBlur}" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>`;
+    // --- main ---------------------------------------------------------------
+    function genSVG({ name="", prompt="", part="helmet", seedExtra=0 } = {}){
+      const seed = hash32(`${name}::${prompt}::${part}::${seedExtra}`);
+      const r = rng(seed);
+      const [trim, base, shade, glow] = biasPalette(prompt, r);
+      const tags = parsePrompt(prompt);
+      const wantGold = /gold|golden/.test(lc(prompt));
+      const defs = defsFx(seed, glow, wantGold);
 
-    return `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <defs>
-    ${filter}
-    ${mask}
-  </defs>
-  <rect x="4" y="4" width="120" height="120" rx="14" fill="${trim}"/>
-  ${bg}
-  <g ${useMask ? `mask="url(#m${seed})"` : ''}>
+      // background + subtle vignette
+      const bg = `
+        <rect x="4" y="4" width="120" height="120" rx="14" fill="${trim}"/>
+        <rect x="4" y="4" width="120" height="120" rx="14" fill="url(#b${seed})"/>
+      `;
+
+      // frame or crest shell
+      const isGun   = tags.includes("gun")   || (tags.includes("weapon") && /gun|pistol|rifle|blaster|uzi/.test(lc(prompt)));
+      const isMelee = tags.includes("melee") || (tags.includes("weapon") && /sword|blade|dagger|katana|spear/.test(lc(prompt)));
+      const frame = isGun ? frameGun(base,shade,trim) : isMelee ? frameMelee(base,shade) : crestShell(part, base, shade);
+
+      // rider/mount logic
+      const wantRide = tags.includes("ride") || /\b(on|riding|mounted)\b/.test(lc(prompt));
+      const rider = tags.includes("clown") ? clownFace(r, base, glow) :
+                    tags.includes("face")  ? clownFace(r, base, glow) : null;
+      const mount = tags.includes("dino")  ? dinoBody(r, base, shade, glow) : null;
+
+      // extras by decor tags
+      let deco = '';
+      if(/\bcrown\b/.test(lc(prompt)))  deco += crown(glow);
+      if(/\bwing/.test(lc(prompt)))     deco += wings(glow);
+      if(/\bflame|flames\b/.test(lc(prompt))) deco += flames(glow);
+
+      // fallback if neither rider nor mount described
+      let mascot='';
+      if (rider && mount && wantRide) mascot = composeRide(r, rider, mount, deco);
+      else if (rider && !mount)       mascot = `<g transform="translate(0,-4)">${rider}${deco}</g>`;
+      else if (!rider && mount)       mascot = `<g>${mount}${deco}</g>`;
+      else                            mascot = abstractGlyphs(r, glow, trim);
+
+      // mask vignette id
+      const vignId = `b${seed}`;
+      const out = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+    <defs>
+      ${defs}
+      <radialGradient id="${vignId}" cx="50%" cy="45%" r="62%">
+        <stop offset="0%" stop-color="${glow}" stop-opacity="0.15"/>
+        <stop offset="100%" stop-color="${glow}" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    ${bg}
     <g filter="url(#f${seed})">
-      ${shell}
-      ${overlay}
+      ${frame}
+      ${mascot}
     </g>
-  </g>
-  <path d="M28 40 Q64 ${36+((r()*10)|0)} 100 40" stroke="#fff" stroke-opacity="${0.08 + r()*0.1}" stroke-width="${2 + (r()*2|0)}" fill="none"/>
-</svg>`;
-  }
+    <path d="M28 40 Q64 ${36+((r()*10)|0)} 100 40" stroke="#fff" stroke-opacity="${0.06 + r()*0.08}" stroke-width="${2 + (r()*2|0)}" fill="none"/>
+  </svg>`;
+      return out;
+    }
 
-  // Expose globally
-  window.IzzaArtGen = { genSVG };
-})();
+    window.IzzaArtGen = { genSVG };
+  })();
+
   const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   const api = (p)=> (API_BASE ? API_BASE + p : p);
 
@@ -289,8 +344,7 @@
   function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
-  // --- AI prompt: server first, then local fallback (keywords -> SVG) ---
-    // --- AI prompt: server first, then local high-variety generator ---
+  // --- AI prompt: server first, then local high-variety generator ---
   async function aiToSVG(prompt){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
