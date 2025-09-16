@@ -375,7 +375,103 @@
       }
     });
   })();
+// Add near the bottom of armour_packs_plugin.js (without touching existing code)
+// Minimal new public hook for Crafting UI → armoury path
+(function(){
+  // map craft "part" to armour slot (reuses your slot normalization logic)
+  function partToSlot(part){
+    switch(String(part||'').toLowerCase()){
+      case 'helmet': return 'head';
+      case 'vest':   return 'chest';
+      case 'legs':   return 'legs';
+      case 'arms':   return 'arms';
+      default:       return 'chest'; // sane default for apparel/merch visuals overlay
+    }
+  }
 
+  // Generate a safe unique key for inventory/shop based on name + timestamp
+  function makeKey(name){
+    const base = (String(name||'untitled').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'item');
+    return `craft_${base}_${Date.now()}`;
+  }
+
+  function ensureSvgWrap(svg){
+    const txt = String(svg||'').trim();
+    return /<svg/i.test(txt) ? txt : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">${txt}</svg>`;
+  }
+
+  // Public:
+  window.ArmourPacks = window.ArmourPacks || {};
+  window.ArmourPacks.injectCraftedItem = function(input){
+    try{
+      const name = String(input?.name||'Untitled').slice(0,48);
+      const key  = makeKey(name);
+      const slot = partToSlot(input?.part);
+      const inlineSvg = ensureSvgWrap(input?.svg||'');
+
+      // ----- inventory grant (mirrors armour grant) -----
+      // Uses the same fields you already use: type:'armor', slot, equippable, iconSvg
+      const inv = (typeof _invRead==='function') ? _invRead() : (IZZA?.api?.getInventory?.()||{});
+      inv[key] = inv[key] || { count:0, name, type:'armor', slot, equippable:true, iconSvg:inlineSvg };
+      if (inv[key].count!=null){ inv[key].count = (inv[key].count|0) + 1; } else { inv[key].owned = true; }
+      if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
+
+      if (typeof _invWrite==='function') _invWrite(inv);
+      else if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv);
+
+      try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
+      try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+
+      // ----- optional: add to shop list (BUY tab) this session -----
+      const sellInShop = !!input?.sellInShop;
+      const price = Math.max(50, Math.min(250, parseInt(input?.priceIC||'100',10)||100));
+      if (sellInShop){
+        const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
+        if (list && !list.querySelector(`[data-craft-item="${key}"]`)){
+          const row = document.createElement('div'); row.className='shop-item'; row.dataset.craftItem = key;
+          row.setAttribute('data-store-ext','1');
+          const meta = document.createElement('div'); meta.className='meta';
+          meta.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px">
+              <div data-icon="1">${inlineSvg}</div>
+              <div>
+                <div class="name">${name}</div>
+                <div class="sub" style="opacity:.85">Custom · ${slot}</div>
+              </div>
+            </div>`;
+          const btn = document.createElement('button'); btn.className='buy'; btn.textContent = `${price} IC`;
+          btn.addEventListener('click', ()=>{
+            try{
+              const coins = IZZA?.api?.getCoins ? IZZA.api.getCoins() : (IZZA?.api?.player?.coins|0);
+              if ((coins|0) < price){ alert('Not enough IZZA Coins'); return; }
+              IZZA?.api?.setCoins && IZZA.api.setCoins((coins|0) - price);
+
+              const inv2 = (typeof _invRead==='function') ? _invRead() : (IZZA?.api?.getInventory?.()||{});
+              inv2[key] = inv2[key] || { count:0, name, type:'armor', slot, equippable:true, iconSvg:inlineSvg };
+              if (inv2[key].count!=null){ inv2[key].count = (inv2[key].count|0) + 1; } else { inv2[key].owned = true; }
+
+              if (typeof _invWrite==='function') _invWrite(inv2);
+              else if (IZZA?.api?.setInventory) IZZA.api.setInventory(inv2);
+
+              try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
+              IZZA.toast?.(\`Purchased \${name}\`);
+              try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
+            }catch(e){ console.warn('[craft shop] buy failed', e); }
+          });
+          row.appendChild(meta);
+          row.appendChild(btn);
+          list.appendChild(row);
+        }
+      }
+
+      // (Optional flag; Crafting UI doesn’t currently use sellInPi here)
+      return { ok:true, id:key };
+    }catch(e){
+      console.warn('[ArmourPacks.injectCraftedItem] failed', e);
+      return { ok:false, reason:String(e) };
+    }
+  };
+})();
   // ---- Wire up
   IZZA.on('ready', a=>{ api=a; migrateArmorPackItems(); });
   IZZA.on('render-post', tryPatchShop);
