@@ -29,15 +29,15 @@
     currentPart: 'helmet',       // helmet | vest | arms | legs || (weapon subtypes)
     fireRateRequested: 0,
     dmgHearts: 0.5,
-    packageCredits: null, // if the user purchased a package this session
+    packageCredits: null,
     createSub: 'setup',   // 'setup' | 'visuals'
   };
 
-  // ---- API base helper: use the host you expose in play.html ----
-  const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,''); // e.g. https://izzagame.onrender.com
+  // ---- API base helper (kept) ----
+  const API_BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   const api = (p)=> (API_BASE ? API_BASE + p : p);
 
-  // ---------- DRAFT PERSISTENCE (keep progress across reloads) ----------
+  // ---------- DRAFT ----------
   const DRAFT_KEY = 'izzaCraftDraft';
   function saveDraft(){
     try{
@@ -62,8 +62,8 @@
     }catch{}
   }
 
-  // ---------- UTIL: moderation ----------
-  const BAD_WORDS = ['badword1','badword2','slur1','slur2']; // replace with your list
+  // ---------- moderation ----------
+  const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
     const s = String(name||'').trim();
     if (s.length < 3 || s.length > 28) return { ok:false, reason:'Name must be 3–28 chars' };
@@ -72,15 +72,11 @@
     return { ok:true };
   }
 
-  // Strip dangerous SVG bits; keep it tight
   function sanitizeSVG(svg){
     try{
       const txt = String(svg||'');
-      // quick rejects
       if (txt.length > 200_000) throw new Error('SVG too large');
       if (/script|onload|onerror|foreignObject|iframe/i.test(txt)) throw new Error('Disallowed elements/attrs');
-
-      // remove external hrefs, javascript:, data: images (allow only inline shapes/paths)
       const cleaned = txt
         .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
         .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
@@ -95,7 +91,7 @@
     }
   }
 
-  // ---------- UTIL: coins + server ----------
+  // ---------- coins ----------
   function getIC(){
     try{ return parseInt(localStorage.getItem('izzaCoins')||'0',10)||0; }catch{ return 0; }
   }
@@ -112,9 +108,8 @@
     return await r.json().catch(()=> ({}));
   }
 
-  // ---------- Pi payment (skeleton) ----------
+  // ---------- Pi (kept) ----------
   async function payWithPi(amountPi, memo){
-    // NOTE: you likely already call Pi.init elsewhere; keep this minimal
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
     }
@@ -132,7 +127,6 @@
           await serverJSON(api('/api/crafting/pi/complete'), { method:'POST', body:JSON.stringify({ paymentId, txid }) });
         }
       });
-      // res.status === 'COMPLETED' usually; treat as success if so
       if (res && res.status && /complete/i.test(res.status)) return { ok:true, receipt:res };
       return { ok:false, reason:'pi-not-complete', raw:res };
     }catch(e){
@@ -141,17 +135,15 @@
     }
   }
 
-  // ---------- IZZA Coin payment ----------
+  // ---------- IZZA Coin payment (kept) ----------
   async function payWithIC(amountIC){
     const cur = getIC();
     if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
     setIC(cur - amountIC);
-    // optional: hit server to record spend
     try{ await serverJSON(api('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
     return { ok:true };
   }
 
-  // ---------- Feature pricing ----------
   function selectedAddOnCount(){
     return Object.values(STATE.featureFlags).filter(Boolean).length;
   }
@@ -161,21 +153,16 @@
     return base + addon * selectedAddOnCount();
   }
 
-  // ---------- AI attempt (stub) ----------
+  // ---------- AI (kept stub) ----------
   async function aiToSVG(prompt){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
-    // call your real endpoint here
     const j = await serverJSON(api('/api/crafting/ai_svg'), { method:'POST', body:JSON.stringify({ prompt }) });
     if (!j || !j.ok || !j.svg) throw new Error('AI failed');
-    // only decrement if we can render (cheap check)
     const cleaned = sanitizeSVG(j.svg);
     if (!cleaned) throw new Error('SVG rejected by sanitizer');
     STATE.aiAttemptsLeft -= 1;
     return cleaned;
   }
-
-  // ---------- Mount UI ----------
-  function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; }
 
   function renderTabs(){
     return `
@@ -216,8 +203,7 @@
 
   function renderCreate(){
     const totalPi = calcTotalCost({ usePi:true });
-    the totalIC = calcTotalCost({ usePi:false });
-
+    const totalIC = calcTotalCost({ usePi:false });
     const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
 
     return `
@@ -302,7 +288,8 @@
 
           <div id="svgPreview"
                style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
-                      min-height:220px; max-height:60vh; overflow:auto; display:flex; align-items:center; justify-content:center">
+                      min-height:220px; max-height:min(60vh,520px); overflow:auto;
+                      display:flex; align-items:center; justify-content:center">
             <div style="opacity:.6; font-size:12px">Preview appears here</div>
           </div>
         </div>
@@ -319,7 +306,7 @@
     `;
   }
 
-  // ---------- "My Creations" data + renderer ----------
+  // ---------- "My Creations" ----------
   async function fetchMine(){
     try{
       const j = await serverJSON(api('/api/crafting/mine'));
@@ -353,7 +340,6 @@
       ? items.map(mineCardHTML).join('')
       : '<div style="opacity:.7">No creations yet.</div>';
 
-    // actions
     host.querySelectorAll('[data-copy]').forEach(b=>{
       b.addEventListener('click', async ()=>{
         const id = b.dataset.copy;
@@ -376,7 +362,6 @@
     STATE.root = root;
     STATE.mounted = true;
 
-    // restore any saved draft before we render
     loadDraft();
 
     root.innerHTML = `
@@ -386,7 +371,6 @@
 
     const tabsHost = root.querySelector('#craftTabs');
 
-    // ⬇️ REPLACE your old setTab with this version
     const setTab = (name)=>{
       if(!STATE.mounted) return;
       if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
@@ -395,12 +379,10 @@
       bindInside();
     };
 
-    // tab button clicks
     root.querySelectorAll('[data-tab]').forEach(b=>{
       b.addEventListener('click', ()=> setTab(b.dataset.tab));
     });
 
-    // default tab
     setTab('packages');
   }
 
@@ -410,7 +392,7 @@
     STATE.mounted = false;
   }
 
-  async function handleBuySingle(kind){ // 'pi' or 'ic'
+  async function handleBuySingle(kind){
     const usePi = (kind==='pi');
     const total = calcTotalCost({ usePi });
 
@@ -431,8 +413,7 @@
     const root = STATE.root;
     if(!root) return;
 
-    /* ---------- Sub-tabs for Create Item (phones) ---------- */
-    // Wire this every render of the Create tab so "Setup/Visuals" always works
+    /* ---------- Sub-tabs ---------- */
     STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
       b.addEventListener('click', ()=>{
         STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
@@ -445,7 +426,7 @@
       }, { passive:true });
     });
 
-    /* ---------- Packages tab ---------- */
+    /* ---------- Packages ---------- */
     root.querySelectorAll('[data-buy-package]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = btn.dataset.buyPackage;
@@ -461,13 +442,13 @@
       btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
     });
 
-    /* ---------- Create tab: payments ---------- */
+    /* ---------- payments ---------- */
     const payPi = root.querySelector('#payPi');
     const payIC = root.querySelector('#payIC');
     payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
     payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
 
-    /* ---------- Create tab: form state ---------- */
+    /* ---------- form state ---------- */
     const itemName = root.querySelector('#itemName');
     if (itemName){
       itemName.value = STATE.currentName || '';
@@ -475,13 +456,11 @@
     }
 
     root.querySelectorAll('[data-ff]').forEach(cb=>{
-      // restore checked state from draft
       const key = cb.dataset.ff;
       if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
       cb.addEventListener('change', ()=>{
         STATE.featureFlags[key] = cb.checked;
         saveDraft();
-        // re-render to refresh the total cost line
         const host = root.querySelector('#craftTabs');
         if (!host) return;
         const saveScroll = host.scrollTop;
@@ -501,7 +480,7 @@
       const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
     };
 
-    /* ---------- Create tab: visuals ---------- */
+    /* ---------- visuals ---------- */
     const btnAI    = root.querySelector('#btnAI');
     const aiPrompt = root.querySelector('#aiPrompt');
     const svgIn    = root.querySelector('#svgIn');
@@ -510,8 +489,10 @@
     const prevHost = root.querySelector('#svgPreview');
     const craftStatus = root.querySelector('#craftStatus');
 
-    // restore SVG textarea + preview from draft, if any
-    if (svgIn && STATE.currentSVG){ svgIn.value = STATE.currentSVG; prevHost && (prevHost.innerHTML = STATE.currentSVG); }
+    if (svgIn && STATE.currentSVG){
+      svgIn.value = STATE.currentSVG;
+      prevHost && (prevHost.innerHTML = STATE.currentSVG);
+    }
 
     btnAI && btnAI.addEventListener('click', async ()=>{
       try{
@@ -521,13 +502,13 @@
         if (svgIn) svgIn.value = svg;
         if (prevHost) {
           prevHost.innerHTML = svg;
-          // scale nicely in the box
           const s = prevHost.querySelector('svg');
           if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
+          prevHost.scrollTop = prevHost.scrollHeight; // ensure fully visible
+          prevHost.scrollIntoView({block:'nearest'});
         }
         STATE.currentSVG = svg;
         saveDraft();
-        // show Mint button
         const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
         aiLeft();
       }catch(e){
@@ -542,21 +523,20 @@
         prevHost.innerHTML = cleaned;
         const s = prevHost.querySelector('svg');
         if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
+        prevHost.scrollTop = prevHost.scrollHeight; // show bottom if tall
+        prevHost.scrollIntoView({block:'nearest'});
       }
       STATE.currentSVG = cleaned;
       saveDraft();
-      // reveal Mint after a good preview
       const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
     });
 
     btnMint && btnMint.addEventListener('click', async ()=>{
       craftStatus.textContent = '';
 
-      // name moderation
       const nm = moderateName(STATE.currentName);
       if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-      // allow free test if PER_ITEM_IC is 0 and no add-ons
       const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
       if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
         craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
@@ -564,7 +544,7 @@
       }
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-      // shop price
+      // computed shop flags
       const sellInShop = !!root.querySelector('#sellInShop')?.checked;
       const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
       const priceIC    = Math.max(
@@ -573,27 +553,29 @@
       );
 
       try{
-        const payload = {
-          name: STATE.currentName,
-          category: STATE.currentCategory,
-          part: STATE.currentPart,
-          svg: STATE.currentSVG,
-          features: STATE.featureFlags,
-          sellInShop, sellInPi, priceIC
-        };
-        const res = await serverJSON(api('/api/crafting/mint'), { method:'POST', body:JSON.stringify(payload) });
-        if (res && res.ok){
+        // ---- NEW: inject into armoury path (no extra API) ----
+        const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+          ? window.ArmourPacks.injectCraftedItem({
+              name: STATE.currentName,
+              category: STATE.currentCategory,
+              part: STATE.currentPart,
+              svg: STATE.currentSVG,
+              priceIC,
+              sellInShop,
+              sellInPi
+            })
+          : { ok:false, reason:'armour-packs-hook-missing' };
+
+        if (injected && injected.ok){
           craftStatus.textContent = 'Crafted ✓';
-          STATE.hasPaidForCurrentItem = false; // consume payment/credit
-          // consume package credit if present
+          STATE.hasPaidForCurrentItem = false;
           if (STATE.packageCredits && STATE.packageCredits.items > 0){
             STATE.packageCredits.items -= 1;
             if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
           }
-          // refresh "Mine" if that tab is open, or just reload list quietly next time
           try{ hydrateMine(); }catch{}
         }else{
-          craftStatus.textContent = 'Server rejected the item';
+          craftStatus.textContent = 'Mint failed: '+(injected?.reason||'armour hook missing');
         }
       }catch(e){
         craftStatus.textContent = 'Error crafting: '+e.message;
