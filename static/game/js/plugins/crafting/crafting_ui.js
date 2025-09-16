@@ -1,4 +1,3 @@
-// --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
   vest:   "Chest/torso armor plate from a top-down 3/4 view. Keep shoulders within bounds.",
@@ -6,13 +5,27 @@ const SLOT_GUIDE = {
   legs:   "Two leg elements (thigh-to-shin). Balanced spacing between left and right.",
   hands:  "Weapon overlay (horizontal composition). Reads at 28px. No full character.",
   gun:    "Handheld gun (treat as hands slot; horizontal composition).",
-  melee:  "Handheld melee blade/club (treat as hands slot; horizontal composition)."
+  melee:  "Handheld melee blade/club (treat as hands slot; horizontal composition).",
+
+  // Apparel guidance (maps to armour slots)
+  shirt:      "Top graphic for chest slot; avoid sleeves overflowing.",
+  hoodie:     "Hooded top for chest slot; keep hood contained.",
+  jacket:     "Outerwear for chest slot; readable silhouette.",
+  pants:      "Pants mapped to legs slot; two leg areas distinct.",
+  sunglasses: "Glasses mapped to helmet/head slot; sit where eyes would be.",
+
+  // Merch
+  collectible:"Collectible/prop; keep within chest slot bounds."
 };
 
 // Map UI part to the server's slot keys
 function mapPartForServer(part){
   const p = String(part||'').toLowerCase();
   if (p==='gun' || p==='melee') return 'hands';
+  if (p==='shirt' || p==='hoodie' || p==='jacket') return 'vest';
+  if (p==='pants') return 'legs';
+  if (p==='sunglasses') return 'helmet';
+  if (p==='collectible') return 'vest';
   if (p==='helmet' || p==='vest' || p==='arms' || p==='legs' || p==='hands') return p;
   return 'helmet';
 }
@@ -25,7 +38,41 @@ const SLOT_VB = {
   legs:   '0 0 140 140',
   hands:  '0 0 160 100',
 };
+// Available part options per category
+const PART_OPTIONS = {
+  armour: [
+    { v:'helmet', t:'Helmet' },
+    { v:'vest',   t:'Vest'   },
+    { v:'arms',   t:'Arms'   },
+    { v:'legs',   t:'Legs'   },
+  ],
+  weapon: [
+    { v:'gun',    t:'Gun'    },
+    { v:'melee',  t:'Melee'  },
+  ],
+  apparel: [
+    // visual-only items; map to armour slots behind the scenes
+    { v:'shirt',      t:'Shirt'      }, // chest
+    { v:'hoodie',     t:'Hoodie'     }, // chest
+    { v:'jacket',     t:'Jacket'     }, // chest
+    { v:'pants',      t:'Pants'      }, // legs
+    { v:'sunglasses', t:'Sunglasses' }  // head
+  ],
+  merch: [
+    { v:'collectible', t:'Collectible' }, // visual-only
+  ]
+};
 
+function repopulatePartOptions(catSelEl, partSelEl){
+  const cat  = (catSelEl?.value || 'armour');
+  const opts = PART_OPTIONS[cat] || PART_OPTIONS.armour;
+
+  const prev = partSelEl?.value;
+  partSelEl.innerHTML = opts.map(o=> `<option value="${o.v}">${o.t}</option>`).join('');
+  partSelEl.value = opts.some(o=>o.v===prev) ? prev : opts[0].v;
+
+  STATE.currentPart = partSelEl.value;
+}
 // Compose the UX prompt shown to the model (keeps constraints tight)
 function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } = {}){
   const guide = SLOT_GUIDE[part] || '';
@@ -62,14 +109,25 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 // /static/game/js/plugins/crafting/crafting_ui.js
 (function(){
   const COSTS = Object.freeze({
-    PER_ITEM_IC:   0,
-    PER_ITEM_PI:   5,
-    ADDON_IC:      1000,
-    ADDON_PI:      1,
-    SHOP_MIN_IC:   50,
-    SHOP_MAX_IC:   250,
-    AI_ATTEMPTS:   5
-  });
+  // Single visual item mint (no extras)
+  PER_ITEM_IC:   2000,   // 2000 IZZA Coins
+  PER_ITEM_PI:   1,      // 1 Pi
+
+  // Add-on feature costs (still available for Armour/Weapon only)
+  ADDON_IC:      1000,
+  ADDON_PI:      1,
+
+  // Shop price limits
+  SHOP_MIN_IC:   50,
+  SHOP_MAX_IC:   250,
+
+  // AI attempts
+  AI_ATTEMPTS:   5,
+
+  // Starter Forge package (two pay options)
+  STARTER_PI:    5,
+  STARTER_IC:    10000
+});
 
   const STATE = {
   root: null,
@@ -234,8 +292,17 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
     return { ok:true };
   }
 
-  function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
-  function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
+  function selectedAddOnCount(){
+  // features are disabled for apparel & merch (visual-only)
+  if (STATE.currentCategory==='apparel' || STATE.currentCategory==='merch') return 0;
+  return Object.values(STATE.featureFlags).filter(Boolean).length;
+}
+
+function calcTotalCost({ usePi }){
+  const base   = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC;
+  const addonC = usePi ? COSTS.ADDON_PI    : COSTS.ADDON_IC;
+  return base + addonC * selectedAddOnCount();
+}
 
   // *** CHANGE 2: server-first, fallback is now a tiny basic blueprint icon ***
   // --- AI prompt: server first, then minimal fallback ---
@@ -307,8 +374,23 @@ const TARGET_VB = {
 // Gun/melee map to "hands" for slot fitting
 function _mapPartToSlot(p){
   p = String(p||'').toLowerCase();
+
+  // Weapons
   if (p==='gun' || p==='melee') return 'hands';
-  return (p==='helmet'||p==='vest'||p==='arms'||p==='legs'||p==='hands') ? p : 'helmet';
+
+  // Apparel (visual-only → armour-equivalent slots)
+  if (p==='shirt' || p==='hoodie' || p==='jacket') return 'vest';
+  if (p==='pants') return 'legs';
+  if (p==='sunglasses') return 'helmet';
+
+  // Merch/collectible (visual-only → chest area is safest)
+  if (p==='collectible') return 'vest';
+
+  // Native armour slots
+  if (p==='helmet'||p==='vest'||p==='arms'||p==='legs'||p==='hands') return p;
+
+  // Fallback
+  return 'helmet';
 }
 
 function _parseVB(vbStr){
@@ -447,29 +529,42 @@ function normalizeSvgForSlot(svgText, part){
   }
 
   function renderPackages(){
-    return `
-      <div style="padding:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
-        <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
-          <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
-          <div style="opacity:.85;font-size:13px;line-height:1.4">
-            2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
-          </div>
-          <div style="margin-top:8px;font-weight:700">Cost: 50 Pi</div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
-            <button class="ghost" data-buy-package="starter-50">Buy</button>
-          </div>
-        </div>
-        <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
-          <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
-          <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
-            <button class="ghost" data-buy-single="pi">Pay 5 Pi</button>
-            <button class="ghost" data-buy-single="ic">Pay 5000 IC</button>
-          </div>
-        </div>
-      </div>`;
-  }
+  return `
+    <div style="padding:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px">
 
+      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
+        <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
+        <div style="opacity:.85;font-size:13px;line-height:1.4">
+          6 items with extras for the price of 5 (includes features & listing rights).
+        </div>
+        <div style="margin-top:8px;font-weight:700">Pay: ${COSTS.STARTER_PI} Pi <span style="opacity:.7">or</span> ${COSTS.STARTER_IC.toLocaleString()} IC</div>
+        <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="ghost" data-buy-package="pi">Pay Pi</button>
+          <button class="ghost" data-buy-package="ic">Pay IZZA Coins</button>
+        </div>
+      </div>
+
+      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
+        <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
+        <div style="opacity:.85;font-size:13px;">Craft 1 visual-only item (no gameplay features).</div>
+        <div style="margin-top:8px;font-weight:700">Pay: ${COSTS.PER_ITEM_PI} Pi <span style="opacity:.7">or</span> ${COSTS.PER_ITEM_IC.toLocaleString()} IC</div>
+        <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="ghost" data-buy-single="pi">Pay Pi</button>
+          <button class="ghost" data-buy-single="ic">Pay IZZA Coins</button>
+        </div>
+      </div>
+
+      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
+        <div style="font-weight:700;margin-bottom:6px">Creator Bundles</div>
+        <div style="opacity:.85;font-size:13px;">Browse player-made bundles or make your own.</div>
+        <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="ghost" data-open-bundles>View Bundles</button>
+          <button class="ghost" data-open-merchant>Open IZZA Pay Dashboard</button>
+        </div>
+      </div>
+
+    </div>`;
+}
   function renderCreate(){
   const totalPi = calcTotalCost({ usePi:true });
   const totalIC = calcTotalCost({ usePi:false });
@@ -697,17 +792,26 @@ function normalizeSvgForSlot(svgText, part){
     });
 
     root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        const id = btn.dataset.buyPackage;
-        const res = await payWithPi(50, `Package:${id}`);
-        if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
-      }, { passive:true });
-    });
+  btn.addEventListener('click', async ()=>{
+    const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
+    if (kind === 'pi'){
+      const res = await payWithPi(COSTS.STARTER_PI, 'Starter Forge');
+      if (res.ok){ STATE.packageCredits = { id:'starter', items:6, featuresIncluded:true }; alert('Starter Forge unlocked — start creating!'); }
+    } else {
+      const res = await payWithIC(COSTS.STARTER_IC);
+      if (res.ok){ STATE.packageCredits = { id:'starter', items:6, featuresIncluded:true }; alert('Starter Forge unlocked — start creating!'); }
+    }
+  }, { passive:true });
+});
 
-    root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-      btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
-    });
-
+// Optional: simple openers (you can point these to your real routes)
+root.querySelector('[data-open-bundles]')?.addEventListener('click', ()=>{
+  // If you have an in-game bundles tab, navigate there; else open your shop URL:
+  try{ IZZA?.emit?.('open-bundles'); }catch{}
+});
+root.querySelector('[data-open-merchant]')?.addEventListener('click', ()=>{
+  window.open('/merchant/dashboard', '_blank'); // point to your IZZA Pay merchant UI
+});
     const payPi = root.querySelector('#payPi');
     const payIC = root.querySelector('#payIC');
     payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
@@ -738,9 +842,50 @@ if (aiAnimChk){  aiAnimChk.checked = !!STATE.wantAnimation; aiAnimChk.addEventLi
     });
 
     const catSel  = root.querySelector('#catSel');
-    const partSel = root.querySelector('#partSel');
-    if (catSel){  catSel.value = STATE.currentCategory; catSel.addEventListener('change', e=>{ STATE.currentCategory = e.target.value; saveDraft(); }, { passive:true }); }
-    if (partSel){ partSel.value = STATE.currentPart;     partSel.addEventListener('change', e=>{ STATE.currentPart     = e.target.value; saveDraft(); }, { passive:true }); }
+const partSel = root.querySelector('#partSel');
+
+if (catSel && partSel){
+  // initial populate on first render
+  catSel.value = STATE.currentCategory;
+  repopulatePartOptions(catSel, partSel);
+
+  catSel.addEventListener('change', e=>{
+    STATE.currentCategory = e.target.value;
+
+    // Re-populate the parts list based on category
+    repopulatePartOptions(catSel, partSel);
+
+    // Disable all feature toggles for visual-only categories
+    const isVisualOnly = (STATE.currentCategory==='apparel' || STATE.currentCategory==='merch');
+    root.querySelectorAll('[data-ff]').forEach(cb=>{
+      cb.disabled = isVisualOnly;
+      const k = cb.dataset.ff;
+      if (isVisualOnly){
+        cb.checked = false;
+        STATE.featureFlags[k] = false;
+      }
+    });
+
+    saveDraft();
+
+    // Re-render totals (keeps scroll position)
+    const host = root.querySelector('#craftTabs');
+    if (host){
+      const keepScroll = host.scrollTop;
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = keepScroll;
+    }
+  }, { passive:true });
+}
+
+if (partSel){
+  partSel.value = STATE.currentPart;
+  partSel.addEventListener('change', e=>{
+    STATE.currentPart = e.target.value;
+    saveDraft();
+  }, { passive:true });
+}
 
     const aiLeft = ()=> {
       const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
