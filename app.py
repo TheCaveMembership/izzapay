@@ -346,7 +346,17 @@ def ensure_schema():
               item_id INTEGER NOT NULL,
               qty INTEGER NOT NULL
             )""")
-
+with conn() as cx:
+    # items table patches for crafted linkage & description
+    it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
+    if "description" not in it_cols:
+        cx.execute("ALTER TABLE items ADD COLUMN description TEXT")
+    if "fulfillment_kind" not in it_cols:
+        # 'physical' (default) | 'crafting'
+        cx.execute("ALTER TABLE items ADD COLUMN fulfillment_kind TEXT DEFAULT 'physical'")
+    if "crafted_item_id" not in it_cols:
+        # opaque string from Crafting Land (id/slug/uuid)
+        cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id TEXT")
         # sessions table patches
         scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
         if "pi_payment_id" not in scols:
