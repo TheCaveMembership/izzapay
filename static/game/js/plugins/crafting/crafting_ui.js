@@ -29,9 +29,8 @@
     currentPart: 'helmet',
     fireRateRequested: 0,
     dmgHearts: 0.5,
-        packageCredits: null,
+    packageCredits: null,
     createSub: 'setup',
-    aiBusy: false,            // <-- ADD THIS
   };
 
   // (Kept: name moderation + sanitizers + helpers)
@@ -118,7 +117,6 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
 // Server-first AI; minimal fallback (simple blueprint) if the server fails.
 async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
-  if (STATE.aiBusy) throw new Error('Please wait — generating…');
 
   // 1) Try the real AI endpoint on your Node server
   try{
@@ -358,34 +356,21 @@ async function aiToSVG(prompt){
       ? items.map(mineCardHTML).join('')
       : '<div style="opacity:.7">No creations yet.</div>';
 
-        host.querySelectorAll('[data-equip]').forEach(b=>{
-      b.addEventListener('click', ()=>{
-        const id = b.dataset.equip;
+    host.querySelectorAll('[data-copy]').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        const id = b.dataset.copy;
         const it = items.find(x=>x.id===id);
-        if (!it) return;
-
-        // Save locally so it persists if your overlay reads from LS
-        try {
-          localStorage.setItem('izzaLastEquipped', JSON.stringify({
-            id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
-          }));
-        } catch {}
-
-        // Back-compat: old event with just ID
-        try { window.IZZA && IZZA.emit && IZZA.emit('equip-crafted', id); } catch{}
-
-        // New event: full payload (recommended)
-        try {
-          window.IZZA && IZZA.emit && IZZA.emit('equip-crafted-v2', {
-            id: it.id,
-            name: it.name,
-            category: it.category,
-            part: it.part,
-            svg: it.svg
-          });
-        } catch{}
+        if(!it) return;
+        try{ await navigator.clipboard.writeText(it.svg||''); alert('SVG copied'); }catch{}
       });
     });
+    host.querySelectorAll('[data-equip]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        try{ window.IZZA && IZZA.emit && IZZA.emit('equip-crafted', b.dataset.equip); }catch{}
+      });
+    });
+  }
+
   function mount(rootSel){
     const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
     if (!root) return;
@@ -501,31 +486,16 @@ async function aiToSVG(prompt){
       prevHost && (prevHost.innerHTML = STATE.currentSVG);
     }
 
-        btnAI && btnAI.addEventListener('click', async ()=>{
-      if (STATE.aiBusy) return;                 // ignore double taps
+    btnAI && btnAI.addEventListener('click', async ()=>{
       try{
         const prompt = String(aiPrompt?.value||'').trim();
         if (!prompt) return;
-
-        STATE.aiBusy = true;                     // lock
-        if (btnAI) {
-          btnAI.disabled = true;
-          btnAI.setAttribute('aria-busy','true');
-          btnAI.textContent = 'Generating…';
-        }
-
         const svg = await aiToSVG(prompt);
-
         if (svgIn) svgIn.value = svg;
         if (prevHost) {
           prevHost.innerHTML = svg;
           const s = prevHost.querySelector('svg');
-          if (s) {
-            s.setAttribute('preserveAspectRatio','xMidYMid meet');
-            s.style.maxWidth='100%';
-            s.style.height='auto';
-            s.style.display='block';
-          }
+          if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
           prevHost.scrollTop = prevHost.scrollHeight;
           prevHost.scrollIntoView({block:'nearest'});
         }
@@ -533,17 +503,9 @@ async function aiToSVG(prompt){
         saveDraft();
         const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
         aiLeft();
-      }catch(e){
-        alert('AI failed: '+ (e?.message || e));
-      }finally{
-        STATE.aiBusy = false;                    // unlock
-        if (btnAI) {
-          btnAI.disabled = false;
-          btnAI.removeAttribute('aria-busy');
-          btnAI.textContent = 'AI → SVG';
-        }
-      }
+      }catch(e){ alert('AI failed: '+e.message); }
     });
+
     btnPrev && btnPrev.addEventListener('click', ()=>{
       const cleaned = sanitizeSVG(svgIn?.value);
       if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
