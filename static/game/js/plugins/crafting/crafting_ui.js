@@ -1393,6 +1393,7 @@ if (!CSS.escape) {
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
-}
+});
+    }
 window.CraftingUI = { mount, unmount };
 })();
