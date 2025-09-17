@@ -6,6 +6,19 @@
   console.log('[IZZA PLAY]', BUILD);
 
   let api = null;
+  // Record a collectible order (IZZA coins) in IZZA Pay (Flask)
+async function postICCollectibleOrder(payload){
+  try{
+    const base = (window.IZZA_APP_BASE && String(window.IZZA_APP_BASE).replace(/\/+$/,'')) || '';
+    if (!base) return;
+    await fetch(base + '/api/orders/collectible_ic', {
+      method:'POST',
+      headers:{ 'content-type':'application/json' },
+      credentials:'include',
+      body: JSON.stringify(payload)
+    });
+  }catch(_){ /* non-fatal */ }
+}
 
   // ---------- Pending crafted items for shop (NEW) ----------
   const _pendingCraftShopAdds = []; // rows to inject when shop opens
@@ -189,50 +202,52 @@ const CRAFTED_WEAPON_BOOST  = 0.75;  // crafted weapons (hands) → make bigger
               </div>`;
             const btn = document.createElement('button'); btn.className='buy'; btn.textContent = `${add.price} IC`;
                         btn.addEventListener('click', ()=>{
-              try{
-                const coins = IZZA?.api?.getCoins ? IZZA.api.getCoins() : (IZZA?.api?.player?.coins|0);
-                if ((coins|0) < add.price){ alert('Not enough IZZA Coins'); return; }
-                IZZA?.api?.setCoins && IZZA.api.setCoins((coins|0) - add.price);
+  try{
+    const coins = IZZA?.api?.getCoins ? IZZA.api.getCoins() : (IZZA?.api?.player?.coins|0);
+    if ((coins|0) < add.price){ alert('Not enough IZZA Coins'); return; }
+    IZZA?.api?.setCoins && IZZA.api.setCoins((coins|0) - add.price);
 
-                // --- Add to buyer's inventory ---
-                const inv2 = _invRead();
-                inv2[add.key] = inv2[add.key] || { count:0, name:add.name, type:add.type, slot:add.slot, equippable:true, iconSvg:add.svg };
-                inv2[add.key].overlaySvg = add.svg;  // ensure buyers also get the in-world overlay art
+    // --- Add to buyer's inventory ---
+    const inv2 = _invRead();
+    inv2[add.key] = inv2[add.key] || { count:0, name:add.name, type:add.type, slot:add.slot, equippable:true, iconSvg:add.svg };
+    inv2[add.key].overlaySvg = add.svg;
 
-                // normalize subtype for weapons so guns.js treats correctly
-                if (add.type==='weapon'){
-                  if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
-                  if (inv2[add.key].subtype==='gun'){
-                    // starter ammo for new guns  (FIXED: add.key, not add[key])
-                    if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add.key].ammo = 60;
-                  }
-                }
-
-                if (inv2[add.key].count!=null){
-                  inv2[add.key].count = (inv2[add.key].count|0) + 1;
-                } else {
-                  // FIXED: add.key, not add[key]
-                  inv2[add.key].owned = true;
-                }
-                _invWrite(inv2);
-
-                // --- Record lastPaid so Sell tab shows 40% (not 10 IC default) ---
-                _writePriceBookLastPaid(add.key, add.price);
-
-                try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
-                IZZA?.toast?.(`Purchased ${add.name}`);
-                try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
-              }catch(e){ console.warn('[craft shop] buy failed', e); }
-            });
-
-            row.appendChild(meta);
-            row.appendChild(btn);
-            list.appendChild(row);
-          }
-        });
+    // normalize subtype for weapons so guns.js treats correctly
+    if (add.type==='weapon'){
+      if (!inv2[add.key].subtype) inv2[add.key].subtype = (add.part==='melee'||add.slot==='hands'&&/melee/i.test(add.name)) ? 'melee' : 'gun';
+      if (inv2[add.key].subtype==='gun'){
+        if (typeof inv2[add.key].ammo!=='number' || inv2[add.key].ammo<0) inv2[add.key].ammo = 60;
       }
-    }catch(e){ console.warn('[armour-packs] shop patch failed', e); }
-  }
+    }
+
+    if (inv2[add.key].count!=null){
+      inv2[add.key].count = (inv2[add.key].count|0) + 1;
+    } else {
+      inv2[add.key].owned = true;
+    }
+    _invWrite(inv2);
+
+    // --- Record lastPaid so Sell tab shows 40% (not 10 IC default) ---
+    _writePriceBookLastPaid(add.key, add.price);
+
+    try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
+    IZZA?.toast?.(`Purchased ${add.name}`);
+    try { window.dispatchEvent(new Event('izza-coins-changed')); } catch {}
+
+    // --- NEW: post to IZZA Pay Orders (collectibles → IZZA coins) ---
+    postICCollectibleOrder({
+      crafted_key: add.key,            // the craft_* key
+      title: add.name,
+      slot: add.slot,                  // 'head'|'chest'|'legs'|'arms'|'hands'
+      part: add.part,                  // 'helmet'|'vest'|'legs'|'arms'|'gun'|'melee'
+      svg: add.svg,                    // optional; server can thumb it
+      price_ic: add.price|0,
+      payment_method: 'izza_coins',
+      source: 'game_shop'
+    });
+
+  }catch(e){ console.warn('[craft shop] buy failed', e); }
+});
   // --- SVG -> <img> cache for fast overlay drawing ---
   const _svgImgCache = new Map();
   function svgToImage(svg){
