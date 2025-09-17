@@ -831,7 +831,52 @@ def pi_me():
         return {"ok": True, "me": r.json()}
     except Exception:
         return {"ok": False, "error": "server_error"}, 500
+# --- Clear/cancel any pending Pi payment for this app/session ---
+@app.post("/api/pi/clear_pending")
+def pi_clear_pending():
+    """
+    Input (JSON or form):
+      - session_id: your sessions.id (recommended), OR
+      - payment_id: explicit Pi payment id (fallback)
+    Behavior:
+      - If we know a payment id, try Pi /v2/payments/:id/cancel (best effort).
+      - Regardless of upstream result, clear our local 'sessions' row (pi_payment_id NULL, state 'initiated').
+    """
+    try:
+        data = request.get_json(silent=True) or request.form or {}
+        session_id = (data.get("session_id") or "").strip()
+        explicit_pid = (data.get("payment_id") or "").strip()
 
+        pay_id = None
+        if session_id:
+            with conn() as cx:
+                s = cx.execute("SELECT id, pi_payment_id FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if s and s["pi_payment_id"]:
+                pay_id = s["pi_payment_id"]
+
+        if not pay_id and explicit_pid:
+            pay_id = explicit_pid
+
+        # Best-effort cancel at Pi platform
+        if pay_id:
+            try:
+                r = requests.post(f"{PI_API_BASE}/v2/payments/{pay_id}/cancel",
+                                  headers=pi_headers(), json={}, timeout=12)
+                # ignore non-200; we still clear locally
+            except Exception:
+                pass
+
+        # Always clear our local session state if given
+        if session_id:
+            try:
+                with conn() as cx:
+                    cx.execute("UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE id=?", (session_id,))
+            except Exception:
+                pass
+
+        return {"ok": True, "cleared": True, "payment_id": (pay_id or None), "session_id": (session_id or None)}
+    except Exception:
+        return {"ok": False, "error": "server_error"}, 500
 # NEW: Same-origin proxy to your LibreTranslate service
 @app.post("/api/translate")
 def api_translate():
