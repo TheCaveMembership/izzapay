@@ -493,30 +493,44 @@ function normalizeSvgForSlot(svgText, part){
   }
 
   function renderPackages(){
-    return `
-      <div style="padding:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
+  return `
+    <div style="padding:14px;">
+      <!-- Top toolbar with Marketplace button -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <div style="font-weight:700;opacity:.85">Packages</div>
+        <div style="margin-left:auto">
+          <button class="ghost" id="goMarketplace">Browse Crafting Land Marketplace</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
+        <!-- Starter Forge -->
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
           <div style="opacity:.85;font-size:13px;line-height:1.4">
             2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
           </div>
           <div style="margin-top:8px;font-weight:700">
-  Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC
-</div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
-            <button class="ghost" data-buy-package="starter-50">Buy</button>
+            Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="ghost" data-buy-package="pi">Pay ${COSTS.PACKAGE_PI} Pi</button>
+            <button class="ghost" data-buy-package="ic">Pay ${COSTS.PACKAGE_IC.toLocaleString()} IC</button>
           </div>
         </div>
+
+        <!-- Single Item (visual) -->
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
           <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
             <button class="ghost" data-buy-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-<button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+            <button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           </div>
         </div>
-      </div>`;
-  }
+      </div>
+    </div>`;
+}
 
   function renderCreate(){
   const totalPi = calcTotalCost({ usePi:true });
@@ -854,62 +868,67 @@ async function fetchMine(){
   const root = STATE.root;
   if(!root) return;
 
-  STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
-      const host = STATE.root.querySelector('#craftTabs');
+  // ...existing sub-tab wiring...
+
+  // Marketplace button (Packages tab)
+  const goMp = root.querySelector('#goMarketplace');
+  if (goMp){
+    goMp.addEventListener('click', async ()=>{
+      try{ IZZA?.emit?.('open-marketplace'); }catch{}
+      const host = STATE.root?.querySelector('#craftTabs');
       if (!host) return;
       const saveScroll = host.scrollTop;
-      host.innerHTML = renderCreate();
-      bindInside();
-      host.scrollTop = saveScroll;
+      host.innerHTML = renderMarketplace();
+      const back = STATE.root.querySelector('#mpBack');
+      if (back){
+        back.addEventListener('click', ()=>{
+          host.innerHTML = renderPackages();
+          bindInside();
+          host.scrollTop = saveScroll;
+        });
+      }
+      await hydrateMarketplace();
+    });
+  }
+
+  // ✅ Starter Forge package purchase (Pi or IC) — correct scope
+  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
+      let res;
+      if (kind === 'pi') {
+        res = await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50');
+      } else {
+        res = await payWithIC(COSTS.PACKAGE_IC);
+      }
+
+      if (res && res.ok){
+        STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
+        STATE.hasPaidForCurrentItem = true;
+        STATE.canUseVisuals = true;
+        STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+        STATE.createSub = 'visuals';
+
+        // jump to Create tab and render Visuals
+        try { 
+          const tabs = STATE.root?.querySelectorAll('[data-tab]');
+          const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+          if (createBtn) createBtn.click();
+          else {
+            const host = STATE.root?.querySelector('#craftTabs');
+            if (host){ host.innerHTML = renderCreate(); bindInside(); }
+          }
+        } catch {}
+      } else {
+        alert('Payment failed');
+      }
     }, { passive:true });
   });
 
-    root.querySelectorAll('[data-sub]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      const want = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
-      // block visuals if locked
-      STATE.createSub = (want==='visuals' && !STATE.canUseVisuals) ? 'setup' : want;
-      const host = STATE.root.querySelector('#craftTabs');
-      if (!host) return;
-      const saveScroll = host.scrollTop;
-      host.innerHTML = renderCreate();
-      bindInside();
-      host.scrollTop = saveScroll;
-    }, { passive:true });
-  });
-    // Marketplace button (Packages tab) — swap to internal Marketplace view
-    const goMp = root.querySelector('#goMarketplace');
-    if (goMp){
-      goMp.addEventListener('click', async ()=>{
-        // keep your existing event for compatibility
-        try{ IZZA?.emit?.('open-marketplace'); }catch{}
-
-        // swap the Packages area to the Marketplace view
-        const host = STATE.root?.querySelector('#craftTabs');
-        if (!host) return;
-        const saveScroll = host.scrollTop;
-        host.innerHTML = renderMarketplace();
-
-        // back button
-        const back = STATE.root.querySelector('#mpBack');
-        if (back){
-          back.addEventListener('click', ()=>{
-            host.innerHTML = renderPackages();
-            bindInside(); // re-bind buttons on packages view
-            host.scrollTop = saveScroll;
-          });
-        }
-
-        // populate marketplace grid
-        await hydrateMarketplace();
-      });
-    }
+  // Single-item purchase buttons (Packages card & Create tab)
   root.querySelectorAll('[data-buy-single]').forEach(btn=>{
     btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
-
   const payPi = root.querySelector('#payPi');
   const payIC = root.querySelector('#payIC');
   payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
@@ -1061,7 +1080,7 @@ async function fetchMine(){
     if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
     const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+    const sellInPi   = !!root.querySelector('#sellInPi')?.checked; // harmless if not rendered
     const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
 
     try{
@@ -1114,15 +1133,14 @@ async function fetchMine(){
         }
 
         try{ hydrateMine(); }catch{}
-
       }else{
         craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
       }
     }catch(e){
       craftStatus.textContent = 'Error crafting: ' + e.message;
     }
-  });
-}
+  }); // <-- closes btnMint handler
+} // <-- closes bindInside()
 
 window.CraftingUI = { mount, unmount };
 })();
