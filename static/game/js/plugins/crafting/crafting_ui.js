@@ -256,7 +256,7 @@ const app  = (p)=> APP_BASE + p;   // Flask
 const node = (p)=> NODE_BASE + p;  // Node
 
 async function appJSON(url, opts={}) {
-  const r = await fetch(app(url), Object.assign({ headers:{'content-type':'application/json'} }, opts));
+  const r = await fetch(app(url), Object.assign({ headers:{'content-type':'application/json'}, credentials:'include' }, opts));
   if (!r.ok) throw new Error('HTTP ' + r.status);
   try { return await r.json(); } catch { return {}; }
 }
