@@ -616,12 +616,23 @@ function normalizeSvgForSlot(svgText, part){
       </div>`;
   }
 
-  async function fetchMine(){
-    try{
-      const j = await serverJSON(api('/api/crafting/mine'));
-      return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
-    }catch{ return []; }
-  }
+  function currentUsername(){
+  // adjust if your player name lives elsewhere; these are safe fallbacks:
+  return (window?.IZZA?.player?.username)
+      || (window?.IZZA?.me?.username)
+      || localStorage.getItem('izzaPlayer')     // if you store it
+      || localStorage.getItem('pi_username')    // if you store it
+      || '';
+}
+
+async function fetchMine(){
+  try{
+    const u = encodeURIComponent(currentUsername());
+    if(!u) return [];
+    const j = await serverJSON(api(`/api/crafting/mine?u=${u}`));
+    return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+  }catch{ return []; }
+}
 
   function mineCardHTML(it){
     const safeSVG = sanitizeSVG(it.svg||'');
@@ -674,29 +685,38 @@ function normalizeSvgForSlot(svgText, part){
 });           // <--- closes forEach
 }             // <--- make sure this closes async function hydrateMine()
   function mount(rootSel){
-    const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
-    if (!root) return;
-    STATE.root = root;
-    STATE.mounted = true;
-    loadDraft();
+  const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
+  if (!root) return;
+  STATE.root = root;
+  STATE.mounted = true;
+  loadDraft();
 
-    root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
-    const tabsHost = root.querySelector('#craftTabs');
+  root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
+  const tabsHost = root.querySelector('#craftTabs');
 
-    const setTab = (name)=>{
-      if(!STATE.mounted) return;
-      if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
-      if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
-      if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
-      bindInside();
-    };
+  const setTab = (name)=>{
+    if(!STATE.mounted) return;
+    if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
+    if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
+    if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
-    root.querySelectorAll('[data-tab]').forEach(b=>{
-      b.addEventListener('click', ()=> setTab(b.dataset.tab));
-    });
+    bindInside();
 
-    setTab('packages');
-  }
+    // >>> ADD THIS: immediately sync the attempts counter when entering Create
+    if (name === 'create') {
+      try {
+        const el = document.getElementById('aiLeft2');
+        if (el) el.textContent = STATE.aiAttemptsLeft;
+      } catch {}
+    }
+  };
+
+  root.querySelectorAll('[data-tab]').forEach(b=>{
+    b.addEventListener('click', ()=> setTab(b.dataset.tab));
+  });
+
+  setTab('packages');
+}
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
@@ -712,124 +732,163 @@ function normalizeSvgForSlot(svgText, part){
   }
 
   function bindInside(){
-    const root = STATE.root;
-    if(!root) return;
+  const root = STATE.root;
+  if(!root) return;
 
-    STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
-      b.addEventListener('click', ()=>{
-        STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
-        const host = STATE.root.querySelector('#craftTabs');
-        if (!host) return;
-        const saveScroll = host.scrollTop;
-        host.innerHTML = renderCreate();
-        bindInside();
-        host.scrollTop = saveScroll;
-      }, { passive:true });
+  STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
+      const host = STATE.root.querySelector('#craftTabs');
+      if (!host) return;
+      const saveScroll = host.scrollTop;
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = saveScroll;
+    }, { passive:true });
+  });
+
+  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.buyPackage;
+      const res = await payWithPi(50, `Package:${id}`);
+      if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
+    }, { passive:true });
+  });
+
+  root.querySelectorAll('[data-buy-single]').forEach(btn=>{
+    btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
+  });
+
+  const payPi = root.querySelector('#payPi');
+  const payIC = root.querySelector('#payIC');
+  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
+  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
+
+  const itemName = root.querySelector('#itemName');
+  if (itemName){
+    itemName.value = STATE.currentName || '';
+    itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
+  }
+
+  const aiStyleSel = root.querySelector('#aiStyleSel');
+  const aiAnimChk  = root.querySelector('#aiAnimChk');
+  if (aiStyleSel){
+    aiStyleSel.value = STATE.aiStyle;
+    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
+  }
+  if (aiAnimChk){
+    aiAnimChk.checked = !!STATE.wantAnimation;
+    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
+  }
+
+  root.querySelectorAll('[data-ff]').forEach(cb=>{
+    const key = cb.dataset.ff;
+    if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
+    cb.addEventListener('change', ()=>{
+      STATE.featureFlags[key] = cb.checked;
+      saveDraft();
+      const host = root.querySelector('#craftTabs');
+      if (!host) return;
+      const saveScroll = host.scrollTop;
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = saveScroll;
     });
+  });
 
-    root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        const id = btn.dataset.buyPackage;
-        const res = await payWithPi(50, `Package:${id}`);
-        if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
-      }, { passive:true });
-    });
+  const catSel  = root.querySelector('#catSel');
+  const partSel = root.querySelector('#partSel');
 
-    root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-      btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
-    });
+  if (catSel && partSel){
+    catSel.value = STATE.currentCategory;
+    repopulatePartOptions(catSel, partSel);
 
-    const payPi = root.querySelector('#payPi');
-    const payIC = root.querySelector('#payIC');
-    payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
-    payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
-
-    const itemName = root.querySelector('#itemName');
-    if (itemName){
-      itemName.value = STATE.currentName || '';
-      itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
-    }
-const aiStyleSel = root.querySelector('#aiStyleSel');
-const aiAnimChk  = root.querySelector('#aiAnimChk');
-if (aiStyleSel){ aiStyleSel.value = STATE.aiStyle; aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); }); }
-if (aiAnimChk){  aiAnimChk.checked = !!STATE.wantAnimation; aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); }); }
-    root.querySelectorAll('[data-ff]').forEach(cb=>{
-      const key = cb.dataset.ff;
-      if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
-      cb.addEventListener('change', ()=>{
-        STATE.featureFlags[key] = cb.checked;
-        saveDraft();
-        const host = root.querySelector('#craftTabs');
-        if (!host) return;
-        const saveScroll = host.scrollTop;
-        host.innerHTML = renderCreate();
-        bindInside();
-        host.scrollTop = saveScroll;
-      });
-    });
-
-    const catSel  = root.querySelector('#catSel');
-    const partSel = root.querySelector('#partSel');
-
-    if (catSel && partSel){
-      // Initial population so Weapon shows only Gun/Melee
-      catSel.value = STATE.currentCategory;
+    catSel.addEventListener('change', e=>{
+      STATE.currentCategory = e.target.value;
       repopulatePartOptions(catSel, partSel);
+      saveDraft();
+    }, { passive:true });
+  }
 
-      catSel.addEventListener('change', e=>{
-        STATE.currentCategory = e.target.value;
-        repopulatePartOptions(catSel, partSel);
-        saveDraft();
-      }, { passive:true });
+  if (partSel){
+    partSel.value = STATE.currentPart;
+    partSel.addEventListener('change', e=>{
+      STATE.currentPart = e.target.value;
+      saveDraft();
+    }, { passive:true });
+  }
+
+  const aiLeft = ()=> {
+    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+  };
+
+  const btnAI    = root.querySelector('#btnAI');
+  const aiPrompt = root.querySelector('#aiPrompt');
+  const svgIn    = root.querySelector('#svgIn');
+  const btnPrev  = root.querySelector('#btnPreview');
+  const btnMint  = root.querySelector('#btnMint');
+  const prevHost = root.querySelector('#svgPreview');
+  const craftStatus = root.querySelector('#craftStatus');
+
+  if (svgIn && STATE.currentSVG){
+    svgIn.value = STATE.currentSVG;
+    prevHost && (prevHost.innerHTML = STATE.currentSVG);
+  }
+
+  // ... keep the rest of your handlers exactly as you pasted ...
+}
+
+  btnAI && btnAI.addEventListener('click', async ()=>{
+    if (!btnAI) return;
+    const prompt = String(aiPrompt?.value||'').trim();
+    if (!prompt) return;
+
+    // lock UI + overlay
+    btnAI.disabled = true;
+    btnAI.setAttribute('aria-busy','true');
+    btnAI.textContent = 'Generating…';
+    const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+
+    try{
+      // Ensure at least 10s passes before we unlock/hide overlay
+      const [svg] = await Promise.all([
+        aiToSVG(prompt),
+        sleep(MIN_AI_WAIT_MS)
+      ]);
+
+      if (svgIn) svgIn.value = svg;
+      if (prevHost) {
+        prevHost.innerHTML = svg;
+        const s = prevHost.querySelector('svg');
+        if (s) {
+          s.setAttribute('preserveAspectRatio','xMidYMid meet');
+          s.style.maxWidth='100%';
+          s.style.height='auto';
+          s.style.display='block';
+        }
+        prevHost.scrollTop = prevHost.scrollHeight;
+        prevHost.scrollIntoView({block:'nearest'});
+      }
+      STATE.currentSVG = svg;
+      saveDraft();
+      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+      aiLeft();
+    }catch(e){
+      alert('AI failed: ' + (e?.message || e));
+    }finally{
+      hideWait(waitEl);
+      btnAI.disabled = false;
+      btnAI.removeAttribute('aria-busy');
+      btnAI.textContent = 'AI → SVG';
     }
+  });
 
-    if (partSel){
-      partSel.value = STATE.currentPart;
-      partSel.addEventListener('change', e=>{
-        STATE.currentPart = e.target.value;
-        saveDraft();
-      }, { passive:true });
-    }
-
-    const aiLeft = ()=> {
-      const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
-      const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
-    };
-
-    const btnAI    = root.querySelector('#btnAI');
-    const aiPrompt = root.querySelector('#aiPrompt');
-    const svgIn    = root.querySelector('#svgIn');
-    const btnPrev  = root.querySelector('#btnPreview');
-    const btnMint  = root.querySelector('#btnMint');
-    const prevHost = root.querySelector('#svgPreview');
-    const craftStatus = root.querySelector('#craftStatus');
-
-    if (svgIn && STATE.currentSVG){
-      svgIn.value = STATE.currentSVG;
-      prevHost && (prevHost.innerHTML = STATE.currentSVG);
-    }
-
-    btnAI && btnAI.addEventListener('click', async ()=>{
-  if (!btnAI) return;
-  const prompt = String(aiPrompt?.value||'').trim();
-  if (!prompt) return;
-
-  // lock UI + overlay
-  btnAI.disabled = true;
-  btnAI.setAttribute('aria-busy','true');
-  btnAI.textContent = 'Generating…';
-  const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
-
-  try{
-    // Ensure at least 10s passes before we unlock/hide overlay
-    const [svg] = await Promise.all([
-      aiToSVG(prompt),
-      sleep(MIN_AI_WAIT_MS)
-    ]);
-
-    if (svgIn) svgIn.value = svg;
+  btnPrev && btnPrev.addEventListener('click', ()=>{
+    const cleaned = sanitizeSVG(svgIn?.value);
+    if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
     if (prevHost) {
-      prevHost.innerHTML = svg;
+      prevHost.innerHTML = cleaned;
       const s = prevHost.querySelector('svg');
       if (s) {
         s.setAttribute('preserveAspectRatio','xMidYMid meet');
@@ -840,86 +899,86 @@ if (aiAnimChk){  aiAnimChk.checked = !!STATE.wantAnimation; aiAnimChk.addEventLi
       prevHost.scrollTop = prevHost.scrollHeight;
       prevHost.scrollIntoView({block:'nearest'});
     }
-    STATE.currentSVG = svg;
+    STATE.currentSVG = cleaned;
     saveDraft();
     const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-    (function aiLeftUpdate(){
-      const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
-      const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
-    })();
-  }catch(e){
-    alert('AI failed: ' + (e?.message || e));
-  }finally{
-    hideWait(waitEl);
-    btnAI.disabled = false;
-    btnAI.removeAttribute('aria-busy');
-    btnAI.textContent = 'AI → SVG';
-  }
-});
+  });
 
-    btnPrev && btnPrev.addEventListener('click', ()=>{
-      const cleaned = sanitizeSVG(svgIn?.value);
-      if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
-      if (prevHost) {
-        prevHost.innerHTML = cleaned;
-        const s = prevHost.querySelector('svg');
-        if (s) { s.setAttribute('preserveAspectRatio','xMidYMid meet'); s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; }
-        prevHost.scrollTop = prevHost.scrollHeight;
-        prevHost.scrollIntoView({block:'nearest'});
-      }
-      STATE.currentSVG = cleaned;
-      saveDraft();
-      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-    });
+  btnMint && btnMint.addEventListener('click', async ()=>{
+    craftStatus.textContent = '';
 
-    btnMint && btnMint.addEventListener('click', async ()=>{
-      craftStatus.textContent = '';
+    const nm = moderateName(STATE.currentName);
+    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-      const nm = moderateName(STATE.currentName);
-      if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+    const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
+    if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
+      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+      return;
+    }
+    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-      const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
-      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-        craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-        return;
-      }
-      if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
 
-      const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-      const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
-      const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+    try{
+      // Keep the player’s preview untouched; only normalize at mint time
+      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
-      try{
-        // Keep the player’s preview untouched; only normalize at mint time
-const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+        ? window.ArmourPacks.injectCraftedItem({
+            name: STATE.currentName,
+            category: STATE.currentCategory,
+            part: STATE.currentPart,
+            svg: normalizedForSlot,          // normalized version goes into the game
+            priceIC,
+            sellInShop,
+            sellInPi,
+            featureFlags: STATE.featureFlags
+          })
+        : { ok:false, reason:'armour-packs-hook-missing' };
 
-const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-  ? window.ArmourPacks.injectCraftedItem({
-      name: STATE.currentName,
-      category: STATE.currentCategory,
-      part: STATE.currentPart,
-      svg: normalizedForSlot,          // <-- normalized version goes into the game
-      priceIC,
-      sellInShop,
-      sellInPi,
-      featureFlags: STATE.featureFlags
-    })
-  : { ok:false, reason:'armour-packs-hook-missing' };
-
-        if (injected && injected.ok){
-          craftStatus.textContent = 'Crafted ✓';
-          STATE.hasPaidForCurrentItem = false;
-          if (STATE.packageCredits && STATE.packageCredits.items > 0){
-            STATE.packageCredits.items -= 1;
-            if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-          }
-          try{ hydrateMine(); }catch{}
-        }else{
-          craftStatus.textContent = 'Mint failed: '+(injected?.reason||'armour hook missing');
+      if (injected && injected.ok){
+        // 1) Local UI bookkeeping
+        craftStatus.textContent = 'Crafted ✓';
+        STATE.hasPaidForCurrentItem = false;
+        if (STATE.packageCredits && STATE.packageCredits.items > 0){
+          STATE.packageCredits.items -= 1;
+          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
-      }catch(e){ craftStatus.textContent = 'Error crafting: '+e.message; }
-    });
-  }
 
-  window.CraftingUI = { mount, unmount };
+        // 2) Persist the crafted item server-side so it survives reloads
+        try{
+          const u = encodeURIComponent(currentUsername());
+          if (u) {
+            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+              method: 'POST',
+              body: JSON.stringify({
+                name: STATE.currentName,
+                category: STATE.currentCategory,
+                part: STATE.currentPart,
+                svg: normalizedForSlot,
+                // optional meta you can fill later:
+                sku: '',
+                image: ''
+              })
+            });
+          }
+        }catch(e){
+          console.warn('[craft] persist failed:', e); // non-fatal
+        }
+
+        // 3) Refresh “My Creations”
+        try{ hydrateMine(); }catch{}
+
+      }else{
+        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+      }
+    }catch(e){
+      craftStatus.textContent = 'Error crafting: ' + e.message;
+    }
+  });
+}
+
+window.CraftingUI = { mount, unmount };
 })();
