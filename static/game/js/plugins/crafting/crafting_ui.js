@@ -154,6 +154,35 @@ const COIN_PER_PI = 2000;
     if (BAD_WORDS.some(w => low.includes(w))) return { ok:false, reason:'Inappropriate name' };
     return { ok:true };
   }
+  // Build a checkout URL on your Flask origin with the info Crafting knows
+function craftCheckoutURL({ totalPi, name, category, part }) {
+  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,'');      // Flask origin
+  const q = new URLSearchParams({
+    mode: 'craft',                 // lets your checkout know this is a crafting purchase
+    name: name || '',
+    category: category || '',
+    part: part || '',
+    amount: String(totalPi || 0),  // expected Pi for this single craft
+    return_to: window.location.href // so checkout can bounce back here after success
+  });
+  return `${base}/checkout/craft?${q.toString()}`;
+}
+
+// If user returns with ?craftPaid=1, unlock visuals
+function applyCraftPaidFromURL() {
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get('craftPaid') === '1') {
+      STATE.hasPaidForCurrentItem = true;
+      STATE.canUseVisuals = true;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      // Clean up the URL so the flag doesn’t linger
+      u.searchParams.delete('craftPaid');
+      const clean = u.pathname + (u.search ? '?'+u.searchParams.toString() : '') + u.hash;
+      history.replaceState(null, '', clean);
+    }
+  } catch {}
+}
 
   function sanitizeSVG(svg){
   try{
@@ -989,6 +1018,7 @@ if (!CSS.escape) {
   STATE.root = root;
   STATE.mounted = true;
   loadDraft();
+applyCraftPaidFromURL();
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
@@ -1026,38 +1056,39 @@ if (!CSS.escape) {
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-    async function handleBuySingle(kind){
-    const usePi = (kind==='pi');
-    const total = calcTotalCost({ usePi });
-    let res;
-    if (usePi) res = await payWithPi(total, 'Craft Single Item');
-    else       res = await payWithIC(total);
+    // REPLACE the whole function starting at "async function handleBuySingle(kind){" with this:
+async function handleBuySingle(kind){
+  const usePi = (kind==='pi');
+  const total = calcTotalCost({ usePi });
 
-    const status = document.getElementById('payStatus'); // present in Create tab
-    if (res && res.ok){
-      // unlock visuals + reset attempts + route to Visuals
-      STATE.hasPaidForCurrentItem = true;
-      STATE.canUseVisuals = true;
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
-      if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
-
-      // force Visuals subtab
-      STATE.createSub = 'visuals';
-
-      // if we are not currently on the Create tab, switch to it;
-      // if already there, just re-render to show Visuals.
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){
-        host.innerHTML = renderCreate();
-        bindInside();
-      }
-    } else {
-      if (status) status.textContent='Payment failed.';
-      // keep visuals locked on failure
-      STATE.canUseVisuals = false;
-    }
+  if (usePi) {
+    // Redirect to your working IZZA Pay checkout (no Pi SDK here)
+    const url = craftCheckoutURL({
+      totalPi: total,
+      name: STATE.currentName,
+      category: STATE.currentCategory,
+      part: STATE.currentPart
+    });
+    window.location.href = url;
+    return;
   }
 
+  // IC flow unchanged
+  const res = await payWithIC(total);
+  const status = document.getElementById('payStatus');
+  if (res && res.ok){
+    STATE.hasPaidForCurrentItem = true;
+    STATE.canUseVisuals = true;
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
+    STATE.createSub = 'visuals';
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){ host.innerHTML = renderCreate(); bindInside(); }
+  } else {
+    if (status) status.textContent='Payment failed.';
+    STATE.canUseVisuals = false;
+  }
+}
   function bindInside(){
   const root = STATE.root;
   if(!root) return;
