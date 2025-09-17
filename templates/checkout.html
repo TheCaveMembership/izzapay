@@ -197,7 +197,25 @@
   const ctryEl  = document.getElementById('ship_country');
 
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
+async function cancelPendingById(paymentId){
+  try{
+    await fetch('/api/pi/cancel', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ paymentId })
+    });
+  }catch(_){}
+}
 
+async function cancelPendingBySession(){
+  try{
+    await fetch('/api/pi/cancel_by_session', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id: sessionId })
+    });
+  }catch(_){}
+}
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
