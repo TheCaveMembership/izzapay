@@ -160,15 +160,26 @@ const COIN_PER_PI = 2000;
 
     // base clean
     let cleaned = txt
-      .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
-      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
-      .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
-      .replace(/(javascript:|data:)/gi,'')
       .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
       .replace(/<!DOCTYPE[^>]*>/gi,'')
-      .replace(/<\?xml[\s\S]*?\?>/gi,'');
+      .replace(/<\?xml[\s\S]*?\?>/gi,'')
 
-    // --- NEW: strip obvious "background" fills so overlays are transparent ---
+      // SAFER href cleanup:
+      // - allow internal fragments (#id)
+      // - remove external http(s), data:, javascript:
+      // normalize xlink:href="#id" -> href="#id"
+      .replace(/\sxlink:href\s*=\s*["']\s*#([^"']+)["']/gi, ' href="#$1"')
+      // drop any xlink:href that isn't a fragment
+      .replace(/\sxlink:href\s*=\s*["'](?!#)[^"']*["']/gi, '')
+      // drop any href that isn't a fragment
+      .replace(/\shref\s*=\s*["']\s*(?!#)[^"']*["']/gi, '')
+      // nuke dangerous protocols anywhere just in case
+      .replace(/(?:javascript:|data:)/gi,'')
+
+      // strip generic inline DOM event handlers
+      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'');
+
+    // --- strip obvious "background" fills so overlays are transparent ---
     // 1) Remove inline CSS background on the <svg> tag
     cleaned = cleaned.replace(
       /(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i,
@@ -1395,9 +1406,29 @@ function bindInside(){
     }
   });
 
+  // --- NEW: Subtab switching (Setup ↔ Visuals)
+  const subtabBar = root.querySelector('.cl-subtabs');
+  if (subtabBar){
+    subtabBar.querySelectorAll('[data-sub]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const sub = btn.getAttribute('data-sub');
+        if (sub === 'visuals' && !STATE.canUseVisuals) return; // keep lock respected
+        STATE.createSub = (sub === 'visuals') ? 'visuals' : 'setup';
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (!host) return;
+        const saveScroll = host.scrollTop;
+        host.innerHTML = renderCreate();
+        bindInside();
+        host.scrollTop = saveScroll;
+      }, { passive:true });
+    });
+  }
+
   // Final: ensure visuals tab reflects current form values
   _maybeUnlockVisuals();
 }
 
+// expose mount/unmount to global
 window.CraftingUI = { mount, unmount };
+
 })();
