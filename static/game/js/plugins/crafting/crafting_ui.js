@@ -98,14 +98,24 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 // /static/game/js/plugins/crafting/crafting_ui.js
 (function(){
   const COSTS = Object.freeze({
-    PER_ITEM_IC:   0,
-    PER_ITEM_PI:   5,
-    ADDON_IC:      1000,
-    ADDON_PI:      1,
-    SHOP_MIN_IC:   50,
-    SHOP_MAX_IC:   250,
-    AI_ATTEMPTS:   5
-  });
+  // --- Single-item TEST pricing (keep for now) ---
+  PER_ITEM_IC:   0,      // keep 0 IC for testing
+  PER_ITEM_PI:   0.1,    // keep 0.10 Pi for testing
+
+  // --- Starter Forge package pricing (fix) ---
+  PACKAGE_PI:    5,          // 5 Pi
+  PACKAGE_IC:    10000,      // 10,000 IC
+
+  // --- Add-on/Shop settings (unchanged logic) ---
+  ADDON_IC:      1000,
+  ADDON_PI:      1,
+  SHOP_MIN_IC:   50,
+  SHOP_MAX_IC:   250,
+  AI_ATTEMPTS:   5
+});
+
+// FYI conversion reference (no logic change): 1 Pi = 2000 IZZA coins
+const COIN_PER_PI = 2000;
 
   const STATE = {
   root: null,
@@ -490,7 +500,9 @@ function normalizeSvgForSlot(svgText, part){
           <div style="opacity:.85;font-size:13px;line-height:1.4">
             2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
           </div>
-          <div style="margin-top:8px;font-weight:700">Cost: 50 Pi</div>
+          <div style="margin-top:8px;font-weight:700">
+  Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC
+</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
             <button class="ghost" data-buy-package="starter-50">Buy</button>
           </div>
