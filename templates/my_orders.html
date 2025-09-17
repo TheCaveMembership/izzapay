@@ -209,5 +209,122 @@
       </div>
     {% endif %}
   </div>
+  <script>
+/* --- bearer helpers (paste as-is) --- */
+function getBearerT(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const fromQS = qs.get('t'); if (fromQS) return fromQS;
+    const fromLS = localStorage.getItem('izzaBearer'); if (fromLS) return fromLS;
+    const m = document.cookie.match(/(?:^|;\s*)t=([^;]+)/);
+    if (m) return decodeURIComponent(m[1]);
+  }catch{}
+  return '';
+}
+async function serverJSON(pathOrUrl, opts={}){
+  const base = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
+  const url = String(pathOrUrl||'').startsWith('http') ? new URL(pathOrUrl) : new URL(base + pathOrUrl);
+  const t = getBearerT();
+  if (t && !url.searchParams.has('t')) url.searchParams.set('t', t);
+  const headers = Object.assign({'content-type':'application/json'}, opts.headers||{}, t ? { 'Authorization':'Bearer '+t } : {});
+  const r = await fetch(url.toString(), Object.assign({ headers, credentials:'include' }, opts));
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return await r.json().catch(()=> ({}));
+}
+
+/* --- small utils --- */
+function esc(str){ return String(str||'').replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+function proxied(url){
+  const v = (url||'').trim(); if(!v) return '';
+  if (v.startsWith('/') || v.startsWith('data:') || v.startsWith('blob:')) return v;
+  try{ const u = new URL(v, location.origin);
+       if (u.protocol==='http:' || u.protocol==='https:') return '/uimg?src='+encodeURIComponent(u.href);
+  }catch(_){} return v;
+}
+
+/* --- renderer --- */
+function collectibleCardHTML(c){
+  const title = esc(c.title || c.name || 'Untitled');
+  const store = esc(c.store || c.merchant || '');
+  const claimed = !!c.claimed;
+  const img = proxied(c.thumb_url || c.image || '');
+  // Tip: prefer server to provide thumb_url; avoid embedding raw svg for safety here.
+  return `
+    <div style="border:1px solid var(--line);border-radius:10px;background:var(--card);padding:10px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="itimg" style="width:64px;height:64px">
+          ${img ? `<img src="${img}" alt="">` : `<span class="muted" style="font-size:12px">—</span>`}
+        </div>
+        <div style="min-width:0">
+          <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${title}</div>
+          ${store ? `<div class="muted" style="font-size:12px">from ${store}</div>` : ``}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end">
+        ${claimed
+          ? `<span class="badge" style="border-color:var(--line)"><span class="success">Claimed ✓</span></span>`
+          : `<button class="ip-btn tiny" data-claim="${esc(c.id)}">Add to Game</button>`
+        }
+      </div>
+    </div>`;
+}
+
+/* --- hydrate list --- */
+async function hydrateCollectibles(){
+  const host = document.getElementById('collectiblesWrap');
+  const card = document.getElementById('collectiblesCard');
+  if(!host || !card) return;
+
+  try{
+    // Your backend should return only in-game (crafting) items purchased by this user.
+    // Suggested shape: { ok:true, items:[{ id, title, store, thumb_url, crafted_item_id, claimed }, ...] }
+    const j = await serverJSON('/api/collectibles');
+    const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+
+    if (!items.length){
+      host.innerHTML = `<div class="muted">No collectibles yet.</div>`;
+      return;
+    }
+
+    host.innerHTML = items.map(collectibleCardHTML).join('');
+
+    // Wire claim buttons
+    host.querySelectorAll('[data-claim]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.getAttribute('data-claim');
+        btn.disabled = true; const prev = btn.textContent; btn.textContent = 'Syncing…';
+        try{
+          // Endpoint should: verify purchase → grant to game inventory → mark as claimed
+          // Expected: { ok:true, granted:{ crafted_item_id, name, svg, ... } }
+          const res = await serverJSON('/api/collectibles/claim', {
+            method:'POST',
+            body: JSON.stringify({ id })
+          });
+          if (res && res.ok){
+            // Optional: notify game shell if open
+            try { IZZA?.emit?.('collectible-claimed', res.granted || { id }); } catch(_){}
+            // Swap UI to "Claimed ✓"
+            const pill = document.createElement('span');
+            pill.className = 'badge';
+            pill.innerHTML = '<span class="success">Claimed ✓</span>';
+            btn.replaceWith(pill);
+          }else{
+            alert('Failed to claim. Please try again.');
+            btn.disabled = false; btn.textContent = prev;
+          }
+        }catch(_){
+          alert('Failed to claim. Please try again.');
+          btn.disabled = false; btn.textContent = prev;
+        }
+      }, { passive:true });
+    });
+
+  }catch(e){
+    host.innerHTML = `<div class="muted">Couldn’t load collectibles.</div>`;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', hydrateCollectibles);
+</script>
 </body>
 </html>
