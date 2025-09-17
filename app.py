@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from PIL import Image
 from werkzeug.utils import secure_filename
 from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
+from flask import Blueprint, jsonify, session, request
 from dotenv import load_dotenv
 import requests
 import mimetypes
@@ -930,7 +931,11 @@ def merchant_setup():
         exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
         if exists:
             tok = get_bearer_token_from_request()
+            prefill = None
+if request.args.get("prefill") == "1":
+    prefill = session.pop("prefill_product", None)
             return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
+                                   PREFILL=prefill,
                                    app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
                                    username=u["pi_username"], colorway=colorway,
                                    error="Slug already taken.")
@@ -2313,7 +2318,39 @@ def crafting_ai_svg():
     except Exception as e:
         current_app.logger.exception("crafting_ai_svg failed")
         return _json_err(e)
+craft_prefill_bp = Blueprint("craft_prefill_bp", __name__)
 
+@craft_prefill_bp.post("/api/merchant/create_product_from_craft")
+def create_product_from_craft():
+    urow = current_user_row()
+    if not urow:
+        return jsonify(ok=False, error="not_logged_in"), 401
+
+    # does this user have a merchant store?
+    with conn() as cx:
+        m = cx.execute(
+            "SELECT slug FROM merchants WHERE owner_user_id=?",
+            (urow["id"],)
+        ).fetchone()
+
+    if not m:
+        # send them to setup if no store yet
+        return jsonify(ok=True, dashboardUrl="/merchant/setup"), 200
+
+    data = request.get_json(force=True) or {}
+    title = (data.get("title") or "").strip()
+    description = (data.get("description") or "").strip()
+    svg = (data.get("svg") or "").strip()
+    crafted_meta = data.get("crafted_meta") or {}
+
+    session["prefill_product"] = {
+        "title": title[:160],
+        "description": description[:500],
+        "svg": svg,
+        "crafted_meta": crafted_meta
+    }
+
+    return jsonify(ok=True, dashboardUrl=f"/merchant/{m['slug']}?prefill=1")
 @crafting_api.get("/mine")
 def crafting_mine():
     try:
@@ -2341,6 +2378,7 @@ def crafting_mine():
     
 # Register the blueprint (do this once)
 app.register_blueprint(crafting_api)
+app.register_blueprint(craft_prefill_bp)
 # ---- end Crafting Land API shims -------------------------------------------
 # =========================================================================== #
 # ----------------- MAIN -----------------
