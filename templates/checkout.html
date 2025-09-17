@@ -198,18 +198,16 @@
 
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
 
-  /* === NEW: single helper that matches your server endpoint === */
-  function clearPending(sessionId, paymentId){
+  /* helper to cancel by paymentId (no UI text, no session lookup) */
+  function cancelByPaymentId(pid){
+    if(!pid) return;
     try{
-      var body = {};
-      if (sessionId) body.session_id = sessionId;
-      if (paymentId) body.payment_id = paymentId;
-      return fetch('/api/pi/clear_pending', {
+      return fetch('/payment/cancel', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(body)
+        body: JSON.stringify({ paymentId: pid })
       }).catch(function(){});
-    }catch(_){ return Promise.resolve(); }
+    }catch(_){}
   }
 
   function initPi(){
@@ -250,23 +248,16 @@
 
   initPi();
 
-  /* === NEW: auto-clear any stuck pending payment for this session on page load (safe no-op if none) === */
-  clearPending(sessionId);
-
   btn?.addEventListener('click', function(){
     const emailVal = (emailEl?.value || '').trim();
     if (!emailVal){
-      setMsg('Please enter your email before continuing.');
       emailEl?.focus();
       return;
     }
 
     if (!window.Pi || !Pi.createPayment){
-      setMsg("Open this page in the Pi Browser.");
       return;
     }
-
-    setMsg('Opening Pi payment…');
 
     ensureAuth().then(() => {
       const memo = (storeName ? (storeName + ' — ') : '') +
@@ -284,18 +275,6 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentId, session_id: sessionId })
-          })
-          .then(function(r){
-            if(!r.ok){
-              return clearPending(sessionId, paymentId).finally(function(){
-                setMsg("Payment reset. Please tap Pay again.");
-              });
-            }
-          })
-          .catch(function(){
-            clearPending(sessionId, paymentId).finally(function(){
-              setMsg("Payment reset. Please tap Pay again.");
-            });
           });
         },
         onReadyForServerCompletion: function(paymentId, txid){
@@ -320,41 +299,18 @@
           });
         },
 
-        /* === NEW: clear any SDK-reported incomplete payment immediately === */
+        /* >>> EXACTLY AS REQUESTED: cancel the incomplete payment by id <<< */
         onIncompletePaymentFound: function(payment){
           try{
             var pid = payment && (payment.identifier || payment.paymentId || payment.id);
-            clearPending(sessionId, pid).finally(function(){
-              setMsg("Previous pending payment cleared. Tap Pay again.");
-            });
-          }catch(_){
-            clearPending(sessionId).finally(function(){
-              setMsg("Previous pending payment cleared. Tap Pay again.");
-            });
-          }
+            cancelByPaymentId(pid);
+          }catch(_){}
         },
 
-        onCancel: function(){
-          /* === NEW: clear local/remote pending on user-cancel === */
-          clearPending(sessionId).finally(function(){
-            setMsg("Payment canceled.");
-          });
-        },
-        onError:  function(e){
-          /* === NEW: handle “already have a pending payment” errors by clearing === */
-          var t = String((e && (e.message || e.error || e)) || "").toLowerCase();
-          if (t.includes("already have a pending") || t.includes("pending payment")){
-            clearPending(sessionId).finally(function(){
-              setMsg("Previous pending payment cleared. Tap Pay again.");
-            });
-          } else {
-            setMsg("Please try again.");
-          }
-        }
+        onCancel: function(){ /* no user-facing text */ },
+        onError:  function(){ /* no user-facing text */ }
       });
-    }).catch(() => {
-      setMsg("Please try again.");
-    });
+    }).catch(() => {});
   });
 })();
 </script>
