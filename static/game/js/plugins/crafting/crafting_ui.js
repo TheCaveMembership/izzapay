@@ -1,3 +1,20 @@
+You made it here and then failed 
+
+Continue from where you failed 
+
+Got it—here’s the full updated file with only the necessary changes:
+	•	Keeps Single Item price at 0 IC and 0.005 Pi (for testing).
+	•	Adds package prices (Starter Forge) at 5 Pi or 10,000 IC with both buttons functional.
+	•	Locks Visuals until a successful purchase (from Packages or Setup), then auto-switches to Visuals and resets AI attempts to 5. AI attempts now show only in Visuals.
+	•	Removes the “Also sell bundle in Crafting Land (Pi)” checkbox from Create.
+	•	Adds a Marketplace button on Packages.
+	•	Adds “Create an IZZA Pay product” checkbox in Visuals; on Mint, it calls your merchant endpoint.
+	•	“My Creations” cards now show Add to Shop (if not listed) or View Shop Stats (if listed).
+	•	Preserves everything else.
+
+⸻
+
+
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -98,8 +115,13 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 // /static/game/js/plugins/crafting/crafting_ui.js
 (function(){
   const COSTS = Object.freeze({
-    PER_ITEM_IC:   0,
-    PER_ITEM_PI:   5,
+    // --- TEST PRICES (requested) ---
+    PER_ITEM_IC:   0,         // single item crafting: 0 IC (testing)
+    PER_ITEM_PI:   0.005,     // single item crafting: 0.005 Pi (testing)
+    // --- Package (Starter Forge) ---
+    PACKAGE_PI:    5,
+    PACKAGE_IC:    10000,
+    // --- Feature add-ons (unchanged unless you change server rules) ---
     ADDON_IC:      1000,
     ADDON_PI:      1,
     SHOP_MIN_IC:   50,
@@ -108,29 +130,31 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
   });
 
   const STATE = {
-  root: null,
-  mounted: false,
-  aiAttemptsLeft: COSTS.AI_ATTEMPTS,
-  hasPaidForCurrentItem: false,
-  currentSVG: '',
-  currentName: '',
-  featureFlags: {
-    dmgBoost: false,
-    fireRate: false,
-    speedBoost: false,
-    dmgReduction: false,
-    tracerFx: false,
-    swingFx: false
-  },
-  aiStyle: 'realistic',      // 'realistic' | 'cartoon' (aka 'stylized')
-  wantAnimation: false,      // creator can toggle animation
-  currentCategory: 'armour',
-  currentPart: 'helmet',
-  fireRateRequested: 0,
-  dmgHearts: 0.5,
-  packageCredits: null,
-  createSub: 'setup',
-};
+    root: null,
+    mounted: false,
+    aiAttemptsLeft: COSTS.AI_ATTEMPTS,
+    hasPaidForCurrentItem: false,
+    currentSVG: '',
+    currentName: '',
+    featureFlags: {
+      dmgBoost: false,
+      fireRate: false,
+      speedBoost: false,
+      dmgReduction: false,
+      tracerFx: false,
+      swingFx: false
+    },
+    aiStyle: 'realistic',      // 'realistic' | 'cartoon' (aka 'stylized')
+    wantAnimation: false,      // creator can toggle animation
+    currentCategory: 'armour',
+    currentPart: 'helmet',
+    fireRateRequested: 0,
+    dmgHearts: 0.5,
+    packageCredits: null,
+    createSub: 'setup',
+    canUseVisuals: false       // visuals locked until successful purchase
+  };
+
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
@@ -142,58 +166,53 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
   }
 
   function sanitizeSVG(svg){
-  try{
-    const txt = String(svg||'');
-    if (txt.length > 200_000) throw new Error('SVG too large');
-    if (/script|onload|onerror|foreignObject|iframe/i.test(txt)) throw new Error('Disallowed elements/attrs');
+    try{
+      const txt = String(svg||'');
+      if (txt.length > 200_000) throw new Error('SVG too large');
+      if (/script|onload|onerror|foreignObject|iframe/i.test(txt)) throw new Error('Disallowed elements/attrs');
 
-    // base clean
-    let cleaned = txt
-      .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
-      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
-      .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
-      .replace(/(javascript:|data:)/gi,'')
-      .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
-      .replace(/<!DOCTYPE[^>]*>/gi,'')
-      .replace(/<\?xml[\s\S]*?\?>/gi,'');
+      // base clean
+      let cleaned = txt
+        .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
+        .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
+        .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
+        .replace(/(javascript:|data:)/gi,'')
+        .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
+        .replace(/<!DOCTYPE[^>]*>/gi,'')
+        .replace(/<\?xml[\s\S]*?\?>/gi,'');
 
-    // --- NEW: strip obvious "background" fills so overlays are transparent ---
-    // 1) Remove inline CSS background on the <svg> tag
-    cleaned = cleaned.replace(
-      /(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i,
-      (_, pre)=> pre
-    );
-
-    // 2) Kill <rect> that clearly cover the whole canvas (100% x 100%)
-    cleaned = cleaned.replace(
-      /<rect\b[^>]*width\s*=\s*["']\s*100%\s*["'][^>]*height\s*=\s*["']\s*100%\s*["'][^>]*\/?>/gi,
-      ''
-    );
-
-    // 3) Kill full-bleed <rect x="0" y="0" width=VBW height=VBH> (common sizes)
-    const vb = /viewBox\s*=\s*["'][^"']*?(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/i.exec(cleaned);
-    if (vb){
-      const w = String(parseFloat(vb[3]));
-      const h = String(parseFloat(vb[4]));
-      const fullRectRe = new RegExp(
-        `<rect\\b[^>]*x\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*y\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*width\\s*=\\s*['"]?(?:${w}|${Math.round(+w)})['"]?[^>]*height\\s*=\\s*['"]?(?:${h}|${Math.round(+h)})['"]?[^>]*\\/?>`,
-        'gi'
-      );
-      cleaned = cleaned.replace(fullRectRe, '');
-    } else {
-      // fallback for common canvases
+      // strip obvious background fills so overlays are transparent
       cleaned = cleaned.replace(
-        /<rect\b[^>]*x\s*=\s*["']?0(?:\.0+)?["']?[^>]*y\s*=\s*["']?0(?:\.0+)?["']?[^>]*width\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*height\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*\/?>/gi,
+        /(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i,
+        (_, pre)=> pre
+      );
+
+      cleaned = cleaned.replace(
+        /<rect\b[^>]*width\s*=\s*["']\s*100%\s*["'][^>]*height\s*=\s*["']\s*100%\s*["'][^>]*\/?>/gi,
         ''
       );
-    }
 
-    // 4) Remove <rect> marked as background via id/class
-    cleaned = cleaned.replace(/<rect\b[^>]*(id|class)\s*=\s*["'][^"']*(?:\bbg\b|\bbackground\b|\bbackdrop\b)[^"']*["'][^>]*\/?>/gi,'');
+      const vb = /viewBox\s*=\s*["'][^"']*?(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/i.exec(cleaned);
+      if (vb){
+        const w = String(parseFloat(vb[3]));
+        const h = String(parseFloat(vb[4]));
+        const fullRectRe = new RegExp(
+          `<rect\\b[^>]*x\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*y\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*width\\s*=\\s*['"]?(?:${w}|${Math.round(+w)})['"]?[^>]*height\\s*=\\s*['"]?(?:${h}|${Math.round(+h)})['"]?[^>]*\\/?>`,
+          'gi'
+        );
+        cleaned = cleaned.replace(fullRectRe, '');
+      } else {
+        cleaned = cleaned.replace(
+          /<rect\b[^>]*x\s*=\s*["']?0(?:\.0+)?["']?[^>]*y\s*=\s*["']?0(?:\.0+)?["']?[^>]*width\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*height\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*\/?>/gi,
+          ''
+        );
+      }
 
-    return cleaned;
-  }catch(e){ return ''; }
-}
+      cleaned = cleaned.replace(/<rect\b[^>]*(id|class)\s*=\s*["'][^"']*(?:\bbg\b|\bbackground\b|\bbackdrop\b)[^"']*["'][^>]*\/?>/gi,'');
+
+      return cleaned;
+    }catch(e){ return ''; }
+  }
 // --- UI helpers for AI wait state ---
 const MIN_AI_WAIT_MS = 10_000;
 const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
@@ -231,7 +250,6 @@ function hideWait(node){
     }catch{}
   }
 
-  // *** CHANGE 1: force default API base to your Node service ***
   // Force default API base to the Node service on Render.
 // You can still override with window.IZZA_PERSIST_BASE if you ever need to.
 const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
@@ -271,11 +289,13 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
   }
 
   function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
-  function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
+  function calcTotalCost({ usePi, includeAddons=true }){
+    const base  = usePi ? COSTS.PER_ITEM_PI  : COSTS.PER_ITEM_IC;
+    const addon = usePi ? COSTS.ADDON_PI     : COSTS.ADDON_IC;
+    return base + (includeAddons ? addon * selectedAddOnCount() : 0);
+  }
 
-  // *** CHANGE 2: server-first, fallback is now a tiny basic blueprint icon ***
   // --- AI prompt: server first, then minimal fallback ---
-// Server-first AI; minimal fallback (simple blueprint) if the server fails.
 async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
@@ -288,12 +308,12 @@ async function aiToSVG(prompt){
           animate: STATE.wantAnimation
         }),
         meta: {
-          part: mapPartForServer(STATE.currentPart),   // hands for gun/melee
+          part: mapPartForServer(STATE.currentPart),
           category: STATE.currentCategory,
           name: STATE.currentName,
-          style: STATE.aiStyle,         // <-- new
-          animate: STATE.wantAnimation, // <-- new
-          animationPaid: false          // UI will set true after purchase when you wire the upsell
+          style: STATE.aiStyle,
+          animate: STATE.wantAnimation,
+          animationPaid: false
         }
       })
     });
@@ -478,44 +498,53 @@ function normalizeSvgForSlot(svgText, part){
         <button class="ghost" data-tab="packages">Packages</button>
         <button class="ghost" data-tab="create">Create Item</button>
         <button class="ghost" data-tab="mine">My Creations</button>
-        <div style="margin-left:auto; opacity:.7; font-size:12px">AI attempts left: <b id="aiLeft">${STATE.aiAttemptsLeft}</b></div>
       </div>`;
   }
 
   function renderPackages(){
     return `
-      <div style="padding:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
+      <div style="padding:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px">
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
           <div style="opacity:.85;font-size:13px;line-height:1.4">
             2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
           </div>
-          <div style="margin-top:8px;font-weight:700">Cost: 50 Pi</div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
-            <button class="ghost" data-buy-package="starter-50">Buy</button>
+          <div style="margin-top:8px;font-weight:700">Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC</div>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="ghost" data-buy-package-pi="starter-50">Pay ${COSTS.PACKAGE_PI} Pi</button>
+            <button class="ghost" data-buy-package-ic="starter-50">Pay ${COSTS.PACKAGE_IC.toLocaleString()} IC</button>
           </div>
         </div>
+
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
           <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
-            <button class="ghost" data-buy-single="pi">Pay 5 Pi</button>
-            <!-- label now reflects actual cost (PER_ITEM_IC = 0 keeps free testing intact) -->
+            <button class="ghost" data-buy-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
             <button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC} IC</button>
+          </div>
+        </div>
+
+        <div style="background:#0f1522;border:1px dashed #2a3550;border-radius:10px;padding:12px">
+          <div style="font-weight:700;margin-bottom:6px">Crafting Land Marketplace</div>
+          <div style="opacity:.85;font-size:13px;">Browse player-made bundles and buy with Pi.</div>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+            <button class="ghost" id="goMarketplace">Open Marketplace</button>
           </div>
         </div>
       </div>`;
   }
 
   function renderCreate(){
-  const totalPi = calcTotalCost({ usePi:true });
-  const totalIC = calcTotalCost({ usePi:false });
-  const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
+    const totalPi = calcTotalCost({ usePi:true });
+    const totalIC = calcTotalCost({ usePi:false });
+    const sub = STATE.canUseVisuals ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup') : 'setup';
+    const visualsDisabledCls = STATE.canUseVisuals ? '' : 'disabled';
 
-  return `
+    return `
     <div class="cl-subtabs">
       <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
-      <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
+      <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}" data-sub="visuals" ${STATE.canUseVisuals?'':'disabled'}>Visuals</button>
     </div>
 
     <div class="cl-body ${sub}">
@@ -530,7 +559,6 @@ function normalizeSvgForSlot(svgText, part){
         </select>
 
         <label style="display:block;margin:8px 0 4px;font-size:12px;opacity:.8">Part / Type</label>
-        <!-- options are populated dynamically to keep Weapon => Gun/Melee only -->
         <select id="partSel"></select>
 
         <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
@@ -561,49 +589,60 @@ function normalizeSvgForSlot(svgText, part){
           <div style="margin-top:6px">
             <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
           </div>
-          <div style="margin-top:4px">
-            <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
-          </div>
+          <!-- removed: Also sell bundle in Crafting Land (Pi) -->
         </div>
       </div>
 
       <div class="cl-pane cl-preview">
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-          <div style="font-weight:700">Visuals</div>
-          <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
+        ${STATE.canUseVisuals ? `
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+            <div style="font-weight:700">Visuals</div>
+            <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
 
-          <!-- Style / Animation controls -->
-          <div style="display:flex; gap:8px; align-items:center; margin-left:auto">
-            <label style="font-size:12px; opacity:.8">Style</label>
-            <select id="aiStyleSel">
-              <option value="realistic">Realistic</option>
-              <option value="cartoon">Cartoon / Stylized</option>
-            </select>
-            <label style="font-size:12px; opacity:.8; margin-left:12px">
-              <input type="checkbox" id="aiAnimChk"/> Add animation (premium)
+            <div style="display:flex; gap:8px; align-items:center; margin-left:auto">
+              <label style="font-size:12px; opacity:.8">Style</label>
+              <select id="aiStyleSel">
+                <option value="realistic">Realistic</option>
+                <option value="cartoon">Cartoon / Stylized</option>
+              </select>
+              <label style="font-size:12px; opacity:.8; margin-left:12px">
+                <input type="checkbox" id="aiAnimChk"/> Add animation (premium)
+              </label>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:10px; margin-top:6px">
+            <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
+            <button class="ghost" id="btnAI">AI → SVG</button>
+          </div>
+
+          <div style="margin-top:8px">
+            <label style="font-size:12px; opacity:.85">
+              <input id="toMerchant" type="checkbox"/>
+              Create an IZZA Pay product for this item
             </label>
           </div>
-        </div>
 
-        <div style="display:flex; gap:10px; margin-top:6px">
-          <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
-          <button class="ghost" id="btnAI">AI → SVG</button>
-        </div>
-        <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
-        <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
+          <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
+          <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
 
-        <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
-          <button class="ghost" id="btnPreview">Preview</button>
-          <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
-          <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
-        </div>
+          <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+            <button class="ghost" id="btnPreview">Preview</button>
+            <button class="ghost" id="btnMint" style="display:none" title="Mint this item into the game!">Mint</button>
+            <span id="craftStatus" style="font-size:12px; opacity:.8"></span>
+          </div>
 
-        <div id="svgPreview"
-             style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
-                    min-height:220px; max-height:min(60vh,520px); overflow:auto;
-                    display:flex; align-items:center; justify-content:center">
-          <div style="opacity:.6; font-size:12px">Preview appears here</div>
-        </div>
+          <div id="svgPreview"
+               style="margin-top:10px; background:#0f1522; border:1px solid #2a3550; border-radius:10px;
+                      min-height:220px; max-height:min(60vh,520px); overflow:auto;
+                      display:flex; align-items:center; justify-content:center">
+            <div style="opacity:.6; font-size:12px">Preview appears here</div>
+          </div>
+        ` : `
+          <div style="opacity:.8; font-size:13px; padding:12px; border:1px dashed #2a3550; border-radius:10px;">
+            Visuals are locked. Complete payment in <b>Setup</b> or on the <b>Packages</b> tab to unlock (includes ${COSTS.AI_ATTEMPTS} AI attempts).
+          </div>
+        `}
       </div>
     </div>`;
 }
@@ -617,25 +656,26 @@ function normalizeSvgForSlot(svgText, part){
   }
 
   function currentUsername(){
-  // adjust if your player name lives elsewhere; these are safe fallbacks:
-  return (window?.IZZA?.player?.username)
-      || (window?.IZZA?.me?.username)
-      || localStorage.getItem('izzaPlayer')     // if you store it
-      || localStorage.getItem('pi_username')    // if you store it
-      || '';
-}
+    // adjust if your player name lives elsewhere; these are safe fallbacks:
+    return (window?.IZZA?.player?.username)
+        || (window?.IZZA?.me?.username)
+        || localStorage.getItem('izzaPlayer')
+        || localStorage.getItem('pi_username')
+        || '';
+  }
 
-async function fetchMine(){
-  try{
-    const u = encodeURIComponent(currentUsername());
-    if(!u) return [];
-    const j = await serverJSON(api(`/api/crafting/mine?u=${u}`));
-    return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
-  }catch{ return []; }
-}
+  async function fetchMine(){
+    try{
+      const u = encodeURIComponent(currentUsername());
+      if(!u) return [];
+      const j = await serverJSON(api(`/api/crafting/mine?u=${u}`));
+      return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+    }catch{ return []; }
+  }
 
   function mineCardHTML(it){
     const safeSVG = sanitizeSVG(it.svg||'');
+    const inShop = !!it.inShop;
     return `
       <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
         <div style="font-weight:700">${it.name||'Untitled'}</div>
@@ -646,6 +686,9 @@ async function fetchMine(){
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
           <button class="ghost" data-copy="${it.id}">Copy SVG</button>
           <button class="ghost" data-equip="${it.id}">Equip</button>
+          ${inShop
+            ? `<button class="ghost" data-stats="${it.id}">View Shop Stats</button>`
+            : `<button class="ghost" data-addshop="${it.id}">Add to Shop</button>`}
         </div>
       </div>`;
   }
@@ -668,119 +711,168 @@ async function fetchMine(){
       });
     });
     host.querySelectorAll('[data-equip]').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    const id = b.dataset.equip;
-    const it = items.find(x=>x.id===id);
-    if (!it) return;
+      b.addEventListener('click', ()=>{
+        const id = b.dataset.equip;
+        const it = items.find(x=>x.id===id);
+        if (!it) return;
 
-    // Persist + fire events (you already have this)
-    try {
-      localStorage.setItem('izzaLastEquipped', JSON.stringify({
-        id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
-      }));
-    } catch {}
-    try { IZZA?.emit?.('equip-crafted', id); } catch{}
-    try { IZZA?.emit?.('equip-crafted-v2', { id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg }); } catch{}
-  });
-});           // <--- closes forEach
-}             // <--- make sure this closes async function hydrateMine()
+        // Persist + fire events (you already have this)
+        try {
+          localStorage.setItem('izzaLastEquipped', JSON.stringify({
+            id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
+          }));
+        } catch {}
+        try { IZZA?.emit?.('equip-crafted', id); } catch{}
+        try { IZZA?.emit?.('equip-crafted-v2', { id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg }); } catch{}
+      });
+    });
+    host.querySelectorAll('[data-addshop]').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        const id = b.dataset.addshop;
+        const it = items.find(x=>x.id===id);
+        if(!it) return;
+        try{
+          const u = encodeURIComponent(currentUsername());
+          const priceIC = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, 100));
+          const j = await serverJSON(api(`/api/shop/add?u=${u}`), {
+            method:'POST',
+            body: JSON.stringify({ id: it.id, priceIC })
+          });
+          if (j && j.ok){ alert('Added to shop!'); hydrateMine(); }
+          else { alert('Failed to add to shop'); }
+        }catch(e){ alert('Failed to add to shop'); }
+      });
+    });
+    host.querySelectorAll('[data-stats]').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        try{
+          const id = b.dataset.stats;
+          const j = await serverJSON(api(`/api/shop/stats?id=${encodeURIComponent(id)}`));
+          if (j && j.ok){
+            const s = j.stats||{};
+            alert(`Sales: ${s.sold||0}\nPlayer resales: ${s.resold||0}`);
+          } else {
+            alert('No stats yet.');
+          }
+        }catch(e){ alert('Could not load stats'); }
+      });
+    });
+  }
+
   function mount(rootSel){
-  const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
-  if (!root) return;
-  STATE.root = root;
-  STATE.mounted = true;
-  loadDraft();
+    const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
+    if (!root) return;
+    STATE.root = root;
+    STATE.mounted = true;
+    loadDraft();
 
-  root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
-  const tabsHost = root.querySelector('#craftTabs');
+    root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
+    const tabsHost = root.querySelector('#craftTabs');
 
-  const setTab = (name)=>{
-    if(!STATE.mounted) return;
-    if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
-    if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
-    if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
+    const setTab = (name)=>{
+      if(!STATE.mounted) return;
+      if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
+      if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
+      if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
-    bindInside();
+      bindInside();
 
-    // >>> ADD THIS: immediately sync the attempts counter when entering Create
-    if (name === 'create') {
-      try {
-        const el = document.getElementById('aiLeft2');
-        if (el) el.textContent = STATE.aiAttemptsLeft;
-      } catch {}
-    }
-  };
+      // keep attempts counter in sync when entering Visuals
+      if (name === 'create' && STATE.canUseVisuals) {
+        try {
+          const el = document.getElementById('aiLeft2');
+          if (el) el.textContent = STATE.aiAttemptsLeft;
+        } catch {}
+      }
+    };
 
-  root.querySelectorAll('[data-tab]').forEach(b=>{
-    b.addEventListener('click', ()=> setTab(b.dataset.tab));
-  });
+    root.querySelectorAll('[data-tab]').forEach(b=>{
+      b.addEventListener('click', ()=> setTab(b.dataset.tab));
+    });
 
-  setTab('packages');
-}
+    setTab('packages');
+  }
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-  async function handleBuySingle(kind){
+  async function handleBuySingle(kind, { includeAddons=true } = {}){
     const usePi = (kind==='pi');
-    const total = calcTotalCost({ usePi });
+    const total = calcTotalCost({ usePi, includeAddons });
     let res;
-    if (usePi) res = await payWithPi(total, 'Craft Single Item');
+    if (usePi) res = await payWithPi(total, includeAddons ? 'Craft Item (+features)' : 'Craft Item');
     else       res = await payWithIC(total);
     const status = document.getElementById('payStatus');
-    if (res && res.ok){ STATE.hasPaidForCurrentItem = true; status && (status.textContent='Paid ✓ — you can craft now.'); }
+    if (res && res.ok){
+      STATE.hasPaidForCurrentItem = true;
+      STATE.canUseVisuals = true;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset attempts each purchase
+      if (status) status.textContent='Paid ✓ — visuals unlocked.';
+      // auto-redirect to Visuals
+      STATE.createSub = 'visuals';
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){ host.innerHTML = renderCreate(); bindInside(); }
+    }
     else { status && (status.textContent='Payment failed.'); }
   }
 
   function bindInside(){
-  const root = STATE.root;
-  if(!root) return;
+    const root = STATE.root;
+    if(!root) return;
 
-  STATE.root.querySelectorAll('[data-sub]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      STATE.createSub = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
-      const host = STATE.root.querySelector('#craftTabs');
-      if (!host) return;
-      const saveScroll = host.scrollTop;
-      host.innerHTML = renderCreate();
-      bindInside();
-      host.scrollTop = saveScroll;
-    }, { passive:true });
-  });
+    root.querySelectorAll('[data-sub]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const want = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
+        // block visuals if locked
+        STATE.createSub = (want==='visuals' && !STATE.canUseVisuals) ? 'setup' : want;
+        const host = STATE.root.querySelector('#craftTabs');
+        if (!host) return;
+        const saveScroll = host.scrollTop;
+        host.innerHTML = renderCreate();
+        bindInside();
+        host.scrollTop = saveScroll;
+      }, { passive:true });
+    });
 
-  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const id = btn.dataset.buyPackage;
-      const res = await payWithPi(50, `Package:${id}`);
-      if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
-    }, { passive:true });
-  });
+    // Packages – package payment buttons
+    root.querySelectorAll('[data-buy-package-pi]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const res = await payWithPi(COSTS.PACKAGE_PI, 'Starter Forge');
+        if(res.ok){ STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
+      }, { passive:true });
+    });
+    root.querySelectorAll('[data-buy-package-ic]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const res = await payWithIC(COSTS.PACKAGE_IC);
+        if(res.ok){ STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
+      }, { passive:true });
+    });
 
-  root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-    btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
-  });
+    // Packages – single item purchase (no feature addons)
+    root.querySelectorAll('[data-buy-single]').forEach(btn=>{
+      btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle, { includeAddons:false }), { passive:true });
+    });
 
+    // Marketplace button
+    const goMp = root.querySelector('#goMarketplace');
+    if (goMp){
+      goMp.addEventListener('click', ()=> {
+        try{ IZZA?.emit?.('open-marketplace'); }catch{}
+      });
+    }
+  // Setup Pay buttons (include addons)
   const payPi = root.querySelector('#payPi');
   const payIC = root.querySelector('#payIC');
-  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
-  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
+  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi', { includeAddons:true }), { passive:true });
+  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic', { includeAddons:true }), { passive:true });
 
+  // Basic form bindings
   const itemName = root.querySelector('#itemName');
   if (itemName){
     itemName.value = STATE.currentName || '';
     itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
   }
 
-  const aiStyleSel = root.querySelector('#aiStyleSel');
-  const aiAnimChk  = root.querySelector('#aiAnimChk');
-  if (aiStyleSel){
-    aiStyleSel.value = STATE.aiStyle;
-    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
-  }
-  if (aiAnimChk){
-    aiAnimChk.checked = !!STATE.wantAnimation;
-    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
-  }
-
+  // Feature flags
   root.querySelectorAll('[data-ff]').forEach(cb=>{
     const key = cb.dataset.ff;
     if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
@@ -796,6 +888,7 @@ async function fetchMine(){
     });
   });
 
+  // Category/part
   const catSel  = root.querySelector('#catSel');
   const partSel = root.querySelector('#partSel');
 
@@ -818,9 +911,21 @@ async function fetchMine(){
     }, { passive:true });
   }
 
+  // Visuals controls exist only when unlocked
+  const aiStyleSel = root.querySelector('#aiStyleSel');
+  const aiAnimChk  = root.querySelector('#aiAnimChk');
+  if (aiStyleSel){
+    aiStyleSel.value = STATE.aiStyle;
+    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
+  }
+  if (aiAnimChk){
+    aiAnimChk.checked = !!STATE.wantAnimation;
+    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
+  }
+
   const aiLeft = ()=> {
-    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
-    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+    const b = document.getElementById('aiLeft2');
+    if (b) b.textContent = STATE.aiAttemptsLeft;
   };
 
   const btnAI    = root.querySelector('#btnAI');
@@ -836,7 +941,7 @@ async function fetchMine(){
     prevHost && (prevHost.innerHTML = STATE.currentSVG);
   }
 
-  // ===== Handlers MUST live inside bindInside() =====
+  // === AI generate ===
   btnAI && btnAI.addEventListener('click', async ()=>{
     if (!btnAI) return;
     const prompt = String(aiPrompt?.value||'').trim();
@@ -849,6 +954,7 @@ async function fetchMine(){
 
     try{
       const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
+
       if (svgIn) svgIn.value = svg;
       if (prevHost) {
         prevHost.innerHTML = svg;
@@ -876,6 +982,7 @@ async function fetchMine(){
     }
   });
 
+  // === Manual preview ===
   btnPrev && btnPrev.addEventListener('click', ()=>{
     const cleaned = sanitizeSVG(svgIn?.value);
     if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
@@ -896,26 +1003,30 @@ async function fetchMine(){
     const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
   });
 
+  // === Mint ===
   btnMint && btnMint.addEventListener('click', async ()=>{
-    craftStatus.textContent = '';
+    craftStatus && (craftStatus.textContent = '');
 
     const nm = moderateName(STATE.currentName);
-    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+    if (!nm.ok){ craftStatus && (craftStatus.textContent = nm.reason); return; }
 
+    // Require payment (single or package) unless free IC testing with no addons
     const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
     if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+      craftStatus && (craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.');
       return;
     }
-    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+    if (!STATE.currentSVG){ craftStatus && (craftStatus.textContent = 'Add/Preview SVG first.'); return; }
 
     const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
     const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+    const toMerchant = !!root.querySelector('#toMerchant')?.checked;
 
     try{
+      // Normalize only at mint-time
       const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
+      // Inject into game
       const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
         ? window.ArmourPacks.injectCraftedItem({
             name: STATE.currentName,
@@ -924,26 +1035,28 @@ async function fetchMine(){
             svg: normalizedForSlot,
             priceIC,
             sellInShop,
-            sellInPi,
+            sellInPi: false, // removed bundle option for single items
             featureFlags: STATE.featureFlags
           })
         : { ok:false, reason:'armour-packs-hook-missing' };
 
       if (injected && injected.ok){
-        craftStatus.textContent = 'Crafted ✓';
+        // Local bookkeeping
+        craftStatus && (craftStatus.textContent = 'Crafted ✓');
         STATE.hasPaidForCurrentItem = false;
         if (STATE.packageCredits && STATE.packageCredits.items > 0){
           STATE.packageCredits.items -= 1;
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
 
+        // Persist crafted item
         try{
           const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
+            (window?.IZZA?.player?.username) ||
+            (window?.IZZA?.me?.username) ||
+            localStorage.getItem('izzaPlayer') ||
+            localStorage.getItem('pi_username') ||
+            ''
           );
           if (u) {
             await serverJSON(api(`/api/crafting/mine?u=${u}`), {
@@ -953,25 +1066,40 @@ async function fetchMine(){
                 category: STATE.currentCategory,
                 part: STATE.currentPart,
                 svg: normalizedForSlot,
+                priceIC,
+                sellInShop,
                 sku: '',
                 image: ''
               })
             });
           }
-        }catch(e){
-          console.warn('[craft] persist failed:', e); // non-fatal
+        }catch(e){ console.warn('[craft] persist failed:', e); }
+
+        // Optional: create merchant product
+        if (toMerchant){
+          try{
+            await serverJSON(api('/api/merchant/create_from_craft'), {
+              method:'POST',
+              body: JSON.stringify({
+                name: STATE.currentName,
+                category: STATE.currentCategory,
+                part: STATE.currentPart,
+                svg: normalizedForSlot,
+                priceIC
+              })
+            });
+          }catch(e){ console.warn('[merchant] create failed:', e); }
         }
 
+        // Refresh My Creations
         try{ hydrateMine(); }catch{}
 
       }else{
-        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+        craftStatus && (craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing'));
       }
     }catch(e){
-      craftStatus.textContent = 'Error crafting: ' + e.message;
+      craftStatus && (craftStatus.textContent = 'Error crafting: ' + e.message);
     }
   });
-}
-
-window.CraftingUI = { mount, unmount };
-})();
+} // end bindInside
+})(); // end IIFE
