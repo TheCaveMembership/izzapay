@@ -345,29 +345,29 @@ setup_backups()
 
 def ensure_schema():
     with conn() as cx:
-    # merchants patches
-    cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-    if "pi_wallet_address" not in cols:
-        cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-    if "pi_handle" not in cols:
-        cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-    if "colorway" not in cols:
-        cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+        # merchants patches
+        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+        if "pi_wallet_address" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+        if "pi_handle" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+        if "colorway" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-    # carts & cart_items
-    cx.execute("""
-        CREATE TABLE IF NOT EXISTS carts(
-          id TEXT PRIMARY KEY,
-          merchant_id INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        )""")
-    cx.execute("""
-        CREATE TABLE IF NOT EXISTS cart_items(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          cart_id TEXT NOT NULL,
-          item_id INTEGER NOT NULL,
-          qty INTEGER NOT NULL
-        )""")
+        # carts & cart_items
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS carts(
+              id TEXT PRIMARY KEY,
+              merchant_id INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )""")
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS cart_items(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              cart_id TEXT NOT NULL,
+              item_id INTEGER NOT NULL,
+              qty INTEGER NOT NULL
+            )""")
 
 with conn() as cx:
     # items table patches for crafted linkage & description
