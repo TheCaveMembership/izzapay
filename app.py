@@ -32,7 +32,29 @@ try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
 except Exception:
     PI_USD_RATE = 0.0
-
+# === Crafting grant hook (game item fulfillment) ===
+def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: int):
+    # Minimal stub: log or record in a queue.
+    # Replace with a real call into your game service when ready.
+    if not (to_user_id and crafted_id and qty > 0):
+        return
+    try:
+        with conn() as cx:
+            cx.execute("""
+                CREATE TABLE IF NOT EXISTS crafting_grants(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  crafted_item_id TEXT NOT NULL,
+                  qty INTEGER NOT NULL,
+                  created_at INTEGER NOT NULL
+                )
+            """)
+            cx.execute(
+                "INSERT INTO crafting_grants(user_id, crafted_item_id, qty, created_at) VALUES(?,?,?,?)",
+                (to_user_id, str(crafted_id), int(qty), int(time.time()))
+            )
+    except Exception:
+        pass
 # ----------------- APP -----------------
 app = Flask(__name__)
 
@@ -323,29 +345,30 @@ setup_backups()
 
 def ensure_schema():
     with conn() as cx:
-        # merchants patches
-        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-        if "pi_handle" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+    # merchants patches
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+    if "pi_wallet_address" not in cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+    if "pi_handle" not in cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+    if "colorway" not in cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-        # carts & cart_items
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS carts(
-              id TEXT PRIMARY KEY,
-              merchant_id INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
-            )""")
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS cart_items(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              cart_id TEXT NOT NULL,
-              item_id INTEGER NOT NULL,
-              qty INTEGER NOT NULL
-            )""")
+    # carts & cart_items
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS carts(
+          id TEXT PRIMARY KEY,
+          merchant_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        )""")
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS cart_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cart_id TEXT NOT NULL,
+          item_id INTEGER NOT NULL,
+          qty INTEGER NOT NULL
+        )""")
+
 with conn() as cx:
     # items table patches for crafted linkage & description
     it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
@@ -357,35 +380,48 @@ with conn() as cx:
     if "crafted_item_id" not in it_cols:
         # opaque string from Crafting Land (id/slug/uuid)
         cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id TEXT")
-        # sessions table patches
-        scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-        if "pi_payment_id" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
-        if "cart_id" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
-        if "line_items_json" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
-        if "user_id" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
 
-        # orders table patches
-        ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-        if "buyer_user_id" not in ocols:
-            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+    # sessions table patches (ALWAYS run; do NOT nest under crafted_item_id)
+    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+    if "pi_payment_id" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
+    if "cart_id" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
+    if "line_items_json" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
+    if "user_id" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
 
-        # payout_requests throttle log (one row per request)
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS payout_requests(
-              id INTEGER PRIMARY KEY,
-              merchant_id INTEGER NOT NULL,
-              requested_at INTEGER NOT NULL,
-              FOREIGN KEY(merchant_id) REFERENCES merchants(id)
-            )
-        """)
-        cx.execute("CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time ON payout_requests(merchant_id, requested_at)")
+    # orders table patches
+    ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+    if "buyer_user_id" not in ocols:
+        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+
+    # payout_requests throttle log (one row per request)
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS payout_requests(
+          id INTEGER PRIMARY KEY,
+          merchant_id INTEGER NOT NULL,
+          requested_at INTEGER NOT NULL,
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id)
+        )
+    """)
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time ON payout_requests(merchant_id, requested_at)")
 
 ensure_schema()
-
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS crafted_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          sku TEXT,
+          image TEXT,
+          meta_json TEXT,
+          created_at INTEGER NOT NULL
+        )
+    """)
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_crafted_items_user ON crafted_items(user_id)")
 # Detect if orders.created_at exists (for 30-day filters)
 with conn() as cx:
     _ORDERS_COLS = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
@@ -957,26 +993,21 @@ def merchant_items(slug):
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
     u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
-    data = request.form
-    link_id = uuid.uuid4().hex[:8]
+    if isinstance(u, Response):
+        return u
 
-    title = (data.get("title") or "").strip()
-    sku   = (data.get("sku") or "").strip()
-    image_url = (data.get("image_url") or "").strip()
-    description = (data.get("description") or "").strip()
-    crafted_item_id = (data.get("crafted_item_id") or "").strip()
+    data = request.form
+    title        = data.get("title", "").strip()
+    sku          = data.get("sku", "").strip()
+    image_url    = data.get("image_url", "").strip()
+    description  = data.get("description", "").strip()
+    pi_price     = data.get("pi_price", "0").strip()
+    stock_qty    = data.get("stock_qty", "0").strip()
+    allow_backorder = 1 if data.get("allow_backorder") else 0
+    crafted_item_id = data.get("crafted_item_id") or None
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
 
-    try:
-        pi_price = float((data.get("pi_price") or "0").strip())
-    except ValueError:
-        pi_price = 0.0
-    try:
-        stock_qty = int((data.get("stock_qty") or "0").strip())
-    except ValueError:
-        stock_qty = 0
-    allow_backorder = int(bool(data.get("allow_backorder")))
+    link_id = uuid.uuid4().hex[:8]
 
     with conn() as cx:
         cx.execute(
@@ -985,12 +1016,23 @@ def merchant_new_item(slug):
                  pi_price, stock_qty, allow_backorder, active,
                  fulfillment_kind, crafted_item_id
                )
-               VALUES(?,?,?,?,?,?,?,?,1,1,?,?)""",
-            (m["id"], link_id, title, sku, image_url, description,
-             float(pi_price), int(stock_qty), fulfillment_kind, crafted_item_id)
+               VALUES(?,?,?,?,?,?,?,?,?,1,?,?)""",
+            (
+                m["id"],
+                link_id,
+                title,
+                sku,
+                image_url,
+                description,
+                float(pi_price),
+                int(stock_qty),
+                int(allow_backorder),
+                fulfillment_kind,
+                (crafted_item_id or None),
+            )
         )
 
-    tok = get_bearer_token_from_request()
+    tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
 @app.post("/merchant/<slug>/items/update")
@@ -1593,6 +1635,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
+            # === NEW: grant in-game item if applicable ===
+            if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
+                try:
+                    _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
+                except Exception:
+                    # don’t fail checkout on grant error; log if you want
+                    pass
+            # ============================================
+
             buyer_token = uuid.uuid4().hex
             cur = cx.execute(
                 """INSERT INTO orders(
@@ -1630,7 +1681,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             created_order_ids.append(cur.lastrowid)
 
         cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
-
     # ===== Emails (unchanged from your version, kept verbatim) =====
     try:
         display_rows = []
@@ -2266,22 +2316,29 @@ def crafting_ai_svg():
 
 @crafting_api.get("/mine")
 def crafting_mine():
-    """
-    Returns the player's crafted items for the 'My Creations' tab.
-    For now we return an empty list so the UI is happy.
-    Later you can load from your DB (e.g., crafted_items table).
-    """
     try:
-        items = []
-        # Example (future):
-        # user_id = session.get("uid")
-        # with conn() as cx:
-        #     items = cx.execute("SELECT id, name, category, part, svg FROM crafted_items WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
+        u = current_user_row()
+        if not u:
+            return _json_ok(items=[])  # UI will show an empty list in the select
+        with conn() as cx:
+            rows = cx.execute(
+                "SELECT id, name, COALESCE(sku,'') AS sku, COALESCE(image,'') AS image "
+                "FROM crafted_items WHERE user_id=? ORDER BY id DESC LIMIT 500",
+                (u["id"],)
+            ).fetchall()
+        items = [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "sku": r["sku"],
+                "image": r["image"],
+            } for r in rows
+        ]
         return _json_ok(items=items)
     except Exception as e:
         current_app.logger.exception("crafting_mine failed")
         return _json_err(e)
-
+    
 # Register the blueprint (do this once)
 app.register_blueprint(crafting_api)
 # ---- end Crafting Land API shims -------------------------------------------
