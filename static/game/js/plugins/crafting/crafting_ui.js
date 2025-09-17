@@ -776,6 +776,14 @@ async function fetchMine(){
         </div>
       </div>`;
   }
+  // CSS.escape ponyfill (safe no-op if native exists)
+if (!window.CSS || !CSS.escape) {
+  (function() {
+    const r = /([-!$%^&*()_+|~=`{}$begin:math:display$$end:math:display$:";'<>?,.\/\s])/g;
+    CSS = window.CSS || {};
+    CSS.escape = function(v){ return String(v).replace(r, '\\$1'); };
+  })();
+}
   async function hydrateMine(){
   const host = STATE.root?.querySelector('#mineList');
   if (!host) return;
