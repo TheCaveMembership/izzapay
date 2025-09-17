@@ -511,9 +511,8 @@ function normalizeSvgForSlot(svgText, part){
           <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
           <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
-            <button class="ghost" data-buy-single="pi">Pay 5 Pi</button>
-            <!-- label now reflects actual cost (PER_ITEM_IC = 0 keeps free testing intact) -->
-            <button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC} IC</button>
+            <button class="ghost" data-buy-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+<button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           </div>
         </div>
       </div>`;
@@ -561,22 +560,19 @@ function normalizeSvgForSlot(svgText, part){
         </div>
 
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-          <button class="ghost" id="payPi">Pay Pi</button>
-          <button class="ghost" id="payIC">Pay IC</button>
+          <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+<button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           <span id="payStatus" style="font-size:12px; opacity:.8"></span>
         </div>
 
         <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-          <div style="margin-top:6px">
-            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
-          </div>
-          <div style="margin-top:4px">
-            <label><input id="sellInPi" type="checkbox"/> Also sell bundle in Crafting Land (Pi)</label>
-          </div>
-        </div>
+  <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+  <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+  <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+  <div style="margin-top:6px">
+    <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
+  </div>
+</div>
       </div>
 
       <div class="cl-pane cl-preview">
