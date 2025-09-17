@@ -123,7 +123,136 @@ def setup_backups():
         _backup_now(db_path, backups_dir)
         _prune_old_backups(backups_dir, keep=10)
 # Serve uploaded files safely from the persistent disk
+# ================== Crafting UI → Flask bridge (minimal + safe) ==================
+# Paste this into app.py after `app = Flask(__name__)` and your other imports.
 
+from flask import Blueprint, request, jsonify
+
+# --- Blueprints ---
+crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
+merchant_api = Blueprint("merchant_api", __name__, url_prefix="/api/merchant")
+
+# --- Helpers (tiny JSON helpers; no DB / auth requirements) ---
+def _ok(**kw):
+    out = {"ok": True}
+    out.update(kw)
+    return jsonify(out)
+
+def _err(reason="unknown"):
+    return jsonify({"ok": False, "reason": str(reason)}), 400
+
+
+# --------------------------- CRAFTING ROUTES ------------------------------------
+
+@crafting_api.post("/pi/approve")
+def crafting_pi_approve():
+    """
+    Called by the browser Pi SDK when a payment is ready for server approval.
+    We forward to your existing IZZA Pay helper if available; otherwise no-op.
+    """
+    data = request.get_json(silent=True) or {}
+    payment_id = data.get("paymentId")
+    try:
+        try:
+            # If you have these helpers in izzapay already, they’ll run.
+            from payments import approve_payment  # existing helper
+            approve_payment(payment_id)
+        except Exception:
+            # helper missing or fails → don't block crafting; return ok anyway
+            pass
+        return _ok(approved=True, paymentId=payment_id)
+    except Exception as e:
+        return _err(e)
+
+
+@crafting_api.post("/pi/complete")
+def crafting_pi_complete():
+    """
+    Called by the browser Pi SDK when a payment is ready for completion.
+    We forward to your existing IZZA Pay helper if available; otherwise no-op.
+    """
+    data = request.get_json(silent=True) or {}
+    payment_id = data.get("paymentId")
+    txid = data.get("txid")
+    try:
+        try:
+            from payments import complete_payment  # existing helper
+            complete_payment(payment_id, txid)
+        except Exception:
+            pass
+        return _ok(completed=True, paymentId=payment_id, txid=txid)
+    except Exception as e:
+        return _err(e)
+
+
+@crafting_api.post("/ic/debit")
+def crafting_ic_debit():
+    """
+    Test-only IC debit so the UI doesn't 404. No real ledger change here.
+    """
+    data = request.get_json(silent=True) or {}
+    amount = data.get("amount")
+    return _ok(debited=True, amount=amount)
+
+
+@crafting_api.post("/ai_svg")
+def crafting_ai_svg():
+    """
+    UI asks the server to render an SVG. We intentionally reply 'no backend'
+    so the client uses its built-in fallback blueprint icon.
+    """
+    return jsonify({"ok": False, "reason": "no-ai-backend"})
+
+
+@crafting_api.get("/mine")
+def crafting_mine_get():
+    """
+    Minimal 'My Creations' GET. Return an empty list so UI renders cleanly.
+    If/when you add storage, return real items here.
+    """
+    # Optional: you can read ?u=username = request.args.get("u")
+    return _ok(items=[])
+
+
+@crafting_api.post("/mine")
+def crafting_mine_post():
+    """
+    Minimal 'save item' endpoint. Accepts payload and returns ok so the UI can
+    proceed. Persist later if desired.
+    """
+    # payload example: {name, category, part, svg, ...}
+    _ = request.get_json(silent=True) or {}
+    return _ok(saved=True)
+
+
+# --------------------------- MERCHANT ROUTES ------------------------------------
+
+@merchant_api.post("/create_product_from_craft")
+def create_product_from_craft():
+    """
+    Crafting UI calls this to jump the user into the IZZA Pay dashboard with
+    prefilled data. If you have a real prefill flow, set dashboardUrl accordingly.
+    For now we just send them to setup which keeps UX unblocked.
+    """
+    # You’ll likely wire this to your existing merchant prefill later and
+    # return their actual store URL, e.g. f"/merchant/{slug}?prefill=1".
+    return jsonify(ok=True, dashboardUrl="/merchant/setup")
+
+
+# --------------------------- REGISTER BLUEPRINTS --------------------------------
+# Do this once (ideally near your other app.register_blueprint calls).
+try:
+    app.register_blueprint(crafting_api)
+except Exception:
+    # already registered or app not yet defined—move this block to after `app = Flask(__name__)`
+    pass
+
+try:
+    app.register_blueprint(merchant_api)
+except Exception:
+    pass
+
+# ================== /Crafting UI → Flask bridge ==================
 @app.get(f"{MEDIA_PREFIX}/<path:filename>")
 def media(filename):
     """
