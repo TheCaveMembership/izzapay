@@ -319,6 +319,21 @@
             window.location.href = fallback;
           });
         },
+
+        /* === NEW: clear any SDK-reported incomplete payment immediately === */
+        onIncompletePaymentFound: function(payment){
+          try{
+            var pid = payment && (payment.identifier || payment.paymentId || payment.id);
+            clearPending(sessionId, pid).finally(function(){
+              setMsg("Previous pending payment cleared. Tap Pay again.");
+            });
+          }catch(_){
+            clearPending(sessionId).finally(function(){
+              setMsg("Previous pending payment cleared. Tap Pay again.");
+            });
+          }
+        },
+
         onCancel: function(){
           /* === NEW: clear local/remote pending on user-cancel === */
           clearPending(sessionId).finally(function(){
