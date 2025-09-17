@@ -2014,6 +2014,53 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
     return {"ok": True, "redirect_url": redirect_url}
 
+# --- Cancel endpoints compatible with your snippet (/payment/cancel & /payment/error) ---
+@app.post("/payment/cancel")
+def payment_cancel():
+    """
+    Accepts JSON or form with either 'paymentId' or 'payment_id'.
+    Best-effort cancel on Pi Platform + clear any local session referencing it.
+    """
+    try:
+        data = request.get_json(silent=True) or request.form or {}
+        payment_id = (data.get("paymentId") or data.get("payment_id") or "").strip()
+        if not payment_id:
+            return {"ok": False, "error": "missing_paymentId"}, 400
+
+        # Cancel on Pi Platform (best effort)
+        try:
+            r = requests.post(
+                f"{PI_API_BASE}/v2/payments/{payment_id}/cancel",
+                headers=pi_headers(),
+                json={},
+                timeout=12
+            )
+            status = r.status_code
+        except Exception:
+            status = 0  # network/other issue, we'll still clear local
+        # Clear any local session tied to this payment so the user can retry
+        try:
+            with conn() as cx:
+                cx.execute(
+                    "UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE pi_payment_id=?",
+                    (payment_id,)
+                )
+        except Exception:
+            pass
+
+        return {"ok": True, "status": status, "payment_id": payment_id}
+    except Exception:
+        return {"ok": False, "error": "server_error"}, 500
+
+
+@app.post("/payment/error")
+def payment_error():
+    """
+    Same behavior as /payment/cancel. Useful to call when the client encounters
+    an SDK error and wants to ensure any stuck payment is cleared.
+    """
+    return payment_cancel()
+
 # ----------------- UPLOADS -----------------
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
