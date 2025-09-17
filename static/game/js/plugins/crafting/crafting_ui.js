@@ -1073,11 +1073,14 @@ async function handleBuySingle(kind){
       category: STATE.currentCategory,
       part: STATE.currentPart
     });
-    window.location.href = url;   // go to your working IZZA Pay checkout
+
+    // ⬅️ force top-level navigation (fixes iOS iframe / cookie context issues)
+    try { (window.top || window).location.assign(url); }
+    catch { window.location.href = url; }
     return;
   }
 
-  // IC flow stays local
+  // IC flow unchanged
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
   if (res && res.ok){
