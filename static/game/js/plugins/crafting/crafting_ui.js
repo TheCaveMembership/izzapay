@@ -793,7 +793,7 @@ async function fetchMine(){
       try{ await navigator.clipboard.writeText(it.svg||''); alert('SVG copied'); }catch{}
     });
   });
-
+}
   host.querySelectorAll('[data-equip]').forEach(b=>{
     b.addEventListener('click', ()=>{
       const id = b.dataset.equip;
