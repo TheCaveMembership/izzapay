@@ -928,24 +928,36 @@ def merchant_setup():
                                error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').")
 
     with conn() as cx:
-        exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
-        if exists:
-            tok = get_bearer_token_from_request()
-            prefill = None
-if request.args.get("prefill") == "1":
-    prefill = session.pop("prefill_product", None)
-            return render_template("merchant_items.html", setup_mode=True, m=None, items=[],
-                                   PREFILL=prefill,
-                                   app_base=APP_BASE_URL, t=tok, share_base=BASE_ORIGIN,
-                                   username=u["pi_username"], colorway=colorway,
-                                   error="Slug already taken.")
-        cx.execute("""INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
-                      theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle, colorway)
-                      VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                   (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email,
-                    "@deprecated", pi_wallet_address, pi_handle, colorway))
-    tok = get_bearer_token_from_request()
-    return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
+    exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
+    if exists:
+        tok = get_bearer_token_from_request()
+        prefill = None
+        if request.args.get("prefill") == "1":
+            prefill = session.pop("prefill_product", None)
+        return render_template(
+            "merchant_items.html",  # keep this name if your file is templates/merchant_items.html
+            setup_mode=True,
+            m=None,
+            items=[],
+            PREFILL=prefill,
+            app_base=APP_BASE_URL,
+            t=tok,
+            share_base=BASE_ORIGIN,
+            username=u["pi_username"],
+            colorway=colorway,
+            error="Slug already taken."
+        )
+
+    cx.execute(
+        """INSERT INTO merchants(owner_user_id, slug, business_name, logo_url,
+           theme_mode, reply_to_email, pi_wallet, pi_wallet_address, pi_handle, colorway)
+           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (u["id"], slug, business_name, logo_url, theme_mode, reply_to_email,
+         "@deprecated", pi_wallet_address, pi_handle, colorway)
+    )
+
+tok = get_bearer_token_from_request()
+return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
 @app.post("/merchant/<slug>/update")
 def merchant_update(slug):
