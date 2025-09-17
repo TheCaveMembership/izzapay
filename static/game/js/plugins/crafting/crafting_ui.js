@@ -1034,23 +1034,14 @@ if (!CSS.escape) {
     if(!STATE.mounted) return;
     if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
     if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
-        // keep attempts counter in sync when entering Visuals
-    if (name === 'create' && STATE.canUseVisuals) {
-      try {
-        const el = document.getElementById('aiLeft2');
-        if (el) el.textContent = STATE.aiAttemptsLeft;
-      } catch {}
-    }
     if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
     bindInside();
 
-    // immediately sync the attempts counter when entering Create
+    // sync attempts counter whenever entering Create
     if (name === 'create') {
-      try {
-        const el = document.getElementById('aiLeft2');
-        if (el) el.textContent = STATE.aiAttemptsLeft;
-      } catch {}
+      const el = document.getElementById('aiLeft2');
+      if (el) el.textContent = STATE.aiAttemptsLeft;
     }
   };
 
@@ -1061,60 +1052,81 @@ if (!CSS.escape) {
   setTab('packages');
 }
 
-  function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
+function unmount(){
+  if(!STATE.root) return;
+  STATE.root.innerHTML='';
+  STATE.mounted=false;
+}
 
-    // Handles a single-item purchase (Pi or IC) and routes to Create → Setup.
-// Visuals remain locked until Setup (category/part/name) is valid.
-// Handles a single-item purchase (Pi or IC) and routes to Create → Setup.
-// Visuals remain locked until Setup (category/part/name) is valid.
+// Single-item purchase -> route to Create → Setup; keep Visuals locked until Setup valid
 async function handleBuySingle(kind){
   const usePi = (kind === 'pi');
   const total = calcTotalCost({ usePi });
+  const res = usePi ? await payWithPi(total, 'Craft Single Item')
+                    : await payWithIC(total);
 
-  // Fire the appropriate payment flow
-  const res = usePi
-    ? await payWithPi(total, 'Craft Single Item')
-    : await payWithIC(total);
-
-  // We show status only if we're already on Create; otherwise we’ll re-render below.
   const status = document.getElementById('payStatus');
 
   if (res && res.ok){
-    // Reserve ONE craft credit
     STATE.hasPaidForCurrentItem = true;
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-
-    // Important: keep Visuals LOCKED until Setup is complete
     STATE.canUseVisuals = false;
     STATE.createSub = 'setup';
-
     if (status) status.textContent = 'Paid ✓ — fill out Setup to continue.';
 
-    // Move user to Create tab (Setup)
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){
       host.innerHTML = renderCreate();
-      bindInside();            // re-wire inputs & buttons
-      try { _maybeUnlockVisuals(); } catch(_) {}  // read DOM -> STATE, toggle button
+      bindInside();
+      try { _maybeUnlockVisuals(); } catch {}
     } else {
-      // If not on the modal yet, switch tabs
-      try {
-        const tabs = STATE.root?.querySelectorAll('[data-tab]');
-        const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
-        createBtn && createBtn.click();
-      } catch {}
+      const tabs = STATE.root?.querySelectorAll('[data-tab]');
+      const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+      createBtn && createBtn.click();
     }
   } else {
     if (status) status.textContent = 'Payment failed.';
-    // Don’t unlock visuals
     STATE.canUseVisuals = false;
   }
 }
-  function bindInside(){
+
+// --- helpers used by listeners (module-scope so other functions can call) ---
+function _setupValid(){
+  return (
+    String(STATE.currentCategory||'').trim() &&
+    String(STATE.currentPart||'').trim() &&
+    String(STATE.currentName||'').trim().length >= 3
+  );
+}
+function _maybeUnlockVisuals(){
+  const catSel  = STATE.root?.querySelector('#catSel');
+  const partSel = STATE.root?.querySelector('#partSel');
+  const item    = STATE.root?.querySelector('#itemName');
+  if (catSel)  STATE.currentCategory = catSel.value;
+  if (partSel) STATE.currentPart     = partSel.value;
+  if (item)    STATE.currentName     = item.value;
+
+  if (STATE.hasPaidForCurrentItem && _setupValid()){
+    STATE.canUseVisuals = true;
+  } else if (!STATE.hasPaidForCurrentItem){
+    STATE.canUseVisuals = false;
+  }
+  const subtabs = STATE.root?.querySelector('.cl-subtabs');
+  if (subtabs){
+    const visBtn = subtabs.querySelector('[data-sub="visuals"]');
+    if (visBtn){
+      if (STATE.canUseVisuals){ visBtn.removeAttribute('disabled'); visBtn.classList.remove('disabled'); }
+      else { visBtn.setAttribute('disabled',''); visBtn.classList.add('disabled'); }
+    }
+  }
+}
+
+// --- all UI wiring lives here (single source of truth) ---
+function bindInside(){
   const root = STATE.root;
   if(!root) return;
 
-  // --- Marketplace button (Packages tab) ---
+  // Marketplace button (Packages tab)
   const goMp = root.querySelector('#goMarketplace');
   if (goMp){
     goMp.addEventListener('click', async ()=>{
@@ -1135,7 +1147,36 @@ async function handleBuySingle(kind){
     });
   }
 
-  // --- Buy buttons on Packages / Create ---
+  // Package purchase (Pi/IC) → reserve credit, route to Create → Setup
+  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
+      const res = (kind === 'pi')
+        ? await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50')
+        : await payWithIC(COSTS.PACKAGE_IC);
+
+      if (res && res.ok){
+        STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
+        STATE.hasPaidForCurrentItem = true;
+        STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+        STATE.canUseVisuals = false;
+        STATE.createSub = 'setup';
+
+        const tabs = STATE.root?.querySelectorAll('[data-tab]');
+        const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+        if (createBtn) createBtn.click();
+        else {
+          const host = STATE.root?.querySelector('#craftTabs');
+          if (host){ host.innerHTML = renderCreate(); bindInside(); }
+        }
+        _maybeUnlockVisuals();
+      } else {
+        alert('Payment failed');
+      }
+    }, { passive:true });
+  });
+
+  // Single-item purchase buttons
   root.querySelectorAll('[data-buy-single]').forEach(btn=>{
     btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
@@ -1144,88 +1185,38 @@ async function handleBuySingle(kind){
   payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
   payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
 
-  // --- Local helpers for setup gating ---
-  function _syncSetupFromDOM(){
-    const catSel  = STATE.root?.querySelector('#catSel');
-    const partSel = STATE.root?.querySelector('#partSel');
-    const item    = STATE.root?.querySelector('#itemName');
-    if (catSel)  STATE.currentCategory = catSel.value;
-    if (partSel) STATE.currentPart     = partSel.value;
-    if (item)    STATE.currentName     = item.value;
-  }
-  function _setupValid(){
-    return (
-      String(STATE.currentCategory||'').trim() &&
-      String(STATE.currentPart||'').trim() &&
-      String(STATE.currentName||'').trim().length >= 3
-    );
-  }
-  function _maybeUnlockVisuals(){
-    _syncSetupFromDOM();
-    if (STATE.hasPaidForCurrentItem && _setupValid()){
-      STATE.canUseVisuals = true;
-    } else if (!STATE.hasPaidForCurrentItem){
-      STATE.canUseVisuals = false;
-    }
-    // toggle Visuals tab button state only (no full rerender)
-    const subtabs = STATE.root?.querySelector('.cl-subtabs');
-    if (subtabs){
-      const visBtn = subtabs.querySelector('[data-sub="visuals"]');
-      if (visBtn){
-        if (STATE.canUseVisuals){ visBtn.removeAttribute('disabled'); visBtn.classList.remove('disabled'); }
-        else { visBtn.setAttribute('disabled',''); visBtn.classList.add('disabled'); }
-      }
-    }
-  }
-
-  // --- Setup inputs ---
+  // Setup inputs
   const itemName = root.querySelector('#itemName');
   const catSel   = root.querySelector('#catSel');
   const partSel  = root.querySelector('#partSel');
 
   if (catSel && partSel){
-    // Initial STATE -> DOM
     catSel.value = STATE.currentCategory;
     repopulatePartOptions(catSel, partSel);
   }
-  if (partSel){
-    partSel.value = STATE.currentPart;
-  }
-  if (itemName){
-    itemName.value = STATE.currentName || '';
-  }
+  if (partSel){ partSel.value = STATE.currentPart; }
+  if (itemName){ itemName.value = STATE.currentName || ''; }
 
-  // Change listeners -> STATE + unlock check
-  if (itemName){
-    itemName.addEventListener('input', e=>{
-      STATE.currentName = e.target.value;
-      saveDraft();
-      _maybeUnlockVisuals();
-    }, { passive:true });
-  }
-  if (catSel){
-    catSel.addEventListener('change', e=>{
-      STATE.currentCategory = e.target.value;
-      repopulatePartOptions(catSel, partSel);
-      saveDraft();
-      _maybeUnlockVisuals();
-    }, { passive:true });
-  }
-  if (partSel){
-    partSel.addEventListener('change', e=>{
-      STATE.currentPart = e.target.value;
-      saveDraft();
-      _maybeUnlockVisuals();
-    }, { passive:true });
-  }
+  itemName && itemName.addEventListener('input', e=>{
+    STATE.currentName = e.target.value; saveDraft(); _maybeUnlockVisuals();
+  }, { passive:true });
 
-  // Optional features checkboxes (re-render keeps the cost line correct)
+  catSel && catSel.addEventListener('change', e=>{
+    STATE.currentCategory = e.target.value;
+    repopulatePartOptions(catSel, partSel);
+    saveDraft(); _maybeUnlockVisuals();
+  }, { passive:true });
+
+  partSel && partSel.addEventListener('change', e=>{
+    STATE.currentPart = e.target.value; saveDraft(); _maybeUnlockVisuals();
+  }, { passive:true });
+
+  // Optional feature checkboxes (re-render updates totals)
   root.querySelectorAll('[data-ff]').forEach(cb=>{
     const key = cb.dataset.ff;
     if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
     cb.addEventListener('change', ()=>{
-      STATE.featureFlags[key] = cb.checked;
-      saveDraft();
+      STATE.featureFlags[key] = cb.checked; saveDraft();
       const host = root.querySelector('#craftTabs');
       if (!host) return;
       const saveScroll = host.scrollTop;
@@ -1235,17 +1226,13 @@ async function handleBuySingle(kind){
     });
   });
 
-  // --- Visuals panel wiring ---
+  // Visuals panel wiring
   const aiStyleSel = root.querySelector('#aiStyleSel');
   const aiAnimChk  = root.querySelector('#aiAnimChk');
-  if (aiStyleSel){
-    aiStyleSel.value = STATE.aiStyle;
-    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
-  }
-  if (aiAnimChk){
-    aiAnimChk.checked = !!STATE.wantAnimation;
-    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
-  }
+  aiStyleSel && (aiStyleSel.value = STATE.aiStyle);
+  aiStyleSel && aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
+  aiAnimChk && (aiAnimChk.checked = !!STATE.wantAnimation);
+  aiAnimChk && aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
 
   const aiLeft = ()=> {
     const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
@@ -1267,7 +1254,6 @@ async function handleBuySingle(kind){
 
   // AI → SVG
   btnAI && btnAI.addEventListener('click', async ()=>{
-    if (!btnAI) return;
     const prompt = String(aiPrompt?.value||'').trim();
     if (!prompt) return;
 
@@ -1293,7 +1279,7 @@ async function handleBuySingle(kind){
       }
       STATE.currentSVG = svg;
       saveDraft();
-      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+      btnMint && (btnMint.style.display = 'inline-block');
       aiLeft();
     }catch(e){
       alert('AI failed: ' + (e?.message || e));
@@ -1324,7 +1310,7 @@ async function handleBuySingle(kind){
     }
     STATE.currentSVG = cleaned;
     saveDraft();
-    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+    btnMint && (btnMint.style.display = 'inline-block');
   });
 
   // Mint
@@ -1369,7 +1355,7 @@ async function handleBuySingle(kind){
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
 
-        // Persist to server (best-effort)
+        // Persist (best-effort)
         try {
           const u = encodeURIComponent(
             (window?.IZZA?.player?.username)
@@ -1391,20 +1377,14 @@ async function handleBuySingle(kind){
               })
             });
           }
-        } catch(e) {
-          console.warn('[craft] persist failed:', e); // non-fatal
-        }
+        } catch(e) { console.warn('[craft] persist failed:', e); }
 
         try{ hydrateMine(); }catch{}
 
-        // IZZA Pay merchant handoff
         if (sellInPi && injected.id) {
           try { IZZA?.emit?.('merchant-handoff', { craftedId: injected.id }); } catch {}
           const qs = new URLSearchParams({ attach: String(injected.id) });
-          try {
-            const t = localStorage.getItem('izzaBearer') || '';
-            if (t) qs.set('t', t);
-          } catch {}
+          try { const t = localStorage.getItem('izzaBearer') || ''; if (t) qs.set('t', t); } catch {}
           location.href = `/merchant?${qs.toString()}`;
         }
       } else {
@@ -1415,303 +1395,9 @@ async function handleBuySingle(kind){
     }
   });
 
-  // Final: make sure the Visuals tab button reflects current form values
+  // Final: ensure visuals tab reflects current form values
   _maybeUnlockVisuals();
 }
-
-  // ✅ Starter Forge package purchase (Pi or IC) — reserve credits, route to Setup
-root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-  btn.addEventListener('click', async ()=>{
-    const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
-    const res = (kind === 'pi')
-      ? await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50')
-      : await payWithIC(COSTS.PACKAGE_IC);
-
-    if (res && res.ok){
-      // This package grants 3 crafts (example). Visuals still require Setup per item.
-      STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
-      STATE.hasPaidForCurrentItem = true;   // reserve 1 craft immediately
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      STATE.canUseVisuals = false;          // LOCK visuals until Setup is valid
-      STATE.createSub = 'setup';
-
-      // Jump to Create → Setup
-      try {
-        const tabs = STATE.root?.querySelectorAll('[data-tab]');
-        const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
-        if (createBtn) createBtn.click();
-        else {
-          const host = STATE.root?.querySelector('#craftTabs');
-          if (host){ host.innerHTML = renderCreate(); bindInside(); }
-        }
-      } catch {}
-
-      // Ensure button state reflects current input values
-      try { _maybeUnlockVisuals(); } catch(_){}
-    } else {
-      alert('Payment failed');
-    }
-  }, { passive:true });
-});
-
-  // Single-item purchase buttons (Packages card & Create tab)
-  root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-    btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
-  });
-  const payPi = root.querySelector('#payPi');
-  const payIC = root.querySelector('#payIC');
-  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
-  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
-
-  const itemName = root.querySelector('#itemName');
-  if (itemName){
-    itemName.value = STATE.currentName || '';
-    itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
-    _maybeUnlockVisuals();
-  }
-
-  const aiStyleSel = root.querySelector('#aiStyleSel');
-  const aiAnimChk  = root.querySelector('#aiAnimChk');
-  if (aiStyleSel){
-    aiStyleSel.value = STATE.aiStyle;
-    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
-  }
-  if (aiAnimChk){
-    aiAnimChk.checked = !!STATE.wantAnimation;
-    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
-  }
-
-  root.querySelectorAll('[data-ff]').forEach(cb=>{
-    const key = cb.dataset.ff;
-    if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
-    cb.addEventListener('change', ()=>{
-      STATE.featureFlags[key] = cb.checked;
-      saveDraft();
-      const host = root.querySelector('#craftTabs');
-      if (!host) return;
-      const saveScroll = host.scrollTop;
-      host.innerHTML = renderCreate();
-      bindInside();
-      host.scrollTop = saveScroll;
-    });
-  });
-
-  const catSel  = root.querySelector('#catSel');
-  const partSel = root.querySelector('#partSel');
-
-  if (catSel && partSel){
-    catSel.value = STATE.currentCategory;
-    repopulatePartOptions(catSel, partSel);
-
-    catSel.addEventListener('change', e=>{
-      _maybeUnlockVisuals();
-      STATE.currentCategory = e.target.value;
-      repopulatePartOptions(catSel, partSel);
-      saveDraft();
-    }, { passive:true });
-  }
-
-  if (partSel){
-    partSel.value = STATE.currentPart;
-    partSel.addEventListener('change', e=>{
-      _maybeUnlockVisuals();
-      STATE.currentPart = e.target.value;
-      saveDraft();
-    }, { passive:true });
-  }
-function _setupValid(){
-  return (
-    String(STATE.currentCategory||'').trim() &&
-    String(STATE.currentPart||'').trim() &&
-    String(STATE.currentName||'').trim().length >= 3
-  );
-}
-function _maybeUnlockVisuals(){
-  if (STATE.hasPaidForCurrentItem && _setupValid()){
-    STATE.canUseVisuals = true;
-  } else if (!STATE.hasPaidForCurrentItem){
-    STATE.canUseVisuals = false;
-  }
-  // re-render the subtab header state without nuking the whole UI
-  const subtabs = STATE.root?.querySelector('.cl-subtabs');
-  if (subtabs){
-    const onVisuals = subtabs.querySelector('[data-sub="visuals"]');
-    if (onVisuals){
-      if (STATE.canUseVisuals){ onVisuals.removeAttribute('disabled'); onVisuals.classList.remove('disabled'); }
-      else { onVisuals.setAttribute('disabled',''); onVisuals.classList.add('disabled'); }
-    }
-  }
-}
-  const aiLeft = ()=> {
-    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
-    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
-  };
-
-  const btnAI    = root.querySelector('#btnAI');
-  const aiPrompt = root.querySelector('#aiPrompt');
-  const svgIn    = root.querySelector('#svgIn');
-  const btnPrev  = root.querySelector('#btnPreview');
-  const btnMint  = root.querySelector('#btnMint');
-  const prevHost = root.querySelector('#svgPreview');
-  const craftStatus = root.querySelector('#craftStatus');
-
-  if (svgIn && STATE.currentSVG){
-    svgIn.value = STATE.currentSVG;
-    prevHost && (prevHost.innerHTML = STATE.currentSVG);
-  }
-
-  // ===== Handlers MUST live inside bindInside() =====
-  btnAI && btnAI.addEventListener('click', async ()=>{
-    if (!btnAI) return;
-    const prompt = String(aiPrompt?.value||'').trim();
-    if (!prompt) return;
-
-    btnAI.disabled = true;
-    btnAI.setAttribute('aria-busy','true');
-    btnAI.textContent = 'Generating…';
-    const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
-
-    try{
-      const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
-      if (svgIn) svgIn.value = svg;
-      if (prevHost) {
-        prevHost.innerHTML = svg;
-        const s = prevHost.querySelector('svg');
-        if (s) {
-          s.setAttribute('preserveAspectRatio','xMidYMid meet');
-          s.style.maxWidth='100%';
-          s.style.height='auto';
-          s.style.display='block';
-        }
-        prevHost.scrollTop = prevHost.scrollHeight;
-        prevHost.scrollIntoView({block:'nearest'});
-      }
-      STATE.currentSVG = svg;
-      saveDraft();
-      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-      aiLeft();
-    }catch(e){
-      alert('AI failed: ' + (e?.message || e));
-    }finally{
-      hideWait(waitEl);
-      btnAI.disabled = false;
-      btnAI.removeAttribute('aria-busy');
-      btnAI.textContent = 'AI → SVG';
-    }
-  });
-
-  btnPrev && btnPrev.addEventListener('click', ()=>{
-    const cleaned = sanitizeSVG(svgIn?.value);
-    if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
-    if (prevHost) {
-      prevHost.innerHTML = cleaned;
-      const s = prevHost.querySelector('svg');
-      if (s) {
-        s.setAttribute('preserveAspectRatio','xMidYMid meet');
-        s.style.maxWidth='100%';
-        s.style.height='auto';
-        s.style.display='block';
-      }
-      prevHost.scrollTop = prevHost.scrollHeight;
-      prevHost.scrollIntoView({block:'nearest'});
-    }
-    STATE.currentSVG = cleaned;
-    saveDraft();
-    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-  });
-
-  btnMint && btnMint.addEventListener('click', async ()=>{
-    craftStatus.textContent = '';
-
-    const nm = moderateName(STATE.currentName);
-    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
-
-    const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
-    if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-      return;
-    }
-    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
-
-    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked; // harmless if not rendered
-    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
-
-    try{
-      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
-
-      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-        ? window.ArmourPacks.injectCraftedItem({
-            name: STATE.currentName,
-            category: STATE.currentCategory,
-            part: STATE.currentPart,
-            svg: normalizedForSlot,
-            priceIC,
-            sellInShop,
-            sellInPi,
-            featureFlags: STATE.featureFlags
-          })
-        : { ok:false, reason:'armour-packs-hook-missing' };
-
-      if (injected && injected.ok){
-        craftStatus.textContent = 'Crafted ✓';
-        STATE.hasPaidForCurrentItem = false;
-        if (STATE.packageCredits && STATE.packageCredits.items > 0){
-          STATE.packageCredits.items -= 1;
-          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-        }
-
-        // Persist + get craftedId (from inject OR server)
-        let craftedId = injected.id || null;
-        try {
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-          }
-        } catch(e) {
-          console.warn('[craft] persist failed:', e); // non-fatal
-        }
-
-        try{ hydrateMine(); }catch{}
-
-        // IZZA Pay merchant handoff
-        if (sellInPi && craftedId) {
-          // Let the host intercept (native app/shell)
-          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
-          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
-          const qs = new URLSearchParams({ attach: String(craftedId) });
-          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
-          try {
-            const t = localStorage.getItem('izzaBearer') || '';
-            if (t) qs.set('t', t);
-          } catch {}
-          location.href = `/merchant?${qs.toString()}`;
-        }
-      } else {
-        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
-      }
-    }catch(e){
-      craftStatus.textContent = 'Error crafting: ' + e.message;
-    }
-  }); // <-- closes btnMint handler
-} // <-- closes bindInside()
 
 window.CraftingUI = { mount, unmount };
 })();
