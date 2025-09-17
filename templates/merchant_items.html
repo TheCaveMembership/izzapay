@@ -779,7 +779,119 @@
     const row = document.getElementById('edit-row-' + id); if(!row) return;
     row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
   });
+<script>
+/* === Crafting Land integration (catalog only) ===
+   - Pulls user's crafted items from /api/crafting/mine
+   - Fills a <select> for create + edit forms
+   - On select, auto-fills title, image, sku (non-destructive if already typed)
+*/
+(async function(){
+  // where we fetch from (same-origin, already mounted as Blueprint)
+  const ENDPOINT = '/api/crafting/mine';
 
+  // common token helper you already have:
+  const bearer = getToken();
+  const headers = {}; if (bearer) headers['Authorization'] = 'Bearer ' + bearer;
+
+  async function fetchCrafted(){
+    try{
+      const r = await fetch(ENDPOINT, { headers, credentials:'include' });
+      if(!r.ok) throw new Error('crafting_mine_failed');
+      const j = await r.json();
+      if(!j || !j.ok) return [];
+      // expected shape: { ok:true, items:[{id, name, image, ...}] }
+      return Array.isArray(j.items) ? j.items : [];
+    }catch(_){ return []; }
+  }
+
+  // render into a <select>
+  function fillSelect(sel, items, currentId){
+    if(!sel) return;
+    // wipe + seed
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = ''; opt0.textContent = '— ' + (sel.classList.contains('craftedEditSelect') ? 'None' : 'Select a crafted item') + ' —';
+    sel.appendChild(opt0);
+
+    items.forEach(it=>{
+      const o = document.createElement('option');
+      o.value = String(it.id || it.slug || it.uuid || '');
+      o.textContent = it.name || it.title || ('Item ' + o.value);
+      if(currentId && String(currentId) === String(o.value)) o.selected = true;
+      // stash a few extras for autofill
+      o.dataset.image = it.image || it.thumbnail || '';
+      o.dataset.sku = it.sku || it.shortcode || '';
+      o.dataset.title = it.name || it.title || '';
+      sel.appendChild(o);
+    });
+  }
+
+  // Autofill for "Create Product" form
+  function wireCreateAutofill(items){
+    const sel = document.getElementById('craftedSelect');
+    const hid = document.getElementById('crafted_item_id');
+    if(!sel || !hid) return;
+
+    sel.addEventListener('change', ()=>{
+      const v = sel.value || '';
+      hid.value = v;
+      if(!v) return;
+
+      const opt = sel.selectedOptions && sel.selectedOptions[0];
+      const title = opt?.dataset.title || '';
+      const img = opt?.dataset.image || '';
+      const sku = opt?.dataset.sku || '';
+
+      const titleEl = document.querySelector('#create-product input[name="title"]');
+      const imageEl = document.getElementById('itUrl');
+      const skuEl   = document.querySelector('#create-product input[name="sku"]');
+
+      // non-destructive: only fill if user hasn't typed yet
+      if(titleEl && !titleEl.value) titleEl.value = title;
+      if(imageEl && !imageEl.value && img){ imageEl.value = img; setThumb('itThumb', proxied(img)); }
+      if(skuEl && !skuEl.value && sku){ skuEl.value = sku; }
+    });
+
+    const btn = document.getElementById('refreshCrafted');
+    if(btn){
+      btn.addEventListener('click', async ()=>{
+        btn.disabled = true; btn.textContent = 'Refreshing…';
+        const items = await fetchCrafted();
+        fillSelect(sel, items, hid.value);
+        btn.disabled = false; btn.textContent = 'Refresh';
+      });
+    }
+  }
+
+  // Autofill for each inline editor row
+  function wireEditAutofill(items){
+    document.querySelectorAll('.craftedEditSelect').forEach(sel=>{
+      const row = sel.closest('tr');
+      if(!row) return;
+      const id = sel.getAttribute('data-item-id');
+      const hid = document.getElementById('crafted_item_id_' + id);
+      fillSelect(sel, items, hid ? hid.value : '');
+
+      sel.addEventListener('change', ()=>{
+        const v = sel.value || '';
+        if(hid) hid.value = v;
+        const opt = sel.selectedOptions && sel.selectedOptions[0];
+        if(!opt) return;
+        // light convenience: if image/title empty, fill them on change
+        const titleEl = row.querySelector('input[name="title"]');
+        const imageEl = row.querySelector('input[name="image_url"]');
+        if(titleEl && !titleEl.value && opt.dataset.title) titleEl.value = opt.dataset.title;
+        if(imageEl && !imageEl.value && opt.dataset.image) imageEl.value = opt.dataset.image;
+      });
+    });
+  }
+
+  // boot once on page load
+  const items = await fetchCrafted();
+  wireCreateAutofill(items);
+  wireEditAutofill(items);
+})();
+</script>
   // Progressive enhancement: delete store -> confirm -> POST -> redirect to /pi_signin.html
   (function(){
     const form = document.getElementById('deleteStoreForm');
