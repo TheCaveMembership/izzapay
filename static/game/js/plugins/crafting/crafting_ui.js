@@ -777,74 +777,95 @@ async function fetchMine(){
       </div>`;
   }
   async function hydrateMine(){
-    const host = STATE.root?.querySelector('#mineList');
-    if(!host) return;
-    host.innerHTML = '<div style="opacity:.7">Loading…</div>';
-    const items = await fetchMine();
-    host.innerHTML = items.length
-      ? items.map(mineCardHTML).join('')
-      : '<div style="opacity:.7">No creations yet.</div>';
+  const host = STATE.root?.querySelector('#mineList');
+  if (!host) return;
 
-      host.querySelectorAll('[data-copy]').forEach(b=>{
-    b.addEventListener('click', async ()=>{
-      const id = b.dataset.copy;
-      const it = items.find(x=>x.id===id);
-      if(!it) return;
-      try{ await navigator.clipboard.writeText(it.svg||''); alert('SVG copied'); }catch{}
-    });
+  // Loading state
+  host.innerHTML = '<div style="opacity:.7">Loading…</div>';
+
+  // Pull items
+  const items = await fetchMine();
+
+  // Render cards
+  host.innerHTML = (items && items.length)
+    ? items.map(mineCardHTML).join('')
+    : '<div style="opacity:.7">No creations yet.</div>';
+
+  // --- COPY SVG ---
+  host.querySelectorAll('[data-copy]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.copy;
+      const it = items.find(x => String(x.id) === String(id));
+      if (!it) return;
+      const text = it.svg || '';
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // fallback
+          const ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta);
+          ta.select(); try{ document.execCommand('copy'); }catch{}
+          document.body.removeChild(ta);
+        }
+        alert('SVG copied');
+      } catch {}
+    }, { passive:true });
   });
-}
-  host.querySelectorAll('[data-equip]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      const id = b.dataset.equip;
-      const it = items.find(x=>x.id===id);
+
+  // --- EQUIP ---
+  host.querySelectorAll('[data-equip]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.equip;
+      const it = items.find(x => String(x.id) === String(id));
       if (!it) return;
 
-      // Persist + fire events (existing behavior)
+      // Persist last equipped
       try {
         localStorage.setItem('izzaLastEquipped', JSON.stringify({
           id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
         }));
       } catch {}
-      try { IZZA?.emit?.('equip-crafted', id); } catch{}
-      try { IZZA?.emit?.('equip-crafted-v2', { id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg }); } catch{}
-    });
+
+      // Game events (both old + new)
+      try { IZZA?.emit?.('equip-crafted', it.id); } catch {}
+      try { IZZA?.emit?.('equip-crafted-v2', {
+        id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
+      }); } catch {}
+    }, { passive:true });
   });
 
-  // ✅ Add to Shop
-  host.querySelectorAll('[data-addshop]').forEach(b=>{
-    b.addEventListener('click', async ()=>{
-      const id = b.dataset.addshop;
-      b.disabled = true;
-      b.textContent = 'Adding…';
+  // --- ADD TO SHOP ---
+  host.querySelectorAll('[data-addshop]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.addshop;
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = 'Adding…';
       const ok = await addToShop(id);
       if (ok){
-        b.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
-        const statsBtn = host.querySelector(`[data-stats="${id}"]`);
-        statsBtn && statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
-      }else{
+        // swap button to "View Shop Stats" and wire it
+        btn.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
+        const statsBtn = host.querySelector(`[data-stats="${CSS.escape(String(id))}"]`);
+        if (statsBtn){
+          statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
+        }
+      } else {
         alert('Failed to add to shop');
-        b.disabled = false;
-        b.textContent = 'Add to Shop';
+        btn.disabled = false;
+        btn.textContent = prev || 'Add to Shop';
       }
     }, { passive:true });
   });
 
-  // ✅ View Shop Stats
-  host.querySelectorAll('[data-stats]').forEach(b=>{
-    b.addEventListener('click', ()=> openStatsModal(b.dataset.stats), { passive:true });
+  // --- VIEW STATS ---
+  host.querySelectorAll('[data-stats]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.stats;
+      if (id) openStatsModal(id);
+    }, { passive:true });
   });
-    // Persist + fire events (you already have this)
-    try {
-      localStorage.setItem('izzaLastEquipped', JSON.stringify({
-        id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
-      }));
-    } catch {}
-    try { IZZA?.emit?.('equip-crafted', id); } catch{}
-    try { IZZA?.emit?.('equip-crafted-v2', { id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg }); } catch{}
-  });
-});           // <--- closes forEach
-}             // <--- make sure this closes async function hydrateMine()
+}
     // --- NEW: Marketplace data fetcher ---
   async function fetchMarketplace(){
     try{
