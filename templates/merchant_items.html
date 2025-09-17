@@ -354,7 +354,18 @@
               <input class="ip-input" name="sku">
             </div>
           </div>
-
+<!-- Crafting Land Linker -->
+<div class="field">
+  <label class="ip-label">Attach Crafting Land item (optional)</label>
+  <div class="row" style="gap:8px;align-items:center">
+    <select class="ip-select" id="craftedSelect">
+      <option value="">— Select a crafted item —</option>
+    </select>
+    <button type="button" class="ip-btn ghost tiny" id="refreshCrafted">Refresh</button>
+  </div>
+  <input type="hidden" name="crafted_item_id" id="crafted_item_id">
+  <small class="note">When attached, this product is marked as an in-game item.</small>
+</div>
           <div class="field">
             <label class="ip-label">Image</label>
             <div class="row" style="gap:8px;align-items:center">
@@ -413,7 +424,12 @@
                     {% endif %}
                   </div>
                 </td>
-                <td>{{ it.title }}</td>
+                <td>
+  {{ it.title }}
+  {% if it.fulfillment_kind == 'crafting' %}
+    <span class="mono" style="font-size:11px; padding:2px 6px; border:1px solid var(--line); border-radius:6px; margin-left:6px;">Game</span>
+  {% endif %}
+</td>
                 <td>{{ '%.7f'|format(it.pi_price) }}</td>
                 <td>{{ it.stock_qty }}</td>
                 <td>
@@ -474,6 +490,16 @@
                       <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item…">{{ it.description or '' }}</textarea>
                       <small class="note">Shown on your product page.</small>
                     </div>
+                    <div class="field">
+  <label class="ip-label">Crafting Land item</label>
+  <div class="row" style="gap:8px;align-items:center">
+    <select class="ip-select craftedEditSelect" data-item-id="{{ it.id }}">
+      <option value="">— None —</option>
+    </select>
+  </div>
+  <input type="hidden" name="crafted_item_id" id="crafted_item_id_{{ it.id }}" value="{{ it.crafted_item_id or '' }}">
+  <small class="note">Leave empty to treat as a normal (physical) item.</small>
+</div>
                     <div class="row" style="justify-content:flex-end">
                       <button class="ip-btn ghost tiny" type="button" data-edit-toggle="{{ it.id }}">Cancel</button>
                       <button class="ip-btn tiny" type="submit">Save</button>
