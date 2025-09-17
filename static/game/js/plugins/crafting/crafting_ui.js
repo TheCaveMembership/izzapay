@@ -245,10 +245,9 @@ function hideWait(node){
   // *** CHANGE 1: force default API base to your Node service ***
   // Force default API base to the Node service on Render.
 // You can still override with window.IZZA_PERSIST_BASE if you ever need to.
-// same-origin (uses izzapay.onrender.com automatically when served from there)
-const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || '').replace(/\/+$/,'');
-const api = (p) => (API_BASE ? API_BASE + p : p);
-  
+const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
+const api = (p)=> (API_BASE ? API_BASE + p : p);
+
   async function serverJSON(url, opts={}){
     const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
     if(!r.ok) throw new Error('HTTP '+r.status);
