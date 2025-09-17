@@ -2003,6 +2003,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         pass
 
     # Redirect back to storefront with success flag (and token if available)
+        # Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
     tok = ""
     if u:
@@ -2010,8 +2011,18 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             tok = mint_login_token(u["id"])
         except Exception:
             tok = ""
+
     join = "&" if tok else ""
-    redirect_url = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
+    default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
+
+    # SPECIAL CASE: izza-game-crafting → send to game auth instead
+    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+    if slug == "izza-game-crafting":
+        game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
+        redirect_url = game_target
+    else:
+        redirect_url = default_target
+
     return {"ok": True, "redirect_url": redirect_url}
 
 # --- Cancel endpoints compatible with your snippet (/payment/cancel & /payment/error) ---
