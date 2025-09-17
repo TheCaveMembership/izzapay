@@ -1311,32 +1311,45 @@ if (!CSS.escape) {
         if (injected && injected.ok){
           craftStatus.textContent = 'Crafted ✓';
 
-          // Best-effort persist
-          try {
-            const u = encodeURIComponent(
-              (window?.IZZA?.player?.username)
-              || (window?.IZZA?.me?.username)
-              || localStorage.getItem('izzaPlayer')
-              || localStorage.getItem('pi_username')
-              || ''
-            );
-            if (u) {
-              await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-                method: 'POST',
-                body: JSON.stringify({
-                  name: STATE.currentName,
-                  category: STATE.currentCategory,
-                  part: STATE.currentPart,
-                  svg: normalizedForSlot,
-                  sku: '',
-                  image: ''
-                })
-              });
-            }
-          } catch(e) { /* non-fatal */ }
+          // Persist minted item to "Mine" (server reads user from session; no username needed)
+try {
+  await serverJSON(api('/api/crafting/mine'), {
+    method: 'POST',
+    body: JSON.stringify({
+      name: STATE.currentName,
+      category: STATE.currentCategory,
+      part: STATE.currentPart,
+      svg: normalizedForSlot,
+      sku: '',
+      image: ''
+    })
+  });
+} catch(e) { /* non-fatal */ }
 
           try{ hydrateMine(); }catch{}
-
+// If player asked to also list in IZZA Pay merchant dashboard, open it with prefilled data
+if (sellInPi) {
+  try {
+    const r = await serverJSON(api('/api/merchant/create_product_from_craft'), {
+      method: 'POST',
+      body: JSON.stringify({
+        title: STATE.currentName,
+        description: `${STATE.currentCategory} / ${STATE.currentPart}`,
+        svg: normalizedForSlot,
+        crafted_meta: {
+          category: STATE.currentCategory,
+          part: STATE.currentPart
+        }
+      })
+    });
+    if (r && r.ok && r.dashboardUrl) {
+      window.location.href = r.dashboardUrl;
+      return; // stop the reset because we’re navigating
+    }
+  } catch(e) {
+    console.warn('IZZA Pay prefill failed', e);
+  }
+}
           // Reset for next single item & return to Setup
           STATE.hasPaidForCurrentItem = false;
           STATE.canUseVisuals = false;
