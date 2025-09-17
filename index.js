@@ -391,6 +391,121 @@ ANIMATION (if used):
     res.status(500).json({ ok:false, reason:'server-error' });
   }
 });
+// ---------------------------------------------------------------------------
+// CRAFTED ITEMS STORAGE (per-user)
+// Files live alongside snapshots as <user>.crafted.json
+// GET  /api/crafting/mine?u=<username>
+// POST /api/crafting/mine?u=<username>   body: { name, category, part, svg, sku?, image? }
+// GET  /api/crafting/mine/meta?u=<username>   -> [{id,name,image,sku}]
+// ---------------------------------------------------------------------------
+
+function craftedPath(user){ return filePath(user, '.crafted'); }
+function isSafeUser(u){ return !!normUser(u); }
+
+function sanitizeSvgTight(svg){
+  try{
+    let t = String(svg||'').trim();
+    if(!t) return '';
+    if(t.length > 200_000) t = t.slice(0,200_000);
+    if(!/^<svg\b[^>]*>[\s\S]*<\/svg>\s*$/i.test(t)) return '';
+    if (/(<!DOCTYPE|<script|\son\w+=|<iframe|<foreignObject)/i.test(t)) return '';
+    if (/\b(xlink:href|href)\s*=\s*['"](?!#)/i.test(t)) return '';
+    // strip background styles on root (optional)
+    t = t.replace(/(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i, (_,pre)=>pre);
+    return t;
+  }catch{ return ''; }
+}
+
+async function readCrafted(user){
+  const j = await readJSON(craftedPath(user));
+  if(Array.isArray(j)) return j;
+  return [];
+}
+
+async function writeCrafted(user, list){
+  await writeJSON(craftedPath(user), Array.isArray(list) ? list : []);
+}
+
+// --- GET full objects (includes svg) ---
+app.get('/api/crafting/mine', async (req,res)=>{
+  try{
+    const u = normUser(req.query.u||'');
+    if(!isSafeUser(u)) return res.status(400).json({ ok:false, reason:'missing-user' });
+    await ensureDir();
+    const rows = await readCrafted(u);
+    res.set('Cache-Control','no-store');
+    res.json({ ok:true, items: rows.slice(-500) });
+  }catch(e){
+    console.error('GET /api/crafting/mine', e);
+    res.status(500).json({ ok:false, reason:'server-error' });
+  }
+});
+
+// --- Slim meta list for merchant dropdown (no svg for speed) ---
+app.get('/api/crafting/mine/meta', async (req,res)=>{
+  try{
+    const u = normUser(req.query.u||'');
+    if(!isSafeUser(u)) return res.status(400).json({ ok:false, reason:'missing-user' });
+    await ensureDir();
+    const rows = await readCrafted(u);
+    const out = rows.map(r=>({
+      id:  r.id,
+      name: r.name,
+      image: r.image || '',
+      sku: r.sku || ''
+    }));
+    res.set('Cache-Control','no-store');
+    res.json({ ok:true, items: out });
+  }catch(e){
+    console.error('GET /api/crafting/mine/meta', e);
+    res.status(500).json({ ok:false, reason:'server-error' });
+  }
+});
+
+// --- POST to append one crafted item ---
+import crypto from 'crypto';
+function newId(){ return crypto.randomBytes(8).toString('hex'); }
+
+app.post('/api/crafting/mine', async (req,res)=>{
+  try{
+    const u = normUser(req.query.u||'');
+    if(!isSafeUser(u)) return res.status(400).json({ ok:false, reason:'missing-user' });
+    await ensureDir();
+
+    let body = req.body;
+    if(typeof body === 'string'){
+      try{ body = JSON.parse(body); }catch{ body = {}; }
+    }
+    const name = String(body.name||'').slice(0,64).trim();
+    const category = String(body.category||'armour').slice(0,24);
+    const part = String(body.part||'helmet').slice(0,16);
+    const sku  = String(body.sku||'').slice(0,32);
+    const image = String(body.image||'').slice(0,256);
+    const svgRaw = body.svg || '';
+
+    if(!name || !svgRaw) return res.status(400).json({ ok:false, reason:'missing-fields' });
+
+    const svg = sanitizeSvgTight(svgRaw);
+    if(!svg) return res.status(422).json({ ok:false, reason:'bad-svg' });
+
+    const rows = await readCrafted(u);
+    const id = newId();
+    rows.push({
+      id, name, category, part, svg,
+      sku, image,
+      created_at: Date.now()
+    });
+
+    // keep last 500
+    const limited = rows.slice(-500);
+    await writeCrafted(u, limited);
+
+    res.json({ ok:true, id });
+  }catch(e){
+    console.error('POST /api/crafting/mine', e);
+    res.status(500).json({ ok:false, reason:'server-error' });
+  }
+});
 // ----------------- end patch -----------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, ()=> console.log(`IZZA persistence on ${PORT} (root=${ROOT})`));
