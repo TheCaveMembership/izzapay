@@ -198,20 +198,6 @@
 
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
 
-  /* === existing helper: best-effort server clear of stuck payments, left unchanged === */
-  function clearPending(sessionId, paymentId){
-    try{
-      var body = {};
-      if (sessionId) body.session_id = sessionId;
-      if (paymentId) body.payment_id = paymentId;
-      return fetch('/api/pi/clear_pending', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(body)
-      }).catch(function(){});
-    }catch(_){ return Promise.resolve(); }
-  }
-
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
@@ -221,9 +207,51 @@
     }catch(e){ return false; }
   }
 
+  /* === EXACT ADD: run completion for a previously stuck payment before starting a new one === */
+  function onIncompletePaymentFound(payment){
+    try{
+      var pid  = payment && (payment.identifier || payment.paymentId || payment.id);
+      var txid = payment && payment.transaction && (payment.transaction.txid || payment.transaction.txID || payment.transaction.hash) || "";
+      if(!pid) return;
+
+      fetch('/api/pi/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentId: pid,
+          session_id: sessionId,
+          txid: txid,
+          buyer: {
+            email: (emailEl?.value || '').trim(),
+            name:  (nameEl?.value  || '').trim(),
+            phone: (phoneEl?.value || '').trim()
+          },
+          shipping: {
+            address:      (addrEl?.value  || '').trim(),
+            address2:     (addr2El?.value || '').trim(),
+            city:         (cityEl?.value  || '').trim(),
+            state:        (stateEl?.value || '').trim(),
+            postal_code:  (postEl?.value  || '').trim(),
+            country:      (ctryEl?.value  || '').trim(),
+            name:         (nameEl?.value  || '').trim(),
+            email:        (emailEl?.value || '').trim(),
+            phone:        (phoneEl?.value || '').trim()
+          }
+        })
+      })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(res){
+        if(res && (res.redirect_url || res.buyer_status_url)){
+          window.location.href = (res.redirect_url || res.buyer_status_url);
+        }
+      })
+      .catch(function(){});
+    }catch(_){}
+  }
+
   function ensureAuth(){
     const scopes = ['payments','username'];
-    return Pi.authenticate(scopes, function(){});
+    return Pi.authenticate(scopes, onIncompletePaymentFound);
   }
 
   function buyerPayload(){
@@ -249,9 +277,6 @@
   }
 
   initPi();
-
-  /* auto-clear any stuck pending payment for this session on page load (safe no-op if none) */
-  clearPending(sessionId);
 
   btn?.addEventListener('click', function(){
     const emailVal = (emailEl?.value || '').trim();
@@ -284,18 +309,6 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentId, session_id: sessionId })
-          })
-          .then(function(r){
-            if(!r.ok){
-              return clearPending(sessionId, paymentId).finally(function(){
-                setMsg("Payment reset. Please tap Pay again.");
-              });
-            }
-          })
-          .catch(function(){
-            clearPending(sessionId, paymentId).finally(function(){
-              setMsg("Payment reset. Please tap Pay again.");
-            });
           });
         },
         onReadyForServerCompletion: function(paymentId, txid){
@@ -319,36 +332,8 @@
             window.location.href = fallback;
           });
         },
-
-        /* === CHANGED: onIncompletePaymentFound -> call /payment/complete with paymentId === */
-        onIncompletePaymentFound: function(payment){
-          try{
-            var pid = payment && (payment.identifier || payment.paymentId || payment.id);
-            if (pid) {
-              fetch('/payment/complete', {
-                method: 'POST',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({ paymentId: pid })
-              });
-            }
-          }catch(_){}
-        },
-
-        onCancel: function(){
-          clearPending(sessionId).finally(function(){
-            setMsg("Payment canceled.");
-          });
-        },
-        onError:  function(e){
-          var t = String((e && (e.message || e.error || e)) || "").toLowerCase();
-          if (t.includes("already have a pending") || t.includes("pending payment")){
-            clearPending(sessionId).finally(function(){
-              setMsg("Previous pending payment cleared. Tap Pay again.");
-            });
-          } else {
-            setMsg("Please try again.");
-          }
-        }
+        onCancel: function(){ setMsg("Payment canceled."); },
+        onError:  function(){ setMsg("Please try again."); }
       });
     }).catch(() => {
       setMsg("Please try again.");
