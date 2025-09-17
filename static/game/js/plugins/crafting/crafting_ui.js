@@ -1,20 +1,3 @@
-You made it here and then failed 
-
-Continue from where you failed 
-
-Got it—here’s the full updated file with only the necessary changes:
-	•	Keeps Single Item price at 0 IC and 0.005 Pi (for testing).
-	•	Adds package prices (Starter Forge) at 5 Pi or 10,000 IC with both buttons functional.
-	•	Locks Visuals until a successful purchase (from Packages or Setup), then auto-switches to Visuals and resets AI attempts to 5. AI attempts now show only in Visuals.
-	•	Removes the “Also sell bundle in Crafting Land (Pi)” checkbox from Create.
-	•	Adds a Marketplace button on Packages.
-	•	Adds “Create an IZZA Pay product” checkbox in Visuals; on Mint, it calls your merchant endpoint.
-	•	“My Creations” cards now show Add to Shop (if not listed) or View Shop Stats (if listed).
-	•	Preserves everything else.
-
-⸻
-
-
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
