@@ -463,7 +463,156 @@ def _inject_i18n(resp):
     return resp
 # -------- /Auto-translate injector --------
 
+# ===== Crafting Land API (lives under /izza-game/api/crafting) =====
+from flask import Blueprint, request, jsonify, current_app, session
+import time
 
+# Pi Platform env for the game app (separate from app.py; same values)
+PI_API_BASE = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com").rstrip("/")
+PI_API_KEY  = os.getenv("PI_PLATFORM_API_KEY", "").strip()
+
+def pi_headers():
+    if not PI_API_KEY:
+        raise RuntimeError("PI_PLATFORM_API_KEY missing for crafting Pi calls")
+    return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
+
+crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
+
+def _json_ok(**kw):
+    out = {"ok": True}
+    out.update(kw)
+    return jsonify(out)
+
+def _json_err(reason="unknown"):
+    return jsonify({"ok": False, "reason": str(reason)}), 400
+
+@crafting_api.post("/pi/approve")
+def crafting_pi_approve():
+    """
+    Called by Crafting UI when payment reaches 'ready for server approval'.
+    Approves on Pi Platform using server key.
+    """
+    data = request.get_json(silent=True) or {}
+    payment_id = (data.get("paymentId") or "").strip()
+    if not payment_id:
+        return _json_err("missing paymentId")
+    try:
+        r = requests.post(
+            f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
+            headers=pi_headers(),
+            json={},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return _json_err(f"upstream approve failed ({r.status_code})")
+        return _json_ok(approved=True, paymentId=payment_id)
+    except Exception as e:
+        current_app.logger.exception("crafting_pi_approve failed")
+        return _json_err("server_error")
+
+@crafting_api.post("/pi/complete")
+def crafting_pi_complete():
+    """
+    Called by Crafting UI when payment is 'ready for server completion'.
+    Completes on Pi Platform using server key.
+    """
+    data = request.get_json(silent=True) or {}
+    payment_id = (data.get("paymentId") or "").strip()
+    txid = (data.get("txid") or "").strip()
+    if not payment_id:
+        return _json_err("missing paymentId")
+    try:
+        r = requests.post(
+            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
+            headers=pi_headers(),
+            json={"txid": txid} if txid else {},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return _json_err(f"upstream complete failed ({r.status_code})")
+        return _json_ok(completed=True, paymentId=payment_id, txid=txid)
+    except Exception as e:
+        current_app.logger.exception("crafting_pi_complete failed")
+        return _json_err("server_error")
+
+@crafting_api.post("/ic/debit")
+def crafting_ic_debit():
+    """
+    Placeholder: debits IZZA Coins when paying with IC.
+    Returns ok=True so UI can proceed (wire to your ledger later).
+    """
+    data = request.get_json(silent=True) or {}
+    amount = int(data.get("amount") or 0)
+    try:
+        return _json_ok(debited=True, amount=amount)
+    except Exception as e:
+        current_app.logger.exception("crafting_ic_debit failed")
+        return _json_err("server_error")
+
+@crafting_api.post("/ai_svg")
+def crafting_ai_svg():
+    """
+    Optional: server-side SVG generator.
+    We currently return ok:false so client falls back to its local blueprint.
+    """
+    return jsonify({"ok": False, "reason": "no-ai-backend"})
+
+@crafting_api.get("/mine")
+def crafting_mine():
+    """
+    Returns the user's crafted items for the merchant dashboard picker.
+    Reads from crafted_items (same DB) filtered by logged-in user.
+    """
+    try:
+        u = current_user_row()
+        if not u:
+            return _json_ok(items=[])
+        with conn() as cx:
+            rows = cx.execute(
+                "SELECT id, name, COALESCE(sku,'') AS sku, COALESCE(image,'') AS image "
+                "FROM crafted_items WHERE user_id=? ORDER BY id DESC LIMIT 500",
+                (u["id"],)
+            ).fetchall()
+        items = [{"id": r["id"], "name": r["name"], "sku": r["sku"], "image": r["image"]} for r in rows]
+        return _json_ok(items=items)
+    except Exception as e:
+        current_app.logger.exception("crafting_mine failed")
+        return _json_err("server_error")
+
+# Create-product-from-craft helper (prefills the merchant form)
+craft_prefill_bp = Blueprint("craft_prefill_bp", __name__)
+
+@craft_prefill_bp.post("/api/merchant/create_product_from_craft")
+def create_product_from_craft():
+    urow = current_user_row()
+    if not urow:
+        return jsonify(ok=False, error="not_logged_in"), 401
+
+    with conn() as cx:
+        m = cx.execute("SELECT slug FROM merchants WHERE owner_user_id=?", (urow["id"],)).fetchone()
+
+    if not m:
+        return jsonify(ok=True, dashboardUrl="/merchant/setup"), 200
+
+    data = request.get_json(force=True) or {}
+    title = (data.get("title") or "").strip()
+    description = (data.get("description") or "").strip()
+    svg = (data.get("svg") or "").strip()
+    crafted_meta = data.get("crafted_meta") or {}
+
+    session["prefill_product"] = {
+        "title": title[:160],
+        "description": description[:500],
+        "svg": svg,
+        "crafted_meta": crafted_meta
+    }
+
+    return jsonify(ok=True, dashboardUrl=f"/merchant/{m['slug']}?prefill=1")
+
+# Register these under the game app prefix (/izza-game/…)
+app.register_blueprint(crafting_api)
+app.register_blueprint(craft_prefill_bp)
+# ===== /Crafting Land API =====
 # ----------------- Multiplayer API mounted here -----------------
 from mp_api import mp_bp  # REST-only blueprint
 
