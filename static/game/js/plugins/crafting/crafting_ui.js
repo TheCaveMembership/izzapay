@@ -1,6 +1,23 @@
 // UPDATE v1.2.0 — Split API bases (Flask vs Node), route endpoints accordingly, align merchant prefill payload; keep previous sanitizeSVG hardening.
   window.IZZA_APP_BASE  = 'https://izzapay.onrender.com';   // Flask
   window.IZZA_NODE_BASE = 'https://izzagame.onrender.com';  // Node (already your default)
+// Configure once:
+window.CRAFT_CHECKOUT_PATH = '/checkout/d0b811e8';                  // <-- your item checkout URL path
+
+function craftCheckoutURL({ totalPi, name, category, part }) {
+  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,'');
+  const p    = (window.CRAFT_CHECKOUT_PATH||'').replace(/^\/+/, ''); // "checkout/d0b811e8"
+  const title= name || `${category||'armour'}/${part||'helmet'} item`;
+
+  const q = new URLSearchParams({
+    from: 'craft',
+    title,
+    amount: String(totalPi || 0),
+    return_to: window.location.href    // we’ll bounce back to the game here
+  });
+
+  return `${base}/${p}?${q.toString()}`;
+}
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -154,25 +171,7 @@ const COIN_PER_PI = 2000;
     if (BAD_WORDS.some(w => low.includes(w))) return { ok:false, reason:'Inappropriate name' };
     return { ok:true };
   }
-  // Build a URL to your EXISTING checkout page
-function craftCheckoutURL({ totalPi, name, category, part }) {
-  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,''); // https://izzapay.onrender.com
-  const title = name || `${category||'armour'}/${part||'helmet'} item`;
-  const ret   = window.location.href;
-
-  // We pass minimal hints so your server can show the item context if you want.
-  // Your checkout already computes amount on the server; this query is just hints.
-  const q = new URLSearchParams({
-    from: 'craft',               // you can optionally use this in the route logic
-    title,
-    amount: String(totalPi || 0),
-    return_to: ret
-  });
-
-  // IMPORTANT: this is the working route in your app
-  return `${base}/checkout?${q.toString()}`;
-}
-
+  
 // If user returns with ?craftPaid=1, unlock visuals
 function applyCraftPaidFromURL() {
   try {
@@ -181,10 +180,16 @@ function applyCraftPaidFromURL() {
       STATE.hasPaidForCurrentItem = true;
       STATE.canUseVisuals = true;
       STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      // Clean up the URL so the flag doesn’t linger
+      STATE.createSub = 'visuals'; // <— force Visuals tab
+
+      // Clean URL
       u.searchParams.delete('craftPaid');
       const clean = u.pathname + (u.search ? '?'+u.searchParams.toString() : '') + u.hash;
       history.replaceState(null, '', clean);
+
+      // Re-render Create to show Visuals immediately
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host) { host.innerHTML = renderCreate(); bindInside(); }
     }
   } catch {}
 }
@@ -1073,13 +1078,11 @@ async function handleBuySingle(kind){
       category: STATE.currentCategory,
       part: STATE.currentPart
     });
-
-    // ⬅️ force top-level navigation (fixes iOS iframe / cookie context issues)
     try { (window.top || window).location.assign(url); }
     catch { window.location.href = url; }
     return;
   }
-
+}
   // IC flow unchanged
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
