@@ -1,3 +1,4 @@
+// UPDATE v1.2.0 — Split API bases (Flask vs Node), route endpoints accordingly, align merchant prefill payload; keep previous sanitizeSVG hardening.
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -242,17 +243,26 @@ function hideWait(node){
     }catch{}
   }
 
-  // *** CHANGE 1: force default API base to your Node service ***
-  // Force default API base to the Node service on Render.
-// You can still override with window.IZZA_PERSIST_BASE if you ever need to.
-const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
-const api = (p)=> (API_BASE ? API_BASE + p : p);
+  
+// === API bases: Flask app vs Node service ===
+// Flask (APP_BASE) handles payments, creations, merchant bridge (same-origin)
+const APP_BASE  = (window.IZZA_APP_BASE && String(window.IZZA_APP_BASE).replace(/\/+$/,'')) || '';
+// Node (NODE_BASE) handles AI/translate and game-side extras
+const NODE_BASE = (window.IZZA_NODE_BASE && String(window.IZZA_NODE_BASE).replace(/\/+$/,'')) || 'https://izzagame.onrender.com';
 
-  async function serverJSON(url, opts={}){
-    const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return await r.json().catch(()=> ({}));
-  }
+const app  = (p)=> APP_BASE + p;   // Flask
+const node = (p)=> NODE_BASE + p;  // Node
+
+async function appJSON(url, opts={}) {
+  const r = await fetch(app(url), Object.assign({ headers:{'content-type':'application/json'} }, opts));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  try { return await r.json(); } catch { return {}; }
+}
+async function nodeJSON(url, opts={}) {
+  const r = await fetch(node(url), Object.assign({ headers:{'content-type':'application/json'} }, opts));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  try { return await r.json(); } catch { return {}; }
+}
 
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
@@ -262,10 +272,10 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
       const paymentData = { amount: String(amountPi), memo: memo || 'IZZA Crafting', metadata: { kind:'crafting', memo } };
       const res = await window.Pi.createPayment(paymentData, {
         onReadyForServerApproval: async (paymentId) => {
-          await serverJSON(api('/api/crafting/pi/approve'), { method:'POST', body:JSON.stringify({ paymentId }) });
+          await appJSON('/api/crafting/pi/approve', { method:'POST', body:JSON.stringify({ paymentId }) });
         },
         onReadyForServerCompletion: async (paymentId, txid) => {
-          await serverJSON(api('/api/crafting/pi/complete'), { method:'POST', body:JSON.stringify({ paymentId, txid }) });
+          await appJSON('/api/crafting/pi/complete', { method:'POST', body:JSON.stringify({ paymentId, txid }) });
         }
       });
       if (res && res.status && /complete/i.test(res.status)) return { ok:true, receipt:res };
@@ -277,7 +287,7 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
     const cur = getIC();
     if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
     setIC(cur - amountIC);
-    try{ await serverJSON(api('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
+    try{ await appJSON('/api/crafting/ic/debit', { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
     return { ok:true };
   }
 
@@ -291,7 +301,7 @@ async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
   try{
-    const j = await serverJSON(api('/api/crafting/ai_svg'), {
+    const j = await nodeJSON('/api/crafting/ai_svg', {
       method:'POST',
       body: JSON.stringify({
         prompt: composeAIPrompt(prompt, STATE.currentPart, {
@@ -693,7 +703,7 @@ async function openStatsModal(itemId){
   body.textContent = 'Loading…';
   try{
     // your server should return: { ok:true, stats:{ purchases: n, resales: n, revenueIC: n, revenuePi: n } }
-    const j = await serverJSON(api(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`));
+    const j = await nodeJSON(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`);
     const st = (j && j.ok && j.stats) ? j.stats : { purchases:0, resales:0, revenueIC:0, revenuePi:0 };
     body.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -711,7 +721,7 @@ async function addToShop(itemId){
   try{
     // Optional: you can prompt for price here or use the stored price from creation
     // Server expects { ok:true } and will mark the item as inShop=true server-side
-    const j = await serverJSON(api('/api/shop/add'), {
+    const j = await nodeJSON('/api/shop/add', {
       method:'POST',
       body: JSON.stringify({ itemId })
     });
@@ -930,7 +940,7 @@ if (!CSS.escape) {
   async function fetchMarketplace(){
     try{
       // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
-      const j = await serverJSON(api('/api/marketplace/list'));
+      const j = await nodeJSON('/api/marketplace/list');
       return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
     }catch{
       return [];
@@ -1313,7 +1323,7 @@ if (!CSS.escape) {
 
           // Persist minted item to "Mine" (server reads user from session; no username needed)
 try {
-  await serverJSON(api('/api/crafting/mine'), {
+  await appJSON('/api/crafting/mine', {
     method: 'POST',
     body: JSON.stringify({
       name: STATE.currentName,
@@ -1330,16 +1340,15 @@ try {
 // If player asked to also list in IZZA Pay merchant dashboard, open it with prefilled data
 if (sellInPi) {
   try {
-    const r = await serverJSON(api('/api/merchant/create_product_from_craft'), {
+    const r = await 
+appJSON('/api/merchant/create_product_from_craft', {
       method: 'POST',
       body: JSON.stringify({
-        title: STATE.currentName,
+        name: STATE.currentName,
+        image: '',
+        price_pi: 0,
         description: `${STATE.currentCategory} / ${STATE.currentPart}`,
-        svg: normalizedForSlot,
-        crafted_meta: {
-          category: STATE.currentCategory,
-          part: STATE.currentPart
-        }
+        crafted_item_id: ''
       })
     });
     if (r && r.ok && r.dashboardUrl) {
