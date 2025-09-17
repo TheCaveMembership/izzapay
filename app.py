@@ -206,22 +206,44 @@ def crafting_ai_svg():
 
 @crafting_api.get("/mine")
 def crafting_mine_get():
-    """
-    Minimal 'My Creations' GET. Return an empty list so UI renders cleanly.
-    If/when you add storage, return real items here.
-    """
-    # Optional: you can read ?u=username = request.args.get("u")
-    return _ok(items=[])
-
+    u = current_user_row()
+    if not u:
+        return _ok(items=[])  # render empty when not signed in
+    with conn() as cx:
+        rows = cx.execute("""
+          SELECT id, name, sku, image, meta_json, created_at
+          FROM crafted_items
+          WHERE user_id=?
+          ORDER BY id DESC
+        """, (u["id"],)).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"],
+            "name": r["name"],
+            "sku": r["sku"],
+            "image": r["image"],
+            "meta": json.loads(r["meta_json"] or "{}"),
+            "created_at": r["created_at"],
+        })
+    return _ok(items=out)
 
 @crafting_api.post("/mine")
 def crafting_mine_post():
-    """
-    Minimal 'save item' endpoint. Accepts payload and returns ok so the UI can
-    proceed. Persist later if desired.
-    """
-    # payload example: {name, category, part, svg, ...}
-    _ = request.get_json(silent=True) or {}
+    """Accepts {name, sku?, image?, meta?} and saves for the signed-in user."""
+    u = current_user_row()
+    if not u:
+        return _err("auth_required")
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip() or "Untitled"
+    sku  = (data.get("sku") or "").strip() or None
+    image= (data.get("image") or "").strip() or None  # e.g. /media/xxxx.webp
+    meta = data.get("meta") or {}
+    with conn() as cx:
+        cx.execute("""
+          INSERT INTO crafted_items(user_id, name, sku, image, meta_json, created_at)
+          VALUES(?,?,?,?,?,?)
+        """, (u["id"], name, sku, image, json.dumps(meta, separators=(",", ":")), int(time.time())))
     return _ok(saved=True)
 
 
@@ -230,13 +252,29 @@ def crafting_mine_post():
 @merchant_api.post("/create_product_from_craft")
 def create_product_from_craft():
     """
-    Crafting UI calls this to jump the user into the IZZA Pay dashboard with
-    prefilled data. If you have a real prefill flow, set dashboardUrl accordingly.
-    For now we just send them to setup which keeps UX unblocked.
+    Accepts { name, image?, price_pi?, description?, crafted_item_id? }
+    Saves to session and redirects merchant to setup/items with prefill.
     """
-    # You’ll likely wire this to your existing merchant prefill later and
-    # return their actual store URL, e.g. f"/merchant/{slug}?prefill=1".
-    return jsonify(ok=True, dashboardUrl="/merchant/setup")
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
+
+    data = request.get_json(silent=True) or {}
+    prefill = {
+        "title": (data.get("name") or "Crafted Item"),
+        "image_url": (data.get("image") or ""),
+        "pi_price": float(data.get("price_pi") or 0) or 0.0,
+        "description": (data.get("description") or "Minted from Crafting UI"),
+        "crafted_item_id": (data.get("crafted_item_id") or ""),
+        "fulfillment_kind": "crafting"  # lets dashboard set the crafted link
+    }
+    try:
+        session["prefill_product"] = prefill
+    except Exception:
+        pass
+
+    # If they already have a store, going to /dashboard will bounce into /merchant/<slug>/items
+    return jsonify(ok=True, dashboardUrl="/merchant/setup?prefill=1")
 
 
 # --------------------------- REGISTER BLUEPRINTS --------------------------------
