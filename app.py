@@ -144,46 +144,6 @@ def _err(reason="unknown"):
 
 # --------------------------- CRAFTING ROUTES ------------------------------------
 
-@crafting_api.post("/pi/approve")
-def crafting_pi_approve():
-    """
-    Called by the browser Pi SDK when a payment is ready for server approval.
-    We forward to your existing IZZA Pay helper if available; otherwise no-op.
-    """
-    data = request.get_json(silent=True) or {}
-    payment_id = data.get("paymentId")
-    try:
-        try:
-            # If you have these helpers in izzapay already, they’ll run.
-            from payments import approve_payment  # existing helper
-            approve_payment(payment_id)
-        except Exception:
-            # helper missing or fails → don't block crafting; return ok anyway
-            pass
-        return _ok(approved=True, paymentId=payment_id)
-    except Exception as e:
-        return _err(e)
-
-
-@crafting_api.post("/pi/complete")
-def crafting_pi_complete():
-    """
-    Called by the browser Pi SDK when a payment is ready for completion.
-    We forward to your existing IZZA Pay helper if available; otherwise no-op.
-    """
-    data = request.get_json(silent=True) or {}
-    payment_id = data.get("paymentId")
-    txid = data.get("txid")
-    try:
-        try:
-            from payments import complete_payment  # existing helper
-            complete_payment(payment_id, txid)
-        except Exception:
-            pass
-        return _ok(completed=True, paymentId=payment_id, txid=txid)
-    except Exception as e:
-        return _err(e)
-
 
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
@@ -194,14 +154,6 @@ def crafting_ic_debit():
     amount = data.get("amount")
     return _ok(debited=True, amount=amount)
 
-
-@crafting_api.post("/ai_svg")
-def crafting_ai_svg():
-    """
-    UI asks the server to render an SVG. We intentionally reply 'no backend'
-    so the client uses its built-in fallback blueprint icon.
-    """
-    return jsonify({"ok": False, "reason": "no-ai-backend"})
 
 
 @crafting_api.get("/mine")
