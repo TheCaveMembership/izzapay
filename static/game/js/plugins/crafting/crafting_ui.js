@@ -265,7 +265,7 @@ function getBearerT(){
   return '';
 }
 
-// Append ?t=… AND send Authorization: Bearer … (you can require either or both server-side)
+// Append ?t=… AND send Authorization: Bearer … (server may require either/both)
 async function serverJSON(pathOrUrl, opts={}){
   const base = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
   const url = String(pathOrUrl||'').startsWith('http') ? new URL(pathOrUrl) : new URL(base + pathOrUrl);
@@ -279,13 +279,27 @@ async function serverJSON(pathOrUrl, opts={}){
     t ? { 'Authorization': 'Bearer ' + t } : {}
   );
 
-  const r = await fetch(url.toString(), Object.assign({
-    headers,
-    credentials: 'include'   // keep cookies if you also use session auth
-  }, opts));
+  try{
+    const r = await fetch(url.toString(), Object.assign({
+      headers,
+      credentials: 'include',  // keep cookies if you also use session auth
+      mode: 'cors',
+    }, opts));
 
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  return await r.json().catch(()=> ({}));
+    if(!r.ok){
+      const txt = await r.text().catch(()=> '');
+      throw new Error(`HTTP ${r.status}${txt ? ` — ${txt.slice(0,140)}` : ''}`);
+    }
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return await r.json();
+    // some servers return text/json
+    const raw = await r.text();
+    try { return JSON.parse(raw); } catch { return {}; }
+  }catch(e){
+    // Safari often throws "Load failed" on network/CORS; surface clearly
+    console.error('[serverJSON] fetch failed:', e);
+    throw new Error(String(e && e.message || 'Network error'));
+  }
 }
 
   async function payWithPi(amountPi, memo){
@@ -1049,61 +1063,58 @@ if (!CSS.escape) {
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-    async function handleBuySingle(kind){
-    const usePi = (kind==='pi');
-    const total = calcTotalCost({ usePi });
-    let res;
-    if (usePi) res = await payWithPi(total, 'Craft Single Item');
-    else       res = await payWithIC(total);
+    // Handles a single-item purchase (Pi or IC) and routes to Create → Setup.
+// Visuals remain locked until Setup (category/part/name) is valid.
+// Handles a single-item purchase (Pi or IC) and routes to Create → Setup.
+// Visuals remain locked until Setup (category/part/name) is valid.
+async function handleBuySingle(kind){
+  const usePi = (kind === 'pi');
+  const total = calcTotalCost({ usePi });
 
-    const status = document.getElementById('payStatus'); // present in Create tab
-    if (res && res.ok){
-      // unlock visuals + reset attempts + route to Visuals
-      STATE.hasPaidForCurrentItem = true;
-      STATE.canUseVisuals = true;
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
-      if (res && res.ok){
-  // mark credit reserved for ONE item
-  STATE.hasPaidForCurrentItem = true;
-  STATE.canUseVisuals = false;   // visuals stay locked until Setup complete
-  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-  if (status) status.textContent = 'Paid ✓ — fill out Setup to continue.';
+  // Fire the appropriate payment flow
+  const res = usePi
+    ? await payWithPi(total, 'Craft Single Item')
+    : await payWithIC(total);
 
-  // route to Create → Setup
-  STATE.createSub = 'setup';
+  // We show status only if we're already on Create; otherwise we’ll re-render below.
+  const status = document.getElementById('payStatus');
 
-  // re-render Create tab
-  const host = STATE.root?.querySelector('#craftTabs');
-  if (host){
-    host.innerHTML = renderCreate();
-    bindInside();
-  }
-} else {
-  if (status) status.textContent='Payment failed.';
-  STATE.canUseVisuals = false;
-}
+  if (res && res.ok){
+    // Reserve ONE craft credit
+    STATE.hasPaidForCurrentItem = true;
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
 
-      // if we are not currently on the Create tab, switch to it;
-      // if already there, just re-render to show Visuals.
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){
-        host.innerHTML = renderCreate();
-        bindInside();
-      }
+    // Important: keep Visuals LOCKED until Setup is complete
+    STATE.canUseVisuals = false;
+    STATE.createSub = 'setup';
+
+    if (status) status.textContent = 'Paid ✓ — fill out Setup to continue.';
+
+    // Move user to Create tab (Setup)
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){
+      host.innerHTML = renderCreate();
+      bindInside();            // re-wire inputs & buttons
+      try { _maybeUnlockVisuals(); } catch(_) {}  // read DOM -> STATE, toggle button
     } else {
-      if (status) status.textContent='Payment failed.';
-      // keep visuals locked on failure
-      STATE.canUseVisuals = false;
+      // If not on the modal yet, switch tabs
+      try {
+        const tabs = STATE.root?.querySelectorAll('[data-tab]');
+        const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+        createBtn && createBtn.click();
+      } catch {}
     }
+  } else {
+    if (status) status.textContent = 'Payment failed.';
+    // Don’t unlock visuals
+    STATE.canUseVisuals = false;
   }
-
+}
   function bindInside(){
   const root = STATE.root;
   if(!root) return;
 
-  // ...existing sub-tab wiring...
-
-  // Marketplace button (Packages tab)
+  // --- Marketplace button (Packages tab) ---
   const goMp = root.querySelector('#goMarketplace');
   if (goMp){
     goMp.addEventListener('click', async ()=>{
@@ -1124,40 +1135,324 @@ if (!CSS.escape) {
     });
   }
 
-  // ✅ Starter Forge package purchase (Pi or IC) — correct scope
-  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
-      let res;
-      if (kind === 'pi') {
-        res = await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50');
-      } else {
-        res = await payWithIC(COSTS.PACKAGE_IC);
-      }
-
-      if (res && res.ok){
-        STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
-        STATE.hasPaidForCurrentItem = true;
-        STATE.canUseVisuals = true;
-        STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-        STATE.createSub = 'setup';
-STATE.canUseVisuals = false;   // require Setup first
-
-        // jump to Create tab and render Visuals
-        try { 
-          const tabs = STATE.root?.querySelectorAll('[data-tab]');
-          const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
-          if (createBtn) createBtn.click();
-          else {
-            const host = STATE.root?.querySelector('#craftTabs');
-            if (host){ host.innerHTML = renderCreate(); bindInside(); }
-          }
-        } catch {}
-      } else {
-        alert('Payment failed');
-      }
-    }, { passive:true });
+  // --- Buy buttons on Packages / Create ---
+  root.querySelectorAll('[data-buy-single]').forEach(btn=>{
+    btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
+  const payPi = root.querySelector('#payPi');
+  const payIC = root.querySelector('#payIC');
+  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
+  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
+
+  // --- Local helpers for setup gating ---
+  function _syncSetupFromDOM(){
+    const catSel  = STATE.root?.querySelector('#catSel');
+    const partSel = STATE.root?.querySelector('#partSel');
+    const item    = STATE.root?.querySelector('#itemName');
+    if (catSel)  STATE.currentCategory = catSel.value;
+    if (partSel) STATE.currentPart     = partSel.value;
+    if (item)    STATE.currentName     = item.value;
+  }
+  function _setupValid(){
+    return (
+      String(STATE.currentCategory||'').trim() &&
+      String(STATE.currentPart||'').trim() &&
+      String(STATE.currentName||'').trim().length >= 3
+    );
+  }
+  function _maybeUnlockVisuals(){
+    _syncSetupFromDOM();
+    if (STATE.hasPaidForCurrentItem && _setupValid()){
+      STATE.canUseVisuals = true;
+    } else if (!STATE.hasPaidForCurrentItem){
+      STATE.canUseVisuals = false;
+    }
+    // toggle Visuals tab button state only (no full rerender)
+    const subtabs = STATE.root?.querySelector('.cl-subtabs');
+    if (subtabs){
+      const visBtn = subtabs.querySelector('[data-sub="visuals"]');
+      if (visBtn){
+        if (STATE.canUseVisuals){ visBtn.removeAttribute('disabled'); visBtn.classList.remove('disabled'); }
+        else { visBtn.setAttribute('disabled',''); visBtn.classList.add('disabled'); }
+      }
+    }
+  }
+
+  // --- Setup inputs ---
+  const itemName = root.querySelector('#itemName');
+  const catSel   = root.querySelector('#catSel');
+  const partSel  = root.querySelector('#partSel');
+
+  if (catSel && partSel){
+    // Initial STATE -> DOM
+    catSel.value = STATE.currentCategory;
+    repopulatePartOptions(catSel, partSel);
+  }
+  if (partSel){
+    partSel.value = STATE.currentPart;
+  }
+  if (itemName){
+    itemName.value = STATE.currentName || '';
+  }
+
+  // Change listeners -> STATE + unlock check
+  if (itemName){
+    itemName.addEventListener('input', e=>{
+      STATE.currentName = e.target.value;
+      saveDraft();
+      _maybeUnlockVisuals();
+    }, { passive:true });
+  }
+  if (catSel){
+    catSel.addEventListener('change', e=>{
+      STATE.currentCategory = e.target.value;
+      repopulatePartOptions(catSel, partSel);
+      saveDraft();
+      _maybeUnlockVisuals();
+    }, { passive:true });
+  }
+  if (partSel){
+    partSel.addEventListener('change', e=>{
+      STATE.currentPart = e.target.value;
+      saveDraft();
+      _maybeUnlockVisuals();
+    }, { passive:true });
+  }
+
+  // Optional features checkboxes (re-render keeps the cost line correct)
+  root.querySelectorAll('[data-ff]').forEach(cb=>{
+    const key = cb.dataset.ff;
+    if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
+    cb.addEventListener('change', ()=>{
+      STATE.featureFlags[key] = cb.checked;
+      saveDraft();
+      const host = root.querySelector('#craftTabs');
+      if (!host) return;
+      const saveScroll = host.scrollTop;
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = saveScroll;
+    });
+  });
+
+  // --- Visuals panel wiring ---
+  const aiStyleSel = root.querySelector('#aiStyleSel');
+  const aiAnimChk  = root.querySelector('#aiAnimChk');
+  if (aiStyleSel){
+    aiStyleSel.value = STATE.aiStyle;
+    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
+  }
+  if (aiAnimChk){
+    aiAnimChk.checked = !!STATE.wantAnimation;
+    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
+  }
+
+  const aiLeft = ()=> {
+    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+  };
+
+  const btnAI    = root.querySelector('#btnAI');
+  const aiPrompt = root.querySelector('#aiPrompt');
+  const svgIn    = root.querySelector('#svgIn');
+  const btnPrev  = root.querySelector('#btnPreview');
+  const btnMint  = root.querySelector('#btnMint');
+  const prevHost = root.querySelector('#svgPreview');
+  const craftStatus = root.querySelector('#craftStatus');
+
+  if (svgIn && STATE.currentSVG){
+    svgIn.value = STATE.currentSVG;
+    prevHost && (prevHost.innerHTML = STATE.currentSVG);
+  }
+
+  // AI → SVG
+  btnAI && btnAI.addEventListener('click', async ()=>{
+    if (!btnAI) return;
+    const prompt = String(aiPrompt?.value||'').trim();
+    if (!prompt) return;
+
+    btnAI.disabled = true;
+    btnAI.setAttribute('aria-busy','true');
+    btnAI.textContent = 'Generating…';
+    const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+
+    try{
+      const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
+      if (svgIn) svgIn.value = svg;
+      if (prevHost) {
+        prevHost.innerHTML = svg;
+        const s = prevHost.querySelector('svg');
+        if (s) {
+          s.setAttribute('preserveAspectRatio','xMidYMid meet');
+          s.style.maxWidth='100%';
+          s.style.height='auto';
+          s.style.display='block';
+        }
+        prevHost.scrollTop = prevHost.scrollHeight;
+        prevHost.scrollIntoView({block:'nearest'});
+      }
+      STATE.currentSVG = svg;
+      saveDraft();
+      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+      aiLeft();
+    }catch(e){
+      alert('AI failed: ' + (e?.message || e));
+      console.error('[AI] generate failed:', e);
+    }finally{
+      hideWait(waitEl);
+      btnAI.disabled = false;
+      btnAI.removeAttribute('aria-busy');
+      btnAI.textContent = 'AI → SVG';
+    }
+  });
+
+  // Manual preview
+  btnPrev && btnPrev.addEventListener('click', ()=>{
+    const cleaned = sanitizeSVG(svgIn?.value);
+    if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
+    if (prevHost) {
+      prevHost.innerHTML = cleaned;
+      const s = prevHost.querySelector('svg');
+      if (s) {
+        s.setAttribute('preserveAspectRatio','xMidYMid meet');
+        s.style.maxWidth='100%';
+        s.style.height='auto';
+        s.style.display='block';
+      }
+      prevHost.scrollTop = prevHost.scrollHeight;
+      prevHost.scrollIntoView({block:'nearest'});
+    }
+    STATE.currentSVG = cleaned;
+    saveDraft();
+    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+  });
+
+  // Mint
+  btnMint && btnMint.addEventListener('click', async ()=>{
+    craftStatus.textContent = '';
+
+    const nm = moderateName(STATE.currentName);
+    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+
+    const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
+    if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
+      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+      return;
+    }
+    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+
+    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+
+    try{
+      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+
+      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+        ? window.ArmourPacks.injectCraftedItem({
+            name: STATE.currentName,
+            category: STATE.currentCategory,
+            part: STATE.currentPart,
+            svg: normalizedForSlot,
+            priceIC,
+            sellInShop,
+            sellInPi,
+            featureFlags: STATE.featureFlags
+          })
+        : { ok:false, reason:'armour-packs-hook-missing' };
+
+      if (injected && injected.ok){
+        craftStatus.textContent = 'Crafted ✓';
+        STATE.hasPaidForCurrentItem = false;
+        if (STATE.packageCredits && STATE.packageCredits.items > 0){
+          STATE.packageCredits.items -= 1;
+          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+        }
+
+        // Persist to server (best-effort)
+        try {
+          const u = encodeURIComponent(
+            (window?.IZZA?.player?.username)
+            || (window?.IZZA?.me?.username)
+            || localStorage.getItem('izzaPlayer')
+            || localStorage.getItem('pi_username')
+            || ''
+          );
+          if (u) {
+            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+              method: 'POST',
+              body: JSON.stringify({
+                name: STATE.currentName,
+                category: STATE.currentCategory,
+                part: STATE.currentPart,
+                svg: normalizedForSlot,
+                sku: '',
+                image: ''
+              })
+            });
+          }
+        } catch(e) {
+          console.warn('[craft] persist failed:', e); // non-fatal
+        }
+
+        try{ hydrateMine(); }catch{}
+
+        // IZZA Pay merchant handoff
+        if (sellInPi && injected.id) {
+          try { IZZA?.emit?.('merchant-handoff', { craftedId: injected.id }); } catch {}
+          const qs = new URLSearchParams({ attach: String(injected.id) });
+          try {
+            const t = localStorage.getItem('izzaBearer') || '';
+            if (t) qs.set('t', t);
+          } catch {}
+          location.href = `/merchant?${qs.toString()}`;
+        }
+      } else {
+        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+      }
+    }catch(e){
+      craftStatus.textContent = 'Error crafting: ' + e.message;
+    }
+  });
+
+  // Final: make sure the Visuals tab button reflects current form values
+  _maybeUnlockVisuals();
+}
+
+  // ✅ Starter Forge package purchase (Pi or IC) — reserve credits, route to Setup
+root.querySelectorAll('[data-buy-package]').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
+    const res = (kind === 'pi')
+      ? await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50')
+      : await payWithIC(COSTS.PACKAGE_IC);
+
+    if (res && res.ok){
+      // This package grants 3 crafts (example). Visuals still require Setup per item.
+      STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
+      STATE.hasPaidForCurrentItem = true;   // reserve 1 craft immediately
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      STATE.canUseVisuals = false;          // LOCK visuals until Setup is valid
+      STATE.createSub = 'setup';
+
+      // Jump to Create → Setup
+      try {
+        const tabs = STATE.root?.querySelectorAll('[data-tab]');
+        const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+        if (createBtn) createBtn.click();
+        else {
+          const host = STATE.root?.querySelector('#craftTabs');
+          if (host){ host.innerHTML = renderCreate(); bindInside(); }
+        }
+      } catch {}
+
+      // Ensure button state reflects current input values
+      try { _maybeUnlockVisuals(); } catch(_){}
+    } else {
+      alert('Payment failed');
+    }
+  }, { passive:true });
+});
 
   // Single-item purchase buttons (Packages card & Create tab)
   root.querySelectorAll('[data-buy-single]').forEach(btn=>{
