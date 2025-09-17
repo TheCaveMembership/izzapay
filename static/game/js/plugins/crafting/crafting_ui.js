@@ -503,8 +503,12 @@ function normalizeSvgForSlot(svgText, part){
         </div>
       </div>
 
+      <div style="background:#0b111c;border:1px dashed #2a3550;border-radius:10px;padding:10px;margin-bottom:12px;font-size:13px;opacity:.9">
+        Coming soon: <b>Battle Packs & Bundles!</b> (multi-mint credits + bonuses)
+      </div>
+
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
-        <!-- Starter Forge -->
+        <!-- Starter Forge (disabled actions for now) -->
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
           <div style="opacity:.85;font-size:13px;line-height:1.4">
@@ -517,6 +521,7 @@ function normalizeSvgForSlot(svgText, part){
             <button class="ghost" data-buy-package="pi">Pay ${COSTS.PACKAGE_PI} Pi</button>
             <button class="ghost" data-buy-package="ic">Pay ${COSTS.PACKAGE_IC.toLocaleString()} IC</button>
           </div>
+          <div style="margin-top:8px;font-size:12px;opacity:.75">Coming soon — bundles are not active yet.</div>
         </div>
 
         <!-- Single Item (visual) -->
@@ -524,8 +529,9 @@ function normalizeSvgForSlot(svgText, part){
           <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
           <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
-            <button class="ghost" data-buy-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-            <button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+            <!-- These now just route to Create → Setup; payment happens there -->
+            <button class="ghost" data-go-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+            <button class="ghost" data-go-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           </div>
         </div>
       </div>
@@ -1039,10 +1045,43 @@ if (!CSS.escape) {
   const root = STATE.root;
   if(!root) return;
 
-  // ...existing sub-tab wiring...
+  // --- helpers (scoped to this bind) ---
+  const getEl = (sel)=> root.querySelector(sel);
+  const fieldsReady = ()=>{
+    const cat  = getEl('#catSel')?.value?.trim();
+    const part = getEl('#partSel')?.value?.trim();
+    const name = getEl('#itemName')?.value?.trim();
+    STATE.currentCategory = cat || STATE.currentCategory;
+    STATE.currentPart     = part || STATE.currentPart;
+    STATE.currentName     = name || STATE.currentName;
+    return Boolean(cat && part && name && name.length >= 3);
+  };
+  const setPayEnabled = ()=>{
+    const enabled = fieldsReady();
+    const payPi = getEl('#payPi');
+    const payIC = getEl('#payIC');
+    if (payPi){ payPi.disabled = !enabled; payPi.title = enabled ? '' : 'Fill Category, Part, and Name first'; }
+    if (payIC){ payIC.disabled = !enabled; payIC.title = enabled ? '' : 'Fill Category, Part, and Name first'; }
+  };
+  const toCreateSetup = ()=>{
+    STATE.createSub = 'setup';
+    STATE.hasPaidForCurrentItem = false;
+    STATE.canUseVisuals = false;
+    const tabs = STATE.root?.querySelectorAll('[data-tab]');
+    const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+    if (createBtn) createBtn.click();
+    else {
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){ host.innerHTML = renderCreate(); bindInside(); }
+    }
+  };
+  const aiLeft = ()=> {
+    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+  };
 
-  // Marketplace button (Packages tab)
-  const goMp = root.querySelector('#goMarketplace');
+  // ===================== PACKAGES TAB WIRING =====================
+  const goMp = getEl('#goMarketplace');
   if (goMp){
     goMp.addEventListener('click', async ()=>{
       try{ IZZA?.emit?.('open-marketplace'); }catch{}
@@ -1062,72 +1101,68 @@ if (!CSS.escape) {
     });
   }
 
-  // ✅ Starter Forge package purchase (Pi or IC) — correct scope
+  // Bundle/package buttons → coming soon (no payment)
   root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
-      let res;
-      if (kind === 'pi') {
-        res = await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50');
-      } else {
-        res = await payWithIC(COSTS.PACKAGE_IC);
-      }
-
-      if (res && res.ok){
-        STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
-        STATE.hasPaidForCurrentItem = true;
-        STATE.canUseVisuals = true;
-        STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-        STATE.createSub = 'visuals';
-
-        // jump to Create tab and render Visuals
-        try { 
-          const tabs = STATE.root?.querySelectorAll('[data-tab]');
-          const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
-          if (createBtn) createBtn.click();
-          else {
-            const host = STATE.root?.querySelector('#craftTabs');
-            if (host){ host.innerHTML = renderCreate(); bindInside(); }
-          }
-        } catch {}
-      } else {
-        alert('Payment failed');
-      }
+    btn.addEventListener('click', ()=>{
+      alert('Coming soon: Battle Packs & Bundles!');
     }, { passive:true });
   });
 
-  // Single-item purchase buttons (Packages card & Create tab)
+  // Single Item buttons on Packages card → route to Create → Setup (no payment yet)
   root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-    btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
+    btn.addEventListener('click', ()=>{
+      toCreateSetup();
+      const status = document.getElementById('payStatus');
+      if (status) status.textContent = 'Choose Category, Part, and Name, then pay to unlock Visuals.';
+    }, { passive:true });
   });
-  const payPi = root.querySelector('#payPi');
-  const payIC = root.querySelector('#payIC');
-  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
-  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
 
-  const itemName = root.querySelector('#itemName');
+  // ===================== CREATE TAB WIRING =====================
+
+  // Inputs: Category / Part / Name
+  const itemName = getEl('#itemName');
+  const catSel   = getEl('#catSel');
+  const partSel  = getEl('#partSel');
+
+  // Initialize select values & options
+  if (catSel && partSel){
+    catSel.value = STATE.currentCategory;
+    repopulatePartOptions(catSel, partSel);
+  }
+  if (partSel){ partSel.value = STATE.currentPart; }
+  if (itemName){ itemName.value = STATE.currentName || ''; }
+
+  // React to changes → save + toggle pay buttons
   if (itemName){
-    itemName.value = STATE.currentName || '';
-    itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
+    itemName.addEventListener('input', e=>{
+      STATE.currentName = e.target.value;
+      setPayEnabled();
+      try{ saveDraft(); }catch{}
+    }, { passive:true });
+  }
+  if (catSel){
+    catSel.addEventListener('change', e=>{
+      STATE.currentCategory = e.target.value;
+      repopulatePartOptions(catSel, partSel);
+      setPayEnabled();
+      try{ saveDraft(); }catch{}
+    }, { passive:true });
+  }
+  if (partSel){
+    partSel.addEventListener('change', e=>{
+      STATE.currentPart = e.target.value;
+      setPayEnabled();
+      try{ saveDraft(); }catch{}
+    }, { passive:true });
   }
 
-  const aiStyleSel = root.querySelector('#aiStyleSel');
-  const aiAnimChk  = root.querySelector('#aiAnimChk');
-  if (aiStyleSel){
-    aiStyleSel.value = STATE.aiStyle;
-    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
-  }
-  if (aiAnimChk){
-    aiAnimChk.checked = !!STATE.wantAnimation;
-    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
-  }
-
+  // Optional features (rerender to recompute totals)
   root.querySelectorAll('[data-ff]').forEach(cb=>{
     const key = cb.dataset.ff;
     if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
     cb.addEventListener('change', ()=>{
       STATE.featureFlags[key] = cb.checked;
-      saveDraft();
+      try{ saveDraft(); }catch{}
       const host = root.querySelector('#craftTabs');
       if (!host) return;
       const saveScroll = host.scrollTop;
@@ -1137,64 +1172,88 @@ if (!CSS.escape) {
     });
   });
 
-  const catSel  = root.querySelector('#catSel');
-  const partSel = root.querySelector('#partSel');
+  // Pay buttons (on Create → Setup): disabled until fieldsReady()
+  const payPi = getEl('#payPi');
+  const payIC = getEl('#payIC');
+  setPayEnabled();
+  if (payPi) payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
+  if (payIC) payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
 
-  if (catSel && partSel){
-    catSel.value = STATE.currentCategory;
-    repopulatePartOptions(catSel, partSel);
-
-    catSel.addEventListener('change', e=>{
-      STATE.currentCategory = e.target.value;
-      repopulatePartOptions(catSel, partSel);
-      saveDraft();
-    }, { passive:true });
+  // Style / Animation selections
+  const aiStyleSel = getEl('#aiStyleSel');
+  const aiAnimChk  = getEl('#aiAnimChk');
+  if (aiStyleSel){
+    aiStyleSel.value = STATE.aiStyle;
+    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; try{ saveDraft(); }catch{} });
+  }
+  if (aiAnimChk){
+    aiAnimChk.checked = !!STATE.wantAnimation;
+    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; try{ saveDraft(); }catch{} });
   }
 
-  if (partSel){
-    partSel.value = STATE.currentPart;
-    partSel.addEventListener('change', e=>{
-      STATE.currentPart = e.target.value;
-      saveDraft();
-    }, { passive:true });
-  }
+  // Visuals panel widgets
+  const btnAI    = getEl('#btnAI');
+  const aiPrompt = getEl('#aiPrompt');
+  const svgIn    = getEl('#svgIn');
+  const btnPrev  = getEl('#btnPreview');
+  const btnMint  = getEl('#btnMint');
+  const prevHost = getEl('#svgPreview');
+  const craftStatus = getEl('#craftStatus');
 
-  const aiLeft = ()=> {
-    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
-    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
-  };
-
-  const btnAI    = root.querySelector('#btnAI');
-  const aiPrompt = root.querySelector('#aiPrompt');
-  const svgIn    = root.querySelector('#svgIn');
-  const btnPrev  = root.querySelector('#btnPreview');
-  const btnMint  = root.querySelector('#btnMint');
-  const prevHost = root.querySelector('#svgPreview');
-  const craftStatus = root.querySelector('#craftStatus');
-
+  // Restore current SVG if any
   if (svgIn && STATE.currentSVG){
     svgIn.value = STATE.currentSVG;
-    prevHost && (prevHost.innerHTML = STATE.currentSVG);
+    if (prevHost) prevHost.innerHTML = STATE.currentSVG;
   }
 
-  // ===== Handlers MUST live inside bindInside() =====
-  btnAI && btnAI.addEventListener('click', async ()=>{
-    if (!btnAI) return;
-    const prompt = String(aiPrompt?.value||'').trim();
-    if (!prompt) return;
+  // AI → SVG
+  if (btnAI){
+    btnAI.addEventListener('click', async ()=>{
+      const prompt = String(aiPrompt?.value||'').trim();
+      if (!prompt) return;
+      btnAI.disabled = true;
+      btnAI.setAttribute('aria-busy','true');
+      btnAI.textContent = 'Generating…';
+      const waitEl = showWait('Crafting your SVG preview…');
+      try{
+        const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
+        if (svgIn) svgIn.value = svg;
+        if (prevHost) {
+          prevHost.innerHTML = svg;
+          const s = prevHost.querySelector('svg');
+          if (s){
+            s.setAttribute('preserveAspectRatio','xMidYMid meet');
+            s.style.maxWidth='100%';
+            s.style.height='auto';
+            s.style.display='block';
+          }
+          prevHost.scrollTop = prevHost.scrollHeight;
+          prevHost.scrollIntoView({block:'nearest'});
+        }
+        STATE.currentSVG = svg;
+        try{ saveDraft(); }catch{}
+        if (btnMint) btnMint.style.display = 'inline-block';
+        aiLeft();
+      }catch(e){
+        alert('AI failed: ' + (e?.message || e));
+      }finally{
+        hideWait(waitEl);
+        btnAI.disabled = false;
+        btnAI.removeAttribute('aria-busy');
+        btnAI.textContent = 'AI → SVG';
+      }
+    });
+  }
 
-    btnAI.disabled = true;
-    btnAI.setAttribute('aria-busy','true');
-    btnAI.textContent = 'Generating…';
-    const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
-
-    try{
-      const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
-      if (svgIn) svgIn.value = svg;
+  // Manual preview
+  if (btnPrev){
+    btnPrev.addEventListener('click', ()=>{
+      const cleaned = sanitizeSVG(svgIn?.value);
+      if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
       if (prevHost) {
-        prevHost.innerHTML = svg;
+        prevHost.innerHTML = cleaned;
         const s = prevHost.querySelector('svg');
-        if (s) {
+        if (s){
           s.setAttribute('preserveAspectRatio','xMidYMid meet');
           s.style.maxWidth='100%';
           s.style.height='auto';
@@ -1203,132 +1262,137 @@ if (!CSS.escape) {
         prevHost.scrollTop = prevHost.scrollHeight;
         prevHost.scrollIntoView({block:'nearest'});
       }
-      STATE.currentSVG = svg;
-      saveDraft();
-      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-      aiLeft();
-    }catch(e){
-      alert('AI failed: ' + (e?.message || e));
-    }finally{
-      hideWait(waitEl);
-      btnAI.disabled = false;
-      btnAI.removeAttribute('aria-busy');
-      btnAI.textContent = 'AI → SVG';
-    }
-  });
+      STATE.currentSVG = cleaned;
+      try{ saveDraft(); }catch{}
+      if (btnMint) btnMint.style.display = 'inline-block';
+    });
+  }
 
-  btnPrev && btnPrev.addEventListener('click', ()=>{
-    const cleaned = sanitizeSVG(svgIn?.value);
-    if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
-    if (prevHost) {
-      prevHost.innerHTML = cleaned;
-      const s = prevHost.querySelector('svg');
-      if (s) {
-        s.setAttribute('preserveAspectRatio','xMidYMid meet');
-        s.style.maxWidth='100%';
-        s.style.height='auto';
-        s.style.display='block';
+  // Mint (full handler with redirect to Setup on success)
+  if (btnMint){
+    btnMint.addEventListener('click', async ()=>{
+      if (!craftStatus) return;
+      craftStatus.textContent = '';
+
+      // Basic checks
+      const nm = moderateName(STATE.currentName);
+      if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+
+      const freeTest = (COSTS.PER_ITEM_IC === 0 && Object.values(STATE.featureFlags).every(v=>!v));
+      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
+        craftStatus.textContent = 'Please pay (Pi or IC) first.';
+        return;
       }
-      prevHost.scrollTop = prevHost.scrollHeight;
-      prevHost.scrollIntoView({block:'nearest'});
-    }
-    STATE.currentSVG = cleaned;
-    saveDraft();
-    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
-  });
+      if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-  btnMint && btnMint.addEventListener('click', async ()=>{
-    craftStatus.textContent = '';
+      const sellInShop = !!getEl('#sellInShop')?.checked;
+      const sellInPi   = !!getEl('#sellInPi')?.checked;
+      const priceIC    = Math.max(
+        COSTS.SHOP_MIN_IC,
+        Math.min(COSTS.SHOP_MAX_IC, parseInt(getEl('#shopPrice')?.value||'100',10)||100)
+      );
 
-    const nm = moderateName(STATE.currentName);
-    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+      try{
+        const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
-    const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
-    if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-      return;
-    }
-    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+        const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+          ? window.ArmourPacks.injectCraftedItem({
+              name: STATE.currentName,
+              category: STATE.currentCategory,
+              part: STATE.currentPart,
+              svg: normalizedForSlot,
+              priceIC,
+              sellInShop,
+              sellInPi,
+              featureFlags: STATE.featureFlags
+            })
+          : { ok:false, reason:'armour-packs-hook-missing' };
 
-    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked; // harmless if not rendered
-    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+        if (injected && injected.ok){
+          craftStatus.textContent = 'Crafted ✓';
 
-    try{
-      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
-
-      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-        ? window.ArmourPacks.injectCraftedItem({
-            name: STATE.currentName,
-            category: STATE.currentCategory,
-            part: STATE.currentPart,
-            svg: normalizedForSlot,
-            priceIC,
-            sellInShop,
-            sellInPi,
-            featureFlags: STATE.featureFlags
-          })
-        : { ok:false, reason:'armour-packs-hook-missing' };
-
-      if (injected && injected.ok){
-        craftStatus.textContent = 'Crafted ✓';
-        STATE.hasPaidForCurrentItem = false;
-        if (STATE.packageCredits && STATE.packageCredits.items > 0){
-          STATE.packageCredits.items -= 1;
-          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-        }
-
-        // Persist + get craftedId (from inject OR server)
-        let craftedId = injected.id || null;
-        try {
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-          }
-        } catch(e) {
-          console.warn('[craft] persist failed:', e); // non-fatal
-        }
-
-        try{ hydrateMine(); }catch{}
-
-        // IZZA Pay merchant handoff
-        if (sellInPi && craftedId) {
-          // Let the host intercept (native app/shell)
-          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
-          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
-          const qs = new URLSearchParams({ attach: String(craftedId) });
-          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
+          // Best-effort persist
           try {
-            const t = localStorage.getItem('izzaBearer') || '';
-            if (t) qs.set('t', t);
-          } catch {}
-          location.href = `/merchant?${qs.toString()}`;
+            const u = encodeURIComponent(
+              (window?.IZZA?.player?.username)
+              || (window?.IZZA?.me?.username)
+              || localStorage.getItem('izzaPlayer')
+              || localStorage.getItem('pi_username')
+              || ''
+            );
+            if (u) {
+              await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+                method: 'POST',
+                body: JSON.stringify({
+                  name: STATE.currentName,
+                  category: STATE.currentCategory,
+                  part: STATE.currentPart,
+                  svg: normalizedForSlot,
+                  sku: '',
+                  image: ''
+                })
+              });
+            }
+          } catch(e) { /* non-fatal */ }
+
+          try{ hydrateMine(); }catch{}
+
+          // Reset for next single item & return to Setup
+          STATE.hasPaidForCurrentItem = false;
+          STATE.canUseVisuals = false;
+          STATE.createSub = 'setup';
+          // Keep their category/part/name as-is (faster flow), but clear the SVG & preview
+          STATE.currentSVG = '';
+          if (svgIn) svgIn.value = '';
+          if (prevHost) prevHost.innerHTML = `<div style="opacity:.6; font-size:12px">Preview appears here</div>`;
+
+          // Re-render Create → Setup so Pay buttons reappear (disabled state handled by setPayEnabled)
+          const host = STATE.root?.querySelector('#craftTabs');
+          if (host){
+            host.innerHTML = renderCreate();
+            bindInside();
+          }
+        } else {
+          craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+        }
+      }catch(e){
+        craftStatus.textContent = 'Error crafting: ' + e.message;
+      }
+    });
+  }
+
+  // Make sure pay buttons state is correct on entry
+  setPayEnabled();
+  // Keep attempts label fresh if present
+  aiLeft();
+
+  // --- SHOP card actions in "My Creations" (if that tab is mounted) ---
+  root.querySelectorAll('[data-addshop]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.addshop;
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = 'Adding…';
+      const ok = await addToShop(id);
+      if (ok){
+        btn.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
+        const statsBtn = root.querySelector(`[data-stats="${CSS.escape(String(id))}"]`);
+        if (statsBtn){
+          statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
         }
       } else {
-        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+        alert('Failed to add to shop');
+        btn.disabled = false;
+        btn.textContent = prev || 'Add to Shop';
       }
-    }catch(e){
-      craftStatus.textContent = 'Error crafting: ' + e.message;
-    }
-  }); // <-- closes btnMint handler
-} // <-- closes bindInside()
+    }, { passive:true });
+  });
 
+  root.querySelectorAll('[data-stats]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.stats;
+      if (id) openStatsModal(id);
+    }, { passive:true });
+}
 window.CraftingUI = { mount, unmount };
 })();
