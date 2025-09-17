@@ -657,6 +657,61 @@ function normalizeSvgForSlot(svgText, part){
         </div>
       </div>`;
   }
+  // ---- Shop Stats Modal (simple) ----
+function ensureStatsModal(){
+  let m = document.getElementById('shopStatsModal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'shopStatsModal';
+  m.style.cssText = 'position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:100000;background:rgba(0,0,0,.45);backdrop-filter:blur(2px)';
+  m.innerHTML = `
+    <div style="background:#0f1522;border:1px solid #2a3550;border-radius:12px;min-width:280px;max-width:92vw;padding:12px 14px;color:#e7ecff">
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="font-weight:700">Shop Stats</div>
+        <button class="ghost" id="statsClose" style="margin-left:auto">Close</button>
+      </div>
+      <div id="statsBody" style="margin-top:8px;font-size:13px;opacity:.95">Loading…</div>
+    </div>`;
+  document.body.appendChild(m);
+  m.querySelector('#statsClose').addEventListener('click', ()=> m.style.display='none');
+  m.addEventListener('click', (e)=> { if (e.target===m) m.style.display='none'; });
+  return m;
+}
+
+async function openStatsModal(itemId){
+  const modal = ensureStatsModal();
+  const body = modal.querySelector('#statsBody');
+  modal.style.display = 'flex';
+  body.textContent = 'Loading…';
+  try{
+    // your server should return: { ok:true, stats:{ purchases: n, resales: n, revenueIC: n, revenuePi: n } }
+    const j = await serverJSON(api(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`));
+    const st = (j && j.ok && j.stats) ? j.stats : { purchases:0, resales:0, revenueIC:0, revenuePi:0 };
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><div style="opacity:.7;font-size:12px">Purchases</div><div style="font-weight:700">${st.purchases|0}</div></div>
+        <div><div style="opacity:.7;font-size:12px">Resales to Shop</div><div style="font-weight:700">${st.resales|0}</div></div>
+        <div><div style="opacity:.7;font-size:12px">Revenue (IC)</div><div style="font-weight:700">${(st.revenueIC||0).toLocaleString()}</div></div>
+        <div><div style="opacity:.7;font-size:12px">Revenue (Pi)</div><div style="font-weight:700">${st.revenuePi||0}</div></div>
+      </div>`;
+  }catch(e){
+    body.textContent = 'Failed to load stats.';
+  }
+}
+
+async function addToShop(itemId){
+  try{
+    // Optional: you can prompt for price here or use the stored price from creation
+    // Server expects { ok:true } and will mark the item as inShop=true server-side
+    const j = await serverJSON(api('/api/shop/add'), {
+      method:'POST',
+      body: JSON.stringify({ itemId })
+    });
+    return !!(j && j.ok);
+  }catch{
+    return false;
+  }
+}
   function currentUsername(){
   // adjust if your player name lives elsewhere; these are safe fallbacks:
   return (window?.IZZA?.player?.username)
@@ -676,20 +731,26 @@ async function fetchMine(){
 }
 
   function mineCardHTML(it){
-    const safeSVG = sanitizeSVG(it.svg||'');
-    return `
-      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
-        <div style="font-weight:700">${it.name||'Untitled'}</div>
-        <div style="opacity:.75;font-size:12px">${it.category||'?'} / ${it.part||'?'}</div>
-        <div style="margin-top:6px;border:1px solid #2a3550;border-radius:8px;background:#0b0f17;overflow:hidden;min-height:80px">
-          ${safeSVG || '<div style="opacity:.6;padding:10px;font-size:12px">No SVG</div>'}
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-          <button class="ghost" data-copy="${it.id}">Copy SVG</button>
-          <button class="ghost" data-equip="${it.id}">Equip</button>
-        </div>
-      </div>`;
-  }
+  const safeSVG = sanitizeSVG(it.svg||'');
+  const listed = !!it.inShop; // server should return this boolean for each item
+  const primaryBtn = listed
+    ? `<button class="ghost" data-stats="${it.id}">View Shop Stats</button>`
+    : `<button class="ghost" data-addshop="${it.id}">Add to Shop</button>`;
+
+  return `
+    <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
+      <div style="font-weight:700">${it.name||'Untitled'}</div>
+      <div style="opacity:.75;font-size:12px">${it.category||'?'} / ${it.part||'?'}</div>
+      <div style="margin-top:6px;border:1px solid #2a3550;border-radius:8px;background:#0b0f17;overflow:hidden;min-height:80px">
+        ${safeSVG || '<div style="opacity:.6;padding:10px;font-size:12px">No SVG</div>'}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="ghost" data-copy="${it.id}">Copy SVG</button>
+        <button class="ghost" data-equip="${it.id}">Equip</button>
+        ${primaryBtn}
+      </div>
+    </div>`;
+}
   // --- NEW: Marketplace bundle card renderer ---
   function marketplaceCardHTML(b){
     // Expecting fields like: { id, name, svg, pricePi, creator }
@@ -737,7 +798,33 @@ async function fetchMine(){
     const id = b.dataset.equip;
     const it = items.find(x=>x.id===id);
     if (!it) return;
+    // Add to Shop
+    host.querySelectorAll('[data-addshop]').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        const id = b.dataset.addshop;
+        b.disabled = true;
+        b.textContent = 'Adding…';
+        const ok = await addToShop(id);
+        if (ok){
+          // swap button to "View Shop Stats"
+          b.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
+          // wire the new button immediately
+          const statsBtn = host.querySelector(`[data-stats="${id}"]`);
+          if (statsBtn){
+            statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
+          }
+        }else{
+          alert('Failed to add to shop');
+          b.disabled = false;
+          b.textContent = 'Add to Shop';
+        }
+      }, { passive:true });
+    });
 
+    // View Shop Stats
+    host.querySelectorAll('[data-stats]').forEach(b=>{
+      b.addEventListener('click', ()=> openStatsModal(b.dataset.stats), { passive:true });
+    });
     // Persist + fire events (you already have this)
     try {
       localStorage.setItem('izzaLastEquipped', JSON.stringify({
