@@ -160,26 +160,15 @@ const COIN_PER_PI = 2000;
 
     // base clean
     let cleaned = txt
+      .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
+      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
+      .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
+      .replace(/(javascript:|data:)/gi,'')
       .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
       .replace(/<!DOCTYPE[^>]*>/gi,'')
-      .replace(/<\?xml[\s\S]*?\?>/gi,'')
+      .replace(/<\?xml[\s\S]*?\?>/gi,'');
 
-      // SAFER href cleanup:
-      // - allow internal fragments (#id)
-      // - remove external http(s), data:, javascript:
-      // normalize xlink:href="#id" -> href="#id"
-      .replace(/\sxlink:href\s*=\s*["']\s*#([^"']+)["']/gi, ' href="#$1"')
-      // drop any xlink:href that isn't a fragment
-      .replace(/\sxlink:href\s*=\s*["'](?!#)[^"']*["']/gi, '')
-      // drop any href that isn't a fragment
-      .replace(/\shref\s*=\s*["']\s*(?!#)[^"']*["']/gi, '')
-      // nuke dangerous protocols anywhere just in case
-      .replace(/(?:javascript:|data:)/gi,'')
-
-      // strip generic inline DOM event handlers
-      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'');
-
-    // --- strip obvious "background" fills so overlays are transparent ---
+    // --- NEW: strip obvious "background" fills so overlays are transparent ---
     // 1) Remove inline CSS background on the <svg> tag
     cleaned = cleaned.replace(
       /(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i,
@@ -259,59 +248,11 @@ function hideWait(node){
 const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
 const api = (p)=> (API_BASE ? API_BASE + p : p);
 
-  // Grab t from ?t=, localStorage, or a cookie — in that order.
-// (Keep it short-lived; your backend should validate expiry.)
-function getBearerT(){
-  try{
-    const qs = new URLSearchParams(location.search);
-    const fromQS = qs.get('t');
-    if (fromQS) return fromQS;
-
-    const fromLS = localStorage.getItem('izzaBearer');
-    if (fromLS) return fromLS;
-
-    const m = document.cookie.match(/(?:^|;\s*)t=([^;]+)/);
-    if (m) return decodeURIComponent(m[1]);
-  }catch{}
-  return '';
-}
-
-// Append ?t=… AND send Authorization: Bearer … (server may require either/both)
-async function serverJSON(pathOrUrl, opts={}){
-  const base = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
-  const url = String(pathOrUrl||'').startsWith('http') ? new URL(pathOrUrl) : new URL(base + pathOrUrl);
-  const t = getBearerT();
-
-  if (t && !url.searchParams.has('t')) url.searchParams.set('t', t);
-
-  const headers = Object.assign(
-    {'content-type':'application/json'},
-    opts.headers || {},
-    t ? { 'Authorization': 'Bearer ' + t } : {}
-  );
-
-  try{
-    const r = await fetch(url.toString(), Object.assign({
-      headers,
-      credentials: 'include',  // keep cookies if you also use session auth
-      mode: 'cors',
-    }, opts));
-
-    if(!r.ok){
-      const txt = await r.text().catch(()=> '');
-      throw new Error(`HTTP ${r.status}${txt ? ` — ${txt.slice(0,140)}` : ''}`);
-    }
-    const ct = r.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return await r.json();
-    // some servers return text/json
-    const raw = await r.text();
-    try { return JSON.parse(raw); } catch { return {}; }
-  }catch(e){
-    // Safari often throws "Load failed" on network/CORS; surface clearly
-    console.error('[serverJSON] fetch failed:', e);
-    throw new Error(String(e && e.message || 'Network error'));
+  async function serverJSON(url, opts={}){
+    const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json().catch(()=> ({}));
   }
-}
 
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
@@ -599,14 +540,9 @@ function normalizeSvgForSlot(svgText, part){
 
   return `
     <div class="cl-subtabs">
-  <button class="${sub==='setup'?'on':''}" data-sub="setup">Setup</button>
-  <button
-    class="${sub==='visuals'?'on':''} ${STATE.canUseVisuals ? '' : 'disabled'}"
-    data-sub="visuals"
-    ${STATE.canUseVisuals ? '' : 'disabled'}
-    title="${STATE.canUseVisuals ? '' : 'Complete Setup to unlock'}"
-  >Visuals</button>
-</div>
+      <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
+      <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}" data-sub="visuals" ${STATE.canUseVisuals?'':'disabled'}>Visuals</button>
+    </div>
 
     <div class="cl-body ${sub}">
       <div class="cl-pane cl-form">
@@ -636,40 +572,33 @@ function normalizeSvgForSlot(svgText, part){
         <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
 
         <div style="margin-top:10px; font-size:13px; opacity:.85">
-  Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
-</div>
+          Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
+        </div>
 
-<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-  ${!STATE.hasPaidForCurrentItem
-    ? `
-      <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-      <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
-      <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-    `
-    : `
-      <span class="badge" style="border:1px solid #2a3550">Credit reserved ✓</span>
-      <span class="muted" style="font-size:12px">Fill out Category, Part, and Name to unlock <b>Visuals</b>.</span>
-    `
-  }
-</div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+          <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+          <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+        </div>
 
-<!-- SINGLE Shop Listing block (no duplicates) -->
-<div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-  <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-  <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-  <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-  <div style="margin-top:6px">
-    <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label><br/>
-    <label><input id="sellInPi" type="checkbox"/> Also list in my IZZA Pay merchant dashboard</label>
-  </div>
-</div>
+        <!-- SINGLE Shop Listing block (no duplicates) -->
+        <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
+          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+          <div style="margin-top:6px">
+            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label><br/>
+            <label><input id="sellInPi" type="checkbox"/> Also list in my IZZA Pay merchant dashboard</label>
+          </div>
+        </div>
+      </div>
 
       <div class="cl-pane cl-preview">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
           <div style="font-weight:700">Visuals</div>
           <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
 
-        <!-- Style / Animation controls -->
+          <!-- Style / Animation controls -->
           <div style="display:flex; gap:8px; align-items:center; margin-left:auto">
             <label style="font-size:12px; opacity:.8">Style</label>
             <select id="aiStyleSel">
@@ -849,58 +778,14 @@ async function fetchMine(){
         </div>
       </div>`;
   }
-
-// CSS.escape ponyfill (safe if native missing)
-if (!window.CSS) window.CSS = {};
-if (!CSS.escape) {
-  // MDN ponyfill
-  CSS.escape = function(value) {
-    const str = String(value);
-    const length = str.length;
-    let result = '';
-    let index = -1;
-    while (++index < length) {
-      const codeUnit = str.charCodeAt(index);
-      // Null character
-      if (codeUnit === 0x0000) {
-        result += '\uFFFD';
-        continue;
-      }
-      // Control characters
-      if (
-        (codeUnit >= 0x0001 && codeUnit <= 0x001F) ||
-        codeUnit === 0x007F
-      ) {
-        result += '\\' + codeUnit.toString(16) + ' ';
-        continue;
-      }
-      // Start with a digit, or a hyphen followed by a digit
-      if (
-        (index === 0 && codeUnit >= 0x0030 && codeUnit <= 0x0039) ||
-        (index === 1 &&
-          codeUnit >= 0x0030 && codeUnit <= 0x0039 &&
-          str.charCodeAt(0) === 0x002D)
-      ) {
-        result += '\\' + codeUnit.toString(16) + ' ';
-        continue;
-      }
-      // Safe characters
-      if (
-        codeUnit === 0x002D || codeUnit === 0x005F || // - _
-        (codeUnit >= 0x0030 && codeUnit <= 0x0039) || // 0-9
-        (codeUnit >= 0x0041 && codeUnit <= 0x005A) || // A-Z
-        (codeUnit >= 0x0061 && codeUnit <= 0x007A)    // a-z
-      ) {
-        result += str.charAt(index);
-        continue;
-      }
-      // Everything else
-      result += '\\' + str.charAt(index);
-    }
-    return result;
-  };
+  // CSS.escape ponyfill (safe no-op if native exists)
+if (!window.CSS || !CSS.escape) {
+  (function() {
+    const r = /([-!$%^&*()_+|~=`{}$begin:math:display$$end:math:display$:";'<>?,.\/\s])/g;
+    CSS = window.CSS || {};
+    CSS.escape = function(v){ return String(v).replace(r, '\\$1'); };
+  })();
 }
-
   async function hydrateMine(){
   const host = STATE.root?.querySelector('#mineList');
   if (!host) return;
@@ -1045,14 +930,23 @@ if (!CSS.escape) {
     if(!STATE.mounted) return;
     if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
     if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
+        // keep attempts counter in sync when entering Visuals
+    if (name === 'create' && STATE.canUseVisuals) {
+      try {
+        const el = document.getElementById('aiLeft2');
+        if (el) el.textContent = STATE.aiAttemptsLeft;
+      } catch {}
+    }
     if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
     bindInside();
 
-    // sync attempts counter whenever entering Create
+    // >>> ADD THIS: immediately sync the attempts counter when entering Create
     if (name === 'create') {
-      const el = document.getElementById('aiLeft2');
-      if (el) el.textContent = STATE.aiAttemptsLeft;
+      try {
+        const el = document.getElementById('aiLeft2');
+        if (el) el.textContent = STATE.aiAttemptsLeft;
+      } catch {}
     }
   };
 
@@ -1063,79 +957,45 @@ if (!CSS.escape) {
   setTab('packages');
 }
 
-function unmount(){
-  if(!STATE.root) return;
-  STATE.root.innerHTML='';
-  STATE.mounted=false;
-}
+  function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-// Single-item purchase -> route to Create → Setup; keep Visuals locked until Setup valid
-async function handleBuySingle(kind){
-  const usePi = (kind === 'pi');
-  const total = calcTotalCost({ usePi });
-  const res = usePi ? await payWithPi(total, 'Craft Single Item')
-                    : await payWithIC(total);
+    async function handleBuySingle(kind){
+    const usePi = (kind==='pi');
+    const total = calcTotalCost({ usePi });
+    let res;
+    if (usePi) res = await payWithPi(total, 'Craft Single Item');
+    else       res = await payWithIC(total);
 
-  const status = document.getElementById('payStatus');
+    const status = document.getElementById('payStatus'); // present in Create tab
+    if (res && res.ok){
+      // unlock visuals + reset attempts + route to Visuals
+      STATE.hasPaidForCurrentItem = true;
+      STATE.canUseVisuals = true;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
+      if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
 
-  if (res && res.ok){
-    STATE.hasPaidForCurrentItem = true;
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    STATE.canUseVisuals = false;
-    STATE.createSub = 'setup';
-    if (status) status.textContent = 'Paid ✓ — fill out Setup to continue.';
+      // force Visuals subtab
+      STATE.createSub = 'visuals';
 
-    const host = STATE.root?.querySelector('#craftTabs');
-    if (host){
-      host.innerHTML = renderCreate();
-      bindInside();
-      try { _maybeUnlockVisuals(); } catch {}
+      // if we are not currently on the Create tab, switch to it;
+      // if already there, just re-render to show Visuals.
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){
+        host.innerHTML = renderCreate();
+        bindInside();
+      }
     } else {
-      const tabs = STATE.root?.querySelectorAll('[data-tab]');
-      const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
-      createBtn && createBtn.click();
-    }
-  } else {
-    if (status) status.textContent = 'Payment failed.';
-    STATE.canUseVisuals = false;
-  }
-}
-
-// --- helpers used by listeners (module-scope so other functions can call) ---
-function _setupValid(){
-  return (
-    String(STATE.currentCategory||'').trim() &&
-    String(STATE.currentPart||'').trim() &&
-    String(STATE.currentName||'').trim().length >= 3
-  );
-}
-function _maybeUnlockVisuals(){
-  const catSel  = STATE.root?.querySelector('#catSel');
-  const partSel = STATE.root?.querySelector('#partSel');
-  const item    = STATE.root?.querySelector('#itemName');
-  if (catSel)  STATE.currentCategory = catSel.value;
-  if (partSel) STATE.currentPart     = partSel.value;
-  if (item)    STATE.currentName     = item.value;
-
-  if (STATE.hasPaidForCurrentItem && _setupValid()){
-    STATE.canUseVisuals = true;
-  } else if (!STATE.hasPaidForCurrentItem){
-    STATE.canUseVisuals = false;
-  }
-  const subtabs = STATE.root?.querySelector('.cl-subtabs');
-  if (subtabs){
-    const visBtn = subtabs.querySelector('[data-sub="visuals"]');
-    if (visBtn){
-      if (STATE.canUseVisuals){ visBtn.removeAttribute('disabled'); visBtn.classList.remove('disabled'); }
-      else { visBtn.setAttribute('disabled',''); visBtn.classList.add('disabled'); }
+      if (status) status.textContent='Payment failed.';
+      // keep visuals locked on failure
+      STATE.canUseVisuals = false;
     }
   }
-}
 
-// --- all UI wiring lives here (single source of truth) ---
-function bindInside(){
+  function bindInside(){
   const root = STATE.root;
   if(!root) return;
+
+  // ...existing sub-tab wiring...
 
   // Marketplace button (Packages tab)
   const goMp = root.querySelector('#goMarketplace');
@@ -1158,36 +1018,41 @@ function bindInside(){
     });
   }
 
-  // Package purchase (Pi/IC) → reserve credit, route to Create → Setup
+  // ✅ Starter Forge package purchase (Pi or IC) — correct scope
   root.querySelectorAll('[data-buy-package]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
-      const res = (kind === 'pi')
-        ? await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50')
-        : await payWithIC(COSTS.PACKAGE_IC);
+      let res;
+      if (kind === 'pi') {
+        res = await payWithPi(COSTS.PACKAGE_PI, 'Package:starter-50');
+      } else {
+        res = await payWithIC(COSTS.PACKAGE_IC);
+      }
 
       if (res && res.ok){
         STATE.packageCredits = { id:'starter-50', items:3, featuresIncluded:true };
         STATE.hasPaidForCurrentItem = true;
+        STATE.canUseVisuals = true;
         STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-        STATE.canUseVisuals = false;
-        STATE.createSub = 'setup';
+        STATE.createSub = 'visuals';
 
-        const tabs = STATE.root?.querySelectorAll('[data-tab]');
-        const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
-        if (createBtn) createBtn.click();
-        else {
-          const host = STATE.root?.querySelector('#craftTabs');
-          if (host){ host.innerHTML = renderCreate(); bindInside(); }
-        }
-        _maybeUnlockVisuals();
+        // jump to Create tab and render Visuals
+        try { 
+          const tabs = STATE.root?.querySelectorAll('[data-tab]');
+          const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
+          if (createBtn) createBtn.click();
+          else {
+            const host = STATE.root?.querySelector('#craftTabs');
+            if (host){ host.innerHTML = renderCreate(); bindInside(); }
+          }
+        } catch {}
       } else {
         alert('Payment failed');
       }
     }, { passive:true });
   });
 
-  // Single-item purchase buttons
+  // Single-item purchase buttons (Packages card & Create tab)
   root.querySelectorAll('[data-buy-single]').forEach(btn=>{
     btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
@@ -1196,38 +1061,29 @@ function bindInside(){
   payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
   payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
 
-  // Setup inputs
   const itemName = root.querySelector('#itemName');
-  const catSel   = root.querySelector('#catSel');
-  const partSel  = root.querySelector('#partSel');
-
-  if (catSel && partSel){
-    catSel.value = STATE.currentCategory;
-    repopulatePartOptions(catSel, partSel);
+  if (itemName){
+    itemName.value = STATE.currentName || '';
+    itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
   }
-  if (partSel){ partSel.value = STATE.currentPart; }
-  if (itemName){ itemName.value = STATE.currentName || ''; }
 
-  itemName && itemName.addEventListener('input', e=>{
-    STATE.currentName = e.target.value; saveDraft(); _maybeUnlockVisuals();
-  }, { passive:true });
+  const aiStyleSel = root.querySelector('#aiStyleSel');
+  const aiAnimChk  = root.querySelector('#aiAnimChk');
+  if (aiStyleSel){
+    aiStyleSel.value = STATE.aiStyle;
+    aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
+  }
+  if (aiAnimChk){
+    aiAnimChk.checked = !!STATE.wantAnimation;
+    aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
+  }
 
-  catSel && catSel.addEventListener('change', e=>{
-    STATE.currentCategory = e.target.value;
-    repopulatePartOptions(catSel, partSel);
-    saveDraft(); _maybeUnlockVisuals();
-  }, { passive:true });
-
-  partSel && partSel.addEventListener('change', e=>{
-    STATE.currentPart = e.target.value; saveDraft(); _maybeUnlockVisuals();
-  }, { passive:true });
-
-  // Optional feature checkboxes (re-render updates totals)
   root.querySelectorAll('[data-ff]').forEach(cb=>{
     const key = cb.dataset.ff;
     if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
     cb.addEventListener('change', ()=>{
-      STATE.featureFlags[key] = cb.checked; saveDraft();
+      STATE.featureFlags[key] = cb.checked;
+      saveDraft();
       const host = root.querySelector('#craftTabs');
       if (!host) return;
       const saveScroll = host.scrollTop;
@@ -1237,13 +1093,27 @@ function bindInside(){
     });
   });
 
-  // Visuals panel wiring
-  const aiStyleSel = root.querySelector('#aiStyleSel');
-  const aiAnimChk  = root.querySelector('#aiAnimChk');
-  aiStyleSel && (aiStyleSel.value = STATE.aiStyle);
-  aiStyleSel && aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
-  aiAnimChk && (aiAnimChk.checked = !!STATE.wantAnimation);
-  aiAnimChk && aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
+  const catSel  = root.querySelector('#catSel');
+  const partSel = root.querySelector('#partSel');
+
+  if (catSel && partSel){
+    catSel.value = STATE.currentCategory;
+    repopulatePartOptions(catSel, partSel);
+
+    catSel.addEventListener('change', e=>{
+      STATE.currentCategory = e.target.value;
+      repopulatePartOptions(catSel, partSel);
+      saveDraft();
+    }, { passive:true });
+  }
+
+  if (partSel){
+    partSel.value = STATE.currentPart;
+    partSel.addEventListener('change', e=>{
+      STATE.currentPart = e.target.value;
+      saveDraft();
+    }, { passive:true });
+  }
 
   const aiLeft = ()=> {
     const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
@@ -1263,8 +1133,9 @@ function bindInside(){
     prevHost && (prevHost.innerHTML = STATE.currentSVG);
   }
 
-  // AI → SVG
+  // ===== Handlers MUST live inside bindInside() =====
   btnAI && btnAI.addEventListener('click', async ()=>{
+    if (!btnAI) return;
     const prompt = String(aiPrompt?.value||'').trim();
     if (!prompt) return;
 
@@ -1290,11 +1161,10 @@ function bindInside(){
       }
       STATE.currentSVG = svg;
       saveDraft();
-      btnMint && (btnMint.style.display = 'inline-block');
+      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
       aiLeft();
     }catch(e){
       alert('AI failed: ' + (e?.message || e));
-      console.error('[AI] generate failed:', e);
     }finally{
       hideWait(waitEl);
       btnAI.disabled = false;
@@ -1303,7 +1173,6 @@ function bindInside(){
     }
   });
 
-  // Manual preview
   btnPrev && btnPrev.addEventListener('click', ()=>{
     const cleaned = sanitizeSVG(svgIn?.value);
     if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
@@ -1321,10 +1190,9 @@ function bindInside(){
     }
     STATE.currentSVG = cleaned;
     saveDraft();
-    btnMint && (btnMint.style.display = 'inline-block');
+    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
   });
 
-  // Mint
   btnMint && btnMint.addEventListener('click', async ()=>{
     craftStatus.textContent = '';
 
@@ -1339,7 +1207,7 @@ function bindInside(){
     if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
     const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+    const sellInPi   = !!root.querySelector('#sellInPi')?.checked; // harmless if not rendered
     const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
 
     try{
@@ -1358,77 +1226,90 @@ function bindInside(){
           })
         : { ok:false, reason:'armour-packs-hook-missing' };
 
-      if (injected && injected.ok){
+            if (injected && injected.ok){
         craftStatus.textContent = 'Crafted ✓';
         STATE.hasPaidForCurrentItem = false;
         if (STATE.packageCredits && STATE.packageCredits.items > 0){
           STATE.packageCredits.items -= 1;
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
-
-        // Persist (best-effort)
-        try {
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-          }
-        } catch(e) { console.warn('[craft] persist failed:', e); }
-
-        try{ hydrateMine(); }catch{}
-
-        if (sellInPi && injected.id) {
-          try { IZZA?.emit?.('merchant-handoff', { craftedId: injected.id }); } catch {}
-          const qs = new URLSearchParams({ attach: String(injected.id) });
-          try { const t = localStorage.getItem('izzaBearer') || ''; if (t) qs.set('t', t); } catch {}
-          location.href = `/merchant?${qs.toString()}`;
-        }
+-
+-        try{
+-          const u = encodeURIComponent(
+-            (window?.IZZA?.player?.username)
+-            || (window?.IZZA?.me?.username)
+-            || localStorage.getItem('izzaPlayer')
+-            || localStorage.getItem('pi_username')
+-            || ''
+-          );
+-          if (u) {
+-            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+-              method: 'POST',
+-              body: JSON.stringify({
+-                name: STATE.currentName,
+-                category: STATE.currentCategory,
+-                part: STATE.currentPart,
+-                svg: normalizedForSlot,
+-                sku: '',
+-                image: ''
+-              })
+-            });
+-          }
+-        }catch(e){
+-          console.warn('[craft] persist failed:', e); // non-fatal
+-        }
++        // Persist + get craftedId (from inject OR server)
++        let craftedId = injected.id || null;
++        try {
++          const u = encodeURIComponent(
++            (window?.IZZA?.player?.username)
++            || (window?.IZZA?.me?.username)
++            || localStorage.getItem('izzaPlayer')
++            || localStorage.getItem('pi_username')
++            || ''
++          );
++          if (u) {
++            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
++              method: 'POST',
++              body: JSON.stringify({
++                name: STATE.currentName,
++                category: STATE.currentCategory,
++                part: STATE.currentPart,
++                svg: normalizedForSlot,
++                sku: '',
++                image: ''
++              })
++            });
++            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
++          }
++        } catch(e) {
++          console.warn('[craft] persist failed:', e); // non-fatal
++        }
+ 
+         try{ hydrateMine(); }catch{}
++
++        // IZZA Pay merchant handoff
++        const sellInPi = !!root.querySelector('#sellInPi')?.checked;
++        if (sellInPi && craftedId) {
++          // Let the host intercept (native app/shell)
++          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
++          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
++          const qs = new URLSearchParams({ attach: String(craftedId) });
++          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
++          try {
++            const t = localStorage.getItem('izzaBearer') || '';
++            if (t) qs.set('t', t);
++          } catch {}
++          location.href = `/merchant?${qs.toString()}`;
++        }
       } else {
         craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
       }
     }catch(e){
       craftStatus.textContent = 'Error crafting: ' + e.message;
     }
-  });
+  }); // <-- closes btnMint handler
+} // <-- closes bindInside()
 
-  // --- NEW: Subtab switching (Setup ↔ Visuals)
-  const subtabBar = root.querySelector('.cl-subtabs');
-  if (subtabBar){
-    subtabBar.querySelectorAll('[data-sub]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const sub = btn.getAttribute('data-sub');
-        if (sub === 'visuals' && !STATE.canUseVisuals) return; // keep lock respected
-        STATE.createSub = (sub === 'visuals') ? 'visuals' : 'setup';
-        const host = STATE.root?.querySelector('#craftTabs');
-        if (!host) return;
-        const saveScroll = host.scrollTop;
-        host.innerHTML = renderCreate();
-        bindInside();
-        host.scrollTop = saveScroll;
-      }, { passive:true });
-    });
-  }
-
-  // Final: ensure visuals tab reflects current form values
-  _maybeUnlockVisuals();
-}
-
-// expose mount/unmount to global
 window.CraftingUI = { mount, unmount };
-
 })();
