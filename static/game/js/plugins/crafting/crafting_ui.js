@@ -1109,13 +1109,13 @@ if (!CSS.escape) {
   });
 
   // Single Item buttons on Packages card → route to Create → Setup (no payment yet)
-  root.querySelectorAll('[data-buy-single]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      toCreateSetup();
-      const status = document.getElementById('payStatus');
-      if (status) status.textContent = 'Choose Category, Part, and Name, then pay to unlock Visuals.';
-    }, { passive:true });
-  });
+  root.querySelectorAll('[data-go-single]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    toCreateSetup();
+    const status = document.getElementById('payStatus');
+    if (status) status.textContent = 'Choose Category, Part, and Name, then pay to unlock Visuals.';
+  }, { passive:true });
+});
 
   // ===================== CREATE TAB WIRING =====================
 
