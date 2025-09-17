@@ -374,7 +374,16 @@
               <button type="button" class="ip-btn" id="itUploadBtn">Upload</button>
             </div>
             <input class="ip-input" id="itUrl" name="image_url" placeholder="https://… (or paste an image URL)">
-          </div>
+            </div>
+            <!-- SVG Code (optional; used when coming from Crafting Land) -->
+<div class="field" style="margin-top:8px">
+  <label class="ip-label">SVG code (optional)</label>
+  <textarea class="ip-textarea" id="svgCode" rows="6" placeholder="<svg>…</svg>"></textarea>
+  <small class="note">If provided, click Preview to render it as the product image. You can still upload a PNG/JPG later.</small>
+  <div class="row" style="justify-content:flex-end;margin-top:6px">
+    <button class="ip-btn ghost tiny" type="button" id="previewSvgBtn">Preview SVG</button>
+  </div>
+</div>
 
           <!-- Item Description -->
           <div class="field">
@@ -876,7 +885,46 @@
     wireCreateAutofill(items);
     wireEditAutofill(items);
   })();
+<script>
+  // ===== SVG preview: renders raw <svg> string into the image thumb =====
+  (function(){
+    const btn = document.getElementById('previewSvgBtn');
+    const ta  = document.getElementById('svgCode');
+    if (!btn || !ta) return;
+    btn.addEventListener('click', ()=>{
+      const raw = (ta.value || '').trim();
+      if (!raw) return;
+      try {
+        const blob = new Blob([raw], { type: 'image/svg+xml' });
+        const url  = URL.createObjectURL(blob);
+        setThumb('itThumb', url);
+      } catch(e){
+        alert('Could not preview SVG.');
+      }
+    });
+  })();
 
+  // ===== Prefill from session (set by /api/merchant/create_product_from_craft) =====
+  (function(){
+    const PREFILL = {{ (PREFILL or {}) | tojson | safe }};
+    if (!PREFILL || Object.keys(PREFILL).length === 0) return;
+
+    const form = document.querySelector('#create-product form');
+    if (!form) return;
+
+    const titleEl = form.querySelector('input[name="title"]');
+    const descEl  = form.querySelector('textarea[name="description"]');
+    const svgTA   = document.getElementById('svgCode');
+    const previewBtn = document.getElementById('previewSvgBtn');
+
+    if (titleEl && !titleEl.value && PREFILL.title) titleEl.value = PREFILL.title;
+    if (descEl  && !descEl.value  && PREFILL.description) descEl.value = PREFILL.description;
+
+    if (svgTA && PREFILL.svg) {
+      svgTA.value = PREFILL.svg;
+      previewBtn && previewBtn.click();
+    }
+  })();
   // Progressive enhancement: delete store -> confirm -> POST -> redirect
   (function(){
     const form = document.getElementById('deleteStoreForm');
