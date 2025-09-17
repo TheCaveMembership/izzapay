@@ -574,9 +574,14 @@ function normalizeSvgForSlot(svgText, part){
 
   return `
     <div class="cl-subtabs">
-      <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
-      <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}" data-sub="visuals" ${STATE.canUseVisuals?'':'disabled'}>Visuals</button>
-    </div>
+  <button class="${sub==='setup'?'on':''}" data-sub="setup">Setup</button>
+  <button
+    class="${sub==='visuals'?'on':''} ${STATE.canUseVisuals ? '' : 'disabled'}"
+    data-sub="visuals"
+    ${STATE.canUseVisuals ? '' : 'disabled'}
+    title="${STATE.canUseVisuals ? '' : 'Complete Setup to unlock'}"
+  >Visuals</button>
+</div>
 
     <div class="cl-body ${sub}">
       <div class="cl-pane cl-form">
@@ -606,26 +611,33 @@ function normalizeSvgForSlot(svgText, part){
         <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
 
         <div style="margin-top:10px; font-size:13px; opacity:.85">
-          Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
-        </div>
+  Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
+</div>
 
-        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-          <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-          <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
-          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-        </div>
+<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+  ${!STATE.hasPaidForCurrentItem
+    ? `
+      <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+      <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+      <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+    `
+    : `
+      <span class="badge" style="border:1px solid #2a3550">Credit reserved ✓</span>
+      <span class="muted" style="font-size:12px">Fill out Category, Part, and Name to unlock <b>Visuals</b>.</span>
+    `
+  }
+</div>
 
-        <!-- SINGLE Shop Listing block (no duplicates) -->
-        <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-          <div style="margin-top:6px">
-            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label><br/>
-            <label><input id="sellInPi" type="checkbox"/> Also list in my IZZA Pay merchant dashboard</label>
-          </div>
-        </div>
-      </div>
+<!-- SINGLE Shop Listing block (no duplicates) -->
+<div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
+  <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+  <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+  <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+  <div style="margin-top:6px">
+    <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label><br/>
+    <label><input id="sellInPi" type="checkbox"/> Also list in my IZZA Pay merchant dashboard</label>
+  </div>
+</div>
 
       <div class="cl-pane cl-preview">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
@@ -1050,10 +1062,26 @@ if (!CSS.escape) {
       STATE.hasPaidForCurrentItem = true;
       STATE.canUseVisuals = true;
       STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
-      if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
+      if (res && res.ok){
+  // mark credit reserved for ONE item
+  STATE.hasPaidForCurrentItem = true;
+  STATE.canUseVisuals = false;   // visuals stay locked until Setup complete
+  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+  if (status) status.textContent = 'Paid ✓ — fill out Setup to continue.';
 
-      // force Visuals subtab
-      STATE.createSub = 'visuals';
+  // route to Create → Setup
+  STATE.createSub = 'setup';
+
+  // re-render Create tab
+  const host = STATE.root?.querySelector('#craftTabs');
+  if (host){
+    host.innerHTML = renderCreate();
+    bindInside();
+  }
+} else {
+  if (status) status.textContent='Payment failed.';
+  STATE.canUseVisuals = false;
+}
 
       // if we are not currently on the Create tab, switch to it;
       // if already there, just re-render to show Visuals.
@@ -1112,7 +1140,8 @@ if (!CSS.escape) {
         STATE.hasPaidForCurrentItem = true;
         STATE.canUseVisuals = true;
         STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-        STATE.createSub = 'visuals';
+        STATE.createSub = 'setup';
+STATE.canUseVisuals = false;   // require Setup first
 
         // jump to Create tab and render Visuals
         try { 
@@ -1192,7 +1221,29 @@ if (!CSS.escape) {
       saveDraft();
     }, { passive:true });
   }
-
+function _setupValid(){
+  return (
+    String(STATE.currentCategory||'').trim() &&
+    String(STATE.currentPart||'').trim() &&
+    String(STATE.currentName||'').trim().length >= 3
+  );
+}
+function _maybeUnlockVisuals(){
+  if (STATE.hasPaidForCurrentItem && _setupValid()){
+    STATE.canUseVisuals = true;
+  } else if (!STATE.hasPaidForCurrentItem){
+    STATE.canUseVisuals = false;
+  }
+  // re-render the subtab header state without nuking the whole UI
+  const subtabs = STATE.root?.querySelector('.cl-subtabs');
+  if (subtabs){
+    const onVisuals = subtabs.querySelector('[data-sub="visuals"]');
+    if (onVisuals){
+      if (STATE.canUseVisuals){ onVisuals.removeAttribute('disabled'); onVisuals.classList.remove('disabled'); }
+      else { onVisuals.setAttribute('disabled',''); onVisuals.classList.add('disabled'); }
+    }
+  }
+}
   const aiLeft = ()=> {
     const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
     const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
