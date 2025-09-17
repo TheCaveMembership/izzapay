@@ -327,7 +327,18 @@ async function nodeJSON(url, opts={}) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   try { return await r.json(); } catch { return {}; }
 }
-
+// --- NEW: server → client credit sync (canonical) ---
+async function syncCreditsFromServer(){
+  try{
+    const j = await appJSON('/api/crafting/credits', { method: 'GET' });
+    if (j && j.ok && Number.isFinite(j.credits)) {
+      setMintCredits(j.credits);
+      STATE.mintCredits = getMintCredits();
+      const bal = STATE.root?.querySelector('#mintBalance');
+      if (bal) bal.innerHTML = `Credits: <b>${STATE.mintCredits}</b>`;
+    }
+  }catch(e){ /* non-fatal */ }
+}
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
@@ -1061,6 +1072,7 @@ if (!CSS.escape) {
   STATE.mounted = true;
   loadDraft();
 applyCraftPaidFromURL();
+await syncCreditsFromServer(); // NEW: server is the source of truth
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
@@ -1120,9 +1132,8 @@ async function handleBuySingle(kind){
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
     if (res && res.ok){
-    // Add a mint credit, do NOT auto-unlock Visuals
-    incMintCredits(1);
-    STATE.mintCredits = getMintCredits();
+  // Server already persisted the credit; pull the canonical number
+  await syncCreditsFromServer();
 
     STATE.hasPaidForCurrentItem = false;
     STATE.canUseVisuals = false;
