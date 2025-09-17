@@ -248,11 +248,45 @@ function hideWait(node){
 const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
 const api = (p)=> (API_BASE ? API_BASE + p : p);
 
-  async function serverJSON(url, opts={}){
-    const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return await r.json().catch(()=> ({}));
-  }
+  // Grab t from ?t=, localStorage, or a cookie — in that order.
+// (Keep it short-lived; your backend should validate expiry.)
+function getBearerT(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const fromQS = qs.get('t');
+    if (fromQS) return fromQS;
+
+    const fromLS = localStorage.getItem('izzaBearer');
+    if (fromLS) return fromLS;
+
+    const m = document.cookie.match(/(?:^|;\s*)t=([^;]+)/);
+    if (m) return decodeURIComponent(m[1]);
+  }catch{}
+  return '';
+}
+
+// Append ?t=… AND send Authorization: Bearer … (you can require either or both server-side)
+async function serverJSON(pathOrUrl, opts={}){
+  const base = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
+  const url = String(pathOrUrl||'').startsWith('http') ? new URL(pathOrUrl) : new URL(base + pathOrUrl);
+  const t = getBearerT();
+
+  if (t && !url.searchParams.has('t')) url.searchParams.set('t', t);
+
+  const headers = Object.assign(
+    {'content-type':'application/json'},
+    opts.headers || {},
+    t ? { 'Authorization': 'Bearer ' + t } : {}
+  );
+
+  const r = await fetch(url.toString(), Object.assign({
+    headers,
+    credentials: 'include'   // keep cookies if you also use session auth
+  }, opts));
+
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return await r.json().catch(()=> ({}));
+}
 
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
