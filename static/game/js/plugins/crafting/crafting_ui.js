@@ -836,27 +836,19 @@ async function fetchMine(){
     prevHost && (prevHost.innerHTML = STATE.currentSVG);
   }
 
-  // ... keep the rest of your handlers exactly as you pasted ...
-}
-
+  // ===== Handlers MUST live inside bindInside() =====
   btnAI && btnAI.addEventListener('click', async ()=>{
     if (!btnAI) return;
     const prompt = String(aiPrompt?.value||'').trim();
     if (!prompt) return;
 
-    // lock UI + overlay
     btnAI.disabled = true;
     btnAI.setAttribute('aria-busy','true');
     btnAI.textContent = 'Generating…';
     const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
 
     try{
-      // Ensure at least 10s passes before we unlock/hide overlay
-      const [svg] = await Promise.all([
-        aiToSVG(prompt),
-        sleep(MIN_AI_WAIT_MS)
-      ]);
-
+      const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
       if (svgIn) svgIn.value = svg;
       if (prevHost) {
         prevHost.innerHTML = svg;
@@ -922,7 +914,6 @@ async function fetchMine(){
     const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
 
     try{
-      // Keep the player’s preview untouched; only normalize at mint time
       const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
       const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
@@ -930,7 +921,7 @@ async function fetchMine(){
             name: STATE.currentName,
             category: STATE.currentCategory,
             part: STATE.currentPart,
-            svg: normalizedForSlot,          // normalized version goes into the game
+            svg: normalizedForSlot,
             priceIC,
             sellInShop,
             sellInPi,
@@ -939,7 +930,6 @@ async function fetchMine(){
         : { ok:false, reason:'armour-packs-hook-missing' };
 
       if (injected && injected.ok){
-        // 1) Local UI bookkeeping
         craftStatus.textContent = 'Crafted ✓';
         STATE.hasPaidForCurrentItem = false;
         if (STATE.packageCredits && STATE.packageCredits.items > 0){
@@ -947,9 +937,14 @@ async function fetchMine(){
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
 
-        // 2) Persist the crafted item server-side so it survives reloads
         try{
-          const u = encodeURIComponent(currentUsername());
+          const u = encodeURIComponent(
+            (window?.IZZA?.player?.username)
+            || (window?.IZZA?.me?.username)
+            || localStorage.getItem('izzaPlayer')
+            || localStorage.getItem('pi_username')
+            || ''
+          );
           if (u) {
             await serverJSON(api(`/api/crafting/mine?u=${u}`), {
               method: 'POST',
@@ -958,7 +953,6 @@ async function fetchMine(){
                 category: STATE.currentCategory,
                 part: STATE.currentPart,
                 svg: normalizedForSlot,
-                // optional meta you can fill later:
                 sku: '',
                 image: ''
               })
@@ -968,7 +962,6 @@ async function fetchMine(){
           console.warn('[craft] persist failed:', e); // non-fatal
         }
 
-        // 3) Refresh “My Creations”
         try{ hydrateMine(); }catch{}
 
       }else{
