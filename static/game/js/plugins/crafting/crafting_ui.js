@@ -154,18 +154,23 @@ const COIN_PER_PI = 2000;
     if (BAD_WORDS.some(w => low.includes(w))) return { ok:false, reason:'Inappropriate name' };
     return { ok:true };
   }
-  // Build a checkout URL on your Flask origin with the info Crafting knows
+  // Build a URL to your EXISTING checkout page
 function craftCheckoutURL({ totalPi, name, category, part }) {
-  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,'');      // Flask origin
+  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,''); // https://izzapay.onrender.com
+  const title = name || `${category||'armour'}/${part||'helmet'} item`;
+  const ret   = window.location.href;
+
+  // We pass minimal hints so your server can show the item context if you want.
+  // Your checkout already computes amount on the server; this query is just hints.
   const q = new URLSearchParams({
-    mode: 'craft',                 // lets your checkout know this is a crafting purchase
-    name: name || '',
-    category: category || '',
-    part: part || '',
-    amount: String(totalPi || 0),  // expected Pi for this single craft
-    return_to: window.location.href // so checkout can bounce back here after success
+    from: 'craft',               // you can optionally use this in the route logic
+    title,
+    amount: String(totalPi || 0),
+    return_to: ret
   });
-  return `${base}/checkout/craft?${q.toString()}`;
+
+  // IMPORTANT: this is the working route in your app
+  return `${base}/checkout?${q.toString()}`;
 }
 
 // If user returns with ?craftPaid=1, unlock visuals
@@ -1062,18 +1067,17 @@ async function handleBuySingle(kind){
   const total = calcTotalCost({ usePi });
 
   if (usePi) {
-    // Redirect to your working IZZA Pay checkout (no Pi SDK here)
     const url = craftCheckoutURL({
       totalPi: total,
       name: STATE.currentName,
       category: STATE.currentCategory,
       part: STATE.currentPart
     });
-    window.location.href = url;
+    window.location.href = url;   // go to your working IZZA Pay checkout
     return;
   }
 
-  // IC flow unchanged
+  // IC flow stays local
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
   if (res && res.ok){
