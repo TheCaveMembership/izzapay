@@ -928,7 +928,7 @@ def merchant_setup():
                                error="Enter a valid Pi Wallet public key (56 chars, starts with 'G').")
 
     with conn() as cx:
-    exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
+        exists = cx.execute("SELECT 1 FROM merchants WHERE slug=?", (slug,)).fetchone()
     if exists:
         tok = get_bearer_token_from_request()
         prefill = None
