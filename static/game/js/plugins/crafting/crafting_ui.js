@@ -1,4 +1,6 @@
 // UPDATE v1.2.0 — Split API bases (Flask vs Node), route endpoints accordingly, align merchant prefill payload; keep previous sanitizeSVG hardening.
+  window.IZZA_APP_BASE  = 'https://izzapay.onrender.com';   // Flask
+  window.IZZA_NODE_BASE = 'https://izzagame.onrender.com';  // Node (already your default)
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -739,13 +741,18 @@ async function addToShop(itemId){
       || '';
 }
 
+// REPLACE THE ENTIRE fetchMine FUNCTION WITH THIS
 async function fetchMine(){
   try{
-    const u = encodeURIComponent(currentUsername());
-    if(!u) return [];
-    const j = await serverJSON(api(`/api/crafting/mine?u=${u}`));
+    const uName = currentUsername() || '';
+    const url = uName ? `/api/crafting/mine?u=${encodeURIComponent(uName)}` : `/api/crafting/mine`;
+    // Crafting/mine lives on Flask → use appJSON (APP_BASE)
+    const j = await appJSON(url, { method: 'GET' });
     return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
-  }catch{ return []; }
+  }catch(e){
+    console.warn('[craft] fetchMine failed:', e);
+    return [];
+  }
 }
 
   function mineCardHTML(it){
