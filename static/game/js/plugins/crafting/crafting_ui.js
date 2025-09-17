@@ -535,7 +535,7 @@ function normalizeSvgForSlot(svgText, part){
   function renderCreate(){
   const totalPi = calcTotalCost({ usePi:true });
   const totalIC = calcTotalCost({ usePi:false });
-    const sub = STATE.canUseVisuals ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup') : 'setup';
+  const sub = STATE.canUseVisuals ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup') : 'setup';
   const visualsDisabledCls = STATE.canUseVisuals ? '' : 'disabled';
 
   return `
@@ -547,6 +547,7 @@ function normalizeSvgForSlot(svgText, part){
     <div class="cl-body ${sub}">
       <div class="cl-pane cl-form">
         <div style="font-weight:700;margin-bottom:6px">Item Setup</div>
+
         <label style="display:block;margin:6px 0 4px;font-size:12px;opacity:.8">Category</label>
         <select id="catSel">
           <option value="armour">Armour</option>
@@ -576,18 +577,20 @@ function normalizeSvgForSlot(svgText, part){
 
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
           <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-<button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+          <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           <span id="payStatus" style="font-size:12px; opacity:.8"></span>
         </div>
 
+        <!-- SINGLE Shop Listing block (no duplicates) -->
         <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
-  <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
-  <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
-  <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
-  <div style="margin-top:6px">
-    <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label>
-  </div>
-</div>
+          <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
+          <div style="font-size:12px;opacity:.8">Set price (server range ${COSTS.SHOP_MIN_IC}-${COSTS.SHOP_MAX_IC} IC)</div>
+          <input id="shopPrice" type="number" min="${COSTS.SHOP_MIN_IC}" max="${COSTS.SHOP_MAX_IC}" value="100" style="width:120px"/>
+          <div style="margin-top:6px">
+            <label><input id="sellInShop" type="checkbox" checked/> List in in-game shop (IC)</label><br/>
+            <label><input id="sellInPi" type="checkbox"/> Also list in my IZZA Pay merchant dashboard</label>
+          </div>
+        </div>
       </div>
 
       <div class="cl-pane cl-preview">
@@ -630,7 +633,6 @@ function normalizeSvgForSlot(svgText, part){
       </div>
     </div>`;
 }
-
   function renderMine(){
     return `
       <div style="padding:14px">
@@ -1224,41 +1226,83 @@ if (!window.CSS || !CSS.escape) {
           })
         : { ok:false, reason:'armour-packs-hook-missing' };
 
-      if (injected && injected.ok){
+            if (injected && injected.ok){
         craftStatus.textContent = 'Crafted ✓';
         STATE.hasPaidForCurrentItem = false;
         if (STATE.packageCredits && STATE.packageCredits.items > 0){
           STATE.packageCredits.items -= 1;
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
-
-        try{
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-          }
-        }catch(e){
-          console.warn('[craft] persist failed:', e); // non-fatal
-        }
-
-        try{ hydrateMine(); }catch{}
-      }else{
+-
+-        try{
+-          const u = encodeURIComponent(
+-            (window?.IZZA?.player?.username)
+-            || (window?.IZZA?.me?.username)
+-            || localStorage.getItem('izzaPlayer')
+-            || localStorage.getItem('pi_username')
+-            || ''
+-          );
+-          if (u) {
+-            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+-              method: 'POST',
+-              body: JSON.stringify({
+-                name: STATE.currentName,
+-                category: STATE.currentCategory,
+-                part: STATE.currentPart,
+-                svg: normalizedForSlot,
+-                sku: '',
+-                image: ''
+-              })
+-            });
+-          }
+-        }catch(e){
+-          console.warn('[craft] persist failed:', e); // non-fatal
+-        }
++        // Persist + get craftedId (from inject OR server)
++        let craftedId = injected.id || null;
++        try {
++          const u = encodeURIComponent(
++            (window?.IZZA?.player?.username)
++            || (window?.IZZA?.me?.username)
++            || localStorage.getItem('izzaPlayer')
++            || localStorage.getItem('pi_username')
++            || ''
++          );
++          if (u) {
++            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
++              method: 'POST',
++              body: JSON.stringify({
++                name: STATE.currentName,
++                category: STATE.currentCategory,
++                part: STATE.currentPart,
++                svg: normalizedForSlot,
++                sku: '',
++                image: ''
++              })
++            });
++            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
++          }
++        } catch(e) {
++          console.warn('[craft] persist failed:', e); // non-fatal
++        }
+ 
+         try{ hydrateMine(); }catch{}
++
++        // IZZA Pay merchant handoff
++        const sellInPi = !!root.querySelector('#sellInPi')?.checked;
++        if (sellInPi && craftedId) {
++          // Let the host intercept (native app/shell)
++          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
++          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
++          const qs = new URLSearchParams({ attach: String(craftedId) });
++          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
++          try {
++            const t = localStorage.getItem('izzaBearer') || '';
++            if (t) qs.set('t', t);
++          } catch {}
++          location.href = `/merchant?${qs.toString()}`;
++        }
+      } else {
         craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
       }
     }catch(e){
