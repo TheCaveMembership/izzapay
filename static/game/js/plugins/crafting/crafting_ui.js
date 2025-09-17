@@ -785,46 +785,55 @@ async function fetchMine(){
       ? items.map(mineCardHTML).join('')
       : '<div style="opacity:.7">No creations yet.</div>';
 
-    host.querySelectorAll('[data-copy]').forEach(b=>{
-      b.addEventListener('click', async ()=>{
-        const id = b.dataset.copy;
-        const it = items.find(x=>x.id===id);
-        if(!it) return;
-        try{ await navigator.clipboard.writeText(it.svg||''); alert('SVG copied'); }catch{}
-      });
+      host.querySelectorAll('[data-copy]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const id = b.dataset.copy;
+      const it = items.find(x=>x.id===id);
+      if(!it) return;
+      try{ await navigator.clipboard.writeText(it.svg||''); alert('SVG copied'); }catch{}
     });
-    host.querySelectorAll('[data-equip]').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    const id = b.dataset.equip;
-    const it = items.find(x=>x.id===id);
-    if (!it) return;
-    // Add to Shop
-    host.querySelectorAll('[data-addshop]').forEach(b=>{
-      b.addEventListener('click', async ()=>{
-        const id = b.dataset.addshop;
-        b.disabled = true;
-        b.textContent = 'Adding…';
-        const ok = await addToShop(id);
-        if (ok){
-          // swap button to "View Shop Stats"
-          b.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
-          // wire the new button immediately
-          const statsBtn = host.querySelector(`[data-stats="${id}"]`);
-          if (statsBtn){
-            statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
-          }
-        }else{
-          alert('Failed to add to shop');
-          b.disabled = false;
-          b.textContent = 'Add to Shop';
-        }
-      }, { passive:true });
-    });
+  });
 
-    // View Shop Stats
-    host.querySelectorAll('[data-stats]').forEach(b=>{
-      b.addEventListener('click', ()=> openStatsModal(b.dataset.stats), { passive:true });
+  host.querySelectorAll('[data-equip]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const id = b.dataset.equip;
+      const it = items.find(x=>x.id===id);
+      if (!it) return;
+
+      // Persist + fire events (existing behavior)
+      try {
+        localStorage.setItem('izzaLastEquipped', JSON.stringify({
+          id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
+        }));
+      } catch {}
+      try { IZZA?.emit?.('equip-crafted', id); } catch{}
+      try { IZZA?.emit?.('equip-crafted-v2', { id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg }); } catch{}
     });
+  });
+
+  // ✅ Add to Shop
+  host.querySelectorAll('[data-addshop]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const id = b.dataset.addshop;
+      b.disabled = true;
+      b.textContent = 'Adding…';
+      const ok = await addToShop(id);
+      if (ok){
+        b.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
+        const statsBtn = host.querySelector(`[data-stats="${id}"]`);
+        statsBtn && statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
+      }else{
+        alert('Failed to add to shop');
+        b.disabled = false;
+        b.textContent = 'Add to Shop';
+      }
+    }, { passive:true });
+  });
+
+  // ✅ View Shop Stats
+  host.querySelectorAll('[data-stats]').forEach(b=>{
+    b.addEventListener('click', ()=> openStatsModal(b.dataset.stats), { passive:true });
+  });
     // Persist + fire events (you already have this)
     try {
       localStorage.setItem('izzaLastEquipped', JSON.stringify({
