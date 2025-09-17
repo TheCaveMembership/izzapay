@@ -18,6 +18,20 @@
     .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <script>
+(async function(){
+  try {
+    if (!window.Pi) return;
+    Pi.init({ version: 2 });
+    const res = await Pi.authenticate(['username']);
+    if (res?.user?.username) {
+      localStorage.setItem('pi_username', res.user.username);
+      localStorage.setItem('izzaPlayer', res.user.username);
+    }
+    // keep your existing /auth/exchange navigation as-is
+  } catch(e) {}
+})();
+</script>
 </head>
 <body class="cw-blue theme-a">
   <div class="wrap">
