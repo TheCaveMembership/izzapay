@@ -1067,6 +1067,7 @@ applyCraftPaidFromURL();
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
     // REPLACE the whole function starting at "async function handleBuySingle(kind){" with this:
+// handleBuySingle — keep only this version
 async function handleBuySingle(kind){
   const usePi = (kind === 'pi');
   const total = calcTotalCost({ usePi });
@@ -1083,7 +1084,7 @@ async function handleBuySingle(kind){
     return;
   }
 
-  // --- IC flow (inside the function) ---
+  // IC path stays local
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
   if (res && res.ok){
@@ -1095,7 +1096,7 @@ async function handleBuySingle(kind){
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
-    if (status) status.textContent = 'Payment failed.';
+    if (status) status.textContent='Payment failed.';
     STATE.canUseVisuals = false;
   }
 }
