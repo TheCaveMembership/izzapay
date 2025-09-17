@@ -1172,6 +1172,7 @@ STATE.canUseVisuals = false;   // require Setup first
   if (itemName){
     itemName.value = STATE.currentName || '';
     itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
+    _maybeUnlockVisuals();
   }
 
   const aiStyleSel = root.querySelector('#aiStyleSel');
@@ -1208,6 +1209,7 @@ STATE.canUseVisuals = false;   // require Setup first
     repopulatePartOptions(catSel, partSel);
 
     catSel.addEventListener('change', e=>{
+      _maybeUnlockVisuals();
       STATE.currentCategory = e.target.value;
       repopulatePartOptions(catSel, partSel);
       saveDraft();
@@ -1217,6 +1219,7 @@ STATE.canUseVisuals = false;   // require Setup first
   if (partSel){
     partSel.value = STATE.currentPart;
     partSel.addEventListener('change', e=>{
+      _maybeUnlockVisuals();
       STATE.currentPart = e.target.value;
       saveDraft();
     }, { passive:true });
