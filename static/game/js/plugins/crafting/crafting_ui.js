@@ -139,7 +139,8 @@ const COIN_PER_PI = 2000;
   fireRateRequested: 0,
   dmgHearts: 0.5,
   packageCredits: null,
-  createSub: 'setup',
+      canUseVisuals: false,      // visuals locked until successful purchase
+    createSub: 'setup',        // which subtab is shown: 'setup' | 'visuals'
 };
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
@@ -488,7 +489,6 @@ function normalizeSvgForSlot(svgText, part){
         <button class="ghost" data-tab="packages">Packages</button>
         <button class="ghost" data-tab="create">Create Item</button>
         <button class="ghost" data-tab="mine">My Creations</button>
-        <div style="margin-left:auto; opacity:.7; font-size:12px">AI attempts left: <b id="aiLeft">${STATE.aiAttemptsLeft}</b></div>
       </div>`;
   }
 
@@ -521,12 +521,13 @@ function normalizeSvgForSlot(svgText, part){
   function renderCreate(){
   const totalPi = calcTotalCost({ usePi:true });
   const totalIC = calcTotalCost({ usePi:false });
-  const sub = STATE.createSub === 'visuals' ? 'visuals' : 'setup';
+    const sub = STATE.canUseVisuals ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup') : 'setup';
+  const visualsDisabledCls = STATE.canUseVisuals ? '' : 'disabled';
 
   return `
     <div class="cl-subtabs">
       <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
-      <button class="${sub==='visuals'?'on':''}" data-sub="visuals">Visuals</button>
+      <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}" data-sub="visuals" ${STATE.canUseVisuals?'':'disabled'}>Visuals</button>
     </div>
 
     <div class="cl-body ${sub}">
@@ -788,6 +789,13 @@ async function fetchMine(){
     if(!STATE.mounted) return;
     if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
     if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
+        // keep attempts counter in sync when entering Visuals
+    if (name === 'create' && STATE.canUseVisuals) {
+      try {
+        const el = document.getElementById('aiLeft2');
+        if (el) el.textContent = STATE.aiAttemptsLeft;
+      } catch {}
+    }
     if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
     bindInside();
@@ -810,15 +818,36 @@ async function fetchMine(){
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-  async function handleBuySingle(kind){
+    async function handleBuySingle(kind){
     const usePi = (kind==='pi');
     const total = calcTotalCost({ usePi });
     let res;
     if (usePi) res = await payWithPi(total, 'Craft Single Item');
     else       res = await payWithIC(total);
-    const status = document.getElementById('payStatus');
-    if (res && res.ok){ STATE.hasPaidForCurrentItem = true; status && (status.textContent='Paid ✓ — you can craft now.'); }
-    else { status && (status.textContent='Payment failed.'); }
+
+    const status = document.getElementById('payStatus'); // present in Create tab
+    if (res && res.ok){
+      // unlock visuals + reset attempts + route to Visuals
+      STATE.hasPaidForCurrentItem = true;
+      STATE.canUseVisuals = true;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
+      if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
+
+      // force Visuals subtab
+      STATE.createSub = 'visuals';
+
+      // if we are not currently on the Create tab, switch to it;
+      // if already there, just re-render to show Visuals.
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){
+        host.innerHTML = renderCreate();
+        bindInside();
+      }
+    } else {
+      if (status) status.textContent='Payment failed.';
+      // keep visuals locked on failure
+      STATE.canUseVisuals = false;
+    }
   }
 
   function bindInside(){
@@ -837,11 +866,17 @@ async function fetchMine(){
     }, { passive:true });
   });
 
-  root.querySelectorAll('[data-buy-package]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const id = btn.dataset.buyPackage;
-      const res = await payWithPi(50, `Package:${id}`);
-      if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
+    root.querySelectorAll('[data-sub]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const want = (b.dataset.sub === 'visuals') ? 'visuals' : 'setup';
+      // block visuals if locked
+      STATE.createSub = (want==='visuals' && !STATE.canUseVisuals) ? 'setup' : want;
+      const host = STATE.root.querySelector('#craftTabs');
+      if (!host) return;
+      const saveScroll = host.scrollTop;
+      host.innerHTML = renderCreate();
+      bindInside();
+      host.scrollTop = saveScroll;
     }, { passive:true });
   });
     // Marketplace button (Packages tab) — swap to internal Marketplace view
