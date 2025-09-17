@@ -177,23 +177,24 @@ const COIN_PER_PI = 2000;
 function applyCraftPaidFromURL() {
   try {
     const u = new URL(window.location.href);
-        // Add one credit, do NOT auto-unlock Visuals
-    incMintCredits(1);
-    STATE.mintCredits = getMintCredits();
+    if (u.searchParams.get('craftPaid') === '1') {
+      // Add one credit, do NOT auto-unlock Visuals
+      incMintCredits(1);
+      STATE.mintCredits = getMintCredits();
 
-    STATE.hasPaidForCurrentItem = false;
-    STATE.canUseVisuals = false;
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    STATE.createSub = 'setup';
+      STATE.hasPaidForCurrentItem = false;
+      STATE.canUseVisuals = false;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      STATE.createSub = 'setup';
 
-    // Clean URL
-    u.searchParams.delete('craftPaid');
-    const clean = u.pathname + (u.search ? '?'+u.searchParams.toString() : '') + u.hash;
-    history.replaceState(null, '', clean);
+      // Clean URL
+      u.searchParams.delete('craftPaid');
+      const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
+      history.replaceState(null, '', clean);
 
-    // Re-render Create to show Setup (with Next if fields ready)
-    const host = STATE.root?.querySelector('#craftTabs');
-    if (host) { host.innerHTML = renderCreate(); bindInside(); }
+      // Re-render Create to show Setup (with Next if fields ready)
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host) { host.innerHTML = renderCreate(); bindInside(); }
     }
   } catch {}
 }
@@ -1412,10 +1413,11 @@ async function handleBuySingle(kind){
       if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
       const freeTest = (COSTS.PER_ITEM_IC === 0 && Object.values(STATE.featureFlags).every(v=>!v));
-      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-        craftStatus.textContent = 'Please pay (Pi or IC) first.';
-        return;
-      }
+const unlocked = STATE.canUseVisuals || STATE.hasPaidForCurrentItem || STATE.packageCredits || freeTest;
+if (!unlocked){
+  craftStatus.textContent = 'Use a credit (Next) or pay first.';
+  return;
+}
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
       const sellInShop = !!getEl('#sellInShop')?.checked;
