@@ -598,7 +598,7 @@ function normalizeSvgForSlot(svgText, part){
           <div style="font-weight:700">Visuals</div>
           <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
 
-          <!-- Style / Animation controls -->
+        <!-- Style / Animation controls -->
           <div style="display:flex; gap:8px; align-items:center; margin-left:auto">
             <label style="font-size:12px; opacity:.8">Style</label>
             <select id="aiStyleSel">
@@ -778,14 +778,58 @@ async function fetchMine(){
         </div>
       </div>`;
   }
-  // CSS.escape ponyfill (safe no-op if native exists)
-if (!window.CSS || !CSS.escape) {
-  (function() {
-    const r = /([-!$%^&*()_+|~=`{}$begin:math:display$$end:math:display$:";'<>?,.\/\s])/g;
-    CSS = window.CSS || {};
-    CSS.escape = function(v){ return String(v).replace(r, '\\$1'); };
-  })();
+
+// CSS.escape ponyfill (safe if native missing)
+if (!window.CSS) window.CSS = {};
+if (!CSS.escape) {
+  // MDN ponyfill
+  CSS.escape = function(value) {
+    const str = String(value);
+    const length = str.length;
+    let result = '';
+    let index = -1;
+    while (++index < length) {
+      const codeUnit = str.charCodeAt(index);
+      // Null character
+      if (codeUnit === 0x0000) {
+        result += '\uFFFD';
+        continue;
+      }
+      // Control characters
+      if (
+        (codeUnit >= 0x0001 && codeUnit <= 0x001F) ||
+        codeUnit === 0x007F
+      ) {
+        result += '\\' + codeUnit.toString(16) + ' ';
+        continue;
+      }
+      // Start with a digit, or a hyphen followed by a digit
+      if (
+        (index === 0 && codeUnit >= 0x0030 && codeUnit <= 0x0039) ||
+        (index === 1 &&
+          codeUnit >= 0x0030 && codeUnit <= 0x0039 &&
+          str.charCodeAt(0) === 0x002D)
+      ) {
+        result += '\\' + codeUnit.toString(16) + ' ';
+        continue;
+      }
+      // Safe characters
+      if (
+        codeUnit === 0x002D || codeUnit === 0x005F || // - _
+        (codeUnit >= 0x0030 && codeUnit <= 0x0039) || // 0-9
+        (codeUnit >= 0x0041 && codeUnit <= 0x005A) || // A-Z
+        (codeUnit >= 0x0061 && codeUnit <= 0x007A)    // a-z
+      ) {
+        result += str.charAt(index);
+        continue;
+      }
+      // Everything else
+      result += '\\' + str.charAt(index);
+    }
+    return result;
+  };
 }
+
   async function hydrateMine(){
   const host = STATE.root?.querySelector('#mineList');
   if (!host) return;
@@ -941,7 +985,7 @@ if (!window.CSS || !CSS.escape) {
 
     bindInside();
 
-    // >>> ADD THIS: immediately sync the attempts counter when entering Create
+    // immediately sync the attempts counter when entering Create
     if (name === 'create') {
       try {
         const el = document.getElementById('aiLeft2');
@@ -1226,82 +1270,57 @@ if (!window.CSS || !CSS.escape) {
           })
         : { ok:false, reason:'armour-packs-hook-missing' };
 
-            if (injected && injected.ok){
+      if (injected && injected.ok){
         craftStatus.textContent = 'Crafted ✓';
         STATE.hasPaidForCurrentItem = false;
         if (STATE.packageCredits && STATE.packageCredits.items > 0){
           STATE.packageCredits.items -= 1;
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
         }
--
--        try{
--          const u = encodeURIComponent(
--            (window?.IZZA?.player?.username)
--            || (window?.IZZA?.me?.username)
--            || localStorage.getItem('izzaPlayer')
--            || localStorage.getItem('pi_username')
--            || ''
--          );
--          if (u) {
--            await serverJSON(api(`/api/crafting/mine?u=${u}`), {
--              method: 'POST',
--              body: JSON.stringify({
--                name: STATE.currentName,
--                category: STATE.currentCategory,
--                part: STATE.currentPart,
--                svg: normalizedForSlot,
--                sku: '',
--                image: ''
--              })
--            });
--          }
--        }catch(e){
--          console.warn('[craft] persist failed:', e); // non-fatal
--        }
-+        // Persist + get craftedId (from inject OR server)
-+        let craftedId = injected.id || null;
-+        try {
-+          const u = encodeURIComponent(
-+            (window?.IZZA?.player?.username)
-+            || (window?.IZZA?.me?.username)
-+            || localStorage.getItem('izzaPlayer')
-+            || localStorage.getItem('pi_username')
-+            || ''
-+          );
-+          if (u) {
-+            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-+              method: 'POST',
-+              body: JSON.stringify({
-+                name: STATE.currentName,
-+                category: STATE.currentCategory,
-+                part: STATE.currentPart,
-+                svg: normalizedForSlot,
-+                sku: '',
-+                image: ''
-+              })
-+            });
-+            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-+          }
-+        } catch(e) {
-+          console.warn('[craft] persist failed:', e); // non-fatal
-+        }
- 
-         try{ hydrateMine(); }catch{}
-+
-+        // IZZA Pay merchant handoff
-+        const sellInPi = !!root.querySelector('#sellInPi')?.checked;
-+        if (sellInPi && craftedId) {
-+          // Let the host intercept (native app/shell)
-+          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
-+          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
-+          const qs = new URLSearchParams({ attach: String(craftedId) });
-+          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
-+          try {
-+            const t = localStorage.getItem('izzaBearer') || '';
-+            if (t) qs.set('t', t);
-+          } catch {}
-+          location.href = `/merchant?${qs.toString()}`;
-+        }
+
+        // Persist + get craftedId (from inject OR server)
+        let craftedId = injected.id || null;
+        try {
+          const u = encodeURIComponent(
+            (window?.IZZA?.player?.username)
+            || (window?.IZZA?.me?.username)
+            || localStorage.getItem('izzaPlayer')
+            || localStorage.getItem('pi_username')
+            || ''
+          );
+          if (u) {
+            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+              method: 'POST',
+              body: JSON.stringify({
+                name: STATE.currentName,
+                category: STATE.currentCategory,
+                part: STATE.currentPart,
+                svg: normalizedForSlot,
+                sku: '',
+                image: ''
+              })
+            });
+            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
+          }
+        } catch(e) {
+          console.warn('[craft] persist failed:', e); // non-fatal
+        }
+
+        try{ hydrateMine(); }catch{}
+
+        // IZZA Pay merchant handoff
+        if (sellInPi && craftedId) {
+          // Let the host intercept (native app/shell)
+          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
+          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
+          const qs = new URLSearchParams({ attach: String(craftedId) });
+          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
+          try {
+            const t = localStorage.getItem('izzaBearer') || '';
+            if (t) qs.set('t', t);
+          } catch {}
+          location.href = `/merchant?${qs.toString()}`;
+        }
       } else {
         craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
       }
