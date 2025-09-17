@@ -24,7 +24,7 @@
     .col{flex:1;min-width:220px}
     .muted{color:var(--muted)}
     .label{display:block;color:var(--muted);font-size:.9rem;margin:6px 0 4px}
-    input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px}
+    input{width:100%;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:#fff;padding:10px}
     .btn{background:var(--brand);color:#0b0f17;border:0;border-radius:10px;padding:12px 14px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}
     .light input{ background:#ffffff; }
 
@@ -197,25 +197,21 @@
   const ctryEl  = document.getElementById('ship_country');
 
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
-async function cancelPendingById(paymentId){
-  try{
-    await fetch('/api/pi/cancel', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ paymentId })
-    });
-  }catch(_){}
-}
 
-async function cancelPendingBySession(){
-  try{
-    await fetch('/api/pi/cancel_by_session', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ session_id: sessionId })
-    });
-  }catch(_){}
-}
+  /* === NEW: single helper that matches your server endpoint === */
+  function clearPending(sessionId, paymentId){
+    try{
+      var body = {};
+      if (sessionId) body.session_id = sessionId;
+      if (paymentId) body.payment_id = paymentId;
+      return fetch('/api/pi/clear_pending', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      }).catch(function(){});
+    }catch(_){ return Promise.resolve(); }
+  }
+
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
@@ -254,6 +250,9 @@ async function cancelPendingBySession(){
 
   initPi();
 
+  /* === NEW: auto-clear any stuck pending payment for this session on page load (safe no-op if none) === */
+  clearPending(sessionId);
+
   btn?.addEventListener('click', function(){
     const emailVal = (emailEl?.value || '').trim();
     if (!emailVal){
@@ -285,6 +284,18 @@ async function cancelPendingBySession(){
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentId, session_id: sessionId })
+          })
+          .then(function(r){
+            if(!r.ok){
+              return clearPending(sessionId, paymentId).finally(function(){
+                setMsg("Payment reset. Please tap Pay again.");
+              });
+            }
+          })
+          .catch(function(){
+            clearPending(sessionId, paymentId).finally(function(){
+              setMsg("Payment reset. Please tap Pay again.");
+            });
           });
         },
         onReadyForServerCompletion: function(paymentId, txid){
@@ -308,8 +319,23 @@ async function cancelPendingBySession(){
             window.location.href = fallback;
           });
         },
-        onCancel: function(){ setMsg("Payment canceled."); },
-        onError:  function(){ setMsg("Please try again."); }
+        onCancel: function(){
+          /* === NEW: clear local/remote pending on user-cancel === */
+          clearPending(sessionId).finally(function(){
+            setMsg("Payment canceled.");
+          });
+        },
+        onError:  function(e){
+          /* === NEW: handle “already have a pending payment” errors by clearing === */
+          var t = String((e && (e.message || e.error || e)) || "").toLowerCase();
+          if (t.includes("already have a pending") || t.includes("pending payment")){
+            clearPending(sessionId).finally(function(){
+              setMsg("Previous pending payment cleared. Tap Pay again.");
+            });
+          } else {
+            setMsg("Please try again.");
+          }
+        }
       });
     }).catch(() => {
       setMsg("Please try again.");
