@@ -960,13 +960,36 @@ def merchant_new_item(slug):
     if isinstance(u, Response): return u
     data = request.form
     link_id = uuid.uuid4().hex[:8]
+
+    title = (data.get("title") or "").strip()
+    sku   = (data.get("sku") or "").strip()
+    image_url = (data.get("image_url") or "").strip()
+    description = (data.get("description") or "").strip()
+    crafted_item_id = (data.get("crafted_item_id") or "").strip()
+    fulfillment_kind = "crafting" if crafted_item_id else "physical"
+
+    try:
+        pi_price = float((data.get("pi_price") or "0").strip())
+    except ValueError:
+        pi_price = 0.0
+    try:
+        stock_qty = int((data.get("stock_qty") or "0").strip())
+    except ValueError:
+        stock_qty = 0
+    allow_backorder = int(bool(data.get("allow_backorder")))
+
     with conn() as cx:
-        cx.execute("""INSERT INTO items(merchant_id, link_id, title, sku, image_url, pi_price,
-                      stock_qty, allow_backorder, active)
-                      VALUES(?,?,?,?,?,?,?,?,1)""",
-                   (m["id"], link_id, data.get("title"), data.get("sku"),
-                    data.get("image_url"), float(data.get("pi_price", "0")),
-                    int(data.get("stock_qty", "0")), int(bool(data.get("allow_backorder")))))
+        cx.execute(
+            """INSERT INTO items(
+                 merchant_id, link_id, title, sku, image_url, description,
+                 pi_price, stock_qty, allow_backorder, active,
+                 fulfillment_kind, crafted_item_id
+               )
+               VALUES(?,?,?,?,?,?,?,?,1,1,?,?)""",
+            (m["id"], link_id, title, sku, image_url, description,
+             float(pi_price), int(stock_qty), fulfillment_kind, crafted_item_id)
+        )
+
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
@@ -979,28 +1002,49 @@ def merchant_update_item(slug):
         item_id = int(data.get("item_id"))
     except (TypeError, ValueError):
         abort(400)
+
     title = (data.get("title") or "").strip()
-    sku = (data.get("sku") or "").strip()
+    sku   = (data.get("sku") or "").strip()
     image_url = (data.get("image_url") or "").strip()
+    description = (data.get("description") or "").strip()
+    crafted_item_id = (data.get("crafted_item_id") or "").strip()
+
     try:
-        pi_price = float(data.get("pi_price", "0").strip() or "0")
+        pi_price = float((data.get("pi_price") or "").strip() or "0")
     except ValueError:
         pi_price = 0.0
     try:
-        stock_qty = int(data.get("stock_qty", "0").strip() or "0")
+        stock_qty = int((data.get("stock_qty") or "").strip() or "0")
     except ValueError:
         stock_qty = 0
+
+    fulfillment_kind = "crafting" if crafted_item_id else "physical"
 
     with conn() as cx:
         it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=?", (item_id, m["id"])).fetchone()
         if not it: abort(404)
-        cx.execute("""UPDATE items
-                      SET title=?, sku=?, image_url=?, pi_price=?, stock_qty=?
-                      WHERE id=? AND merchant_id=?""",
-                   (title or it["title"], sku or it["sku"], image_url or it["image_url"],
-                    pi_price if pi_price > 0 else it["pi_price"],
-                    stock_qty if stock_qty >= 0 else it["stock_qty"],
-                    item_id, m["id"]))
+        cx.execute(
+            """UPDATE items
+               SET title=?,
+                   sku=?,
+                   image_url=?,
+                   description=?,
+                   pi_price=?,
+                   stock_qty=?,
+                   fulfillment_kind=?,
+                   crafted_item_id=?
+               WHERE id=? AND merchant_id=?""",
+            (title or it["title"],
+             sku or it["sku"],
+             image_url or (it["image_url"] or ""),
+             description or (it["description"] or ""),
+             (pi_price if pi_price > 0 else it["pi_price"]),
+             (stock_qty if stock_qty >= 0 else it["stock_qty"]),
+             fulfillment_kind,
+             (crafted_item_id or None),
+             item_id, m["id"])
+        )
+
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
