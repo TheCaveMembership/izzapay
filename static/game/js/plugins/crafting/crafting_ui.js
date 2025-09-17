@@ -1068,7 +1068,7 @@ applyCraftPaidFromURL();
 
     // REPLACE the whole function starting at "async function handleBuySingle(kind){" with this:
 async function handleBuySingle(kind){
-  const usePi = (kind==='pi');
+  const usePi = (kind === 'pi');
   const total = calcTotalCost({ usePi });
 
   if (usePi) {
@@ -1082,8 +1082,8 @@ async function handleBuySingle(kind){
     catch { window.location.href = url; }
     return;
   }
-}
-  // IC flow unchanged
+
+  // --- IC flow (inside the function) ---
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
   if (res && res.ok){
@@ -1095,7 +1095,7 @@ async function handleBuySingle(kind){
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
-    if (status) status.textContent='Payment failed.';
+    if (status) status.textContent = 'Payment failed.';
     STATE.canUseVisuals = false;
   }
 }
