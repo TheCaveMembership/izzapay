@@ -795,7 +795,7 @@
      - On select, auto-fills title, image, sku (non-destructive if already typed)
   */
   (async function(){
-    const ENDPOINT = '/api/crafting/mine';
+    const ENDPOINT = '/izza-game/api/crafting/mine';
     const bearer = getToken();
     const headers = {}; if (bearer) headers['Authorization'] = 'Bearer ' + bearer;
 
