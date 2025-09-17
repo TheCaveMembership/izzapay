@@ -623,7 +623,25 @@ function normalizeSvgForSlot(svgText, part){
         <div id="mineList" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px"></div>
       </div>`;
   }
+  // --- NEW: Crafting Land Marketplace view (internal page) ---
+  function renderMarketplace(){
+    return `
+      <div style="padding:14px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-weight:700">Crafting Land Marketplace</div>
+          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="ghost" id="mpBack">← Back to Packages</button>
+          </div>
+        </div>
+        <div style="opacity:.85;font-size:13px;margin-top:6px">
+          Browse player-created bundles offered for Pi.
+        </div>
 
+        <div id="mpList" style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
+          <div style="opacity:.7">Loading…</div>
+        </div>
+      </div>`;
+  }
   function currentUsername(){
   // adjust if your player name lives elsewhere; these are safe fallbacks:
   return (window?.IZZA?.player?.username)
@@ -657,7 +675,31 @@ async function fetchMine(){
         </div>
       </div>`;
   }
+  // --- NEW: Marketplace bundle card renderer ---
+  function marketplaceCardHTML(b){
+    // Expecting fields like: { id, name, svg, pricePi, creator }
+    const safeSVG = sanitizeSVG(b.svg || '');
+    const price = (typeof b.pricePi === 'number' ? b.pricePi : b.pricePi ? Number(b.pricePi) : null);
+    const priceLabel = (price != null && isFinite(price)) ? `${price} Pi` : '—';
 
+    return `
+      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
+        <div style="display:flex;gap:6px;align-items:center;justify-content:space-between">
+          <div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.name || 'Bundle'}</div>
+          <div style="font-size:12px;opacity:.75">${priceLabel}</div>
+        </div>
+        <div style="opacity:.75;font-size:12px;margin-top:2px">
+          by ${b.creator || 'unknown'}
+        </div>
+        <div style="margin-top:6px;border:1px solid #2a3550;border-radius:8px;background:#0b0f17;overflow:hidden;min-height:80px">
+          ${safeSVG || '<div style="opacity:.6;padding:10px;font-size:12px">No preview</div>'}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button class="ghost" data-mp-view="${b.id}">View</button>
+          <button class="ghost" data-mp-buy="${b.id}">Buy</button>
+        </div>
+      </div>`;
+  }
   async function hydrateMine(){
     const host = STATE.root?.querySelector('#mineList');
     if(!host) return;
@@ -692,6 +734,46 @@ async function fetchMine(){
   });
 });           // <--- closes forEach
 }             // <--- make sure this closes async function hydrateMine()
+    // --- NEW: Marketplace data fetcher ---
+  async function fetchMarketplace(){
+    try{
+      // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
+      const j = await serverJSON(api('/api/marketplace/list'));
+      return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
+    }catch{
+      return [];
+    }
+  }
+
+  // --- NEW: Marketplace hydrator ---
+  async function hydrateMarketplace(){
+    const host = STATE.root?.querySelector('#mpList');
+    if (!host) return;
+    host.innerHTML = '<div style="opacity:.7">Loading…</div>';
+
+    const bundles = await fetchMarketplace();
+
+    host.innerHTML = bundles.length
+      ? bundles.map(marketplaceCardHTML).join('')
+      : '<div style="opacity:.7">No bundles yet. Creators can publish bundles from My Creations.</div>';
+
+    // Wire "View" and "Buy" buttons (they can be no-ops for now, or emit your events)
+    host.querySelectorAll('[data-mp-view]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.mpView;
+        try { IZZA?.emit?.('marketplace-view', { id }); } catch {}
+        alert('Bundle details would open here (implement in-game).');
+      });
+    });
+
+    host.querySelectorAll('[data-mp-buy]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.mpBuy;
+        try { IZZA?.emit?.('marketplace-buy', { id }); } catch {}
+        alert('Purchase flow would start here (implement in-game / server).');
+      });
+    });
+  }
   function mount(rootSel){
   const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
   if (!root) return;
@@ -762,7 +844,33 @@ async function fetchMine(){
       if(res.ok){ STATE.packageCredits = { id, items:3, featuresIncluded:true }; alert('Package unlocked — start creating!'); }
     }, { passive:true });
   });
+    // Marketplace button (Packages tab) — swap to internal Marketplace view
+    const goMp = root.querySelector('#goMarketplace');
+    if (goMp){
+      goMp.addEventListener('click', async ()=>{
+        // keep your existing event for compatibility
+        try{ IZZA?.emit?.('open-marketplace'); }catch{}
 
+        // swap the Packages area to the Marketplace view
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (!host) return;
+        const saveScroll = host.scrollTop;
+        host.innerHTML = renderMarketplace();
+
+        // back button
+        const back = STATE.root.querySelector('#mpBack');
+        if (back){
+          back.addEventListener('click', ()=>{
+            host.innerHTML = renderPackages();
+            bindInside(); // re-bind buttons on packages view
+            host.scrollTop = saveScroll;
+          });
+        }
+
+        // populate marketplace grid
+        await hydrateMarketplace();
+      });
+    }
   root.querySelectorAll('[data-buy-single]').forEach(btn=>{
     btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
