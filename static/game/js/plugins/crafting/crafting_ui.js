@@ -1,3 +1,23 @@
+// UPDATE v1.2.0 — Split API bases (Flask vs Node), route endpoints accordingly, align merchant prefill payload; keep previous sanitizeSVG hardening.
+  window.IZZA_APP_BASE  = 'https://izzapay.onrender.com';   // Flask
+  window.IZZA_NODE_BASE = 'https://izzagame.onrender.com';  // Node (already your default)
+// Configure once:
+window.CRAFT_CHECKOUT_PATH = '/checkout/d0b811e8';                  // <-- your item checkout URL path
+
+function craftCheckoutURL({ totalPi, name, category, part }) {
+  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,'');
+  const p    = (window.CRAFT_CHECKOUT_PATH||'').replace(/^\/+/, ''); // "checkout/d0b811e8"
+  const title= name || `${category||'armour'}/${part||'helmet'} item`;
+
+  const q = new URLSearchParams({
+    from: 'craft',
+    title,
+    amount: String(totalPi || 0),
+    return_to: window.location.href    // we’ll bounce back to the game here
+  });
+
+  return `${base}/${p}?${q.toString()}`;
+}
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -73,13 +93,13 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     : "STYLE: Realistic materials (chrome, glass, brushed steel, leather). Subtle AO and specular highlights.";
 
   const animLine = animate
-    ? "ANIMATION: Allowed. Use lightweight loop via <animate>/<animateTransform> or CSS @keyframes. 1â2 effects max (glow pulse, flame lick). No JS."
+    ? "ANIMATION: Allowed. Use lightweight loop via <animate>/<animateTransform> or CSS @keyframes. 1–2 effects max (glow pulse, flame lick). No JS."
     : "ANIMATION: Not required. Ensure static silhouette reads clearly.";
 
   // Hard constraints (these mirror your server SYSTEM_PROMPT)
   const constraints = [
     `Item part: ${slot}`,
-    `Use viewBox="${vb}". Fit art tightly with 0â2px padding; center visually.`,
+    `Use viewBox="${vb}". Fit art tightly with 0–2px padding; center visually.`,
     "Transparent background. Do NOT draw any full-bleed background rects.",
     "Vector only: <path>, <rect>, <circle>, <polygon>, <g>, <defs>, gradients, filters (feGaussianBlur, feDropShadow). No <image>, no <foreignObject>.",
     "Must read at ~28px inventory size. Clean silhouette + controlled detail.",
@@ -142,15 +162,42 @@ const COIN_PER_PI = 2000;
       canUseVisuals: false,      // visuals locked until successful purchase
     createSub: 'setup',        // which subtab is shown: 'setup' | 'visuals'
 };
+  STATE.mintCredits = getMintCredits();
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
     const s = String(name||'').trim();
-    if (s.length < 3 || s.length > 28) return { ok:false, reason:'Name must be 3â28 chars' };
+    if (s.length < 3 || s.length > 28) return { ok:false, reason:'Name must be 3–28 chars' };
     const low = s.toLowerCase();
     if (BAD_WORDS.some(w => low.includes(w))) return { ok:false, reason:'Inappropriate name' };
     return { ok:true };
   }
+  
+// If user returns with ?craftPaid=1, unlock visuals
+function applyCraftPaidFromURL() {
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get('craftPaid') === '1') {
+      // Add one credit, do NOT auto-unlock Visuals
+      incMintCredits(1);
+      STATE.mintCredits = getMintCredits();
+
+      STATE.hasPaidForCurrentItem = false;
+      STATE.canUseVisuals = false;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      STATE.createSub = 'setup';
+
+      // Clean URL
+      u.searchParams.delete('craftPaid');
+      const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
+      history.replaceState(null, '', clean);
+
+      // Re-render Create to show Setup (with Next if fields ready)
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host) { host.innerHTML = renderCreate(); bindInside(); }
+    }
+  } catch {}
+}
 
   function sanitizeSVG(svg){
   try{
@@ -223,7 +270,7 @@ function showWait(text){
       border-radius:12px; padding:14px 16px; font-size:14px;
       min-width:220px; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.35);
     ">
-      <div style="font-weight:700; margin-bottom:6px">Generatingâ¦</div>
+      <div style="font-weight:700; margin-bottom:6px">Generating…</div>
       <div style="opacity:.85">${text||'Please wait while we create your preview.'}</div>
     </div>`;
   document.body.appendChild(el);
@@ -241,19 +288,57 @@ function hideWait(node){
       window.dispatchEvent(new Event('izza-coins-changed'));
     }catch{}
   }
+// === MINT CREDITS (stackable; 1 credit = 5 AI attempts) =====================
+function getMintCredits(){
+  try { return parseInt(localStorage.getItem('izzaMintCredits')||'0',10) || 0; } catch { return 0; }
+}
+function setMintCredits(v){
+  try{
+    const n = Math.max(0, v|0);
+    localStorage.setItem('izzaMintCredits', String(n));
+    window.dispatchEvent(new Event('izza-mint-credits-changed'));
+  }catch{}
+}
+function incMintCredits(delta=1){ setMintCredits(getMintCredits() + (delta|0)); }
+function consumeMintCredit(){
+  const n = getMintCredits();
+  if (n <= 0) return false;
+  setMintCredits(n - 1);
+  return true;
+}
+// ============================================================================
+  
+// === API bases: Flask app vs Node service ===
+// Flask (APP_BASE) handles payments, creations, merchant bridge (same-origin)
+const APP_BASE  = (window.IZZA_APP_BASE && String(window.IZZA_APP_BASE).replace(/\/+$/,'')) || '';
+// Node (NODE_BASE) handles AI/translate and game-side extras
+const NODE_BASE = (window.IZZA_NODE_BASE && String(window.IZZA_NODE_BASE).replace(/\/+$/,'')) || 'https://izzagame.onrender.com';
 
-  // *** CHANGE 1: force default API base to your Node service ***
-  // Force default API base to the Node service on Render.
-// You can still override with window.IZZA_PERSIST_BASE if you ever need to.
-const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
-const api = (p)=> (API_BASE ? API_BASE + p : p);
+const app  = (p)=> APP_BASE + p;   // Flask
+const node = (p)=> NODE_BASE + p;  // Node
 
-  async function serverJSON(url, opts={}){
-    const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return await r.json().catch(()=> ({}));
-  }
-
+async function appJSON(url, opts={}) {
+  const r = await fetch(app(url), Object.assign({ headers:{'content-type':'application/json'}, credentials:'include' }, opts));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  try { return await r.json(); } catch { return {}; }
+}
+async function nodeJSON(url, opts={}) {
+  const r = await fetch(node(url), Object.assign({ headers:{'content-type':'application/json'} }, opts));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  try { return await r.json(); } catch { return {}; }
+}
+// --- NEW: server → client credit sync (canonical) ---
+async function syncCreditsFromServer(){
+  try{
+    const j = await appJSON('/api/crafting/credits', { method: 'GET' });
+    if (j && j.ok && Number.isFinite(j.credits)) {
+      setMintCredits(j.credits);
+      STATE.mintCredits = getMintCredits();
+      const bal = STATE.root?.querySelector('#mintBalance');
+      if (bal) bal.innerHTML = `Credits: <b>${STATE.mintCredits}</b>`;
+    }
+  }catch(e){ /* non-fatal */ }
+}
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
@@ -262,10 +347,10 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
       const paymentData = { amount: String(amountPi), memo: memo || 'IZZA Crafting', metadata: { kind:'crafting', memo } };
       const res = await window.Pi.createPayment(paymentData, {
         onReadyForServerApproval: async (paymentId) => {
-          await serverJSON(api('/api/crafting/pi/approve'), { method:'POST', body:JSON.stringify({ paymentId }) });
+          await appJSON('/api/crafting/pi/approve', { method:'POST', body:JSON.stringify({ paymentId }) });
         },
         onReadyForServerCompletion: async (paymentId, txid) => {
-          await serverJSON(api('/api/crafting/pi/complete'), { method:'POST', body:JSON.stringify({ paymentId, txid }) });
+          await appJSON('/api/crafting/pi/complete', { method:'POST', body:JSON.stringify({ paymentId, txid }) });
         }
       });
       if (res && res.status && /complete/i.test(res.status)) return { ok:true, receipt:res };
@@ -277,7 +362,7 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
     const cur = getIC();
     if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
     setIC(cur - amountIC);
-    try{ await serverJSON(api('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
+    try{ await appJSON('/api/crafting/ic/debit', { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
     return { ok:true };
   }
 
@@ -291,7 +376,7 @@ async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
   try{
-    const j = await serverJSON(api('/api/crafting/ai_svg'), {
+    const j = await nodeJSON('/api/crafting/ai_svg', {
       method:'POST',
       body: JSON.stringify({
         prompt: composeAIPrompt(prompt, STATE.currentPart, {
@@ -512,7 +597,7 @@ function normalizeSvgForSlot(svgText, part){
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
           <div style="opacity:.85;font-size:13px;line-height:1.4">
-            2Ã Weapons (Â½-heart dmg), 1Ã Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
+            2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
           </div>
           <div style="margin-top:8px;font-weight:700">
             Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC
@@ -521,7 +606,7 @@ function normalizeSvgForSlot(svgText, part){
             <button class="ghost" data-buy-package="pi">Pay ${COSTS.PACKAGE_PI} Pi</button>
             <button class="ghost" data-buy-package="ic">Pay ${COSTS.PACKAGE_IC.toLocaleString()} IC</button>
           </div>
-          <div style="margin-top:8px;font-size:12px;opacity:.75">Coming soon â bundles are not active yet.</div>
+          <div style="margin-top:8px;font-size:12px;opacity:.75">Coming soon — bundles are not active yet.</div>
         </div>
 
         <!-- Single Item (visual) -->
@@ -529,7 +614,7 @@ function normalizeSvgForSlot(svgText, part){
           <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
           <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
           <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
-            <!-- These now just route to Create â Setup; payment happens there -->
+            <!-- These now just route to Create → Setup; payment happens there -->
             <button class="ghost" data-go-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
             <button class="ghost" data-go-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           </div>
@@ -567,7 +652,7 @@ function normalizeSvgForSlot(svgText, part){
         <select id="partSel"></select>
 
         <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
-        <input id="itemName" type="text" maxlength="28" placeholder="Nameâ¦" style="width:100%"/>
+        <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
 
         <div style="margin-top:10px;font-weight:700">Optional Features</div>
         <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
@@ -581,11 +666,20 @@ function normalizeSvgForSlot(svgText, part){
           Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
         </div>
 
-        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-          <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-          <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
-          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-        </div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center">
+  <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+  <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+  <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+  <span id="mintBalance" style="margin-left:auto; font-size:12px; opacity:.85">
+    Credits: <b>${STATE.mintCredits ?? 0}</b>
+  </span>
+</div>
+
+<!-- NEXT → Visuals (only shows when fields ok & credits > 0) -->
+<div id="nextRow" style="display:none; margin-top:10px">
+  <button class="ghost" id="goNext">Next → Visuals</button>
+  <span id="nextHint" style="font-size:12px; opacity:.8"></span>
+</div>
 
         <!-- SINGLE Shop Listing block (no duplicates) -->
         <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
@@ -618,11 +712,11 @@ function normalizeSvgForSlot(svgText, part){
         </div>
 
         <div style="display:flex; gap:10px; margin-top:6px">
-          <input id="aiPrompt" placeholder="Describe your itemâ¦" style="flex:1"/>
-          <button class="ghost" id="btnAI">AI â SVG</button>
+          <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
+          <button class="ghost" id="btnAI">AI → SVG</button>
         </div>
         <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
-        <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>â¦</svg>"></textarea>
+        <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
 
         <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
           <button class="ghost" id="btnPreview">Preview</button>
@@ -653,7 +747,7 @@ function normalizeSvgForSlot(svgText, part){
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="font-weight:700">Crafting Land Marketplace</div>
           <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="ghost" id="mpBack">â Back to Packages</button>
+            <button class="ghost" id="mpBack">← Back to Packages</button>
           </div>
         </div>
         <div style="opacity:.85;font-size:13px;margin-top:6px">
@@ -661,7 +755,7 @@ function normalizeSvgForSlot(svgText, part){
         </div>
 
         <div id="mpList" style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
-          <div style="opacity:.7">Loadingâ¦</div>
+          <div style="opacity:.7">Loading…</div>
         </div>
       </div>`;
   }
@@ -678,7 +772,7 @@ function ensureStatsModal(){
         <div style="font-weight:700">Shop Stats</div>
         <button class="ghost" id="statsClose" style="margin-left:auto">Close</button>
       </div>
-      <div id="statsBody" style="margin-top:8px;font-size:13px;opacity:.95">Loadingâ¦</div>
+      <div id="statsBody" style="margin-top:8px;font-size:13px;opacity:.95">Loading…</div>
     </div>`;
   document.body.appendChild(m);
   m.querySelector('#statsClose').addEventListener('click', ()=> m.style.display='none');
@@ -690,10 +784,10 @@ async function openStatsModal(itemId){
   const modal = ensureStatsModal();
   const body = modal.querySelector('#statsBody');
   modal.style.display = 'flex';
-  body.textContent = 'Loadingâ¦';
+  body.textContent = 'Loading…';
   try{
     // your server should return: { ok:true, stats:{ purchases: n, resales: n, revenueIC: n, revenuePi: n } }
-    const j = await serverJSON(api(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`));
+    const j = await nodeJSON(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`);
     const st = (j && j.ok && j.stats) ? j.stats : { purchases:0, resales:0, revenueIC:0, revenuePi:0 };
     body.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -711,7 +805,7 @@ async function addToShop(itemId){
   try{
     // Optional: you can prompt for price here or use the stored price from creation
     // Server expects { ok:true } and will mark the item as inShop=true server-side
-    const j = await serverJSON(api('/api/shop/add'), {
+    const j = await nodeJSON('/api/shop/add', {
       method:'POST',
       body: JSON.stringify({ itemId })
     });
@@ -729,13 +823,18 @@ async function addToShop(itemId){
       || '';
 }
 
+// REPLACE THE ENTIRE fetchMine FUNCTION WITH THIS
 async function fetchMine(){
   try{
-    const u = encodeURIComponent(currentUsername());
-    if(!u) return [];
-    const j = await serverJSON(api(`/api/crafting/mine?u=${u}`));
+    const uName = currentUsername() || '';
+    const url = uName ? `/api/crafting/mine?u=${encodeURIComponent(uName)}` : `/api/crafting/mine`;
+    // Crafting/mine lives on Flask → use appJSON (APP_BASE)
+    const j = await appJSON(url, { method: 'GET' });
     return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
-  }catch{ return []; }
+  }catch(e){
+    console.warn('[craft] fetchMine failed:', e);
+    return [];
+  }
 }
 
   function mineCardHTML(it){
@@ -764,7 +863,7 @@ async function fetchMine(){
     // Expecting fields like: { id, name, svg, pricePi, creator }
     const safeSVG = sanitizeSVG(b.svg || '');
     const price = (typeof b.pricePi === 'number' ? b.pricePi : b.pricePi ? Number(b.pricePi) : null);
-    const priceLabel = (price != null && isFinite(price)) ? `${price} Pi` : 'â';
+    const priceLabel = (price != null && isFinite(price)) ? `${price} Pi` : '—';
 
     return `
       <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
@@ -841,7 +940,7 @@ if (!CSS.escape) {
   if (!host) return;
 
   // Loading state
-  host.innerHTML = '<div style="opacity:.7">Loadingâ¦</div>';
+  host.innerHTML = '<div style="opacity:.7">Loading…</div>';
 
   // Pull items
   const items = await fetchMine();
@@ -901,7 +1000,7 @@ if (!CSS.escape) {
       const id = btn.dataset.addshop;
       btn.disabled = true;
       const prev = btn.textContent;
-      btn.textContent = 'Addingâ¦';
+      btn.textContent = 'Adding…';
       const ok = await addToShop(id);
       if (ok){
         // swap button to "View Shop Stats" and wire it
@@ -930,7 +1029,7 @@ if (!CSS.escape) {
   async function fetchMarketplace(){
     try{
       // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
-      const j = await serverJSON(api('/api/marketplace/list'));
+      const j = await nodeJSON('/api/marketplace/list');
       return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
     }catch{
       return [];
@@ -941,7 +1040,7 @@ if (!CSS.escape) {
   async function hydrateMarketplace(){
     const host = STATE.root?.querySelector('#mpList');
     if (!host) return;
-    host.innerHTML = '<div style="opacity:.7">Loadingâ¦</div>';
+    host.innerHTML = '<div style="opacity:.7">Loading…</div>';
 
     const bundles = await fetchMarketplace();
 
@@ -972,6 +1071,8 @@ if (!CSS.escape) {
   STATE.root = root;
   STATE.mounted = true;
   loadDraft();
+applyCraftPaidFromURL();
+await syncCreditsFromServer(); // NEW: server is the source of truth
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
@@ -1009,38 +1110,43 @@ if (!CSS.escape) {
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-    async function handleBuySingle(kind){
-    const usePi = (kind==='pi');
-    const total = calcTotalCost({ usePi });
-    let res;
-    if (usePi) res = await payWithPi(total, 'Craft Single Item');
-    else       res = await payWithIC(total);
+    // REPLACE the whole function starting at "async function handleBuySingle(kind){" with this:
+// handleBuySingle — keep only this version
+async function handleBuySingle(kind){
+  const usePi = (kind === 'pi');
+  const total = calcTotalCost({ usePi });
 
-    const status = document.getElementById('payStatus'); // present in Create tab
-    if (res && res.ok){
-      // unlock visuals + reset attempts + route to Visuals
-      STATE.hasPaidForCurrentItem = true;
-      STATE.canUseVisuals = true;
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
-      if (status) status.textContent = 'Paid â â visuals unlocked.';
-
-      // force Visuals subtab
-      STATE.createSub = 'visuals';
-
-      // if we are not currently on the Create tab, switch to it;
-      // if already there, just re-render to show Visuals.
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){
-        host.innerHTML = renderCreate();
-        bindInside();
-      }
-    } else {
-      if (status) status.textContent='Payment failed.';
-      // keep visuals locked on failure
-      STATE.canUseVisuals = false;
-    }
+  if (usePi) {
+    const url = craftCheckoutURL({
+      totalPi: total,
+      name: STATE.currentName,
+      category: STATE.currentCategory,
+      part: STATE.currentPart
+    });
+    try { (window.top || window).location.assign(url); }
+    catch { window.location.href = url; }
+    return;
   }
 
+  // IC path stays local
+  const res = await payWithIC(total);
+  const status = document.getElementById('payStatus');
+    if (res && res.ok){
+  // Server already persisted the credit; pull the canonical number
+  await syncCreditsFromServer();
+
+    STATE.hasPaidForCurrentItem = false;
+    STATE.canUseVisuals = false;
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+
+    if (status) status.textContent = 'Credit added ✓ — fill the fields, then tap Next to open Visuals.';
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){ host.innerHTML = renderCreate(); bindInside(); }
+  } else {
+    if (status) status.textContent='Payment failed.';
+    STATE.canUseVisuals = false;
+  }
+}
   function bindInside(){
   const root = STATE.root;
   if(!root) return;
@@ -1056,12 +1162,29 @@ if (!CSS.escape) {
     STATE.currentName     = name || STATE.currentName;
     return Boolean(cat && part && name && name.length >= 3);
   };
-  const setPayEnabled = ()=>{
-    const enabled = fieldsReady();
+    const setPayEnabled = ()=>{
+    const ready = fieldsReady();
     const payPi = getEl('#payPi');
     const payIC = getEl('#payIC');
-    if (payPi){ payPi.disabled = !enabled; payPi.title = enabled ? '' : 'Fill Category, Part, and Name first'; }
-    if (payIC){ payIC.disabled = !enabled; payIC.title = enabled ? '' : 'Fill Category, Part, and Name first'; }
+    if (payPi){ payPi.disabled = !ready; payPi.title = ready ? '' : 'Fill Category, Part, and Name first'; }
+    if (payIC){ payIC.disabled = !ready; payIC.title = ready ? '' : 'Fill Category, Part, and Name first'; }
+
+    // Next row logic
+    const nextRow  = getEl('#nextRow');
+    const nextHint = getEl('#nextHint');
+    const credits  = STATE.mintCredits ?? 0;
+    if (nextRow){
+      const canShow = ready && credits > 0;
+      nextRow.style.display = canShow ? 'block' : 'none';
+      if (!canShow && nextHint) {
+        nextHint.textContent = credits > 0 ? '' : 'Buy a credit to continue.';
+      } else if (nextHint) {
+        nextHint.textContent = '';
+      }
+    }
+    // balance label
+    const bal = getEl('#mintBalance');
+    if (bal) bal.innerHTML = `Credits: <b>${credits}</b>`;
   };
   const toCreateSetup = ()=>{
     STATE.createSub = 'setup';
@@ -1101,14 +1224,14 @@ if (!CSS.escape) {
     });
   }
 
-  // Bundle/package buttons â coming soon (no payment)
+  // Bundle/package buttons → coming soon (no payment)
   root.querySelectorAll('[data-buy-package]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       alert('Coming soon: Battle Packs & Bundles!');
     }, { passive:true });
   });
 
-  // Single Item buttons on Packages card â route to Create â Setup (no payment yet)
+  // Single Item buttons on Packages card → route to Create → Setup (no payment yet)
   root.querySelectorAll('[data-go-single]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     toCreateSetup();
@@ -1132,7 +1255,7 @@ if (!CSS.escape) {
   if (partSel){ partSel.value = STATE.currentPart; }
   if (itemName){ itemName.value = STATE.currentName || ''; }
 
-  // React to changes â save + toggle pay buttons
+  // React to changes → save + toggle pay buttons
   if (itemName){
     itemName.addEventListener('input', e=>{
       STATE.currentName = e.target.value;
@@ -1172,12 +1295,34 @@ if (!CSS.escape) {
     });
   });
 
-  // Pay buttons (on Create â Setup): disabled until fieldsReady()
+  // Pay buttons (on Create → Setup): disabled until fieldsReady()
   const payPi = getEl('#payPi');
   const payIC = getEl('#payIC');
   setPayEnabled();
   if (payPi) payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
   if (payIC) payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
+      // Next → Visuals (consume one credit)
+  const nextBtn = getEl('#goNext');
+  if (nextBtn){
+    nextBtn.addEventListener('click', ()=>{
+      if (!fieldsReady()) return;
+      if (!consumeMintCredit()) return; // no credit
+
+      STATE.mintCredits = getMintCredits();
+      STATE.canUseVisuals = true;
+      STATE.createSub = 'visuals';
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){ host.innerHTML = renderCreate(); bindInside(); }
+
+      // sync attempts immediately
+      try{
+        const el = document.getElementById('aiLeft2');
+        if (el) el.textContent = STATE.aiAttemptsLeft;
+      }catch{}
+    }, { passive:true });
+  }
 
   // Style / Animation selections
   const aiStyleSel = getEl('#aiStyleSel');
@@ -1206,15 +1351,15 @@ if (!CSS.escape) {
     if (prevHost) prevHost.innerHTML = STATE.currentSVG;
   }
 
-  // AI â SVG
+  // AI → SVG
   if (btnAI){
     btnAI.addEventListener('click', async ()=>{
       const prompt = String(aiPrompt?.value||'').trim();
       if (!prompt) return;
       btnAI.disabled = true;
       btnAI.setAttribute('aria-busy','true');
-      btnAI.textContent = 'Generatingâ¦';
-      const waitEl = showWait('Crafting your SVG previewâ¦');
+      btnAI.textContent = 'Generating…';
+      const waitEl = showWait('Crafting your SVG preview…');
       try{
         const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
         if (svgIn) svgIn.value = svg;
@@ -1240,7 +1385,7 @@ if (!CSS.escape) {
         hideWait(waitEl);
         btnAI.disabled = false;
         btnAI.removeAttribute('aria-busy');
-        btnAI.textContent = 'AI â SVG';
+        btnAI.textContent = 'AI → SVG';
       }
     });
   }
@@ -1279,10 +1424,11 @@ if (!CSS.escape) {
       if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
       const freeTest = (COSTS.PER_ITEM_IC === 0 && Object.values(STATE.featureFlags).every(v=>!v));
-      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-        craftStatus.textContent = 'Please pay (Pi or IC) first.';
-        return;
-      }
+const unlocked = STATE.canUseVisuals || STATE.hasPaidForCurrentItem || STATE.packageCredits || freeTest;
+if (!unlocked){
+  craftStatus.textContent = 'Use a credit (Next) or pay first.';
+  return;
+}
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
       const sellInShop = !!getEl('#sellInShop')?.checked;
@@ -1309,11 +1455,11 @@ if (!CSS.escape) {
           : { ok:false, reason:'armour-packs-hook-missing' };
 
         if (injected && injected.ok){
-          craftStatus.textContent = 'Crafted â';
+          craftStatus.textContent = 'Crafted ✓';
 
           // Persist minted item to "Mine" (server reads user from session; no username needed)
 try {
-  await serverJSON(api('/api/crafting/mine'), {
+  await appJSON('/api/crafting/mine', {
     method: 'POST',
     body: JSON.stringify({
       name: STATE.currentName,
@@ -1330,21 +1476,20 @@ try {
 // If player asked to also list in IZZA Pay merchant dashboard, open it with prefilled data
 if (sellInPi) {
   try {
-    const r = await serverJSON(api('/api/merchant/create_product_from_craft'), {
+    const r = await 
+appJSON('/api/merchant/create_product_from_craft', {
       method: 'POST',
       body: JSON.stringify({
-        title: STATE.currentName,
+        name: STATE.currentName,
+        image: '',
+        price_pi: 0,
         description: `${STATE.currentCategory} / ${STATE.currentPart}`,
-        svg: normalizedForSlot,
-        crafted_meta: {
-          category: STATE.currentCategory,
-          part: STATE.currentPart
-        }
+        crafted_item_id: ''
       })
     });
     if (r && r.ok && r.dashboardUrl) {
       window.location.href = r.dashboardUrl;
-      return; // stop the reset because weâre navigating
+      return; // stop the reset because we’re navigating
     }
   } catch(e) {
     console.warn('IZZA Pay prefill failed', e);
@@ -1359,7 +1504,7 @@ if (sellInPi) {
           if (svgIn) svgIn.value = '';
           if (prevHost) prevHost.innerHTML = `<div style="opacity:.6; font-size:12px">Preview appears here</div>`;
 
-          // Re-render Create â Setup so Pay buttons reappear (disabled state handled by setPayEnabled)
+          // Re-render Create → Setup so Pay buttons reappear (disabled state handled by setPayEnabled)
           const host = STATE.root?.querySelector('#craftTabs');
           if (host){
             host.innerHTML = renderCreate();
@@ -1385,7 +1530,7 @@ if (sellInPi) {
       const id = btn.dataset.addshop;
       btn.disabled = true;
       const prev = btn.textContent;
-      btn.textContent = 'Addingâ¦';
+      btn.textContent = 'Adding…';
       const ok = await addToShop(id);
       if (ok){
         btn.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
