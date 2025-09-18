@@ -355,7 +355,93 @@ try:
     app.register_blueprint(merchant_api)
 except Exception:
     pass
+    
+@app.get("/api/collectibles")
+def collectibles_list():
+    u = current_user_row()
+    if not u:
+        return _ok(items=[])
+    with conn() as cx:
+        rows = cx.execute("""
+            SELECT
+              o.id            AS order_id,
+              o.qty           AS qty,
+              i.title         AS title,
+              i.image_url     AS image_url,
+              i.crafted_item_id AS crafted_item_id,
+              i.fulfillment_kind AS fulfillment_kind,
+              m.business_name AS store,
+              m.slug          AS mslug,
+              (SELECT 1 FROM collectible_claims c
+                 WHERE c.order_id=o.id AND c.user_id=?
+              ) AS claimed
+            FROM orders o
+            JOIN items i   ON i.id = o.item_id
+            JOIN merchants m ON m.id = o.merchant_id
+            WHERE o.status='paid'
+              AND o.buyer_user_id = ?
+              AND i.fulfillment_kind = 'crafting'
+              AND i.crafted_item_id IS NOT NULL
+            ORDER BY o.id DESC
+        """, (u["id"], u["id"])).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "id": int(r["order_id"]),
+            "title": r["title"],
+            "store": r["store"],
+            "thumb_url": r["image_url"] or "",
+            "crafted_item_id": r["crafted_item_id"],
+            "claimed": bool(r["claimed"])
+        })
+    return _ok(items=out)
 
+@app.post("/api/collectibles/claim")
+def collectibles_claim():
+    u = current_user_row()
+    if not u:
+        return _err("auth_required")
+    data = request.get_json(silent=True) or {}
+    try:
+        oid = int(data.get("id") or 0)
+    except Exception:
+        oid = 0
+    if oid <= 0:
+        return _err("bad_id")
+
+    with conn() as cx:
+        r = cx.execute("""
+            SELECT o.id AS oid, o.qty AS qty, o.buyer_user_id AS buyer_uid,
+                   i.crafted_item_id AS crafted_id
+            FROM orders o
+            JOIN items i ON i.id=o.item_id
+            WHERE o.id=? AND o.status='paid'
+              AND i.fulfillment_kind='crafting'
+              AND i.crafted_item_id IS NOT NULL
+        """, (oid,)).fetchone()
+        if not r:
+            return _err("not_found")
+        if int(r["buyer_uid"] or 0) != int(u["id"]):
+            return _err("forbidden")
+
+        # idempotent: if already claimed, just return ok
+        dup = cx.execute("SELECT 1 FROM collectible_claims WHERE order_id=? AND user_id=?", (oid, u["id"])).fetchone()
+        if not dup:
+            cx.execute(
+                "INSERT INTO collectible_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
+                (oid, u["id"], int(time.time()))
+            )
+            # Grant into game (your existing safe stub)
+            try:
+                _grant_crafting_item(u["id"], r["crafted_id"], int(r["qty"] or 1))
+            except Exception:
+                pass
+
+    return _ok(granted={
+        "order_id": oid,
+        "crafted_item_id": r["crafted_id"],
+        "qty": int(r["qty"] or 1)
+    })
 # ================== /Crafting UI â Flask bridge ==================
 @app.get(f"{MEDIA_PREFIX}/<path:filename>")
 def media(filename):
