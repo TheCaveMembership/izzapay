@@ -4,14 +4,16 @@ from datetime import timedelta
 from urllib.parse import urlparse
 from PIL import Image
 from werkzeug.utils import secure_filename
-from flask import Flask, request, render_template, render_template_string, redirect, session, abort, Response
-from flask import Blueprint, jsonify, session, request
+from flask import (
+    Flask, request, render_template, render_template_string,
+    redirect, session, abort, Response, Blueprint, jsonify
+)
 from dotenv import load_dotenv
 import requests
 import mimetypes
 from emailer import send_email
 from payments import split_amounts
-# Local modules you already have
+
 # Local modules you already have
 try:
     # If db.py exports ensure_schema, use it
@@ -47,14 +49,6 @@ except ImportError:
                   qty INTEGER NOT NULL
                 )
             """)
-            with conn() as cx:
-    cx.execute("""
-      CREATE TABLE IF NOT EXISTS crafting_credit_claims(
-        order_id INTEGER PRIMARY KEY,   -- 1 row per order, prevents duplicates
-        user_id  INTEGER NOT NULL,
-        claimed_at INTEGER NOT NULL
-      )
-    """)
 
 # ----------------- ENV -----------------
 load_dotenv()
@@ -66,15 +60,16 @@ APP_NAME      = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL  = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN   = APP_BASE_URL
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
-# NEW: LibreTranslate endpoint for browser-safe proxying
 LIBRE_EP = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
+
 # The product that represents a single-use crafting credit
-SINGLE_CREDIT_LINK_ID = "d0b811e8"  # checkout/<this>
-# Optional: estimated USD per ÃÂ to display conversion on /orders (0 disables)
+SINGLE_CREDIT_LINK_ID = "d0b811e8"  # must match items.link_id for the product
+
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
 except Exception:
     PI_USD_RATE = 0.0
+
 # === Crafting grant hook (game item fulfillment) ===
 def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: int):
     # Minimal stub: log or record in a queue.
@@ -98,6 +93,20 @@ def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: in
             )
     except Exception:
         pass
+
+# Ensure the claims table exists (separate from the grant hook)
+def _ensure_extra_schema():
+    with conn() as cx:
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS crafting_credit_claims(
+              order_id   INTEGER PRIMARY KEY,   -- 1 row per order, prevents duplicates
+              user_id    INTEGER NOT NULL,
+              claimed_at INTEGER NOT NULL
+            )
+        """)
+
+_ensure_extra_schema()
+
 # ----------------- APP -----------------
 app = Flask(__name__)
 
@@ -121,6 +130,7 @@ def _normalize_ext(fmt: str) -> str:
         return ""
     fmt = fmt.lower()
     return "jpg" if fmt == "jpeg" else fmt
+
 # ---- Simple SQLite snapshot backups on boot ----
 import shutil
 from datetime import datetime
@@ -164,11 +174,8 @@ def setup_backups():
     if db_path and os.path.exists(db_path):
         _backup_now(db_path, backups_dir)
         _prune_old_backups(backups_dir, keep=10)
-# Serve uploaded files safely from the persistent disk
-# ================== Crafting UI â Flask bridge (minimal + safe) ==================
-# Paste this into app.py after `app = Flask(__name__)` and your other imports.
 
-from flask import Blueprint, request, jsonify
+# ================== Crafting UI → Flask bridge (minimal + safe) ==================
 
 # --- Blueprints ---
 crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
@@ -183,10 +190,7 @@ def _ok(**kw):
 def _err(reason="unknown"):
     return jsonify({"ok": False, "reason": str(reason)}), 400
 
-
 # --------------------------- CRAFTING ROUTES ------------------------------------
-
-
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
     """
@@ -228,25 +232,23 @@ def crafting_ic_reconcile():
 
     uid = int(u["id"])
 
-    # Find paid orders for our single-credit product that are not yet claimed
     with conn() as cx:
         rows = cx.execute("""
             SELECT o.id, o.qty
-            FROM orders o
-            JOIN items i ON i.id = o.item_id
-            WHERE o.buyer_user_id = ?
-              AND o.status = 'paid'
-              AND i.link_id = ?
-              AND NOT EXISTS (
-                    SELECT 1 FROM crafting_credit_claims c
+              FROM orders o
+              JOIN items i ON i.id = o.item_id
+             WHERE o.buyer_user_id = ?
+               AND o.status = 'paid'
+               AND i.link_id = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM crafting_credit_claims c
                     WHERE c.order_id = o.id
-              )
+               )
         """, (uid, SINGLE_CREDIT_LINK_ID)).fetchall()
 
         total_new = sum(int(r["qty"] or 0) for r in rows)
 
         if total_new > 0:
-            # Award and mark claimed atomically
             newbal = add_ic_credits(uid, total_new)
             now = int(time.time())
             for r in rows:
@@ -263,13 +265,13 @@ def crafting_ic_reconcile():
 def crafting_mine_get():
     u = current_user_row()
     if not u:
-        return _ok(items=[])  # render empty when not signed in
+        return _ok(items=[])
     with conn() as cx:
         rows = cx.execute("""
           SELECT id, name, sku, image, meta_json, created_at
-          FROM crafted_items
-          WHERE user_id=?
-          ORDER BY id DESC
+            FROM crafted_items
+           WHERE user_id=?
+        ORDER BY id DESC
         """, (u["id"],)).fetchall()
     out = []
     for r in rows:
@@ -285,39 +287,23 @@ def crafting_mine_get():
 
 @crafting_api.get("/collectibles")
 def crafting_collectibles_inventory():
-    """
-    Returns a compact inventory-like map for the game UI.
-    Shape:
-      { "craft_<rowid>": {
-            "name": "...",
-            "count": 1,
-            "type": meta.type| "armor"/"weapon"/"collectible",
-            "slot": meta.slot| None,
-            "equippable": bool,
-            "iconSvg": meta.iconSvg| "",
-            "crafted_id": "<your crafted_item_id or sku>",
-        }, ... }
-    """
     u = current_user_row()
     if not u:
         return _ok(items={})
     with conn() as cx:
         rows = cx.execute("""
           SELECT id, name, sku, image, meta_json, created_at
-          FROM crafted_items
-          WHERE user_id=?
-          ORDER BY id DESC
+            FROM crafted_items
+           WHERE user_id=?
+        ORDER BY id DESC
         """, (u["id"],)).fetchall()
 
     out = {}
     for r in rows:
-        meta = {}
         try:
             meta = json.loads(r["meta_json"] or "{}") or {}
         except Exception:
             meta = {}
-
-        # Heuristics / defaults that match your core:
         _type  = (meta.get("type") or "").strip().lower() or "collectible"
         _slot  = (meta.get("slot") or None)
         _equ   = bool(meta.get("equippable", _type in ("armor","weapon")))
@@ -338,7 +324,6 @@ def crafting_collectibles_inventory():
 
 @crafting_api.post("/mine")
 def crafting_mine_post():
-    """Accepts {name, sku?, image?, meta?} and saves for the signed-in user."""
     u = current_user_row()
     if not u:
         return _err("auth_required")
@@ -350,16 +335,15 @@ def crafting_mine_post():
     with conn() as cx:
         cx.execute("""
           INSERT INTO crafted_items(user_id, name, sku, image, meta_json, created_at)
-          VALUES(?,?,?,?,?,?)
+               VALUES(?,?,?,?,?,?)
         """, (u["id"], name, sku, image, json.dumps(meta, separators=(",", ":")), int(time.time())))
     return _ok(saved=True)
 
 @crafting_api.post("/credits/claim_order")
 def crafting_ic_claim_order():
     """
-    Fallback endpoint used by my_orders.html when it scans visible table rows.
-    Body: { order_id }
-    If that order is the single-use mint and paid, grant +qty once.
+    Fallback used by my_orders.html: { order_id } → if the order is for the
+    single-use mint and is paid, grant +qty once (idempotent).
     """
     u = current_user_row()
     if not u:
@@ -378,21 +362,22 @@ def crafting_ic_claim_order():
     with conn() as cx:
         r = cx.execute("""
             SELECT o.id, o.qty
-            FROM orders o
-            JOIN items i ON i.id = o.item_id
-            WHERE o.id = ? AND o.buyer_user_id = ? AND o.status='paid' AND i.link_id = ?
+              FROM orders o
+              JOIN items i ON i.id = o.item_id
+             WHERE o.id = ?
+               AND o.buyer_user_id = ?
+               AND o.status='paid'
+               AND i.link_id = ?
         """, (oid, uid, SINGLE_CREDIT_LINK_ID)).fetchone()
 
         if not r:
             return _err("not_eligible")
 
-        # Already claimed?
         dup = cx.execute("SELECT 1 FROM crafting_credit_claims WHERE order_id=?", (oid,)).fetchone()
         if dup:
             bal = get_ic_credits(uid)
             return _ok(already=True, credits=bal)
 
-        # Award + mark claimed
         qty = int(r["qty"] or 1)
         newbal = add_ic_credits(uid, qty)
         cx.execute(
@@ -401,9 +386,8 @@ def crafting_ic_claim_order():
         )
 
     return _ok(awarded=True, amount=qty, credits=newbal)
-    
-# --------------------------- MERCHANT ROUTES ------------------------------------
 
+# --------------------------- MERCHANT ROUTES ------------------------------------
 @merchant_api.post("/create_product_from_craft")
 def create_product_from_craft():
     """
