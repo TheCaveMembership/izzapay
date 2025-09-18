@@ -787,7 +787,7 @@ async function openStatsModal(itemId){
   body.textContent = 'Loading…';
   try{
     // your server should return: { ok:true, stats:{ purchases: n, resales: n, revenueIC: n, revenuePi: n } }
-    const j = await nodeJSON(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`);
+    const j = await appJSON(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`);
     const st = (j && j.ok && j.stats) ? j.stats : { purchases:0, resales:0, revenueIC:0, revenuePi:0 };
     body.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -805,7 +805,7 @@ async function addToShop(itemId){
   try{
     // Optional: you can prompt for price here or use the stored price from creation
     // Server expects { ok:true } and will mark the item as inShop=true server-side
-    const j = await nodeJSON('/api/shop/add', {
+    const j = await appJSON('/api/shop/add', {
       method:'POST',
       body: JSON.stringify({ itemId })
     });
@@ -1029,7 +1029,7 @@ if (!CSS.escape) {
   async function fetchMarketplace(){
     try{
       // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
-      const j = await nodeJSON('/api/marketplace/list');
+      const j = await appJSON('/api/marketplace/list');
       return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
     }catch{
       return [];
@@ -1065,7 +1065,7 @@ if (!CSS.escape) {
       });
     });
   }
-  function mount(rootSel){
+  async function mount(rootSel){
   const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
   if (!root) return;
   STATE.root = root;
