@@ -201,9 +201,22 @@ def crafting_ic_debit():
 def crafting_ic_balance():
     u = current_user_row()
     if not u:
-        return _ok(balance=0)  # anonymous gets 0
+        return _ok(balance=0, credits=0)
     bal = get_ic_credits(int(u["id"]))
-    return _ok(balance=bal)
+    # Return both keys so older/newer clients are happy
+    return _ok(balance=bal, credits=bal)
+
+@crafting_api.post("/credits/reconcile")
+def crafting_ic_reconcile():
+    """
+    Idempotent 'confirm my credits after checkout'. We already award credits
+    during /payment/complete, so this just re-reads the balance.
+    """
+    u = current_user_row()
+    if not u:
+        return _err("auth_required")
+    bal = get_ic_credits(int(u["id"]))
+    return _ok(reconciled=True, credits=bal)
 
 @crafting_api.get("/mine")
 def crafting_mine_get():
@@ -2159,13 +2172,16 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     # SPECIAL CASE: izza-game-crafting → send to game auth instead
     slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-    if slug == "izza-game-crafting":
-        game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
-        redirect_url = game_target
+if slug == "izza-game-crafting":
+    # Preserve bearer token (if present) and append craftPaid=1 so the game UI
+    # will call /api/crafting/credits/reconcile and update the visible balance.
+    if tok:
+        game_target = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
     else:
-        redirect_url = default_target
-
-    return {"ok": True, "redirect_url": redirect_url}
+        game_target = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
+    redirect_url = game_target
+else:
+    redirect_url = default_target
 
 
 @app.post("/payment/error")
