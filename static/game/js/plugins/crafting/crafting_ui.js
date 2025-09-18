@@ -1093,7 +1093,7 @@ if (!CSS.escape) {
       });
     });
   }
-  function mount(rootSel){
+  async function mount(rootSel){
   const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
   if (!root) return;
   STATE.root = root;
