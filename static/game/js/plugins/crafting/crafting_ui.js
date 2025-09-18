@@ -283,6 +283,32 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
 
   function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
+  // --- REQUIRED-FIELDS VALIDATION (Create tab only) ---
+function isCreateFormValid(){
+  const hasCat  = !!STATE.currentCategory;
+  const hasPart = !!STATE.currentPart;
+  const nm = moderateName(STATE.currentName || '');
+  return hasCat && hasPart && nm.ok;
+}
+
+function updatePayButtonsState(){
+  const root = STATE.root;
+  if(!root) return;
+  const ok = isCreateFormValid();
+
+  const pi = root.querySelector('#payPi');
+  const ic = root.querySelector('#payIC');
+  [pi, ic].forEach(btn=>{
+    if (!btn) return;
+    btn.disabled = !ok;
+    btn.title = ok ? '' : 'Fill Category, Part/Type, and Item Name first';
+  });
+
+  const status = root.querySelector('#payStatus');
+  if (status){
+    status.textContent = ok ? '' : 'Fill Category, Part/Type, and Item Name to enable Pay.';
+  }
+}
 
   // *** CHANGE 2: server-first, fallback is now a tiny basic blueprint icon ***
   // --- AI prompt: server first, then minimal fallback ---
@@ -1003,7 +1029,14 @@ if (!CSS.escape) {
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
-    async function handleBuySingle(kind){
+    async function handleBuySingle(kind, enforceForm){
+        // Enforce required fields only when invoked from the Create tab
+  if (enforceForm && !isCreateFormValid()){
+    const status = document.getElementById('payStatus');
+    if (status) status.textContent = 'Fill Category, Part/Type, and Item Name first.';
+    updatePayButtonsState();
+    return;
+  }
     const usePi = (kind==='pi');
     const total = calcTotalCost({ usePi });
     let res;
@@ -1101,15 +1134,20 @@ if (!CSS.escape) {
     btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
   const payPi = root.querySelector('#payPi');
-  const payIC = root.querySelector('#payIC');
-  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
-  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
+const payIC = root.querySelector('#payIC');
+// enforceForm=true for Create tab buttons
+payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi', true), { passive:true });
+payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic', true), { passive:true });
 
   const itemName = root.querySelector('#itemName');
-  if (itemName){
-    itemName.value = STATE.currentName || '';
-    itemName.addEventListener('input', e=>{ STATE.currentName = e.target.value; saveDraft(); }, { passive:true });
-  }
+if (itemName){
+  itemName.value = STATE.currentName || '';
+  itemName.addEventListener('input', e=>{
+    STATE.currentName = e.target.value;
+    saveDraft();
+    updatePayButtonsState(); // <-- ADD THIS
+  }, { passive:true });
+}
 
   const aiStyleSel = root.querySelector('#aiStyleSel');
   const aiAnimChk  = root.querySelector('#aiAnimChk');
@@ -1145,20 +1183,22 @@ if (!CSS.escape) {
     repopulatePartOptions(catSel, partSel);
 
     catSel.addEventListener('change', e=>{
-      STATE.currentCategory = e.target.value;
-      repopulatePartOptions(catSel, partSel);
-      saveDraft();
-    }, { passive:true });
+  STATE.currentCategory = e.target.value;
+  repopulatePartOptions(catSel, partSel);
+  saveDraft();
+  updatePayButtonsState(); // <-- ADD THIS
+}, { passive:true });
   }
 
   if (partSel){
     partSel.value = STATE.currentPart;
     partSel.addEventListener('change', e=>{
-      STATE.currentPart = e.target.value;
-      saveDraft();
-    }, { passive:true });
+  STATE.currentPart = e.target.value;
+  saveDraft();
+  updatePayButtonsState(); // <-- ADD THIS
+}, { passive:true });
   }
-
+updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
   const aiLeft = ()=> {
     const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
     const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
