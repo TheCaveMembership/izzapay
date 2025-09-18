@@ -2723,6 +2723,190 @@ def buyer_status(token):
 def success():
     return render_template("success.html")
 
+# ====== COLLECTIBLES — schema patch (IC purchases recorded separately) ======
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS collectible_orders_ic(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          crafted_key TEXT,         -- e.g. "craft_<slug>_<ts>" from client
+          title TEXT NOT NULL,
+          slot TEXT,                -- head/chest/arms/legs/hands
+          part TEXT,                -- helmet/vest/arms/legs/gun/melee (as provided by client)
+          svg TEXT,                 -- sanitized SVG or inventory-safe icon (keep small)
+          price_ic INTEGER NOT NULL,
+          payment_method TEXT,      -- 'izza_coins'
+          source TEXT,              -- 'game_shop' | 'crafting_ui' etc.
+          created_at INTEGER NOT NULL
+        )
+    """)
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_collectible_orders_ic_user ON collectible_orders_ic(user_id)")
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_collectible_orders_ic_key ON collectible_orders_ic(crafted_key)")
+
+# ====== COLLECTIBLES — record IC collectible order from the game/shop ======
+@app.post("/api/orders/collectible_ic")
+def api_orders_collectible_ic():
+    """
+    Called by the game (armour_packs_plugin.js) after an IZZA coin purchase
+    so IZZA Pay can reflect it in the player's collectibles.
+
+    JSON body (already implemented in your plugin):
+      {
+        crafted_key, title, slot, part, svg, price_ic, payment_method, source
+      }
+    """
+    u = current_user_row()
+    if not u:
+        return {"ok": False, "error": "auth_required"}, 401
+
+    data = request.get_json(silent=True) or {}
+    title   = (data.get("title") or "").strip() or "Untitled"
+    key     = (data.get("crafted_key") or "").strip() or None
+    slot    = (data.get("slot") or "").strip() or None
+    part    = (data.get("part") or "").strip() or None
+    svg     = (data.get("svg") or "").strip() or ""   # trust front-end sanitizer; server is not re-using this SVG beyond listing
+    try:
+        price_ic = int(data.get("price_ic") or 0)
+    except Exception:
+        price_ic = 0
+    paym    = (data.get("payment_method") or "izza_coins").strip()
+    source  = (data.get("source") or "game_shop").strip()
+
+    if price_ic <= 0:
+        return {"ok": False, "error": "bad_amount"}, 400
+
+    with conn() as cx:
+        cx.execute("""
+          INSERT INTO collectible_orders_ic(
+            user_id, crafted_key, title, slot, part, svg, price_ic, payment_method, source, created_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (
+            int(u["id"]), key, title, slot, part, svg, int(price_ic), paym, source, int(time.time())
+        ))
+
+    # Side-effect: optional grant hook (no-op if you prefer client-side inventory only)
+    try:
+        # If we received a crafted_key, grant 1 copy for the buyer (mirrors your Pi grant path)
+        if key:
+            _grant_crafting_item(int(u["id"]), key, 1)
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+# ====== COLLECTIBLES — unified feed for Crafting Land UI ======
+@app.get("/api/crafts/feed")
+def api_crafts_feed():
+    """
+    Returns one payload the CRAFTS page can render.
+    - creations:      items the user CREATED via crafting UI (table: crafted_items)
+    - purchases_ic:   collectibles purchased with IZZA coins (table: collectible_orders_ic)
+    - purchases_pi:   collectibles purchased via Pi checkout (orders joined to items)
+    - claims:         map of {order_id: true} for claimed Pi collectibles
+    """
+    u = current_user_row()
+    if not u:
+        return {"ok": True, "creations": [], "purchases_ic": [], "purchases_pi": [], "claims": {}}
+
+    uid = int(u["id"])
+
+    # 1) My creations (from crafting UI)
+    with conn() as cx:
+        rows = cx.execute("""
+            SELECT id, name, sku, image, meta_json, created_at
+            FROM crafted_items
+            WHERE user_id=?
+            ORDER BY id DESC
+        """, (uid,)).fetchall()
+    creations = []
+    for r in rows:
+        try:
+            meta = json.loads(r["meta_json"] or "{}") or {}
+        except Exception:
+            meta = {}
+        creations.append({
+            "id": int(r["id"]),
+            "name": r["name"],
+            "sku": r["sku"],
+            "image": r["image"],
+            "meta": meta,
+            "created_at": int(r["created_at"] or 0),
+        })
+
+    # 2) IC purchases (from the new table)
+    with conn() as cx:
+        ic_rows = cx.execute("""
+            SELECT id, crafted_key, title, slot, part, svg, price_ic, payment_method, source, created_at
+            FROM collectible_orders_ic
+            WHERE user_id=?
+            ORDER BY id DESC
+        """, (uid,)).fetchall()
+    purchases_ic = [dict(r) for r in ic_rows]
+
+    # 3) Pi collectibles (orders w/ fulfillment_kind='crafting')
+    with conn() as cx:
+        pi_rows = cx.execute("""
+            SELECT o.id            AS order_id,
+                   o.qty           AS qty,
+                   i.title         AS title,
+                   i.image_url     AS image_url,
+                   i.crafted_item_id AS crafted_item_id,
+                   i.fulfillment_kind AS fulfillment_kind,
+                   m.business_name AS store,
+                   m.slug          AS mslug
+            FROM orders o
+            JOIN items i   ON i.id = o.item_id
+            JOIN merchants m ON m.id = o.merchant_id
+            WHERE o.status='paid'
+              AND o.buyer_user_id = ?
+              AND i.fulfillment_kind = 'crafting'
+              AND i.crafted_item_id IS NOT NULL
+            ORDER BY o.id DESC
+        """, (uid,)).fetchall()
+
+        # 4) Claim map (which Pi collectibles have been pulled into the game already)
+        claimed_rows = cx.execute("""
+            SELECT order_id FROM collectible_claims WHERE user_id=?
+        """, (uid,)).fetchall()
+
+    claims = { int(r["order_id"]): True for r in claimed_rows }
+    purchases_pi = [{
+        "order_id": int(r["order_id"]),
+        "title": r["title"],
+        "store": r["store"],
+        "thumb_url": r["image_url"] or "",
+        "crafted_item_id": r["crafted_item_id"],
+        "qty": int(r["qty"] or 1),
+        "claimed": bool(claims.get(int(r["order_id"])))
+    } for r in pi_rows]
+
+    return {
+        "ok": True,
+        "creations": creations,
+        "purchases_ic": purchases_ic,
+        "purchases_pi": purchases_pi,
+        "claims": claims
+    }
+
+# ====== CRAFTS PAGE (game-side page; very small server view) ======
+@app.get("/izza-game/crafts")
+def game_crafts_page():
+    """
+    Renders the CRAFTS page (game template). This DOES NOT duplicate /orders.
+    It simply ships a shell that calls /api/crafts/feed on load and renders tabs:
+      - CRAFTS (my creations)
+      - PURCHASES (IC + Pi collectibles)
+    """
+    u = require_user()
+    if isinstance(u, Response):  # redirected to signin if needed
+        return u
+    # Token helps the game template call APIs if third-party cookies are blocked
+    try:
+        tok = mint_login_token(int(u["id"]))
+    except Exception:
+        tok = None
+    return render_template("crafts.html", t=tok, sandbox=PI_SANDBOX)
+
 # =========================================================================== #
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
