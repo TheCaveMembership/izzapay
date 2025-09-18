@@ -2021,131 +2021,129 @@ cx.execute(
     (tx_hash, s["id"])
 )
     # ===== Emails (unchanged from your version, kept verbatim) =====
-    try:
-        display_rows = []
-        for li in lines:
-            it = by_id.get(int(li["item_id"]))
-            title = (it["title"] if it else f"Item {li['item_id']}")
-            qty = int(li["qty"])
-            gross = float(li["price"]) * qty
-            display_rows.append({"title": title, "qty": qty, "gross": gross})
+try:
+    display_rows = []
+    for li in lines:
+        it = by_id.get(int(li["item_id"]))
+        title = (it["title"] if it else f"Item {li['item_id']}")
+        qty = int(li["qty"])
+        gross = float(li["price"]) * qty
+        display_rows.append({"title": title, "qty": qty, "gross": gross})
 
-        line_html = "".join(
-            f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
-            f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
-            f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} Ï</td></tr>"
-            for dr in display_rows
-        )
-        items_table = (
-            "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
-            "<thead><tr>"
-            "<th style='text-align:left; padding:6px 8px'>Item</th>"
-            "<th style='text-align:right; padding:6px 8px'>Qty</th>"
-            "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
-            "</tr></thead>"
-            f"<tbody>{line_html}</tbody>"
-            "<tfoot>"
-            f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-            f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} Ï</strong></td></tr>"
-            "</tfoot>"
-            "</table>"
-        )
+    line_html = "".join(
+        f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
+        f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
+        f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
+        for dr in display_rows
+    )
+    items_table = (
+        "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
+        "<thead><tr>"
+        "<th style='text-align:left; padding:6px 8px'>Item</th>"
+        "<th style='text-align:right; padding:6px 8px'>Qty</th>"
+        "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
+        "</tr></thead>"
+        f"<tbody>{line_html}</tbody>"
+        "<tfoot>"
+        f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
+        f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
+        "</tfoot>"
+        "</table>"
+    )
 
-        merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+    merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
 
-        shipping_html = ""
-        if isinstance(shipping, dict):
-            name   = (shipping.get("name") or "").strip()
-            email  = (shipping.get("email") or "").strip()
-            phone  = (shipping.get("phone") or "").strip()
-            addr1  = (shipping.get("address") or "").strip()
-            addr2  = (shipping.get("address2") or "").strip()
-            city   = (shipping.get("city") or "").strip()
-            state  = (shipping.get("state") or "").strip()
-            postal = (shipping.get("postal_code") or "").strip()
-            country= (shipping.get("country") or "").strip()
-            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
-            if any_shipping:
-                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
-                locality_parts = [p for p in [city, state] if p]
-                locality_line = ", ".join(locality_parts)
-                if postal:
-                    locality_line = (locality_line + " " if locality_line else "") + postal
-                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
-                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
-                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
-                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
-                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
-                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
-                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
-                shipping_html = "".join(block)
+    shipping_html = ""
+    if isinstance(shipping, dict):
+        name   = (shipping.get("name") or "").strip()
+        email  = (shipping.get("email") or "").strip()
+        phone  = (shipping.get("phone") or "").strip()
+        addr1  = (shipping.get("address") or "").strip()
+        addr2  = (shipping.get("address2") or "").strip()
+        city   = (shipping.get("city") or "").strip()
+        state  = (shipping.get("state") or "").strip()
+        postal = (shipping.get("postal_code") or "").strip()
+        country= (shipping.get("country") or "").strip()
+        any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
+        if any_shipping:
+            street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
+            locality_parts = [p for p in [city, state] if p]
+            locality_line = ", ".join(locality_parts)
+            if postal:
+                locality_line = (locality_line + " " if locality_line else "") + postal
+            block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
+            if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
+            if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
+            if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
+            if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
+            if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
+            if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
+            shipping_html = "".join(block)
 
-        # Email subjects (no walrus / no fancy ternary inside f-strings)
-                # Email subjects (no walrus / no fancy ternary inside f-strings)
-                suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-                if suffix:
-                    subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
-                else:
-                    subj_buyer = f"Your order at {m['business_name']} is confirmed"
-                
-                subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} Ï){suffix}"
-
-        if buyer_email:
-            send_email(
-                buyer_email,
-                subj_buyer,
-                f"""
-                    <h2>Thanks for your order!</h2>
-                    <p><strong>Store:</strong> {m['business_name']}</p>
-                    {items_table}
-                    <p style="margin-top:12px">
-                      Youâll receive updates from the merchant if anything changes.
-                    </p>
-                """,
-                reply_to=merchant_mail
-            )
-
-        send_email(
-            merchant_mail,
-            subj_merchant,
-            f"""
-                <h2>You received a new order</h2>
-                {items_table}
-                <p style="margin:10px 0 0">
-                  <small>Fees total: {fee_total:.7f} Ï â¢ Net total: {net_total:.7f} Ï</small>
-                </p>
-                <h3 style="margin:16px 0 6px">Buyer</h3>
-                <div>{(buyer_name or 'â')} ({(buyer_email or 'â')})</div>
-                {shipping_html}
-                <p style="margin-top:10px"><small>TX: {tx_hash or 'â'}</small></p>
-            """
-        )
-
-    except Exception:
-        pass
-
-    # Redirect back to storefront with success flag (and token if available)
-        # Redirect back to storefront with success flag (and token if available)
-    u = current_user_row()
-    tok = ""
-    if u:
-        try:
-            tok = mint_login_token(u["id"])
-        except Exception:
-            tok = ""
-
-    join = "&" if tok else ""
-    default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
-
-    # SPECIAL CASE: izza-game-crafting → send to game auth instead
-    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-    if slug == "izza-game-crafting":
-        game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
-        redirect_url = game_target
+    # Email subjects (no walrus / no fancy ternary inside f-strings)
+    suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+    if suffix:
+        subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
     else:
-        redirect_url = default_target
+        subj_buyer = f"Your order at {m['business_name']} is confirmed"
 
-    return {"ok": True, "redirect_url": redirect_url}
+    subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+
+    if buyer_email:
+        send_email(
+            buyer_email,
+            subj_buyer,
+            f"""
+                <h2>Thanks for your order!</h2>
+                <p><strong>Store:</strong> {m['business_name']}</p>
+                {items_table}
+                <p style="margin-top:12px">
+                  You’ll receive updates from the merchant if anything changes.
+                </p>
+            """,
+            reply_to=merchant_mail
+        )
+
+    send_email(
+        merchant_mail,
+        subj_merchant,
+        f"""
+            <h2>You received a new order</h2>
+            {items_table}
+            <p style="margin:10px 0 0">
+              <small>Fees total: {fee_total:.7f} π • Net total: {net_total:.7f} π</small>
+            </p>
+            <h3 style="margin:16px 0 6px">Buyer</h3>
+            <div>{(buyer_name or '—')} ({(buyer_email or '—')})</div>
+            {shipping_html}
+            <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
+        """
+    )
+
+except Exception:
+    pass
+
+# Redirect back to storefront with success flag (and token if available)
+u = current_user_row()
+tok = ""
+if u:
+    try:
+        tok = mint_login_token(u["id"])
+    except Exception:
+        tok = ""
+
+join = "&" if tok else ""
+default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
+
+# SPECIAL CASE: izza-game-crafting → send to game auth instead
+slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+if slug == "izza-game-crafting":
+    game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
+    redirect_url = game_target
+else:
+    redirect_url = default_target
+
+return {"ok": True, "redirect_url": redirect_url}
 
 # --- Cancel endpoints compatible with your snippet (/payment/cancel & /payment/error) ---
 @app.post("/payment/cancel")
