@@ -205,6 +205,48 @@ const COIN_PER_PI = 2000;
     return cleaned;
   }catch(e){ return ''; }
 }
+  // Mirror the armoury-injected inventory entry into "My Creations"
+// Uses the injector's source of truth so it complies with Core v3 gating.
+function mirrorInjectedInventoryToMine(injected){
+  try{
+    const apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    if (!apiObj || typeof apiObj.getInventory !== 'function') return;
+
+    const inv = apiObj.getInventory() || {};
+
+    // Prefer an explicit id/key returned by the injector (best case)
+    let id = injected && (injected.id || injected.key) || '';
+
+    // Fallback: find the new craft_* by name/part if injector didn't return an id
+    if (!id){
+      const wantName = String(STATE.currentName||'').toLowerCase();
+      const wantPart = String(STATE.currentPart||'').toLowerCase();
+      id = Object.keys(inv).find(k=>{
+        if (!/^craft_/.test(k)) return false;
+        const e = inv[k];
+        const nm = String(e?.name||'').toLowerCase();
+        const pt = String(e?.part||'').toLowerCase();
+        return (nm === wantName) && (!pt || pt === wantPart);
+      }) || '';
+    }
+
+    const entry = id && inv[id];
+    if (!entry) return; // nothing to mirror (don’t break mint flow)
+
+    // Pick an icon/overlay the player will actually see in the card
+    const svg = entry.overlaySvg || entry.iconSvg || STATE.currentSVG || '';
+
+    addMintToMineLocal({
+      id,
+      name: entry.name || STATE.currentName || 'Untitled',
+      category: entry.category || STATE.currentCategory || 'armour',
+      part: entry.part || STATE.currentPart || 'helmet',
+      svg
+    });
+  }catch(e){
+    console.warn('[craft] mirrorInjectedInventoryToMine failed', e);
+  }
+}
 // --- UI helpers for AI wait state ---
 const MIN_AI_WAIT_MS = 10_000;
 const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
@@ -1401,19 +1443,12 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
     console.warn('[craft] persist failed:', e); // non-fatal
   }
 
-  // ✅ Immediately show in My Creations if that tab is mounted (local injector)
-  try{
-    addMintToMineLocal({
-      id: craftedId || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
-      name: STATE.currentName,
-      category: STATE.currentCategory,
-      part: STATE.currentPart,
-      svg: normalizedForSlot
-    });
-  }catch{}
+  // ✅ Mirror the armoury-injected inventory entry into My Creations
+// (Complies with Core v3: only injected items appear.)
+try { mirrorInjectedInventoryToMine(injected); } catch {}
 
-  // Optional reconcile with server (safe to keep one call)
-  try{ hydrateMine(); }catch{}
+// Optional reconcile with server (safe to keep one call)
+try { hydrateMine(); } catch {}
 
   // go back to Setup after a successful Mint
   STATE.createSub = 'setup';
