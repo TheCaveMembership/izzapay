@@ -147,6 +147,140 @@ def _ensure_game_profiles_columns():
 
 
 # -------------------- routes --------------------
+from flask import jsonify
+
+@app.get("/api/crafts/feed")
+def crafts_feed():
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=True, creations=[], purchases_ic=[], purchases_pi=[])
+
+    uid = u["id"]
+    with conn() as cx:
+        # Creations (items the player minted)
+        cx.execute("""
+        CREATE TABLE IF NOT EXISTS crafted_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          name TEXT,
+          svg TEXT,
+          sku TEXT,
+          image TEXT,
+          meta TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        rows_c = cx.execute(
+            "SELECT id, name, COALESCE(sku,'') AS sku, COALESCE(image,'') AS image, COALESCE(meta,'{}') AS meta "
+            "FROM crafted_items WHERE user_id=? ORDER BY id DESC LIMIT 500",
+            (uid,),
+        ).fetchall()
+        creations = [{
+            "id": r["id"],
+            "name": r["name"],
+            "sku": r["sku"],
+            "image": r["image"],
+            "meta": json.loads(r["meta"] or "{}")
+        } for r in rows_c]
+
+        # IC purchases (from your in-game shop)
+        cx.execute("""
+        CREATE TABLE IF NOT EXISTS ic_orders(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          title TEXT,
+          svg TEXT,
+          part TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        rows_ic = cx.execute(
+            "SELECT id, COALESCE(title,'') AS title, COALESCE(svg,'') AS svg, COALESCE(part,'') AS part "
+            "FROM ic_orders WHERE user_id=? ORDER BY id DESC LIMIT 500",
+            (uid,),
+        ).fetchall()
+        purchases_ic = [{
+            "id": r["id"],
+            "title": r["title"],
+            "svg": r["svg"],
+            "part": r["part"]
+        } for r in rows_ic]
+
+        # Pi purchases (from your Pi checkout bridge; keep 'claimed' flag)
+        cx.execute("""
+        CREATE TABLE IF NOT EXISTS pi_orders(
+          order_id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          title TEXT,
+          thumb_url TEXT,
+          store TEXT,
+          crafted_item_id TEXT,
+          claimed INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        rows_pi = cx.execute(
+            "SELECT order_id, COALESCE(title,'') AS title, COALESCE(thumb_url,'') AS thumb_url, "
+            "COALESCE(store,'') AS store, COALESCE(crafted_item_id,'') AS crafted_item_id, "
+            "COALESCE(claimed,0) AS claimed "
+            "FROM pi_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 500",
+            (uid,),
+        ).fetchall()
+        purchases_pi = [{
+            "order_id": r["order_id"],
+            "title": r["title"],
+            "thumb_url": r["thumb_url"],
+            "store": r["store"],
+            "crafted_item_id": r["crafted_item_id"],
+            "claimed": bool(r["claimed"])
+        } for r in rows_pi]
+
+    return jsonify(ok=True, creations=creations, purchases_ic=purchases_ic, purchases_pi=purchases_pi)
+
+@app.post("/api/collectibles/claim")
+def collectibles_claim():
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, error="not_logged_in"), 401
+
+    data = request.get_json(force=True) or {}
+    order_id = str(data.get("id") or "").strip()
+    if not order_id:
+        return jsonify(ok=False, error="missing_id"), 400
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT order_id, user_id, COALESCE(claimed,0) AS claimed, COALESCE(crafted_item_id,'') AS crafted_item_id "
+            "FROM pi_orders WHERE order_id=?", (order_id,)
+        ).fetchone()
+        if not row or int(row["user_id"]) != int(u["id"]):
+            return jsonify(ok=False, error="not_found"), 404
+        if int(row["claimed"]):
+            return jsonify(ok=True, already=True)
+
+        # Mark claimed
+        cx.execute("UPDATE pi_orders SET claimed=1 WHERE order_id=?", (order_id,))
+
+        # OPTIONAL: add to inventory
+        cx.execute("""
+        CREATE TABLE IF NOT EXISTS player_inventory(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          item_ref TEXT,    -- could be crafted_item_id or a SKU
+          source TEXT,      -- 'pi'
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        item_ref = row["crafted_item_id"] or order_id
+        cx.execute(
+            "INSERT INTO player_inventory(user_id, item_ref, source) VALUES(?,?,?)",
+            (u["id"], item_ref, "pi")
+        )
+
+    return jsonify(ok=True)
+
+@app.get("/crafts")
+def crafts_page():
+    """Serve the CRAFTS UI (your existing templates/game/crafts.html)."""
+    t = _get_bearer_token_from_request()
+    return render_template("game/crafts.html", t=t)
+
 @app.route("/auth")
 def game_auth():
     """
@@ -486,68 +620,6 @@ def _json_ok(**kw):
 def _json_err(reason="unknown"):
     return jsonify({"ok": False, "reason": str(reason)}), 400
 
-@crafting_api.post("/pi/approve")
-def crafting_pi_approve():
-    """
-    Called by Crafting UI when payment reaches 'ready for server approval'.
-    Approves on Pi Platform using server key.
-    """
-    data = request.get_json(silent=True) or {}
-    payment_id = (data.get("paymentId") or "").strip()
-    if not payment_id:
-        return _json_err("missing paymentId")
-    try:
-        r = requests.post(
-            f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
-            headers=pi_headers(),
-            json={},
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return _json_err(f"upstream approve failed ({r.status_code})")
-        return _json_ok(approved=True, paymentId=payment_id)
-    except Exception as e:
-        current_app.logger.exception("crafting_pi_approve failed")
-        return _json_err("server_error")
-
-@crafting_api.post("/pi/complete")
-def crafting_pi_complete():
-    """
-    Called by Crafting UI when payment is 'ready for server completion'.
-    Completes on Pi Platform using server key.
-    """
-    data = request.get_json(silent=True) or {}
-    payment_id = (data.get("paymentId") or "").strip()
-    txid = (data.get("txid") or "").strip()
-    if not payment_id:
-        return _json_err("missing paymentId")
-    try:
-        r = requests.post(
-            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
-            headers=pi_headers(),
-            json={"txid": txid} if txid else {},
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return _json_err(f"upstream complete failed ({r.status_code})")
-        return _json_ok(completed=True, paymentId=payment_id, txid=txid)
-    except Exception as e:
-        current_app.logger.exception("crafting_pi_complete failed")
-        return _json_err("server_error")
-
-@crafting_api.post("/ic/debit")
-def crafting_ic_debit():
-    """
-    Placeholder: debits IZZA Coins when paying with IC.
-    Returns ok=True so UI can proceed (wire to your ledger later).
-    """
-    data = request.get_json(silent=True) or {}
-    amount = int(data.get("amount") or 0)
-    try:
-        return _json_ok(debited=True, amount=amount)
-    except Exception as e:
-        current_app.logger.exception("crafting_ic_debit failed")
-        return _json_err("server_error")
 
 @crafting_api.post("/ai_svg")
 def crafting_ai_svg():
