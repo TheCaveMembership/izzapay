@@ -11,9 +11,41 @@ import requests
 import mimetypes
 
 # Local modules you already have
-from db import init_db, conn
-from emailer import send_email
-from payments import split_amounts
+# Local modules you already have
+try:
+    # If db.py exports ensure_schema, use it
+    from db import init_db, conn, ensure_schema
+except ImportError:
+    # Legacy/working layout: define the same ensure_schema locally
+    from db import init_db, conn
+
+    def ensure_schema():
+        with conn() as cx:
+            # merchants patches
+            cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+            if "pi_wallet_address" not in cols:
+                cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+            if "pi_handle" not in cols:
+                cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+            if "colorway" not in cols:
+                cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+
+            # carts & cart_items
+            cx.execute("""
+                CREATE TABLE IF NOT EXISTS carts(
+                  id TEXT PRIMARY KEY,
+                  merchant_id INTEGER NOT NULL,
+                  created_at INTEGER NOT NULL
+                )
+            """)
+            cx.execute("""
+                CREATE TABLE IF NOT EXISTS cart_items(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  cart_id TEXT NOT NULL,
+                  item_id INTEGER NOT NULL,
+                  qty INTEGER NOT NULL
+                )
+            """)
 
 # ----------------- ENV -----------------
 load_dotenv()
@@ -530,6 +562,7 @@ def require_admin():
 # ----------------- DB & SCHEMA -----------------
 init_db()
 setup_backups()
+ensure_schema()
 
 # --- Users & merchants table patches ---
 with conn() as cx:
