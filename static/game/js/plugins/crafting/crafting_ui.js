@@ -178,25 +178,35 @@ function applyCraftPaidFromURL() {
   try {
     const u = new URL(window.location.href);
     if (u.searchParams.get('craftPaid') === '1') {
-      // Add one credit, do NOT auto-unlock Visuals
-      incMintCredits(1);
-      STATE.mintCredits = getMintCredits();
+  // First ask server to reconcile new orders → credits
+  let credited = false;
+  try {
+    const r = await appJSON('/api/crafting/credits/reconcile', { method:'POST' });
+    credited = !!(r && r.ok);
+  } catch(_) {}
 
-      STATE.hasPaidForCurrentItem = false;
-      STATE.canUseVisuals = false;
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      STATE.createSub = 'setup';
+  // Pull canonical number
+  try { await syncCreditsFromServer(); } catch(_) {}
 
-      // Clean URL
-      u.searchParams.delete('craftPaid');
-      const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
-      history.replaceState(null, '', clean);
+  // Fallback (rare): if server didn’t grant for any reason, keep the old local path
+  if (!credited) {
+    incMintCredits(1);
+    STATE.mintCredits = getMintCredits();
+  }
 
-      // Re-render Create to show Setup (with Next if fields ready)
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host) { host.innerHTML = renderCreate(); bindInside(); }
-    }
-  } catch {}
+  STATE.hasPaidForCurrentItem = false;
+  STATE.canUseVisuals = false;
+  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+  STATE.createSub = 'setup';
+
+  // Clean URL
+  u.searchParams.delete('craftPaid');
+  const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
+  history.replaceState(null, '', clean);
+
+  // Re-render Create to show Setup (with Next if fields ready)
+  const host = STATE.root?.querySelector('#craftTabs');
+  if (host) { host.innerHTML = renderCreate(); bindInside(); }
 }
 
   function sanitizeSVG(svg){
@@ -1118,7 +1128,11 @@ if (!CSS.escape) {
   loadDraft();
 applyCraftPaidFromURL();
 await syncCreditsFromServer(); // NEW: server is the source of truth
-
+// Try server-side reconcile (same idea as /orders page)
+try {
+  await appJSON('/api/crafting/credits/reconcile', { method:'POST' });
+  await syncCreditsFromServer(); // pull updated credit count after reconcile
+} catch(_) { /* non-fatal */ }
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
 
