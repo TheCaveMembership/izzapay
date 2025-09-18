@@ -2135,15 +2135,15 @@ if u:
 join = "&" if tok else ""
 default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-# SPECIAL CASE: izza-game-crafting → send to game auth instead
-slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-if slug == "izza-game-crafting":
-    game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
-    redirect_url = game_target
-else:
-    redirect_url = default_target
+    # SPECIAL CASE: izza-game-crafting → send to game auth instead
+    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+    if slug == "izza-game-crafting":
+        game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
+        redirect_url = game_target
+    else:
+        redirect_url = default_target
 
-return {"ok": True, "redirect_url": redirect_url}
+    return {"ok": True, "redirect_url": redirect_url}
 
 # --- Cancel endpoints compatible with your snippet (/payment/cancel & /payment/error) ---
 @app.post("/payment/cancel")
@@ -2610,7 +2610,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
