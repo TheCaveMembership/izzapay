@@ -2104,7 +2104,7 @@ try:
             reply_to=merchant_mail
         )
 
-except Exception:
+    except Exception:
         pass
 
     # Redirect back to storefront with success flag (and token if available)
@@ -2128,7 +2128,6 @@ except Exception:
         redirect_url = default_target
 
     return {"ok": True, "redirect_url": redirect_url}
-
 # --- Cancel endpoints compatible with your snippet (/payment/cancel & /payment/error) ---
 @app.post("/payment/cancel")
 def payment_cancel():
