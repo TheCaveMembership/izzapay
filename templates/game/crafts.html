@@ -55,6 +55,7 @@
   (function(){
     const T = {{ (t and ('"'+t+'"')) or 'null' }};
     function api(url, opts={}){
+      // url can be relative (e.g., "api/crafts/feed") or absolute (e.g., "/api/crafting/credits/reconcile")
       const join = url.includes('?') ? '&' : '?';
       const final = T ? (url + join + 't=' + encodeURIComponent(T)) : url;
       return fetch(final, Object.assign({ credentials:'include' }, opts));
@@ -168,7 +169,8 @@
             btn.addEventListener('click', async ()=>{
               btn.disabled = true;
               try{
-                const res = await api('/api/collectibles/claim', {
+                // relative → /izza-game/api/collectibles/claim
+                const res = await api('api/collectibles/claim', {
                   method:'POST',
                   headers:{ 'Content-Type':'application/json' },
                   body: JSON.stringify({ id: row.id })
@@ -196,7 +198,8 @@
 
     async function load(){
       try{
-        const r = await api('/api/crafts/feed');
+        // relative → /izza-game/api/crafts/feed
+        const r = await api('api/crafts/feed');
         const j = await r.json();
         if(!j || !j.ok){ throw new Error('bad'); }
         renderCrafts(j.creations || []);
@@ -207,8 +210,8 @@
       }
     }
 
-    // If we returned from a Pi checkout and the URL included craftPaid=1,
-    // reconcile credits once so the Visuals step can unlock in the crafting UI.
+    // If returning from Pi checkout with ?craftPaid=1,
+    // reconcile credits on the MAIN app (absolute path).
     (async function reconcileIfNeeded(){
       const sp = new URLSearchParams(location.search);
       if(sp.get('craftPaid')==='1'){
