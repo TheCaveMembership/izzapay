@@ -288,7 +288,6 @@ function hideWait(node){
       window.dispatchEvent(new Event('izza-coins-changed'));
     }catch{}
   }
- 
 // === MINT CREDITS (stackable; 1 credit = 5 AI attempts) =====================
 function getMintCredits(){
   try { return parseInt(localStorage.getItem('izzaMintCredits')||'0',10) || 0; } catch { return 0; }
@@ -340,16 +339,6 @@ async function syncCreditsFromServer(){
     }
   }catch(e){ /* non-fatal */ }
 }
-  // === CREDIT HELPERS ==========================================================
-async function grantOneCredit(reason){
-  try{
-    const j = await appJSON('/api/crafting/credits/add', {
-      method: 'POST',
-      body: JSON.stringify({ qty: 1, reason: String(reason||'manual') })
-    });
-    return !!(j && j.ok);
-  }catch(_){ return false; }
-}
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
@@ -369,34 +358,14 @@ async function grantOneCredit(reason){
     }catch(e){ console.warn('[craft] Pi pay failed', e); return { ok:false, reason:String(e) }; }
   }
 
-  // Replace the payWithIC function
-// Replace the entire payWithIC with this
-async function payWithIC(amountIC){
-  // 0 IC promo/test: grant a credit on the server
-  if ((amountIC|0) === 0){
-    const ok = await grantOneCredit('ic-0');
-    if (ok){
-      try { await syncCreditsFromServer(); } catch(_) {}
-      return { ok:true, granted:true, amountIC:0 };
-    }
-    // last-resort local fallback so UI can proceed even if server missing
-    try { incMintCredits(1); } catch(_){}
-    return { ok:true, granted:true, amountIC:0, local:true };
+  async function payWithIC(amountIC){
+    const cur = getIC();
+    if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
+    setIC(cur - amountIC);
+    try{ await appJSON('/api/crafting/ic/debit', { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
+    return { ok:true };
   }
 
-  // Normal debit path (non-zero): use Flask via appJSON so cookies & CORS are right
-  const cur = getIC();
-  if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
-  setIC(cur - amountIC);
-  try{
-    await appJSON('/api/crafting/ic/debit', {
-      method:'POST',
-      body: JSON.stringify({ amount: amountIC })
-    });
-    await syncCreditsFromServer(); // refresh canonical balance
-  }catch(_){}
-  return { ok:true };
-}
   function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
@@ -818,7 +787,7 @@ async function openStatsModal(itemId){
   body.textContent = 'Loading…';
   try{
     // your server should return: { ok:true, stats:{ purchases: n, resales: n, revenueIC: n, revenuePi: n } }
-    const j = await appJSON(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`);
+    const j = await nodeJSON(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`);
     const st = (j && j.ok && j.stats) ? j.stats : { purchases:0, resales:0, revenueIC:0, revenuePi:0 };
     body.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -836,7 +805,7 @@ async function addToShop(itemId){
   try{
     // Optional: you can prompt for price here or use the stored price from creation
     // Server expects { ok:true } and will mark the item as inShop=true server-side
-    const j = await appJSON('/api/shop/add', {
+    const j = await nodeJSON('/api/shop/add', {
       method:'POST',
       body: JSON.stringify({ itemId })
     });
@@ -1060,7 +1029,7 @@ if (!CSS.escape) {
   async function fetchMarketplace(){
     try{
       // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
-      const j = await appJSON('/api/marketplace/list');
+      const j = await nodeJSON('/api/marketplace/list');
       return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
     }catch{
       return [];
@@ -1096,7 +1065,7 @@ if (!CSS.escape) {
       });
     });
   }
-  async function mount(rootSel){
+  function mount(rootSel){
   const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
   if (!root) return;
   STATE.root = root;
@@ -1472,20 +1441,19 @@ if (!unlocked){
       try{
         const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
-        const injected = await (
-  window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem === 'function'
-    ? window.ArmourPacks.injectCraftedItem({
-        name: STATE.currentName,
-        category: STATE.currentCategory,
-        part: STATE.currentPart,
-        svg: normalizedForSlot,
-        priceIC,
-        sellInShop,
-        sellInPi,
-        featureFlags: STATE.featureFlags
-      })
-    : { ok: false, reason: 'armour-packs-hook-missing' }
-);
+        const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+          ? window.ArmourPacks.injectCraftedItem({
+              name: STATE.currentName,
+              category: STATE.currentCategory,
+              part: STATE.currentPart,
+              svg: normalizedForSlot,
+              priceIC,
+              sellInShop,
+              sellInPi,
+              featureFlags: STATE.featureFlags
+            })
+          : { ok:false, reason:'armour-packs-hook-missing' };
+
         if (injected && injected.ok){
           craftStatus.textContent = 'Crafted ✓';
 
