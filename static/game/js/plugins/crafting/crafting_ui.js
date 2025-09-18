@@ -779,6 +779,62 @@ async function fetchMine(){
       </div>
     </div>`;
 }
+  // --- ADD: local prepend into "My Creations" without changing anything else ---
+function addMintToMineLocal(item){
+  const host = STATE.root?.querySelector('#mineList');
+  if (!host) return; // My Creations not mounted -> skip silently
+
+  // Prepend the new card
+  host.insertAdjacentHTML('afterbegin', mineCardHTML(Object.assign({ inShop:false }, item)));
+
+  // Wire minimal actions for THIS new card only
+  const card = host.firstElementChild;
+  if (!card) return;
+
+  const copyBtn = card.querySelector('[data-copy]');
+  if (copyBtn){
+    copyBtn.addEventListener('click', async ()=>{
+      try { await (navigator.clipboard?.writeText(item.svg || '')); alert('SVG copied'); } catch {}
+    }, { passive:true });
+  }
+
+  const equipBtn = card.querySelector('[data-equip]');
+  if (equipBtn){
+    equipBtn.addEventListener('click', ()=>{
+      try {
+        localStorage.setItem('izzaLastEquipped', JSON.stringify({
+          id:item.id, name:item.name, category:item.category, part:item.part, svg:item.svg
+        }));
+      } catch {}
+      try { IZZA?.emit?.('equip-crafted', item.id); } catch {}
+      try { IZZA?.emit?.('equip-crafted-v2', {
+        id:item.id, name:item.name, category:item.category, part:item.part, svg:item.svg
+      }); } catch {}
+    }, { passive:true });
+  }
+
+  const addShopBtn = card.querySelector('[data-addshop]');
+  if (addShopBtn){
+    addShopBtn.addEventListener('click', async ()=>{
+      const id = item.id;
+      addShopBtn.disabled = true;
+      const prev = addShopBtn.textContent;
+      addShopBtn.textContent = 'Adding…';
+      const ok = await addToShop(id);
+      if (ok){
+        addShopBtn.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
+        const statsBtn = card.querySelector(`[data-stats="${CSS.escape(String(id))}"]`);
+        if (statsBtn){
+          statsBtn.addEventListener('click', ()=> openStatsModal(id), { passive:true });
+        }
+      } else {
+        alert('Failed to add to shop');
+        addShopBtn.disabled = false;
+        addShopBtn.textContent = prev || 'Add to Shop';
+      }
+    }, { passive:true });
+  }
+}
   // --- NEW: Marketplace bundle card renderer ---
   function marketplaceCardHTML(b){
     // Expecting fields like: { id, name, svg, pricePi, creator }
@@ -1343,8 +1399,21 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
             if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
           }
         } catch(e) {
-          console.warn('[craft] persist failed:', e); // non-fatal
-        }
+  console.warn('[craft] persist failed:', e); // non-fatal
+}
+
+// Immediately show in My Creations if that tab is mounted
+try{
+  addMintToMineLocal({
+    id: craftedId || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+    name: STATE.currentName,
+    category: STATE.currentCategory,
+    part: STATE.currentPart,
+    svg: normalizedForSlot
+  });
+}catch{}
+
+try{ hydrateMine(); }catch{}
 
         try{ hydrateMine(); }catch{}
 // go back to Setup after a successful Mint
