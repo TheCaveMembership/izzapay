@@ -326,5 +326,67 @@ async function hydrateCollectibles(){
 
 document.addEventListener('DOMContentLoaded', hydrateCollectibles);
 </script>
+  <script>
+// --- Reconcile mint credits from visible "My Purchases" table ----------------
+// Matches:
+//  - Title exactly like "IZZA Game Crafting (single-use)"
+//  - OR store/row containing the checkout path ".../checkout/d0b811e8"
+// Status should look complete/paid/settled/approved (badge text).
+(async function reconcileCreditsFromOrders(){
+  // Preferred: let the server scan DB for this user and credit accordingly.
+  try {
+    const r = await fetch('/api/crafting/credits/reconcile', {
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      credentials:'include'
+    });
+    if (r.ok) return; // done
+  } catch(_) {}
+
+  // Fallback: scan the table rendered on the page
+  try{
+    const rows = document.querySelectorAll('.ip-table tbody tr');
+    if (!rows || !rows.length) return;
+    const matches = [];
+
+    rows.forEach(tr=>{
+      const title  = tr.querySelector('.col-item')?.textContent?.trim() || '';
+      const store  = tr.querySelector('.col-store')?.textContent?.trim() || '';
+      const id     = tr.querySelector('.col-num')?.textContent?.trim() || '';
+      const status = (tr.querySelector('.col-status .badge')?.textContent || '').toLowerCase();
+
+      const isCraftTitle = /^(IZZA\s+Game\s+Crafting\s*\(single-use\))$/i.test(title);
+      const isCraftStore = /\/checkout\/d0b811e8/i.test(store) || /izzapay\.onrender\.com\/checkout\/d0b811e8/i.test(store);
+      const isComplete   = /(complete|paid|settled|approved)/i.test(status);
+
+      if ((isCraftTitle || isCraftStore) && isComplete && id) {
+        matches.push(id);
+      }
+    });
+
+    if (!matches.length) return;
+
+    // Avoid double-claiming the same order from this browser
+    const key = 'izzaCreditedOrders';
+    const seen = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+
+    for (const oid of matches) {
+      if (seen.has(oid)) continue;
+      try{
+        const res = await fetch('/api/crafting/credits/claim_order', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          credentials:'include',
+          body: JSON.stringify({ order_id: oid })
+        }).then(r=>r.json()).catch(()=>null);
+        if (res && res.ok){
+          seen.add(oid);
+          localStorage.setItem(key, JSON.stringify(Array.from(seen)));
+        }
+      }catch(_){}
+    }
+  }catch(_){}
+})();
+</script>
 </body>
 </html>
