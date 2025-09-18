@@ -274,23 +274,8 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
   }
 
   async function payWithIC(amountIC){
-  // Even if price is 0 IC (testing), we still grant a mint credit.
-  try{
-    const ic = Math.max(0, parseInt(amountIC,10) || 0);
-    if (ic > 0){
-      const cur = getIC();
-      if (cur < ic) return { ok:false, reason:'not-enough-ic' };
-      setIC(cur - ic);
-      try{ await appJSON('/api/crafting/ic/debit', { method:'POST', body:JSON.stringify({ amount:ic }) }); }catch{}
-    }
-    // Grant one mint credit per purchase while packages are inactive
-    incMintCredits(1);
-    STATE.mintCredits = getMintCredits();
-    return { ok:true };
-  }catch(e){
-    return { ok:false, reason:String(e||'ic-failed') };
-  }
-};
+    const cur = getIC();
+    if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
     setIC(cur - amountIC);
     try{ await serverJSON(api('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
     return { ok:true };
