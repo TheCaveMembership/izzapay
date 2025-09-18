@@ -279,15 +279,29 @@ function showWait(text){
 function hideWait(node){
   try{ node && node.parentNode && node.parentNode.removeChild(node); }catch{}
 }
-  function getIC(){
-    try{ return parseInt(localStorage.getItem('izzaCoins')||'0',10)||0; }catch{ return 0; }
-  }
-  function setIC(v){
-    try{
-      localStorage.setItem('izzaCoins', String(Math.max(0, v|0)));
-      window.dispatchEvent(new Event('izza-coins-changed'));
-    }catch{}
-  }
+  // === IZZA Coins (game wallet) helpers — use IZZA.api if available; fall back to localStorage ===
+function getIC(){
+  try{
+    if (IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
+    const p = IZZA?.api?.player;
+    if (p && typeof p.coins === 'number') return p.coins|0;
+    return parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
+  }catch{ return 0; }
+}
+
+function setIC(v){
+  try{
+    const n = Math.max(0, v|0);
+    if (IZZA?.api?.setCoins) {
+      IZZA.api.setCoins(n);
+    } else if (IZZA?.api?.player && typeof IZZA.api.player === 'object') {
+      IZZA.api.player.coins = n;
+    }
+    // keep local mirror so UI still works if api isn’t ready yet
+    localStorage.setItem('izzaCoins', String(n));
+    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+  }catch{}
+}
  
 // === MINT CREDITS (stackable; 1 credit = 5 AI attempts) =====================
 function getMintCredits(){
