@@ -297,6 +297,48 @@ const CRAFTED_WEAPON_BOOST  = 0.75;  // crafted weapons (hands) → make bigger
     if(changed) _invWrite(inv);
   }
 
+// --- Minimal: mirror minted item into Crafting UI's "My Creations" if it's open
+function _maybeAppendMineCard(item){
+  try{
+    const host = document.querySelector('#mineList'); // only exists when My Creations tab is rendered
+    if (!host) return; // nothing to do if the UI isn't showing
+
+    const safeSvg = String(item.svg||'');
+    const idAttr = String(item.id||'').replace(/"/g,'&quot;');
+
+    const card = `
+      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
+        <div style="font-weight:700">${item.name||'Untitled'}</div>
+        <div style="opacity:.75;font-size:12px">${item.category||'?'} / ${item.part||'?'}</div>
+        <div style="margin-top:6px;border:1px solid #2a3550;border-radius:8px;background:#0b0f17;overflow:hidden;min-height:80px">
+          ${safeSvg || '<div style="opacity:.6;padding:10px;font-size:12px">No SVG</div>'}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button class="ghost" data-copy="${idAttr}">Copy SVG</button>
+          <button class="ghost" data-equip="${idAttr}">Equip</button>
+        </div>
+      </div>`;
+
+    host.insertAdjacentHTML('afterbegin', card);
+
+    const cardEl = host.firstElementChild;
+    if (!cardEl) return;
+
+    const copyBtn = cardEl.querySelector(`[data-copy="${CSS.escape(String(item.id))}"]`);
+    const equipBtn= cardEl.querySelector(`[data-equip="${CSS.escape(String(item.id))}"]`);
+
+    copyBtn && copyBtn.addEventListener('click', async ()=>{
+      try { await (navigator.clipboard?.writeText(item.svg||'')); alert('SVG copied'); } catch {}
+    }, { passive:true });
+
+    equipBtn && equipBtn.addEventListener('click', ()=>{
+      // Reuse existing game equip pipeline
+      try { IZZA?.emit?.('equip-crafted-v2', item); } catch {}
+    }, { passive:true });
+
+  }catch(e){ console.warn('[craft mirror] append failed', e); }
+}
+  
   // ---- One-time migration ----
   let _migratedOnce = false;
   function migrateArmorPackItems(){
@@ -729,6 +771,15 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
         try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
         try { IZZA?.requestRender?.(); } catch {}
 
+        // Mirror into Crafting UI "My Creations" (if that tab is currently visible)
+        _maybeAppendMineCard({
+          id: key,
+          name,
+          category: (type==='armor' ? 'armour' : 'weapon'),
+          part: String(input?.part||'helmet'),
+          svg: rawOverlaySvg || inlineSvg
+        });
+        
         // ---- optional: add to shop list (BUY tab) this session ----
         const sellInShop = !!input?.sellInShop;
         if (sellInShop){
