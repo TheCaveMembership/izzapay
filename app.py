@@ -2104,36 +2104,20 @@ try:
             reply_to=merchant_mail
         )
 
-    send_email(
-        merchant_mail,
-        subj_merchant,
-        f"""
-            <h2>You received a new order</h2>
-            {items_table}
-            <p style="margin:10px 0 0">
-              <small>Fees total: {fee_total:.7f} π • Net total: {net_total:.7f} π</small>
-            </p>
-            <h3 style="margin:16px 0 6px">Buyer</h3>
-            <div>{(buyer_name or '—')} ({(buyer_email or '—')})</div>
-            {shipping_html}
-            <p style="margin-top:10px"><small>TX: {tx_hash or '—'}</small></p>
-        """
-    )
+        except Exception:
+        pass
 
-except Exception:
-    pass
+    # Redirect back to storefront with success flag (and token if available)
+    u = current_user_row()
+    tok = ""
+    if u:
+        try:
+            tok = mint_login_token(u["id"])
+        except Exception:
+            tok = ""
 
-# Redirect back to storefront with success flag (and token if available)
-u = current_user_row()
-tok = ""
-if u:
-    try:
-        tok = mint_login_token(u["id"])
-    except Exception:
-        tok = ""
-
-join = "&" if tok else ""
-default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
+    join = "&" if tok else ""
+    default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
     # SPECIAL CASE: izza-game-crafting → send to game auth instead
     slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
