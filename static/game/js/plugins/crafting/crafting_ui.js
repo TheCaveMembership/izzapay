@@ -1128,13 +1128,13 @@ if (!CSS.escape) {
   STATE.root = root;
   STATE.mounted = true;
   loadDraft();
-applyCraftPaidFromURL();
+await applyCraftPaidFromURL();
 await syncCreditsFromServer(); // NEW: server is the source of truth
 // Try server-side reconcile (same idea as /orders page)
 try {
   await appJSON('/api/crafting/credits/reconcile', { method:'POST' });
-  await syncCreditsFromServer(); // pull updated credit count after reconcile
-} catch(_) { /* non-fatal */ }
+  await syncCreditsFromServer();
+} catch(_) {}
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
 
