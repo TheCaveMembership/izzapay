@@ -99,7 +99,7 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 (function(){
   const COSTS = Object.freeze({
   // --- Single-item TEST pricing (keep for now) ---
-  PER_ITEM_IC:   0,      // keep 0 IC for testing
+  PER_ITEM_IC:   5,      // keep 0 IC for testing
   PER_ITEM_PI:   0.1,    // keep 0.10 Pi for testing
 
   // --- Starter Forge package pricing (fix) ---
