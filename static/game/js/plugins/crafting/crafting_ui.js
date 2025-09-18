@@ -1098,11 +1098,29 @@ if (!CSS.escape) {
   if (!root) return;
   STATE.root = root;
   STATE.mounted = true;
-  loadDraft();
-  // Grant visuals if a Pi checkout completed while the player was away
-  reconcileCraftCredits();
-  root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
-  const tabsHost = root.querySelector('#craftTabs');
+loadDraft();
+
+// If they just came back from payment, server will mark credits on reconcile
+await reconcileCraftCredits();
+
+root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
+const tabsHost = root.querySelector('#craftTabs');
+
+// NEW: ask server how many credits we have and pick initial tab
+let initialTab = 'packages';
+try{
+  const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
+  if (s && s.ok && (s.credits|0) > 0){
+    STATE.hasPaidForCurrentItem = true;   // let them mint once
+    STATE.canUseVisuals = true;           // enable Visuals subtab
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset attempts per item
+    STATE.createSub = 'visuals';          // open the Visuals subtab
+    initialTab = 'create';                // and start on the Create tab
+  }
+}catch(_){}
+
+// Optional: if we set a breadcrumb on auth page, clear it now
+try{ localStorage.removeItem('izzaCraftGrantSeen'); }catch(_){}
 
 // Re-run reconcile whenever the tab gains focus again
 if (!window.__izzaReconHook){
@@ -1140,7 +1158,7 @@ if (!window.__izzaReconHook){
     b.addEventListener('click', ()=> setTab(b.dataset.tab));
   });
 
-  setTab('packages');
+  setTab(initialTab);
 }
 
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
