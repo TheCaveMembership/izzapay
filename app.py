@@ -532,8 +532,8 @@ def require_admin():
 init_db()
 setup_backups()
 
-def ensure_schema():
-    with conn() as cx:
+with conn:
+    u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
         # users table patch for in-game credits
 u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
 if "ic_credits" not in u_cols:
