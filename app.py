@@ -300,15 +300,15 @@ def create_product_from_craft():
 
 # --------------------------- REGISTER BLUEPRINTS --------------------------------
 # Do this once (ideally near your other app.register_blueprint calls).
-try:
+    try:
     app.register_blueprint(crafting_api)
-except Exception:
+    except Exception:
     # already registered or app not yet definedâmove this block to after `app = Flask(__name__)`
     pass
 
-try:
+    try:
     app.register_blueprint(merchant_api)
-except Exception:
+    except Exception:
     pass
 
 # ================== /Crafting UI â Flask bridge ==================
@@ -532,35 +532,39 @@ def require_admin():
 init_db()
 setup_backups()
 
-with conn:
+# --- Users & merchants table patches ---
+with conn() as cx:
     # users table patch for in-game credits
     u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
     if "ic_credits" not in u_cols:
         cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
 
     # merchants patches
-    cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-    if "pi_wallet_address" not in cols:
+    m_cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+    if "pi_wallet_address" not in m_cols:
         cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-    if "pi_handle" not in cols:
+    if "pi_handle" not in m_cols:
         cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-    if "colorway" not in cols:
+    if "colorway" not in m_cols:
         cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
-        # carts & cart_items
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS carts(
-              id TEXT PRIMARY KEY,
-              merchant_id INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
-            )""")
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS cart_items(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              cart_id TEXT NOT NULL,
-              item_id INTEGER NOT NULL,
-              qty INTEGER NOT NULL
-            )""")
+# --- Carts & cart_items must ALWAYS exist (not gated on colorway) ---
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS carts(
+          id TEXT PRIMARY KEY,
+          merchant_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+    """)
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS cart_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cart_id TEXT NOT NULL,
+          item_id INTEGER NOT NULL,
+          qty INTEGER NOT NULL
+        )
+    """)
 
 with conn() as cx:
     # items table patches for crafted linkage & description
@@ -1891,13 +1895,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
     buyer_name  =  buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
 
-    # --- NEW: robust buyer_user_id resolution (prefer session, else current user) ---
+    # --- Robust buyer_user_id resolution (prefer session, else current user) ---
     u_ctx = current_user_row()
     try:
         buyer_user_id = s["user_id"] if s["user_id"] is not None else (u_ctx["id"] if u_ctx else None)
     except Exception:
         buyer_user_id = (u_ctx["id"] if u_ctx else None)
-    # -------------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
     try:
         lines = json.loads(s["line_items_json"] or "[]")
@@ -1943,167 +1947,168 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            # === NEW: grant in-game item if applicable ===
+            # === Grant in-game item if applicable ===
             if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
                 try:
                     _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
                 except Exception:
-                    # donât fail checkout on grant error; log if you want
+                    # don't fail checkout on grant error
                     pass
-            # ============================================
-           # --- IC CREDITS: award credits for special crafted ids or SKUs ---
-try:
-    # Strategy 1: crafted_item_id like "ic:<amount>"  (e.g., "ic:500")
-    cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
-    awarded = 0
-    if cid.startswith("ic:"):
-        try:
-            unit = int(cid.split(":", 1)[1] or "0")
-        except Exception:
-            unit = 0
-        if unit > 0 and buyer_user_id:
-            awarded = unit * qty
-            add_ic_credits(int(buyer_user_id), awarded)
 
-    # Strategy 2 (fallback): SKU like "IC500" or "ic_500"
-    if not awarded:
-        sku = (it["sku"] or "").strip().lower() if it else ""
-        if sku.startswith("ic"):
-            import re
-            m = re.search(r"(\d+)", sku)
-            if m and buyer_user_id:
-                unit = int(m.group(1))
-                if unit > 0:
-                    awarded = unit * qty
-                    add_ic_credits(int(buyer_user_id), awarded)
-except Exception:
-    pass
+            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
+            try:
+                # Strategy 1: crafted_item_id like "ic:<amount>" (e.g., "ic:500")
+                cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
+                awarded = 0
+                if cid.startswith("ic:"):
+                    try:
+                        unit = int(cid.split(":", 1)[1] or "0")
+                    except Exception:
+                        unit = 0
+                    if unit > 0 and buyer_user_id:
+                        awarded = unit * qty
+                        add_ic_credits(int(buyer_user_id), awarded)
 
-# (dedented) create order row for this line
-buyer_token = uuid.uuid4().hex
-cur = cx.execute(
-    """INSERT INTO orders(
-         merchant_id,
-         item_id,
-         qty,
-         buyer_email,
-         buyer_name,
-         shipping_json,
-         pi_amount,
-         pi_fee,
-         pi_merchant_net,
-         pi_tx_hash,
-         payout_status,
-         status,
-         buyer_token,
-         buyer_user_id
-       )
-       VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
-    (
-        s["merchant_id"],
-        (it["id"] if it else None),
-        qty,
-        buyer_email,
-        buyer_name,
-        json.dumps(shipping),
-        float(line_gross),
-        float(line_fee),
-        float(line_net),
-        tx_hash,
-        buyer_token,
-        buyer_user_id,
-    ),
-)
-created_order_ids.append(cur.lastrowid)
+                # Strategy 2 (fallback): SKU like "IC500" or "ic_500"
+                if not awarded:
+                    sku = (it["sku"] or "").strip().lower() if it else ""
+                    if sku.startswith("ic"):
+                        import re
+                        match = re.search(r"(\d+)", sku)
+                        if match and buyer_user_id:
+                            unit = int(match.group(1))
+                            if unit > 0:
+                                awarded = unit * qty
+                                add_ic_credits(int(buyer_user_id), awarded)
+            except Exception:
+                pass
 
-cx.execute(
-    "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-    (tx_hash, s["id"])
-)
-    # ===== Emails (unchanged from your version, kept verbatim) =====
-try:
-    display_rows = []
-    for li in lines:
-        it = by_id.get(int(li["item_id"]))
-        title = (it["title"] if it else f"Item {li['item_id']}")
-        qty = int(li["qty"])
-        gross = float(li["price"]) * qty
-        display_rows.append({"title": title, "qty": qty, "gross": gross})
+            # Create order row for this line
+            buyer_token = uuid.uuid4().hex
+            cur = cx.execute(
+                """INSERT INTO orders(
+                     merchant_id,
+                     item_id,
+                     qty,
+                     buyer_email,
+                     buyer_name,
+                     shipping_json,
+                     pi_amount,
+                     pi_fee,
+                     pi_merchant_net,
+                     pi_tx_hash,
+                     payout_status,
+                     status,
+                     buyer_token,
+                     buyer_user_id
+                   )
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
+                (
+                    s["merchant_id"],
+                    (it["id"] if it else None),
+                    qty,
+                    buyer_email,
+                    buyer_name,
+                    json.dumps(shipping),
+                    float(line_gross),
+                    float(line_fee),
+                    float(line_net),
+                    tx_hash,
+                    buyer_token,
+                    buyer_user_id,
+                ),
+            )
+            created_order_ids.append(cur.lastrowid)
 
-    line_html = "".join(
-        f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
-        f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
-        f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} Ï</td></tr>"
-        for dr in display_rows
-    )
-    items_table = (
-        "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
-        "<thead><tr>"
-        "<th style='text-align:left; padding:6px 8px'>Item</th>"
-        "<th style='text-align:right; padding:6px 8px'>Qty</th>"
-        "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
-        "</tr></thead>"
-        f"<tbody>{line_html}</tbody>"
-        "<tfoot>"
-        f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-        f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} Ï</strong></td></tr>"
-        "</tfoot>"
-        "</table>"
-    )
-
-    merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
-
-    shipping_html = ""
-    if isinstance(shipping, dict):
-        name   = (shipping.get("name") or "").strip()
-        email  = (shipping.get("email") or "").strip()
-        phone  = (shipping.get("phone") or "").strip()
-        addr1  = (shipping.get("address") or "").strip()
-        addr2  = (shipping.get("address2") or "").strip()
-        city   = (shipping.get("city") or "").strip()
-        state  = (shipping.get("state") or "").strip()
-        postal = (shipping.get("postal_code") or "").strip()
-        country= (shipping.get("country") or "").strip()
-        any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
-        if any_shipping:
-            street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
-            locality_parts = [p for p in [city, state] if p]
-            locality_line = ", ".join(locality_parts)
-            if postal:
-                locality_line = (locality_line + " " if locality_line else "") + postal
-            block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
-            if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
-            if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
-            if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
-            if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
-            if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
-            if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
-            shipping_html = "".join(block)
-
-    # Email subjects (no walrus / no fancy ternary inside f-strings)
-    suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-    if suffix:
-        subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
-    else:
-        subj_buyer = f"Your order at {m['business_name']} is confirmed"
-
-    subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} Ï){suffix}"
-
-    if buyer_email:
-        send_email(
-            buyer_email,
-            subj_buyer,
-            f"""
-                <h2>Thanks for your order!</h2>
-                <p><strong>Store:</strong> {m['business_name']}</p>
-                {items_table}
-                <p style="margin-top:12px">
-                  Youâll receive updates from the merchant if anything changes.
-                </p>
-            """,
-            reply_to=merchant_mail
+        # Mark the session as paid
+        cx.execute(
+            "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+            (tx_hash, s["id"])
         )
 
+    # ===== Emails =====
+    try:
+        display_rows = []
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            title = (it["title"] if it else f"Item {li['item_id']}")
+            qty = int(li["qty"])
+            gross = float(li["price"]) * qty
+            display_rows.append({"title": title, "qty": qty, "gross": gross})
+
+        line_html = "".join(
+            f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
+            for dr in display_rows
+        )
+        items_table = (
+            "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
+            "<thead><tr>"
+            "<th style='text-align:left; padding:6px 8px'>Item</th>"
+            "<th style='text-align:right; padding:6px 8px'>Qty</th>"
+            "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
+            "</tr></thead>"
+            f"<tbody>{line_html}</tbody>"
+            "<tfoot>"
+            f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
+            f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
+            "</tfoot>"
+            "</table>"
+        )
+
+        merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+
+        shipping_html = ""
+        if isinstance(shipping, dict):
+            name   = (shipping.get("name") or "").strip()
+            email  = (shipping.get("email") or "").strip()
+            phone  = (shipping.get("phone") or "").strip()
+            addr1  = (shipping.get("address") or "").strip()
+            addr2  = (shipping.get("address2") or "").strip()
+            city   = (shipping.get("city") or "").strip()
+            state  = (shipping.get("state") or "").strip()
+            postal = (shipping.get("postal_code") or "").strip()
+            country= (shipping.get("country") or "").strip()
+            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
+            if any_shipping:
+                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
+                locality_parts = [p for p in [city, state] if p]
+                locality_line = ", ".join(locality_parts)
+                if postal:
+                    locality_line = (locality_line + " " if locality_line else "") + postal
+                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
+                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
+                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
+                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
+                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
+                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
+                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
+                shipping_html = "".join(block)
+
+        # Email subjects
+        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+        if suffix:
+            subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
+        else:
+            subj_buyer = f"Your order at {m['business_name']} is confirmed"
+
+        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+
+        if buyer_email:
+            send_email(
+                buyer_email,
+                subj_buyer,
+                f"""
+                    <h2>Thanks for your order!</h2>
+                    <p><strong>Store:</strong> {m['business_name']}</p>
+                    {items_table}
+                    <p style="margin-top:12px">
+                      You’ll receive updates from the merchant if anything changes.
+                    </p>
+                """,
+                reply_to=merchant_mail
+            )
     except Exception:
         pass
 
@@ -2119,7 +2124,7 @@ try:
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # SPECIAL CASE: izza-game-crafting â send to game auth instead
+    # SPECIAL CASE: izza-game-crafting → send to game auth instead
     slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
     if slug == "izza-game-crafting":
         game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
@@ -2128,43 +2133,6 @@ try:
         redirect_url = default_target
 
     return {"ok": True, "redirect_url": redirect_url}
-# --- Cancel endpoints compatible with your snippet (/payment/cancel & /payment/error) ---
-@app.post("/payment/cancel")
-def payment_cancel():
-    """
-    Accepts JSON or form with either 'paymentId' or 'payment_id'.
-    Best-effort cancel on Pi Platform + clear any local session referencing it.
-    """
-    try:
-        data = request.get_json(silent=True) or request.form or {}
-        payment_id = (data.get("paymentId") or data.get("payment_id") or "").strip()
-        if not payment_id:
-            return {"ok": False, "error": "missing_paymentId"}, 400
-
-        # Cancel on Pi Platform (best effort)
-        try:
-            r = requests.post(
-                f"{PI_API_BASE}/v2/payments/{payment_id}/cancel",
-                headers=pi_headers(),
-                json={},
-                timeout=12
-            )
-            status = r.status_code
-        except Exception:
-            status = 0  # network/other issue, we'll still clear local
-        # Clear any local session tied to this payment so the user can retry
-        try:
-            with conn() as cx:
-                cx.execute(
-                    "UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE pi_payment_id=?",
-                    (payment_id,)
-                )
-        except Exception:
-            pass
-
-        return {"ok": True, "status": status, "payment_id": payment_id}
-    except Exception:
-        return {"ok": False, "error": "server_error"}, 500
 
 
 @app.post("/payment/error")
