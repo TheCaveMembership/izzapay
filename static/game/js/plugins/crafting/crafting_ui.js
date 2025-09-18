@@ -296,6 +296,17 @@ const api = (p)=> (API_BASE ? API_BASE + p : p);
     return await r.json().catch(()=> ({}));
   }
 
+  // --- credit reconcile (server-first) ---
+async function reconcileCraftCredits(){
+  try{
+    await fetch(api('/api/crafting/credits/reconcile'), {
+      method:'POST',
+      headers:{ 'content-type':'application/json' },
+      credentials:'include'
+    });
+  }catch(_){ /* soft-fail */ }
+}
+
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
@@ -1088,10 +1099,19 @@ if (!CSS.escape) {
   STATE.root = root;
   STATE.mounted = true;
   loadDraft();
-
+  // Grant visuals if a Pi checkout completed while the player was away
+  reconcileCraftCredits();
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
 
+// Re-run reconcile whenever the tab gains focus again
+if (!window.__izzaReconHook){
+  document.addEventListener('visibilitychange', ()=>{
+    if (!document.hidden) reconcileCraftCredits();
+  }, { passive:true });
+  window.__izzaReconHook = true;
+}
+    
   const setTab = (name)=>{
     if(!STATE.mounted) return;
     if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
