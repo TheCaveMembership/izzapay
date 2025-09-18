@@ -327,63 +327,53 @@ async function hydrateCollectibles(){
 document.addEventListener('DOMContentLoaded', hydrateCollectibles);
 </script>
   <script>
-<!-- CREDIT RECONCILE: place this just before </body>, after hydrateCollectibles script -->
-<script>
-(async function reconcileCreditsFromOrders(){
-  // Try server-side reconcile first (preferred, idempotent)
-  try {
-    const r = await fetch('/api/crafting/credits/reconcile', {
+/* --- VISUALS UNLOCK RECONCILE (orders page) --- */
+(async function reconcileVisualsUnlocks(){
+  // 1) Server-first reconcile (no-op if your backend already handled it)
+  try{
+    const r = await fetch('/api/crafting/unlocks/reconcile', {
       method:'POST',
       headers:{'content-type':'application/json'},
       credentials:'include'
     });
-    if (r.ok) return; // server handled it
-  } catch(_) {}
+    if (r.ok) return;
+  }catch(_){} // fall back to client scan
 
-  // Fallback: scan visible table rows
+  // 2) Scan visible purchases table for our product
   try{
     const rows = document.querySelectorAll('.ip-table tbody tr');
     if (!rows.length) return;
+
     const matches = [];
-
     rows.forEach(tr=>{
-      const title  = tr.querySelector('.col-item')?.textContent?.trim() || '';
-      const store  = tr.querySelector('.col-store')?.textContent?.trim() || '';
-      const id     = tr.querySelector('.col-num')?.textContent?.trim() || '';
-      const status = (tr.querySelector('.col-status .badge')?.textContent || '').toLowerCase();
+      const title   = tr.querySelector('.col-item')?.textContent?.trim() || '';
+      const status  = (tr.querySelector('.col-status .badge')?.textContent || '').toLowerCase();
+      const orderId = tr.querySelector('.col-num')?.textContent?.trim() || '';
 
-      const isCraftTitle = /^(IZZA\s+Game\s+Crafting\s*\(single-use\))$/i.test(title);
-      const isCraftStore =
-        /izzapay\.onrender\.com\/checkout\/d0b811e8/i.test(store) ||
-        /\/checkout\/d0b811e8/i.test(store) ||
-        /izzapay\.onrender\.com\/store\/izza-game-crafting\/signin/i.test(store);
-
+      const isTargetTitle = /^IZZA\s+Game\s+Crafting\s*\(single-use\)$/i.test(title);
       const isComplete = /(complete|paid|settled|approved)/i.test(status);
 
-      if ((isCraftTitle || isCraftStore) && isComplete && id) {
-        matches.push(id);
-      }
+      if (isTargetTitle && isComplete && orderId) matches.push(orderId);
     });
 
     if (!matches.length) return;
 
-    // Idempotency across refreshes
-    const key = 'izzaCreditedOrders';
-    const seen = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    // Idempotent per order-id
+    const KEY = 'izzaUnlockOrdersClaimed';
+    const seen = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
 
-    for (const oid of matches) {
+    for (const oid of matches){
       if (seen.has(oid)) continue;
       try{
-        const res = await fetch('/api/crafting/credits/claim_order', {
+        const res = await fetch('/api/crafting/unlocks/claim_order', {
           method:'POST',
           headers:{'content-type':'application/json'},
           credentials:'include',
           body: JSON.stringify({ order_id: oid })
         }).then(r=>r.json()).catch(()=>null);
-
         if (res && res.ok){
           seen.add(oid);
-          localStorage.setItem(key, JSON.stringify(Array.from(seen)));
+          localStorage.setItem(KEY, JSON.stringify(Array.from(seen)));
         }
       }catch(_){}
     }
