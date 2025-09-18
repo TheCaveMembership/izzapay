@@ -1180,7 +1180,8 @@ if (!window.__izzaReconHook){
     if (status) status.textContent = 'Taking you to IZZA Pay checkout…';
 
     const u = encodeURIComponent(currentUsername() || '');
-    const back = encodeURIComponent(location.href);
+const back = encodeURIComponent('https://izzapay.onrender.com/izza-game/auth');
+location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${back}`;
     // IZZA Game Crafting (single-use) product checkout
     location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${back}`;
     return; // Orders page will grant visuals after payment
