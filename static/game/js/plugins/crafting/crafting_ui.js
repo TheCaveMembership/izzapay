@@ -366,6 +366,34 @@ async function syncCreditsFromServer(){
     }
   }catch(e){ /* non-fatal */ }
 }
+  // --- NEW: ensure user has Flask session via Pi auth ----------------
+async function ensureFlaskSession() {
+  // quick ping: if 200 and has a user, we already have a session cookie
+  try {
+    const me = await appJSON('/api/me', { method: 'GET' }); // backend should return {ok:true,user:{...}}
+    if (me && me.ok && me.user) return true;
+  } catch {}
+
+  // Otherwise, do Pi auth → exchange → cookie session
+  if (!window.Pi || !Pi.init) return false;
+  try {
+    Pi.init({ version: "2.0", sandbox: !!window.PI_SANDBOX });
+    const scopes = ['payments','username'];
+    const auth = await Pi.authenticate(scopes, ()=>{});
+    // Exchange for Flask session cookie
+    await appJSON('/auth/exchange', {
+      method: 'POST',
+      body: JSON.stringify({
+        accessToken: auth.accessToken,
+        user: auth.user
+      })
+    });
+    return true;
+  } catch(e) {
+    console.warn('Pi re-auth failed', e);
+    return false;
+  }
+}
   // === CREDIT HELPERS ==========================================================
 async function grantOneCredit(reason){
   try{
@@ -1127,10 +1155,16 @@ if (!CSS.escape) {
   if (!root) return;
   STATE.root = root;
   STATE.mounted = true;
-  loadDraft();
+  STATE.root = root;
+STATE.mounted = true;
+loadDraft();
+
+// NEW: ensure Flask session exists (re-auth with Pi if needed)
+await ensureFlaskSession();
+
 await applyCraftPaidFromURL();
 await syncCreditsFromServer(); // NEW: server is the source of truth
-// Try server-side reconcile (same idea as /orders page)
+// Try server-side reconcile ...
 try {
   await appJSON('/api/crafting/credits/reconcile', { method:'POST' });
   await syncCreditsFromServer();
