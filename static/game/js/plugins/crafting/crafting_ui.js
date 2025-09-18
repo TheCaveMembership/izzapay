@@ -5,15 +5,18 @@
 window.CRAFT_CHECKOUT_PATH = '/checkout/d0b811e8';                  // <-- your item checkout URL path
 
 function craftCheckoutURL({ totalPi, name, category, part }) {
-  const base = (window.IZZA_APP_BASE||'').replace(/\/+$/,'');
-  const p    = (window.CRAFT_CHECKOUT_PATH||'').replace(/^\/+/, ''); // "checkout/d0b811e8"
-  const title= name || `${category||'armour'}/${part||'helmet'} item`;
+  const base  = (window.IZZA_APP_BASE||'').replace(/\/+$/,'');   // https://izzapay.onrender.com
+  const p     = (window.CRAFT_CHECKOUT_PATH||'').replace(/^\/+/, ''); // "checkout/xxxx"
+  const title = name || `${category||'armour'}/${part||'helmet'} item`;
+
+  // **Force landing on Create with craftPaid=1 so we reconcile**
+  const returnTo = `${base}/izza-game/create?craftPaid=1`;
 
   const q = new URLSearchParams({
     from: 'craft',
     title,
     amount: String(totalPi || 0),
-    return_to: window.location.href    // we’ll bounce back to the game here
+    return_to: returnTo
   });
 
   return `${base}/${p}?${q.toString()}`;
