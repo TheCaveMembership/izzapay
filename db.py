@@ -111,4 +111,11 @@ def init_db():
           tx_hash TEXT,
           created_at INTEGER
         );
+                CREATE TABLE IF NOT EXISTS collectible_claims(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          order_id INTEGER NOT NULL UNIQUE,
+          user_id  INTEGER NOT NULL,
+          claimed_at INTEGER NOT NULL,
+          FOREIGN KEY(order_id) REFERENCES orders(id)
+        );
         """)
