@@ -1126,43 +1126,46 @@ if (!CSS.escape) {
   function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
 
     async function handleBuySingle(kind, enforceForm){
-        // Enforce required fields only when invoked from the Create tab
+  // Enforce required fields only when invoked from the Create tab
   if (enforceForm && !isCreateFormValid()){
     const status = document.getElementById('payStatus');
     if (status) status.textContent = 'Fill Category, Part/Type, and Item Name first.';
     updatePayButtonsState();
     return;
   }
-    const usePi = (kind==='pi');
-    const total = calcTotalCost({ usePi });
-    let res;
-    if (usePi) res = await payWithPi(total, 'Craft Single Item');
-    else       res = await payWithIC(total);
 
-    const status = document.getElementById('payStatus'); // present in Create tab
-    if (res && res.ok){
-      // unlock visuals + reset attempts + route to Visuals
-      STATE.hasPaidForCurrentItem = true;
-      STATE.canUseVisuals = true;
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset to 5 (or whatever in COSTS)
-      if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
+  const usePi = (kind === 'pi');
 
-      // force Visuals subtab
-      STATE.createSub = 'visuals';
+  // ---------- Pi path: REDIRECT to IZZA Pay checkout (no local unlock) ----------
+  if (usePi) {
+    const status = document.getElementById('payStatus');
+    if (status) status.textContent = 'Taking you to IZZA Pay checkout…';
 
-      // if we are not currently on the Create tab, switch to it;
-      // if already there, just re-render to show Visuals.
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){
-        host.innerHTML = renderCreate();
-        bindInside();
-      }
-    } else {
-      if (status) status.textContent='Payment failed.';
-      // keep visuals locked on failure
-      STATE.canUseVisuals = false;
-    }
+    const u = encodeURIComponent(currentUsername() || '');
+    const back = encodeURIComponent(location.href);
+    // IZZA Game Crafting (single-use) product checkout
+    location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${back}`;
+    return; // Orders page will grant visuals after payment
   }
+
+  // ---------- IC path: unchanged ----------
+  const total = calcTotalCost({ usePi:false });
+  const res = await payWithIC(total);
+
+  const status = document.getElementById('payStatus'); // present in Create tab
+  if (res && res.ok){
+    STATE.hasPaidForCurrentItem = true;
+    STATE.canUseVisuals = true;
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
+    STATE.createSub = 'visuals';
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){ host.innerHTML = renderCreate(); bindInside(); }
+  } else {
+    if (status) status.textContent='Payment failed.';
+    STATE.canUseVisuals = false;
+  }
+}
 
   function bindInside(){
   const root = STATE.root;
