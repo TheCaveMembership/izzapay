@@ -1951,14 +1951,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     # don’t fail checkout on grant error; log if you want
                     pass
             # ============================================
-            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
+           # --- IC CREDITS: award credits for special crafted ids or SKUs ---
 try:
     # Strategy 1: crafted_item_id like "ic:<amount>"  (e.g., "ic:500")
     cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
     awarded = 0
     if cid.startswith("ic:"):
         try:
-            unit = int(cid.split(":",1)[1] or "0")
+            unit = int(cid.split(":", 1)[1] or "0")
         except Exception:
             unit = 0
         if unit > 0 and buyer_user_id:
@@ -1969,7 +1969,6 @@ try:
     if not awarded:
         sku = (it["sku"] or "").strip().lower() if it else ""
         if sku.startswith("ic"):
-            # pull trailing digits
             import re
             m = re.search(r"(\d+)", sku)
             if m and buyer_user_id:
@@ -1980,43 +1979,47 @@ try:
 except Exception:
     pass
 
-            buyer_token = uuid.uuid4().hex
-            cur = cx.execute(
-                """INSERT INTO orders(
-                     merchant_id,
-                     item_id,
-                     qty,
-                     buyer_email,
-                     buyer_name,
-                     shipping_json,
-                     pi_amount,
-                     pi_fee,
-                     pi_merchant_net,
-                     pi_tx_hash,
-                     payout_status,
-                     status,
-                     buyer_token,
-                     buyer_user_id
-                   )
-                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
-                (
-                    s["merchant_id"],
-                    (it["id"] if it else None),
-                    qty,
-                    buyer_email,
-                    buyer_name,
-                    json.dumps(shipping),
-                    float(line_gross),
-                    float(line_fee),
-                    float(line_net),
-                    tx_hash,
-                    buyer_token,
-                    buyer_user_id,
-                ),
-            )
-            created_order_ids.append(cur.lastrowid)
+# (dedented) create order row for this line
+buyer_token = uuid.uuid4().hex
+cur = cx.execute(
+    """INSERT INTO orders(
+         merchant_id,
+         item_id,
+         qty,
+         buyer_email,
+         buyer_name,
+         shipping_json,
+         pi_amount,
+         pi_fee,
+         pi_merchant_net,
+         pi_tx_hash,
+         payout_status,
+         status,
+         buyer_token,
+         buyer_user_id
+       )
+       VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
+    (
+        s["merchant_id"],
+        (it["id"] if it else None),
+        qty,
+        buyer_email,
+        buyer_name,
+        json.dumps(shipping),
+        float(line_gross),
+        float(line_fee),
+        float(line_net),
+        tx_hash,
+        buyer_token,
+        buyer_user_id,
+    ),
+)
+created_order_ids.append(cur.lastrowid)
 
-        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
+cx.execute(
+    "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+    (tx_hash, s["id"])
+)
     # ===== Emails (unchanged from your version, kept verbatim) =====
     try:
         display_rows = []
