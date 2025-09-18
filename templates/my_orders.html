@@ -327,26 +327,23 @@ async function hydrateCollectibles(){
 document.addEventListener('DOMContentLoaded', hydrateCollectibles);
 </script>
   <script>
-// --- Reconcile mint credits from visible "My Purchases" table ----------------
-// Matches:
-//  - Title exactly like "IZZA Game Crafting (single-use)"
-//  - OR store/row containing the checkout path ".../checkout/d0b811e8"
-// Status should look complete/paid/settled/approved (badge text).
+<!-- CREDIT RECONCILE: place this just before </body>, after hydrateCollectibles script -->
+<script>
 (async function reconcileCreditsFromOrders(){
-  // Preferred: let the server scan DB for this user and credit accordingly.
+  // Try server-side reconcile first (preferred, idempotent)
   try {
     const r = await fetch('/api/crafting/credits/reconcile', {
       method:'POST',
       headers:{'content-type':'application/json'},
       credentials:'include'
     });
-    if (r.ok) return; // done
+    if (r.ok) return; // server handled it
   } catch(_) {}
 
-  // Fallback: scan the table rendered on the page
+  // Fallback: scan visible table rows
   try{
     const rows = document.querySelectorAll('.ip-table tbody tr');
-    if (!rows || !rows.length) return;
+    if (!rows.length) return;
     const matches = [];
 
     rows.forEach(tr=>{
@@ -356,8 +353,12 @@ document.addEventListener('DOMContentLoaded', hydrateCollectibles);
       const status = (tr.querySelector('.col-status .badge')?.textContent || '').toLowerCase();
 
       const isCraftTitle = /^(IZZA\s+Game\s+Crafting\s*\(single-use\))$/i.test(title);
-      const isCraftStore = /\/checkout\/d0b811e8/i.test(store) || /izzapay\.onrender\.com\/checkout\/d0b811e8/i.test(store);
-      const isComplete   = /(complete|paid|settled|approved)/i.test(status);
+      const isCraftStore =
+        /izzapay\.onrender\.com\/checkout\/d0b811e8/i.test(store) ||
+        /\/checkout\/d0b811e8/i.test(store) ||
+        /izzapay\.onrender\.com\/store\/izza-game-crafting\/signin/i.test(store);
+
+      const isComplete = /(complete|paid|settled|approved)/i.test(status);
 
       if ((isCraftTitle || isCraftStore) && isComplete && id) {
         matches.push(id);
@@ -366,7 +367,7 @@ document.addEventListener('DOMContentLoaded', hydrateCollectibles);
 
     if (!matches.length) return;
 
-    // Avoid double-claiming the same order from this browser
+    // Idempotency across refreshes
     const key = 'izzaCreditedOrders';
     const seen = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
 
@@ -379,6 +380,7 @@ document.addEventListener('DOMContentLoaded', hydrateCollectibles);
           credentials:'include',
           body: JSON.stringify({ order_id: oid })
         }).then(r=>r.json()).catch(()=>null);
+
         if (res && res.ok){
           seen.add(oid);
           localStorage.setItem(key, JSON.stringify(Array.from(seen)));
