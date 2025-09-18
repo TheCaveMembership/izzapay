@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en" data-no-global-i18n="1">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>CRAFTS</title>
+  <style>
+    :root { --bg:#0b0c10; --card:#13151b; --text:#e7ecf3; --sub:#96a2b3; --accent:#4ad4ff; --chip:#273042; --good:#22cc88; --warn:#ffae3a; --pi:#6cc1ff; --ic:#ffd54a; }
+    html,body { margin:0; padding:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,Segoe UI,Roboto,Ubuntu,sans-serif; }
+    .shell { max-width:960px; margin:0 auto; padding:16px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    header h1 { font-size:18px; margin:0; letter-spacing:.3px; }
+    .tabs { display:flex; gap:6px; }
+    .tab { padding:8px 12px; border-radius:8px; background:var(--card); cursor:pointer; user-select:none; border:1px solid #1f2330; }
+    .tab.active { outline:2px solid var(--accent); }
+    .list { display:grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:10px; margin-top:12px; }
+    .card { background:var(--card); border:1px solid #1f2330; border-radius:12px; padding:10px; display:flex; gap:10px; }
+    .thumb { width:64px; height:64px; background:#0f1118; border-radius:8px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .thumb img { width:100%; height:100%; object-fit:cover; }
+    .meta { flex:1; min-width:0; }
+    .title { font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sub { color:var(--sub); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
+    .chip { background:var(--chip); color:#dce7f6; padding:2px 8px; border-radius:999px; font-size:12px; }
+    .chip.ic { background:rgba(255,213,74,.15); color:var(--ic); border:1px solid rgba(255,213,74,.35); }
+    .chip.pi { background:rgba(108,193,255,.15); color:var(--pi); border:1px solid rgba(108,193,255,.35); }
+    .btn { padding:6px 10px; border-radius:8px; border:0; cursor:pointer; }
+    .btn-claim { background:var(--good); color:#0b2a19; }
+    .btn-claimed { background:#1d2a22; color:#7fdab2; cursor:default; }
+    .empty { opacity:.8; text-align:center; padding:24px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <h1>CRAFTS</h1>
+      <div class="tabs">
+        <div id="tabCrafts" class="tab active">My Creations</div>
+        <div id="tabPurchases" class="tab">Purchases</div>
+      </div>
+    </header>
+
+    <section id="viewCrafts">
+      <div id="craftsList" class="list"></div>
+      <div id="craftsEmpty" class="empty" style="display:none">No creations yet.</div>
+    </section>
+
+    <section id="viewPurchases" style="display:none">
+      <div id="purchasesList" class="list"></div>
+      <div id="purchasesEmpty" class="empty" style="display:none">No collectibles yet.</div>
+    </section>
+  </div>
+
+  <script>
+  (function(){
+    const T = {{ (t and ('"'+t+'"')) or 'null' }};
+    function api(url, opts={}){
+      const join = url.includes('?') ? '&' : '?';
+      const final = T ? (url + join + 't=' + encodeURIComponent(T)) : url;
+      return fetch(final, Object.assign({ credentials:'include' }, opts));
+    }
+    const $ = sel => document.querySelector(sel);
+
+    // Tabs
+    const tabCrafts = $('#tabCrafts');
+    const tabPurch  = $('#tabPurchases');
+    const viewCrafts = $('#viewCrafts');
+    const viewPurch  = $('#viewPurchases');
+    function show(which){
+      const onCrafts = (which==='crafts');
+      tabCrafts.classList.toggle('active', onCrafts);
+      tabPurch.classList.toggle('active', !onCrafts);
+      viewCrafts.style.display = onCrafts ? '' : 'none';
+      viewPurch.style.display  = onCrafts ? 'none' : '';
+    }
+    tabCrafts.addEventListener('click', ()=> show('crafts'));
+    tabPurch.addEventListener('click', ()=> show('purchases'));
+
+    // Helpers
+    function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstElementChild; }
+    function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+    function renderCrafts(creations){
+      const list = $('#craftsList');
+      const empty = $('#craftsEmpty');
+      list.innerHTML = '';
+      if(!creations || !creations.length){ empty.style.display=''; return; }
+      empty.style.display='none';
+      creations.forEach(r=>{
+        const thumb = r.image ? `<img src="${esc(r.image)}" alt="">`
+                              : `<div style="font-size:11px; color:#8aa1b7">No Image</div>`;
+        const meta  = r.meta || {};
+        list.appendChild(el(`
+          <div class="card">
+            <div class="thumb">${thumb}</div>
+            <div class="meta">
+              <div class="title">${esc(r.name||'Untitled')}</div>
+              <div class="sub">${esc(meta.part||meta.slot||r.sku||'')}</div>
+              <div class="row">
+                <span class="chip">Created</span>
+                <span style="color:var(--sub); font-size:12px;">#${r.id}</span>
+              </div>
+            </div>
+          </div>
+        `));
+      });
+    }
+
+    function renderPurchases(purchases_ic, purchases_pi){
+      const list = $('#purchasesList');
+      const empty = $('#purchasesEmpty');
+      list.innerHTML = '';
+
+      const rows = [];
+      (purchases_ic||[]).forEach(r=>{
+        rows.push({
+          kind:'ic',
+          title: r.title,
+          sub: r.part || r.slot || r.crafted_key || '',
+          thumb: r.svg ? `data:image/svg+xml;utf8,${encodeURIComponent(r.svg)}` : '',
+          id: r.id
+        });
+      });
+      (purchases_pi||[]).forEach(r=>{
+        rows.push({
+          kind:'pi',
+          title: r.title,
+          sub: r.store || r.crafted_item_id || '',
+          thumb: r.thumb_url || '',
+          id: r.order_id,
+          claimed: !!r.claimed
+        });
+      });
+
+      if(!rows.length){ empty.style.display=''; return; }
+      empty.style.display='none';
+
+      rows.forEach(row=>{
+        const badge = row.kind==='ic'
+          ? `<span class="chip ic">IC</span>`
+          : `<span class="chip pi">Pi</span>`;
+        const thumb = row.thumb
+          ? `<img src="${esc(row.thumb)}" alt="">`
+          : `<div style="font-size:11px; color:#8aa1b7">No Image</div>`;
+
+        const card = el(`
+          <div class="card" data-kind="${row.kind}" data-id="${row.id}">
+            <div class="thumb">${thumb}</div>
+            <div class="meta">
+              <div class="title">${esc(row.title||'Untitled')}</div>
+              <div class="sub">${esc(row.sub||'')}</div>
+              <div class="row">
+                ${badge}
+                <div class="sp"></div>
+                <div class="actions"></div>
+              </div>
+            </div>
+          </div>
+        `);
+
+        // Claim button for unclaimed Pi purchases
+        if(row.kind==='pi'){
+          const actions = card.querySelector('.actions');
+          if(row.claimed){
+            actions.appendChild(el(`<button class="btn btn-claimed" disabled>Claimed</button>`));
+          }else{
+            const btn = el(`<button class="btn btn-claim">Claim</button>`);
+            btn.addEventListener('click', async ()=>{
+              btn.disabled = true;
+              try{
+                const res = await api('/api/collectibles/claim', {
+                  method:'POST',
+                  headers:{ 'Content-Type':'application/json' },
+                  body: JSON.stringify({ id: row.id })
+                });
+                const j = await res.json();
+                if(j && j.ok){
+                  btn.textContent = 'Claimed';
+                  btn.className = 'btn btn-claimed';
+                }else{
+                  btn.disabled = false;
+                  alert('Claim failed');
+                }
+              }catch{
+                btn.disabled = false;
+                alert('Claim failed');
+              }
+            });
+            actions.appendChild(btn);
+          }
+        }
+
+        list.appendChild(card);
+      });
+    }
+
+    async function load(){
+      try{
+        const r = await api('/api/crafts/feed');
+        const j = await r.json();
+        if(!j || !j.ok){ throw new Error('bad'); }
+        renderCrafts(j.creations || []);
+        renderPurchases(j.purchases_ic || [], j.purchases_pi || []);
+      }catch(e){
+        $('#craftsEmpty').style.display='';
+        $('#purchasesEmpty').style.display='';
+      }
+    }
+
+    // If we returned from a Pi checkout and the URL included craftPaid=1,
+    // reconcile credits once so the Visuals step can unlock in the crafting UI.
+    (async function reconcileIfNeeded(){
+      const sp = new URLSearchParams(location.search);
+      if(sp.get('craftPaid')==='1'){
+        try { await api('/api/crafting/credits/reconcile'); } catch {}
+      }
+    })();
+
+    load();
+  })();
+  </script>
+</body>
+</html>
