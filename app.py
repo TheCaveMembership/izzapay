@@ -47,6 +47,14 @@ except ImportError:
                   qty INTEGER NOT NULL
                 )
             """)
+            with conn() as cx:
+    cx.execute("""
+      CREATE TABLE IF NOT EXISTS crafting_credit_claims(
+        order_id INTEGER PRIMARY KEY,   -- 1 row per order, prevents duplicates
+        user_id  INTEGER NOT NULL,
+        claimed_at INTEGER NOT NULL
+      )
+    """)
 
 # ----------------- ENV -----------------
 load_dotenv()
@@ -60,7 +68,8 @@ BASE_ORIGIN   = APP_BASE_URL
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 # NEW: LibreTranslate endpoint for browser-safe proxying
 LIBRE_EP = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
-
+# The product that represents a single-use crafting credit
+SINGLE_CREDIT_LINK_ID = "d0b811e8"  # checkout/<this>
 # Optional: estimated USD per ÃÂ to display conversion on /orders (0 disables)
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
@@ -209,14 +218,46 @@ def crafting_ic_balance():
 @crafting_api.post("/credits/reconcile")
 def crafting_ic_reconcile():
     """
-    Idempotent 'confirm my credits after checkout'. We already award credits
-    during /payment/complete, so this just re-reads the balance.
+    Server-side, idempotent: look for any PAID orders for the single-use
+    mint product that haven't been claimed yet by this user, grant +qty
+    credits, and return the updated balance.
     """
     u = current_user_row()
     if not u:
         return _err("auth_required")
-    bal = get_ic_credits(int(u["id"]))
-    return _ok(reconciled=True, credits=bal)
+
+    uid = int(u["id"])
+
+    # Find paid orders for our single-credit product that are not yet claimed
+    with conn() as cx:
+        rows = cx.execute("""
+            SELECT o.id, o.qty
+            FROM orders o
+            JOIN items i ON i.id = o.item_id
+            WHERE o.buyer_user_id = ?
+              AND o.status = 'paid'
+              AND i.link_id = ?
+              AND NOT EXISTS (
+                    SELECT 1 FROM crafting_credit_claims c
+                    WHERE c.order_id = o.id
+              )
+        """, (uid, SINGLE_CREDIT_LINK_ID)).fetchall()
+
+        total_new = sum(int(r["qty"] or 0) for r in rows)
+
+        if total_new > 0:
+            # Award and mark claimed atomically
+            newbal = add_ic_credits(uid, total_new)
+            now = int(time.time())
+            for r in rows:
+                cx.execute(
+                    "INSERT INTO crafting_credit_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
+                    (int(r["id"]), uid, now)
+                )
+        else:
+            newbal = get_ic_credits(uid)
+
+    return _ok(reconciled=True, awarded=(total_new if rows else 0), credits=newbal)
 
 @crafting_api.get("/mine")
 def crafting_mine_get():
@@ -313,7 +354,54 @@ def crafting_mine_post():
         """, (u["id"], name, sku, image, json.dumps(meta, separators=(",", ":")), int(time.time())))
     return _ok(saved=True)
 
+@crafting_api.post("/credits/claim_order")
+def crafting_ic_claim_order():
+    """
+    Fallback endpoint used by my_orders.html when it scans visible table rows.
+    Body: { order_id }
+    If that order is the single-use mint and paid, grant +qty once.
+    """
+    u = current_user_row()
+    if not u:
+        return _err("auth_required")
 
+    data = request.get_json(silent=True) or {}
+    try:
+        oid = int(data.get("order_id") or 0)
+    except Exception:
+        oid = 0
+    if oid <= 0:
+        return _err("bad_id")
+
+    uid = int(u["id"])
+
+    with conn() as cx:
+        r = cx.execute("""
+            SELECT o.id, o.qty
+            FROM orders o
+            JOIN items i ON i.id = o.item_id
+            WHERE o.id = ? AND o.buyer_user_id = ? AND o.status='paid' AND i.link_id = ?
+        """, (oid, uid, SINGLE_CREDIT_LINK_ID)).fetchone()
+
+        if not r:
+            return _err("not_eligible")
+
+        # Already claimed?
+        dup = cx.execute("SELECT 1 FROM crafting_credit_claims WHERE order_id=?", (oid,)).fetchone()
+        if dup:
+            bal = get_ic_credits(uid)
+            return _ok(already=True, credits=bal)
+
+        # Award + mark claimed
+        qty = int(r["qty"] or 1)
+        newbal = add_ic_credits(uid, qty)
+        cx.execute(
+            "INSERT INTO crafting_credit_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
+            (oid, uid, int(time.time()))
+        )
+
+    return _ok(awarded=True, amount=qty, credits=newbal)
+    
 # --------------------------- MERCHANT ROUTES ------------------------------------
 
 @merchant_api.post("/create_product_from_craft")
