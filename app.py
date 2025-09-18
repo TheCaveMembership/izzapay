@@ -533,19 +533,19 @@ init_db()
 setup_backups()
 
 with conn:
+    # users table patch for in-game credits
     u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
-        # users table patch for in-game credits
-u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
-if "ic_credits" not in u_cols:
-    cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
-        # merchants patches
-        cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-        if "pi_handle" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+    if "ic_credits" not in u_cols:
+        cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
+
+    # merchants patches
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+    if "pi_wallet_address" not in cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+    if "pi_handle" not in cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+    if "colorway" not in cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
 
         # carts & cart_items
         cx.execute("""
