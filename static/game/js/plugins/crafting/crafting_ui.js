@@ -174,39 +174,41 @@ const COIN_PER_PI = 2000;
   }
   
 // If user returns with ?craftPaid=1, unlock visuals
-function applyCraftPaidFromURL() {
+async function applyCraftPaidFromURL() {
   try {
     const u = new URL(window.location.href);
     if (u.searchParams.get('craftPaid') === '1') {
-  // First ask server to reconcile new orders → credits
-  let credited = false;
-  try {
-    const r = await appJSON('/api/crafting/credits/reconcile', { method:'POST' });
-    credited = !!(r && r.ok);
-  } catch(_) {}
+      // First ask server to reconcile new orders → credits
+      let credited = false;
+      try {
+        const r = await appJSON('/api/crafting/credits/reconcile', { method: 'POST' });
+        credited = !!(r && r.ok);
+      } catch (_) {}
 
-  // Pull canonical number
-  try { await syncCreditsFromServer(); } catch(_) {}
+      // Pull canonical number
+      try { await syncCreditsFromServer(); } catch (_) {}
 
-  // Fallback (rare): if server didn’t grant for any reason, keep the old local path
-  if (!credited) {
-    incMintCredits(1);
-    STATE.mintCredits = getMintCredits();
-  }
+      // Fallback (rare): if server didn’t grant for any reason, keep the old local path
+      if (!credited) {
+        incMintCredits(1);
+        STATE.mintCredits = getMintCredits();
+      }
 
-  STATE.hasPaidForCurrentItem = false;
-  STATE.canUseVisuals = false;
-  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-  STATE.createSub = 'setup';
+      STATE.hasPaidForCurrentItem = false;
+      STATE.canUseVisuals = false;
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      STATE.createSub = 'setup';
 
-  // Clean URL
-  u.searchParams.delete('craftPaid');
-  const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
-  history.replaceState(null, '', clean);
+      // Clean URL
+      u.searchParams.delete('craftPaid');
+      const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
+      history.replaceState(null, '', clean);
 
-  // Re-render Create to show Setup (with Next if fields ready)
-  const host = STATE.root?.querySelector('#craftTabs');
-  if (host) { host.innerHTML = renderCreate(); bindInside(); }
+      // Re-render Create to show Setup (with Next if fields ready)
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host) { host.innerHTML = renderCreate(); bindInside(); }
+    }
+  } catch (_) {}
 }
 
   function sanitizeSVG(svg){
