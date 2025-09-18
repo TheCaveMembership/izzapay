@@ -1473,16 +1473,17 @@ if (!unlocked){
         const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
         const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-          ? window.ArmourPacks.injectCraftedItem({
-              name: STATE.currentName,
-              category: STATE.currentCategory,
-              part: STATE.currentPart,
-              svg: normalizedForSlot,
-              priceIC,
-              sellInShop,
-              sellInPi,
-              featureFlags: STATE.featureFlags
-            })
+  ? window.ArmourPacks.injectCraftedItem({
+      name: STATE.currentName,
+      category: STATE.currentCategory,
+      part: STATE.currentPart,
+      svg: normalizedForSlot,
+      priceIC,
+      sellInShop,
+      sellInPi,
+      featureFlags: STATE.featureFlags
+    })
+  : { ok:false, reason:'armour-packs-hook-missing' };
           : { ok:false, reason:'armour-packs-hook-missing' };
 
         if (injected && injected.ok){
