@@ -729,7 +729,37 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
         try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
         try { IZZA?.requestRender?.(); } catch {}
 
-        
+                // --- also persist in "My Creations" store so Crafting UI will show it later ---
+        try{
+          // Same pattern as other calls: prefer override, fallback to your Node service
+          const base = (window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE).replace(/\/+$/,'')) || 'https://izzagame.onrender.com';
+
+          // Resolve current username just like elsewhere in game
+          const u = encodeURIComponent(
+            (window?.IZZA?.player?.username) ||
+            (window?.IZZA?.me?.username) ||
+            localStorage.getItem('izzaPlayer') ||
+            localStorage.getItem('pi_username') ||
+            ''
+          );
+
+          if (u){
+            // Mirror the newly minted item; Crafting UI fetchMine() will pick this up
+            fetch(base + `/api/crafting/mine?u=${u}`, {
+              method:'POST',
+              headers:{ 'content-type':'application/json' },
+              body: JSON.stringify({
+                name,
+                category: (type === 'armor' ? 'armour' : 'weapon'),
+                part: String(input?.part || (slot==='hands' ? (subtype || 'gun') : 'helmet')),
+                svg: rawOverlaySvg || inlineSvg,
+                sku: '',
+                image: '',
+                craftedId: key // optional: lets server keep a stable link to inventory key
+              })
+            }).catch(()=>{});
+          }
+        }catch{}
         
         // ---- optional: add to shop list (BUY tab) this session ----
         const sellInShop = !!input?.sellInShop;
