@@ -1,7 +1,11 @@
 import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import timedelta
+from datetime import timedelta, datetime
 from urllib.parse import urlparse
+import shutil
+import requests
+import mimetypes
+from io import BytesIO
 from PIL import Image
 from werkzeug.utils import secure_filename
 from flask import (
@@ -9,19 +13,14 @@ from flask import (
     redirect, session, abort, Response, Blueprint, jsonify
 )
 from dotenv import load_dotenv
-import requests
-import mimetypes
 from emailer import send_email
 from payments import split_amounts
 
-# Local modules you already have
+# ---- DB bootstrap ------------------------------------------------------------
 try:
-    # If db.py exports ensure_schema, use it
     from db import init_db, conn, ensure_schema
 except ImportError:
-    # Legacy/working layout: define the same ensure_schema locally
     from db import init_db, conn
-
     def ensure_schema():
         with conn() as cx:
             # merchants patches
@@ -50,9 +49,18 @@ except ImportError:
                 )
             """)
 
+# Create the “already-claimed” ledger once on boot (not inside other functions)
+with conn() as cx:
+    cx.execute("""
+      CREATE TABLE IF NOT EXISTS crafting_credit_claims(
+        order_id   INTEGER PRIMARY KEY,   -- 1 row per order, prevents duplicates
+        user_id    INTEGER NOT NULL,
+        claimed_at INTEGER NOT NULL
+      )
+    """)
+
 # ----------------- ENV -----------------
 load_dotenv()
-
 PI_SANDBOX    = os.getenv("PI_SANDBOX", "false").lower() == "true"
 PI_API_BASE   = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com")
 PI_API_KEY    = os.getenv("PI_PLATFORM_API_KEY", "")
@@ -60,20 +68,82 @@ APP_NAME      = os.getenv("APP_NAME", "IZZA PAY")
 APP_BASE_URL  = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip("/")
 BASE_ORIGIN   = APP_BASE_URL
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
-LIBRE_EP = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
+LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
 
-# The product that represents a single-use crafting credit
-SINGLE_CREDIT_LINK_ID = "d0b811e8"  # must match items.link_id for the product
+# ⚠️ Single-use crafting credit identifier.
+# This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
+SINGLE_CREDIT_LINK_ID = "d0b811e8"
 
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
 except Exception:
     PI_USD_RATE = 0.0
 
-# === Crafting grant hook (game item fulfillment) ===
+# ----------------- APP -----------------
+app = Flask(__name__)
+
+# ----------------- PERSISTENT DATA ROOT -----------------
+DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
+os.makedirs(DATA_ROOT, exist_ok=True)
+UPLOAD_DIR  = os.path.join(DATA_ROOT, "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+MEDIA_PREFIX = "/media"
+
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+
+def _normalize_ext(fmt: str) -> str:
+    if not fmt: return ""
+    fmt = fmt.lower()
+    return "jpg" if fmt == "jpeg" else fmt
+
+# ---- Simple SQLite snapshot backups on boot ----
+def _detect_db_file() -> str | None:
+    try:
+        with conn() as cx:
+            info = cx.execute("PRAGMA database_list").fetchone()
+            return (info["file"] if info and "file" in info.keys() else None) or None
+    except Exception:
+        return None
+
+def _backup_now(db_path: str, backups_dir: str) -> str | None:
+    try:
+        os.makedirs(backups_dir, exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(backups_dir, f"app-{ts}.sqlite")
+        shutil.copy2(db_path, dest)
+        return dest
+    except Exception:
+        return None
+
+def _prune_old_backups(backups_dir: str, keep: int = 10):
+    try:
+        files = [f for f in os.listdir(backups_dir) if f.endswith(".sqlite")]
+        files.sort(reverse=True)
+        for f in files[keep:]:
+            try: os.remove(os.path.join(backups_dir, f))
+            except Exception: pass
+    except Exception:
+        pass
+
+def setup_backups():
+    backups_dir = os.path.join(os.getenv("DATA_ROOT", "/var/data/izzapay"), "backups")
+    db_path = _detect_db_file()
+    if db_path and os.path.exists(db_path):
+        _backup_now(db_path, backups_dir)
+        _prune_old_backups(backups_dir, keep=10)
+
+# ----------------- BLUEPRINTS & HELPERS -----------------
+crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
+merchant_api = Blueprint("merchant_api", __name__, url_prefix="/api/merchant")
+
+def _ok(**kw):
+    out = {"ok": True}; out.update(kw); return jsonify(out)
+def _err(reason="unknown"):
+    return jsonify({"ok": False, "reason": str(reason)}), 400
+
+# === Crafting grant hook (separate concern, no schema creation here) ============
 def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: int):
-    # Minimal stub: log or record in a queue.
-    # Replace with a real call into your game service when ready.
     if not (to_user_id and crafted_id and qty > 0):
         return
     try:
@@ -94,160 +164,44 @@ def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: in
     except Exception:
         pass
 
-# Ensure the claims table exists (separate from the grant hook)
-def _ensure_extra_schema():
-    with conn() as cx:
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS crafting_credit_claims(
-              order_id   INTEGER PRIMARY KEY,   -- 1 row per order, prevents duplicates
-              user_id    INTEGER NOT NULL,
-              claimed_at INTEGER NOT NULL
-            )
-        """)
-
-_ensure_extra_schema()
-
-# ----------------- APP -----------------
-app = Flask(__name__)
-
-# ----------------- PERSISTENT DATA ROOT -----------------
-# All user uploads will live on your Render Disk (survives deploys).
-DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
-os.makedirs(DATA_ROOT, exist_ok=True)
-
-# Uploads folder on the persistent disk
-UPLOAD_DIR  = os.path.join(DATA_ROOT, "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Public URL prefix to serve files from the disk
-MEDIA_PREFIX = "/media"
-
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
-
-def _normalize_ext(fmt: str) -> str:
-    if not fmt:
-        return ""
-    fmt = fmt.lower()
-    return "jpg" if fmt == "jpeg" else fmt
-
-# ---- Simple SQLite snapshot backups on boot ----
-import shutil
-from datetime import datetime
-
-def _detect_db_file() -> str | None:
-    try:
-        with conn() as cx:
-            info = cx.execute("PRAGMA database_list").fetchone()
-            # row has columns: seq, name, file
-            path = info["file"] if info and "file" in info.keys() else None
-            # Some environments can return '' for in-memory; treat as missing
-            return path or None
-    except Exception:
-        return None
-
-def _backup_now(db_path: str, backups_dir: str) -> str | None:
-    try:
-        os.makedirs(backups_dir, exist_ok=True)
-        ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-        dest = os.path.join(backups_dir, f"app-{ts}.sqlite")
-        shutil.copy2(db_path, dest)
-        return dest
-    except Exception:
-        return None
-
-def _prune_old_backups(backups_dir: str, keep: int = 10):
-    try:
-        files = [f for f in os.listdir(backups_dir) if f.endswith(".sqlite")]
-        files.sort(reverse=True)  # newest first by name with timestamp
-        for f in files[keep:]:
-            try:
-                os.remove(os.path.join(backups_dir, f))
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-def setup_backups():
-    backups_dir = os.path.join(os.getenv("DATA_ROOT", "/var/data/izzapay"), "backups")
-    db_path = _detect_db_file()
-    if db_path and os.path.exists(db_path):
-        _backup_now(db_path, backups_dir)
-        _prune_old_backups(backups_dir, keep=10)
-
-# ================== Crafting UI → Flask bridge (minimal + safe) ==================
-
-# --- Blueprints ---
-crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
-merchant_api = Blueprint("merchant_api", __name__, url_prefix="/api/merchant")
-
-# --- Helpers (tiny JSON helpers; no DB / auth requirements) ---
-def _ok(**kw):
-    out = {"ok": True}
-    out.update(kw)
-    return jsonify(out)
-
-def _err(reason="unknown"):
-    return jsonify({"ok": False, "reason": str(reason)}), 400
-
 # --------------------------- CRAFTING ROUTES ------------------------------------
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
-    """
-    Debit in-game credits from the signed-in user's server wallet.
-    Input JSON: { amount: <positive integer> }
-    """
     u = current_user_row()
-    if not u:
-        return _err("auth_required")
+    if not u: return _err("auth_required")
     data = request.get_json(silent=True) or {}
-    try:
-        amt = int(data.get("amount") or 0)
-    except Exception:
-        amt = 0
-    if amt <= 0:
-        return _err("bad_amount")
+    try: amt = int(data.get("amount") or 0)
+    except Exception: amt = 0
+    if amt <= 0: return _err("bad_amount")
     newbal = add_ic_credits(int(u["id"]), -amt)
     return _ok(debited=True, amount=amt, balance=newbal)
 
 @crafting_api.get("/credits")
 def crafting_ic_balance():
     u = current_user_row()
-    if not u:
-        return _ok(balance=0, credits=0)
+    if not u: return _ok(balance=0, credits=0)
     bal = get_ic_credits(int(u["id"]))
-    # Return both keys so older/newer clients are happy
     return _ok(balance=bal, credits=bal)
 
 @crafting_api.post("/credits/reconcile")
 def crafting_ic_reconcile():
-    """
-    Server-side, idempotent: look for any PAID orders for the single-use
-    mint product that haven't been claimed yet by this user, grant +qty
-    credits, and return the updated balance.
-    """
     u = current_user_row()
-    if not u:
-        return _err("auth_required")
-
+    if not u: return _err("auth_required")
     uid = int(u["id"])
-
     with conn() as cx:
         rows = cx.execute("""
             SELECT o.id, o.qty
-              FROM orders o
-              JOIN items i ON i.id = o.item_id
-             WHERE o.buyer_user_id = ?
-               AND o.status = 'paid'
-               AND i.link_id = ?
-               AND NOT EXISTS (
-                   SELECT 1 FROM crafting_credit_claims c
-                    WHERE c.order_id = o.id
-               )
+            FROM orders o
+            JOIN items i ON i.id = o.item_id
+            WHERE o.buyer_user_id = ?
+              AND o.status = 'paid'
+              AND i.link_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM crafting_credit_claims c WHERE c.order_id = o.id
+              )
         """, (uid, SINGLE_CREDIT_LINK_ID)).fetchall()
 
         total_new = sum(int(r["qty"] or 0) for r in rows)
-
         if total_new > 0:
             newbal = add_ic_credits(uid, total_new)
             now = int(time.time())
@@ -258,120 +212,27 @@ def crafting_ic_reconcile():
                 )
         else:
             newbal = get_ic_credits(uid)
-
     return _ok(reconciled=True, awarded=(total_new if rows else 0), credits=newbal)
-
-@crafting_api.get("/mine")
-def crafting_mine_get():
-    u = current_user_row()
-    if not u:
-        return _ok(items=[])
-    with conn() as cx:
-        rows = cx.execute("""
-          SELECT id, name, sku, image, meta_json, created_at
-            FROM crafted_items
-           WHERE user_id=?
-        ORDER BY id DESC
-        """, (u["id"],)).fetchall()
-    out = []
-    for r in rows:
-        out.append({
-            "id": r["id"],
-            "name": r["name"],
-            "sku": r["sku"],
-            "image": r["image"],
-            "meta": json.loads(r["meta_json"] or "{}"),
-            "created_at": r["created_at"],
-        })
-    return _ok(items=out)
-
-@crafting_api.get("/collectibles")
-def crafting_collectibles_inventory():
-    u = current_user_row()
-    if not u:
-        return _ok(items={})
-    with conn() as cx:
-        rows = cx.execute("""
-          SELECT id, name, sku, image, meta_json, created_at
-            FROM crafted_items
-           WHERE user_id=?
-        ORDER BY id DESC
-        """, (u["id"],)).fetchall()
-
-    out = {}
-    for r in rows:
-        try:
-            meta = json.loads(r["meta_json"] or "{}") or {}
-        except Exception:
-            meta = {}
-        _type  = (meta.get("type") or "").strip().lower() or "collectible"
-        _slot  = (meta.get("slot") or None)
-        _equ   = bool(meta.get("equippable", _type in ("armor","weapon")))
-        _icon  = meta.get("iconSvg") or ""
-
-        key = f"craft_{r['id']}"
-        out[key] = {
-            "name": r["name"],
-            "count": 1,
-            "type": _type,
-            "slot": _slot,
-            "equippable": _equ,
-            "iconSvg": _icon,
-            "crafted_id": (meta.get("crafted_id") or r["sku"] or str(r["id"])),
-        }
-
-    return _ok(items=out)
-
-@crafting_api.post("/mine")
-def crafting_mine_post():
-    u = current_user_row()
-    if not u:
-        return _err("auth_required")
-    data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip() or "Untitled"
-    sku  = (data.get("sku") or "").strip() or None
-    image= (data.get("image") or "").strip() or None  # e.g. /media/xxxx.webp
-    meta = data.get("meta") or {}
-    with conn() as cx:
-        cx.execute("""
-          INSERT INTO crafted_items(user_id, name, sku, image, meta_json, created_at)
-               VALUES(?,?,?,?,?,?)
-        """, (u["id"], name, sku, image, json.dumps(meta, separators=(",", ":")), int(time.time())))
-    return _ok(saved=True)
 
 @crafting_api.post("/credits/claim_order")
 def crafting_ic_claim_order():
-    """
-    Fallback used by my_orders.html: { order_id } → if the order is for the
-    single-use mint and is paid, grant +qty once (idempotent).
-    """
     u = current_user_row()
-    if not u:
-        return _err("auth_required")
-
+    if not u: return _err("auth_required")
     data = request.get_json(silent=True) or {}
-    try:
-        oid = int(data.get("order_id") or 0)
-    except Exception:
-        oid = 0
-    if oid <= 0:
-        return _err("bad_id")
+    try: oid = int(data.get("order_id") or 0)
+    except Exception: oid = 0
+    if oid <= 0: return _err("bad_id")
 
     uid = int(u["id"])
-
     with conn() as cx:
         r = cx.execute("""
             SELECT o.id, o.qty
-              FROM orders o
-              JOIN items i ON i.id = o.item_id
-             WHERE o.id = ?
-               AND o.buyer_user_id = ?
-               AND o.status='paid'
-               AND i.link_id = ?
+            FROM orders o
+            JOIN items i ON i.id = o.item_id
+            WHERE o.id = ? AND o.buyer_user_id = ? AND o.status='paid' AND i.link_id = ?
         """, (oid, uid, SINGLE_CREDIT_LINK_ID)).fetchone()
 
-        if not r:
-            return _err("not_eligible")
+        if not r: return _err("not_eligible")
 
         dup = cx.execute("SELECT 1 FROM crafting_credit_claims WHERE order_id=?", (oid,)).fetchone()
         if dup:
@@ -384,7 +245,6 @@ def crafting_ic_claim_order():
             "INSERT INTO crafting_credit_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
             (oid, uid, int(time.time()))
         )
-
     return _ok(awarded=True, amount=qty, credits=newbal)
 
 # --------------------------- MERCHANT ROUTES ------------------------------------
