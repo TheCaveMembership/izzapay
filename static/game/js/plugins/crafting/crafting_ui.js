@@ -552,13 +552,12 @@ function normalizeSvgForSlot(svgText, part){
   }
 
   function renderTabs(){
-    return `
-      <div style="display:flex; gap:8px; padding:10px; border-bottom:1px solid #2a3550; background:#0f1624">
-        <button class="ghost" data-tab="packages">Packages</button>
-        <button class="ghost" data-tab="create">Create Item</button>
-        <button class="ghost" data-tab="mine">My Creations</button>
-      </div>`;
-  }
+  return `
+    <div style="display:flex; gap:8px; padding:10px; border-bottom:1px solid #2a3550; background:#0f1624">
+      <button class="ghost" data-tab="packages">Packages</button>
+      <button class="ghost" data-tab="create">Create Item</button>
+    </div>`;
+}
 
   function renderPackages(){
   return `
