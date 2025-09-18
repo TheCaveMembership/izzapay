@@ -2244,6 +2244,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
+    def fulfill_session(s, tx_hash, buyer, shipping):
     # Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
     tok = ""
@@ -2258,16 +2259,18 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     # SPECIAL CASE: izza-game-crafting → send to game auth instead
     slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-if slug == "izza-game-crafting":
-    # Preserve bearer token (if present) and append craftPaid=1 so the game UI
-    # will call /api/crafting/credits/reconcile and update the visible balance.
-    if tok:
-        game_target = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
+    if slug == "izza-game-crafting":
+        # Preserve bearer token (if present) and append craftPaid=1 so the game UI
+        # will call /api/crafting/credits/reconcile and update the visible balance.
+        if tok:
+            game_target = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
+        else:
+            game_target = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
+        redirect_url = game_target
     else:
-        game_target = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
-    redirect_url = game_target
-else:
-    redirect_url = default_target
+        redirect_url = default_target
+
+    return {"ok": True, "redirect_url": redirect_url}
 
 
 @app.post("/payment/error")
