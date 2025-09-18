@@ -911,7 +911,6 @@ if (!CSS.escape) {
     return result;
   };
 }
-
   async function hydrateMine(){
   const host = STATE.root?.querySelector('#mineList');
   if (!host) return;
@@ -1367,78 +1366,76 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
         : { ok:false, reason:'armour-packs-hook-missing' };
 
       if (injected && injected.ok){
-        craftStatus.textContent = 'Crafted ✓';
-        STATE.hasPaidForCurrentItem = false;
-        if (STATE.packageCredits && STATE.packageCredits.items > 0){
-          STATE.packageCredits.items -= 1;
-          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-        }
+  craftStatus.textContent = 'Crafted ✓';
+  STATE.hasPaidForCurrentItem = false;
+  if (STATE.packageCredits && STATE.packageCredits.items > 0){
+    STATE.packageCredits.items -= 1;
+    if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+  }
 
-        // Persist + get craftedId (from inject OR server)
-        let craftedId = injected.id || null;
-        try {
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-          }
-        } catch(e) {
-  console.warn('[craft] persist failed:', e); // non-fatal
+  // Persist + get craftedId (from inject OR server)
+  let craftedId = injected.id || null;
+  try {
+    const u = encodeURIComponent(
+      (window?.IZZA?.player?.username)
+      || (window?.IZZA?.me?.username)
+      || localStorage.getItem('izzaPlayer')
+      || localStorage.getItem('pi_username')
+      || ''
+    );
+    if (u) {
+      const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+        method: 'POST',
+        body: JSON.stringify({
+          name: STATE.currentName,
+          category: STATE.currentCategory,
+          part: STATE.currentPart,
+          svg: normalizedForSlot,
+          sku: '',
+          image: ''
+        })
+      });
+      if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
+    }
+  } catch(e) {
+    console.warn('[craft] persist failed:', e); // non-fatal
+  }
+
+  // ✅ Immediately show in My Creations if that tab is mounted (local injector)
+  try{
+    addMintToMineLocal({
+      id: craftedId || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      name: STATE.currentName,
+      category: STATE.currentCategory,
+      part: STATE.currentPart,
+      svg: normalizedForSlot
+    });
+  }catch{}
+
+  // Optional reconcile with server (safe to keep one call)
+  try{ hydrateMine(); }catch{}
+
+  // go back to Setup after a successful Mint
+  STATE.createSub = 'setup';
+  const host = STATE.root?.querySelector('#craftTabs');
+  if (host){
+    host.innerHTML = renderCreate();
+    bindInside();
+  }
+
+  // IZZA Pay merchant handoff (unchanged)
+  if (sellInPi && craftedId) {
+    try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
+    const qs = new URLSearchParams({ attach: String(craftedId) });
+    try {
+      const t = localStorage.getItem('izzaBearer') || '';
+      if (t) qs.set('t', t);
+    } catch {}
+    location.href = `/merchant?${qs.toString()}`;
+  }
+} else {
+  craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
 }
-
-// Immediately show in My Creations if that tab is mounted
-try{
-  addMintToMineLocal({
-    id: craftedId || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
-    name: STATE.currentName,
-    category: STATE.currentCategory,
-    part: STATE.currentPart,
-    svg: normalizedForSlot
-  });
-}catch{}
-
-try{ hydrateMine(); }catch{}
-
-        try{ hydrateMine(); }catch{}
-// go back to Setup after a successful Mint
-STATE.createSub = 'setup';
-const host = STATE.root?.querySelector('#craftTabs');
-if (host){
-  host.innerHTML = renderCreate();
-  bindInside();
-}
-        // IZZA Pay merchant handoff
-        if (sellInPi && craftedId) {
-          // Let the host intercept (native app/shell)
-          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
-          // Fallback: direct the browser to merchant dashboard "Create Product" with preselection
-          const qs = new URLSearchParams({ attach: String(craftedId) });
-          // Optional: short-lived bearer (if you already use ?t= in the merchant app)
-          try {
-            const t = localStorage.getItem('izzaBearer') || '';
-            if (t) qs.set('t', t);
-          } catch {}
-          location.href = `/merchant?${qs.toString()}`;
-        }
-      } else {
-        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
-      }
     }catch(e){
       craftStatus.textContent = 'Error crafting: ' + e.message;
     }
