@@ -162,7 +162,6 @@ const COIN_PER_PI = 2000;
       canUseVisuals: false,      // visuals locked until successful purchase
     createSub: 'setup',        // which subtab is shown: 'setup' | 'visuals'
 };
-  STATE.mintCredits = getMintCredits();
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
@@ -178,21 +177,17 @@ function applyCraftPaidFromURL() {
   try {
     const u = new URL(window.location.href);
     if (u.searchParams.get('craftPaid') === '1') {
-      // Add one credit, do NOT auto-unlock Visuals
-      incMintCredits(1);
-      STATE.mintCredits = getMintCredits();
-
-      STATE.hasPaidForCurrentItem = false;
-      STATE.canUseVisuals = false;
+      STATE.hasPaidForCurrentItem = true;
+      STATE.canUseVisuals = true;
       STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      STATE.createSub = 'setup';
+      STATE.createSub = 'visuals'; // <— force Visuals tab
 
       // Clean URL
       u.searchParams.delete('craftPaid');
-      const clean = u.pathname + (u.search ? '?' + u.searchParams.toString() : '') + u.hash;
+      const clean = u.pathname + (u.search ? '?'+u.searchParams.toString() : '') + u.hash;
       history.replaceState(null, '', clean);
 
-      // Re-render Create to show Setup (with Next if fields ready)
+      // Re-render Create to show Visuals immediately
       const host = STATE.root?.querySelector('#craftTabs');
       if (host) { host.innerHTML = renderCreate(); bindInside(); }
     }
@@ -288,25 +283,7 @@ function hideWait(node){
       window.dispatchEvent(new Event('izza-coins-changed'));
     }catch{}
   }
-// === MINT CREDITS (stackable; 1 credit = 5 AI attempts) =====================
-function getMintCredits(){
-  try { return parseInt(localStorage.getItem('izzaMintCredits')||'0',10) || 0; } catch { return 0; }
-}
-function setMintCredits(v){
-  try{
-    const n = Math.max(0, v|0);
-    localStorage.setItem('izzaMintCredits', String(n));
-    window.dispatchEvent(new Event('izza-mint-credits-changed'));
-  }catch{}
-}
-function incMintCredits(delta=1){ setMintCredits(getMintCredits() + (delta|0)); }
-function consumeMintCredit(){
-  const n = getMintCredits();
-  if (n <= 0) return false;
-  setMintCredits(n - 1);
-  return true;
-}
-// ============================================================================
+
   
 // === API bases: Flask app vs Node service ===
 // Flask (APP_BASE) handles payments, creations, merchant bridge (same-origin)
@@ -327,18 +304,7 @@ async function nodeJSON(url, opts={}) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   try { return await r.json(); } catch { return {}; }
 }
-// --- NEW: server → client credit sync (canonical) ---
-async function syncCreditsFromServer(){
-  try{
-    const j = await appJSON('/api/crafting/credits', { method: 'GET' });
-    if (j && j.ok && Number.isFinite(j.credits)) {
-      setMintCredits(j.credits);
-      STATE.mintCredits = getMintCredits();
-      const bal = STATE.root?.querySelector('#mintBalance');
-      if (bal) bal.innerHTML = `Credits: <b>${STATE.mintCredits}</b>`;
-    }
-  }catch(e){ /* non-fatal */ }
-}
+
   async function payWithPi(amountPi, memo){
     if (!window.Pi || typeof window.Pi.createPayment!=='function'){
       alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
@@ -666,20 +632,11 @@ function normalizeSvgForSlot(svgText, part){
           Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
         </div>
 
-        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center">
-  <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-  <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
-  <span id="payStatus" style="font-size:12px; opacity:.8"></span>
-  <span id="mintBalance" style="margin-left:auto; font-size:12px; opacity:.85">
-    Credits: <b>${STATE.mintCredits ?? 0}</b>
-  </span>
-</div>
-
-<!-- NEXT → Visuals (only shows when fields ok & credits > 0) -->
-<div id="nextRow" style="display:none; margin-top:10px">
-  <button class="ghost" id="goNext">Next → Visuals</button>
-  <span id="nextHint" style="font-size:12px; opacity:.8"></span>
-</div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+          <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
+          <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+          <span id="payStatus" style="font-size:12px; opacity:.8"></span>
+        </div>
 
         <!-- SINGLE Shop Listing block (no duplicates) -->
         <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
@@ -1072,7 +1029,6 @@ if (!CSS.escape) {
   STATE.mounted = true;
   loadDraft();
 applyCraftPaidFromURL();
-await syncCreditsFromServer(); // NEW: server is the source of truth
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
@@ -1131,15 +1087,12 @@ async function handleBuySingle(kind){
   // IC path stays local
   const res = await payWithIC(total);
   const status = document.getElementById('payStatus');
-    if (res && res.ok){
-  // Server already persisted the credit; pull the canonical number
-  await syncCreditsFromServer();
-
-    STATE.hasPaidForCurrentItem = false;
-    STATE.canUseVisuals = false;
+  if (res && res.ok){
+    STATE.hasPaidForCurrentItem = true;
+    STATE.canUseVisuals = true;
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-
-    if (status) status.textContent = 'Credit added ✓ — fill the fields, then tap Next to open Visuals.';
+    if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
+    STATE.createSub = 'visuals';
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
@@ -1162,29 +1115,12 @@ async function handleBuySingle(kind){
     STATE.currentName     = name || STATE.currentName;
     return Boolean(cat && part && name && name.length >= 3);
   };
-    const setPayEnabled = ()=>{
-    const ready = fieldsReady();
+  const setPayEnabled = ()=>{
+    const enabled = fieldsReady();
     const payPi = getEl('#payPi');
     const payIC = getEl('#payIC');
-    if (payPi){ payPi.disabled = !ready; payPi.title = ready ? '' : 'Fill Category, Part, and Name first'; }
-    if (payIC){ payIC.disabled = !ready; payIC.title = ready ? '' : 'Fill Category, Part, and Name first'; }
-
-    // Next row logic
-    const nextRow  = getEl('#nextRow');
-    const nextHint = getEl('#nextHint');
-    const credits  = STATE.mintCredits ?? 0;
-    if (nextRow){
-      const canShow = ready && credits > 0;
-      nextRow.style.display = canShow ? 'block' : 'none';
-      if (!canShow && nextHint) {
-        nextHint.textContent = credits > 0 ? '' : 'Buy a credit to continue.';
-      } else if (nextHint) {
-        nextHint.textContent = '';
-      }
-    }
-    // balance label
-    const bal = getEl('#mintBalance');
-    if (bal) bal.innerHTML = `Credits: <b>${credits}</b>`;
+    if (payPi){ payPi.disabled = !enabled; payPi.title = enabled ? '' : 'Fill Category, Part, and Name first'; }
+    if (payIC){ payIC.disabled = !enabled; payIC.title = enabled ? '' : 'Fill Category, Part, and Name first'; }
   };
   const toCreateSetup = ()=>{
     STATE.createSub = 'setup';
@@ -1301,28 +1237,6 @@ async function handleBuySingle(kind){
   setPayEnabled();
   if (payPi) payPi.addEventListener('click', ()=> handleBuySingle('pi'), { passive:true });
   if (payIC) payIC.addEventListener('click', ()=> handleBuySingle('ic'), { passive:true });
-      // Next → Visuals (consume one credit)
-  const nextBtn = getEl('#goNext');
-  if (nextBtn){
-    nextBtn.addEventListener('click', ()=>{
-      if (!fieldsReady()) return;
-      if (!consumeMintCredit()) return; // no credit
-
-      STATE.mintCredits = getMintCredits();
-      STATE.canUseVisuals = true;
-      STATE.createSub = 'visuals';
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){ host.innerHTML = renderCreate(); bindInside(); }
-
-      // sync attempts immediately
-      try{
-        const el = document.getElementById('aiLeft2');
-        if (el) el.textContent = STATE.aiAttemptsLeft;
-      }catch{}
-    }, { passive:true });
-  }
 
   // Style / Animation selections
   const aiStyleSel = getEl('#aiStyleSel');
@@ -1424,11 +1338,10 @@ async function handleBuySingle(kind){
       if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
       const freeTest = (COSTS.PER_ITEM_IC === 0 && Object.values(STATE.featureFlags).every(v=>!v));
-const unlocked = STATE.canUseVisuals || STATE.hasPaidForCurrentItem || STATE.packageCredits || freeTest;
-if (!unlocked){
-  craftStatus.textContent = 'Use a credit (Next) or pay first.';
-  return;
-}
+      if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
+        craftStatus.textContent = 'Please pay (Pi or IC) first.';
+        return;
+      }
       if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
       const sellInShop = !!getEl('#sellInShop')?.checked;
