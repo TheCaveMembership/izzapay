@@ -290,11 +290,14 @@ function hideWait(node){
 const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
 const api = (p)=> (API_BASE ? API_BASE + p : p);
 
-  async function serverJSON(url, opts={}){
-    const r = await fetch(url, Object.assign({ headers:{'content-type':'application/json'} }, opts));
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return await r.json().catch(()=> ({}));
-  }
+  async function serverJSON(url, opts = {}) {
+  const r = await fetch(url, Object.assign({
+    headers: { 'content-type': 'application/json' },
+    credentials: 'include'           // ← add this
+  }, opts));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.json().catch(() => ({}));
+}
 
   // --- credit reconcile (server-first) ---
 async function reconcileCraftCredits(){
