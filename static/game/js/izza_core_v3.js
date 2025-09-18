@@ -1993,7 +1993,30 @@ Promise.all([
     ready: true
   };
   IZZA.emit('ready', IZZA.api);
+// ---- Sync server credits & collectibles into the local game store ----
+(function syncServerBankAndCollectibles(){
+  // credits → coins
+  fetch('/api/crafting/credits', {credentials:'include'})
+    .then(r=>r.json()).then(j=>{
+      if(j && j.ok && typeof j.balance==='number'){
+        try{ setCoins(Math.max(getCoins(), j.balance|0)); }catch{}
+        try{ window.dispatchEvent(new Event('izza-bank-changed')); }catch{}
+      }
+    }).catch(()=>{});
 
+  // collectibles → merge into inventory
+  fetch('/api/crafting/collectibles', {credentials:'include'})
+    .then(r=>r.json()).then(j=>{
+      if(j && j.ok && j.items && typeof j.items==='object'){
+        try{
+          const cur = (typeof IZZA.api.getInventory==='function') ? (IZZA.api.getInventory()||{}) : {};
+          const merged = Object.assign({}, cur, j.items);
+          if(typeof IZZA.api.setInventory==='function') IZZA.api.setInventory(merged);
+          try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+        }catch(e){}
+      }
+    }).catch(()=>{});
+})();
   setHearts(getHearts());
   
   // If the map plugin exposed the HUD redraw, sync hearts from saved state now
