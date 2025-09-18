@@ -133,5 +133,20 @@
     });
   })();
   </script>
+  <script>
+/* Reconcile any new Pi purchases (e.g., "IZZA Game Crafting (single-use)")
+   so the server grants a credit to the current pi_username. */
+(async function(){
+  try{
+    await fetch('/api/crafting/credits/reconcile', {
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      credentials:'include'
+    });
+    // Optional breadcrumb so the Crafting UI knows we just came back from a flow:
+    localStorage.setItem('izzaCraftGrantSeen', '1');
+  }catch(_){}
+})();
+</script>
 </body>
 </html>
