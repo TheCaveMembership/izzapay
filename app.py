@@ -28,7 +28,7 @@ DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 # NEW: LibreTranslate endpoint for browser-safe proxying
 LIBRE_EP = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
 
-# Optional: estimated USD per Ï to display conversion on /orders (0 disables)
+# Optional: estimated USD per ÃÂ to display conversion on /orders (0 disables)
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
 except Exception:
@@ -123,7 +123,7 @@ def setup_backups():
         _backup_now(db_path, backups_dir)
         _prune_old_backups(backups_dir, keep=10)
 # Serve uploaded files safely from the persistent disk
-# ================== Crafting UI → Flask bridge (minimal + safe) ==================
+# ================== Crafting UI â Flask bridge (minimal + safe) ==================
 # Paste this into app.py after `app = Flask(__name__)` and your other imports.
 
 from flask import Blueprint, request, jsonify
@@ -303,7 +303,7 @@ def create_product_from_craft():
 try:
     app.register_blueprint(crafting_api)
 except Exception:
-    # already registered or app not yet defined—move this block to after `app = Flask(__name__)`
+    # already registered or app not yet definedâmove this block to after `app = Flask(__name__)`
     pass
 
 try:
@@ -311,7 +311,7 @@ try:
 except Exception:
     pass
 
-# ================== /Crafting UI → Flask bridge ==================
+# ================== /Crafting UI â Flask bridge ==================
 @app.get(f"{MEDIA_PREFIX}/<path:filename>")
 def media(filename):
     """
@@ -367,7 +367,7 @@ I18N_SNIPPET = r"""
 if(!window.__IZZA_I18N_BOOTED__){
   window.__IZZA_I18N_BOOTED__=true;
 
-  // Same-origin proxy â main app serves /api/translate
+  // Same-origin proxy Ã¢ÂÂ main app serves /api/translate
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
       const r = await fetch('/api/translate', {
@@ -387,11 +387,11 @@ if(!window.__IZZA_I18N_BOOTED__){
 
     // >>> ONLY RUN IF USER PICKED A LANGUAGE <<<
     const raw = localStorage.getItem(LANG_KEY);
-    if (!raw) return; // user hasn't chosen â do nothing
+    if (!raw) return; // user hasn't chosen Ã¢ÂÂ do nothing
 
     const to   = String(raw).slice(0,5);
     const from = (document.documentElement.getAttribute('lang')||'en').slice(0,5);
-    if (!to || to === from) return; // nothing to translate â do nothing
+    if (!to || to === from) return; // nothing to translate Ã¢ÂÂ do nothing
 
     if (typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
 
@@ -1549,7 +1549,7 @@ def merchant_delete_store(slug):
     if request.is_json or "application/json" in (request.headers.get("Accept") or ""):
         return {"ok": True, "redirect": target}, 200
 
-    # Normal form POST → send a 303 so the browser follows with GET
+    # Normal form POST â send a 303 so the browser follows with GET
     return redirect(target, code=303)
 
 # ----------------- STOREFRONT AUTH -----------------
@@ -1948,7 +1948,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 try:
                     _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
                 except Exception:
-                    # don’t fail checkout on grant error; log if you want
+                    # donât fail checkout on grant error; log if you want
                     pass
             # ============================================
            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
@@ -2033,7 +2033,7 @@ try:
     line_html = "".join(
         f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
         f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
-        f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
+        f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} Ï</td></tr>"
         for dr in display_rows
     )
     items_table = (
@@ -2046,7 +2046,7 @@ try:
         f"<tbody>{line_html}</tbody>"
         "<tfoot>"
         f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-        f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
+        f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} Ï</strong></td></tr>"
         "</tfoot>"
         "</table>"
     )
@@ -2087,7 +2087,7 @@ try:
     else:
         subj_buyer = f"Your order at {m['business_name']} is confirmed"
 
-    subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+    subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} Ï){suffix}"
 
     if buyer_email:
         send_email(
@@ -2098,7 +2098,7 @@ try:
                 <p><strong>Store:</strong> {m['business_name']}</p>
                 {items_table}
                 <p style="margin-top:12px">
-                  You’ll receive updates from the merchant if anything changes.
+                  Youâll receive updates from the merchant if anything changes.
                 </p>
             """,
             reply_to=merchant_mail
@@ -2119,7 +2119,7 @@ try:
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # SPECIAL CASE: izza-game-crafting → send to game auth instead
+    # SPECIAL CASE: izza-game-crafting â send to game auth instead
     slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
     if slug == "izza-game-crafting":
         game_target = f"{BASE_ORIGIN}/izza-game/auth{('?t='+tok) if tok else ''}"
@@ -2545,10 +2545,10 @@ def merchant_payout(slug):
         <p><strong>Merchant Wallet:</strong> {wallet}</p>
         <h3>Last 30 Days</h3>
         <ul>
-          <li>Gross: {gross_30:.7f} Ï</li>
-          <li>Pi Fee: {fee_30:.7f} Ï</li>
-          <li>App Fee (1%): {app_fee_30:.7f} Ï</li>
-          <li><strong>Net to pay:</strong> {net_30:.7f} Ï</li>
+          <li>Gross: {gross_30:.7f} ÃÂ</li>
+          <li>Pi Fee: {fee_30:.7f} ÃÂ</li>
+          <li>App Fee (1%): {app_fee_30:.7f} ÃÂ</li>
+          <li><strong>Net to pay:</strong> {net_30:.7f} ÃÂ</li>
         </ul>
         <p>Requested by @{u['pi_username']} (user_id {u['id']}).</p>
         <p><em>Note: Merchant UI informs payout may take up to 24 hours.</em></p>
@@ -2558,7 +2558,7 @@ def merchant_payout(slug):
     try:
         ok = send_email(
             DEFAULT_ADMIN_EMAIL,
-            f"[Payout] {m['business_name']} â {net_30:.7f} Ï",
+            f"[Payout] {m['business_name']} Ã¢ÂÂ {net_30:.7f} ÃÂ",
             body,
             reply_to=(m["reply_to_email"] or None),
         )
