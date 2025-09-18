@@ -2244,8 +2244,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
-    def fulfill_session(s, tx_hash, buyer, shipping):
-    # Redirect back to storefront with success flag (and token if available)
+    # ---- Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
     tok = ""
     if u:
@@ -2271,6 +2270,24 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         redirect_url = default_target
 
     return {"ok": True, "redirect_url": redirect_url}
+
+
+# Provide a concrete cancel endpoint used by /payment/error
+@app.post("/payment/cancel")
+def payment_cancel():
+    """
+    Clears local session state for a given session_id (JSON or form),
+    returning ok=True whether or not the upstream cancel succeeded.
+    """
+    data = request.get_json(silent=True) or request.form or {}
+    session_id = (data.get("session_id") or "").strip()
+    if session_id:
+        try:
+            with conn() as cx:
+                cx.execute("UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE id=?", (session_id,))
+        except Exception:
+            pass
+    return {"ok": True, "cleared": bool(session_id)}
 
 
 @app.post("/payment/error")
@@ -2699,7 +2716,7 @@ def buyer_status(token):
     if not o: abort(404)
     with conn() as cx:
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()  # <-- tuple fixed
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 @app.get("/success")
