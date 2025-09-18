@@ -148,13 +148,29 @@ def _err(reason="unknown"):
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
     """
-    Test-only IC debit so the UI doesn't 404. No real ledger change here.
+    Debit in-game credits from the signed-in user's server wallet.
+    Input JSON: { amount: <positive integer> }
     """
+    u = current_user_row()
+    if not u:
+        return _err("auth_required")
     data = request.get_json(silent=True) or {}
-    amount = data.get("amount")
-    return _ok(debited=True, amount=amount)
+    try:
+        amt = int(data.get("amount") or 0)
+    except Exception:
+        amt = 0
+    if amt <= 0:
+        return _err("bad_amount")
+    newbal = add_ic_credits(int(u["id"]), -amt)
+    return _ok(debited=True, amount=amt, balance=newbal)
 
-
+@crafting_api.get("/credits")
+def crafting_ic_balance():
+    u = current_user_row()
+    if not u:
+        return _ok(balance=0)  # anonymous gets 0
+    bal = get_ic_credits(int(u["id"]))
+    return _ok(balance=bal)
 
 @crafting_api.get("/mine")
 def crafting_mine_get():
@@ -178,6 +194,59 @@ def crafting_mine_get():
             "meta": json.loads(r["meta_json"] or "{}"),
             "created_at": r["created_at"],
         })
+    return _ok(items=out)
+
+@crafting_api.get("/collectibles")
+def crafting_collectibles_inventory():
+    """
+    Returns a compact inventory-like map for the game UI.
+    Shape:
+      { "craft_<rowid>": {
+            "name": "...",
+            "count": 1,
+            "type": meta.type| "armor"/"weapon"/"collectible",
+            "slot": meta.slot| None,
+            "equippable": bool,
+            "iconSvg": meta.iconSvg| "",
+            "crafted_id": "<your crafted_item_id or sku>",
+        }, ... }
+    """
+    u = current_user_row()
+    if not u:
+        return _ok(items={})
+    with conn() as cx:
+        rows = cx.execute("""
+          SELECT id, name, sku, image, meta_json, created_at
+          FROM crafted_items
+          WHERE user_id=?
+          ORDER BY id DESC
+        """, (u["id"],)).fetchall()
+
+    out = {}
+    for r in rows:
+        meta = {}
+        try:
+            meta = json.loads(r["meta_json"] or "{}") or {}
+        except Exception:
+            meta = {}
+
+        # Heuristics / defaults that match your core:
+        _type  = (meta.get("type") or "").strip().lower() or "collectible"
+        _slot  = (meta.get("slot") or None)
+        _equ   = bool(meta.get("equippable", _type in ("armor","weapon")))
+        _icon  = meta.get("iconSvg") or ""
+
+        key = f"craft_{r['id']}"
+        out[key] = {
+            "name": r["name"],
+            "count": 1,
+            "type": _type,
+            "slot": _slot,
+            "equippable": _equ,
+            "iconSvg": _icon,
+            "crafted_id": (meta.get("crafted_id") or r["sku"] or str(r["id"])),
+        }
+
     return _ok(items=out)
 
 @crafting_api.post("/mine")
@@ -465,6 +534,10 @@ setup_backups()
 
 def ensure_schema():
     with conn() as cx:
+        # users table patch for in-game credits
+u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
+if "ic_credits" not in u_cols:
+    cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
         # merchants patches
         cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
         if "pi_wallet_address" not in cols:
@@ -597,6 +670,24 @@ def require_user():
     row = current_user_row()
     if not row: return redirect("/signin")
     return row
+def get_ic_credits(user_id: int) -> int:
+    try:
+        with conn() as cx:
+            row = cx.execute("SELECT ic_credits FROM users WHERE id=?", (user_id,)).fetchone()
+            return int(row["ic_credits"] or 0) if row else 0
+    except Exception:
+        return 0
+
+def add_ic_credits(user_id: int, delta: int) -> int:
+    """Atomically add (or subtract) credits. Clamps at 0. Returns new balance."""
+    if not user_id or not isinstance(delta, int):
+        return 0
+    with conn() as cx:
+        row = cx.execute("SELECT ic_credits FROM users WHERE id=?", (user_id,)).fetchone()
+        cur = int((row["ic_credits"] if row else 0) or 0)
+        new = max(0, cur + int(delta))
+        cx.execute("UPDATE users SET ic_credits=? WHERE id=?", (new, user_id))
+    return new
 
 def resolve_merchant_by_slug(slug):
     with conn() as cx:
@@ -1860,6 +1951,34 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     # don’t fail checkout on grant error; log if you want
                     pass
             # ============================================
+            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
+try:
+    # Strategy 1: crafted_item_id like "ic:<amount>"  (e.g., "ic:500")
+    cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
+    awarded = 0
+    if cid.startswith("ic:"):
+        try:
+            unit = int(cid.split(":",1)[1] or "0")
+        except Exception:
+            unit = 0
+        if unit > 0 and buyer_user_id:
+            awarded = unit * qty
+            add_ic_credits(int(buyer_user_id), awarded)
+
+    # Strategy 2 (fallback): SKU like "IC500" or "ic_500"
+    if not awarded:
+        sku = (it["sku"] or "").strip().lower() if it else ""
+        if sku.startswith("ic"):
+            # pull trailing digits
+            import re
+            m = re.search(r"(\d+)", sku)
+            if m and buyer_user_id:
+                unit = int(m.group(1))
+                if unit > 0:
+                    awarded = unit * qty
+                    add_ic_credits(int(buyer_user_id), awarded)
+except Exception:
+    pass
 
             buyer_token = uuid.uuid4().hex
             cur = cx.execute(
