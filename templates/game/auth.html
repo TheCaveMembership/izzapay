@@ -148,5 +148,19 @@
   }catch(_){}
 })();
 </script>
+  <script>
+/* When players return here after checkout, grant any new credits to their account */
+(async function(){
+  try{
+    await fetch('/api/crafting/credits/reconcile', {
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      credentials:'include'
+    });
+    // Breadcrumb for the game UI (optional)
+    localStorage.setItem('izzaCraftGrantSeen','1');
+  }catch(_){}
+})();
+</script>
 </body>
 </html>
