@@ -288,6 +288,16 @@ function hideWait(node){
       window.dispatchEvent(new Event('izza-coins-changed'));
     }catch{}
   }
+  // Grants exactly one mint credit (server should be canonical)
+async function grantOneCredit(reason){
+  try{
+    const r = await fetch('/api/crafting/credits/add', {
+    method:'POST', headers:{'content-type':'application/json'}, credentials:'include',
+    body: JSON.stringify({ qty: 1, reason: String(reason||'ic-0') })
+  });
+    return r.ok;
+  }catch(_){ return false; }
+}
 // === MINT CREDITS (stackable; 1 credit = 5 AI attempts) =====================
 function getMintCredits(){
   try { return parseInt(localStorage.getItem('izzaMintCredits')||'0',10) || 0; } catch { return 0; }
@@ -370,31 +380,31 @@ async function grantOneCredit(reason){
 
   // Replace the payWithIC function
 async function payWithIC(amountIC){
-  // Promo path: 0 IC still grants one mint credit
-  if ((amountIC|0) === 0) {
-    const ok = await grantOneCredit('ic-0-promo');
-    if (ok) {
+  // If 0 IC (promo/test), just grant a credit and sync balance
+  if ((amountIC|0) === 0){
+    const ok = await grantOneCredit('ic-0');
+    if (ok){
       try { await syncCreditsFromServer(); } catch(_) {}
       return { ok:true, granted:true, amountIC:0 };
     }
-    return { ok:false, reason:'grant-failed' };
+    // last-resort local fallback so UI can proceed even if server missing:
+    try { incMintCredits(1); } catch(_){}
+    return { ok:true, granted:true, amountIC:0, local:true };
   }
 
-  // Normal IC debit path
+  // Normal debit path (non-zero)
   const cur = getIC();
   if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
   setIC(cur - amountIC);
-  try {
-    await appJSON('/api/crafting/ic/debit', {
-      method:'POST',
-      body: JSON.stringify({ amount: amountIC })
+  try{
+    await fetch('/api/crafting/ic/debit', {
+      method:'POST', headers:{'content-type':'application/json'},
+      credentials:'include', body: JSON.stringify({ amount: amountIC })
     });
-    // server persists credit; sync to reflect canonical balance
-    await syncCreditsFromServer();
-  } catch(_){}
+    await syncCreditsFromServer(); // show canonical balance
+  }catch(_){}
   return { ok:true };
 }
-
   function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
   function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
