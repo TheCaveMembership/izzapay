@@ -2104,7 +2104,7 @@ try:
             reply_to=merchant_mail
         )
 
-        except Exception:
+except Exception:
         pass
 
     # Redirect back to storefront with success flag (and token if available)
