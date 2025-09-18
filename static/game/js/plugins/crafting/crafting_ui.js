@@ -1347,7 +1347,13 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
         }
 
         try{ hydrateMine(); }catch{}
-
+// go back to Setup after a successful Mint
+STATE.createSub = 'setup';
+const host = STATE.root?.querySelector('#craftTabs');
+if (host){
+  host.innerHTML = renderCreate();
+  bindInside();
+}
         // IZZA Pay merchant handoff
         if (sellInPi && craftedId) {
           // Let the host intercept (native app/shell)
