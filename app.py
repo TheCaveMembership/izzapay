@@ -299,16 +299,15 @@ def create_product_from_craft():
 
 
 # --------------------------- REGISTER BLUEPRINTS --------------------------------
-# Do this once (ideally near your other app.register_blueprint calls).
-    try:
+try:
     app.register_blueprint(crafting_api)
-    except Exception:
-    # already registered or app not yet definedâmove this block to after `app = Flask(__name__)`
+except Exception:
+    # already registered
     pass
 
-    try:
+try:
     app.register_blueprint(merchant_api)
-    except Exception:
+except Exception:
     pass
 
 # ================== /Crafting UI â Flask bridge ==================
