@@ -173,6 +173,45 @@ def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: in
     except Exception:
         pass
 
+import json, urllib.request
+
+SINGLE_CREDIT_LINK_ID = "d0b811e8"  # your existing constant
+
+def _is_single_mint_item(it: dict) -> bool:
+    if not it: return False
+    if str(it.get("link_id", "")) == SINGLE_CREDIT_LINK_ID:  # your checkout link
+        return True
+    sku = (it.get("sku") or "").strip().upper()
+    if sku == "IC1":
+        return True
+    cid = (it.get("crafted_item_id") or "").strip().lower()
+    if cid in ("ic:1", "ic1"):
+        return True
+    return False
+
+def _grant_game_mint_credit(username: str, amount: int, order_id: int) -> bool:
+    if not (username and amount > 0):
+        return False
+    try:
+        # same host, mounted game app
+        url = (request.url_root.rstrip("/") + "/izza-game/api/crafting/credits/grant")
+        payload = json.dumps({
+            "username": username.lstrip("@"),
+            "amount": int(amount),
+            "order_id": int(order_id)
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            j = json.loads(resp.read().decode() or "{}")
+            return bool(j.get("ok"))
+    except Exception:
+        return False
+
 # --------------------------- CRAFTING ROUTES ------------------------------------
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
@@ -2030,7 +2069,33 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         buyer_user_id = (u_ctx["id"] if u_ctx else None)
     # ---------------------------------------------------------------------------
+# --- Single In-Game Item Mint: grant visuals credit in the game ---
+# Resolve buyer's Pi username (prefer whatever you store on the order/meta)
+buyer_username = ""
+try:
+    buyer_username = (
+        (order.get("buyer_pi_username") or "") or
+        ((order.get("meta") or {}).get("u") if isinstance(order.get("meta"), dict) else "") or
+        (request.args.get("u") or "")
+    ).strip().lstrip("@")
+except Exception:
+    pass
 
+if not buyer_username:
+    try:
+        buyer_username = db_get_username_for_user_id(buyer_user_id) or ""
+    except Exception:
+        buyer_username = ""
+
+mint_qty = 0
+for li in lines:
+    it = by_id.get(int(li["item_id"]))
+    if _is_single_mint_item(it):
+        mint_qty += int(li.get("qty", 1) or 1)
+
+if mint_qty > 0 and buyer_username:
+    _grant_game_mint_credit(buyer_username, mint_qty, order_id)
+# --- /grant ---
     try:
         lines = json.loads(s["line_items_json"] or "[]")
     except Exception:
