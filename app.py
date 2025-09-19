@@ -142,6 +142,34 @@ def _ok(**kw):
 def _err(reason="unknown"):
     return jsonify({"ok": False, "reason": str(reason)}), 400
 
+# --- Mint-code helpers (voucher system) --------------------------------------
+def _ensure_mint_codes(cx):
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS mint_codes(
+          code     TEXT PRIMARY KEY,
+          user_id  INTEGER,
+          used     INTEGER DEFAULT 0,
+          used_at  INTEGER
+        )
+    """)
+
+def _new_mint_code(cx, user_id: int | None) -> str:
+    import secrets, time
+    _ensure_mint_codes(cx)
+    # 8-hex (uppercase) like "A1B2C3D4"
+    for _ in range(5):
+        code = secrets.token_hex(4).upper()
+        try:
+            cx.execute("INSERT INTO mint_codes(code, user_id) VALUES(?,?)", (code, int(user_id or 0)))
+            return code
+        except Exception:
+            # rare collision, try again
+            pass
+    # last-resort (very unlikely)
+    code = secrets.token_hex(4).upper()
+    cx.execute("INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)", (code, int(user_id or 0)))
+    return code
+
 # === Crafting grant hook (separate concern, no schema creation here) ============
 def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: int):
     if not (to_user_id and crafted_id and qty > 0):
