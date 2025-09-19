@@ -60,6 +60,43 @@ function repopulatePartOptions(catSelEl, partSelEl){
   partSelEl.innerHTML = opts.map(o=> `<option value="${o.v}">${o.t}</option>`).join('');
   partSelEl.value = opts.some(o=>o.v===prev) ? prev : opts[0].v;
 }
+
+function totalMintCredits(){
+  const singles = (STATE.mintCredits|0);
+  const pkg = (STATE.packageCredits && STATE.packageCredits.items|0) || 0;
+  return singles + pkg;
+}
+
+// Update the little badge beside "Create Item" without re-rendering the whole header
+function updateTabsHeaderCredits(){
+  try{
+    const wrap = STATE.root?.querySelector('[data-tab="create"]');
+    if (!wrap) return;
+    const have = totalMintCredits();
+    const label = 'Create Item';
+
+    // ensure we don't stack multiple badges
+    const old = wrap.querySelector('.cl-credit-badge');
+    if (old) old.remove();
+
+    if (have > 0){
+      const b = document.createElement('span');
+      b.className = 'cl-credit-badge';
+      b.textContent = String(have);
+      b.style.cssText = `
+        display:inline-block; margin-left:6px; padding:0 6px; min-width:18px; height:18px;
+        line-height:18px; font-size:11px; font-weight:700; border-radius:6px;
+        background:#0b2b17; border:1px solid #1bd760; color:#b8ffd1; vertical-align:middle;
+      `;
+      // Make sure button has the base label
+      if (!/Create Item/i.test(wrap.textContent)) wrap.textContent = label;
+      wrap.appendChild(b);
+    } else {
+      // restore plain label if we removed a badge
+      wrap.textContent = label;
+    }
+  }catch(_){}
+}
 /* ------------------------------------------------------------------------- */
 
 // Compose the UX prompt shown to the model (keeps constraints tight)
@@ -147,6 +184,7 @@ const COIN_PER_PI = 2000;
   const next = Math.max(0, n|0);
   STATE.mintCredits   = next;
   STATE.canUseVisuals = next > 0;
+  updateTabsHeaderCredits();
 }
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
@@ -572,10 +610,19 @@ function normalizeSvgForSlot(svgText, part){
   }
 
   function renderTabs(){
+  const have = totalMintCredits();
+  const badge = (have > 0)
+    ? `<span class="cl-credit-badge"
+        style="display:inline-block;margin-left:6px;padding:0 6px;min-width:18px;height:18px;line-height:18px;
+               font-size:11px;font-weight:700;border-radius:6px;background:#0b2b17;border:1px solid #1bd760;color:#b8ffd1;vertical-align:middle;">
+         ${have}
+       </span>`
+    : '';
+
   return `
     <div style="display:flex; gap:8px; padding:10px; border-bottom:1px solid #2a3550; background:#0f1624">
       <button class="ghost" data-tab="packages">Packages</button>
-      <button class="ghost" data-tab="create">Create Item</button>
+      <button class="ghost" data-tab="create">Create Item${badge}</button>
     </div>`;
 }
 
@@ -1132,6 +1179,7 @@ let initialTab = 'packages';
 try{
   if (localStorage.getItem('izzaCraftGrantSeen') === '1') {
     applyCreditState((STATE.mintCredits|0) + 1); // one credit granted by checkout return
+    updateTabsHeaderCredits();
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
     STATE.createSub = 'setup';
     initialTab = 'create';
@@ -1142,6 +1190,7 @@ try{
   const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
   if (s && s.ok){
     applyCreditState(s.credits|0);
+    updateTabsHeaderCredits();
     if (STATE.mintCredits > 0){
       STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
       STATE.createSub = 'setup';
@@ -1224,6 +1273,7 @@ if (!window.__izzaReconHook){
     applyCreditState((STATE.mintCredits|0) + 1);   // ← grant one mint credit
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
     if (status) status.textContent = 'Paid ✓ — visual credit granted.';
+    updateTabsHeaderCredits();
     STATE.createSub = 'setup';                     // ← start on Setup after paying
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
