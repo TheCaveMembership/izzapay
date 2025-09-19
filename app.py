@@ -2390,7 +2390,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
 
-    if buyer_email:
+    try:
+        if buyer_email:
         send_email(
             buyer_email,
             subj_buyer,
