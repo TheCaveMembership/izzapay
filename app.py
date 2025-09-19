@@ -2390,22 +2390,22 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
         subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
 
-        if buyer_email:
-            send_email(
-                buyer_email,
-                subj_buyer,
-                f"""
-                    <h2>Thanks for your order!</h2>
-                    <p><strong>Store:</strong> {m['business_name']}</p>
-                    {items_table}
-                    <p style="margin-top:12px">
-                      You’ll receive updates from the merchant if anything changes.
-                    </p>
-                """,
-                reply_to=merchant_mail
-            )
-    except Exception:
-        pass
+    if buyer_email:
+        send_email(
+            buyer_email,
+            subj_buyer,
+            f"""
+                <h2>Thanks for your order!</h2>
+                <p><strong>Store:</strong> {m['business_name']}</p>
+                {items_table}
+                <p style="margin-top:12px">
+                  You’ll receive updates from the merchant if anything changes.
+                </p>
+            """,
+            reply_to=merchant_mail
+        )
+except Exception:
+    pass
 
     # --- Voucher redirect override (if a mint code was generated earlier) ---
     mint_code = session.pop("last_mint_code", None)
@@ -2473,7 +2473,9 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             path="/"
         )
 
-    return resp
+    return resp   # ✅ inside fulfill_session
+
+
 # Provide a concrete cancel endpoint used by /payment/error
 @app.post("/payment/cancel")
 def payment_cancel():
@@ -2486,12 +2488,16 @@ def payment_cancel():
     if session_id:
         try:
             with conn() as cx:
-                cx.execute("UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE id=?", (session_id,))
+                cx.execute(
+                    "UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE id=?",
+                    (session_id,)
+                )
         except Exception:
             pass
     return {"ok": True, "cleared": bool(session_id)}
 
-@app.get("/mint/success/<code>", endpoint="mint_success_voucher")
+
+@app.get("/mint/success/<code>")
 def mint_success_voucher(code):
     # Very small inline page — you can move to a template later
     return f"""
@@ -2513,6 +2519,7 @@ def mint_success_voucher(code):
 </html>
     """
 
+
 @app.post("/api/mint_codes/consume")
 def mint_codes_consume():
     data = request.get_json(force=True) or {}
@@ -2522,15 +2529,22 @@ def mint_codes_consume():
 
     with conn() as cx:
         _ensure_credit_codes(cx)
-        row = cx.execute("SELECT code, user_id, used FROM mint_codes WHERE code=?", (code,)).fetchone()
+        row = cx.execute(
+            "SELECT code, user_id, used FROM mint_codes WHERE code=?",
+            (code,)
+        ).fetchone()
         if not row:
             return {"ok": False, "reason": "invalid"}, 404
         if int(row["used"] or 0) == 1:
             return {"ok": False, "reason": "used"}, 409
 
-        cx.execute("UPDATE mint_codes SET used=1, used_at=strftime('%s','now') WHERE code=?", (code,))
+        cx.execute(
+            "UPDATE mint_codes SET used=1, used_at=strftime('%s','now') WHERE code=?",
+            (code,)
+        )
 
     return {"ok": True, "creditsAdded": 1}
+
 
 @app.post("/payment/error")
 def payment_error():
@@ -2540,6 +2554,7 @@ def payment_error():
     """
     return payment_cancel()
 
+# (rest of your file continues unchanged…)
 # ----------------- UPLOADS -----------------
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
