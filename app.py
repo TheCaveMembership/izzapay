@@ -2408,11 +2408,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         pass
 
     # --- Voucher redirect override (if a mint code was generated earlier) ---
-mint_code = session.pop("last_mint_code", None)
-if mint_code:
-    redirect_url = url_for("mint_success_voucher", code=mint_code, _external=True)
-    resp = jsonify({"ok": True, "redirect_url": redirect_url})
-    return resp
+    mint_code = session.pop("last_mint_code", None)
+    if mint_code:
+        redirect_url = url_for("mint_success_voucher", code=mint_code, _external=True)
+        resp = jsonify({"ok": True, "redirect_url": redirect_url})
+        return resp
 
     # ---- Redirect target (voucher-first) ----
     u = current_user_row()
@@ -2441,16 +2441,16 @@ if mint_code:
     except Exception:
         grants_single_mint = False
 
-  # If it's the crafting store OR an order with the special single-mint product → voucher page
-if (slug == "izza-game-crafting") or grants_single_mint:
-    try:
-        with conn() as cx:
-            code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
-        redirect_url = url_for("mint_success_voucher", code=code, _external=True)
-    except Exception:
+    # If it's the crafting store OR an order with the special single-mint product → voucher page
+    if (slug == "izza-game-crafting") or grants_single_mint:
+        try:
+            with conn() as cx:
+                code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
+            redirect_url = url_for("mint_success_voucher", code=code, _external=True)
+        except Exception:
+            redirect_url = default_target
+    else:
         redirect_url = default_target
-else:
-    redirect_url = default_target
 
     # Build response JSON
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
