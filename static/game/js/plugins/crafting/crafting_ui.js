@@ -1200,34 +1200,51 @@ if (!window.__izzaReconHook){
     if (status) status.textContent = 'Taking you to IZZA Pay checkout…';
 
     const u = encodeURIComponent(currentUsername() || '');
-const back = encodeURIComponent('https://izzapay.onrender.com/izza-game/auth');
-location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${back}`;
-     return; // Orders page will grant visuals after payment
+    const back = encodeURIComponent('https://izzapay.onrender.com/izza-game/auth');
+    location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${back}`;
+    return; // Orders page will grant visuals after payment
   }
 
-  // ---------- IC path: unchanged ----------
+  // ---------- IC path ----------
   const total = calcTotalCost({ usePi:false });
   const res = await payWithIC(total);
 
   const status = document.getElementById('payStatus'); // present in Create tab
   if (res && res.ok){
-  applyCreditState((STATE.mintCredits|0) + 1);   // ← grant one mint credit
-  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-  const status = document.getElementById('payStatus');
-  if (status) status.textContent = 'Paid ✓ — visual credit granted.';
-  STATE.createSub = 'setup';                     // ← start on Setup after paying
-  const host = STATE.root?.querySelector('#craftTabs');
-  if (host){ host.innerHTML = renderCreate(); bindInside(); }
-} else {
-  const status = document.getElementById('payStatus');
-  if (status) status.textContent='Payment failed.';
+    applyCreditState((STATE.mintCredits|0) + 1);   // ← grant one mint credit
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    if (status) status.textContent = 'Paid ✓ — visual credit granted.';
+    STATE.createSub = 'setup';                     // ← start on Setup after paying
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){ host.innerHTML = renderCreate(); bindInside(); }
+  } else {
+    if (status) status.textContent='Payment failed.';
+  }
+} // ←←← THIS closing brace was missing!
+
+// Keep visual tab highlight consistent in one place
+function _syncVisualsTabStyle(){
+  try{
+    const vb = STATE.root?.querySelector('.cl-subtabs [data-sub="visuals"]');
+    if (!vb) return;
+    const hasCredit = (STATE.mintCredits|0) > 0 || (STATE.packageCredits && STATE.packageCredits.items > 0);
+    if (hasCredit){
+      vb.style.background   = '#0b2b17';
+      vb.style.boxShadow    = '0 0 0 1px #1bd760 inset';
+      vb.style.color        = '#b8ffd1';
+      vb.title = 'You have mint credit available';
+    } else {
+      vb.style.background   = '';
+      vb.style.boxShadow    = '';
+      vb.style.color        = '';
+      vb.title = '';
+    }
+  }catch(_){}
 }
 
-  function bindInside(){
+function bindInside(){
   const root = STATE.root;
   if(!root) return;
-
-  // ...existing sub-tab wiring...
 
   // Marketplace button (Packages tab)
   const goMp = root.querySelector('#goMarketplace');
@@ -1250,23 +1267,22 @@ location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${
     });
   }
 
-// Packages → "Create Now" just opens Create→Setup
-const goCreateBtn = root.querySelector('#pkGoCreate');
-if (goCreateBtn){
-  goCreateBtn.addEventListener('click', ()=>{
-    STATE.createSub = 'setup';                // ensure subtab is Setup
-    const createTabBtn = STATE.root?.querySelector('[data-tab="create"]');
-    if (createTabBtn) {
-      createTabBtn.click();                   // use existing tab switch
-    } else {
-      // fallback: render directly if the button isn’t there for any reason
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){ host.innerHTML = renderCreate(); bindInside(); }
-    }
-  }, { passive:true });
-}
-    
-  // ✅ Starter Forge package purchase (Pi or IC) — correct scope
+  // Packages → "Create Now" just opens Create→Setup
+  const goCreateBtn = root.querySelector('#pkGoCreate');
+  if (goCreateBtn){
+    goCreateBtn.addEventListener('click', ()=>{
+      STATE.createSub = 'setup';
+      const createTabBtn = STATE.root?.querySelector('[data-tab="create"]');
+      if (createTabBtn) {
+        createTabBtn.click();
+      } else {
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (host){ host.innerHTML = renderCreate(); bindInside(); }
+      }
+    }, { passive:true });
+  }
+
+  // Starter Forge (unchanged)
   root.querySelectorAll('[data-buy-package]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const kind = btn.dataset.buyPackage; // 'pi' | 'ic'
@@ -1285,7 +1301,7 @@ if (goCreateBtn){
         STATE.createSub = 'visuals';
 
         // jump to Create tab and render Visuals
-        try { 
+        try {
           const tabs = STATE.root?.querySelectorAll('[data-tab]');
           const createBtn = Array.from(tabs||[]).find(b=>b.dataset.tab==='create');
           if (createBtn) createBtn.click();
@@ -1305,20 +1321,20 @@ if (goCreateBtn){
     btn.addEventListener('click', ()=> handleBuySingle(btn.dataset.buySingle), { passive:true });
   });
   const payPi = root.querySelector('#payPi');
-const payIC = root.querySelector('#payIC');
-// enforceForm=true for Create tab buttons
-payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi', true), { passive:true });
-payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic', true), { passive:true });
+  const payIC = root.querySelector('#payIC');
+  // enforceForm=true for Create tab buttons
+  payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi', true), { passive:true });
+  payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic', true), { passive:true });
 
   const itemName = root.querySelector('#itemName');
-if (itemName){
-  itemName.value = STATE.currentName || '';
-  itemName.addEventListener('input', e=>{
-    STATE.currentName = e.target.value;
-    saveDraft();
-    updatePayButtonsState(); // <-- ADD THIS
-  }, { passive:true });
-}
+  if (itemName){
+    itemName.value = STATE.currentName || '';
+    itemName.addEventListener('input', e=>{
+      STATE.currentName = e.target.value;
+      saveDraft();
+      updatePayButtonsState();
+    }, { passive:true });
+  }
 
   const aiStyleSel = root.querySelector('#aiStyleSel');
   const aiAnimChk  = root.querySelector('#aiAnimChk');
@@ -1354,22 +1370,24 @@ if (itemName){
     repopulatePartOptions(catSel, partSel);
 
     catSel.addEventListener('change', e=>{
-  STATE.currentCategory = e.target.value;
-  repopulatePartOptions(catSel, partSel);
-  saveDraft();
-  updatePayButtonsState(); // <-- ADD THIS
-}, { passive:true });
+      STATE.currentCategory = e.target.value;
+      repopulatePartOptions(catSel, partSel);
+      saveDraft();
+      updatePayButtonsState();
+    }, { passive:true });
   }
 
   if (partSel){
     partSel.value = STATE.currentPart;
     partSel.addEventListener('change', e=>{
-  STATE.currentPart = e.target.value;
-  saveDraft();
-  updatePayButtonsState(); // <-- ADD THIS
-}, { passive:true });
+      STATE.currentPart = e.target.value;
+      saveDraft();
+      updatePayButtonsState();
+    }, { passive:true });
   }
-updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
+
+  updatePayButtonsState();
+
   const aiLeft = ()=> {
     const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
     const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
@@ -1388,40 +1406,23 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
     prevHost && (prevHost.innerHTML = STATE.currentSVG);
   }
 
-// Sub-tab switching
-root.querySelectorAll('[data-sub]').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    const next = b.dataset.sub;
-    // Only allow Visuals when unlocked
-    if (next === 'visuals' && !STATE.canUseVisuals) return;
-    STATE.createSub = next;
-    const host = STATE.root?.querySelector('#craftTabs');
-    if (host){
-      host.innerHTML = renderCreate();
-      bindInside();
+  // Sub-tab switching
+  root.querySelectorAll('[data-sub]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const next = b.dataset.sub;
+      // Only allow Visuals when unlocked
+      if (next === 'visuals' && !STATE.canUseVisuals) return;
+      STATE.createSub = next;
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){
+        host.innerHTML = renderCreate();
+        bindInside();
+        _syncVisualsTabStyle();
+      }
+    }, { passive:true });
+  });
 
-      // update visuals tab highlight if unlocked
-      try{
-        const vb = STATE.root?.querySelector('.cl-subtabs [data-sub="visuals"]');
-        if (vb){
-          if (STATE.canUseVisuals){
-            vb.style.background   = '#0b2b17';
-            vb.style.boxShadow    = '0 0 0 1px #1bd760 inset';
-            vb.style.color        = '#b8ffd1';
-            vb.title = 'You have mint credit available';
-          } else {
-            vb.style.background   = '';
-            vb.style.boxShadow    = '';
-            vb.style.color        = '';
-            vb.title = '';
-          }
-        }
-      }catch(_){}
-    }
-  }, { passive:true });
-});
-    
-  // ===== Handlers MUST live inside bindInside() =====
+  // ===== Handlers =====
   btnAI && btnAI.addEventListener('click', async ()=>{
     if (!btnAI) return;
     const prompt = String(aiPrompt?.value||'').trim();
@@ -1571,25 +1572,7 @@ root.querySelectorAll('[data-sub]').forEach(b=>{
         if (host){
           host.innerHTML = renderCreate();
           bindInside();
-
-          // Visuals subtab: green highlight if credit remains, normal if not
-          try{
-            const vb = STATE.root?.querySelector('.cl-subtabs [data-sub="visuals"]');
-            if (vb){
-              const hasCredit = (STATE.mintCredits|0) > 0 || (STATE.packageCredits && STATE.packageCredits.items > 0);
-              if (hasCredit){
-                vb.style.background   = '#0b2b17';
-                vb.style.boxShadow    = '0 0 0 1px #1bd760 inset';
-                vb.style.color        = '#b8ffd1';
-                vb.title = 'You have mint credit available';
-              }else{
-                vb.style.background   = '';
-                vb.style.boxShadow    = '';
-                vb.style.color        = '';
-                vb.title = '';
-              }
-            }
-          }catch(_){}
+          _syncVisualsTabStyle();
         }
 
         // Optional IZZA Pay merchant handoff
