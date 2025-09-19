@@ -2176,7 +2176,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
-    # ---- Redirect back to storefront with success flag (and token if available)
+        # ---- Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
     tok = ""
     if u:
@@ -2194,23 +2194,40 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         # Preserve bearer token (if present) and append craftPaid=1 so the game UI
         # will call /api/crafting/credits/reconcile and update the visible balance.
         if tok:
-            game_target = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
+            redirect_url = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
         else:
-            game_target = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
-        redirect_url = game_target
+            redirect_url = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
     else:
         redirect_url = default_target
 
-        resp = jsonify({"ok": True, "redirect_url": redirect_url})
-    # one-time craft credit so the game opens Create → Visuals on return
-    resp.set_cookie(
-        "craft_credit", "1",
-        max_age=15 * 60,     # 15 minutes is plenty
-        secure=True,         # Pi Browser uses HTTPS
-        samesite="None",     # allow cross-site if your flow ever hops origins
-        httponly=False,      # UI doesn't need to read it via JS, but False is fine
-        path="/"
-    )
+    # Build the JSON response once
+    resp = jsonify({"ok": True, "redirect_url": redirect_url})
+
+    # One-time cookie to cue the game to open Create → Visuals (only when relevant)
+    should_flag = False
+    try:
+        if slug == "izza-game-crafting":
+            should_flag = True
+        else:
+            # If this order includes the single-use crafting product, also flag
+            for li in lines:
+                it = by_id.get(int(li["item_id"]))
+                if it and str(it.get("link_id") or "") == SINGLE_CREDIT_LINK_ID:
+                    should_flag = True
+                    break
+    except Exception:
+        should_flag = False
+
+    if should_flag:
+        resp.set_cookie(
+            "craft_credit", "1",
+            max_age=15 * 60,     # 15 minutes
+            secure=True,         # HTTPS only
+            samesite="None",     # cross-site friendly (Pi Browser)
+            httponly=False,      # UI may read it if needed
+            path="/"
+        )
+
     return resp
 
 
