@@ -611,6 +611,48 @@ def pi_headers():
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
+# ========= CRAFTING CREDITS: schema helpers =========
+def _ensure_credit_tables(cx):
+    cx.executescript("""
+    CREATE TABLE IF NOT EXISTS crafting_credits(
+      user_id INTEGER PRIMARY KEY,
+      balance INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS crafting_credit_ledger(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      delta  INTEGER NOT NULL,
+      reason TEXT,
+      uniq   TEXT UNIQUE,              -- idempotency key (e.g., order:<id>)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+def _credit_add(cx, user_id:int, delta:int, reason:str, uniq:str|None=None):
+    if delta == 0: 
+        return
+    _ensure_credit_tables(cx)
+    if uniq:
+        # idempotency: skip if this grant already exists
+        row = cx.execute("SELECT 1 FROM crafting_credit_ledger WHERE uniq=?", (uniq,)).fetchone()
+        if row: 
+            return
+    cx.execute(
+        "INSERT INTO crafting_credit_ledger(user_id, delta, reason, uniq) VALUES(?,?,?,?)",
+        (user_id, delta, reason, uniq)
+    )
+    # upsert balance
+    cx.execute("""
+      INSERT INTO crafting_credits(user_id, balance) VALUES(?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET balance = crafting_credits.balance + excluded.balance,
+                                         updated_at = CURRENT_TIMESTAMP
+    """, (user_id, delta))
+
+def _credit_get(cx, user_id:int) -> int:
+    _ensure_credit_tables(cx)
+    row = cx.execute("SELECT balance FROM crafting_credits WHERE user_id=?", (user_id,)).fetchone()
+    return int(row["balance"]) if row and row["balance"] is not None else 0
 
 def _json_ok(**kw):
     out = {"ok": True}
@@ -680,6 +722,76 @@ def create_product_from_craft():
     }
 
     return jsonify(ok=True, dashboardUrl=f"/merchant/{m['slug']}?prefill=1")
+@crafting_api.get("/credits/status")
+def crafting_credit_status():
+    u = current_user_row()
+    if not u:
+        return _json_ok(credits=0)
+    with conn() as cx:
+        return _json_ok(credits=_credit_get(cx, int(u["id"])))
+
+@crafting_api.post("/credits/reconcile")
+def crafting_credit_reconcile():
+    # We grant credits from IZZA Pay fulfillment, so reconciliation is a no-op.
+    return _json_ok()
+
+@crafting_api.post("/credits/grant")
+def crafting_credit_grant():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip().lstrip("@")
+    amount   = int(data.get("amount") or 0)
+    order_id = data.get("order_id")
+    if amount <= 0:
+        return _json_err("bad-amount")
+
+    # Resolve user_id either from username or current session
+    with conn() as cx:
+        user_id = None
+        if username:
+            r = cx.execute("SELECT id FROM users WHERE lower(pi_username)=lower(?)", (username,)).fetchone()
+            if r: user_id = int(r["id"])
+        if not user_id:
+            u = current_user_row()
+            if u: user_id = int(u["id"])
+        if not user_id:
+            return _json_err("user-not-found")
+
+        uniq = f"order:{int(order_id)}" if order_id else None
+        _credit_add(cx, user_id, +amount, reason="single-mint", uniq=uniq)
+        return _json_ok(granted=amount)
+
+@crafting_api.post("/mine")
+def crafting_mine_post():
+    u = current_user_row()
+    if not u:
+        return _json_err("not_logged_in")
+    j = request.get_json(force=True) or {}
+    name = (j.get("name") or "").strip()[:160]
+    category = (j.get("category") or "").strip()[:40]
+    part = (j.get("part") or "").strip()[:20]
+    svg = (j.get("svg") or "").strip()
+    sku = (j.get("sku") or "").strip()[:40]
+    image = (j.get("image") or "").strip()
+
+    with conn() as cx:
+        cx.execute("""
+          CREATE TABLE IF NOT EXISTS crafted_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT,
+            svg TEXT,
+            sku TEXT,
+            image TEXT,
+            meta TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        """)
+        cx.execute(
+            "INSERT INTO crafted_items(user_id, name, svg, sku, image, meta) VALUES(?,?,?,?,?,?)",
+            (u["id"], name, svg, sku, image, json.dumps({"category":category, "part":part}))
+        )
+        new_id = cx.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    return _json_ok(id=new_id)
 
 # Register these under the game app prefix (/izza-game/…)
 app.register_blueprint(crafting_api)
