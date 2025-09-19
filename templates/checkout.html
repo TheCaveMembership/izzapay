@@ -250,12 +250,9 @@
   }
 
   function ensureAuth(){
-  const scopes = ['payments','username'];
-  return Pi.authenticate(scopes, onIncompletePaymentFound).then(({ user }) => {
-    window.__piUser = (user && user.username) || '';
-    return user;
-  });
-}
+    const scopes = ['payments','username'];
+    return Pi.authenticate(scopes, onIncompletePaymentFound);
+  }
 
   function buyerPayload(){
     return {
@@ -307,24 +304,23 @@
       };
 
       Pi.createPayment(paymentData, {
-        // onReadyForServerApproval
-fetch('/api/pi/approve', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ paymentId, session_id: sessionId, pi_username: window.__piUser || '' })
-});
-
-// onReadyForServerCompletion
-fetch('/api/pi/complete', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    paymentId, session_id: sessionId, txid,
-    pi_username: window.__piUser || '',
-    buyer: buyerPayload(),
-    shipping: shippingPayload()
-  })
-})
+        onReadyForServerApproval: function(paymentId){
+          fetch('/api/pi/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId, session_id: sessionId })
+          });
+        },
+        onReadyForServerCompletion: function(paymentId, txid){
+          fetch('/api/pi/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paymentId, session_id: sessionId, txid,
+              buyer: buyerPayload(),
+              shipping: shippingPayload()
+            })
+          })
           .then(r => r.json())
           .then(res => {
             const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
