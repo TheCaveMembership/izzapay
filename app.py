@@ -48,6 +48,15 @@ except ImportError:
                   qty INTEGER NOT NULL
                 )
             """)
+            # One-per-payment idempotency for memo-based grants (prevents duplicate +1s)
+with conn() as cx:
+    cx.execute("""
+      CREATE TABLE IF NOT EXISTS crafting_credit_grants_payments(
+        payment_id TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL,
+        granted_at INTEGER NOT NULL
+      )
+    """)
 
 # Create the “already-claimed” ledger once on boot (not inside other functions)
 with conn() as cx:
@@ -1950,7 +1959,19 @@ def pi_complete():
     except Exception:
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
-
+    # Extract memo/description from the verified payment payload
+    memo_text = ""
+    try:
+        meta = pdata.get("metadata") or {}
+        memo_text = str(
+            pdata.get("memo")
+            or pdata.get("description")
+            or meta.get("description")
+            or meta.get("memo")
+            or ""
+        )
+    except Exception:
+        memo_text = ""
     # ✅ Grant mint credit ONLY for the single-mint checkout path
     try:
         username      = s["pi_username"]  # set when session is created
@@ -1973,6 +1994,42 @@ def pi_complete():
             print(f"[pi_complete] no credit grant (path={checkout_path})")
     except Exception as e:
         print("[pi_complete] credit grant failed:", e)
+            # 🔁 Fallback: if the Pi memo mentions "IZZA GAME", grant +1 single mint credit
+    # (idempotent per payment_id via crafting_credit_grants_payments)
+    try:
+        if memo_text:
+            norm = " ".join(memo_text.split()).lower()  # collapse whitespace, case-insensitive
+            if ("izza game" in norm) and (checkout_path != f"/checkout/{SINGLE_CREDIT_LINK_ID}"):
+                # Resolve user id (prefer session’s user_id)
+                uid = None
+                try:
+                    uid = int(s["user_id"]) if s["user_id"] is not None else None
+                except Exception:
+                    uid = None
+                if not uid:
+                    u_ctx = current_user_row()
+                    uid = int(u_ctx["id"]) if u_ctx else None
+
+                if uid:
+                    with conn() as cx:
+                        dup = cx.execute(
+                            "SELECT 1 FROM crafting_credit_grants_payments WHERE payment_id=?",
+                            (payment_id,)
+                        ).fetchone()
+                        if not dup:
+                            add_ic_credits(uid, 1)  # +1 single mint credit
+                            cx.execute(
+                                "INSERT INTO crafting_credit_grants_payments(payment_id, user_id, granted_at) VALUES(?,?,?)",
+                                (payment_id, uid, int(time.time()))
+                            )
+                            print(f"[pi_complete] memo-based credit granted (+1) to user_id={uid} for payment {payment_id}")
+                        else:
+                            print(f"[pi_complete] memo-based grant already recorded for payment {payment_id}")
+            else:
+                if memo_text:
+                    print(f"[pi_complete] memo present but not qualifying or already handled by path: {memo_text[:80]!r}")
+    except Exception as e:
+        print("[pi_complete] memo-based grant failed:", e)
 
     return fulfill_session(s, txid, buyer, shipping)
 
