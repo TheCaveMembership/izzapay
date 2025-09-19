@@ -444,6 +444,48 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 
+@app.get("/izza-game/voucher")
+def voucher_page():
+    # optional: require sign-in to see it
+    u = current_user_row()
+    if not u:
+        return redirect("/signin?fresh=1&path=/izza-game/voucher")
+
+    # if craftPaid=1 was passed, kick off reconcile right away
+    craft_paid = request.args.get("craftPaid") == "1"
+
+    html = f"""
+    <!doctype html>
+    <html>
+    <head><meta charset="utf-8"><title>Voucher</title></head>
+    <body style="font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding:24px">
+      <h1>Your voucher</h1>
+      <p>Thanks! If this was a crafting purchase, your credits will appear below.</p>
+      <div id="result" style="margin-top:12px; padding:12px; border:1px solid #ddd; border-radius:8px;">
+        Checking credits…
+      </div>
+      <script>
+      async function reconcile() {{
+        try {{
+          const r = await fetch('/api/crafting/credits/reconcile', {{method:'POST'}});
+          const j = await r.json();
+          if (j && j.ok) {{
+            document.getElementById('result').textContent =
+              'Credits: ' + (j.credits ?? j.balance ?? 0) + ' (awarded: ' + (j.awarded ?? 0) + ')';
+          }} else {{
+            document.getElementById('result').textContent = 'Could not load credits.';
+          }}
+        }} catch(e) {{
+          document.getElementById('result').textContent = 'Network error.';
+        }}
+      }}
+      { 'reconcile();' if craft_paid else '' }
+      </script>
+    </body>
+    </html>
+    """
+    return Response(html, headers={"Content-Type": "text/html; charset=utf-8"})
+
 @app.context_processor
 def inject_globals():
     return {
