@@ -2381,32 +2381,32 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
                 shipping_html = "".join(block)
 
-        # Email subjects
-        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        if suffix:
-            subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
-        else:
-            subj_buyer = f"Your order at {m['business_name']} is confirmed"
+    # Email subjects
+    suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+    if suffix:
+        subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
+    else:
+        subj_buyer = f"Your order at {m['business_name']} is confirmed"
 
-        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+    subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
 
     try:
         if buyer_email:
-        send_email(
-            buyer_email,
-            subj_buyer,
-            f"""
-                <h2>Thanks for your order!</h2>
-                <p><strong>Store:</strong> {m['business_name']}</p>
-                {items_table}
-                <p style="margin-top:12px">
-                  You’ll receive updates from the merchant if anything changes.
-                </p>
-            """,
-            reply_to=merchant_mail
-        )
-except Exception:
-    pass
+            send_email(
+                buyer_email,
+                subj_buyer,
+                f"""
+                    <h2>Thanks for your order!</h2>
+                    <p><strong>Store:</strong> {m['business_name']}</p>
+                    {items_table}
+                    <p style="margin-top:12px">
+                      You’ll receive updates from the merchant if anything changes.
+                    </p>
+                """,
+                reply_to=merchant_mail
+            )
+    except Exception:
+        pass
 
     # --- Voucher redirect override (if a mint code was generated earlier) ---
     mint_code = session.pop("last_mint_code", None)
@@ -2427,23 +2427,35 @@ except Exception:
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # Decide where to send the buyer after success
-    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+    # Decide where to send the buyer after success (product-based)
+    SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)  # e.g. "d0b811e8"
+    SINGLE_PRODUCT_TITLE = "IZZA Game Crafting (single-use)"
 
-    # Detect if this basket grants a single-mint credit
-    SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)
     grants_single_mint = False
     try:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
-            if it and str(it.get("link_id") or "") == SINGLE_ID:
+            if not it:
+                continue
+            # 1) Preferred: link_id matches the single-mint product
+            if str(it.get("link_id") or "") == SINGLE_ID:
+                grants_single_mint = True
+                break
+            # 2) Fallback: title matches exactly (case-insensitive, trim)
+            it_title = (it.get("title") or "").strip().lower()
+            if it_title == SINGLE_PRODUCT_TITLE.strip().lower():
                 grants_single_mint = True
                 break
     except Exception:
         grants_single_mint = False
 
-    # If it's the crafting store OR an order with the special single-mint product → voucher page
-    if (slug == "izza-game-crafting") or grants_single_mint:
+    # 3) Extra fallback: session checkout path ends with /<SINGLE_ID>
+    checkout_path = (s.get("checkout_path") or s.get("path") or s.get("checkout_url") or "").strip()
+    if (not grants_single_mint) and checkout_path.endswith(f"/{SINGLE_ID}"):
+        grants_single_mint = True
+
+    # Voucher-first redirect when the basket grants the single-mint credit
+    if grants_single_mint:
         try:
             with conn() as cx:
                 code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
@@ -2456,14 +2468,8 @@ except Exception:
     # Build response JSON
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
 
-    # Optional: keep the craft_credit cookie so the game UI can highlight Create→Visuals
-    should_flag = False
-    try:
-        if (slug == "izza-game-crafting") or grants_single_mint:
-            should_flag = True
-    except Exception:
-        should_flag = False
-
+    # Optional cookie so the game can highlight Create→Visuals
+    should_flag = grants_single_mint
     if should_flag:
         resp.set_cookie(
             "craft_credit", "1",
@@ -2474,7 +2480,7 @@ except Exception:
             path="/"
         )
 
-    return resp   # ✅ inside fulfill_session
+    return resp
 
 
 # Provide a concrete cancel endpoint used by /payment/error
@@ -2489,15 +2495,13 @@ def payment_cancel():
     if session_id:
         try:
             with conn() as cx:
-                cx.execute(
-                    "UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE id=?",
-                    (session_id,)
-                )
+                cx.execute("UPDATE sessions SET pi_payment_id=NULL, state='initiated' WHERE id=?", (session_id,))
         except Exception:
             pass
     return {"ok": True, "cleared": bool(session_id)}
 
 
+# Voucher success page (renamed endpoint to avoid duplicate)
 @app.get("/mint/success/<code>")
 def mint_success_voucher(code):
     # Very small inline page — you can move to a template later
@@ -2530,19 +2534,13 @@ def mint_codes_consume():
 
     with conn() as cx:
         _ensure_credit_codes(cx)
-        row = cx.execute(
-            "SELECT code, user_id, used FROM mint_codes WHERE code=?",
-            (code,)
-        ).fetchone()
+        row = cx.execute("SELECT code, user_id, used FROM mint_codes WHERE code=?", (code,)).fetchone()
         if not row:
             return {"ok": False, "reason": "invalid"}, 404
         if int(row["used"] or 0) == 1:
             return {"ok": False, "reason": "used"}, 409
 
-        cx.execute(
-            "UPDATE mint_codes SET used=1, used_at=strftime('%s','now') WHERE code=?",
-            (code,)
-        )
+        cx.execute("UPDATE mint_codes SET used=1, used_at=strftime('%s','now') WHERE code=?", (code,))
 
     return {"ok": True, "creditsAdded": 1}
 
@@ -2555,10 +2553,11 @@ def payment_error():
     """
     return payment_cancel()
 
-# (rest of your file continues unchanged…)
+
 # ----------------- UPLOADS -----------------
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 @app.post("/upload")
 def upload():
@@ -2672,11 +2671,13 @@ def upload():
     url = f"{MEDIA_PREFIX}/{safe_name}"
     return {"ok": True, "url": url}, 200
 
+
 # ----------------- IMAGE PROXY -----------------
 _TRANSPARENT_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
     "AAC0lEQVR42mP8/x8AAwMCAO6dEpgAAAAASUVORK5CYII="
 )
+
 
 @app.get("/uimg")
 def uimg():
@@ -2731,18 +2732,22 @@ def uimg():
 
     return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
+
 # ----------------- POLICIES / STATIC PAGES -----------------
 @app.get("/validation-key.txt")
 def validation_key():
     return app.send_static_file("validation-key.txt")
 
+
 @app.get("/privacy")
 def privacy():
     return render_template("privacy.html")
 
+
 @app.get("/terms")
 def terms():
     return render_template("terms.html")
+
 
 # ----------------- ORDERS PAGE (Purchases + Merchant stats) -----------------
 def _merchant_30d_stats(merchant_id: int):
@@ -2806,6 +2811,7 @@ def _merchant_30d_stats(merchant_id: int):
         "usd_rate": usd_rate,
         "usd_estimate": usd_estimate,
     }
+
 
 @app.get("/orders")
 def orders_page():
@@ -2877,6 +2883,7 @@ def orders_page():
         payout_sent=(request.args.get("payout") == "sent"),
         t=tok,   # <-- pass token
     )
+
 
 # Trigger payout email (manual payout by app owner)
 @app.post("/merchant/<slug>/payout")
@@ -2966,20 +2973,24 @@ def merchant_payout(slug):
         q += f"&t={tok}"
     return redirect(f"/merchant/{m['slug']}/orders{q}")
 
+
 # ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
 def buyer_status(token):
     with conn() as cx:
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
-    if not o: abort(404)
+    if not o:
+        abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()  # <-- tuple fixed
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
+
 
 @app.get("/success")
 def success():
     return render_template("success.html")
+
 
 # ====== COLLECTIBLES — schema patch (IC purchases recorded separately) ======
 with conn() as cx:
@@ -2987,31 +2998,26 @@ with conn() as cx:
         CREATE TABLE IF NOT EXISTS collectible_orders_ic(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
-          crafted_key TEXT,         -- e.g. "craft_<slug>_<ts>" from client
+          crafted_key TEXT,
           title TEXT NOT NULL,
-          slot TEXT,                -- head/chest/arms/legs/hands
-          part TEXT,                -- helmet/vest/arms/legs/gun/melee (as provided by client)
-          svg TEXT,                 -- sanitized SVG or inventory-safe icon (keep small)
+          slot TEXT,
+          part TEXT,
+          svg TEXT,
           price_ic INTEGER NOT NULL,
-          payment_method TEXT,      -- 'izza_coins'
-          source TEXT,              -- 'game_shop' | 'crafting_ui' etc.
+          payment_method TEXT,
+          source TEXT,
           created_at INTEGER NOT NULL
         )
     """)
     cx.execute("CREATE INDEX IF NOT EXISTS idx_collectible_orders_ic_user ON collectible_orders_ic(user_id)")
     cx.execute("CREATE INDEX IF NOT EXISTS idx_collectible_orders_ic_key ON collectible_orders_ic(crafted_key)")
 
+
 # ====== COLLECTIBLES — record IC collectible order from the game/shop ======
 @app.post("/api/orders/collectible_ic")
 def api_orders_collectible_ic():
     """
-    Called by the game (armour_packs_plugin.js) after an IZZA coin purchase
-    so IZZA Pay can reflect it in the player's collectibles.
-
-    JSON body (already implemented in your plugin):
-      {
-        crafted_key, title, slot, part, svg, price_ic, payment_method, source
-      }
+    Called by the game after an IZZA coin purchase so IZZA Pay can reflect it.
     """
     u = current_user_row()
     if not u:
@@ -3022,7 +3028,7 @@ def api_orders_collectible_ic():
     key     = (data.get("crafted_key") or "").strip() or None
     slot    = (data.get("slot") or "").strip() or None
     part    = (data.get("part") or "").strip() or None
-    svg     = (data.get("svg") or "").strip() or ""   # trust front-end sanitizer; server is not re-using this SVG beyond listing
+    svg     = (data.get("svg") or "").strip() or ""
     try:
         price_ic = int(data.get("price_ic") or 0)
     except Exception:
@@ -3042,9 +3048,7 @@ def api_orders_collectible_ic():
             int(u["id"]), key, title, slot, part, svg, int(price_ic), paym, source, int(time.time())
         ))
 
-    # Side-effect: optional grant hook (no-op if you prefer client-side inventory only)
     try:
-        # If we received a crafted_key, grant 1 copy for the buyer (mirrors your Pi grant path)
         if key:
             _grant_crafting_item(int(u["id"]), key, 1)
     except Exception:
@@ -3052,23 +3056,17 @@ def api_orders_collectible_ic():
 
     return {"ok": True}
 
+
 # ====== COLLECTIBLES — unified feed for Crafting Land UI ======
 @app.get("/api/crafts/feed")
 def api_crafts_feed():
-    """
-    Returns one payload the CRAFTS page can render.
-    - creations:      items the user CREATED via crafting UI (table: crafted_items)
-    - purchases_ic:   collectibles purchased with IZZA coins (table: collectible_orders_ic)
-    - purchases_pi:   collectibles purchased via Pi checkout (orders joined to items)
-    - claims:         map of {order_id: true} for claimed Pi collectibles
-    """
     u = current_user_row()
     if not u:
         return {"ok": True, "creations": [], "purchases_ic": [], "purchases_pi": [], "claims": {}}
 
     uid = int(u["id"])
 
-    # 1) My creations (from crafting UI)
+    # 1) My creations
     with conn() as cx:
         rows = cx.execute("""
             SELECT id, name, sku, image, meta_json, created_at
@@ -3091,7 +3089,7 @@ def api_crafts_feed():
             "created_at": int(r["created_at"] or 0),
         })
 
-    # 2) IC purchases (from the new table)
+    # 2) IC purchases
     with conn() as cx:
         ic_rows = cx.execute("""
             SELECT id, crafted_key, title, slot, part, svg, price_ic, payment_method, source, created_at
@@ -3101,7 +3099,7 @@ def api_crafts_feed():
         """, (uid,)).fetchall()
     purchases_ic = [dict(r) for r in ic_rows]
 
-    # 3) Pi collectibles (orders w/ fulfillment_kind='crafting')
+    # 3) Pi collectibles
     with conn() as cx:
         pi_rows = cx.execute("""
             SELECT o.id            AS order_id,
@@ -3122,12 +3120,11 @@ def api_crafts_feed():
             ORDER BY o.id DESC
         """, (uid,)).fetchall()
 
-        # 4) Claim map (which Pi collectibles have been pulled into the game already)
         claimed_rows = cx.execute("""
             SELECT order_id FROM collectible_claims WHERE user_id=?
         """, (uid,)).fetchall()
 
-    claims = { int(r["order_id"]): True for r in claimed_rows }
+    claims = {int(r["order_id"]): True for r in claimed_rows}
     purchases_pi = [{
         "order_id": int(r["order_id"]),
         "title": r["title"],
@@ -3146,24 +3143,19 @@ def api_crafts_feed():
         "claims": claims
     }
 
+
 # ====== CRAFTS PAGE (game-side page; very small server view) ======
 @app.get("/izza-game/crafts")
 def game_crafts_page():
-    """
-    Renders the CRAFTS page (game template). This DOES NOT duplicate /orders.
-    It simply ships a shell that calls /api/crafts/feed on load and renders tabs:
-      - CRAFTS (my creations)
-      - PURCHASES (IC + Pi collectibles)
-    """
     u = require_user()
-    if isinstance(u, Response):  # redirected to signin if needed
+    if isinstance(u, Response):
         return u
-    # Token helps the game template call APIs if third-party cookies are blocked
     try:
         tok = mint_login_token(int(u["id"]))
     except Exception:
         tok = None
     return render_template("crafts.html", t=tok, sandbox=PI_SANDBOX)
+
 
 # =========================================================================== #
 # ----------------- MAIN -----------------
