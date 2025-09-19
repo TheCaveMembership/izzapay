@@ -61,42 +61,6 @@ function repopulatePartOptions(catSelEl, partSelEl){
   partSelEl.value = opts.some(o=>o.v===prev) ? prev : opts[0].v;
 }
 
-function totalMintCredits(){
-  const singles = (STATE.mintCredits|0);
-  const pkg = (STATE.packageCredits && STATE.packageCredits.items|0) || 0;
-  return singles + pkg;
-}
-
-// Update the little badge beside "Create Item" without re-rendering the whole header
-function updateTabsHeaderCredits(){
-  try{
-    const wrap = STATE.root?.querySelector('[data-tab="create"]');
-    if (!wrap) return;
-    const have = totalMintCredits();
-    const label = 'Create Item';
-
-    // ensure we don't stack multiple badges
-    const old = wrap.querySelector('.cl-credit-badge');
-    if (old) old.remove();
-
-    if (have > 0){
-      const b = document.createElement('span');
-      b.className = 'cl-credit-badge';
-      b.textContent = String(have);
-      b.style.cssText = `
-        display:inline-block; margin-left:6px; padding:0 6px; min-width:18px; height:18px;
-        line-height:18px; font-size:11px; font-weight:700; border-radius:6px;
-        background:#0b2b17; border:1px solid #1bd760; color:#b8ffd1; vertical-align:middle;
-      `;
-      // Make sure button has the base label
-      if (!/Create Item/i.test(wrap.textContent)) wrap.textContent = label;
-      wrap.appendChild(b);
-    } else {
-      // restore plain label if we removed a badge
-      wrap.textContent = label;
-    }
-  }catch(_){}
-}
 /* ------------------------------------------------------------------------- */
 
 // Compose the UX prompt shown to the model (keeps constraints tight)
@@ -186,6 +150,46 @@ const COIN_PER_PI = 2000;
   STATE.canUseVisuals = next > 0;
   updateTabsHeaderCredits();
 }
+
+// --------- MOVED INSIDE IIFE + FIXED BITWISE LOGIC ---------
+function totalMintCredits(){
+  const singles = (STATE.mintCredits | 0);
+  const pkg = (STATE.packageCredits && (STATE.packageCredits.items | 0)) || 0;
+  return singles + pkg;
+}
+
+// Update the little badge beside "Create Item" without re-rendering the whole header
+function updateTabsHeaderCredits(){
+  try{
+    const wrap = STATE.root?.querySelector('[data-tab="create"]');
+    if (!wrap) return;
+    const have = totalMintCredits();
+    const label = 'Create Item';
+
+    // ensure we don't stack multiple badges
+    const old = wrap.querySelector('.cl-credit-badge');
+    if (old) old.remove();
+
+    if (have > 0){
+      const b = document.createElement('span');
+      b.className = 'cl-credit-badge';
+      b.textContent = String(have);
+      b.style.cssText = `
+        display:inline-block; margin-left:6px; padding:0 6px; min-width:18px; height:18px;
+        line-height:18px; font-size:11px; font-weight:700; border-radius:6px;
+        background:#0b2b17; border:1px solid #1bd760; color:#b8ffd1; vertical-align:middle;
+      `;
+      // Make sure button has the base label
+      if (!/Create Item/i.test(wrap.textContent)) wrap.textContent = label;
+      wrap.appendChild(b);
+    } else {
+      // restore plain label if we removed a badge
+      wrap.textContent = label;
+    }
+  }catch(_){}
+}
+// -----------------------------------------------------------
+
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
