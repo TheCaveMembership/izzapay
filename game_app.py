@@ -613,8 +613,7 @@ def pi_headers():
 crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
 # game_app.py (bottom where other blueprints are registered)
 # game_app.py
-from game_pi_checkout import pi_checkout_bp
-app.register_blueprint(pi_checkout_bp)  # ✅ no extra url_prefix here
+
 # ========= CRAFTING CREDITS: schema helpers =========
 def _ensure_credit_tables(cx):
     cx.executescript("""
