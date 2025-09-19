@@ -854,6 +854,21 @@ def add_ic_credits(user_id: int, delta: int) -> int:
         cx.execute("UPDATE users SET ic_credits=? WHERE id=?", (new, user_id))
     return new
 
+def _new_mint_code(cx, user_id:int) -> str:
+    import secrets, time, sqlite3
+    _ensure_credit_codes(cx)  # your existing table creator
+    while True:
+        # Format like IZZA-AB12-CD34-EF56 (feel free to tweak)
+        code = "IZZA-" + secrets.token_hex(2).upper() + "-" + secrets.token_hex(2).upper() + "-" + secrets.token_hex(2).upper()
+        try:
+            cx.execute(
+                "INSERT INTO mint_codes(code, user_id, used, created_at) VALUES(?,?,0,?)",
+                (code, int(user_id or 0), int(time.time()))
+            )
+            return code
+        except sqlite3.IntegrityError:
+            continue  # regenerate on rare collision
+
 def resolve_merchant_by_slug(slug):
     with conn() as cx:
         return cx.execute("SELECT * FROM merchants WHERE slug=?", (slug,)).fetchone()
@@ -1795,6 +1810,14 @@ def storefront(slug):
     return render_template("store.html", m=m, items=items, cid=cid, cart_count=cnt,
                            app_base=APP_BASE_URL, username=u["pi_username"], t=tok,
                            colorway=m["colorway"])
+    
+@app.get("/voucher/<code>")
+def mint_success(code):
+    with conn() as cx:
+        row = cx.execute("SELECT code, used, used_at FROM mint_codes WHERE code=?", (code,)).fetchone()
+    status = ("invalid" if not row else ("used" if int(row["used"]) else "ok"))
+    return render_template("mint_success.html", code=code, status=status), (404 if status=="invalid" else 200)
+
 
 @app.post("/store/<slug>/add")
 def store_add(slug):
@@ -2387,7 +2410,7 @@ if mint_code:
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
     return resp
 
-# ---- Redirect back to storefront with success flag (and token if available)
+    # ---- Redirect target (voucher-first) ----
     u = current_user_row()
     tok = ""
     if u:
@@ -2400,64 +2423,53 @@ if mint_code:
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
     # Decide where to send the buyer after success
-slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
 
-# Detect if this order should grant a Crafting "single mint" code.
-# You already computed SINGLE_ID above and built 'by_id' + 'lines'.
-grants_single_mint = False
-try:
-    for li in lines:
-        it = by_id.get(int(li["item_id"]))
-        if it and str(it.get("link_id") or "") == SINGLE_ID:
-            grants_single_mint = True
-            break
-except Exception:
+    # Detect if this basket grants a single-mint credit
+    SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)
     grants_single_mint = False
-
-# If it's the crafting store OR the order contained the special single-mint item:
-if (slug == "izza-game-crafting") or grants_single_mint:
     try:
-        # Make a one-time code for THIS user
-        with conn() as cx:
-            code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
-        # Send them to the voucher page where they’ll copy the code
-        redirect_url = url_for("mint_success", code=code, _external=True)
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            if it and str(it.get("link_id") or "") == SINGLE_ID:
+                grants_single_mint = True
+                break
     except Exception:
-        # Fall back to the storefront success if something goes wrong
-        redirect_url = default_target
-else:
-    redirect_url = default_target
+        grants_single_mint = False
 
-    # Build the JSON response once
+    # If it's the crafting store OR an order with the special single-mint product → voucher page
+    if (slug == "izza-game-crafting") or grants_single_mint:
+        try:
+            with conn() as cx:
+                code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
+            redirect_url = url_for("mint_success", code=code, _external=True)
+        except Exception:
+            redirect_url = default_target
+    else:
+        redirect_url = default_target
+
+    # Build response JSON
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
 
-    # One-time cookie to cue the game to open Create → Visuals (only when relevant)
+    # Optional: keep the craft_credit cookie so the game UI can highlight Create→Visuals
     should_flag = False
     try:
-        if slug == "izza-game-crafting":
+        if (slug == "izza-game-crafting") or grants_single_mint:
             should_flag = True
-        else:
-            # If this order includes the single-use crafting product, also flag
-            for li in lines:
-                it = by_id.get(int(li["item_id"]))
-                if it and str(it.get("link_id") or "") == SINGLE_CREDIT_LINK_ID:
-                    should_flag = True
-                    break
     except Exception:
         should_flag = False
 
     if should_flag:
         resp.set_cookie(
             "craft_credit", "1",
-            max_age=15 * 60,     # 15 minutes
-            secure=True,         # HTTPS only
-            samesite="None",     # cross-site friendly (Pi Browser)
-            httponly=False,      # UI may read it if needed
+            max_age=15 * 60,
+            secure=True,
+            samesite="None",
+            httponly=False,
             path="/"
         )
 
     return resp
-
 
 # Provide a concrete cancel endpoint used by /payment/error
 @app.post("/payment/cancel")
