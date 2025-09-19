@@ -1945,6 +1945,29 @@ def pi_complete():
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
 
+    # ✅ Grant mint credit ONLY for the single-mint checkout path
+    try:
+        username      = s["pi_username"]  # set when session is created
+        checkout_path = s["checkout_path"] if "checkout_path" in s.keys() else None
+
+        if username and checkout_path == "/checkout/d0b811e8":
+            # Optional: basic idempotency by tagging request with payment_id
+            requests.post(
+                "https://izzapay.onrender.com/api/credits/claim",
+                json={
+                    "username": username,
+                    "source": "pi",
+                    "credits": 1,
+                    "idempotency_key": f"pi:{payment_id}"
+                },
+                timeout=5
+            )
+            print(f"[pi_complete] credit granted to {username} for {payment_id}")
+        else:
+            print(f"[pi_complete] no credit grant (path={checkout_path})")
+    except Exception as e:
+        print("[pi_complete] credit grant failed:", e)
+
     return fulfill_session(s, txid, buyer, shipping)
 
 # ----------------- FULFILLMENT + EMAIL -----------------
