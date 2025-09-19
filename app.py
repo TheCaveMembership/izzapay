@@ -2403,74 +2403,73 @@ try:
 except Exception:
     pass
 
-# --- Voucher redirect override (if a mint code was generated earlier) ---
-mint_code = session.pop("last_mint_code", None)
-if mint_code:
-    redirect_url = url_for("mint_success", code=mint_code, _external=True)
-    resp = jsonify({"ok": True, "redirect_url": redirect_url})
-    return resp
+    # --- Voucher redirect override (if a mint code was generated earlier) ---
+    mint_code = session.pop("last_mint_code", None)
+    if mint_code:
+        redirect_url = url_for("mint_success", code=mint_code, _external=True)
+        resp = jsonify({"ok": True, "redirect_url": redirect_url})
+        return resp
 
-# ---- Redirect target (voucher-first) ----
-u = current_user_row()
-tok = ""
-if u:
-    try:
-        tok = mint_login_token(u["id"])
-    except Exception:
-        tok = ""
+    # ---- Redirect target (voucher-first) ----
+    u = current_user_row()
+    tok = ""
+    if u:
+        try:
+            tok = mint_login_token(u["id"])
+        except Exception:
+            tok = ""
 
-join = "&" if tok else ""
-default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
+    join = "&" if tok else ""
+    default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-# Decide where to send the buyer after success
-slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+    # Decide where to send the buyer after success
+    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
 
-# Detect if this basket grants a single-mint credit
-SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)
-grants_single_mint = False
-try:
-    for li in lines:
-        it = by_id.get(int(li["item_id"]))
-        if it and str(it.get("link_id") or "") == SINGLE_ID:
-            grants_single_mint = True
-            break
-except Exception:
+    # Detect if this basket grants a single-mint credit
+    SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)
     grants_single_mint = False
-
-# If it's the crafting store OR an order with the special single-mint product → voucher page
-if (slug == "izza-game-crafting") or grants_single_mint:
     try:
-        with conn() as cx:
-            code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
-        redirect_url = url_for("mint_success", code=code, _external=True)
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            if it and str(it.get("link_id") or "") == SINGLE_ID:
+                grants_single_mint = True
+                break
     except Exception:
-        redirect_url = default_target
-else:
-    redirect_url = default_target
+        grants_single_mint = False
 
-# Build response JSON
-resp = jsonify({"ok": True, "redirect_url": redirect_url})
-
-# Optional: keep the craft_credit cookie so the game UI can highlight Create→Visuals
-should_flag = False
-try:
+    # If it's the crafting store OR an order with the special single-mint product → voucher page
     if (slug == "izza-game-crafting") or grants_single_mint:
-        should_flag = True
-except Exception:
+        try:
+            with conn() as cx:
+                code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
+            redirect_url = url_for("mint_success", code=code, _external=True)
+        except Exception:
+            redirect_url = default_target
+    else:
+        redirect_url = default_target
+
+    # Build response JSON
+    resp = jsonify({"ok": True, "redirect_url": redirect_url})
+
+    # Optional: keep the craft_credit cookie so the game UI can highlight Create→Visuals
     should_flag = False
+    try:
+        if (slug == "izza-game-crafting") or grants_single_mint:
+            should_flag = True
+    except Exception:
+        should_flag = False
 
-if should_flag:
-    resp.set_cookie(
-        "craft_credit", "1",
-        max_age=15 * 60,
-        secure=True,
-        samesite="None",
-        httponly=False,
-        path="/"
-    )
+    if should_flag:
+        resp.set_cookie(
+            "craft_credit", "1",
+            max_age=15 * 60,
+            secure=True,
+            samesite="None",
+            httponly=False,
+            path="/"
+        )
 
-return resp
-
+    return resp
 # Provide a concrete cancel endpoint used by /payment/error
 @app.post("/payment/cancel")
 def payment_cancel():
