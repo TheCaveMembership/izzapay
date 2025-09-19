@@ -2311,11 +2311,12 @@ try:
         session["last_mint_code"] = code
 except Exception as e:
     print("[fulfill_session] mint code generation failed:", e)
-        # Mark session as paid after all lines are processed
-        cx.execute(
-            "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-            (tx_hash, s["id"])
-        )
+
+# Mark session as paid after all lines are processed
+cx.execute(
+    "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+    (tx_hash, s["id"])
+)
 
     
     try:
