@@ -2297,111 +2297,115 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             except Exception:
                 # do not fail the fulfillment if credit record fails
                 pass
-# --- Voucher: generate mint code for player to redeem in-game ---
-import secrets
-try:
-    if link_id == SINGLE_ID and buyer_user_id:
-        _ensure_credit_codes(cx)
-        code = secrets.token_hex(4).upper()  # 8-char voucher
+
+    # --- Voucher: generate mint code for player to redeem in-game ---
+    import secrets
+    try:
+        # link_id may not be defined if no item had it; guard implicitly
+        if ('link_id' in locals()) and (link_id == SINGLE_ID) and buyer_user_id:
+            with conn() as cx:
+                _ensure_credit_codes(cx)
+                code = secrets.token_hex(4).upper()  # 8-char voucher
+                cx.execute(
+                    "INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)",
+                    (code, int(buyer_user_id))
+                )
+            # Save code in session for redirect
+            session["last_mint_code"] = code
+    except Exception as e:
+        print("[fulfill_session] mint code generation failed:", e)
+
+    # Mark session as paid after all lines are processed
+    with conn() as cx:
         cx.execute(
-            "INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)",
-            (code, int(buyer_user_id))
+            "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
+            (tx_hash, s["id"])
         )
-        # Save code in session for redirect
-        session["last_mint_code"] = code
-except Exception as e:
-    print("[fulfill_session] mint code generation failed:", e)
 
-# Mark session as paid after all lines are processed
-cx.execute(
-    "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-    (tx_hash, s["id"])
-)
+    try:
+        display_rows = []
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            title = (it["title"] if it else f"Item {li['item_id']}")
+            qty = int(li["qty"])
+            gross = float(li["price"]) * qty
+            display_rows.append({"title": title, "qty": qty, "gross": gross})
 
-try:
-    display_rows = []
-    for li in lines:
-        it = by_id.get(int(li["item_id"]))
-        title = (it["title"] if it else f"Item {li['item_id']}")
-        qty = int(li["qty"])
-        gross = float(li["price"]) * qty
-        display_rows.append({"title": title, "qty": qty, "gross": gross})
-
-    line_html = "".join(
-        f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
-        f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
-        f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
-        for dr in display_rows
-    )
-    items_table = (
-        "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
-        "<thead><tr>"
-        "<th style='text-align:left; padding:6px 8px'>Item</th>"
-        "<th style='text-align:right; padding:6px 8px'>Qty</th>"
-        "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
-        "</tr></thead>"
-        f"<tbody>{line_html}</tbody>"
-        "<tfoot>"
-        f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
-        f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
-        "</tfoot>"
-        "</table>"
-    )
-
-    merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
-
-    shipping_html = ""
-    if isinstance(shipping, dict):
-        name   = (shipping.get("name") or "").strip()
-        email  = (shipping.get("email") or "").strip()
-        phone  = (shipping.get("phone") or "").strip()
-        addr1  = (shipping.get("address") or "").strip()
-        addr2  = (shipping.get("address2") or "").strip()
-        city   = (shipping.get("city") or "").strip()
-        state  = (shipping.get("state") or "").strip()
-        postal = (shipping.get("postal_code") or "").strip()
-        country= (shipping.get("country") or "").strip()
-        any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
-        if any_shipping:
-            street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
-            locality_parts = [p for p in [city, state] if p]
-            locality_line = ", ".join(locality_parts)
-            if postal:
-                locality_line = (locality_line + " " if locality_line else "") + postal
-            block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
-            if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
-            if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
-            if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
-            if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
-            if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
-            if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
-            shipping_html = "".join(block)
-
-    # Email subjects
-    suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-    if suffix:
-        subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
-    else:
-        subj_buyer = f"Your order at {m['business_name']} is confirmed"
-
-    subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
-
-    if buyer_email:
-        send_email(
-            buyer_email,
-            subj_buyer,
-            f"""
-                <h2>Thanks for your order!</h2>
-                <p><strong>Store:</strong> {m['business_name']}</p>
-                {items_table}
-                <p style="margin-top:12px">
-                  You’ll receive updates from the merchant if anything changes.
-                </p>
-            """,
-            reply_to=merchant_mail
+        line_html = "".join(
+            f"<tr><td style='padding:6px 8px'>{dr['title']}</td>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['qty']}</td>"
+            f"<td style='padding:6px 8px; text-align:right'>{dr['gross']:.7f} π</td></tr>"
+            for dr in display_rows
         )
-except Exception:
-    pass
+        items_table = (
+            "<table style='border-collapse:collapse; width:100%; max-width:560px'>"
+            "<thead><tr>"
+            "<th style='text-align:left; padding:6px 8px'>Item</th>"
+            "<th style='text-align:right; padding:6px 8px'>Qty</th>"
+            "<th style='text-align:right; padding:6px 8px'>Line Total</th>"
+            "</tr></thead>"
+            f"<tbody>{line_html}</tbody>"
+            "<tfoot>"
+            f"<tr><td></td><td style='padding:6px 8px; text-align:right'><strong>Total</strong></td>"
+            f"<td style='padding:6px 8px; text-align:right'><strong>{gross_total:.7f} π</strong></td></tr>"
+            "</tfoot>"
+            "</table>"
+        )
+
+        merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+
+        shipping_html = ""
+        if isinstance(shipping, dict):
+            name   = (shipping.get("name") or "").strip()
+            email  = (shipping.get("email") or "").strip()
+            phone  = (shipping.get("phone") or "").strip()
+            addr1  = (shipping.get("address") or "").strip()
+            addr2  = (shipping.get("address2") or "").strip()
+            city   = (shipping.get("city") or "").strip()
+            state  = (shipping.get("state") or "").strip()
+            postal = (shipping.get("postal_code") or "").strip()
+            country= (shipping.get("country") or "").strip()
+            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
+            if any_shipping:
+                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
+                locality_parts = [p for p in [city, state] if p]
+                locality_line = ", ".join(locality_parts)
+                if postal:
+                    locality_line = (locality_line + " " if locality_line else "") + postal
+                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
+                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
+                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
+                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
+                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
+                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
+                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
+                shipping_html = "".join(block)
+
+        # Email subjects
+        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+        if suffix:
+            subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
+        else:
+            subj_buyer = f"Your order at {m['business_name']} is confirmed"
+
+        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+
+        if buyer_email:
+            send_email(
+                buyer_email,
+                subj_buyer,
+                f"""
+                    <h2>Thanks for your order!</h2>
+                    <p><strong>Store:</strong> {m['business_name']}</p>
+                    {items_table}
+                    <p style="margin-top:12px">
+                      You’ll receive updates from the merchant if anything changes.
+                    </p>
+                """,
+                reply_to=merchant_mail
+            )
+    except Exception:
+        pass
 
     # --- Voucher redirect override (if a mint code was generated earlier) ---
     mint_code = session.pop("last_mint_code", None)
