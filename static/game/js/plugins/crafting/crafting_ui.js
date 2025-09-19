@@ -1388,6 +1388,39 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
     prevHost && (prevHost.innerHTML = STATE.currentSVG);
   }
 
+// Sub-tab switching
+root.querySelectorAll('[data-sub]').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    const next = b.dataset.sub;
+    // Only allow Visuals when unlocked
+    if (next === 'visuals' && !STATE.canUseVisuals) return;
+    STATE.createSub = next;
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){
+      host.innerHTML = renderCreate();
+      bindInside();
+
+      // update visuals tab highlight if unlocked
+      try{
+        const vb = STATE.root?.querySelector('.cl-subtabs [data-sub="visuals"]');
+        if (vb){
+          if (STATE.canUseVisuals){
+            vb.style.background   = '#0b2b17';
+            vb.style.boxShadow    = '0 0 0 1px #1bd760 inset';
+            vb.style.color        = '#b8ffd1';
+            vb.title = 'You have mint credit available';
+          } else {
+            vb.style.background   = '';
+            vb.style.boxShadow    = '';
+            vb.style.color        = '';
+            vb.title = '';
+          }
+        }
+      }catch(_){}
+    }
+  }, { passive:true });
+});
+    
   // ===== Handlers MUST live inside bindInside() =====
   btnAI && btnAI.addEventListener('click', async ()=>{
     if (!btnAI) return;
