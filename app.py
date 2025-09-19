@@ -2187,6 +2187,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     # Track if any SINGLE_MINT credit should be recorded per order row
     SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)  # defined elsewhere in your app
+    grants_single_mint = False              # <-- we'll set this True when we see the special product
+
     with conn() as cx:
         # Ensure credit-claims table exists (safe/no-op if already there)
         cx.execute("""
@@ -2284,6 +2286,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             try:
                 link_id = str(it.get("link_id") or "") if it else ""
                 if link_id == SINGLE_ID and buyer_user_id:
+                    grants_single_mint = True  # <-- remember that this basket qualifies for a voucher
                     # Idempotent per order_id
                     dup = cx.execute(
                         "SELECT 1 FROM crafting_credit_claims WHERE order_id=?",
@@ -2298,23 +2301,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 # do not fail the fulfillment if credit record fails
                 pass
 
-    # --- Voucher: generate mint code for player to redeem in-game ---
-    import secrets
-    try:
-        # link_id may not be defined if no item had it; guard implicitly
-        if ('link_id' in locals()) and (link_id == SINGLE_ID) and buyer_user_id:
-            with conn() as cx:
-                _ensure_credit_codes(cx)
-                code = secrets.token_hex(4).upper()  # 8-char voucher
-                cx.execute(
-                    "INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)",
-                    (code, int(buyer_user_id))
-                )
-            # Save code in session for redirect
-            session["last_mint_code"] = code
-    except Exception as e:
-        print("[fulfill_session] mint code generation failed:", e)
-
     # Mark session as paid after all lines are processed
     with conn() as cx:
         cx.execute(
@@ -2322,6 +2308,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             (tx_hash, s["id"])
         )
 
+    # ---- Emails (unchanged) ----
     try:
         display_rows = []
         for li in lines:
@@ -2407,14 +2394,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
-    # --- Voucher redirect override (if a mint code was generated earlier) ---
-    mint_code = session.pop("last_mint_code", None)
-    if mint_code:
-        redirect_url = url_for("mint_success_voucher", code=mint_code, _external=True)
-        resp = jsonify({"ok": True, "redirect_url": redirect_url})
-        return resp
-
-    # ---- Redirect target (voucher-first) ----
+    # ---- Build redirect (voucher-first when basket grants single-mint) ----
     u = current_user_row()
     tok = ""
     if u:
@@ -2426,44 +2406,32 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # Decide where to send the buyer after success
-    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-
-    # Detect if this basket grants a single-mint credit
-    SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)
-    grants_single_mint = False
-    try:
-        for li in lines:
-            it = by_id.get(int(li["item_id"]))
-            if it and str(it.get("link_id") or "") == SINGLE_ID:
-                grants_single_mint = True
-                break
-    except Exception:
-        grants_single_mint = False
-
-    # If it's the crafting store OR an order with the special single-mint product → voucher page
-    if (slug == "izza-game-crafting") or grants_single_mint:
+    # If this basket included the single-use crafting product, generate a code and send to voucher page
+    if grants_single_mint and buyer_user_id:
+        import secrets
         try:
             with conn() as cx:
-                code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
+                cx.execute("""
+                  CREATE TABLE IF NOT EXISTS mint_codes(
+                    code TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    used INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    used_at TIMESTAMP
+                  )
+                """)
+                code = secrets.token_hex(4).upper()  # 8 chars
+                cx.execute("INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)",
+                           (code, int(buyer_user_id)))
             redirect_url = url_for("mint_success_voucher", code=code, _external=True)
         except Exception:
             redirect_url = default_target
     else:
         redirect_url = default_target
 
-    # Build response JSON
+    # JSON response + optional UI cue cookie
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
-
-    # Optional: keep the craft_credit cookie so the game UI can highlight Create→Visuals
-    should_flag = False
-    try:
-        if (slug == "izza-game-crafting") or grants_single_mint:
-            should_flag = True
-    except Exception:
-        should_flag = False
-
-    if should_flag:
+    if grants_single_mint:
         resp.set_cookie(
             "craft_credit", "1",
             max_age=15 * 60,
