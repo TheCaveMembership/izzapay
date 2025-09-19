@@ -618,17 +618,27 @@ function normalizeSvgForSlot(svgText, part){
   function renderCreate(){
   const totalPi = calcTotalCost({ usePi:true });
   const totalIC = calcTotalCost({ usePi:false });
-  const sub = STATE.canUseVisuals ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup') : 'setup';
+
+  // If visuals are unlocked, respect current subtab; otherwise force 'setup'
+  const sub = STATE.canUseVisuals
+    ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup')
+    : 'setup';
+
   const visualsDisabledCls = STATE.canUseVisuals ? '' : 'disabled';
-  const visualsCreditStyle = STATE.canUseVisuals ? 'background:#1bd760;color:#001;font-weight:700;border-color:#1bd760' : '';
+
+  // Credit indicator: subtle green border/glow (no full background)
+  const visualsCreditStyle = STATE.canUseVisuals
+    ? 'box-shadow:inset 0 0 0 1px #1bd760; color:#b8ffd1; background:#0b2b17;'
+    : '';
 
   return `
-    <div class="cl-subtabs">
-      <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
+    <div class="cl-subtabs" style="display:flex;flex-direction:column;gap:6px">
+      <button class="${sub==='setup'?'on':''}" data-sub="setup" style="flex:0 0 auto">Setup</button>
       <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}"
-        data-sub="visuals"
-        ${STATE.canUseVisuals?'':'disabled'}
-        style="${visualsCreditStyle}">Visuals</button>
+              data-sub="visuals"
+              ${STATE.canUseVisuals ? '' : 'disabled'}
+              style="flex:0 0 auto; ${visualsCreditStyle}">Visuals</button>
+    </div>
 
     <div class="cl-body ${sub}">
       <div class="cl-pane cl-form">
@@ -684,7 +694,7 @@ function normalizeSvgForSlot(svgText, part){
           <div style="font-weight:700">Visuals</div>
           <div style="font-size:12px; opacity:.75">AI attempts left: <b id="aiLeft2">${STATE.aiAttemptsLeft}</b></div>
 
-        <!-- Style / Animation controls -->
+          <!-- Style / Animation controls -->
           <div style="display:flex; gap:8px; align-items:center; margin-left:auto">
             <label style="font-size:12px; opacity:.8">Style</label>
             <select id="aiStyleSel">
@@ -718,6 +728,7 @@ function normalizeSvgForSlot(svgText, part){
         </div>
       </div>
     </div>`;
+}}
 }
   function renderMine(){
     return `
