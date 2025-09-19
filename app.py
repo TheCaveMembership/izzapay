@@ -1972,28 +1972,6 @@ def pi_complete():
         )
     except Exception:
         memo_text = ""
-    # ✅ Grant mint credit ONLY for the single-mint checkout path
-    try:
-        username      = s["pi_username"]  # set when session is created
-        checkout_path = s["checkout_path"] if "checkout_path" in s.keys() else None
-
-        if username and checkout_path == "/checkout/d0b811e8":
-            # Optional: basic idempotency by tagging request with payment_id
-            requests.post(
-                "https://izzapay.onrender.com/api/credits/claim",
-                json={
-                    "username": username,
-                    "source": "pi",
-                    "credits": 1,
-                    "idempotency_key": f"pi:{payment_id}"
-                },
-                timeout=5
-            )
-            print(f"[pi_complete] credit granted to {username} for {payment_id}")
-        else:
-            print(f"[pi_complete] no credit grant (path={checkout_path})")
-    except Exception as e:
-        print("[pi_complete] credit grant failed:", e)
             # 🔁 Fallback: if the Pi memo mentions "IZZA GAME", grant +1 single mint credit
     # (idempotent per payment_id via crafting_credit_grants_payments)
     try:
@@ -2104,7 +2082,20 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 except Exception:
                     # don't fail checkout on grant error
                     pass
-
+        # --- SINGLE MINT CREDIT: immediate grant for the special product ---
+        try:
+            if it:
+                # Compare against your global constant
+                link_id = str(it.get("link_id") or "")
+                if link_id == SINGLE_CREDIT_LINK_ID and buyer_user_id:
+                    # 1 credit per quantity
+                    # Idempotency: tie to *this order row* once inserted (we'll use buyer_token temporarily, then fix order_id below)
+                    # NOTE: we don't yet have the created order_id until after insert.
+                    # So we'll accumulate a flag and finalize after the insert below.
+                    grant_single_credit = grant_single_credit if 'grant_single_credit' in locals() else []
+                    grant_single_credit.append({"qty": qty})  # stash qty; we'll write the claims row with the actual order_id after insert
+        except Exception:
+            pass
             # --- IC CREDITS: award credits for special crafted ids or SKUs ---
             try:
                 # Strategy 1: crafted_item_id like "ic:<amount>" (e.g., "ic:500")
@@ -2169,6 +2160,27 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 ),
             )
             created_order_ids.append(cur.lastrowid)
+                    # Finalize single-mint-credit claim(s) now that we have order_id
+        try:
+            if 'grant_single_credit' in locals() and grant_single_credit:
+                for _ in grant_single_credit:
+                    # Prevent duplicates (idempotent per order)
+                    dup = cx.execute(
+                        "SELECT 1 FROM crafting_credit_claims WHERE order_id=?",
+                        (cur.lastrowid,)
+                    ).fetchone()
+                    if not dup:
+                        # Record claim and add 1*qty credits (these are your *mint* credits backing Visuals unlock)
+                        cx.execute(
+                            "INSERT INTO crafting_credit_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
+                            (cur.lastrowid, int(buyer_user_id), int(time.time()))
+                        )
+                        # If your Visuals tab simply checks balance, add to ic_credits here:
+                        add_ic_credits(int(buyer_user_id), 1 * qty)
+                # reset per-line accumulator
+                grant_single_credit = []
+        except Exception:
+            pass
 
         # Mark the session as paid
         cx.execute(
