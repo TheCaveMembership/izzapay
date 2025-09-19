@@ -141,7 +141,13 @@ const COIN_PER_PI = 2000;
   packageCredits: null,
       canUseVisuals: false,      // visuals locked until successful purchase
     createSub: 'setup',        // which subtab is shown: 'setup' | 'visuals'
+    mintCredits: 0,
 };
+  function applyCreditState(n){
+  const next = Math.max(0, n|0);
+  STATE.mintCredits   = next;
+  STATE.canUseVisuals = next > 0;
+}
   // (Kept: name moderation + sanitizers + helpers)
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
@@ -614,12 +620,15 @@ function normalizeSvgForSlot(svgText, part){
   const totalIC = calcTotalCost({ usePi:false });
   const sub = STATE.canUseVisuals ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup') : 'setup';
   const visualsDisabledCls = STATE.canUseVisuals ? '' : 'disabled';
+  const visualsCreditStyle = STATE.canUseVisuals ? 'background:#1bd760;color:#001;font-weight:700;border-color:#1bd760' : '';
 
   return `
     <div class="cl-subtabs">
       <button class="${sub==='setup'?'on':''}"   data-sub="setup">Setup</button>
-      <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}" data-sub="visuals" ${STATE.canUseVisuals?'':'disabled'}>Visuals</button>
-    </div>
+      <button class="${sub==='visuals'?'on':''} ${visualsDisabledCls}"
+        data-sub="visuals"
+        ${STATE.canUseVisuals?'':'disabled'}
+        style="${visualsCreditStyle}">Visuals</button>
 
     <div class="cl-body ${sub}">
       <div class="cl-pane cl-form">
@@ -1109,33 +1118,27 @@ const tabsHost = root.querySelector('#craftTabs');
 let initialTab = 'packages';
 
 // Fallback: if the checkout return page set a breadcrumb, unlock visuals this once.
+// Breadcrumb: unlock visuals but show Setup first (one-off)
 try{
   if (localStorage.getItem('izzaCraftGrantSeen') === '1') {
-    // NEW: unlock visuals but show Setup first
-STATE.hasPaidForCurrentItem = true;      // one-off flag (kept)
-STATE.canUseVisuals = true;              // enables the Visuals subtab
-STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-STATE.createSub = 'setup';               // <-- start on Setup
-initialTab = 'create';
+    applyCreditState((STATE.mintCredits|0) + 1); // one credit granted by checkout return
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    STATE.createSub = 'setup';
+    initialTab = 'create';
   }
 }catch(_){}
 
 try{
   const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
-  // after: const s = await serverJSON(api('/api/crafting/credits/status'));
-if (s && s.ok){
-  const n = (s.credits|0);
-  STATE.mintCredits = n;                 // <-- track stacked credits locally
-  if (n > 0){
-    STATE.hasPaidForCurrentItem = true;
-    STATE.canUseVisuals = true;
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    STATE.createSub = 'setup';           // <-- show Setup first
-    initialTab = 'create';
+  if (s && s.ok){
+    applyCreditState(s.credits|0);
+    if (STATE.mintCredits > 0){
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      STATE.createSub = 'setup';
+      initialTab = 'create';
+    }
   }
-}
 }catch(_){}
-
 // Clear the breadcrumb after we’ve reacted to it (so it’s one-time)
 try{ localStorage.removeItem('izzaCraftGrantSeen'); }catch(_){}
 
@@ -1208,17 +1211,16 @@ location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${
 
   const status = document.getElementById('payStatus'); // present in Create tab
   if (res && res.ok){
-    STATE.hasPaidForCurrentItem = true;
-    STATE.canUseVisuals = true;
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    if (status) status.textContent = 'Paid ✓ — visuals unlocked.';
-    STATE.createSub = 'visuals';
-    const host = STATE.root?.querySelector('#craftTabs');
-    if (host){ host.innerHTML = renderCreate(); bindInside(); }
-  } else {
-    if (status) status.textContent='Payment failed.';
-    STATE.canUseVisuals = false;
-  }
+  applyCreditState((STATE.mintCredits|0) + 1);   // ← grant one mint credit
+  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+  const status = document.getElementById('payStatus');
+  if (status) status.textContent = 'Paid ✓ — visual credit granted.';
+  STATE.createSub = 'setup';                     // ← start on Setup after paying
+  const host = STATE.root?.querySelector('#craftTabs');
+  if (host){ host.innerHTML = renderCreate(); bindInside(); }
+} else {
+  const status = document.getElementById('payStatus');
+  if (status) status.textContent='Payment failed.';
 }
 
   function bindInside(){
@@ -1480,80 +1482,96 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
         : { ok:false, reason:'armour-packs-hook-missing' };
 
       if (injected && injected.ok){
-  // you already have:
-craftStatus.textContent = 'Crafted ✓';
-STATE.hasPaidForCurrentItem = false;
-if (STATE.packageCredits && STATE.packageCredits.items > 0){
-  STATE.packageCredits.items -= 1;
-  if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-}
+        // ---- SUCCESS: Minted ----
+        craftStatus.textContent = 'Crafted ✓';
 
-// ADD THIS BLOCK to handle stacked single-use credits:
-if (typeof STATE.mintCredits === 'number') {
-  STATE.mintCredits = Math.max(0, STATE.mintCredits - 1);
-  if (STATE.mintCredits === 0) {
-    STATE.canUseVisuals = false;       // lock Visuals again when exhausted
-  } else {
-    STATE.canUseVisuals = true;        // still unlocked while > 0
-  }
-}
+        // Clear single-use flag and handle package credits (if used)
+        STATE.hasPaidForCurrentItem = false;
+        if (STATE.packageCredits && STATE.packageCredits.items > 0){
+          STATE.packageCredits.items -= 1;
+          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+        }
 
-  // Persist + get craftedId (from inject OR server)
-  let craftedId = injected.id || null;
-  try {
-    const u = encodeURIComponent(
-      (window?.IZZA?.player?.username)
-      || (window?.IZZA?.me?.username)
-      || localStorage.getItem('izzaPlayer')
-      || localStorage.getItem('pi_username')
-      || ''
-    );
-    if (u) {
-      const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
-        method: 'POST',
-        body: JSON.stringify({
-          name: STATE.currentName,
-          category: STATE.currentCategory,
-          part: STATE.currentPart,
-          svg: normalizedForSlot,
-          sku: '',
-          image: ''
-        })
-      });
-      if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-    }
-  } catch(e) {
-    console.warn('[craft] persist failed:', e); // non-fatal
-  }
+        // Decrement stacked single-use credits (Visuals stays unlocked while > 0)
+        if (typeof STATE.mintCredits === 'number') {
+          STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
+        }
+        // Lock/unlock Visuals based on remaining credits
+        const stillHasCredit = (STATE.mintCredits|0) > 0 || (STATE.packageCredits && STATE.packageCredits.items > 0);
+        STATE.canUseVisuals = !!stillHasCredit;
 
-  // ✅ Mirror the armoury-injected inventory entry into My Creations
-// (Complies with Core v3: only injected items appear.)
-try { mirrorInjectedInventoryToMine(injected); } catch {}
+        // Persist + get craftedId (from inject OR server)
+        let craftedId = injected.id || null;
+        try {
+          const u = encodeURIComponent(
+            (window?.IZZA?.player?.username)
+            || (window?.IZZA?.me?.username)
+            || localStorage.getItem('izzaPlayer')
+            || localStorage.getItem('pi_username')
+            || ''
+          );
+          if (u) {
+            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+              method: 'POST',
+              body: JSON.stringify({
+                name: STATE.currentName,
+                category: STATE.currentCategory,
+                part: STATE.currentPart,
+                svg: normalizedForSlot,
+                sku: '',
+                image: ''
+              })
+            });
+            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
+          }
+        } catch(e) {
+          console.warn('[craft] persist failed:', e); // non-fatal
+        }
 
-// Optional reconcile with server (safe to keep one call)
-try { hydrateMine(); } catch {}
+        // Mirror into My Creations + optional refresh
+        try { mirrorInjectedInventoryToMine(injected); } catch {}
+        try { hydrateMine(); } catch {}
 
-  // go back to Setup after a successful Mint
-  STATE.createSub = 'setup';
-  const host = STATE.root?.querySelector('#craftTabs');
-  if (host){
-    host.innerHTML = renderCreate();
-    bindInside();
-  }
+        // After a successful Mint: return to Setup
+        STATE.createSub = 'setup';
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (host){
+          host.innerHTML = renderCreate();
+          bindInside();
 
-  // IZZA Pay merchant handoff (unchanged)
-  if (sellInPi && craftedId) {
-    try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
-    const qs = new URLSearchParams({ attach: String(craftedId) });
-    try {
-      const t = localStorage.getItem('izzaBearer') || '';
-      if (t) qs.set('t', t);
-    } catch {}
-    location.href = `/merchant?${qs.toString()}`;
-  }
-} else {
-  craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
-}
+          // Visuals subtab: green highlight if credit remains, normal if not
+          try{
+            const vb = STATE.root?.querySelector('.cl-subtabs [data-sub="visuals"]');
+            if (vb){
+              const hasCredit = (STATE.mintCredits|0) > 0 || (STATE.packageCredits && STATE.packageCredits.items > 0);
+              if (hasCredit){
+                vb.style.background   = '#0b2b17';
+                vb.style.boxShadow    = '0 0 0 1px #1bd760 inset';
+                vb.style.color        = '#b8ffd1';
+                vb.title = 'You have mint credit available';
+              }else{
+                vb.style.background   = '';
+                vb.style.boxShadow    = '';
+                vb.style.color        = '';
+                vb.title = '';
+              }
+            }
+          }catch(_){}
+        }
+
+        // Optional IZZA Pay merchant handoff
+        if (sellInPi && craftedId) {
+          try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
+          const qs = new URLSearchParams({ attach: String(craftedId) });
+          try {
+            const t = localStorage.getItem('izzaBearer') || '';
+            if (t) qs.set('t', t);
+          } catch {}
+          location.href = `/merchant?${qs.toString()}`;
+        }
+      } else {
+        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+      }
     }catch(e){
       craftStatus.textContent = 'Error crafting: ' + e.message;
     }
