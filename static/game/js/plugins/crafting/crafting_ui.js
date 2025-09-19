@@ -1111,18 +1111,30 @@ const tabsHost = root.querySelector('#craftTabs');
 
 // NEW: ask server how many credits we have and pick initial tab
 let initialTab = 'packages';
+
+// Fallback: if the checkout return page set a breadcrumb, unlock visuals this once.
 try{
-  const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
-  if (s && s.ok && (s.credits|0) > 0){
-    STATE.hasPaidForCurrentItem = true;   // let them mint once
-    STATE.canUseVisuals = true;           // enable Visuals subtab
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS; // reset attempts per item
-    STATE.createSub = 'visuals';          // open the Visuals subtab
-    initialTab = 'create';                // and start on the Create tab
+  if (localStorage.getItem('izzaCraftGrantSeen') === '1') {
+    STATE.hasPaidForCurrentItem = true;
+    STATE.canUseVisuals = true;
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    STATE.createSub = 'visuals';
+    initialTab = 'create';
   }
 }catch(_){}
 
-// Optional: if we set a breadcrumb on auth page, clear it now
+try{
+  const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
+  if (s && s.ok && (s.credits|0) > 0){
+    STATE.hasPaidForCurrentItem = true;
+    STATE.canUseVisuals = true;
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    STATE.createSub = 'visuals';
+    initialTab = 'create';
+  }
+}catch(_){}
+
+// Clear the breadcrumb after we’ve reacted to it (so it’s one-time)
 try{ localStorage.removeItem('izzaCraftGrantSeen'); }catch(_){}
 
 // Re-run reconcile whenever the tab gains focus again
