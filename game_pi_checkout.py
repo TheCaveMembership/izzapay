@@ -1,172 +1,190 @@
 # game_pi_checkout.py
-import os, time, json
-from flask import Blueprint, request, jsonify
+import os, json, requests, time
+from flask import Blueprint, request, jsonify, current_app, session
+from dotenv import load_dotenv
 from db import conn
-import requests
 
-PI_API_BASE = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com").rstrip("/")
-PI_API_KEY  = os.getenv("PI_PLATFORM_API_KEY", "").strip()
+load_dotenv()
 
-def _pi_headers():
-    if not PI_API_KEY:
-        raise RuntimeError("PI_PLATFORM_API_KEY not set")
+# ---------- ENV ----------
+PI_SANDBOX   = os.getenv("PI_SANDBOX", "false").lower() == "true"
+PI_API_BASE  = (os.getenv("PI_PLATFORM_API_URL") or "https://api.minepi.com").rstrip("/")
+PI_API_KEY   = (os.getenv("PI_PLATFORM_API_KEY") or "").strip()
+APP_NAME     = os.getenv("APP_NAME", "IZZA PAY")
+APP_BASE_URL = (os.getenv("APP_BASE_URL") or "https://izzapay.onrender.com").rstrip("/")
+BASE_ORIGIN  = APP_BASE_URL  # left for parity; not strictly needed here
+
+if not PI_API_KEY:
+    raise RuntimeError("PI_PLATFORM_API_KEY not set for game Pi checkout")
+
+def pi_headers():
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
-def _ok(**kw):  return jsonify({"ok": True, **kw})
-def _err(msg, code=400): return jsonify({"ok": False, "reason": str(msg)}), code
+# ---------- Minimal credit tables (duplicated here for isolation) ----------
+def _ensure_credit_tables(cx):
+    cx.executescript("""
+    CREATE TABLE IF NOT EXISTS crafting_credits(
+      user_id INTEGER PRIMARY KEY,
+      balance INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS crafting_credit_ledger(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      delta  INTEGER NOT NULL,
+      reason TEXT,
+      uniq   TEXT UNIQUE,              -- idempotency key (e.g., order:<payment_id>)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
 
-# Minimal bookkeeping for Pi payments and credits
-# - pi_craft_sessions: tracks the Pi payment lifecycle
-# - crafting_mint_credits: simple balance (one row per user)
-DDL = """
-CREATE TABLE IF NOT EXISTS pi_craft_sessions(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  pi_payment_id TEXT UNIQUE,
-  user_id INTEGER NOT NULL,
-  amount_pi REAL NOT NULL,
-  memo TEXT,
-  status TEXT,            -- 'created','approved','completed'
-  txid TEXT,
-  created_at INTEGER,
-  updated_at INTEGER
-);
-CREATE TABLE IF NOT EXISTS crafting_mint_credits(
-  user_id INTEGER PRIMARY KEY,
-  credits INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER
-);
-"""
-def _ensure_schema():
-    with conn() as cx: cx.executescript(DDL)
+def _credit_add(cx, user_id:int, delta:int, reason:str, uniq:str|None=None):
+    if delta == 0:
+        return
+    _ensure_credit_tables(cx)
+    if uniq:
+        hit = cx.execute("SELECT 1 FROM crafting_credit_ledger WHERE uniq=?", (uniq,)).fetchone()
+        if hit:  # idempotent
+            return
+    cx.execute(
+        "INSERT INTO crafting_credit_ledger(user_id, delta, reason, uniq) VALUES(?,?,?,?)",
+        (user_id, delta, reason, uniq)
+    )
+    cx.execute("""
+      INSERT INTO crafting_credits(user_id, balance) VALUES(?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET balance = crafting_credits.balance + excluded.balance,
+                                         updated_at = CURRENT_TIMESTAMP
+    """, (user_id, delta))
 
-def _add_credits(user_id: int, n: int):
-    n = max(0, int(n))
-    if n == 0: return
-    now = int(time.time())
+def _current_user():
+    uid = session.get("user_id")
+    if not uid:
+        return None
     with conn() as cx:
-        row = cx.execute("SELECT credits FROM crafting_mint_credits WHERE user_id=?", (user_id,)).fetchone()
-        if row:
-            cx.execute("UPDATE crafting_mint_credits SET credits=credits+?, updated_at=? WHERE user_id=?",
-                       (n, now, user_id))
-        else:
-            cx.execute("INSERT INTO crafting_mint_credits(user_id, credits, updated_at) VALUES(?,?,?)",
-                       (user_id, n, now))
+        return cx.execute("SELECT id, pi_uid, pi_username FROM users WHERE id=?", (uid,)).fetchone()
 
-def _get_credits(user_id: int) -> int:
+def _record_pi_order(user_id:int, payment_id:str, title:str="", store:str="IZZA PAY",
+                     crafted_item_id:str="", thumb_url:str=""):
     with conn() as cx:
-        row = cx.execute("SELECT credits FROM crafting_mint_credits WHERE user_id=?", (user_id,)).fetchone()
-        return int(row["credits"]) if row else 0
+        cx.execute("""
+        CREATE TABLE IF NOT EXISTS pi_orders(
+          order_id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          title TEXT,
+          thumb_url TEXT,
+          store TEXT,
+          crafted_item_id TEXT,
+          claimed INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        cx.execute("""
+          INSERT OR IGNORE INTO pi_orders(order_id, user_id, title, thumb_url, store, crafted_item_id, claimed)
+          VALUES(?,?,?,?,?,?,0)
+        """, (payment_id, user_id, title or "Craft Mint Credit", thumb_url or "", store or "IZZA PAY", crafted_item_id or ""))
 
-def _consume_credit(user_id: int, n: int = 1) -> bool:
-    with conn() as cx:
-        row = cx.execute("SELECT credits FROM crafting_mint_credits WHERE user_id=?", (user_id,)).fetchone()
-        have = int(row["credits"]) if row else 0
-        if have < n: return False
-        cx.execute("UPDATE crafting_mint_credits SET credits=credits-? WHERE user_id=?", (n, user_id))
-        return True
+# ---------- Pi helpers ----------
+def fetch_pi_payment(payment_id: str):
+    return requests.get(f"{PI_API_BASE}/v2/payments/{payment_id}", headers=pi_headers(), timeout=20)
 
-pi_checkout_bp = Blueprint("pi_checkout_bp", __name__, url_prefix="/api/crafting")
+# ---------- Blueprint ----------
+pi_checkout_bp = Blueprint("game_pi_checkout", __name__)
 
-# Called by your UI BEFORE calling Pi.createPayment (optional; useful if you want a server memo)
-@pi_checkout_bp.post("/pi/create")
-def pi_create():
-    from game_app import current_user_row  # reuse helper
-    u = current_user_row()
-    if not u: return _err("not_logged_in", 401)
-
-    _ensure_schema()
-    data = request.get_json(force=True) or {}
-    amount = float(data.get("amount") or 0.0)
-    memo   = str(data.get("memo") or "Crafting:single-mint")
-
-    if amount <= 0: return _err("bad_amount")
-
-    with conn() as cx:
-        cx.execute(
-            "INSERT INTO pi_craft_sessions(pi_payment_id, user_id, amount_pi, memo, status, created_at, updated_at) "
-            "VALUES(?,?,?,?,? ,?,?)",
-            (None, int(u["id"]), amount, memo, "created", int(time.time()), int(time.time()))
-        )
-    return _ok()
-
-# Pi SDK callback #1
-@pi_checkout_bp.post("/pi/approve")
+@pi_checkout_bp.post("/api/pi/approve")
 def pi_approve():
-    from game_app import current_user_row
-    u = current_user_row()
-    if not u: return _err("not_logged_in", 401)
-
-    _ensure_schema()
+    """
+    Stateless approve to match the crafting UI.
+    Expects: { paymentId, session_id }
+    """
     data = request.get_json(force=True) or {}
-    pid  = str(data.get("paymentId") or "").strip()
-    if not pid: return _err("missing_payment_id")
+    payment_id = (data.get("paymentId") or "").strip()
+    if not payment_id:
+        return jsonify(ok=False, error="missing_paymentId"), 400
 
-    # Verify with Pi Platform (server-to-server)
-    r = requests.get(f"{PI_API_BASE}/v2/payments/{pid}", headers=_pi_headers(), timeout=20)
-    if r.status_code != 200: return _err("pi_fetch_failed", 502)
-    p = r.json()
+    # Just forward to Pi Platform
+    r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
+                      headers=pi_headers(), json={}, timeout=20)
+    if r.status_code != 200:
+        return jsonify(ok=False, error="approve_failed", status=r.status_code,
+                       body=safe_json(r)), 502
+    return jsonify(ok=True)
 
-    # Basic sanity: amount/memo (only if you want to enforce a fixed price)
-    try_amount = float(p.get("amount") or 0)
-    if try_amount <= 0: return _err("bad_amount")
-
-    with conn() as cx:
-        row = cx.execute("SELECT id FROM pi_craft_sessions WHERE pi_payment_id=?", (pid,)).fetchone()
-        if not row:
-            cx.execute(
-                "INSERT INTO pi_craft_sessions(pi_payment_id, user_id, amount_pi, memo, status, created_at, updated_at) "
-                "VALUES(?,?,?,?,? ,?,?)",
-                (pid, int(u["id"]), try_amount, p.get("memo") or "", "approved", int(time.time()), int(time.time()))
-            )
-        else:
-            cx.execute("UPDATE pi_craft_sessions SET status='approved', updated_at=? WHERE pi_payment_id=?",
-                       (int(time.time()), pid))
-    return _ok()
-
-# Pi SDK callback #2
-@pi_checkout_bp.post("/pi/complete")
+@pi_checkout_bp.post("/api/pi/complete")
 def pi_complete():
-    from game_app import current_user_row
-    u = current_user_row()
-    if not u: return _err("not_logged_in", 401)
-
-    _ensure_schema()
+    """
+    Stateless completion. Validates payment, then grants 1 mint credit for 'craft-credit'.
+    Body: { paymentId, txid, session_id, buyer?, shipping? }
+    """
     data = request.get_json(force=True) or {}
-    pid  = str(data.get("paymentId") or "").strip()
-    txid = str(data.get("txid") or "").strip()
-    if not pid or not txid: return _err("missing_params")
+    payment_id = (data.get("paymentId") or "").strip()
+    txid       = (data.get("txid") or "").strip()
+    session_id = (data.get("session_id") or "").strip()  # e.g., "craft-credit"
+    buyer      = data.get("buyer") or {}
+    shipping   = data.get("shipping") or {}
 
-    # Verify on-chain completion with Pi Platform (server-to-server)
-    r = requests.post(f"{PI_API_BASE}/v2/payments/{pid}/complete",
-                      headers=_pi_headers(),
-                      json={"txid": txid, "verified": True},
-                      timeout=30)
-    if r.status_code not in (200, 201):  # some envs return 201
-        return _err("pi_complete_failed", 502)
+    if not payment_id:
+        return jsonify(ok=False, error="missing_paymentId"), 400
 
-    # Mark as completed and grant ONE mint credit
-    with conn() as cx:
-        cx.execute("UPDATE pi_craft_sessions SET status='completed', txid=?, updated_at=? WHERE pi_payment_id=?",
-                   (txid, int(time.time()), pid))
-    _add_credits(int(u["id"]), 1)
+    # 1) Fetch to confirm status / txid (best-effort in sandbox)
+    try:
+        r = fetch_pi_payment(payment_id)
+        if r.status_code != 200 and not PI_SANDBOX:
+            return jsonify(ok=False, error="fetch_failed"), 502
+        if r.status_code == 200:
+            pj = r.json()
+            # If txid provided by client and platform has a tx, ensure they match (outside sandbox)
+            plat_txid = ((pj.get("transaction") or {}).get("txid")
+                         or (pj.get("transaction") or {}).get("txID")
+                         or (pj.get("transaction") or {}).get("hash") or "")
+            if txid and plat_txid and (txid != plat_txid) and not PI_SANDBOX:
+                return jsonify(ok=False, error="txid_mismatch"), 400
+    except Exception:
+        if not PI_SANDBOX:
+            return jsonify(ok=False, error="verify_error"), 500
 
-    return _ok(granted=1)
+    # 2) Complete on Pi Platform (may be already completed; treat 409/400 as ok-ish)
+    try:
+        rc = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
+                           headers=pi_headers(), json={"txid": txid} if txid else {},
+                           timeout=20)
+        if rc.status_code not in (200, 201):
+            # If already completed or bad transition, allow when sandbox
+            if not PI_SANDBOX:
+                return jsonify(ok=False, error="complete_failed", status=rc.status_code,
+                               body=safe_json(rc)), 502
+    except Exception:
+        if not PI_SANDBOX:
+            return jsonify(ok=False, error="complete_exception"), 500
 
-# Simple status the UI can poll on mount
-@pi_checkout_bp.get("/credits/status")
-def credits_status():
-    from game_app import current_user_row
-    u = current_user_row()
-    if not u: return _ok(credits=0)
-    _ensure_schema()
-    return _ok(credits=_get_credits(int(u["id"])))
+    # 3) Success: grant credit if we know the user
+    u = _current_user()
+    user_id = int(u["id"]) if u else None
 
-# Optional: consume one credit when you actually mint
-@pi_checkout_bp.post("/credits/consume")
-def credits_consume():
-    from game_app import current_user_row
-    u = current_user_row()
-    if not u: return _err("not_logged_in", 401)
-    _ensure_schema()
-    ok = _consume_credit(int(u["id"]), 1)
-    return _ok(consumed=bool(ok))
+    if session_id == "craft-credit" and user_id:
+        # idempotency key based on payment id
+        uniq = f"order:{payment_id}"
+        with conn() as cx:
+            _credit_add(cx, user_id, +1, reason="single-mint", uniq=uniq)
+        # Also record the order for /api/crafts/feed
+        _record_pi_order(user_id, payment_id, title="Craft Mint Credit", store=APP_NAME)
+
+    return jsonify(ok=True, status="complete")
+
+@pi_checkout_bp.get("/api/pi/status")
+def pi_status():
+    """Optional: Used by clients to poll payment state."""
+    payment_id = (request.args.get("paymentId") or "").strip()
+    if not payment_id:
+        return jsonify(ok=False, error="missing_paymentId"), 400
+    r = fetch_pi_payment(payment_id)
+    try:
+        body = r.json()
+    except Exception:
+        body = {"raw": r.text[:4000]}
+    return jsonify(ok=(r.status_code == 200), status=r.status_code, payment=body)
+
+# ---------- utils ----------
+def safe_json(resp):
+    try:
+        return resp.json()
+    except Exception:
+        return {"text": resp.text[:4000], "status": resp.status_code}
