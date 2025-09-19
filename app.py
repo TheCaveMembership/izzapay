@@ -688,6 +688,45 @@ def _ensure_credit_codes(cx):
       used_at TIMESTAMP
     );
     """)
+    # Uses your schema: (code TEXT PK, user_id INT, used INT, created_at, used_at)
+import secrets, time
+
+def _new_mint_code(cx, user_id:int=0) -> str:
+    _ensure_credit_codes(cx)
+    # 12 easy chars: IZZA-XXXX-XXXX
+    while True:
+        raw = secrets.token_hex(5).upper()    # 10 hex chars
+        code = "IZZA-" + raw[:4] + "-" + raw[4:8]
+        try:
+            cx.execute("INSERT INTO mint_codes(code, user_id) VALUES(?,?)",
+                       (code, int(user_id or 0)))
+            return code
+        except Exception:
+            # rare collision → retry
+            continue
+
+def _consume_mint_code(cx, code:str, claimer_user_id:int=0):
+    _ensure_credit_codes(cx)
+    code = (code or "").strip().upper()
+    row = cx.execute("SELECT code, used FROM mint_codes WHERE code=?", (code,)).fetchone()
+    if not row:
+        return {"ok": False, "reason": "invalid"}
+    if int(row["used"] or 0) == 1:
+        return {"ok": False, "reason": "used"}
+
+    cx.execute("UPDATE mint_codes SET used=1, used_at=CURRENT_TIMESTAMP WHERE code=?", (code,))
+
+    # Track that we granted a mint credit for this code (idempotent)
+    cx.execute("""
+      CREATE TABLE IF NOT EXISTS crafting_credit_grants_codes(
+        code TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        granted_at INTEGER NOT NULL
+      )
+    """)
+    cx.execute("INSERT OR IGNORE INTO crafting_credit_grants_codes(code, user_id, granted_at) VALUES(?,?,?)",
+               (code, int(claimer_user_id or 0), int(time.time())))
+    return {"ok": True}
 with conn() as cx:
     # items table patches for crafted linkage & description
     it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
@@ -2235,7 +2274,20 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             except Exception:
                 # do not fail the fulfillment if credit record fails
                 pass
-
+# --- Voucher: generate mint code for player to redeem in-game ---
+import secrets
+try:
+    if link_id == SINGLE_ID and buyer_user_id:
+        _ensure_credit_codes(cx)
+        code = secrets.token_hex(4).upper()  # 8-char voucher
+        cx.execute(
+            "INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)",
+            (code, int(buyer_user_id))
+        )
+        # Save code in session for redirect
+        session["last_mint_code"] = code
+except Exception as e:
+    print("[fulfill_session] mint code generation failed:", e)
         # Mark session as paid after all lines are processed
         cx.execute(
             "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
@@ -2326,9 +2378,16 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 reply_to=merchant_mail
             )
     except Exception:
-        pass
+    pass
 
-        # ---- Redirect back to storefront with success flag (and token if available)
+# --- Voucher redirect override (if a mint code was generated earlier) ---
+mint_code = session.pop("last_mint_code", None)
+if mint_code:
+    redirect_url = url_for("mint_success", code=mint_code, _external=True)
+    resp = jsonify({"ok": True, "redirect_url": redirect_url})
+    return resp
+
+# ---- Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
     tok = ""
     if u:
