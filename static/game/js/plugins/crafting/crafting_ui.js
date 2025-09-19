@@ -94,6 +94,21 @@ function initPiExact(){
   }catch(e){ return false; }
 }
 
+// ===== keep ROOT endpoints here (do NOT wrap with api()) =====
+// --- Minimal auth + buyer helpers (no email, no shipping) ---
+function ensureAuthExact(){
+  const scopes = ['payments','username']; // just what we need
+  return Pi.authenticate(scopes, onIncompletePaymentFound);
+}
+
+function buyerPayload(){
+  const uname =
+    (window?.IZZA?.me?.username) ||
+    (window?.IZZA?.player?.username) ||
+    localStorage.getItem('pi_username') ||
+    'IZZA Player';
+  return { name: uname };
+}
 // EXACT port from checkout.html: recover incomplete payments via /api/pi/complete
 function onIncompletePaymentFound(payment){
   try{
@@ -109,31 +124,77 @@ function onIncompletePaymentFound(payment){
         paymentId: pid,
         session_id: sessionId,
         txid,
-        buyer:   buyerPayload(),
-        shipping: shippingPayload()
+        buyer: buyerPayload()      // ← keep buyer only
+        // no shipping
       })
     }).then(r => r.ok ? r.json() : null).catch(()=>{});
   }catch(_){}
 }
 
-function ensureAuthExact(){
-  const scopes = ['payments','username'];
-  return Pi.authenticate(scopes, onIncompletePaymentFound);
-}
+/* ====== REPLACED to mirror checkout.html exactly ====== */
+async function payWithPi(amountPi, memo){
+  // init exactly like checkout
+  if (!initPiExact()){
+    alert('Open in Pi Browser to pay.');
+    return { ok:false, reason:'no-pi' };
+  }
+  if (!window.Pi || typeof Pi.createPayment !== 'function'){
+    alert('Pi SDK not available');
+    return { ok:false, reason:'no-pi' };
+  }
 
-// Minimal buyer/shipping payloads for in-game (no checkout form here)
-function buyerPayload(){
-  const uname = (window?.IZZA?.me?.username) || (window?.IZZA?.player?.username) || '' || 'IZZA Player';
-  const email = (localStorage.getItem('izzaEmail') || '').trim();
-  return { email, name: uname || 'IZZA Player', phone: '' };
+  try{
+    const sessionId = "craft-credit"; // stable bucket for single mint credit
+
+    // Same auth + recovery as checkout.html
+    await ensureAuthExact();
+
+    const storeName = (window.STORE_NAME || 'IZZA PAY');
+    const memoText  = (storeName ? (storeName + ' — ') : '') + 'Order ' + sessionId.slice(0,8);
+
+    const paymentData = {
+      amount: Number(amountPi),
+      memo: memo || memoText,
+      // include buyer inside metadata, no email/phone/shipping
+      metadata: { session_id: sessionId, buyer: buyerPayload() }
+    };
+
+    const res = await Pi.createPayment(paymentData, {
+      onReadyForServerApproval: function(paymentId){
+        return fetch('/api/pi/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentId, session_id: sessionId })
+        });
+      },
+      onReadyForServerCompletion: function(paymentId, txid){
+        return fetch('/api/pi/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paymentId,
+            session_id: sessionId,
+            txid,
+            buyer: buyerPayload() // ← keep buyer only
+            // no shipping
+          })
+        }).then(r=>r.json()).catch(()=> ({}));
+      },
+      onCancel: function(){ /* status handled below */ },
+      onError:  function(){ /* status handled below */ }
+    });
+
+    if (res && typeof res.status === 'string' && /complete/i.test(res.status)){
+      return { ok:true, receipt:res };
+    }
+    return { ok:false, reason:(res && res.status) || 'pi-not-complete', raw:res };
+
+  }catch(e){
+    console.warn('[craft] Pi pay failed', e);
+    return { ok:false, reason:String(e && e.message || e) };
+  }
 }
-function shippingPayload(){
-  const p = buyerPayload();
-  return {
-    address:'', address2:'', city:'', state:'', postal_code:'', country:'',
-    name: p.name, email: p.email, phone: ''
-  };
-}
+/* ====================================================== */
 /* ================================================ */
 
 /* ------------------------------------------------------------------------- */
@@ -434,66 +495,6 @@ async function reconcileCraftCredits(){
 }
 
 /* ====== REPLACED to mirror checkout.html exactly ====== */
-async function payWithPi(amountPi, memo){
-  // init exactly like checkout
-  if (!initPiExact()){
-    alert('Open in Pi Browser to pay.');
-    return { ok:false, reason:'no-pi' };
-  }
-  if (!window.Pi || typeof Pi.createPayment !== 'function'){
-    alert('Pi SDK not available');
-    return { ok:false, reason:'no-pi' };
-  }
-
-  try{
-    const sessionId = "craft-credit"; // stable bucket for single mint credit
-
-    // Same auth + recovery as checkout.html
-    await ensureAuthExact();
-
-    const storeName = (window.STORE_NAME || 'IZZA PAY');
-    const memoText  = (storeName ? (storeName + ' — ') : '') + 'Order ' + sessionId.slice(0,8);
-
-    const paymentData = {
-      amount: Number(amountPi),
-      memo: memo || memoText,
-      metadata: { session_id: sessionId }
-    };
-
-    const res = await Pi.createPayment(paymentData, {
-      onReadyForServerApproval: function(paymentId){
-        return fetch('/api/pi/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paymentId, session_id: sessionId })
-        });
-      },
-      onReadyForServerCompletion: function(paymentId, txid){
-        return fetch('/api/pi/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            paymentId, session_id: sessionId, txid,
-            buyer:   buyerPayload(),
-            shipping: shippingPayload()
-          })
-        }).then(r=>r.json()).catch(()=> ({}));
-      },
-      onCancel: function(){ /* status handled below */ },
-      onError:  function(){ /* status handled below */ }
-    });
-
-    if (res && typeof res.status === 'string' && /complete/i.test(res.status)){
-      return { ok:true, receipt:res };
-    }
-    return { ok:false, reason:(res && res.status) || 'pi-not-complete', raw:res };
-
-  }catch(e){
-    console.warn('[craft] Pi pay failed', e);
-    return { ok:false, reason:String(e && e.message || e) };
-  }
-}
-/* ====================================================== */
 
   async function payWithIC(amountIC){
     const cur = getIC();
