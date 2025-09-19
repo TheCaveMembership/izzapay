@@ -282,37 +282,6 @@ function scoreSvgQuality(s, mode) {
   return score;
 }
 
-// --- Sanitizers (unchanged except we also block @import in <style>) ---
-function sanitizeSVG(svg) {
-  try {
-    const max = 200_000;
-    let t = String(svg || '').trim();
-    if (!t) return '';
-    if (t.length > max) t = t.slice(0, max);
-    if (/(<!DOCTYPE|<script|\son\w+=|<iframe|<foreignObject)/i.test(t)) return '';
-    if (/\b(xlink:href|href)\s*=\s*['"](?!#)/i.test(t)) return '';
-    if (!/^<svg\b[^>]*>[\s\S]*<\/svg>\s*$/i.test(t)) return '';
-    // remove @import or url() with external refs in styles
-    t = t.replace(/@import[\s\S]*?;?/gi,'').replace(/url\(\s*['"]?(https?:)?\/\//gi,'url(#');
-    t = t
-      .replace(/<\?xml[\s\S]*?\?>/gi, '')
-      .replace(/<!DOCTYPE[^>]*>/gi, '')
-      .replace(/<metadata[\s\S]*?<\/metadata>/gi, '')
-      .replace(/\s+xmlns:xlink="[^"]*"/i, '');
-    return t;
-  } catch { return ''; }
-}
-
-function stripAnimations(svg) {
-  let t = String(svg || '');
-  t = t.replace(/<\s*animate(?:Transform|Motion)?\b[^>]*>(?:[\s\S]*?<\/\s*animate(?:Transform|Motion)?\s*>|)/gi, '');
-  t = t.replace(/@keyframes[\s\S]*?}\s*}/gi, '');
-  t = t.replace(/animation\s*:[^;"]*;?/gi, '')
-       .replace(/animation-(name|duration|timing-function|delay|iteration-count|direction|fill-mode|play-state)\s*:[^;"]*;?/gi, '');
-  t = t.replace(/\sdata-anim="[^"]*"/gi, '');
-  return t;
-}
-
 app.post('/api/crafting/ai_svg', async (req, res) => {
   try {
     const body       = (typeof req.body === 'string') ? JSON.parse(req.body) : (req.body || {});
