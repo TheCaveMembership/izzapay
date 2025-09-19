@@ -475,12 +475,16 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     const name       = String(meta.name || '').slice(0, 64);
     const wantAnim   = !!meta.animate;
     const animPaid   = !!meta.animationPaid;
-    const styleParam = (meta.style || 'auto').toLowerCase(); // 'auto'|'realistic'|'cartoon'|'stylized'
+        const styleParam = (meta.style || 'auto').toLowerCase(); // 'auto'|'realistic'|'cartoon'|'stylized'
     const style      = detectStyleFromPrompt(prompt, styleParam === 'auto' ? '' : styleParam);
+
+    // Add lexicon-based hint expansion RIGHT AFTER style detection
+    const lexHints   = expandWithLexicons(prompt);
 
     if (!prompt) return res.status(400).json({ ok:false, reason:'empty-prompt' });
     if (!OPENAI_API_KEY) return res.status(503).json({ ok:false, reason:'no-api-key' });
 
+    // Slot table (unchanged)
     const SLOT = {
       helmet: { vb:'0 0 128 128', box:{w:38,h:38} },
       vest:   { vb:'0 0 128 128', box:{w:40,h:40} },
@@ -502,47 +506,48 @@ ANIMATION (if used):
     : style === 'cartoon'   ? `STYLE: ANIME/SHŌNEN — bold clean outlines, cel-shading, crisp highlights, readable silhouettes. If a specific anime/game is named (One Piece, Pokémon, DBZ, CoD, MGS, GTA), echo its visual vibe (no logos/text).`
                              : `STYLE: STYLIZED — luxury-street neon with occult vibe; bold but layered with highlights and glow stacks.`;
 
+    // Build user message lines
     const userLines = [
-  `Part: ${part}`,
-  name ? `Name: ${name}` : null,
-  `Prompt: ${prompt}`,
-  lexHints,
-  `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
-  `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
-  modeHint,
-  animHint
-];
+      `Part: ${part}`,
+      name ? `Name: ${name}` : null,
+      `Prompt: ${prompt}`,
+      lexHints, // ← short additive hints from your lexicons
+      `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
+      `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
+      modeHint,
+      animHint
+    ];
 
-// ↓ Add this conditional exactly here, before joining
-if (
-  part === 'helmet' &&
-  !/\b(eye|visor|mask|mouth|smile|grin|teeth|goggles|glasses|open\s*face|hat|bandana|scarf)\b/i.test(prompt)
-) {
-  userLines.push('Helmet face should not be blank; include an open-face area or subtle visor/eye cutouts.');
-}
+    // Helmet face rule (avoid blank faces when ambiguous)
+    if (
+      part === 'helmet' &&
+      !/\b(eye|visor|mask|mouth|smile|grin|teeth|goggles|glasses|open\s*face|hat|bandana|scarf)\b/i.test(prompt)
+    ) {
+      userLines.push('Helmet face should not be blank; include an open-face area or subtle visor/eye cutouts.');
+    }
 
-// Join into the final message
-const userMsg = userLines.filter(Boolean).join('\n');
+    const userMsg = userLines.filter(Boolean).join('\n');
 
-// (unchanged)
-const temperature = style === 'realistic' ? 0.45
-                  : style === 'cartoon'   ? 0.9
-                                          : 0.7;
+    // Sampling temps by style
+    const temperature = style === 'realistic' ? 0.45
+                      : style === 'cartoon'   ? 0.9
+                                              : 0.7;
 
-const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-  method: 'POST',
-  headers: { 'authorization': `Bearer ${OPENAI_API_KEY}`, 'content-type': 'application/json' },
-  body: JSON.stringify({
-    model: SVG_MODEL_ID,
-    temperature,
-    max_tokens: 2500,
-    n: 8,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user',   content: userMsg }
-    ]
-  })
-});
+    // BIG settings you chose
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'authorization': `Bearer ${OPENAI_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: SVG_MODEL_ID,
+        temperature,
+        max_tokens: 2500,
+        n: 8,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user',   content: userMsg }
+        ]
+      })
+    });
 
     if (!resp.ok) {
       const txt = await resp.text().catch(()=> '');
