@@ -200,35 +200,45 @@ function stripAnimations(svg) {
   return t;
 }
 
-// ----------------- PLAYER-CONTROLLED STYLE SVG GEN (patch) -----------------
+// ----------------- PLAYER-CONTROLLED STYLE SVG GEN (surgical prompt upgrade) -----------------
 const SYSTEM_PROMPT = `
-You generate SVG overlays for IZZA: hip hop, streetwear, neon-mystic. The PLAYER is in control:
-- Style can be "realistic", "cartoon", or "stylized". If not specified, infer from the text.
+You generate SVG overlays for IZZA. The PLAYER controls subject/style; you ensure slot constraints.
 
 OUTPUT (strict):
 • Return ONLY one <svg> element. Transparent background. No prose.
 • Vector only: <path>, <rect>, <circle>, <polygon>, <g>, <defs>, <linearGradient>, <radialGradient>, <filter> with <feGaussianBlur>, <feDropShadow>. Optional <style> for CSS.
-• No <image>, no bitmaps, no <foreignObject>, no external href, no events.
+• No <image>, no bitmaps, no <foreignObject>, no external href, no event handlers.
 
 COMPOSITION:
-• Fit art tightly (0–2px padding). Center visually. Must read at ~28px.
-• Use layered shading: base → occlusion shadows → specular highlights → edge accents → optional glow/FX (if asked).
+• Fit art tightly (0–2px padding). Center visually. Must read at ~28px inventory size.
+• Layered shading: base → occlusion shadows → specular highlights → edge accents → optional glow/FX (if asked).
 
-SLOTS:
-- helmet: viewBox="0 0 128 128" — headwear/face-plate; believable planes if realism; clear mask/visor shapes allowed.
+SLOTS (unchanged rules):
+- helmet: viewBox="0 0 128 128" — headwear/face-plate; clear mask/visor shapes allowed.
 - vest:   viewBox="0 0 128 128" — chest/torso; keep shoulders inside bounds.
 - arms:   viewBox="0 0 160 120" — two separate forearm motifs (left/right). No single central blob.
 - legs:   viewBox="0 0 140 140" — two balanced leg elements (thigh→shin). No single mono-shape.
 - hands:  viewBox="0 0 160 100" — horizontal weapon/blade/gun layout.
 
-ENGINE OVERLAY TARGETS (center your focal mass roughly to these crafted overlay boxes):
-• head 38×38, chest 40×40, arms 38×38, legs 40×40, hands 36×36.
-• World transforms approx: helmet s2.80 oy-12; vest s2.40 oy+3; arms s2.60 oy+2; legs s2.45 oy+10.
+STYLE MODES:
+• REALISTIC — Treat materials as **real-life**: steel, chrome, brushed metal, gold, silver, leather, denim, wool, velvet, wood, glass, crystal, diamond, stone, concrete; natural elements like water, smoke, fire, sky, grass, sand, snow. Use believable PBR-ish cues in SVG (base color, gradients for specular, subtle AO, micro-scratches/edge wear). Avoid thick outlines (>1.4) and flat emoji shapes.
+• CARTOON / STYLIZED — **Anime/shōnen** flavor by default: bold line art, cel-shading, simple but expressive highlights, readable silhouettes. If a franchise is referenced (One Piece, Pokémon, Dragon Ball, Naruto, Ghibli, Persona, Zelda, Genshin), mimic its line weight, color blocking, and exaggeration (no logos or textual marks).
 
-STYLE MODES (follow the chosen/ inferred mode):
-• REALISTIC — believable materials (brushed/polished metal, glass, leather), soft AO shadows, controlled specular, micro-bevels. Avoid thick outlines (>1.4). Avoid flat emoji shapes.
-• CARTOON — clean, confident shapes; you MAY use thicker outlines and bolder silhouettes. Still avoid flat single-fill icons: include at least light/dark separation or subtle gradient.
-• STYLIZED — luxury-street neon with occult flair; bold shapes plus layered highlights and glows.
+REFERENCE UNDERSTANDING:
+• Recognize and adapt to pop culture, video games, fashion, and meme cues (e.g., Call of Duty, Metal Gear Solid, GTA; streetwear/hip-hop/mafia; baggy/emo/hipster/high-fashion; sunglasses, scarves, bandanas; meme/YouTube vibes). Emulate **style and vibe** only; do not draw exact logos/trademarks or text.
+
+SEMANTICS (armour vs apparel):
+• If the prompt describes **clothing only** (e.g., "arms with red gloves"), depict clothing only; do **not** add armour.
+• If the prompt mentions armour/metals/tactical terms ("steel", "gold", "plate", "chain", "tactical"), depict armour accordingly (e.g., plated bracers with red gloves).
+• Helmets/headwear: respect hats/hoods/caps ("pirate hat") and leave the face open unless armour/visor/mask is requested.
+• Examples:
+  - "pirate hat One Piece style" → anime/stylized pirate hat, top-only, face visible.
+  - "gold helmet with black trim and a red bandana at the neck" → gilded helm with black edge trim + red neck bandana.
+  - "Pikachu looking head" → Pokémon-inspired headgear silhouette and palette (no logos/text).
+
+DETAIL FIDELITY:
+• Respect requested colors/shades/trim, textures (e.g., diamond sparkle via layered gradients), and expressions/attitude (smile/grin/angry/sad/happy) when applicable to visors/masks/headwear.
+• Keep forms crisp for ~28px readability.
 
 EFFECTS:
 • If user asks for glow/energy/flames: build vector glow stacks (inner solid, mid translucent, outer blurred) and flame paths with blur. No bitmaps.
@@ -246,18 +256,25 @@ CHECKLIST (self-verify before emitting):
 
 // --- Helpers: style detection & scoring heuristics ---
 function detectStyleFromPrompt(prompt, explicit) {
+  // explicit UI choice (Realistic vs Cartoon / Stylized) always wins
   if (explicit && /^(realistic|cartoon|stylized)$/i.test(explicit)) {
     return explicit.toLowerCase();
   }
   const p = (prompt||'').toLowerCase();
-  const realismHits = /(realistic|photo|photoreal|metal|chrome|glass|leather|texture|bevel|specular|raytraced|physically based|pbr)/.test(p);
-  const cartoonHits = /(cartoon|anime|manga|chibi|cel|comic|flat|bold outline|toon)/.test(p);
-  const stylizedHits = /(neon|glow|mystic|occult|luxury|streetwear|graffiti|vaporwave|cyberpunk)/.test(p);
-  if (realismHits && !cartoonHits) return 'realistic';
-  if (cartoonHits && !realismHits) return 'cartoon';
-  if (stylizedHits) return 'stylized';
-  // fallback vibe for IZZA
-  return 'stylized';
+
+  // Anime / shōnen / game-art cues
+  const animeOrGame =
+    /(anime|manga|shōnen|shonen|cel[-\s]?shade|chibi|one\s*piece|luffy|pokemon|pokémon|pikachu|dragon\s*ball|dbz|naruto|ghibli|persona|zelda|genshin|overwatch|valorant|street\s*fighter|fortnite)/i.test(p) ||
+    /(call\s*of\s*duty|cod|metal\s*gear|mgs|gta|grand\s*theft\s*auto)/i.test(p);
+
+  // Real-material / natural-element cues
+  const realMaterials =
+    /(photo|photoreal|realistic|pbr|physically\s*based|steel|iron|gold|silver|chrome|aluminum|copper|brass|leather|denim|cotton|wool|velvet|wood|oak|mahogany|marble|granite|stone|concrete|diamond|gem|crystal|glass|rust|patina|mud|water|flame|fire|smoke|sky|cloud|grass|sand|snow|ice)/i.test(p);
+
+  if (animeOrGame && !realMaterials) return 'cartoon';
+  if (realMaterials && !animeOrGame) return 'realistic';
+  // Default to realistic if materials dominate words; otherwise anime cartoon.
+  return realMaterials ? 'realistic' : 'cartoon';
 }
 
 function scoreSvgQuality(s, mode) {
@@ -272,12 +289,9 @@ function scoreSvgQuality(s, mode) {
 
   if (mode === 'realistic' || mode === 'stylized') {
     score += lin*3 + rad*3 + fil*2 + pathCount*1;
-    // penalize thick cartoon lines only in realistic mode
-    if (mode === 'realistic') score -= strokeThick*3;
-  } else { // cartoon
-    // cartoon prefers strong shapes but still some layering
+    if (mode === 'realistic') score -= strokeThick*3; // avoid very thick toon lines in realism
+  } else { // cartoon (anime)
     score += pathCount*2 + (lin+rad)*1 + fil*1;
-    // no penalty for thick lines
   }
   return score;
 }
@@ -314,8 +328,8 @@ ANIMATION (if used):
 ` : '';
 
     const modeHint =
-      style === 'realistic' ? `STYLE: REALISTIC — believable materials, soft AO, controlled specular, micro-bevels. Avoid thick outlines (>1.4) and flat emoji shapes.`
-    : style === 'cartoon'   ? `STYLE: CARTOON — bold shapes with confident outlines allowed; still include light/dark separation or gradients (avoid single flat one-color icons).`
+      style === 'realistic' ? `STYLE: REALISTIC — depict **actual real materials/natural elements** with believable PBR-like shading using vectors (base+AO+specular+edge wear). Avoid thick toon outlines (>1.4).`
+    : style === 'cartoon'   ? `STYLE: ANIME/SHŌNEN — bold clean outlines, cel-shading, crisp highlights, readable silhouettes. If a specific anime/game is named (One Piece, Pokémon, DBZ, CoD, MGS, GTA), echo its visual vibe (no logos/text).`
                              : `STYLE: STYLIZED — luxury-street neon with occult vibe; bold but layered with highlights and glow stacks.`;
 
     const userMsg = [
