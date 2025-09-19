@@ -728,7 +728,6 @@ function normalizeSvgForSlot(svgText, part){
         </div>
       </div>
     </div>`;
-}}
 }
   function renderMine(){
     return `
