@@ -2489,8 +2489,19 @@ def mint_codes_consume():
         return {"ok": False, "reason": "missing_code"}, 400
 
     with conn() as cx:
-        _ensure_credit_codes(cx)
-        row = cx.execute("SELECT code, user_id, used FROM mint_codes WHERE code=?", (code,)).fetchone()
+        cx.execute("""
+          CREATE TABLE IF NOT EXISTS mint_codes(
+            code TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at TIMESTAMP
+          )
+        """)
+        row = cx.execute(
+            "SELECT code, user_id, used FROM mint_codes WHERE code=?",
+            (code,)
+        ).fetchone()
         if not row:
             return {"ok": False, "reason": "invalid"}, 404
         if int(row["used"] or 0) == 1:
@@ -2499,7 +2510,7 @@ def mint_codes_consume():
         cx.execute("UPDATE mint_codes SET used=1, used_at=strftime('%s','now') WHERE code=?", (code,))
 
     return {"ok": True, "creditsAdded": 1}
-
+    
 @app.post("/payment/error")
 def payment_error():
     """
@@ -3003,119 +3014,6 @@ def api_orders_collectible_ic():
         pass
 
     return {"ok": True}
-
-# ====== COLLECTIBLES — unified feed for Crafting Land UI ======
-@app.get("/api/crafts/feed")
-def api_crafts_feed():
-    """
-    Returns one payload the CRAFTS page can render.
-    - creations:      items the user CREATED via crafting UI (table: crafted_items)
-    - purchases_ic:   collectibles purchased with IZZA coins (table: collectible_orders_ic)
-    - purchases_pi:   collectibles purchased via Pi checkout (orders joined to items)
-    - claims:         map of {order_id: true} for claimed Pi collectibles
-    """
-    u = current_user_row()
-    if not u:
-        return {"ok": True, "creations": [], "purchases_ic": [], "purchases_pi": [], "claims": {}}
-
-    uid = int(u["id"])
-
-    # 1) My creations (from crafting UI)
-    with conn() as cx:
-        rows = cx.execute("""
-            SELECT id, name, sku, image, meta_json, created_at
-            FROM crafted_items
-            WHERE user_id=?
-            ORDER BY id DESC
-        """, (uid,)).fetchall()
-    creations = []
-    for r in rows:
-        try:
-            meta = json.loads(r["meta_json"] or "{}") or {}
-        except Exception:
-            meta = {}
-        creations.append({
-            "id": int(r["id"]),
-            "name": r["name"],
-            "sku": r["sku"],
-            "image": r["image"],
-            "meta": meta,
-            "created_at": int(r["created_at"] or 0),
-        })
-
-    # 2) IC purchases (from the new table)
-    with conn() as cx:
-        ic_rows = cx.execute("""
-            SELECT id, crafted_key, title, slot, part, svg, price_ic, payment_method, source, created_at
-            FROM collectible_orders_ic
-            WHERE user_id=?
-            ORDER BY id DESC
-        """, (uid,)).fetchall()
-    purchases_ic = [dict(r) for r in ic_rows]
-
-    # 3) Pi collectibles (orders w/ fulfillment_kind='crafting')
-    with conn() as cx:
-        pi_rows = cx.execute("""
-            SELECT o.id            AS order_id,
-                   o.qty           AS qty,
-                   i.title         AS title,
-                   i.image_url     AS image_url,
-                   i.crafted_item_id AS crafted_item_id,
-                   i.fulfillment_kind AS fulfillment_kind,
-                   m.business_name AS store,
-                   m.slug          AS mslug
-            FROM orders o
-            JOIN items i   ON i.id = o.item_id
-            JOIN merchants m ON m.id = o.merchant_id
-            WHERE o.status='paid'
-              AND o.buyer_user_id = ?
-              AND i.fulfillment_kind = 'crafting'
-              AND i.crafted_item_id IS NOT NULL
-            ORDER BY o.id DESC
-        """, (uid,)).fetchall()
-
-        # 4) Claim map (which Pi collectibles have been pulled into the game already)
-        claimed_rows = cx.execute("""
-            SELECT order_id FROM collectible_claims WHERE user_id=?
-        """, (uid,)).fetchall()
-
-    claims = { int(r["order_id"]): True for r in claimed_rows }
-    purchases_pi = [{
-        "order_id": int(r["order_id"]),
-        "title": r["title"],
-        "store": r["store"],
-        "thumb_url": r["image_url"] or "",
-        "crafted_item_id": r["crafted_item_id"],
-        "qty": int(r["qty"] or 1),
-        "claimed": bool(claims.get(int(r["order_id"])))
-    } for r in pi_rows]
-
-    return {
-        "ok": True,
-        "creations": creations,
-        "purchases_ic": purchases_ic,
-        "purchases_pi": purchases_pi,
-        "claims": claims
-    }
-
-# ====== CRAFTS PAGE (game-side page; very small server view) ======
-@app.get("/izza-game/crafts")
-def game_crafts_page():
-    """
-    Renders the CRAFTS page (game template). This DOES NOT duplicate /orders.
-    It simply ships a shell that calls /api/crafts/feed on load and renders tabs:
-      - CRAFTS (my creations)
-      - PURCHASES (IC + Pi collectibles)
-    """
-    u = require_user()
-    if isinstance(u, Response):  # redirected to signin if needed
-        return u
-    # Token helps the game template call APIs if third-party cookies are blocked
-    try:
-        tok = mint_login_token(int(u["id"]))
-    except Exception:
-        tok = None
-    return render_template("crafts.html", t=tok, sandbox=PI_SANDBOX)
 
 # =========================================================================== #
 # ----------------- MAIN -----------------
