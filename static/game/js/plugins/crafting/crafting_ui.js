@@ -1115,23 +1115,29 @@ let initialTab = 'packages';
 // Fallback: if the checkout return page set a breadcrumb, unlock visuals this once.
 try{
   if (localStorage.getItem('izzaCraftGrantSeen') === '1') {
-    STATE.hasPaidForCurrentItem = true;
-    STATE.canUseVisuals = true;
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    STATE.createSub = 'visuals';
-    initialTab = 'create';
+    // NEW: unlock visuals but show Setup first
+STATE.hasPaidForCurrentItem = true;      // one-off flag (kept)
+STATE.canUseVisuals = true;              // enables the Visuals subtab
+STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+STATE.createSub = 'setup';               // <-- start on Setup
+initialTab = 'create';
   }
 }catch(_){}
 
 try{
   const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
-  if (s && s.ok && (s.credits|0) > 0){
+  // after: const s = await serverJSON(api('/api/crafting/credits/status'));
+if (s && s.ok){
+  const n = (s.credits|0);
+  STATE.mintCredits = n;                 // <-- track stacked credits locally
+  if (n > 0){
     STATE.hasPaidForCurrentItem = true;
     STATE.canUseVisuals = true;
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    STATE.createSub = 'visuals';
+    STATE.createSub = 'setup';           // <-- show Setup first
     initialTab = 'create';
   }
+}
 }catch(_){}
 
 // Clear the breadcrumb after we’ve reacted to it (so it’s one-time)
@@ -1462,12 +1468,23 @@ updatePayButtonsState(); // <-- ADD THIS once after wiring Create-tab controls
         : { ok:false, reason:'armour-packs-hook-missing' };
 
       if (injected && injected.ok){
-  craftStatus.textContent = 'Crafted ✓';
-  STATE.hasPaidForCurrentItem = false;
-  if (STATE.packageCredits && STATE.packageCredits.items > 0){
-    STATE.packageCredits.items -= 1;
-    if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+  // you already have:
+craftStatus.textContent = 'Crafted ✓';
+STATE.hasPaidForCurrentItem = false;
+if (STATE.packageCredits && STATE.packageCredits.items > 0){
+  STATE.packageCredits.items -= 1;
+  if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+}
+
+// ADD THIS BLOCK to handle stacked single-use credits:
+if (typeof STATE.mintCredits === 'number') {
+  STATE.mintCredits = Math.max(0, STATE.mintCredits - 1);
+  if (STATE.mintCredits === 0) {
+    STATE.canUseVisuals = false;       // lock Visuals again when exhausted
+  } else {
+    STATE.canUseVisuals = true;        // still unlocked while > 0
   }
+}
 
   // Persist + get craftedId (from inject OR server)
   let craftedId = injected.id || null;
