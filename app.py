@@ -69,10 +69,11 @@ APP_BASE_URL  = os.getenv("APP_BASE_URL", "https://izzapay.onrender.com").rstrip
 BASE_ORIGIN   = APP_BASE_URL
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
-
 # ⚠️ Single-use crafting credit identifier.
 # This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
-SINGLE_CREDIT_LINK_ID = "d0b811e8"
+SINGLE_CREDIT_LINK_ID = "d0b811e8",
+# Where to send buyers after a successful “izza-game-crafting” purchase
+VOUCHER_PATH = os.getenv("VOUCHER_PATH", "/izza-game/voucher")
 
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
@@ -2239,17 +2240,18 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # SPECIAL CASE: izza-game-crafting → send to game auth instead
-    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-    if slug == "izza-game-crafting":
-        # Preserve bearer token (if present) and append craftPaid=1 so the game UI
-        # will call /api/crafting/credits/reconcile and update the visible balance.
-        if tok:
-            redirect_url = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
-        else:
-            redirect_url = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
+# SPECIAL CASE: izza-game-crafting → send to voucher page instead
+slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+if slug == "izza-game-crafting":
+    # Keep the bearer token (if present) and the craftPaid=1 flag so the page
+    # can trigger /api/crafting/credits/reconcile and update the balance.
+    base = f"{BASE_ORIGIN}{VOUCHER_PATH}"
+    if tok:
+        redirect_url = f"{base}?t={tok}&craftPaid=1"
     else:
-        redirect_url = default_target
+        redirect_url = f"{base}?craftPaid=1"
+else:
+    redirect_url = default_target
 
     # Build the JSON response once
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
