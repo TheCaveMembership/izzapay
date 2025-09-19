@@ -535,8 +535,8 @@ const resp = await fetch('https://api.openai.com/v1/chat/completions', {
   body: JSON.stringify({
     model: SVG_MODEL_ID,
     temperature,
-    max_tokens: 1800,
-    n: 2,
+    max_tokens: 2500,
+    n: 8,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user',   content: userMsg }
