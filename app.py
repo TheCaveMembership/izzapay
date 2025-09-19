@@ -659,6 +659,7 @@ with conn() as cx:
         cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
     if "colorway" not in m_cols:
         cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+        
 
 # --- Carts & cart_items must ALWAYS exist (not gated on colorway) ---
 with conn() as cx:
@@ -677,7 +678,16 @@ with conn() as cx:
           qty INTEGER NOT NULL
         )
     """)
-
+def _ensure_credit_codes(cx):
+    cx.executescript("""
+    CREATE TABLE IF NOT EXISTS mint_codes(
+      code TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      used_at TIMESTAMP
+    );
+    """)
 with conn() as cx:
     # items table patches for crafted linkage & description
     it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
@@ -2330,17 +2340,34 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # SPECIAL CASE: izza-game-crafting → send to game auth instead
-    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-    if slug == "izza-game-crafting":
-        # Preserve bearer token (if present) and append craftPaid=1 so the game UI
-        # will call /api/crafting/credits/reconcile and update the visible balance.
-        if tok:
-            redirect_url = f"{BASE_ORIGIN}/izza-game/auth?t={tok}&craftPaid=1"
-        else:
-            redirect_url = f"{BASE_ORIGIN}/izza-game/auth?craftPaid=1"
-    else:
+    # Decide where to send the buyer after success
+slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
+
+# Detect if this order should grant a Crafting "single mint" code.
+# You already computed SINGLE_ID above and built 'by_id' + 'lines'.
+grants_single_mint = False
+try:
+    for li in lines:
+        it = by_id.get(int(li["item_id"]))
+        if it and str(it.get("link_id") or "") == SINGLE_ID:
+            grants_single_mint = True
+            break
+except Exception:
+    grants_single_mint = False
+
+# If it's the crafting store OR the order contained the special single-mint item:
+if (slug == "izza-game-crafting") or grants_single_mint:
+    try:
+        # Make a one-time code for THIS user
+        with conn() as cx:
+            code = _new_mint_code(cx, int(buyer_user_id) if buyer_user_id else 0)
+        # Send them to the voucher page where they’ll copy the code
+        redirect_url = url_for("mint_success", code=code, _external=True)
+    except Exception:
+        # Fall back to the storefront success if something goes wrong
         redirect_url = default_target
+else:
+    redirect_url = default_target
 
     # Build the JSON response once
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
@@ -2390,7 +2417,45 @@ def payment_cancel():
             pass
     return {"ok": True, "cleared": bool(session_id)}
 
+@app.get("/mint/success/<code>")
+def mint_success(code):
+    # Very small inline page — you can move to a template later
+    return f"""
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IZZA Mint Credit</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif; background:#0f1522; color:#e7ecff; display:flex; min-height:100vh; align-items:center; justify-content:center;">
+  <div style="background:#0b0f17; border:1px solid #2a3550; border-radius:12px; padding:16px 18px; max-width:560px; text-align:center">
+    <h1 style="margin:6px 0 10px; font-size:20px">Mint Credit Code</h1>
+    <p style="opacity:.85; margin:0 0 12px">Copy this code and paste it in the game's Crafting screen (Redeem Code):</p>
+    <div style="font-weight:800; letter-spacing:1px; font-size:22px; background:#0f1522; border:1px solid #2a3550; border-radius:10px; padding:12px; display:inline-block">{code}</div>
+    <p style="opacity:.7; font-size:12px; margin:12px 0 0">Each code is single-use.</p>
+  </div>
+</body>
+</html>
+    """
+@app.post("/api/mint_codes/consume")
+def mint_codes_consume():
+    data = request.get_json(force=True) or {}
+    code = (data.get("code") or "").strip().upper()
+    if not code:
+        return {"ok": False, "reason": "missing_code"}, 400
 
+    with conn() as cx:
+        _ensure_credit_codes(cx)
+        row = cx.execute("SELECT code, user_id, used FROM mint_codes WHERE code=?", (code,)).fetchone()
+        if not row:
+            return {"ok": False, "reason": "invalid"}, 404
+        if int(row["used"] or 0) == 1:
+            return {"ok": False, "reason": "used"}, 409
+
+        cx.execute("UPDATE mint_codes SET used=1, used_at=strftime('%s','now') WHERE code=?", (code,))
+
+    return {"ok": True, "creditsAdded": 1}
 @app.post("/payment/error")
 def payment_error():
     """
