@@ -1194,8 +1194,6 @@ try{
     }
   }
 }catch(_){}
-// Clear the breadcrumb after we’ve reacted to it (so it’s one-time)
-try{ localStorage.removeItem('izzaCraftGrantSeen'); }catch(_){}
 
 // Re-run reconcile whenever the tab gains focus again
 if (!window.__izzaReconHook){
