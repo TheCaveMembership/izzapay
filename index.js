@@ -200,59 +200,229 @@ function stripAnimations(svg) {
   return t;
 }
 
-// ----------------- PLAYER-CONTROLLED STYLE SVG GEN (surgical prompt upgrade) -----------------
+// ----------------- MAXED SYSTEM PROMPT (NO sizing changes) -----------------
 const SYSTEM_PROMPT = `
-You generate SVG overlays for IZZA. The PLAYER controls subject/style; you ensure slot constraints.
+You generate SVG overlays for IZZA. Convert the player's text into an original, safe, vector-only overlay.
 
 OUTPUT (strict):
-• Return ONLY one <svg> element. Transparent background. No prose.
-• Vector only: <path>, <rect>, <circle>, <polygon>, <g>, <defs>, <linearGradient>, <radialGradient>, <filter> with <feGaussianBlur>, <feDropShadow>. Optional <style> for CSS.
+• Return ONE <svg> element, transparent background. No prose/comments.
+• Vector only: <path>, <rect>, <circle>, <polygon>, <g>, <defs>, <linearGradient>, <radialGradient>, <filter> with <feGaussianBlur>/<feDropShadow>. Optional <style>.
 • No <image>, no bitmaps, no <foreignObject>, no external href, no event handlers.
 
-COMPOSITION:
+COMPOSITION & FIT:
 • Fit art tightly (0–2px padding). Center visually. Must read at ~28px inventory size.
-• Layered shading: base → occlusion shadows → specular highlights → edge accents → optional glow/FX (if asked).
+• Layer order: base → occlusion shadows → specular highlights → edge accents → optional glow/FX.
+• Arms/legs are two distinct sides; hands (weapons) are horizontal. Never draw full-canvas backgrounds.
 
-SLOTS (unchanged rules):
-- helmet: viewBox="0 0 128 128" — headwear/face-plate; clear mask/visor shapes allowed.
-- vest:   viewBox="0 0 128 128" — chest/torso; keep shoulders inside bounds.
-- arms:   viewBox="0 0 160 120" — two separate forearm motifs (left/right). No single central blob.
-- legs:   viewBox="0 0 140 140" — two balanced leg elements (thigh→shin). No single mono-shape.
-- hands:  viewBox="0 0 160 100" — horizontal weapon/blade/gun layout.
+SLOTS (unchanged):
+- helmet: viewBox="0 0 128 128"
+- vest:   viewBox="0 0 128 128"
+- arms:   viewBox="0 0 160 120"
+- legs:   viewBox="0 0 140 140"
+- hands:  viewBox="0 0 160 100"
 
-STYLE MODES:
-• REALISTIC — Treat materials as **real-life**: steel, chrome, brushed metal, gold, silver, leather, denim, wool, velvet, wood, glass, crystal, diamond, stone, concrete; natural elements like water, smoke, fire, sky, grass, sand, snow. Use believable PBR-ish cues in SVG (base color, gradients for specular, subtle AO, micro-scratches/edge wear). Avoid thick outlines (>1.4) and flat emoji shapes.
-• CARTOON / STYLIZED — **Anime/shōnen** flavor by default: bold line art, cel-shading, simple but expressive highlights, readable silhouettes. If a franchise is referenced (One Piece, Pokémon, Dragon Ball, Naruto, Ghibli, Persona, Zelda, Genshin), mimic its line weight, color blocking, and exaggeration (no logos or textual marks).
+STYLE ROUTER:
+• REALISTIC → **real materials**: brushed/polished metals (steel, gold, brass, titanium), glass & gemstones, leather grains, woods, carbon/kevlar weaves, fabric weaves, ceramic glaze. Soft ambient occlusion, controlled specular, micro-bevels. Thin/clean outlines only (avoid >1.4), no flat emoji icons.
+• CARTOON / ANIME → bold silhouettes & confident outlines, 2–3 tone cel shading, speed lines/energy streaks allowed. Must still have light/dark separation (avoid single flat fills).
+• STYLIZED → neon luxury street: punchy shapes, precise highlights, tasteful glow stacks and occult/tech motifs.
 
-REFERENCE UNDERSTANDING:
-• Recognize and adapt to pop culture, video games, fashion, and meme cues (e.g., Call of Duty, Metal Gear Solid, GTA; streetwear/hip-hop/mafia; baggy/emo/hipster/high-fashion; sunglasses, scarves, bandanas; meme/YouTube vibes). Emulate **style and vibe** only; do not draw exact logos/trademarks or text.
+REFERENCE HANDLING (broad but safe):
+• Understand slang, memes, games, anime, cartoons, and TV. **Evoke** the vibe with original, legally distinct motifs. Avoid exact logos/wordmarks, title typography, or 1:1 character copies. No real-person likenesses; use generic archetypes.
+• Currency / “dead presidents” → banknote engraving cues: guilloché curves, micro-hatching, oval bust frame, security flourishes in green/black; use a **generic** bust or symbols (no real identities).
+• Network/era vibes (Cartoon Network/Nick/Disney/YTV/Family Channel) → channel-era *feel* via shapes/color language and cel shading—not exact characters.
 
-SEMANTICS (armour vs apparel):
-• If the prompt describes **clothing only** (e.g., "arms with red gloves"), depict clothing only; do **not** add armour.
-• If the prompt mentions armour/metals/tactical terms ("steel", "gold", "plate", "chain", "tactical"), depict armour accordingly (e.g., plated bracers with red gloves).
-• Helmets/headwear: respect hats/hoods/caps ("pirate hat") and leave the face open unless armour/visor/mask is requested.
+ARMOUR vs APPAREL INTENT:
+• If the text clearly asks apparel (gloves, scarf, bandana, hat, sunglasses, crown, tiara), render apparel; **do not** add armor plates.
+• If materials imply armor (steel/plate/chain/kevlar/ceramic/titanium/gold), render armor with those materials; apparel bits may be accents.
 • Examples:
-  - "pirate hat One Piece style" → anime/stylized pirate hat, top-only, face visible.
-  - "gold helmet with black trim and a red bandana at the neck" → gilded helm with black edge trim + red neck bandana.
-  - "Pikachu looking head" → Pokémon-inspired headgear silhouette and palette (no logos/text).
+  – “arms with red gloves” → forearms + red gloves (no armor).
+  – “arms of steel and gold with red gloves” → armored forearms (two sides) in steel+gold, red glove accents.
+  – “pirate hat” on helmet → a pirate hat silhouette, face area open.
 
-DETAIL FIDELITY:
-• Respect requested colors/shades/trim, textures (e.g., diamond sparkle via layered gradients), and expressions/attitude (smile/grin/angry/sad/happy) when applicable to visors/masks/headwear.
-• Keep forms crisp for ~28px readability.
+FACE POLICY (helmet slot):
+• If the user says open face / no mask / hat → leave face area open; **never** output a blank featureless face.
+• If a mask/visor is requested → include readable eye/visor/mouth cues (cutouts, slits, glow), not a blank slab.
+• Default when ambiguous → avoid blank faces: hint eyes/visor cutouts or keep face open.
 
-EFFECTS:
-• If user asks for glow/energy/flames: build vector glow stacks (inner solid, mid translucent, outer blurred) and flame paths with blur. No bitmaps.
-• If animation is present, prefer 1–2 lightweight loops via <animate>/<animateTransform> or CSS @keyframes in <style>. No JS.
+MATERIAL / TEXTURE LIBRARY (invoke when mentioned or implied):
+• Metals: brushed steel, gunmetal, anodized aluminum, polished/rose gold, brass, copper, titanium. Radial/linear specular streaks; micro-bevels; light edge wear.
+• Stones & gems: diamond facet star glints, emerald/sapphire/ruby/jade, marble veins, granite speckle.
+• Composites/ceramics: carbon-fiber weave, kevlar weave, ceramic glaze micro-speckle.
+• Fabrics/leather: denim twill, canvas, knit ribbing, quilted padding, leather grain & stitching, suede nap, velvet sheen, satin highlight.
+• Natural: wood growth rings, bark texture, water caustics, ice crystal facets, flame stacks (core→mid→blur), smoke wisps, sand/dust, aurora/galaxy gradients, clouds/sky bands, grass blades.
+
+FASHION / SUBCULTURE CUES (if referenced):
+• Streetwear/hip-hop/trap/drill: baggy drape, oversized cuffs, gold chains, iced stones, grills, graffiti tags (generic).
+• Classic “gangster/mafia”: pinstripes, fedora-like hat, playing-card/chip motifs; noir palette with tasteful gold.
+• Emo/goth/punk: skinny cuts, straps/studs, safety pins, torn hems, heavy liner shapes.
+• Hipster/casual: beanie, round glasses, flannel checks, denim, earthy tones.
+• High-fashion/couture: glossy piping, metallic trims, tasteful monogram-like repeats (generic), satin/velvet sheen.
+• Kawaii/rainbow/unicorn: pastel gradients, sparkles, hearts/stars, clouds, rainbow arcs; soft outlines.
+• Grunge/nightmare/horror: distressed textures, cracked enamel, drips, barbed contours, thorn silhouettes, gothic filigree.
+
+ANIME / GAME VIBES (evoke, don’t copy):
+• One Piece → adventurous pirate motifs, straw-hat nods, bold cel shading.
+• Pokémon → cute rounded chibi energy, elemental icons; legally distinct.
+• Dragon Ball / DBZ → spiky energy auras, speed lines, hard cel shadows, rim lights.
+• Tactical shooters (CoD-like) → matte polymers, rails, cerakote tan/black, realistic wear.
+• Stealth-tech (MGS-like) → subdued palettes, crisp specular on industrial panels.
+• Hero shooters (Overwatch/Valorant-like) → stylized hard surfaces, saturated accents, decals (generic).
+• Fantasy/Soulslike/Zelda-like → engraved metals, leather straps, gem inlays, mystic glyphs (generic).
+• Halo/Destiny-like → armored alloys with emissive seams, clean bevels.
+• Fortnite-like → chunky playful shapes, clean bevels, bold contrast.
+
+ACCESSORIES / PATTERNS / COLORS (when asked):
+• Accessories: crowns/tiaras, headbands, bandanas, scarves, goggles/sunglasses (aviator, square, round), earrings, nose rings, chains, pendants, nails, makeup/face paint (abstract).
+• Patterns: woodland/desert/urban camo (generic), tiger/cheetah print, plaid, tartan, pinstripe, argyle, checkerboard, tie-dye swirl, geometric repeats, guilloché.
+• Palettes: neon, pastel, monochrome, earth-tones, metallics, iridescent/oil-slick, color-shift “anodized”.
+
+ANIMATION (if allowed for this item):
+• Use at most 1–2 lightweight loops via <animate>/<animateTransform> or CSS @keyframes; silhouette must look complete if paused. No JS.
 
 METADATA ON ROOT:
 • data-slot="helmet|vest|arms|legs|hands"
-• If FX used, data-fx="glow,flame,energy"
-• If animation present, data-anim="1"
+• If FX used, data-fx="glow,flame,energy,smoke,water,ice"
+• If any animation present, data-anim="1"
 
 CHECKLIST (self-verify before emitting):
-• Correct slot viewBox. No full-canvas background rect.
-• Arms/legs are two sides; hands (weapon) is horizontal.
+• Correct slot viewBox, transparent background, no full-bleed rects.
+• Arms/legs are two sides; hands are horizontal.
+• Realistic = believable materials; Cartoon = anime/cel shading; Stylized = neon luxury street.
+• Helmet face is NEVER blank; obey “open face” vs “mask/visor” intent.
 `;
+
+// === INSERT A: goes right after const SYSTEM_PROMPT = `...`; ===
+
+// Broad, safe “evoke” lexicons (no logos/likenesses). Each adds a short hint when matched.
+const REFERENCE_LEXICON = [
+  { re:/\b(one\s*piece|luffy|straw\s*hat)\b/i, add:'Adventure-pirate anime vibe: open-face hat, bold cel-shading; legally distinct.' },
+  { re:/\b(pok[eé]mon|pikachu|pika)\b/i,       add:'Cute chibi energy, rounded forms, electric icons; legally distinct.' },
+  { re:/\b(dragon\s*ball|dbz|super\s*saiyan)\b/i, add:'Spiky energy aura, speed lines, hard cel-shadows.' },
+  { re:/\b(call\s*of\s*duty|cod)\b/i,          add:'Tactical polymers, rails, matte cerakote tan/black, realistic wear.' },
+  { re:/\b(metal\s*gear|mgs)\b/i,              add:'Industrial stealth-tech: subdued palette, crisp panel specular.' },
+  { re:/\b(overwatch|valorant)\b/i,            add:'Stylized hard-surface bevels, saturated accents, generic decals.' },
+  { re:/\b(zelda|souls|soulslike)\b/i,         add:'Engraved metals, leather straps, gem inlays, mystic glyphs.' },
+  { re:/\b(halo|destiny)\b/i,                  add:'Armored alloys with emissive seams and clean bevels.' },
+  { re:/\b(fortnite)\b/i,                      add:'Chunky playful shapes, bold contrast, clean bevels.' },
+
+  // Money / engraving vibe (generic, no real faces)
+  { re:/\b(dead\s*president|banknote|bill|money|cash|currency)\b/i,
+    add:'Banknote engraving vibe: guilloché curves, micro-hatching, oval bust frame, security flourishes in green/black; use a generic bust (no real likeness).' },
+
+  // Streetwear / culture (safe, non-logo)
+  { re:/\bstreetwear|hip\s*hop|trap|drill\b/i,
+    add:'Baggy drape, oversized cuffs, gold chain silhouettes, iced stone glints, generic graffiti drips (no text).' },
+
+  // “Gangster/mafia” as fashion vibe (no people/brands)
+  { re:/\b(gangster|mafia|noir)\b/i,
+    add:'Pinstripes, fedora-like hat cues, playing-card/chip motifs; noir palette with tasteful gold.' },
+
+  // Emo/goth/punk etc.
+  { re:/\b(emo|goth|punk|metalhead)\b/i,
+    add:'Skinny cuts, straps/studs, safety pins, torn hems, heavy liner shapes.' },
+
+  // Kawaii / rainbow / unicorn
+  { re:/\b(kawaii|unicorn|rainbow|sparkle)\b/i,
+    add:'Pastel gradients, hearts/stars, cloud puffs, gentle sparkles.' },
+
+  // Cannabis-only (safe stylization)
+  { re:/\b(weed|cannabis|marijuana|ganja|kush|indica|sativa|hemp|420)\b/i,
+    add:'Cannabis styling: 5–7 pointed leaf silhouettes, hemp-rope braid accents, soft smoke wisps, neon grow-glow; motifs stylized/generic.' },
+];
+
+const PATTERN_LEXICON = [
+  { re:/\bcamo|camouflage\b/i,       add:'Generic woodland/desert/urban camo blocks; no military insignia.' },
+  { re:/\btartan|plaid|flannel\b/i,  add:'Balanced tartan/plaid repeats with subtle fabric weave.' },
+  { re:/\bpin\s*stripe|pinstripe\b/i,add:'Fine pinstripes with soft specular on peaks.' },
+  { re:/\bargyle\b/i,                add:'Diamond argyle tiling with thin separators.' },
+  { re:/\bcheetah|tiger|leopard\b/i, add:'Animal print, tasteful scaling and edge softening.' },
+  { re:/\bchecker(board)?\b/i,       add:'High-contrast checkers with slight motion skew.' },
+  { re:/\btie[-\s]?dye\b/i,          add:'Spiral tie-dye gradient bands.' },
+  { re:/\bguilloch[eé]\b/i,          add:'Banknote guilloché wave curves and rosettes.' },
+  { re:/\bhoundstooth\b/i,           add:'Sharp houndstooth tessellation, small scale.' },
+  { re:/\bhex(agon)?\b/i,            add:'Hex tiling with micro-bevels, sci-fi panel vibe.' },
+];
+
+const COLOR_LEXICON = [
+  { re:/\b(emerald|jade|forest)\b/i, add:'Green ramp (deep→emerald→mint) with gemstone/leafy cues.' },
+  { re:/\b(cobalt|royal|navy)\b/i,   add:'Blue ramp (navy→cobalt→sky) with cool rim lights.' },
+  { re:/\b(crimson|scarlet|ruby)\b/i,add:'Rich red ramp with ruby glints.' },
+  { re:/\b(amber|saffron|goldenrod)\b/i, add:'Warm yellow-orange metallic option.' },
+  { re:/\b(lilac|lavender|amethyst)\b/i, add:'Soft violet ramp with delicate sheen.' },
+  { re:/\b(teal|turquoise|aqua)\b/i, add:'Blue-green ramp with watery caustic highlights.' },
+  { re:/\b(burgundy|maroon|wine)\b/i,add:'Deep red-violet with velvet glow.' },
+  { re:/\b(steel|gunmetal|slate)\b/i,add:'Cool gray ramp; brushed/stone specular cues.' },
+  { re:/\bpastel\s*rainbow\b/i,      add:'Soft multi-stop rainbow (rose→peach→lemon→mint→sky→lilac).' },
+  { re:/\bneon\s*rainbow\b/i,        add:'High-sat rainbow with glow stacks at edges.' },
+];
+// ----------------- EXTRA STREET / CANNABIS-ONLY + COLOR/PATTERN EXPANSIONS -----------------
+
+REFERENCE_LEXICON.push(
+  // Street life (clean, non-violent cues)
+  { re:/\bstreet\s?life|block|hood|urban\b/i,
+    add:'Urban texture cues: concrete speckle, brick-line suggestions, street sign silhouettes, reflective paint striping, generic tags (no words).' },
+  { re:/\bgraffiti|tag(ging)?|throw[- ]?up|stencil\b/i,
+    add:'Graffiti vibe: fat-cap drips, bubble throw shapes, stencil cutouts, spray mist haloes—no readable words or logos.' },
+  { re:/\bboombox|cassette|mixtape|turntable|vinyl\b/i,
+    add:'Retro audio nods: cassette/record icon shapes, equalizer bars, speaker cones, needle arm silhouettes (generic).' },
+  { re:/\blowrider|custom\b/i,
+    add:'Candy-paint pinstripes, metallic flake sheen, chrome trims with star glints (generic vehicle cues only).' },
+  { re:/\bbodega|corner\s*store\b/i,
+    add:'Awning stripes, neon OPEN-style glow, shelf stripe hints—no brand names, no text.' },
+
+  // Cannabis / weed ONLY (no other drugs; keep it tasteful & stylized)
+  { re:/\b(weed|cannabis|marijuana|mary\s*jane|ganja|kush|indica|sativa|hemp|420)\b/i,
+    add:'Cannabis styling: 5–7 pointed leaf silhouettes with vein hints, hemp-rope braid details, grinder/water-drop glass cues, earthy greens; optional smoke wisps and neon “grow” glow. No paraphernalia realism; keep motifs abstract/stylized.' },
+  { re:/\bleaf\b/i,
+    add:'Leaf motifs: layered leaflets with midrib veins, slight gloss on edges, dewdrop specular highlights if “fresh” is implied.' },
+  { re:/\bsmoke|cloud|puff\b/i,
+    add:'Soft smoke wisps built from layered translucent paths and light blur; avoid heavy opacity.' },
+  { re:/\bgrow|hydro|buds?\b/i,
+    add:'Bud/flower abstraction: clustered teardrop scales with tiny sparkle glints; keep shapes generic and readable at small size.' },
+);
+
+PATTERN_LEXICON.push(
+  // More patterns
+  { re:/\bpaisley\b/i,             add:'Paisley droplets and curlicues in layered repeats; fine line accents.' },
+  { re:/\bfloral|flowers?\b/i,     add:'Stylized petals/leaves in repeat; lightweight outlines and soft gradients.' },
+  { re:/\bmoir[eé]\b/i,            add:'Moire wave interference lines; thin balanced strokes, avoid shimmer artifacts.' },
+  { re:/\bchevron\b/i,             add:'Zigzag chevrons in even rhythm with highlight edges.' },
+  { re:/\bhoundstooth\b/i,         add:'Houndstooth tessellation; keep scale small and crisp.' },
+  { re:/\bpolka\s*dots?\b/i,       add:'Evenly spaced dots with subtle volumetric shading (not flat).' },
+  { re:/\bhex(agon(al)?)?\b/i,     add:'Hex grid/tiling with subtle bevels; sci-fi panel vibe.' },
+  { re:/\bscale(s)?|fish\s*scale\b/i, add:'Overlapped scale pattern with edge specular; gradient from top to bottom.' },
+  { re:/\bcloud\s*pattern\b/i,     add:'Soft cloud bands in parallax curves; gentle vertical gradient.' },
+  { re:/\bstarry|galaxy|nebula\b/i,add:'Star speckle fields, nebula swirl gradients, tiny cross-spark flares.' },
+  { re:/\bchecker\s*racing|racing\s*flag\b/i, add:'High-contrast checkers with motion skew; subtle tire-rub streaks.' },
+);
+
+COLOR_LEXICON.push(
+  // Much wider palette references
+  { re:/\b(navy|royal|cobalt)\s*blue\b/i, add:'deep to mid blue ramp with cool rim lights.' },
+  { re:/\b(emerald|forest|mint)\s*green\b/i, add:'green ramp (forest→emerald→mint) with gemstone or leafy cues.' },
+  { re:/\b(crimson|scarlet|ruby)\b/i,    add:'rich red ramp with subtle specular; ruby glints if gem-like.' },
+  { re:/\b(magenta|fuchsia|hot\s*pink)\b/i, add:'bold magenta/fuchsia with neon bloom option.' },
+  { re:/\b(amber|saffron|goldenrod)\b/i, add:'warm yellow-orange with metallic edge options.' },
+  { re:/\b(lilac|lavender|amethyst)\b/i, add:'soft violet ramp with delicate sheen; amethyst if gem-like.' },
+  { re:/\b(teal|turquoise|aqua)\b/i,     add:'blue-green ramp, coastal vibe, optional caustic highlights.' },
+  { re:/\b(rose|blush|salmon)\b/i,       add:'rosy pinks with satin highlights.' },
+  { re:/\b(olive|khaki|tan|beige)\b/i,   add:'earth neutrals with fabric/leather options.' },
+  { re:/\b(burgundy|maroon|wine)\b/i,    add:'deep red-violets with velvet glow.' },
+  { re:/\b(steel|gunmetal|slate)\b/i,    add:'cool gray ramp with brushed/stone specular cues.' },
+  { re:/\bpastel\s*rainbow\b/i,          add:'soft multi-stop gradient (rose→peach→lemon→mint→sky→lilac).' },
+  { re:/\bneon\s*rainbow\b/i,            add:'high-saturation gradient with glow stacks on edges.' },
+);
+
+// Build short additive hints based on user text
+function expandWithLexicons(txt){
+  if (!txt) return '';
+  const adds = [];
+  for (const x of REFERENCE_LEXICON) if (x.re.test(txt)) adds.push(x.add);
+  for (const x of PATTERN_LEXICON)   if (x.re.test(txt)) adds.push(x.add);
+  for (const x of COLOR_LEXICON)     if (x.re.test(txt)) adds.push(x.add);
+  // Make a compact bullet list the model can follow (no layout/sizing info)
+  return adds.length ? 'HINTS:\n• ' + adds.join('\n• ') : '';
+}
 
 // --- Helpers: style detection & scoring heuristics ---
 function detectStyleFromPrompt(prompt, explicit) {
@@ -332,34 +502,47 @@ ANIMATION (if used):
     : style === 'cartoon'   ? `STYLE: ANIME/SHŌNEN — bold clean outlines, cel-shading, crisp highlights, readable silhouettes. If a specific anime/game is named (One Piece, Pokémon, DBZ, CoD, MGS, GTA), echo its visual vibe (no logos/text).`
                              : `STYLE: STYLIZED — luxury-street neon with occult vibe; bold but layered with highlights and glow stacks.`;
 
-    const userMsg = [
-      `Part: ${part}`,
-      name ? `Name: ${name}` : null,
-      `Prompt: ${prompt}`,
-      `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
-      `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
-      modeHint,
-      animHint
-    ].filter(Boolean).join('\n');
+    const userLines = [
+  `Part: ${part}`,
+  name ? `Name: ${name}` : null,
+  `Prompt: ${prompt}`,
+  lexHints,
+  `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
+  `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
+  modeHint,
+  animHint
+];
 
-    const temperature = style === 'realistic' ? 0.45
-                      : style === 'cartoon'   ? 0.9
-                                              : 0.7;
+// ↓ Add this conditional exactly here, before joining
+if (
+  part === 'helmet' &&
+  !/\b(eye|visor|mask|mouth|smile|grin|teeth|goggles|glasses|open\s*face|hat|bandana|scarf)\b/i.test(prompt)
+) {
+  userLines.push('Helmet face should not be blank; include an open-face area or subtle visor/eye cutouts.');
+}
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'authorization': `Bearer ${OPENAI_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: SVG_MODEL_ID,
-        temperature,
-        max_tokens: 1800,
-        n: 2,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user',   content: userMsg }
-        ]
-      })
-    });
+// Join into the final message
+const userMsg = userLines.filter(Boolean).join('\n');
+
+// (unchanged)
+const temperature = style === 'realistic' ? 0.45
+                  : style === 'cartoon'   ? 0.9
+                                          : 0.7;
+
+const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  method: 'POST',
+  headers: { 'authorization': `Bearer ${OPENAI_API_KEY}`, 'content-type': 'application/json' },
+  body: JSON.stringify({
+    model: SVG_MODEL_ID,
+    temperature,
+    max_tokens: 1800,
+    n: 2,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user',   content: userMsg }
+    ]
+  })
+});
 
     if (!resp.ok) {
       const txt = await resp.text().catch(()=> '');
