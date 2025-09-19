@@ -1888,62 +1888,38 @@ def checkout(link_id):
 @app.post("/api/pi/approve")
 def pi_approve():
     data = request.get_json(force=True)
-    payment_id  = data.get("paymentId")
-    session_id  = data.get("session_id")
-    pi_username = (data.get("pi_username") or "").strip()  # ← NEW
-
+    payment_id = data.get("paymentId")
+    session_id = data.get("session_id")
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
-
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
-    if not s:
-        return {"ok": False, "error": "unknown_session"}, 400
-
+    if not s: return {"ok": False, "error": "unknown_session"}, 400
     try:
-        r = requests.post(
-            f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
-            headers=pi_headers(),
-            json={}
-        )
+        r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
+                          headers=pi_headers(), json={})
         if r.status_code != 200:
             return {"ok": False, "error": "approve_failed", "status": r.status_code}, 502
-
         with conn() as cx:
-            if pi_username:
-                cx.execute(
-                    "UPDATE sessions SET pi_payment_id=?, state=?, pi_username=? WHERE id=?",
-                    (payment_id, "approved", pi_username, session_id)
-                )
-            else:
-                cx.execute(
-                    "UPDATE sessions SET pi_payment_id=?, state=? WHERE id=?",
-                    (payment_id, "approved", session_id)
-                )
+            cx.execute("UPDATE sessions SET pi_payment_id=?, state=? WHERE id=?",
+                       (payment_id, "approved", session_id))
         return {"ok": True}
     except Exception:
         return {"ok": False, "error": "server_error"}, 500
 
-
 @app.post("/api/pi/complete")
 def pi_complete():
     data = request.get_json(force=True)
-    payment_id  = data.get("paymentId")
-    session_id  = data.get("session_id")
-    txid        = data.get("txid") or ""
-    buyer       = data.get("buyer") or {}
-    shipping    = data.get("shipping") or {}
-    pi_username = (data.get("pi_username") or "").strip()  # ← NEW
-
+    payment_id = data.get("paymentId")
+    session_id = data.get("session_id")
+    txid       = data.get("txid") or ""
+    buyer      = data.get("buyer") or {}
+    shipping   = data.get("shipping") or {}
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
-
     try:
-        r = requests.post(
-            f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
-            headers=pi_headers(),
-            json={"txid": txid}
-        )
+        r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
+                          headers=pi_headers(), json={"txid": txid})
         if r.status_code != 200:
             return {"ok": False, "error": "complete_failed", "status": r.status_code}, 502
     except Exception:
@@ -1971,10 +1947,11 @@ def pi_complete():
 
     # ✅ Grant mint credit ONLY for the single-mint checkout path
     try:
-        username      = pi_username or s["pi_username"] or session.get("pi_username")
+        username      = s["pi_username"]  # set when session is created
         checkout_path = s["checkout_path"] if "checkout_path" in s.keys() else None
 
         if username and checkout_path == "/checkout/d0b811e8":
+            # Optional: basic idempotency by tagging request with payment_id
             requests.post(
                 "https://izzapay.onrender.com/api/credits/claim",
                 json={
@@ -1987,12 +1964,12 @@ def pi_complete():
             )
             print(f"[pi_complete] credit granted to {username} for {payment_id}")
         else:
-            print(f"[pi_complete] no credit grant (user={username}, path={checkout_path})")
+            print(f"[pi_complete] no credit grant (path={checkout_path})")
     except Exception as e:
         print("[pi_complete] credit grant failed:", e)
 
     return fulfill_session(s, txid, buyer, shipping)
-    
+
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
