@@ -1552,11 +1552,13 @@ function bindInside(){
     const nm = moderateName(STATE.currentName);
     if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-    const freeTest = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
-    if (!STATE.hasPaidForCurrentItem && !STATE.packageCredits && !freeTest){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-      return;
-    }
+    const freeTest   = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
+const hasCredit  = totalMintCredits() > 0; // counts single credits + package items
+
+if (!STATE.hasPaidForCurrentItem && !hasCredit && !freeTest){
+  craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+  return;
+}
     if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
     const sellInShop = !!root.querySelector('#sellInShop')?.checked;
