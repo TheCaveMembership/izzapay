@@ -611,6 +611,10 @@ def pi_headers():
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
+# game_app.py (bottom where other blueprints are registered)
+# game_app.py
+from game_pi_checkout import pi_checkout_bp
+app.register_blueprint(pi_checkout_bp)  # ✅ no extra url_prefix here
 # ========= CRAFTING CREDITS: schema helpers =========
 def _ensure_credit_tables(cx):
     cx.executescript("""
@@ -722,18 +726,7 @@ def create_product_from_craft():
     }
 
     return jsonify(ok=True, dashboardUrl=f"/merchant/{m['slug']}?prefill=1")
-@crafting_api.get("/credits/status")
-def crafting_credit_status():
-    u = current_user_row()
-    if not u:
-        return _json_ok(credits=0)
-    with conn() as cx:
-        return _json_ok(credits=_credit_get(cx, int(u["id"])))
 
-@crafting_api.post("/credits/reconcile")
-def crafting_credit_reconcile():
-    # We grant credits from IZZA Pay fulfillment, so reconciliation is a no-op.
-    return _json_ok()
 
 @crafting_api.post("/credits/grant")
 def crafting_credit_grant():
