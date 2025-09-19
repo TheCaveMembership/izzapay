@@ -1180,15 +1180,7 @@ let initialTab = 'packages';
 
 // Fallback: if the checkout return page set a breadcrumb, unlock visuals this once.
 // Breadcrumb: unlock visuals but show Setup first (one-off)
-try{
-  if (localStorage.getItem('izzaCraftGrantSeen') === '1') {
-    applyCreditState((STATE.mintCredits|0) + 1); // one credit granted by checkout return
-    updateTabsHeaderCredits();
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    STATE.createSub = 'setup';
-    initialTab = 'create';
-  }
-}catch(_){}
+
 
 try{
   const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
