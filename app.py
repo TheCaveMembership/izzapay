@@ -2052,6 +2052,18 @@ def pi_complete():
 
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
+    """
+    - Marks session paid
+    - Creates order rows per line
+    - Updates stock
+    - Grants in-game crafting items (fulfillment_kind == 'crafting')
+    - Records SINGLE_MINT credit claims when the special product is purchased
+    - Keeps existing IC credit award logic (from crafted_item_id 'ic:###' or SKU 'IC###')
+    - Sends emails
+    - Returns redirect JSON to the storefront success page
+    """
+    import uuid, json, time
+
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
@@ -2059,49 +2071,26 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     gross_total, fee_total, net_total = split_amounts(amt)
     gross_total = float(gross_total); fee_total = float(fee_total); net_total = float(net_total)
 
+    # Buyer contact
     buyer_email = (buyer.get("email") or (shipping.get("email") if isinstance(shipping, dict) else None) or None)
-    buyer_name  =  buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None
+    buyer_name  =  (buyer.get("name")  or (shipping.get("name")  if isinstance(shipping, dict) else None) or None)
 
     # --- Robust buyer_user_id resolution (prefer session, else current user) ---
     u_ctx = current_user_row()
     try:
-        buyer_user_id = s["user_id"] if s["user_id"] is not None else (u_ctx["id"] if u_ctx else None)
+        buyer_user_id = s["user_id"] if s.get("user_id") is not None else (u_ctx["id"] if u_ctx else None)
     except Exception:
         buyer_user_id = (u_ctx["id"] if u_ctx else None)
     # ---------------------------------------------------------------------------
-# --- Single In-Game Item Mint: grant visuals credit in the game ---
-# Resolve buyer's Pi username (prefer whatever you store on the order/meta)
-buyer_username = ""
-try:
-    buyer_username = (
-        (order.get("buyer_pi_username") or "") or
-        ((order.get("meta") or {}).get("u") if isinstance(order.get("meta"), dict) else "") or
-        (request.args.get("u") or "")
-    ).strip().lstrip("@")
-except Exception:
-    pass
 
-if not buyer_username:
+    # Snapshot of line items
     try:
-        buyer_username = db_get_username_for_user_id(buyer_user_id) or ""
-    except Exception:
-        buyer_username = ""
-
-mint_qty = 0
-for li in lines:
-    it = by_id.get(int(li["item_id"]))
-    if _is_single_mint_item(it):
-        mint_qty += int(li.get("qty", 1) or 1)
-
-if mint_qty > 0 and buyer_username:
-    _grant_game_mint_credit(buyer_username, mint_qty, order_id)
-# --- /grant ---
-    try:
-        lines = json.loads(s["line_items_json"] or "[]")
+        lines = json.loads(s.get("line_items_json") or "[]")
     except Exception:
         lines = []
 
     if not lines:
+        # Mark session paid even if no lines were captured
         with conn() as cx:
             cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
         try:
@@ -2114,58 +2103,58 @@ if mint_qty > 0 and buyer_username:
             pass
         return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
-    item_ids = [int(li["item_id"]) for li in lines]
+    # Fetch items referenced by the snapshot
+    item_ids = [int(li["item_id"]) for li in lines if "item_id" in li]
     with conn() as cx:
         placeholders = ",".join("?" for _ in item_ids)
         items = cx.execute(f"SELECT * FROM items WHERE id IN ({placeholders})", item_ids).fetchall()
         by_id = {int(r["id"]): r for r in items}
 
     created_order_ids = []
-    total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
+    total_snapshot_gross = sum(float(li["price"]) * int(li.get("qty", 1)) for li in lines) or 1.0
 
+    # Track if any SINGLE_MINT credit should be recorded per order row
+    SINGLE_ID = str(SINGLE_CREDIT_LINK_ID)  # defined elsewhere in your app
     with conn() as cx:
-        for li in lines:
-            it = by_id.get(int(li["item_id"]))
-            qty = int(li["qty"])
-            snap_price = float(li["price"])
+        # Ensure credit-claims table exists (safe/no-op if already there)
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS crafting_credit_claims(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              order_id INTEGER NOT NULL UNIQUE,
+              user_id INTEGER NOT NULL,
+              claimed_at INTEGER NOT NULL
+            )
+        """)
 
+        for li in lines:
+            it  = by_id.get(int(li["item_id"]))
+            qty = int(li.get("qty", 1) or 1)
+            snap_price = float(li["price"])
             line_gross = snap_price * qty
-            # Split the session-level fee proportionally across lines
+            # Pro-rate fee across lines
             line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
             line_net   = line_gross - line_fee
 
+            # Stock decrement (if not backorderable)
             if it and not it["allow_backorder"]:
                 cx.execute(
                     "UPDATE items SET stock_qty=? WHERE id=?",
-                    (max(0, it["stock_qty"] - qty), it["id"])
+                    (max(0, int(it["stock_qty"]) - qty), it["id"])
                 )
 
-            # === Grant in-game item if applicable ===
+            # === Grant in-game crafting item (normal crafting products) ===
             if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
                 try:
                     _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
                 except Exception:
-                    # don't fail checkout on grant error
+                    # do not fail checkout on grant error
                     pass
-        # --- SINGLE MINT CREDIT: immediate grant for the special product ---
-        try:
-            if it:
-                # Compare against your global constant
-                link_id = str(it.get("link_id") or "")
-                if link_id == SINGLE_CREDIT_LINK_ID and buyer_user_id:
-                    # 1 credit per quantity
-                    # Idempotency: tie to *this order row* once inserted (we'll use buyer_token temporarily, then fix order_id below)
-                    # NOTE: we don't yet have the created order_id until after insert.
-                    # So we'll accumulate a flag and finalize after the insert below.
-                    grant_single_credit = grant_single_credit if 'grant_single_credit' in locals() else []
-                    grant_single_credit.append({"qty": qty})  # stash qty; we'll write the claims row with the actual order_id after insert
-        except Exception:
-            pass
+
             # --- IC CREDITS: award credits for special crafted ids or SKUs ---
             try:
+                awarded = 0
                 # Strategy 1: crafted_item_id like "ic:<amount>" (e.g., "ic:500")
                 cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
-                awarded = 0
                 if cid.startswith("ic:"):
                     try:
                         unit = int(cid.split(":", 1)[1] or "0")
@@ -2187,26 +2176,17 @@ if mint_qty > 0 and buyer_username:
                                 awarded = unit * qty
                                 add_ic_credits(int(buyer_user_id), awarded)
             except Exception:
+                # ignore IC credit calc errors
                 pass
 
-            # Create order row for this line
+            # === Insert the order row ===
             buyer_token = uuid.uuid4().hex
             cur = cx.execute(
                 """INSERT INTO orders(
-                     merchant_id,
-                     item_id,
-                     qty,
-                     buyer_email,
-                     buyer_name,
-                     shipping_json,
-                     pi_amount,
-                     pi_fee,
-                     pi_merchant_net,
-                     pi_tx_hash,
-                     payout_status,
-                     status,
-                     buyer_token,
-                     buyer_user_id
+                     merchant_id, item_id, qty,
+                     buyer_email, buyer_name, shipping_json,
+                     pi_amount, pi_fee, pi_merchant_net, pi_tx_hash,
+                     payout_status, status, buyer_token, buyer_user_id
                    )
                    VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
                 (
@@ -2224,36 +2204,35 @@ if mint_qty > 0 and buyer_username:
                     buyer_user_id,
                 ),
             )
-            created_order_ids.append(cur.lastrowid)
-                    # Finalize single-mint-credit claim(s) now that we have order_id
-        try:
-            if 'grant_single_credit' in locals() and grant_single_credit:
-                for _ in grant_single_credit:
-                    # Prevent duplicates (idempotent per order)
+            order_id = cur.lastrowid
+            created_order_ids.append(order_id)
+
+            # === SINGLE In-Game Item Mint: record a *mint credit* claim (no IC coins) ===
+            # Only when this line’s product is the special single-mint product.
+            try:
+                link_id = str(it.get("link_id") or "") if it else ""
+                if link_id == SINGLE_ID and buyer_user_id:
+                    # Idempotent per order_id
                     dup = cx.execute(
                         "SELECT 1 FROM crafting_credit_claims WHERE order_id=?",
-                        (cur.lastrowid,)
+                        (order_id,)
                     ).fetchone()
                     if not dup:
-                        # Record claim and add 1*qty credits (these are your *mint* credits backing Visuals unlock)
                         cx.execute(
                             "INSERT INTO crafting_credit_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
-                            (cur.lastrowid, int(buyer_user_id), int(time.time()))
+                            (order_id, int(buyer_user_id), int(time.time()))
                         )
-                        # If your Visuals tab simply checks balance, add to ic_credits here:
-                        add_ic_credits(int(buyer_user_id), 1 * qty)
-                # reset per-line accumulator
-                grant_single_credit = []
-        except Exception:
-            pass
+            except Exception:
+                # do not fail the fulfillment if credit record fails
+                pass
 
-        # Mark the session as paid
+        # Mark session as paid after all lines are processed
         cx.execute(
             "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
             (tx_hash, s["id"])
         )
 
-    # ===== Emails =====
+    
     try:
         display_rows = []
         for li in lines:
