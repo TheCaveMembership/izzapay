@@ -69,7 +69,37 @@ async function readBest(base, preferLastGood){
 
 // ---------- app ----------
 const app = express();
-app.use(cors());
+
+const allowedOrigins = [
+  'https://izzapay.onrender.com',     // Pi app + game origin
+  // 'http://localhost:3000',          // add your local dev origins if needed
+  // 'http://127.0.0.1:3000',
+];
+
+// CORS that allows credentials (needed because the client now sends credentials:'include')
+app.use(cors({
+  origin(origin, cb) {
+    // allow same-origin / server-to-server / curl (no Origin header) OR your allowlist
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS: origin not allowed'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// make caches/proxies vary per Origin
+app.use((req, res, next) => { res.header('Vary', 'Origin'); next(); });
+
+// Preflight handler (so OPTIONS succeeds with the same policy)
+app.options('*', cors({
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS: origin not allowed'));
+  },
+  credentials: true
+}));
+
 app.use(morgan('combined'));
 
 // accept JSON and Safari/Pi sendBeacon text payloads
