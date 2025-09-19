@@ -846,7 +846,15 @@ function normalizeSvgForSlot(svgText, part){
           <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
           <span id="payStatus" style="font-size:12px; opacity:.8"></span>
         </div>
-
+<!-- Voucher / Redeem -->
+<div style="margin-top:12px; border-top:1px solid #2a3550; padding-top:10px">
+  <div style="font-weight:700; margin-bottom:6px">Have a code?</div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap">
+    <input id="redeemCode" placeholder="IZZA-XXXX-XXXX-XXXX" style="flex:1; min-width:220px"/>
+    <button class="ghost" id="btnRedeem">Redeem</button>
+  </div>
+  <div id="redeemStatus" style="font-size:12px; opacity:.8; margin-top:6px"></div>
+</div>
         <!-- SINGLE Shop Listing block (no duplicates) -->
         <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
           <div style="font-weight:700;margin-bottom:6px">Shop Listing</div>
@@ -1365,35 +1373,33 @@ async function handleBuySingle(kind, enforceForm){
 
   const usePi = (kind === 'pi');
 
-  // ---------- Pi path: IN-GAME Pi SDK modal (no redirect) ----------
-  if (usePi) {
-    const status = document.getElementById('payStatus');
-    if (status) status.textContent = 'Opening Pi checkout…';
+  // ---------- Pi path: external IZZA Pay checkout (voucher flow) ----------
+if (usePi) {
+  const status = document.getElementById('payStatus');
+  if (status) status.textContent = 'Opening IZZA Pay…';
 
-    const total = calcTotalCost({ usePi:true }); // base + selected add-ons
-    const res = await payWithPi(total, 'Single mint credit');
+  // who is buying (good to pass along for receipt + voucher note)
+  const u = currentUsername() || '';
 
-    if (res && res.ok){
-      // Grant 1 mint credit locally; server also finalized the payment in /complete
-      applyCreditState((STATE.mintCredits|0) + 1);
-      STATE.hasPaidForCurrentItem = true;          // unlock this craft
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      STATE.createSub = 'setup';
+  // Optional: let checkout know which product and who the buyer is,
+  // and where to send them after success (your success page on izzapay creates the code)
+  const qs = new URLSearchParams({
+    product: 'craft-credit',
+    u,                         // player username, if present
+    // OPTIONAL: in case your izzapay success page wants a back-to-game hint
+    back: location.origin + '/crafting' 
+  });
 
-      if (status) status.textContent = 'Paid ✓ — 1 mint credit added.';
-      updateTabsHeaderCredits();
+  const url = 'https://izzapay.onrender.com/checkout/d0b811e8?' + qs.toString();
 
-      // Re-render Create tab so “Visuals” unlock & counters reflect
-      const host = STATE.root?.querySelector('#craftTabs');
-      if (host){ host.innerHTML = renderCreate(); bindInside(); }
-
-      return;
-    } else {
-      if (status) status.textContent = 'Payment cancelled or failed.';
-      return;
-    }
+  try {
+    window.open(url, '_blank'); // in Pi Browser this is fine
+    if (status) status.textContent = 'Complete payment in IZZA Pay, then paste your code below.';
+  } catch {
+    if (status) status.textContent = 'Could not open checkout.';
   }
-
+  return; // stop here; redemption happens via code entry
+}
   // ---------- IC path (unchanged) ----------
   const total = calcTotalCost({ usePi:false });
   const res = await payWithIC(total);
@@ -1516,7 +1522,46 @@ function bindInside(){
   // enforceForm=true for Create tab buttons
   payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi', true), { passive:true });
   payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic', true), { passive:true });
+// ---- Redeem code handler ----
+const redeemInput = root.querySelector('#redeemCode');
+const redeemBtn   = root.querySelector('#btnRedeem');
+const redeemStat  = root.querySelector('#redeemStatus');
 
+async function redeemMintCode(code){
+  try{
+    const j = await serverJSON(api('/api/crafting/code/redeem'), {
+      method:'POST',
+      body: JSON.stringify({ code: String(code||'').trim() })
+    });
+    return j;
+  }catch(e){
+    return { ok:false, reason:'network' };
+  }
+}
+
+if (redeemBtn){
+  redeemBtn.addEventListener('click', async ()=>{
+    const code = redeemInput?.value || '';
+    if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
+      redeemStat.textContent = 'Enter a valid code.';
+      return;
+    }
+    redeemBtn.disabled = true;
+    redeemStat.textContent = 'Checking code…';
+
+    const r = await redeemMintCode(code);
+    redeemBtn.disabled = false;
+
+    if (r && r.ok){
+      applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1)); // server already credited
+      updateTabsHeaderCredits();
+      redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+    } else {
+      const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
+      redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+    }
+  }, { passive:true });
+}
   const itemName = root.querySelector('#itemName');
   if (itemName){
     itemName.value = STATE.currentName || '';
