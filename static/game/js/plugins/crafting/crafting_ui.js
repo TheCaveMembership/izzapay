@@ -80,6 +80,62 @@ async function ensurePiInit(){
   }
 }
 
+/* ====== EXACT checkout-style helpers (added) ====== */
+// Mirror checkout: init with optional appId + sandbox, then authenticate with recovery.
+function initPiExact(){
+  try{
+    if (!window.Pi || !Pi.init) return false;
+    // Re-init is safe; Pi SDK ignores dupes.
+    const sandbox = (typeof window.PI_SANDBOX !== 'undefined') ? !!window.PI_SANDBOX : false;
+    const appId   = (typeof window.PI_APP_ID   !== 'undefined') ? String(window.PI_APP_ID) : '';
+    if (appId) { Pi.init({ version: "2.0", sandbox, appId }); }
+    else       { Pi.init({ version: "2.0", sandbox }); }
+    return true;
+  }catch(e){ return false; }
+}
+
+// EXACT port from checkout.html: recover incomplete payments via /api/pi/complete
+function onIncompletePaymentFound(payment){
+  try{
+    const sessionId = "craft-credit"; // stable bucket for single mint credit
+    const pid  = payment && (payment.identifier || payment.paymentId || payment.id);
+    const txid = payment && payment.transaction && (payment.transaction.txid || payment.transaction.txID || payment.transaction.hash) || "";
+    if(!pid) return;
+
+    fetch('/api/pi/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paymentId: pid,
+        session_id: sessionId,
+        txid,
+        buyer:   buyerPayload(),
+        shipping: shippingPayload()
+      })
+    }).then(r => r.ok ? r.json() : null).catch(()=>{});
+  }catch(_){}
+}
+
+function ensureAuthExact(){
+  const scopes = ['payments','username'];
+  return Pi.authenticate(scopes, onIncompletePaymentFound);
+}
+
+// Minimal buyer/shipping payloads for in-game (no checkout form here)
+function buyerPayload(){
+  const uname = (window?.IZZA?.me?.username) || (window?.IZZA?.player?.username) || '' || 'IZZA Player';
+  const email = (localStorage.getItem('izzaEmail') || '').trim();
+  return { email, name: uname || 'IZZA Player', phone: '' };
+}
+function shippingPayload(){
+  const p = buyerPayload();
+  return {
+    address:'', address2:'', city:'', state:'', postal_code:'', country:'',
+    name: p.name, email: p.email, phone: ''
+  };
+}
+/* ================================================ */
+
 /* ------------------------------------------------------------------------- */
 
 // Compose the UX prompt shown to the model (keeps constraints tight)
@@ -377,44 +433,67 @@ async function reconcileCraftCredits(){
   }catch(_){ /* soft-fail */ }
 }
 
-  async function payWithPi(amountPi, memo){
-  if (!await ensurePiInit()){
-    alert('Pi SDK not available'); 
+/* ====== REPLACED to mirror checkout.html exactly ====== */
+async function payWithPi(amountPi, memo){
+  // init exactly like checkout
+  if (!initPiExact()){
+    alert('Open in Pi Browser to pay.');
+    return { ok:false, reason:'no-pi' };
+  }
+  if (!window.Pi || typeof Pi.createPayment !== 'function'){
+    alert('Pi SDK not available');
     return { ok:false, reason:'no-pi' };
   }
 
   try{
+    const sessionId = "craft-credit"; // stable bucket for single mint credit
+
+    // Same auth + recovery as checkout.html
+    await ensureAuthExact();
+
+    const storeName = (window.STORE_NAME || 'IZZA PAY');
+    const memoText  = (storeName ? (storeName + ' — ') : '') + 'Order ' + sessionId.slice(0,8);
+
     const paymentData = {
-      amount: String(amountPi),
-      memo: memo || 'IZZA Crafting',
-      metadata: { kind:'crafting', memo }
+      amount: Number(amountPi),
+      memo: memo || memoText,
+      metadata: { session_id: sessionId }
     };
 
-    const res = await window.Pi.createPayment(paymentData, {
-      onReadyForServerApproval: async (paymentId) => {
-        await serverJSON(api('/api/crafting/pi/approve'), {
-          method:'POST',
-          body: JSON.stringify({ paymentId })
+    const res = await Pi.createPayment(paymentData, {
+      onReadyForServerApproval: function(paymentId){
+        return fetch('/api/pi/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentId, session_id: sessionId })
         });
       },
-      onReadyForServerCompletion: async (paymentId, txid) => {
-        await serverJSON(api('/api/crafting/pi/complete'), {
-          method:'POST',
-          body: JSON.stringify({ paymentId, txid })
-        });
-      }
+      onReadyForServerCompletion: function(paymentId, txid){
+        return fetch('/api/pi/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paymentId, session_id: sessionId, txid,
+            buyer:   buyerPayload(),
+            shipping: shippingPayload()
+          })
+        }).then(r=>r.json()).catch(()=> ({}));
+      },
+      onCancel: function(){ /* status handled below */ },
+      onError:  function(){ /* status handled below */ }
     });
 
-    // Pi Browser returns { status:"completed" | "cancelled" | ... }
     if (res && typeof res.status === 'string' && /complete/i.test(res.status)){
       return { ok:true, receipt:res };
     }
     return { ok:false, reason:(res && res.status) || 'pi-not-complete', raw:res };
+
   }catch(e){
     console.warn('[craft] Pi pay failed', e);
     return { ok:false, reason:String(e && e.message || e) };
   }
 }
+/* ====================================================== */
 
   async function payWithIC(amountIC){
     const cur = getIC();
@@ -1058,8 +1137,8 @@ if (!CSS.escape) {
       // Safe characters
       if (
         codeUnit === 0x002D || codeUnit === 0x005F || // - _
-        (codeUnit >= 0x0030 && codeUnit <= 0x0039) || // 0-9
-        (codeUnit >= 0x0041 && codeUnit <= 0x005A) || // A-Z
+        (codeUnit >= 0x0030 && codeUnit <= 0x0039) || // 0
+                (codeUnit >= 0x0041 && codeUnit <= 0x005A) || // A-Z
         (codeUnit >= 0x0061 && codeUnit <= 0x007A)    // a-z
       ) {
         result += str.charAt(index);
@@ -1071,7 +1150,9 @@ if (!CSS.escape) {
     return result;
   };
 }
-  async function hydrateMine(){
+
+/* ---------- hydrate "My Creations" ---------- */
+async function hydrateMine(){
   const host = STATE.root?.querySelector('#mineList');
   if (!host) return;
 
@@ -1161,103 +1242,95 @@ if (!CSS.escape) {
     }, { passive:true });
   });
 }
-    // --- NEW: Marketplace data fetcher ---
-  async function fetchMarketplace(){
-    try{
-      // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
-      const j = await serverJSON(api('/api/marketplace/list'));
-      return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
-    }catch{
-      return [];
-    }
+
+/* ---------- Marketplace (internal) ---------- */
+async function fetchMarketplace(){
+  try{
+    // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
+    const j = await serverJSON(api('/api/marketplace/list'));
+    return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
+  }catch{
+    return [];
   }
+}
 
-  // --- NEW: Marketplace hydrator ---
-  async function hydrateMarketplace(){
-    const host = STATE.root?.querySelector('#mpList');
-    if (!host) return;
-    host.innerHTML = '<div style="opacity:.7">Loading…</div>';
+async function hydrateMarketplace(){
+  const host = STATE.root?.querySelector('#mpList');
+  if (!host) return;
+  host.innerHTML = '<div style="opacity:.7">Loading…</div>';
 
-    const bundles = await fetchMarketplace();
+  const bundles = await fetchMarketplace();
 
-    host.innerHTML = bundles.length
-      ? bundles.map(marketplaceCardHTML).join('')
-      : '<div style="opacity:.7">No bundles yet. Creators can publish bundles from My Creations.</div>';
+  host.innerHTML = bundles.length
+    ? bundles.map(marketplaceCardHTML).join('')
+    : '<div style="opacity:.7">No bundles yet. Creators can publish bundles from My Creations.</div>';
 
-    // Wire "View" and "Buy" buttons (they can be no-ops for now, or emit your events)
-    host.querySelectorAll('[data-mp-view]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.dataset.mpView;
-        try { IZZA?.emit?.('marketplace-view', { id }); } catch {}
-        alert('Bundle details would open here (implement in-game).');
-      });
+  // Wire "View" and "Buy" buttons (they can be no-ops for now, or emit your events)
+  host.querySelectorAll('[data-mp-view]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.mpView;
+      try { IZZA?.emit?.('marketplace-view', { id }); } catch {}
+      alert('Bundle details would open here (implement in-game).');
     });
+  });
 
-    host.querySelectorAll('[data-mp-buy]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.dataset.mpBuy;
-        try { IZZA?.emit?.('marketplace-buy', { id }); } catch {}
-        alert('Purchase flow would start here (implement in-game / server).');
-      });
+  host.querySelectorAll('[data-mp-buy]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.mpBuy;
+      try { IZZA?.emit?.('marketplace-buy', { id }); } catch {}
+      alert('Purchase flow would start here (implement in-game / server).');
     });
-  }
-  async function mount(rootSel){
+  });
+}
+
+/* ---------- Mount / Unmount ---------- */
+async function mount(rootSel){
   const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
   if (!root) return;
   STATE.root = root;
   STATE.mounted = true;
-loadDraft();
 
-// If they just came back from payment, server will mark credits on reconcile
-await reconcileCraftCredits();
+  loadDraft();
 
-root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
-const tabsHost = root.querySelector('#craftTabs');
+  // If they just came back from payment, server will mark credits on reconcile
+  await reconcileCraftCredits();
 
-// NEW: ask server how many credits we have and pick initial tab
-let initialTab = 'packages';
+  root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
+  const tabsHost = root.querySelector('#craftTabs');
 
-// Fallback: if the checkout return page set a breadcrumb, unlock visuals this once.
-// Breadcrumb: unlock visuals but show Setup first (one-off)
+  // NEW: ask server how many credits we have and pick initial tab
+  let initialTab = 'packages';
 
-
-try{
-  const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
-  if (s && s.ok){
-    applyCreditState(s.credits|0);
-    updateTabsHeaderCredits();
-    if (STATE.mintCredits > 0){
-      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      STATE.createSub = 'setup';
-      initialTab = 'create';
+  try{
+    const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
+    if (s && s.ok){
+      applyCreditState(s.credits|0);
+      updateTabsHeaderCredits();
+      if (STATE.mintCredits > 0){
+        STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+        STATE.createSub = 'setup';
+        initialTab = 'create';
+      }
     }
-  }
-}catch(_){}
+  }catch(_){}
 
-// Re-run reconcile whenever the tab gains focus again
-if (!window.__izzaReconHook){
-  document.addEventListener('visibilitychange', ()=>{
-    if (!document.hidden) reconcileCraftCredits();
-  }, { passive:true });
-  window.__izzaReconHook = true;
-}
-    
+  // Re-run reconcile whenever the tab gains focus again
+  if (!window.__izzaReconHook){
+    document.addEventListener('visibilitychange', ()=>{
+      if (!document.hidden) reconcileCraftCredits();
+    }, { passive:true });
+    window.__izzaReconHook = true;
+  }
+
   const setTab = (name)=>{
     if(!STATE.mounted) return;
     if(name==='packages'){ tabsHost.innerHTML = renderPackages(); }
     if(name==='create'){   tabsHost.innerHTML = renderCreate(); }
-        // keep attempts counter in sync when entering Visuals
-    if (name === 'create' && STATE.canUseVisuals) {
-      try {
-        const el = document.getElementById('aiLeft2');
-        if (el) el.textContent = STATE.aiAttemptsLeft;
-      } catch {}
-    }
     if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
     bindInside();
 
-    // immediately sync the attempts counter when entering Create
+    // keep attempts counter in sync when entering Create
     if (name === 'create') {
       try {
         const el = document.getElementById('aiLeft2');
@@ -1273,9 +1346,14 @@ if (!window.__izzaReconHook){
   setTab(initialTab);
 }
 
-  function unmount(){ if(!STATE.root) return; STATE.root.innerHTML=''; STATE.mounted=false; }
+function unmount(){
+  if(!STATE.root) return;
+  STATE.root.innerHTML='';
+  STATE.mounted=false;
+}
 
-    async function handleBuySingle(kind, enforceForm){
+/* ---------- Single purchase buttons ---------- */
+async function handleBuySingle(kind, enforceForm){
   // Enforce required fields only when invoked from the Create tab
   if (enforceForm && !isCreateFormValid()){
     const status = document.getElementById('payStatus');
@@ -1333,7 +1411,7 @@ if (!window.__izzaReconHook){
   }
 }
 
-// Keep visual tab highlight consistent in one place
+/* ---------- Visuals tab highlight ---------- */
 function _syncVisualsTabStyle(){
   try{
     const vb = STATE.root?.querySelector('.cl-subtabs [data-sub="visuals"]');
@@ -1353,6 +1431,7 @@ function _syncVisualsTabStyle(){
   }catch(_){}
 }
 
+/* ---------- Bind inside current tab ---------- */
 function bindInside(){
   const root = STATE.root;
   if(!root) return;
@@ -1600,12 +1679,12 @@ function bindInside(){
     if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
     const freeTest   = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
-const hasCredit  = totalMintCredits() > 0; // counts single credits + package items
+    const hasCredit  = totalMintCredits() > 0; // counts single credits + package items
 
-if (!STATE.hasPaidForCurrentItem && !hasCredit && !freeTest){
-  craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-  return;
-}
+    if (!STATE.hasPaidForCurrentItem && !hasCredit && !freeTest){
+      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+      return;
+    }
     if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
     const sellInShop = !!root.querySelector('#sellInShop')?.checked;
@@ -1707,5 +1786,6 @@ if (!STATE.hasPaidForCurrentItem && !hasCredit && !freeTest){
   }); // <-- closes btnMint handler
 } // <-- closes bindInside()
 
+/* ---------- Public API ---------- */
 window.CraftingUI = { mount, unmount };
-})();
+})(); // <-- closes IIFE
