@@ -119,3 +119,18 @@ def init_db():
           FOREIGN KEY(order_id) REFERENCES orders(id)
         );
         """)
+
+def ensure_schema():
+    """Add missing columns without dropping existing data."""
+    with _lock, conn() as cx:
+        # sessions.pi_username
+        try:
+            cx.execute("ALTER TABLE sessions ADD COLUMN pi_username TEXT")
+        except Exception:
+            pass  # already exists
+
+        # sessions.checkout_path
+        try:
+            cx.execute("ALTER TABLE sessions ADD COLUMN checkout_path TEXT")
+        except Exception:
+            pass  # already exists
