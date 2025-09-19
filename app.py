@@ -1789,16 +1789,18 @@ def checkout_cart(cid):
         for r in rows
     ])
 
-    with conn() as cx:
+            with conn() as cx:
         cx.execute(
             """INSERT INTO sessions(
                    id, merchant_id, item_id, qty, expected_pi, state,
-                   created_at, cart_id, line_items_json, user_id
+                   created_at, cart_id, line_items_json, user_id,
+                   pi_username, checkout_path
                )
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 sid, m["id"], None, 1, total, "initiated",
-                int(time.time()), cid, line_items, u["id"]
+                int(time.time()), cid, line_items, u["id"],
+                u["pi_username"], f"/checkout/cart/{cid}"
             )
         )
 
@@ -1862,15 +1864,19 @@ def checkout(link_id):
         "price": float(i["pi_price"]),
     }])
 
-    with conn() as cx:
+        with conn() as cx:
         cx.execute(
             """INSERT INTO sessions(
                    id, merchant_id, item_id, qty, expected_pi, state,
-                   created_at, line_items_json, user_id
+                   created_at, line_items_json, user_id,
+                   pi_username, checkout_path
                )
-               VALUES(?,?,?,?,?,?,?, ?, ?)""",
-            (sid, i["mid"], i["id"], qty, expected, "initiated",
-             int(time.time()), line_items, u["id"])
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                sid, i["mid"], i["id"], qty, expected, "initiated",
+                int(time.time()), line_items, u["id"],
+                u["pi_username"], f"/checkout/{link_id}"
+            )
         )
 
     return render_template(
