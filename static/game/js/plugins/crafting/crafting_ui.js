@@ -1373,32 +1373,12 @@ async function handleBuySingle(kind, enforceForm){
 
   const usePi = (kind === 'pi');
 
-  // ---------- Pi path: external IZZA Pay checkout (voucher flow) ----------
+  // ---------- Pi path: open hosted checkout (voucher flow) ----------
 if (usePi) {
   const status = document.getElementById('payStatus');
-  if (status) status.textContent = 'Opening IZZA Pay…';
-
-  // who is buying (good to pass along for receipt + voucher note)
-  const u = currentUsername() || '';
-
-  // Optional: let checkout know which product and who the buyer is,
-  // and where to send them after success (your success page on izzapay creates the code)
-  const qs = new URLSearchParams({
-    product: 'craft-credit',
-    u,                         // player username, if present
-    // OPTIONAL: in case your izzapay success page wants a back-to-game hint
-    back: location.origin + '/crafting' 
-  });
-
-  const url = 'https://izzapay.onrender.com/checkout/d0b811e8?' + qs.toString();
-
-  try {
-    window.open(url, '_blank'); // in Pi Browser this is fine
-    if (status) status.textContent = 'Complete payment in IZZA Pay, then paste your code below.';
-  } catch {
-    if (status) status.textContent = 'Could not open checkout.';
-  }
-  return; // stop here; redemption happens via code entry
+  if (status) status.textContent = 'Opening IZZA Pay checkout…';
+  location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
+  return; // we’re done here; the user will come back with a code
 }
   // ---------- IC path (unchanged) ----------
   const total = calcTotalCost({ usePi:false });
@@ -1418,6 +1398,20 @@ if (usePi) {
   }
 }
 
+async function redeemMintCode(code){
+  try{
+    const r = await fetch('https://izzapay.onrender.com/api/mint_codes/consume', {
+      method:'POST',
+      headers:{ 'content-type':'application/json' },
+      body: JSON.stringify({ code })
+    });
+    const j = await r.json();
+    return j;
+  }catch(e){
+    return { ok:false, reason:'network' };
+  }
+}
+  
 /* ---------- Visuals tab highlight ---------- */
 function _syncVisualsTabStyle(){
   try{
