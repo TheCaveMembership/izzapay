@@ -1789,7 +1789,7 @@ def checkout_cart(cid):
         for r in rows
     ])
 
-            with conn() as cx:
+    with conn() as cx:  # <-- corrected indentation
         cx.execute(
             """INSERT INTO sessions(
                    id, merchant_id, item_id, qty, expected_pi, state,
@@ -1825,6 +1825,7 @@ def checkout_cart(cid):
         rows=rows,      # full cart rows so order summary dropdown works
         slug=m["slug"], # for redirect after payment
     )
+
 
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
@@ -1864,7 +1865,7 @@ def checkout(link_id):
         "price": float(i["pi_price"]),
     }])
 
-        with conn() as cx:
+    with conn() as cx:  # <-- corrected indentation
         cx.execute(
             """INSERT INTO sessions(
                    id, merchant_id, item_id, qty, expected_pi, state,
@@ -1889,7 +1890,6 @@ def checkout(link_id):
         app_base=APP_BASE_URL,
         colorway=i["colorway"]
     )
-
 # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
 def pi_approve():
