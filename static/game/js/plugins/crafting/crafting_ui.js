@@ -576,7 +576,7 @@ function normalizeSvgForSlot(svgText, part){
   function renderPackages(){
   return `
     <div style="padding:14px;">
-      <!-- Top toolbar with Marketplace button -->
+      <!-- Top toolbar with Marketplace button (unchanged) -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <div style="font-weight:700;opacity:.85">Packages</div>
         <div style="margin-left:auto">
@@ -585,7 +585,16 @@ function normalizeSvgForSlot(svgText, part){
       </div>
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
-        <!-- Starter Forge -->
+        <!-- Single In-Game Item FIRST -->
+        <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
+          <div style="font-weight:700;margin-bottom:6px">Single In-Game Item Mint</div>
+          <div style="opacity:.85;font-size:13px;">(Craft 1 item)</div>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="ghost" id="pkGoCreate">Create Now</button>
+          </div>
+        </div>
+
+        <!-- Starter Forge (no buttons) -->
         <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
           <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
           <div style="opacity:.85;font-size:13px;line-height:1.4">
@@ -594,20 +603,7 @@ function normalizeSvgForSlot(svgText, part){
           <div style="margin-top:8px;font-weight:700">
             Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC
           </div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
-            <button class="ghost" data-buy-package="pi">Pay ${COSTS.PACKAGE_PI} Pi</button>
-            <button class="ghost" data-buy-package="ic">Pay ${COSTS.PACKAGE_IC.toLocaleString()} IC</button>
-          </div>
-        </div>
-
-        <!-- Single Item (visual) -->
-        <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
-          <div style="font-weight:700;margin-bottom:6px">Single Item (visual)</div>
-          <div style="opacity:.85;font-size:13px;">Craft 1 item (no gameplay features).</div>
-          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap">
-            <button class="ghost" data-buy-single="pi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-            <button class="ghost" data-buy-single="ic">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
-          </div>
+          <div style="margin-top:10px;opacity:.7;font-weight:700">Coming soon!</div>
         </div>
       </div>
     </div>`;
@@ -1252,6 +1248,22 @@ location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${
     });
   }
 
+// Packages → "Create Now" just opens Create→Setup
+const goCreateBtn = root.querySelector('#pkGoCreate');
+if (goCreateBtn){
+  goCreateBtn.addEventListener('click', ()=>{
+    STATE.createSub = 'setup';                // ensure subtab is Setup
+    const createTabBtn = STATE.root?.querySelector('[data-tab="create"]');
+    if (createTabBtn) {
+      createTabBtn.click();                   // use existing tab switch
+    } else {
+      // fallback: render directly if the button isn’t there for any reason
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){ host.innerHTML = renderCreate(); bindInside(); }
+    }
+  }, { passive:true });
+}
+    
   // ✅ Starter Forge package purchase (Pi or IC) — correct scope
   root.querySelectorAll('[data-buy-package]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
