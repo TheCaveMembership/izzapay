@@ -2201,7 +2201,17 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     else:
         redirect_url = default_target
 
-    return {"ok": True, "redirect_url": redirect_url}
+        resp = jsonify({"ok": True, "redirect_url": redirect_url})
+    # one-time craft credit so the game opens Create → Visuals on return
+    resp.set_cookie(
+        "craft_credit", "1",
+        max_age=15 * 60,     # 15 minutes is plenty
+        secure=True,         # Pi Browser uses HTTPS
+        samesite="None",     # allow cross-site if your flow ever hops origins
+        httponly=False,      # UI doesn't need to read it via JS, but False is fine
+        path="/"
+    )
+    return resp
 
 
 # Provide a concrete cancel endpoint used by /payment/error
