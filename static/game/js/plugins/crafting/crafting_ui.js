@@ -61,6 +61,25 @@ function repopulatePartOptions(catSelEl, partSelEl){
   partSelEl.value = opts.some(o=>o.v===prev) ? prev : opts[0].v;
 }
 
+// --- Pi SDK bootstrap (safe, idempotent) ---
+async function ensurePiInit(){
+  try{
+    if (!window.Pi || typeof window.Pi.init !== 'function') return false;
+    if (window.__PI_INITED__) return true;
+
+    // If your template sets a global, use it; otherwise fallback to false.
+    const sandbox =
+      (typeof window.PI_SANDBOX !== 'undefined' ? !!window.PI_SANDBOX : false);
+
+    await window.Pi.init({ version: '2.0', sandbox });
+    window.__PI_INITED__ = true;
+    return true;
+  }catch(e){
+    console.warn('[craft] Pi init failed:', e);
+    return false;
+  }
+}
+
 /* ------------------------------------------------------------------------- */
 
 // Compose the UX prompt shown to the model (keeps constraints tight)
@@ -359,23 +378,43 @@ async function reconcileCraftCredits(){
 }
 
   async function payWithPi(amountPi, memo){
-    if (!window.Pi || typeof window.Pi.createPayment!=='function'){
-      alert('Pi SDK not available'); return { ok:false, reason:'no-pi' };
-    }
-    try{
-      const paymentData = { amount: String(amountPi), memo: memo || 'IZZA Crafting', metadata: { kind:'crafting', memo } };
-      const res = await window.Pi.createPayment(paymentData, {
-        onReadyForServerApproval: async (paymentId) => {
-          await serverJSON(api('/api/crafting/pi/approve'), { method:'POST', body:JSON.stringify({ paymentId }) });
-        },
-        onReadyForServerCompletion: async (paymentId, txid) => {
-          await serverJSON(api('/api/crafting/pi/complete'), { method:'POST', body:JSON.stringify({ paymentId, txid }) });
-        }
-      });
-      if (res && res.status && /complete/i.test(res.status)) return { ok:true, receipt:res };
-      return { ok:false, reason:'pi-not-complete', raw:res };
-    }catch(e){ console.warn('[craft] Pi pay failed', e); return { ok:false, reason:String(e) }; }
+  if (!await ensurePiInit()){
+    alert('Pi SDK not available'); 
+    return { ok:false, reason:'no-pi' };
   }
+
+  try{
+    const paymentData = {
+      amount: String(amountPi),
+      memo: memo || 'IZZA Crafting',
+      metadata: { kind:'crafting', memo }
+    };
+
+    const res = await window.Pi.createPayment(paymentData, {
+      onReadyForServerApproval: async (paymentId) => {
+        await serverJSON(api('/api/crafting/pi/approve'), {
+          method:'POST',
+          body: JSON.stringify({ paymentId })
+        });
+      },
+      onReadyForServerCompletion: async (paymentId, txid) => {
+        await serverJSON(api('/api/crafting/pi/complete'), {
+          method:'POST',
+          body: JSON.stringify({ paymentId, txid })
+        });
+      }
+    });
+
+    // Pi Browser returns { status:"completed" | "cancelled" | ... }
+    if (res && typeof res.status === 'string' && /complete/i.test(res.status)){
+      return { ok:true, receipt:res };
+    }
+    return { ok:false, reason:(res && res.status) || 'pi-not-complete', raw:res };
+  }catch(e){
+    console.warn('[craft] Pi pay failed', e);
+    return { ok:false, reason:String(e && e.message || e) };
+  }
+}
 
   async function payWithIC(amountIC){
     const cur = getIC();
@@ -1247,18 +1286,36 @@ if (!window.__izzaReconHook){
 
   const usePi = (kind === 'pi');
 
-  // ---------- Pi path: REDIRECT to IZZA Pay checkout (no local unlock) ----------
+  // ---------- Pi path: IN-GAME Pi SDK modal (no redirect) ----------
   if (usePi) {
     const status = document.getElementById('payStatus');
-    if (status) status.textContent = 'Taking you to IZZA Pay checkout…';
+    if (status) status.textContent = 'Opening Pi checkout…';
 
-    const u = encodeURIComponent(currentUsername() || '');
-    const back = encodeURIComponent('https://izzapay.onrender.com/izza-game/auth');
-    location.href = `https://izzapay.onrender.com/checkout/d0b811e8?u=${u}&return=${back}`;
-    return; // Orders page will grant visuals after payment
+    const total = calcTotalCost({ usePi:true }); // base + selected add-ons
+    const res = await payWithPi(total, 'Single mint credit');
+
+    if (res && res.ok){
+      // Grant 1 mint credit locally; server also finalized the payment in /complete
+      applyCreditState((STATE.mintCredits|0) + 1);
+      STATE.hasPaidForCurrentItem = true;          // unlock this craft
+      STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+      STATE.createSub = 'setup';
+
+      if (status) status.textContent = 'Paid ✓ — 1 mint credit added.';
+      updateTabsHeaderCredits();
+
+      // Re-render Create tab so “Visuals” unlock & counters reflect
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){ host.innerHTML = renderCreate(); bindInside(); }
+
+      return;
+    } else {
+      if (status) status.textContent = 'Payment cancelled or failed.';
+      return;
+    }
   }
 
-  // ---------- IC path ----------
+  // ---------- IC path (unchanged) ----------
   const total = calcTotalCost({ usePi:false });
   const res = await payWithIC(total);
 
@@ -1274,7 +1331,7 @@ if (!window.__izzaReconHook){
   } else {
     if (status) status.textContent='Payment failed.';
   }
-} // ←←← THIS closing brace was missing!
+}
 
 // Keep visual tab highlight consistent in one place
 function _syncVisualsTabStyle(){
