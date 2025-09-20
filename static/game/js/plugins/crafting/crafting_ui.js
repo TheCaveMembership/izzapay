@@ -1,6 +1,9 @@
-// ---- ROUTE BASES (game vs payments) ----
-// Your WSGI mounts the GAME app at /izza-game.
-// Leave PAY_BASE as same-origin izzapay (this file is served by izzapay).
+// put near the top of crafting_ui.js:
+const GAME_BASE = 'https://izzagame.onrender.com';   // Core/Game side
+const PAY_BASE  = 'https://izzapay.onrender.com';    // IZZA Pay side
+
+const apiGame = (p)=> `${GAME_BASE}${p}`.replace(/\/+$/, '');
+const apiPay  = (p)=> `${PAY_BASE}${p}`.replace(/\/+$/, '');
 const GAME_BASE = '/izza-game';
 const PAY_BASE  = '';
 
@@ -563,14 +566,14 @@ async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
   try{
-    const j = await serverJSON(payApi('/api/crafting/ai_svg'), {
+    const j = await serverJSON(apiGame('/api/crafting/ai_svg'), {
   method:'POST',
-  body: JSON.stringify({ /* ... */ })
-        prompt: composeAIPrompt(prompt, STATE.currentPart, {
-          style: STATE.aiStyle,
-          animate: STATE.wantAnimation
-        }),
-        meta: {
+  body: JSON.stringify({
+    prompt: composeAIPrompt(prompt, STATE.currentPart, {
+      style: STATE.aiStyle,
+      animate: STATE.wantAnimation
+    }),
+    meta: {
           part: mapPartForServer(STATE.currentPart),   // hands for gun/melee
           category: STATE.currentCategory,
           name: STATE.currentName,
