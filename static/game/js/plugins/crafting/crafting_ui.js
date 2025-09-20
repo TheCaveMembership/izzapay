@@ -1,6 +1,13 @@
-// Use same-origin (works with your DispatcherMiddleware mount)
-const API_BASE = '';
-const api = (p) => (API_BASE ? API_BASE + p : p);
+// ---- ROUTE BASES (game vs payments) ----
+// Your WSGI mounts the GAME app at /izza-game.
+// Leave PAY_BASE as same-origin izzapay (this file is served by izzapay).
+const GAME_BASE = '/izza-game';
+const PAY_BASE  = '';
+
+// Helpers
+const gameApi = (p) => GAME_BASE + String(p || '').replace(/^\/+/, '/');
+const payApi  = (p)  => PAY_BASE  + String(p || '').replace(/^\/+/, '/');
+
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -120,7 +127,7 @@ function onIncompletePaymentFound(payment){
     const txid = payment && payment.transaction && (payment.transaction.txid || payment.transaction.txID || payment.transaction.hash) || "";
     if(!pid) return;
 
-    fetch('/api/pi/complete', {
+    fetch(payApi('/api/pi/complete'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -164,14 +171,14 @@ async function payWithPi(amountPi, memo){
 
     const res = await Pi.createPayment(paymentData, {
       onReadyForServerApproval: function(paymentId){
-        return fetch('/api/pi/approve', {
+        return fetch(payApi('/api/pi/approve'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ paymentId, session_id: sessionId })
         });
       },
       onReadyForServerCompletion: function(paymentId, txid){
-        return fetch('/api/pi/complete', {
+        return fetch(payApi('/api/pi/complete'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -471,69 +478,39 @@ function hideWait(node){
     }catch{}
   }
 
-  // *** CHANGE 1: force default API base to your Node service ***
-  // Force default API base to the Node service on Render.
-// You can still override with window.IZZA_PERSIST_BASE if you ever need to.
-
-  async function serverJSON(url, opts = {}) {
+// Generic JSON helper (credentials included)
+async function serverJSON(url, opts = {}) {
   const r = await fetch(url, Object.assign({
     headers: { 'content-type': 'application/json' },
-    credentials: 'include'           // ← add this
+    credentials: 'include'
   }, opts));
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return await r.json().catch(() => ({}));
 }
 
-// ---- Single source of truth for voucher redemption ----
+// ---- Single source of truth for voucher redemption (izzapay) ----
 async function redeemMintCode(codeRaw){
-  const code = String(codeRaw || '').trim().toUpperCase();
-  const body = JSON.stringify({ code });
-
-  // Try same-origin first (works when Crafting UI is under izzapay via /izza-game)
-  async function hit(url){
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body
+  try{
+    const code = String(codeRaw||'').trim().toUpperCase();
+    const r = await fetch(payApi('/api/mint_codes/consume'), {
+      method:'POST',
+      headers:{ 'content-type':'application/json' },
+      body: JSON.stringify({ code })
     });
-    let data = null;
-    try { data = await r.json(); } catch {} // tolerate empty body
-
-    if (r.ok) return data || { ok:true, creditsAdded:1 };
-
-    // Map common server statuses to UI reasons
-    const reason =
-      (data && data.reason) ||
-      (r.status === 404 ? 'invalid' :
-       r.status === 400 ? 'used'    : // app.py returns 400 for "used" or "missing"
-       'unknown');
-
-    return { ok:false, reason };
-  }
-
-  try {
-    // same-origin (via API_BASE '' + DispatcherMiddleware)
-    const res = await hit('/api/mint_codes/consume');
-    // If CORS/host mismatch caused a fetch failure above, fall back:
-    if (!res || (res.ok === false && res.reason === 'network')) {
-      // force absolute to izzapay (works if UI is opened on a different host)
-      return await hit('https://izzapay.onrender.com/api/mint_codes/consume');
-    }
-    return res;
-  } catch {
-    // Last resort: absolute host
-    try {
-      return await hit('https://izzapay.onrender.com/api/mint_codes/consume');
-    } catch {
-      return { ok:false, reason:'network' };
-    }
+    let j = {};
+    try { j = await r.json(); } catch {}
+    if (r.ok && j && j.ok) return j; // { ok:true, creditsAdded: 1 }
+    return { ok:false,
+             reason: j.reason || (r.status===404?'invalid' : r.status===400?'used' : 'network') };
+  }catch(_){
+    return { ok:false, reason:'network' };
   }
 }
   
-  // --- credit reconcile (server-first) ---
+// --- credit reconcile (server-first) ---
 async function reconcileCraftCredits(){
   try{
-    await fetch(api('/api/crafting/credits/reconcile'), {
+    await fetch(gameApi('/api/crafting/credits/reconcile'), {
       method:'POST',
       headers:{ 'content-type':'application/json' },
       credentials:'include'
@@ -543,17 +520,17 @@ async function reconcileCraftCredits(){
 
 /* ====== REPLACED to mirror checkout.html exactly ====== */
 
-  async function payWithIC(amountIC){
-    const cur = getIC();
-    if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
-    setIC(cur - amountIC);
-    try{ await serverJSON(api('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
-    return { ok:true };
-  }
+async function payWithIC(amountIC){
+  const cur = getIC();
+  if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
+  setIC(cur - amountIC);
+  try{ await serverJSON(gameApi('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
+  return { ok:true };
+}
 
-  function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
-  function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
-  // --- REQUIRED-FIELDS VALIDATION (Create tab only) ---
+function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
+function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
+// --- REQUIRED-FIELDS VALIDATION (Create tab only) ---
 function isCreateFormValid(){
   const hasCat  = !!STATE.currentCategory;
   const hasPart = !!STATE.currentPart;
@@ -580,14 +557,13 @@ function updatePayButtonsState(){
   }
 }
 
-  // *** CHANGE 2: server-first, fallback is now a tiny basic blueprint icon ***
-  // --- AI prompt: server first, then minimal fallback ---
+// --- AI prompt: server first, then minimal fallback ---
 // Server-first AI; minimal fallback (simple blueprint) if the server fails.
 async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
   try{
-    const j = await serverJSON(api('/api/crafting/ai_svg'), {
+    const j = await serverJSON(gameApi('/api/crafting/ai_svg'), {
       method:'POST',
       body: JSON.stringify({
         prompt: composeAIPrompt(prompt, STATE.currentPart, {
@@ -1008,7 +984,7 @@ async function openStatsModal(itemId){
   body.textContent = 'Loading…';
   try{
     // your server should return: { ok:true, stats:{ purchases: n, resales: n, revenueIC: n, revenuePi: n } }
-    const j = await serverJSON(api(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`));
+    const j = await serverJSON(gameApi(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`));
     const st = (j && j.ok && j.stats) ? j.stats : { purchases:0, resales:0, revenueIC:0, revenuePi:0 };
     body.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -1026,7 +1002,7 @@ async function addToShop(itemId){
   try{
     // Optional: you can prompt for price here or use the stored price from creation
     // Server expects { ok:true } and will mark the item as inShop=true server-side
-    const j = await serverJSON(api('/api/shop/add'), {
+    const j = await serverJSON(gameApi('/api/shop/add'), {
       method:'POST',
       body: JSON.stringify({ itemId })
     });
@@ -1048,7 +1024,7 @@ async function fetchMine(){
   try{
     const u = encodeURIComponent(currentUsername());
     if(!u) return [];
-    const j = await serverJSON(api(`/api/crafting/mine?u=${u}`));
+    const j = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`));
     return (j && j.ok && Array.isArray(j.items)) ? j.items : [];
   }catch{ return []; }
 }
@@ -1303,7 +1279,7 @@ async function hydrateMine(){
 async function fetchMarketplace(){
   try{
     // Placeholder endpoint; your server should return: { ok:true, bundles:[{id,name,svg,pricePi,creator}, ...] }
-    const j = await serverJSON(api('/api/marketplace/list'));
+    const j = await serverJSON(gameApi('/api/marketplace/list'));
     return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
   }catch{
     return [];
@@ -1358,7 +1334,7 @@ async function mount(rootSel){
   let initialTab = 'packages';
 
   try{
-    const s = await serverJSON(api('/api/crafting/credits/status')); // { ok:true, credits:number }
+    const s = await serverJSON(gameApi('/api/crafting/credits/status')); // { ok:true, credits:number }
     if (s && s.ok){
       applyCreditState(s.credits|0);
       updateTabsHeaderCredits();
@@ -1421,12 +1397,12 @@ async function handleBuySingle(kind, enforceForm){
   const usePi = (kind === 'pi');
 
   // ---------- Pi path: open hosted checkout (voucher flow) ----------
-if (usePi) {
-  const status = document.getElementById('payStatus');
-  if (status) status.textContent = 'Opening IZZA Pay checkout…';
-  location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
-  return; // we’re done here; the user will come back with a code
-}
+  if (usePi) {
+    const status = document.getElementById('payStatus');
+    if (status) status.textContent = 'Opening IZZA Pay checkout…';
+    location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
+    return; // we’re done here; the user will come back with a code
+  }
   // ---------- IC path (unchanged) ----------
   const total = calcTotalCost({ usePi:false });
   const res = await payWithIC(total);
@@ -1549,34 +1525,36 @@ function bindInside(){
   // enforceForm=true for Create tab buttons
   payPi && payPi.addEventListener('click', ()=> handleBuySingle('pi', true), { passive:true });
   payIC && payIC.addEventListener('click', ()=> handleBuySingle('ic', true), { passive:true });
-// ---- Redeem code handler ----
-const redeemInput = root.querySelector('#redeemCode');
-const redeemBtn   = root.querySelector('#btnRedeem');
-const redeemStat  = root.querySelector('#redeemStatus');
 
-if (redeemBtn){
-  redeemBtn.addEventListener('click', async ()=>{
-    const code = redeemInput?.value || '';
-    if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
-      redeemStat.textContent = 'Enter a valid code.';
-      return;
-    }
-    redeemBtn.disabled = true;
-    redeemStat.textContent = 'Checking code…';
+  // ---- Redeem code handler ----
+  const redeemInput = root.querySelector('#redeemCode');
+  const redeemBtn   = root.querySelector('#btnRedeem');
+  const redeemStat  = root.querySelector('#redeemStatus');
 
-    const r = await redeemMintCode(code);
-    redeemBtn.disabled = false;
+  if (redeemBtn){
+    redeemBtn.addEventListener('click', async ()=>{
+      const code = redeemInput?.value || '';
+      if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
+        redeemStat.textContent = 'Enter a valid code.';
+        return;
+      }
+      redeemBtn.disabled = true;
+      redeemStat.textContent = 'Checking code…';
 
-    if (r && r.ok){
-      applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1)); // server already credited
-      updateTabsHeaderCredits();
-      redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
-    } else {
-      const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
-      redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
-    }
-  }, { passive:true });
-}
+      const r = await redeemMintCode(code);
+      redeemBtn.disabled = false;
+
+      if (r && r.ok){
+        applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1)); // server already credited
+        updateTabsHeaderCredits();
+        redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+      } else {
+        const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
+        redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+      }
+    }, { passive:true });
+  }
+
   const itemName = root.querySelector('#itemName');
   if (itemName){
     itemName.value = STATE.currentName || '';
@@ -1798,7 +1776,7 @@ if (redeemBtn){
             || ''
           );
           if (u) {
-            const resp = await serverJSON(api(`/api/crafting/mine?u=${u}`), {
+            const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
               method: 'POST',
               body: JSON.stringify({
                 name: STATE.currentName,
