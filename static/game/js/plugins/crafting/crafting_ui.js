@@ -1,3 +1,6 @@
+// Use same-origin (works with your DispatcherMiddleware mount)
+const API_BASE = '';
+const api = (p) => (API_BASE ? API_BASE + p : p);
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
 const SLOT_GUIDE = {
   helmet: "Helmet/headwear from a top-down 3/4 view. Stay in head slot; don't spill onto torso.",
@@ -471,8 +474,6 @@ function hideWait(node){
   // *** CHANGE 1: force default API base to your Node service ***
   // Force default API base to the Node service on Render.
 // You can still override with window.IZZA_PERSIST_BASE if you ever need to.
-const API_BASE = ((window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE)) || 'https://izzagame.onrender.com').replace(/\/+$/,'');
-const api = (p)=> (API_BASE ? API_BASE + p : p);
 
   async function serverJSON(url, opts = {}) {
   const r = await fetch(url, Object.assign({
@@ -1395,20 +1396,6 @@ if (usePi) {
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
     if (status) status.textContent='Payment failed.';
-  }
-}
-
-async function redeemMintCode(code){
-  try{
-    const r = await fetch('https://izzapay.onrender.com/api/mint_codes/consume', {
-      method:'POST',
-      headers:{ 'content-type':'application/json' },
-      body: JSON.stringify({ code })
-    });
-    const j = await r.json();
-    return j;
-  }catch(e){
-    return { ok:false, reason:'network' };
   }
 }
   
