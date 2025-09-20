@@ -411,6 +411,47 @@ function _prettyItemName(k){
   return s.replace(/\b([a-z])/g, m=>m.toUpperCase());
 }
 
+function _bankPresentation(rawKey){
+  const key = String(rawKey||'').trim().toLowerCase().replace(/\s+/g,'_');
+
+  const KNOWN = {
+    'coin':'', 'coins':'',
+    'cardboard_box': { title:'Cardboard Box', iconId:'cardboard_box' },
+    'jack_o_lantern': { title:'Jack-o’-Lantern', iconId:'jack_o_lantern' },
+    'jacklantern':    { title:'Jack-o’-Lantern', iconId:'jack_o_lantern' },
+    'pumpkin_piece':  { title:'Pumpkin', iconId:'pumpkin_piece' },
+    'pumpkin':        { title:'Pumpkin', iconId:'pumpkin_piece' },
+    'bat':            { title:'Baseball Bat', iconId:'bat' },
+    'knuckles':       { title:'Brass Knuckles', iconId:'knuckles' },
+    'pistol':         { title:'Pistol', iconId:'pistol' },
+    'uzi':            { title:'Uzi', iconId:'uzi' },
+    'grenade':        { title:'Grenade', iconId:'grenade' }
+  };
+  if (KNOWN[key]) return { key, title: KNOWN[key].title, iconId: KNOWN[key].iconId, iconSvgRaw: '' };
+
+  try{
+    const api = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    const inv = api && typeof api.getInventory==='function' ? (api.getInventory()||{}) : {};
+    const it  = inv[rawKey] || inv[key];
+    if (it){
+      const title = (typeof it.name==='string' && it.name.trim()) ? it.name.trim() : _prettyItemName(rawKey||key);
+      const iconSvgRaw = (typeof it.iconSvg==='string' && it.iconSvg.trim()) ? it.iconSvg : '';
+      const iconId = (typeof it.iconId==='string' && it.iconId.trim()) ? it.iconId : key;
+      return { key, title, iconId, iconSvgRaw };
+    }
+  }catch{}
+
+  return { key, title: _prettyItemName(rawKey||key), iconId: key, iconSvgRaw: '' };
+}
+
+function _iconHTMLFromPresentation(p, size=22){
+  if (p.iconSvgRaw && p.iconSvgRaw.trim()) return p.iconSvgRaw;
+  const html = svgIcon(p.iconId, size, size);
+  return (html && html.trim())
+    ? html
+    : '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="4" fill="#1a2235" stroke="#2a3550" stroke-width="2"/></svg>';
+}
+  
 /** Ask core svgIcon() for a small image, with safe fallback */
 function _smallIcon(id){
   try{
@@ -429,65 +470,97 @@ function _smallIcon(id){
 function _decorateBankList(){
   const host = _findBankHost(); if (!host) return;
 
-  // rows are usually siblings with a "Deposit" / "Withdraw" button
-  const rows = Array.from(host.querySelectorAll('div,li'))
-    .filter(n => n.querySelector('button') && /deposit|withdraw/i.test(n.querySelector('button').textContent||''));
+  const actionBtns = Array.from(host.querySelectorAll('button'))
+    .filter(b => /deposit|withdraw/i.test(b.textContent||''));
+
+  const rows = new Set();
+  actionBtns.forEach(btn=>{
+    const row = btn.closest('.bank-row, li, [role="listitem"], .row, .item, .line') || btn.parentElement;
+    if (row) rows.add(row);
+  });
 
   rows.forEach(row=>{
-    // find the best candidate text node for the item name
-    let nameEl = row.querySelector('[data-name]') ||
-                 row.querySelector('.name,.title,.label') ||
-                 Array.from(row.childNodes).find(n => n.nodeType===Node.TEXT_NODE && (n.textContent||'').trim())?.parentElement ||
-                 row.firstElementChild;
+    if (row.dataset.bankDecorated === '1') return;
 
-    if (!nameEl) return;
+    let nameEl =
+      row.querySelector('[data-item-name],[data-name],[data-key]') ||
+      row.querySelector('.name,.title,.label') ||
+      row.querySelector('span,div');
 
-    // original key-ish text (fallback to a data-key if you store it)
-    const raw = (nameEl.dataset.key || nameEl.textContent || '').trim();
-    if (!raw) return;
+    const keyAttr = (nameEl && (nameEl.getAttribute('data-key') || nameEl.getAttribute('data-name'))) || '';
+    const fallbackKey = row.getAttribute('data-item') || row.getAttribute('data-id') || '';
+    let lastResort = '';
+    if (nameEl) {
+      const tn = Array.from(nameEl.childNodes).find(n=>n.nodeType===Node.TEXT_NODE && (n.textContent||'').trim());
+      lastResort = tn ? tn.textContent.trim() : (nameEl.textContent||'').trim();
+    }
+    const rawKey = keyAttr || fallbackKey || lastResort || '';
+    if (!rawKey) { row.dataset.bankDecorated='1'; return; }
 
-    // compute clean display + an id for the icon
-    const idGuess = raw.replace(/\s+/g,'_').toLowerCase();
-    const display = _prettyItemName(raw);
+    const pres = _bankPresentation(rawKey);
 
-    // inject icon (once)
+    let label = row.querySelector('[data-bank-label]');
+    if (!label){
+      label = document.createElement('span');
+      label.setAttribute('data-bank-label','1');
+      const firstBtn = row.querySelector('button');
+      if (firstBtn && firstBtn.parentElement===row) {
+        row.insertBefore(label, firstBtn);
+      } else {
+        if (!nameEl) { nameEl = row; }
+        nameEl.prepend(label);
+      }
+    }
+
     if (!row.querySelector('[data-bank-icon]')){
       const wrap = document.createElement('span');
       wrap.setAttribute('data-bank-icon','1');
-      wrap.innerHTML = _smallIcon(idGuess);
       wrap.style.display='inline-flex';
       wrap.style.verticalAlign='middle';
       wrap.style.marginRight='8px';
-      nameEl.prepend(wrap);
+      wrap.innerHTML = _iconHTMLFromPresentation(pres, 22);
+      label.appendChild(wrap);
     }
 
-    // set pretty label
-    nameEl.firstChild?.nodeType===Node.TEXT_NODE
-      ? (nameEl.firstChild.textContent = display + ' ')
-      : (nameEl.childNodes.forEach(n=>{ if(n.nodeType===Node.TEXT_NODE){ n.textContent = display + ' '; }}));
+    const afterIcon = row.querySelector('[data-bank-icon]');
+    if (afterIcon){
+      let t = afterIcon.nextSibling;
+      if (!t || t.nodeType !== Node.TEXT_NODE){
+        t = document.createTextNode(' ');
+        afterIcon.parentNode.insertBefore(t, afterIcon.nextSibling);
+      }
+      t.textContent = ' ' + pres.title;
+    }
+
+    row.dataset.bankDecorated = '1';
   });
 }
-
 /** Observe bank open/close + content changes */
 (function _watchBank(){
-  const mo = new MutationObserver(()=> {
+  let scheduled = false;
+  function tick(){
+    scheduled = false;
     const host = _findBankHost();
     if (!host) return;
-
     const visible = host.offsetParent !== null || getComputedStyle(host).display!=='none';
     _elevateBankHost(visible);
     if (visible) _decorateBankList();
+  }
+
+  const mo = new MutationObserver(()=> {
+    if (!scheduled){
+      scheduled = true;
+      requestAnimationFrame(tick);
+    }
   });
   mo.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['style','class'] });
 
-  // also run once on boot for SSR/static cases
-  setTimeout(()=>{ const host=_findBankHost(); if(host){ _elevateBankHost(true); _decorateBankList(); } }, 0);
+  requestAnimationFrame(tick);
 
-  // if you emit custom events, hook them too (optional, no-op if absent)
   try{
-    window.addEventListener('izza-bank-open', ()=>{ _elevateBankHost(true);  _decorateBankList(); });
+    window.addEventListener('izza-bank-open', ()=>{ requestAnimationFrame(tick); });
     window.addEventListener('izza-bank-close', ()=>{ _elevateBankHost(false); });
-    window.addEventListener('izza-bank-updated', _decorateBankList);
+    window.addEventListener('izza-bank-updated', ()=>{ requestAnimationFrame(tick); });
   }catch{}
 })();
   
