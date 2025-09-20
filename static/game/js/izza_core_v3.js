@@ -360,90 +360,59 @@ function tintHairLayer(pack, hairColor){
   }
 }
 
-/* === ROBUST BANK LIFT + DECORATION ================================= */
+/* === BANK UI LIFT + ITEM DECORATION =============================== */
 
-/* 1) Deep traversal that can see into shadow DOM */
-function _deepQueryAll(root, pred, limit=2000){
-  const out = [];
-  const stack = [root];
-  while (stack.length && out.length < limit){
-    const n = stack.pop();
-    if (!n) continue;
-    try{
-      if (pred(n)) out.push(n);
-      // dive into children
-      if (n.shadowRoot) stack.push(n.shadowRoot);
-      if (n.children && n.children.length){
-        for (let i=n.children.length-1;i>=0;i--) stack.push(n.children[i]);
-      }
-    }catch{}
+/* reuse the inventory helper you already dropped in */
+const _BANK_Z = 9999;
+
+/** Find the bank container (works with multiple builds) */
+function _findBankHost(){
+  // preferred ids/classes if you have them
+  const byId = document.getElementById('bankPanel') || document.getElementById('izzaBank');
+  if (byId) return byId;
+
+  // fallback: look for a card/modal that contains the "IZZA Bank" header text
+  const candidates = Array.from(document.querySelectorAll('div,section,aside,article'));
+  for (const el of candidates){
+    const t = (el.textContent || '').trim();
+    if (!t) continue;
+    if (/^\s*IZZA\s+Bank\b/i.test(t) && el.querySelector('button')) return el;
   }
-  return out;
+  return null;
 }
 
-/* 2) Identify a “bank-like” host very loosely */
-function _findBankHostLoose(){
-  // Heuristic: a container that has multiple rows each with an item-ish label
-  // and an action containing “deposit” or “withdraw”
-  const candidates = _deepQueryAll(document, el=>{
-    // must be an element and visible
-    if (!(el instanceof Element)) return false;
-    const style = getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
+/** Make sure the bank floats above pills + disable pills while open */
+function _elevateBankHost(on){
+  const host = _findBankHost();
+  if (!host) return;
 
-    // contain at least one actionable control with deposit/withdraw wording
-    const acts = Array.from(el.querySelectorAll('button,a,[role="button"],input[type="button"]'))
-      .filter(n => /deposit|withdraw/i.test(n.textContent||n.value||''));
-    if (acts.length < 1) return false;
-
-    // must have a handful of rows or list items
-    const rows = Array.from(el.querySelectorAll('li, .row, .item, .bank-row, div'))
-      .filter(n => /deposit|withdraw/i.test((n.textContent||'')) && (n !== el));
-    return rows.length >= 2;
-  }, 4000);
-
-  // prefer the smallest container that still satisfies the heuristic
-  candidates.sort((a,b)=> a.getBoundingClientRect().width * a.getBoundingClientRect().height
-                        - b.getBoundingClientRect().width * b.getBoundingClientRect().height);
-  return candidates[0] || null;
+  if (on){
+    if (!host.dataset._prevPos) host.dataset._prevPos = host.style.position || '';
+    if (!host.dataset._prevZ)   host.dataset._prevZ   = host.style.zIndex || '';
+    host.style.position = host.style.position || 'relative';
+    host.style.zIndex   = String(_BANK_Z);
+    try{ _floatPillsBehindInventory(true); }catch{}
+  }else{
+    if ('_prevPos' in host.dataset) host.style.position = host.dataset._prevPos;
+    if ('_prevZ'   in host.dataset) host.style.zIndex   = host.dataset._prevZ;
+    delete host.dataset._prevPos; delete host.dataset._prevZ;
+    try{ _floatPillsBehindInventory(false); }catch{}
+  }
 }
 
-/* 3) Pill suppression via body flag + CSS (wins stacking contexts) */
-(function _injectBankCSS(){
-  if (document.getElementById('izza-bank-css')) return;
-  const css = document.createElement('style');
-  css.id = 'izza-bank-css';
-  css.textContent = `
-    /* when bank is open, float pills lose clicks + drop behind */
-    body[data-bank-open="1"] .pill, 
-    body[data-bank-open="1"] .chip, 
-    body[data-bank-open="1"] #btnFriends,
-    body[data-bank-open="1"] #btnCraft,
-    body[data-bank-open="1"] #btnFull {
-      pointer-events: none !important;
-      z-index: 0 !important;
-    }
-    /* booster class to rip a panel above common shells */
-    .izza-bank-boost {
-      position: relative !important;
-      z-index: 999999 !important;
-    }
-    .izza-bank-boost * { position: relative; }
-  `;
-  document.head.appendChild(css);
-})();
-
-/* 4) Pretty-print names */
-function _bankPrettyName(raw){
-  if (!raw) return '';
-  const k = String(raw).trim();
+/** Utility: clean item names for display */
+function _prettyItemName(k){
+  if (!k) return '';
+  // known special-cases first
   if (k==='jack_o_lantern' || k==='jacklantern') return "Jack-o’-Lantern";
-  if (k==='cardboard_box') return 'Cardboard Box';
-  return k.replace(/[_]+/g,' ').replace(/\b([a-z])/g, m=>m.toUpperCase());
+  if (k==='cardboard_box')  return 'Cardboard Box';
+  // generic: underscores → spaces, Title Case
+  const s = String(k).replace(/[_]+/g, ' ').trim();
+  return s.replace(/\b([a-z])/g, m=>m.toUpperCase());
 }
 
-/* 5) Safe tiny icon */
-function _bankIcon(id){
+/** Ask core svgIcon() for a small image, with safe fallback */
+function _smallIcon(id){
   try{
     const svg = svgIcon(id, 22, 22) || svgIcon(id.replace(/\s+/g,'_'), 22, 22);
     if (svg && svg.trim()) return svg;
@@ -451,74 +420,77 @@ function _bankIcon(id){
   return '<svg viewBox="0 0 24 24" width="22" height="22" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="4" fill="#1a2235" stroke="#2a3550" stroke-width="2"/></svg>';
 }
 
-/* 6) Decorate rows regardless of control type */
-function _decorateBankRows(host){
-  if (!host) return;
-  const rows = Array.from(host.querySelectorAll('li, .row, .item, .bank-row, div'))
-    .filter(n => /deposit|withdraw/i.test((n.textContent||'')));
+/**
+ * Decorate the visible bank list:
+ * - prepend tiny SVG icon
+ * - pretty-print item names (underscores → spaces, Title Case)
+ * Works with simple row structures (left label + right action button).
+ */
+function _decorateBankList(){
+  const host = _findBankHost(); if (!host) return;
+
+  // rows are usually siblings with a "Deposit" / "Withdraw" button
+  const rows = Array.from(host.querySelectorAll('div,li'))
+    .filter(n => n.querySelector('button') && /deposit|withdraw/i.test(n.querySelector('button').textContent||''));
 
   rows.forEach(row=>{
-    // find a name-ish node: prefer a labelled span/div without the action text
-    let nameEl = row.querySelector('[data-name], .name, .label, .title') || null;
-    if (!nameEl){
-      // pick the first child that is not a button/link and has some text
-      const kids = Array.from(row.childNodes);
-      const tnode = kids.find(n => n.nodeType===Node.TEXT_NODE && (n.textContent||'').trim());
-      nameEl = (tnode && tnode.parentElement) || kids.find(n=> n.nodeType===1 && !(n.matches?.('button,a,[role="button"]')) ) || row;
-    }
-    const raw = (nameEl.dataset?.key) || (nameEl.textContent||'').trim();
+    // find the best candidate text node for the item name
+    let nameEl = row.querySelector('[data-name]') ||
+                 row.querySelector('.name,.title,.label') ||
+                 Array.from(row.childNodes).find(n => n.nodeType===Node.TEXT_NODE && (n.textContent||'').trim())?.parentElement ||
+                 row.firstElementChild;
+
+    if (!nameEl) return;
+
+    // original key-ish text (fallback to a data-key if you store it)
+    const raw = (nameEl.dataset.key || nameEl.textContent || '').trim();
     if (!raw) return;
 
-    const id = raw.toLowerCase().replace(/\s+/g,'_');
-    const pretty = _bankPrettyName(raw);
+    // compute clean display + an id for the icon
+    const idGuess = raw.replace(/\s+/g,'_').toLowerCase();
+    const display = _prettyItemName(raw);
 
+    // inject icon (once)
     if (!row.querySelector('[data-bank-icon]')){
       const wrap = document.createElement('span');
       wrap.setAttribute('data-bank-icon','1');
-      wrap.innerHTML = _bankIcon(id);
-      Object.assign(wrap.style,{display:'inline-flex',verticalAlign:'middle',marginRight:'8px'});
+      wrap.innerHTML = _smallIcon(idGuess);
+      wrap.style.display='inline-flex';
+      wrap.style.verticalAlign='middle';
+      wrap.style.marginRight='8px';
       nameEl.prepend(wrap);
     }
-    // replace leading plain text with the pretty label
-    const first = nameEl.firstChild;
-    if (first && first.nodeType===Node.TEXT_NODE){
-      first.textContent = pretty + ' ';
-    }else{
-      nameEl.insertBefore(document.createTextNode(pretty + ' '), nameEl.firstChild);
-    }
+
+    // set pretty label
+    nameEl.firstChild?.nodeType===Node.TEXT_NODE
+      ? (nameEl.firstChild.textContent = display + ' ')
+      : (nameEl.childNodes.forEach(n=>{ if(n.nodeType===Node.TEXT_NODE){ n.textContent = display + ' '; }}));
   });
 }
 
-/* 7) Watcher: detect bank, boost it, flag body, decorate */
-(function _watchBankLoose(){
-  let lastHost = null;
+/** Observe bank open/close + content changes */
+(function _watchBank(){
+  const mo = new MutationObserver(()=> {
+    const host = _findBankHost();
+    if (!host) return;
 
-  function tick(){
-    const host = _findBankHostLoose();
-    const visible = !!host;
+    const visible = host.offsetParent !== null || getComputedStyle(host).display!=='none';
+    _elevateBankHost(visible);
+    if (visible) _decorateBankList();
+  });
+  mo.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['style','class'] });
 
-    document.body.toggleAttribute('data-bank-open', visible ? '1' : '');
+  // also run once on boot for SSR/static cases
+  setTimeout(()=>{ const host=_findBankHost(); if(host){ _elevateBankHost(true); _decorateBankList(); } }, 0);
 
-    if (visible){
-      if (host !== lastHost){
-        // remove boost from previous
-        if (lastHost) lastHost.classList.remove('izza-bank-boost');
-        host.classList.add('izza-bank-boost');
-        lastHost = host;
-      }
-      try{ _decorateBankRows(host); }catch{}
-    }else if (lastHost){
-      lastHost.classList.remove('izza-bank-boost');
-      lastHost = null;
-    }
-  }
-
-  // MutationObserver + periodic safety net (covers shadow content changes)
-  const mo = new MutationObserver(()=> tick());
-  mo.observe(document.documentElement, {subtree:true, childList:true, attributes:true});
-  setInterval(tick, 500); // low-cost poll to see into shadow DOM mutations
-  tick();
+  // if you emit custom events, hook them too (optional, no-op if absent)
+  try{
+    window.addEventListener('izza-bank-open', ()=>{ _elevateBankHost(true);  _decorateBankList(); });
+    window.addEventListener('izza-bank-close', ()=>{ _elevateBankHost(false); });
+    window.addEventListener('izza-bank-updated', _decorateBankList);
+  }catch{}
 })();
+  
   // ===== Coins & Progress (persist) =====
 const LS = {
   coins:         'izzaCoins',
