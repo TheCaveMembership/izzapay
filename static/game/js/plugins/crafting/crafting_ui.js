@@ -563,9 +563,9 @@ async function aiToSVG(prompt){
   if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
   try{
-    const j = await serverJSON(gameApi('/api/crafting/ai_svg'), {
-      method:'POST',
-      body: JSON.stringify({
+    const j = await serverJSON(payApi('/api/crafting/ai_svg'), {
+  method:'POST',
+  body: JSON.stringify({ /* ... */ })
         prompt: composeAIPrompt(prompt, STATE.currentPart, {
           style: STATE.aiStyle,
           animate: STATE.wantAnimation
