@@ -19,6 +19,73 @@
   let api=null;
   let driving=false, car=null, savedWalk=null;
 
+  // ---- speed floor wrappers (cannot be overridden by later writes) ----
+const SPEED_KEYS = ['speed','moveSpeed','maxSpeed','maxVel'];
+const _speedFloor = { armed:false, floor:120, bak:{}, backing:{} };
+
+function armSpeedFloor(floor){
+  try{
+    const p = api && api.player; if(!p || _speedFloor.armed) return;
+    _speedFloor.floor = floor|0;
+    _speedFloor.bak = {};
+    _speedFloor.backing = {};
+
+    SPEED_KEYS.forEach(k=>{
+      // snapshot current descriptor & value
+      const desc = Object.getOwnPropertyDescriptor(p, k) || { configurable:true, enumerable:true, writable:true, value:p[k] };
+      _speedFloor.bak[k] = desc;
+      const initial = (typeof p[k] === 'number') ? p[k] : 0;
+      _speedFloor.backing[k] = initial;
+
+      // define floor-enforcing accessor
+      Object.defineProperty(p, k, {
+        configurable: true,
+        enumerable: desc.enumerable !== false,
+        get(){ return Math.max(_speedFloor.backing[k] || 0, (_speedFloor.armed ? _speedFloor.floor : 0)); },
+        set(v){
+          // keep last writer's intent, but reads are floored while armed
+          _speedFloor.backing[k] = (typeof v === 'number') ? v : _speedFloor.backing[k];
+        }
+      });
+    });
+
+    _speedFloor.armed = true;
+  }catch(e){ console.warn('[free-drive] speed floor arm failed', e); }
+}
+
+function disarmSpeedFloor(){
+  try{
+    const p = api && api.player; if(!p || !_speedFloor.armed) return;
+    SPEED_KEYS.forEach(k=>{
+      const bak = _speedFloor.bak[k];
+      if(bak){
+        // restore original descriptor/value safely
+        try{
+          Object.defineProperty(p, k, bak);
+        }catch{
+          // last resort: direct write
+          p[k] = _speedFloor.backing[k];
+        }
+      }
+    });
+  }catch(e){ console.warn('[free-drive] speed floor disarm failed', e); }
+  finally{
+    _speedFloor.armed = false;
+    _speedFloor.bak = {};
+    _speedFloor.backing = {};
+  }
+}
+
+// ultra-belt & suspenders in case defineProperty failed (old browsers etc.)
+function forceSpeedNow(min){
+  if(!api?.player) return;
+  const p = api.player;
+  if (typeof p.speed     === 'number' && p.speed     < min) p.speed     = min;
+  if (typeof p.moveSpeed === 'number' && p.moveSpeed < min) p.moveSpeed = min;
+  if (typeof p.maxSpeed  === 'number' && p.maxSpeed  < min) p.maxSpeed  = min;
+  if (typeof p.maxVel    === 'number' && p.maxVel    < min) p.maxVel    = min;
+}
+
   // Track movement to decide if collisions kill cops
   let prevPX=0, prevPY=0;
   let carMoving=false;
@@ -250,6 +317,8 @@
     driving=true;
     if(savedWalk==null) savedWalk=api.player.speed;
     api.player.speed=CAR_SPEED;
+    armSpeedFloor(CAR_SPEED);   // make 120 un-clampable while driving
+    forceSpeedNow(CAR_SPEED);   // immediate effect this frame too
     IZZA.emit?.('toast',{text:`Car hijacked! (${kind}) Press B again to park.`});
 
     // init movement tracker at start so the first frame isn't counted as a huge jump
@@ -274,6 +343,8 @@
     driving=true;
     if(savedWalk==null) savedWalk=api.player.speed;
     api.player.speed=CAR_SPEED;
+    armSpeedFloor(CAR_SPEED);   // make 120 un-clampable while driving
+    forceSpeedNow(CAR_SPEED);   // immediate effect this frame too
     IZZA.emit?.('toast',{text:'Back in your car. Press B to park.'});
 
     // init movement tracker on re-entry
@@ -304,19 +375,26 @@
   }
 
   function stopDrivingAndPark(){
-    if(!driving) return;
+  if(!driving) return;
 
-    snapshotPursuers();
+  snapshotPursuers();
 
-    parkHereAndStartTimer();
-    driving=false; car=null;
-    if(savedWalk!=null){ api.player.speed=savedWalk; savedWalk=null; }
-    IZZA.emit?.('toast',{text:'Parked. It’ll stay ~5 min.'});
+  parkHereAndStartTimer();
+  driving=false; 
+  car=null;
 
-    carMoving = false;
+  // remove the speed-floor so walking isn’t stuck fast
+  disarmSpeedFloor();
 
-    armGuard('park');
+  if(savedWalk!=null){
+    api.player.speed = savedWalk;
+    savedWalk = null;
   }
+
+  IZZA.emit?.('toast',{text:'Parked. It’ll stay ~5 min.'});
+  carMoving = false;
+  armGuard('park');
+}
 
   function onB(e){
     if(!api?.ready || !m3Done()) return;
@@ -506,53 +584,54 @@
   });
 
   // --- ensure cops cleared & wanted reset on death/respawn (hard) ---
-  function clearAllPursuitAndWanted(){
-    try{
-      // Clear in-place
-      PURSUER_KEYS.forEach(k=>{
-        if (!api[k]) api[k] = [];
-        api[k].length = 0;
-      });
-      destroyAllTanks();
-      if(api?.player){ api.setWanted(0); }
+function clearAllPursuitAndWanted(){
+  try{
+    // ensure speed-floor is gone on death/respawn
+    disarmSpeedFloor();
 
-      // (Do NOT replace arrays; preserve references)
+    // Clear in-place
+    PURSUER_KEYS.forEach(k=>{
+      if (!api[k]) api[k] = [];
+      api[k].length = 0;
+    });
+    destroyAllTanks();
+    if(api?.player){ api.setWanted(0); }
 
-      hijackTag = null;
-      fiveStarSince = 0;
-      nextTankAt = 0;
-      lastReinforceAt = 0;
+    hijackTag = null;
+    fiveStarSince = 0;
+    nextTankAt = 0;
+    lastReinforceAt = 0;
 
-      // Ensure no residual heat/snapshots can revive stars or units on respawn
-      lastCarCrimeAt = 0;
-      pursuerSnap   = null;
+    // Ensure no residual heat/snapshots can revive stars or units on respawn
+    lastCarCrimeAt = 0;
+    pursuerSnap   = null;
 
-      // Force the player OUT of the vehicle on death/respawn
-      driving = false;
-      car = null;
-      if (api?.player && savedWalk != null) { api.player.speed = savedWalk; }
-      savedWalk = null;
+    // Force the player OUT of the vehicle on death/respawn
+    driving = false;
+    car = null;
+    if (api?.player && savedWalk != null) { api.player.speed = savedWalk; }
+    savedWalk = null;
 
-      carMoving = false;
+    carMoving = false;
 
-      // Drop all guards and block any spawn attempts for a short window
-      guardUntil = 0; guardWanted = 0;
-      spawnLockUntil = now() + 1200;
-      suppressAllSpawnsUntil = now() + 1500;
+    // Drop all guards and block any spawn attempts for a short window
+    guardUntil = 0; guardWanted = 0;
+    spawnLockUntil = now() + 1200;
+    suppressAllSpawnsUntil = now() + 1500;
 
-      // Belt & suspenders: repeat clears next tick as well (still in place)
-      setTimeout(()=>{
-        try{
-          PURSUER_KEYS.forEach(k=>{
-            if (!api[k]) api[k] = [];
-            api[k].length = 0;
-          });
-          destroyAllTanks();
-          if(api?.player){ api.setWanted(0); }
-        }catch{}
-      }, 0);
-    }catch{}
-  }
+    // Belt & suspenders: repeat clears next tick as well (still in place)
+    setTimeout(()=>{
+      try{
+        PURSUER_KEYS.forEach(k=>{
+          if (!api[k]) api[k] = [];
+          api[k].length = 0;
+        });
+        destroyAllTanks();
+        if(api?.player){ api.setWanted(0); }
+      }catch{}
+    }, 0);
+  }catch{}
+}
   IZZA.on?.('player-died', clearAllPursuitAndWanted);
   IZZA.on?.('player-death', clearAllPursuitAndWanted);
   IZZA.on?.('player-respawn', clearAllPursuitAndWanted);
