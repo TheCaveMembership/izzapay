@@ -272,36 +272,34 @@ def crafting_ic_claim_order():
     return _ok(awarded=True, amount=qty, credits=newbal)
 
 @crafting_api.post("/code/redeem")
-def crafting_code_redeem():
-    # Player must be signed in (Pi auth) to receive the credit
+def crafting_redeem_code():
     u = current_user_row()
     if not u:
         return _err("auth_required")
-
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
     if not code:
-        return _err("invalid")
+        return jsonify(ok=False, reason="invalid"), 400
 
-    ensure_voucher_tables()  # creates mint_codes table if missing
-
+    ensure_voucher_tables()
     import time
     with conn() as cx:
         rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
         if not rec:
             return jsonify(ok=False, reason="invalid"), 404
-        if (rec["status"] or "").lower() != "issued":
+        if rec["status"] != "issued":
+            # could be 'consumed' (used) or anything else → treat as used
             return jsonify(ok=False, reason="used"), 409
 
-        # Mark code consumed
+        # Mark consumed first to be idempotent
         cx.execute(
             "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
             (int(time.time()), code)
         )
 
-    # Add credit to the player; UI assumes server already credited them
+    # Add one mint credit (or whatever the code carries)
     credits = int(rec["credits"] or 1)
-    newbal  = add_ic_credits(int(u["id"]), credits)
+    newbal = add_ic_credits(int(u["id"]), credits)
 
     return jsonify(ok=True, creditsAdded=credits, balance=newbal)
 
