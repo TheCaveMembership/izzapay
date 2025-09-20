@@ -627,23 +627,8 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
 
   return true;
 }
-  // ---- Speed bump for the “royal_savage” legs (top-tier flair) ----
-  (function speedBoostTopTier(){
-    let base=null;
-    IZZA?.on?.('update-post', ()=>{
-      if(!api?.ready) return;
-      const inv=_invRead(), p=api.player||{};
-      if(!base){ base={ speed:p.speed, moveSpeed:p.moveSpeed, maxSpeed:p.maxSpeed, maxVel:p.maxVel }; }
-      const legsEquipped = Object.keys(inv).some(k=> k.endsWith('_legs') && _isEquipped(inv[k]) && k.startsWith('royal_savage'));
-      const boost = 1.65;
-      if(legsEquipped){
-        if(typeof p.speed==='number')     p.speed     = Math.max(base.speed,     base.speed*boost);
-        if(typeof p.moveSpeed==='number') p.moveSpeed = Math.max(base.moveSpeed, base.moveSpeed*boost);
-        if(typeof p.maxSpeed==='number')  p.maxSpeed  = Math.max(base.maxSpeed,  base.maxSpeed*boost);
-        if(typeof p.maxVel==='number')    p.maxVel    = Math.max(base.maxVel,    base.maxVel*boost);
-      }
-    });
-  })();
+  // (TEMP) Disable royal_savage legs speed boost entirely (keeps all other boosts untouched)
+  (function speedBoostTopTier(){ /* disabled */ })();
 
   // === Crafted-item hook (UPDATED) =========================================
   (function(){
