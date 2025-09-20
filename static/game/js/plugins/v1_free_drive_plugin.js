@@ -571,6 +571,15 @@
   // Use ctx/S provided by the engine so we paint on the correct layer
   IZZA.on('update-post', ()=>{
     if(!api?.ready) return;
+      // While driving, enforce a minimum vehicle speed so other systems can't
+  // clamp us down to walking speed. Higher boosts (e.g., special legs) still win.
+  if (driving && api?.player){
+    const p = api.player;
+    if (typeof p.speed     === 'number' && p.speed     < CAR_SPEED) p.speed     = CAR_SPEED;
+    if (typeof p.moveSpeed === 'number' && p.moveSpeed < CAR_SPEED) p.moveSpeed = CAR_SPEED;
+    if (typeof p.maxSpeed  === 'number' && p.maxSpeed  < CAR_SPEED) p.maxSpeed  = CAR_SPEED;
+    if (typeof p.maxVel    === 'number' && p.maxVel    < CAR_SPEED) p.maxVel    = CAR_SPEED;
+  }
 
     // 5★ logic: first tank after 30s, then more every 30s while still 5★
     if ((api.player?.wanted|0) >= TANK_BUILD_STARS){
