@@ -506,6 +506,79 @@ if (onArmDoor) return; // don't consume B here; armoury handler will open the mo
     d.querySelector('#hsClose').onclick = ()=> hospitalClose();
     d.querySelector('#hsBuy').onclick   = ()=> hospitalBuy();
   }
+  /* ===== SURGICAL BANK UI FIXES (overlay stacking + scroll) ===== */
+(function(){
+  // Find the floating “pill” buttons by id or text
+  function _findFloatPills(){
+    const out = new Set();
+    // common ids if present
+    ['btnFriends','btnCraft','btnFull'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (el) out.add(el);
+    });
+    // text fallback (case-insensitive)
+    document.querySelectorAll('button, .pill, .chip, .ghost').forEach(el=>{
+      const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+      if (t==='friends' || t==='craft' || t==='full') out.add(el);
+    });
+    return Array.from(out);
+  }
+
+  // Disable clicks & push behind while the bank is open; restore on close
+  function _toggleFloatPillsDisabled(on){
+    _findFloatPills().forEach(el=>{
+      if (on){
+        if (!el.dataset._prevZ)  el.dataset._prevZ  = el.style.zIndex || '';
+        if (!el.dataset._prevPE) el.dataset._prevPE = el.style.pointerEvents || '';
+        el.style.zIndex = '0';
+        el.style.pointerEvents = 'none';
+      }else{
+        if ('_prevZ'  in el.dataset) el.style.zIndex       = el.dataset._prevZ;
+        if ('_prevPE' in el.dataset) el.style.pointerEvents = el.dataset._prevPE;
+        delete el.dataset._prevZ; delete el.dataset._prevPE;
+      }
+    });
+  }
+
+  // Make the bank body scroll within the card and raise the overlay above pills
+  function _styleBankOverlay(){
+    const wrap = document.getElementById('bankWrap');   // your bank backdrop
+    const body = document.getElementById('bankBody');   // the scrolling area (list container)
+    if (wrap){
+      // Ensure it truly sits above any floating HUD pills
+      // (Hospital overlay uses z-index:50; give Bank plenty of headroom.)
+      wrap.style.position = 'fixed';
+      wrap.style.inset    = '0';
+      wrap.style.zIndex   = '10060';
+      // A solid click-blocking backdrop prevents click-throughs
+      // (rgba alpha in 0..1 — avoid values like "rgba(...,45)" from older code)
+      const cs = getComputedStyle(wrap);
+      if (!/rgba\(/i.test(cs.background || '')) {
+        wrap.style.background = 'rgba(0,0,0,0.45)';
+      }
+    }
+    if (body){
+      // Let content grow but never push layout; add native scroll
+      body.style.maxHeight    = '56vh';    // tweak as you like
+      body.style.overflow     = 'auto';
+      body.style.paddingRight = '4px';     // small gutter so scrollbar doesn’t overlay text
+      body.style.boxSizing    = 'border-box';
+    }
+  }
+
+  // Wire open/close hooks
+  // If your Bank code dispatches these (mirrors your inventory/map events),
+  // we use them to toggle pills + apply styles reliably.
+  window.addEventListener('izza-bank-open',  ()=>{ _styleBankOverlay(); _toggleFloatPillsDisabled(true);  });
+  window.addEventListener('izza-bank-close', ()=>{ _toggleFloatPillsDisabled(false); });
+
+  // Also style if the DOM appears late / updated dynamically
+  const mo = new MutationObserver(()=>{ _styleBankOverlay(); });
+  mo.observe(document.body, {subtree:true, childList:true});
+
+  // First pass once scripts finish
+  requestAnimationFrame(_styleBankOverlay);
+})();
   function hospitalOpen(){
     ensureShopUI();
     const api=IZZA.api; if(!api?.ready) return;
