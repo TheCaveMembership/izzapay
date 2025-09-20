@@ -982,17 +982,68 @@ function svgIcon(id, w, h){
     }
     return host;
   }
-  function toggleInventoryPanel(){
-    const host = ensureInvHost();
-    const on = host.style.display!=='none';
+
+// --- Float pill handling: push Friends/Craft/Full behind inventory when open ---
+const FLOAT_PILL_LABELS = ['friends','craft','full'];
+
+function _findFloatPills(){
+  const out = new Set();
+
+  // 1) Try stable IDs if they exist
+  ['btnFriends','btnCraft','btnFull'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) out.add(el);
+  });
+
+  // 2) Fallback by visible text (case-insensitive, trims whitespace)
+  document.querySelectorAll('button, .pill, .chip, .ghost').forEach(el=>{
+    try{
+      const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+      if (FLOAT_PILL_LABELS.includes(t)) out.add(el);
+    }catch{}
+  });
+
+  return Array.from(out);
+}
+
+function _floatPillsBehindInventory(on){
+  const pills = _findFloatPills();
+  pills.forEach(el=>{
     if(on){
-      host.style.display = 'none';
+      // remember original stacking + interactivity just once
+      if(!el.dataset._prevZ){ el.dataset._prevZ = (el.style.zIndex || ''); }
+      if(!el.dataset._prevPE){ el.dataset._prevPE = (el.style.pointerEvents || ''); }
+
+      // push behind and disable clicks while the inventory is open
+      el.style.zIndex = '0';
+      el.style.pointerEvents = 'none';
     }else{
-      closeMapUI();
-      host.style.display = 'block';
-      renderInventoryPanel();
+      // restore exactly what was there before
+      if(' _prevZ' in el.dataset || '_prevZ' in el.dataset){
+        el.style.zIndex = el.dataset._prevZ;
+      }
+      if('_prevPE' in el.dataset){
+        el.style.pointerEvents = el.dataset._prevPE;
+      }
+      delete el.dataset._prevZ;
+      delete el.dataset._prevPE;
     }
+  });
+}
+  
+  function toggleInventoryPanel(){
+  const host = ensureInvHost();
+  const on = host.style.display!=='none';
+  if(on){
+    host.style.display = 'none';
+    _floatPillsBehindInventory(false);   // restore Friends/Craft/Full
+  }else{
+    closeMapUI();
+    host.style.display = 'block';
+    _floatPillsBehindInventory(true);    // push Friends/Craft/Full behind & disable
+    renderInventoryPanel();
   }
+}
   // --- Dynamic armour renderer (for plugin-added sets) ---
 function _armorKeysAlreadyShown(host){
   const s = new Set();
