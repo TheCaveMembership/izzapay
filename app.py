@@ -49,6 +49,29 @@ except ImportError:
                 )
             """)
 
+def ensure_voucher_tables():
+    with conn() as cx:
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS voucher_redirects (
+                token TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                payment_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS mint_codes (
+                code TEXT PRIMARY KEY,
+                credits INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'issued',  -- 'issued' | 'consumed'
+                payment_id TEXT,
+                session_id TEXT,
+                created_at INTEGER NOT NULL,
+                consumed_at INTEGER
+            )
+        """)
+
 # Create the “already-claimed” ledger once on boot (not inside other functions)
 with conn() as cx:
     cx.execute("""
@@ -73,7 +96,6 @@ LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstr
 # This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
 SINGLE_CREDIT_LINK_ID = "d0b811e8"
 # Where to send buyers after a successful “izza-game-crafting” purchase
-VOUCHER_PATH = os.getenv("VOUCHER_PATH", "/izza-game/voucher")
 
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
@@ -143,33 +165,6 @@ def _ok(**kw):
 def _err(reason="unknown"):
     return jsonify({"ok": False, "reason": str(reason)}), 400
 
-# --- Mint-code helpers (voucher system) --------------------------------------
-def _ensure_mint_codes(cx):
-    cx.execute("""
-        CREATE TABLE IF NOT EXISTS mint_codes(
-          code     TEXT PRIMARY KEY,
-          user_id  INTEGER,
-          used     INTEGER DEFAULT 0,
-          used_at  INTEGER
-        )
-    """)
-
-def _new_mint_code(cx, user_id: int | None) -> str:
-    import secrets, time
-    _ensure_mint_codes(cx)
-    # 8-hex (uppercase) like "A1B2C3D4"
-    for _ in range(5):
-        code = secrets.token_hex(4).upper()
-        try:
-            cx.execute("INSERT INTO mint_codes(code, user_id) VALUES(?,?)", (code, int(user_id or 0)))
-            return code
-        except Exception:
-            # rare collision, try again
-            pass
-    # last-resort (very unlikely)
-    code = secrets.token_hex(4).upper()
-    cx.execute("INSERT OR IGNORE INTO mint_codes(code, user_id) VALUES(?,?)", (code, int(user_id or 0)))
-    return code
 
 # === Crafting grant hook (separate concern, no schema creation here) ============
 def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: int):
@@ -849,7 +844,7 @@ def get_or_create_cart(merchant_id, cid=None):
         cx.execute("INSERT INTO carts(id, merchant_id, created_at) VALUES(?,?,?)",
                    (cid, merchant_id, int(time.time())))
         return cid
-
+        
 def pi_headers():
     if not PI_API_KEY:
         raise RuntimeError("PI_PLATFORM_API_KEY is required")
@@ -1955,6 +1950,63 @@ def checkout(link_id):
         colorway=i["colorway"]
     )
 
+@app.get("/voucher/new")
+def voucher_new():
+    ensure_voucher_tables()
+    tok = request.args.get("token", "").strip()
+    if not tok:
+        return "<h2>Link expired</h2>", 410
+
+    with conn() as cx:
+        row = cx.execute("SELECT * FROM voucher_redirects WHERE token=? AND used=0", (tok,)).fetchone()
+        if not row:
+            return "<h2>Link expired</h2>", 410
+        # one-shot
+        cx.execute("UPDATE voucher_redirects SET used=1 WHERE token=?", (tok,))
+
+    # generate a fresh, single-use code
+    import secrets, time
+    code = ("IZZA-" + secrets.token_hex(6)).upper()  # e.g., IZZA-AB12CD34EF56
+    with conn() as cx:
+        cx.execute(
+            """INSERT INTO mint_codes(code, credits, status, payment_id, session_id, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (code, 1, "issued", row["payment_id"], row["session_id"], int(time.time()))
+        )
+
+    # very simple HTML (you can replace with a template):
+    return f"""
+      <div style="font-family:ui-sans-serif,system-ui;max-width:560px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px">
+        <h2 style="margin:0 0 8px">Your voucher code</h2>
+        <p style="opacity:.8;margin:0 0 10px">Use this in the Crafting UI to add 1 mint credit.</p>
+        <div style="font-size:20px;font-weight:700;background:#f6f7fb;border:1px dashed #c6c8d1;border-radius:8px;padding:10px 12px">{code}</div>
+        <button onclick="navigator.clipboard.writeText('{code}');this.textContent='Copied ✓';"
+                style="margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer">
+          Copy
+        </button>
+        <div style="margin-top:16px;opacity:.7">You can now return to the game and paste this code.</div>
+      </div>
+    """
+
+@app.post("/api/mint_codes/consume")
+def consume_mint_code():
+    ensure_voucher_tables()
+    code = (request.get_json(silent=True) or {}).get("code", "").strip().upper()
+    if not code:
+        return jsonify(ok=False, reason="invalid"), 400
+    import time
+    with conn() as cx:
+        rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
+        if not rec:
+            return jsonify(ok=False, reason="invalid"), 404
+        if rec["status"] != "issued":
+            return jsonify(ok=False, reason="used"), 409
+        cx.execute(
+            "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
+            (int(time.time()), code)
+        )
+    return jsonify(ok=True, creditsAdded=int(rec["credits"] or 1))
+    
 # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
 def pi_approve():
@@ -2016,30 +2068,27 @@ def pi_complete():
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
 
-    # ✅ Grant mint credit ONLY for the single-mint checkout path
+    # === Voucher-redirect setup (one-shot token created after successful verify) ===
+    # We don't grant credits here anymore; we just create a redirect token.
     try:
-        username      = s["pi_username"]  # set when session is created
-        checkout_path = s["checkout_path"] if "checkout_path" in s.keys() else None
+        ensure_voucher_tables()  # creates tables if missing
 
-        if username and checkout_path == "/checkout/d0b811e8":
-            # Optional: basic idempotency by tagging request with payment_id
-            requests.post(
-                "https://izzapay.onrender.com/api/credits/claim",
-                json={
-                    "username": username,
-                    "source": "pi",
-                    "credits": 1,
-                    "idempotency_key": f"pi:{payment_id}"
-                },
-                timeout=5
+        import secrets, time
+        vtoken = secrets.token_urlsafe(32)
+        with conn() as cx:
+            cx.execute(
+                """INSERT INTO voucher_redirects(token, session_id, payment_id, created_at, used)
+                   VALUES (?,?,?,?,0)""",
+                (vtoken, s["id"], payment_id, int(time.time()))
             )
-            print(f"[pi_complete] credit granted to {username} for {payment_id}")
-        else:
-            print(f"[pi_complete] no credit grant (path={checkout_path})")
+        # (We do not return here; fulfill_session will choose the correct redirect)
+        print(f"[pi_complete] voucher redirect token created for session {s['id']}")
     except Exception as e:
-        print("[pi_complete] credit grant failed:", e)
+        # Non-fatal; worst case we fall back to default store redirect inside fulfill_session
+        print("[pi_complete] voucher token creation failed:", e)
 
     return fulfill_session(s, txid, buyer, shipping)
+
 
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
@@ -2284,14 +2333,22 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
     # SPECIAL CASE: izza-game-crafting → send to voucher page instead
     slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-    if slug == "izza-game-crafting":
-        # Keep the bearer token (if present) and the craftPaid=1 flag so the page
-        # can trigger /api/crafting/credits/reconcile and update the balance.
-        base = f"{BASE_ORIGIN}{VOUCHER_PATH}"
-        if tok:
-            redirect_url = f"{base}?t={tok}&craftPaid=1"
-        else:
-            redirect_url = f"{base}?craftPaid=1"
+
+    # Try to find a voucher redirect token we created for this session
+    voucher_redirect_url = None
+    try:
+        with conn() as cx:
+            vr = cx.execute(
+                "SELECT token FROM voucher_redirects WHERE session_id=? AND used=0 ORDER BY created_at DESC LIMIT 1",
+                (s["id"],)
+            ).fetchone()
+        if vr and vr["token"]:
+            voucher_redirect_url = f"{BASE_ORIGIN}/voucher/new?token={vr['token']}"
+    except Exception as e:
+        print("[fulfill_session] voucher token lookup failed:", e)
+
+    if slug == "izza-game-crafting" and voucher_redirect_url:
+        redirect_url = voucher_redirect_url
     else:
         redirect_url = default_target
 
@@ -2324,8 +2381,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         )
 
     return resp
-
-# Provide a concrete cancel endpoint used by /payment/error
 @app.post("/payment/cancel")
 def payment_cancel():
     """
