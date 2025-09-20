@@ -641,11 +641,6 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
         if(typeof p.moveSpeed==='number') p.moveSpeed = Math.max(base.moveSpeed, base.moveSpeed*boost);
         if(typeof p.maxSpeed==='number')  p.maxSpeed  = Math.max(base.maxSpeed,  base.maxSpeed*boost);
         if(typeof p.maxVel==='number')    p.maxVel    = Math.max(base.maxVel,    base.maxVel*boost);
-      }else if(base){
-        if(typeof p.speed==='number')     p.speed     = base.speed;
-        if(typeof p.moveSpeed==='number') p.moveSpeed = base.moveSpeed;
-        if(typeof p.maxSpeed==='number')  p.maxSpeed  = base.maxSpeed;
-        if(typeof p.maxVel==='number')    p.maxVel    = base.maxVel;
       }
     });
   })();
