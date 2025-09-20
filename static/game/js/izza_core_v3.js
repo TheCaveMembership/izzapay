@@ -381,6 +381,52 @@ function _findBankHost(){
   return null;
 }
 
+/* >>> PATCH: bank pills + scrolling helpers (ADD right after _findBankHost) */
+
+// Hide/disable the FRIENDS / CRAFT / FULL pills strictly while the bank is open
+function _togglePillsForBank(visible){
+  const pills = (typeof _findFloatPills === 'function') ? _findFloatPills() : [];
+  pills.forEach(el=>{
+    if (visible){
+      if (!el.dataset._origZ)   el.dataset._origZ   = el.style.zIndex || '';
+      if (!el.dataset._origPE)  el.dataset._origPE  = el.style.pointerEvents || '';
+      if (!el.dataset._origVis) el.dataset._origVis = el.style.visibility || '';
+      el.style.zIndex = '0';
+      el.style.pointerEvents = 'none';
+      el.style.visibility = 'hidden';
+    }else{
+      if ('_origZ'   in el.dataset) el.style.zIndex = el.dataset._origZ;
+      if ('_origPE'  in el.dataset) el.style.pointerEvents = el.dataset._origPE;
+      if ('_origVis' in el.dataset) el.style.visibility = el.dataset._origVis;
+      delete el.dataset._origZ;
+      delete el.dataset._origPE;
+      delete el.dataset._origVis;
+    }
+  });
+}
+
+// Keep the bank’s item list from pushing the layout; make it scroll inside the bank
+function _ensureBankListScrollable(){
+  const host = _findBankHost(); if(!host) return;
+
+  // Try common list containers; fall back to a dense child div; last resort host
+  let list =
+    host.querySelector('.bank-list, [role="list"], ul, ol, .list, .items') ||
+    Array.from(host.querySelectorAll('div, section, article'))
+      .find(el => el !== host && el.children && el.children.length >= 4 && el.querySelector('button'));
+
+  if (!list) list = host;
+
+  if (!list.dataset._scroll_applied){
+    list.dataset._scroll_applied = '1';
+    list.style.maxHeight = list.style.maxHeight || '60vh';
+    list.style.overflowY = 'auto';
+    list.style.webkitOverflowScrolling = 'touch';
+  }
+}
+/* <<< PATCH END */
+  
+/** Make sure the bank floats above pills + disable pills while open */
 /** Make sure the bank floats above pills + disable pills while open */
 function _elevateBankHost(on){
   const host = _findBankHost();
@@ -391,15 +437,18 @@ function _elevateBankHost(on){
     if (!host.dataset._prevZ)   host.dataset._prevZ   = host.style.zIndex || '';
     host.style.position = host.style.position || 'relative';
     host.style.zIndex   = String(_BANK_Z);
-    try{ _floatPillsBehindInventory(true); }catch{}
+
+    // HARD hide/disable FRIENDS / CRAFT / FULL while bank is open
+    try{ _togglePillsForBank(true); }catch{}
   }else{
     if ('_prevPos' in host.dataset) host.style.position = host.dataset._prevPos;
     if ('_prevZ'   in host.dataset) host.style.zIndex   = host.dataset._prevZ;
     delete host.dataset._prevPos; delete host.dataset._prevZ;
-    try{ _floatPillsBehindInventory(false); }catch{}
+
+    // Restore those pills
+    try{ _togglePillsForBank(false); }catch{}
   }
 }
-
 /** Utility: clean item names for display */
 function _prettyItemName(k){
   if (!k) return '';
@@ -544,6 +593,7 @@ function _decorateBankList(){
     if (!host) return;
     const visible = host.offsetParent !== null || getComputedStyle(host).display!=='none';
     _elevateBankHost(visible);
+    _ensureBankListScrollable();
     if (visible) _decorateBankList();
   }
 
