@@ -484,6 +484,52 @@ function hideWait(node){
   return await r.json().catch(() => ({}));
 }
 
+// ---- Single source of truth for voucher redemption ----
+async function redeemMintCode(codeRaw){
+  const code = String(codeRaw || '').trim().toUpperCase();
+  const body = JSON.stringify({ code });
+
+  // Try same-origin first (works when Crafting UI is under izzapay via /izza-game)
+  async function hit(url){
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body
+    });
+    let data = null;
+    try { data = await r.json(); } catch {} // tolerate empty body
+
+    if (r.ok) return data || { ok:true, creditsAdded:1 };
+
+    // Map common server statuses to UI reasons
+    const reason =
+      (data && data.reason) ||
+      (r.status === 404 ? 'invalid' :
+       r.status === 400 ? 'used'    : // app.py returns 400 for "used" or "missing"
+       'unknown');
+
+    return { ok:false, reason };
+  }
+
+  try {
+    // same-origin (via API_BASE '' + DispatcherMiddleware)
+    const res = await hit('/api/mint_codes/consume');
+    // If CORS/host mismatch caused a fetch failure above, fall back:
+    if (!res || (res.ok === false && res.reason === 'network')) {
+      // force absolute to izzapay (works if UI is opened on a different host)
+      return await hit('https://izzapay.onrender.com/api/mint_codes/consume');
+    }
+    return res;
+  } catch {
+    // Last resort: absolute host
+    try {
+      return await hit('https://izzapay.onrender.com/api/mint_codes/consume');
+    } catch {
+      return { ok:false, reason:'network' };
+    }
+  }
+}
+  
   // --- credit reconcile (server-first) ---
 async function reconcileCraftCredits(){
   try{
@@ -1507,18 +1553,6 @@ function bindInside(){
 const redeemInput = root.querySelector('#redeemCode');
 const redeemBtn   = root.querySelector('#btnRedeem');
 const redeemStat  = root.querySelector('#redeemStatus');
-
-async function redeemMintCode(code){
-  try{
-    const j = await serverJSON(api('/api/crafting/code/redeem'), {
-      method:'POST',
-      body: JSON.stringify({ code: String(code||'').trim() })
-    });
-    return j;
-  }catch(e){
-    return { ok:false, reason:'network' };
-  }
-}
 
 if (redeemBtn){
   redeemBtn.addEventListener('click', async ()=>{
