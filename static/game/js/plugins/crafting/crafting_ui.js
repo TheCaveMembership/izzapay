@@ -271,9 +271,9 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     hasPaidForCurrentItem: false,
     currentSVG: '',
     currentName: '',
+    featureLevels: {},   // <-- needed so first toggle shows meters without switching category
     featureFlags: {
       // weapon shared
-      featureLevels: {},
       dmgBoost: false,
       // gun only
       fireRate: false,
@@ -447,15 +447,15 @@ function renderFeatureMeters(){
       const lvl = Math.max(ui.min, (typeof rawLvl==='number' ? rawLvl : ui.min));
       const prev = meterPreview(k, lvl);
 
-      // Make 1..3 clickable pills (bounded by min/max)
+      // 1..3 clickable pills (horizontal)
       const pills = [];
       for (let i = ui.min; i <= ui.max; i++){
         pills.push(`
-          <button type="button"
-                  class="lvl-pill ${i===lvl?'on':''}"
-                  data-m="${k}" data-lvl="${i}"
-                  aria-pressed="${i===lvl?'true':'false'}"
-                  style="min-width:28px;height:28px;border-radius:6px;border:1px solid #2a3550;background:${i===lvl?'#0b2b17':'#0b0f17'};padding:0 8px;font-size:12px;font-weight:700;cursor:pointer">
+          <button
+            type="button"
+            class="lvl-pill ${i===lvl?'on':''}"
+            data-m="${k}" data-lvl="${i}"
+            aria-pressed="${i===lvl?'true':'false'}">
             ${i}
           </button>`);
       }
@@ -463,7 +463,7 @@ function renderFeatureMeters(){
       return `
         <div class="meter" data-meter="${k}" style="margin:8px 0;display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center">
           <div style="opacity:.85;font-size:12px">${ui.label}</div>
-          <div class="lvl-wrap" style="display:flex;gap:6px;flex-wrap:wrap">${pills.join('')}</div>
+          <div class="lvl-wrap">${pills.join('')}</div>
           <div data-out="${k}" style="font-size:12px;opacity:.8;text-align:right">${prev}</div>
         </div>`;
     });
@@ -475,14 +475,32 @@ function renderFeatureMeters(){
 
   if (!rows.length && !fxBlocks.length) return '';
 
-  // Local styles for pills (kept inline/surgical)
+  // Local CSS (forces horizontal pills + overrides global button styles)
   const localCSS = `
     <style>
+      .lvl-wrap{
+        display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+      }
+      .lvl-pill{
+        display:inline-flex; align-items:center; justify-content:center;
+        min-width:28px; height:28px; padding:0 10px;
+        border-radius:6px; border:1px solid #2a3550;
+        background:#0b0f17; font-size:12px; font-weight:700; cursor:pointer;
+        line-height:1; white-space:nowrap; width:auto;  /* override any global button width */
+      }
       .lvl-pill:focus{ outline:none; box-shadow:0 0 0 2px rgba(27,215,96,.35); }
-      .lvl-pill.on{ box-shadow: inset 0 0 0 1px #1bd760; color:#b8ffd1; }
+      .lvl-pill.on{ box-shadow: inset 0 0 0 1px #1bd760; color:#b8ffd1; background:#0b2b17; }
+
+      .meter{display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center}
       @media (max-width: 480px){
         .meter{ grid-template-columns:120px 1fr; }
         .meter [data-out]{ grid-column:1/-1; text-align:left; opacity:.8; margin-top:2px }
+      }
+
+      /* keep interactions local so drags/clicks don’t bubble to the close bar */
+      .meter-box{
+        margin-top:6px;border:1px solid #2a3550;border-radius:10px;background:#0b0f17;padding:10px;
+        touch-action: pan-y; -webkit-tap-highlight-color:transparent; contain:layout paint;
       }
     </style>`;
 
@@ -490,9 +508,7 @@ function renderFeatureMeters(){
     <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
       ${localCSS}
       <div style="font-weight:700;margin-bottom:6px">Performance Meters</div>
-      <div class="meter-box"
-           style="margin-top:6px;border:1px solid #2a3550;border-radius:10px;background:#0b0f17;padding:10px;
-                  -webkit-tap-highlight-color:transparent;contain:layout paint;">
+      <div class="meter-box">
         ${rows.join('')}
         ${fxBlocks.join('')}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
