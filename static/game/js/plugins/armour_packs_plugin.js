@@ -70,7 +70,30 @@ const CRAFTED_WEAPON_BOOST  = 0.75;  // crafted weapons (hands) → make bigger
       localStorage.setItem(PB_KEY, JSON.stringify(pb));
     }catch{}
   }
+/* ==== ARMOUR DEFAULT STATS (additive) ==== */
+function defaultStatsForSet(set){
+  // map tags ➜ stats; tweak freely
+  const t = set.tags||{};
+  const base = { drPct:0.10, heartsBoost:0, staminaBoost:0 }; // baseline
+  if(t.tank){ base.drPct = 0.25; base.heartsBoost = 1; }
+  if(t.hybrid){ base.drPct = 0.15; base.heartsBoost = 0; base.staminaBoost = 0.10; }
+  if(t.ranged){ base.drPct = 0.12; base.staminaBoost = 0.15; }
+  if(t.prestige){ base.drPct += 0.05; base.heartsBoost += 1; }
+  return base;
+}
 
+/* When creating the inventory entry for a purchased piece, stamp stats */
+function stampArmorStats(entry, set){
+  const s = defaultStatsForSet(set);
+  entry.drPct = typeof entry.drPct==='number' ? entry.drPct : s.drPct;
+  entry.heartsBoost = typeof entry.heartsBoost==='number' ? entry.heartsBoost : s.heartsBoost;
+  entry.staminaBoost = typeof entry.staminaBoost==='number' ? entry.staminaBoost : s.staminaBoost;
+}
+
+/* In addShopArmorRow(...) after you create/adjust inv[invKey], stamp: */
+inv[invKey] = inv[invKey] || { count:0, name, type:'armor', slot:piece.slot, equippable:true, iconSvg:inlineSvg };
+stampArmorStats(inv[invKey], set);
+  
   // ---- Data model for sets (easy to extend) ----
   const SETS = [
     { id:'bronze_street',   name:'Bronze Street',   price:50,  colors:{ base:'#b07a43', shade:'#6a4826', trim:'#2a2a2a', glow:'#ff4a2a' }, tags:{melee:true} },
