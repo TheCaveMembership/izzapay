@@ -449,23 +449,31 @@ function renderFeatureMeters(){
       return `
         <div class="meter" data-meter="${k}" style="margin:6px 0">
           <div style="opacity:.85;font-size:12px">${ui.label}</div>
-          <input type="range" min="${ui.min}" max="${ui.max}" step="1" value="${lvl}" data-m="${k}" style="width:100%;touch-action:pan-y;"/>
+          <input type="range"
+                 min="${ui.min}" max="${ui.max}" step="1" value="${lvl}" data-m="${k}"
+                 style="width:100%;touch-action:pan-y;"/>
           <div data-out="${k}" style="font-size:12px;opacity:.8;text-align:right">${prev}</div>
         </div>`;
     });
 
   // FX preset pickers (only when their toggles are on & allowed)
   const fxBlocks = [];
-  if (allow.toggles.includes('tracerFx') && STATE.featureFlags?.tracerFx) fxBlocks.push(renderTracerPicker());
-  if (allow.toggles.includes('swingFx')  && STATE.featureFlags?.swingFx)  fxBlocks.push(renderSwingPicker());
+  if (allow.toggles.includes('tracerFx') && STATE.featureFlags?.tracerFx) {
+    fxBlocks.push(renderTracerPicker());
+  }
+  if (allow.toggles.includes('swingFx') && STATE.featureFlags?.swingFx) {
+    fxBlocks.push(renderSwingPicker());
+  }
 
   if (!rows.length && !fxBlocks.length) return '';
   return `
     <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
       <div style="font-weight:700;margin-bottom:6px">Performance Meters</div>
       <div class="meter-box"
-           style="margin-top:6px;border:1px solid #2a3550;border-radius:10px;background:#0b0f17;padding:10px;
-                  touch-action:pan-y;-webkit-tap-highlight-color:transparent;contain:layout paint;">
+           style="margin-top:6px;border:1px solid #2a3550;border-radius:10px;
+                  background:#0b0f17;padding:10px;
+                  touch-action:pan-y;-webkit-tap-highlight-color:transparent;
+                  contain:layout paint;">
         ${rows.join('')}
         ${fxBlocks.join('')}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
@@ -474,6 +482,21 @@ function renderFeatureMeters(){
       </div>
     </div>`;
 }
+
+/* --- FX PRESETS (tiny previews) --- */
+const TRACER_PRESETS = [
+  { id:'comet',  name:'Comet Spark',  demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0" stop-opacity=".0"/><stop offset=".7" stop-opacity=".9"/></linearGradient></defs><path d="M5 15 H75" stroke="url(#g1)" stroke-width="3"/><circle cx="75" cy="15" r="3"/></svg>` },
+  { id:'ember',  name:'Fire Trail',   demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><path d="M5 15 C30 10 45 20 75 15" stroke="orange" stroke-width="2" fill="none"/><circle cx="75" cy="15" r="3" /></svg>` },
+  { id:'prism',  name:'Neon Prism',   demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><path d="M5 15 H75" stroke="#7af" stroke-width="2" /><path d="M5 12 H70" stroke="#fa7" stroke-width="1"/><path d="M5 18 H70" stroke="#af7" stroke-width="1"/><circle cx="75" cy="15" r="3"/></svg>` },
+  { id:'stardust',name:'Stardust',    demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><g opacity=".8"><circle cx="10" cy="15" r="1"/><circle cx="25" cy="13" r="1"/><circle cx="40" cy="16" r="1"/></g><path d="M5 15 H75" stroke="#fff" stroke-width="1.5"/><circle cx="75" cy="15" r="2"/></svg>` },
+];
+
+const SWING_PRESETS = [
+  { id:'arcLight', name:'Arc Light', demo:`<svg viewBox="0 0 80 40" xmlns="http://www.w3.org/2000/svg"><path d="M10 30 Q40 5 70 30" stroke="#7af" stroke-width="3" fill="none"/></svg>` },
+  { id:'emberCut', name:'Ember Cut', demo:`<svg viewBox="0 0 80 40" xmlns="http://www.w3.org/2000/svg"><path d="M10 30 Q40 8 70 30" stroke="orange" stroke-width="2" fill="none"/><circle cx="70" cy="30" r="3"/></svg>` },
+  { id:'shockwave',name:'Shockwave', demo:`<svg viewBox="0 0 80 40" xmlns="http://www.w3.org/2000/svg"><path d="M10 28 Q40 10 70 28" stroke="#fff" stroke-width="2" fill="none"/><path d="M14 30 Q40 16 66 30" stroke="#fff" stroke-width="1" fill="none" opacity=".5"/></svg>` },
+];
+  
 function renderPresetGrid(presets, chosen, dataAttr){
   const cells = presets.map(p => `
     <div class="preset ${chosen===p.id?'on':''}" ${dataAttr}="${p.id}" title="${p.name}">
