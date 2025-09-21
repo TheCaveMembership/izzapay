@@ -114,6 +114,54 @@
     return null;
   };
 
+  /* ==== APPLY CRAFTED WEAPON STATS (additive) ==== */
+function craftedGunTuning(){
+  const cg = firstEquippedCreatorGun(); if(!cg) return null;
+  const it = cg.it;
+  return {
+    // interval override (ms)
+    fireIntervalMs: clamp(parseInt(it.fireIntervalMs||TUNE.creatorGun.fireIntervalMs,10)||TUNE.creatorGun.fireIntervalMs, 60, 800),
+    // bullet speed multiplier
+    bulletSpeedMul: Math.max(0.4, Math.min(2.2, Number(it.bulletSpeedMul||1.0))),
+    // crit & damage boost
+    critChance: Math.max(0, Math.min(0.5, Number(it.critChance||0))),       // up to 50% hard cap
+    dmgMult:    Math.max(0.5, Math.min(3.0, Number(it.dmgMult||1.0)))
+  };
+}
+
+/* Replace usages where creatorGun fires to respect interval + speed */
+function creatorGunIntervalMs(){
+  const tune = craftedGunTuning();
+  return tune ? tune.fireIntervalMs : TUNE.creatorGun.fireIntervalMs;
+}
+function creatorGunSpeedMul(){
+  const tune = craftedGunTuning();
+  return tune ? tune.bulletSpeedMul : TUNE.creatorGun.bulletSpeedMul;
+}
+
+/* Hook into your bullet spawn to include damage payload */
+function computeBulletDamageBase(){
+  const kind = equippedKind();
+  let dmg = 1; // 1 segment baseline per bullet hit (your existing default)
+  if(kind==='creatorGun'){
+    const tune = craftedGunTuning()||{};
+    dmg *= (tune.dmgMult||1.0);
+    // crit?
+    if(Math.random() < (tune.critChance||0)){
+      dmg *= 1.8; // crit multiplier
+    }
+  }
+  return Math.max(0.5, Math.min(5, dmg));
+}
+
+/* Wherever you register a hit on NPC/PvP, use computeBulletDamageBase() to decide how many segments to subtract.
+   Example (pseudo inside applyImpactAt or collision loop):
+   const segments = Math.max(1, Math.round(computeBulletDamageBase()));
+   IZZA.emit('apply-seg-damage', { segs: segments, source:'bullet' }); 
+*/
+
+/* Also replace creator gun cadence to use creatorGunIntervalMs() */
+  
   function ammoFor(kind){
     const inv = readInv();
     if(kind==='grenade'){
