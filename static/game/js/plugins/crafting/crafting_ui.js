@@ -1728,7 +1728,7 @@ async function payForCraft(usePi){
     const redeemBtn   = root.querySelector('#btnRedeem');
     const redeemStat  = root.querySelector('#redeemStatus');
 
-    if (redeemBtn){
+        if (redeemBtn){
       redeemBtn.addEventListener('click', async ()=>{
         const code = redeemInput?.value || '';
         if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
@@ -1742,4 +1742,313 @@ async function payForCraft(usePi){
         redeemBtn.disabled = false;
 
         if (r && r.ok){
-          applyCreditState
+          applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1)); // server already credited
+          updateTabsHeaderCredits();
+          redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+        } else {
+          const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
+          redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+        }
+      }, { passive:true });
+    }
+
+    const itemName = root.querySelector('#itemName');
+    if (itemName){
+      itemName.value = STATE.currentName || '';
+      itemName.addEventListener('input', e=>{
+        STATE.currentName = e.target.value;
+        saveDraft();
+        updatePayButtonsState();
+      }, { passive:true });
+    }
+
+    const aiStyleSel = root.querySelector('#aiStyleSel');
+    const aiAnimChk  = root.querySelector('#aiAnimChk');
+    if (aiStyleSel){
+      aiStyleSel.value = STATE.aiStyle;
+      aiStyleSel.addEventListener('change', e=>{ STATE.aiStyle = e.target.value; saveDraft(); });
+    }
+    if (aiAnimChk){
+      aiAnimChk.checked = !!STATE.wantAnimation;
+      aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
+    }
+
+    // Feature checkboxes (simple on/off flags)
+    root.querySelectorAll('[data-ff]').forEach(cb=>{
+      const key = cb.dataset.ff;
+      if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
+      cb.addEventListener('change', ()=>{
+        STATE.featureFlags[key] = cb.checked;
+        saveDraft();
+        const host = root.querySelector('#craftTabs');
+        if (!host) return;
+        const saveScroll = host.scrollTop;
+        host.innerHTML = renderCreate();
+        bindInside();
+        bindFeatureMeters(STATE.root); // ensure sliders are wired after re-render
+        host.scrollTop = saveScroll;
+      });
+    });
+
+    const catSel  = root.querySelector('#catSel');
+    const partSel = root.querySelector('#partSel');
+
+    if (catSel && partSel){
+      catSel.value = STATE.currentCategory;
+      repopulatePartOptions(catSel, partSel);
+
+      catSel.addEventListener('change', e=>{
+        STATE.currentCategory = e.target.value;
+        repopulatePartOptions(catSel, partSel);
+        saveDraft();
+        updatePayButtonsState();
+        // rewire meters after category/part changes (weapon vs armor)
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (host){
+          const saveScroll = host.scrollTop;
+          host.innerHTML = renderCreate();
+          bindInside();
+          bindFeatureMeters(STATE.root);
+          host.scrollTop = saveScroll;
+        }
+      }, { passive:true });
+    }
+
+    if (partSel){
+      partSel.value = STATE.currentPart;
+      partSel.addEventListener('change', e=>{
+        STATE.currentPart = e.target.value;
+        saveDraft();
+        updatePayButtonsState();
+        // re-render to show correct meter set
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (host){
+          const saveScroll = host.scrollTop;
+          host.innerHTML = renderCreate();
+          bindInside();
+          bindFeatureMeters(STATE.root);
+          host.scrollTop = saveScroll;
+        }
+      }, { passive:true });
+    }
+
+    updatePayButtonsState();
+
+    const aiLeft = ()=> {
+      const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+      const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+    };
+
+    const btnAI    = root.querySelector('#btnAI');
+    const aiPrompt = root.querySelector('#aiPrompt');
+    const svgIn    = root.querySelector('#svgIn');
+    const btnPrev  = root.querySelector('#btnPreview');
+    const btnMint  = root.querySelector('#btnMint');
+    const prevHost = root.querySelector('#svgPreview');
+    const craftStatus = root.querySelector('#craftStatus');
+
+    if (svgIn && STATE.currentSVG){
+      svgIn.value = STATE.currentSVG;
+      prevHost && (prevHost.innerHTML = STATE.currentSVG);
+    }
+
+    // Sub-tab switching
+    root.querySelectorAll('[data-sub]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const next = b.dataset.sub;
+        // Only allow Visuals when unlocked
+        if (next === 'visuals' && !STATE.canUseVisuals) return;
+        STATE.createSub = next;
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (host){
+          host.innerHTML = renderCreate();
+          bindInside();
+          bindFeatureMeters(STATE.root);
+          _syncVisualsTabStyle();
+        }
+      }, { passive:true });
+    });
+
+    // ===== Handlers =====
+    btnAI && btnAI.addEventListener('click', async ()=>{
+      if (!btnAI) return;
+      const prompt = String(aiPrompt?.value||'').trim();
+      if (!prompt) return;
+
+      btnAI.disabled = true;
+      btnAI.setAttribute('aria-busy','true');
+      btnAI.textContent = 'Generating…';
+      const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+
+      try{
+        const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
+        if (svgIn) svgIn.value = svg;
+        if (prevHost) {
+          prevHost.innerHTML = svg;
+          const s = prevHost.querySelector('svg');
+          if (s) {
+            s.setAttribute('preserveAspectRatio','xMidYMid meet');
+            s.style.maxWidth='100%';
+            s.style.height='auto';
+            s.style.display='block';
+          }
+          prevHost.scrollTop = prevHost.scrollHeight;
+          prevHost.scrollIntoView({block:'nearest'});
+        }
+        STATE.currentSVG = svg;
+        saveDraft();
+        const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+        aiLeft();
+      }catch(e){
+        alert('AI failed: ' + (e?.message || e));
+      }finally{
+        hideWait(waitEl);
+        btnAI.disabled = false;
+        btnAI.removeAttribute('aria-busy');
+        btnAI.textContent = 'AI → SVG';
+      }
+    });
+
+    btnPrev && btnPrev.addEventListener('click', ()=>{
+      const cleaned = sanitizeSVG(svgIn?.value);
+      if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
+      if (prevHost) {
+        prevHost.innerHTML = cleaned;
+        const s = prevHost.querySelector('svg');
+        if (s) {
+          s.setAttribute('preserveAspectRatio','xMidYMid meet');
+          s.style.maxWidth='100%';
+          s.style.height='auto';
+          s.style.display='block';
+        }
+        prevHost.scrollTop = prevHost.scrollHeight;
+        prevHost.scrollIntoView({block:'nearest'});
+      }
+      STATE.currentSVG = cleaned;
+      saveDraft();
+      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+    });
+
+    btnMint && btnMint.addEventListener('click', async ()=>{
+      craftStatus.textContent = '';
+
+      const nm = moderateName(STATE.currentName);
+      if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+
+      const freeTest   = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
+      const hasCredit  = totalMintCredits() > 0; // counts single credits + package items
+
+      if (!STATE.hasPaidForCurrentItem && !hasCredit && !freeTest){
+        craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+        return;
+      }
+      if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+
+      const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+      const sellInPi   = !!root.querySelector('#sellInPi')?.checked; // harmless if not rendered
+      const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+
+      try{
+        const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+
+        const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+          ? window.ArmourPacks.injectCraftedItem({
+              name: STATE.currentName,
+              category: STATE.currentCategory,
+              part: STATE.currentPart,
+              svg: normalizedForSlot,
+              priceIC,
+              sellInShop,
+              sellInPi,
+              featureFlags: STATE.featureFlags
+            })
+          : { ok:false, reason:'armour-packs-hook-missing' };
+
+        if (injected && injected.ok){
+          // ---- SUCCESS: Minted ----
+          craftStatus.textContent = 'Crafted ✓';
+
+          // Clear single-use flag and handle package credits (if used)
+          STATE.hasPaidForCurrentItem = false;
+          if (STATE.packageCredits && STATE.packageCredits.items > 0){
+            STATE.packageCredits.items -= 1;
+            if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+          }
+
+          // Decrement stacked single-use credits (Visuals stays unlocked while > 0)
+          if (typeof STATE.mintCredits === 'number') {
+            STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
+          }
+          // Lock/unlock Visuals based on remaining credits
+          const stillHasCredit = (STATE.mintCredits|0) > 0 || (STATE.packageCredits && STATE.packageCredits.items > 0);
+          STATE.canUseVisuals = !!stillHasCredit;
+
+          // Persist + get craftedId (from inject OR server)
+          let craftedId = injected.id || null;
+          try {
+            const u = encodeURIComponent(
+              (window?.IZZA?.player?.username)
+              || (window?.IZZA?.me?.username)
+              || localStorage.getItem('izzaPlayer')
+              || localStorage.getItem('pi_username')
+              || ''
+            );
+            if (u) {
+              const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
+                method: 'POST',
+                body: JSON.stringify({
+                  name: STATE.currentName,
+                  category: STATE.currentCategory,
+                  part: STATE.currentPart,
+                  svg: normalizedForSlot,
+                  sku: '',
+                  image: ''
+                })
+              });
+              if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
+            }
+          } catch(e) {
+            console.warn('[craft] persist failed:', e); // non-fatal
+          }
+
+          // Mirror into My Creations + optional refresh
+          try { mirrorInjectedInventoryToMine(injected); } catch {}
+          try { hydrateMine(); } catch {}
+
+          // After a successful Mint: return to Setup
+          STATE.createSub = 'setup';
+          const host = STATE.root?.querySelector('#craftTabs');
+          if (host){
+            host.innerHTML = renderCreate();
+            bindInside();
+            bindFeatureMeters(STATE.root);
+            _syncVisualsTabStyle();
+          }
+
+          // Optional IZZA Pay merchant handoff
+          if (sellInPi && craftedId) {
+            const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+            try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
+            const qs = new URLSearchParams({ attach: String(craftedId) });
+            try {
+              const t = localStorage.getItem('izzaBearer') || '';
+              if (t) qs.set('t', t);
+            } catch {}
+            location.href = `/merchant?${qs.toString()}`;
+          }
+        } else {
+          craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+        }
+      }catch(e){
+        craftStatus.textContent = 'Error crafting: ' + e.message;
+      }
+    }); // <-- closes btnMint handler
+
+    // finally, wire sliders/meters on initial render
+    bindFeatureMeters(STATE.root);
+
+  } // <-- closes bindInside()
+
+  /* ---------- Public API ---------- */
+  window.CraftingUI = { mount, unmount };
+})(); // <-- closes IIFE
