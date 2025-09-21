@@ -273,6 +273,7 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     currentName: '',
     featureFlags: {
       // weapon shared
+      featureLevels: {},
       dmgBoost: false,
       // gun only
       fireRate: false,
@@ -443,37 +444,55 @@ function renderFeatureMeters(){
     .map(k=>{
       const ui = METER_UI[k];
       const rawLvl = STATE.featureLevels?.[k];
-      // If toggle just got turned on and level was 0/undefined → start at 1 (baseline)
       const lvl = Math.max(ui.min, (typeof rawLvl==='number' ? rawLvl : ui.min));
       const prev = meterPreview(k, lvl);
+
+      // Make 1..3 clickable pills (bounded by min/max)
+      const pills = [];
+      for (let i = ui.min; i <= ui.max; i++){
+        pills.push(`
+          <button type="button"
+                  class="lvl-pill ${i===lvl?'on':''}"
+                  data-m="${k}" data-lvl="${i}"
+                  aria-pressed="${i===lvl?'true':'false'}"
+                  style="min-width:28px;height:28px;border-radius:6px;border:1px solid #2a3550;background:${i===lvl?'#0b2b17':'#0b0f17'};padding:0 8px;font-size:12px;font-weight:700;cursor:pointer">
+            ${i}
+          </button>`);
+      }
+
       return `
-        <div class="meter" data-meter="${k}" style="margin:6px 0">
+        <div class="meter" data-meter="${k}" style="margin:8px 0;display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center">
           <div style="opacity:.85;font-size:12px">${ui.label}</div>
-          <input type="range"
-                 min="${ui.min}" max="${ui.max}" step="1" value="${lvl}" data-m="${k}"
-                 style="width:100%;touch-action:pan-y;"/>
+          <div class="lvl-wrap" style="display:flex;gap:6px;flex-wrap:wrap">${pills.join('')}</div>
           <div data-out="${k}" style="font-size:12px;opacity:.8;text-align:right">${prev}</div>
         </div>`;
     });
 
   // FX preset pickers (only when their toggles are on & allowed)
   const fxBlocks = [];
-  if (allow.toggles.includes('tracerFx') && STATE.featureFlags?.tracerFx) {
-    fxBlocks.push(renderTracerPicker());
-  }
-  if (allow.toggles.includes('swingFx') && STATE.featureFlags?.swingFx) {
-    fxBlocks.push(renderSwingPicker());
-  }
+  if (allow.toggles.includes('tracerFx') && STATE.featureFlags?.tracerFx) fxBlocks.push(renderTracerPicker());
+  if (allow.toggles.includes('swingFx')  && STATE.featureFlags?.swingFx)  fxBlocks.push(renderSwingPicker());
 
   if (!rows.length && !fxBlocks.length) return '';
+
+  // Local styles for pills (kept inline/surgical)
+  const localCSS = `
+    <style>
+      .lvl-pill:focus{ outline:none; box-shadow:0 0 0 2px rgba(27,215,96,.35); }
+      .lvl-pill.on{ box-shadow: inset 0 0 0 1px #1bd760; color:#b8ffd1; }
+      @media (max-width: 480px){
+        .meter{ grid-template-columns:120px 1fr; }
+        .meter [data-out]{ grid-column:1/-1; text-align:left; opacity:.8; margin-top:2px }
+      }
+    </style>`;
+
   return `
     <div style="margin-top:12px;border-top:1px solid #2a3550;padding-top:10px">
+      ${localCSS}
       <div style="font-weight:700;margin-bottom:6px">Performance Meters</div>
       <div class="meter-box"
-           style="margin-top:6px;border:1px solid #2a3550;border-radius:10px;
-                  background:#0b0f17;padding:10px;
-                  touch-action:pan-y;-webkit-tap-highlight-color:transparent;
-                  contain:layout paint;">
+           style="margin-top:6px;border:1px solid #2a3550;border-radius:10px;background:#0b0f17;padding:10px;
+                  -webkit-tap-highlight-color:transparent;contain:layout paint;">
         ${rows.join('')}
         ${fxBlocks.join('')}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
@@ -482,7 +501,6 @@ function renderFeatureMeters(){
       </div>
     </div>`;
 }
-
 /* --- FX PRESETS (tiny previews) --- */
 const TRACER_PRESETS = [
   { id:'comet',  name:'Comet Spark',  demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0" stop-opacity=".0"/><stop offset=".7" stop-opacity=".9"/></linearGradient></defs><path d="M5 15 H75" stroke="url(#g1)" stroke-width="3"/><circle cx="75" cy="15" r="3"/></svg>` },
@@ -533,61 +551,37 @@ function bindFeatureMeters(root){
     if (out) out.textContent = meterPreview(mKey, lvl);
   };
 
-  // --- range inputs
-  wrap.querySelectorAll('.meter input[type="range"][data-m]').forEach(inp=>{
-    const key = inp.dataset.m;
+  // Stop clicks inside the meter box from bubbling to any parent close/drag bars
+  const meterBox = wrap.querySelector('.meter-box');
+  if (meterBox){
+    ['pointerdown','pointerup','click','touchstart','touchend','mousedown','mouseup']
+      .forEach(ev => meterBox.addEventListener(ev, e=>{
+        e.stopPropagation();
+      }, { passive:true }));
+  }
 
-    // Ensure the slider itself doesn’t trigger parent drags/close bars while interacting
-    const stop = (e)=>{
-      try{ e.preventDefault(); }catch{}
-      try{ e.stopPropagation(); }catch{}
-      try{ e.stopImmediatePropagation && e.stopImmediatePropagation(); }catch{}
-    };
+  // Delegate clicks on the level pills
+  wrap.querySelectorAll('.lvl-pill[data-m][data-lvl]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const key = btn.getAttribute('data-m');
+      const lvl = parseInt(btn.getAttribute('data-lvl'), 10) || 1;
 
-    // Capture pointer only while pressed on the slider; release afterward
-    inp.addEventListener('pointerdown', (e)=>{
-      // Only act on primary button/finger
-      if (e.isPrimary === false) return;
-      stop(e);
-      try{ inp.setPointerCapture && inp.setPointerCapture(e.pointerId); }catch{}
-      // avoid accidental text selection
-      inp.style.userSelect = 'none';
-      inp.style.webkitUserSelect = 'none';
-    }, { passive:false });
-
-    inp.addEventListener('pointermove', (e)=>{
-      if (e.isPrimary === false) return;
-      // While captured, keep events local so parent bars/panels don't react
-      stop(e);
-    }, { passive:false });
-
-    const release = (e)=>{
-      stop(e);
-      try{ inp.releasePointerCapture && inp.releasePointerCapture(e.pointerId); }catch{}
-      // Drop focus so later taps elsewhere don't keep sliding it
-      try{ inp.blur(); }catch{}
-      // restore selection behavior
-      inp.style.userSelect = '';
-      inp.style.webkitUserSelect = '';
-    };
-    inp.addEventListener('pointerup', release, { passive:false });
-    inp.addEventListener('pointercancel', release, { passive:false });
-
-    // Touch events (for older browsers that may not fully route via Pointer Events)
-    inp.addEventListener('touchstart', stop, { passive:false });
-    inp.addEventListener('touchmove',  stop, { passive:false });
-    inp.addEventListener('touchend',   ()=>{ try{ inp.blur(); }catch{} }, { passive:true });
-
-    // Mouse fallback: make sure mouseup anywhere drops focus
-    inp.addEventListener('mouseup', ()=>{ try{ inp.blur(); }catch{} }, { passive:true });
-    inp.addEventListener('mouseleave', ()=>{ try{ inp.blur(); }catch{} }, { passive:true });
-
-    // Main live update
-    inp.addEventListener('input', ()=>{
-      const lvl = parseInt(inp.value, 10) || 1;
+      // Set state
       STATE.featureLevels[key] = lvl;
-      updateOut(key, lvl);
       saveDraft();
+
+      // Toggle button visuals within this meter
+      const meterEl = btn.closest('.meter');
+      if (meterEl){
+        meterEl.querySelectorAll(`.lvl-pill[data-m="${CSS.escape(key)}"]`).forEach(b=>{
+          const isOn = (parseInt(b.getAttribute('data-lvl'),10) === lvl);
+          b.classList.toggle('on', isOn);
+          b.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+        });
+      }
+
+      // Preview text
+      updateOut(key, lvl);
 
       // Update totals display live
       const totals = calcDynamicPrice();
@@ -602,29 +596,18 @@ function bindFeatureMeters(root){
     }, { passive:true });
   });
 
-  // If user taps anywhere else in the form, defocus any focused range
-  const blurFocusedRangeIfAny = (ev)=>{
-    const ae = document.activeElement;
-    if (ae && ae.tagName === 'INPUT' && ae.type === 'range' && ev.target !== ae) {
-      try{ ae.blur(); }catch{}
-    }
-  };
-  // Capture early so even label taps clear the range focus first
-  wrap.addEventListener('pointerdown', blurFocusedRangeIfAny, { capture:true, passive:true });
-  wrap.addEventListener('touchstart',  blurFocusedRangeIfAny, { capture:true, passive:true });
-  wrap.addEventListener('mousedown',   blurFocusedRangeIfAny, { capture:true, passive:true });
-
-  // FX grid clicks
+  // FX grid clicks (unchanged behavior)
   wrap.querySelectorAll('[data-tracer]').forEach(div=>{
-    div.addEventListener('click', ()=>{
+    div.addEventListener('click', (e)=>{
+      e.stopPropagation();
       STATE.tracerPreset = div.getAttribute('data-tracer') || 'comet';
       saveDraft();
-      // toggle selection
       wrap.querySelectorAll('[data-tracer]').forEach(d=> d.classList.toggle('on', d===div));
     }, { passive:true });
   });
   wrap.querySelectorAll('[data-swing]').forEach(div=>{
-    div.addEventListener('click', ()=>{
+    div.addEventListener('click', (e)=>{
+      e.stopPropagation();
       STATE.swingPreset = div.getAttribute('data-swing') || 'arcLight';
       saveDraft();
       wrap.querySelectorAll('[data-swing]').forEach(d=> d.classList.toggle('on', d===div));
@@ -633,16 +616,21 @@ function bindFeatureMeters(root){
 
   const reset = wrap.querySelector('#metersReset');
   if (reset){
-    reset.addEventListener('click', ()=>{
+    reset.addEventListener('click', (e)=>{
+      e.stopPropagation();
       Object.keys(STATE.featureLevels||{}).forEach(k=>{
         delete STATE.featureLevels[k];
-        const slider = wrap.querySelector(`.meter input[data-m="${CSS.escape(k)}"]`);
-        if (slider) slider.value = String(METER_UI[k]?.min ?? 1);
-        updateOut(k, METER_UI[k]?.min ?? 1);
+        const min = METER_UI[k]?.min ?? 1;
+        // Visually set pill 1 (or min) active
+        wrap.querySelectorAll(`.lvl-pill[data-m="${CSS.escape(k)}"]`).forEach(b=>{
+          const isOn = (parseInt(b.getAttribute('data-lvl'),10) === min);
+          b.classList.toggle('on', isOn);
+          b.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+        });
+        updateOut(k, min);
       });
-      // ensure no slider stays focused after a reset
-      try{ document.activeElement && document.activeElement.blur && document.activeElement.blur(); }catch{}
       saveDraft();
+
       const totals = calcDynamicPrice();
       const piTotal = wrap.querySelector('#totalPiDisp');
       const icTotal = wrap.querySelector('#totalIcDisp');
