@@ -115,6 +115,116 @@
     }catch{ return { x: player.x, y: player.y }; }
   }
 
+  /* ==== ARMOUR & DAMAGE REDUCTION (additive) ==== */
+function _readInv(){
+  try{
+    if(IZZA?.api?.getInventory) return IZZA.api.getInventory()||{};
+    const raw=localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
+  }catch{ return {}; }
+}
+function _equippedEntries(){
+  const inv=_readInv();
+  return Object.values(inv).filter(e=> e && (e.equipped===true || e.equip===true || (e.equippedCount|0)>0));
+}
+function armorDRPct(){
+  // sum but cap at 60% to avoid immortality
+  const sum = _equippedEntries().reduce((a,e)=> a + (Number(e.drPct)||0), 0);
+  return Math.min(0.60, Math.max(0, sum));
+}
+function heartsBoostTotal(){
+  return Math.max(0, _equippedEntries().reduce((a,e)=> a + (Number(e.heartsBoost)||0), 0));
+}
+
+/* Hook max hearts on init and on inventory change */
+function recalcMaxHearts(){
+  const base = getMaxHearts(); // your persisted baseline
+  const boost = heartsBoostTotal();
+  player.maxHearts = Math.max(1, base + boost);
+  // keep segs within range
+  player.heartSegs = Math.min(player.maxHearts*3, player.heartSegs|0);
+  setCurSegs(player.heartSegs, player.maxHearts);
+  drawDOMHearts();
+}
+window.addEventListener('izza-inventory-changed', ()=>{ try{ recalcMaxHearts(); }catch{} });
+
+/* Reduce incoming damage by equipped DR */
+const _origTakeDamageSegs = typeof takeDamageSegs==='function' ? takeDamageSegs : null;
+if(_origTakeDamageSegs){
+  window.takeDamageSegs = function(n=1){
+    if (window.__IZZA_DUEL && window.__IZZA_DUEL.active) return _origTakeDamageSegs(n); // keep PvP isolation
+    const dr = armorDRPct();                 // 0..0.60
+    const reduced = Math.max(1, Math.round(n * (1 - dr))); // at least 1 segment
+    return _origTakeDamageSegs(reduced);
+  };
+}
+
+/* ==== DEATH RECOVERY (Keep Inventory) ==== */
+async function showRecoverPromptAndMaybeRestore(invBackupJson){
+  return new Promise((resolve)=>{
+    // lightweight modal
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+    wrap.innerHTML=`
+      <div style="background:#0f1522;border:1px solid #2a3550;border-radius:12px;padding:14px 16px;color:#e7ecff;min-width:260px">
+        <div style="font-weight:700;margin-bottom:6px">Keep your inventory?</div>
+        <div style="opacity:.85;margin-bottom:12px">Pay <b>5,000 IZZA Coins</b> or <b>2.5 Pi</b> to recover everything you were carrying when you died.</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="recNo" class="pill ghost">No</button>
+          <button id="recIC" class="pill">Pay 5,000 IC</button>
+          <button id="recPi" class="pill">Pay 2.5 Pi</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+
+    function close(ok){ try{ document.body.removeChild(wrap); }catch{} resolve(!!ok); }
+
+    wrap.querySelector('#recNo').onclick = ()=> close(false);
+    wrap.querySelector('#recIC').onclick = async ()=>{
+      try{
+        const coins = IZZA?.api?.getCoins ? IZZA.api.getCoins() : 0;
+        if((coins|0) < 5000){ alert('Not enough IZZA Coins'); return; }
+        IZZA?.api?.setCoins && IZZA.api.setCoins((coins|0) - 5000);
+        // server-side bookkeeping (best-effort)
+        try{ await fetch('/izza-game/api/recover/ic', {method:'POST',credentials:'include'}); }catch{}
+        // restore inventory
+        if(invBackupJson){ localStorage.setItem('izzaInventory', invBackupJson); window.dispatchEvent(new Event('izza-inventory-changed')); }
+        healFull();
+        toast('Inventory recovered via IZZA Coins', 3);
+        close(true);
+      }catch{ close(false); }
+    };
+    wrap.querySelector('#recPi').onclick = async ()=>{
+      try{
+        if(typeof payWithPi!=='function'){ alert('Open in Pi Browser to pay.'); return; }
+        const res = await payWithPi(2.5, 'IZZA Keep Inventory');
+        if(!res || !res.ok){ alert('Pi payment did not complete.'); return; }
+        try{ await fetch('/izza-game/api/recover/pi', {method:'POST',credentials:'include'}); }catch{}
+        if(invBackupJson){ localStorage.setItem('izzaInventory', invBackupJson); window.dispatchEvent(new Event('izza-inventory-changed')); }
+        healFull();
+        toast('Inventory recovered via Pi', 3);
+        close(true);
+      }catch{ close(false); }
+    };
+  });
+}
+
+/* Patch onDeath to snapshot & offer recovery */
+const _origOnDeath = typeof onDeath==='function' ? onDeath : null;
+if(_origOnDeath){
+  window.onDeath = async function(){
+    // snapshot inventory BEFORE loss
+    let invBackup = null;
+    try{ invBackup = localStorage.getItem('izzaInventory') || '{}'; }catch{}
+    // proceed with your normal death routine (coin loss, wipe, respawn)
+    _origOnDeath();
+    // ask for recovery — if accepted and paid, restore snapshot
+    try{ await showRecoverPromptAndMaybeRestore(invBackup); }catch{}
+  };
+}
+
+/* Recalc hearts once on init (after initHearts runs) */
+setTimeout(()=>{ try{ recalcMaxHearts(); }catch{} }, 0);
+  
   // ---------- toast ----------
   function toast(text, seconds=3){
     let h = document.getElementById('tutHint');
