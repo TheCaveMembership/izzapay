@@ -524,7 +524,7 @@ function renderSwingPicker(){
     </div>`;
 }
 
-/* Bind sliders + fx pickers → STATE + live preview */
+/* Bind sliders + fx pickers → STATE + live preview (updated to isolate slider drag) */
 function bindFeatureMeters(root){
   const wrap = root?.querySelector('.cl-pane.cl-form'); if (!wrap) return;
 
@@ -537,12 +537,58 @@ function bindFeatureMeters(root){
   wrap.querySelectorAll('.meter input[type="range"][data-m]').forEach(inp=>{
     const key = inp.dataset.m;
 
+    // Ensure the slider itself doesn’t trigger parent drags/close bars while interacting
+    const stop = (e)=>{
+      try{ e.preventDefault(); }catch{}
+      try{ e.stopPropagation(); }catch{}
+      try{ e.stopImmediatePropagation && e.stopImmediatePropagation(); }catch{}
+    };
+
+    // Capture pointer only while pressed on the slider; release afterward
+    inp.addEventListener('pointerdown', (e)=>{
+      // Only act on primary button/finger
+      if (e.isPrimary === false) return;
+      stop(e);
+      try{ inp.setPointerCapture && inp.setPointerCapture(e.pointerId); }catch{}
+      // avoid accidental text selection
+      inp.style.userSelect = 'none';
+      inp.style.webkitUserSelect = 'none';
+    }, { passive:false });
+
+    inp.addEventListener('pointermove', (e)=>{
+      if (e.isPrimary === false) return;
+      // While captured, keep events local so parent bars/panels don't react
+      stop(e);
+    }, { passive:false });
+
+    const release = (e)=>{
+      stop(e);
+      try{ inp.releasePointerCapture && inp.releasePointerCapture(e.pointerId); }catch{}
+      // Drop focus so later taps elsewhere don't keep sliding it
+      try{ inp.blur(); }catch{}
+      // restore selection behavior
+      inp.style.userSelect = '';
+      inp.style.webkitUserSelect = '';
+    };
+    inp.addEventListener('pointerup', release, { passive:false });
+    inp.addEventListener('pointercancel', release, { passive:false });
+
+    // Touch events (for older browsers that may not fully route via Pointer Events)
+    inp.addEventListener('touchstart', stop, { passive:false });
+    inp.addEventListener('touchmove',  stop, { passive:false });
+    inp.addEventListener('touchend',   ()=>{ try{ inp.blur(); }catch{} }, { passive:true });
+
+    // Mouse fallback: make sure mouseup anywhere drops focus
+    inp.addEventListener('mouseup', ()=>{ try{ inp.blur(); }catch{} }, { passive:true });
+    inp.addEventListener('mouseleave', ()=>{ try{ inp.blur(); }catch{} }, { passive:true });
+
     // Main live update
     inp.addEventListener('input', ()=>{
       const lvl = parseInt(inp.value, 10) || 1;
       STATE.featureLevels[key] = lvl;
       updateOut(key, lvl);
       saveDraft();
+
       // Update totals display live
       const totals = calcDynamicPrice();
       const piTotal = wrap.querySelector('#totalPiDisp');
@@ -554,13 +600,6 @@ function bindFeatureMeters(root){
       const piBtn = document.getElementById('payPi');
       if (piBtn) piBtn.textContent = `Pay ${totals.pi} Pi`;
     }, { passive:true });
-
-    // IMPORTANT: stop the slider from owning the whole UI after a drag
-    const blurSlider = ()=> { try{ inp.blur(); }catch{} };
-    inp.addEventListener('touchend', blurSlider, { passive:true });
-    inp.addEventListener('pointerup', blurSlider, { passive:true });
-    inp.addEventListener('mouseup', blurSlider, { passive:true });
-    inp.addEventListener('mouseleave', blurSlider, { passive:true });
   });
 
   // If user taps anywhere else in the form, defocus any focused range
@@ -616,10 +655,6 @@ function bindFeatureMeters(root){
     }, { passive:true });
   }
 }
-
-/* Store chosen levels in STATE (start empty; we set to 1 when toggle shows its slider) */
-STATE.featureLevels = {}; // keys set on-demand when toggled on
-
 /* Apply selected stats onto an inventory entry (weapon/armour) */
 function attachCraftStats(invKey, entry){
   try{
