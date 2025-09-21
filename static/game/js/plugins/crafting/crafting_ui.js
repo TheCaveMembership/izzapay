@@ -284,6 +284,7 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
       dmgReduction: false, // helmet/vest only
       speedBoost: false    // legs only
     },
+        featureLevels: {},
     aiStyle: 'realistic',
     wantAnimation: false,
     currentCategory: 'armour',
@@ -537,7 +538,7 @@ function bindFeatureMeters(root){
       wrap.querySelectorAll('[data-tracer]').forEach(d=> d.classList.toggle('on', d===div));
     });
   });
-  wrap.querySelectorAll('[data-swing]').forEach	div=>{
+  wrap.querySelectorAll('[data-swing]').forEach(div=>{
     div.addEventListener('click', ()=>{
       STATE.swingPreset = div.getAttribute('data-swing') || 'arcLight';
       saveDraft();
