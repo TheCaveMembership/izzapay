@@ -292,7 +292,103 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     createSub: 'setup',        // which subtab is shown: 'setup' | 'visuals'
     mintCredits: 0,
   };
+/* ==== CRAFT FEATURE METERS (additive) ==== */
+/* Pricing you requested */
+const CRAFT_PRICE = { PI: 0.5, IC: 100 };
 
+/* Player-selectable meters (lightweight) */
+const FEATURE_METERS = {
+  // Weapons
+  fireRate:      { key:'fireIntervalMs',  toValue:(lvl)=> Math.max(60, Math.round(170 - 30*lvl)) }, // lvl 0..3
+  dmgBoost:      { key:'dmgMult',         toValue:(lvl)=> 1.0 + 0.15*lvl },                         // 1.00..1.45
+  critChance:    { key:'critChance',      toValue:(lvl)=> Math.min(0.30, 0.10*lvl) },                // 0..30%
+  bulletSpeed:   { key:'bulletSpeedMul',  toValue:(lvl)=> 1.0 + 0.20*lvl },                          // 1.0..1.6
+
+  // Armour
+  dmgReduction:  { key:'drPct',           toValue:(lvl)=> 0.10*lvl },                                // 0..30%
+  healthBoost:   { key:'heartsBoost',     toValue:(lvl)=> lvl },                                     // +0..+3 hearts
+  stamina:       { key:'staminaBoost',    toValue:(lvl)=> 0.10*lvl },                                // 0..+30% swing/skill haste
+};
+
+/* Store chosen levels temporarily in STATE (default zeros) */
+STATE.featureLevels = {
+  fireRate:0, dmgBoost:0, critChance:0, bulletSpeed:0,
+  dmgReduction:0, healthBoost:0, stamina:0
+};
+
+/* Helper: apply selected stats onto an inventory entry (weapon/armour) */
+function attachCraftStats(invKey, entry){
+  try{
+    const isWeapon = (entry.type==='weapon') || (entry.slot==='hands') || /gun|melee/i.test(entry.subtype||'');
+    const L = STATE.featureLevels;
+
+    const apply = (meter, gate)=>{
+      if (typeof L[meter] !== 'number' || L[meter] <= 0) return;
+      const { key, toValue } = FEATURE_METERS[meter];
+      // weapons get weapon meters; armour gets armour meters
+      if (gate==='weapon' && !isWeapon) return;
+      if (gate==='armor'  &&  isWeapon) return;
+      entry[key] = toValue(L[meter]); // write numeric property onto the item
+    };
+
+    apply('fireRate','weapon');
+    apply('dmgBoost','weapon');
+    apply('critChance','weapon');
+    apply('bulletSpeed','weapon');
+
+    apply('dmgReduction','armor');
+    apply('healthBoost','armor');
+    apply('stamina','armor');
+
+    // Mark as crafted so other systems can branch if needed
+    entry.crafted = true;
+  }catch(e){ console.warn('[craft] attachCraftStats failed', e); }
+}
+
+/* After the craft is injected by armoury/inventory, stamp the stats */
+function __applyStatsToNewestCraft(){
+  try{
+    const apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    const inv = apiObj?.getInventory ? (apiObj.getInventory()||{}) : JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+    // Find newest craft_* by part/name
+    const wantName = String(STATE.currentName||'').toLowerCase();
+    const wantPart = String(STATE.currentPart||'').toLowerCase();
+    const key = Object.keys(inv).reverse().find(k=>{
+      if(!/^craft_/.test(k)) return false;
+      const e=inv[k]||{};
+      return (String(e.name||'').toLowerCase()===wantName) && (String(e.part||e.slot||'').toLowerCase()===wantPart || wantPart==='gun' || wantPart==='melee');
+    });
+    if(!key) return;
+    attachCraftStats(key, inv[key]);
+    apiObj?.setInventory ? apiObj.setInventory(inv) : localStorage.setItem('izzaInventory', JSON.stringify(inv));
+    try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+  }catch(e){ console.warn('[craft] __applyStatsToNewestCraft skipped', e); }
+}
+
+/* Hook your existing mirror step — call right after you mirror the craft */
+const _origMirrorToMine = (typeof mirrorInjectedInventoryToMine==='function') ? mirrorInjectedInventoryToMine : null;
+if (_origMirrorToMine){
+  window.mirrorInjectedInventoryToMine = function(injected){
+    _origMirrorToMine(injected);
+    setTimeout(__applyStatsToNewestCraft, 0);
+  };
+}
+
+/* Enforce your per-craft prices on the two pay buttons */
+async function payForCraft(usePi){
+  const memo = 'IZZA Craft';
+  if(usePi){
+    const res = await payWithPi(CRAFT_PRICE.PI, memo); /* same Pi flow as checkout */
+    return res && res.ok;
+  }else{
+    // IC via game coins
+    const cur = (IZZA?.api?.getCoins ? IZZA.api.getCoins() : 0) | 0;
+    if (cur < CRAFT_PRICE.IC) { alert('Not enough IZZA Coins'); return false; }
+    IZZA?.api?.setCoins && IZZA.api.setCoins(cur - CRAFT_PRICE.IC);
+    try{ await fetch(gameApi('/api/crafting/ic/debit'), { method:'POST', credentials:'include' }); }catch{}
+    return true;
+  }
+}
   function applyCreditState(n){
     const next = Math.max(0, n|0);
     STATE.mintCredits   = next;
