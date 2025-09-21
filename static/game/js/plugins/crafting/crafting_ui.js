@@ -537,9 +537,9 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
   // --- REQUIRED-FIELDS VALIDATION (Create tab only) ---
   function isCreateFormValid(){
     const hasCat  = !!STATE.currentCategory;
-    thehasPart = !!STATE.currentPart; // (typo fixed below)
+    const hasPart = !!STATE.currentPart;
     const nm = moderateName(STATE.currentName || '');
-    return hasCat && !!STATE.currentPart && nm.ok;
+    return hasCat && hasPart && nm.ok;
   }
 
   function updatePayButtonsState(){
@@ -1090,8 +1090,9 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
             id:item.id, name:item.name, category:item.category, part:item.part, svg:item.svg
           }));
         } catch {}
-        try { IZZA?.emit?.('equip-crafted', item.id); } catch {}
-        try { IZZA?.emit?.('equip-crafted-v2', {
+        const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+        try { BUS?.emit?.('equip-crafted', item.id); } catch {}
+        try { BUS?.emit?.('equip-crafted-v2', {
           id:item.id, name:item.name, category:item.category, part:item.part, svg:item.svg
         }); } catch {}
       }, { passive:true });
@@ -1229,9 +1230,10 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
           }));
         } catch {}
 
-        // Game events (both old + new)
-        try { IZZA?.emit?.('equip-crafted', it.id); } catch {}
-        try { IZZA?.emit?.('equip-crafted-v2', {
+        // Game events (both old + new) via robust BUS
+        const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+        try { BUS?.emit?.('equip-crafted', it.id); } catch {}
+        try { BUS?.emit?.('equip-crafted-v2', {
           id: it.id, name: it.name, category: it.category, part: it.part, svg: it.svg
         }); } catch {}
       }, { passive:true });
@@ -1295,7 +1297,8 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     host.querySelectorAll('[data-mp-view]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const id = btn.dataset.mpView;
-        try { IZZA?.emit?.('marketplace-view', { id }); } catch {}
+        const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+        try { BUS?.emit?.('marketplace-view', { id }); } catch {}
         alert('Bundle details would open here (implement in-game).');
       });
     });
@@ -1303,7 +1306,8 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     host.querySelectorAll('[data-mp-buy]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const id = btn.dataset.mpBuy;
-        try { IZZA?.emit?.('marketplace-buy', { id }); } catch {}
+        const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+        try { BUS?.emit?.('marketplace-buy', { id }); } catch {}
         alert('Purchase flow would start here (implement in-game / server).');
       });
     });
@@ -1445,7 +1449,8 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     const goMp = root.querySelector('#goMarketplace');
     if (goMp){
       goMp.addEventListener('click', async ()=>{
-        try{ IZZA?.emit?.('open-marketplace'); }catch{}
+        const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+        try{ BUS?.emit?.('open-marketplace'); }catch{}
         const host = STATE.root?.querySelector('#craftTabs');
         if (!host) return;
         const saveScroll = host.scrollTop;
@@ -1803,7 +1808,8 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 
           // Optional IZZA Pay merchant handoff
           if (sellInPi && craftedId) {
-            try { IZZA?.emit?.('merchant-handoff', { craftedId }); } catch {}
+            const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+            try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
             const qs = new URLSearchParams({ attach: String(craftedId) });
             try {
               const t = localStorage.getItem('izzaBearer') || '';
