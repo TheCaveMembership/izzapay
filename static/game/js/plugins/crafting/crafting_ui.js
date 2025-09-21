@@ -247,24 +247,21 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
 
 (function(){
   const COSTS = Object.freeze({
-    // --- Single-item pricing (updated) ---
-    PER_ITEM_IC:   500,    // 500 IZZA Coins per craft
-    PER_ITEM_PI:   0.25,   // 0.25 Pi per craft
+    // --- Base craft pricing (visual mint) ---
+    PER_ITEM_IC:   500,    // 500 IZZA Coins per craft (base)
+    PER_ITEM_PI:   0.25,   // 0.25 Pi per craft (base)
 
     // --- Starter Forge package pricing (unchanged) ---
     PACKAGE_PI:    5,          // 5 Pi
     PACKAGE_IC:    10000,      // 10,000 IC
 
     // --- Add-on/Shop settings ---
-    // We keep addons free so the per-craft price is fixed as requested
-    ADDON_IC:      0,
-    ADDON_PI:      0,
     SHOP_MIN_IC:   50,
     SHOP_MAX_IC:   250,
     AI_ATTEMPTS:   5
   });
 
-  // FYI conversion reference (no logic change): 1 Pi = 2000 IZZA coins
+  // FYI conversion: 1 Pi = 2000 IZZA coins
   const COIN_PER_PI = 2000;
 
   const STATE = {
@@ -275,68 +272,98 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     currentSVG: '',
     currentName: '',
     featureFlags: {
+      // weapon shared
       dmgBoost: false,
+      // gun only
       fireRate: false,
-      speedBoost: false,
-      dmgReduction: false,
       tracerFx: false,
-      swingFx: false
+      // melee only
+      swingRate: false,
+      swingFx: false,
+      // armour
+      dmgReduction: false, // helmet/vest only
+      speedBoost: false    // legs only
     },
-    aiStyle: 'realistic',      // 'realistic' | 'cartoon' (aka 'stylized')
-    wantAnimation: false,      // creator can toggle animation
+    aiStyle: 'realistic',
+    wantAnimation: false,
     currentCategory: 'armour',
     currentPart: 'helmet',
-    fireRateRequested: 0,
-    dmgHearts: 0.5,
     packageCredits: null,
-    canUseVisuals: false,      // visuals locked until successful purchase
-    createSub: 'setup',        // which subtab is shown: 'setup' | 'visuals'
+    canUseVisuals: false,
+    createSub: 'setup',
     mintCredits: 0,
 
-    // NEW: presets default
+    // FX presets
     tracerPreset: 'comet',
     swingPreset: 'arcLight',
   };
 
-/* ==== CRAFT FEATURE METERS (additive) ==== */
-/* Fixed per-craft pricing you requested */
-const CRAFT_PRICE = { PI: 0.25, IC: 500 };
+/* ==== CRAFT FEATURE METERS & PRICE RULES ==== */
+/*
+  Price rule (per your spec):
+  - Each selected toggle adds +0.15 Pi to price.
+  - If that toggle has a slider (levels 1..3), the toggle counts as level 1 baseline.
+    Each extra step (2 or 3) adds +0.15 Pi again per step.
+  - DR slider steps: 5% / 10% / 15% (level 1/2/3). Helmet and Vest each cap at 15%.
+  NOTE: We only *display* dynamic Pi total for now, but we *charge* dynamic IZZA Coins.
+*/
+const TOGGLE_PI_INCREMENT = 0.15;
+const CRAFT_BASE = { PI: COSTS.PER_ITEM_PI, IC: COSTS.PER_ITEM_IC };
 
 /* Player-selectable meters (lightweight) */
 const FEATURE_METERS = {
-  // Weapons
-  fireRate:      { key:'fireIntervalMs',  toValue:(lvl)=> Math.max(60, Math.round(170 - 30*lvl)) }, // lvl 0..3
-  dmgBoost:      { key:'dmgMult',         toValue:(lvl)=> 1.0 + 0.15*lvl },                         // 1.00..1.45
-  critChance:    { key:'critChance',      toValue:(lvl)=> Math.min(0.30, 0.10*lvl) },                // 0..30%
-  bulletSpeed:   { key:'bulletSpeedMul',  toValue:(lvl)=> 1.0 + 0.20*lvl },                          // 1.0..1.6
+  // Weapons (guns)
+  fireRate:      { key:'fireIntervalMs',  toValue:(lvl)=> Math.max(60, Math.round(170 - 30*lvl)) }, // lvl 1..3 → faster
+  dmgBoost:      { key:'dmgMult',         toValue:(lvl)=> 1.0 + 0.15*lvl },                         // 1.15 / 1.30 / 1.45
+
+  // Weapons (melee)
+  swingRate:     { key:'swingIntervalMs', toValue:(lvl)=> Math.max(100, Math.round(220 - 40*lvl)) }, // 1..3
 
   // Armour
-  dmgReduction:  { key:'drPct',           toValue:(lvl)=> 0.10*lvl },                                // 0..30%
-  healthBoost:   { key:'heartsBoost',     toValue:(lvl)=> lvl },                                     // +0..+3 hearts
-  stamina:       { key:'staminaBoost',    toValue:(lvl)=> 0.10*lvl },                                // 0..+30% swing/skill haste
-
-  // NEW: Legs-only speed boost
-  speedBoost:    { key:'speedMult',       toValue:(lvl)=> 1.0 + 0.05*lvl },                          // +5/10/15% run speed
+  dmgReduction:  { key:'drPct',           toValue:(lvl)=> 0.05*lvl },                                // 5%/10%/15% per piece
+  speedBoost:    { key:'speedMult',       toValue:(lvl)=> 1.0 + 0.05*lvl },                          // +5/10/15% run speed (legs only)
 };
 
-/* UI spec (labels + which items they apply to) */
+/* UI spec (labels + where they apply) */
 const METER_UI = {
-  // Weapons
-  fireRate:     { label:'Fire Rate',         gate:'weapon', min:0, max:3 },
-  dmgBoost:     { label:'Damage Boost',      gate:'weapon', min:0, max:3 },
-  critChance:   { label:'Critical Chance',   gate:'weapon', min:0, max:3 },
-  bulletSpeed:  { label:'Bullet Speed',      gate:'weapon', min:0, max:3 },
+  // guns
+  fireRate:     { label:'Gun Fire Rate',     gate:'gun',      min:1, max:3 },
+  dmgBoost:     { label:'Weapon Damage',     gate:'weapon',   min:1, max:3 },
 
-  // Armour
-  dmgReduction: { label:'Damage Reduction',  gate:'armor',  min:0, max:3 },
-  healthBoost:  { label:'Extra Hearts',      gate:'armor',  min:0, max:3 },
-  stamina:      { label:'Stamina Recharge',  gate:'armor',  min:0, max:3 },
+  // melee
+  swingRate:    { label:'Melee Swing Rate',  gate:'melee',    min:1, max:3 },
 
-  // NEW: legs-only
-  speedBoost:   { label:'Speed Boost',       gate:'legs',   min:0, max:3 },
+  // armour
+  dmgReduction: { label:'Damage Reduction',  gate:'helmVest', min:1, max:3 }, // helmet/vest only (5/10/15)
+  speedBoost:   { label:'Speed Boost',       gate:'legs',     min:1, max:3 },
 };
 
-/* NEW: responsive CSS (fixes right-edge cutoff on sliders) */
+/* Which toggles/meters are allowed for the current selection */
+function allowedTogglesForSelection(){
+  const cat  = String(STATE.currentCategory||'').toLowerCase();
+  const part = String(STATE.currentPart||'').toLowerCase();
+
+  // weapon selection
+  if (cat==='weapon' && (part==='gun' || part==='hands')) {
+    return { toggles:['dmgBoost','fireRate','tracerFx'], meters:['dmgBoost','fireRate'] };
+  }
+  if (cat==='weapon' && part==='melee') {
+    return { toggles:['dmgBoost','swingRate','swingFx'], meters:['dmgBoost','swingRate'] };
+  }
+
+  // armour selection
+  if (cat==='armour' && part==='legs') {
+    return { toggles:['speedBoost'], meters:['speedBoost'] };
+  }
+  if (cat==='armour' && (part==='helmet' || part==='vest')) {
+    return { toggles:['dmgReduction'], meters:['dmgReduction'] };
+  }
+
+  // other armour parts (arms) -> no special options for now
+  return { toggles:[], meters:[] };
+}
+
+/* --------- CSS for meters and presets ---------- */
 (function ensureCraftCSS(){
   if (document.getElementById('crafting-css')) return;
   const css = document.createElement('style'); css.id='crafting-css';
@@ -360,40 +387,50 @@ function meterPreview(mKey, lvl){
   try{
     const v = spec.toValue(lvl|0);
     if (mKey==='fireRate')     return `${v} ms between shots`;
+    if (mKey==='swingRate')    return `${v} ms per swing`;
     if (mKey==='dmgBoost')     return `${Math.round(v*100)}% damage`;
-  if (mKey==='critChance')   return `${Math.round(v*100)}% crit`;
-  if (mKey==='bulletSpeed')  return `${Math.round(v*100)}% bullet speed`;
-  if (mKey==='dmgReduction') return `${Math.round(v*100)}% DR`;
-  if (mKey==='healthBoost')  return `+${v|0} heart${v===1?'':'s'}`;
-  if (mKey==='stamina')      return `${Math.round(v*100)}% faster regen`;
-  if (mKey==='speedBoost')   return `${Math.round(v*100)}% run speed`;
-  return String(v);
-}catch{ return ''; }
+    if (mKey==='dmgReduction') return `${Math.round(v*100)}% DR`;
+    if (mKey==='speedBoost')   return `${Math.round(v*100)}% run speed`;
+    return String(v);
+  }catch{ return ''; }
 }
 
-/* Small helper to know if current selection is legs */
-function _isLegsSelected(){
-  const p = String(STATE.currentPart||'').toLowerCase();
-  return p === 'legs';
+/* --------- Dynamic pricing ---------- */
+/* Return { pi: number, ic: number } */
+function calcDynamicPrice(){
+  const allow = allowedTogglesForSelection();
+  const flags = STATE.featureFlags || {};
+  const levels = STATE.featureLevels || {};
+
+  let pi = CRAFT_BASE.PI; // base visual cost
+  // For display only: add dynamic Pi increments
+  allow.toggles.forEach(t=>{
+    if (!flags[t]) return;
+    // Toggle adds one step
+    pi += TOGGLE_PI_INCREMENT;
+    // If there is an associated meter, add extra steps above lvl=1
+    if (allow.meters.includes(t)){
+      const lvl = Math.max(1, parseInt(levels[t]||1,10));
+      if (lvl > 1) pi += TOGGLE_PI_INCREMENT * (lvl - 1);
+    }
+  });
+
+  // IC is actually charged
+  const ic = Math.round(pi * COIN_PER_PI);
+
+  return { pi: Number(pi.toFixed(2)), ic };
 }
 
-/* Render the relevant meters based on current part (weapon / armor / legs-only) */
+/* --------- Meters rendering (only when toggle ON) ---------- */
 function renderFeatureMeters(){
-  const p = String(STATE.currentPart||'').toLowerCase();
-  const isWeapon = (p==='gun' || p==='melee' || p==='hands');
-  const isLegs   = (p==='legs');
-
-  const rows = Object.keys(METER_UI)
-    .filter(k=>{
-      const gate = METER_UI[k].gate;
-      if (gate === 'weapon') return isWeapon;
-      if (gate === 'armor')  return !isWeapon; // includes legs by default
-      if (gate === 'legs')   return isLegs;    // legs-only meter
-      return false;
-    })
+  const allow = allowedTogglesForSelection();
+  const rows = allow.meters
+    .filter(k => STATE.featureFlags[k]) // show only when toggle is ON
     .map(k=>{
       const ui = METER_UI[k];
-      const lvl = (STATE.featureLevels && typeof STATE.featureLevels[k]==='number') ? STATE.featureLevels[k] : 0;
+      const rawLvl = STATE.featureLevels?.[k];
+      // If toggle just got turned on and level was 0/undefined → start at 1 (baseline)
+      const lvl = Math.max(ui.min, (typeof rawLvl==='number' ? rawLvl : ui.min));
       const prev = meterPreview(k, lvl);
       return `
         <div class="meter" data-meter="${k}" style="margin:6px 0">
@@ -403,10 +440,10 @@ function renderFeatureMeters(){
         </div>`;
     });
 
-  // FX preset pickers (only when toggles are on)
+  // FX preset pickers (only when their toggles are on & allowed)
   const fxBlocks = [];
-  if (STATE.featureFlags?.tracerFx) fxBlocks.push(renderTracerPicker());
-  if (STATE.featureFlags?.swingFx)  fxBlocks.push(renderSwingPicker());
+  if (allow.toggles.includes('tracerFx') && STATE.featureFlags?.tracerFx) fxBlocks.push(renderTracerPicker());
+  if (allow.toggles.includes('swingFx')  && STATE.featureFlags?.swingFx)  fxBlocks.push(renderSwingPicker());
 
   if (!rows.length && !fxBlocks.length) return '';
   return `
@@ -420,7 +457,7 @@ function renderFeatureMeters(){
     </div>`;
 }
 
-/* --- FX PRESETS (tiny previews with trendy names) --- */
+/* --- FX PRESETS (tiny previews) --- */
 const TRACER_PRESETS = [
   { id:'comet',  name:'Comet Spark',  demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0" stop-opacity=".0"/><stop offset=".7" stop-opacity=".9"/></linearGradient></defs><path d="M5 15 H75" stroke="url(#g1)" stroke-width="3"/><circle cx="75" cy="15" r="3"/></svg>` },
   { id:'ember',  name:'Fire Trail',   demo:`<svg viewBox="0 0 80 30" xmlns="http://www.w3.org/2000/svg"><path d="M5 15 C30 10 45 20 75 15" stroke="orange" stroke-width="2" fill="none"/><circle cx="75" cy="15" r="3" /></svg>` },
@@ -473,10 +510,18 @@ function bindFeatureMeters(root){
   wrap.querySelectorAll('.meter input[type="range"][data-m]').forEach(inp=>{
     const key = inp.dataset.m;
     inp.addEventListener('input', ()=>{
-      const lvl = parseInt(inp.value, 10) || 0;
+      const lvl = parseInt(inp.value, 10) || 1;
       STATE.featureLevels[key] = lvl;
       updateOut(key, lvl);
       saveDraft();
+      // Update totals display live
+      const totals = calcDynamicPrice();
+      const piTotal = wrap.querySelector('#totalPiDisp');
+      const icTotal = wrap.querySelector('#totalIcDisp');
+      if (piTotal) piTotal.textContent = `${totals.pi} Pi`;
+      if (icTotal) icTotal.textContent = `${totals.ic.toLocaleString()} IC`;
+      const icBtn = document.getElementById('payIC');
+      if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
     }, { passive:true });
   });
 
@@ -501,56 +546,58 @@ function bindFeatureMeters(root){
   if (reset){
     reset.addEventListener('click', ()=>{
       Object.keys(STATE.featureLevels||{}).forEach(k=>{
-        STATE.featureLevels[k] = 0;
+        delete STATE.featureLevels[k];
         const slider = wrap.querySelector(`.meter input[data-m="${CSS.escape(k)}"]`);
-        if (slider) slider.value = '0';
-        updateOut(k, 0);
+        if (slider) slider.value = String(METER_UI[k]?.min ?? 1);
+        updateOut(k, METER_UI[k]?.min ?? 1);
       });
       saveDraft();
+      const totals = calcDynamicPrice();
+      const piTotal = wrap.querySelector('#totalPiDisp');
+      const icTotal = wrap.querySelector('#totalIcDisp');
+      if (piTotal) piTotal.textContent = `${totals.pi} Pi`;
+      if (icTotal) icTotal.textContent = `${totals.ic.toLocaleString()} IC`;
+      const icBtn = document.getElementById('payIC');
+      if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
     }, { passive:true });
   }
 }
 
-/* Store chosen levels temporarily in STATE (default zeros) */
-STATE.featureLevels = {
-  fireRate:0, dmgBoost:0, critChance:0, bulletSpeed:0,
-  dmgReduction:0, healthBoost:0, stamina:0, speedBoost:0
-};
+/* Store chosen levels in STATE (start empty; we set to 1 when toggle shows its slider) */
+STATE.featureLevels = {}; // keys set on-demand when toggled on
 
-/* Helper: apply selected stats onto an inventory entry (weapon/armour) */
+/* Apply selected stats onto an inventory entry (weapon/armour) */
 function attachCraftStats(invKey, entry){
   try{
-    const isWeapon = (entry.type==='weapon') || (entry.slot==='hands') || /gun|melee/i.test(entry.subtype||'');
-    const isLegs   = (String(entry.part||entry.slot||'').toLowerCase()==='legs');
-    const L = STATE.featureLevels;
+    const part = String(entry.part||entry.slot||'').toLowerCase();
+    const isGun   = /gun|hands/i.test(STATE.currentPart) && STATE.currentPart==='gun';
+    const isMelee = STATE.currentPart==='melee';
+    const isLegs  = part === 'legs';
+    const isHelmVest = (part==='helmet'||part==='vest');
 
-    const apply = (meter, gate)=>{
-      if (typeof L[meter] !== 'number' || L[meter] <= 0) return;
-      const { key, toValue } = FEATURE_METERS[meter];
-      if (gate==='weapon' && !isWeapon) return;
-      if (gate==='armor'  &&  isWeapon) return;
-      if (gate==='legs'   && !isLegs)   return;
-      entry[key] = toValue(L[meter]);
+    const L = STATE.featureLevels || {};
+    const F = STATE.featureFlags  || {};
+    const setIf = (flagKey, meterKey, condition) => {
+      if (!F[flagKey]) return;
+      if (!condition) return;
+      const meter = FEATURE_METERS[meterKey];
+      const lvl = Math.max(METER_UI[meterKey]?.min||1, parseInt(L[meterKey]||1,10));
+      entry[meter.key] = meter.toValue(lvl);
     };
 
     // weapons
-    apply('fireRate','weapon');
-    apply('dmgBoost','weapon');
-    apply('critChance','weapon');
-    apply('bulletSpeed','weapon');
+    setIf('dmgBoost','dmgBoost', isGun || isMelee);
+    setIf('fireRate','fireRate', isGun);
+    setIf('swingRate','swingRate', isMelee);
 
     // armour
-    apply('dmgReduction','armor');
-    apply('healthBoost','armor');
-    apply('stamina','armor');
+    setIf('dmgReduction','dmgReduction', isHelmVest); // per-piece capped at 15% via slider range
+    setIf('speedBoost','speedBoost', isLegs);
 
-    // legs only
-    apply('speedBoost','legs');
-
-    // FX selections (stored as metadata for runtime to consume)
+    // FX selections
     entry.fx = entry.fx || {};
-    if (STATE.featureFlags.tracerFx) entry.fx.tracer = STATE.tracerPreset;
-    if (STATE.featureFlags.swingFx)  entry.fx.swing  = STATE.swingPreset;
+    if (F.tracerFx && isGun)  entry.fx.tracer = STATE.tracerPreset;
+    if (F.swingFx  && isMelee) entry.fx.swing  = STATE.swingPreset;
 
     entry.crafted = true;
   }catch(e){ console.warn('[craft] attachCraftStats failed', e); }
@@ -585,37 +632,18 @@ if (_origMirrorToMine){
   };
 }
 
-/* Enforce your per-craft prices on the two pay buttons */
-async function payForCraft(usePi){
-  const memo = 'IZZA Craft';
-  if(usePi){
-    const res = await payWithPi(CRAFT_PRICE.PI, memo); /* same Pi flow as checkout */
-    return res && res.ok;
-  }else{
-    // IC via game coins
-    const cur = (IZZA?.api?.getCoins ? IZZA.api.getCoins() : 0) | 0;
-    if (cur < CRAFT_PRICE.IC) { alert('Not enough IZZA Coins'); return false; }
-    IZZA?.api?.setCoins && IZZA.api.setCoins(cur - CRAFT_PRICE.IC);
-    try{ await fetch(gameApi('/api/crafting/ic/debit'), { method:'POST', credentials:'include' }); }catch{}
-    return true;
-  }
-}
-
+/* Credit badge helpers */
 function applyCreditState(n){
   const next = Math.max(0, n|0);
   STATE.mintCredits   = next;
   STATE.canUseVisuals = next > 0;
   updateTabsHeaderCredits();
 }
-
-/* --------- MOVED INSIDE IIFE + FIXED BITWISE LOGIC --------- */
 function totalMintCredits(){
   const singles = (STATE.mintCredits | 0);
   const pkg = (STATE.packageCredits && (STATE.packageCredits.items | 0)) || 0;
   return singles + pkg;
 }
-
-/* Update the little badge beside "Create Item" without re-rendering the whole header */
 function updateTabsHeaderCredits(){
   try{
     const wrap = STATE.root?.querySelector('[data-tab="create"]');
@@ -623,7 +651,6 @@ function updateTabsHeaderCredits(){
     const have = totalMintCredits();
     const label = 'Create Item';
 
-    // ensure we don't stack multiple badges
     const old = wrap.querySelector('.cl-credit-badge');
     if (old) old.remove();
 
@@ -636,16 +663,13 @@ function updateTabsHeaderCredits(){
         line-height:18px; font-size:11px; font-weight:700; border-radius:6px;
         background:#0b2b17; border:1px solid #1bd760; color:#b8ffd1; vertical-align:middle;
       `;
-      // Make sure button has the base label
       if (!/Create Item/i.test(wrap.textContent)) wrap.textContent = label;
       wrap.appendChild(b);
     } else {
-      // restore plain label if we removed a badge
       wrap.textContent = label;
     }
   }catch(_){}
 }
-/* ----------------------------------------------------------- */
 
 /* (Kept: name moderation + sanitizers + helpers) */
 const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
@@ -833,9 +857,6 @@ async function payWithIC(amountIC){
   try{ await serverJSON(gameApi('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
   return { ok:true };
 }
-
-function selectedAddOnCount(){ return Object.values(STATE.featureFlags).filter(Boolean).length; }
-function calcTotalCost({ usePi }){ const base = usePi ? COSTS.PER_ITEM_PI : COSTS.PER_ITEM_IC; const addon = usePi ? COSTS.ADDON_PI : COSTS.ADDON_IC; return base + addon * selectedAddOnCount(); }
 
 /* --- REQUIRED-FIELDS VALIDATION (Create tab only) --- */
 function isCreateFormValid(){
@@ -1027,7 +1048,7 @@ function normalizeSvgForSlot(svgText, part){
   const wrap = document.createElementNS('http://www.w3.org/2000/svg','g');
   wrap.setAttribute('transform', `translate(${tx.toFixed(3)} ${ty.toFixed(3)}) scale(${s.toFixed(5)})`);
 
-  // Append original visible nodes (from original svg, not measured clones)
+  // Append original visible nodes
   Array.from(container.querySelectorAll('svg > *')).forEach(n=>{
     const t = n.tagName?.toLowerCase?.();
     if (!t || t==='defs'||t==='metadata'||t==='title'||t==='desc'||t==='style') return;
@@ -1047,7 +1068,7 @@ function saveDraft(){
       cat: STATE.currentCategory,
       part: STATE.currentPart,
       ff: STATE.featureFlags,
-      fl: STATE.featureLevels,      // persist meter levels (incl. speedBoost)
+      fl: STATE.featureLevels,      // persist meter levels
       svg: STATE.currentSVG,
       tracer: STATE.tracerPreset,
       swing: STATE.swingPreset,
@@ -1067,6 +1088,40 @@ function loadDraft(){
     STATE.tracerPreset     = j.tracer || STATE.tracerPreset;
     STATE.swingPreset      = j.swing  || STATE.swingPreset;
   }catch{}
+}
+
+/* ---------- UI: toggles block based on selection ---------- */
+function renderFeatureToggles(){
+  const allow = allowedTogglesForSelection();
+  const flags = STATE.featureFlags || {};
+  const blocks = [];
+
+  const push = (key, label, hint='')=>{
+    if (!allow.toggles.includes(key)) return;
+    const checked = flags[key] ? 'checked' : '';
+    const title = hint ? ` title="${hint}"` : '';
+    blocks.push(`<label><input type="checkbox" data-ff="${key}" ${checked}${title}/> ${label}</label>`);
+  };
+
+  // weapon shared
+  push('dmgBoost','Weapon damage boost');
+
+  // gun-only
+  push('fireRate','Gun fire-rate','Uzi can be fastest; pistol = single tap → one shot (engine caps per gun).');
+  push('tracerFx','Bullet tracer FX');
+
+  // melee-only
+  push('swingRate','Melee swing rate');
+  push('swingFx','Melee swing FX');
+
+  // armour
+  push('speedBoost','Speed boost');
+  push('dmgReduction','Armour damage reduction','Helmet/Vest only; 15% each piece. Max 30% when both equipped.');
+
+  return blocks.length
+    ? `<div style="margin-top:10px;font-weight:700">Optional Features</div>
+       ${blocks.join('<br/>')}`
+    : '';
 }
 
 function renderTabs(){
@@ -1120,8 +1175,7 @@ function renderPackages(){
 }
 
 function renderCreate(){
-  const totalPi = calcTotalCost({ usePi:true });
-  const totalIC = calcTotalCost({ usePi:false });
+  const totals = calcDynamicPrice();
 
   const sub = STATE.canUseVisuals
     ? (STATE.createSub === 'visuals' ? 'visuals' : 'setup')
@@ -1133,7 +1187,8 @@ function renderCreate(){
     ? 'box-shadow:inset 0 0 0 1px #1bd760; color:#b8ffd1; background:#0b2b17;'
     : '';
 
-  const metersHTML = renderFeatureMeters();
+  const togglesHTML = renderFeatureToggles();
+  const metersHTML  = renderFeatureMeters();
 
   return `
     <div class="cl-subtabs" style="display:flex;flex-direction:column;gap:6px">
@@ -1162,21 +1217,17 @@ function renderCreate(){
         <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
         <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
 
-        <div style="margin-top:10px;font-weight:700">Optional Features</div>
-        <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
-        <label><input type="checkbox" data-ff="fireRate"/> Gun fire-rate (server-capped)</label><br/>
-        <label><input type="checkbox" data-ff="speedBoost"/> Speed boost</label><br/>
-        <label><input type="checkbox" data-ff="dmgReduction"/> Armour damage reduction</label><br/>
-        <label><input type="checkbox" data-ff="tracerFx"/> Bullet tracer FX</label><br/>
-        <label><input type="checkbox" data-ff="swingFx"/> Melee swing FX</label>
+        ${togglesHTML || ''}
 
         <div style="margin-top:10px; font-size:13px; opacity:.85">
-          Total (visual + selected features): <b>${totalPi} Pi</b> or <b>${totalIC} IC</b>
+          Total (base + features): <b id="totalPiDisp">${totals.pi} Pi</b> or <b id="totalIcDisp">${totals.ic.toLocaleString()} IC</b>
         </div>
 
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+          <!-- Keep Pi button fixed for now (display only shows dynamic) -->
           <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
-          <button class="ghost" id="payIC">Pay ${COSTS.PER_ITEM_IC.toLocaleString()} IC</button>
+          <!-- IC button reflects dynamic price and is actually charged -->
+          <button class="ghost" id="payIC">Pay ${totals.ic.toLocaleString()} IC</button>
           <span id="payStatus" style="font-size:12px; opacity:.8"></span>
         </div>
 
@@ -1552,8 +1603,7 @@ async function hydrateMine(){
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
-});   // close forEach
-}
+}}
 
 /* ---------- Marketplace (internal) ---------- */
 async function fetchMarketplace(){
@@ -1585,7 +1635,7 @@ async function hydrateMarketplace(){
     });
   });
 
-  host.querySelectorAll('[data-mp-buy]').forEach(btn=>{
+    host.querySelectorAll('[data-mp-buy]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.dataset.mpBuy;
       const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
@@ -1674,11 +1724,13 @@ async function handleBuySingle(kind, enforceForm){
   if (usePi) {
     const status = document.getElementById('payStatus');
     if (status) status.textContent = 'Opening IZZA Pay checkout…';
+    // Keep Pi checkout fixed at base for now
     location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
     return;
   }
 
-  const total = calcTotalCost({ usePi:false });
+  // Dynamic IC total based on toggles + levels
+  const total = calcDynamicPrice().ic;
   const res = await payWithIC(total);
 
   const status = document.getElementById('payStatus');
@@ -1844,13 +1896,33 @@ function bindInside(){
     aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
   }
 
-  // Feature checkboxes (flags + re-render for meters & FX pickers)
+  // Feature checkboxes (selection-aware)
   root.querySelectorAll('[data-ff]').forEach(cb=>{
     const key = cb.dataset.ff;
+    const allow = allowedTogglesForSelection();
+    // Initialize checked state from STATE
     if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
+    // Disable checkboxes that are not allowed for current selection
+    if (!allow.toggles.includes(key)) {
+      cb.checked = false;
+      cb.disabled = true;
+    } else {
+      cb.disabled = false;
+    }
+
     cb.addEventListener('change', ()=>{
       STATE.featureFlags[key] = cb.checked;
+      // If a meter exists for this toggle and we just turned it on with no level → set to 1
+      const hasMeter = allow.meters.includes(key);
+      if (cb.checked && hasMeter && (STATE.featureLevels[key] == null || STATE.featureLevels[key] === 0)) {
+        STATE.featureLevels[key] = METER_UI[key]?.min ?? 1;
+      }
+      if (!cb.checked && hasMeter) {
+        delete STATE.featureLevels[key];
+      }
       saveDraft();
+
+      // Re-render to show/hide meters + recalc totals
       const host = root.querySelector('#craftTabs');
       if (!host) return;
       const saveScroll = host.scrollTop;
@@ -1864,14 +1936,6 @@ function bindInside(){
   const catSel  = root.querySelector('#catSel');
   const partSel = root.querySelector('#partSel');
 
-  function repopulatePartOptions(catSelEl, partSelEl){
-    const cat  = (catSelEl?.value || 'armour');
-    const opts = PART_OPTIONS[cat] || PART_OPTIONS.armour;
-    const prev = partSelEl?.value;
-    partSelEl.innerHTML = opts.map(o=> `<option value="${o.v}">${o.t}</option>`).join('');
-    partSelEl.value = opts.some(o=>o.v===prev) ? prev : opts[0].v;
-  }
-
   if (catSel && partSel){
     catSel.value = STATE.currentCategory;
     repopulatePartOptions(catSel, partSel);
@@ -1879,6 +1943,9 @@ function bindInside(){
     catSel.addEventListener('change', e=>{
       STATE.currentCategory = e.target.value;
       repopulatePartOptions(catSel, partSel);
+      // Clear feature flags/levels when switching categories/parts to avoid invalid combos
+      STATE.featureFlags = Object.fromEntries(Object.keys(STATE.featureFlags).map(k=>[k,false]));
+      STATE.featureLevels = {};
       saveDraft();
       updatePayButtonsState();
       const host = STATE.root?.querySelector('#craftTabs');
@@ -1896,6 +1963,9 @@ function bindInside(){
     partSel.value = STATE.currentPart;
     partSel.addEventListener('change', e=>{
       STATE.currentPart = e.target.value;
+      // Reset flags/levels for invalid ones on part change
+      STATE.featureFlags = Object.fromEntries(Object.keys(STATE.featureFlags).map(k=>[k,false]));
+      STATE.featureLevels = {};
       saveDraft();
       updatePayButtonsState();
       const host = STATE.root?.querySelector('#craftTabs');
@@ -2011,10 +2081,8 @@ function bindInside(){
     const nm = moderateName(STATE.currentName);
     if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-    const freeTest   = (COSTS.PER_ITEM_IC === 0 && selectedAddOnCount() === 0);
     const hasCredit  = totalMintCredits() > 0;
-
-    if (!STATE.hasPaidForCurrentItem && !hasCredit && !freeTest){
+    if (!hasCredit){
       craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
       return;
     }
@@ -2046,19 +2114,14 @@ function bindInside(){
         // ---- SUCCESS: Minted ----
         craftStatus.textContent = 'Crafted ✓';
 
-        // Clear single-use flag and handle package credits (if used)
-        STATE.hasPaidForCurrentItem = false;
+        // Handle credit burn (single or package)
         if (STATE.packageCredits && STATE.packageCredits.items > 0){
           STATE.packageCredits.items -= 1;
           if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-        }
-
-        // Decrement single-use credits
-        if (typeof STATE.mintCredits === 'number') {
+        } else if (typeof STATE.mintCredits === 'number') {
           STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
         }
-        const stillHasCredit = (STATE.mintCredits|0) > 0 || (STATE.packageCredits && STATE.packageCredits.items > 0);
-        STATE.canUseVisuals = !!stillHasCredit;
+        STATE.canUseVisuals = totalMintCredits() > 0;
 
         // Persist + get craftedId (from inject OR server)
         let craftedId = injected.id || null;
@@ -2124,8 +2187,21 @@ function bindInside(){
   // finally, wire sliders/meters + presets on initial render
   bindFeatureMeters(STATE.root);
 
+  // Make sure totals reflect any persisted draft immediately
+  const totals = calcDynamicPrice();
+  const piTotal = root.querySelector('#totalPiDisp');
+  const icTotal = root.querySelector('#totalIcDisp');
+  if (piTotal) piTotal.textContent = `${totals.pi} Pi`;
+  if (icTotal) icTotal.textContent = `${totals.ic.toLocaleString()} IC`;
+  const icBtn = document.getElementById('payIC');
+  if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
+
+  _syncVisualsTabStyle();
 } // <-- closes bindInside()
 
 /* ---------- Public API ---------- */
 window.CraftingUI = { mount, unmount };
 })(); // <-- closes IIFE
+
+
+  
