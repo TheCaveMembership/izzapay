@@ -447,7 +447,7 @@ function renderFeatureMeters(){
       const lvl = Math.max(ui.min, (typeof rawLvl==='number' ? rawLvl : ui.min));
       const prev = meterPreview(k, lvl);
 
-      // 1..3 clickable pills (horizontal)
+      // Build horizontal clickable pills
       const pills = [];
       for (let i = ui.min; i <= ui.max; i++){
         pills.push(`
@@ -463,7 +463,7 @@ function renderFeatureMeters(){
       return `
         <div class="meter" data-meter="${k}" style="margin:8px 0;display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center">
           <div style="opacity:.85;font-size:12px">${ui.label}</div>
-          <div class="lvl-wrap">${pills.join('')}</div>
+          <div class="lvl-wrap">${pills.join(' ')}</div>
           <div data-out="${k}" style="font-size:12px;opacity:.8;text-align:right">${prev}</div>
         </div>`;
     });
@@ -475,18 +475,24 @@ function renderFeatureMeters(){
 
   if (!rows.length && !fxBlocks.length) return '';
 
-  // Local CSS (forces horizontal pills + overrides global button styles)
+  // Local CSS for pills, forced horizontal
   const localCSS = `
     <style>
-      .lvl-wrap{
-        display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+      .meter-box .lvl-wrap{
+        display:flex !important;
+        flex-wrap:wrap;
+        gap:6px;
+        align-items:center;
       }
-      .lvl-pill{
-        display:inline-flex; align-items:center; justify-content:center;
+      .meter-box button.lvl-pill{
+        display:inline-flex !important;
+        flex:0 0 auto !important;
+        width:auto !important;
+        align-items:center; justify-content:center;
         min-width:28px; height:28px; padding:0 10px;
         border-radius:6px; border:1px solid #2a3550;
         background:#0b0f17; font-size:12px; font-weight:700; cursor:pointer;
-        line-height:1; white-space:nowrap; width:auto;  /* override any global button width */
+        line-height:1; white-space:nowrap;
       }
       .lvl-pill:focus{ outline:none; box-shadow:0 0 0 2px rgba(27,215,96,.35); }
       .lvl-pill.on{ box-shadow: inset 0 0 0 1px #1bd760; color:#b8ffd1; background:#0b2b17; }
@@ -497,7 +503,6 @@ function renderFeatureMeters(){
         .meter [data-out]{ grid-column:1/-1; text-align:left; opacity:.8; margin-top:2px }
       }
 
-      /* keep interactions local so drags/clicks don’t bubble to the close bar */
       .meter-box{
         margin-top:6px;border:1px solid #2a3550;border-radius:10px;background:#0b0f17;padding:10px;
         touch-action: pan-y; -webkit-tap-highlight-color:transparent; contain:layout paint;
