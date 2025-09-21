@@ -1598,12 +1598,13 @@ async function hydrateMine(){
     }, { passive:true });
   });
 
-  host.querySelectorAll('[data-stats]').forEach(btn=>{
+    host.querySelectorAll('[data-stats]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
-}}
+  });
+}
 
 /* ---------- Marketplace (internal) ---------- */
 async function fetchMarketplace(){
