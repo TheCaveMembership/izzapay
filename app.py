@@ -1993,12 +1993,11 @@ def voucher_new():
         row = cx.execute("SELECT * FROM voucher_redirects WHERE token=? AND used=0", (tok,)).fetchone()
         if not row:
             return "<h2>Link expired</h2>", 410
-        # one-shot
         cx.execute("UPDATE voucher_redirects SET used=1 WHERE token=?", (tok,))
 
     # generate a fresh, single-use code
     import secrets, time
-    code = ("IZZA-" + secrets.token_hex(6)).upper()  # e.g., IZZA-AB12CD34EF56
+    code = ("IZZA-" + secrets.token_hex(6)).upper()
     with conn() as cx:
         cx.execute(
             """INSERT INTO mint_codes(code, credits, status, payment_id, session_id, created_at)
@@ -2006,19 +2005,225 @@ def voucher_new():
             (code, 1, "issued", row["payment_id"], row["session_id"], int(time.time()))
         )
 
-    # very simple HTML (you can replace with a template):
-    return f"""
-      <div style="font-family:ui-sans-serif,system-ui;max-width:560px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px">
-        <h2 style="margin:0 0 8px">Your voucher code</h2>
-        <p style="opacity:.8;margin:0 0 10px">Use this in the Crafting UI to add 1 mint credit.</p>
-        <div style="font-size:20px;font-weight:700;background:#f6f7fb;border:1px dashed #c6c8d1;border-radius:8px;padding:10px 12px">{code}</div>
-        <button onclick="navigator.clipboard.writeText('{code}');this.textContent='Copied ✓';"
-                style="margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer">
-          Copy
-        </button>
-        <div style="margin-top:16px;opacity:.7">You can now return to the game and paste this code.</div>
+    back_to_game = "/izza-game/voucher?craftPaid=1"
+
+    # NOTE: plain string (NOT an f-string). We swap __CODE__ and __BACK__ afterwards.
+    HTML_TMPL = r"""<!doctype html>
+<html lang="en" data-no-global-i18n="0">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Voucher Unlocked • IZZA PAY</title>
+  <style>
+    :root {
+      --bg:#0b0f17;
+      --panel:#0f1522;
+      --border:#2a3550;
+      --text:#e7ecff;
+      --muted:#a7b0c9;
+      --accent:#7b5cff;
+      --accent-2:#1bd760;
+    }
+    html,body { height:100%; background:radial-gradient(1200px 60% at 50% -10%, #152037 0%, var(--bg) 60%) fixed; }
+    body {
+      margin:0; color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+      display:flex; align-items:center; justify-content:center; padding:20px;
+      overflow-x:hidden;
+    }
+    .wrap { position:relative; width:min(720px, 94vw); }
+    .card {
+      background:linear-gradient(180deg, rgba(19,28,48,.7), rgba(14,20,34,.9));
+      border:1px solid var(--border); border-radius:16px; padding:18px 18px 16px;
+      box-shadow:0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
+      backdrop-filter:saturate(120%) blur(2px);
+      position:relative; z-index:2;
+    }
+    .hdr { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .logo {
+      font-weight:900; letter-spacing:.5px; font-size:18px;
+      background: linear-gradient(90deg, #ff84e8, #7b5cff, #1bd760);
+      -webkit-background-clip:text; background-clip:text; color:transparent;
+      text-shadow:0 0 10px rgba(123,92,255,.25);
+    }
+    .title { font-size:22px; font-weight:800; margin:4px 0 2px; }
+    .sub   { color:var(--muted); }
+    .code {
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      margin-top:12px; padding:14px 14px;
+      background:#0b0f17; border:1px dashed #415082; border-radius:12px;
+      font:700 20px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      letter-spacing:1px;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);
+    }
+    .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    .btn {
+      appearance:none; border:1px solid var(--border); background:var(--panel); color:var(--text);
+      border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer;
+      transition:transform .05s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    .btn:hover { border-color:#4b5e8c; box-shadow:0 6px 22px rgba(0,0,0,.35); }
+    .btn:active { transform:translateY(1px); }
+    .btn.primary { background:linear-gradient(180deg, #17233d, #101a2f); border-color:#345094; }
+    .btn.success { background:linear-gradient(180deg, #0e2919, #0a2215); border-color:#1bd76055; color:#b8ffd1; }
+    .foot { margin-top:12px; color:var(--muted); font-size:12px; }
+    .badge {
+      display:inline-block; border:1px solid #1bd760; color:#b8ffd1; background:#0b2b17;
+      padding:4px 8px; border-radius:8px; font-weight:800; font-size:12px; margin-left:6px;
+    }
+    canvas.confetti, canvas.fireworks {
+      position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:1;
+    }
+    canvas.fireworks { z-index:0; mix-blend-mode:screen; opacity:.75; }
+  </style>
+</head>
+<body>
+  <canvas class="fireworks"></canvas>
+  <canvas class="confetti"></canvas>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="hdr">
+        <div class="logo">IZZA&nbsp;PAY</div>
+        <span class="badge">Voucher Ready</span>
       </div>
-    """
+
+      <div class="title">You got a Crafting Credit! 💥</div>
+      <div class="sub">Use this code in the Crafting UI to add <strong>1 mint credit</strong>.</div>
+
+      <div class="code">
+        <span id="vcode">__CODE__</span>
+        <button class="btn primary" id="copyBtn" aria-label="Copy code">Copy</button>
+      </div>
+
+      <div class="btns">
+        <a class="btn success" href="__BACK__">Open Crafting (reconcile)</a>
+        <button class="btn" id="moreBtn">See how to redeem</button>
+      </div>
+
+      <div class="foot" id="howto" style="display:none">
+        In the Crafting UI, scroll to <b>Packages → Create Item</b>, enter your item name, then under
+        “Have a code?” paste the voucher and press <b>Redeem</b>. Your credit counter will increase and
+        the Visuals tab will unlock.
+      </div>
+    </div>
+  </div>
+
+  <script>
+  const $ = (sel)=>document.querySelector(sel);
+
+  $("#moreBtn").addEventListener("click", ()=>{
+    const el = $("#howto");
+    el.style.display = el.style.display === "none" ? "block" : "none";
+  });
+
+  $("#copyBtn").addEventListener("click", async ()=>{
+    try {
+      await navigator.clipboard.writeText($("#vcode").textContent.trim());
+      $("#copyBtn").textContent = "Copied ✓";
+      burstConfetti();
+    } catch(_) {
+      $("#copyBtn").textContent = "Copied ✓";
+    }
+    setTimeout(()=> $("#copyBtn").textContent = "Copy", 1800);
+  });
+
+  // --------- Confetti ----------
+  (function confettiInit(){
+    const c = document.querySelector('canvas.confetti');
+    const ctx = c.getContext('2d');
+    let W, H, pieces = [];
+    function rs(){
+      W = c.width = window.innerWidth;
+      H = c.height = window.innerHeight;
+    }
+    window.addEventListener('resize', rs, {passive:true}); rs();
+
+    function makePiece(x, y, pow=1){
+      const a = Math.random()*Math.PI*2;
+      const sp = 2 + Math.random()*3*pow;
+      return {
+        x, y,
+        vx: Math.cos(a)*sp,
+        vy: Math.sin(a)*sp - (6*pow),
+        w: 6 + Math.random()*6,
+        h: 2 + Math.random()*4,
+        r: Math.random()*Math.PI,
+        vr: (Math.random()*0.2-0.1),
+        life: 120 + (Math.random()*60)
+      };
+    }
+    function spawnBurst(pow=1){
+      const cx = W/2, cy = Math.max(120, H*0.25);
+      for(let i=0;i<120*pow;i++) pieces.push(makePiece(cx, cy, pow));
+    }
+    window.burstConfetti = ()=> spawnBurst(1.2);
+
+    function tick(){
+      ctx.clearRect(0,0,W,H);
+      for(let i=pieces.length-1;i>=0;i--){
+        const p = pieces[i];
+        p.life -= 1;
+        if(p.life<=0 || p.y>H+100) { pieces.splice(i,1); continue; }
+        p.vy += 0.12; p.vx *= 0.995;
+        p.x += p.vx; p.y += p.vy; p.r += p.vr;
+        ctx.save();
+        ctx.translate(p.x,p.y); ctx.rotate(p.r);
+        ctx.fillStyle = (i%6===0) ? '#1bd760' : (i%5===0?'#7b5cff':(i%4===0?'#ff84e8':'#e7ecff'));
+        ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+        ctx.restore();
+      }
+      requestAnimationFrame(tick);
+    }
+    tick();
+    setTimeout(()=> spawnBurst(1.2), 250);
+  })();
+
+  // --------- Fireworks ----------
+  (function fireworksInit(){
+    const c = document.querySelector('canvas.fireworks');
+    const ctx = c.getContext('2d');
+    let W,H; function rs(){ W=c.width=window.innerWidth; H=c.height=window.innerHeight; }
+    window.addEventListener('resize', rs, {passive:true}); rs();
+
+    const rockets=[], sparks=[];
+    function rocket(){
+      const x = Math.random()*W*0.8 + W*0.1;
+      rockets.push({ x, y:H+20, vx:(Math.random()-.5)*1.2, vy:- (5+Math.random()*2), t: 60+Math.random()*30 });
+    }
+    function explode(x,y){
+      for(let i=0;i<60;i++) {
+        const a = Math.random()*Math.PI*2;
+        const sp = 1.5+Math.random()*2.5;
+        sparks.push({ x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life: 70+Math.random()*40 });
+      }
+    }
+
+    setInterval(rocket, 900);
+
+    function frame(){
+      ctx.clearRect(0,0,W,H);
+      for(let i=rockets.length-1;i>=0;i--) {
+        const r=rockets[i];
+        r.t--; r.vy += 0.06; r.x += r.vx; r.y += r.vy;
+        ctx.fillStyle='rgba(255,255,255,.7)'; ctx.fillRect(r.x-1,r.y-1,2,2);
+        if(r.t<=0) { explode(r.x,r.y); rockets.splice(i,1); }
+      }
+      for(let i=sparks.length-1;i>=0;i--) {
+        const s=sparks[i]; s.life--; s.vy+=0.03; s.x+=s.vx; s.y+=s.vy;
+        ctx.fillStyle = (i%3===0)?'rgba(27,215,96,.9)':(i%2===0?'rgba(123,92,255,.9)':'rgba(255,132,232,.9)');
+        ctx.fillRect(s.x,s.y,2,2);
+        if(s.life<=0) sparks.splice(i,1);
+      }
+      requestAnimationFrame(frame);
+    }
+    frame();
+  })();
+  </script>
+</body>
+</html>"""
+
+    html = HTML_TMPL.replace("__CODE__", code).replace("__BACK__", back_to_game)
+    return Response(html, headers={"Content-Type": "text/html; charset=utf-8"})
 
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
