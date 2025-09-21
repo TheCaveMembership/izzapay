@@ -440,69 +440,54 @@ function calcDynamicPrice(){
 function renderFeatureMeters(){
   const allow = allowedTogglesForSelection();
   const rows = allow.meters
-    .filter(k => STATE.featureFlags[k]) // show only when toggle is ON
+    .filter(k => STATE.featureFlags[k])
     .map(k=>{
-      const ui = METER_UI[k];
-      const rawLvl = STATE.featureLevels?.[k];
-      const lvl = Math.max(ui.min, (typeof rawLvl==='number' ? rawLvl : ui.min));
+      const ui   = METER_UI[k];
+      const raw  = STATE.featureLevels?.[k];
+      const lvl  = Math.max(ui.min, (typeof raw==='number' ? raw : ui.min));
       const prev = meterPreview(k, lvl);
 
-      // Build horizontal clickable pills
+      // Horizontal pills with inline styles to defeat any global button CSS
+      const pillStyle =
+        'display:inline-flex;flex:0 0 auto;width:auto;align-items:center;justify-content:center;' +
+        'min-width:28px;height:28px;padding:0 10px;margin:0 6px 0 0;border-radius:6px;' +
+        'border:1px solid #2a3550;background:#0b0f17;font-size:12px;font-weight:700;line-height:1;white-space:nowrap;';
       const pills = [];
       for (let i = ui.min; i <= ui.max; i++){
-        pills.push(`
-          <button
-            type="button"
-            class="lvl-pill ${i===lvl?'on':''}"
-            data-m="${k}" data-lvl="${i}"
-            aria-pressed="${i===lvl?'true':'false'}">
-            ${i}
-          </button>`);
+        pills.push(
+          `<button type="button"
+                   class="lvl-pill ${i===lvl?'on':''}"
+                   data-m="${k}" data-lvl="${i}"
+                   aria-pressed="${i===lvl?'true':'false'}"
+                   style="${pillStyle}">${i}</button>`
+        );
       }
 
       return `
-        <div class="meter" data-meter="${k}" style="margin:8px 0;display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center">
+        <div class="meter" data-meter="${k}"
+             style="margin:8px 0;display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center">
           <div style="opacity:.85;font-size:12px">${ui.label}</div>
-          <div class="lvl-wrap">${pills.join(' ')}</div>
+          <div class="lvl-wrap"
+               style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pills.join('')}</div>
           <div data-out="${k}" style="font-size:12px;opacity:.8;text-align:right">${prev}</div>
         </div>`;
     });
 
-  // FX preset pickers (only when their toggles are on & allowed)
   const fxBlocks = [];
   if (allow.toggles.includes('tracerFx') && STATE.featureFlags?.tracerFx) fxBlocks.push(renderTracerPicker());
   if (allow.toggles.includes('swingFx')  && STATE.featureFlags?.swingFx)  fxBlocks.push(renderSwingPicker());
 
   if (!rows.length && !fxBlocks.length) return '';
 
-  // Local CSS for pills, forced horizontal
+  // Tiny CSS just for active state + responsive meter grid
   const localCSS = `
     <style>
-      .meter-box .lvl-wrap{
-        display:flex !important;
-        flex-wrap:wrap;
-        gap:6px;
-        align-items:center;
-      }
-      .meter-box button.lvl-pill{
-        display:inline-flex !important;
-        flex:0 0 auto !important;
-        width:auto !important;
-        align-items:center; justify-content:center;
-        min-width:28px; height:28px; padding:0 10px;
-        border-radius:6px; border:1px solid #2a3550;
-        background:#0b0f17; font-size:12px; font-weight:700; cursor:pointer;
-        line-height:1; white-space:nowrap;
-      }
-      .lvl-pill:focus{ outline:none; box-shadow:0 0 0 2px rgba(27,215,96,.35); }
       .lvl-pill.on{ box-shadow: inset 0 0 0 1px #1bd760; color:#b8ffd1; background:#0b2b17; }
-
-      .meter{display:grid;grid-template-columns:140px 1fr 120px;gap:10px;align-items:center}
-      @media (max-width: 480px){
-        .meter{ grid-template-columns:120px 1fr; }
+      .lvl-pill:focus{ outline:none; box-shadow:0 0 0 2px rgba(27,215,96,.35); }
+      @media (max-width:480px){
+        .meter{ grid-template-columns:120px 1fr !important; }
         .meter [data-out]{ grid-column:1/-1; text-align:left; opacity:.8; margin-top:2px }
       }
-
       .meter-box{
         margin-top:6px;border:1px solid #2a3550;border-radius:10px;background:#0b0f17;padding:10px;
         touch-action: pan-y; -webkit-tap-highlight-color:transparent; contain:layout paint;
