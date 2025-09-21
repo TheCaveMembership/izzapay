@@ -498,7 +498,6 @@ function renderSwingPicker(){
     </div>`;
 }
 
-/* Bind sliders + fx pickers Ã¢ÂÂ STATE + live preview */
 /* Bind sliders + fx pickers → STATE + live preview */
 function bindFeatureMeters(root){
   const wrap = root?.querySelector('.cl-pane.cl-form'); if (!wrap) return;
@@ -508,14 +507,17 @@ function bindFeatureMeters(root){
     if (out) out.textContent = meterPreview(mKey, lvl);
   };
 
+  // Sliders — non-passive, ensure the control takes the gesture
   wrap.querySelectorAll('.meter input[type="range"][data-m]').forEach(inp=>{
     const key = inp.dataset.m;
+    inp.style.pointerEvents = 'auto';
     inp.addEventListener('input', ()=>{
       const lvl = parseInt(inp.value, 10) || 1;
       STATE.featureLevels[key] = lvl;
       updateOut(key, lvl);
       saveDraft();
-      // Update totals display live
+
+      // Update totals display live (keeps the rest of your code untouched)
       const totals = calcDynamicPrice();
       const piTotal = wrap.querySelector('#totalPiDisp');
       const icTotal = wrap.querySelector('#totalIcDisp');
@@ -524,7 +526,7 @@ function bindFeatureMeters(root){
       const icBtn = document.getElementById('payIC');
       if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
       const piBtn = document.getElementById('payPi'); if (piBtn) piBtn.textContent = `Pay ${totals.pi} Pi`;
-    }, { passive:true });
+    });
   });
 
   // FX grid clicks
@@ -532,16 +534,15 @@ function bindFeatureMeters(root){
     div.addEventListener('click', ()=>{
       STATE.tracerPreset = div.getAttribute('data-tracer') || 'comet';
       saveDraft();
-      // toggle selection
       wrap.querySelectorAll('[data-tracer]').forEach(d=> d.classList.toggle('on', d===div));
-    }, { passive:true });
+    });
   });
-  wrap.querySelectorAll('[data-swing]').forEach(div=>{
+  wrap.querySelectorAll('[data-swing]').forEach	div=>{
     div.addEventListener('click', ()=>{
       STATE.swingPreset = div.getAttribute('data-swing') || 'arcLight';
       saveDraft();
       wrap.querySelectorAll('[data-swing]').forEach(d=> d.classList.toggle('on', d===div));
-    }, { passive:true });
+    });
   });
 
   const reset = wrap.querySelector('#metersReset');
@@ -562,11 +563,9 @@ function bindFeatureMeters(root){
       const icBtn = document.getElementById('payIC');
       if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
       const piBtn = document.getElementById('payPi'); if (piBtn) piBtn.textContent = `Pay ${totals.pi} Pi`;
-    }, { passive:true });
+    });
   }
 }
-/* Store chosen levels in STATE (start empty; we set to 1 when toggle shows its slider) */
-STATE.featureLevels = {}; // keys set on-demand when toggled on
 
 /* Apply selected stats onto an inventory entry (weapon/armour) */
 function attachCraftStats(invKey, entry){
@@ -1899,13 +1898,15 @@ function bindInside(){
     aiAnimChk.addEventListener('change', e=>{ STATE.wantAnimation = !!e.target.checked; saveDraft(); });
   }
 
-  // Feature checkboxes (selection-aware)
+// Feature checkboxes (selection-aware)
 root.querySelectorAll('[data-ff]').forEach(cb=>{
   const key = cb.dataset.ff;
   const allow = allowedTogglesForSelection();
-  // Initialize checked state from STATE
+
+  // Initialize from STATE
   if (STATE.featureFlags && key in STATE.featureFlags) cb.checked = !!STATE.featureFlags[key];
-  // Disable checkboxes that are not allowed for current selection
+
+  // Enable/disable by current selection
   if (!allow.toggles.includes(key)) {
     cb.checked = false;
     cb.disabled = true;
@@ -1915,7 +1916,8 @@ root.querySelectorAll('[data-ff]').forEach(cb=>{
 
   cb.addEventListener('change', ()=>{
     STATE.featureFlags[key] = cb.checked;
-    // If a meter exists for this toggle and we just turned it on with no level → set to 1
+
+    // Initialize or clear paired meter level
     const hasMeter = allow.meters.includes(key);
     if (cb.checked && hasMeter && (STATE.featureLevels[key] == null || STATE.featureLevels[key] === 0)) {
       STATE.featureLevels[key] = METER_UI[key]?.min ?? 1;
@@ -1925,14 +1927,18 @@ root.querySelectorAll('[data-ff]').forEach(cb=>{
     }
     saveDraft();
 
-    // Re-render to show/hide meters + recalc totals
+    // Defer the re-render so the click finishes cleanly (prevents "freeze")
     const host = root.querySelector('#craftTabs');
     if (!host) return;
     const saveScroll = host.scrollTop;
-    host.innerHTML = renderCreate();
-    bindInside();
-    bindFeatureMeters(STATE.root);
-    host.scrollTop = saveScroll;
+
+    requestAnimationFrame(()=>{
+      try { document.activeElement?.blur?.(); } catch {}
+      host.innerHTML = renderCreate();
+      bindInside();
+      bindFeatureMeters(STATE.root);
+      host.scrollTop = saveScroll;
+    });
   });
 });
   const catSel  = root.querySelector('#catSel');
