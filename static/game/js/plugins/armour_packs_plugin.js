@@ -799,7 +799,7 @@ window.ArmourPacks.injectCraftedItem = function(input){
     return { ok:false, reason:String(e) };
   }
 };
-
+})();
   // ---- Safe boot/wire-up ----
   function __armourPacksBoot(){
     if (!window.IZZA || typeof IZZA.on!=='function') return false;
