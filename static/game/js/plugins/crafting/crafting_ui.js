@@ -654,16 +654,19 @@ function bindFeatureMeters(root){
 function attachCraftStats(invKey, entry){
   try{
     const part = String(entry.part||entry.slot||'').toLowerCase();
-    const isGun      = (part === 'gun');
+    const isGun      = (part === 'gun' || part === 'hands'); // <— broaden
     const isMelee    = (part === 'melee');
     const isLegs     = (part === 'legs');
     const isHelmVest = (part === 'helmet' || part === 'vest');
 
+    // NEW: harmless type stamps (helps guns/loot/pickups agree)
+    if (isGun) { entry.type = 'weapon'; entry.subtype = 'gun'; entry.gun = true; }
+    if (isMelee){ entry.type = 'weapon'; entry.subtype = 'melee'; }
+
     const L = STATE.featureLevels || {};
     const F = STATE.featureFlags  || {};
     const setIf = (flagKey, meterKey, condition) => {
-      if (!F[flagKey]) return;
-      if (!condition) return;
+      if (!F[flagKey] || !condition) return;
       const meter = FEATURE_METERS[meterKey];
       const lvl = Math.max(METER_UI[meterKey]?.min||1, parseInt(L[meterKey]||1,10));
       entry[meter.key] = meter.toValue(lvl);
@@ -678,12 +681,12 @@ function attachCraftStats(invKey, entry){
     setIf('dmgReduction','dmgReduction', isHelmVest);
     setIf('speedBoost','speedBoost', isLegs);
 
-    // FX selections (cosmetic)
+    // FX
     entry.fx = entry.fx || {};
     if (F.tracerFx && isGun)  entry.fx.tracer = STATE.tracerPreset;
     if (F.swingFx  && isMelee) entry.fx.swing  = STATE.swingPreset;
 
-    // --- HARDENING: re-assert auto flags AFTER any FX writes
+    // Re-assert auto AFTER FX
     if (isGun && STATE.featureFlags?.autoFire) {
       entry.auto = true;
       entry.autoFire = true;
@@ -700,15 +703,18 @@ function __enforceCreatorAuto(){
     const apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
     const inv = apiObj?.getInventory ? (apiObj.getInventory()||{}) : JSON.parse(localStorage.getItem('izzaInventory')||'{}');
     const wantName = String(STATE.currentName||'').toLowerCase();
+
     const key = Object.keys(inv).reverse().find(k=>{
       if(!/^craft_/.test(k)) return false;
       const e = inv[k]||{};
       const part = String(e.part||e.slot||'').toLowerCase();
-      return (String(e.name||'').toLowerCase()===wantName) && part==='gun';
+      const subtype = String(e.subtype||'').toLowerCase();
+      const isGunLike = (part==='gun' || part==='hands' || subtype==='gun' || e.gun===true);
+      return isGunLike && (String(e.name||'').toLowerCase()===wantName);
     });
     if(!key) return;
+
     const it = inv[key]||{};
-    // Only touch if it's a gun and not already 'auto'
     const alreadyAuto = !!(it.auto || it.autoFire || String(it.fireMode||'').toLowerCase()==='auto');
     if (!alreadyAuto) {
       it.auto = true; it.autoFire = true; it.fireMode = 'auto';
