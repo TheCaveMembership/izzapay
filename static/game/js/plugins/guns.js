@@ -46,6 +46,7 @@
 
   // creator guns + legacy pistols/uzis
   let lastPistolAt = 0, uziTimer = null;
+  let creatorAutoTimer = null;
   let lastCreatorShotAt = 0;
 
   // melee swing state
@@ -183,6 +184,11 @@ function craftedGunTuning(){
     critChance: Math.max(0, Math.min(0.5, Number(it.critChance||0))),       // up to 50% hard cap
     dmgMult:    Math.max(0.5, Math.min(3.0, Number(it.dmgMult||1.0)))
   };
+}
+  function creatorGunIsAuto(){
+  const cg = firstEquippedCreatorGun(); if(!cg) return false;
+  const it = cg.it || {};
+  return !!(it.auto || it.autoFire || String(it.fireMode||'').toLowerCase()==='auto');
 }
   // ---- creator melee tuning (reads optional item fields) ----
 function craftedMeleeTuning(){
@@ -577,24 +583,69 @@ function drawTracerTrail(ctx, styleKey, sx, sy, vx, vy, lifeRatio){
 
   // ---------- firing ----------
   function firePistol(){
-    const t=now();
-    if(t-lastPistolAt < TUNE.pistolDelayMs) return;
-    if(!pistolEquipped()) return;
-    if(!takeAmmo('pistol')){ lastPistolAt=t; return; }
-    spawnBulletOrPointBlank(); lastPistolAt=t;
+  const t=now();
+  if(t-lastPistolAt < TUNE.pistolDelayMs) return;
+  if(!pistolEquipped()) return;
+  if(!takeAmmo('pistol')){ lastPistolAt=t; return; }
+  const spawned = spawnBulletOrPointBlank();
+  if (!spawned){
+    const inv = readInv(); if (inv.pistol){ inv.pistol.ammo = (inv.pistol.ammo|0)+1; writeInv(inv); updateAmmoHUD(); }
   }
+  lastPistolAt=t;
+}
   function uziStart(){
-    if(uziTimer || !uziEquipped()) return;
-    if(!takeAmmo('uzi')) return;
-    spawnBulletOrPointBlank();
-    uziTimer=setInterval(()=>{
-      if(!uziEquipped()){ uziStop(); return; }
-      if(!takeAmmo('uzi')){ uziStop(); return; }
-      spawnBulletOrPointBlank();
-    }, TUNE.uziIntervalMs);
+  if(uziTimer || !uziEquipped()) return;
+  if(!takeAmmo('uzi')) return;
+  const spawned = spawnBulletOrPointBlank();
+  if (!spawned){ /* no projectile (point-blank), refund 1 ammo */
+    const inv = readInv(); if (inv.uzi){ inv.uzi.ammo = (inv.uzi.ammo|0)+1; writeInv(inv); updateAmmoHUD(); }
+    return;
   }
+  uziTimer = setInterval(()=>{
+  if(!uziEquipped()){ uziStop(); return; }
+  if(!takeAmmo('uzi')){ uziStop(); return; }
+  const spawned = spawnBulletOrPointBlank();
+  if (!spawned){
+    const inv = readInv();
+    if (inv.uzi){ inv.uzi.ammo = (inv.uzi.ammo|0) + 1; writeInv(inv); updateAmmoHUD(); }
+  }
+}, TUNE.uziIntervalMs);
+}
   function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer=null; } }
+function creatorAutoStart(){
+  if (creatorAutoTimer) return;
+  const cg = firstEquippedCreatorGun(); if(!cg) return;
 
+  const step = ()=>{
+    // stop if unequipped / no ammo
+    const cur = firstEquippedCreatorGun(); 
+    if (!cur) { creatorAutoStop(); return; }
+    if (!takeAmmo('creatorGun')) { creatorAutoStop(); return; }
+
+    const style = selectedCreatorFX();
+    const mul   = Number(cur.it.bulletSpeedMul || 1.0);
+    const spawned = spawnBulletOrPointBlank(mul, style);
+    if (!spawned){
+      // refund 1 since we consumed but didn’t spawn
+      const inv = readInv();
+      const slot = inv[cur.key];
+      if (slot){
+        slot.ammo = (slot.ammo|0) + 1;
+        writeInv(inv);
+        updateAmmoHUD();
+        patchInventoryAmmo('creatorGun', slot.ammo, cur.key);
+      }
+    }
+  };
+
+  // fire immediately, then continue on interval
+  step();
+  const interval = Math.max(60, (cg.it.fireIntervalMs|0) || TUNE.creatorGun.fireIntervalMs);
+  creatorAutoTimer = setInterval(step, interval);
+}
+function creatorAutoStop(){
+  if (creatorAutoTimer){ clearInterval(creatorAutoTimer); creatorAutoTimer=null; }
+}
   // ---- NEW: creator gun one-shot (uses item fireIntervalMs + bulletSpeedMul)
     // ---- NEW: creator gun one-shot (uses item fireIntervalMs + bulletSpeedMul)
   function fireCreatorGun(){
@@ -603,10 +654,14 @@ function drawTracerTrail(ctx, styleKey, sx, sy, vx, vy, lifeRatio){
     if(t - lastCreatorShotAt < (cg.it.fireIntervalMs|0)) return;
     if(!takeAmmo('creatorGun')){ lastCreatorShotAt = t; return; }
 
-    const style = selectedCreatorFX(); // null if player didn't choose any tracer
-    spawnBulletOrPointBlank(Number(cg.it.bulletSpeedMul||1.0), style);
-
-    lastCreatorShotAt = t;
+    const style = selectedCreatorFX();
+const spawned = spawnBulletOrPointBlank(Number(cg.it.bulletSpeedMul||1.0), style);
+if (!spawned){
+  const inv = readInv();
+  const slot = inv[cg.key];
+  if (slot){ slot.ammo = (slot.ammo|0) + 1; writeInv(inv); updateAmmoHUD(); patchInventoryAmmo('creatorGun', slot.ammo, cg.key); }
+}
+lastCreatorShotAt = t;
   }
 
   // ---- NEW: melee swing (no ammo) ------------------------------------------
@@ -697,10 +752,14 @@ function meleeSwingActive(){
       if(k==='uzi'){ uziStart(); }
       else if(k==='pistol'){ firePistol(); }
       else if(k==='grenade'){ throwGrenade(); }
-      else if(k==='creatorGun'){ fireCreatorGun(); }
+      else if (k==='creatorGun'){ 
+  if (creatorGunIsAuto()) creatorAutoStart();
+  else fireCreatorGun();
+}
       else if(k==='melee'){ startMeleeSwing(); }
     };
-    const up  =(ev)=>{ ev.preventDefault(); ev.stopPropagation(); uziStop(); /* melee one-shot */ };
+    const up  =(ev)=>{ ev.preventDefault(); ev.stopPropagation(); uziStop(); creatorAutoStop();   
+    /* melee one-shot */ };
     fireBtn.addEventListener('pointerdown',down,{passive:false});
     fireBtn.addEventListener('pointerup',  up,  {passive:false});
     fireBtn.addEventListener('touchstart',down,{passive:false});
@@ -776,15 +835,23 @@ function meleeSwingActive(){
       if(anyPopupOpen()) return; // respect hidden state
       const ek=equippedKind(); if(!ek) return;
       e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-      if(ek==='uzi'){ if(!uziTimer) uziStart(); }
-      else if(ek==='pistol'){ firePistol(); }
-      else if(ek==='grenade'){ throwGrenade(); }
-      else if(ek==='creatorGun'){ fireCreatorGun(); }
-      else if(ek==='melee'){ startMeleeSwing(); }
+      if (ek==='uzi') {
+  if(!uziTimer) uziStart();
+} else if (ek==='pistol') {
+  firePistol();
+} else if (ek==='grenade') {
+  throwGrenade();
+} else if (ek==='creatorGun') {
+  if (creatorGunIsAuto()) creatorAutoStart();
+  else fireCreatorGun();
+} else if (ek==='melee') {
+  startMeleeSwing();
+}
     };
     const onUpCapture = (e)=>{
       const k=(e.key||'').toLowerCase(); if(k!=='a') return;
       if(uziTimer) uziStop();
+      creatorAutoStop(); 
       e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
     };
     window.addEventListener('keydown', onDownCapture, {capture:true, passive:false});
