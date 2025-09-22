@@ -105,7 +105,32 @@
     h.textContent = msg; h.style.display='block';
     setTimeout(()=>{ h.style.display='none'; }, seconds*1000);
   }
+// ---- crafted gun helpers (mirror of guns file semantics) ----
+function firstEquippedCreatorGun(inv){
+  if(!inv) return null;
+  for(const k in inv){
+    const it = inv[k];
+    if(!it || !it.equipped) continue;
+    if(it.type === 'weapon' && (it.subtype === 'gun' || it.gun === true)){
+      // normalize ammo field
+      it.ammo = (it.ammo|0);
+      return { key: k, it };
+    }
+  }
+  return null;
+}
 
+// Accept flags set by the Crafting UI:
+// - it.auto === true
+// - it.autoFire === true
+// - it.fireMode === 'auto'
+function creatorGunIsAuto(it){
+  if(!it) return false;
+  if(it.auto === true) return true;
+  if(it.autoFire === true) return true;
+  if(String(it.fireMode||'').toLowerCase() === 'auto') return true;
+  return false;
+}
   // ----- hooks -----
   IZZA.on('ready', (a)=>{
     api=a; player=a.player; TILE=a.TILE; camera=a.camera;
@@ -170,26 +195,46 @@
 
       // Weapons/consumables: ALWAYS pickable
       const inv = (api && api.getInventory) ? api.getInventory() : {};
-      if(it.kind === 'pistol'){
-        const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
-        const had = !!inv.pistol && !!inv.pistol.owned;
-        cur.owned = true;
-        // +17 ammo per pickup (same as shop)
-        cur.ammo  = (cur.ammo|0) + 17;
-        inv.pistol = cur;
-        if(api.setInventory) api.setInventory(inv);
-        toast(had ? `Pistol ammo +17` : `Picked up pistol (+17 rounds)`);
-        log('picked pistol; ammo:', cur.ammo, 'ownedBefore?', had);
+            if(it.kind === 'pistol'){
+        // If a crafted gun is equipped and NOT auto, pistol ammo goes to that crafted gun
+        const cg = firstEquippedCreatorGun(inv);
+        if (cg && !creatorGunIsAuto(cg.it)) {
+          const slot = inv[cg.key] || (inv[cg.key] = cg.it);
+          slot.ammo = (slot.ammo|0) + 17;
+          if(api.setInventory) api.setInventory(inv);
+          toast(`Creator gun ammo +17`);
+          log('pistol pickup → crafted (semi-auto).', cg.key, 'ammo:', slot.ammo);
+        } else {
+          // default: pistol ammo
+          const cur = inv.pistol || { owned:true, ammo:0, equipped:false };
+          const had = !!inv.pistol && !!inv.pistol.owned;
+          cur.owned = true;
+          cur.ammo  = (cur.ammo|0) + 17;
+          inv.pistol = cur;
+          if(api.setInventory) api.setInventory(inv);
+          toast(had ? `Pistol ammo +17` : `Picked up pistol (+17 rounds)`);
+          log('picked pistol; ammo:', cur.ammo, 'ownedBefore?', had);
+        }
       } else if(it.kind === 'uzi'){
-        // Each Uzi pickup adds +50 ammo; first pickup grants ownership
-        const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
-        const had = !!inv.uzi && !!inv.uzi.owned;
-        cur.owned = true;
-        cur.ammo  = (cur.ammo|0) + 50;
-        inv.uzi = cur;
-        if(api.setInventory) api.setInventory(inv);
-        toast(had ? `Uzi ammo +50` : `Picked up Uzi (+50 rounds)`);
-        log('picked uzi; ammo:', cur.ammo, 'ownedBefore?', had);
+        // If a crafted gun is equipped and IS auto, uzi ammo goes to that crafted gun
+        const cg = firstEquippedCreatorGun(inv);
+        if (cg && creatorGunIsAuto(cg.it)) {
+          const slot = inv[cg.key] || (inv[cg.key] = cg.it);
+          slot.ammo = (slot.ammo|0) + 50;
+          if(api.setInventory) api.setInventory(inv);
+          toast(`Creator gun ammo +50`);
+          log('uzi pickup → crafted (auto).', cg.key, 'ammo:', slot.ammo);
+        } else {
+          // default: uzi ammo
+          const cur = inv.uzi || { owned:true, ammo:0, equipped:false };
+          const had = !!inv.uzi && !!inv.uzi.owned;
+          cur.owned = true;
+          cur.ammo  = (cur.ammo|0) + 50;
+          inv.uzi = cur;
+          if(api.setInventory) api.setInventory(inv);
+          toast(had ? `Uzi ammo +50` : `Picked up Uzi (+50 rounds)`);
+          log('picked uzi; ammo:', cur.ammo, 'ownedBefore?', had);
+        }
       } else if(it.kind === 'grenade'){
         // Treat grenades as a stackable consumable
         const cur = inv.grenade || { count:0, equipped:false };
