@@ -363,7 +363,21 @@ function allowedTogglesForSelection(){
   // other armour parts (arms) -> no special options for now
   return { toggles:[], meters:[] };
 }
+/* ---- Armour(y) Packs injection compatibility ---- */
+function getCraftInjectHook(){
+  const w = window;
 
+  if (w.ArmourPacks?.injectCraftedItem && typeof w.ArmourPacks.injectCraftedItem === 'function') {
+    return w.ArmourPacks.injectCraftedItem.bind(w.ArmourPacks);
+  }
+  if (w.ArmouryPacks?.injectCraftedItem && typeof w.ArmouryPacks.injectCraftedItem === 'function') {
+    return w.ArmouryPacks.injectCraftedItem.bind(w.ArmouryPacks);
+  }
+  if (w.IZZA?.api?.injectCraftedItem && typeof w.IZZA.api.injectCraftedItem === 'function') {
+    return w.IZZA.api.injectCraftedItem.bind(w.IZZA.api);
+  }
+  return null;
+}
 /* --------- CSS for meters and presets ---------- */
 (function ensureCraftCSS(){
   if (document.getElementById('crafting-css')) return;
@@ -2180,20 +2194,25 @@ function bindInside(){
     try{
       const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
-      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-        ? window.ArmourPacks.injectCraftedItem({
-            name: STATE.currentName,
-            category: STATE.currentCategory,
-            part: STATE.currentPart,
-            svg: normalizedForSlot,
-            priceIC,
-            sellInShop,
-            sellInPi,
-            featureFlags: STATE.featureFlags,
-            tracerPreset: STATE.tracerPreset,
-            swingPreset: STATE.swingPreset
-          })
-        : { ok:false, reason:'armour-packs-hook-missing' };
+      const injectFn = getCraftInjectHook();
+
+const payload = {
+  name: STATE.currentName,
+  category: STATE.currentCategory,
+  part: STATE.currentPart,
+  svg: normalizedForSlot,
+  priceIC,
+  sellInShop,
+  sellInPi,
+  featureFlags: STATE.featureFlags,
+  tracerPreset: STATE.tracerPreset,
+  swingPreset: STATE.swingPreset
+};
+
+// Use whichever injector exists (sync or async)
+const injected = injectFn
+  ? await Promise.resolve(injectFn(payload))
+  : { ok:false, reason:'armour-packs-hook-missing' };
 
       if (injected && injected.ok){
         // ---- SUCCESS: Minted ----
