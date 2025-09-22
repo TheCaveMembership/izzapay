@@ -163,7 +163,7 @@ async function payWithPi(amountPi, memo){
     await ensureAuthExact();
 
     const storeName = (window.STORE_NAME || 'IZZA PAY');
-    const memoText  = (storeName ? (storeName + ' — ') : '') + 'Order ' + sessionId.slice(0,8);
+    const memoText  = (storeName ? (storeName + ' â ') : '') + 'Order ' + sessionId.slice(0,8);
 
     const paymentData = {
       amount: Number(amountPi),
@@ -222,13 +222,13 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     : "STYLE: Realistic materials (chrome, glass, brushed steel, leather). Subtle AO and specular highlights.";
 
   const animLine = animate
-    ? "ANIMATION: Allowed. Use lightweight loop via <animate>/<animateTransform> or CSS @keyframes. 1–2 effects max (glow pulse, flame lick). No JS."
+    ? "ANIMATION: Allowed. Use lightweight loop via <animate>/<animateTransform> or CSS @keyframes. 1â2 effects max (glow pulse, flame lick). No JS."
     : "ANIMATION: Not required. Ensure static silhouette reads clearly.";
 
   // Hard constraints (mirror server SYSTEM_PROMPT)
   const constraints = [
     `Item part: ${slot}`,
-    `Use viewBox="${vb}". Fit art tightly with 0–2px padding; center visually.`,
+    `Use viewBox="${vb}". Fit art tightly with 0â2px padding; center visually.`,
     "Transparent background. Do NOT draw any full-bleed background rects.",
     "Vector only: <path>, <rect>, <circle>, <polygon>, <g>, <defs>, gradients, filters (feGaussianBlur, feDropShadow). No <image>, no <foreignObject>.",
     "Must read at ~28px inventory size. Clean silhouette + controlled detail.",
@@ -365,7 +365,7 @@ function __applyStatsToNewestCraft(){
   }catch(e){ console.warn('[craft] __applyStatsToNewestCraft skipped', e); }
 }
 
-/* Hook your existing mirror step — call right after you mirror the craft */
+/* Hook your existing mirror step â call right after you mirror the craft */
 const _origMirrorToMine = (typeof mirrorInjectedInventoryToMine==='function') ? mirrorInjectedInventoryToMine : null;
 if (_origMirrorToMine){
   window.mirrorInjectedInventoryToMine = function(injected){
@@ -439,7 +439,7 @@ async function payForCraft(usePi){
   const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
   function moderateName(name){
     const s = String(name||'').trim();
-    if (s.length < 3 || s.length > 28) return { ok:false, reason:'Name must be 3–28 chars' };
+    if (s.length < 3 || s.length > 28) return { ok:false, reason:'Name must be 3â28 chars' };
     const low = s.toLowerCase();
     if (BAD_WORDS.some(w => low.includes(w))) return { ok:false, reason:'Inappropriate name' };
     return { ok:true };
@@ -559,7 +559,7 @@ async function payForCraft(usePi){
         border-radius:12px; padding:14px 16px; font-size:14px;
         min-width:220px; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.35);
       ">
-        <div style="font-weight:700; margin-bottom:6px">Generating…</div>
+        <div style="font-weight:700; margin-bottom:6px">Generatingâ¦</div>
         <div style="opacity:.85">${text||'Please wait while we create your preview.'}</div>
       </div>`;
     document.body.appendChild(el);
@@ -663,7 +663,7 @@ async function payForCraft(usePi){
     if (STATE.aiAttemptsLeft <= 0) throw new Error('No attempts left');
 
     try{
-      // >>>>>> ONLY CHANGE REQUESTED: AI → GAME
+      // >>>>>> ONLY CHANGE REQUESTED: AI â GAME
       const j = await serverJSON(gameApi('/api/crafting/ai_svg'), {
         method:'POST',
         body: JSON.stringify({
@@ -900,7 +900,7 @@ async function payForCraft(usePi){
           <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:12px">
             <div style="font-weight:700;margin-bottom:6px">Starter Forge</div>
             <div style="opacity:.85;font-size:13px;line-height:1.4">
-              2× Weapons (½-heart dmg), 1× Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
+              2Ã Weapons (Â½-heart dmg), 1Ã Armour set (+0.25% speed, 25% DR).<br/>Includes features & listing rights.
             </div>
             <div style="margin-top:8px;font-weight:700">
               Cost: ${COSTS.PACKAGE_PI} Pi or ${COSTS.PACKAGE_IC.toLocaleString()} IC
@@ -953,7 +953,7 @@ async function payForCraft(usePi){
           <select id="partSel"></select>
 
           <label style="display:block;margin:10px 0 4px;font-size:12px;opacity:.8">Item Name</label>
-          <input id="itemName" type="text" maxlength="28" placeholder="Name…" style="width:100%"/>
+          <input id="itemName" type="text" maxlength="28" placeholder="Nameâ¦" style="width:100%"/>
 
           <div style="margin-top:10px;font-weight:700">Optional Features</div>
           <label><input type="checkbox" data-ff="dmgBoost"/> Weapon damage boost</label><br/>
@@ -1014,11 +1014,11 @@ async function payForCraft(usePi){
           </div>
 
           <div style="display:flex; gap:10px; margin-top:6px">
-            <input id="aiPrompt" placeholder="Describe your item…" style="flex:1"/>
-            <button class="ghost" id="btnAI">AI → SVG</button>
+            <input id="aiPrompt" placeholder="Describe your itemâ¦" style="flex:1"/>
+            <button class="ghost" id="btnAI">AI â SVG</button>
           </div>
           <div style="font-size:12px; opacity:.75; margin-top:6px">or paste/edit SVG manually</div>
-          <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>…</svg>"></textarea>
+          <textarea id="svgIn" style="width:100%; height:200px; margin-top:6px" placeholder="<svg>â¦</svg>"></textarea>
 
           <div class="cl-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
             <button class="ghost" id="btnPreview">Preview</button>
@@ -1051,7 +1051,7 @@ async function payForCraft(usePi){
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="font-weight:700">Crafting Land Marketplace</div>
           <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="ghost" id="mpBack">← Back to Packages</button>
+            <button class="ghost" id="mpBack">â Back to Packages</button>
           </div>
         </div>
         <div style="opacity:.85;font-size:13px;margin-top:6px">
@@ -1059,7 +1059,7 @@ async function payForCraft(usePi){
         </div>
 
         <div id="mpList" style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px">
-          <div style="opacity:.7">Loading…</div>
+          <div style="opacity:.7">Loadingâ¦</div>
         </div>
       </div>`;
   }
@@ -1077,7 +1077,7 @@ async function payForCraft(usePi){
           <div style="font-weight:700">Shop Stats</div>
           <button class="ghost" id="statsClose" style="margin-left:auto">Close</button>
         </div>
-        <div id="statsBody" style="margin-top:8px;font-size:13px;opacity:.95">Loading…</div>
+        <div id="statsBody" style="margin-top:8px;font-size:13px;opacity:.95">Loadingâ¦</div>
       </div>`;
     document.body.appendChild(m);
     m.querySelector('#statsClose').addEventListener('click', ()=> m.style.display='none');
@@ -1089,7 +1089,7 @@ async function payForCraft(usePi){
     const modal = ensureStatsModal();
     const body = modal.querySelector('#statsBody');
     modal.style.display = 'flex';
-    body.textContent = 'Loading…';
+    body.textContent = 'Loadingâ¦';
     try{
       // your server: { ok:true, stats:{ purchases, resales, revenueIC, revenuePi } }
       const j = await serverJSON(gameApi(`/api/shop/stats?itemId=${encodeURIComponent(itemId)}`));
@@ -1200,7 +1200,7 @@ async function payForCraft(usePi){
         const id = item.id;
         addShopBtn.disabled = true;
         const prev = addShopBtn.textContent;
-        addShopBtn.textContent = 'Adding…';
+        addShopBtn.textContent = 'Addingâ¦';
         const ok = await addToShop(id);
         if (ok){
           addShopBtn.outerHTML = `<button class="ghost" data-stats="${id}">View Shop Stats</button>`;
@@ -1222,7 +1222,7 @@ async function payForCraft(usePi){
     // Expecting fields like: { id, name, svg, pricePi, creator }
     const safeSVG = sanitizeSVG(b.svg || '');
     const price = (typeof b.pricePi === 'number' ? b.pricePi : b.pricePi ? Number(b.pricePi) : null);
-    const priceLabel = (price != null && isFinite(price)) ? `${price} Pi` : '—';
+    const priceLabel = (price != null && isFinite(price)) ? `${price} Pi` : 'â';
 
     return `
       <div style="background:#0f1522;border:1px solid #2a3550;border-radius:10px;padding:10px">
@@ -1280,7 +1280,7 @@ async function payForCraft(usePi){
     if (!host) return;
 
     // Loading state
-    host.innerHTML = '<div style="opacity:.7">Loading…</div>';
+    host.innerHTML = '<div style="opacity:.7">Loadingâ¦</div>';
 
     // Pull items
     const items = await fetchMine();
@@ -1341,7 +1341,7 @@ async function payForCraft(usePi){
         const id = btn.dataset.addshop;
         btn.disabled = true;
         const prev = btn.textContent;
-        btn.textContent = 'Adding…';
+        btn.textContent = 'Addingâ¦';
         const ok = await addToShop(id);
         if (ok){
           // swap button to "View Shop Stats" and wire it
@@ -1381,7 +1381,7 @@ async function payForCraft(usePi){
   async function hydrateMarketplace(){
     const host = STATE.root?.querySelector('#mpList');
     if (!host) return;
-    host.innerHTML = '<div style="opacity:.7">Loading…</div>';
+    host.innerHTML = '<div style="opacity:.7">Loadingâ¦</div>';
 
     const bundles = await fetchMarketplace();
 
@@ -1493,9 +1493,9 @@ async function payForCraft(usePi){
     // ---------- Pi path: open hosted checkout (voucher flow) ----------
     if (usePi) {
       const status = document.getElementById('payStatus');
-      if (status) status.textContent = 'Opening IZZA Pay checkout…';
+      if (status) status.textContent = 'Opening IZZA Pay checkoutâ¦';
       location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
-      return; // we’re done here; the user will come back with a code
+      return; // weâre done here; the user will come back with a code
     }
 
     // ---------- IC path (unchanged) ----------
@@ -1504,11 +1504,11 @@ async function payForCraft(usePi){
 
     const status = document.getElementById('payStatus'); // present in Create tab
     if (res && res.ok){
-      applyCreditState((STATE.mintCredits|0) + 1);   // ← grant one mint credit
+      applyCreditState((STATE.mintCredits|0) + 1);   // â grant one mint credit
       STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-      if (status) status.textContent = 'Paid ✓ — visual credit granted.';
+      if (status) status.textContent = 'Paid â â visual credit granted.';
       updateTabsHeaderCredits();
-      STATE.createSub = 'setup';                     // ← start on Setup after paying
+      STATE.createSub = 'setup';                     // â start on Setup after paying
       const host = STATE.root?.querySelector('#craftTabs');
       if (host){ host.innerHTML = renderCreate(); bindInside(); }
     } else {
@@ -1563,7 +1563,7 @@ async function payForCraft(usePi){
       });
     }
 
-    // Packages → "Create Now" just opens Create→Setup
+    // Packages â "Create Now" just opens CreateâSetup
     const goCreateBtn = root.querySelector('#pkGoCreate');
     if (goCreateBtn){
       goCreateBtn.addEventListener('click', ()=>{
@@ -1635,7 +1635,7 @@ async function payForCraft(usePi){
           return;
         }
         redeemBtn.disabled = true;
-        redeemStat.textContent = 'Checking code…';
+        redeemStat.textContent = 'Checking codeâ¦';
 
         const r = await redeemMintCode(code);
         redeemBtn.disabled = false;
@@ -1643,7 +1643,7 @@ async function payForCraft(usePi){
         if (r && r.ok){
           applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1)); // server already credited
           updateTabsHeaderCredits();
-          redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+          redeemStat.textContent = 'Redeemed â â mint credit added.';
         } else {
           const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
           redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
@@ -1755,8 +1755,8 @@ async function payForCraft(usePi){
 
       btnAI.disabled = true;
       btnAI.setAttribute('aria-busy','true');
-      btnAI.textContent = 'Generating…';
-      const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+      btnAI.textContent = 'Generatingâ¦';
+      const waitEl = showWait('Crafting your SVG preview (this can take ~5â10s)â¦');
 
       try{
         const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
@@ -1783,7 +1783,7 @@ async function payForCraft(usePi){
         hideWait(waitEl);
         btnAI.disabled = false;
         btnAI.removeAttribute('aria-busy');
-        btnAI.textContent = 'AI → SVG';
+        btnAI.textContent = 'AI â SVG';
       }
     });
 
@@ -1844,7 +1844,7 @@ async function payForCraft(usePi){
 
         if (injected && injected.ok){
           // ---- SUCCESS: Minted ----
-          craftStatus.textContent = 'Crafted ✓';
+          craftStatus.textContent = 'Crafted â';
 
           // Clear single-use flag and handle package credits (if used)
           STATE.hasPaidForCurrentItem = false;
