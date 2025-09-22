@@ -145,16 +145,21 @@ const TRACER = {
     return null;
   }
   function meleeEquippedItem(){
-    const inv = readInv();
-    for (const k in inv){
-      const it = inv[k];
-      if(!it || !it.equipped) continue;
-      if(it.type==='weapon' && (it.subtype==='melee' || it.melee===true)){
-        return {key:k, it};
-      }
+  const inv = readInv();
+  const isBasicMelee = (k, it)=>{
+    const name = (it && (it.name||it.title||k)||'').toLowerCase();
+    // expand as needed (bat, knuckles out of the box)
+    return /(bat|knuckle|brass knuckle)/i.test(name);
+  };
+  for (const k in inv){
+    const it = inv[k];
+    if(!it || !it.equipped) continue;
+    if(it.type==='weapon' && (it.subtype==='melee' || it.melee===true || isBasicMelee(k,it))){
+      return {key:k, it};
     }
-    return null;
   }
+  return null;
+}
 
     const equippedKind = ()=> {
     const cg = firstEquippedCreatorGun(); if(cg) return 'creatorGun';  // move creatorGun first
@@ -785,7 +790,47 @@ function meleeSwingActive(){
     window.addEventListener('keydown', onDownCapture, {capture:true, passive:false});
     window.addEventListener('keyup',   onUpCapture,   {capture:true, passive:false});
   }
+function unEquipAllWeapons(){
+  const inv = readInv(); if(!inv) return;
+  // legacy slots
+  if(inv.pistol)  inv.pistol.equipped  = false;
+  if(inv.uzi)     inv.uzi.equipped     = false;
+  if(inv.grenade) inv.grenade.equipped = false;
+  // creator guns + melee items
+  for (const k in inv){
+    const it = inv[k];
+    if(!it) continue;
+    if(it.type==='weapon'){
+      it.equipped = false;
+    }
+  }
+  writeInv(inv);
+}
 
+function ensureUseHandsButton(){
+  try{
+    const host = document.getElementById('invPanel');
+    if(!host || host.style.display==='none') return;
+
+    // find an existing "Use Hands" button OR row; adapt if your DOM differs
+    // Option 1: explicit id
+    let btn = host.querySelector('#useHands');
+    // Option 2: fallback by label
+    if(!btn){
+      btn = [...host.querySelectorAll('button, .pill, .btn')].find(b => /use\s*hands/i.test(b.textContent||''));
+    }
+    if(!btn) return;
+
+    if(!btn._izzaBound){
+      btn._izzaBound = true;
+      btn.addEventListener('click', (e)=>{
+        e.preventDefault(); e.stopPropagation();
+        unEquipAllWeapons();
+        syncFireBtn(); // refresh FIRE state/label
+      }, {passive:false});
+    }
+  }catch{}
+}
   // ---------- hooks ----------
   function attachHooks(){
     // keep button/hud in sync
@@ -1093,6 +1138,7 @@ if(meleeSwingActive()){
         for(const m of muts){
           if(m.attributeName==='style' && host.style.display!=='none'){
             setTimeout(ensureGrenadeEquipButton, 0);
+            setTimeout(ensureUseHandsButton, 0);
           }
         }
       }).observe(host, {attributes:true, attributeFilter:['style']});
