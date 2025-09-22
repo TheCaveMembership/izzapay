@@ -494,6 +494,10 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     };
     const part = SLOT[partIn] ? partIn : 'helmet';
     const { vb, box } = SLOT[part];
+    const ORIENT_RIGHT_HINT =
+  part === 'hands'
+    ? 'ORIENTATION: For hands/guns, draw the weapon facing RIGHT — barrel/muzzle on the right (+X), stock/grip on the left. Keep the root <svg> unrotated and unflipped; internal symmetry is fine.'
+    : '';
 
     const animHint = wantAnim ? `
 ANIMATION (if used):
@@ -508,15 +512,16 @@ ANIMATION (if used):
 
     // Build user message lines
     const userLines = [
-      `Part: ${part}`,
-      name ? `Name: ${name}` : null,
-      `Prompt: ${prompt}`,
-      lexHints, // ← short additive hints from your lexicons
-      `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
-      `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
-      modeHint,
-      animHint
-    ];
+  `Part: ${part}`,
+  name ? `Name: ${name}` : null,
+  `Prompt: ${prompt}`,
+  lexHints,
+  `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
+  `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
+  ORIENT_RIGHT_HINT,
+  modeHint,
+  animHint
+];
 
     // Helmet face rule (avoid blank faces when ambiguous)
     if (
