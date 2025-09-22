@@ -107,11 +107,10 @@
     return null;
   }
 
-  const equippedKind   = ()=> {
-    // legacy precedence kept
+    const equippedKind = ()=> {
+    const cg = firstEquippedCreatorGun(); if(cg) return 'creatorGun';  // move creatorGun first
     if (uziEquipped()) return 'uzi';
     if (pistolEquipped()) return 'pistol';
-    const cg = firstEquippedCreatorGun(); if(cg) return 'creatorGun';
     if (grenadeEquipped()) return 'grenade';
     const m = meleeEquippedItem(); if(m) return 'melee';
     return null;
