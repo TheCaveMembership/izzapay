@@ -287,7 +287,17 @@
       window.__MP_START_PENDING = payload;
     }
   }
-
+// FIRE revive watchdog (runs a few times after load)
+(function(){
+  let tries = 12; // ~6s total
+  const t = setInterval(()=>{
+    const pop = ui && ui.friendsPopup;
+    const popVisible = pop && getComputedStyle(pop).visibility !== 'hidden' && getComputedStyle(pop).opacity !== '0';
+    if (!popVisible) reviveFireButton();
+    if (--tries <= 0) clearInterval(t);
+  }, 500);
+})();
+  
   async function enqueue(mode){
     try{
       lastQueueMode=mode;
@@ -635,70 +645,54 @@ function positionFriendsUI(){
 
   // --- FIRE button helpers (hide while friends list open) --------------------
   // REPLACEMENT #1 — be strict about what we can hide (never the canvas)
+// strict FIRE lookup (never canvas)
 function getFireButton(){
-  // Known ids/classes only (extend this list if you have other names)
-  const strict = document.querySelector(
+  return document.querySelector(
     '#btnFire, #fireBtn, #shootBtn, .btn-fire, button[data-role="fire"]'
   );
-  if (strict) return strict;
+}
 
-  // Try a labeled button element (but only if it's actually a BUTTON)
-  const btns = Array.from(document.querySelectorAll('button'));
-  const byText = btns.find(b => /\bFIRE\b/i.test((b.textContent||'').trim()));
-  if (byText) return byText;
-
-  // No loose heuristics! Never guess from position/size.
-  return null;
+// hard revive helper
+function reviveFireButton(){
+  const el = getFireButton();
+  if (!el) return;
+  const target = el.closest('button') || el;
+  // blow away any stale inline hiding
+  target.style.setProperty('display', '', 'important');
+  target.style.opacity = '';
+  target.style.pointerEvents = '';
 }
 
 function setFireHidden(hidden){
-  const fire = getFireButton();
-  if (!fire) return; // nothing to hide = nothing to break 🙂
+  const el = getFireButton();
+  if (!el){
+    // nothing found—don't do anything destructive
+    return;
+  }
+  const target = el.closest('button') || el;
 
-  const target = fire.closest('button') || fire;
   if (hidden){
     target.__prevVis = {
       display: target.style.display,
       opacity: target.style.opacity,
       pointerEvents: target.style.pointerEvents
     };
+    // hide
+    target.style.setProperty('display','none','important');
     target.style.opacity = '0';
     target.style.pointerEvents = 'none';
-    target.style.display = 'none';
   }else{
+    // show (and revive no matter what)
     if (target.__prevVis){
-      target.style.display = target.__prevVis.display || '';
-      target.style.opacity = target.__prevVis.opacity || '';
-      target.style.pointerEvents = target.__prevVis.pointerEvents || '';
+      target.style.display      = target.__prevVis.display || '';
+      target.style.opacity      = target.__prevVis.opacity || '';
+      target.style.pointerEvents= target.__prevVis.pointerEvents || '';
       delete target.__prevVis;
-    }else{
-      target.style.display = '';
-      target.style.opacity = '';
-      target.style.pointerEvents = '';
     }
+    // ensure it's visible even if something else hid it
+    reviveFireButton();
   }
 }
-  function setFireHidden(hidden){
-    const fire = getFireButton(); if(!fire) return;
-    // hide the container too if it’s a nested label
-    const target = fire.closest('button,div') || fire;
-    if(hidden){
-      target.__prevVis = {display:target.style.display, opacity:target.style.opacity, pointerEvents:target.style.pointerEvents};
-      target.style.opacity='0'; target.style.pointerEvents='none'; target.style.display='none';
-    }else{
-      if(target.__prevVis){
-        target.style.display = target.__prevVis.display || '';
-        target.style.opacity = target.__prevVis.opacity || '';
-        target.style.pointerEvents = target.__prevVis.pointerEvents || '';
-        delete target.__prevVis;
-      }else{
-        target.style.display='';
-        target.style.opacity='';
-        target.style.pointerEvents='';
-      }
-    }
-  }
-
   // Friends popup (global overlay; positioned under Type box)
   // --- REPLACEMENT #1 ---
 function ensureFriendsPopup(){
@@ -833,10 +827,11 @@ function toggleFriendsPopup(){
 
   if (isVisible) {
     // HIDE
-    ui.friendsPopup.style.opacity = '0';
-    ui.friendsPopup.style.visibility = 'hidden';
-    ui.friendsPopup.style.pointerEvents = 'none';
-    setFireHidden(false);
+ui.friendsPopup.style.opacity='0';
+ui.friendsPopup.style.visibility='hidden';
+ui.friendsPopup.style.pointerEvents='none';
+setFireHidden(false);
+reviveFireButton();              // <- belt & suspenders
     console.debug('[friends] popup -> hidden');
   } else {
     // SHOW
