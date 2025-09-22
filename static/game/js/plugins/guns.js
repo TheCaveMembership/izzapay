@@ -142,19 +142,30 @@ function creatorGunSpeedMul(){
   return tune ? tune.bulletSpeedMul : TUNE.creatorGun.bulletSpeedMul;
 }
   // ---- tracer style chosen in Crafting UI for the equipped creator gun ----
-  // Looks at common item fields like it.fx / it.tracer / it.skin (use whichever you store)
-  function selectedCreatorFX(){
-    const cg = firstEquippedCreatorGun(); if(!cg) return null;
-    const raw = (cg.it.fx || cg.it.tracer || cg.it.skin || '').toString().toLowerCase();
+// Accepts either a flat string (it.tracer / it.skin) or nested {fx:{tracer}}.
+function selectedCreatorFX(){
+  const cg = firstEquippedCreatorGun(); 
+  if(!cg) return null;
 
-    if(/fire|flame/.test(raw))   return 'fire';   // flaming tracer + ember on hit
-    if(/neon|glow/.test(raw))    return 'neon';   // glowing neon halo on hit
-    if(/spark|electric|zap/.test(raw)) return 'spark';  // crackly electric pop
-    if(/ice|frost/.test(raw))    return 'ice';    // frosty puff on hit
-    if(/acid|toxic|poison/.test(raw)) return 'acid';  // splashy acid blot
-    // add more mappings as your UI grows…
-    return null; // no FX selected
-  }
+  // pull value in priority: fx.tracer -> fx.skin -> tracer -> skin
+  let v = (cg.it && cg.it.fx && (cg.it.fx.tracer || cg.it.fx.skin)) 
+          || cg.it.tracer 
+          || cg.it.skin 
+          || '';
+
+  const raw = String(v).toLowerCase();
+
+  // Map Crafting UI presets -> internal render styles
+  // presets you use in UI: comet, ember, prism, stardust
+  if (/(ember|fire|flame)/.test(raw))         return 'fire';   // ember → fire
+  if (/(prism|neon|glow)/.test(raw))          return 'neon';   // prism → neon
+  if (/(stardust|spark|electric|zap)/.test(raw)) return 'spark';  // stardust → spark
+  if (/ice|frost/.test(raw))                  return 'ice';
+  if (/acid|toxic|poison/.test(raw))          return 'acid';
+  if (/comet/.test(raw))                      return 'spark';  // choose spark-ish look for comet
+
+  return null; // no FX
+}
 /* Hook into your bullet spawn to include damage payload */
 function computeBulletDamageBase(){
   const kind = equippedKind();
