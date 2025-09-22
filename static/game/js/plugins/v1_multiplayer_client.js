@@ -691,70 +691,44 @@
   }
 
   // Friends popup (global overlay; positioned under Type box)
-  // REPLACEMENT: ensureFriendsPopup (popup is a global fixed overlay)
-// - uses visibility/opacity (not display) to avoid CSS conflicts
-// - forces display:block !important so other styles can't suppress it
-function ensureFriendsPopup(){
-  if (ui.friendsPopup) return ui.friendsPopup;
+  function ensureFriendsPopup(){
+    if(ui.friendsPopup) return ui.friendsPopup;
+    const pop = document.createElement('div');
+    pop.id='mpFriendsPopup';
+    Object.assign(pop.style, {
+      position:'fixed',
+      right:'14px',
+      top:'0px',           // <- anchor by TOP; precise value set by positionFriendsUI()
+      zIndex:Z.drop,
+      background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
+      width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
+      boxShadow:'0 10px 28px rgba(0,0,0,.35)'
+    });
+    const head = document.createElement('div');
+    head.style.cssText='display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #2a3550;';
+    const ttl = document.createElement('div');
+    ttl.textContent='Friends';
+    ttl.style.cssText='font-weight:700';
+    const x = document.createElement('button');
+    x.className='mp-small ghost';
+    x.textContent='Close';
+    x.addEventListener('click', ()=>{ pop.style.display='none'; setFireHidden(false); });
 
-  const pop = document.createElement('div');
-  pop.id = 'mpFriendsPopup';
-  Object.assign(pop.style, {
-    position:'fixed',
-    right:'14px',
-    top:'0px',                          // precise Y set by positionFriendsUI()
-    zIndex:'9999',
-    background:'#0f1522',
-    border:'1px solid #2a3550',
-    borderRadius:'12px',
-    width:'320px',
-    maxWidth:'92vw',
-    maxHeight:'340px',
-    overflow:'auto',
-    boxShadow:'0 10px 28px rgba(0,0,0,.35)',
-    // show/hide via visibility+opacity to avoid black-canvas quirks
-    visibility:'hidden',
-    opacity:'0',
-    pointerEvents:'none',
-    transition:'opacity .12s ease-out, visibility 0s linear .12s',
-    // mobile/GPU compositing hints to prevent flicker/black frames
-    WebkitTransform:'translateZ(0)',
-    transform:'translateZ(0)',
-    willChange:'opacity, transform',
-    contain:'layout paint'
-  });
-  pop.style.setProperty('display', 'block', 'important');
+    head.appendChild(ttl); head.appendChild(x);
 
-  const head = document.createElement('div');
-  head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #2a3550;';
-  const ttl  = document.createElement('div');
-  ttl.textContent = 'Friends';
-  ttl.style.cssText = 'font-weight:700';
-  const x = document.createElement('button');
-  x.className = 'mp-small ghost';
-  x.textContent = 'Close';
-  x.addEventListener('click', ()=>{
-    pop.style.opacity='0';
-    pop.style.visibility='hidden';
-    pop.style.pointerEvents='none';
-    setFireHidden(false); // use your existing FIRE logic
-  });
+    const body = document.createElement('div');
+    body.id='mpFriendsListBody';
+    body.style.cssText='display:flex; flex-direction:column; gap:6px; padding:10px;';
 
-  const body = document.createElement('div');
-  body.id = 'mpFriendsListBody';
-  body.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:10px;';
-
-  head.appendChild(ttl); head.appendChild(x);
-  pop.appendChild(head); pop.appendChild(body);
-  document.body.appendChild(pop);
-
-  ui.friendsPopup = pop;
-  ui.friendsBody  = body;
-
-  // position after paint
-  setTimeout(positionFriendsUI, 0);
-  return pop;
-}
+    pop.appendChild(head);
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+    ui.friendsPopup = pop;
+    ui.friendsBody  = body;
+    // position relative to chat bar
+    setTimeout(positionFriendsUI, 0);
+    return pop;
+  }
   function renderFriendsPopup(){
     ensureFriendsPopup();
     if(!ui.friendsBody) return;
@@ -794,35 +768,14 @@ function ensureFriendsPopup(){
       ui.friendsBody.appendChild(none);
     }
   }
-  // REPLACEMENT: toggleFriendsPopup (robust toggle + re-position pass)
-function toggleFriendsPopup(){
-  ensureFriendsPopup();
-  if (!ui.friendsPopup) return;
-
-  const cs = getComputedStyle(ui.friendsPopup);
-  const isVisible = (cs.visibility !== 'hidden') && (cs.opacity !== '0');
-
-  if (isVisible){
-    // HIDE
-    ui.friendsPopup.style.opacity = '0';
-    ui.friendsPopup.style.visibility = 'hidden';
-    ui.friendsPopup.style.pointerEvents = 'none';
-    setFireHidden(false); // use your existing FIRE logic
-  } else {
-    // SHOW
-    ui.friendsPopup.style.setProperty('display', 'block', 'important');
-    renderFriendsPopup();
-    positionFriendsUI();
-    // one extra tick for mobile layout stabilization
-    requestAnimationFrame(positionFriendsUI);
-
-    ui.friendsPopup.style.zIndex = '9999';
-    ui.friendsPopup.style.opacity = '1';
-    ui.friendsPopup.style.visibility = 'visible';
-    ui.friendsPopup.style.pointerEvents = 'auto';
-    setFireHidden(true); // use your existing FIRE logic
+  function toggleFriendsPopup(){
+    ensureFriendsPopup();
+    if(!ui.friendsPopup) return;
+    const vis = (ui.friendsPopup.style.display!=='none');
+    ui.friendsPopup.style.display = vis ? 'none' : 'block';
+    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
+    else { setFireHidden(false); }
   }
-}
 
   // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
   function ensureNotifUI(){
