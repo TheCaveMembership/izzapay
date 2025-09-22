@@ -692,6 +692,16 @@ if (isGun && F.autoFire) {
   entry.auto = true;
   entry.autoFire = true;
   entry.fireMode = 'auto';
+  // Uzi-identical cadence + ammo/class so all systems treat it the same
+const uziMs =
+  (window.GUN_CONSTS?.uzi?.intervalMs) ||
+  (window.IZZA?.bal?.uzi?.intervalMs) ||
+  (window.IZZA?.config?.UZI_INTERVAL_MS) ||
+  90; // fallback to your TUNE.uziIntervalMs
+
+entry.fireIntervalMs = uziMs;
+entry.ammoClass = 'uzi';
+entry.weaponClass = 'uzi';
 
   // Make auto cadence identical to Uzi (never pistol):
   const uziMs =
