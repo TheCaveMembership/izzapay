@@ -674,7 +674,7 @@ function attachCraftStats(invKey, entry){
 
     // weapons
     setIf('dmgBoost','dmgBoost', isGun || isMelee);
-    setIf('fireRate','fireRate', isGun);
+    setIf('fireRate','fireRate', isGun && !F.autoFire);
     setIf('swingRate','swingRate', isMelee);
 
     // armour
@@ -687,11 +687,25 @@ function attachCraftStats(invKey, entry){
     if (F.swingFx  && isMelee) entry.fx.swing  = STATE.swingPreset;
 
     // Re-assert auto AFTER FX
-    if (isGun && STATE.featureFlags?.autoFire) {
-      entry.auto = true;
-      entry.autoFire = true;
-      entry.fireMode = 'auto';
-    }
+    // inside attachCraftStats, after you've set entry.auto/autoFire/fireMode
+if (isGun && F.autoFire) {
+  entry.auto = true;
+  entry.autoFire = true;
+  entry.fireMode = 'auto';
+
+  // Make auto cadence identical to Uzi (never pistol):
+  const uziMs =
+      (window.GUN_CONSTS?.uzi?.intervalMs) ||
+      (window.IZZA?.bal?.uzi?.intervalMs) ||
+      (window.IZZA?.config?.UZI_INTERVAL_MS) ||
+      110; // sensible fallback
+
+  entry.fireIntervalMs = uziMs;
+
+  // Make loot & HUD treat it like an Uzi:
+  entry.ammoClass = 'uzi';   // or 'smg' if that’s your canonical key
+  entry.weaponClass = 'uzi'; // optional, but helps any class-based code paths
+}
 
     entry.crafted = true;
   }catch(e){ console.warn('[craft] attachCraftStats failed', e); }
