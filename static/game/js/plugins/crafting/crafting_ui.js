@@ -653,11 +653,12 @@ function bindFeatureMeters(root){
 function attachCraftStats(invKey, entry){
   try{
     const part = String(entry.part||entry.slot||'').toLowerCase();
-    const isGun   = /gun|hands/i.test(STATE.currentPart) && STATE.currentPart==='gun';
-    const isMelee = STATE.currentPart==='melee';
-    const isLegs  = part === 'legs';
-    const isHelmVest = (part==='helmet'||part==='vest');
-
+// part is exactly what was minted: 'gun' | 'melee' | 'helmet' | 'vest' | 'arms' | 'legs'
+const isGun      = (part === 'gun');
+const isMelee    = (part === 'melee');
+const isLegs     = (part === 'legs');
+const isHelmVest = (part === 'helmet' || part === 'vest');
+    
     const L = STATE.featureLevels || {};
     const F = STATE.featureFlags  || {};
     const setIf = (flagKey, meterKey, condition) => {
