@@ -1,5 +1,6 @@
 // IZZA Guns — v6.0 (creator weapons + melee swing, preserves v5.3 behavior)
 // pistols + uzi + grenades + creator guns/melee, resilient FIRE/HUD, cops balance
+
 (function(){
   // ---- tunables / layout ----
     const TUNE = {
@@ -59,6 +60,54 @@
   const distLE = (ax,ay,bx,by,r)=> Math.hypot(ax-bx, ay-by) <= r;
   const clamp = (v, lo, hi)=> Math.max(lo, Math.min(hi, v));
 
+// --- tracer style tuning (intensity + colors) ---
+const TRACER = {
+  fire: {
+    tailMul: 0.06, count: 5, coreR: 3.2, glowR: 7.5, baseA: 0.75,
+    colors: {
+      glow0: 'rgba(255,180,60,',  // inner glow
+      glow1: 'rgba(255,120,40,',  // mid glow
+      core:  'rgba(255,210,120,', // hot core
+      streak:'rgba(255,140,60,'   // short head streak
+    }
+  },
+  neon: {
+    tailMul: 0.055, count: 5, coreR: 3.0, glowR: 7.2, baseA: 0.70,
+    colors: {
+      glow0: 'rgba(140,255,240,',
+      glow1: 'rgba( 80,255,220,',
+      core:  'rgba(200,255,255,',
+      streak:'rgba(120,255,230,'
+    }
+  },
+  spark: {
+    tailMul: 0.045, count: 4, coreR: 2.4, glowR: 5.8, baseA: 0.65,
+    colors: {
+      glow0: 'rgba(240,240,255,',
+      glow1: 'rgba(200,210,255,',
+      core:  'rgba(255,255,255,',
+      streak:'rgba(220,230,255,'
+    }
+  },
+  ice: {
+    tailMul: 0.055, count: 5, coreR: 3.0, glowR: 7.0, baseA: 0.70,
+    colors: {
+      glow0: 'rgba(200,235,255,',
+      glow1: 'rgba(160,220,255,',
+      core:  'rgba(255,255,255,',
+      streak:'rgba(170,220,255,'
+    }
+  },
+  acid: {
+    tailMul: 0.055, count: 5, coreR: 3.0, glowR: 7.0, baseA: 0.72,
+    colors: {
+      glow0: 'rgba(170,255,120,',
+      glow1: 'rgba(110,255, 90,',
+      core:  'rgba(230,255,170,',
+      streak:'rgba(150,255,110,'
+    }
+  }
+};
   // ---------- inventory helpers ----------
   function readInv(){
     try{
@@ -220,7 +269,68 @@ function computeBulletDamageBase(){
     updateAmmoHUD(); patchInventoryAmmo(kind, slot.ammo);
     return true;
   }
+function drawTracerTrail(ctx, styleKey, sx, sy, vx, vy, lifeRatio){
+  const cfg = TRACER[styleKey]; if(!cfg) return;
 
+  const aBase = cfg.baseA * lifeRatio;
+  const prevOp = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+
+  for (let k = 0; k < cfg.count; k++) {
+    const fall = (k + 1);
+    const fx = sx - vx * (cfg.tailMul * fall);
+    const fy = sy - vy * (cfg.tailMul * fall);
+
+    // fade down the tail; keep head orbs hotter
+    const tailT  = 1 - (k / cfg.count);
+    const localA = aBase * (0.35 + 0.65 * tailT);
+
+    // outer glow
+    const g = ctx.createRadialGradient(fx, fy, 0, fx, fy, cfg.glowR);
+    g.addColorStop(0.00, `${cfg.colors.glow0}${0.55 * localA})`);
+    g.addColorStop(0.60, `${cfg.colors.glow1}${0.35 * localA})`);
+    g.addColorStop(1.00, `rgba(0,0,0,0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(fx, fy, cfg.glowR, 0, Math.PI * 2); ctx.fill();
+
+    // hot core
+    ctx.fillStyle = `${cfg.colors.core}${0.90 * localA})`;
+    ctx.beginPath(); ctx.arc(fx, fy, cfg.coreR, 0, Math.PI * 2); ctx.fill();
+
+    // OPTIONAL per-style accents:
+    if (styleKey === 'spark') {
+      // tiny star flecks
+      const sA = 0.7 * localA;
+      ctx.fillStyle = `rgba(255,255,255,${sA})`;
+      const ang = (k * 1.9) + performance.now() * 0.006;
+      const dx = Math.cos(ang) * (2 + 1.5 * tailT);
+      const dy = Math.sin(ang) * (2 + 1.5 * tailT);
+      ctx.fillRect(fx + dx, fy + dy, 1.5, 1.5);
+    } else if (styleKey === 'ice') {
+      // faint icy shard streak
+      ctx.strokeStyle = `rgba(220,240,255,${0.5 * localA})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx - vx * 0.01 * tailT, fy - vy * 0.01 * tailT);
+      ctx.stroke();
+    } else if (styleKey === 'acid') {
+      // bubbly dots
+      ctx.fillStyle = `rgba(200,255,140,${0.45 * localA})`;
+      ctx.beginPath(); ctx.arc(fx, fy, 1.6 + 1.0 * (1 - tailT), 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // short head streak
+  ctx.strokeStyle = `${cfg.colors.streak}${0.55 * aBase})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(sx - vx * (cfg.tailMul * 0.7), sy - vy * (cfg.tailMul * 0.7));
+  ctx.stroke();
+
+  ctx.globalCompositeOperation = prevOp;
+}
   // patchers (keep legacy behavior, extend for creator gun where possible)
   function patchInventoryAmmo(kind, value, keyOpt){
     try{
@@ -751,61 +861,21 @@ for(let i=bullets.length-1;i>=0;i--){
       const ctx=cvs.getContext('2d'); ctx.save(); ctx.imageSmoothingEnabled=false;
 
       // bullets
-for(const b of bullets){
-  const {sx,sy}=w2s(b.x,b.y);
+for (const b of bullets) {
+  const { sx, sy } = w2s(b.x, b.y);
 
-  // base dot stays the same so legacy guns look identical
-  ctx.fillStyle='#000';
-  ctx.fillRect(sx-2, sy-2, 4, 4);
+  // base dot (legacy look)
+  ctx.fillStyle = '#000';
+  ctx.fillRect(sx - 2, sy - 2, 4, 4);
 
-  // overlay tracer ONLY if this is a creator-gun bullet with a selected style
-  if(b.style){
-    const age = now()-b.born;
+  // unified multi-orb tracer per style
+  if (b.style && TRACER[b.style]) {
+    const age = now() - b.born;
     const lifeRatio = Math.max(0, 1 - age / TUNE.lifeMs);
-    const alpha = 0.9 * lifeRatio;
-
-    if(b.style==='fire'){
-      ctx.strokeStyle = `rgba(255,120,40,${alpha})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx - b.vx*0.02, sy - b.vy*0.02);
-      ctx.stroke();
-    } else if(b.style==='neon'){
-      ctx.strokeStyle = `rgba(80,255,220,${alpha})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx - b.vx*0.022, sy - b.vy*0.022);
-      ctx.stroke();
-
-      ctx.fillStyle = `rgba(80,255,220,${0.35*alpha})`;
-      ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI*2); ctx.fill();
-    } else if(b.style==='spark'){
-      ctx.strokeStyle = `rgba(220,230,255,${alpha})`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx - b.vx*0.018, sy - b.vy*0.018);
-      ctx.stroke();
-    } else if(b.style==='ice'){
-      ctx.strokeStyle = `rgba(160,220,255,${alpha})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx - b.vx*0.02, sy - b.vy*0.02);
-      ctx.stroke();
-    } else if(b.style==='acid'){
-      ctx.strokeStyle = `rgba(110,255,90,${alpha})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx - b.vx*0.02, sy - b.vy*0.02);
-      ctx.stroke();
-    }
+    drawTracerTrail(ctx, b.style, sx, sy, b.vx, b.vy, lifeRatio);
   }
 }
-
+  
       // grenades
       ctx.fillStyle='#6fbf6f';
       for(const g of grenades){ const {sx,sy}=w2s(g.x,g.y); ctx.fillRect(sx-3, sy-3, 6, 6); }
