@@ -287,17 +287,7 @@
       window.__MP_START_PENDING = payload;
     }
   }
-// FIRE revive watchdog (runs a few times after load)
-(function(){
-  let tries = 12; // ~6s total
-  const t = setInterval(()=>{
-    const pop = ui && ui.friendsPopup;
-    const popVisible = pop && getComputedStyle(pop).visibility !== 'hidden' && getComputedStyle(pop).opacity !== '0';
-    if (!popVisible) reviveFireButton();
-    if (--tries <= 0) clearInterval(t);
-  }, 500);
-})();
-  
+
   async function enqueue(mode){
     try{
       lastQueueMode=mode;
@@ -486,36 +476,56 @@
     if(en) return en.getBoundingClientRect();
     return null;
   }
-  // REPLACEMENT #2 — small safety in positioning when chat bar isn't found
-function positionFriendsUI(){
-  const r = findChatBarRect();
-  // Defaults if chat bar not present (top-right, safe margin)
-  let topPx  = Math.round(window.scrollY + 80);
-  const rightPx = 14;
+  function positionFriendsUI(){
+    const r = findChatBarRect();
+    if(!r){ return; }
+    const gapBtn = 8;   // gap under Send/EN for button
+    const gapPop = 12;  // gap under Type box for popup
+    // Place the Friends button *under* the Send/EN row by anchoring with TOP
+    const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
+    if(ui.friendsToggle){
+      ui.friendsToggle.style.top = btnTop+'px';
+      ui.friendsToggle.style.right = '14px';
+      ui.friendsToggle.style.bottom = ''; // ensure we don't anchor by bottom anymore
+    }
+    // ▼ Popup opens DOWNWARD under the message box (anchor with TOP)
+    if(ui.friendsPopup){
+      const popTop = Math.round(window.scrollY + r.bottom + gapPop);
+      ui.friendsPopup.style.top = popTop + 'px';
+      ui.friendsPopup.style.right = '14px';
+      ui.friendsPopup.style.bottom = ''; // stop anchoring by bottom
 
-  if (r){
-    const gapBtn = 8;
-    const gapPop = 12;
-    topPx = Math.round(window.scrollY + r.bottom + gapPop);
-
-    if (ui.friendsToggle){
-      const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
-      ui.friendsToggle.style.top = btnTop + 'px';
-      ui.friendsToggle.style.right = rightPx + 'px';
-      ui.friendsToggle.style.bottom = '';
+      // keep within viewport height
+      const remaining = Math.max(120, window.innerHeight - (popTop - window.scrollY) - 16);
+      ui.friendsPopup.style.maxHeight = remaining + 'px';
     }
   }
+  window.addEventListener('resize', positionFriendsUI);
 
-  if (ui.friendsPopup){
-    ui.friendsPopup.style.top = topPx + 'px';
-    ui.friendsPopup.style.right = rightPx + 'px';
-    ui.friendsPopup.style.bottom = '';
-
-    const remaining = Math.max(120, window.innerHeight - (topPx - window.scrollY) - 16);
-    ui.friendsPopup.style.maxHeight = remaining + 'px';
+  // ===== GLOBAL friends button (always visible; sits under Send/EN) =========
+  function ensureFriendsButtonOverlay(){
+    if(ui.friendsToggle && ui.friendsToggle._global) return;
+    const btn = document.createElement('button');
+    btn.id='mpFriendsToggleGlobal';
+    btn.title='Friends';
+    btn.textContent='Friends';
+    Object.assign(btn.style, {
+      position:'fixed',
+      right:'14px',
+      top:'0px',   // will be positioned precisely by positionFriendsUI()
+      zIndex:Z.bell,
+      height:'34px', padding:'0 12px', borderRadius:'18px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    btn.addEventListener('click', toggleFriendsPopup);
+    document.body.appendChild(btn);
+    ui.friendsToggle = btn;
+    ui.friendsToggle._global = true;
+    // initial position under chat bar if present
+    setTimeout(positionFriendsUI, 0);
   }
-}
-
 
   // NEW: Notification UI helpers (uses global overlay now)
   function renderNotifDropdown(){
@@ -644,140 +654,81 @@ function positionFriendsUI(){
   }
 
   // --- FIRE button helpers (hide while friends list open) --------------------
-  // REPLACEMENT #1 — be strict about what we can hide (never the canvas)
-// strict FIRE lookup (never canvas)
-function getFireButton(){
-  return document.querySelector(
-    '#btnFire, #fireBtn, #shootBtn, .btn-fire, button[data-role="fire"]'
-  );
-}
-
-// hard revive helper
-function reviveFireButton(){
-  const el = getFireButton();
-  if (!el) return;
-  const target = el.closest('button') || el;
-  // blow away any stale inline hiding
-  target.style.setProperty('display', '', 'important');
-  target.style.opacity = '';
-  target.style.pointerEvents = '';
-}
-
-function setFireHidden(hidden){
-  const el = getFireButton();
-  if (!el){
-    // nothing found—don't do anything destructive
-    return;
+  function getFireButton(){
+    // Common ids/classes
+    const byCommon = document.querySelector('#btnFire, #fireBtn, #shootBtn, .btn-fire, .fire');
+    if(byCommon) return byCommon;
+    // Any element whose text contains FIRE (case-insensitive)
+    const all = Array.from(document.querySelectorAll('button,div,span'));
+    const byText = all.find(el => /\bFIRE\b/i.test((el.textContent||'').trim()));
+    if(byText) return byText.closest('button,div') || byText;
+    // Circle near bottom-right (fallback): pick element with large size there
+    const candidates = all
+      .map(el=>[el, el.getBoundingClientRect?.()])
+      .filter(([,r])=>r && r.width>50 && r.height>50 && r.bottom>window.innerHeight*0.6 && r.right>window.innerWidth*0.6)
+      .sort((a,b)=> (b[1].width*b[1].height)-(a[1].width*a[1].height));
+    return candidates.length? candidates[0][0] : null;
   }
-  const target = el.closest('button') || el;
-
-  if (hidden){
-    target.__prevVis = {
-      display: target.style.display,
-      opacity: target.style.opacity,
-      pointerEvents: target.style.pointerEvents
-    };
-    // hide
-    target.style.setProperty('display','none','important');
-    target.style.opacity = '0';
-    target.style.pointerEvents = 'none';
-  }else{
-    // show (and revive no matter what)
-    if (target.__prevVis){
-      target.style.display      = target.__prevVis.display || '';
-      target.style.opacity      = target.__prevVis.opacity || '';
-      target.style.pointerEvents= target.__prevVis.pointerEvents || '';
-      delete target.__prevVis;
+  function setFireHidden(hidden){
+    const fire = getFireButton(); if(!fire) return;
+    // hide the container too if it’s a nested label
+    const target = fire.closest('button,div') || fire;
+    if(hidden){
+      target.__prevVis = {display:target.style.display, opacity:target.style.opacity, pointerEvents:target.style.pointerEvents};
+      target.style.opacity='0'; target.style.pointerEvents='none'; target.style.display='none';
+    }else{
+      if(target.__prevVis){
+        target.style.display = target.__prevVis.display || '';
+        target.style.opacity = target.__prevVis.opacity || '';
+        target.style.pointerEvents = target.__prevVis.pointerEvents || '';
+        delete target.__prevVis;
+      }else{
+        target.style.display='';
+        target.style.opacity='';
+        target.style.pointerEvents='';
+      }
     }
-    // ensure it's visible even if something else hid it
-    reviveFireButton();
   }
-}
+
   // Friends popup (global overlay; positioned under Type box)
-  // --- REPLACEMENT #1 ---
-function ensureFriendsPopup(){
-  if (ui.friendsPopup) return ui.friendsPopup;
+  function ensureFriendsPopup(){
+    if(ui.friendsPopup) return ui.friendsPopup;
+    const pop = document.createElement('div');
+    pop.id='mpFriendsPopup';
+    Object.assign(pop.style, {
+      position:'fixed',
+      right:'14px',
+      top:'0px',           // <- anchor by TOP; precise value set by positionFriendsUI()
+      zIndex:Z.drop,
+      background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
+      width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
+      boxShadow:'0 10px 28px rgba(0,0,0,.35)'
+    });
+    const head = document.createElement('div');
+    head.style.cssText='display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #2a3550;';
+    const ttl = document.createElement('div');
+    ttl.textContent='Friends';
+    ttl.style.cssText='font-weight:700';
+    const x = document.createElement('button');
+    x.className='mp-small ghost';
+    x.textContent='Close';
+    x.addEventListener('click', ()=>{ pop.style.display='none'; setFireHidden(false); });
 
-  const pop = document.createElement('div');
-  pop.id = 'mpFriendsPopup';
-  Object.assign(pop.style, {
-    position: 'fixed',
-    right: '14px',
-    top: '0px',
-    zIndex: '9999',
-    background: '#0f1522',
-    border: '1px solid #2a3550',
-    borderRadius: '12px',
-    width: '320px',
-    maxWidth: '92vw',
-    maxHeight: '340px',
-    overflow: 'auto',
-    boxShadow: '0 10px 28px rgba(0,0,0,.35)',
-    // default hidden via visibility/opacity (NOT display)
-    visibility: 'hidden',
-    opacity: '0',
-    pointerEvents: 'none',
-    transition: 'opacity .12s ease-out, visibility 0s linear .12s'
-  });
-  // Make sure no external CSS keeps it non-rendered
-  pop.style.setProperty('display', 'block', 'important');
+    head.appendChild(ttl); head.appendChild(x);
 
-  const head = document.createElement('div');
-  head.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #2a3550;';
-  const ttl = document.createElement('div');
-  ttl.textContent = 'Friends';
-  ttl.style.cssText = 'font-weight:700';
-  const x = document.createElement('button');
-  x.className = 'mp-small ghost';
-  x.textContent = 'Close';
-  x.addEventListener('click', () => {
-    pop.style.opacity = '0';
-    pop.style.visibility = 'hidden';
-    pop.style.pointerEvents = 'none';
-    setFireHidden(false);
-  });
+    const body = document.createElement('div');
+    body.id='mpFriendsListBody';
+    body.style.cssText='display:flex; flex-direction:column; gap:6px; padding:10px;';
 
-  head.appendChild(ttl);
-  head.appendChild(x);
-
-  const body = document.createElement('div');
-  body.id = 'mpFriendsListBody';
-  body.style.cssText = 'display:flex; flex-direction:column; gap:6px; padding:10px;';
-
-  pop.appendChild(head);
-  pop.appendChild(body);
-  document.body.appendChild(pop);
-
-  ui.friendsPopup = pop;
-  ui.friendsBody  = body;
-
-  // position relative to chat bar after first paint
-  setTimeout(positionFriendsUI, 0);
-  return pop;
-}
-
-function ensureFriendsButtonOverlay(){
-  if(ui.friendsToggle && ui.friendsToggle._global) return;
-  const btn = document.createElement('button');
-  btn.id='mpFriendsToggleGlobal';
-  btn.title='Friends';
-  btn.textContent='Friends';
-  Object.assign(btn.style, {
-    position:'fixed',
-    right:'14px',
-    top:'0px',
-    zIndex: 9999,                 // <- also bring the button to the top
-    height:'34px', padding:'0 12px', borderRadius:'18px',
-    background:'#162134', color:'#cfe0ff',
-    border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
-    boxShadow:'0 2px 8px rgba(0,0,0,.25)', pointerEvents:'auto', cursor:'pointer'
-  });
-  btn.addEventListener('click', toggleFriendsPopup);
-  document.body.appendChild(btn);
-  ui.friendsToggle = btn;
-  ui.friendsToggle._global = true;
-  setTimeout(positionFriendsUI, 0);
-}
+    pop.appendChild(head);
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+    ui.friendsPopup = pop;
+    ui.friendsBody  = body;
+    // position relative to chat bar
+    setTimeout(positionFriendsUI, 0);
+    return pop;
+  }
   function renderFriendsPopup(){
     ensureFriendsPopup();
     if(!ui.friendsBody) return;
@@ -817,36 +768,14 @@ function ensureFriendsButtonOverlay(){
       ui.friendsBody.appendChild(none);
     }
   }
-  // --- REPLACEMENT #2 ---
-function toggleFriendsPopup(){
-  ensureFriendsPopup();
-  if (!ui.friendsPopup) return;
-
-  const style = getComputedStyle(ui.friendsPopup);
-  const isVisible = (style.visibility !== 'hidden') && (style.opacity !== '0');
-
-  if (isVisible) {
-    // HIDE
-ui.friendsPopup.style.opacity='0';
-ui.friendsPopup.style.visibility='hidden';
-ui.friendsPopup.style.pointerEvents='none';
-setFireHidden(false);
-reviveFireButton();              // <- belt & suspenders
-    console.debug('[friends] popup -> hidden');
-  } else {
-    // SHOW
-    renderFriendsPopup();
-    positionFriendsUI();
-    // guard against external CSS
-    ui.friendsPopup.style.setProperty('display', 'block', 'important');
-    ui.friendsPopup.style.zIndex = '9999';
-    ui.friendsPopup.style.opacity = '1';
-    ui.friendsPopup.style.visibility = 'visible';
-    ui.friendsPopup.style.pointerEvents = 'auto';
-    setFireHidden(true);
-    console.debug('[friends] popup -> visible', ui.friendsPopup.getBoundingClientRect());
+  function toggleFriendsPopup(){
+    ensureFriendsPopup();
+    if(!ui.friendsPopup) return;
+    const vis = (ui.friendsPopup.style.display!=='none');
+    ui.friendsPopup.style.display = vis ? 'none' : 'block';
+    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
+    else { setFireHidden(false); }
   }
-}
 
   // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
   function ensureNotifUI(){
