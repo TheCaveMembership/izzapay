@@ -654,12 +654,11 @@ function bindFeatureMeters(root){
 function attachCraftStats(invKey, entry){
   try{
     const part = String(entry.part||entry.slot||'').toLowerCase();
-// part is exactly what was minted: 'gun' | 'melee' | 'helmet' | 'vest' | 'arms' | 'legs'
-const isGun      = (part === 'gun');
-const isMelee    = (part === 'melee');
-const isLegs     = (part === 'legs');
-const isHelmVest = (part === 'helmet' || part === 'vest');
-    
+    const isGun      = (part === 'gun');
+    const isMelee    = (part === 'melee');
+    const isLegs     = (part === 'legs');
+    const isHelmVest = (part === 'helmet' || part === 'vest');
+
     const L = STATE.featureLevels || {};
     const F = STATE.featureFlags  || {};
     const setIf = (flagKey, meterKey, condition) => {
@@ -671,30 +670,61 @@ const isHelmVest = (part === 'helmet' || part === 'vest');
     };
 
     // weapons
-setIf('dmgBoost','dmgBoost', isGun || isMelee);
-setIf('fireRate','fireRate', isGun);
-setIf('swingRate','swingRate', isMelee);
-
-// --- NEW: if "Automatic" is checked for a gun, stamp auto flags understood by other systems
-if (isGun && STATE.featureFlags?.autoFire) {
-  entry.auto = true;                 // v1 flag
-  entry.autoFire = true;             // v2 flag
-  entry.fireMode = 'auto';           // defensive: string-based mode
-}
+    setIf('dmgBoost','dmgBoost', isGun || isMelee);
+    setIf('fireRate','fireRate', isGun);
+    setIf('swingRate','swingRate', isMelee);
 
     // armour
-    setIf('dmgReduction','dmgReduction', isHelmVest); // per-piece capped at 15% via slider range
+    setIf('dmgReduction','dmgReduction', isHelmVest);
     setIf('speedBoost','speedBoost', isLegs);
 
-    // FX selections
+    // FX selections (cosmetic)
     entry.fx = entry.fx || {};
     if (F.tracerFx && isGun)  entry.fx.tracer = STATE.tracerPreset;
     if (F.swingFx  && isMelee) entry.fx.swing  = STATE.swingPreset;
 
+    // --- HARDENING: re-assert auto flags AFTER any FX writes
+    if (isGun && STATE.featureFlags?.autoFire) {
+      entry.auto = true;
+      entry.autoFire = true;
+      entry.fireMode = 'auto';
+    }
+
     entry.crafted = true;
   }catch(e){ console.warn('[craft] attachCraftStats failed', e); }
 }
+// Re-stamp auto onto the newest crafted gun if UI autoFire was on.
+function __enforceCreatorAuto(){
+  try{
+    if (!STATE?.featureFlags?.autoFire) return;
+    const apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    const inv = apiObj?.getInventory ? (apiObj.getInventory()||{}) : JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+    const wantName = String(STATE.currentName||'').toLowerCase();
+    const key = Object.keys(inv).reverse().find(k=>{
+      if(!/^craft_/.test(k)) return false;
+      const e = inv[k]||{};
+      const part = String(e.part||e.slot||'').toLowerCase();
+      return (String(e.name||'').toLowerCase()===wantName) && part==='gun';
+    });
+    if(!key) return;
+    const it = inv[key]||{};
+    // Only touch if it's a gun and not already 'auto'
+    const alreadyAuto = !!(it.auto || it.autoFire || String(it.fireMode||'').toLowerCase()==='auto');
+    if (!alreadyAuto) {
+      it.auto = true; it.autoFire = true; it.fireMode = 'auto';
+      inv[key] = it;
+      apiObj?.setInventory ? apiObj.setInventory(inv)
+                           : localStorage.setItem('izzaInventory', JSON.stringify(inv));
+      try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+    }
+  }catch(e){ console.warn('[craft] enforceCreatorAuto failed', e); }
+}
 
+// Light window to run the enforcer (next tick + a short follow-up)
+function __scheduleAutoEnforce(){
+  setTimeout(__enforceCreatorAuto, 0);
+  setTimeout(__enforceCreatorAuto, 50);
+}
 /* After the craft is injected by armoury/inventory, stamp the stats */
 function __applyStatsToNewestCraft(){
   try{
@@ -712,6 +742,7 @@ function __applyStatsToNewestCraft(){
     attachCraftStats(key, inv[key]);
     apiObj?.setInventory ? apiObj.setInventory(inv) : localStorage.setItem('izzaInventory', JSON.stringify(inv));
     try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+    __scheduleAutoEnforce();
   }catch(e){ console.warn('[craft] __applyStatsToNewestCraft skipped', e); }
 }
 
@@ -863,7 +894,13 @@ function mirrorInjectedInventoryToMine(injected){
     console.warn('[craft] mirrorInjectedInventoryToMine failed', e);
   }
 }
-
+if (_origMirrorToMine){
+  window.mirrorInjectedInventoryToMine = function(injected){
+    _origMirrorToMine(injected);
+    setTimeout(__applyStatsToNewestCraft, 0);
+    __scheduleAutoEnforce(); // <-- add this line
+  };
+}
 /* --- UI helpers for AI wait state --- */
 const MIN_AI_WAIT_MS = 10_000;
 const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
