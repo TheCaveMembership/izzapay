@@ -319,7 +319,7 @@ const FEATURE_METERS = {
   dmgBoost:      { key:'dmgMult',         toValue:(lvl)=> 1.0 + 0.15*lvl },                         // 1.15 / 1.30 / 1.45
 
   // Weapons (melee)
-  swingRate:     { key:'swingMs',         toValue:(lvl)=> Math.max(100, Math.round(220 - 40*lvl)) }, // 1..3  (engine expects swingMs)
+  swingRate:     { key:'swingIntervalMs', toValue:(lvl)=> Math.max(100, Math.round(220 - 40*lvl)) }, // 1..3
 
   // Armour
   dmgReduction:  { key:'drPct',           toValue:(lvl)=> 0.05*lvl },                                // 5%/10%/15% per piece
@@ -347,8 +347,8 @@ function allowedTogglesForSelection(){
 
   // weapon selection
   if (cat==='weapon' && (part==='gun' || part==='hands')) {
-    return { toggles:['dmgBoost','fireRate','tracerFx','autoFire'], meters:['dmgBoost','fireRate'] };
-  }
+  return { toggles:['dmgBoost','fireRate','tracerFx','autoFire'], meters:['dmgBoost','fireRate'] };
+}
   if (cat==='weapon' && part==='melee') {
     return { toggles:['dmgBoost','swingRate','swingFx'], meters:['dmgBoost','swingRate'] };
   }
@@ -381,7 +381,7 @@ function allowedTogglesForSelection(){
     .preset svg{display:block;max-width:100%;height:auto}
     /* IMPORTANT: prevent the range control from hijacking horizontal drags globally on iOS */
     .meter input[type="range"]{ touch-action: pan-y; }
-    /* Dedicated interaction box so slider drags don't bleed into the rest of the UI */
+        /* Dedicated interaction box so slider drags don't bleed into the rest of the UI */
     .meter-box{
       margin-top:10px;
       border:1px solid #2a3550;
@@ -660,7 +660,7 @@ function attachCraftStats(invKey, entry){
     const isHelmVest = (part === 'helmet' || part === 'vest');
 
     // NEW: harmless type stamps (helps guns/loot/pickups agree)
-    if (isGun)  { entry.type = 'weapon'; entry.subtype = 'gun'; entry.gun = true; }
+    if (isGun) { entry.type = 'weapon'; entry.subtype = 'gun'; entry.gun = true; }
     if (isMelee){ entry.type = 'weapon'; entry.subtype = 'melee'; }
 
     const L = STATE.featureLevels || {};
@@ -683,26 +683,29 @@ function attachCraftStats(invKey, entry){
 
     // FX
     entry.fx = entry.fx || {};
-    if (F.tracerFx && isGun)   entry.fx.tracer = STATE.tracerPreset;
+    if (F.tracerFx && isGun)  entry.fx.tracer = STATE.tracerPreset;
     if (F.swingFx  && isMelee) entry.fx.swing  = STATE.swingPreset;
 
-    // Re-assert auto AFTER FX (single, de-duped block)
-    if (isGun && F.autoFire) {
-      entry.auto = true;
-      entry.autoFire = true;
-      entry.fireMode = 'auto';
+    // Re-assert auto AFTER FX
+    // inside attachCraftStats, after you've set entry.auto/autoFire/fireMode
+if (isGun && F.autoFire) {
+  entry.auto = true;
+  entry.autoFire = true;
+  entry.fireMode = 'auto';
 
-      // Uzi-identical cadence + ammo/class so all systems treat it the same
-      const uziMs =
-        (window.GUN_CONSTS?.uzi?.intervalMs) ||
-        (window.IZZA?.bal?.uzi?.intervalMs) ||
-        (window.IZZA?.config?.UZI_INTERVAL_MS) ||
-        90; // fallback aligned with engine's Uzi interval
+  // Make auto cadence identical to Uzi (never pistol):
+  const uziMs =
+      (window.GUN_CONSTS?.uzi?.intervalMs) ||
+      (window.IZZA?.bal?.uzi?.intervalMs) ||
+      (window.IZZA?.config?.UZI_INTERVAL_MS) ||
+      110; // sensible fallback
 
-      entry.fireIntervalMs = uziMs;
-      entry.ammoClass = 'uzi';
-      entry.weaponClass = 'uzi';
-    }
+  entry.fireIntervalMs = uziMs;
+
+  // Make loot & HUD treat it like an Uzi:
+  entry.ammoClass = 'uzi';   // or 'smg' if that’s your canonical key
+  entry.weaponClass = 'uzi'; // optional, but helps any class-based code paths
+}
 
     entry.crafted = true;
   }catch(e){ console.warn('[craft] attachCraftStats failed', e); }
@@ -753,8 +756,7 @@ function __applyStatsToNewestCraft(){
     const key = Object.keys(inv).reverse().find(k=>{
       if(!/^craft_/.test(k)) return false;
       const e=inv[k]||{};
-      return (String(e.name||'').toLowerCase()===wantName) &&
-             (String(e.part||e.slot||'').toLowerCase()===wantPart || wantPart==='gun' || wantPart==='melee');
+      return (String(e.name||'').toLowerCase()===wantName) && (String(e.part||e.slot||'').toLowerCase()===wantPart || wantPart==='gun' || wantPart==='melee');
     });
     if(!key) return;
     attachCraftStats(key, inv[key]);
@@ -770,7 +772,6 @@ if (_origMirrorToMine){
   window.mirrorInjectedInventoryToMine = function(injected){
     _origMirrorToMine(injected);
     setTimeout(__applyStatsToNewestCraft, 0);
-    __scheduleAutoEnforce();
   };
 }
 
@@ -913,7 +914,13 @@ function mirrorInjectedInventoryToMine(injected){
     console.warn('[craft] mirrorInjectedInventoryToMine failed', e);
   }
 }
-
+if (_origMirrorToMine){
+  window.mirrorInjectedInventoryToMine = function(injected){
+    _origMirrorToMine(injected);
+    setTimeout(__applyStatsToNewestCraft, 0);
+    __scheduleAutoEnforce(); // <-- add this line
+  };
+}
 /* --- UI helpers for AI wait state --- */
 const MIN_AI_WAIT_MS = 10_000;
 const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
@@ -986,7 +993,7 @@ async function reconcileCraftCredits(){
   try{
     await fetch(gameApi('/api/crafting/credits/reconcile'), {
       method:'POST',
-      headers:{ 'content-type': 'application/json' },
+      headers:{ 'content-type':'application/json' },
       credentials:'include'
     });
   }catch(_){ /* soft-fail */ }
@@ -1249,9 +1256,9 @@ function renderFeatureToggles(){
   push('dmgBoost','Weapon damage boost');
 
   // gun-only
-  push('fireRate','Gun fire-rate','Uzi can be fastest; pistol = single tap → one shot (engine caps per gun).');
-  push('tracerFx','Bullet tracer FX');
-  push('autoFire','Automatic (hold to fire)');
+push('fireRate','Gun fire-rate','Uzi can be fastest; pistol = single tap → one shot (engine caps per gun).');
+push('tracerFx','Bullet tracer FX');
+push('autoFire','Automatic (hold to fire)'); // <— NEW
 
   // melee-only
   push('swingRate','Melee swing rate');
@@ -1367,8 +1374,8 @@ function renderCreate(){
         </div>
 
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
-          <!-- Keep Pi button label dynamic for visibility -->
-          <button class="ghost" id="payPi">Pay ${totals.pi} Pi</button>
+          <!-- Keep Pi button fixed for now (display only shows dynamic) -->
+          <button class="ghost" id="payPi">Pay ${COSTS.PER_ITEM_PI} Pi</button>
           <!-- IC button reflects dynamic price and is actually charged -->
           <button class="ghost" id="payIC">Pay ${totals.ic.toLocaleString()} IC</button>
           <span id="payStatus" style="font-size:12px; opacity:.8"></span>
@@ -1746,6 +1753,7 @@ async function hydrateMine(){
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
+  });
 }
 
 /* ---------- Marketplace (internal) ---------- */
@@ -1867,7 +1875,7 @@ async function handleBuySingle(kind, enforceForm){
   if (usePi) {
     const status = document.getElementById('payStatus');
     if (status) status.textContent = 'Opening IZZA Pay checkout…';
-    // Pi flow (dynamic label already shown; amount handled in checkout)
+    // Keep Pi checkout fixed at base for now
     location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
     return;
   }
@@ -2281,7 +2289,7 @@ function bindInside(){
             const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
               method: 'POST',
               body: JSON.stringify({
-                name: STATE.currentName,
+                                name: STATE.currentName,
                 category: STATE.currentCategory,
                 part: STATE.currentPart,
                 svg: normalizedForSlot,
