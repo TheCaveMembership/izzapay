@@ -1364,12 +1364,14 @@ if (!window._izzaBoatActive) {
     }
 
     const stackables = [];
-    Object.keys(inv||{}).forEach(k=>{
-      const v=inv[k];
-      if(v && typeof v==='object' && typeof v.count==='number' && v.count>0){
-        stackables.push({key:k, count:v.count});
-      }
-    });
+Object.keys(inv||{}).forEach(k=>{
+  const v = inv[k];
+  if (!v || typeof v!=='object') return;
+  // depositable only if it’s stackable AND NOT equipped
+  if (typeof v.count==='number' && v.count>0 && !_isEquipped(v)) {
+    stackables.push({ key:k, count:v.count });
+  }
+});
 
     const ammoRows = [];
     if(inv?.pistol?.ammo>0){ ammoRows.push({ key:'pistol', ammo: inv.pistol.ammo|0 }); }
@@ -1380,8 +1382,9 @@ if (!window._izzaBoatActive) {
       list += `<div style="padding:12px;opacity:.75">No depositable items in your inventory right now.</div>`;
     }else{
       stackables.forEach(s=>{
-        list += itemRow(`${s.key} ×${s.count}`, `Click to move 1 to bank.`, `dep_item_${s.key}`, false);
-      });
+  const display = (inv[s.key]?.name || s.key) + ' ×' + s.count;
+  list += itemRow(display, `Click to move 1 to bank.`, `dep_item_${s.key}`, false);
+});
       ammoRows.forEach(a=>{
         list += `
           <div style="padding:10px;border-bottom:1px solid #19243a">
@@ -1413,17 +1416,25 @@ if (!window._izzaBoatActive) {
 
     // wire stackables deposit (1 each click)
     stackables.forEach(s=>{
-      host.querySelector(`#dep_item_${s.key}`)?.addEventListener('click', ()=>{
-        const inv2=_readInv(), bank2=_readBank();
-        if(inv2?.[s.key]?.count>0){
-          inv2[s.key].count -= 1;
-          if(inv2[s.key].count<=0){ inv2[s.key].count=0; }
-          bank2.items[s.key] = (bank2.items[s.key]|0) + 1;
-          _writeInv(inv2); _writeBank(bank2);
-          _drawDeposit();
-        }
-      });
-    });
+  host.querySelector(`#dep_item_${s.key}`)?.addEventListener('click', ()=>{
+    const inv2 = _readInv(), bank2 = _readBank();
+    const entry = inv2?.[s.key];
+    if (!entry) return;
+
+    // Safety: don’t allow deposit if equipped now
+    if (_isEquipped(entry)) {
+      try { alert('Unequip this item before depositing.'); } catch {}
+      return;
+    }
+
+    if ((entry.count|0) > 0) {
+      entry.count = Math.max(0, (entry.count|0) - 1);
+      bank2.items[s.key] = (bank2.items[s.key]|0) + 1;
+      _writeInv(inv2); _writeBank(bank2);
+      _drawDeposit();
+    }
+  });
+});
 
     // wire ammo deposit
     ammoRows.forEach(a=>{
