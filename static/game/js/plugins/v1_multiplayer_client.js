@@ -476,31 +476,35 @@
     if(en) return en.getBoundingClientRect();
     return null;
   }
-  function positionFriendsUI(){
-    const r = findChatBarRect();
-    if(!r){ return; }
-    const gapBtn = 8;   // gap under Send/EN for button
-    const gapPop = 12;  // gap under Type box for popup
-    // Place the Friends button *under* the Send/EN row by anchoring with TOP
-    const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
-    if(ui.friendsToggle){
-      ui.friendsToggle.style.top = btnTop+'px';
-      ui.friendsToggle.style.right = '14px';
-      ui.friendsToggle.style.bottom = ''; // ensure we don't anchor by bottom anymore
-    }
-    // ▼ Popup opens DOWNWARD under the message box (anchor with TOP)
-    if(ui.friendsPopup){
-      const popTop = Math.round(window.scrollY + r.bottom + gapPop);
-      ui.friendsPopup.style.top = popTop + 'px';
-      ui.friendsPopup.style.right = '14px';
-      ui.friendsPopup.style.bottom = ''; // stop anchoring by bottom
+  // REPLACEMENT #2 — small safety in positioning when chat bar isn't found
+function positionFriendsUI(){
+  const r = findChatBarRect();
+  // Defaults if chat bar not present (top-right, safe margin)
+  let topPx  = Math.round(window.scrollY + 80);
+  const rightPx = 14;
 
-      // keep within viewport height
-      const remaining = Math.max(120, window.innerHeight - (popTop - window.scrollY) - 16);
-      ui.friendsPopup.style.maxHeight = remaining + 'px';
+  if (r){
+    const gapBtn = 8;
+    const gapPop = 12;
+    topPx = Math.round(window.scrollY + r.bottom + gapPop);
+
+    if (ui.friendsToggle){
+      const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
+      ui.friendsToggle.style.top = btnTop + 'px';
+      ui.friendsToggle.style.right = rightPx + 'px';
+      ui.friendsToggle.style.bottom = '';
     }
   }
-  window.addEventListener('resize', positionFriendsUI);
+
+  if (ui.friendsPopup){
+    ui.friendsPopup.style.top = topPx + 'px';
+    ui.friendsPopup.style.right = rightPx + 'px';
+    ui.friendsPopup.style.bottom = '';
+
+    const remaining = Math.max(120, window.innerHeight - (topPx - window.scrollY) - 16);
+    ui.friendsPopup.style.maxHeight = remaining + 'px';
+  }
+}
 
 
   // NEW: Notification UI helpers (uses global overlay now)
@@ -630,21 +634,50 @@
   }
 
   // --- FIRE button helpers (hide while friends list open) --------------------
-  function getFireButton(){
-    // Common ids/classes
-    const byCommon = document.querySelector('#btnFire, #fireBtn, #shootBtn, .btn-fire, .fire');
-    if(byCommon) return byCommon;
-    // Any element whose text contains FIRE (case-insensitive)
-    const all = Array.from(document.querySelectorAll('button,div,span'));
-    const byText = all.find(el => /\bFIRE\b/i.test((el.textContent||'').trim()));
-    if(byText) return byText.closest('button,div') || byText;
-    // Circle near bottom-right (fallback): pick element with large size there
-    const candidates = all
-      .map(el=>[el, el.getBoundingClientRect?.()])
-      .filter(([,r])=>r && r.width>50 && r.height>50 && r.bottom>window.innerHeight*0.6 && r.right>window.innerWidth*0.6)
-      .sort((a,b)=> (b[1].width*b[1].height)-(a[1].width*a[1].height));
-    return candidates.length? candidates[0][0] : null;
+  // REPLACEMENT #1 — be strict about what we can hide (never the canvas)
+function getFireButton(){
+  // Known ids/classes only (extend this list if you have other names)
+  const strict = document.querySelector(
+    '#btnFire, #fireBtn, #shootBtn, .btn-fire, button[data-role="fire"]'
+  );
+  if (strict) return strict;
+
+  // Try a labeled button element (but only if it's actually a BUTTON)
+  const btns = Array.from(document.querySelectorAll('button'));
+  const byText = btns.find(b => /\bFIRE\b/i.test((b.textContent||'').trim()));
+  if (byText) return byText;
+
+  // No loose heuristics! Never guess from position/size.
+  return null;
+}
+
+function setFireHidden(hidden){
+  const fire = getFireButton();
+  if (!fire) return; // nothing to hide = nothing to break 🙂
+
+  const target = fire.closest('button') || fire;
+  if (hidden){
+    target.__prevVis = {
+      display: target.style.display,
+      opacity: target.style.opacity,
+      pointerEvents: target.style.pointerEvents
+    };
+    target.style.opacity = '0';
+    target.style.pointerEvents = 'none';
+    target.style.display = 'none';
+  }else{
+    if (target.__prevVis){
+      target.style.display = target.__prevVis.display || '';
+      target.style.opacity = target.__prevVis.opacity || '';
+      target.style.pointerEvents = target.__prevVis.pointerEvents || '';
+      delete target.__prevVis;
+    }else{
+      target.style.display = '';
+      target.style.opacity = '';
+      target.style.pointerEvents = '';
+    }
   }
+}
   function setFireHidden(hidden){
     const fire = getFireButton(); if(!fire) return;
     // hide the container too if it’s a nested label
