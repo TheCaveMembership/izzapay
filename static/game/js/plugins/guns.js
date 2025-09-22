@@ -2,7 +2,7 @@
 // pistols + uzi + grenades + creator guns/melee, resilient FIRE/HUD, cops balance
 (function(){
   // ---- tunables / layout ----
-  const TUNE = {
+    const TUNE = {
     speedFallback: 180,
     lifeMs: 900,
     hitRadius: 16,
@@ -30,7 +30,6 @@
     meleeArcDeg: 80,
     meleeRange: 36
   };
-
   const POINT_BLANK_R = 24;
   const DROP_GRACE_MS = 1000;
   const DROP_OFFSET   = 18;
@@ -38,7 +37,11 @@
   const bullets  = []; // {x,y,vx,vy,born}
   const grenades = []; // {x,y,vx,vy,born}
   const blasts   = []; // {x,y,born}
-  const copHits  = new WeakMap();
+    const copHits  = new WeakMap();
+
+  // FX buffer for short-lived hit visuals (only for crafted creator guns)
+  const fxEvents = []; // {x,y,type,born}
+  
 
   // creator guns + legacy pistols/uzis
   let lastPistolAt = 0, uziTimer = null;
@@ -138,7 +141,20 @@ function creatorGunSpeedMul(){
   const tune = craftedGunTuning();
   return tune ? tune.bulletSpeedMul : TUNE.creatorGun.bulletSpeedMul;
 }
+  // ---- tracer style chosen in Crafting UI for the equipped creator gun ----
+  // Looks at common item fields like it.fx / it.tracer / it.skin (use whichever you store)
+  function selectedCreatorFX(){
+    const cg = firstEquippedCreatorGun(); if(!cg) return null;
+    const raw = (cg.it.fx || cg.it.tracer || cg.it.skin || '').toString().toLowerCase();
 
+    if(/fire|flame/.test(raw))   return 'fire';   // flaming tracer + ember on hit
+    if(/neon|glow/.test(raw))    return 'neon';   // glowing neon halo on hit
+    if(/spark|electric|zap/.test(raw)) return 'spark';  // crackly electric pop
+    if(/ice|frost/.test(raw))    return 'ice';    // frosty puff on hit
+    if(/acid|toxic|poison/.test(raw)) return 'acid';  // splashy acid blot
+    // add more mappings as your UI grows…
+    return null; // no FX selected
+  }
 /* Hook into your bullet spawn to include damage payload */
 function computeBulletDamageBase(){
   const kind = equippedKind();
@@ -373,11 +389,19 @@ function computeBulletDamageBase(){
   }
 
   // ---------- projectile / grenade spawn ----------
-  function spawnBulletOrPointBlank(speedMul=1.0){
+    // ---------- projectile / grenade spawn ----------
+  function spawnBulletOrPointBlank(speedMul=1.0, style=null){
     const p=IZZA.api.player, dir=aimVector();
     const playerCX = p.x+16, playerCY = p.y+16;
 
-    if(applyImpactAt(playerCX, playerCY)){ return false; }
+    // POINT-BLANK check (e.g., melee-distance bullet)
+    if(applyImpactAt(playerCX, playerCY)){
+      // only emit FX if this bullet came from a crafted creator gun with a style
+      if(style){
+        fxEvents.push({x:playerCX, y:playerCY, type: style+'Hit', born: now()});
+      }
+      return false;
+    }
 
     const spd=bulletSpeed()*speedMul;
     bullets.push({
@@ -385,7 +409,9 @@ function computeBulletDamageBase(){
       y: playerCY + dir.y*18,
       vx: dir.x*spd,
       vy: dir.y*spd,
-      born: now()
+      born: now(),
+      // style is ONLY set for creator guns with a selected tracer; pistols/uzi pass null
+      style: style
     });
     return true;
   }
@@ -423,12 +449,16 @@ function computeBulletDamageBase(){
   function uziStop(){ if(uziTimer){ clearInterval(uziTimer); uziTimer=null; } }
 
   // ---- NEW: creator gun one-shot (uses item fireIntervalMs + bulletSpeedMul)
+    // ---- NEW: creator gun one-shot (uses item fireIntervalMs + bulletSpeedMul)
   function fireCreatorGun(){
     const t=now();
     const cg = firstEquippedCreatorGun(); if(!cg) return;
     if(t - lastCreatorShotAt < (cg.it.fireIntervalMs|0)) return;
     if(!takeAmmo('creatorGun')){ lastCreatorShotAt = t; return; }
-    spawnBulletOrPointBlank(Number(cg.it.bulletSpeedMul||1.0));
+
+    const style = selectedCreatorFX(); // null if player didn't choose any tracer
+    spawnBulletOrPointBlank(Number(cg.it.bulletSpeedMul||1.0), style);
+
     lastCreatorShotAt = t;
   }
 
@@ -620,34 +650,46 @@ function computeBulletDamageBase(){
 
     IZZA.on('update-post', ({dtSec})=>{
       // bullets
-      for(let i=bullets.length-1;i>=0;i--){
-        const b=bullets[i];
-        b.x+=b.vx*dtSec; b.y+=b.vy*dtSec;
-        if(now()-b.born > TUNE.lifeMs){ bullets.splice(i,1); continue; }
+for(let i=bullets.length-1;i>=0;i--){
+  const b=bullets[i];
+  b.x+=b.vx*dtSec; b.y+=b.vy*dtSec;
+  if(now()-b.born > TUNE.lifeMs){ bullets.splice(i,1); continue; }
 
-        let hit=false;
-        for(const p of IZZA.api.pedestrians){
-          if(p.state==='blink') continue;
-          if(distLE(b.x,b.y,p.x+16,p.y+16,TUNE.hitRadius)){
-            p.state='blink'; p.blinkT=0.3; if((IZZA.api.player.wanted|0) < 5){ bumpWanted(); }
-            hit=true; break;
-          }
-        }
-        if(hit){ bullets.splice(i,1); continue; }
+  let hit=false, hitX=0, hitY=0;
 
-        for(const c of IZZA.api.cops){
-          if(distLE(b.x,b.y,c.x+16,c.y+16,TUNE.hitRadius)){
-            const n=(copHits.get(c)||0)+1; copHits.set(c,n);
-            if(n>=2){
-              const idx=IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
-              IZZA.api.setWanted((IZZA.api.player.wanted|0)-1);
-              ensureCops(); dropFromCop(c);
-            }
-            hit=true; break;
-          }
-        }
-        if(hit){ bullets.splice(i,1); continue; }
+  // pedestrians
+  for(const p of IZZA.api.pedestrians){
+    if(p.state==='blink') continue;
+    if(distLE(b.x,b.y,p.x+16,p.y+16,TUNE.hitRadius)){
+      p.state='blink'; p.blinkT=0.3;
+      if((IZZA.api.player.wanted|0) < 5){ bumpWanted(); }
+      hit=true; hitX=p.x+16; hitY=p.y+16;
+      break;
+    }
+  }
+  if(hit){
+    if(b.style){ fxEvents.push({x:hitX, y:hitY, type:b.style+'Hit', born:now()}); }
+    bullets.splice(i,1); continue;
+  }
+
+  // cops
+  for(const c of IZZA.api.cops){
+    if(distLE(b.x,b.y,c.x+16,c.y+16,TUNE.hitRadius)){
+      const n=(copHits.get(c)||0)+1; copHits.set(c,n);
+      if(n>=2){
+        const idx=IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
+        IZZA.api.setWanted((IZZA.api.player.wanted|0)-1);
+        ensureCops(); dropFromCop(c);
       }
+      hit=true; hitX=c.x+16; hitY=c.y+16;
+      break;
+    }
+  }
+  if(hit){
+    if(b.style){ fxEvents.push({x:hitX, y:hitY, type:b.style+'Hit', born:now()}); }
+    bullets.splice(i,1); continue;
+  }
+}
 
       // grenades
       for(let i=grenades.length-1;i>=0;i--){
@@ -699,8 +741,60 @@ function computeBulletDamageBase(){
       const ctx=cvs.getContext('2d'); ctx.save(); ctx.imageSmoothingEnabled=false;
 
       // bullets
-      ctx.fillStyle='#000';
-      for(const b of bullets){ const {sx,sy}=w2s(b.x,b.y); ctx.fillRect(sx-2, sy-2, 4, 4); }
+for(const b of bullets){
+  const {sx,sy}=w2s(b.x,b.y);
+
+  // base dot stays the same so legacy guns look identical
+  ctx.fillStyle='#000';
+  ctx.fillRect(sx-2, sy-2, 4, 4);
+
+  // overlay tracer ONLY if this is a creator-gun bullet with a selected style
+  if(b.style){
+    const age = now()-b.born;
+    const lifeRatio = Math.max(0, 1 - age / TUNE.lifeMs);
+    const alpha = 0.9 * lifeRatio;
+
+    if(b.style==='fire'){
+      ctx.strokeStyle = `rgba(255,120,40,${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx - b.vx*0.02, sy - b.vy*0.02);
+      ctx.stroke();
+    } else if(b.style==='neon'){
+      ctx.strokeStyle = `rgba(80,255,220,${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx - b.vx*0.022, sy - b.vy*0.022);
+      ctx.stroke();
+
+      ctx.fillStyle = `rgba(80,255,220,${0.35*alpha})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI*2); ctx.fill();
+    } else if(b.style==='spark'){
+      ctx.strokeStyle = `rgba(220,230,255,${alpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx - b.vx*0.018, sy - b.vy*0.018);
+      ctx.stroke();
+    } else if(b.style==='ice'){
+      ctx.strokeStyle = `rgba(160,220,255,${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx - b.vx*0.02, sy - b.vy*0.02);
+      ctx.stroke();
+    } else if(b.style==='acid'){
+      ctx.strokeStyle = `rgba(110,255,90,${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx - b.vx*0.02, sy - b.vy*0.02);
+      ctx.stroke();
+    }
+  }
+}
 
       // grenades
       ctx.fillStyle='#6fbf6f';
@@ -731,7 +825,50 @@ function computeBulletDamageBase(){
         ctx.arc(center.sx, center.sy, r, ang-half, ang+half);
         ctx.stroke();
       }
+      // --- FX Events (only triggered by creator-gun bullets with a selected tracer) ---
+      for(let i=fxEvents.length-1;i>=0;i--){
+        const fx = fxEvents[i];
+        const age = now()-fx.born;
+        if(age > 550){ fxEvents.splice(i,1); continue; } // ~0.55s linger
 
+        const {sx,sy} = w2s(fx.x, fx.y);
+        const a = Math.max(0, 1 - age/550);
+
+        if(fx.type==='fireHit'){
+          // warm glow + tiny ember ring
+          ctx.fillStyle = `rgba(255,110,30,${0.55*a})`;
+          ctx.beginPath(); ctx.arc(sx, sy, 9+age*0.02, 0, Math.PI*2); ctx.fill();
+
+          ctx.strokeStyle = `rgba(255,200,60,${0.9*a})`;
+          ctx.lineWidth=1.5;
+          ctx.beginPath(); ctx.arc(sx, sy, 6+age*0.03, 0, Math.PI*2); ctx.stroke();
+        }
+        else if(fx.type==='neonHit'){
+          // pulsing neon halo
+          ctx.strokeStyle = `hsla(${(age*6)%360},100%,60%,${a})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(sx, sy, 10+age*0.05, 0, Math.PI*2); ctx.stroke();
+        }
+        else if(fx.type==='sparkHit'){
+          // crackly starburst
+          ctx.fillStyle = `rgba(240,240,255,${a})`;
+          for(let n=0;n<6;n++){
+            const ang = (Math.PI*2*n/6) + age*0.02;
+            const dx = Math.cos(ang)*(4+age*0.04), dy=Math.sin(ang)*(4+age*0.04);
+            ctx.fillRect(sx+dx, sy+dy, 2, 2);
+          }
+        }
+        else if(fx.type==='iceHit'){
+          // frosty puff
+          ctx.fillStyle = `rgba(160,220,255,${0.6*a})`;
+          ctx.beginPath(); ctx.arc(sx, sy, 8+age*0.03, 0, Math.PI*2); ctx.fill();
+        }
+        else if(fx.type==='acidHit'){
+          // splashy blot
+          ctx.fillStyle = `rgba(110,255,90,${0.55*a})`;
+          ctx.beginPath(); ctx.arc(sx, sy, 9+age*0.04, 0, Math.PI*2); ctx.fill();
+        }
+      }
       ctx.restore();
     });
 
