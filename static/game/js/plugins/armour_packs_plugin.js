@@ -680,7 +680,7 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
         inv[key].overlaySvg = rawOverlaySvg || inlineSvg; // <-- raw for world overlay (matches other items)
         // default crafted overlay box per slot (can be overridden)
 {
-  const def = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
+    const def = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
   const wIn = parseInt(input?.overlayW, 10);
   const hIn = parseInt(input?.overlayH, 10);
   inv[key].overlayBox = {
@@ -688,6 +688,25 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
     h: Number.isFinite(hIn) && hIn > 0 ? hIn : def.h
   };
 }
+// >>> INSERT THIS BLOCK ↓↓↓ ---------------------------------------------------
+inv[key].fx = inv[key].fx || {};
+// Crafting UI calls it “Fire Trail” in the visuals — normalize & persist
+// Accept a few possible field names the UI might send:
+const tp = (input?.tracerPreset ?? input?.tracer ?? input?.fireTrail ?? input?.fx)
+            ?.toString().toLowerCase().trim();
+if (tp && tp !== 'off' && tp !== 'none') {
+  // guns.js selectedCreatorFX() will map 'fire trail'/'ember'/'prism'/'stardust'/etc.
+  inv[key].fx.tracer = tp;      // primary place guns.js reads
+  inv[key].tracer     = tp;     // legacy mirrors (harmless, keeps older builds happy)
+  inv[key].skin       = tp;
+}
+// (Optional) if your UI also has a melee swing preset:
+const sp = (input?.swingPreset ?? input?.swing)?.toString().toLowerCase().trim();
+if (sp && sp !== 'off' && sp !== 'none') {
+  inv[key].fx.swing = sp;
+}
+// <<< END INSERT --------------------------------------------------------------
+
         inv[key].subtype = subtype;
         if (type === 'weapon') {
           inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
