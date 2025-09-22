@@ -278,6 +278,7 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
       // gun only
       fireRate: false,
       tracerFx: false,
+      autoFire: false,
       // melee only
       swingRate: false,
       swingFx: false,
@@ -346,8 +347,8 @@ function allowedTogglesForSelection(){
 
   // weapon selection
   if (cat==='weapon' && (part==='gun' || part==='hands')) {
-    return { toggles:['dmgBoost','fireRate','tracerFx'], meters:['dmgBoost','fireRate'] };
-  }
+  return { toggles:['dmgBoost','fireRate','tracerFx','autoFire'], meters:['dmgBoost','fireRate'] };
+}
   if (cat==='weapon' && part==='melee') {
     return { toggles:['dmgBoost','swingRate','swingFx'], meters:['dmgBoost','swingRate'] };
   }
@@ -670,9 +671,16 @@ const isHelmVest = (part === 'helmet' || part === 'vest');
     };
 
     // weapons
-    setIf('dmgBoost','dmgBoost', isGun || isMelee);
-    setIf('fireRate','fireRate', isGun);
-    setIf('swingRate','swingRate', isMelee);
+setIf('dmgBoost','dmgBoost', isGun || isMelee);
+setIf('fireRate','fireRate', isGun);
+setIf('swingRate','swingRate', isMelee);
+
+// --- NEW: if "Automatic" is checked for a gun, stamp auto flags understood by other systems
+if (isGun && STATE.featureFlags?.autoFire) {
+  entry.auto = true;                 // v1 flag
+  entry.autoFire = true;             // v2 flag
+  entry.fireMode = 'auto';           // defensive: string-based mode
+}
 
     // armour
     setIf('dmgReduction','dmgReduction', isHelmVest); // per-piece capped at 15% via slider range
@@ -1191,8 +1199,9 @@ function renderFeatureToggles(){
   push('dmgBoost','Weapon damage boost');
 
   // gun-only
-  push('fireRate','Gun fire-rate','Uzi can be fastest; pistol = single tap → one shot (engine caps per gun).');
-  push('tracerFx','Bullet tracer FX');
+push('fireRate','Gun fire-rate','Uzi can be fastest; pistol = single tap → one shot (engine caps per gun).');
+push('tracerFx','Bullet tracer FX');
+push('autoFire','Automatic (hold to fire)'); // <— NEW
 
   // melee-only
   push('swingRate','Melee swing rate');
