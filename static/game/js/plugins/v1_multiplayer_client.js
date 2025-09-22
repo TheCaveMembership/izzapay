@@ -769,13 +769,14 @@
     }
   }
   function toggleFriendsPopup(){
-    ensureFriendsPopup();
-    if(!ui.friendsPopup) return;
-    const vis = (ui.friendsPopup.style.display!=='none');
-    ui.friendsPopup.style.display = vis ? 'none' : 'block';
-    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
-    else { setFireHidden(false); }
-  }
+  ensureFriendsPopup();
+  if(!ui.friendsPopup) return;
+  // ✅ robust visibility check
+  const vis = getComputedStyle(ui.friendsPopup).display !== 'none';
+  ui.friendsPopup.style.display = vis ? 'none' : 'block';
+  if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
+  else { setFireHidden(false); }
+}
 
   // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
   function ensureNotifUI(){
