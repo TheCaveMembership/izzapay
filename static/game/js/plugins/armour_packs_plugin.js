@@ -658,128 +658,147 @@ const scale = HANDS_RENDER.scale * (isCrafted ? CRAFTED_WEAPON_BOOST : 1) * perI
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="28" height="28" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%;height:auto">${inner}</svg>`;
     }
 
-    window.ArmourPacks = window.ArmourPacks || {};
-    window.ArmourPacks.injectCraftedItem = function(input){
-      try{
-        const name = String(input?.name||'Untitled').slice(0,48);
-        const key  = makeKey(name);
-        const map  = partToSlotAndType(input?.part);
-        const slot = map.slot;
-        const type = map.type;
-        const subtype = map.subtype || null;
+    // === REPLACE the whole function with this version ===
+window.ArmourPacks = window.ArmourPacks || {};
+window.ArmourPacks.injectCraftedItem = function(input){
+  try{
+    const name = String(input?.name||'Untitled').slice(0,48);
+    const key  = makeKey(name);
+    const map  = partToSlotAndType(input?.part);
+    const slot = map.slot;
+    const type = map.type;
+    const subtype = map.subtype || null;
 
-        // Use the raw (sanitized by crafting UI) SVG for overlay, and the wrapped icon for inventory
-        const rawOverlaySvg = String(input?.svg||'');
-        const inlineSvg = ensureSvgWrap(rawOverlaySvg);
-        const price = Math.max(50, Math.min(250, parseInt(input?.priceIC||'100',10)||100));
-        const ff = input?.featureFlags || {};
+    // Use the raw (sanitized by crafting UI) SVG for overlay, and the wrapped icon for inventory
+    const rawOverlaySvg = String(input?.svg||'');
+    const inlineSvg = ensureSvgWrap(rawOverlaySvg);
+    const price = Math.max(50, Math.min(250, parseInt(input?.priceIC||'100',10)||100));
+    const ff = input?.featureFlags || {};
 
-        // ---- inventory grant (creator minted copy) ----
-        const inv = _invRead();
-        inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
-        inv[key].overlaySvg = rawOverlaySvg || inlineSvg; // <-- raw for world overlay (matches other items)
-        // default crafted overlay box per slot (can be overridden)
-{
-    const def = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
-  const wIn = parseInt(input?.overlayW, 10);
-  const hIn = parseInt(input?.overlayH, 10);
-  inv[key].overlayBox = {
-    w: Number.isFinite(wIn) && wIn > 0 ? wIn : def.w,
-    h: Number.isFinite(hIn) && hIn > 0 ? hIn : def.h
-  };
-}
-// >>> INSERT THIS BLOCK ↓↓↓ ---------------------------------------------------
-inv[key].fx = inv[key].fx || {};
-// Crafting UI calls it “Fire Trail” in the visuals — normalize & persist
-// Accept a few possible field names the UI might send:
-const tp = (input?.tracerPreset ?? input?.tracer ?? input?.fireTrail ?? input?.fx)
-            ?.toString().toLowerCase().trim();
-if (tp && tp !== 'off' && tp !== 'none') {
-  // guns.js selectedCreatorFX() will map 'fire trail'/'ember'/'prism'/'stardust'/etc.
-  inv[key].fx.tracer = tp;      // primary place guns.js reads
-  inv[key].tracer     = tp;     // legacy mirrors (harmless, keeps older builds happy)
-  inv[key].skin       = tp;
-}
-// (Optional) if your UI also has a melee swing preset:
-const sp = (input?.swingPreset ?? input?.swing)?.toString().toLowerCase().trim();
-if (sp && sp !== 'off' && sp !== 'none') {
-  inv[key].fx.swing = sp;
-}
-// <<< END INSERT --------------------------------------------------------------
+    // ---- inventory grant (creator minted copy) ----
+    const inv = _invRead();
+    inv[key] = inv[key] || { count:0, name, type, slot, equippable:true, iconSvg:inlineSvg };
+    inv[key].overlaySvg = rawOverlaySvg || inlineSvg; // raw for world overlay
+    // default crafted overlay box per slot (can be overridden)
+    {
+      const def = CRAFTED_OVERLAY_BOX[slot] || CRAFTED_OVERLAY_BOX.chest;
+      const wIn = parseInt(input?.overlayW, 10);
+      const hIn = parseInt(input?.overlayH, 10);
+      inv[key].overlayBox = {
+        w: Number.isFinite(wIn) && wIn > 0 ? wIn : def.w,
+        h: Number.isFinite(hIn) && hIn > 0 ? hIn : def.h
+      };
+    }
 
-        inv[key].subtype = subtype;
-        if (type === 'weapon') {
-          inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
-        }
-        inv[key].count = (inv[key].count|0) + 1;
-        if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
+    // --- FX presets from Crafting UI (tracer/swing) ---
+    inv[key].fx = inv[key].fx || {};
+    const tp = (input?.tracerPreset ?? input?.tracer ?? input?.fireTrail ?? input?.fx)
+                ?.toString().toLowerCase().trim();
+    if (tp && tp !== 'off' && tp !== 'none') {
+      inv[key].fx.tracer = tp; // primary
+      inv[key].tracer    = tp; // legacy mirrors (harmless)
+      inv[key].skin      = tp;
+    }
+    const sp = (input?.swingPreset ?? input?.swing)?.toString().toLowerCase().trim();
+    if (sp && sp !== 'off' && sp !== 'none') {
+      inv[key].fx.swing = sp;
+    }
 
-        // creator copy rules:
-        inv[key].nonSell = true;
-        inv[key].listPriceIC = price;
-        if (type==='weapon' && subtype==='gun'){
-          if (typeof inv[key].ammo!=='number') inv[key].ammo = 60;
-          if (typeof inv[key].fireIntervalMs!=='number' && ff.fireRate) inv[key].fireIntervalMs = 140;
-          if (typeof inv[key].bulletSpeedMul!=='number' && ff.tracerFx) inv[key].bulletSpeedMul = 1.1;
-        }
-        _invWrite(inv);
+    inv[key].subtype = subtype;
+    if (type === 'weapon') {
+      inv[key].weaponKind = String(input?.part||'').toLowerCase()==='gun' ? 'gun' : 'melee';
+    }
 
-        try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
-        try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
-        try { IZZA?.requestRender?.(); } catch {}
+    // ---- AUTO semantics (make Auto == Uzi immediately) ----
+    const isGun = (type === 'weapon' && (subtype === 'gun' || input?.part === 'gun'));
+    if (isGun) {
+      const autoOn = !!(ff.autoFire);
+      if (autoOn) {
+        inv[key].auto = true;
+        inv[key].autoFire = true;
+        inv[key].fireMode = 'auto';
 
-                // --- also persist in "My Creations" store so Crafting UI will show it later ---
-        try{
-          // Same pattern as other calls: prefer override, fallback to your Node service
-          const base = (window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE).replace(/\/+$/,'')) || 'https://izzagame.onrender.com';
+        // Uzi cadence (never pistol)
+        const uziMs =
+            (window.GUN_CONSTS?.uzi?.intervalMs) ||
+            (window.IZZA?.bal?.uzi?.intervalMs) ||
+            (window.IZZA?.config?.UZI_INTERVAL_MS) ||
+            110; // fallback
+        inv[key].fireIntervalMs = uziMs;
 
-          // Resolve current username just like elsewhere in game
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username) ||
-            (window?.IZZA?.me?.username) ||
-            localStorage.getItem('izzaPlayer') ||
-            localStorage.getItem('pi_username') ||
-            ''
-          );
-
-          if (u){
-            // Mirror the newly minted item; Crafting UI fetchMine() will pick this up
-            fetch(base + `/api/crafting/mine?u=${u}`, {
-              method:'POST',
-              headers:{ 'content-type':'application/json' },
-              body: JSON.stringify({
-                name,
-                category: (type === 'armor' ? 'armour' : 'weapon'),
-                part: String(input?.part || (slot==='hands' ? (subtype || 'gun') : 'helmet')),
-                svg: rawOverlaySvg || inlineSvg,
-                sku: '',
-                image: '',
-                craftedId: key // optional: lets server keep a stable link to inventory key
-              })
-            }).catch(()=>{});
-          }
-        }catch{}
-        
-        // ---- optional: add to shop list (BUY tab) this session ----
-        const sellInShop = !!input?.sellInShop;
-        if (sellInShop){
-          const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
-          const entry = { key, name, svg:inlineSvg, price, slot, type, part:input?.part };
-          if (list && !list.querySelector(`[data-craft-item="${key}"]`)){
-            _pendingCraftShopAdds.push(entry); // queue then flush immediately if shop open
-            tryPatchShop();
-          }else{
-            _pendingCraftShopAdds.push(entry);
-          }
-        }
-
-        return { ok:true, id:key };
-      }catch(e){
-        console.warn('[ArmourPacks.injectCraftedItem] failed', e);
-        return { ok:false, reason:String(e) };
+        // Route ammo & class like Uzi/SMG so loot + HUD behave
+        inv[key].ammoClass   = 'uzi';
+        inv[key].weaponClass = 'uzi';
+      } else {
+        // Semi default. If player picked Fire Rate, give a baseline unless already set.
+        if (ff.fireRate && typeof inv[key].fireIntervalMs !== 'number') inv[key].fireIntervalMs = 140;
+        inv[key].ammoClass = 'pistol'; // pistol ammo routes here when not auto
       }
-    };
-  })();
+
+      inv[key].gun = true; // some paths look for this boolean
+      if (typeof inv[key].ammo!=='number') inv[key].ammo = 60; // creator gets a starter mag
+      if (typeof inv[key].bulletSpeedMul!=='number' && ff.tracerFx) inv[key].bulletSpeedMul = 1.1;
+    }
+
+    inv[key].count = (inv[key].count|0) + 1;
+    if (!inv[key].iconSvg) inv[key].iconSvg = inlineSvg;
+
+    // creator copy rules:
+    inv[key].nonSell = true;
+    inv[key].listPriceIC = price;
+
+    _invWrite(inv);
+
+    try { if(typeof window.renderInventoryPanel==='function') window.renderInventoryPanel(); } catch{}
+    try { window.dispatchEvent(new Event('izza-inventory-changed')); } catch {}
+    try { IZZA?.requestRender?.(); } catch {}
+
+    // --- also persist in "My Creations" so Crafting UI will show it later ---
+    try{
+      const base = (window.IZZA_PERSIST_BASE && String(window.IZZA_PERSIST_BASE).replace(/\/+$/,'')) || 'https://izzagame.onrender.com';
+      const u = encodeURIComponent(
+        (window?.IZZA?.player?.username) ||
+        (window?.IZZA?.me?.username) ||
+        localStorage.getItem('izzaPlayer') ||
+        localStorage.getItem('pi_username') ||
+        ''
+      );
+      if (u){
+        fetch(base + `/api/crafting/mine?u=${u}`, {
+          method:'POST',
+          headers:{ 'content-type':'application/json' },
+          body: JSON.stringify({
+            name,
+            category: (type === 'armor' ? 'armour' : 'weapon'),
+            part: String(input?.part || (slot==='hands' ? (subtype || 'gun') : 'helmet')),
+            svg: rawOverlaySvg || inlineSvg,
+            sku: '',
+            image: '',
+            craftedId: key
+          })
+        }).catch(()=>{});
+      }
+    }catch{}
+
+    // ---- optional: add to shop list (BUY tab) this session ----
+    const sellInShop = !!input?.sellInShop;
+    if (sellInShop){
+      const list = document.getElementById('shopBuyList') || document.getElementById('shopList');
+      const entry = { key, name, svg:inlineSvg, price, slot, type, part:input?.part };
+      if (list && !list.querySelector(`[data-craft-item="${key}"]`)){
+        _pendingCraftShopAdds.push(entry); // queue then flush immediately if shop open
+        tryPatchShop();
+      }else{
+        _pendingCraftShopAdds.push(entry);
+      }
+    }
+
+    return { ok:true, id:key };
+  }catch(e){
+    console.warn('[ArmourPacks.injectCraftedItem] failed', e);
+    return { ok:false, reason:String(e) };
+  }
+};
 
   // ---- Safe boot/wire-up ----
   function __armourPacksBoot(){
