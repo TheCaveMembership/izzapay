@@ -185,10 +185,61 @@ function craftedGunTuning(){
     dmgMult:    Math.max(0.5, Math.min(3.0, Number(it.dmgMult||1.0)))
   };
 }
-  function creatorGunIsAuto(){
-  const cg = firstEquippedCreatorGun(); if(!cg) return false;
+  function creatorGunIsAuto(it){
+  if (!it) {
+    const cg = firstEquippedCreatorGun();
+    it = cg && cg.it;
+  }
+  if (!it) return false;
+  const mode = String(it.fireMode||'').toLowerCase();
+  return it.auto === true || it.autoFire === true || mode === 'auto';
+}
+
+let creatorAutoTimer = null;
+
+function creatorAutoStart(){
+  if (creatorAutoTimer) return;
+
+  const cg = firstEquippedCreatorGun(); 
+  if (!cg) return;
+
+  // If the crafted gun is flagged auto, prefer Uzi timing by default.
   const it = cg.it || {};
-  return !!(it.auto || it.autoFire || String(it.fireMode||'').toLowerCase()==='auto');
+  const isAuto = creatorGunIsAuto(it);
+  const interval =
+    Math.max(
+      60,
+      Number(it.fireIntervalMs) || (isAuto ? TUNE.uziIntervalMs : TUNE.creatorGun.fireIntervalMs)
+    );
+
+  const step = ()=>{
+    const cur = firstEquippedCreatorGun(); 
+    if (!cur) { creatorAutoStop(); return; }
+    if (!takeAmmo('creatorGun')) { creatorAutoStop(); return; }
+
+    const style = selectedCreatorFX();
+    const mul   = Number(cur.it.bulletSpeedMul || 1.0);
+    const spawned = spawnBulletOrPointBlank(mul, style);
+    if (!spawned){
+      // refund
+      const inv = readInv();
+      const slot = inv[cur.key];
+      if (slot){
+        slot.ammo = (slot.ammo|0) + 1;
+        writeInv(inv);
+        updateAmmoHUD();
+        patchInventoryAmmo('creatorGun', slot.ammo, cur.key);
+      }
+    }
+  };
+
+  // fire once immediately, then continue at interval
+  step();
+  creatorAutoTimer = setInterval(step, interval);
+}
+
+function creatorAutoStop(){
+  if (creatorAutoTimer){ clearInterval(creatorAutoTimer); creatorAutoTimer=null; }
 }
   // ---- creator melee tuning (reads optional item fields) ----
 function craftedMeleeTuning(){
