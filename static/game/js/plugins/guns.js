@@ -179,6 +179,28 @@ function craftedGunTuning(){
     dmgMult:    Math.max(0.5, Math.min(3.0, Number(it.dmgMult||1.0)))
   };
 }
+  // ---- creator melee tuning (reads optional item fields) ----
+function craftedMeleeTuning(){
+  const m = meleeEquippedItem(); if(!m) return null;
+  const it = m.it || {};
+  return {
+    swingMs:   Math.max(120, Math.min(800, parseInt(it.swingMs,10)      || TUNE.meleeSwingMs)),
+    arcDeg:    Math.max(40,  Math.min(160, parseFloat(it.swingArcDeg)   || TUNE.meleeArcDeg)),
+    range:     Math.max(20,  Math.min(72,  parseFloat(it.swingRange)    || TUNE.meleeRange)),
+    dmgMult:   Math.max(0.5, Math.min(3.0, Number(it.dmgMult || 1.0))),
+    critChance:Math.max(0.0, Math.min(0.5, Number(it.critChance || 0.0)))
+  };
+}
+
+function computeMeleeDamageBase(){
+  let dmg = 1; // legacy baseline segment
+  const tune = craftedMeleeTuning();
+  if (tune){
+    dmg *= tune.dmgMult;
+    if (Math.random() < tune.critChance) dmg *= 1.8;
+  }
+  return Math.max(0.5, Math.min(5, dmg));
+}
 
 /* Replace usages where creatorGun fires to respect interval + speed */
 function creatorGunIntervalMs(){
@@ -584,60 +606,66 @@ function drawTracerTrail(ctx, styleKey, sx, sy, vx, vy, lifeRatio){
 
   // ---- NEW: melee swing (no ammo) ------------------------------------------
   function startMeleeSwing(){
-    meleeSwinging = true;
-    meleeSwingBorn = now();
-  }
-  function meleeSwingActive(){
-    if(!meleeSwinging) return false;
-    if(now() - meleeSwingBorn > TUNE.meleeSwingMs){ meleeSwinging=false; return false; }
-    return true;
-  }
+  const t = now();
+  const tune = craftedMeleeTuning();
+  const swingMs = tune ? tune.swingMs : TUNE.meleeSwingMs;
+  // simple gate so you can’t swing faster than duration
+  if (t - meleeSwingBorn < swingMs * 0.9) return;
+  meleeSwinging = true;
+  meleeSwingBorn = t;
+}
+
+function meleeSwingActive(){
+  if(!meleeSwinging) return false;
+  const tune = craftedMeleeTuning();
+  const swingMs = tune ? tune.swingMs : TUNE.meleeSwingMs;
+  if(now() - meleeSwingBorn > swingMs){ meleeSwinging=false; return false; }
+  return true;
+}
   function applyMeleeArcHits(){
-    // center + facing
-    const p=IZZA.api.player, dir=aimVector();
-    const cx=p.x+16, cy=p.y+16;
+  const p=IZZA.api.player, dir=aimVector();
+  const cx=p.x+16, cy=p.y+16;
 
-    // simple arc test: project onto direction, require distance & angle
-    const maxR = TUNE.meleeRange;
-    const cosThresh = Math.cos((TUNE.meleeArcDeg*Math.PI/180)/2);
+  const tune = craftedMeleeTuning();
+  const maxR = tune ? tune.range : TUNE.meleeRange;
+  const arcDeg = tune ? tune.arcDeg : TUNE.meleeArcDeg;
+  const cosThresh = Math.cos((arcDeg*Math.PI/180)/2);
 
-    const test = (tx,ty)=>{
-      const dx=tx-cx, dy=ty-cy, r=Math.hypot(dx,dy); if(r>maxR) return false;
-      const ux=dx/(r||1), uy=dy/(r||1);
-      const dot = ux*dir.x + uy*dir.y;
-      return dot >= cosThresh;
-    };
+  const test = (tx,ty)=>{
+    const dx=tx-cx, dy=ty-cy, r=Math.hypot(dx,dy); if(r>maxR) return false;
+    const ux=dx/(r||1), uy=dy/(r||1);
+    return (ux*dir.x + uy*dir.y) >= cosThresh;
+  };
 
-    let any=false;
+  let any=false;
+  const segs = Math.max(1, Math.round(computeMeleeDamageBase())); // tuned segments
 
-    // cops
-    for(let j=IZZA.api.cops.length-1;j>=0;j--){
-      const c=IZZA.api.cops[j];
-      if(test(c.x+16, c.y+16)){
-        // same 2-hits-to-kill logic as bullets (instant if already hit once “this life”)
-        const n=(copHits.get(c)||0)+1; copHits.set(c,n);
-        if(n>=2){
-          const idx=IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
-          IZZA.api.setWanted((IZZA.api.player.wanted|0)-1);
-          ensureCops(); dropFromCop(c);
-        }
-        any=true;
+  // cops
+  for(let j=IZZA.api.cops.length-1;j>=0;j--){
+    const c=IZZA.api.cops[j];
+    if(test(c.x+16, c.y+16)){
+      const n=(copHits.get(c)||0)+segs; copHits.set(c,n);
+      if(n>=2){
+        const idx=IZZA.api.cops.indexOf(c); if(idx>=0) IZZA.api.cops.splice(idx,1);
+        IZZA.api.setWanted((IZZA.api.player.wanted|0)-1);
+        ensureCops(); dropFromCop(c);
       }
+      any=true;
     }
-
-    // pedestrians
-    for(const p2 of IZZA.api.pedestrians){
-      if(p2.state==='blink') continue;
-      if(test(p2.x+16, p2.y+16)){
-        p2.state='blink'; p2.blinkT=0.3;
-        if((IZZA.api.player.wanted|0) < 5) bumpWanted();
-        any=true;
-      }
-    }
-
-    return any;
   }
 
+  // pedestrians
+  for(const p2 of IZZA.api.pedestrians){
+    if(p2.state==='blink') continue;
+    if(test(p2.x+16, p2.y+16)){
+      p2.state='blink'; p2.blinkT=0.3;
+      if((IZZA.api.player.wanted|0) < 5) bumpWanted();
+      any=true;
+    }
+  }
+
+  return any;
+}
   // ---------- UI: FIRE + ammo pill ----------
   function ensureFireBtn(){
     if(fireBtn) return fireBtn;
@@ -854,7 +882,107 @@ for(let i=bullets.length-1;i>=0;i--){
         if(now()-blasts[i].born > TUNE.grenadeShockMs) blasts.splice(i,1);
       }
     });
+const _meleeImgCache = new Map();
 
+function _svgToImg(svg){
+  if(!svg) return null;
+  if(_meleeImgCache.has(svg)) return _meleeImgCache.get(svg);
+  const img = new Image(); img.decoding='async';
+  img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  _meleeImgCache.set(svg, img);
+  return img;
+}
+
+function _meleeProgress(){
+  const tune = craftedMeleeTuning();
+  const ms = tune ? tune.swingMs : TUNE.meleeSwingMs;
+  return Math.max(0, Math.min(1, (now() - meleeSwingBorn)/ms));
+}
+
+// Optional: style name chosen in crafting UI, e.g. fx.swing, swing, skin
+function selectedMeleeFX(){
+  const m = meleeEquippedItem(); if(!m) return null;
+  const it = m.it || {};
+  let v = (it.fx && (it.fx.swing || it.fx.tracer || it.fx.skin)) || it.swing || it.skin || '';
+  const raw = String(v).toLowerCase();
+  if (/(ember|fire|flame)/.test(raw))            return 'fire';
+  if (/(prism|neon|glow)/.test(raw))             return 'neon';
+  if (/(stardust|spark|electric|zap)/.test(raw)) return 'spark';
+  if (/ice|frost/.test(raw))                     return 'ice';
+  if (/acid|toxic|poison/.test(raw))             return 'acid';
+  return null;
+}
+
+// Draw the weapon swinging (basic for all, plus optional glow accents)
+function drawMeleeWeaponSwing(ctx){
+  if(!meleeSwingActive()) return;
+  const m = meleeEquippedItem(); if(!m) return;
+  const it = m.it || {};
+
+  const p=IZZA.api.player, dir=aimVector();
+  const center = w2s(p.x+16, p.y+16);
+
+  const tune = craftedMeleeTuning();
+  const arcDeg = tune ? tune.arcDeg : TUNE.meleeArcDeg;
+  const range  = (tune ? tune.range  : TUNE.meleeRange) * SCALE();
+
+  const prog = _meleeProgress(); // 0..1 across swing
+  const baseAng = Math.atan2(dir.y, dir.x);
+  const half = (arcDeg*Math.PI/180)/2;
+  const theta = baseAng - half + prog * (2*half);
+
+  const x = center.sx + Math.cos(theta)*range;
+  const y = center.sy + Math.sin(theta)*range;
+
+  const svg = it.overlaySvg || it.iconSvg;
+  const img = _svgToImg(svg);
+
+  // fallback size if no svg
+  const w = (it.overlayBox && it.overlayBox.w|0) || 32;
+  const h = (it.overlayBox && it.overlayBox.h|0) || 32;
+
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.rotate(theta);
+
+  if (img && img.complete){
+    try{ ctx.drawImage(img, -w/2, -h/2, w, h); }catch{}
+  } else {
+    // basic shape so every melee shows something
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(-w/2, -h/2, w, h);
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.strokeRect(-w/2, -h/2, w, h);
+  }
+
+  ctx.restore();
+
+  // Optional upgraded visuals layered on top (glow beads along the arc)
+  const style = selectedMeleeFX();
+  if(style && TRACER[style]){
+    const cfg = TRACER[style];
+    const a = 1 - prog; // fade toward end
+    const prevOp = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'lighter';
+
+    const steps = 8;
+    for(let i=0;i<steps;i++){
+      const t = i/(steps-1);
+      const th = baseAng - half + t*(2*half);
+      const px = center.sx + Math.cos(th)*range;
+      const py = center.sy + Math.sin(th)*range;
+      const g = ctx.createRadialGradient(px, py, 0, px, py, cfg.glowR);
+      g.addColorStop(0.0, `${cfg.colors.glow0}${0.55*cfg.baseA*a})`);
+      g.addColorStop(0.6, `${cfg.colors.glow1}${0.35*cfg.baseA*a})`);
+      g.addColorStop(1.0, `rgba(0,0,0,0)`);
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(px,py,cfg.glowR,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = `${cfg.colors.core}${0.9*cfg.baseA*a})`;
+      ctx.beginPath(); ctx.arc(px,py,cfg.coreR,0,Math.PI*2); ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = prevOp;
+  }
+}
     // Render
     IZZA.on('render-post', ()=>{
       const cvs=document.getElementById('game'); if(!cvs) return;
@@ -891,20 +1019,26 @@ for (const b of bullets) {
       }
 
       // melee swing arc (visual only)
-      if(meleeSwingActive()){
-        const p=IZZA.api.player, dir=aimVector();
-        const center = w2s(p.x+16, p.y+16);
-        const r = TUNE.meleeRange*SCALE();
-        // quick arc sweep
-        ctx.strokeStyle='rgba(255,255,255,0.15)';
-        ctx.lineWidth=2;
-        ctx.beginPath();
-        // draw small arc in facing direction
-        const ang = Math.atan2(dir.y, dir.x);
-        const half = (TUNE.meleeArcDeg*Math.PI/180)/2;
-        ctx.arc(center.sx, center.sy, r, ang-half, ang+half);
-        ctx.stroke();
-      }
+      // melee swing (basic + optional upgraded visuals)
+if(meleeSwingActive()){
+  const p=IZZA.api.player, dir=aimVector();
+  const center = w2s(p.x+16, p.y+16);
+  const tune = craftedMeleeTuning();
+  const r = (tune ? tune.range : TUNE.meleeRange)*SCALE();
+  const arcDeg = tune ? tune.arcDeg : TUNE.meleeArcDeg;
+
+  // base faint sweep for legacy feel
+  ctx.strokeStyle='rgba(255,255,255,0.15)';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  const ang = Math.atan2(dir.y, dir.x);
+  const half = (arcDeg*Math.PI/180)/2;
+  ctx.arc(center.sx, center.sy, r, ang-half, ang+half);
+  ctx.stroke();
+
+  // draw the actual weapon swinging + optional glow accents
+  drawMeleeWeaponSwing(ctx);
+}
       // --- FX Events (only triggered by creator-gun bullets with a selected tracer) ---
       for(let i=fxEvents.length-1;i>=0;i--){
         const fx = fxEvents[i];
