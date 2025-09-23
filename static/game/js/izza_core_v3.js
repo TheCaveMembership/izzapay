@@ -789,8 +789,10 @@ IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
     _snapshotActiveWorld();
 
     // Persist & reseed
-    _setCurrentWorld(target);
-    reseedForWorld(target);
+_setCurrentWorld(target);
+reseedForWorld(target);
+// NEW: keep public worldId in sync
+try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = target; } catch {}
 
     // Reset wanted on join (clean slate) and load that world’s arrays
     setWanted(0);
@@ -832,6 +834,9 @@ IZZA.on('mp-send', (msg)=>{
 IZZA.on('ready', ()=>{
   try{
     const wid = getCurrentWorld();
+    // NEW: expose current world to plugins/UI
+    try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = String(wid); } catch {}
+
     reseedForWorld(wid);          // ensure RNG is set for initial world
     _restoreWorldArrays(wid);     // make sure arrays are bound to WORLD_STATE
     _snapshotActiveWorld();       // capture the starting world
@@ -2051,8 +2056,8 @@ function spawnCop(kind){
     if(player.moving) player.animTime += dtMs;
 
     // Spawns/updates
-    if(pedestrians.length<6 && Math.random()<0.02) spawnPed();
-    if(cars.length<3 && Math.random()<0.02) spawnCar();
+    if (pedestrians.length < 6 && RNG() < 0.02) spawnPed();
+    if (cars.length < 3 && RNG() < 0.02) spawnCar();
     pedestrians.forEach(p=>updatePed(p, dtSec));
     cars.forEach(c=>updateCar(c, dtSec));
 
@@ -2186,6 +2191,14 @@ Object.assign(api, {
   getInventory, setInventory,
   getHearts, setHearts,
   hRoadY, vRoadX,
+
+  // NEW: world helpers
+  getWorldId: () => (IZZA.api && IZZA.api.worldId) ? String(IZZA.api.worldId) : String(getCurrentWorld()),
+  isSoloWorld: (id) => {
+    const w = String(id ?? ((IZZA.api && IZZA.api.worldId) ? IZZA.api.worldId : getCurrentWorld()));
+    // adjust this predicate as your project defines “solo”
+    return (w === '1' || w.toLowerCase() === 'solo');
+  },
 
   ready: true
 });
