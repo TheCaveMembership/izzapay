@@ -733,27 +733,86 @@ function unequipArmorSlot(slot){
   }
   // --- SWITCH-WORLD GUARD & RESET (core) -----------------------
 
-// Per-world snapshots so peds/cars/cops don’t bleed between worlds
+// Per-world snapshots so peds/cars/cops/loot don’t bleed between worlds
 const WORLD_STATE = Object.create(null);
 function _getWorldState(worldId){
   const k = String(worldId||'1');
-  if (!WORLD_STATE[k]) WORLD_STATE[k] = { pedestrians:[], cars:[], cops:[] };
+  if (!WORLD_STATE[k]) WORLD_STATE[k] = { pedestrians:[], cars:[], cops:[], loot:[] };
   return WORLD_STATE[k];
 }
 
-// We already have getCurrentWorld() declared above; use it
+// Persist the current world id
 function _setCurrentWorld(worldId){
   localStorage.setItem('izzaWorldId', String(worldId||'1'));
 }
 
+// === Loot bridge (best-effort; works with most loot plugins) ==================
+function _lootApi(){
+  // If your loot system exposes itself, prefer that
+  return (IZZA.api && IZZA.api.loot) ? IZZA.api.loot : null;
+}
+
+// Read the current on-ground loot into a serializable array
+function _readLootList(){
+  try{
+    const api = _lootApi();
+    if (api && Array.isArray(api.items)) {
+      // Copy, but drop non-serializable stuff
+      return api.items.map(it=>({
+        kind: it.kind||it.type||'coin',
+        x: +it.x|0, y: +it.y|0,
+        amount: it.amount|0, value: it.value|0,
+        noPickupUntil: it.noPickupUntil|0,
+        // carry any id if present
+        id: it.id!=null ? it.id : undefined
+      }));
+    }
+  }catch(e){}
+  // Fallback: if a DOM-based loot exists, try to grab positions
+  try{
+    const nodes = Array.from(document.querySelectorAll('[data-loot],[data-pickup]'));
+    return nodes.map(n=>{
+      const r = n.getBoundingClientRect();
+      return { kind: n.getAttribute('data-kind')||'coin', x: Math.round(r.left), y: Math.round(r.top) };
+    });
+  }catch(e){}
+  return [];
+}
+
+// Clear loot visuals immediately
+function _clearLootVisuals(){
+  try{
+    const api = _lootApi();
+    if (api && typeof api.clear==='function') { api.clear(); return; }
+  }catch(e){}
+  // Broadcast so other modules can clear themselves
+  try{ IZZA.emit('loot-clear', {}); }catch(e){}
+  // Last-ditch DOM cleanup for common selectors
+  try{ document.querySelectorAll('[data-loot],[data-pickup],.loot').forEach(n=>n.remove()); }catch(e){}
+}
+
+// Restore a loot list for the target world (if your loot plugin supports it)
+function _restoreLootList(list){
+  try{
+    const api = _lootApi();
+    if (api && typeof api.set==='function') { api.set(Array.isArray(list)?list:[]); return; }
+    if (Array.isArray(list) && list.length){
+      // Broadcast a bulk spawn so custom loot managers can rebuild
+      list.forEach(it=>{
+        IZZA.emit('loot-spawn', it); // many plugins listen for this
+      });
+    }
+  }catch(e){}
+}
+
 // Are there active cops (or wanted) right now?
 function hasActiveCops(){
-  // Prefer live arrays if present; otherwise consult state for current world
   const curId = getCurrentWorld();
   const s = _getWorldState(curId);
-  const liveCops = (IZZA.api && Array.isArray(IZZA.api.cops) ? IZZA.api.cops : (typeof cops!=='undefined' ? cops : [])) || [];
-  const anyCops = liveCops.length > 0 || (s.cops && s.cops.length > 0);
-  return anyCops;
+  const liveCops =
+    (IZZA.api && Array.isArray(IZZA.api.cops) ? IZZA.api.cops :
+     (typeof cops!=='undefined' ? cops : [])) || [];
+  return (liveCops.length > 0) || ((s.cops||[]).length > 0);
 }
 
 // Can we switch?
@@ -761,7 +820,7 @@ IZZA.api.canSwitchWorld = function canSwitchWorld(){
   return (player.wanted|0) === 0 && !hasActiveCops();
 };
 
-// Save current world arrays into WORLD_STATE (call before leaving)
+// Save current world arrays + loot into WORLD_STATE (call before leaving)
 function _snapshotActiveWorld(){
   try{
     const wid = getCurrentWorld();
@@ -769,15 +828,36 @@ function _snapshotActiveWorld(){
     s.pedestrians = [...pedestrians];
     s.cars        = [...cars];
     s.cops        = [...cops];
+    s.loot        = _readLootList();  // ← track pickups for this world
   }catch(e){ console.warn('snapshot failed', e); }
 }
 
-// Load arrays from WORLD_STATE for a target world (call after joining)
+// Clear live globals so render shows an immediate change
+function _clearWorldEntities(){
+  pedestrians.length = 0;
+  cars.length = 0;
+  cops.length = 0;
+  _clearLootVisuals(); // ← make the switch obvious; no leftover pickups
+}
+
+// Load arrays from WORLD_STATE for a target world
 function _restoreWorldArrays(wid){
   const s = _getWorldState(wid);
-  pedestrians.length = 0; pedestrians.push(...s.pedestrians);
-  cars.length = 0;        cars.push(...s.cars);
-  cops.length = 0;        cops.push(...s.cops);
+
+  // Option A (recommended for “obvious switch”): keep the visual reset and let normal spawns repopulate
+  pedestrians.length = 0;
+  cars.length = 0;
+  cops.length = 0;
+
+  // Restore that world’s loot (if any) after clearing visuals
+  _clearLootVisuals();
+  _restoreLootList(s.loot || []);
+
+  // Option B (to fully restore exact scene), replace the three lines above with:
+  // pedestrians.length = 0; pedestrians.push(...s.pedestrians);
+  // cars.length = 0;        cars.push(...s.cars);
+  // cops.length = 0;        cops.push(...s.cops);
+  // _clearLootVisuals(); _restoreLootList(s.loot||[]);
 }
 
 // Perform the actual switch locally (MP layer may also broadcast)
@@ -789,67 +869,65 @@ IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
     _snapshotActiveWorld();
 
     // Persist & reseed
-_setCurrentWorld(target);
-reseedForWorld(target);
-// NEW: keep public worldId in sync
-try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = target; } catch {}
+    _setCurrentWorld(target);
+    reseedForWorld(target);
 
-    // Reset wanted on join (clean slate) and load that world’s arrays
+    // Keep public worldId in sync for plugins/UI
+    try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = target; } catch {}
+
+    // Hard reset the scene so the switch is obvious
     setWanted(0);
+    _clearWorldEntities();
     _restoreWorldArrays(target);
 
-    // Let plugins clear their own caches
+    // Extra signals for external modules that might cache state
     IZZA.emit('world-changed', { world: target });
+    IZZA.emit('loot-world-changed', { world: target });
 
     try { toast(`🌍 Joined World ${target}`); } catch {}
   } catch(e){ console.warn('[core] world switch failed', e); }
 };
 
-// Public helper you can call from buttons/UI:
+// Public helper:
 //   IZZA.api.requestWorldChange('2')
 IZZA.api.requestWorldChange = function requestWorldChange(newWorld){
   if (!IZZA.api.canSwitchWorld()){
     try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
     return false;
   }
-  // If you have MP transport, still emit it
   IZZA.emit('mp-send', { type:'join-world', data:{ world:String(newWorld||'1') } });
-  // And switch locally right away (works offline / without MP)
   IZZA.api._onWorldChanged(String(newWorld||'1'));
   return true;
 };
 
-// If the MP layer is using the IZZA bus passthrough, mirror the join locally
+// Mirror MP join locally if your transport relays via IZZA bus
 IZZA.on('mp-send', (msg)=>{
   if (!msg || msg.type !== 'join-world') return;
   const target = (msg.data && msg.data.world) || '1';
   if (!IZZA.api.canSwitchWorld()){
     try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
-    return; // veto
+    return;
   }
   IZZA.api._onWorldChanged(target);
 });
 
-// Make sure the very first world has a snapshot once the game is ready
+// On first ready: expose worldId, seed RNG, and start from a clean scene
 IZZA.on('ready', ()=>{
   try{
     const wid = getCurrentWorld();
-    // NEW: expose current world to plugins/UI
     try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = String(wid); } catch {}
-
-    reseedForWorld(wid);          // ensure RNG is set for initial world
-    _restoreWorldArrays(wid);     // make sure arrays are bound to WORLD_STATE
-    _snapshotActiveWorld();       // capture the starting world
+    reseedForWorld(wid);
+    _clearWorldEntities();     // ← so initial join is visually clean
+    _snapshotActiveWorld();    // capture starting world (empty scene + loot[])
   }catch(e){}
 });
 
-// Optional: react to storage changes (e.g., other tab tries to change world)
+// React to external storage changes (other tab)
 window.addEventListener('storage', (ev)=>{
   if (ev.key !== 'izzaWorldId') return;
   const next = String(ev.newValue||'1');
   if (!IZZA.api.canSwitchWorld()){
-    // revert the external change
-    _setCurrentWorld(getCurrentWorld());
+    _setCurrentWorld(getCurrentWorld()); // revert external change
     return;
   }
   IZZA.api._onWorldChanged(next);
