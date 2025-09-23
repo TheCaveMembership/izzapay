@@ -11,7 +11,7 @@
 
   let api = null;
 
-  // --- NEW: global mission enable check (Solo only) ---------------------------
+  // --- global mission enable check (Solo only) -------------------------------
   function missionsEnabled(){
     try { return !!window.__IZZA_MISSIONS_ENABLED__; } catch { return true; }
   }
@@ -40,11 +40,17 @@
 
   function setM4(v){ try{ localStorage.setItem(M4_KEY, v); }catch{} }
 
-  // ---------- HQ door → box position ----------
+  // ---------- HQ door → box position (freeze once so it doesn't move) ----------
+  let _hqBase = null;
   function hqDoorGrid(){
-    const t = api.TILE;
-    const d = api.doorSpawn || { x: api.player?.x||0, y: api.player?.y||0 };
-    return { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
+    if (_hqBase) return _hqBase;
+    const t = api?.TILE || 60;
+    // Prefer real doorSpawn; if missing, snapshot player's current pos ONCE
+    const d = (api?.doorSpawn && Number.isFinite(api.doorSpawn.x))
+      ? api.doorSpawn
+      : { x: api?.player?.x||0, y: api?.player?.y||0 };
+    _hqBase = { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
+    return _hqBase;
   }
   // same offsets as your original mission script
   function cardboardBoxGrid(){
@@ -192,7 +198,7 @@
   function renderBox(){
     try{
       if (!api?.ready) return;
-      if (!missionsEnabled()) return; // ← NEW: hide in MP
+      if (!missionsEnabled()) return; // hide in MP
       if (localStorage.getItem('izzaMapTier') !== '2') return;
       if (localStorage.getItem(BOX_TAKEN_KEY) === '1') return;
 
@@ -207,7 +213,7 @@
   // ---------- B: pick up box ONLY when standing on it ----------
   function onB(e){
     if (!api?.ready) return;
-    if (!missionsEnabled()) return; // ← NEW: no pickup in MP
+    if (!missionsEnabled()) return; // no pickup in MP
     if (localStorage.getItem('izzaMapTier') !== '2') return;
     if (localStorage.getItem(BOX_TAKEN_KEY) === '1') return;
 
@@ -341,6 +347,7 @@
   // ---------- hook up ----------
   IZZA.on?.('ready', (a)=>{
     api = a;
+    hqDoorGrid(); // snapshot the HQ base once so the box tile stays fixed
     IZZA.on?.('render-under', renderBox);
     document.getElementById('btnB')?.addEventListener('click', onB, true);
     window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
