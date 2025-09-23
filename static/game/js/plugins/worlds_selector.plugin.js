@@ -1,6 +1,6 @@
 // worlds_selector.plugin.js — Worlds switcher + remote players + 1v1 invite (client-only)
 (function(){
-  const BUILD='worlds-selector/v1.3';
+  const BUILD='worlds-selector/v1.4';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- MP adapter ----
@@ -81,9 +81,28 @@
     mo.observe(document.body, { childList:true, subtree:true });
   }
 
+  // ---- Guard helpers (use core if present) ----
+  function canSwitchNow(){
+    try{
+      if (window.IZZA?.api && typeof IZZA.api.canSwitchWorld === 'function'){
+        return !!IZZA.api.canSwitchWorld();
+      }
+    }catch{}
+    return true; // no core guard exposed → allow
+  }
+  function vetoToast(){
+    try { (window.toast||console.log)('✋ Lose the cops / clear your stars first.'); } catch {}
+  }
+
   // ---- Worlds modal ----
   let counts = {1:0,2:0,3:0,4:0}, pollTimer=null;
   function openWorldsModal(){
+    // BLOCK if cops/stars active
+    if (!canSwitchNow()){
+      vetoToast();
+      return;
+    }
+
     const cur = getWorld();
     const hostId='worldsModal';
     let m = document.getElementById(hostId);
@@ -146,12 +165,26 @@
   function switchWorld(newWorld){
     const old = getWorld();
     if(String(old)===String(newWorld)){ closeWorldsModal(); return; }
+
+    // final guard right before switching
+    if (!canSwitchNow()){
+      closeWorldsModal();
+      vetoToast();
+      return;
+    }
+
     setWorld(newWorld);
     MP.joinWorld(newWorld);
+
+    // local reset (safe even if the server also ACKs later)
+    try { window.IZZA?.api?._onWorldChanged?.(newWorld); } catch {}
+
+    // clear any world-scoped UI caches
+    try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
+
     try{ IZZA?.api?.clearRemotePlayers?.(); }catch{}
     try{ IZZA?.toast?.(`Joined World ${newWorld}`); }catch{}
     closeWorldsModal();            // also unhides FIRE via close handler
-    try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
   }
 
   // ---- Live counts ----
