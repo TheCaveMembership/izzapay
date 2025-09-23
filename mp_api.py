@@ -1,10 +1,13 @@
-# mp_api.py — v4.0 (IZZA MP)
-# - Keeps: friends, invites, ranks, v1 duels (best-of-3), tracers, selfdown
-# - NEW: Worlds pose hub (HTTP polling) so players see each other per world
-# - QoL: PvP pull returns opponent velocity + server time for better interpolation
+# mp_api.py — v3.3 (world-aware queues + smoother PvP pull timing)
+# Keeps: friends, invites, best-of-3 duels, tracer sharing, mirrored cops, equipped-weapon mirroring, /duel/selfdown
+# Adds:
+#   - /world/join  (POST)    -> { ok:true }
+#   - /worlds/counts (GET)   -> { counts: {"1":N1,"2":N2,"3":N3,"4":N4} }
+#   - World-scoped v1 queues and duel rooms
+#   - Pull payload timing hints: serverNow, lastUpdate for me/opponent
+
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
-from collections import defaultdict
 from db import conn
 import time
 
@@ -51,6 +54,30 @@ def _username_by_id(uid: int) -> Optional[str]:
     with conn() as cx:
         r = cx.execute("SELECT pi_username FROM users WHERE id=?", (uid,)).fetchone()
         return r["pi_username"] if r else None
+
+# ---- Worlds (memory, in-proc) -----------------------------------------------
+# Backward-friendly defaults: world '1' unless a user POSTs /world/join.
+_WORLDS = ("1","2","3","4")
+_WORLD_OF: Dict[int, str] = {}                 # uid -> worldId
+_WORLD_MEMBERS: Dict[str, set] = {w:set() for w in _WORLDS}
+
+def _coerce_world(w: Any) -> str:
+    s = str(w or "1").strip()
+    return s if s in _WORLDS else "1"
+
+def _set_world(uid:int, world:str):
+    world = _coerce_world(world)
+    # remove from all first
+    for w in _WORLDS:
+        _WORLD_MEMBERS[w].discard(uid)
+    _WORLD_OF[uid] = world
+    _WORLD_MEMBERS[world].add(uid)
+
+def _user_world(uid:int) -> str:
+    return _WORLD_OF.get(uid, "1")
+
+def _counts_by_world() -> Dict[str,int]:
+    return {w: len(_WORLD_MEMBERS[w]) for w in _WORLDS}
 
 # ---- minimal schema (friends/invites/rank) ----------------------------------
 
@@ -99,140 +126,17 @@ def _is_friend(a:int,b:int)->bool:
                         LIMIT 1""",(a,b,b,a)).fetchone()
         return bool(r)
 
-# =============================================================================
-# Worlds pose hub (HTTP polling fallback)
-# =============================================================================
+# ---- simple mm queues (per world) -------------------------------------------
 
-# in-memory world state: uid -> world, and per-world pose tables
-_WORLD_BY_UID: Dict[int, str] = {}
-# world -> { uid: {username, x, y, facing, appearance, t, vx, vy} }
-_WORLD_POSES: Dict[str, Dict[int, Dict[str,Any]]] = defaultdict(dict)
-_WORLD_TTL = 8.0   # seconds: consider pose stale after this
-
-def _safe_world(w: Any) -> str:
-    s = str(w or "1").strip()
-    return s if s in ("1","2","3","4") else "1"
-
-def _counts_now() -> Dict[str,int]:
-    now = time.time()
-    out: Dict[str,int] = {}
-    for w, tbl in _WORLD_POSES.items():
-        c = 0
-        for _, pose in tbl.items():
-            if (now - float(pose.get("t", 0))) <= _WORLD_TTL:
-                c += 1
-        out[w] = c
-    # ensure 1..4 keys exist
-    for w in ("1","2","3","4"):
-        out.setdefault(w, 0)
-    return out
-
-@mp_bp.post("/world/join")
-def mp_world_join():
-    _ensure_schema()
-    who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid, _, uname = who
-    _mark_active(uid)
-    data = (request.get_json(silent=True) or {})
-    world = _safe_world(data.get("world"))
-    _WORLD_BY_UID[uid] = world
-    # seed an entry so counts include this user immediately
-    tbl = _WORLD_POSES[world]
-    cur = tbl.get(uid, {})
-    cur.update({"username": uname, "t": time.time()})
-    tbl[uid] = cur
-    return jsonify({"ok": True, "world": world})
-
-@mp_bp.post("/world/pose")
-def mp_world_pose():
-    who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid, _, uname = who
-    _mark_active(uid)
-    world = _WORLD_BY_UID.get(uid, "1")
-    world = _safe_world(world)
-    data = (request.get_json(silent=True) or {})
-    now = time.time()
-    tbl = _WORLD_POSES[world]
-
-    # velocity (based on last pose)
-    prev = tbl.get(uid)
-    px = float(prev.get("x", 0.0)) if prev else 0.0
-    py = float(prev.get("y", 0.0)) if prev else 0.0
-    pt = float(prev.get("t", 0.0)) if prev else 0.0
-
-    x = float(data.get("x") or 0.0)
-    y = float(data.get("y") or 0.0)
-    dt = max(0.001, now - pt) if pt else 0.001
-    vx = (x - px) / dt if pt else 0.0
-    vy = (y - py) / dt if pt else 0.0
-
-    pose = {
-        "username": uname,
-        "x": x,
-        "y": y,
-        "facing": data.get("facing") or "down",
-        "appearance": data.get("appearance") or {},
-        "t": now,
-        "vx": float(vx),
-        "vy": float(vy),
-    }
-    tbl[uid] = pose
-    return jsonify({"ok": True})
-
-@mp_bp.get("/world/pull")
-def mp_world_pull():
-    who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid, _, _ = who
-    _mark_active(uid)
-    world = _WORLD_BY_UID.get(uid, "1")
-    world = _safe_world(world)
-    tbl = _WORLD_POSES.get(world, {})
-    now = time.time()
-
-    players = []
-    for ouid, pose in tbl.items():
-        if ouid == uid: continue
-        if (now - float(pose.get("t", 0))) > _WORLD_TTL:
-            continue
-        players.append({
-            "username": pose.get("username") or "player",
-            "x": float(pose.get("x", 0.0)),
-            "y": float(pose.get("y", 0.0)),
-            "facing": pose.get("facing", "down"),
-            "appearance": pose.get("appearance") or {},
-            "vx": float(pose.get("vx", 0.0)),
-            "vy": float(pose.get("vy", 0.0)),
-        })
-
-    return jsonify({
-        "ok": True,
-        "world": world,
-        "t": now,                # server time for client-side interpolation
-        "players": players,
-        "counts": _counts_now()
-    })
-
-@mp_bp.get("/worlds/counts")
-def mp_world_counts():
-    who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid, _, _ = who
-    _mark_active(uid)
-    return jsonify({"ok": True, "counts": _counts_now()})
-
-# =============================================================================
-# simple mm queues (v1)
-# =============================================================================
-
-_QUEUES: Dict[str, List[int]] = {"v1": []}
+_QUEUES: Dict[str, Dict[str, List[int]]] = {
+    "v1": { w:[] for w in _WORLDS }
+}
 _STARTS: Dict[int, Dict[str, Any]] = {}  # per-user "start" payloads
 
-def _make_start(mode: str, a: int, b: int) -> Dict[str, Any]:
+def _make_start(mode: str, a: int, b: int, world: str) -> Dict[str, Any]:
     return {
         "mode": mode,
+        "world": world,
         "matchId": str(int(time.time() * 1000)),
         "players": [
             {"id": a, "username": _username_by_id(a)},
@@ -240,13 +144,32 @@ def _make_start(mode: str, a: int, b: int) -> Dict[str, Any]:
         ]
     }
 
-def _try_match_v1():
-    q=_QUEUES["v1"]
+def _try_match_v1(world:str):
+    q=_QUEUES["v1"][world]
     if len(q)>=2:
         a=q.pop(0); b=q.pop(0)
-        start=_make_start("v1", a, b)
+        start=_make_start("v1", a, b, world)
         _STARTS[a]=start; _STARTS[b]=start
-        _DUELS[start["matchId"]] = _new_room("v1", a, b)
+        _DUELS[start["matchId"]] = _new_room("v1", a, b, world)
+
+# ---- API: worlds -------------------------------------------------------------
+
+@mp_bp.post("/world/join")
+def mp_world_join():
+    _ensure_schema()
+    who=_current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid,_,_=who
+    data=(request.get_json(silent=True) or {})
+    world = _coerce_world(data.get("worldId") or data.get("world") or request.args.get("world") or "1")
+    _set_world(uid, world)
+    _mark_active(uid)
+    return jsonify({"ok":True,"world":world})
+
+@mp_bp.get("/worlds/counts")
+def mp_world_counts():
+    # public-ish; no auth required for a simple count
+    return jsonify({"ok":True, "counts": _counts_by_world()})
 
 # ---- API: me/friends/search/lobby -------------------------------------------
 
@@ -256,7 +179,9 @@ def mp_me():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,name=who; _mark_active(uid)
-    return jsonify({"username":name,"active":True,"inviteLink":"/izza-game/auth"})
+    # if user never set world, default to '1' & mark
+    if uid not in _WORLD_OF: _set_world(uid, "1")
+    return jsonify({"username":name,"active":True,"world":_user_world(uid),"inviteLink":"/izza-game/auth"})
 
 @mp_bp.get("/friends/list")
 def mp_friends_list():
@@ -274,7 +199,8 @@ def mp_friends_list():
             WHERE fr.status='accepted' AND (fr.from_user=? OR fr.to_user=?)
             ORDER BY u.pi_username COLLATE NOCASE
         """,(uid,uid,uid,uid)).fetchall()
-    return jsonify({"friends":[{"username":r["username"],"active":_is_active(int(r["fid"])), "friend":True} for r in rows]})
+    friends=[{"username":r["username"],"active":_is_active(int(r["fid"])), "friend":True} for r in rows]
+    return jsonify({"friends":friends})
 
 @mp_bp.get("/players/search")
 @mp_bp.get("/friends/search")
@@ -283,7 +209,6 @@ def mp_players_search():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     my_id,_,_=who
-    _mark_active(my_id)
     raw_q=(request.args.get("q") or "").strip()
     if len(raw_q)<2: return jsonify({"users":[]})
     q=raw_q.lstrip("@").lower(); like=f"%{q}%"
@@ -307,7 +232,6 @@ def mp_friends_request():
     who = _current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_ = who
-    _mark_active(me)
 
     data = (request.get_json(silent=True) or {})
     to_name = (data.get("toUsername") or data.get("username") or "").strip()
@@ -334,7 +258,6 @@ def mp_friends_accept():
     who = _current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_ = who
-    _mark_active(me)
 
     data = (request.get_json(silent=True) or {})
     req_id = data.get("requestId")
@@ -365,7 +288,6 @@ def mp_friends_decline():
     who = _current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_ = who
-    _mark_active(me)
 
     data = (request.get_json(silent=True) or {})
     req_id = data.get("requestId")
@@ -390,21 +312,21 @@ def mp_friends_decline():
 
     return jsonify({"ok": True})
 
+# ---- Lobby / invites ---------------------------------------------------------
+
 @mp_bp.post("/lobby/invite")
 def mp_lobby_invite():
     _ensure_schema()
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_=who
-    _mark_active(me)
-    data=(request.get_json(silent=True) or {})
-    to=(data.get("toUsername") or "").strip()
+    to=( (request.get_json(silent=True) or {}).get("toUsername") or "" ).strip()
     to_id=_user_id_by_username(to)
     if not to_id: return jsonify({"ok":False,"error":"player_not_found"}),404
     if to_id==me: return jsonify({"ok":False,"error":"cannot_invite_self"}),400
     with conn() as cx:
         cx.execute("INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
-                   (me, to_id, (data.get('mode') or 'v1'), int(data.get('ttlSec') or 1800)))
+                   (me, to_id, 'v1', 1800))
     return jsonify({"ok":True})
 
 @mp_bp.post("/lobby/accept")
@@ -413,7 +335,6 @@ def mp_lobby_accept():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     inv_id=int(data.get("inviteId") or 0)
     if not inv_id: return jsonify({"ok":False,"error":"bad_invite"}),400
@@ -421,10 +342,13 @@ def mp_lobby_accept():
         inv=cx.execute("SELECT * FROM mp_invites WHERE id=? AND to_user=? AND status='pending'", (inv_id,uid)).fetchone()
         if not inv: return jsonify({"ok":False,"error":"invite_not_found"}),404
         cx.execute("UPDATE mp_invites SET status='accepted' WHERE id=?", (inv_id,))
-    start=_make_start(inv["mode"] or "v1", int(inv["from_user"]), int(inv["to_user"]))
+    # Start match in current world of inviter (both should be there to see each other)
+    inviter = int(inv["from_user"])
+    world = _user_world(inviter)
+    start=_make_start(inv["mode"] or "v1", inviter, int(inv["to_user"]), world)
     _STARTS[int(inv["from_user"])]=start
     _STARTS[int(inv["to_user"])]=start
-    _DUELS[start["matchId"]] = _new_room(start["mode"], int(inv["from_user"]), int(inv["to_user"]))
+    _DUELS[start["matchId"]] = _new_room(start["mode"], inviter, int(inv["to_user"]), world)
     return jsonify({"ok":True,"start":start})
 
 @mp_bp.post("/lobby/decline")
@@ -433,7 +357,6 @@ def mp_lobby_decline():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     inv_id=int(data.get("inviteId") or 0)
     if not inv_id: return jsonify({"ok":False,"error":"bad_invite"}),400
@@ -450,6 +373,7 @@ def mp_notifications():
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
     _mark_active(uid)
+    if uid not in _WORLD_OF: _set_world(uid, "1")
     start=_STARTS.pop(uid, None)
     with conn() as cx:
         rows=cx.execute("""
@@ -459,7 +383,6 @@ def mp_notifications():
             WHERE i.to_user=? AND i.status='pending'
             ORDER BY i.created_at DESC LIMIT 5
         """,(uid,)).fetchall()
-
         fr_rows=cx.execute("""
             SELECT fr.id, u.pi_username AS from_username
             FROM mp_friend_requests fr
@@ -469,7 +392,9 @@ def mp_notifications():
         """,(uid,)).fetchall()
     invites=[{"id":r["id"],"from":r["from_username"],"mode":r["mode"] or "v1"} for r in rows]
     friend_requests=[{"id":r["id"],"from":r["from_username"]} for r in fr_rows]
-    return jsonify({"invites":invites, "friendRequests": friend_requests, "start":start})
+    return jsonify({"invites":invites, "friendRequests": friend_requests, "start":start, "world": _user_world(uid)})
+
+# ---- Queue / dequeue (per world) --------------------------------------------
 
 @mp_bp.post("/queue")
 def mp_queue():
@@ -478,60 +403,63 @@ def mp_queue():
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
     _mark_active(uid)
+    if uid not in _WORLD_OF: _set_world(uid, "1")
+    world = _user_world(uid)
     data=(request.get_json(silent=True) or {})
     mode=(data.get("mode") or "v1").lower()
     if mode=="v1":
-        if uid not in _QUEUES["v1"]:
-            _QUEUES["v1"].append(uid)
-        _try_match_v1()
+        q = _QUEUES["v1"][world]
+        if uid not in q: q.append(uid)
+        _try_match_v1(world)
         start=_STARTS.pop(uid, None)
         if start:
-            _DUELS[start["matchId"]] = _new_room(start["mode"], start["players"][0]["id"], start["players"][1]["id"])
+            # ensure room created for this start (safety if caller jumped the gun)
+            _DUELS[start["matchId"]] = _new_room(start["mode"], start["players"][0]["id"], start["players"][1]["id"], world)
             return jsonify({"ok":True,"start":start})
-        return jsonify({"ok":True,"queued":True})
-    return jsonify({"ok":True,"queued":True})
+        return jsonify({"ok":True,"queued":True,"world":world})
+    return jsonify({"ok":True,"queued":True,"world":world})
 
 @mp_bp.post("/dequeue")
 def mp_dequeue():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
-    for m in _QUEUES:
-        if uid in _QUEUES[m]: _QUEUES[m].remove(uid)
+    for w in _WORLDS:
+        for m in _QUEUES:
+            q = _QUEUES[m][w]
+            if uid in q: q.remove(uid)
     return jsonify({"ok":True})
 
-# =============================================================================
-# Duel state
-# =============================================================================
+# ---- Duel state --------------------------------------------------------------
 
 # Room layout:
 # {
-#   "mode":"v1",
+#   "mode":"v1", "world":"1",
 #   "players":[a,b],
 #   "snapshots": {uid:{username,appearance}},
-#   "state": {uid:{x,y,facing,hp,inv,t,_vx,_vy,_qhp}},
+#   "state": {uid:{x,y,facing,hp,inv,t}},
 #   "cops":  {uid:[{x,y,kind,facing}, ...]},
-#   "round": {"number":1,"bestOf":3,"wins":{a:0,b:0},"ended":False,"matchOver":False,
-#             "countdownAt":epoch(+5s settle)},
-#   "events": {"traces":[...]},
+#   "round": {"number":1,"bestOf":3,"wins":{a:0,b:0},"ended":False,"matchOver":False,"countdownAt":epoch(+5s)},
+#   "events": {"traces":[...]}
 #   "pullSince": {uid:last_ts_sent}
 # }
+
 _DUELS: Dict[str, Dict[str, Any]] = {}
 
-def _new_room(mode:str, a:int, b:int) -> Dict[str, Any]:
-  now=time.time()
-  return {
-      "mode": mode,
-      "players": [int(a),int(b)],
-      "snapshots": {},
-      "state": {},
-      "cops": {int(a):[], int(b):[]},
-      "round": {"number":1, "bestOf":3, "wins":{int(a):0,int(b):0},
-                "ended":False, "matchOver":False, "countdownAt": now+5.0},
-      "events": {"traces":[]},
-      "pullSince": {int(a):0.0,int(b):0.0}
-  }
+def _new_room(mode:str, a:int, b:int, world:str) -> Dict[str, Any]:
+    now=time.time()
+    return {
+        "mode": mode,
+        "world": _coerce_world(world),
+        "players": [int(a),int(b)],
+        "snapshots": {},
+        "state": {},
+        "cops": {int(a):[], int(b):[]},
+        "round": {"number":1, "bestOf":3, "wins":{int(a):0,int(b):0},
+                  "ended":False, "matchOver":False, "countdownAt": now+5.0},
+        "events": {"traces":[]},
+        "pullSince": {int(a):0.0,int(b):0.0}
+    }
 
 def _get_room(mid:str):
     return _DUELS.get(str(mid))
@@ -557,29 +485,26 @@ def mp_duel_poke():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,uname=who
-    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
-    now = time.time()
-    # live state + velocity
-    st = room["state"].get(uid, {})
-    px, py, pt = float(st.get("x",0.0)), float(st.get("y",0.0)), float(st.get("t",0.0))
-    nx, ny = float(data.get("x") or 0.0), float(data.get("y") or 0.0)
-    dt = max(0.001, now - pt) if pt else 0.001
-    vx = (nx - px)/dt if pt else 0.0
-    vy = (ny - py)/dt if pt else 0.0
+    # world gate: both players must be in the room's world
+    if _user_world(uid) != room.get("world"):
+        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
 
+    # live state
+    st = room["state"].get(uid, {})
+    x = float(data.get("x") or 0.0)
+    y = float(data.get("y") or 0.0)
+    hp = float(data.get("hp") or 3.0)
     st.update({
-        "x": nx,
-        "y": ny,
-        "facing": data.get("facing") or "down",
-        "hp": float(data.get("hp") or 3.0),  # client sends its heart float
+        "x": x, "y": y,
+        "facing": (data.get("facing") or "down"),
+        "hp": hp,
         "inv": data.get("inv") or {},
-        "t": now,
-        "_vx": float(vx), "_vy": float(vy)
+        "t": time.time()
     })
     room["state"][uid]=st
 
@@ -590,7 +515,7 @@ def mp_duel_poke():
         snap["appearance"] = data["appearance"]
     room["snapshots"][uid]=snap
 
-    # mirror nearby cops (visual only)
+    # mirror nearby cops (visual only; short list)
     cops = data.get("cops")
     if isinstance(cops, list):
         room["cops"][uid] = [
@@ -606,14 +531,14 @@ def mp_duel_pull():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
     mid=request.args.get("matchId","")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
-    a,b = room["players"]
-    opp  = _other(room, uid)
+    if _user_world(uid) != room.get("world"):
+        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
 
+    opp  = _other(room, uid)
     me_state = room["state"].get(uid) or {}
     op_state = room["state"].get(opp) or {}
     op_snap  = room["snapshots"].get(opp, {})
@@ -631,9 +556,13 @@ def mp_duel_pull():
 
     payload = {
         "ok": True,
-        "serverTime": time.time(),           # for client interpolation
+        "world": room.get("world"),
+        "serverNow": time.time(),                 # NEW: for client-side lerp sync
         "opponent": None,
-        "me": {"hp": float(me_state.get("hp", 3.0))},
+        "me": {
+            "hp": float(me_state.get("hp", 3.0)),
+            "lastUpdate": float(me_state.get("t", 0.0))  # NEW
+        },
         "round": rnd,
         "opponentCops": room["cops"].get(opp, []),
         "traces": new_traces
@@ -649,8 +578,7 @@ def mp_duel_pull():
             "hp": float(op_state.get("hp", 3.0)),
             "inv": op_inv,
             "equipped": op_weapon,
-            "vx": float(op_state.get("_vx", 0.0)),      # NEW: velocity hint
-            "vy": float(op_state.get("_vy", 0.0)),
+            "lastUpdate": float(op_state.get("t",0.0))   # NEW
         }
 
     return jsonify(payload)
@@ -660,12 +588,13 @@ def mp_duel_hit():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     kind=(data.get("kind") or "bullet").lower()
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
+    if _user_world(uid) != room.get("world"):
+        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
 
     opp = _other(room, uid)
     os  = room["state"].get(opp) or {"hp":3.0}
@@ -701,11 +630,12 @@ def mp_duel_trace():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
+    if _user_world(uid) != room.get("world"):
+        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
 
     e = {
         "from": uid,
@@ -728,11 +658,12 @@ def mp_duel_selfdown():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
-    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
+    if _user_world(uid) != room.get("world"):
+        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
 
     opp = _other(room, uid)
     _on_round_end(room, winner_uid=opp)
@@ -762,19 +693,19 @@ def _on_round_end(room:Dict[str,Any], winner_uid:int):
         room["_expireAt"] = time.time() + 15.0
         return
 
-    # schedule next round (bump number; set countdown +5s settle)
+    # schedule next round (+5s settle)
     rnd["number"] = int(rnd.get("number",1)) + 1
     rnd["ended"] = False
     rnd["countdownAt"] = time.time() + 5.0  # both clients can wait for this
 
-    # reset both players server-side hp backing; clients will reset hearts visually
+    # reset server-side hp backing; clients reset hearts visually
     for uid in (a,b):
         st = room["state"].get(uid) or {}
         st["_qhp"] = int(round(float(st.get("hp", 3.0))*4))
         room["state"][uid] = st
 
 def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
-    """Update simple W/L for v1 on mp_ranks and clear the room shortly after."""
+    """Update simple W/L for v1 on mp_ranks."""
     try:
         with conn() as cx:
             cx.execute("INSERT OR IGNORE INTO mp_ranks(user_id) VALUES(?)", (a,))
@@ -792,19 +723,17 @@ def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
 # ---- background sweeper (lazy, on each request) -----------------------------
 
 @mp_bp.before_app_request
-def _sweep_duel_rooms_and_worlds():
+def _sweep_duel_rooms():
     now = time.time()
-    # Duels: drop old traces + expire rooms
+    trash = []
     for mid, room in list(_DUELS.items()):
+        # drop old traces
         traces = room["events"]["traces"]
         if traces:
             room["events"]["traces"] = [e for e in traces if (now - e.get("t",now)) < 12.0]
+        # expire room if flagged
         exp = room.get("_expireAt")
         if exp and now >= exp:
-            _DUELS.pop(mid, None)
-
-    # Worlds: remove stale poses
-    for w, table in list(_WORLD_POSES.items()):
-        for uid, pose in list(table.items()):
-            if (now - float(pose.get("t", 0))) > _WORLD_TTL:
-                table.pop(uid, None)
+            trash.append(mid)
+    for mid in trash:
+        _DUELS.pop(mid, None)
