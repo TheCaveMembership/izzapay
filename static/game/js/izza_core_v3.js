@@ -731,7 +731,7 @@ function unequipArmorSlot(slot){
     if(nub){ nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px'; }
     vec.x=(c/r)*ux; vec.y=(c/r)*uy;
   }
-  // --- SWITCH-WORLD GUARD & RESET (core) -----------------------
+  // --- SWITCH-WORLD GUARD & RESET (core) --------------------------------------
 
 // Per-world snapshots so peds/cars/cops/loot don’t bleed between worlds
 const WORLD_STATE = Object.create(null);
@@ -746,29 +746,18 @@ function _setCurrentWorld(worldId){
   localStorage.setItem('izzaWorldId', String(worldId||'1'));
 }
 
-// Current world id helper (uses your existing getter if present)
-function getCurrentWorld(){
-  try { return localStorage.getItem('izzaWorldId') || '1'; } catch { return '1'; }
+// Helper: what counts as SOLO vs MP (strict)
+// ✅ Only the literal "solo" is mission-enabled; Worlds "1"-"4" are multiplayer (no missions)
+function _isSoloWorld(id){
+  const w = String(id || 'solo').toLowerCase();
+  return (w === 'solo');
 }
 
-// Solo-vs-multiplayer helper
-function _isSoloWorldId(id){
-  const t = String(id||'1').toLowerCase();
-  // Treat "solo" as the story world; everything else = multiplayer
-  return t === 'solo';
-}
+// === Loot bridge (best-effort; works with most loot plugins) =================
+function _lootApi(){ try{ return (IZZA.api && IZZA.api.loot) ? IZZA.api.loot : null; }catch{ return null; } }
 
-// === Loot bridge (best-effort; works with most loot plugins) ==================
-function _lootApi(){
-  // If your loot system exposes itself, prefer that
-  return (IZZA.api && IZZA.api.loot) ? IZZA.api.loot : null;
-}
-
-// Mission-start pickup kinds (blocked in MP)
-const _MISSION_PICKUP_KINDS = new Set(['cardboard_box','jack_o_lantern','jacklantern']);
-
-// Read the current on-ground loot into a serializable array
 function _readLootList(){
+  // Prefer an exposed loot api if present
   try{
     const api = _lootApi();
     if (api && Array.isArray(api.items)) {
@@ -780,63 +769,92 @@ function _readLootList(){
         id: it.id!=null ? it.id : undefined
       }));
     }
-  }catch(e){}
-  // Fallback: if a DOM-based loot exists, try to grab positions
+  }catch{}
+  // Fallback: DOM probes (weak, but avoids stale visuals)
   try{
     const nodes = Array.from(document.querySelectorAll('[data-loot],[data-pickup]'));
     return nodes.map(n=>{
       const r = n.getBoundingClientRect();
-      return {
-        kind: (n.getAttribute('data-kind')||n.getAttribute('data-loot')||'coin').toLowerCase(),
-        x: Math.round(r.left), y: Math.round(r.top)
-      };
+      return { kind: n.getAttribute('data-kind')||'coin', x: Math.round(r.left), y: Math.round(r.top) };
     });
-  }catch(e){}
+  }catch{}
   return [];
 }
 
-// Clear loot visuals immediately
 function _clearLootVisuals(){
-  try{
-    const api = _lootApi();
-    if (api && typeof api.clear==='function') { api.clear(); return; }
-  }catch(e){}
-  // Broadcast so other modules can clear themselves
-  try{ IZZA.emit('loot-clear', {}); }catch(e){}
-  // Last-ditch DOM cleanup for common selectors
-  try{ document.querySelectorAll('[data-loot],[data-pickup],.loot').forEach(n=>n.remove()); }catch(e){}
+  try{ const api=_lootApi(); if(api && typeof api.clear==='function'){ api.clear(); return; } }catch{}
+  try{ IZZA.emit('loot-clear', {}); }catch{}
+  try{ document.querySelectorAll('[data-loot],[data-pickup],.loot').forEach(n=>n.remove()); }catch{}
 }
 
-// Remove any mission-start pickups from DOM (safety, for MP worlds)
-function _stripMissionPickupNodes(){
-  try{
-    document.querySelectorAll('[data-loot],[data-pickup]').forEach(n=>{
-      const kind = (n.getAttribute('data-kind')||n.getAttribute('data-loot')||'').toLowerCase();
-      if (_MISSION_PICKUP_KINDS.has(kind)) n.remove();
-    });
-  }catch(e){}
-}
-
-// Restore a loot list for the target world (if your loot plugin supports it)
-// Filters mission-start items in multiplayer worlds so they never appear there
 function _restoreLootList(list){
-  const wid = getCurrentWorld();
-  const solo = _isSoloWorldId(wid);
-  const filtered = Array.isArray(list)
-    ? list.filter(it => {
-        const k = String(it.kind||it.type||'').toLowerCase();
-        return solo || !_MISSION_PICKUP_KINDS.has(k);
-      })
-    : [];
+  try{
+    const api=_lootApi();
+    if(api && typeof api.set==='function'){ api.set(Array.isArray(list)?list:[]); return; }
+  }catch{}
+  try{
+    (Array.isArray(list)?list:[]).forEach(it=>{ IZZA.emit('loot-spawn', it); });
+  }catch{}
+}
+
+// === Mission UI / interactables policy ======================================
+
+// Global flag (plugins can read)
+window.__IZZA_MISSIONS_ENABLED__ = true;
+
+// Despawn / hide mission objects immediately (DOM + typical classes/attrs)
+function _despawnMissionObjects(){
+  const SEL = [
+    // generic
+    '[data-mission-node]','[data-mission]',
+    // pumpkin/jack-o’-lantern
+    '.jack-o-lantern','.jackolantern','[data-jackolantern]','[data-jack]','[data-mission="m5_jack"]',
+    // cardboard box
+    '.cardboard-box','[data-cardboard]','[data-mission="m4_box"]'
+  ].join(',');
 
   try{
-    const api = _lootApi();
-    if (api && typeof api.set==='function') { api.set(filtered); return; }
-    if (filtered.length){
-      filtered.forEach(it=>{ IZZA.emit('loot-spawn', it); });
-    }
-  }catch(e){}
+    document.querySelectorAll(SEL).forEach(n=>{
+      try{ if (typeof n.destroy==='function') n.destroy(); }catch{}
+      n.remove();
+    });
+  }catch{}
+
+  try{ IZZA.emit('missions-despawn-all', {}); }catch{}
+  try{ window.dispatchEvent(new CustomEvent('izza-missions-despawn', {detail:{reason:'mp-world'}})); }catch{}
 }
+
+// Show/hide the mission HUD and broadcast toggle
+function _applyMissionPolicyForWorld(targetId){
+  const solo = _isSoloWorld(targetId);
+  window.__IZZA_MISSIONS_ENABLED__ = solo;
+
+  // Toggle mission HUD depending on world
+  const missionHud = document.querySelector('[data-ui="mission-hud"], #missionHud, .mission-hud');
+  if (missionHud) missionHud.style.display = solo ? '' : 'none';
+
+  // Broadcast for mission plugins to listen and disable themselves
+  try{
+    window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail: { enabled: solo } }));
+    IZZA.emit('missions-toggle', { enabled: solo });
+  }catch{}
+
+  // In MP, forcibly despawn mission objects
+  if (!solo) _despawnMissionObjects();
+}
+
+// Runtime guard: if any mission tries to start in MP, cancel it
+IZZA.on('mission-start-request', (e)=>{
+  try{
+    const worldId = (IZZA.api && IZZA.api.worldId) || localStorage.getItem('izzaWorldId') || '1';
+    if(!_isSoloWorld(worldId)){
+      try{ toast('Missions are solo only. Switch to Solo world to play.'); }catch{}
+      if (e && typeof e==='object') e.cancel = true;
+    }
+  }catch{}
+});
+
+// -----------------------------------------------------------------------------
 
 // Are there active cops (or wanted) right now?
 function hasActiveCops(){
@@ -849,7 +867,6 @@ function hasActiveCops(){
 }
 
 // Can we switch?
-IZZA.api = IZZA.api || {};
 IZZA.api.canSwitchWorld = function canSwitchWorld(){
   return (player.wanted|0) === 0 && !hasActiveCops();
 };
@@ -862,7 +879,7 @@ function _snapshotActiveWorld(){
     s.pedestrians = [...pedestrians];
     s.cars        = [...cars];
     s.cops        = [...cops];
-    s.loot        = _readLootList();  // ← track pickups for this world
+    s.loot        = _readLootList();  // track pickups for this world
   }catch(e){ console.warn('snapshot failed', e); }
 }
 
@@ -871,14 +888,14 @@ function _clearWorldEntities(){
   pedestrians.length = 0;
   cars.length = 0;
   cops.length = 0;
-  _clearLootVisuals(); // ← make the switch obvious; no leftover pickups
+  _clearLootVisuals(); // make the switch obvious; no leftover pickups
 }
 
 // Load arrays from WORLD_STATE for a target world
 function _restoreWorldArrays(wid){
   const s = _getWorldState(wid);
 
-  // Option A (recommended for “obvious switch”): keep the visual reset and let normal spawns repopulate
+  // Recommended: start visually clean and let normal spawns repopulate
   pedestrians.length = 0;
   cars.length = 0;
   cops.length = 0;
@@ -887,7 +904,7 @@ function _restoreWorldArrays(wid){
   _clearLootVisuals();
   _restoreLootList(s.loot || []);
 
-  // Option B (to fully restore exact scene), replace the three lines above with:
+  // If you ever want exact restoration, replace the 4 lines above with:
   // pedestrians.length = 0; pedestrians.push(...s.pedestrians);
   // cars.length = 0;        cars.push(...s.cars);
   // cops.length = 0;        cops.push(...s.cops);
@@ -909,27 +926,13 @@ IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
     // Keep public worldId in sync for plugins/UI
     try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = target; } catch {}
 
+    // Apply mission policy (hide/despawn in MP, show in Solo)
+    _applyMissionPolicyForWorld(target);
+
     // Hard reset the scene so the switch is obvious
     setWanted(0);
     _clearWorldEntities();
     _restoreWorldArrays(target);
-
-    // ======= SOLO vs MULTIPLAYER mission gating =======
-    // Toggle mission HUD depending on world
-    const missionHud = document.querySelector('[data-ui="mission-hud"], #missionHud, .mission-hud');
-    const missionsEnabled = _isSoloWorldId(target);
-    if (missionHud) {
-      missionHud.style.display = missionsEnabled ? '' : 'none';
-    }
-    // Broadcast for mission plugins to listen and disable themselves
-    window.dispatchEvent(new CustomEvent('izza-missions-toggle', {
-      detail: { enabled: missionsEnabled }
-    }));
-
-    // In multiplayer worlds, make sure mission-start pickups are NOT present
-    if (!missionsEnabled) {
-      _stripMissionPickupNodes();
-    }
 
     // Extra signals for external modules that might cache state
     IZZA.emit('world-changed', { world: target });
@@ -968,15 +971,12 @@ IZZA.on('ready', ()=>{
     const wid = getCurrentWorld();
     try { (window.IZZA = window.IZZA || {}).api = (IZZA.api || {}); IZZA.api.worldId = String(wid); } catch {}
     reseedForWorld(wid);
-    _clearWorldEntities();     // ← so initial join is visually clean
-    _snapshotActiveWorld();    // capture starting world (empty scene + loot[])
 
-    // Apply mission gating immediately on first load
-    const missionsEnabled = _isSoloWorldId(wid);
-    const missionHud = document.querySelector('[data-ui="mission-hud"], #missionHud, .mission-hud');
-    if (missionHud) missionHud.style.display = missionsEnabled ? '' : 'none';
-    window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail: { enabled: missionsEnabled } }));
-    if (!missionsEnabled) _stripMissionPickupNodes();
+    // Make sure mission policy applies right from boot
+    _applyMissionPolicyForWorld(wid);
+
+    _clearWorldEntities();     // initial join looks distinct
+    _snapshotActiveWorld();    // capture starting world (empty scene + loot[])
   }catch(e){}
 });
 
@@ -990,7 +990,6 @@ window.addEventListener('storage', (ev)=>{
   }
   IZZA.api._onWorldChanged(next);
 });
-
 // === Runtime guard: if any system tries to spawn mission pickups in MP, drop them ===
 try{
   IZZA.on('loot-spawn', (it)=>{
