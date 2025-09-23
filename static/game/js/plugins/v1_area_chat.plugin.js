@@ -58,7 +58,8 @@
     if(localStorage.getItem('izzaTradeCentre')==='1') return 'tc';
     return 'world';
   }
-
+function currentWorldId(){ return (localStorage.getItem('izzaWorldId') || '1'); }
+window.addEventListener('izza-world-changed', ()=>{ /* causes room key to change */ });
   // ---- UI: compact bar + expandable feed (lang label is read-only) ----
   function ensureUI(){
     if(Chat.host) return;
@@ -158,7 +159,13 @@
   }
 
   // ---- helpers ----
-  function areaRoom(){ const a = currentArea(); return (a==='duel') ? 'duel' : (a==='tc' ? 'tc' : 'world'); }
+  function areaRoom(){
+  const a = currentArea();
+  if (a === 'duel') return 'duel';
+  if (a === 'tc')   return 'tc';
+  // Scope world chat to the selected world
+  return 'world:' + currentWorldId();
+}
   function tsStamp(ms){ const d = ms ? new Date(ms) : new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
   function escapeHTML(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
