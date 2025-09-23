@@ -733,67 +733,121 @@ function unequipArmorSlot(slot){
   }
   // --- SWITCH-WORLD GUARD & RESET (core) -----------------------
 
-// Keep separate per-world state instead of one global array
-const WORLD_STATE = {};
-function getWorldState(worldId){
-  if(!WORLD_STATE[worldId]){
-    WORLD_STATE[worldId] = { pedestrians:[], cars:[], cops:[] };
-  }
-  return WORLD_STATE[worldId];
+// Per-world snapshots so peds/cars/cops don’t bleed between worlds
+const WORLD_STATE = Object.create(null);
+function _getWorldState(worldId){
+  const k = String(worldId||'1');
+  if (!WORLD_STATE[k]) WORLD_STATE[k] = { pedestrians:[], cars:[], cops:[] };
+  return WORLD_STATE[k];
 }
 
-// Currently active world (synced with storage)
-function getCurrentWorld(){ return localStorage.getItem('izzaWorldId') || '1'; }
-function setCurrentWorld(worldId){ localStorage.setItem('izzaWorldId', String(worldId||'1')); }
+// We already have getCurrentWorld() declared above; use it
+function _setCurrentWorld(worldId){
+  localStorage.setItem('izzaWorldId', String(worldId||'1'));
+}
 
+// Are there active cops (or wanted) right now?
 function hasActiveCops(){
-  const s = getWorldState(getCurrentWorld());
-  return (s.cops && s.cops.length > 0) || (player.wanted|0) > 0;
+  // Prefer live arrays if present; otherwise consult state for current world
+  const curId = getCurrentWorld();
+  const s = _getWorldState(curId);
+  const liveCops = (IZZA.api && Array.isArray(IZZA.api.cops) ? IZZA.api.cops : (typeof cops!=='undefined' ? cops : [])) || [];
+  const anyCops = liveCops.length > 0 || (s.cops && s.cops.length > 0);
+  return anyCops;
 }
 
-// Let plugins ask if switching worlds is allowed right now
+// Can we switch?
 IZZA.api.canSwitchWorld = function canSwitchWorld(){
   return (player.wanted|0) === 0 && !hasActiveCops();
 };
 
-// Local reset when we DO switch worlds
+// Save current world arrays into WORLD_STATE (call before leaving)
+function _snapshotActiveWorld(){
+  try{
+    const wid = getCurrentWorld();
+    const s = _getWorldState(wid);
+    s.pedestrians = [...pedestrians];
+    s.cars        = [...cars];
+    s.cops        = [...cops];
+  }catch(e){ console.warn('snapshot failed', e); }
+}
+
+// Load arrays from WORLD_STATE for a target world (call after joining)
+function _restoreWorldArrays(wid){
+  const s = _getWorldState(wid);
+  pedestrians.length = 0; pedestrians.push(...s.pedestrians);
+  cars.length = 0;        cars.push(...s.cars);
+  cops.length = 0;        cops.push(...s.cops);
+}
+
+// Perform the actual switch locally (MP layer may also broadcast)
 IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
   try {
-    // Save old world state back
-    const old = getCurrentWorld();
-    WORLD_STATE[old] = { pedestrians:[...pedestrians], cars:[...cars], cops:[...cops] };
+    const target = String(newWorld||'1');
 
-    // Switch current
-    setCurrentWorld(newWorld);
+    // Save what we’re leaving
+    _snapshotActiveWorld();
 
-    // Load that world’s state fresh
-    const s = getWorldState(newWorld);
-    pedestrians.length = 0; pedestrians.push(...s.pedestrians);
-    cars.length = 0; cars.push(...s.cars);
-    cops.length = 0; cops.push(...s.cops);
+    // Persist & reseed
+    _setCurrentWorld(target);
+    reseedForWorld(target);
 
-    // Clear wanted level on switch (fresh start)
+    // Reset wanted on join (clean slate) and load that world’s arrays
     setWanted(0);
+    _restoreWorldArrays(target);
 
-    // Reseed RNG so spawns differ per world
-    reseedForWorld(newWorld);
+    // Let plugins clear their own caches
+    IZZA.emit('world-changed', { world: target });
 
-    // tell any plugins (loot, chat, etc.) to clear their own caches
-    IZZA.emit('world-changed', { world: String(newWorld) });
+    try { toast(`🌍 Joined World ${target}`); } catch {}
+  } catch(e){ console.warn('[core] world switch failed', e); }
+};
 
-    try { toast(`🌍 Joined World ${newWorld}`); } catch {}
-  } catch(e){ console.warn('[core] world reset failed', e); }
+// Public helper you can call from buttons/UI:
+//   IZZA.api.requestWorldChange('2')
+IZZA.api.requestWorldChange = function requestWorldChange(newWorld){
+  if (!IZZA.api.canSwitchWorld()){
+    try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
+    return false;
+  }
+  // If you have MP transport, still emit it
+  IZZA.emit('mp-send', { type:'join-world', data:{ world:String(newWorld||'1') } });
+  // And switch locally right away (works offline / without MP)
+  IZZA.api._onWorldChanged(String(newWorld||'1'));
+  return true;
 };
 
 // If the MP layer is using the IZZA bus passthrough, mirror the join locally
 IZZA.on('mp-send', (msg)=>{
   if (!msg || msg.type !== 'join-world') return;
-  const newWorld = (msg.data && msg.data.world) || '1';
+  const target = (msg.data && msg.data.world) || '1';
   if (!IZZA.api.canSwitchWorld()){
     try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
-    return; // veto switch
+    return; // veto
   }
-  IZZA.api._onWorldChanged(newWorld);
+  IZZA.api._onWorldChanged(target);
+});
+
+// Make sure the very first world has a snapshot once the game is ready
+IZZA.on('ready', ()=>{
+  try{
+    const wid = getCurrentWorld();
+    reseedForWorld(wid);          // ensure RNG is set for initial world
+    _restoreWorldArrays(wid);     // make sure arrays are bound to WORLD_STATE
+    _snapshotActiveWorld();       // capture the starting world
+  }catch(e){}
+});
+
+// Optional: react to storage changes (e.g., other tab tries to change world)
+window.addEventListener('storage', (ev)=>{
+  if (ev.key !== 'izzaWorldId') return;
+  const next = String(ev.newValue||'1');
+  if (!IZZA.api.canSwitchWorld()){
+    // revert the external change
+    _setCurrentWorld(getCurrentWorld());
+    return;
+  }
+  IZZA.api._onWorldChanged(next);
 });
   function resetNub(){ if(nub){ nub.style.left='40px'; nub.style.top='40px'; } vec.x=0; vec.y=0; }
   function startDrag(e){ dragging=true; baseRect=stick.getBoundingClientRect(); e.preventDefault(); }
@@ -1572,127 +1626,131 @@ window.addEventListener('izza-inventory-changed', ()=>{
 });
 
   // ===== NPCs & cars =====
-  const pedestrians=[];
-  const cars=[];        // {x,y,dir,spd,kind}
-  const cops=[];
+const pedestrians=[];
+const cars=[];        // {x,y,dir,spd,kind}
+const cops=[];
 
-  function clampToUnlockedX(px){
-    const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
-    return Math.max(min, Math.min(max, px));
-  }
-  function clampToUnlockedY(py){
-    const min=unlocked.y0*TILE, max=unlocked.y1*TILE;
-    return Math.max(min, Math.min(max, py));
-  }
+// Clamp helpers (unchanged)
+function clampToUnlockedX(px){
+  const min=unlocked.x0*TILE, max=unlocked.x1*TILE;
+  return Math.max(min, Math.min(max, px));
+}
+function clampToUnlockedY(py){
+  const min=unlocked.y0*TILE, max=unlocked.y1*TILE;
+  return Math.max(min, Math.min(max, py));
+}
 
-  function randVehicleKind(){
-    const keys = Object.keys(VEHICLE_SHEETS);
-    if(!keys.length) return 'sedan';
-    return keys[(Math.random()*keys.length)|0];
-  }
+// Use RNG (per-world), not Math.random
+function randVehicleKind(){
+  const keys = Object.keys(VEHICLE_SHEETS);
+  if(!keys.length) return 'sedan';
+  return keys[(RNG()*keys.length)|0];
+}
 
-  function spawnPed(){
-    const left = Math.random()<0.5;
-    const sideTop = Math.random()<0.5;
-    const yRow = sideTop ? sidewalkTopY : sidewalkBotY;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const dir = left ? 1 : -1;
-    const skins = ['ped_m','ped_f','ped_m_dark','ped_f_dark'];
-    const skin  = skins[(Math.random()*skins.length)|0];
+function spawnPed(){
+  const left = RNG()<0.5;
+  const sideTop = RNG()<0.5;
+  const yRow = sideTop ? sidewalkTopY : sidewalkBotY;
+  const gx = left ? unlocked.x0 : unlocked.x1;
+  const dir = left ? 1 : -1;
+  const skins = ['ped_m','ped_f','ped_m_dark','ped_f_dark'];
+  const skin  = skins[(RNG()*skins.length)|0];
 
-    pedestrians.push({
-      x: gx*TILE, y: yRow*TILE,
-      mode:'horiz', dir, spd: 40,
-      hp: 4,
-      state: 'walk',
-      crossSide: sideTop?'top':'bot',
-      vertX: (Math.random()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
-      blinkT:0,
-      skin,
-      facing: dir>0?'right':'left',
-      moving: true
-    });
-  }
-  function spawnCar(){
-    const left = Math.random()<0.5;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const dir = left ? 1 : -1;
-    cars.push({ x: gx*TILE, y: hRoadY*TILE, dir, spd: 120, kind: randVehicleKind() });
-  }
+  pedestrians.push({
+    x: gx*TILE, y: yRow*TILE,
+    mode:'horiz', dir, spd: 40,
+    hp: 4,
+    state: 'walk',
+    crossSide: sideTop?'top':'bot',
+    vertX: (RNG()<0.5 ? vSidewalkLeftX : vSidewalkRightX),
+    blinkT:0,
+    skin,
+    facing: dir>0?'right':'left',
+    moving: true
+  });
+}
 
-  function updatePed(p, dtSec){
-    if(p.state==='walk'){
-      if(p.mode==='horiz'){
-        p.x += p.dir * p.spd * dtSec;
-        p.facing = p.dir>0 ? 'right' : 'left';
-        const gx = Math.floor(p.x/TILE);
-        if(gx===vRoadX){
-          p.mode='crossing';
-        }else{
-          if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
-            p.dir *= -1;
-            p.x = clampToUnlockedX(p.x);
-          }
-        }
-      } else if(p.mode==='crossing'){
-        const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
-        const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
-        p.y += vy * p.spd * dtSec;
-        p.facing = vy<0 ? 'up' : vy>0 ? 'down' : p.facing;
-        if(Math.abs(p.y - targetY) < 0.5){
-          p.y = targetY;
-          p.mode = 'vert';
-          p.dir  = (Math.random()<0.5 ? -1 : 1);
-          p.x = p.vertX*TILE;
-        }
-      } else if(p.mode==='vert'){
-        p.y += p.dir * p.spd * dtSec;
-        p.facing = p.dir>0 ? 'down' : 'up';
-        if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
+function spawnCar(){
+  const left = RNG()<0.5;
+  const gx = left ? unlocked.x0 : unlocked.x1;
+  const dir = left ? 1 : -1;
+  cars.push({ x: gx*TILE, y: hRoadY*TILE, dir, spd: 120, kind: randVehicleKind() });
+}
+
+function updatePed(p, dtSec){
+  if(p.state==='walk'){
+    if(p.mode==='horiz'){
+      p.x += p.dir * p.spd * dtSec;
+      p.facing = p.dir>0 ? 'right' : 'left';
+      const gx = Math.floor(p.x/TILE);
+      if(gx===vRoadX){
+        p.mode='crossing';
+      }else{
+        if(p.x <= unlocked.x0*TILE || p.x >= unlocked.x1*TILE){
           p.dir *= -1;
-          p.y = clampToUnlockedY(p.y);
+          p.x = clampToUnlockedX(p.x);
         }
       }
-    } else if(p.state==='blink'){
-      p.blinkT -= dtSec;
-      if(p.blinkT<=0){
-        const i=pedestrians.indexOf(p);
-        if(i>=0) pedestrians.splice(i,1);
+    } else if(p.mode==='crossing'){
+      const targetY = (p.crossSide==='top'? sidewalkBotY : sidewalkTopY)*TILE;
+      const vy = (p.y < targetY) ? 1 : (p.y > targetY ? -1 : 0);
+      p.y += vy * p.spd * dtSec;
+      p.facing = vy<0 ? 'up' : vy>0 ? 'down' : p.facing;
+      if(Math.abs(p.y - targetY) < 0.5){
+        p.y = targetY;
+        p.mode = 'vert';
+        p.dir  = (RNG()<0.5 ? -1 : 1);
+        p.x = p.vertX*TILE;
+      }
+    } else if(p.mode==='vert'){
+      p.y += p.dir * p.spd * dtSec;
+      p.facing = p.dir>0 ? 'down' : 'up';
+      if(p.y <= unlocked.y0*TILE || p.y >= unlocked.y1*TILE){
+        p.dir *= -1;
+        p.y = clampToUnlockedY(p.y);
+      }
+    }
+  } else if(p.state==='blink'){
+    p.blinkT -= dtSec;
+    if(p.blinkT<=0){
+      const i=pedestrians.indexOf(p);
+      if(i>=0) pedestrians.splice(i,1);
 
-        const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
-        const pos = makeDropPos(centerX, centerY);
-        const tnow = performance.now();
-        IZZA.emit('ped-killed', {
-          coins: 25,
-          x: pos.x, y: pos.y,
-          droppedAt: tnow,
-          noPickupUntil: tnow + DROP_GRACE_MS
-        });
+      const centerX = p.x + TILE/2, centerY = p.y + TILE/2;
+      const pos = makeDropPos(centerX, centerY);
+      const tnow = performance.now();
+      IZZA.emit('ped-killed', {
+        coins: 25,
+        x: pos.x, y: pos.y,
+        droppedAt: tnow,
+        noPickupUntil: tnow + DROP_GRACE_MS
+      });
 
-        if(tutorial.active && tutorial.step==='hitPed'){
-          tutorial.step='hitCop';
-          showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
-        }
+      if(tutorial.active && tutorial.step==='hitPed'){
+        tutorial.step='hitCop';
+        showHint('Oh no! A cop is here. Eliminate the cop within 30 seconds (press A).');
       }
     }
   }
-  function updateCar(c, dtSec){
-    c.x += c.dir * c.spd * dtSec;
-    if(c.x < unlocked.x0*TILE) c.x = unlocked.x1*TILE;
-    if(c.x > unlocked.x1*TILE) c.x = unlocked.x0*TILE;
-  }
+}
 
-  // ===== Cops & wanted =====
-  function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
-  function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
-  function spawnCop(kind){
-    const left = Math.random()<0.5;
-    const top  = Math.random()<0.5;
-    const gx = left ? unlocked.x0 : unlocked.x1;
-    const gy = top  ? unlocked.y0 : unlocked.y1;
-    const now = performance.now();
-    cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000, facing:'down' });
-  }
+function updateCar(c, dtSec){
+  c.x += c.dir * c.spd * dtSec;
+  if(c.x < unlocked.x0*TILE) c.x = unlocked.x1*TILE;
+  if(c.x > unlocked.x1*TILE) c.x = unlocked.x0*TILE;
+}
+
+// ===== Cops & wanted (unchanged logic) =====
+function copSpeed(kind){ return kind==='army'? 95 : kind==='swat'? 90 : 80; }
+function copHP(kind){ return kind==='army'?6 : kind==='swat'?5 : 4; }
+function spawnCop(kind){
+  const left = RNG()<0.5;
+  const top  = RNG()<0.5;
+  const gx = left ? unlocked.x0 : unlocked.x1;
+  const gy = top  ? unlocked.y0 : unlocked.y1;
+  const now = performance.now();
+  cops.push({ x: gx*TILE, y: gy*TILE, spd: copSpeed(kind), hp: copHP(kind), kind, reinforceAt: now + 30000, facing:'down' });
+}
   function maintainCops(){
     const needed = player.wanted;
     let cur = cops.length;
