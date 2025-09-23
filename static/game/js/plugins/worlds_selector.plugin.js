@@ -1,10 +1,9 @@
 // worlds_selector.plugin.js — Worlds switcher + remote players + 1v1 invite (client-only)
-// Safe: no changes to existing code; uses event bus if present (RemotePlayers/IZZA).
 (function(){
-  const BUILD='worlds-selector/v1.2';
+  const BUILD='worlds-selector/v1.3';
   console.log('[IZZA PLAY]', BUILD);
 
-  // ---- MP adapter (works with your existing buses) ----
+  // ---- MP adapter ----
   const MP = {
     send(type, data){
       try{
@@ -28,19 +27,37 @@
   const getWorld = ()=> localStorage.getItem('izzaWorldId') || '1';
   const setWorld = id => localStorage.setItem('izzaWorldId', String(id||'1'));
 
-  // Find Friends button by text or known hooks
+  // ---- Helpers: Friends button + FIRE hide/show ----
   function findFriendsEl(){
-    // exact text match (case-insensitive) across common clickable elems
     const nodes = document.querySelectorAll('button,.btn,.pill,[role="button"]');
     for (const el of nodes){
       const t = (el.textContent||'').trim().toLowerCase();
       if (t === 'friends') return el;
     }
-    // explicit hooks if you add them later
     return document.querySelector('#btnFriends,[data-ui="btn-friends"]');
   }
 
-  // ---- UI: add "Worlds" button BESIDE Friends and only after it exists ----
+  function fireEls(){
+    // common hooks + fallback by visible text "FIRE"
+    const all = [
+      ...document.querySelectorAll('#btnFire,[data-ui="btn-fire"],button,.btn,[role="button"]')
+    ];
+    return all.filter(el => ((el.textContent||'').trim().toLowerCase() === 'fire'));
+  }
+  function hideFire(on=true){
+    const els = fireEls();
+    for (const el of els){
+      if (on){
+        if (!el.dataset._oldDisplay) el.dataset._oldDisplay = el.style.display || '';
+        el.style.display = 'none';
+      } else {
+        el.style.display = el.dataset._oldDisplay || '';
+        delete el.dataset._oldDisplay;
+      }
+    }
+  }
+
+  // ---- UI: add "Worlds" button beside Friends ----
   function mountWorldsButton(){
     if (document.getElementById('btnWorlds')) return true;
     const friendsBtn = findFriendsEl();
@@ -50,24 +67,18 @@
     btn.id = 'btnWorlds';
     btn.type = 'button';
     btn.textContent = 'Worlds';
-    // copy look from Friends if possible; else safe fallback
     if (friendsBtn.className) btn.className = friendsBtn.className;
-    Object.assign(btn.style, { marginLeft:'8px' });
+    btn.style.marginLeft = '8px';
     friendsBtn.insertAdjacentElement('afterend', btn);
     btn.addEventListener('click', openWorldsModal, { passive:true });
 
     console.log('[WORLDS] button mounted next to Friends');
     return true;
   }
-
-  // If Friends isn’t there yet, watch the DOM until it appears
   function ensureWorldsButton(){
     if (mountWorldsButton()) return;
-    const mo = new MutationObserver(()=> {
-      if (mountWorldsButton()) mo.disconnect();
-    });
+    const mo = new MutationObserver(()=> { if (mountWorldsButton()) mo.disconnect(); });
     mo.observe(document.body, { childList:true, subtree:true });
-    setTimeout(()=>{ if (!document.getElementById('btnWorlds')) console.log('[WORLDS] waiting for Friends…'); }, 1500);
   }
 
   // ---- Worlds modal ----
@@ -78,7 +89,12 @@
     let m = document.getElementById(hostId);
     if(!m){
       m = document.createElement('div'); m.id=hostId;
-      Object.assign(m.style, {position:'fixed', inset:'0', display:'flex', alignItems:'center', justifyContent:'center', zIndex:60, background:'rgba(0,0,0,.45)'});
+      Object.assign(m.style, {
+        position:'fixed', inset:'0', display:'flex',
+        alignItems:'center', justifyContent:'center',
+        zIndex: 10040,                 // above fire/controls
+        background:'rgba(0,0,0,.45)'
+      });
       m.innerHTML = `
         <div style="background:#0b0f17;border:1px solid #2a3550;border-radius:14px;padding:14px 16px;color:#dbe6ff;min-width:280px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -91,14 +107,17 @@
       document.body.appendChild(m);
       m.querySelector('#worldsClose').onclick = ()=> closeWorldsModal();
     }
-    renderWorldCards(); m.style.display='flex';
+    renderWorldCards();
+    m.style.display='flex';
 
+    hideFire(true);                 // << hide FIRE while picker is open
     if(!pollTimer){ pollTimer = setInterval(()=> MP.askCounts(), 3000); }
     MP.askCounts();
   }
   function closeWorldsModal(){
     const m = document.getElementById('worldsModal'); if(m) m.style.display='none';
     if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+    hideFire(false);                // << show FIRE again when closed
   }
   function renderWorldCards(){
     const grid = document.getElementById('worldGrid'); if(!grid) return;
@@ -131,11 +150,11 @@
     MP.joinWorld(newWorld);
     try{ IZZA?.api?.clearRemotePlayers?.(); }catch{}
     try{ IZZA?.toast?.(`Joined World ${newWorld}`); }catch{}
-    closeWorldsModal();
+    closeWorldsModal();            // also unhides FIRE via close handler
     try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
   }
 
-  // ---- Receive live counts ----
+  // ---- Live counts ----
   MP.on('worlds-counts', (payload)=>{
     if(payload && payload.counts){
       counts = Object.assign({1:0,2:0,3:0,4:0}, payload.counts);
@@ -143,8 +162,7 @@
     }
   });
 
-  // ---- Proximity 1v1 invite with “B” ----
-  let NEAR = null;
+  // ---- 1v1 invite via "B" ----
   function nearestPlayerWithin(px,py,maxDist=42){
     const list = (IZZA?.api?.remotePlayers)||[];
     let best=null, bestD=maxDist+1;
@@ -160,7 +178,7 @@
     if(!m){
       m=document.createElement('div'); m.id=id;
       Object.assign(m.style,{position:'fixed',left:'50%',top:'50%',transform:'translate(-50%,-50%)',
-        background:'#0b0f17',border:'1px solid #2a3550',borderRadius:'12px',padding:'12px',zIndex:58,color:'#e4efff',minWidth:'260px'});
+        background:'#0b0f17',border:'1px solid #2a3550',borderRadius:'12px',padding:'12px',zIndex:10030,color:'#e4efff',minWidth:'260px'});
       m.innerHTML=`
         <div style="font-weight:800;margin-bottom:6px">1v1 Duel</div>
         <div id="duelTarget" style="opacity:.85;margin-bottom:8px"></div>
@@ -188,7 +206,7 @@
     if(!d){
       d=document.createElement('div'); d.id=id;
       Object.assign(d.style,{position:'fixed',left:'50%',top:'50%',transform:'translate(-50%,-50%)',
-        background:'#0b0f17',border:'1px solid #2a3550',borderRadius:'12px',padding:'12px',zIndex:58,color:'#e4efff',minWidth:'260px'});
+        background:'#0b0f17',border:'1px solid #2a3550',borderRadius:'12px',padding:'12px',zIndex:10030,color:'#e4efff',minWidth:'260px'});
       d.innerHTML=`
         <div style="font-weight:800;margin-bottom:6px">Incoming 1v1</div>
         <div style="opacity:.85;margin-bottom:8px">from @<span id="duelFrom"></span></div>
@@ -210,7 +228,7 @@
       if(!IZZA?.api?.ready) return;
       const me = IZZA.api.player || {x:0,y:0};
       const near = nearestPlayerWithin(me.x, me.y, 38);
-      if(near){ NEAR=near; showDuelSheet(near); }
+      if(near){ showDuelSheet(near); }
     }catch{}
   }, {capture:true, passive:true});
 
