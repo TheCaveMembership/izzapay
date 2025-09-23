@@ -1,7 +1,7 @@
 // worlds_selector.plugin.js — Worlds switcher + remote players + 1v1 invite (client-only)
 // Safe: no changes to existing code; uses event bus if present (RemotePlayers/IZZA).
 (function(){
-  const BUILD='worlds-selector/v1.1';
+  const BUILD='worlds-selector/v1.2';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- MP adapter (works with your existing buses) ----
@@ -20,44 +20,54 @@
         if (window.IZZA?.on)               return IZZA.on('mp-'+type, (_,{data})=>cb(data));
       }catch(e){ console.warn('[WORLDS] on fail', e); }
     },
-    joinWorld(worldId){
-      // inform server/bus we’re switching rooms
-      MP.send('join-world', { world: String(worldId) });
-    },
-    askCounts(){
-      MP.send('worlds-counts', {}); // server/bus should reply with {counts:{1:n,2:n,3:n,4:n}}
-    }
+    joinWorld(worldId){ MP.send('join-world', { world: String(worldId) }); },
+    askCounts(){ MP.send('worlds-counts', {}); }
   };
 
   // ---- World state ----
-  function getWorld(){ return localStorage.getItem('izzaWorldId') || '1'; }
-  function setWorld(id){ localStorage.setItem('izzaWorldId', String(id||'1')); }
+  const getWorld = ()=> localStorage.getItem('izzaWorldId') || '1';
+  const setWorld = id => localStorage.setItem('izzaWorldId', String(id||'1'));
 
-  // ---- UI: add "Worlds" button beneath Friends (or next to it if not stacked) ----
-  function ensureWorldsButton(){
-    const bar = document.getElementById('gameCard')?.parentElement || document.body;
-    if (!bar) return;
+  // Find Friends button by text or known hooks
+  function findFriendsEl(){
+    // exact text match (case-insensitive) across common clickable elems
+    const nodes = document.querySelectorAll('button,.btn,.pill,[role="button"]');
+    for (const el of nodes){
+      const t = (el.textContent||'').trim().toLowerCase();
+      if (t === 'friends') return el;
+    }
+    // explicit hooks if you add them later
+    return document.querySelector('#btnFriends,[data-ui="btn-friends"]');
+  }
 
-    // Try to position near "Friends" if we can find it
-    const friendsBtn = document.querySelector('#btnFriends,[data-ui="btn-friends"],button:contains("Friends")');
-
-    if (document.getElementById('btnWorlds')) return;
+  // ---- UI: add "Worlds" button BESIDE Friends and only after it exists ----
+  function mountWorldsButton(){
+    if (document.getElementById('btnWorlds')) return true;
+    const friendsBtn = findFriendsEl();
+    if (!friendsBtn) return false;
 
     const btn = document.createElement('button');
     btn.id = 'btnWorlds';
+    btn.type = 'button';
     btn.textContent = 'Worlds';
-    Object.assign(btn.style, {
-      background:'#1a2540', color:'#cfe0ff', border:'1px solid #2a3550',
-      borderRadius:'8px', padding:'8px 10px', marginLeft:'6px', fontWeight:'700', zIndex:7
-    });
+    // copy look from Friends if possible; else safe fallback
+    if (friendsBtn.className) btn.className = friendsBtn.className;
+    Object.assign(btn.style, { marginLeft:'8px' });
+    friendsBtn.insertAdjacentElement('afterend', btn);
+    btn.addEventListener('click', openWorldsModal, { passive:true });
 
-    if (friendsBtn && friendsBtn.parentElement){
-      friendsBtn.parentElement.appendChild(btn);
-    } else {
-      // fallback: under the chat bar / HUD
-      (document.getElementById('chatBar') || bar).appendChild(btn);
-    }
-    btn.addEventListener('click', openWorldsModal, {passive:true});
+    console.log('[WORLDS] button mounted next to Friends');
+    return true;
+  }
+
+  // If Friends isn’t there yet, watch the DOM until it appears
+  function ensureWorldsButton(){
+    if (mountWorldsButton()) return;
+    const mo = new MutationObserver(()=> {
+      if (mountWorldsButton()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList:true, subtree:true });
+    setTimeout(()=>{ if (!document.getElementById('btnWorlds')) console.log('[WORLDS] waiting for Friends…'); }, 1500);
   }
 
   // ---- Worlds modal ----
@@ -73,7 +83,7 @@
         <div style="background:#0b0f17;border:1px solid #2a3550;border-radius:14px;padding:14px 16px;color:#dbe6ff;min-width:280px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div style="font-weight:800">Choose World</div>
-            <button id="worldsClose" style="background:#1a2540;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:4px 8px">Close</button>
+            <button id="worldsClose" class="ghost" style="border-color:#2a3550">Close</button>
           </div>
           <div id="worldGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
           <div style="opacity:.8;font-size:12px;margin-top:8px">You are in <b>World ${cur}</b>. Players shown are active now.</div>
@@ -83,7 +93,6 @@
     }
     renderWorldCards(); m.style.display='flex';
 
-    // start counts polling while open
     if(!pollTimer){ pollTimer = setInterval(()=> MP.askCounts(), 3000); }
     MP.askCounts();
   }
@@ -114,22 +123,19 @@
     });
   }
 
-  // ---- Switch world (client-only; your MP hub/server should segregate rooms by world) ----
+  // ---- Switch world ----
   function switchWorld(newWorld){
     const old = getWorld();
     if(String(old)===String(newWorld)){ closeWorldsModal(); return; }
     setWorld(newWorld);
     MP.joinWorld(newWorld);
-    // reset / redraw remote players via your core API if exposed
     try{ IZZA?.api?.clearRemotePlayers?.(); }catch{}
     try{ IZZA?.toast?.(`Joined World ${newWorld}`); }catch{}
     closeWorldsModal();
-
-    // inform chat plugin so it scopes to world
     try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
   }
 
-  // ---- Receive live counts from bus ----
+  // ---- Receive live counts ----
   MP.on('worlds-counts', (payload)=>{
     if(payload && payload.counts){
       counts = Object.assign({1:0,2:0,3:0,4:0}, payload.counts);
@@ -138,9 +144,6 @@
   });
 
   // ---- Proximity 1v1 invite with “B” ----
-  // Requirements:
-  //  • Your MP layer must expose the list of visible remote players (or fire mp-players event)
-  //  • We’ll request a duel invite handshake and, when both “Ready”, emit mp-start (your Duel client already listens)
   let NEAR = null;
   function nearestPlayerWithin(px,py,maxDist=42){
     const list = (IZZA?.api?.remotePlayers)||[];
@@ -151,7 +154,6 @@
     }
     return bestD<=maxDist? best : null;
   }
-
   function showDuelSheet(target){
     const id='duelMiniSheet';
     let m=document.getElementById(id);
@@ -164,7 +166,7 @@
         <div id="duelTarget" style="opacity:.85;margin-bottom:8px"></div>
         <div style="display:flex;gap:8px">
           <button id="duelReady" style="flex:1;background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:800">Ready</button>
-          <button id="duelCancel" style="background:#1a2540;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:8px 10px">Cancel</button>
+          <button id="duelCancel" class="ghost" style="border-color:#2a3550">Cancel</button>
         </div>`;
       document.body.appendChild(m);
       m.querySelector('#duelCancel').onclick = ()=> m.remove();
@@ -176,15 +178,9 @@
     }
     m.querySelector('#duelTarget').textContent = `Challenging @${target.username}`;
   }
-
-  // When both sides agree, server should broadcast a duel-start payload.
-  // We then emit the standard event your PvP client already handles.
   MP.on('duel-start', (payload)=>{
-    // payload: { matchId, players:[{username}, {username}], roundsToWin? }
     try{ IZZA?.emit?.('mp-start', Object.assign({mode:'v1'}, payload)); }catch{}
   });
-
-  // Invite pop (from other player)
   MP.on('duel-invite', (m)=>{
     if(!m || String(m.world)!==String(getWorld())) return;
     const id='duelIncoming';
@@ -198,7 +194,7 @@
         <div style="opacity:.85;margin-bottom:8px">from @<span id="duelFrom"></span></div>
         <div style="display:flex;gap:8px">
           <button id="duelAccept" style="flex:1;background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:800">Accept</button>
-          <button id="duelDecline" style="background:#1a2540;color:#cfe0ff;border:1px solid #2a3550;border-radius:8px;padding:8px 10px">Decline</button>
+          <button id="duelDecline" class="ghost" style="border-color:#2a3550">Decline</button>
         </div>`;
       document.body.appendChild(d);
       d.querySelector('#duelDecline').onclick = ()=> d.remove();
@@ -208,8 +204,6 @@
     }
     d.querySelector('#duelFrom').textContent = m.from || 'player';
   });
-
-  // Key “B” → open mini 1v1 sheet if near a player
   window.addEventListener('keydown', (e)=>{
     if((e.key||'').toLowerCase()!=='b') return;
     try{
@@ -220,7 +214,7 @@
     }catch{}
   }, {capture:true, passive:true});
 
-  // ---- Boot: join last world & add button when DOM/IZZA ready ----
+  // ---- Boot ----
   function boot(){
     ensureWorldsButton();
     MP.joinWorld(getWorld());
