@@ -2172,20 +2172,23 @@ Promise.all([
   const imgs = { body: tintedBody, outfit: outfitRaw, hair: tintedHair };
 
   const doorSpawn = { x: door.gx*TILE + (TILE/2 - 8), y: door.gy*TILE };
-  IZZA.api = {
-    player, cops, pedestrians, cars,
-    setCoins, getCoins, setWanted,
-    TILE, DRAW, camera,
-    doorSpawn,
-    user: { username: (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || 'guest' },
+  // ✅ Preserve existing IZZA.api (keeps canSwitchWorld, _onWorldChanged, etc.)
+const api = (window.IZZA.api = window.IZZA.api || {});
+Object.assign(api, {
+  player, cops, pedestrians, cars,
+  setCoins, getCoins, setWanted,
+  TILE, DRAW, camera,
+  doorSpawn,
+  user: { username: (window.__IZZA_PROFILE__ && __IZZA_PROFILE__.username) || 'guest' },
 
-    // expose for plugins:
-    getMissionCount,
-    getInventory, setInventory,
-    getHearts, setHearts,
-    hRoadY, vRoadX,
-    ready: true
-  };
+  // expose for plugins:
+  getMissionCount,
+  getInventory, setInventory,
+  getHearts, setHearts,
+  hRoadY, vRoadX,
+
+  ready: true
+});
   IZZA.emit('ready', IZZA.api);
 // ---- Sync server credits & collectibles into the local game store ----
 (function syncServerBankAndCollectibles(){
