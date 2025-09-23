@@ -1,6 +1,6 @@
 // worlds_selector.plugin.js — Worlds switcher + remote players + 1v1 invite (client-only)
 (function(){
-  const BUILD='worlds-selector/v1.4';
+  const BUILD='worlds-selector/v1.5';
   console.log('[IZZA PLAY]', BUILD);
 
   // ---- MP adapter ----
@@ -161,7 +161,7 @@
     });
   }
 
-  // ---- Switch world ----
+  // ---- Switch world (prefers core helper if present) ----
   function switchWorld(newWorld){
     const old = getWorld();
     if(String(old)===String(newWorld)){ closeWorldsModal(); return; }
@@ -173,24 +173,38 @@
       return;
     }
 
-    setWorld(newWorld);
-    MP.joinWorld(newWorld);
+    // Prefer core’s public API (broadcasts + local switch); fallback to manual path
+    let switched = false;
+    try{
+      if (window.IZZA?.api && typeof IZZA.api.requestWorldChange === 'function'){
+        switched = !!IZZA.api.requestWorldChange(String(newWorld));
+      }
+    }catch{}
 
-    // local reset (safe even if the server also ACKs later)
-    try { window.IZZA?.api?._onWorldChanged?.(newWorld); } catch {}
+    if (!switched){
+      // manual path: persist + notify MP + local reset
+      setWorld(newWorld);
+      MP.joinWorld(newWorld);
+      try { window.IZZA?.api?._onWorldChanged?.(String(newWorld)); } catch {}
+      try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
+      try{ IZZA?.api?.clearRemotePlayers?.(); }catch{}
+      try{ (window.toast||console.log)(`🌍 Joined World ${newWorld}`); }catch{}
+    }
 
-    // clear any world-scoped UI caches
-    try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
-
-    try{ IZZA?.api?.clearRemotePlayers?.(); }catch{}
-    try{ IZZA?.toast?.(`Joined World ${newWorld}`); }catch{}
-    closeWorldsModal();            // also unhides FIRE via close handler
+    closeWorldsModal(); // also unhides FIRE via close handler
   }
 
   // ---- Live counts ----
   MP.on('worlds-counts', (payload)=>{
     if(payload && payload.counts){
       counts = Object.assign({1:0,2:0,3:0,4:0}, payload.counts);
+      renderWorldCards();
+    }
+  });
+
+  // ---- Keep UI in sync if another tab changes world ----
+  window.addEventListener('storage', (ev)=>{
+    if (ev.key === 'izzaWorldId'){
       renderWorldCards();
     }
   });
