@@ -712,6 +712,43 @@ function unequipArmorSlot(slot){
     if(nub){ nub.style.left=(40+ux*c)+'px'; nub.style.top=(40+uy*c)+'px'; }
     vec.x=(c/r)*ux; vec.y=(c/r)*uy;
   }
+  // --- SWITCH-WORLD GUARD & RESET (core) -----------------------
+function hasActiveCops(){
+  const list = (IZZA.api && Array.isArray(IZZA.api.cops) ? IZZA.api.cops : cops) || [];
+  return list.length > 0;
+}
+
+// Let plugins ask if switching worlds is allowed right now
+IZZA.api.canSwitchWorld = function canSwitchWorld(){
+  return (player.wanted|0) === 0 && !hasActiveCops();
+};
+
+// Local reset when we DO switch worlds
+IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
+  try {
+    // wipe transient per-world state (no carry-over)
+    pedestrians.length = 0;
+    cars.length = 0;
+    cops.length = 0;
+
+    // tell any plugins (loot, chat, etc.) to clear their own caches
+    IZZA.emit('world-changed', { world: String(newWorld) });
+
+    // optional: visual nudge
+    try { toast(`Joined World ${newWorld}`); } catch {}
+  } catch(e){ console.warn('[core] world reset failed', e); }
+};
+  // If the MP layer is using the IZZA bus passthrough, mirror the join locally
+IZZA.on('mp-send', (msg)=>{
+  if (!msg || msg.type !== 'join-world') return;
+  const newWorld = (msg.data && msg.data.world) || '1';
+  // Switch is only legal if guard passes
+  if (!IZZA.api.canSwitchWorld()) {
+    try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
+    return; // veto
+  }
+  IZZA.api._onWorldChanged(newWorld);
+});
   function resetNub(){ if(nub){ nub.style.left='40px'; nub.style.top='40px'; } vec.x=0; vec.y=0; }
   function startDrag(e){ dragging=true; baseRect=stick.getBoundingClientRect(); e.preventDefault(); }
   function moveDrag(e){ if(!dragging) return; const t=e.touches?e.touches[0]:e; const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(t.clientX-cx,t.clientY-cy); e.preventDefault(); }
