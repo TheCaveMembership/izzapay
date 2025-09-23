@@ -1,12 +1,13 @@
 /**
- * IZZA Multiplayer Client — v1.7.3
+ * IZZA Multiplayer Client — v1.7.4
  * - Best-of-3 round coordinator (first to 2) + watchdogs
- * - Friends + invites + notifications (global overlays)
- * - SOLO world awareness: PvP queues disabled in SOLO; friendly toasts on errors
- * - Inventory handoff: exposes loadout via IZZA.api.getInventorySnapshot() (from Remote Players API)
+ * - Friends + invites + notifications (GLOBAL overlays; independent of lobby)
+ * - SOLO world awareness: queues disabled in SOLO with friendly toasts
+ * - Inventory handoff: exposes loadout via IZZA.api.getInventorySnapshot()
+ * - Robust mount: bell + friends button are created at boot (even if lobby never opens)
  */
 (function(){
-  const BUILD='v1.7.3-mp-client+bo3+state+watchdog+friends+notifs+solo-aware';
+  const BUILD='v1.7.4-mp-client+bo3+watchdogs+friends+notifs+solo+robust';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
@@ -20,6 +21,7 @@
     betweenWatchdogMs: 5000,
   };
 
+  // overlay z-indexes (sit above lobby/shield)
   const Z = { shield:1002, lobby:1003, bell:1011, drop:1012 };
 
   // --- helpers / fetch ---
@@ -45,18 +47,19 @@
   }
   const debounced=(fn,ms)=>{ let t=null,a=null; return (...args)=>{a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms);}};
 
+  // --- state ---
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
   let me=null, friends=[], lobby=null, ui={};
   let notifTimer=null;
 
-  // NEW: notifications state
-  let notifications = { unread: 0, items: [] };
+  // notifications state
+  let notifications = { unread: 0, items: [] }; // {id,type:'friend'|'battle', from, mode?}
 
   let lobbyOpen=false, shield=null, hudEls=[], hudCssPrev=[];
   const $  = (s,r=document)=> r.querySelector(s);
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
-  // SOLO-aware helper
+  // SOLO-aware helper (uses /me.world)
   const isSolo = ()=> String((me && me.world) || 'solo').toLowerCase()==='solo';
 
   async function loadMe(){ me = await jget('/me'); return me; }
@@ -70,10 +73,9 @@
     set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
-  // quick friend helper
   const isFriend = (name)=> !!friends.find(f=> (f.username||'').toLowerCase() === (name||'').toLowerCase());
 
-  // === UI BUILDERS (unchanged pieces trimmed for brevity) ====================
+  // === UI BUILDERS ===========================================================
   function makeRow(u, source='search'){
     const row=document.createElement('div');
     row.className='friend';
@@ -124,7 +126,7 @@
   function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
 
   // ==== MATCH / ROUNDS — state machine + watchdogs ===========================
-  let match = null;
+  let match = null; // { id, mode, players[], myName, oppName, ... }
 
   function clearWatch(){
     if(match && match.tWatch){ clearTimeout(match.tWatch); match.tWatch=null; }
@@ -154,15 +156,28 @@
   }
   function hardResetMatch(){ clearWatch(); match = null; }
 
+  function getAppearance(){ try{ return (window.IZZA?.api?.getAppearance?.()) || {}; }catch{ return {}; } }
+  function getInventorySnapshot(){
+    // prefer an explicit snapshot hook if Remote Players API injected it
+    try{
+      if(IZZA?.api?.getInventorySnapshot) return IZZA.api.getInventorySnapshot();
+      const merged = {};
+      try{ Object.assign(merged, (IZZA?.api?.getInventory?.())||{}); }catch{}
+      try{ Object.assign(merged, (IZZA?.api?.getArmory?.())||{}); }catch{}
+      try{ merged.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
+      return merged;
+    }catch{ return {}; }
+  }
+
   function initMatch(payload){
     hardResetMatch();
-    const players = payload?.players?.map(p=>p.username) || [];
+    const names = (payload?.players||[]).map(p=>p.username||p);
     const myName  = me?.username || 'me';
-    const oppName = players.find(n=>n!==myName) || (players[0]||'opponent');
+    const oppName = names.find(n=>n!==myName) || (names[0]||'opponent');
     match = {
       id: payload?.matchId || payload?.id || ('m_'+Math.random().toString(36).slice(2)),
       mode: payload?.mode || 'v1',
-      players, myName, oppName,
+      players: names, myName, oppName,
       myWins:0, oppWins:0,
       roundsToWin: MATCH_CFG.roundsToWin,
       finished:false,
@@ -172,21 +187,19 @@
       lastChange:Date.now()
     };
 
-    // pass loadout/appearance immediately to duel client via bus
+    // surface config + loadout for duel client
     try{
-      const appearance = (window.IZZA?.api?.getAppearance?.()) || {};
-      const invSnap    = (window.IZZA?.api?.getInventorySnapshot?.()) || {};
       IZZA?.emit?.('duel-config', {
         roundsToWin: MATCH_CFG.roundsToWin,
         matchId: match.id,
-        appearance,
-        inventory: invSnap
+        appearance: getAppearance(),
+        inventory:  getInventorySnapshot()
       });
     }catch{}
-
-    IZZA?.emit?.('duel-config', { roundsToWin: MATCH_CFG.roundsToWin, matchId: match.id });
   }
+
   function onRoundStart(_data){ if(!match || match.finished) return; if(match.state!=='in_round'){ setState('in_round'); } }
+
   function onRoundEnd(data){
     if(!match || match.finished) return;
     const rid = (data && data.roundId) || ('r_'+Date.now());
@@ -209,6 +222,7 @@
       (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
     }
   }
+
   function finishMatch(winnerName){
     if(!match || match.finished) return;
     match.finished = true;
@@ -261,17 +275,13 @@
 
       initMatch(payload);
 
-      // include appearance + inventory snapshot alongside start in case the duel client wants it
-      const startPayload = (function(){
-        const appearance = (window.IZZA?.api?.getAppearance?.()) || {};
-        const inventory  = (window.IZZA?.api?.getInventorySnapshot?.()) || {};
-        return Object.assign({}, payload, {
-          roundsToWin: MATCH_CFG.roundsToWin,
-          matchId: match.id,
-          appearance,
-          inventory
-        });
-      })();
+      const startPayload = {
+        ...payload,
+        roundsToWin: MATCH_CFG.roundsToWin,
+        matchId: match.id,
+        appearance: getAppearance(),
+        inventory:  getInventorySnapshot()
+      };
 
       if(window.IZZA && typeof IZZA.emit==='function'){
         IZZA.emit('mp-start', startPayload);
@@ -354,7 +364,7 @@
     });
   }
 
-  // --- typing shield (unchanged from your version) ---
+  // --- typing shield (unchanged) ---
   function isLobbyEditor(el){ if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   function guardKeyEvent(e){ if(!isLobbyEditor(e.target)) return; const k=(e.key||'').toLowerCase(); if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); } }
   ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
@@ -423,25 +433,475 @@
     }
   }
 
-  // ---------- SEARCH state & lobby mounting (trimmed; same as your v1.7.2) ----------
+  // ---------- SEARCH state ----------
   let searchRunId = 0;
 
-  // ===== Global notifications UI, friends popup, etc. (same as your v1.7.2) ===
-  // (…omitted unchanged UI code for brevity in this header; the rest is identical to your previous file…)
+  // ===== GLOBAL notification bell & dropdown (fixed overlays) ================
+  function ensureBellOverlay(){
+    if(ui.notifBell && ui.notifBadge && ui.notifDropdown) return;
 
-  // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
-  // (keep your existing ensureNotifUI / mountLobby implementations unchanged)
-  // NOTE: they’re retained from your v1.7.2 code block above; no functional change needed here.
+    // bell (smaller & below hearts area)
+    const bell = document.createElement('button');
+    bell.id = 'mpNotifBell';
+    bell.title = 'Notifications';
+    bell.textContent = '🔔';
+    Object.assign(bell.style, {
+      position:'fixed', right:'14px', top:'56px', zIndex:Z.bell,
+      width:'28px', height:'28px', borderRadius:'16px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    bell.addEventListener('click', toggleNotifDropdown);
+    document.body.appendChild(bell);
 
-  // ---- Notifications poll (extended) ----
+    // badge
+    const badge = document.createElement('span');
+    badge.id='mpNotifBadge';
+    Object.assign(badge.style, {
+      position:'fixed', right:'6px', top:'48px', zIndex:Z.drop,
+      minWidth:'14px', height:'14px', borderRadius:'7px',
+      background:'#e11d48', color:'#fff', fontSize:'10px',
+      display:'none', alignItems:'center', justifyContent:'center',
+      padding:'0 4px', lineHeight:'14px'
+    });
+    document.body.appendChild(badge);
+
+    // dropdown
+    const dd = document.createElement('div');
+    dd.id='mpNotifDropdown';
+    Object.assign(dd.style, {
+      position:'fixed', right:'10px', top:'90px', zIndex:Z.drop,
+      background:'#0f1522', color:'#e8eef7',
+      border:'1px solid #2a3550', borderRadius:'12px',
+      minWidth:'280px', maxWidth:'92vw', maxHeight:'300px', overflow:'auto',
+      display:'none', boxShadow:'0 10px 24px rgba(0,0,0,.45)'
+    });
+    document.body.appendChild(dd);
+
+    ui.notifBell = bell;
+    ui.notifBadge = badge;
+    ui.notifDropdown = dd;
+  }
+
+  // ===== GLOBAL friends button (always visible; near chat bar) ==============
+  function findChatBarRect(){
+    const txt = document.querySelector('input[placeholder="Type..."], textarea[placeholder="Type..."]');
+    if(txt) return txt.getBoundingClientRect();
+    const send = Array.from(document.querySelectorAll('button')).find(b=> (b.textContent||'').trim()==='Send');
+    if(send) return send.getBoundingClientRect();
+    const en = Array.from(document.querySelectorAll('button,div')).find(b=> (b.textContent||'').trim()==='EN');
+    if(en) return en.getBoundingClientRect();
+    return null;
+  }
+  function positionFriendsUI(){
+    const r = findChatBarRect();
+    if(!r){ return; }
+    const gapBtn = 8;
+    const gapPop = 12;
+    const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
+    if(ui.friendsToggle){
+      ui.friendsToggle.style.top = btnTop+'px';
+      ui.friendsToggle.style.right = '14px';
+      ui.friendsToggle.style.bottom = '';
+    }
+    if(ui.friendsPopup){
+      const popTop = Math.round(window.scrollY + r.bottom + gapPop);
+      ui.friendsPopup.style.top = popTop + 'px';
+      ui.friendsPopup.style.right = '14px';
+      ui.friendsPopup.style.bottom = '';
+      const remaining = Math.max(120, window.innerHeight - (popTop - window.scrollY) - 16);
+      ui.friendsPopup.style.maxHeight = remaining + 'px';
+    }
+  }
+  window.addEventListener('resize', positionFriendsUI);
+
+  function ensureFriendsButtonOverlay(){
+    if(ui.friendsToggle && ui.friendsToggle._global) return;
+    const btn = document.createElement('button');
+    btn.id='mpFriendsToggleGlobal';
+    btn.title='Friends';
+    btn.textContent='Friends';
+    Object.assign(btn.style, {
+      position:'fixed',
+      right:'14px',
+      top:'0px',   // later positioned under chat bar
+      zIndex:Z.bell,
+      height:'34px', padding:'0 12px', borderRadius:'18px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    btn.addEventListener('click', toggleFriendsPopup);
+    document.body.appendChild(btn);
+    ui.friendsToggle = btn;
+    ui.friendsToggle._global = true;
+    setTimeout(positionFriendsUI, 0);
+  }
+
+  // ===== Friends popup (global overlay) ======================================
+  function getFireButton(){
+    const byCommon = document.querySelector('#btnFire, #fireBtn, #shootBtn, .btn-fire, .fire');
+    if(byCommon) return byCommon;
+    const all = Array.from(document.querySelectorAll('button,div,span'));
+    const byText = all.find(el => /\bFIRE\b/i.test((el.textContent||'').trim()));
+    if(byText) return byText.closest('button,div') || byText;
+    const candidates = all
+      .map(el=>[el, el.getBoundingClientRect?.()])
+      .filter(([,r])=>r && r.width>50 && r.height>50 && r.bottom>window.innerHeight*0.6 && r.right>window.innerWidth*0.6)
+      .sort((a,b)=> (b[1].width*b[1].height)-(a[1].width*a[1].height));
+    return candidates.length? candidates[0][0] : null;
+  }
+  function setFireHidden(hidden){
+    const fire = getFireButton(); if(!fire) return;
+    const target = fire.closest('button,div') || fire;
+    if(hidden){
+      target.__prevVis = {display:target.style.display, opacity:target.style.opacity, pointerEvents:target.style.pointerEvents};
+      target.style.opacity='0'; target.style.pointerEvents='none'; target.style.display='none';
+    }else{
+      if(target.__prevVis){
+        target.style.display = target.__prevVis.display || '';
+        target.style.opacity = target.__prevVis.opacity || '';
+        target.style.pointerEvents = target.__prevVis.pointerEvents || '';
+        delete target.__prevVis;
+      }else{
+        target.style.display='';
+        target.style.opacity='';
+        target.style.pointerEvents='';
+      }
+    }
+  }
+
+  function ensureFriendsPopup(){
+    if(ui.friendsPopup) return ui.friendsPopup;
+    const pop = document.createElement('div');
+    pop.id='mpFriendsPopup';
+    Object.assign(pop.style, {
+      position:'fixed',
+      right:'14px',
+      top:'0px',
+      zIndex:Z.drop,
+      background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
+      width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
+      boxShadow:'0 10px 28px rgba(0,0,0,.35)'
+    });
+    const head = document.createElement('div');
+    head.style.cssText='display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #2a3550;';
+    const ttl = document.createElement('div');
+    ttl.textContent='Friends';
+    ttl.style.cssText='font-weight:700';
+    const x = document.createElement('button');
+    x.className='mp-small ghost';
+    x.textContent='Close';
+    x.addEventListener('click', ()=>{ pop.style.display='none'; setFireHidden(false); });
+
+    head.appendChild(ttl); head.appendChild(x);
+
+    const body = document.createElement('div');
+    body.id='mpFriendsListBody';
+    body.style.cssText='display:flex; flex-direction:column; gap:6px; padding:10px;';
+
+    pop.appendChild(head);
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+    ui.friendsPopup = pop;
+    ui.friendsBody  = body;
+    setTimeout(positionFriendsUI, 0);
+    return pop;
+  }
+  function renderFriendsPopup(){
+    ensureFriendsPopup();
+    if(!ui.friendsBody) return;
+    ui.friendsBody.innerHTML='';
+    (friends||[]).forEach(f=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; background:#0f1624; border:1px solid #2a3550; border-radius:8px;';
+      const left=document.createElement('div');
+      left.innerHTML = `<div>${f.username}</div><div class="meta ${f.active?'active':'offline'}" style="opacity:.8;font-size:12px">${f.active?'Active':'Offline'}</div>`;
+      const right=document.createElement('div');
+      right.style.cssText='display:flex; gap:6px;';
+      const invite=document.createElement('button');
+      invite.className='mp-small';
+      invite.textContent='Invite';
+      invite.addEventListener('click', async ()=>{
+        try{ await jpost('/lobby/invite',{toUsername:f.username}); toast('Invite sent to '+f.username); }
+        catch(e){ toast('Invite failed: '+e.message); }
+      });
+      right.appendChild(invite);
+      if(f.active){
+        const join=document.createElement('button');
+        join.className='mp-small outline';
+        join.textContent='Invite to Lobby';
+        join.addEventListener('click', async ()=>{
+          try{ await jpost('/lobby/invite',{toUsername:f.username}); toast('Lobby invite sent to '+f.username); }
+          catch(e){ toast('Invite failed: '+e.message); }
+        });
+        right.appendChild(join);
+      }
+      row.appendChild(left); row.appendChild(right);
+      ui.friendsBody.appendChild(row);
+    });
+    if(!friends || !friends.length){
+      const none=document.createElement('div');
+      none.style.cssText='opacity:.8; padding:10px;';
+      none.textContent='No friends yet. Use "Search All Players" to add some!';
+      ui.friendsBody.appendChild(none);
+    }
+  }
+  function toggleFriendsPopup(){
+    ensureFriendsPopup();
+    if(!ui.friendsPopup) return;
+    const vis = (ui.friendsPopup.style.display!=='none');
+    ui.friendsPopup.style.display = vis ? 'none' : 'block';
+    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
+    else { setFireHidden(false); }
+  }
+
+  // ===== Notifications UI helpers ===========================================
+  function renderNotifDropdown(){
+    if(!ui.notifDropdown) return;
+    const host = ui.notifDropdown;
+    host.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.textContent = 'Notifications';
+    header.style.cssText='padding:10px 12px;font-weight:700;border-bottom:1px solid #24324e';
+    host.appendChild(header);
+
+    if(!notifications.items.length){
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:10px; opacity:.8;';
+      empty.textContent = 'No notifications';
+      host.appendChild(empty);
+      return;
+    }
+
+    notifications.items.forEach(n=>{
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border-bottom:1px solid #18233a;';
+      const label = document.createElement('div');
+      label.style.cssText='font-size:13px; line-height:1.3;';
+
+      if(n.type==='friend'){
+        label.textContent = `${n.from} sent you a friend request`;
+        const actions = document.createElement('div');
+        actions.style.cssText='display:flex; gap:6px;';
+        const accept = document.createElement('button');
+        accept.className='mp-small';
+        accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          try{
+            await jpost('/friends/accept', { requestId:n.id, from:n.from, username:n.from });
+            toast('Friend added: '+n.from);
+            try{ await loadFriends(); repaintFriends(); }catch{}
+            removeNotification(n.id);
+          }catch(e){ toast('Accept failed: '+e.message); }
+        });
+
+        const decline = document.createElement('button');
+        decline.className='mp-small ghost';
+        decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          try{ await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from }); }
+          catch(e){}
+          removeNotification(n.id);
+        });
+
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else if(n.type==='battle'){
+        label.textContent = `${n.from} invited you${n.mode?(' ('+n.mode+')'):''}`;
+        const actions = document.createElement('div');
+        actions.style.cssText='display:flex; gap:6px;';
+        const accept = document.createElement('button');
+        accept.className='mp-small';
+        accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          try{
+            const r = await jpost('/lobby/accept',{ inviteId:n.id, from:n.from });
+            removeNotification(n.id);
+            if(r && r.start) startMatch(r.start);
+          }catch(e){ toast('Accept failed: '+e.message); }
+        });
+        const decline = document.createElement('button');
+        decline.className='mp-small ghost';
+        decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }catch(e){}
+          removeNotification(n.id);
+        });
+
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else{
+        label.textContent = 'Notification';
+        row.appendChild(label);
+      }
+
+      host.appendChild(row);
+    });
+  }
+
+  function setUnread(n){
+    notifications.unread = Math.max(0, n|0);
+    ensureBellOverlay();
+    if(notifications.unread>0){
+      ui.notifBadge.style.display='flex';
+      ui.notifBadge.textContent = String(notifications.unread);
+      ui.notifBell.style.background = '#2b1720';
+      ui.notifBell.style.borderColor = '#7d223a';
+      ui.notifBell.style.color = '#ffd7df';
+    }else{
+      ui.notifBadge.style.display='none';
+      ui.notifBell.style.background = '#162134';
+      ui.notifBell.style.borderColor = '#2a3550';
+      ui.notifBell.style.color = '#cfe0ff';
+    }
+  }
+  function addNotification(n){
+    notifications.items.unshift(n);
+    setUnread(notifications.unread+1);
+    if(ui.notifDropdown && ui.notifDropdown.style.display!=='none'){
+      renderNotifDropdown();
+      markAllNotificationsRead();
+    }
+  }
+  function removeNotification(id){
+    notifications.items = notifications.items.filter(x=>x.id!==id);
+    renderNotifDropdown();
+  }
+  function markAllNotificationsRead(){ setUnread(0); }
+  function toggleNotifDropdown(){
+    ensureBellOverlay();
+    const vis = (ui.notifDropdown.style.display!=='none');
+    ui.notifDropdown.style.display = vis ? 'none' : 'block';
+    if(!vis){
+      renderNotifDropdown();
+      markAllNotificationsRead();
+    }
+  }
+
+  // === Lobby mounting (rename label + wire buttons) ==========================
+  function ensureNotifUI(){
+    // Ensure global overlays exist (bell/badge/dropdown + friends button)
+    ensureBellOverlay();
+    ensureFriendsButtonOverlay();
+
+    if(lobby){
+      const label = $('#mpFriendsLabel', lobby);
+      if(label) label.textContent = 'Search All Players';
+
+      if(ui.searchStatus && !ui.searchStatus._relabelled){
+        ui.searchStatus.textContent = 'Search All Players — type a name and press Search or Return';
+        ui.searchStatus._relabelled = true;
+      }
+
+      // If a lobby-scoped friends toggle exists from earlier builds, remove duplication
+      const old = lobby.querySelector('#mpFriendsToggle');
+      if(old){ old.remove(); }
+    }
+  }
+
+  function mountLobby(host){
+    lobby = host || document.getElementById('mpLobby');
+    if(!lobby) return;
+    if(lobby.dataset.mpMounted === '1') return;
+    lobby.dataset.mpMounted = '1';
+
+    ui.queueMsg     = lobby.querySelector('#mpQueueMsg');
+    ui.search       = lobby.querySelector('#mpSearch');
+    ui.searchBtn    = lobby.querySelector('#mpSearchBtn');
+    ui.searchStatus = lobby.querySelector('#mpSearchStatus');
+
+    lobby.querySelectorAll('.mp-btn').forEach(btn=> btn.onclick=()=> enqueue(btn.getAttribute('data-mode')));
+    lobby.querySelector('#mpClose')?.addEventListener('click', ()=>{ if(lastQueueMode) dequeue(); });
+
+    lobby.querySelector('#mpCopyLink')?.addEventListener('click', async ()=>{
+      try{
+        const res = await jget('/me');
+        const link = (res && res.inviteLink) || (location.origin + '/izza-game/auth?src=invite&from=' + encodeURIComponent(res.username||'player'));
+        await navigator.clipboard.writeText(link);
+        toast('Invite link copied');
+      }catch(e){
+        const fallback = location.origin + '/izza-game/auth';
+        toast('Copy failed; showing link…'); prompt('Copy this invite link:', fallback);
+      }
+    });
+
+    // SEARCH
+    const doSearch = async (immediate=false)=>{
+      const q=(ui.search?.value||'').trim();
+      const thisRun = ++searchRunId;
+      const setStatus = (txt)=>{ if(searchRunId===thisRun && ui.searchStatus) ui.searchStatus.textContent = txt; };
+      const enableBtn = ()=>{ if(ui.searchBtn) ui.searchBtn.disabled=false; };
+      const disableBtn= ()=>{ if(ui.searchBtn) ui.searchBtn.disabled=true; };
+
+      if(!q){
+        disableBtn(); paintFriends(friends); setStatus('Search All Players — type a name and press Search or Return'); enableBtn(); return;
+      }
+      if(!immediate && q.length<2){ setStatus('Type at least 2 characters'); return; }
+
+      disableBtn(); setStatus('Searching…');
+      try{
+        const list = await searchPlayers(q);
+        if(searchRunId !== thisRun) return;
+        paintFriends((list||[]).map(u=>({username:u.username, active:!!u.active})));
+        setStatus((list&&list.length)?`Found ${list.length} result${list.length===1?'':'s'}`:'No players found');
+        if(!list || !list.length){
+          const host = lobby.querySelector('#mpFriends');
+          if(host){
+            const none=document.createElement('div');
+            none.className='friend';
+            none.innerHTML=`
+              <div>
+                <div>${q}</div>
+                <div class="meta">Player not found — Invite user to join IZZA GAME</div>
+              </div>
+              <button class="mp-small">Copy Invite</button>`;
+            none.querySelector('button')?.addEventListener('click', async ()=>{
+              const link = location.origin + '/izza-game/auth?src=invite&from=' + encodeURIComponent(me?.username||'player');
+              try{ await navigator.clipboard.writeText(link); toast('Invite link copied'); }
+              catch{ prompt('Copy link:', link); }
+            });
+            host.appendChild(none);
+          }
+        }
+      }catch(err){
+        if(searchRunId === thisRun) setStatus(`Search failed: ${err.message}`);
+      }finally{
+        if(searchRunId === thisRun) enableBtn();
+      }
+    };
+
+    const debouncedSearch = debounced(()=>doSearch(false), CFG.searchDebounceMs);
+    ui.search?.addEventListener('input',  debouncedSearch);
+    ui.search?.addEventListener('change', debouncedSearch);
+    ui.search?.addEventListener('paste',  debouncedSearch);
+    ui.search?.addEventListener('keydown', (e)=>{
+      if((e.key||'').toLowerCase()==='enter'){ e.preventDefault(); doSearch(true); }
+    });
+    ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
+
+    ensureNotifUI();
+
+    paintRanks(); paintFriends(friends);
+  }
+
+  // Observe lobby visibility to mount once it opens
+  const obs = new MutationObserver(function(){
+    const h=document.getElementById('mpLobby'); if(!h) return;
+    const visible = h.style.display && h.style.display!=='none';
+    if(visible) mountLobby(h);
+  });
+  (function bootObserver(){
+    const root=document.body||document.documentElement;
+    if(root) obs.observe(root,{subtree:true, attributes:true, childList:true, attributeFilter:['style']});
+  })();
+
+  // ---- Notifications poll (friend requests + battle invites + match signals)
   async function pullNotifications(){
     try{
       const n = await jget('/notifications');
-
-      // SOLO/wrong-world hints if present on server payloads
-      if(n && n.error === 'wrong_world' && n.world){
-        toast('You’re in a different world. Open WORLDS and join '+n.world+'.');
-      }
 
       if(n && n.start){ startMatch(n.start); return; }
       if(n && n.round){
@@ -449,7 +909,7 @@
         else onRoundEnd({ roundId:n.round.roundId, winner:n.round.winner });
       }
       if(n && n.finish && (!match || !n.finish.matchId || n.finish.matchId===match.id)){
-        if(n.finish.winner) finishMatch(n.finish.winner, 'server');
+        if(n.finish && n.finish.winner) finishMatch(n.finish.winner, 'server');
       }
 
       // battle invites
@@ -474,14 +934,14 @@
     }catch{}
   }
 
+  // --- STARTUP ---------------------------------------------------------------
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
 
-      // SOLO info toast
-      if(isSolo()){
-        console.log('[MP] In SOLO world — PvP queue disabled until user switches via WORLDS.');
-      }
+      // Ensure global overlays exist from the start (fixes "gone now?" issue)
+      ensureBellOverlay();
+      ensureFriendsButtonOverlay();
 
       // presence refresher
       setInterval(async () => { try { await jget('/me'); } catch{} }, 20000);
@@ -495,6 +955,14 @@
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
 
+      // position friends button after layout settles
+      setTimeout(positionFriendsUI, 250);
+
+      // SOLO hint
+      if(isSolo()){
+        console.log('[MP] In SOLO world — PvP queue disabled until user switches via WORLDS.');
+      }
+
       console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
     }catch(e){
       console.error('MP client start failed', e);
@@ -504,19 +972,15 @@
   if(document.readyState==='complete' || document.readyState==='interactive') start();
   else addEventListener('DOMContentLoaded', start, {once:true});
 
-  // === SOLO error helpers: surface server 409s meaningfully ==================
-  // Intercept fetch errors emitted by duel pulls (if your duel client calls jget/jpost itself, it can show these too)
+  // === SOLO error helpers for other modules to surface nicely ================
   window.addEventListener('mp-error', (e)=>{
     const payload = e && e.detail;
     if(!payload) return;
-    if(payload.error === 'in_solo_world'){
+    if(payload.error === 'in_solo_world' || payload.error === 'solo_world'){
       toast('PvP is not available in SOLO. Pick WORLD 1–4 from WORLDS.');
     }
     if(payload.error === 'wrong_world'){
       toast('You’re in a different world. Open WORLDS and join '+(payload.world||'1')+'.');
-    }
-    if(payload.error === 'solo_world'){
-      toast('PvP is not available in SOLO. Pick WORLD 1–4 from WORLDS.');
     }
   });
 
