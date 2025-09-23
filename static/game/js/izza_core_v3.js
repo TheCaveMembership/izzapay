@@ -746,24 +746,37 @@ function _setCurrentWorld(worldId){
   localStorage.setItem('izzaWorldId', String(worldId||'1'));
 }
 
+// Current world id helper (uses your existing getter if present)
+function getCurrentWorld(){
+  try { return localStorage.getItem('izzaWorldId') || '1'; } catch { return '1'; }
+}
+
+// Solo-vs-multiplayer helper
+function _isSoloWorldId(id){
+  const t = String(id||'1').toLowerCase();
+  // Treat "solo" as the story world; everything else = multiplayer
+  return t === 'solo';
+}
+
 // === Loot bridge (best-effort; works with most loot plugins) ==================
 function _lootApi(){
   // If your loot system exposes itself, prefer that
   return (IZZA.api && IZZA.api.loot) ? IZZA.api.loot : null;
 }
 
+// Mission-start pickup kinds (blocked in MP)
+const _MISSION_PICKUP_KINDS = new Set(['cardboard_box','jack_o_lantern','jacklantern']);
+
 // Read the current on-ground loot into a serializable array
 function _readLootList(){
   try{
     const api = _lootApi();
     if (api && Array.isArray(api.items)) {
-      // Copy, but drop non-serializable stuff
       return api.items.map(it=>({
         kind: it.kind||it.type||'coin',
         x: +it.x|0, y: +it.y|0,
         amount: it.amount|0, value: it.value|0,
         noPickupUntil: it.noPickupUntil|0,
-        // carry any id if present
         id: it.id!=null ? it.id : undefined
       }));
     }
@@ -773,7 +786,10 @@ function _readLootList(){
     const nodes = Array.from(document.querySelectorAll('[data-loot],[data-pickup]'));
     return nodes.map(n=>{
       const r = n.getBoundingClientRect();
-      return { kind: n.getAttribute('data-kind')||'coin', x: Math.round(r.left), y: Math.round(r.top) };
+      return {
+        kind: (n.getAttribute('data-kind')||n.getAttribute('data-loot')||'coin').toLowerCase(),
+        x: Math.round(r.left), y: Math.round(r.top)
+      };
     });
   }catch(e){}
   return [];
@@ -791,16 +807,33 @@ function _clearLootVisuals(){
   try{ document.querySelectorAll('[data-loot],[data-pickup],.loot').forEach(n=>n.remove()); }catch(e){}
 }
 
+// Remove any mission-start pickups from DOM (safety, for MP worlds)
+function _stripMissionPickupNodes(){
+  try{
+    document.querySelectorAll('[data-loot],[data-pickup]').forEach(n=>{
+      const kind = (n.getAttribute('data-kind')||n.getAttribute('data-loot')||'').toLowerCase();
+      if (_MISSION_PICKUP_KINDS.has(kind)) n.remove();
+    });
+  }catch(e){}
+}
+
 // Restore a loot list for the target world (if your loot plugin supports it)
+// Filters mission-start items in multiplayer worlds so they never appear there
 function _restoreLootList(list){
+  const wid = getCurrentWorld();
+  const solo = _isSoloWorldId(wid);
+  const filtered = Array.isArray(list)
+    ? list.filter(it => {
+        const k = String(it.kind||it.type||'').toLowerCase();
+        return solo || !_MISSION_PICKUP_KINDS.has(k);
+      })
+    : [];
+
   try{
     const api = _lootApi();
-    if (api && typeof api.set==='function') { api.set(Array.isArray(list)?list:[]); return; }
-    if (Array.isArray(list) && list.length){
-      // Broadcast a bulk spawn so custom loot managers can rebuild
-      list.forEach(it=>{
-        IZZA.emit('loot-spawn', it); // many plugins listen for this
-      });
+    if (api && typeof api.set==='function') { api.set(filtered); return; }
+    if (filtered.length){
+      filtered.forEach(it=>{ IZZA.emit('loot-spawn', it); });
     }
   }catch(e){}
 }
@@ -816,6 +849,7 @@ function hasActiveCops(){
 }
 
 // Can we switch?
+IZZA.api = IZZA.api || {};
 IZZA.api.canSwitchWorld = function canSwitchWorld(){
   return (player.wanted|0) === 0 && !hasActiveCops();
 };
@@ -880,6 +914,23 @@ IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
     _clearWorldEntities();
     _restoreWorldArrays(target);
 
+    // ======= SOLO vs MULTIPLAYER mission gating =======
+    // Toggle mission HUD depending on world
+    const missionHud = document.querySelector('[data-ui="mission-hud"], #missionHud, .mission-hud');
+    const missionsEnabled = _isSoloWorldId(target);
+    if (missionHud) {
+      missionHud.style.display = missionsEnabled ? '' : 'none';
+    }
+    // Broadcast for mission plugins to listen and disable themselves
+    window.dispatchEvent(new CustomEvent('izza-missions-toggle', {
+      detail: { enabled: missionsEnabled }
+    }));
+
+    // In multiplayer worlds, make sure mission-start pickups are NOT present
+    if (!missionsEnabled) {
+      _stripMissionPickupNodes();
+    }
+
     // Extra signals for external modules that might cache state
     IZZA.emit('world-changed', { world: target });
     IZZA.emit('loot-world-changed', { world: target });
@@ -919,6 +970,13 @@ IZZA.on('ready', ()=>{
     reseedForWorld(wid);
     _clearWorldEntities();     // ← so initial join is visually clean
     _snapshotActiveWorld();    // capture starting world (empty scene + loot[])
+
+    // Apply mission gating immediately on first load
+    const missionsEnabled = _isSoloWorldId(wid);
+    const missionHud = document.querySelector('[data-ui="mission-hud"], #missionHud, .mission-hud');
+    if (missionHud) missionHud.style.display = missionsEnabled ? '' : 'none';
+    window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail: { enabled: missionsEnabled } }));
+    if (!missionsEnabled) _stripMissionPickupNodes();
   }catch(e){}
 });
 
@@ -932,6 +990,22 @@ window.addEventListener('storage', (ev)=>{
   }
   IZZA.api._onWorldChanged(next);
 });
+
+// === Runtime guard: if any system tries to spawn mission pickups in MP, drop them ===
+try{
+  IZZA.on('loot-spawn', (it)=>{
+    try{
+      const wid = getCurrentWorld();
+      if (!_isSoloWorldId(wid)) {
+        const k = String(it && (it.kind||it.type)||'').toLowerCase();
+        if (_MISSION_PICKUP_KINDS.has(k)) {
+          // Block by immediately clearing visuals again
+          _stripMissionPickupNodes();
+        }
+      }
+    }catch(e){}
+  });
+}catch(e){}
   function resetNub(){ if(nub){ nub.style.left='40px'; nub.style.top='40px'; } vec.x=0; vec.y=0; }
   function startDrag(e){ dragging=true; baseRect=stick.getBoundingClientRect(); e.preventDefault(); }
   function moveDrag(e){ if(!dragging) return; const t=e.touches?e.touches[0]:e; const cx=baseRect.left+baseRect.width/2, cy=baseRect.top+baseRect.height/2; setNub(t.clientX-cx,t.clientY-cy); e.preventDefault(); }
