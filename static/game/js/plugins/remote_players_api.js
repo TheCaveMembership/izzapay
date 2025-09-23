@@ -1,6 +1,9 @@
-// Remote Players API — v1.3 (SOLO-aware + world presence via REST + mission freeze in MP)
+// Remote Players API — v1.4
+// SOLO-aware + world presence via REST
+// MP worlds: missions hidden (only), population stays
+// Duel mode: hide pedestrians & cops, keep vehicles visible
 (function(){
-  const BUILD = 'v1.3-remote-players';
+  const BUILD = 'v1.4-remote-players';
   console.log('[IZZA PLAY]', BUILD);
 
   // -------- config / helpers ----------
@@ -20,11 +23,10 @@
   const getWorld = ()=> localStorage.getItem('izzaWorldId') || 'solo';
   const isMPWorld = ()=> { const w = getWorld(); return w!=='solo'; };
 
-  // ---- appearance/inventory mirror (includes crafted armory if core exposes it) ----
+  // ---- appearance/inventory mirror ----
   function readAppearance(){
     try{
       const p = window.__IZZA_PROFILE__ || {};
-      // Prefer extended appearance blob if present
       return (p.appearance && Object.keys(p.appearance).length) ? p.appearance : {
         sprite_skin: p.sprite_skin || localStorage.getItem('sprite_skin') || 'default',
         hair:        p.hair        || localStorage.getItem('hair')        || 'short',
@@ -37,21 +39,10 @@
     }catch{ return { sprite_skin:'default', hair:'short', outfit:'street' }; }
   }
   function readInventory(){
-    // Merge base inventory + armory pack + crafted items if core exposes them
     const inv = {};
-    try{
-      const base = (IZZA?.api?.getInventory && IZZA.api.getInventory()) || {};
-      Object.assign(inv, base);
-    }catch{}
-    try{
-      const arm = (IZZA?.api?.getArmory && IZZA.api.getArmory()) || {};
-      Object.assign(inv, arm);
-    }catch{}
-    try{
-      const crafted = (IZZA?.api?.getCraftedItems && IZZA.api.getCraftedItems()) || {};
-      // store under crafted:* or merge functional flags if any
-      inv.crafted = crafted;
-    }catch{}
+    try{ Object.assign(inv, (IZZA?.api?.getInventory?.())||{}); }catch{}
+    try{ Object.assign(inv, (IZZA?.api?.getArmory?.())||{}); }catch{}
+    try{ inv.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
     return inv;
   }
 
@@ -65,7 +56,7 @@
     try{ if (window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
   }
 
-  // ---------- asset loaders (same as before) ----------
+  // ---------- asset loaders ----------
   function loadImg(src){ return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
   async function loadLayer(kind, name){
     const base = '/static/game/sprites/' + kind + '/';
@@ -157,20 +148,33 @@
     });
   }
 
-  // ---------- SOLO vs MP mission/NPC/vehicle toggles ----------
+  // ---------- Modes ----------
+  // Multiplayer mode: missions hidden only (keep world population intact)
   function setMultiplayerMode(on){
     try{
-      // Freeze mission engine if core exposes it
       IZZA?.api?.setMultiplayerMode?.(!!on);
 
       // Hide mission HUD + prompts
-      const nodes = document.querySelectorAll('[data-ui="mission-hud"], #missionHud, .mission-hud, .mission-prompt, [data-ui="mission-prompt"]');
+      const nodes = document.querySelectorAll(
+        '[data-ui="mission-hud"], #missionHud, .mission-hud, .mission-prompt, [data-ui="mission-prompt"]'
+      );
       nodes.forEach(n=> n.style.display = on ? 'none' : '');
 
-      // Freeze common NPC/vehicle layers non-destructively (CSS)
+      // Broadcast to any listeners
+      window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail:{ enabled: !on }}));
+    }catch{}
+  }
+
+  // Duel mode: hide pedestrians & cops; KEEP vehicles visible
+  function setDuelMode(on){
+    try{
       const hideSel = [
-        '.npc', '[data-npc]', '.vehicle', '[data-vehicle]', '[data-role="npc"]'
+        // pedestrians / generic NPCs
+        '.npc', '[data-npc]', '.pedestrian', '[data-role="npc"]',
+        // cops / authorities
+        '.cop', '[data-cop]', '.police', '.swat', '.military', '[data-role="cop"]'
       ].join(',');
+
       document.querySelectorAll(hideSel).forEach(n=>{
         if(on){
           if(!n.dataset._oldVis){ n.dataset._oldVis = n.style.visibility || ''; }
@@ -181,8 +185,7 @@
         }
       });
 
-      // App-level event for any other plugins
-      window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail:{ enabled: !on }}));
+      window.dispatchEvent(new CustomEvent('izza-duel-toggle', { detail:{ on: !!on }}));
     }catch{}
   }
 
@@ -214,7 +217,6 @@
       const r = await jget('/world/roster?since=' + encodeURIComponent(lastRosterTs||0));
       if(r && r.ok){
         if(Array.isArray(r.players)){
-          // Upsert partials; a full heartbeat from others carries appearance/inv
           r.players.forEach(upsertRemote);
         }
         if(typeof r.serverNow==='number') lastRosterTs = r.serverNow;
@@ -228,7 +230,6 @@
     heartbeatT = setInterval(sendHeartbeat, 4000);
     tickT      = setInterval(sendPos,      400);
     rosterT    = setInterval(pullRoster,   1500);
-    // initial kicks
     sendHeartbeat();
     pullRoster();
   }
@@ -245,9 +246,7 @@
 
   const REMOTE_PLAYERS_API = window.REMOTE_PLAYERS_API = window.REMOTE_PLAYERS_API || {
     send(type, data){
-      // Wire only what we support without websockets
       if(type==='join-world'){
-        // data.world expected
         try{ jpost('/world/join', { world: String(data.world||'1') }); }catch{}
         onWorldChanged(String(data.world||'1'));
       }else if(type==='worlds-counts'){
@@ -262,8 +261,15 @@
   // ---------- world-change handling ----------
   function onWorldChanged(nextWorld){
     clearRemotePlayers();
-    if(nextWorld==='solo'){ disarmTimers(); setMultiplayerMode(false); return; }
+    if(nextWorld==='solo'){
+      disarmTimers();
+      setMultiplayerMode(false);
+      // also ensure duel visuals are cleared (e.g., if player quit during duel)
+      setDuelMode(false);
+      return;
+    }
     setMultiplayerMode(true);
+    setDuelMode(false);
     lastRosterTs = 0;
     armTimers();
   }
@@ -276,18 +282,29 @@
     }
   });
 
+  // ---------- Duel wiring ----------
+  // Enter duel mode when multiplayer client starts a match; exit when finished
+  (function wireDuelToggles(){
+    try{ IZZA?.on?.('mp-start',  ()=> setDuelMode(true)); }catch{}
+    try{ IZZA?.on?.('mp-finish', ()=> setDuelMode(false)); }catch{}
+    // Safety hooks if your duel client emits these:
+    try{ IZZA?.on?.('duel-round-start',   ()=> setDuelMode(true)); }catch{}
+    try{ IZZA?.on?.('duel-match-finish',  ()=> setDuelMode(false)); }catch{}
+  })();
+
   // ---------- renderer + boot ----------
   function installPublicAPI(){
     if(!window.IZZA || !IZZA.api) return;
     IZZA.api.remotePlayers = REMOTES;
     if(!IZZA.api.clearRemotePlayers) IZZA.api.clearRemotePlayers = clearRemotePlayers;
     if(!IZZA.api.getAppearance) IZZA.api.getAppearance = readAppearance;
+    // Optional: expose duel toggles in case other systems want to force it
+    IZZA.api.setDuelMode = setDuelMode;
   }
 
   function boot(){
     installPublicAPI();
     installRenderer();
-    // SOLO or MP?
     onWorldChanged(getWorld());
   }
 
