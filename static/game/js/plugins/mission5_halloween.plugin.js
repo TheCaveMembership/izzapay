@@ -15,6 +15,11 @@
   const JACK_TAKEN_KEY = 'izzaJackTaken';
   const M5_MS = 5 * 60 * 1000;
 
+  // --- NEW: global mission enable check (Solo only) ---------------------------
+  function missionsEnabled(){
+    try { return !!window.__IZZA_MISSIONS_ENABLED__; } catch { return true; }
+  }
+
   // ---------------- state ----------------
   let nightOn=false, mission5Active=false, mission5Start=0, werewolfNext=0, lastPos=null;
   const pumpkins = []; // {tx,ty,collected,img}
@@ -431,6 +436,8 @@
   function renderM5Under(){
     try{
       if (!api?.ready) return;
+      if (!missionsEnabled()) return; // ← NEW: hide entirely in MP
+
       const force = localStorage.getItem('izzaForceM5') === '1';
       const tier2 = localStorage.getItem('izzaMapTier') === '2';
       const m4done = isMission4Done();
@@ -481,6 +488,7 @@
   function renderM5Over(){
     try{
       if (!api?.ready) return;
+      if (!missionsEnabled()) return; // ← NEW
       const ctx=document.getElementById('game')?.getContext('2d'); if(!ctx) return;
       drawWolves(ctx); // above map/player
     }catch{}
@@ -496,6 +504,7 @@
 
   function onB(e){
     if(!api?.ready) return;
+    if (!missionsEnabled()) return; // ← NEW
 
     const tierOK = localStorage.getItem('izzaMapTier') === '2';
     const force = localStorage.getItem('izzaForceM5') === '1';
@@ -527,7 +536,6 @@
         _addOne(inv, 'pumpkin_piece', 'Pumpkin');
         invWrite(inv);
         IZZA.toast?.('+1 Pumpkin');
-        // IMPORTANT: do NOT auto-craft or end here anymore.
         return;
       }
     }
@@ -593,7 +601,7 @@
     try{ IZZA.emit('m6-unlocked'); }catch{}
   }
 
-  // ---------- M5 “Congratulations” popup (same UI style you provided) ----------
+  // ---------- M5 “Congratulations” popup ----------
   function ensureCongratsUI(){
     if (document.getElementById('missionCongrats')) return;
     const wrap = document.createElement('div');
@@ -626,7 +634,6 @@
     bumpMission5UI();
     unlockMission6();
 
-    // keep existing small completion popup too
     try{
       IZZA?.api?.UI?.popup?.({style:'agent',title:'Mission Completed',body:'Pumpkin Armour crafted. Set bonus active!',timeout:2200});
     }catch{
@@ -638,7 +645,7 @@
     }
   }
 
-    function isMoving(){
+  function isMoving(){
     const p={x:api?.player?.x||0, y:api?.player?.y||0};
     if(!lastPos){ lastPos=p; return false; }
     const d=Math.hypot(p.x-lastPos.x,p.y-lastPos.y); lastPos=p; return d>((api?.TILE||60)*0.35);
@@ -665,7 +672,6 @@
       // spawn wolves periodically while player moves
       if (now >= werewolfNext){
         if (isMoving()) spawnWerewolf();
-        // spawn every ~28s like before
         werewolfNext = now + 28000;
       }
 
@@ -687,7 +693,6 @@
     IZZA.on?.('render-post',  renderM5Over);
     IZZA.on?.('update-post',  onUpdate);
     wireB();
-    // (no auto-crafting on ready)
   });
 
   // ---------- Mission 5 completion via inventory check (like Mission 4) ----------
@@ -721,13 +726,13 @@
     }
   }
 
-  // Inventory changes during the run: mirror M4 — complete once the full set exists
+  // Inventory changes during the run
   window.addEventListener('izza-inventory-changed', ()=>{
     try{ IZZA.emit?.('render-under'); }catch{}
     maybeFinishM5();
   });
 
-  // Armoury craft clicks are the preferred finish trigger (when they’re emitted):
+  // Armoury craft clicks
   IZZA.on?.('gear-crafted',  ({kind,set})=>{
     if(kind==='pumpkin' || set==='pumpkin'){
       if (!_m5CongratsShown) showCongrats('Pumpkin Armour crafted — Mission 5 Completed!');
@@ -743,7 +748,7 @@
     }
   });
 
-  // ---------- NEW: Death during mission = fail + end timer/night + respawn Jack ----------
+  // Death during mission = fail + end timer/night + respawn Jack
   IZZA.on?.('player-died', ()=>{
     if (!mission5Active) return;
     mission5Active = false;
@@ -751,10 +756,25 @@
     clearPumpkins();
     clearTimer();
     WOLVES.length = 0;
-    // respawn Jack so the player can try again
     try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{}
     _m5CongratsShown = false;
     IZZA.toast?.('Mission 5 failed — you were taken out!');
+  });
+
+  // --- NEW: react to Solo/MP toggle from the world switcher -------------------
+  window.addEventListener('izza-missions-toggle', (ev)=>{
+    const enabled = !!(ev?.detail?.enabled);
+    if (!enabled) {
+      // If we switch to MP mid-run, shut everything down & clean visuals
+      mission5Active = false;
+      setNight(false);
+      clearPumpkins();
+      clearTimer();
+      WOLVES.length = 0;
+      try{ localStorage.removeItem(JACK_TAKEN_KEY); }catch{}
+      _m5CongratsShown = false;
+      try{ IZZA.emit?.('render-under'); }catch{}
+    }
   });
 
   IZZA.on?.('shutdown', ()=>{ clearTimer(); setNight(false); WOLVES.length=0; });
