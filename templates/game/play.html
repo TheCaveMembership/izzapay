@@ -596,7 +596,7 @@
   <script src="/static/game/js/plugins/v1_trade_centre.plugin.js"></script>
   <script src="/static/game/js/plugins/izza-orientation-landscape.plugin.js?v=3"></script>
 
-  <!-- NEW: Area Chat & translation hook (added, nothing else changed) -->
+    <!-- NEW: Area Chat & translation hook (added, nothing else changed) -->
   <script src="/static/game/js/plugins/v1_area_chat.plugin.js"></script>
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
@@ -612,7 +612,10 @@
       return text;
     }
   };
-</script>
+  </script>
+
+  <!-- NEW: Worlds selector (rooms + counts + 1v1 invite) -->
+  <script defer src="/static/game/js/plugins/worlds_selector.plugin.js?v=2"></script>
   <script>
   (function(){
     const LANG_KEY='izzaLang';
