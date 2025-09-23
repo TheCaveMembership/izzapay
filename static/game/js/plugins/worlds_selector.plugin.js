@@ -1,9 +1,9 @@
-// worlds_selector.plugin.js — Worlds switcher + remote players + 1v1 invite (client-only)
+// worlds_selector.plugin.js — Worlds switcher (SOLO default) + remote players + 1v1 invite
 (function(){
-  const BUILD='worlds-selector/v1.5';
+  const BUILD='worlds-selector/v2.0-solo';
   console.log('[IZZA PLAY]', BUILD);
 
-  // ---- MP adapter ----
+  // MP adapter → talks to your REMOTE_PLAYERS_API or IZZA bus
   const MP = {
     send(type, data){
       try{
@@ -23,56 +23,40 @@
     askCounts(){ MP.send('worlds-counts', {}); }
   };
 
-  // ---- World state ----
-  const getWorld = ()=> localStorage.getItem('izzaWorldId') || '1';
-  const setWorld = id => localStorage.setItem('izzaWorldId', String(id||'1'));
+  // SOLO by default
+  const getWorld = ()=> localStorage.getItem('izzaWorldId') || 'solo';
+  const setWorld = id => localStorage.setItem('izzaWorldId', String(id||'solo'));
 
-  // ---- Helpers: Friends button + FIRE hide/show ----
+  // Toggle mission/remote state
+  function setMultiplayerMode(on){
+    try{
+      if (IZZA?.api) {
+        IZZA.api.setMultiplayerMode?.(!!on);
+        IZZA.api.clearRemotePlayers?.();
+      }
+      // Hide mission HUD in multiplayer
+      const missionHud = document.querySelector('[data-ui="mission-hud"], #missionHud, .mission-hud');
+      if(missionHud) missionHud.style.display = on ? 'none' : '';
+      window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail:{ enabled: !on }}));
+    }catch{}
+  }
+
+  // UI
   function findFriendsEl(){
     const nodes = document.querySelectorAll('button,.btn,.pill,[role="button"]');
-    for (const el of nodes){
-      const t = (el.textContent||'').trim().toLowerCase();
-      if (t === 'friends') return el;
-    }
+    for (const el of nodes){ if ((el.textContent||'').trim().toLowerCase()==='friends') return el; }
     return document.querySelector('#btnFriends,[data-ui="btn-friends"]');
   }
 
-  function fireEls(){
-    // common hooks + fallback by visible text "FIRE"
-    const all = [
-      ...document.querySelectorAll('#btnFire,[data-ui="btn-fire"],button,.btn,[role="button"]')
-    ];
-    return all.filter(el => ((el.textContent||'').trim().toLowerCase() === 'fire'));
-  }
-  function hideFire(on=true){
-    const els = fireEls();
-    for (const el of els){
-      if (on){
-        if (!el.dataset._oldDisplay) el.dataset._oldDisplay = el.style.display || '';
-        el.style.display = 'none';
-      } else {
-        el.style.display = el.dataset._oldDisplay || '';
-        delete el.dataset._oldDisplay;
-      }
-    }
-  }
-
-  // ---- UI: add "Worlds" button beside Friends ----
   function mountWorldsButton(){
     if (document.getElementById('btnWorlds')) return true;
-    const friendsBtn = findFriendsEl();
-    if (!friendsBtn) return false;
-
+    const friendsBtn = findFriendsEl(); if (!friendsBtn) return false;
     const btn = document.createElement('button');
-    btn.id = 'btnWorlds';
-    btn.type = 'button';
-    btn.textContent = 'Worlds';
+    btn.id='btnWorlds'; btn.type='button'; btn.textContent='Worlds';
     if (friendsBtn.className) btn.className = friendsBtn.className;
-    btn.style.marginLeft = '8px';
+    btn.style.marginLeft='8px';
     friendsBtn.insertAdjacentElement('afterend', btn);
     btn.addEventListener('click', openWorldsModal, { passive:true });
-
-    console.log('[WORLDS] button mounted next to Friends');
     return true;
   }
   function ensureWorldsButton(){
@@ -81,39 +65,14 @@
     mo.observe(document.body, { childList:true, subtree:true });
   }
 
-  // ---- Guard helpers (use core if present) ----
-  function canSwitchNow(){
-    try{
-      if (window.IZZA?.api && typeof IZZA.api.canSwitchWorld === 'function'){
-        return !!IZZA.api.canSwitchWorld();
-      }
-    }catch{}
-    return true; // no core guard exposed → allow
-  }
-  function vetoToast(){
-    try { (window.toast||console.log)('✋ Lose the cops / clear your stars first.'); } catch {}
-  }
-
-  // ---- Worlds modal ----
   let counts = {1:0,2:0,3:0,4:0}, pollTimer=null;
   function openWorldsModal(){
-    // BLOCK if cops/stars active
-    if (!canSwitchNow()){
-      vetoToast();
-      return;
-    }
-
     const cur = getWorld();
     const hostId='worldsModal';
     let m = document.getElementById(hostId);
     if(!m){
       m = document.createElement('div'); m.id=hostId;
-      Object.assign(m.style, {
-        position:'fixed', inset:'0', display:'flex',
-        alignItems:'center', justifyContent:'center',
-        zIndex: 10040,                 // above fire/controls
-        background:'rgba(0,0,0,.45)'
-      });
+      Object.assign(m.style,{position:'fixed',inset:'0',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10040,background:'rgba(0,0,0,.45)'});
       m.innerHTML = `
         <div style="background:#0b0f17;border:1px solid #2a3550;border-radius:14px;padding:14px 16px;color:#dbe6ff;min-width:280px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -121,80 +80,55 @@
             <button id="worldsClose" class="ghost" style="border-color:#2a3550">Close</button>
           </div>
           <div id="worldGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
-          <div style="opacity:.8;font-size:12px;margin-top:8px">You are in <b>World ${cur}</b>. Players shown are active now.</div>
+          <div style="opacity:.8;font-size:12px;margin-top:8px">You are in <b>${cur.toUpperCase()}</b>.</div>
+          <div style="opacity:.8;font-size:12px;margin-top:2px">SOLO = missions on, no players. Worlds 1–4 = multiplayer.</div>
         </div>`;
       document.body.appendChild(m);
       m.querySelector('#worldsClose').onclick = ()=> closeWorldsModal();
     }
     renderWorldCards();
     m.style.display='flex';
-
-    hideFire(true);                 // << hide FIRE while picker is open
     if(!pollTimer){ pollTimer = setInterval(()=> MP.askCounts(), 3000); }
     MP.askCounts();
   }
   function closeWorldsModal(){
     const m = document.getElementById('worldsModal'); if(m) m.style.display='none';
     if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
-    hideFire(false);                // << show FIRE again when closed
   }
   function renderWorldCards(){
     const grid = document.getElementById('worldGrid'); if(!grid) return;
     const cur = getWorld();
     grid.innerHTML='';
+    // SOLO card
+    const solo = document.createElement('button');
+    solo.innerHTML = `<div style="font-weight:800">SOLO</div><div style="opacity:.85;font-size:12px;margin-top:4px">Missions enabled</div>${cur==='solo'?'<div style="margin-top:6px;font-size:12px;opacity:.85">Current</div>':''}`;
+    Object.assign(solo.style,{textAlign:'left',background:cur==='solo'?'#1f2d4f':'#0e1626',color:'#cfe0ff',border:'1px solid #2a3550',borderRadius:'10px',padding:'10px 12px'});
+    solo.onclick = ()=> switchWorld('solo');
+    grid.appendChild(solo);
+    // Worlds 1–4
     [1,2,3,4].forEach(n=>{
-      const card = document.createElement('button');
-      card.setAttribute('data-world', String(n));
-      const selected = (String(n)===String(cur));
-      card.innerHTML = `
-        <div style="font-weight:800">WORLD ${n}</div>
-        <div style="opacity:.85;font-size:12px;margin-top:4px">Players: <b>${counts[n]||0}</b></div>
-        ${selected? '<div style="margin-top:6px;font-size:12px;opacity:.85">Current</div>':''}
-      `;
-      Object.assign(card.style, {
-        textAlign:'left', background: selected?'#1f2d4f':'#0e1626',
-        color:'#cfe0ff', border:'1px solid #2a3550', borderRadius:'10px',
-        padding:'10px 12px'
-      });
+      const card=document.createElement('button');
+      const selected = String(n)===String(cur);
+      card.innerHTML = `<div style="font-weight:800">WORLD ${n}</div><div style="opacity:.85;font-size:12px;margin-top:4px">Players: <b>${counts[n]||0}</b></div>${selected?'<div style="margin-top:6px;font-size:12px;opacity:.85">Current</div>':''}`;
+      Object.assign(card.style,{textAlign:'left',background:selected?'#1f2d4f':'#0e1626',color:'#cfe0ff',border:'1px solid #2a3550',borderRadius:'10px',padding:'10px 12px'});
       card.onclick = ()=> switchWorld(String(n));
       grid.appendChild(card);
     });
   }
 
-  // ---- Switch world (prefers core helper if present) ----
   function switchWorld(newWorld){
     const old = getWorld();
     if(String(old)===String(newWorld)){ closeWorldsModal(); return; }
-
-    // final guard right before switching
-    if (!canSwitchNow()){
-      closeWorldsModal();
-      vetoToast();
-      return;
-    }
-
-    // Prefer core’s public API (broadcasts + local switch); fallback to manual path
-    let switched = false;
-    try{
-      if (window.IZZA?.api && typeof IZZA.api.requestWorldChange === 'function'){
-        switched = !!IZZA.api.requestWorldChange(String(newWorld));
-      }
-    }catch{}
-
-    if (!switched){
-      // manual path: persist + notify MP + local reset
-      setWorld(newWorld);
-      MP.joinWorld(newWorld);
-      try { window.IZZA?.api?._onWorldChanged?.(String(newWorld)); } catch {}
-      try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
-      try{ IZZA?.api?.clearRemotePlayers?.(); }catch{}
-      try{ (window.toast||console.log)(`🌍 Joined World ${newWorld}`); }catch{}
-    }
-
-    closeWorldsModal(); // also unhides FIRE via close handler
+    setWorld(newWorld);
+    MP.joinWorld(newWorld);
+    const isMulti = (String(newWorld)!=='solo');
+    setMultiplayerMode(isMulti);
+    try{ (window.toast||console.log)(isMulti?`🌍 Joined World ${newWorld}`:`🏝️ Back to SOLO world`); }catch{}
+    try{ IZZA?.api?._onWorldChanged?.(String(newWorld)); }catch{}
+    try{ window.dispatchEvent(new Event('izza-world-changed')); }catch{}
+    closeWorldsModal();
   }
 
-  // ---- Live counts ----
   MP.on('worlds-counts', (payload)=>{
     if(payload && payload.counts){
       counts = Object.assign({1:0,2:0,3:0,4:0}, payload.counts);
@@ -202,91 +136,12 @@
     }
   });
 
-  // ---- Keep UI in sync if another tab changes world ----
-  window.addEventListener('storage', (ev)=>{
-    if (ev.key === 'izzaWorldId'){
-      renderWorldCards();
-    }
-  });
-
-  // ---- 1v1 invite via "B" ----
-  function nearestPlayerWithin(px,py,maxDist=42){
-    const list = (IZZA?.api?.remotePlayers)||[];
-    let best=null, bestD=maxDist+1;
-    for(const p of list){
-      const d = Math.hypot((p.x|0)-(px|0),(p.y|0)-(py|0));
-      if(d<bestD){ best=p; bestD=d; }
-    }
-    return bestD<=maxDist? best : null;
-  }
-  function showDuelSheet(target){
-    const id='duelMiniSheet';
-    let m=document.getElementById(id);
-    if(!m){
-      m=document.createElement('div'); m.id=id;
-      Object.assign(m.style,{position:'fixed',left:'50%',top:'50%',transform:'translate(-50%,-50%)',
-        background:'#0b0f17',border:'1px solid #2a3550',borderRadius:'12px',padding:'12px',zIndex:10030,color:'#e4efff',minWidth:'260px'});
-      m.innerHTML=`
-        <div style="font-weight:800;margin-bottom:6px">1v1 Duel</div>
-        <div id="duelTarget" style="opacity:.85;margin-bottom:8px"></div>
-        <div style="display:flex;gap:8px">
-          <button id="duelReady" style="flex:1;background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:800">Ready</button>
-          <button id="duelCancel" class="ghost" style="border-color:#2a3550">Cancel</button>
-        </div>`;
-      document.body.appendChild(m);
-      m.querySelector('#duelCancel').onclick = ()=> m.remove();
-      m.querySelector('#duelReady').onclick = ()=> {
-        MP.send('duel-invite', { to: target.username, world: getWorld() });
-        m.querySelector('#duelReady').disabled = true;
-        m.querySelector('#duelReady').textContent = 'Waiting…';
-      };
-    }
-    m.querySelector('#duelTarget').textContent = `Challenging @${target.username}`;
-  }
-  MP.on('duel-start', (payload)=>{
-    try{ IZZA?.emit?.('mp-start', Object.assign({mode:'v1'}, payload)); }catch{}
-  });
-  MP.on('duel-invite', (m)=>{
-    if(!m || String(m.world)!==String(getWorld())) return;
-    const id='duelIncoming';
-    let d=document.getElementById(id);
-    if(!d){
-      d=document.createElement('div'); d.id=id;
-      Object.assign(d.style,{position:'fixed',left:'50%',top:'50%',transform:'translate(-50%,-50%)',
-        background:'#0b0f17',border:'1px solid #2a3550',borderRadius:'12px',padding:'12px',zIndex:10030,color:'#e4efff',minWidth:'260px'});
-      d.innerHTML=`
-        <div style="font-weight:800;margin-bottom:6px">Incoming 1v1</div>
-        <div style="opacity:.85;margin-bottom:8px">from @<span id="duelFrom"></span></div>
-        <div style="display:flex;gap:8px">
-          <button id="duelAccept" style="flex:1;background:#2ea043;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:800">Accept</button>
-          <button id="duelDecline" class="ghost" style="border-color:#2a3550">Decline</button>
-        </div>`;
-      document.body.appendChild(d);
-      d.querySelector('#duelDecline').onclick = ()=> d.remove();
-      d.querySelector('#duelAccept').onclick = ()=>{
-        MP.send('duel-accept', { from: m.from, world: getWorld() }); d.remove();
-      };
-    }
-    d.querySelector('#duelFrom').textContent = m.from || 'player';
-  });
-  window.addEventListener('keydown', (e)=>{
-    if((e.key||'').toLowerCase()!=='b') return;
-    try{
-      if(!IZZA?.api?.ready) return;
-      const me = IZZA.api.player || {x:0,y:0};
-      const near = nearestPlayerWithin(me.x, me.y, 38);
-      if(near){ showDuelSheet(near); }
-    }catch{}
-  }, {capture:true, passive:true});
-
-  // ---- Boot ----
   function boot(){
+    if(!localStorage.getItem('izzaWorldId')) setWorld('solo');
     ensureWorldsButton();
     MP.joinWorld(getWorld());
+    setMultiplayerMode(String(getWorld())!=='solo');
   }
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', boot, {once:true});
-  }else{
-    boot();
-  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot, {once:true});
+  else boot();
 })();
