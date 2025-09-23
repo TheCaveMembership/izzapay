@@ -58,7 +58,26 @@ const RESOLVED = {
   const camera={x:0,y:0};
   const w2sX = wx => (wx - camera.x) * SCALE_FACTOR;
   const w2sY = wy => (wy - camera.y) * SCALE_FACTOR;
+// --- world-scoped RNG (different sequence per world) ---
+function xmur3(str){
+  for(var i=0,h=1779033703^str.length;i<str.length;i++){
+    h=Math.imul(h^str.charCodeAt(i),3432918353);
+    h=h<<13|h>>>19;
+  }
+  return function(){ h=Math.imul(h^h>>>16,2246822507); h=Math.imul(h^h>>>13,3266489909); return (h^h>>>16)>>>0; };
+}
+function mulberry32(a){
+  return function(){ var t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15, t|1); t^=t+Math.imul(t^t>>>7, t|61); return ((t^t>>>14)>>>0)/4294967296; };
+}
+function getCurrentWorld(){ return localStorage.getItem('izzaWorldId') || '1'; }
 
+let RNG = Math.random;   // fallback
+function reseedForWorld(worldId){
+  // make it stable per user+world so each world feels distinct
+  const user = (window.__IZZA_PROFILE__ && __IZZA_PROFILE__.username) || 'guest';
+  const seed = xmur3(`${worldId}|${user}`)();
+  RNG = mulberry32(seed);
+}
   // --- loot drop behavior knobs ---
   const DROP_GRACE_MS = 1000;
   const DROP_OFFSET   = 18;
@@ -713,9 +732,23 @@ function unequipArmorSlot(slot){
     vec.x=(c/r)*ux; vec.y=(c/r)*uy;
   }
   // --- SWITCH-WORLD GUARD & RESET (core) -----------------------
+
+// Keep separate per-world state instead of one global array
+const WORLD_STATE = {};
+function getWorldState(worldId){
+  if(!WORLD_STATE[worldId]){
+    WORLD_STATE[worldId] = { pedestrians:[], cars:[], cops:[] };
+  }
+  return WORLD_STATE[worldId];
+}
+
+// Currently active world (synced with storage)
+function getCurrentWorld(){ return localStorage.getItem('izzaWorldId') || '1'; }
+function setCurrentWorld(worldId){ localStorage.setItem('izzaWorldId', String(worldId||'1')); }
+
 function hasActiveCops(){
-  const list = (IZZA.api && Array.isArray(IZZA.api.cops) ? IZZA.api.cops : cops) || [];
-  return list.length > 0;
+  const s = getWorldState(getCurrentWorld());
+  return (s.cops && s.cops.length > 0) || (player.wanted|0) > 0;
 }
 
 // Let plugins ask if switching worlds is allowed right now
@@ -726,26 +759,39 @@ IZZA.api.canSwitchWorld = function canSwitchWorld(){
 // Local reset when we DO switch worlds
 IZZA.api._onWorldChanged = function onWorldChanged(newWorld){
   try {
-    // wipe transient per-world state (no carry-over)
-    pedestrians.length = 0;
-    cars.length = 0;
-    cops.length = 0;
+    // Save old world state back
+    const old = getCurrentWorld();
+    WORLD_STATE[old] = { pedestrians:[...pedestrians], cars:[...cars], cops:[...cops] };
+
+    // Switch current
+    setCurrentWorld(newWorld);
+
+    // Load that world’s state fresh
+    const s = getWorldState(newWorld);
+    pedestrians.length = 0; pedestrians.push(...s.pedestrians);
+    cars.length = 0; cars.push(...s.cars);
+    cops.length = 0; cops.push(...s.cops);
+
+    // Clear wanted level on switch (fresh start)
+    setWanted(0);
+
+    // Reseed RNG so spawns differ per world
+    reseedForWorld(newWorld);
 
     // tell any plugins (loot, chat, etc.) to clear their own caches
     IZZA.emit('world-changed', { world: String(newWorld) });
 
-    // optional: visual nudge
-    try { toast(`Joined World ${newWorld}`); } catch {}
+    try { toast(`🌍 Joined World ${newWorld}`); } catch {}
   } catch(e){ console.warn('[core] world reset failed', e); }
 };
-  // If the MP layer is using the IZZA bus passthrough, mirror the join locally
+
+// If the MP layer is using the IZZA bus passthrough, mirror the join locally
 IZZA.on('mp-send', (msg)=>{
   if (!msg || msg.type !== 'join-world') return;
   const newWorld = (msg.data && msg.data.world) || '1';
-  // Switch is only legal if guard passes
-  if (!IZZA.api.canSwitchWorld()) {
+  if (!IZZA.api.canSwitchWorld()){
     try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
-    return; // veto
+    return; // veto switch
   }
   IZZA.api._onWorldChanged(newWorld);
 });
@@ -781,6 +827,7 @@ IZZA.on('mp-send', (msg)=>{
     camera.x = Math.max(unlocked.x0*TILE, Math.min(camera.x, maxX));
     camera.y = Math.max(unlocked.y0*TILE, Math.min(camera.y, maxY));
   }
+  reseedForWorld(getCurrentWorld());
 
   // ===== Collision =====
   const isHQ = (gx,gy)=> gx>=bX&&gx<bX+bW&&gy>=bY&&gy<bY+bH;
