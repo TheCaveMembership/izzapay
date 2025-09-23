@@ -1,8 +1,10 @@
-# mp_api.py — v3.2
-# Adds robust Duel REST (best-of-3 rounds, tracer sharing, mirrored cops, equipped-weapon mirroring)
-# NEW in v3.2: /duel/selfdown so a player eliminated by cops during PvP cleanly loses the round
+# mp_api.py — v4.0 (IZZA MP)
+# - Keeps: friends, invites, ranks, v1 duels (best-of-3), tracers, selfdown
+# - NEW: Worlds pose hub (HTTP polling) so players see each other per world
+# - QoL: PvP pull returns opponent velocity + server time for better interpolation
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
+from collections import defaultdict
 from db import conn
 import time
 
@@ -97,7 +99,133 @@ def _is_friend(a:int,b:int)->bool:
                         LIMIT 1""",(a,b,b,a)).fetchone()
         return bool(r)
 
-# ---- simple mm queues --------------------------------------------------------
+# =============================================================================
+# Worlds pose hub (HTTP polling fallback)
+# =============================================================================
+
+# in-memory world state: uid -> world, and per-world pose tables
+_WORLD_BY_UID: Dict[int, str] = {}
+# world -> { uid: {username, x, y, facing, appearance, t, vx, vy} }
+_WORLD_POSES: Dict[str, Dict[int, Dict[str,Any]]] = defaultdict(dict)
+_WORLD_TTL = 8.0   # seconds: consider pose stale after this
+
+def _safe_world(w: Any) -> str:
+    s = str(w or "1").strip()
+    return s if s in ("1","2","3","4") else "1"
+
+def _counts_now() -> Dict[str,int]:
+    now = time.time()
+    out: Dict[str,int] = {}
+    for w, tbl in _WORLD_POSES.items():
+        c = 0
+        for _, pose in tbl.items():
+            if (now - float(pose.get("t", 0))) <= _WORLD_TTL:
+                c += 1
+        out[w] = c
+    # ensure 1..4 keys exist
+    for w in ("1","2","3","4"):
+        out.setdefault(w, 0)
+    return out
+
+@mp_bp.post("/world/join")
+def mp_world_join():
+    _ensure_schema()
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid, _, uname = who
+    _mark_active(uid)
+    data = (request.get_json(silent=True) or {})
+    world = _safe_world(data.get("world"))
+    _WORLD_BY_UID[uid] = world
+    # seed an entry so counts include this user immediately
+    tbl = _WORLD_POSES[world]
+    cur = tbl.get(uid, {})
+    cur.update({"username": uname, "t": time.time()})
+    tbl[uid] = cur
+    return jsonify({"ok": True, "world": world})
+
+@mp_bp.post("/world/pose")
+def mp_world_pose():
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid, _, uname = who
+    _mark_active(uid)
+    world = _WORLD_BY_UID.get(uid, "1")
+    world = _safe_world(world)
+    data = (request.get_json(silent=True) or {})
+    now = time.time()
+    tbl = _WORLD_POSES[world]
+
+    # velocity (based on last pose)
+    prev = tbl.get(uid)
+    px = float(prev.get("x", 0.0)) if prev else 0.0
+    py = float(prev.get("y", 0.0)) if prev else 0.0
+    pt = float(prev.get("t", 0.0)) if prev else 0.0
+
+    x = float(data.get("x") or 0.0)
+    y = float(data.get("y") or 0.0)
+    dt = max(0.001, now - pt) if pt else 0.001
+    vx = (x - px) / dt if pt else 0.0
+    vy = (y - py) / dt if pt else 0.0
+
+    pose = {
+        "username": uname,
+        "x": x,
+        "y": y,
+        "facing": data.get("facing") or "down",
+        "appearance": data.get("appearance") or {},
+        "t": now,
+        "vx": float(vx),
+        "vy": float(vy),
+    }
+    tbl[uid] = pose
+    return jsonify({"ok": True})
+
+@mp_bp.get("/world/pull")
+def mp_world_pull():
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    _mark_active(uid)
+    world = _WORLD_BY_UID.get(uid, "1")
+    world = _safe_world(world)
+    tbl = _WORLD_POSES.get(world, {})
+    now = time.time()
+
+    players = []
+    for ouid, pose in tbl.items():
+        if ouid == uid: continue
+        if (now - float(pose.get("t", 0))) > _WORLD_TTL:
+            continue
+        players.append({
+            "username": pose.get("username") or "player",
+            "x": float(pose.get("x", 0.0)),
+            "y": float(pose.get("y", 0.0)),
+            "facing": pose.get("facing", "down"),
+            "appearance": pose.get("appearance") or {},
+            "vx": float(pose.get("vx", 0.0)),
+            "vy": float(pose.get("vy", 0.0)),
+        })
+
+    return jsonify({
+        "ok": True,
+        "world": world,
+        "t": now,                # server time for client-side interpolation
+        "players": players,
+        "counts": _counts_now()
+    })
+
+@mp_bp.get("/worlds/counts")
+def mp_world_counts():
+    who = _current_user_ids()
+    if not who: return jsonify({"error":"not_authenticated"}), 401
+    uid, _, _ = who
+    _mark_active(uid)
+    return jsonify({"ok": True, "counts": _counts_now()})
+
+# =============================================================================
+# simple mm queues (v1)
+# =============================================================================
 
 _QUEUES: Dict[str, List[int]] = {"v1": []}
 _STARTS: Dict[int, Dict[str, Any]] = {}  # per-user "start" payloads
@@ -155,6 +283,7 @@ def mp_players_search():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     my_id,_,_=who
+    _mark_active(my_id)
     raw_q=(request.args.get("q") or "").strip()
     if len(raw_q)<2: return jsonify({"users":[]})
     q=raw_q.lstrip("@").lower(); like=f"%{q}%"
@@ -178,6 +307,7 @@ def mp_friends_request():
     who = _current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_ = who
+    _mark_active(me)
 
     data = (request.get_json(silent=True) or {})
     to_name = (data.get("toUsername") or data.get("username") or "").strip()
@@ -186,14 +316,12 @@ def mp_friends_request():
     if to_id == me: return jsonify({"ok":False, "error":"cannot_friend_self"}), 400
 
     with conn() as cx:
-        # if already friends, return ok
         if _is_friend(me, to_id):
             return jsonify({"ok": True, "already":"friends"})
         try:
             cx.execute("""INSERT INTO mp_friend_requests(from_user,to_user,status)
                           VALUES(?,?, 'pending')""", (me, to_id))
         except Exception:
-            # If exists (either direction) and not accepted, set to pending
             cx.execute("""UPDATE mp_friend_requests
                           SET status='pending'
                           WHERE ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
@@ -206,6 +334,7 @@ def mp_friends_accept():
     who = _current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_ = who
+    _mark_active(me)
 
     data = (request.get_json(silent=True) or {})
     req_id = data.get("requestId")
@@ -236,6 +365,7 @@ def mp_friends_decline():
     who = _current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_ = who
+    _mark_active(me)
 
     data = (request.get_json(silent=True) or {})
     req_id = data.get("requestId")
@@ -266,6 +396,7 @@ def mp_lobby_invite():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     me,_,_=who
+    _mark_active(me)
     data=(request.get_json(silent=True) or {})
     to=(data.get("toUsername") or "").strip()
     to_id=_user_id_by_username(to)
@@ -282,6 +413,7 @@ def mp_lobby_accept():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     inv_id=int(data.get("inviteId") or 0)
     if not inv_id: return jsonify({"ok":False,"error":"bad_invite"}),400
@@ -301,6 +433,7 @@ def mp_lobby_decline():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     inv_id=int(data.get("inviteId") or 0)
     if not inv_id: return jsonify({"ok":False,"error":"bad_invite"}),400
@@ -327,7 +460,6 @@ def mp_notifications():
             ORDER BY i.created_at DESC LIMIT 5
         """,(uid,)).fetchall()
 
-        # include pending friend requests (NEW)
         fr_rows=cx.execute("""
             SELECT fr.id, u.pi_username AS from_username
             FROM mp_friend_requests fr
@@ -364,22 +496,25 @@ def mp_dequeue():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     for m in _QUEUES:
         if uid in _QUEUES[m]: _QUEUES[m].remove(uid)
     return jsonify({"ok":True})
 
-# ---- Duel state --------------------------------------------------------------
+# =============================================================================
+# Duel state
+# =============================================================================
 
 # Room layout:
 # {
 #   "mode":"v1",
 #   "players":[a,b],
 #   "snapshots": {uid:{username,appearance}},
-#   "state": {uid:{x,y,facing,hp,inv,t}},
+#   "state": {uid:{x,y,facing,hp,inv,t,_vx,_vy,_qhp}},
 #   "cops":  {uid:[{x,y,kind,facing}, ...]},
 #   "round": {"number":1,"bestOf":3,"wins":{a:0,b:0},"ended":False,"matchOver":False,
 #             "countdownAt":epoch(+5s settle)},
-#   "events": {"traces":[{"from":uid,"kind":"pistol","x1":..,"y1":..,"x2":..,"y2":..,"t":..}, ...]},
+#   "events": {"traces":[...]},
 #   "pullSince": {uid:last_ts_sent}
 # }
 _DUELS: Dict[str, Dict[str, Any]] = {}
@@ -422,20 +557,29 @@ def mp_duel_poke():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,uname=who
+    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
 
-    # live state
+    now = time.time()
+    # live state + velocity
     st = room["state"].get(uid, {})
+    px, py, pt = float(st.get("x",0.0)), float(st.get("y",0.0)), float(st.get("t",0.0))
+    nx, ny = float(data.get("x") or 0.0), float(data.get("y") or 0.0)
+    dt = max(0.001, now - pt) if pt else 0.001
+    vx = (nx - px)/dt if pt else 0.0
+    vy = (ny - py)/dt if pt else 0.0
+
     st.update({
-        "x": float(data.get("x") or 0.0),
-        "y": float(data.get("y") or 0.0),
+        "x": nx,
+        "y": ny,
         "facing": data.get("facing") or "down",
         "hp": float(data.get("hp") or 3.0),  # client sends its heart float
         "inv": data.get("inv") or {},
-        "t": time.time()
+        "t": now,
+        "_vx": float(vx), "_vy": float(vy)
     })
     room["state"][uid]=st
 
@@ -462,6 +606,7 @@ def mp_duel_pull():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     mid=request.args.get("matchId","")
     room=_get_room(mid)
     if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
@@ -486,6 +631,7 @@ def mp_duel_pull():
 
     payload = {
         "ok": True,
+        "serverTime": time.time(),           # for client interpolation
         "opponent": None,
         "me": {"hp": float(me_state.get("hp", 3.0))},
         "round": rnd,
@@ -502,7 +648,9 @@ def mp_duel_pull():
             "facing": op_state.get("facing","down"),
             "hp": float(op_state.get("hp", 3.0)),
             "inv": op_inv,
-            "equipped": op_weapon
+            "equipped": op_weapon,
+            "vx": float(op_state.get("_vx", 0.0)),      # NEW: velocity hint
+            "vy": float(op_state.get("_vy", 0.0)),
         }
 
     return jsonify(payload)
@@ -512,6 +660,7 @@ def mp_duel_hit():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     kind=(data.get("kind") or "bullet").lower()
@@ -552,6 +701,7 @@ def mp_duel_trace():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     room=_get_room(mid)
@@ -578,6 +728,7 @@ def mp_duel_selfdown():
     who=_current_user_ids()
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,_=who
+    _mark_active(uid)
     data=(request.get_json(silent=True) or {})
     mid=str(data.get("matchId") or "")
     room=_get_room(mid)
@@ -607,6 +758,8 @@ def _on_round_end(room:Dict[str,Any], winner_uid:int):
     if a_w >= need or b_w >= need:
         rnd["matchOver"] = True
         _apply_match_result(mode=room.get("mode","v1"), a=a, b=b, a_w=a_w, b_w=b_w)
+        # schedule cleanup
+        room["_expireAt"] = time.time() + 15.0
         return
 
     # schedule next round (bump number; set countdown +5s settle)
@@ -635,27 +788,23 @@ def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
                     cx.execute("UPDATE mp_ranks SET v1_l = COALESCE(v1_l,0)+1 WHERE user_id=?", (a,))
     except Exception:
         pass
-    # mark room for cleanup in ~15s
-    mid_list = [k for k,v in _DUELS.items() if v.get("players")==[a,b] or v.get("players")==[b,a]]
-    for mid in mid_list:
-        room = _DUELS.get(mid)
-        if room:
-            room["_expireAt"] = time.time() + 15.0
 
 # ---- background sweeper (lazy, on each request) -----------------------------
 
 @mp_bp.before_app_request
-def _sweep_duel_rooms():
+def _sweep_duel_rooms_and_worlds():
     now = time.time()
-    trash = []
+    # Duels: drop old traces + expire rooms
     for mid, room in list(_DUELS.items()):
-        # drop old traces
         traces = room["events"]["traces"]
         if traces:
             room["events"]["traces"] = [e for e in traces if (now - e.get("t",now)) < 12.0]
-        # expire room if flagged
         exp = room.get("_expireAt")
         if exp and now >= exp:
-            trash.append(mid)
-    for mid in trash:
-        _DUELS.pop(mid, None)
+            _DUELS.pop(mid, None)
+
+    # Worlds: remove stale poses
+    for w, table in list(_WORLD_POSES.items()):
+        for uid, pose in list(table.items()):
+            if (now - float(pose.get("t", 0))) > _WORLD_TTL:
+                table.pop(uid, None)
