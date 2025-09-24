@@ -1,9 +1,9 @@
-// Remote Players API — v1.4
-// SOLO-aware + world presence via REST
-// MP worlds: missions hidden (only), population stays
-// Duel mode: hide pedestrians & cops, keep vehicles visible
+// Remote Players API — v2.1
+// Smooth interpolation + skinKey compositing cache + robust asset loads
+// SOLO-aware + world presence via REST (unchanged endpoints)
+// Missions hidden only in MP worlds; Duel mode hides pedestrians/cops (vehicles kept)
 (function(){
-  const BUILD = 'v1.4-remote-players';
+  const BUILD = 'v2.1-remote-players-smooth+skinKey';
   console.log('[IZZA PLAY]', BUILD);
 
   // -------- config / helpers ----------
@@ -45,6 +45,8 @@
     try{ inv.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
     return inv;
   }
+  // export a snapshot helper for other modules (e.g., MP client)
+  try{ if(!IZZA.api.getInventorySnapshot){ IZZA.api.getInventorySnapshot = readInventory; } }catch{}
 
   // -------- remote players store ----------
   const REMOTES = [];
@@ -56,49 +58,220 @@
     try{ if (window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
   }
 
-  // ---------- asset loaders ----------
-  function loadImg(src){ return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
+  // ---------- ASSETS & SKIN CACHE ----------
+  const FRAME_W=32, FRAME_H=32, ROWS=4;
+  const DIR_INDEX = { down:0, right:1, left:2, up:3 };
+
+  function loadImg(src){
+    return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; });
+  }
   async function loadLayer(kind, name){
     const base = '/static/game/sprites/' + kind + '/';
     const try2 = await loadImg(base + encodeURIComponent(name + ' 2') + '.png');
-    if (try2) return { img: try2, cols: Math.max(1, Math.floor(try2.width / 32)) };
+    if (try2) return { img: try2, cols: Math.max(1, Math.floor(try2.width / FRAME_W)) };
     const try1 = await loadImg(base + encodeURIComponent(name) + '.png');
-    if (try1) return { img: try1, cols: Math.max(1, Math.floor(try1.width / 32)) };
+    if (try1) return { img: try1, cols: Math.max(1, Math.floor(try1.width / FRAME_W)) };
     return { img: null, cols: 1 };
   }
-  const DIR_INDEX = { down:0, left:2, right:1, up:3 };
-  const FRAME_W=32, FRAME_H=32, WALK_FPS=8, WALK_MS=1000/WALK_FPS;
-  function currentFrame(cols, moving, tMs){ if(cols<=1) return 0; if(!moving) return 1%cols; return Math.floor(tMs/WALK_MS)%cols; }
 
+  // Order: back-to-front (body first, weapon last so it sits above)
+  const LAYER_ORDER = [
+    'body', 'legs', 'arms', 'outfit', 'vest', 'helm', 'hat', 'hair', 'weapon'
+  ];
+
+  // Parse “armor_<material>_(helm|vest|arms|legs)” → {kind, name}
+  function parseArmorId(id){
+    const m = /^armor_([a-z0-9]+)_(helm|vest|arms|legs)$/i.exec(id);
+    if(!m) return null;
+    return { kind: m[2], name: `${m[1]}_${m[2]}` };
+  }
+
+  // Convert inventory (+crafted) into a list of sprite layers to stack
+  function invToLayers(inv){
+    const ap = readAppearance();
+    const layers = [];
+
+    const c = (k)=> (inv?.[k]?.count|0)>0;
+
+    // Base appearance (always)
+    layers.push({ kind:'body',   name:(ap.sprite_skin || 'default') });
+    layers.push({ kind:'outfit', name:(ap.outfit || 'street') });
+    layers.push({ kind:'hair',   name:(ap.hair   || 'short') });
+
+    // Known cardboard aliases
+    if(c('armor_cardboard_legs') || c('cardboard_legs')) layers.push({kind:'legs', name:'cardboard_legs'});
+    if(c('armor_cardboard_arms') || c('cardboard_arms')) layers.push({kind:'arms', name:'cardboard_arms'});
+    if(c('armor_cardboard_vest') || c('cardboard_chest'))layers.push({kind:'vest', name:'cardboard_vest'});
+    if(c('armor_cardboard_helm') || c('cardboard_helm')) layers.push({kind:'helm', name:'cardboard_helm'});
+
+    // Generic armor IDs (auto-map any material set you add later)
+    Object.keys(inv||{}).forEach(id=>{
+      if(!c(id)) return;
+      const parsed = parseArmorId(id);
+      if(parsed) layers.push(parsed);
+    });
+
+    // Crafted armor / cosmetics
+    // Accept either boolean flags (crafted[key]===true) or {count:1} style
+    Object.keys(inv?.crafted||{}).forEach(k=>{
+      const val = inv.crafted[k];
+      const on  = (typeof val==='object') ? ((val.count|0)>0) : !!val;
+      if(!on) return;
+
+      // Direct sprite layer names (e.g., crafted.gold_crown → hat: gold_crown)
+      if(/^hat_/.test(k)) layers.push({ kind:'hat', name:k.replace(/^hat_/,'') });
+
+      // crafted “armor_<material>_<part>”
+      const parsed = parseArmorId(k);
+      if(parsed) layers.push(parsed);
+
+      // Single-name cosmetics (if you name crafted keys to match your sprite filenames)
+      if(/^(helm|vest|arms|legs|weapon|hair|outfit)_[a-z0-9]+$/i.test(k)){
+        const [kind, name] = k.split('_', 2);
+        layers.push({ kind, name: k.slice(kind.length+1) });
+      }
+
+      // Example: gold_crown (no prefix)
+      if(k==='gold_crown') layers.push({ kind:'hat', name:'gold_crown' });
+    });
+
+    // Weapons (pick one — priority order)
+    const weaponKeys = ['uzi','shotgun','sniper','pistol','smg','rifle'];
+    for(const w of weaponKeys){
+      if(c('wpn_'+w) || c('weapon_'+w) || inv?.crafted?.['weapon_'+w]){
+        layers.push({ kind:'weapon', name:w }); break;
+      }
+    }
+
+    // Ensure layer order
+    layers.sort((a,b)=> LAYER_ORDER.indexOf(a.kind) - LAYER_ORDER.indexOf(b.kind));
+    return layers;
+  }
+
+  // skinKey = deterministic hash of appearance + inventory (counts + crafted flags)
+  function makeSkinKey(ap, inv){
+    try{
+      const normInv = Object.keys(inv||{}).sort()
+        .map(k => k+':' + ((inv[k]?.count|0)||0));
+      const normCraft = Object.keys(inv?.crafted||{}).sort()
+        .map(k => k+':' + (typeof inv.crafted[k]==='object' ? (inv.crafted[k].count|0) : (inv.crafted[k]?1:0)));
+      const key = {
+        body: ap?.sprite_skin||'default',
+        hair: ap?.hair||'short',
+        outfit: ap?.outfit||'street',
+        inv: normInv,
+        crafted: normCraft
+      };
+      return JSON.stringify(key);
+    }catch{ return 'default'; }
+  }
+
+  const SKIN_CACHE = Object.create(null); // skinKey -> {img, cols}
+  async function buildComposite(skinKey, layers){
+    const loaded = await Promise.all(layers.map(l=>loadLayer(l.kind, l.name)));
+    const cols = Math.max(1, ...loaded.map(x=>x?.cols||1));
+    const cvs = document.createElement('canvas');
+    cvs.width  = cols*FRAME_W;
+    cvs.height = ROWS*FRAME_H;
+    const ctx = cvs.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+
+    for(let row=0; row<ROWS; row++){
+      for(let col=0; col<cols; col++){
+        const dx = col*FRAME_W, dy = row*FRAME_H;
+        for(let i=0;i<layers.length;i++){
+          const lay = loaded[i];
+          if(!lay || !lay.img) continue;       // skip missing layers (prevents invisibility)
+          const srcCol = Math.min(col, (lay.cols||1)-1);
+          ctx.drawImage(lay.img, srcCol*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx, dy, FRAME_W, FRAME_H);
+        }
+      }
+    }
+    SKIN_CACHE[skinKey] = { img:cvs, cols };
+    return SKIN_CACHE[skinKey];
+  }
+  async function getComposite(ap, inv){
+    const skinKey = makeSkinKey(ap, inv);
+    if(SKIN_CACHE[skinKey]) return SKIN_CACHE[skinKey];
+    // Build lazily; return a placeholder immediately so player never renders invisible
+    const ph = SKIN_CACHE[skinKey] = { img:null, cols:1, _pending:true };
+    buildComposite(skinKey, invToLayers(inv)).then(()=>{ ph._pending=false; }).catch(()=>{ ph._pending=false; });
+    return ph;
+  }
+
+  // ---------- INTERPOLATION BUFFER ----------
+  const BUFFER_MS = 140;        // how far behind real-time we render for smoothness
+  const STALE_MS  = 5000;       // drop if no updates for this long
+  const MAX_SNAP  = 24;         // keep last N snapshots per player
+
+  function pushSnap(rp, x, y, facing){
+    const t = Date.now();
+    rp.buf.push({t, x, y, facing});
+    if(rp.buf.length>MAX_SNAP) rp.buf.splice(0, rp.buf.length-MAX_SNAP);
+    rp.lastPacket = t;
+  }
+  function sampleBuffered(rp, now){
+    const target = now - BUFFER_MS;
+    const b = rp.buf;
+    if(!b.length){
+      return { x:rp.x, y:rp.y, facing:rp.facing };
+    }
+    // find the two surrounding samples
+    let i=b.length-1;
+    while(i>0 && b[i-1].t>target) i--;
+    const a = b[Math.max(0,i-1)];
+    const c = b[i];
+    if(!a || !c){ return { x:c?.x??rp.x, y:c?.y??rp.y, facing:c?.facing??rp.facing }; }
+    if(c.t===a.t){ return { x:c.x, y:c.y, facing:c.facing }; }
+    const t = (target - a.t) / (c.t - a.t);
+    const lerp=(p,q)=> p + (q-p)*Math.max(0,Math.min(1,t));
+    return { x: lerp(a.x,c.x), y: lerp(a.y,c.y), facing: (t>0.5?c.facing:a.facing) };
+  }
+
+  // ---------- remote struct ----------
   function makeRemote(opts){
     const rp = {
       username: (opts && opts.username) || 'player',
-      appearance: (opts && opts.appearance) || readAppearance(),
+      ap: (opts && opts.appearance) || readAppearance(),
       inv: (opts && opts.inv) || {},
       x: +((opts && opts.x) ?? 0), y: +((opts && opts.y) ?? 0),
       facing: (opts && opts.facing) || 'down',
-      moving:false, animTime:0, _lastX:0, _lastY:0,
-      _imgs:null, _cols:{body:1,outfit:1,hair:1}
+      buf: [], lastPacket: 0,
+      composite: { img:null, cols:1 }, compositeKey:''
     };
-    Promise.all([
-      loadLayer('body',   rp.appearance.sprite_skin || 'default'),
-      loadLayer('outfit', rp.appearance.outfit      || 'street'),
-      loadLayer('hair',   rp.appearance.hair        || 'short')
-    ]).then(([b,o,h])=>{
-      rp._imgs = { body:b.img, outfit:o.img, hair:h.img };
-      rp._cols = { body:b.cols, outfit:o.cols, hair:h.cols };
-    });
+    rp.compositeKey = makeSkinKey(rp.ap, rp.inv);
+    getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; }); // async prime
+    pushSnap(rp, rp.x, rp.y, rp.facing); // seed
     return rp;
   }
   function upsertRemote(p){
     const u = String(p?.username||'').trim(); if(!u) return;
     let rp = byName[u];
     if(!rp){ rp = byName[u] = makeRemote(p); REMOTES.push(rp); }
-    if (typeof p.x==='number') rp.x = p.x;
-    if (typeof p.y==='number') rp.y = p.y;
+
+    if (typeof p.x==='number' || typeof p.y==='number'){
+      pushSnap(rp, (p.x??rp.x), (p.y??rp.y), p.facing||rp.facing);
+      rp.x = p.x??rp.x; rp.y = p.y??rp.y;
+    }
     if (p.facing) rp.facing = p.facing;
-    if (p.appearance) rp.appearance = p.appearance;
-    if (p.inv) rp.inv = p.inv;
+
+    if (p.appearance) rp.ap = p.appearance;
+    if (p.inv)        rp.inv = p.inv;
+
+    const key = makeSkinKey(rp.ap, rp.inv);
+    if(key !== rp.compositeKey){
+      rp.compositeKey = key;
+      getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; });
+    }
+  }
+
+  function pruneStale(now){
+    for(let i=REMOTES.length-1;i>=0;i--){
+      const rp=REMOTES[i];
+      if(now - (rp.lastPacket||0) > STALE_MS){
+        REMOTES.splice(i,1); delete byName[rp.username];
+      }
+    }
   }
 
   // ---------- renderer ----------
@@ -111,6 +284,8 @@
         const api = IZZA.api; if(!api || !api.ready) return;
         if(!isMPWorld()) return; // do not render in SOLO
 
+        pruneStale(now);
+
         const cvs = document.getElementById('game'); if(!cvs) return;
         const ctx = cvs.getContext('2d');
         const S=api.DRAW, scale=S/api.TILE;
@@ -118,22 +293,20 @@
         ctx.save(); ctx.imageSmoothingEnabled=false;
 
         for(const p of REMOTES){
-          if(!p || !p._imgs) continue;
+          const snap = sampleBuffered(p, now);
+          const sx=(snap.x - api.camera.x)*scale, sy=(snap.y - api.camera.y)*scale;
+          const row = DIR_INDEX[snap.facing] || 0;
+          const comp = p.composite;
 
-          p.moving = (Math.abs(p.x - p._lastX) + Math.abs(p.y - p._lastY)) > 0.5;
-          p._lastX = p.x; p._lastY = p.y;
-          if(p.moving) p.animTime = (p.animTime||0) + 16;
-
-          const sx=(p.x - api.camera.x)*scale, sy=(p.y - api.camera.y)*scale;
-          const row = DIR_INDEX[p.facing] || 0;
-          const drawLayer = (img, cols)=>{
-            if(!img) return;
-            const frame = currentFrame(cols, p.moving, p.animTime||0);
-            ctx.drawImage(img, frame*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
-          };
-          drawLayer(p._imgs.body,   p._cols.body);
-          drawLayer(p._imgs.outfit, p._cols.outfit);
-          drawLayer(p._imgs.hair,   p._cols.hair);
+          if(comp && comp.img){
+            const cols = Math.max(1, comp.cols|0);
+            const t = Math.floor(now/120)%cols; // simple walk frame
+            ctx.drawImage(comp.img, t*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
+          }else{
+            // placeholder until composite finishes (prevents “invisible” players)
+            ctx.fillStyle='rgba(80,120,200,0.85)';
+            ctx.fillRect(sx, sy, S, S);
+          }
 
           // nameplate
           ctx.fillStyle = 'rgba(8,12,20,.85)';
@@ -144,7 +317,7 @@
         }
 
         ctx.restore();
-      }catch{}
+      }catch(e){}
     });
   }
 
@@ -154,13 +327,11 @@
     try{
       IZZA?.api?.setMultiplayerMode?.(!!on);
 
-      // Hide mission HUD + prompts
       const nodes = document.querySelectorAll(
         '[data-ui="mission-hud"], #missionHud, .mission-hud, .mission-prompt, [data-ui="mission-prompt"]'
       );
       nodes.forEach(n=> n.style.display = on ? 'none' : '');
 
-      // Broadcast to any listeners
       window.dispatchEvent(new CustomEvent('izza-missions-toggle', { detail:{ enabled: !on }}));
     }catch{}
   }
@@ -169,9 +340,7 @@
   function setDuelMode(on){
     try{
       const hideSel = [
-        // pedestrians / generic NPCs
         '.npc', '[data-npc]', '.pedestrian', '[data-role="npc"]',
-        // cops / authorities
         '.cop', '[data-cop]', '.police', '.swat', '.military', '[data-role="cop"]'
       ].join(',');
 
@@ -228,8 +397,8 @@
     disarmTimers();
     if(!isMPWorld()) return;
     heartbeatT = setInterval(sendHeartbeat, 4000);
-    tickT      = setInterval(sendPos,      400);
-    rosterT    = setInterval(pullRoster,   1500);
+    tickT      = setInterval(sendPos,      400);   // keep your cadence
+    rosterT    = setInterval(pullRoster,   800);   // a bit faster → steadier buffer
     sendHeartbeat();
     pullRoster();
   }
@@ -264,7 +433,6 @@
     if(nextWorld==='solo'){
       disarmTimers();
       setMultiplayerMode(false);
-      // also ensure duel visuals are cleared (e.g., if player quit during duel)
       setDuelMode(false);
       return;
     }
@@ -274,7 +442,6 @@
     armTimers();
   }
 
-  // Core or other plugins can broadcast this
   try{ IZZA?.on?.('world-changed', ({ world })=> onWorldChanged(world)); }catch{}
   window.addEventListener('storage', (ev)=>{
     if (ev.key==='izzaWorldId'){
@@ -283,11 +450,9 @@
   });
 
   // ---------- Duel wiring ----------
-  // Enter duel mode when multiplayer client starts a match; exit when finished
   (function wireDuelToggles(){
     try{ IZZA?.on?.('mp-start',  ()=> setDuelMode(true)); }catch{}
     try{ IZZA?.on?.('mp-finish', ()=> setDuelMode(false)); }catch{}
-    // Safety hooks if your duel client emits these:
     try{ IZZA?.on?.('duel-round-start',   ()=> setDuelMode(true)); }catch{}
     try{ IZZA?.on?.('duel-match-finish',  ()=> setDuelMode(false)); }catch{}
   })();
@@ -298,7 +463,7 @@
     IZZA.api.remotePlayers = REMOTES;
     if(!IZZA.api.clearRemotePlayers) IZZA.api.clearRemotePlayers = clearRemotePlayers;
     if(!IZZA.api.getAppearance) IZZA.api.getAppearance = readAppearance;
-    // Optional: expose duel toggles in case other systems want to force it
+    if(!IZZA.api.getInventorySnapshot) IZZA.api.getInventorySnapshot = readInventory;
     IZZA.api.setDuelMode = setDuelMode;
   }
 
