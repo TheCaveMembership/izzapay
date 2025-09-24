@@ -12,8 +12,12 @@
   let api = null;
 
   // --- global mission enable check (Solo only) -------------------------------
+  // MP worlds (1–4) should set window.__IZZA_MISSIONS_ENABLED__ = false
   function missionsEnabled(){
-    try { return !!window.__IZZA_MISSIONS_ENABLED__; } catch { return true; }
+    try {
+      if (typeof window.__IZZA_MISSIONS_ENABLED__ === 'boolean') return window.__IZZA_MISSIONS_ENABLED__;
+    } catch {}
+    return true; // default to ON in Solo if not specified
   }
 
   // ---------- helpers: inventory (wallet untouched) ----------
@@ -45,14 +49,12 @@
   function hqDoorGrid(){
     if (_hqBase) return _hqBase;
     const t = api?.TILE || 60;
-    // Prefer real doorSpawn; if missing, snapshot player's current pos ONCE
     const d = (api?.doorSpawn && Number.isFinite(api.doorSpawn.x))
       ? api.doorSpawn
       : { x: api?.player?.x||0, y: api?.player?.y||0 };
     _hqBase = { gx: Math.round(d.x/t), gy: Math.round(d.y/t) };
     return _hqBase;
   }
-  // same offsets as your original mission script
   function cardboardBoxGrid(){
     const d = hqDoorGrid();
     return { x: d.gx + 3, y: d.gy + 10 };
@@ -177,6 +179,82 @@
     }catch{}
   }
 
+  // ---------- tiny, safe confirm (custom popup) ----------
+  function confirmPickup(cb){
+    try{
+      const woodTex = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
+          <defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#3b2a1a"/><stop offset="0.5" stop-color="#5a4330"/><stop offset="1" stop-color="#2a1a10"/></linearGradient></defs>
+          <rect width="100%" height="100%" fill="url(#g)"/>
+          <g opacity="0.45" stroke="#1a110b" stroke-width="2" fill="none">
+            <path d="M0,18 C30,8 60,26 120,14"/><path d="M0,42 C25,30 70,48 120,34"/><path d="M10,10 L20,20 M40,5 L44,15 M80,25 L92,40"/>
+          </g>
+        </svg>`);
+      const skullBG = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><g opacity="0.12" fill="#cfd8dc">
+          <path d="M40 10c-9 0-16 7-16 16v5c0 5 3 7 6 9v8c0 1 .8 2 2 2h2c1 0 2-.9 2-2v-4h8v4c0 1 .9 2 2 2h2c1 0 2-.9 2-2v-8c3-2 6-4 6-9v-5c0-9-7-16-16-16zM30 28a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm20 0a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+        </g></svg>`);
+      let wrap = document.createElement('div');
+      wrap.id = 'm4BoxConfirm';
+      wrap.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:10000;';
+      const card = document.createElement('div');
+      card.style.cssText = 'position:relative;min-width:320px;max-width:560px;padding:18px 16px 14px;border-radius:14px;border:2px solid #6a4c1e;box-shadow:0 16px 44px rgba(0,0,0,.6), inset 0 0 40px rgba(255,215,64,.15);color:#0c0a08;overflow:hidden;' +
+        `background:
+           radial-gradient(120% 90% at -10% -10%, rgba(255,215,64,.20), rgba(0,0,0,0) 60%),
+           radial-gradient(130% 80% at 110% 110%, rgba(192,192,192,.22), rgba(0,0,0,0) 60%),
+           linear-gradient(135deg, #ffe7a4 0%, #ffd56a 35%, #f2b84a 60%, #e0a83f 100%),
+           url("data:image/svg+xml,${skullBG}") repeat`;
+      const spray = document.createElement('div');
+      spray.style.cssText = 'position:absolute;left:-10%;right:-10%;top:54px;height:14px;background:linear-gradient(90deg, rgba(0,229,255,.35), rgba(255,0,255,.35), rgba(57,255,20,.35));filter:blur(3px);transform:skewX(-12deg);opacity:.7;';
+      const title = document.createElement('div');
+      title.style.cssText = 'font-size:22px;font-weight:900;letter-spacing:1px;margin-bottom:8px;transform:skewX(-2deg) rotate(-0.4deg);' +
+        `background-image:url("data:image/svg+xml,${woodTex}"); -webkit-background-clip:text; background-clip:text; color:transparent;` +
+        'text-shadow:0 1px 0 rgba(0,0,0,0.65), 0 2px 0 rgba(0,0,0,0.45);';
+      title.textContent = 'A cardboard box?';
+      const rhyme = document.createElement('div');
+      rhyme.style.cssText = 'margin:10px 0 14px;font-weight:900;line-height:1.35;color:#0b1935;text-shadow:0 1px 0 rgba(255,255,255,0.06), 0 2px 0 rgba(0,0,0,0.45);';
+      rhyme.innerHTML = `<div style="transform:rotate(-0.4deg)">
+          Hmmm… should I grab it or walk away?<br>
+          Feels simple, but something about this choice hits different 📦 🤔 💭<br><br>
+          Could change the path I'm on, could shape what's next. There are some boats by the docks? I wonder what they could lead to? 🏝️<br><br>
+          <strong>Take it… or leave it? ☠️ ⚓️</strong>
+        </div>`;
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;align-items:center;';
+      const noBtn = document.createElement('button');
+      noBtn.textContent = 'Leave it';
+      noBtn.style.cssText = 'background:#263447;color:#cfe3ff;border:0;border-radius:8px;padding:8px 12px;font-weight:800;cursor:pointer;';
+      const yesBtn = document.createElement('button');
+      yesBtn.textContent = 'Take the Box';
+      yesBtn.style.cssText = 'background:#1f6feb;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:900;cursor:pointer;box-shadow:0 0 0 0 rgba(255,210,63,.0);';
+      let pulse = 0; (function pulseBtn(){ if (!wrap.parentNode) return; pulse += 0.12; const glow=(Math.sin(pulse)*0.5+0.5)*18+12; yesBtn.style.boxShadow=`0 0 ${glow}px ${Math.round(glow*0.06)}px rgba(255,210,63,.7)`; requestAnimationFrame(pulseBtn); })();
+
+      btnRow.appendChild(noBtn); btnRow.appendChild(yesBtn);
+      card.appendChild(spray); card.appendChild(title); card.appendChild(rhyme); card.appendChild(btnRow);
+      wrap.appendChild(card); document.body.appendChild(wrap);
+
+      function close(){ wrap.remove(); }
+      noBtn.addEventListener('click', close, {capture:true});
+      wrap.addEventListener('click', (e)=>{ if(e.target===wrap) close(); }, {capture:true});
+      window.addEventListener('keydown', (e)=>{ if((e.key||'').toLowerCase()==='escape') close(); }, {capture:true});
+
+      yesBtn.addEventListener('click', ()=>{
+        try{ cb?.(); }catch{}
+        try{
+          const px = api.player.x + 16, py = api.player.y + 16;
+          const scr = worldToScreen(px, py);
+          spawnFireworksAt(scr.sx, scr.sy - 10);
+        }catch{
+          const gc = document.getElementById('game');
+          spawnFireworksAt(gc.width/2, gc.height/2);
+        }
+        close();
+      }, {capture:true});
+      return;
+    }catch{}
+    if (window.confirm('Pick up the cardboard box?')) cb?.();
+  }
+
   // ---------- draw: simple 3D-looking box ----------
   function draw3DBox(ctx, sx, sy, S){
     ctx.save();
@@ -211,7 +289,7 @@
   }
 
   // ---------- B: pick up box ONLY when standing on it ----------
-  function onB(e){
+  function onBCore(e){
     if (!api?.ready) return;
     if (!missionsEnabled()) return; // no pickup in MP
     if (localStorage.getItem('izzaMapTier') !== '2') return;
@@ -234,6 +312,28 @@
         try{ IZZA.toast?.('Cardboard Box added to Inventory'); }catch{}
       });
     }
+  }
+
+  // Robust wiring: delegate click from document (capture) so it survives re-renders
+  let _delegatedClick = null, _keydown = null;
+  function wireB(){
+    // remove previous if any
+    if (_delegatedClick){ document.removeEventListener('click', _delegatedClick, true); }
+    if (_keydown){ window.removeEventListener('keydown', _keydown, true); }
+
+    _delegatedClick = function(e){
+      // accept clicks on #btnB or elements inside it
+      const t = e.target;
+      const btn = (t?.id === 'btnB') ? t : t?.closest?.('#btnB');
+      if (!btn) return;
+      onBCore(e);
+    };
+    document.addEventListener('click', _delegatedClick, true); // capture so we run even if UI stops bubbling
+
+    _keydown = function(e){
+      if ((e.key||'').toLowerCase() === 'b') onBCore(e);
+    };
+    window.addEventListener('keydown', _keydown, true);
   }
 
   // ---------- Mission 4 completion (requires full cardboard set) ----------
@@ -276,9 +376,7 @@
         return;
       }catch{}
       const el = document.createElement('div');
-      el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);' +
-                         'background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;' +
-                         'border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
+      el.style.cssText = 'position:absolute;left:50%;top:18%;transform:translateX(-50%);background:rgba(10,12,20,0.92);color:#b6ffec;padding:14px 18px;border:2px solid #36f;border-radius:8px;font-family:monospace;z-index:9999';
       el.innerHTML = '<strong>Mission Completed</strong><div>You’ve completed mission 4.</div>';
       (document.getElementById('gameCard')||document.body).appendChild(el);
       setTimeout(()=>{ el.remove(); }, 2000);
@@ -338,7 +436,7 @@
 
     IZZA.on?.('resume', ({inventoryMeta})=>{
       if ((inventoryMeta?.missionsCompleted|0) >= 4) {
-        try{ localStorage.setItem(M4_DONE_KEY, '1'); }catch{}
+        try{ localStorage.setItem('izzaMission4_done', '1'); }catch{}
       }
       spendCardboardBoxOnceIfReady();
     });
@@ -347,16 +445,15 @@
   // ---------- hook up ----------
   IZZA.on?.('ready', (a)=>{
     api = a;
-    hqDoorGrid(); // snapshot the HQ base once so the box tile stays fixed
+    hqDoorGrid();            // snapshot once so the box tile stays fixed
     IZZA.on?.('render-under', renderBox);
-    document.getElementById('btnB')?.addEventListener('click', onB, true);
-    window.addEventListener('keydown', e=>{ if((e.key||'').toLowerCase()==='b') onB(e); }, true);
+    wireB();                 // robust B wiring (delegated click + keydown)
   });
 
-  // --- (optional) react to Solo/MP toggle to force repaint without box -------
-  window.addEventListener('izza-missions-toggle', (ev)=>{
-    const enabled = !!(ev?.detail?.enabled);
-    if (!enabled) { try { IZZA.emit?.('render-under'); } catch {} }
+  // --- react to Solo/MP toggle to force repaint and keep wiring alive ---------
+  window.addEventListener('izza-missions-toggle', ()=>{
+    try { IZZA.emit?.('render-under'); } catch {}
+    wireB(); // in case UI rebuilt the B button
   });
 
 })();
