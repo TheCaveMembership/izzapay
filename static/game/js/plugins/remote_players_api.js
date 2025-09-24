@@ -1,10 +1,9 @@
-// Remote Players API — v2.2
-// Smooth interpolation + skinKey compositing cache + robust asset loads
-// Equipped-first armor replication (incl. crafted) + no "blue box" flicker
-// SOLO-aware + world presence via REST (unchanged endpoints)
-// Missions hidden only in MP worlds; Duel mode hides pedestrians/cops (vehicles kept)
+// Remote Players API — v2.3
+// Matches core v3.17 tinting (skin tone + hair color) and slot/equipped armor
+// Smooth interpolation + last-good composite fallback (no blue-box flicker)
+// SOLO-aware + REST presence (unchanged endpoints)
 (function(){
-  const BUILD = 'v2.2-remote-players-smooth+skinKey+equipped-first+lastgood';
+  const BUILD = 'v2.3-remote-players-core317-tint+equipped-slots';
   console.log('[IZZA PLAY]', BUILD);
 
   // -------- config / helpers ----------
@@ -24,39 +23,34 @@
   const getWorld = ()=> localStorage.getItem('izzaWorldId') || 'solo';
   const isMPWorld = ()=> { const w = getWorld(); return w!=='solo'; };
 
-  // ---- appearance/inventory mirror ----
+  // ---- profile appearance ----
   function readAppearance(){
     try{
       const p = window.__IZZA_PROFILE__ || {};
-      return (p.appearance && Object.keys(p.appearance).length) ? p.appearance : {
-        sprite_skin: p.sprite_skin || localStorage.getItem('sprite_skin') || 'default',
-        hair:        p.hair        || localStorage.getItem('hair')        || 'short',
-        outfit:      p.outfit      || localStorage.getItem('outfit')      || 'street',
-        body_type:   p.body_type   || 'male',
-        hair_color:  p.hair_color  || '',
-        skin_tone:   p.skin_tone   || 'light',
-        female_outfit_color: p.female_outfit_color || 'blue'
+      const a = p.appearance || p || {};
+      return {
+        username: p.username || 'guest',
+        body_type: a.body_type || 'male',
+        sprite_skin: a.sprite_skin || 'default',
+        skin_tone: a.skin_tone || 'light',
+        outfit: a.outfit || 'street',
+        hair: a.hair || 'short',
+        hair_color: a.hair_color || 'black',
+        female_outfit_color: a.female_outfit_color || 'blue'
       };
-    }catch{ return { sprite_skin:'default', hair:'short', outfit:'street' }; }
+    }catch{ return { body_type:'male', sprite_skin:'default', hair:'short', outfit:'street', skin_tone:'light', hair_color:'black', female_outfit_color:'blue' }; }
   }
 
+  // ---- inventory (reads your core store if exposed) ----
   function readInventory(){
+    // Prefer your core’s getInventory() if present (keeps slot/equipped flags)
+    try{ if (typeof IZZA?.api?.getInventory==='function') return IZZA.api.getInventory() || {}; }catch{}
+    // Fallback to older exposure
     const inv = {};
-    try{ Object.assign(inv, (IZZA?.api?.getInventory?.())||{}); }catch{}
     try{ Object.assign(inv, (IZZA?.api?.getArmory?.())||{}); }catch{}
     try{ inv.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
-    // NEW: prioritize equipped snapshot if available
-    try{
-      inv.equipped =
-        (IZZA?.api?.inventory?.equipped?.()) ||
-        (IZZA?.api?.getEquipped?.()) ||
-        null; // { helm:'armor_x_helm', vest:'armor_x_vest', arms:'armor_x_arms', legs:'armor_x_legs' }
-    }catch{}
     return inv;
   }
-
-  // export a snapshot helper for other modules (e.g., MP client)
-  try{ if(!IZZA.api.getInventorySnapshot){ IZZA.api.getInventorySnapshot = readInventory; } }catch{}
 
   // -------- remote players store ----------
   const REMOTES = [];
@@ -68,23 +62,13 @@
     try{ if (window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
   }
 
-  // ---------- ASSETS & SKIN CACHE ----------
+  // ---------- ASSETS & TINTING (matches core v3.17) ----------
   const FRAME_W=32, FRAME_H=32, ROWS=4;
   const DIR_INDEX = { down:0, right:1, left:2, up:3 };
 
-  // Robust loader with one retry to avoid transient misses
   function loadImg(src){
-    return new Promise((res)=>{
-      const tryOnce = (url, n=0)=>{
-        const i=new Image();
-        i.onload=()=>res(i);
-        i.onerror=()=> n<1 ? setTimeout(()=>tryOnce(url, n+1), 120) : res(null);
-        i.src=url;
-      };
-      tryOnce(src);
-    });
+    return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; });
   }
-
   async function loadLayer(kind, name){
     const base = '/static/game/sprites/' + kind + '/';
     const try2 = await loadImg(base + encodeURIComponent(name + ' 2') + '.png');
@@ -93,102 +77,204 @@
     if (try1) return { img: try1, cols: Math.max(1, Math.floor(try1.width / FRAME_W)) };
     return { img: null, cols: 1 };
   }
+  function emptyLayer(){ const c=document.createElement('canvas'); c.width=32; c.height=32; return {img:c, cols:1}; }
 
-  // Order: back-to-front (body first, weapon last so it sits above)
-  const LAYER_ORDER = [ 'body', 'legs', 'arms', 'outfit', 'vest', 'helm', 'hat', 'hair', 'weapon' ];
+  // ==== same ramps as core ====
+  const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
+  const SKIN_TO = {
+    light:  ["#FFE7D6","#F3C6A7","#D8A187"],
+    medium: ["#F1BD94","#D79A73","#B67955"],
+    tan:    ["#E2A878","#C88756","#9F663C"],
+    dark:   ["#B9825B","#9A6644","#714A31"],
+    deep:   ["#8B5A3B","#6A402A","#432818"]
+  };
+  const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
+  const FEMALE_DRESS_TO = {
+    blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
+    red:    ["#FF7A7A","#E24C4C","#B12F2F"],
+    green:  ["#7DD68A","#4CB56B","#2F7F47"],
+    purple: ["#B796FF","#8C6BE0","#6A49B8"],
+    yellow: ["#FFE08A","#E7C45A","#B89433"],
+    pink:   ["#FFA6D6","#E57CB2","#C45C96"],
+    black:  ["#3A3A3D","#232326","#0E0E10"],
+    white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
+    brown:  ["#A87854","#7C563A","#593D29"],
+    orange: ["#FFB46A","#E4873A","#B65E1F"]
+  };
+  const HAIR_TO = {
+    black:  ["#2C2C31","#17171B","#0A0A0D"],
+    brown:  ["#7A5336","#5C3E28","#3E2B1B"],
+    blonde: ["#FBE58F","#E5C35A","#B89433"],
+    red:    ["#E65F35","#B54426","#8E321A"],
+    white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
+    blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
+    green:  ["#7DD68A","#4CB56B","#2F7F47"],
+    pink:   ["#FFA6D6","#E57CB2","#C45C96"]
+  };
 
-  // Parse “armor_<material>_(helm|vest|arms|legs)” → {kind, name}
-  function parseArmorId(id){
-    const m = /^armor_([a-z0-9]+)_(helm|vest|arms|legs)$/i.exec(id);
-    if(!m) return null;
-    return { kind: m[2], name: `${m[1]}_${m[2]}` };
+  const hexToRgb = h => { const n=parseInt(String(h).replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+  const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+
+  function extractThreeToneRamp(img){
+    const w=img.width,h=img.height;
+    const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+    const c=oc.getContext('2d',{willReadFrequently:true});
+    c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+    const d=c.getImageData(0,0,w,h).data;
+    function lum(r,g,b){ return 0.2126*r + 0.7152*g + 0.0722*b; }
+    const samples=[];
+    for(let i=0;i<d.length;i+=16){
+      const a=d[i+3]; if(a<12) continue;
+      const r=d[i],g=d[i+1],b=d[i+2];
+      samples.push({r,g,b,L:lum(r,g,b)});
+    }
+    if(samples.length<12) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+    samples.sort((a,b)=>a.L-b.L);
+    const pick = q => {
+      const idx = Math.max(0, Math.min(samples.length-1, Math.floor(q*(samples.length-1))));
+      const s = samples[idx];
+      return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');
+    };
+    return [pick(0.2), pick(0.55), pick(0.85)];
+  }
+  function paletteSwapCanvas(img, fromRampHex, toRampHex, tolerance=2000){
+    const from = fromRampHex.map(hexToRgb), to = toRampHex.map(hexToRgb);
+    const c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
+    const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
+    const id=g.getImageData(0,0,c.width,c.height), d=id.data;
+    for(let i=0;i<d.length;i+=4){
+      if(d[i+3]===0) continue;
+      const p={r:d[i],g:d[i+1],b:d[i+2]};
+      let k=0, best=1e9; for(let j=0;j<from.length;j++){ const s=dist2(p,from[j]); if(s<best){best=s;k=j;} }
+      if(best<=tolerance){ const t=to[k]||to[1]||to[0]; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+    }
+    g.putImageData(id,0,0);
+    return c;
+  }
+  function overlayTintCanvas(img, hex, strength=1.0){
+    const w=img.width,h=img.height;
+    const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+    const c=oc.getContext('2d',{willReadFrequently:true});
+    c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+    const id=c.getImageData(0,0,w,h), d=id.data;
+    const n = parseInt(String(hex).replace('#',''),16);
+    const tr=(n>>16)&255, tg=(n>>8)&255, tb=(n>>0)&255;
+    function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255); }
+    for(let i=0;i<d.length;i+=4){
+      if(d[i+3]===0) continue;
+      const r=ov(d[i],tr), g=ov(d[i+1],tg), b=ov(d[i+2],tb);
+      d[i]=Math.round(d[i]*(1-strength)+r*strength);
+      d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+      d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+    }
+    c.putImageData(id,0,0);
+    return oc;
   }
 
-  // Convert inventory (+crafted + equipped) into a list of sprite layers to stack
-  function invToLayers(inv){
-    const ap = readAppearance();
+  function tintBodyLayer(pack, ap){
+    try{
+      const isFemale = (ap.body_type==='female');
+      const skin = SKIN_TO[ap.skin_tone] || SKIN_TO.light;
+      let canvas = paletteSwapCanvas(pack.img, SKIN_BASE, skin, 4000);
+      if(isFemale){
+        const dress = FEMALE_DRESS_TO[ap.female_outfit_color] || FEMALE_DRESS_TO.blue;
+        canvas = paletteSwapCanvas(canvas, FEMALE_DRESS_BASE, dress, 4000);
+      }
+      return { img: canvas, cols: pack.cols };
+    }catch{ return pack; }
+  }
+  function tintHairLayer(pack, ap){
+    try{
+      const target = HAIR_TO[ap.hair_color] || HAIR_TO.black;
+      const detected = extractThreeToneRamp(pack.img);
+      let canvas = paletteSwapCanvas(pack.img, detected, target, 4000);
+
+      // tiny diff test; if no visible change, force overlay
+      const g = canvas.getContext('2d'), before = document.createElement('canvas');
+      before.width=pack.img.width; before.height=pack.img.height;
+      const gb=before.getContext('2d'); gb.imageSmoothingEnabled=false; gb.drawImage(pack.img,0,0);
+      const A = gb.getImageData(0,0,before.width,before.height).data;
+      const B = g.getImageData(0,0,canvas.width,canvas.height).data;
+      let diffs=0; for(let i=0;i<B.length;i+=16){ if(A[i]!==B[i]||A[i+1]!==B[i+1]||A[i+2]!==B[i+2]){ diffs++; if(diffs>20) break; } }
+      if(diffs<=20) canvas = overlayTintCanvas(pack.img, target[1], 1.0);
+
+      return { img: canvas, cols: pack.cols };
+    }catch{ return pack; }
+  }
+
+  // ---- layer order (hair under helm/hat) ----
+  const LAYER_ORDER = [ 'body', 'legs', 'arms', 'outfit', 'hair', 'vest', 'helm', 'hat', 'weapon' ];
+
+  // Map your inventory slot/id to sprite folder + name
+  function invToLayers(inv, ap){
     const layers = [];
 
-    const c = (k)=> (inv?.[k]?.count|0)>0;
+    // base sheets (note: outfit is skipped for female, like core)
+    const bodyName = ap.body_type==='female' ? `${ap.sprite_skin}__female_wide` : ap.sprite_skin;
+    layers.push({ kind:'body',   name: bodyName, _tint:'body' });
+    if(ap.body_type!=='female') layers.push({ kind:'outfit', name: ap.outfit || 'street' });
+    layers.push({ kind:'hair',   name: ap.hair   || 'short', _tint:'hair' });
 
-    // Base appearance (always)
-    layers.push({ kind:'body',   name:(ap.sprite_skin || 'default') });
-    layers.push({ kind:'outfit', name:(ap.outfit || 'street') });
-    layers.push({ kind:'hair',   name:(ap.hair   || 'short') });
-
-    // --- NEW: prefer explicit equipped slots if present ---
-    const eq = inv?.equipped || null;
-    if (eq) {
-      if (eq.legs) { const p=parseArmorId(eq.legs); if(p) layers.push({kind:'legs', name:p.name}); }
-      if (eq.arms) { const p=parseArmorId(eq.arms); if(p) layers.push({kind:'arms', name:p.name}); }
-      if (eq.vest) { const p=parseArmorId(eq.vest); if(p) layers.push({kind:'vest', name:p.name}); }
-      if (eq.helm) { const p=parseArmorId(eq.helm); if(p) layers.push({kind:'helm', name:p.name}); }
-    } else {
-      // Fallback to counts (legacy)
-      if(c('armor_cardboard_legs') || c('cardboard_legs')) layers.push({kind:'legs', name:'cardboard_legs'});
-      if(c('armor_cardboard_arms') || c('cardboard_arms')) layers.push({kind:'arms', name:'cardboard_arms'});
-      if(c('armor_cardboard_vest') || c('cardboard_chest'))layers.push({kind:'vest', name:'cardboard_vest'});
-      if(c('armor_cardboard_helm') || c('cardboard_helm')) layers.push({kind:'helm', name:'cardboard_helm'});
-    }
-
-    // Generic armor IDs (auto-map any material set you add later)
+    // Equipped-first: look for entries with slot + equipped
+    const slotMap = { head:'helm', chest:'vest', legs:'legs', arms:'arms', hat:'hat' };
     Object.keys(inv||{}).forEach(id=>{
-      if(!c(id)) return;
-      const parsed = parseArmorId(id);
-      if(parsed) layers.push(parsed);
-    });
-
-    // Crafted armor / cosmetics
-    Object.keys(inv?.crafted||{}).forEach(k=>{
-      const val = inv.crafted[k];
-      const on  = (typeof val==='object') ? ((val.count|0)>0) : !!val;
+      const e = inv[id];
+      if(!e || typeof e!=='object') return;
+      const on = !!(e.equipped || e.equip || (e.equippedCount|0)>0);
       if(!on) return;
 
-      // crafted “armor_<material>_<part>”
-      const parsed = parseArmorId(k);
-      if(parsed) layers.push(parsed);
+      // Prefer explicit slot
+      const slot = (e.slot||'').toLowerCase();
+      const kind = slotMap[slot] || (
+        /helmet|helm/i.test(id) ? 'helm' :
+        /vest|chest/i.test(id)  ? 'vest' :
+        /legs|pants/i.test(id)  ? 'legs' :
+        /arms|sleeve/i.test(id) ? 'arms' :
+        /hat|crown/i.test(id)   ? 'hat'  : null
+      );
+      if(!kind) return;
 
-      // Named cosmetics & hats
-      if(/^hat_/.test(k)) layers.push({ kind:'hat', name:k.replace(/^hat_/,'') });
-      if(/^(helm|vest|arms|legs|weapon|hair|outfit)_[a-z0-9]+$/i.test(k)){
-        const [kind] = k.split('_', 2);
-        layers.push({ kind, name: k.slice(kind.length+1) });
+      // Derive sprite name (normalize: “CardboardHelmet” → “cardboard_helm”)
+      const base = String(id).replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
+      let name = base;
+      // common transforms for your sets
+      name = name
+        .replace(/helmet|_helmet/g,'_helm')
+        .replace(/_chest/g,'_vest')
+        .replace(/_arms$/,'_arms')
+        .replace(/_legs$/,'_legs');
+
+      // If set prefix present (cardboard/pumpkin), prefer "<set>_<part>"
+      // e.g. "cardboardHelmet" -> "cardboard_helm"
+      if(/cardboard/.test(name)||/pumpkin/.test(name)){
+        const set = /cardboard/.test(name) ? 'cardboard' : 'pumpkin';
+        const part = (kind==='helm'?'helm':kind);
+        name = `${set}_${part}`;
       }
-      if(k==='gold_crown') layers.push({ kind:'hat', name:'gold_crown' });
+
+      layers.push({ kind, name });
     });
 
-    // Weapons (pick one — priority order)
-    const weaponKeys = ['uzi','shotgun','sniper','pistol','smg','rifle'];
-    for(const w of weaponKeys){
-      if(c('wpn_'+w) || c('weapon_'+w) || inv?.crafted?.['weapon_'+w]){
-        layers.push({ kind:'weapon', name:w }); break;
-      }
-    }
-
-    // Ensure layer order
+    // If no explicit weapon via equipped crafted, still show held weapon from core HUD? (skip here)
     layers.sort((a,b)=> LAYER_ORDER.indexOf(a.kind) - LAYER_ORDER.indexOf(b.kind));
     return layers;
   }
 
-  // skinKey = deterministic hash of appearance + inventory (counts + crafted + equipped)
+  // skinKey = hash of appearance + “equipped view” (so swaps trigger rebuild)
   function makeSkinKey(ap, inv){
     try{
-      const normInv = Object.keys(inv||{}).filter(k=>k!=='crafted' && k!=='equipped').sort()
-        .map(k => k+':' + ((inv[k]?.count|0)||0));
-
-      const normCraft = Object.keys(inv?.crafted||{}).sort()
-        .map(k => k+':' + (typeof inv.crafted[k]==='object' ? (inv.crafted[k].count|0) : (inv.crafted[k]?1:0)));
-
-      const normEq = inv?.equipped ? ['helm','vest','arms','legs']
-        .map(sl => sl+':' + (inv.equipped[sl]||'')).join('|') : '';
-
+      const eqBits=[];
+      Object.keys(inv||{}).forEach(k=>{
+        const e=inv[k];
+        if(!e||typeof e!=='object') return;
+        if(e.slot && (e.equipped||e.equip||(e.equippedCount|0)>0)) eqBits.push(e.slot+':'+k);
+      });
+      eqBits.sort();
       const key = {
-        body: ap?.sprite_skin||'default',
-        hair: ap?.hair||'short',
-        outfit: ap?.outfit||'street',
-        inv: normInv,
-        crafted: normCraft,
-        eq: normEq
+        body: ap.body_type+'|'+ap.sprite_skin+'|'+ap.skin_tone+'|'+ap.female_outfit_color,
+        hair: ap.hair+'|'+ap.hair_color,
+        outfit: ap.outfit,
+        eq: eqBits
       };
       return JSON.stringify(key);
     }catch{ return 'default'; }
@@ -196,8 +282,19 @@
 
   const SKIN_CACHE = Object.create(null); // skinKey -> {img, cols}
 
-  async function buildComposite(skinKey, layers){
-    const loaded = await Promise.all(layers.map(l=>loadLayer(l.kind, l.name)));
+  async function buildComposite(ap, inv){
+    const layers = invToLayers(inv, ap);
+
+    // Load all base sheets (no tint yet)
+    const loaded = await Promise.all(layers.map(l=> loadLayer(l.kind, l.name)));
+    // Apply tints on the fly to *matching* layers
+    for(let i=0;i<layers.length;i++){
+      const meta = layers[i];
+      if(!loaded[i] || !loaded[i].img) continue;
+      if(meta._tint==='body') loaded[i] = tintBodyLayer(loaded[i], ap);
+      else if(meta._tint==='hair') loaded[i] = tintHairLayer(loaded[i], ap);
+    }
+
     const cols = Math.max(1, ...loaded.map(x=>x?.cols||1));
     const cvs = document.createElement('canvas');
     cvs.width  = cols*FRAME_W;
@@ -210,14 +307,13 @@
         const dx = col*FRAME_W, dy = row*FRAME_H;
         for(let i=0;i<layers.length;i++){
           const lay = loaded[i];
-          if(!lay || !lay.img) continue; // skip missing layers (prevents invisibility)
+          if(!lay || !lay.img) continue;
           const srcCol = Math.min(col, (lay.cols||1)-1);
           ctx.drawImage(lay.img, srcCol*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx, dy, FRAME_W, FRAME_H);
         }
       }
     }
-    SKIN_CACHE[skinKey] = { img:cvs, cols };
-    return SKIN_CACHE[skinKey];
+    return { img:cvs, cols };
   }
 
   async function getComposite(ap, inv){
@@ -225,19 +321,23 @@
     if(SKIN_CACHE[skinKey]) return SKIN_CACHE[skinKey];
     // Build lazily; placeholder entry avoids flicker
     const ph = SKIN_CACHE[skinKey] = { img:null, cols:1, _pending:true };
-    buildComposite(skinKey, invToLayers(inv))
-      .then(()=>{ ph._pending=false; })
-      .catch(()=>{ ph._pending=false; });
+    buildComposite(ap, inv)
+      .then(c=>{ SKIN_CACHE[skinKey] = c; })
+      .catch(()=>{ /* keep placeholder */ })
+      .finally(()=>{ ph._pending=false; });
     return ph;
   }
 
-  // ---------- INTERPOLATION BUFFER ----------
-  const BUFFER_MS = 140;        // render slightly behind for smoothness
-  const STALE_MS  = 5000;       // drop if no updates for this long
-  const MAX_SNAP  = 24;         // keep last N snapshots per player
+  // ---------- INTERPOLATION BUFFER (slightly larger for smoothness) ----------
+  const BUFFER_MS = 180;
+  const STALE_MS  = 5000;
+  const MAX_SNAP  = 24;
 
   function pushSnap(rp, x, y, facing){
     const t = Date.now();
+    const last = rp.buf[rp.buf.length-1];
+    // dedupe identical snaps
+    if(last && last.x===x && last.y===y && last.facing===facing) { rp.lastPacket=t; return; }
     rp.buf.push({t, x, y, facing});
     if(rp.buf.length>MAX_SNAP) rp.buf.splice(0, rp.buf.length-MAX_SNAP);
     rp.lastPacket = t;
@@ -269,13 +369,19 @@
       facing: (opts && opts.facing) || 'down',
       buf: [], lastPacket: 0,
       composite: { img:null, cols:1 }, compositeKey:'',
-      lastGoodComposite: null,            // NEW: stable fallback once something rendered
-      _bodyOnly: null                     // NEW: bare body sprite fallback
+      lastGoodComposite: null,
+      _bodyOnly: null
     };
     rp.compositeKey = makeSkinKey(rp.ap, rp.inv);
     getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; if(c && c.img) rp.lastGoodComposite = c; });
-    loadLayer('body', rp.ap.sprite_skin || 'default').then(b=>{ rp._bodyOnly = b; });
-    pushSnap(rp, rp.x, rp.y, rp.facing); // seed
+    // prepare body-only tinted fallback
+    (async ()=>{
+      const bodyName = rp.ap.body_type==='female' ? `${rp.ap.sprite_skin}__female_wide` : rp.ap.sprite_skin;
+      const raw = await loadLayer('body', bodyName) || emptyLayer();
+      const tin = tintBodyLayer(raw, rp.ap);
+      rp._bodyOnly = tin;
+    })();
+    pushSnap(rp, rp.x, rp.y, rp.facing);
     return rp;
   }
 
@@ -317,13 +423,14 @@
     IZZA.on('render-post', ({ now })=>{
       try{
         const api = IZZA.api; if(!api || !api.ready) return;
-        if(!isMPWorld()) return; // do not render in SOLO
+        if(!isMPWorld()) return;
 
         pruneStale(now);
 
         const cvs = document.getElementById('game'); if(!cvs) return;
         const ctx = cvs.getContext('2d');
         const S=api.DRAW, scale=S/api.TILE;
+
         ctx.save(); ctx.imageSmoothingEnabled=false;
 
         for(const p of REMOTES){
@@ -331,19 +438,16 @@
           const sx=(snap.x - api.camera.x)*scale, sy=(snap.y - api.camera.y)*scale;
           const row = DIR_INDEX[snap.facing] || 0;
 
-          // Prefer current composite, else last-good, else bare body, else tiny box
-          let drawn = false;
-          const comp = p.composite && p.composite.img ? p.composite : (p.lastGoodComposite || null);
+          // Prefer current composite, else last-good, else tinted body, else small box
+          let comp = (p.composite && p.composite.img) ? p.composite : (p.lastGoodComposite || null);
           if(comp && comp.img){
             const cols = Math.max(1, comp.cols|0);
-            const t = Math.floor(now/120)%cols; // simple walk frame
+            const t = Math.floor(now/120)%cols;
             ctx.drawImage(comp.img, t*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
-            drawn = true;
           }else if(p._bodyOnly && p._bodyOnly.img){
             const cols = Math.max(1, p._bodyOnly.cols|0);
             const t = Math.floor(now/120)%cols;
             ctx.drawImage(p._bodyOnly.img, t*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
-            drawn = true;
           }else{
             ctx.fillStyle='rgba(60,90,150,0.85)';
             ctx.fillRect(sx, sy, S, S);
@@ -363,7 +467,6 @@
   }
 
   // ---------- Modes ----------
-  // Multiplayer mode: missions hidden only (keep world population intact)
   function setMultiplayerMode(on){
     try{
       IZZA?.api?.setMultiplayerMode?.(!!on);
@@ -377,7 +480,6 @@
     }catch{}
   }
 
-  // Duel mode: hide pedestrians & cops; KEEP vehicles visible
   function setDuelMode(on){
     try{
       const hideSel = [
@@ -438,8 +540,8 @@
     disarmTimers();
     if(!isMPWorld()) return;
     heartbeatT = setInterval(sendHeartbeat, 4000);
-    tickT      = setInterval(sendPos,      400);   // keep your cadence
-    rosterT    = setInterval(pullRoster,   800);   // a bit faster → steadier buffer
+    tickT      = setInterval(sendPos,      400);
+    rosterT    = setInterval(pullRoster,   600);   // a touch faster than before for steadier buffer
     sendHeartbeat();
     pullRoster();
   }
@@ -449,7 +551,7 @@
     if(rosterT){ clearInterval(rosterT); rosterT=null; }
   }
 
-  // --- NEW: push updated loadout immediately on changes (equipped/crafted/etc)
+  // Push updated loadout immediately on changes (equipped/crafted/etc)
   function wireLoadoutPushOnce(){
     if (wireLoadoutPushOnce._done) return;
     wireLoadoutPushOnce._done = true;
@@ -465,11 +567,13 @@
       }catch{}
     };
 
-    ['inventory-changed','armor-equipped','gear-crafted','armor-crafted','resume']
-      .forEach(ev=> IZZA?.on?.(ev, bump));
+    ['inventory-changed','armor-equipped','gear-crafted','armor-crafted','resume','izza-inventory-changed']
+      .forEach(ev=> { try{ IZZA?.on?.(ev, bump); }catch{} });
+    // Also watch localStorage changes from other tabs
+    window.addEventListener('storage', (e)=>{ if(e.key==='izzaInventory') bump(); });
   }
 
-  // ---------- public bridge (for Worlds plugin, etc.) ----------
+  // ---------- public bridge ----------
   const localListeners = Object.create(null);
   function listen(type, cb){ (localListeners[type] ||= []).push(cb); }
   function fanout(type, data){ (localListeners[type]||[]).forEach(fn=>{ try{ fn(data); }catch(e){ console.warn(e); } }); }
@@ -531,7 +635,7 @@
   function boot(){
     installPublicAPI();
     installRenderer();
-    wireLoadoutPushOnce();   // NEW: start listening for equip/craft changes
+    wireLoadoutPushOnce();
     onWorldChanged(getWorld());
   }
 
