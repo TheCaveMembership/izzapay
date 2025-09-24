@@ -1,9 +1,10 @@
-// Remote Players API — v2.1
+// Remote Players API — v2.2
 // Smooth interpolation + skinKey compositing cache + robust asset loads
+// Equipped-first armor replication (incl. crafted) + no "blue box" flicker
 // SOLO-aware + world presence via REST (unchanged endpoints)
 // Missions hidden only in MP worlds; Duel mode hides pedestrians/cops (vehicles kept)
 (function(){
-  const BUILD = 'v2.1-remote-players-smooth+skinKey';
+  const BUILD = 'v2.2-remote-players-smooth+skinKey+equipped-first+lastgood';
   console.log('[IZZA PLAY]', BUILD);
 
   // -------- config / helpers ----------
@@ -38,13 +39,22 @@
       };
     }catch{ return { sprite_skin:'default', hair:'short', outfit:'street' }; }
   }
+
   function readInventory(){
     const inv = {};
     try{ Object.assign(inv, (IZZA?.api?.getInventory?.())||{}); }catch{}
     try{ Object.assign(inv, (IZZA?.api?.getArmory?.())||{}); }catch{}
     try{ inv.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
+    // NEW: prioritize equipped snapshot if available
+    try{
+      inv.equipped =
+        (IZZA?.api?.inventory?.equipped?.()) ||
+        (IZZA?.api?.getEquipped?.()) ||
+        null; // { helm:'armor_x_helm', vest:'armor_x_vest', arms:'armor_x_arms', legs:'armor_x_legs' }
+    }catch{}
     return inv;
   }
+
   // export a snapshot helper for other modules (e.g., MP client)
   try{ if(!IZZA.api.getInventorySnapshot){ IZZA.api.getInventorySnapshot = readInventory; } }catch{}
 
@@ -62,9 +72,19 @@
   const FRAME_W=32, FRAME_H=32, ROWS=4;
   const DIR_INDEX = { down:0, right:1, left:2, up:3 };
 
+  // Robust loader with one retry to avoid transient misses
   function loadImg(src){
-    return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; });
+    return new Promise((res)=>{
+      const tryOnce = (url, n=0)=>{
+        const i=new Image();
+        i.onload=()=>res(i);
+        i.onerror=()=> n<1 ? setTimeout(()=>tryOnce(url, n+1), 120) : res(null);
+        i.src=url;
+      };
+      tryOnce(src);
+    });
   }
+
   async function loadLayer(kind, name){
     const base = '/static/game/sprites/' + kind + '/';
     const try2 = await loadImg(base + encodeURIComponent(name + ' 2') + '.png');
@@ -75,9 +95,7 @@
   }
 
   // Order: back-to-front (body first, weapon last so it sits above)
-  const LAYER_ORDER = [
-    'body', 'legs', 'arms', 'outfit', 'vest', 'helm', 'hat', 'hair', 'weapon'
-  ];
+  const LAYER_ORDER = [ 'body', 'legs', 'arms', 'outfit', 'vest', 'helm', 'hat', 'hair', 'weapon' ];
 
   // Parse “armor_<material>_(helm|vest|arms|legs)” → {kind, name}
   function parseArmorId(id){
@@ -86,7 +104,7 @@
     return { kind: m[2], name: `${m[1]}_${m[2]}` };
   }
 
-  // Convert inventory (+crafted) into a list of sprite layers to stack
+  // Convert inventory (+crafted + equipped) into a list of sprite layers to stack
   function invToLayers(inv){
     const ap = readAppearance();
     const layers = [];
@@ -98,11 +116,20 @@
     layers.push({ kind:'outfit', name:(ap.outfit || 'street') });
     layers.push({ kind:'hair',   name:(ap.hair   || 'short') });
 
-    // Known cardboard aliases
-    if(c('armor_cardboard_legs') || c('cardboard_legs')) layers.push({kind:'legs', name:'cardboard_legs'});
-    if(c('armor_cardboard_arms') || c('cardboard_arms')) layers.push({kind:'arms', name:'cardboard_arms'});
-    if(c('armor_cardboard_vest') || c('cardboard_chest'))layers.push({kind:'vest', name:'cardboard_vest'});
-    if(c('armor_cardboard_helm') || c('cardboard_helm')) layers.push({kind:'helm', name:'cardboard_helm'});
+    // --- NEW: prefer explicit equipped slots if present ---
+    const eq = inv?.equipped || null;
+    if (eq) {
+      if (eq.legs) { const p=parseArmorId(eq.legs); if(p) layers.push({kind:'legs', name:p.name}); }
+      if (eq.arms) { const p=parseArmorId(eq.arms); if(p) layers.push({kind:'arms', name:p.name}); }
+      if (eq.vest) { const p=parseArmorId(eq.vest); if(p) layers.push({kind:'vest', name:p.name}); }
+      if (eq.helm) { const p=parseArmorId(eq.helm); if(p) layers.push({kind:'helm', name:p.name}); }
+    } else {
+      // Fallback to counts (legacy)
+      if(c('armor_cardboard_legs') || c('cardboard_legs')) layers.push({kind:'legs', name:'cardboard_legs'});
+      if(c('armor_cardboard_arms') || c('cardboard_arms')) layers.push({kind:'arms', name:'cardboard_arms'});
+      if(c('armor_cardboard_vest') || c('cardboard_chest'))layers.push({kind:'vest', name:'cardboard_vest'});
+      if(c('armor_cardboard_helm') || c('cardboard_helm')) layers.push({kind:'helm', name:'cardboard_helm'});
+    }
 
     // Generic armor IDs (auto-map any material set you add later)
     Object.keys(inv||{}).forEach(id=>{
@@ -112,26 +139,21 @@
     });
 
     // Crafted armor / cosmetics
-    // Accept either boolean flags (crafted[key]===true) or {count:1} style
     Object.keys(inv?.crafted||{}).forEach(k=>{
       const val = inv.crafted[k];
       const on  = (typeof val==='object') ? ((val.count|0)>0) : !!val;
       if(!on) return;
 
-      // Direct sprite layer names (e.g., crafted.gold_crown → hat: gold_crown)
-      if(/^hat_/.test(k)) layers.push({ kind:'hat', name:k.replace(/^hat_/,'') });
-
       // crafted “armor_<material>_<part>”
       const parsed = parseArmorId(k);
       if(parsed) layers.push(parsed);
 
-      // Single-name cosmetics (if you name crafted keys to match your sprite filenames)
+      // Named cosmetics & hats
+      if(/^hat_/.test(k)) layers.push({ kind:'hat', name:k.replace(/^hat_/,'') });
       if(/^(helm|vest|arms|legs|weapon|hair|outfit)_[a-z0-9]+$/i.test(k)){
-        const [kind, name] = k.split('_', 2);
+        const [kind] = k.split('_', 2);
         layers.push({ kind, name: k.slice(kind.length+1) });
       }
-
-      // Example: gold_crown (no prefix)
       if(k==='gold_crown') layers.push({ kind:'hat', name:'gold_crown' });
     });
 
@@ -148,25 +170,32 @@
     return layers;
   }
 
-  // skinKey = deterministic hash of appearance + inventory (counts + crafted flags)
+  // skinKey = deterministic hash of appearance + inventory (counts + crafted + equipped)
   function makeSkinKey(ap, inv){
     try{
-      const normInv = Object.keys(inv||{}).sort()
+      const normInv = Object.keys(inv||{}).filter(k=>k!=='crafted' && k!=='equipped').sort()
         .map(k => k+':' + ((inv[k]?.count|0)||0));
+
       const normCraft = Object.keys(inv?.crafted||{}).sort()
         .map(k => k+':' + (typeof inv.crafted[k]==='object' ? (inv.crafted[k].count|0) : (inv.crafted[k]?1:0)));
+
+      const normEq = inv?.equipped ? ['helm','vest','arms','legs']
+        .map(sl => sl+':' + (inv.equipped[sl]||'')).join('|') : '';
+
       const key = {
         body: ap?.sprite_skin||'default',
         hair: ap?.hair||'short',
         outfit: ap?.outfit||'street',
         inv: normInv,
-        crafted: normCraft
+        crafted: normCraft,
+        eq: normEq
       };
       return JSON.stringify(key);
     }catch{ return 'default'; }
   }
 
   const SKIN_CACHE = Object.create(null); // skinKey -> {img, cols}
+
   async function buildComposite(skinKey, layers){
     const loaded = await Promise.all(layers.map(l=>loadLayer(l.kind, l.name)));
     const cols = Math.max(1, ...loaded.map(x=>x?.cols||1));
@@ -181,7 +210,7 @@
         const dx = col*FRAME_W, dy = row*FRAME_H;
         for(let i=0;i<layers.length;i++){
           const lay = loaded[i];
-          if(!lay || !lay.img) continue;       // skip missing layers (prevents invisibility)
+          if(!lay || !lay.img) continue; // skip missing layers (prevents invisibility)
           const srcCol = Math.min(col, (lay.cols||1)-1);
           ctx.drawImage(lay.img, srcCol*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, dx, dy, FRAME_W, FRAME_H);
         }
@@ -190,17 +219,20 @@
     SKIN_CACHE[skinKey] = { img:cvs, cols };
     return SKIN_CACHE[skinKey];
   }
+
   async function getComposite(ap, inv){
     const skinKey = makeSkinKey(ap, inv);
     if(SKIN_CACHE[skinKey]) return SKIN_CACHE[skinKey];
-    // Build lazily; return a placeholder immediately so player never renders invisible
+    // Build lazily; placeholder entry avoids flicker
     const ph = SKIN_CACHE[skinKey] = { img:null, cols:1, _pending:true };
-    buildComposite(skinKey, invToLayers(inv)).then(()=>{ ph._pending=false; }).catch(()=>{ ph._pending=false; });
+    buildComposite(skinKey, invToLayers(inv))
+      .then(()=>{ ph._pending=false; })
+      .catch(()=>{ ph._pending=false; });
     return ph;
   }
 
   // ---------- INTERPOLATION BUFFER ----------
-  const BUFFER_MS = 140;        // how far behind real-time we render for smoothness
+  const BUFFER_MS = 140;        // render slightly behind for smoothness
   const STALE_MS  = 5000;       // drop if no updates for this long
   const MAX_SNAP  = 24;         // keep last N snapshots per player
 
@@ -216,7 +248,6 @@
     if(!b.length){
       return { x:rp.x, y:rp.y, facing:rp.facing };
     }
-    // find the two surrounding samples
     let i=b.length-1;
     while(i>0 && b[i-1].t>target) i--;
     const a = b[Math.max(0,i-1)];
@@ -237,13 +268,17 @@
       x: +((opts && opts.x) ?? 0), y: +((opts && opts.y) ?? 0),
       facing: (opts && opts.facing) || 'down',
       buf: [], lastPacket: 0,
-      composite: { img:null, cols:1 }, compositeKey:''
+      composite: { img:null, cols:1 }, compositeKey:'',
+      lastGoodComposite: null,            // NEW: stable fallback once something rendered
+      _bodyOnly: null                     // NEW: bare body sprite fallback
     };
     rp.compositeKey = makeSkinKey(rp.ap, rp.inv);
-    getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; }); // async prime
+    getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; if(c && c.img) rp.lastGoodComposite = c; });
+    loadLayer('body', rp.ap.sprite_skin || 'default').then(b=>{ rp._bodyOnly = b; });
     pushSnap(rp, rp.x, rp.y, rp.facing); // seed
     return rp;
   }
+
   function upsertRemote(p){
     const u = String(p?.username||'').trim(); if(!u) return;
     let rp = byName[u];
@@ -261,7 +296,7 @@
     const key = makeSkinKey(rp.ap, rp.inv);
     if(key !== rp.compositeKey){
       rp.compositeKey = key;
-      getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; });
+      getComposite(rp.ap, rp.inv).then(c=>{ rp.composite = c; if(c && c.img) rp.lastGoodComposite = c; });
     }
   }
 
@@ -289,22 +324,28 @@
         const cvs = document.getElementById('game'); if(!cvs) return;
         const ctx = cvs.getContext('2d');
         const S=api.DRAW, scale=S/api.TILE;
-
         ctx.save(); ctx.imageSmoothingEnabled=false;
 
         for(const p of REMOTES){
           const snap = sampleBuffered(p, now);
           const sx=(snap.x - api.camera.x)*scale, sy=(snap.y - api.camera.y)*scale;
           const row = DIR_INDEX[snap.facing] || 0;
-          const comp = p.composite;
 
+          // Prefer current composite, else last-good, else bare body, else tiny box
+          let drawn = false;
+          const comp = p.composite && p.composite.img ? p.composite : (p.lastGoodComposite || null);
           if(comp && comp.img){
             const cols = Math.max(1, comp.cols|0);
             const t = Math.floor(now/120)%cols; // simple walk frame
             ctx.drawImage(comp.img, t*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
+            drawn = true;
+          }else if(p._bodyOnly && p._bodyOnly.img){
+            const cols = Math.max(1, p._bodyOnly.cols|0);
+            const t = Math.floor(now/120)%cols;
+            ctx.drawImage(p._bodyOnly.img, t*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
+            drawn = true;
           }else{
-            // placeholder until composite finishes (prevents “invisible” players)
-            ctx.fillStyle='rgba(80,120,200,0.85)';
+            ctx.fillStyle='rgba(60,90,150,0.85)';
             ctx.fillRect(sx, sy, S, S);
           }
 
@@ -408,6 +449,26 @@
     if(rosterT){ clearInterval(rosterT); rosterT=null; }
   }
 
+  // --- NEW: push updated loadout immediately on changes (equipped/crafted/etc)
+  function wireLoadoutPushOnce(){
+    if (wireLoadoutPushOnce._done) return;
+    wireLoadoutPushOnce._done = true;
+
+    const bump = ()=>{ if(!isMPWorld()) return;
+      try{
+        const me = (IZZA?.api?.player)||{x:0,y:0,facing:'down'};
+        jpost('/world/heartbeat', {
+          x: me.x|0, y: me.y|0, facing: me.facing||'down',
+          appearance: readAppearance(),
+          inv: readInventory()
+        }).catch(()=>{});
+      }catch{}
+    };
+
+    ['inventory-changed','armor-equipped','gear-crafted','armor-crafted','resume']
+      .forEach(ev=> IZZA?.on?.(ev, bump));
+  }
+
   // ---------- public bridge (for Worlds plugin, etc.) ----------
   const localListeners = Object.create(null);
   function listen(type, cb){ (localListeners[type] ||= []).push(cb); }
@@ -470,6 +531,7 @@
   function boot(){
     installPublicAPI();
     installRenderer();
+    wireLoadoutPushOnce();   // NEW: start listening for equip/craft changes
     onWorldChanged(getWorld());
   }
 
