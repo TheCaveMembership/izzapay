@@ -1,15 +1,21 @@
-// Remote Players API — v2.5
-// - Guaranteed remote loadout sync (normalized inventory → heartbeat on every equip/craft)
-// - Hair-under-helm/hat layering + outfit always present (male/female)
-// - Image caching, safe composites (never invisible), last-good fallback
-// - Smoother interpolation + timer pause on tab hide
-// - Accurate leave (pagehide/beforeunload) + presence online on join
+// Remote Players API — v3.0 ULTRA
+// Goal: make remote players look/feel like the local player
+// - High rate client → server: /world/pos @ ~30 Hz; /world/heartbeat @ 4s
+// - High rate server → client: /world/roster pulls @ ~20–30 Hz (adaptive)
+// - Tight interpolation buffer (~85–110ms) for snap responsiveness
+// - Short-gap dead-reckoning (<=120ms) to smooth micro-stalls
+// - Bigger snapshot ring to keep motion continuous
+// - Immediate loadout push on equip/craft changes
+// - Accurate leave + presence off on page hide/unload
+// - Duel toggles + body fallback + skin cache retained
+// - Optional WS fast-path (if backend emits world.pos/world.batch)
 (function(){
-  const BUILD = 'v2.5-remote-players';
+  const BUILD = 'v3.0-ultra-remote-players';
   console.log('[IZZA PLAY]', BUILD);
 
   // -------- config / helpers ----------
   const MP_BASE = (window.__MP_BASE__ || '/izza-game/api/mp');
+  const MP_WS   = (window.__MP_WS__   || '/izza-game/api/mp/ws'); // optional fast-path
   const TOK = (window.__IZZA_T__ || '').toString();
   const withTok = (p) => TOK ? p + (p.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK) : p;
 
@@ -20,7 +26,8 @@
   }
   async function jpost(p,b){
     const r = await fetch(withTok(MP_BASE+p), {
-      method:'POST', credentials:'include',
+      method:'POST',
+      credentials:'include',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(b||{})
     });
@@ -28,10 +35,10 @@
     return r.json();
   }
 
-  const getWorld  = ()=> localStorage.getItem('izzaWorldId') || 'solo';
-  const isMPWorld = ()=> getWorld() !== 'solo';
+  const getWorld = ()=> localStorage.getItem('izzaWorldId') || 'solo';
+  const isMPWorld = ()=> getWorld()!=='solo';
 
-  // ---- appearance ----
+  // ---- profile appearance ----
   function readAppearance(){
     try{
       const p = window.__IZZA_PROFILE__ || {};
@@ -51,70 +58,13 @@
     }
   }
 
-  // ---- inventory (normalize to a stable "equipped" view so armor shows remotely) ----
-  function deepClone(x){ try{ return JSON.parse(JSON.stringify(x||{})); }catch{ return {}; } }
-
-  function readInventoryRaw(){
-    // Prefer the consolidated snapshot if present (it already merges inventory + armory + crafted)
-    try{ if(typeof IZZA?.api?.getInventorySnapshot === 'function') return IZZA.api.getInventorySnapshot() || {}; }catch{}
-    try{ if(typeof IZZA?.api?.getInventory === 'function')        return IZZA.api.getInventory() || {}; }catch{}
+  // ---- inventory snapshot ----
+  function readInventory(){
+    try{ if (typeof IZZA?.api?.getInventory==='function') return IZZA.api.getInventory() || {}; }catch{}
     const inv = {};
     try{ Object.assign(inv, (IZZA?.api?.getArmory?.())||{}); }catch{}
     try{ inv.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
     return inv;
-  }
-
-  // Normalize different shapes to:
-  //  { [id]: { slot?: 'head'|'chest'|'legs'|'arms'|'hat'|..., equipped: boolean }, crafted: {...}}
-  function normalizeInventory(invIn){
-    const inv = deepClone(invIn);
-    const out = {};
-    const coerceId = (id)=> String(id||'').replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
-
-    const pickSlotFromId = (id)=>{
-      if(/helmet|helm/i.test(id)) return 'head';
-      if(/vest|chest/i.test(id))  return 'chest';
-      if(/legs|pants/i.test(id))  return 'legs';
-      if(/arms|sleeve/i.test(id)) return 'arms';
-      if(/hat|crown/i.test(id))   return 'hat';
-      return ''; // unknown/weapon/etc
-    };
-
-    Object.keys(inv).forEach(key=>{
-      if(key==='crafted') return;
-      const v = inv[key];
-      const id = coerceId(key);
-      if(v && typeof v==='object'){
-        const slot = (String(v.slot||'').toLowerCase()) || pickSlotFromId(id);
-        const eq = !!(v.equipped || v.equip || (v.equippedCount|0)>0 || v.on===true);
-        out[id] = { slot, equipped:eq };
-      }else if(typeof v==='number'){ // legacy count-flags: treat count>0 as owned, not necessarily equipped
-        out[id] = { slot: pickSlotFromId(id), equipped: false, count:v|0 };
-      }else if(v===true){ // boolean flags → consider equipped if it's a gear-like id
-        out[id] = { slot: pickSlotFromId(id), equipped: true };
-      }
-    });
-
-    // weapons (surface one weapon overlay if any equipped)
-    const weapons = ['uzi','shotgun','sniper','pistol'];
-    for(const w of weapons){
-      const a = inv['wpn_'+w] || inv['weapon_'+w];
-      if(a && (a.equipped || a.equip || a.on===true || (a.equippedCount|0)>0)){
-        out['weapon_'+w] = { slot:'weapon', equipped:true };
-        break;
-      }
-    }
-
-    // crafted passthrough
-    if(inv.crafted && typeof inv.crafted==='object'){
-      out.crafted = deepClone(inv.crafted);
-    }
-
-    return out;
-  }
-
-  function readInventory(){
-    return normalizeInventory(readInventoryRaw());
   }
 
   // -------- remote players store ----------
@@ -122,26 +72,17 @@
   const byName = Object.create(null);
   function clearRemotePlayers(){
     REMOTES.splice(0, REMOTES.length);
-    for(const k in byName) delete byName[k];
-    try{ if(window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
+    for (const k in byName) delete byName[k];
+    try{ if (window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
   }
 
-  // ---------- ASSETS & LAYERING ----------
+  // ---------- ASSETS ----------
   const FRAME_W=32, FRAME_H=32, ROWS=4;
   const DIR_INDEX = { down:0, right:1, left:2, up:3 };
 
-  const IMG_CACHE = Object.create(null);
   function loadImg(src){
-    if(IMG_CACHE[src]) return IMG_CACHE[src];
-    IMG_CACHE[src] = new Promise((res)=>{
-      const i=new Image();
-      i.onload = ()=> res(i);
-      i.onerror= ()=> res(null);
-      i.src=src;
-    });
-    return IMG_CACHE[src];
+    return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; });
   }
-
   async function loadLayer(kind, name){
     const base = '/static/game/sprites/' + kind + '/';
     const try2 = await loadImg(base + encodeURIComponent(name + ' 2') + '.png');
@@ -152,24 +93,23 @@
   }
   function emptyLayer(){ const c=document.createElement('canvas'); c.width=32; c.height=32; return {img:c, cols:1}; }
 
-  // Order is back→front. Hair sits under helm/hat. Outfit is always present (male/female).
+  // Draw order (back → front)
   const LAYER_ORDER = [ 'body', 'legs', 'arms', 'outfit', 'hair', 'vest', 'helm', 'hat', 'weapon' ];
 
+  // Map inventory → sprite layers (equipped only)
   function invToLayers(inv, ap){
     const layers = [];
     const bodyName = ap.body_type==='female' ? `${ap.sprite_skin}__female_wide` : ap.sprite_skin;
     layers.push({ kind:'body',   name: bodyName });
-    layers.push({ kind:'outfit', name: ap.outfit || 'street' });
+    if(ap.body_type!=='female') layers.push({ kind:'outfit', name: ap.outfit || 'street' });
     layers.push({ kind:'hair',   name: ap.hair   || 'short' });
 
-    // armor slots
     const slotMap = { head:'helm', chest:'vest', legs:'legs', arms:'arms', hat:'hat' };
     Object.keys(inv||{}).forEach(id=>{
-      if(id==='crafted') return;
       const e = inv[id];
       if(!e || typeof e!=='object') return;
-      if(!e.equipped) return;
-
+      const on = !!(e.equipped || e.equip || (e.equippedCount|0)>0);
+      if(!on) return;
       const slot = (e.slot||'').toLowerCase();
       const kind = slotMap[slot] || (
         /helmet|helm/i.test(id) ? 'helm' :
@@ -179,10 +119,8 @@
         /hat|crown/i.test(id)   ? 'hat'  : null
       );
       if(!kind) return;
-
-      // normalize well-known sets (cardboard, pumpkin)
-      let name = id;
-      name = name.replace(/helmet|_helmet/g,'_helm').replace(/_chest/g,'_vest');
+      const base = String(id).replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
+      let name = base.replace(/helmet|_helmet/g,'_helm').replace(/_chest/g,'_vest');
       if(/cardboard/.test(name)||/pumpkin/.test(name)){
         const set = /cardboard/.test(name) ? 'cardboard' : 'pumpkin';
         const part = (kind==='helm'?'helm':kind);
@@ -191,26 +129,23 @@
       layers.push({ kind, name });
     });
 
-    // weapons
-    const hadWeapon = Object.keys(inv||{}).some(k=> /^weapon_/.test(k) && inv[k]?.equipped);
-    if(hadWeapon){
-      const w = Object.keys(inv).find(k=> /^weapon_/.test(k) && inv[k]?.equipped);
-      layers.push({kind:'weapon', name: (w||'weapon_pistol').replace(/^weapon_/, '') });
+    // one weapon overlay
+    const weapons = ['uzi','shotgun','sniper','pistol'];
+    for(const w of weapons){
+      if(inv['wpn_'+w]?.equipped || inv['weapon_'+w]?.equipped){ layers.push({kind:'weapon', name:w}); break; }
     }
 
-    // sort by drawing order
     layers.sort((a,b)=> LAYER_ORDER.indexOf(a.kind) - LAYER_ORDER.indexOf(b.kind));
     return layers;
   }
 
-  // skinKey = deterministic hash of appearance + equipped inventory
+  // Composite cache key = appearance + equipped
   function makeSkinKey(ap, inv){
     try{
       const eqBits=[];
       Object.keys(inv||{}).forEach(k=>{
-        if(k==='crafted') return;
         const e=inv[k]; if(!e||typeof e!=='object') return;
-        if(e.equipped) eqBits.push((e.slot||'')+':'+k);
+        if(e.slot && (e.equipped||e.equip||(e.equippedCount|0)>0)) eqBits.push(e.slot+':'+k);
       });
       eqBits.sort();
       return JSON.stringify({
@@ -241,7 +176,6 @@
     }
     return { img:cvs, cols };
   }
-
   async function getComposite(ap, inv){
     const key = makeSkinKey(ap, inv);
     if(SKIN_CACHE[key]) return SKIN_CACHE[key];
@@ -250,30 +184,64 @@
     return ph;
   }
 
-  // ---------- INTERPOLATION ----------
-  const BUFFER_MS = 160;
-  const STALE_MS  = 5000;
-  const MAX_SNAP  = 24;
+  // ---------- SNAPSHOTS / INTERPOLATION / PREDICTION ----------
+  // Render ~100ms behind to absorb network jitter but keep feel snappy
+  const BUFFER_MS = 100;          // interpolation offset
+  const PREDICT_MS = 120;         // allow tiny extrapolation if packet late
+  const STALE_MS  = 4000;         // drop remotes after this idle window
+  const MAX_SNAP  = 64;           // larger ring for continuity
 
   function pushSnap(rp, x, y, facing){
     const t = Date.now();
-    const last = rp.buf[rp.buf.length-1];
-    if(last && last.x===x && last.y===y && last.facing===facing) { rp.lastPacket=t; return; }
-    rp.buf.push({t, x, y, facing});
-    if(rp.buf.length>MAX_SNAP) rp.buf.splice(0, rp.buf.length-MAX_SNAP);
+    const b = rp.buf;
+    const last = b[b.length-1];
+    if(last && last.x===x && last.y===y && last.facing===facing){
+      rp.lastPacket=t; return;
+    }
+    // estimate velocity based on previous sample
+    if(last){
+      const dt = Math.max(1, t - last.t);
+      rp.vx = (x - last.x) / dt;
+      rp.vy = (y - last.y) / dt;
+    }
+    b.push({t, x, y, facing});
+    if(b.length>MAX_SNAP) b.splice(0, b.length-MAX_SNAP);
     rp.lastPacket = t;
   }
+
   function sampleBuffered(rp, now){
     const target = now - BUFFER_MS;
     const b = rp.buf;
-    if(!b.length){ return { x:rp.x, y:rp.y, facing:rp.facing }; }
-    let i=b.length-1; while(i>0 && b[i-1].t>target) i--;
-    const a = b[Math.max(0,i-1)], c = b[i];
-    if(!a || !c){ return { x:c?.x??rp.x, y:c?.y??rp.y, facing:c?.facing??rp.facing }; }
-    if(c.t===a.t){ return { x:c.x, y:c.y, facing:c.facing }; }
-    const t = (target - a.t) / (c.t - a.t);
-    const lerp=(p,q)=> p + (q-p)*Math.max(0,Math.min(1,t));
-    return { x: lerp(a.x,c.x), y: lerp(a.y,c.y), facing: (t>0.5?c.facing:a.facing) };
+    if(!b.length) return { x:rp.x, y:rp.y, facing:rp.facing };
+
+    // find segment surrounding target
+    let i=b.length-1;
+    while(i>0 && b[i-1].t>target) i--;
+    const a = b[Math.max(0,i-1)];
+    const c = b[i];
+
+    // exact sample or clamp to ends
+    if(!a || !c) return { x:c?.x??rp.x, y:c?.y??rp.y, facing:c?.facing??rp.facing };
+    if(c.t===a.t) return { x:c.x, y:c.y, facing:c.facing };
+
+    // inside interval → interpolate
+    if(c.t>=target && a.t<=target){
+      const t = (target - a.t) / (c.t - a.t);
+      const lerp=(p,q)=> p + (q-p)*Math.max(0,Math.min(1,t));
+      return { x: lerp(a.x,c.x), y: lerp(a.y,c.y), facing: (t>0.5?c.facing:a.facing) };
+    }
+
+    // target falls after latest → short extrapolation (dead-reckoning)
+    const newest = b[b.length-1];
+    const lateBy = target - newest.t;
+    if(lateBy>0 && lateBy<=PREDICT_MS){
+      const sx = newest.x + (rp.vx||0) * lateBy;
+      const sy = newest.y + (rp.vy||0) * lateBy;
+      return { x:sx, y:sy, facing:newest.facing };
+    }
+
+    // otherwise clamp to most recent
+    return { x:newest.x, y:newest.y, facing:newest.facing };
   }
 
   // ---------- remote struct ----------
@@ -285,6 +253,7 @@
       x: +((opts && opts.x) ?? 0), y: +((opts && opts.y) ?? 0),
       facing: (opts && opts.facing) || 'down',
       buf: [], lastPacket: 0,
+      vx:0, vy:0,
       composite: { img:null, cols:1 }, compositeKey:'',
       lastGoodComposite: null, _bodyOnly: null
     };
@@ -308,7 +277,7 @@
     }
     if (p.facing) rp.facing = p.facing;
     if (p.appearance) rp.ap = p.appearance;
-    if (p.inv)        rp.inv = normalizeInventory(p.inv); // ensure we rebuild off normalized input
+    if (p.inv)        rp.inv = p.inv;
 
     const key = makeSkinKey(rp.ap, rp.inv);
     if(key !== rp.compositeKey){
@@ -349,10 +318,10 @@
           const sx=(snap.x - api.camera.x)*scale, sy=(snap.y - api.camera.y)*scale;
           const row = DIR_INDEX[snap.facing] || 0;
 
-          const comp = (p.composite && p.composite.img) ? p.composite : (p.lastGoodComposite || null);
+          let comp = (p.composite && p.composite.img) ? p.composite : (p.lastGoodComposite || null);
           if(comp && comp.img){
             const cols = Math.max(1, comp.cols|0);
-            const t = Math.floor(now/120)%cols;
+            const t = Math.floor(now/100)%cols; // a tad faster animation tick for “live” feel
             ctx.drawImage(comp.img, t*FRAME_W, row*FRAME_H, FRAME_W, FRAME_H, sx, sy, S, S);
           }else if(p._bodyOnly && p._bodyOnly.img){
             const cols = Math.max(1, p._bodyOnly.cols|0);
@@ -406,11 +375,22 @@
     }catch{}
   }
 
-  // ---------- REST presence poll/push ----------
+  // ---------- REST/WS presence & transport ----------
   let lastRosterTs = 0;
-  let tickT=null, rosterT=null, heartbeatT=null;
+  let posT=null, rosterT=null, heartbeatT=null;
+  let ws=null, wsReady=false;
 
-  async function presenceOnline(){ try{ await jpost('/presence/online', {}); }catch{} }
+  // ULTRA rates (you asked to “crank the Hz”):
+  const RATE = {
+    posMs:       33,   // ~30 Hz position push
+    rosterMs:    50,   // 20 Hz pulls (will adapt to 33ms if the page is smooth)
+    rosterMinMs: 33,   // floor at ~30 Hz
+    heartbeatMs: 4000
+  };
+
+  // Adaptive roster pull: if rAF cadence is fast, pull a bit faster
+  let _lastFrameAt = performance.now();
+  IZZA?.on?.('render-post', ({ now })=>{ _lastFrameAt = now; });
 
   async function sendHeartbeat(){
     if(!isMPWorld()) return;
@@ -423,6 +403,7 @@
       });
     }catch(e){}
   }
+
   async function sendPos(){
     if(!isMPWorld()) return;
     try{
@@ -430,12 +411,13 @@
       await jpost('/world/pos', { x: me.x|0, y: me.y|0, facing: me.facing||'down' });
     }catch(e){}
   }
+
   async function pullRoster(){
     if(!isMPWorld()) return;
     try{
       const r = await jget('/world/roster?since=' + encodeURIComponent(lastRosterTs||0));
       if(r && r.ok){
-        if(Array.isArray(r.players)) r.players.forEach(upsertRemote);
+        if(Array.isArray(r.players)){ r.players.forEach(upsertRemote); }
         if(typeof r.serverNow==='number') lastRosterTs = r.serverNow;
       }
     }catch(e){}
@@ -444,21 +426,56 @@
   function armTimers(){
     disarmTimers();
     if(!isMPWorld()) return;
-    heartbeatT = setInterval(sendHeartbeat, 4000);
-    tickT      = setInterval(sendPos,      400);
-    rosterT    = setInterval(pullRoster,   600);
-    // Prime immediately so others see your current gear instantly
-    presenceOnline();
+
+    // pos @ ~30 Hz
+    posT = setInterval(sendPos, RATE.posMs);
+
+    // heartbeat @ 4s
+    heartbeatT = setInterval(sendHeartbeat, RATE.heartbeatMs);
+
+    // roster pulls (adaptive 33–50ms)
+    const pull = async ()=>{
+      await pullRoster();
+      const now = performance.now();
+      const dtFrame = Math.max(1, now - _lastFrameAt);
+      const next = dtFrame < 20 ? RATE.rosterMinMs : RATE.rosterMs; // if we’re v-synced nicely, pull faster
+      rosterT = setTimeout(pull, next);
+    };
+    pull();
+
+    // prime
     sendHeartbeat();
     pullRoster();
   }
   function disarmTimers(){
     if(heartbeatT){ clearInterval(heartbeatT); heartbeatT=null; }
-    if(tickT){ clearInterval(tickT); tickT=null; }
-    if(rosterT){ clearInterval(rosterT); rosterT=null; }
+    if(posT){ clearInterval(posT); posT=null; }
+    if(rosterT){ clearTimeout(rosterT); rosterT=null; }
   }
 
-  // immediate loadout push on changes (cover many event names + storage sync)
+  // Optional WebSocket fast-path (if server emits world.pos/world.batch)
+  function connectWS(){
+    try{
+      const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+MP_WS;
+      ws=new WebSocket(url);
+    }catch(e){ return; }
+    ws.addEventListener('open', ()=>{ wsReady=true; });
+    ws.addEventListener('close', ()=>{ wsReady=false; ws=null; setTimeout(()=>connectWS(), 1500); });
+    ws.addEventListener('message',(evt)=>{
+      let msg=null; try{ msg=JSON.parse(evt.data);}catch{}
+      if(!msg) return;
+      if(!isMPWorld()) return;
+
+      // Accept either single or batch world updates
+      if(msg.type==='world.pos' && msg.user){
+        upsertRemote({ username:msg.user, x:msg.x|0, y:msg.y|0, facing:msg.facing||'down', appearance:msg.appearance, inv:msg.inv });
+      }else if(msg.type==='world.batch' && Array.isArray(msg.players)){
+        msg.players.forEach(p=> upsertRemote(p));
+      }
+    });
+  }
+
+  // immediate loadout push on changes
   function wireLoadoutPushOnce(){
     if (wireLoadoutPushOnce._done) return;
     wireLoadoutPushOnce._done = true;
@@ -472,17 +489,9 @@
         }).catch(()=>{});
       }catch{}
     };
-    // Broad coverage for equip/craft/consume/inventory mutations
-    [
-      'inventory-changed','armor-equipped','armor-unequipped',
-      'gear-crafted','armor-crafted','item-crafted',
-      'izza-inventory-changed','izza-gear-updated',
-      'resume'
-    ].forEach(ev=> { try{ IZZA?.on?.(ev, bump); }catch{} });
-    window.addEventListener('storage', (e)=>{ if(e.key && /izza/i.test(e.key)) bump(); });
-
-    // Public hook to force a push from elsewhere
-    window.addEventListener('izza-loadout-bump', bump);
+    ['inventory-changed','armor-equipped','gear-crafted','armor-crafted','resume','izza-inventory-changed']
+      .forEach(ev=> { try{ IZZA?.on?.(ev, bump); }catch{} });
+    window.addEventListener('storage', (e)=>{ if(e.key==='izzaInventory') bump(); });
   }
 
   // ---------- public bridge ----------
@@ -499,8 +508,6 @@
         jget('/worlds/counts').then(j=> fanout('worlds-counts', j||{})).catch(()=>{});
       }else if(type==='players-get'){
         pullRoster();
-      }else if(type==='loadout-bump'){
-        window.dispatchEvent(new Event('izza-loadout-bump'));
       }
     },
     on(type, cb){ listen(type, cb); }
@@ -526,11 +533,8 @@
     if (ev.key==='izzaWorldId'){ onWorldChanged(String(ev.newValue||'solo')); }
   });
 
-  // Pause/resume on visibility to save CPU & avoid packet bursts
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.hidden){ disarmTimers(); }
-    else { armTimers(); }
-  });
+  // We keep ultra mode always-on; if you want to pause on hidden tab, uncomment:
+  // document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ disarmTimers(); } else { armTimers(); } });
 
   // On unload: mark offline & leave world so counts are correct
   async function gracefulLeave(){
@@ -552,10 +556,9 @@
   function installPublicAPI(){
     if(!window.IZZA || !IZZA.api) return;
     IZZA.api.remotePlayers = REMOTES;
-    IZZA.api.remotePlayersVersion = BUILD;
-    if(!IZZA.api.clearRemotePlayers)    IZZA.api.clearRemotePlayers = clearRemotePlayers;
-    if(!IZZA.api.getAppearance)         IZZA.api.getAppearance = readAppearance;
-    if(!IZZA.api.getInventorySnapshot)  IZZA.api.getInventorySnapshot = readInventoryRaw; // raw snapshot for other modules
+    if(!IZZA.api.clearRemotePlayers) IZZA.api.clearRemotePlayers = clearRemotePlayers;
+    if(!IZZA.api.getAppearance) IZZA.api.getAppearance = readAppearance;
+    if(!IZZA.api.getInventorySnapshot) IZZA.api.getInventorySnapshot = readInventory;
     IZZA.api.setDuelMode = setDuelMode;
   }
 
@@ -564,6 +567,7 @@
     installRenderer();
     wireLoadoutPushOnce();
     onWorldChanged(getWorld());
+    connectWS(); // harmless if server doesn’t publish world messages
   }
 
   if(window.IZZA && IZZA.on){
