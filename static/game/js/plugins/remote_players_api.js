@@ -1,10 +1,11 @@
-// Remote Players API — v2.4
-// - Accurate leave (tab close / page hide → /world/leave + presence off)
-// - Auto-pause timers while tab hidden to reduce lag
-// - Immediate loadout push when equipment/crafting changes
-// - Tinting + equipped-slot layering (hair under helm/hat), smooth interpolation
+// Remote Players API — v2.5
+// - Guaranteed remote loadout sync (normalized inventory → heartbeat on every equip/craft)
+// - Hair-under-helm/hat layering + outfit always present (male/female)
+// - Image caching, safe composites (never invisible), last-good fallback
+// - Smoother interpolation + timer pause on tab hide
+// - Accurate leave (pagehide/beforeunload) + presence online on join
 (function(){
-  const BUILD = 'v2.4-remote-players';
+  const BUILD = 'v2.5-remote-players';
   console.log('[IZZA PLAY]', BUILD);
 
   // -------- config / helpers ----------
@@ -14,18 +15,23 @@
 
   async function jget(p){
     const r = await fetch(withTok(MP_BASE+p), { credentials:'include' });
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json();
+    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
   }
   async function jpost(p,b){
-    const r = await fetch(withTok(MP_BASE+p), { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b||{}) });
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json();
+    const r = await fetch(withTok(MP_BASE+p), {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(b||{})
+    });
+    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
   }
 
-  const getWorld = ()=> localStorage.getItem('izzaWorldId') || 'solo';
-  const setWorld = (w)=> localStorage.setItem('izzaWorldId', String(w||'solo'));
-  const isMPWorld = ()=> { const w = getWorld(); return w!=='solo'; };
+  const getWorld  = ()=> localStorage.getItem('izzaWorldId') || 'solo';
+  const isMPWorld = ()=> getWorld() !== 'solo';
 
-  // ---- profile appearance ----
+  // ---- appearance ----
   function readAppearance(){
     try{
       const p = window.__IZZA_PROFILE__ || {};
@@ -40,16 +46,75 @@
         hair_color: a.hair_color || 'black',
         female_outfit_color: a.female_outfit_color || 'blue'
       };
-    }catch{ return { body_type:'male', sprite_skin:'default', hair:'short', outfit:'street', skin_tone:'light', hair_color:'black', female_outfit_color:'blue' }; }
+    }catch{
+      return { body_type:'male', sprite_skin:'default', hair:'short', outfit:'street', skin_tone:'light', hair_color:'black', female_outfit_color:'blue' };
+    }
   }
 
-  // ---- inventory (reads your core store if exposed) ----
-  function readInventory(){
-    try{ if (typeof IZZA?.api?.getInventory==='function') return IZZA.api.getInventory() || {}; }catch{}
+  // ---- inventory (normalize to a stable "equipped" view so armor shows remotely) ----
+  function deepClone(x){ try{ return JSON.parse(JSON.stringify(x||{})); }catch{ return {}; } }
+
+  function readInventoryRaw(){
+    // Prefer the consolidated snapshot if present (it already merges inventory + armory + crafted)
+    try{ if(typeof IZZA?.api?.getInventorySnapshot === 'function') return IZZA.api.getInventorySnapshot() || {}; }catch{}
+    try{ if(typeof IZZA?.api?.getInventory === 'function')        return IZZA.api.getInventory() || {}; }catch{}
     const inv = {};
     try{ Object.assign(inv, (IZZA?.api?.getArmory?.())||{}); }catch{}
     try{ inv.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
     return inv;
+  }
+
+  // Normalize different shapes to:
+  //  { [id]: { slot?: 'head'|'chest'|'legs'|'arms'|'hat'|..., equipped: boolean }, crafted: {...}}
+  function normalizeInventory(invIn){
+    const inv = deepClone(invIn);
+    const out = {};
+    const coerceId = (id)=> String(id||'').replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
+
+    const pickSlotFromId = (id)=>{
+      if(/helmet|helm/i.test(id)) return 'head';
+      if(/vest|chest/i.test(id))  return 'chest';
+      if(/legs|pants/i.test(id))  return 'legs';
+      if(/arms|sleeve/i.test(id)) return 'arms';
+      if(/hat|crown/i.test(id))   return 'hat';
+      return ''; // unknown/weapon/etc
+    };
+
+    Object.keys(inv).forEach(key=>{
+      if(key==='crafted') return;
+      const v = inv[key];
+      const id = coerceId(key);
+      if(v && typeof v==='object'){
+        const slot = (String(v.slot||'').toLowerCase()) || pickSlotFromId(id);
+        const eq = !!(v.equipped || v.equip || (v.equippedCount|0)>0 || v.on===true);
+        out[id] = { slot, equipped:eq };
+      }else if(typeof v==='number'){ // legacy count-flags: treat count>0 as owned, not necessarily equipped
+        out[id] = { slot: pickSlotFromId(id), equipped: false, count:v|0 };
+      }else if(v===true){ // boolean flags → consider equipped if it's a gear-like id
+        out[id] = { slot: pickSlotFromId(id), equipped: true };
+      }
+    });
+
+    // weapons (surface one weapon overlay if any equipped)
+    const weapons = ['uzi','shotgun','sniper','pistol'];
+    for(const w of weapons){
+      const a = inv['wpn_'+w] || inv['weapon_'+w];
+      if(a && (a.equipped || a.equip || a.on===true || (a.equippedCount|0)>0)){
+        out['weapon_'+w] = { slot:'weapon', equipped:true };
+        break;
+      }
+    }
+
+    // crafted passthrough
+    if(inv.crafted && typeof inv.crafted==='object'){
+      out.crafted = deepClone(inv.crafted);
+    }
+
+    return out;
+  }
+
+  function readInventory(){
+    return normalizeInventory(readInventoryRaw());
   }
 
   // -------- remote players store ----------
@@ -57,17 +122,26 @@
   const byName = Object.create(null);
   function clearRemotePlayers(){
     REMOTES.splice(0, REMOTES.length);
-    for (const k in byName) delete byName[k];
-    try{ if (window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
+    for(const k in byName) delete byName[k];
+    try{ if(window.IZZA?.api) IZZA.api.remotePlayers = REMOTES; }catch{}
   }
 
-  // ---------- ASSETS & TINTING ----------
+  // ---------- ASSETS & LAYERING ----------
   const FRAME_W=32, FRAME_H=32, ROWS=4;
   const DIR_INDEX = { down:0, right:1, left:2, up:3 };
 
+  const IMG_CACHE = Object.create(null);
   function loadImg(src){
-    return new Promise((res)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; });
+    if(IMG_CACHE[src]) return IMG_CACHE[src];
+    IMG_CACHE[src] = new Promise((res)=>{
+      const i=new Image();
+      i.onload = ()=> res(i);
+      i.onerror= ()=> res(null);
+      i.src=src;
+    });
+    return IMG_CACHE[src];
   }
+
   async function loadLayer(kind, name){
     const base = '/static/game/sprites/' + kind + '/';
     const try2 = await loadImg(base + encodeURIComponent(name + ' 2') + '.png');
@@ -78,23 +152,24 @@
   }
   function emptyLayer(){ const c=document.createElement('canvas'); c.width=32; c.height=32; return {img:c, cols:1}; }
 
-  // minimal (reuse your v2.3 tint maps if present in global)
+  // Order is back→front. Hair sits under helm/hat. Outfit is always present (male/female).
   const LAYER_ORDER = [ 'body', 'legs', 'arms', 'outfit', 'hair', 'vest', 'helm', 'hat', 'weapon' ];
 
   function invToLayers(inv, ap){
     const layers = [];
     const bodyName = ap.body_type==='female' ? `${ap.sprite_skin}__female_wide` : ap.sprite_skin;
     layers.push({ kind:'body',   name: bodyName });
-    if(ap.body_type!=='female') layers.push({ kind:'outfit', name: ap.outfit || 'street' });
+    layers.push({ kind:'outfit', name: ap.outfit || 'street' });
     layers.push({ kind:'hair',   name: ap.hair   || 'short' });
 
-    // slots/equipped
+    // armor slots
     const slotMap = { head:'helm', chest:'vest', legs:'legs', arms:'arms', hat:'hat' };
     Object.keys(inv||{}).forEach(id=>{
+      if(id==='crafted') return;
       const e = inv[id];
       if(!e || typeof e!=='object') return;
-      const on = !!(e.equipped || e.equip || (e.equippedCount|0)>0);
-      if(!on) return;
+      if(!e.equipped) return;
+
       const slot = (e.slot||'').toLowerCase();
       const kind = slotMap[slot] || (
         /helmet|helm/i.test(id) ? 'helm' :
@@ -104,8 +179,10 @@
         /hat|crown/i.test(id)   ? 'hat'  : null
       );
       if(!kind) return;
-      const base = String(id).replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
-      let name = base.replace(/helmet|_helmet/g,'_helm').replace(/_chest/g,'_vest');
+
+      // normalize well-known sets (cardboard, pumpkin)
+      let name = id;
+      name = name.replace(/helmet|_helmet/g,'_helm').replace(/_chest/g,'_vest');
       if(/cardboard/.test(name)||/pumpkin/.test(name)){
         const set = /cardboard/.test(name) ? 'cardboard' : 'pumpkin';
         const part = (kind==='helm'?'helm':kind);
@@ -114,20 +191,26 @@
       layers.push({ kind, name });
     });
 
-    // weapons (simple overlay)
-    const weapons = ['uzi','shotgun','sniper','pistol'];
-    for(const w of weapons){ if(inv['wpn_'+w]?.equipped || inv['weapon_'+w]?.equipped){ layers.push({kind:'weapon', name:w}); break; } }
+    // weapons
+    const hadWeapon = Object.keys(inv||{}).some(k=> /^weapon_/.test(k) && inv[k]?.equipped);
+    if(hadWeapon){
+      const w = Object.keys(inv).find(k=> /^weapon_/.test(k) && inv[k]?.equipped);
+      layers.push({kind:'weapon', name: (w||'weapon_pistol').replace(/^weapon_/, '') });
+    }
 
+    // sort by drawing order
     layers.sort((a,b)=> LAYER_ORDER.indexOf(a.kind) - LAYER_ORDER.indexOf(b.kind));
     return layers;
   }
 
+  // skinKey = deterministic hash of appearance + equipped inventory
   function makeSkinKey(ap, inv){
     try{
       const eqBits=[];
       Object.keys(inv||{}).forEach(k=>{
+        if(k==='crafted') return;
         const e=inv[k]; if(!e||typeof e!=='object') return;
-        if(e.slot && (e.equipped||e.equip||(e.equippedCount|0)>0)) eqBits.push(e.slot+':'+k);
+        if(e.equipped) eqBits.push((e.slot||'')+':'+k);
       });
       eqBits.sort();
       return JSON.stringify({
@@ -158,6 +241,7 @@
     }
     return { img:cvs, cols };
   }
+
   async function getComposite(ap, inv){
     const key = makeSkinKey(ap, inv);
     if(SKIN_CACHE[key]) return SKIN_CACHE[key];
@@ -167,7 +251,7 @@
   }
 
   // ---------- INTERPOLATION ----------
-  const BUFFER_MS = 180;
+  const BUFFER_MS = 160;
   const STALE_MS  = 5000;
   const MAX_SNAP  = 24;
 
@@ -224,7 +308,7 @@
     }
     if (p.facing) rp.facing = p.facing;
     if (p.appearance) rp.ap = p.appearance;
-    if (p.inv)        rp.inv = p.inv;
+    if (p.inv)        rp.inv = normalizeInventory(p.inv); // ensure we rebuild off normalized input
 
     const key = makeSkinKey(rp.ap, rp.inv);
     if(key !== rp.compositeKey){
@@ -265,7 +349,7 @@
           const sx=(snap.x - api.camera.x)*scale, sy=(snap.y - api.camera.y)*scale;
           const row = DIR_INDEX[snap.facing] || 0;
 
-          let comp = (p.composite && p.composite.img) ? p.composite : (p.lastGoodComposite || null);
+          const comp = (p.composite && p.composite.img) ? p.composite : (p.lastGoodComposite || null);
           if(comp && comp.img){
             const cols = Math.max(1, comp.cols|0);
             const t = Math.floor(now/120)%cols;
@@ -326,6 +410,8 @@
   let lastRosterTs = 0;
   let tickT=null, rosterT=null, heartbeatT=null;
 
+  async function presenceOnline(){ try{ await jpost('/presence/online', {}); }catch{} }
+
   async function sendHeartbeat(){
     if(!isMPWorld()) return;
     try{
@@ -349,7 +435,7 @@
     try{
       const r = await jget('/world/roster?since=' + encodeURIComponent(lastRosterTs||0));
       if(r && r.ok){
-        if(Array.isArray(r.players)){ r.players.forEach(upsertRemote); }
+        if(Array.isArray(r.players)) r.players.forEach(upsertRemote);
         if(typeof r.serverNow==='number') lastRosterTs = r.serverNow;
       }
     }catch(e){}
@@ -361,6 +447,8 @@
     heartbeatT = setInterval(sendHeartbeat, 4000);
     tickT      = setInterval(sendPos,      400);
     rosterT    = setInterval(pullRoster,   600);
+    // Prime immediately so others see your current gear instantly
+    presenceOnline();
     sendHeartbeat();
     pullRoster();
   }
@@ -370,7 +458,7 @@
     if(rosterT){ clearInterval(rosterT); rosterT=null; }
   }
 
-  // immediate loadout push on changes
+  // immediate loadout push on changes (cover many event names + storage sync)
   function wireLoadoutPushOnce(){
     if (wireLoadoutPushOnce._done) return;
     wireLoadoutPushOnce._done = true;
@@ -384,9 +472,17 @@
         }).catch(()=>{});
       }catch{}
     };
-    ['inventory-changed','armor-equipped','gear-crafted','armor-crafted','resume','izza-inventory-changed']
-      .forEach(ev=> { try{ IZZA?.on?.(ev, bump); }catch{} });
-    window.addEventListener('storage', (e)=>{ if(e.key==='izzaInventory') bump(); });
+    // Broad coverage for equip/craft/consume/inventory mutations
+    [
+      'inventory-changed','armor-equipped','armor-unequipped',
+      'gear-crafted','armor-crafted','item-crafted',
+      'izza-inventory-changed','izza-gear-updated',
+      'resume'
+    ].forEach(ev=> { try{ IZZA?.on?.(ev, bump); }catch{} });
+    window.addEventListener('storage', (e)=>{ if(e.key && /izza/i.test(e.key)) bump(); });
+
+    // Public hook to force a push from elsewhere
+    window.addEventListener('izza-loadout-bump', bump);
   }
 
   // ---------- public bridge ----------
@@ -403,6 +499,8 @@
         jget('/worlds/counts').then(j=> fanout('worlds-counts', j||{})).catch(()=>{});
       }else if(type==='players-get'){
         pullRoster();
+      }else if(type==='loadout-bump'){
+        window.dispatchEvent(new Event('izza-loadout-bump'));
       }
     },
     on(type, cb){ listen(type, cb); }
@@ -428,7 +526,7 @@
     if (ev.key==='izzaWorldId'){ onWorldChanged(String(ev.newValue||'solo')); }
   });
 
-  // Pause/resume on visibility
+  // Pause/resume on visibility to save CPU & avoid packet bursts
   document.addEventListener('visibilitychange', ()=>{
     if(document.hidden){ disarmTimers(); }
     else { armTimers(); }
@@ -454,9 +552,10 @@
   function installPublicAPI(){
     if(!window.IZZA || !IZZA.api) return;
     IZZA.api.remotePlayers = REMOTES;
-    if(!IZZA.api.clearRemotePlayers) IZZA.api.clearRemotePlayers = clearRemotePlayers;
-    if(!IZZA.api.getAppearance) IZZA.api.getAppearance = readAppearance;
-    if(!IZZA.api.getInventorySnapshot) IZZA.api.getInventorySnapshot = readInventory;
+    IZZA.api.remotePlayersVersion = BUILD;
+    if(!IZZA.api.clearRemotePlayers)    IZZA.api.clearRemotePlayers = clearRemotePlayers;
+    if(!IZZA.api.getAppearance)         IZZA.api.getAppearance = readAppearance;
+    if(!IZZA.api.getInventorySnapshot)  IZZA.api.getInventorySnapshot = readInventoryRaw; // raw snapshot for other modules
     IZZA.api.setDuelMode = setDuelMode;
   }
 
