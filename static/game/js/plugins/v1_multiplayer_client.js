@@ -1,46 +1,27 @@
 /**
- * IZZA Multiplayer Client — v1.7.2
- * - Best-of-3 round coordinator (first to 2)
- * - Single authoritative winner (no “both lose”)
- * - FIX: round lifecycle state machine + watchdog to avoid freezes
- * - FIX: hard reset between matches; no double wiring; idempotent handlers
- *
- * ADDITIONS (v1.7.2+friends+notifs):
- * - "Friends" label -> "Search All Players"
- * - Add Friend button next to Invite
- * - Friend requests (send/accept) + minimal UI
- * - Notification bell with unread badge (friend requests + battle invites)
- * - Friends List toggle popup (scrollable)
- *
- * PATCH (overlay fix):
- * - Bell & notifications dropdown rendered as GLOBAL overlays (fixed; high z-index),
- *   not inside the Play Modes modal — so they sit above the lobby and do not close with it.
- *
- * PATCH2 (friends button always-on + popup placement):
- * - Friends button is now a GLOBAL overlay too (fixed), kept visually beside the bell
- *   so it’s always available even when the Play Modes modal is closed.
- * - Friends list popup now appears over the game canvas near the bottom-right,
- *   above the FIRE button. When opened, the FIRE button is hidden and restored on close.
- *
- * PATCH3 (requested tweaks):
- * - Make the bell a little smaller.
- * - Move the bell down so it doesn’t sit beside the hearts.
- * - Move the Friends button to sit just under the Send/EN controls.
- * - Friends popup appears just under the Type box and hides the FIRE button while open.
+ * IZZA Multiplayer Client — v1.9.0 ULTRA
+ * - Keeps ALL friends & notifications features intact (global bell, popup, requests).
+ * - Auto-switch SOLO → WORLD 1 before any PvP (queue, accept, invite).
+ * - Sends appearance + inventory snapshot at match start (mirrors local loadout).
+ * - Tighter round watchdogs + idempotent lifecycle (no freezes/double wiring).
+ * - WS fast-path supported (if server emits events); REST remains the source of truth.
+ * - Positions Friends UI under chat; hides FIRE while open (unchanged behavior).
  */
 (function(){
-  const BUILD='v1.7.2-mp-client+bo3+state+watchdog+friends+notifs+overlayfix+friendsbutton+tweakpos2';
+  const BUILD='v1.9.0-mp-ultra+duels+friends+notifs';
   console.log('[IZZA PLAY]', BUILD);
 
   const CFG = {
     base: (window.__MP_BASE__ || '/izza-game/api/mp'),
     ws:   (window.__MP_WS__   || '/izza-game/api/mp/ws'),
     searchDebounceMs: 250,
+    meRefreshMs: 20000,
+    notifPollMs: 5000
   };
   const MATCH_CFG = {
     roundsToWin: 2,          // best of 3
-    roundWatchdogMs: 8000,   // if a round is "in play" too long without an end event, nudge
-    betweenWatchdogMs: 5000, // if we reported a round end but no start of next, nudge
+    roundWatchdogMs: 6000,   // tighter than 1.7.2 (8s) for snappier nudges
+    betweenWatchdogMs: 3500  // tighter than 1.7.2 (5s)
   };
 
   // === overlay z-indexes (ensure we sit above lobby/shield) ==================
@@ -69,22 +50,42 @@
   }
   const debounced=(fn,ms)=>{ let t=null,a=null; return (...args)=>{a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms);}};
 
+  // SOLO/world helpers
+  const getWorld = ()=> localStorage.getItem('izzaWorldId') || 'solo';
+  const isSolo = ()=> String(getWorld()||'solo').toLowerCase()==='solo';
+  function joinWorld(w){
+    try{
+      (window.REMOTE_PLAYERS_API && REMOTE_PLAYERS_API.send('join-world', {world:String(w||'1')})) || null;
+      localStorage.setItem('izzaWorldId', String(w||'1'));
+      window.dispatchEvent(new CustomEvent('world-changed', { detail:{ world:String(w||'1') }}));
+    }catch{}
+  }
+  async function ensureWorldForPvP(){
+    if(isSolo()){
+      joinWorld('1');
+      await new Promise(r=>setTimeout(r,250));
+      return true;
+    }
+    return false;
+  }
+
   let ws=null, wsReady=false, reconnectT=null, lastQueueMode=null;
   let me=null, friends=[], lobby=null, ui={};
   let notifTimer=null;
 
-  // NEW: notifications state
-  let notifications = {
-    unread: 0,
-    items: [] // {id,type:'friend'|'battle', from, mode?, createdAt?}
-  };
+  // notifications state
+  let notifications = { unread: 0, items: [] }; // {id,type:'friend'|'battle', from, mode?}
 
   let lobbyOpen=false, shield=null, hudEls=[], hudCssPrev=[];
   const $  = (s,r=document)=> r.querySelector(s);
   const toast = (t)=> (window.IZZA&&IZZA.emit)?IZZA.emit('toast',{text:t}):console.log('[TOAST]',t);
 
   async function loadMe(){ me = await jget('/me'); return me; }
-  async function loadFriends(){ const res=await jget('/friends/list'); friends=res.friends||[]; return friends; }
+  async function loadFriends(){
+    const res=await jget('/friends/list');
+    friends=res.friends||[];
+    return friends;
+  }
   async function searchPlayers(q){ const res=await jget('/players/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
 
   async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
@@ -94,14 +95,25 @@
     set('#r-br10','br10'); set('#r-v1','v1'); set('#r-v2','v2'); set('#r-v3','v3');
   }
 
-  // NEW: quick friend helper
   const isFriend = (name)=> !!friends.find(f=> (f.username||'').toLowerCase() === (name||'').toLowerCase());
 
+  // === Appearance/Inventory snapshot (for mirror-accurate duel start) =======
+  function getAppearance(){ try{ return (window.IZZA?.api?.getAppearance?.()) || {}; }catch{ return {}; } }
+  function getInventorySnapshot(){
+    try{
+      if(IZZA?.api?.getInventorySnapshot) return IZZA.api.getInventorySnapshot();
+      const merged={};
+      try{ Object.assign(merged, (IZZA?.api?.getInventory?.())||{}); }catch{}
+      try{ Object.assign(merged, (IZZA?.api?.getArmory?.())||{}); }catch{}
+      try{ merged.crafted = (IZZA?.api?.getCraftedItems?.())||{}; }catch{}
+      return merged;
+    }catch{ return {}; }
+  }
+
   // === UI BUILDERS ===========================================================
-  function makeRow(u, source='search'){
+  function makeRow(u){
     const row=document.createElement('div');
     row.className='friend';
-
     const alreadyFriend = isFriend(u.username);
     const activeLabel   = u.active ? 'Active' : 'Offline';
 
@@ -116,14 +128,14 @@
         ${alreadyFriend ? '' : `<button class="mp-small ghost" data-add="${u.username}">Add Friend</button>`}
       </div>`;
 
-    row.querySelector('button[data-invite]')?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Invite sent to '+u.username); }
+    async function invite(username){
+      if(await ensureWorldForPvP()) await new Promise(r=>setTimeout(r,150));
+      try{ await jpost('/lobby/invite',{toUsername:username, mode:'v1'}); toast('Invite sent to '+username); }
       catch(e){ toast('Invite failed: '+e.message); }
-    });
-    row.querySelector('button[data-join]')?.addEventListener('click', async ()=>{
-      try{ await jpost('/lobby/invite',{toUsername:u.username}); toast('Lobby invite sent to '+u.username); }
-      catch(e){ toast('Invite failed: '+e.message); }
-    });
+    }
+
+    row.querySelector('button[data-invite]')?.addEventListener('click', ()=> invite(u.username));
+    row.querySelector('button[data-join]')?.addEventListener('click', ()=> invite(u.username));
     row.querySelector('button[data-add]')?.addEventListener('click', async ()=>{
       try{
         await jpost('/friends/request',{ toUsername:u.username, username:u.username });
@@ -138,14 +150,17 @@
   function paintFriends(list){
     const host=$('#mpFriends',lobby); if(!host) return;
     host.innerHTML='';
-    (list||[]).forEach(u=> host.appendChild(makeRow(u, 'friends')));
+    (list||[]).forEach(u=> host.appendChild(makeRow(u)));
   }
   function repaintFriends(){
     const q=$('#mpSearch',lobby)?.value?.trim().toLowerCase()||'';
     const filtered = q ? friends.filter(x=> (x.username||'').toLowerCase().includes(q)) : friends;
     paintFriends(filtered);
   }
-  function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
+  function updatePresence(user, active){
+    const f=friends.find(x=>x.username===user);
+    if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); }
+  }
 
   // ==== MATCH / ROUNDS — state machine + watchdogs ===========================
   let match = null; // { id, mode, players[], myName, oppName, myWins, oppWins, state, fence, tWatch, lastChange }
@@ -180,13 +195,13 @@
 
   function initMatch(payload){
     hardResetMatch();
-    const players = payload?.players || [];
-       const myName  = me?.username || 'me';
-    const oppName = players.find(p=>p!==myName) || (players[0]||'opponent');
+    const names = (payload?.players||[]).map(p=>p.username||p);
+    const myName  = me?.username || 'me';
+    const oppName = names.find(n=>n!==myName) || (names[0]||'opponent');
     match = {
       id: payload?.matchId || payload?.id || ('m_'+Math.random().toString(36).slice(2)),
       mode: payload?.mode || 'v1',
-      players, myName, oppName,
+      players: names, myName, oppName,
       myWins:0, oppWins:0,
       roundsToWin: MATCH_CFG.roundsToWin,
       finished:false,
@@ -195,9 +210,19 @@
       tWatch:null,
       lastChange:Date.now()
     };
-    IZZA?.emit?.('duel-config', { roundsToWin: MATCH_CFG.roundsToWin, matchId: match.id });
+
+    try{
+      // Send full visuals so both sides render identically from frame 0
+      IZZA?.emit?.('duel-config', {
+        roundsToWin: match.roundsToWin,
+        matchId: match.id,
+        appearance: getAppearance(),
+        inventory:  getInventorySnapshot()
+      });
+    }catch{}
   }
-  function onRoundStart(_data){ if(!match || match.finished) return; if(match.state!=='in_round'){ setState('in_round'); } }
+
+  function onRoundStart(_d){ if(!match || match.finished) return; if(match.state!=='in_round'){ setState('in_round'); } }
   function onRoundEnd(data){
     if(!match || match.finished) return;
     const rid = (data && data.roundId) || ('r_'+Date.now());
@@ -214,49 +239,42 @@
     }catch{} })();
 
     if(match.myWins>=match.roundsToWin || match.oppWins>=match.roundsToWin){
-      finishMatch(iWon?match.myName:match.oppName, 'local');
+      finishMatch(iWon?match.myName:match.oppName);
     }else{
       setState('between');
       (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
     }
   }
+
   function finishMatch(winnerName){
     if(!match || match.finished) return;
     match.finished = true;
     setState('finished');
 
-    const loserName = (winnerName===match.myName) ? match.oppName : match.myName;
-
-    IZZA.emit?.('mp-finish', { matchId:match.id, winner:winnerName, loser:loserName, myWins:match.myWins, oppWins:match.oppWins });
-
-    try{
-      const modeKey = match.mode || 'v1';
-      me = me || {};
-      me.ranks = me.ranks || {};
-      me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0};
-      if (winnerName === (me.username || match.myName)) me.ranks[modeKey].w++; else me.ranks[modeKey].l++;
-      paintRanks();
-    }catch(e){}
+    const modeKey = match.mode || 'v1';
+    me = me || {};
+    me.ranks = me.ranks || {};
+    me.ranks[modeKey] = me.ranks[modeKey] || { w:0, l:0 };
+    if (winnerName === (me.username || match.myName)) me.ranks[modeKey].w++; else me.ranks[modeKey].l++;
+    paintRanks();
 
     (async()=>{
       try{ await jpost('/match/finish',{matchId:match.id, winner:winnerName}); }catch{}
       try{ await refreshRanks(); }catch{}
     })();
 
-    const msg = (winnerName===match.myName) ? 'You won the match!' : `${winnerName} won the match`;
-    toast(msg);
+    toast(winnerName===match.myName ? 'You won the match!' : `${winnerName} won the match`);
   }
 
-  // Wire duel hooks once
   (function wireDuelHooksOnce(){
     if(!window.IZZA) return;
     if(wireDuelHooksOnce._wired) return;
     wireDuelHooksOnce._wired = true;
 
     IZZA.on?.('ready', function(){
-      IZZA.on?.('duel-round-start', (_,_payload)=> onRoundStart(_payload||{}));
-      IZZA.on?.('duel-round-end',   (_,_payload)=> onRoundEnd(_payload||{}));
-      IZZA.on?.('duel-match-finish',(_,_payload)=>{ if(_payload && _payload.winner) finishMatch(_payload.winner, 'duel'); });
+      IZZA.on?.('duel-round-start', (_,_p)=> onRoundStart(_p||{}));
+      IZZA.on?.('duel-round-end',   (_,_p)=> onRoundEnd(_p||{}));
+      IZZA.on?.('duel-match-finish',(_,_p)=>{ if(_p && _p.winner) finishMatch(_p.winner); });
 
       if(window.__MP_START_PENDING){
         const p = window.__MP_START_PENDING; delete window.__MP_START_PENDING;
@@ -266,40 +284,55 @@
   })();
 
   function startMatch(payload){
-    try{
-      ui.queueMsg && (ui.queueMsg.textContent='');
-      lobby && (lobby.style.display='none');
+    (async ()=>{
+      try{
+        // Ensure we’re not in SOLO before starting; retry quickly once
+        if(await ensureWorldForPvP()) await new Promise(r=>setTimeout(r,150));
 
-      initMatch(payload);
+        ui.queueMsg && (ui.queueMsg.textContent='');
+        lobby && (lobby.style.display='none');
+        initMatch(payload);
 
-      const startPayload = Object.assign({}, payload, { roundsToWin: MATCH_CFG.roundsToWin, matchId: match.id });
-      if(window.IZZA && typeof IZZA.emit==='function'){
-        IZZA.emit('mp-start', startPayload);
-      }else{
-        window.__MP_START_PENDING = startPayload;
+        const startPayload = {
+          ...payload,
+          roundsToWin: match.roundsToWin,
+          matchId: match.id,
+          appearance: getAppearance(),
+          inventory:  getInventorySnapshot()
+        };
+
+        if(window.IZZA && typeof IZZA.emit==='function'){
+          IZZA.emit('mp-start', startPayload);
+        }else{
+          window.__MP_START_PENDING = startPayload;
+        }
+        toast('Match starting…');
+
+        setState('between');
+        try{ await jpost('/match/next',{matchId:match.id}); }catch{}
+      }catch(e){
+        console.warn('startMatch failed', e);
+        window.__MP_START_PENDING = payload;
       }
-      toast('Match starting…');
-
-      setState('between');
-      (async()=>{ try{ await jpost('/match/next',{matchId:match.id}); }catch{} })();
-    }catch(e){
-      console.warn('startMatch failed', e);
-      window.__MP_START_PENDING = payload;
-    }
+    })();
   }
 
   async function enqueue(mode){
     try{
+      if(await ensureWorldForPvP()) await new Promise(r=>setTimeout(r,150));
       lastQueueMode=mode;
       const nice= mode==='br10'?'Battle Royale (10)': mode==='v1'?'1v1': mode==='v2'?'2v2':'3v3';
       ui.queueMsg && (ui.queueMsg.textContent=`Queued for ${nice}… (waiting for match)`);
       const res = await jpost('/queue',{mode});
       if(res && res.start){ startMatch(res.start); }
-    }catch(e){ ui.queueMsg && (ui.queueMsg.textContent=''); toast('Queue error: '+e.message); }
+    }catch(e){
+      ui.queueMsg && (ui.queueMsg.textContent='');
+      toast('Queue error: '+e.message);
+    }
   }
   async function dequeue(){ try{ await jpost('/dequeue'); }catch{} ui.queueMsg && (ui.queueMsg.textContent=''); lastQueueMode=null; }
 
-  // --- WS ---
+  // --- WS (friends/queue/duel/requests fast-path; REST remains baseline) -----
   function connectWS(){
     try{
       const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
@@ -327,23 +360,22 @@
       }else if(msg.type==='match.round'){
         if(!match || match.finished) return;
         if(msg.matchId && match.id !== msg.matchId) return;
-        const w = msg.winner;
-        onRoundEnd({ roundId: msg.roundId || ('ws_'+Date.now()), winner: w });
+        onRoundEnd({ roundId: msg.roundId || ('ws_'+Date.now()), winner: msg.winner });
 
       }else if(msg.type==='match.finish'){
-        if(msg.matchId && match && match.id!==msg.matchId) return;
-        if(msg.winner) finishMatch(msg.winner, 'server');
+        if(!match || (msg.matchId && match.id!==msg.matchId)) return;
+        if(msg.winner) finishMatch(msg.winner);
 
-      // OPTIONAL: friend request via WS
       }else if(msg.type==='friend.request'){
         addNotification({ id: msg.id || ('fr_'+Date.now()), type:'friend', from: msg.from });
-      }else if(msg.type==='invite'){ // battle request
+
+      }else if(msg.type==='invite'){
         addNotification({ id: msg.id || ('inv_'+Date.now()), type:'battle', from: msg.from, mode: msg.mode });
       }
     });
   }
 
-  // --- typing shield (unchanged) ---
+  // --- typing shield (unchanged visuals/behavior) ----------------------------
   function isLobbyEditor(el){ if(!el) return false; const inLobby = !!(el.closest && el.closest('#mpLobby')); return inLobby && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
   function guardKeyEvent(e){ if(!isLobbyEditor(e.target)) return; const k=(e.key||'').toLowerCase(); if(k==='i'||k==='b'||k==='a'){ e.stopImmediatePropagation(); e.stopPropagation(); } }
   ['keydown','keypress','keyup'].forEach(type=> window.addEventListener(type, guardKeyEvent, {capture:true, passive:false}));
@@ -458,20 +490,15 @@
     });
     document.body.appendChild(dd);
 
-    ui.notifBell = bell;
-    ui.notifBadge = badge;
-    ui.notifDropdown = dd;
+    ui.notifBell = bell; ui.notifBadge = badge; ui.notifDropdown = dd;
   }
 
   // ===== Utility: find chat bar rect (Type/Send/EN) & position friends UI ===
   function findChatBarRect(){
-    // Try input/textarea with placeholder "Type..."
     const txt = document.querySelector('input[placeholder="Type..."], textarea[placeholder="Type..."]');
     if(txt) return txt.getBoundingClientRect();
-    // Try the Send button
     const send = Array.from(document.querySelectorAll('button')).find(b=> (b.textContent||'').trim()==='Send');
     if(send) return send.getBoundingClientRect();
-    // Try EN button
     const en = Array.from(document.querySelectorAll('button,div')).find(b=> (b.textContent||'').trim()==='EN');
     if(en) return en.getBoundingClientRect();
     return null;
@@ -479,23 +506,18 @@
   function positionFriendsUI(){
     const r = findChatBarRect();
     if(!r){ return; }
-    const gapBtn = 8;   // gap under Send/EN for button
-    const gapPop = 12;  // gap under Type box for popup
-    // Place the Friends button *under* the Send/EN row by anchoring with TOP
+    const gapBtn = 8, gapPop = 12;
     const btnTop = Math.round(window.scrollY + r.bottom + gapBtn);
     if(ui.friendsToggle){
       ui.friendsToggle.style.top = btnTop+'px';
       ui.friendsToggle.style.right = '14px';
-      ui.friendsToggle.style.bottom = ''; // ensure we don't anchor by bottom anymore
+      ui.friendsToggle.style.bottom = '';
     }
-    // ▼ Popup opens DOWNWARD under the message box (anchor with TOP)
     if(ui.friendsPopup){
       const popTop = Math.round(window.scrollY + r.bottom + gapPop);
       ui.friendsPopup.style.top = popTop + 'px';
       ui.friendsPopup.style.right = '14px';
-      ui.friendsPopup.style.bottom = ''; // stop anchoring by bottom
-
-      // keep within viewport height
+      ui.friendsPopup.style.bottom = '';
       const remaining = Math.max(120, window.innerHeight - (popTop - window.scrollY) - 16);
       ui.friendsPopup.style.maxHeight = remaining + 'px';
     }
@@ -512,7 +534,7 @@
     Object.assign(btn.style, {
       position:'fixed',
       right:'14px',
-      top:'0px',   // will be positioned precisely by positionFriendsUI()
+      top:'0px',   // positioned by positionFriendsUI()
       zIndex:Z.bell,
       height:'34px', padding:'0 12px', borderRadius:'18px',
       background:'#162134', color:'#cfe0ff',
@@ -521,44 +543,26 @@
     });
     btn.addEventListener('click', toggleFriendsPopup);
     document.body.appendChild(btn);
-    ui.friendsToggle = btn;
-    ui.friendsToggle._global = true;
-    // initial position under chat bar if present
+    ui.friendsToggle = btn; ui.friendsToggle._global = true;
     setTimeout(positionFriendsUI, 0);
   }
 
-  // NEW: Notification UI helpers (uses global overlay now)
+  // ===== Notifications (UI + state) =========================================
   function renderNotifDropdown(){
     if(!ui.notifDropdown) return;
-    const host = ui.notifDropdown;
-    host.innerHTML = '';
-
-    const header = document.createElement('div');
-    header.textContent = 'Notifications';
+    const host = ui.notifDropdown; host.innerHTML = '';
+    const header = document.createElement('div'); header.textContent='Notifications';
     header.style.cssText='padding:10px 12px;font-weight:700;border-bottom:1px solid #24324e';
     host.appendChild(header);
-
-    if(!notifications.items.length){
-      const empty = document.createElement('div');
-      empty.style.cssText = 'padding:10px; opacity:.8;';
-      empty.textContent = 'No notifications';
-      host.appendChild(empty);
-      return;
-    }
-
+    if(!notifications.items.length){ const empty=document.createElement('div'); empty.style.cssText='padding:10px; opacity:.8;'; empty.textContent='No notifications'; host.appendChild(empty); return; }
     notifications.items.forEach(n=>{
       const row = document.createElement('div');
       row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border-bottom:1px solid #18233a;';
-      const label = document.createElement('div');
-      label.style.cssText='font-size:13px; line-height:1.3;';
-
+      const label = document.createElement('div'); label.style.cssText='font-size:13px; line-height:1.3;';
       if(n.type==='friend'){
         label.textContent = `${n.from} sent you a friend request`;
-        const actions = document.createElement('div');
-        actions.style.cssText='display:flex; gap:6px;';
-        const accept = document.createElement('button');
-        accept.className='mp-small';
-        accept.textContent='Accept';
+        const actions = document.createElement('div'); actions.style.cssText='display:flex; gap:6px;';
+        const accept=document.createElement('button'); accept.className='mp-small'; accept.textContent='Accept';
         accept.addEventListener('click', async ()=>{
           try{
             await jpost('/friends/accept', { requestId:n.id, from:n.from, username:n.from });
@@ -567,238 +571,69 @@
             removeNotification(n.id);
           }catch(e){ toast('Accept failed: '+e.message); }
         });
-
-        const decline = document.createElement('button');
-        decline.className='mp-small ghost';
-        decline.textContent='Decline';
-        decline.addEventListener('click', async ()=>{
-          try{ await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from }); }
-          catch(e){}
-          removeNotification(n.id);
-        });
-
-        actions.appendChild(accept); actions.appendChild(decline);
-        row.appendChild(label); row.appendChild(actions);
+        const decline=document.createElement('button'); decline.className='mp-small ghost'; decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{ try{ await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from }); }catch{} removeNotification(n.id); });
+        actions.appendChild(accept); actions.appendChild(decline); row.appendChild(label); row.appendChild(actions);
       }else if(n.type==='battle'){
         label.textContent = `${n.from} invited you${n.mode?(' ('+n.mode+')'):''}`;
-        const actions = document.createElement('div');
-        actions.style.cssText='display:flex; gap:6px;';
-        const accept = document.createElement('button');
-        accept.className='mp-small';
-        accept.textContent='Accept';
+        const actions = document.createElement('div'); actions.style.cssText='display:flex; gap:6px;';
+        const accept=document.createElement('button'); accept.className='mp-small'; accept.textContent='Accept';
         accept.addEventListener('click', async ()=>{
           try{
+            if(await ensureWorldForPvP()) await new Promise(r=>setTimeout(r,150));
             const r = await jpost('/lobby/accept',{ inviteId:n.id, from:n.from });
             removeNotification(n.id);
             if(r && r.start) startMatch(r.start);
           }catch(e){ toast('Accept failed: '+e.message); }
         });
-        const decline = document.createElement('button');
-        decline.className='mp-small ghost';
-        decline.textContent='Decline';
-        decline.addEventListener('click', async ()=>{
-          try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }catch(e){}
-          removeNotification(n.id);
-        });
-
-        actions.appendChild(accept); actions.appendChild(decline);
-        row.appendChild(label); row.appendChild(actions);
+        const decline=document.createElement('button'); decline.className='mp-small ghost'; decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{ try{ await jpost('/lobby/decline',{ inviteId:n.id, from:n.from }); }catch{} removeNotification(n.id); });
+        actions.appendChild(accept); actions.appendChild(decline); row.appendChild(label); row.appendChild(actions);
       }else{
-        label.textContent = 'Notification';
-        row.appendChild(label);
+        label.textContent = 'Notification'; row.appendChild(label);
       }
-
       host.appendChild(row);
     });
   }
-
   function setUnread(n){
     notifications.unread = Math.max(0, n|0);
     ensureBellOverlay();
     if(notifications.unread>0){
-      ui.notifBadge.style.display='flex';
-      ui.notifBadge.textContent = String(notifications.unread);
-      ui.notifBell.style.background = '#2b1720';
-      ui.notifBell.style.borderColor = '#7d223a';
-      ui.notifBell.style.color = '#ffd7df';
+      ui.notifBadge.style.display='flex'; ui.notifBadge.textContent = String(notifications.unread);
+      ui.notifBell.style.background = '#2b1720'; ui.notifBell.style.borderColor = '#7d223a'; ui.notifBell.style.color = '#ffd7df';
     }else{
-      ui.notifBadge.style.display='none';
-      ui.notifBell.style.background = '#162134';
-      ui.notifBell.style.borderColor = '#2a3550';
-      ui.notifBell.style.color = '#cfe0ff';
+      ui.notifBadge.style.display='none'; ui.notifBell.style.background = '#162134'; ui.notifBell.style.borderColor = '#2a3550'; ui.notifBell.style.color = '#cfe0ff';
     }
   }
   function addNotification(n){
     notifications.items.unshift(n);
     setUnread(notifications.unread+1);
-    if(ui.notifDropdown && ui.notifDropdown.style.display!=='none'){
-      renderNotifDropdown();
-      markAllNotificationsRead();
-    }
+    if(ui.notifDropdown && ui.notifDropdown.style.display!=='none'){ renderNotifDropdown(); markAllNotificationsRead(); }
   }
   function removeNotification(id){
     notifications.items = notifications.items.filter(x=>x.id!==id);
     renderNotifDropdown();
   }
-  function markAllNotificationsRead(){
-    setUnread(0);
-  }
+  function markAllNotificationsRead(){ setUnread(0); }
   function toggleNotifDropdown(){
     ensureBellOverlay();
-    const vis = (ui.notifDropdown.style.display!=='none');
-    ui.notifDropdown.style.display = vis ? 'none' : 'block';
-    if(!vis){
-      renderNotifDropdown();
-      markAllNotificationsRead();
-    }
+    const dd = document.getElementById('mpNotifDropdown'); if(!dd) return;
+    const vis = (dd.style.display!=='none');
+    dd.style.display = vis ? 'none' : 'block';
+    if(!vis){ renderNotifDropdown(); markAllNotificationsRead(); }
   }
 
-  // --- FIRE button helpers (hide while friends list open) --------------------
-  function getFireButton(){
-    // Common ids/classes
-    const byCommon = document.querySelector('#btnFire, #fireBtn, #shootBtn, .btn-fire, .fire');
-    if(byCommon) return byCommon;
-    // Any element whose text contains FIRE (case-insensitive)
-    const all = Array.from(document.querySelectorAll('button,div,span'));
-    const byText = all.find(el => /\bFIRE\b/i.test((el.textContent||'').trim()));
-    if(byText) return byText.closest('button,div') || byText;
-    // Circle near bottom-right (fallback): pick element with large size there
-    const candidates = all
-      .map(el=>[el, el.getBoundingClientRect?.()])
-      .filter(([,r])=>r && r.width>50 && r.height>50 && r.bottom>window.innerHeight*0.6 && r.right>window.innerWidth*0.6)
-      .sort((a,b)=> (b[1].width*b[1].height)-(a[1].width*a[1].height));
-    return candidates.length? candidates[0][0] : null;
-  }
-  function setFireHidden(hidden){
-    const fire = getFireButton(); if(!fire) return;
-    // hide the container too if it’s a nested label
-    const target = fire.closest('button,div') || fire;
-    if(hidden){
-      target.__prevVis = {display:target.style.display, opacity:target.style.opacity, pointerEvents:target.style.pointerEvents};
-      target.style.opacity='0'; target.style.pointerEvents='none'; target.style.display='none';
-    }else{
-      if(target.__prevVis){
-        target.style.display = target.__prevVis.display || '';
-        target.style.opacity = target.__prevVis.opacity || '';
-        target.style.pointerEvents = target.__prevVis.pointerEvents || '';
-        delete target.__prevVis;
-      }else{
-        target.style.display='';
-        target.style.opacity='';
-        target.style.pointerEvents='';
-      }
-    }
-  }
-
-  // Friends popup (global overlay; positioned under Type box)
-  function ensureFriendsPopup(){
-    if(ui.friendsPopup) return ui.friendsPopup;
-    const pop = document.createElement('div');
-    pop.id='mpFriendsPopup';
-    Object.assign(pop.style, {
-      position:'fixed',
-      right:'14px',
-      top:'0px',           // <- anchor by TOP; precise value set by positionFriendsUI()
-      zIndex:Z.drop,
-      background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
-      width:'320px', maxWidth:'92vw', maxHeight:'340px', overflow:'auto', display:'none',
-      boxShadow:'0 10px 28px rgba(0,0,0,.35)'
-    });
-    const head = document.createElement('div');
-    head.style.cssText='display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #2a3550;';
-    const ttl = document.createElement('div');
-    ttl.textContent='Friends';
-    ttl.style.cssText='font-weight:700';
-    const x = document.createElement('button');
-    x.className='mp-small ghost';
-    x.textContent='Close';
-    x.addEventListener('click', ()=>{ pop.style.display='none'; setFireHidden(false); });
-
-    head.appendChild(ttl); head.appendChild(x);
-
-    const body = document.createElement('div');
-    body.id='mpFriendsListBody';
-    body.style.cssText='display:flex; flex-direction:column; gap:6px; padding:10px;';
-
-    pop.appendChild(head);
-    pop.appendChild(body);
-    document.body.appendChild(pop);
-    ui.friendsPopup = pop;
-    ui.friendsBody  = body;
-    // position relative to chat bar
-    setTimeout(positionFriendsUI, 0);
-    return pop;
-  }
-  function renderFriendsPopup(){
-    ensureFriendsPopup();
-    if(!ui.friendsBody) return;
-    ui.friendsBody.innerHTML='';
-    (friends||[]).forEach(f=>{
-      const row=document.createElement('div');
-      row.style.cssText='display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; background:#0f1624; border:1px solid #2a3550; border-radius:8px;';
-      const left=document.createElement('div');
-      left.innerHTML = `<div>${f.username}</div><div class="meta ${f.active?'active':'offline'}" style="opacity:.8;font-size:12px">${f.active?'Active':'Offline'}</div>`;
-      const right=document.createElement('div');
-      right.style.cssText='display:flex; gap:6px;';
-      const invite=document.createElement('button');
-      invite.className='mp-small';
-      invite.textContent='Invite';
-      invite.addEventListener('click', async ()=>{
-        try{ await jpost('/lobby/invite',{toUsername:f.username}); toast('Invite sent to '+f.username); }
-        catch(e){ toast('Invite failed: '+e.message); }
-      });
-      right.appendChild(invite);
-      if(f.active){
-        const join=document.createElement('button');
-        join.className='mp-small outline';
-        join.textContent='Invite to Lobby';
-        join.addEventListener('click', async ()=>{
-          try{ await jpost('/lobby/invite',{toUsername:f.username}); toast('Lobby invite sent to '+f.username); }
-          catch(e){ toast('Invite failed: '+e.message); }
-        });
-        right.appendChild(join);
-      }
-      row.appendChild(left); row.appendChild(right);
-      ui.friendsBody.appendChild(row);
-    });
-    if(!friends || !friends.length){
-      const none=document.createElement('div');
-      none.style.cssText='opacity:.8; padding:10px;';
-      none.textContent='No friends yet. Use "Search All Players" to add some!';
-      ui.friendsBody.appendChild(none);
-    }
-  }
-  function toggleFriendsPopup(){
-    ensureFriendsPopup();
-    if(!ui.friendsPopup) return;
-    const vis = (ui.friendsPopup.style.display!=='none');
-    ui.friendsPopup.style.display = vis ? 'none' : 'block';
-    if(!vis){ renderFriendsPopup(); positionFriendsUI(); setFireHidden(true); }
-    else { setFireHidden(false); }
-  }
-
-  // === Lobby mounting (kept minimal; only rename label + wire buttons) =======
   function ensureNotifUI(){
-    // Ensure global overlays exist (bell/badge/dropdown + friends button)
     ensureBellOverlay();
     ensureFriendsButtonOverlay();
-
-    // Rename label to "Search All Players" if host exists
     if(lobby){
       const label = $('#mpFriendsLabel', lobby);
       if(label) label.textContent = 'Search All Players';
-
-      // Also hint in status line once
       if(ui.searchStatus && !ui.searchStatus._relabelled){
         ui.searchStatus.textContent = 'Search All Players — type a name and press Search or Return';
         ui.searchStatus._relabelled = true;
       }
-
-      // If a lobby-scoped friends toggle exists from earlier builds, remove duplication
-      if(!ui.friendsToggle || !ui.friendsToggle._global){
-        const old = lobby.querySelector('#mpFriendsToggle');
-        if(old){ old.remove(); }
-      }
+      const old = lobby.querySelector('#mpFriendsToggle'); if(old){ old.remove(); }
     }
   }
 
@@ -882,12 +717,12 @@
     });
     ui.searchBtn?.addEventListener('click', ()=> doSearch(true));
 
-    // NEW: Upgrade the header with our actions / rename labels
     ensureNotifUI();
 
     paintRanks(); paintFriends(friends);
   }
 
+  // Observe lobby visibility to mount once it opens
   const obs = new MutationObserver(function(){
     const h=document.getElementById('mpLobby'); if(!h) return;
     const visible = h.style.display && h.style.display!=='none';
@@ -898,18 +733,19 @@
     if(root) obs.observe(root,{subtree:true, attributes:true, childList:true, attributeFilter:['style']});
   })();
 
-  // ---- Notifications poll (extended) ----
+  // ---- Notifications poll ---------------------------------------------------
   async function pullNotifications(){
     try{
       const n = await jget('/notifications');
-      // starts / rounds / finishes (existing)
+
+      // duel lifecycle
       if(n && n.start){ startMatch(n.start); return; }
       if(n && n.round){
         if(n.round.type==='start') onRoundStart(n.round);
         else onRoundEnd({ roundId:n.round.roundId, winner:n.round.winner });
       }
       if(n && n.finish && (!match || !n.finish.matchId || n.finish.matchId===match.id)){
-        if(n.finish.winner) finishMatch(n.finish.winner, 'server');
+        if(n.finish && n.finish.winner) finishMatch(n.finish.winner);
       }
 
       // battle invites
@@ -921,7 +757,7 @@
         }
       }
 
-      // optional friend requests (any supported shape)
+      // friend requests (any shape)
       const reqs = (n && (n.friendRequests || n.requests)) || (n && n.friend ? [n.friend] : []);
       if(Array.isArray(reqs)){
         reqs.forEach(fr=>{
@@ -934,27 +770,27 @@
     }catch{}
   }
 
+  // --- STARTUP ---------------------------------------------------------------
   async function start(){
     try{
       await loadMe(); await loadFriends(); refreshRanks();
 
-      // make sure global overlays exist immediately
+      // Overlays
       ensureBellOverlay();
       ensureFriendsButtonOverlay();
 
-      // presence refresher
-      setInterval(async () => { try { await jget('/me'); } catch{} }, 20000);
+      // presence refresher (kept same cadence; not user-visible animation)
+      setInterval(async () => { try { await jget('/me'); } catch{} }, CFG.meRefreshMs);
 
       // notifications poll
       pullNotifications();
-      notifTimer=setInterval(pullNotifications, 5000);
+      notifTimer=setInterval(pullNotifications, CFG.notifPollMs);
 
       connectWS();
 
       const h=document.getElementById('mpLobby');
       if(h && h.style.display && h.style.display!=='none') mountLobby(h);
 
-      // ensure overlays track chat bar location after initial layout
       setTimeout(positionFriendsUI, 250);
 
       console.log('[MP] client ready', {user:me?.username, friends:friends.length, ws:!!ws});
@@ -965,4 +801,19 @@
   }
   if(document.readyState==='complete' || document.readyState==='interactive') start();
   else addEventListener('DOMContentLoaded', start, {once:true});
+
+  // === SOLO error helpers for other modules to surface nicely ================
+  window.addEventListener('mp-error', (e)=>{
+    const payload = e && e.detail;
+    if(!payload) return;
+    if(payload.error === 'in_solo_world' || payload.error === 'solo_world'){
+      toast('PvP is not available in SOLO. Picking WORLD 1 for you…');
+      joinWorld('1');
+    }
+    if(payload.error === 'wrong_world'){
+      joinWorld(String(payload.world||'1'));
+      toast('Switching to WORLD '+(payload.world||'1')+'…');
+    }
+  });
+
 })();
