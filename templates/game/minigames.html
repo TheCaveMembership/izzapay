@@ -86,8 +86,8 @@
           <span class="muted">Mini Game Arena</span>
         </div>
         <div class="wallet">
-          <span class="pill">IZZA Coins: <strong id="coins">—</strong></span>
-          <span class="pill">Craft Credits: <strong id="craft">—</strong></span>
+          <span class="pill">IZZA Coins: <strong id="coins">{{ coins|default(0) }}</strong></span>
+          <span class="pill">Craft Credits: <strong id="craft">{{ crafting|default(0) }}</strong></span>
           <a class="btn" href="/izza-game/city">Enter IZZA City</a>
         </div>
       </div>
@@ -98,14 +98,10 @@
       <div class="grid" id="gameGrid">
         <!-- Basketball -->
         <div class="tile" data-game="basketball">
-          <div class="thumb">
-            <div class="net"></div>
-          </div>
+          <div class="thumb"><div class="net"></div></div>
           <h3>Street Basketball</h3>
           <p>Time your shots, rack up combos, beat the buzzer.</p>
-          <div class="row">
-            <span class="pill">Arcade</span><span class="pill">Solo</span>
-          </div>
+          <div class="row"><span class="pill">Arcade</span><span class="pill">Solo</span></div>
           <div class="row" style="justify-content:space-between;align-items:center">
             <span class="earn">* Earn Coins + Credits</span>
             <a href="/izza-game/minigames/basketball" class="btn enter-btn">Enter to play</a>
@@ -114,14 +110,10 @@
 
         <!-- Racing -->
         <div class="tile" data-game="racing">
-          <div class="thumb">
-            <div class="road"></div>
-          </div>
+          <div class="thumb"><div class="road"></div></div>
           <h3>Street Race</h3>
           <p>Dodge traffic, hit boosts, and set a new record.</p>
-          <div class="row">
-            <span class="pill">Racing</span><span class="pill">Solo</span>
-          </div>
+          <div class="row"><span class="pill">Racing</span><span class="pill">Solo</span></div>
           <div class="row" style="justify-content:space-between;align-items:center">
             <span class="earn">* Earn Coins + Credits</span>
             <a href="/izza-game/minigames/race" class="btn enter-btn">Enter to play</a>
@@ -130,18 +122,14 @@
 
         <!-- Jetman -->
         <div class="tile" data-game="jetman">
-          <div class="thumb">
-            <div class="stars"></div>
+          <div class="thumb"><div class="stars"></div></div>
+          <h3>Jetman Rooftops</h3>
+          <p>Tap to thrust, weave through neon towers, survive.</p>
+          <div class="row"><span class="pill">Endless</span><span class="pill">Skill</span></div>
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <span class="earn">* Earn Coins + Credits</span>
+            <a href="/izza-game/minigames/jetman" class="btn enter-btn">Enter to play</a>
           </div>
-            <h3>Jetman Rooftops</h3>
-            <p>Tap to thrust, weave through neon towers, survive.</p>
-            <div class="row">
-              <span class="pill">Endless</span><span class="pill">Skill</span>
-            </div>
-            <div class="row" style="justify-content:space-between;align-items:center">
-              <span class="earn">* Earn Coins + Credits</span>
-              <a href="/izza-game/minigames/jetman" class="btn enter-btn">Enter to play</a>
-            </div>
         </div>
 
         <!-- Puzzle -->
@@ -194,36 +182,20 @@
 
   <script>
   (function(){
-    // --- Character gate: if no character, send them to creation (same flow) ---
+    // --- Character gate: redirect to creation if not set (server + client agree) ---
     async function ensureCharacter(){
-      // We’ll try to detect character existence; if endpoint is missing, we won’t block.
-      const endpoints = [
-        '/izza-game/api/character',
-        '/api/character/me',
-        '/api/me/character'
-      ];
-      for(const ep of endpoints){
-        try{
-          const r = await fetch(ep, { credentials:'include' });
-          if(r.ok){
-            const j = await r.json().catch(()=>null);
-            if(j && (j.body_type || j.skin_tone || j.sprite_skin || j.outfit)) return j;
-          }
-        }catch(_){}
-      }
-      // If we cannot confirm character, still check a local breadcrumb:
       try{
-        const j = JSON.parse(localStorage.getItem('izzaCharacter')||'null');
-        if(j) return j;
+        const r = await fetch('/izza-game/api/character', { credentials:'include' });
+        if(!r.ok) throw new Error('not-auth');
+        const j = await r.json();
+        if(j && j.hasCharacter) return j;
       }catch(_){}
-      // Redirect to creation; preserve return
       const next = encodeURIComponent('/izza-game/minigames');
       location.replace('/izza-game/create?next='+next);
-      // Prevent rest of boot if it redirects
-      throw new Error('redirecting-to-create');
+      throw new Error('redirecting');
     }
 
-    // --- Minimal sprite dictionary (matches your character creation page) -----
+    // --- Minimal sprite dictionary (same as creation page) -----
     const SPRITES = {
       body: {
         default:  "/static/game/sprites/body/default.png",
@@ -242,7 +214,7 @@
       }
     };
 
-    // --- Palette ramps (copied from creation so the avatar looks identical) ---
+    // --- Palette ramps (identical to creation page) ---
     const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
@@ -275,7 +247,7 @@
       pink:   ["#FFA6D6","#E57CB2","#C45C96"]
     };
 
-    // --- utils identical to creation page ------------------------------------
+    // --- utils (same as creation) ---
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
@@ -298,7 +270,7 @@
       const pick = q => {
         const idx = Math.max(0, Math.min(samples.length-1, Math.floor(q*(samples.length-1))));
         const s = samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0').padStart?.(2,'0') || '#000000';
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');
       };
       return [pick(0.2), pick(0.55), pick(0.85)];
     }
@@ -306,14 +278,12 @@
     function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
       const from = fromRampHex.map(hexToRgb);
       const to   = toRampHex.map(hexToRgb);
-
       const w=img.width,h=img.height;
       const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
       const c=oc.getContext('2d',{willReadFrequently:true});
       c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
       const id=c.getImageData(0,0,w,h), d=id.data;
       let changed=0;
-
       for(let i=0;i<d.length;i+=4){
         if(d[i+3]===0) continue;
         const p={r:d[i],g:d[i+1],b:d[i+2]};
@@ -348,7 +318,6 @@
       return oc;
     }
 
-    // --- Draw avatar (same look as creation page, same filenames) ------------
     async function buildAvatarCanvas(dstCtx, size, profile){
       const DW=size, DH=size, X=0, Y=0;
       const type   = profile.body_type || 'male';
@@ -359,7 +328,6 @@
       const hairCol   = profile.hair_color || 'black';
       const femaleOutColor = profile.female_outfit_color || 'blue';
 
-      // Body (female uses EXACT SAME two filename attempts as your creation page)
       let body=null;
       if(type === 'female'){
         const femaleWide = `/static/game/sprites/body/${theme}__female_wide.png`;
@@ -370,11 +338,9 @@
         body = await loadImg(SPRITES.body[theme] || SPRITES.body.default);
       }
 
-      // Hair & outfit
       const hair  = await loadImg(SPRITES.hair[hairKey] || SPRITES.hair.short);
       const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey] || SPRITES.outfit.street));
 
-      // Skin tint first
       let bodyCanvas;
       if(body){
         const targetSkin = SKIN_TO[tone] || SKIN_TO.light;
@@ -385,7 +351,6 @@
         }
       }
 
-      // Female dress tint
       if(type==='female' && bodyCanvas){
         const targetDress = FEMALE_DRESS_TO[femaleOutColor] || FEMALE_DRESS_TO.blue;
         const reDress = paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
@@ -395,7 +360,6 @@
         }
       }
 
-      // Clear and draw
       dstCtx.clearRect(0,0,DW,DH);
       if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
       if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
@@ -412,30 +376,21 @@
       }
     }
 
-    // --- Avatar cursor logic --------------------------------------------------
     const avatarWrap = document.getElementById('avatarWrap');
     const avatarCanvas = document.getElementById('avatarCursor');
     const actx = avatarCanvas.getContext('2d');
     actx.imageSmoothingEnabled = false;
 
-    // Track coins/craft display (wire later server-side; placeholders now)
     const elCoins = document.getElementById('coins');
     const elCraft = document.getElementById('craft');
 
-    // Move avatar (desktop follows pointer, mobile drag)
     let isTouch = window.matchMedia('(pointer:coarse)').matches;
-    let drag = { active:false, dx:0, dy:0 };
-
-    function setAvatarPos(x,y){
-      avatarWrap.style.transform = `translate3d(${x}px,${y}px,0)`;
-    }
+    function setAvatarPos(x,y){ avatarWrap.style.transform = `translate3d(${x}px,${y}px,0)`; }
 
     function animateAvatarTo(el, cb){
       const r = el.getBoundingClientRect();
-      // aim for center of the button
       const targetX = r.left + r.width/2 - 48 + window.scrollX;
       const targetY = r.top + r.height/2 - 48 + window.scrollY;
-      // quick tween
       const start = avatarWrap.getBoundingClientRect();
       const sx = start.left + window.scrollX;
       const sy = start.top + window.scrollY;
@@ -443,7 +398,7 @@
       const t0 = performance.now();
       function tick(t){
         const k = Math.min(1, (t - t0) / duration);
-        const e = 1 - Math.pow(1-k, 3); // ease out
+        const e = 1 - Math.pow(1-k, 3);
         const x = sx + (targetX - sx)*e;
         const y = sy + (targetY - sy)*e;
         setAvatarPos(x, y);
@@ -456,32 +411,28 @@
       requestAnimationFrame(tick);
     }
 
-    function wirePointer(profile){
-      // Desktop: follow mouse
+    function wirePointer(){
       if(!isTouch){
         document.addEventListener('mousemove', (e)=>{
           setAvatarPos(e.clientX - 48 + window.scrollX, e.clientY - 48 + window.scrollY);
         }, {passive:true});
       }else{
-        // Mobile: drag
         avatarWrap.style.pointerEvents = 'auto';
-        let startX=0, startY=0;
+        let startX=0, startY=0, active=false;
         avatarWrap.addEventListener('pointerdown', (e)=>{
-          drag.active = true;
-          avatarWrap.setPointerCapture(e.pointerId);
+          active = true; avatarWrap.setPointerCapture(e.pointerId);
           const rect = avatarWrap.getBoundingClientRect();
-          startX = e.clientX - rect.left;
-          startY = e.clientY - rect.top;
+          startX = e.clientX - rect.left; startY = e.clientY - rect.top;
         });
         avatarWrap.addEventListener('pointermove', (e)=>{
-          if(!drag.active) return;
+          if(!active) return;
           setAvatarPos(e.clientX - startX + window.scrollX, e.clientY - startY + window.scrollY);
         });
-        avatarWrap.addEventListener('pointerup', ()=>{ drag.active=false; });
-        avatarWrap.addEventListener('pointercancel', ()=>{ drag.active=false; });
+        const stop=()=>{ active=false; };
+        avatarWrap.addEventListener('pointerup', stop);
+        avatarWrap.addEventListener('pointercancel', stop);
       }
 
-      // Clicking “Enter to play” animates avatar onto that button first
       document.querySelectorAll('.enter-btn').forEach(a=>{
         a.addEventListener('click', (ev)=>{
           ev.preventDefault();
@@ -491,32 +442,24 @@
       });
     }
 
-    // --- Boot ---------------------------------------------------------------
     (async function boot(){
       try{
-        const profile = await ensureCharacter(); // will redirect if missing
-        // Remember locally so the mini games can read, too (optional)
+        const profile = await ensureCharacter();  // redirect if missing
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
-
-        // Render avatar sprite
         await buildAvatarCanvas(actx, 96, profile);
 
-        // Place avatar at TL for mobile; center-ish for desktop (will follow mouse anyway)
         if(isTouch) setAvatarPos(16, 16);
         else setAvatarPos(window.innerWidth/2 - 48, window.innerHeight/2 - 48);
 
-        // Fill balances (placeholder; non-blocking)
+        // balances
         try{
           const r = await fetch('/izza-game/api/wallet', {credentials:'include'});
           if(r.ok){ const j = await r.json(); elCoins.textContent = j.coins ?? '0'; elCraft.textContent = j.crafting ?? '0'; }
-          else { elCoins.textContent='0'; elCraft.textContent='0'; }
-        }catch(_){ elCoins.textContent='0'; elCraft.textContent='0'; }
+        }catch(_){}
 
-        wirePointer(profile);
+        wirePointer();
       }catch(e){
-        if(String(e.message) !== 'redirecting-to-create'){
-          console.error('Arena init error', e);
-        }
+        if(String(e.message) !== 'redirecting'){ console.error('Arena init error', e); }
       }
     })();
   })();
