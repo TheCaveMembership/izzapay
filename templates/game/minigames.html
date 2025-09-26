@@ -328,35 +328,34 @@
       if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
     }
 
-    // -------- Wallet Hydration (only change) --------
-    function syncCoinsToLocal(total){
-      try {
-        if (typeof window.setCoins === 'function') window.setCoins(+total || 0);
-      } catch {}
+    // ====== Wallet helpers (robust; minimal & additive) ======
+    const toNum = (v)=>{ const n = Number(v); return Number.isFinite(n) ? n : 0; };
+    function readLocalWallet(){
+      let coins = toNum(localStorage.getItem('izzaCoins'));
+      // try a few common keys for crafting credits
+      let craft = toNum(
+        localStorage.getItem('izzaCrafting') ??
+        localStorage.getItem('craftingCredits') ??
+        localStorage.getItem('izzaCraftCredits')
+      );
+      return { coins, crafting: craft };
     }
-    async function hydrateWallet(){
-      // show cached immediately if your core stored it
-      try{
-        if (typeof window.getCoins === 'function'){
-          const cached = +window.getCoins() || 0;
-          if (elCoins) elCoins.textContent = String(cached);
-        }
-      }catch{}
-      // authoritative from server
-      try{
-        const r = await fetch('/izza-game/api/wallet'+TQ, { credentials:'include' });
-        if (!r.ok) throw new Error('wallet fetch failed');
-        const j = await r.json();
-        const coins = (j && typeof j.coins === 'number') ? j.coins : 0;
-        const craft = (j && typeof j.crafting === 'number') ? j.crafting : 0;
-        if (elCoins) elCoins.textContent = String(coins);
-        if (elCraft) elCraft.textContent = String(craft);
-        syncCoinsToLocal(coins);
-      }catch(e){
-        console.warn('[wallet] fallback to cached coins', e);
+    function renderWallet(obj){
+      if (!obj) return;
+      if (elCoins) elCoins.textContent = String(toNum(obj.coins));
+      if (elCraft) elCraft.textContent = String(toNum(obj.crafting));
+    }
+    function parseWalletResponse(j){
+      if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
+      // direct fields
+      if ('coins' in j || 'crafting' in j || 'credits' in j){
+        return { coins: toNum(j.coins), crafting: toNum(j.crafting ?? j.credits) };
       }
+      // nested: wallet / balance
+      if (j.wallet)   return parseWalletResponse(j.wallet);
+      if (j.balance)  return parseWalletResponse(j.balance);
+      return { coins:0, crafting:0 };
     }
-    // ------------------------------------------------
 
     (async function boot(){
       try{
@@ -364,18 +363,59 @@
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
         await buildAvatarCanvas(actx,96,profile);
 
-        // place avatar over logo on phones
+        // --- place avatar over the IZZA PAY logo on phones ---
         const logo = document.getElementById('brandWord');
         if (isTouch && logo){
           const r = logo.getBoundingClientRect();
-          const y = r.top + window.scrollY - 6 - 96;
-          const x = r.left + window.scrollX - 24;
+          const y = r.top + window.scrollY - 6 - 96;  // 6px gap, avatar 96px tall
+          const x = r.left + window.scrollX - 24;     // slight left nudge
           setAvatarPos(Math.max(8, x), Math.max(8, y));
         } else {
           setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
         }
 
-        await hydrateWallet();   // <— new call
+        // 1) paint any cached values immediately
+        renderWallet(readLocalWallet());
+
+        // 2) fetch authoritative wallet (preserve t + include bearer if available)
+        try{
+          const headers = { 'content-type':'application/json' };
+          try{
+            const bearer = localStorage.getItem('izzaBearer') || '';
+            if (bearer) headers['authorization'] = 'Bearer ' + bearer;
+          }catch(_){}
+
+          const r = await fetch('/izza-game/api/wallet'+TQ, {
+            credentials:'include',
+            headers
+          });
+
+          if (r.ok){
+            let j = {};
+            try{ j = await r.json(); }catch(_){}
+            const parsed = parseWalletResponse(j);
+            renderWallet(parsed);
+            try{
+              localStorage.setItem('izzaCoins', String(toNum(parsed.coins)));
+              localStorage.setItem('izzaCrafting', String(toNum(parsed.crafting)));
+            }catch(_){}
+          } else {
+            console.warn('Wallet fetch failed', r.status);
+          }
+        }catch(e){
+          console.warn('Wallet fetch error', e);
+        }
+
+        // 3) react to app-wide wallet changes
+        window.addEventListener('izza-wallet-changed', (ev)=>{
+          const d = ev && ev.detail ? ev.detail : {};
+          const local = readLocalWallet();
+          renderWallet({ coins: d.coins ?? local.coins, crafting: d.crafting ?? d.credits ?? local.crafting });
+        }, { passive:true });
+
+        window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
+        window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
+
         wirePointer();
       }catch(e){ if(String(e.message)!=='redirecting'){ console.error('Arena init error',e); } }
     })();
