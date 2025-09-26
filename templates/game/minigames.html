@@ -20,15 +20,25 @@
     .tile h3{margin:0;font-size:18px}
     .tile p{margin:0;font-size:13px;color:var(--muted)}
     .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
-    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:11px;background:var(--chip-bg)}
+    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:11px;background:var(--chip-bg); white-space:nowrap;}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);cursor:pointer;text-decoration:none;color:inherit}
     .btn:hover{filter:brightness(1.08)}
     .earn{font-size:12px;color:var(--muted)}
-    .topbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
-    .topbar .left{display:flex;align-items:center;gap:10px}
-    .brand-word{height:28px;filter:brightness(1.06) contrast(1.02)}
-    .wallet{display:flex;gap:8px;flex-wrap:wrap}
+
+    /* top bar cleanup */
+    .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .topbar .left{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+    .brand-word{height:28px;filter:brightness(1.06) contrast(1.02); margin-top:6px;} /* nudge down a touch */
+    .wallet{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
     .wallet .pill strong{font-weight:700}
+
+    /* Make the avatar look like it's standing on the logo on phones:
+       add vertical offset above the topbar and stack wallet neatly. */
+    @media (max-width: 640px){
+      .topbar{margin-top:56px;}              /* pushes logo under the fixed avatar */
+      .wallet{flex-direction:column; align-items:flex-end;}
+      .wallet .btn{width:auto;}
+    }
 
     /* avatar cursor */
     .avatar-wrap{position:fixed; left:16px; top:16px; width:96px; height:96px; z-index:9999; pointer-events:none; transform:translate3d(0,0,0);}
@@ -144,7 +154,7 @@
 
   <script>
   (function(){
-    // --- NEW: token helpers (kept minimal) ---
+    // --- token helpers (unchanged) ---
     const T   = new URLSearchParams(location.search).get('t') || '';
     const TQ  = T ? `?t=${encodeURIComponent(T)}` : '';
     const withT = (path) => {
@@ -155,13 +165,11 @@
 
     async function ensureCharacter(){
       try{
-        // pass t to hydrate session via @before_request
         const r = await fetch('/izza-game/api/character'+TQ, { credentials:'include' });
         if(!r.ok) throw new Error('not-auth');
         const j = await r.json();
         if(j && j.hasCharacter) return j;
       }catch(_){}
-      // preserve t inside the "next" param so we come back with it
       const next = encodeURIComponent(withT('/izza-game/minigames'));
       location.replace('/izza-game/create?next='+next);
       throw new Error('redirecting');
@@ -182,7 +190,7 @@
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722;b
 
     function extractThreeToneRamp(img){
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
@@ -192,8 +200,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0').padStart?.(2,'0')??s.b.toString(16).padStart(2,'0'); };
-      // fix for some browsers lacking optional chaining in padStart above:
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
