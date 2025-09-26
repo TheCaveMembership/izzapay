@@ -154,6 +154,12 @@
     <canvas id="avatarCursor" width="96" height="96"></canvas>
   </div>
 
+  <!-- Persist: instant wallet hydrate + live change events -->
+  <script>
+    window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';
+  </script>
+  <script src="/static/izza-persist.js"></script>
+
   <script>
   (function(){
     // token helpers
@@ -328,7 +334,7 @@
       if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
     }
 
-    // ====== Wallet helpers (robust; minimal & additive) ======
+    /* ====== Wallet helpers (robust; minimal & additive) ====== */
     const toNum = (v)=>{ const n = Number(v); return Number.isFinite(n) ? n : 0; };
     function readLocalWallet(){
       let coins = toNum(localStorage.getItem('izzaCoins'));
@@ -363,7 +369,7 @@
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
         await buildAvatarCanvas(actx,96,profile);
 
-        // --- place avatar over the IZZA PAY logo on phones ---
+        // place avatar over logo on phones
         const logo = document.getElementById('brandWord');
         if (isTouch && logo){
           const r = logo.getBoundingClientRect();
@@ -374,7 +380,7 @@
           setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
         }
 
-        // 1) paint any cached values immediately
+        // 1) paint any cached values immediately (persist/local)
         renderWallet(readLocalWallet());
 
         // 2) fetch authoritative wallet (preserve t + include bearer if available)
