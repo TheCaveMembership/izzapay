@@ -177,9 +177,22 @@
       return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
     };
 
+    // --- tiny helpers shared by both character + wallet fetches ---
+    function bearerHeaders(base = {}) {
+      const headers = Object.assign({ 'content-type':'application/json' }, base || {});
+      try{
+        const bearer = localStorage.getItem('izzaBearer') || '';
+        if (bearer) headers['authorization'] = 'Bearer ' + bearer;
+      }catch(_){}
+      return headers;
+    }
+
     async function ensureCharacter(){
       try{
-        const r = await fetch('/izza-game/api/character'+TQ, { credentials:'include' });
+        const r = await fetch('/izza-game/api/character'+TQ, {
+          credentials:'include',
+          headers: bearerHeaders()
+        });
         if(!r.ok) throw new Error('not-auth');
         const j = await r.json();
         if(j && j.hasCharacter) return j;
@@ -374,8 +387,26 @@
 
     (async function boot(){
       try{
+        // 0) get character (with bearer) — this is authoritative and may include wallet-like fields
         const profile=await ensureCharacter();  // redirects if missing; preserves t
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
+
+        // >>> NEW: seed wallet from character payload if present (prevents "0 until city" + fixes refresh) <<<
+        const seeded = parseWalletResponse(profile);
+        if ((seeded.coins|0) > 0 || (seeded.crafting|0) > 0){
+          try{
+            localStorage.setItem('izzaCoins', String(toNum(seeded.coins)));
+            localStorage.setItem('izzaCrafting', String(toNum(seeded.crafting)));
+          }catch(_){}
+          LAST_WALLET = { coins: toNum(seeded.coins), crafting: toNum(seeded.crafting) };
+          renderWallet(LAST_WALLET);
+        } else {
+          // paint any cached values immediately if character didn't include balances
+          renderWallet(LAST_WALLET);
+        }
+        // <<< END NEW >>>
+
+        // 1) draw avatar
         await buildAvatarCanvas(actx,96,profile);
 
         // place avatar
@@ -389,17 +420,12 @@
           setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
         }
 
-        // 1) paint any cached values immediately
-        renderWallet(LAST_WALLET);
-
         // 2) fetch authoritative wallet (preserve t + include bearer if available)
         try{
-          const headers = { 'content-type':'application/json' };
-          try{
-            const bearer = localStorage.getItem('izzaBearer') || '';
-            if (bearer) headers['authorization'] = 'Bearer ' + bearer;
-          }catch(_){}
-          const r = await fetch('/izza-game/api/wallet'+TQ, { credentials:'include', headers });
+          const r = await fetch('/izza-game/api/wallet'+TQ, {
+            credentials:'include',
+            headers: bearerHeaders()
+          });
           if (r.ok){
             let j = {};
             try{ j = await r.json(); }catch(_){}
