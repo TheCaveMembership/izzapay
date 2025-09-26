@@ -451,7 +451,111 @@ def game_play():
 
     return render_template("game/play.html", profile=profile_dict, user=user_ctx, t=t)
 
+# =========================
+# Mini Game Arena routes
+# =========================
+from flask import Blueprint, request, session, redirect, url_for, jsonify, render_template
 
+# If you use a Blueprint for game routes, set APP = game_bp; otherwise APP = app
+APP = app  # <-- change to your actual route object if needed (e.g., game_bp)
+
+def _is_logged_in():
+    # Reuse whatever you already use. Common patterns:
+    # return 'user_id' in session
+    # or: return bool(session.get('pi_username'))
+    return bool(session.get('user_id') or session.get('pi_username'))
+
+def _login_redirect(next_path="/izza-game/minigames"):
+    return redirect(url_for('auth_game') + f"?next={next_path}")  # or your auth route path
+
+def _get_current_user_id():
+    # Map to your existing identity. Examples:
+    # return session.get('user_id')
+    # If you track only pi_username, you can also return that and key off it in your model layer.
+    return session.get('user_id') or session.get('pi_username')
+
+def _get_profile(user_id):
+    """
+    Replace the internals of this helper with the SAME function/ORM call
+    you already use on the character creation page to fetch the player's saved
+    base appearance. It must return a dict with (at least) the keys used by
+    your create page:
+      body_type, skin_tone, sprite_skin, outfit,
+      hair, hair_color, female_outfit_color
+    Return None if character not created yet.
+    """
+    # EXAMPLES ONLY — replace with your real calls:
+    # p = db.profile_get(user_id)
+    # return p and {
+    #     "body_type": p.body_type,
+    #     "skin_tone": p.skin_tone,
+    #     "sprite_skin": p.sprite_skin,
+    #     "outfit": p.outfit,
+    #     "hair": p.hair,
+    #     "hair_color": p.hair_color,
+    #     "female_outfit_color": p.female_outfit_color,
+    # }
+    return None
+
+def _get_wallet(user_id):
+    """
+    Replace with your real wallet lookup. Should return:
+      {"coins": int, "crafting": int}
+    """
+    return {"coins": 0, "crafting": 0}
+
+# ---- HTML page: arena picker ----
+@APP.get("/izza-game/minigames")
+def minigames_page():
+    # 1) must be logged in (same behavior as your other game routes)
+    if not _is_logged_in():
+        return _login_redirect(next_path="/izza-game/minigames")
+
+    # 2) must have a saved base character; else push through character creation
+    uid = _get_current_user_id()
+    prof = _get_profile(uid)
+    if not prof:
+        return redirect(url_for('create_character') + "?next=/izza-game/minigames")
+
+    # 3) render arena
+    # We pass minimal context so template can show balances without extra fetch if you want.
+    wallet = _get_wallet(uid)
+    return render_template(
+        "game/minigames.html",
+        coins=wallet.get("coins", 0),
+        crafting=wallet.get("crafting", 0),
+    )
+
+# ---- JSON: character (used by arena/minigames page boot) ----
+@APP.get("/izza-game/api/character")
+def api_character_me():
+    if not _is_logged_in():
+        return jsonify({"ok": False, "error": "not_logged_in"}), 401
+    uid = _get_current_user_id()
+    prof = _get_profile(uid)
+    if not prof:
+        return jsonify({"ok": True, "hasCharacter": False}), 200
+    # Keep the same field names your creation page uses:
+    out = {
+        "body_type": prof.get("body_type"),
+        "skin_tone": prof.get("skin_tone"),
+        "sprite_skin": prof.get("sprite_skin"),
+        "outfit": prof.get("outfit"),
+        "hair": prof.get("hair"),
+        "hair_color": prof.get("hair_color"),
+        "female_outfit_color": prof.get("female_outfit_color"),
+    }
+    return jsonify({"ok": True, "hasCharacter": True, **out})
+
+# ---- JSON: wallet (coins + crafting) ----
+@APP.get("/izza-game/api/wallet")
+def api_wallet_me():
+    if not _is_logged_in():
+        return jsonify({"ok": False, "error": "not_logged_in"}), 401
+    uid = _get_current_user_id()
+    w = _get_wallet(uid)
+    return jsonify({"ok": True, "coins": int(w.get("coins", 0)), "crafting": int(w.get("crafting", 0))})
+    
 # -------- Auto-translate injector (global) --------
 I18N_SNIPPET = r"""
 <script>
