@@ -537,7 +537,7 @@ def _get_current_user_id():
 
 
 # ---- HTML page: arena picker ----
-@APP.get("/izza-game/minigames")
+@APP.get("/minigames")
 def minigames_page():
     # 1) must be logged in (same behavior as your other game routes)
     if not _is_logged_in():
@@ -561,7 +561,7 @@ def minigames_page():
 
 
 # ---- JSON: character (used by arena/minigames page boot) ----
-@APP.get("/izza-game/api/character")
+@APP.get("/api/character")
 def api_character_me():
     if not _is_logged_in():
         return jsonify({"ok": False, "error": "not_logged_in"}), 401
@@ -582,7 +582,7 @@ def api_character_me():
 
 
 # ---- JSON: wallet (coins + crafting) ----
-@APP.get("/izza-game/api/wallet")
+@APP.get("/api/wallet")
 def api_wallet_me():
     if not _is_logged_in():
         return jsonify({"ok": False, "error": "not_logged_in"}), 401
