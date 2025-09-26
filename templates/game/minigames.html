@@ -154,7 +154,7 @@
 
   <script>
   (function(){
-    /* --------- t param: save, restore, and attach where needed (no global rewrites) --------- */
+    /* --------- t param: save, restore, and attach where needed --------- */
     const T_KEY = 'izzaTokenT';
     let T = new URLSearchParams(location.search).get('t') || '';
     try{
@@ -177,7 +177,7 @@
       return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
     };
 
-    // --- tiny helpers shared by both character + wallet fetches ---
+    /* --- headers helper --- */
     function bearerHeaders(base = {}) {
       const headers = Object.assign({ 'content-type':'application/json' }, base || {});
       try{
@@ -187,6 +187,7 @@
       return headers;
     }
 
+    /* --- auth/character --- */
     async function ensureCharacter(){
       try{
         const r = await fetch('/izza-game/api/character'+TQ, {
@@ -202,12 +203,12 @@
       throw new Error('redirecting');
     }
 
+    /* --- avatar assets (unchanged) --- */
     const SPRITES = {
       body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
       hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
       outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
     };
-
     const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
     const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
@@ -306,6 +307,7 @@
       }
     }
 
+    /* ====== UI & motion ====== */
     const avatarWrap=document.getElementById('avatarWrap');
     const avatarCanvas=document.getElementById('avatarCursor');
     const actx=avatarCanvas.getContext('2d'); actx.imageSmoothingEnabled=false;
@@ -342,18 +344,17 @@
         const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
       }
 
-      // Ensure all game "enter" links carry t (and keep your original animated click)
+      // Ensure "enter" links carry t
       document.querySelectorAll('.enter-btn').forEach(a=>{
         a.href = withT(a.getAttribute('href') || '#');
         a.addEventListener('click',(ev)=>{ ev.preventDefault(); const href=a.getAttribute('href'); animateAvatarTo(a,()=>{ location.href=href; }); });
       });
 
-      // Top "Enter IZZA City" button
       const cityBtn = document.getElementById('enterCityBtn');
       if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
     }
 
-    /* ====== Wallet helpers with anti-zero-clobber ====== */
+    /* ====== Wallet helpers ====== */
     const toNum = (v)=>{ const n = Number(v); return Number.isFinite(n) ? n : 0; };
     function readLocalWallet(){
       let coins = toNum(localStorage.getItem('izzaCoins'));
@@ -385,31 +386,62 @@
       return { coins:0, crafting:0 };
     }
 
+    /* ====== NEW: silent prime from IZZA City (hidden iframe) ====== */
+    function primeFromCity({ timeoutMs=2500 } = {}){
+      return new Promise((resolve)=>{
+        // If we already have non-zero, still prime (state may have changed in city),
+        // but resolve as soon as we detect any update or timeout.
+        const iframe = document.createElement('iframe');
+        iframe.style.position='fixed';
+        iframe.style.width='0'; iframe.style.height='0';
+        iframe.style.border='0'; iframe.style.opacity='0';
+        iframe.setAttribute('aria-hidden','true');
+        iframe.src = withT('/izza-game/play?prime_silent=1');
+        document.body.appendChild(iframe);
+
+        const t0 = performance.now();
+        const done = (label)=>{
+          try{ document.body.removeChild(iframe); }catch(_){}
+          resolve(label);
+        };
+
+        // Poll localStorage for wallet becoming defined or changing
+        const startWallet = readLocalWallet();
+        const poll = setInterval(()=>{
+          const w = readLocalWallet();
+          const changed = (w.coins !== startWallet.coins) || (w.crafting !== startWallet.crafting);
+          const now = performance.now();
+          if (changed || (w.coins>0 || w.crafting>0) || (now - t0 > timeoutMs)){
+            clearInterval(poll);
+            done('primed');
+          }
+        }, 120);
+
+        // Also finish when iframe loads (city booted); give it an extra tick to run scripts
+        iframe.addEventListener('load', ()=>{
+          setTimeout(()=>{/* allow city JS to run */}, 50);
+        });
+      });
+    }
+
     (async function boot(){
       try{
-        // 0) get character (with bearer) — this is authoritative and may include wallet-like fields
-        const profile=await ensureCharacter();  // redirects if missing; preserves t
+        const profile=await ensureCharacter();  // redirects if missing
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
 
-        // >>> NEW: seed wallet from character payload if present (prevents "0 until city" + fixes refresh) <<<
-        const seeded = parseWalletResponse(profile);
-        if ((seeded.coins|0) > 0 || (seeded.crafting|0) > 0){
-          try{
-            localStorage.setItem('izzaCoins', String(toNum(seeded.coins)));
-            localStorage.setItem('izzaCrafting', String(toNum(seeded.crafting)));
-          }catch(_){}
-          LAST_WALLET = { coins: toNum(seeded.coins), crafting: toNum(seeded.crafting) };
-          renderWallet(LAST_WALLET);
-        } else {
-          // paint any cached values immediately if character didn't include balances
-          renderWallet(LAST_WALLET);
-        }
-        // <<< END NEW >>>
+        // Paint whatever we have right away
+        renderWallet(LAST_WALLET);
 
-        // 1) draw avatar
+        // Silent prime from city to capture latest wallet/equipment, then repaint
+        try{
+          await primeFromCity();
+          renderWallet(readLocalWallet());
+        }catch(_){}
+
+        // Draw avatar after prime so equipped items are up-to-date
         await buildAvatarCanvas(actx,96,profile);
 
-        // place avatar
+        // Place avatar nicely
         const logo = document.getElementById('brandWord');
         if (isTouch && logo){
           const r = logo.getBoundingClientRect();
@@ -420,7 +452,7 @@
           setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
         }
 
-        // 2) fetch authoritative wallet (preserve t + include bearer if available)
+        // Fetch authoritative wallet (server) afterwards; repaint & persist
         try{
           const r = await fetch('/izza-game/api/wallet'+TQ, {
             credentials:'include',
@@ -442,7 +474,7 @@
           console.warn('Wallet fetch error', e);
         }
 
-        // 3) react to app-wide wallet changes
+        // Keep in sync with app-wide changes
         window.addEventListener('izza-wallet-changed', (ev)=>{
           const d = ev && ev.detail ? ev.detail : {};
           const local = readLocalWallet();
@@ -451,13 +483,20 @@
         window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
         window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
 
-        // On focus, refresh from local (when coming back from city)
-        document.addEventListener('visibilitychange', ()=>{
-          if (!document.hidden) renderWallet(readLocalWallet());
+        // When coming back from city/tab, re-prime quickly and repaint
+        document.addEventListener('visibilitychange', async ()=>{
+          if (!document.hidden){
+            try{ await primeFromCity({ timeoutMs:1200 }); }catch(_){}
+            renderWallet(readLocalWallet());
+          }
         }, { passive:true });
 
         wirePointer();
-      }catch(e){ if(String(e.message)!=='redirecting'){ console.error('Arena init error',e); } }
+      }catch(e){
+        if(String(e.message)!=='redirecting'){
+          console.error('Arena init error',e);
+        }
+      }
     })();
   })();
   </script>
