@@ -39,6 +39,17 @@
       const raw = localStorage.getItem('izzaCoins'); return raw? (parseInt(raw,10)||0) : 0;
     }catch{ return 0; }
   }
+  // NEW: crafting credits reader (matches arena & UI keys)
+  function readCraftingCredits(){
+    try{
+      const raw =
+        localStorage.getItem('izzaCrafting') ??
+        localStorage.getItem('craftingCredits') ??
+        localStorage.getItem('izzaCraftCredits');
+      const v = parseInt(raw, 10);
+      return Number.isFinite(v) ? Math.max(0, v|0) : 0;
+    }catch{ return 0; }
+  }
   function readMissions(){
     try{
       if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
@@ -77,6 +88,7 @@
     const bank   = readBank(u);
     const inv    = readInventory();
     const onHand = readCoinsOnHand();
+    const crafting = readCraftingCredits(); // NEW
     const pos    = readPlayerXY();
     const heartsSegs = readHeartsSegs();
     const missions   = readMissions();
@@ -88,6 +100,7 @@
       version: 1,
       player: { x: pos.x|0, y: pos.y|0, heartsSegs },
       coins: onHand|0,             // WALLET ONLY lives here
+      crafting: crafting|0,        // NEW: persist crafting credits
       missions: missions|0,
       missionState: missionState || {},
       inventory: inv || {},
@@ -159,6 +172,14 @@
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
       }
 
+      // NEW: CRAFTING CREDITS (on-hand)
+      if (Number.isFinite(seed.crafting)){
+        try{
+          localStorage.setItem('izzaCrafting', String(seed.crafting|0));
+          try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
+        }catch(e){ console.warn('[persist] crafting hydrate failed', e); }
+      }
+
       // BANK (per-user key)
       if (seed.bank && typeof seed.bank === 'object'){
         try{
@@ -222,7 +243,8 @@
         (!s.bank.items || !Object.keys(s.bank.items).length) &&
         (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
       );
-      const walletZero = (s.coins|0)===0;
+      // NEW: wallet is "zero" only if BOTH coins and crafting are zero
+      const walletZero = ((s.coins|0)===0) && ((s.crafting|0)===0);
       const heartsUnknown = (s.player?.heartsSegs==null);
       return walletZero && bankEmpty && invEmpty && heartsUnknown;
     }catch{ return true; }
@@ -404,6 +426,8 @@
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
   window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
   window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
+  // NEW: persist on crafting changes
+  window.addEventListener('izza-crafting-changed', ()=> tryKick('crafting'));
   if (window.IZZA?.on) {
     IZZA.on('missions-updated', ()=> tryKick('missions'));
   }
