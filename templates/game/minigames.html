@@ -6,11 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{
-      --tile-bg: var(--card);
-      --tile-line: var(--line);
-      --tile-hover: rgba(255,255,255,.04);
-    }
+    :root{ --tile-bg: var(--card); --tile-line: var(--line); --tile-hover: rgba(255,255,255,.04); }
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
     .wrap{max-width:1100px;margin:0 auto;padding:16px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
@@ -18,21 +14,9 @@
     h1{margin:0 0 6px}
     .lead{margin:6px 0 0}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:12px}
-    .tile{
-      background:var(--tile-bg);
-      border:1px solid var(--tile-line);
-      border-radius:12px;
-      padding:12px;
-      display:flex;flex-direction:column;gap:10px;
-      transition:background .15s ease, transform .1s ease;
-    }
+    .tile{background:var(--tile-bg);border:1px solid var(--tile-line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;transition:background .15s ease, transform .1s ease;}
     .tile:hover{background:var(--tile-hover); transform:translateY(-1px)}
-    .tile .thumb{
-      height:130px; border-radius:8px; border:1px solid var(--tile-line);
-      display:flex;align-items:center;justify-content:center;overflow:hidden;
-      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.06));
-      position:relative;
-    }
+    .tile .thumb{height:130px; border-radius:8px; border:1px solid var(--tile-line); display:flex;align-items:center;justify-content:center;overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.06)); position:relative;}
     .tile h3{margin:0;font-size:18px}
     .tile p{margin:0;font-size:13px;color:var(--muted)}
     .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
@@ -46,35 +30,20 @@
     .wallet{display:flex;gap:8px;flex-wrap:wrap}
     .wallet .pill strong{font-weight:700}
 
-    /* Avatar cursor/overlay */
-    .avatar-wrap{
-      position:fixed; left:16px; top:16px; width:96px; height:96px;
-      z-index:9999; pointer-events:none;
-      transform:translate3d(0,0,0);
-    }
+    /* avatar cursor */
+    .avatar-wrap{position:fixed; left:16px; top:16px; width:96px; height:96px; z-index:9999; pointer-events:none; transform:translate3d(0,0,0);}
     canvas#avatarCursor{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
     .avatar-bounce{animation:bob .9s ease-in-out infinite}
-    @keyframes bob{
-      0%{ transform:translateY(0) }
-      50%{ transform:translateY(-6px) }
-      100%{ transform:translateY(0) }
-    }
+    @keyframes bob{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
 
-    /* For mobile dragging handle (we allow pointer events during drag) */
     .draggable{pointer-events:auto; touch-action:none}
-
-    /* Thumb demo garnishes */
     .net{position:absolute;right:12px;top:12px;width:48px;height:48px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.15)}
     .road{position:absolute;left:0;right:0;bottom:0;height:36px;background:repeating-linear-gradient(90deg, rgba(255,255,255,.18) 0 10px, transparent 10px 20px)}
     .stars{position:absolute;inset:0;background:
       radial-gradient(circle at 20% 30%, rgba(255,255,255,.35) 1px, transparent 1px) 0 0/40px 40px,
       radial-gradient(circle at 70% 60%, rgba(255,255,255,.25) 1.5px, transparent 1.5px) 0 0/60px 60px}
 
-    /* Hide OS cursor on desktop so avatar is the “cursor” */
-    @media (pointer:fine){
-      body{ cursor:none; }
-      a, button{ cursor:none; }
-    }
+    @media (pointer:fine){ body{ cursor:none; } a, button{ cursor:none; } }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -88,7 +57,7 @@
         <div class="wallet">
           <span class="pill">IZZA Coins: <strong id="coins">{{ coins|default(0) }}</strong></span>
           <span class="pill">Craft Credits: <strong id="craft">{{ crafting|default(0) }}</strong></span>
-          <a class="btn" href="/izza-game/city">Enter IZZA City</a>
+          <a class="btn" href="/izza-game/play">Enter IZZA City</a>
         </div>
       </div>
 
@@ -96,7 +65,6 @@
       <p class="lead muted">Earn IZZA Coins &amp; Item Crafting Credits by playing mini games. Your character is used as the player avatar.</p>
 
       <div class="grid" id="gameGrid">
-        <!-- Basketball -->
         <div class="tile" data-game="basketball">
           <div class="thumb"><div class="net"></div></div>
           <h3>Street Basketball</h3>
@@ -108,7 +76,6 @@
           </div>
         </div>
 
-        <!-- Racing -->
         <div class="tile" data-game="racing">
           <div class="thumb"><div class="road"></div></div>
           <h3>Street Race</h3>
@@ -120,7 +87,6 @@
           </div>
         </div>
 
-        <!-- Jetman -->
         <div class="tile" data-game="jetman">
           <div class="thumb"><div class="stars"></div></div>
           <h3>Jetman Rooftops</h3>
@@ -132,7 +98,6 @@
           </div>
         </div>
 
-        <!-- Puzzle -->
         <div class="tile" data-game="puzzle">
           <div class="thumb"></div>
           <h3>Puzzle Dash</h3>
@@ -144,7 +109,6 @@
           </div>
         </div>
 
-        <!-- Target Range -->
         <div class="tile" data-game="targets">
           <div class="thumb"></div>
           <h3>Target Range</h3>
@@ -156,7 +120,6 @@
           </div>
         </div>
 
-        <!-- Runner -->
         <div class="tile" data-game="runner">
           <div class="thumb"></div>
           <h3>Subway Runner</h3>
@@ -175,14 +138,12 @@
     </div>
   </div>
 
-  <!-- Avatar overlay -->
   <div class="avatar-wrap draggable" id="avatarWrap" aria-hidden="true">
     <canvas id="avatarCursor" width="96" height="96"></canvas>
   </div>
 
   <script>
   (function(){
-    // --- Character gate: redirect to creation if not set (server + client agree) ---
     async function ensureCharacter(){
       try{
         const r = await fetch('/izza-game/api/character', { credentials:'include' });
@@ -195,120 +156,56 @@
       throw new Error('redirecting');
     }
 
-    // --- Minimal sprite dictionary (same as creation page) -----
     const SPRITES = {
-      body: {
-        default:  "/static/game/sprites/body/default.png",
-        street_a: "/static/game/sprites/body/street_a.png",
-        street_b: "/static/game/sprites/body/street_b.png"
-      },
-      hair: {
-        short: "/static/game/sprites/hair/short.png",
-        buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png"
-      },
-      outfit: {
-        street:   "/static/game/sprites/outfit/street.png",
-        athletic: "/static/game/sprites/outfit/athletic.png",
-        luxury:   "/static/game/sprites/outfit/luxury.png"
-      }
+      body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
+      hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
+      outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
     };
 
-    // --- Palette ramps (identical to creation page) ---
-    const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
-    const SKIN_TO = {
-      light:  ["#FFE7D6","#F3C6A7","#D8A187"],
-      medium: ["#F1BD94","#D79A73","#B67955"],
-      tan:    ["#E2A878","#C88756","#9F663C"],
-      dark:   ["#B9825B","#9A6644","#714A31"],
-      deep:   ["#8B5A3B","#6A402A","#432818"]
-    };
-    const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
-    const FEMALE_DRESS_TO = {
-      blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
-      red:    ["#FF7A7A","#E24C4C","#B12F2F"],
-      green:  ["#7DD68A","#4CB56B","#2F7F47"],
-      purple: ["#B796FF","#8C6BE0","#6A49B8"],
-      yellow: ["#FFE08A","#E7C45A","#B89433"],
-      pink:   ["#FFA6D6","#E57CB2","#C45C96"],
-      black:  ["#3A3A3D","#232326","#0E0E10"],
-      white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
-      brown:  ["#A87854","#7C563A","#593D29"],
-      orange: ["#FFB46A","#E4873A","#B65E1F"]
-    };
-    const HAIR_TO = {
-      black:  ["#2C2C31","#17171B","#0A0A0D"],
-      brown:  ["#7A5336","#5C3E28","#3E2B1B"],
-      blonde: ["#FBE58F","#E5C35A","#B89433"],
-      red:    ["#E65F35","#B54426","#8E321A"],
-      white:  ["#FFFFFF","#E6E6E6","#C9C9C9"],
-      blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
-      green:  ["#7DD68A","#4CB56B","#2F7F47"],
-      pink:   ["#FFA6D6","#E57CB2","#C45C96"]
-    };
+    const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
+    const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
+    const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+    const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
+    const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 
-    // --- utils (same as creation) ---
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-    const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
-    const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-    const lum   = (r,g,b)=> 0.2126*r + 0.7152*g + 0.0722*b;
+    const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+    const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
 
     function extractThreeToneRamp(img){
-      const w=img.width,h=img.height;
-      const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-      const c=oc.getContext('2d',{willReadFrequently:true});
-      c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-      const d=c.getImageData(0,0,w,h).data;
-      const samples=[];
-      for(let i=0;i<d.length;i+=4){
-        const a=d[i+3]; if(a<10) continue;
-        const r=d[i],g=d[i+1],b=d[i+2];
-        samples.push({r,g,b,L:lum(r,g,b)});
-      }
+      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const d=c.getImageData(0,0,w,h).data, samples=[];
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; samples.push({r,g,b,L:lum(r,g,b)}); }
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
-      const pick = q => {
-        const idx = Math.max(0, Math.min(samples.length-1, Math.floor(q*(samples.length-1))));
-        const s = samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');
-      };
-      return [pick(0.2), pick(0.55), pick(0.85)];
+      const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+      return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
     function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
-      const from = fromRampHex.map(hexToRgb);
-      const to   = toRampHex.map(hexToRgb);
-      const w=img.width,h=img.height;
-      const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-      const c=oc.getContext('2d',{willReadFrequently:true});
-      c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-      const id=c.getImageData(0,0,w,h), d=id.data;
-      let changed=0;
+      const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const id=c.getImageData(0,0,w,h), d=id.data; let changed=0;
       for(let i=0;i<d.length;i+=4){
         if(d[i+3]===0) continue;
-        const p={r:d[i],g:d[i+1],b:d[i+2]};
-        let best=-1, score=1e9;
+        const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
         for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
-        if(score<=tolerance){
-          const t=to[best]||to[1]||to[0];
-          if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
-          d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
-        }
+        if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
       }
       c.putImageData(id,0,0);
       return {canvas:oc, changedPixels:changed};
     }
 
     function overlayTint(img, hex, strength=1.0){
-      const w=img.width,h=img.height;
-      const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-      const c=oc.getContext('2d',{willReadFrequently:true});
-      c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-      const id=c.getImageData(0,0,w,h), d=id.data;
-      const t=hexToRgb(hex);
+      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
       function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
-      for(let i=0;i<d.length;i+=4){
-        if(d[i+3]===0) continue;
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
         const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
         d[i]=Math.round(d[i]*(1-strength)+r*strength);
         d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
@@ -319,148 +216,105 @@
     }
 
     async function buildAvatarCanvas(dstCtx, size, profile){
-      const DW=size, DH=size, X=0, Y=0;
-      const type   = profile.body_type || 'male';
-      const tone   = profile.skin_tone || 'light';
-      const theme  = profile.sprite_skin || 'default';
-      const outfitKey = profile.outfit || 'street';
-      const hairKey   = profile.hair || 'short';
-      const hairCol   = profile.hair_color || 'black';
-      const femaleOutColor = profile.female_outfit_color || 'blue';
+      const DW=size,DH=size,X=0,Y=0;
+      const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+      const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+      const femaleOut=profile.female_outfit_color||'blue';
 
       let body=null;
-      if(type === 'female'){
-        const femaleWide = `/static/game/sprites/body/${theme}__female_wide.png`;
-        const femaleSlim = `/static/game/sprites/body/${theme}__female.png`;
+      if(type==='female'){
+        const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
+        const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
         body = await loadImg(femaleWide) || await loadImg(femaleSlim);
       }
-      if(!body){
-        body = await loadImg(SPRITES.body[theme] || SPRITES.body.default);
-      }
+      if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
 
-      const hair  = await loadImg(SPRITES.hair[hairKey] || SPRITES.hair.short);
-      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey] || SPRITES.outfit.street));
+      const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
 
       let bodyCanvas;
       if(body){
-        const targetSkin = SKIN_TO[tone] || SKIN_TO.light;
-        const swapped = paletteSwap(body, SKIN_BASE, targetSkin, 4000);
-        bodyCanvas = swapped.canvas;
-        if(swapped.changedPixels < 8){
-          bodyCanvas = overlayTint(body, targetSkin[1], 0.98);
-        }
+        const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+        const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+        bodyCanvas=swapped.canvas;
+        if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
       }
 
       if(type==='female' && bodyCanvas){
-        const targetDress = FEMALE_DRESS_TO[femaleOutColor] || FEMALE_DRESS_TO.blue;
-        const reDress = paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
-        bodyCanvas = reDress.canvas;
-        if(reDress.changedPixels < 6){
-          bodyCanvas = overlayTint(bodyCanvas, targetDress[1], 0.85);
-        }
+        const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+        const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+        bodyCanvas=reDress.canvas;
+        if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
       }
 
       dstCtx.clearRect(0,0,DW,DH);
       if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
       if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
       if(hair){
-        const detected = extractThreeToneRamp(hair);
-        const target   = HAIR_TO[hairCol]||HAIR_TO.black;
-        const swap     = paletteSwap(hair, detected, target, 4000);
-        let hairCanvas = swap.canvas;
-        if(swap.changedPixels < 8){
-          hairCanvas = overlayTint(hair, target[1], 1.0);
-        }
-        const hairY = (type==='female' && hairKey==='buzz') ? (Y - 4) : Y;
+        const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+        const swap=paletteSwap(hair, detected, target, 4000);
+        let hairCanvas=swap.canvas;
+        if(swap.changedPixels<8){ hairCanvas=overlayTint(hair, target[1], 1.0); }
+        const hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
         dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
       }
     }
 
-    const avatarWrap = document.getElementById('avatarWrap');
-    const avatarCanvas = document.getElementById('avatarCursor');
-    const actx = avatarCanvas.getContext('2d');
-    actx.imageSmoothingEnabled = false;
+    const avatarWrap=document.getElementById('avatarWrap');
+    const avatarCanvas=document.getElementById('avatarCursor');
+    const actx=avatarCanvas.getContext('2d'); actx.imageSmoothingEnabled=false;
+    const elCoins=document.getElementById('coins'); const elCraft=document.getElementById('craft');
+    let isTouch=window.matchMedia('(pointer:coarse)').matches;
+    function setAvatarPos(x,y){ avatarWrap.style.transform=`translate3d(${x}px,${y}px,0)`; }
 
-    const elCoins = document.getElementById('coins');
-    const elCraft = document.getElementById('craft');
-
-    let isTouch = window.matchMedia('(pointer:coarse)').matches;
-    function setAvatarPos(x,y){ avatarWrap.style.transform = `translate3d(${x}px,${y}px,0)`; }
-
-    function animateAvatarTo(el, cb){
-      const r = el.getBoundingClientRect();
-      const targetX = r.left + r.width/2 - 48 + window.scrollX;
-      const targetY = r.top + r.height/2 - 48 + window.scrollY;
-      const start = avatarWrap.getBoundingClientRect();
-      const sx = start.left + window.scrollX;
-      const sy = start.top + window.scrollY;
-      const duration = 280;
-      const t0 = performance.now();
+    function animateAvatarTo(el,cb){
+      const r=el.getBoundingClientRect();
+      const targetX=r.left + r.width/2 - 48 + window.scrollX;
+      const targetY=r.top + r.height/2 - 48 + window.scrollY;
+      const start=avatarWrap.getBoundingClientRect();
+      const sx=start.left + window.scrollX, sy=start.top + window.scrollY;
+      const duration=280, t0=performance.now();
       function tick(t){
-        const k = Math.min(1, (t - t0) / duration);
-        const e = 1 - Math.pow(1-k, 3);
-        const x = sx + (targetX - sx)*e;
-        const y = sy + (targetY - sy)*e;
-        setAvatarPos(x, y);
+        const k=Math.min(1,(t-t0)/duration), e=1-Math.pow(1-k,3);
+        const x=sx+(targetX-sx)*e, y=sy+(targetY-sy)*e;
+        setAvatarPos(x,y);
         if(k<1) requestAnimationFrame(tick);
-        else {
-          avatarWrap.classList.add('avatar-bounce');
-          setTimeout(()=>{ avatarWrap.classList.remove('avatar-bounce'); cb && cb(); }, 420);
-        }
+        else { avatarWrap.classList.add('avatar-bounce'); setTimeout(()=>{ avatarWrap.classList.remove('avatar-bounce'); cb&&cb(); }, 420); }
       }
       requestAnimationFrame(tick);
     }
 
     function wirePointer(){
       if(!isTouch){
-        document.addEventListener('mousemove', (e)=>{
-          setAvatarPos(e.clientX - 48 + window.scrollX, e.clientY - 48 + window.scrollY);
-        }, {passive:true});
+        document.addEventListener('mousemove',(e)=>{ setAvatarPos(e.clientX-48+window.scrollX, e.clientY-48+window.scrollY); },{passive:true});
       }else{
-        avatarWrap.style.pointerEvents = 'auto';
-        let startX=0, startY=0, active=false;
-        avatarWrap.addEventListener('pointerdown', (e)=>{
-          active = true; avatarWrap.setPointerCapture(e.pointerId);
-          const rect = avatarWrap.getBoundingClientRect();
-          startX = e.clientX - rect.left; startY = e.clientY - rect.top;
-        });
-        avatarWrap.addEventListener('pointermove', (e)=>{
-          if(!active) return;
-          setAvatarPos(e.clientX - startX + window.scrollX, e.clientY - startY + window.scrollY);
-        });
-        const stop=()=>{ active=false; };
-        avatarWrap.addEventListener('pointerup', stop);
-        avatarWrap.addEventListener('pointercancel', stop);
+        avatarWrap.style.pointerEvents='auto';
+        let startX=0,startY=0,active=false;
+        avatarWrap.addEventListener('pointerdown',(e)=>{ active=true; avatarWrap.setPointerCapture(e.pointerId);
+          const rect=avatarWrap.getBoundingClientRect(); startX=e.clientX-rect.left; startY=e.clientY-rect.top; });
+        avatarWrap.addEventListener('pointermove',(e)=>{ if(!active) return; setAvatarPos(e.clientX-startX+window.scrollX, e.clientY-startY+window.scrollY); });
+        const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
       }
-
       document.querySelectorAll('.enter-btn').forEach(a=>{
-        a.addEventListener('click', (ev)=>{
-          ev.preventDefault();
-          const href = a.getAttribute('href');
-          animateAvatarTo(a, ()=>{ location.href = href; });
-        });
+        a.addEventListener('click',(ev)=>{ ev.preventDefault(); const href=a.getAttribute('href'); animateAvatarTo(a,()=>{ location.href=href; }); });
       });
     }
 
     (async function boot(){
       try{
-        const profile = await ensureCharacter();  // redirect if missing
+        const profile=await ensureCharacter();  // redirects if missing
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
-        await buildAvatarCanvas(actx, 96, profile);
+        await buildAvatarCanvas(actx,96,profile);
 
-        if(isTouch) setAvatarPos(16, 16);
-        else setAvatarPos(window.innerWidth/2 - 48, window.innerHeight/2 - 48);
+        if(isTouch) setAvatarPos(16,16); else setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
 
-        // balances
         try{
-          const r = await fetch('/izza-game/api/wallet', {credentials:'include'});
-          if(r.ok){ const j = await r.json(); elCoins.textContent = j.coins ?? '0'; elCraft.textContent = j.crafting ?? '0'; }
+          const r=await fetch('/izza-game/api/wallet',{credentials:'include'});
+          if(r.ok){ const j=await r.json(); elCoins.textContent=j.coins??'0'; elCraft.textContent=j.crafting??'0'; }
         }catch(_){}
 
         wirePointer();
-      }catch(e){
-        if(String(e.message) !== 'redirecting'){ console.error('Arena init error', e); }
-      }
+      }catch(e){ if(String(e.message)!=='redirecting'){ console.error('Arena init error',e); } }
     })();
   })();
   </script>
