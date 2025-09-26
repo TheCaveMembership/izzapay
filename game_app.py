@@ -2,10 +2,11 @@
 import os
 import json  # <-- ADDED
 from datetime import timedelta
-from flask import Flask, render_template, session, request, redirect, url_for
+from flask import Flask, render_template, session, request, redirect, url_for, jsonify
 from dotenv import load_dotenv
 from db import conn
 import requests  # <-- ADDED for LibreTranslate proxy
+import time
 
 load_dotenv()
 
@@ -146,9 +147,65 @@ def _ensure_game_profiles_columns():
             cx.execute("ALTER TABLE game_profiles ADD COLUMN appearance TEXT")  # JSON blob
 
 
-# -------------------- routes --------------------
-from flask import jsonify
+def _resolve_next_from_request(default_play="/izza-game/play"):
+    """
+    Decide where to send the player after create/skip.
+    Priority:
+      1) explicit ?next=... (or form next)
+      2) ?dest=minigames → /izza-game/minigames
+      3) default to main play route
+    """
+    next_url = (request.args.get("next") or request.form.get("next") or "").strip()
+    if next_url:
+        return next_url
+    dest = (request.args.get("dest") or request.form.get("dest") or "").strip().lower()
+    if dest == "minigames":
+        return "/izza-game/minigames"
+    return default_play
 
+
+def _get_profile(user_id=None):
+    """
+    Fetch the saved base character in the SAME way as /play.
+    Returns dict with keys used by the creation/minigame front-end,
+    or None if not created yet.
+    """
+    urow = current_user_row()
+    if not urow:
+        return None
+
+    _ensure_game_profiles_columns()
+    pi_uid = urow["pi_uid"]
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT sprite_skin, hair, outfit, appearance FROM game_profiles WHERE pi_uid=?",
+            (pi_uid,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    appearance = {}
+    try:
+        if row["appearance"]:
+            appearance = json.loads(row["appearance"]) or {}
+    except Exception:
+        appearance = {}
+
+    # Fallbacks so older rows still work
+    profile = {
+        "sprite_skin": row["sprite_skin"] or "default",
+        "hair": row["hair"] or "short",
+        "outfit": row["outfit"] or "street",
+        "body_type": appearance.get("body_type", "male"),
+        "hair_color": appearance.get("hair_color", ""),
+        "skin_tone": appearance.get("skin_tone", "light"),
+        "female_outfit_color": appearance.get("female_outfit_color", "blue"),
+    }
+    return profile
+
+
+# -------------------- routes --------------------
 @app.get("/api/crafts/feed")
 def crafts_feed():
     u = current_user_row()
@@ -234,6 +291,7 @@ def crafts_feed():
 
     return jsonify(ok=True, creations=creations, purchases_ic=purchases_ic, purchases_pi=purchases_pi)
 
+
 @app.post("/api/collectibles/claim")
 def collectibles_claim():
     u = current_user_row()
@@ -275,18 +333,20 @@ def collectibles_claim():
 
     return jsonify(ok=True)
 
+
 @app.get("/crafts")
 def crafts_page():
     """Serve the CRAFTS UI (your existing templates/game/crafts.html)."""
     t = _get_bearer_token_from_request()
     return render_template("game/crafts.html", t=t)
 
+
 @app.route("/auth")
 def game_auth():
     """
     Landing page for IZZA GAME authentication.
     Renders templates/game/auth.html. The page uses Pi SDK and posts to /auth/exchange
-    in the main app with next=/izza-game/create.
+    in the main app with next=/izza-game/create (or /izza-game/create?dest=minigames).
     """
     return render_template("game/auth.html", sandbox=PI_SANDBOX)
 
@@ -295,16 +355,16 @@ def game_auth():
 def game_create():
     """
     Character creation. Admins (e.g., CamMac) always see this screen to test art/choices.
-    Normal users: if a profile exists, skip straight to /play.
+    Normal users: if a profile exists, skip to the requested destination (next/dest) or /play.
     """
     need = require_login_redirect()
     if need:
         return need
 
-    # Grab token (if any) so we can preserve it on POST and redirects
+    # Keep token (if any) for redirects
     t = _get_bearer_token_from_request()
 
-    # Look up the IZZA PAY user record to get pi_uid + username
+    # Who is this?
     urow = current_user_row()
     if not urow:
         return redirect("/signin")
@@ -313,8 +373,11 @@ def game_create():
     pi_username = urow["pi_username"]
     admin = _is_admin(urow)
 
-    # Ensure table + appearance column
+    # Ensure schema
     _ensure_game_profiles_columns()
+
+    # Where to go after create/skip
+    next_url = _resolve_next_from_request(default_play=url_for("game_play"))
 
     if request.method == "POST":
         # Legacy fields (unchanged)
@@ -322,7 +385,7 @@ def game_create():
         hair = request.form.get("hair", "short")
         outfit = request.form.get("outfit", "street")
 
-        # NEW extended creator fields (safe defaults)
+        # Extended fields (unchanged)
         body_type = request.form.get("body_type", "male")
         hair_color = request.form.get("hair_color", "").strip()
         skin_tone = request.form.get("skin_tone", "light")
@@ -353,10 +416,11 @@ def game_create():
                 (pi_uid, pi_username, sprite, hair, outfit, json.dumps(appearance)),
             )
 
-        # After save -> go play (preserve token if present)
+        # After save → go to intended destination
         if t:
-            return redirect(f"{url_for('game_play')}?t={t}")
-        return redirect(url_for("game_play"))
+            sep = "&" if "?" in next_url else "?"
+            return redirect(f"{next_url}{sep}t={t}")
+        return redirect(next_url)
 
     # If profile already exists:
     with conn() as cx:
@@ -367,11 +431,12 @@ def game_create():
         # Fall-through: render create screen for admin testing
         return render_template("game/create_character.html", t=t)
 
-    # Normal users: skip to play if they already have a profile
+    # Normal users: skip to intended destination if profile exists
     if row:
         if t:
-            return redirect(f"{url_for('game_play')}?t={t}")
-        return redirect(url_for("game_play"))
+            sep = "&" if "?" in next_url else "?"
+            return redirect(f"{next_url}{sep}t={t}")
+        return redirect(next_url)
 
     # New user: render creation form
     return render_template("game/create_character.html", t=t)
@@ -451,58 +516,25 @@ def game_play():
 
     return render_template("game/play.html", profile=profile_dict, user=user_ctx, t=t)
 
+
 # =========================
 # Mini Game Arena routes
 # =========================
-from flask import Blueprint, request, session, redirect, url_for, jsonify, render_template
 
-# If you use a Blueprint for game routes, set APP = game_bp; otherwise APP = app
-APP = app  # <-- change to your actual route object if needed (e.g., game_bp)
+# Use the same app object (no blueprint change)
+APP = app  # If you later mount under a blueprint, swap this to your BP.
 
 def _is_logged_in():
-    # Reuse whatever you already use. Common patterns:
-    # return 'user_id' in session
-    # or: return bool(session.get('pi_username'))
-    return bool(session.get('user_id') or session.get('pi_username'))
+    return bool(current_user_row())
 
 def _login_redirect(next_path="/izza-game/minigames"):
-    return redirect(url_for('auth_game') + f"?next={next_path}")  # or your auth route path
+    # Use your existing auth endpoint name
+    return redirect(url_for('game_auth') + f"?next={next_path}")
 
 def _get_current_user_id():
-    # Map to your existing identity. Examples:
-    # return session.get('user_id')
-    # If you track only pi_username, you can also return that and key off it in your model layer.
-    return session.get('user_id') or session.get('pi_username')
+    u = current_user_row()
+    return u and u.get("id")
 
-def _get_profile(user_id):
-    """
-    Replace the internals of this helper with the SAME function/ORM call
-    you already use on the character creation page to fetch the player's saved
-    base appearance. It must return a dict with (at least) the keys used by
-    your create page:
-      body_type, skin_tone, sprite_skin, outfit,
-      hair, hair_color, female_outfit_color
-    Return None if character not created yet.
-    """
-    # EXAMPLES ONLY — replace with your real calls:
-    # p = db.profile_get(user_id)
-    # return p and {
-    #     "body_type": p.body_type,
-    #     "skin_tone": p.skin_tone,
-    #     "sprite_skin": p.sprite_skin,
-    #     "outfit": p.outfit,
-    #     "hair": p.hair,
-    #     "hair_color": p.hair_color,
-    #     "female_outfit_color": p.female_outfit_color,
-    # }
-    return None
-
-def _get_wallet(user_id):
-    """
-    Replace with your real wallet lookup. Should return:
-      {"coins": int, "crafting": int}
-    """
-    return {"coins": 0, "crafting": 0}
 
 # ---- HTML page: arena picker ----
 @APP.get("/izza-game/minigames")
@@ -512,27 +544,28 @@ def minigames_page():
         return _login_redirect(next_path="/izza-game/minigames")
 
     # 2) must have a saved base character; else push through character creation
-    uid = _get_current_user_id()
-    prof = _get_profile(uid)
+    prof = _get_profile()
     if not prof:
-        return redirect(url_for('create_character') + "?next=/izza-game/minigames")
+        return redirect(url_for('game_create') + "?next=/izza-game/minigames")
 
-    # 3) render arena
-    # We pass minimal context so template can show balances without extra fetch if you want.
-    wallet = _get_wallet(uid)
-    return render_template(
-        "game/minigames.html",
-        coins=wallet.get("coins", 0),
-        crafting=wallet.get("crafting", 0),
-    )
+    # 3) render arena (balances optional; default to zero)
+    coins = 0
+    crafting = 0
+    try:
+        # If you store balances, you can fetch them here based on current user id
+        pass
+    except Exception:
+        pass
+
+    return render_template("game/minigames.html", coins=coins, crafting=crafting)
+
 
 # ---- JSON: character (used by arena/minigames page boot) ----
 @APP.get("/izza-game/api/character")
 def api_character_me():
     if not _is_logged_in():
         return jsonify({"ok": False, "error": "not_logged_in"}), 401
-    uid = _get_current_user_id()
-    prof = _get_profile(uid)
+    prof = _get_profile()
     if not prof:
         return jsonify({"ok": True, "hasCharacter": False}), 200
     # Keep the same field names your creation page uses:
@@ -547,15 +580,16 @@ def api_character_me():
     }
     return jsonify({"ok": True, "hasCharacter": True, **out})
 
+
 # ---- JSON: wallet (coins + crafting) ----
 @APP.get("/izza-game/api/wallet")
 def api_wallet_me():
     if not _is_logged_in():
         return jsonify({"ok": False, "error": "not_logged_in"}), 401
-    uid = _get_current_user_id()
-    w = _get_wallet(uid)
-    return jsonify({"ok": True, "coins": int(w.get("coins", 0)), "crafting": int(w.get("crafting", 0))})
-    
+    # If you track balances in DB, return them here; default zeros
+    return jsonify({"ok": True, "coins": 0, "crafting": 0})
+
+
 # -------- Auto-translate injector (global) --------
 I18N_SNIPPET = r"""
 <script>
@@ -702,8 +736,7 @@ def _inject_i18n(resp):
 # -------- /Auto-translate injector --------
 
 # ===== Crafting Land API (lives under /izza-game/api/crafting) =====
-from flask import Blueprint, request, jsonify, current_app, session
-import time
+from flask import Blueprint, current_app
 
 # Pi Platform env for the game app (separate from app.py; same values)
 PI_API_BASE = os.getenv("PI_PLATFORM_API_URL", "https://api.minepi.com").rstrip("/")
@@ -715,8 +748,6 @@ def pi_headers():
     return {"Authorization": f"Key {PI_API_KEY}", "Content-Type": "application/json"}
 
 crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
-# game_app.py (bottom where other blueprints are registered)
-# game_app.py
 
 # ========= CRAFTING CREDITS: schema helpers =========
 def _ensure_credit_tables(cx):
@@ -737,13 +768,13 @@ def _ensure_credit_tables(cx):
     """)
 
 def _credit_add(cx, user_id:int, delta:int, reason:str, uniq:str|None=None):
-    if delta == 0: 
+    if delta == 0:
         return
     _ensure_credit_tables(cx)
     if uniq:
         # idempotency: skip if this grant already exists
         row = cx.execute("SELECT 1 FROM crafting_credit_ledger WHERE uniq=?", (uniq,)).fetchone()
-        if row: 
+        if row:
             return
     cx.execute(
         "INSERT INTO crafting_credit_ledger(user_id, delta, reason, uniq) VALUES(?,?,?,?)",
@@ -778,6 +809,7 @@ def crafting_ai_svg():
     """
     return jsonify({"ok": False, "reason": "no-ai-backend"})
 
+
 @crafting_api.get("/mine")
 def crafting_mine():
     """
@@ -799,6 +831,7 @@ def crafting_mine():
     except Exception as e:
         current_app.logger.exception("crafting_mine failed")
         return _json_err("server_error")
+
 
 # Create-product-from-craft helper (prefills the merchant form)
 craft_prefill_bp = Blueprint("craft_prefill_bp", __name__)
@@ -856,6 +889,7 @@ def crafting_credit_grant():
         _credit_add(cx, user_id, +amount, reason="single-mint", uniq=uniq)
         return _json_ok(granted=amount)
 
+
 @crafting_api.post("/mine")
 def crafting_mine_post():
     u = current_user_row()
@@ -887,17 +921,20 @@ def crafting_mine_post():
             (u["id"], name, svg, sku, image, json.dumps({"category":category, "part":part}))
         )
         new_id = cx.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-    return _json_ok(id=new_id)
+        return _json_ok(id=new_id)
+
 
 # Register these under the game app prefix (/izza-game/…)
 app.register_blueprint(crafting_api)
 app.register_blueprint(craft_prefill_bp)
 # ===== /Crafting Land API =====
-# ----------------- Multiplayer API mounted here -----------------
-from mp_api import mp_bp  # REST-only blueprint
 
+
+# ----------------- Multiplayer API mounted here -----------------
 # Public paths become /izza-game/api/mp/*
+from mp_api import mp_bp  # REST-only blueprint
 app.register_blueprint(mp_bp, url_prefix="/api/mp")
+
 
 # ---- DEBUG: route list so we can confirm mounting in Pi Browser ----
 @app.get("/debug/routes")
@@ -915,7 +952,7 @@ def debug_routes():
         return {"ok": False, "error": str(e)}, 500
 
 
-# ------------- ADDED: lightweight translate proxy -------------
+# ------------- Lightweight translate proxy -------------
 @app.post("/api/translate")
 def game_translate_api():
     """
