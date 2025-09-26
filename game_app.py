@@ -711,6 +711,38 @@ if(!window.__IZZA_I18N_BOOTED__){
 </script>
 """
 
+# --- NEW: API base fixer (keeps mini game on page by pinning calls under /izza-game) ---
+API_BASE_SHIM = r"""
+<script>
+/*
+  This shim keeps templates that call absolute /api/... working when the game
+  app is mounted at /izza-game. It transparently rewrites fetch('/api/...') to
+  fetch('/izza-game/api/...') so requests hit this app instead of the main app.
+*/
+(function(){
+  if (window.__IZZA_FIX_API_BASE__) return;
+  window.__IZZA_FIX_API_BASE__ = true;
+  const PREFIX = '/izza-game';
+
+  const origFetch = window.fetch;
+  window.fetch = function(input, init){
+    try{
+      let url = (typeof input === 'string') ? input : (input && input.url);
+      if (typeof url === 'string' && url.startsWith('/api/')) {
+        const newUrl = PREFIX + url;
+        if (typeof input === 'string') {
+          input = newUrl;
+        } else {
+          input = new Request(newUrl, input);
+        }
+      }
+    }catch(e){}
+    return origFetch.apply(this, arguments);
+  };
+})();
+</script>
+"""
+
 @app.after_request
 def _inject_i18n(resp):
     try:
@@ -723,7 +755,8 @@ def _inject_i18n(resp):
                 lower = body.lower()
                 i = lower.rfind("</body>")
                 if i != -1:
-                    body = body[:i] + I18N_SNIPPET + body[i:]
+                    # Inject API base shim first, then i18n
+                    body = body[:i] + API_BASE_SHIM + I18N_SNIPPET + body[i:]
                     resp.set_data(body)
                     try:
                         resp.headers["Content-Length"] = str(len(body.encode("utf-8")))
@@ -843,7 +876,7 @@ def create_product_from_craft():
         return jsonify(ok=False, error="not_logged_in"), 401
 
     with conn() as cx:
-        m = cx.execute("SELECT slug FROM merchants WHERE owner_user_id=?", (urow["id"],)).fetchone()
+        m = cx.execute("SELECT slug FROM merchants WHERE owner_user_id=?", (urow["id"]),).fetchone()
 
     if not m:
         return jsonify(ok=True, dashboardUrl="/merchant/setup"), 200
