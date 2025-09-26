@@ -18,20 +18,6 @@
     .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
-  <script>
-(async function(){
-  try {
-    if (!window.Pi) return;
-    Pi.init({ version: 2 });
-    const res = await Pi.authenticate(['username']);
-    if (res?.user?.username) {
-      localStorage.setItem('pi_username', res.user.username);
-      localStorage.setItem('izzaPlayer', res.user.username);
-    }
-    // keep your existing /auth/exchange navigation as-is
-  } catch(e) {}
-})();
-</script>
 </head>
 <body class="cw-blue theme-a">
   <div class="wrap">
@@ -42,8 +28,8 @@
 
     <div class="card">
       <h1>Authenticate to Play</h1>
-      <p class="muted">
-        You’re about to enter <strong>IZZA GAME</strong>. We use Pi sign-in to link your progress,
+      <p class="muted" id="destCopy">
+        You’re about to enter <strong>IZZA City</strong>. We use Pi sign-in to link your progress,
         character, and inventory to your account.
       </p>
 
@@ -56,7 +42,7 @@
       <div id="err" class="err"></div>
 
       <p class="muted" style="margin-top:10px;font-size:13px">
-        Tip: Make sure you’re opening this in the Pi Browser so the Pi SDK can run.
+        Tip: Open this in the Pi Browser so the Pi SDK can run.
       </p>
     </div>
   </div>
@@ -67,15 +53,25 @@
     const btn = document.getElementById('piGameAuthBtn');
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
+    const destCopy = document.getElementById('destCopy');
 
     function setMsg(t){ msg.textContent = t || ''; }
     function setErr(t){ err.textContent = t || ''; }
 
-    // NEW: read invite params so backend can auto-link friends on first auth
+    // read params
     const url = new URL(location.href);
     const inviteFrom = url.searchParams.get('from') || '';
     const inviteCode = url.searchParams.get('code') || '';
     const inviteSrc  = url.searchParams.get('src')  || '';
+    const dest       = (url.searchParams.get('dest')||'city').toLowerCase() === 'minigames' ? 'minigames' : 'city';
+
+    // nicety: update copy based on dest
+    try{
+      if(dest==='minigames'){
+        destCopy.innerHTML = `You’re about to enter the <strong>Mini Game Arena</strong>. We use Pi sign-in to link your progress,
+        character, and inventory to your account.`;
+      }
+    }catch(_){}
 
     function initPi(){
       if (!window.Pi || !Pi.init) return false;
@@ -94,10 +90,10 @@
 
       Pi.authenticate(scopes, onIncompletePaymentFound)
         .then(function(auth){
-          // NEW: cache minimal identity locally for client UI (invite link, headers, etc.)
+          // cache minimal identity locally for client UI
           try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
 
-          // Reuse your existing /auth/exchange to set session, then jump to the game.
+          // Server session + next = character creation (first-time) with destination
           const form = document.createElement('form');
           form.method = 'POST';
           form.action = '/auth/exchange';
@@ -107,13 +103,12 @@
           payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
           form.appendChild(payload);
 
-          // After session set, go to character creation page first
           const next = document.createElement('input');
           next.type='hidden'; next.name='next';
-          next.value = '/izza-game/create';
+          next.value = '/izza-game/create?dest='+encodeURIComponent(dest);
           form.appendChild(next);
 
-          // NEW: pass invite metadata so server can add inviter to friend list and record referral
+          // pass invite metadata if present
           if(inviteSrc === 'invite'){
             const from = document.createElement('input');
             from.type='hidden'; from.name='inviteFrom'; from.value = inviteFrom;
@@ -133,34 +128,19 @@
     });
   })();
   </script>
+
+  <!-- Optional: reconcile crafting credits if you keep this here -->
   <script>
-/* Reconcile any new Pi purchases (e.g., "IZZA Game Crafting (single-use)")
-   so the server grants a credit to the current pi_username. */
-(async function(){
-  try{
-    await fetch('/api/crafting/credits/reconcile', {
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      credentials:'include'
-    });
-    // Optional breadcrumb so the Crafting UI knows we just came back from a flow:
-    localStorage.setItem('izzaCraftGrantSeen', '1');
-  }catch(_){}
-})();
-</script>
-  <script>
-/* When players return here after checkout, grant any new credits to their account */
-(async function(){
-  try{
-    await fetch('/api/crafting/credits/reconcile', {
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      credentials:'include'
-    });
-    // Breadcrumb for the game UI (optional)
-    localStorage.setItem('izzaCraftGrantSeen','1');
-  }catch(_){}
-})();
-</script>
+  (async function(){
+    try{
+      await fetch('/api/crafting/credits/reconcile', {
+        method:'POST',
+        headers:{'content-type':'application/json'},
+        credentials:'include'
+      });
+      localStorage.setItem('izzaCraftGrantSeen', '1');
+    }catch(_){}
+  })();
+  </script>
 </body>
 </html>
