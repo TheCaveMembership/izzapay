@@ -328,32 +328,54 @@
       if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
     }
 
+    // -------- Wallet Hydration (only change) --------
+    function syncCoinsToLocal(total){
+      try {
+        if (typeof window.setCoins === 'function') window.setCoins(+total || 0);
+      } catch {}
+    }
+    async function hydrateWallet(){
+      // show cached immediately if your core stored it
+      try{
+        if (typeof window.getCoins === 'function'){
+          const cached = +window.getCoins() || 0;
+          if (elCoins) elCoins.textContent = String(cached);
+        }
+      }catch{}
+      // authoritative from server
+      try{
+        const r = await fetch('/izza-game/api/wallet'+TQ, { credentials:'include' });
+        if (!r.ok) throw new Error('wallet fetch failed');
+        const j = await r.json();
+        const coins = (j && typeof j.coins === 'number') ? j.coins : 0;
+        const craft = (j && typeof j.crafting === 'number') ? j.crafting : 0;
+        if (elCoins) elCoins.textContent = String(coins);
+        if (elCraft) elCraft.textContent = String(craft);
+        syncCoinsToLocal(coins);
+      }catch(e){
+        console.warn('[wallet] fallback to cached coins', e);
+      }
+    }
+    // ------------------------------------------------
+
     (async function boot(){
       try{
         const profile=await ensureCharacter();  // redirects if missing; preserves t
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
         await buildAvatarCanvas(actx,96,profile);
 
-        // --- place avatar over the IZZA PAY logo on phones ---
+        // place avatar over logo on phones
         const logo = document.getElementById('brandWord');
         if (isTouch && logo){
           const r = logo.getBoundingClientRect();
-          // Put avatar so its feet are just above the logo
-          const y = r.top + window.scrollY - 6 - 96;     // 6px gap, avatar is 96px tall
-          // Nudge horizontally so avatar sits slightly to the left of the logo
-          const x = r.left + window.scrollX - 24;        // tweak left by ~24px
+          const y = r.top + window.scrollY - 6 - 96;
+          const x = r.left + window.scrollX - 24;
           setAvatarPos(Math.max(8, x), Math.max(8, y));
         } else {
-          // desktop default
           setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
         }
 
-        // fetch wallet (preserve t)
-        try{
-          const r=await fetch('/izza-game/api/wallet'+TQ,{credentials:'include'});
-          if(r.ok){ const j=await r.json(); elCoins.textContent=j.coins??'0'; elCraft.textContent=j.crafting??'0'; }
-        }catch(_){}
-
+        await hydrateWallet();   // <— new call
         wirePointer();
       }catch(e){ if(String(e.message)!=='redirecting'){ console.error('Arena init error',e); } }
     })();
