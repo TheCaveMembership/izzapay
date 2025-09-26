@@ -524,12 +524,21 @@ def game_play():
 # Use the same app object (no blueprint change)
 APP = app  # If you later mount under a blueprint, swap this to your BP.
 
+def _append_t(url_str: str) -> str:
+    """Carry a short-lived token through redirects if present."""
+    t = _get_bearer_token_from_request()
+    if t:
+        sep = "&" if ("?" in url_str) else "?"
+        return f"{url_str}{sep}t={t}"
+    return url_str
+
 def _is_logged_in():
     return bool(current_user_row())
 
 def _login_redirect(next_path="/izza-game/minigames"):
-    # Use your existing auth endpoint name
-    return redirect(url_for('game_auth') + f"?next={next_path}")
+    # Ensure the 'next' we hand to /auth preserves ?t= if present
+    next_with_t = _append_t(next_path)
+    return redirect(url_for('game_auth') + f"?next={next_with_t}")
 
 def _get_current_user_id():
     u = current_user_row()
@@ -546,7 +555,8 @@ def minigames_page():
     # 2) must have a saved base character; else push through character creation
     prof = _get_profile()
     if not prof:
-        return redirect(url_for('game_create') + "?next=/izza-game/minigames")
+        # Preserve token so the subsequent /create -> next -> minigames keeps the session
+        return redirect(_append_t(url_for('game_create') + "?next=/izza-game/minigames"))
 
     # 3) render arena (balances optional; default to zero)
     coins = 0
@@ -711,38 +721,6 @@ if(!window.__IZZA_I18N_BOOTED__){
 </script>
 """
 
-# --- NEW: API base fixer (keeps mini game on page by pinning calls under /izza-game) ---
-API_BASE_SHIM = r"""
-<script>
-/*
-  This shim keeps templates that call absolute /api/... working when the game
-  app is mounted at /izza-game. It transparently rewrites fetch('/api/...') to
-  fetch('/izza-game/api/...') so requests hit this app instead of the main app.
-*/
-(function(){
-  if (window.__IZZA_FIX_API_BASE__) return;
-  window.__IZZA_FIX_API_BASE__ = true;
-  const PREFIX = '/izza-game';
-
-  const origFetch = window.fetch;
-  window.fetch = function(input, init){
-    try{
-      let url = (typeof input === 'string') ? input : (input && input.url);
-      if (typeof url === 'string' && url.startsWith('/api/')) {
-        const newUrl = PREFIX + url;
-        if (typeof input === 'string') {
-          input = newUrl;
-        } else {
-          input = new Request(newUrl, input);
-        }
-      }
-    }catch(e){}
-    return origFetch.apply(this, arguments);
-  };
-})();
-</script>
-"""
-
 @app.after_request
 def _inject_i18n(resp):
     try:
@@ -755,8 +733,7 @@ def _inject_i18n(resp):
                 lower = body.lower()
                 i = lower.rfind("</body>")
                 if i != -1:
-                    # Inject API base shim first, then i18n
-                    body = body[:i] + API_BASE_SHIM + I18N_SNIPPET + body[i:]
+                    body = body[:i] + I18N_SNIPPET + body[i:]
                     resp.set_data(body)
                     try:
                         resp.headers["Content-Length"] = str(len(body.encode("utf-8")))
@@ -876,7 +853,7 @@ def create_product_from_craft():
         return jsonify(ok=False, error="not_logged_in"), 401
 
     with conn() as cx:
-        m = cx.execute("SELECT slug FROM merchants WHERE owner_user_id=?", (urow["id"]),).fetchone()
+        m = cx.execute("SELECT slug FROM merchants WHERE owner_user_id=?", (urow["id"],)).fetchone()
 
     if not m:
         return jsonify(ok=True, dashboardUrl="/merchant/setup"), 200
