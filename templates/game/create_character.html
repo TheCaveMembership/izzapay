@@ -29,6 +29,7 @@
     .note{font-size:13px}
     .danger{color:#ff9aa2}
     .btns{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
+    /* tiny helper for hide/show of fields */
     .hide{display:none}
   </style>
 </head>
@@ -51,12 +52,10 @@
 
         <!-- Right: Form -->
         <div>
-          <form id="charForm" method="post" action="/izza-game/create">
+          <form id="charForm" method="post">
             {% if t %}
               <input type="hidden" name="t" value="{{ t }}">
             {% endif %}
-            <!-- NEW: carry desired destination so server can route post-save -->
-            <input type="hidden" id="destField" name="dest" value="city">
 
             <label>Body Type</label>
             <select id="body_type" name="body_type">
@@ -128,7 +127,7 @@
             </select>
 
             <div class="btns">
-              <button class="ip-btn" type="submit" id="saveBtn">Save and Enter IZZA</button>
+              <button class="ip-btn" type="submit">Save and Enter IZZA</button>
               <a class="ip-btn ghost" href="/">Cancel</a>
             </div>
 
@@ -144,16 +143,6 @@
 
   <script>
   (function(){
-    // --- destination wiring (reads ?dest=city|minigames, defaults to city) ---
-    const usp = new URLSearchParams(location.search);
-    const dest = (usp.get('dest')||'city').toLowerCase()==='minigames' ? 'minigames' : 'city';
-    const destField = document.getElementById('destField');
-    const saveBtn = document.getElementById('saveBtn');
-    if(destField) destField.value = dest;
-    if(saveBtn){
-      saveBtn.textContent = dest==='minigames' ? 'Save and Enter Mini Games' : 'Save and Enter IZZA City';
-    }
-
     const SPRITES = {
       body: {
         default:  "/static/game/sprites/body/default.png",
@@ -163,7 +152,7 @@
       hair: {
         short: "/static/game/sprites/hair/short.png",
         buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png"
+        long:  "/static/game/sprites/hair/long.png" // same for male/female
       },
       outfit: {
         street:   "/static/game/sprites/outfit/street.png",
@@ -172,7 +161,7 @@
       }
     };
 
-    // --- Ramps ---
+    // --- Ramps ---------------------------------------------------------------
     const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
@@ -182,6 +171,7 @@
       deep:   ["#8B5A3B","#6A402A","#432818"]
     };
 
+    // Dress base = current female sprite’s blue ramp (approx.)
     const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
     const FEMALE_DRESS_TO = {
       blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
@@ -207,7 +197,7 @@
       pink:   ["#FFA6D6","#E57CB2","#C45C96"]
     };
 
-    // --- DOM ---
+    // --- DOM -----------------------------------------------------------------
     const selType = document.getElementById('body_type');
     const selTone = document.getElementById('skin_tone');
     const selSkin = document.getElementById('sprite_skin');
@@ -225,7 +215,7 @@
     const form = document.getElementById('charForm');
     ctx.imageSmoothingEnabled = false;
 
-    // --- utils ---
+    // --- utils ---------------------------------------------------------------
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
@@ -303,22 +293,24 @@
       const isFemale = (selType.value === 'female');
       blockMale.classList.toggle('hide', isFemale);
       blockFemale.classList.toggle('hide', !isFemale);
+      // keep selects enabled/disabled to avoid accidental submission
       selSkin.disabled = false;
       selOut.disabled  = false;
     }
 
-    // --- draw ---
+    // --- draw ----------------------------------------------------------------
     async function draw(){
       toggleBlocks();
 
-      const ctx2 = ctx;
-      ctx2.clearRect(0,0,cvs.width,cvs.height);
-      const g = ctx2.createRadialGradient(80,80,10,80,80,90);
+      // bg
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+      const g = ctx.createRadialGradient(80,80,10,80,80,90);
       g.addColorStop(0,"rgba(255,255,255,.08)"); g.addColorStop(1,"rgba(0,0,0,0)");
-      ctx2.fillStyle=g; ctx2.fillRect(0,0,cvs.width,cvs.height);
+      ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
 
       const DW=96,DH=96,X=(cvs.width-DW)/2,Y=(cvs.height-DH)/2;
 
+      // choose base body sprite
       const theme=selSkin.value;
       const isFemale=(selType.value==='female');
 
@@ -331,14 +323,17 @@
       }
       if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
 
+      // hair
       let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
       let hair=await loadImg(hairURL);
 
+      // outfit (only for non-female)
       let outfit=null;
       if(!isFemale){
         outfit=await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
       }
 
+      // --- skin tint first ---
       let bodyCanvas;
       if(body){
         const targetSkin = SKIN_TO[selTone.value]||SKIN_TO.light;
@@ -349,20 +344,25 @@
         }
       }
 
+      // --- female dress tint (if female) ---
       if(isFemale && bodyCanvas){
         const targetDress = FEMALE_DRESS_TO[selFemaleOutfit.value] || FEMALE_DRESS_TO.blue;
         const reDress = paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
         bodyCanvas = reDress.canvas;
         if(reDress.changedPixels < 6){
+          // strong fallback so it’s clearly different
           bodyCanvas = overlayTint(bodyCanvas, targetDress[1], 0.85);
         }
       }
 
-      if(bodyCanvas) ctx2.drawImage(bodyCanvas, X, Y, DW, DH);
-      else { ctx2.fillStyle="#41d1a7"; ctx2.fillRect(X,Y,DW,DH); }
+      // draw body
+      if(bodyCanvas) ctx.drawImage(bodyCanvas, X, Y, DW, DH);
+      else { ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH); }
 
-      if(outfit){ ctx2.drawImage(outfit, X, Y, DW, DH); }
+      // outfit (skip for female)
+      if(outfit){ ctx.drawImage(outfit, X, Y, DW, DH); }
 
+      // hair (keep “approved” approach)
       if(hair){
         const detected = extractThreeToneRamp(hair);
         const target   = HAIR_TO[selHairColor.value]||HAIR_TO.black;
@@ -372,17 +372,17 @@
           hairCanvas = overlayTint(hair, target[1], 1.0);
         }
         const hairY = (isFemale && selHair.value==='buzz') ? (Y - 4) : Y;
-        ctx2.drawImage(hairCanvas, X, hairY, DW, DH);
+        ctx.drawImage(hairCanvas, X, hairY, DW, DH);
       }else{
-        ctx2.fillStyle="#f2d16b"; ctx2.fillRect(X+28,Y+6,40,22);
+        ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28,Y+6,40,22);
       }
 
+      // label
       preset.textContent =
         `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value})` +
         (isFemale ? ` • Outfit: ${selFemaleOutfit.value}` : ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}`);
     }
 
-    const form = document.getElementById('charForm');
     form.addEventListener('submit', function(ev){
       const ok = confirm("Save character?\n\nBase appearance will be LOCKED.\nYou can still change style via in-game shops.");
       if(!ok){ ev.preventDefault(); }
@@ -391,6 +391,7 @@
     [selType, selTone, selSkin, selOut, selFemaleOutfit, selHair, selHairColor]
       .forEach(el=> el.addEventListener('change', draw));
 
+    // initial
     toggleBlocks();
     draw();
   })();
