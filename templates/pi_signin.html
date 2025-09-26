@@ -32,6 +32,8 @@
     p{color:var(--muted);margin:6px 0}
     .muted{color:var(--muted)}
     .hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+    .cta-note{font-size:13px;color:var(--muted)}
+    .stack{display:flex;flex-direction:column;gap:8px}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -63,16 +65,24 @@
         <button id="piSignInBtn" class="ip-btn">Authorize with Pi</button>
         <a class="ip-btn ghost" href="/orders">View My Purchases</a>
         <a class="ip-btn ghost" href="/explore">See Stores</a>
-        <!-- NEW: Play IZZA GAME -->
-        <a class="ip-btn" href="/izza-game/auth" aria-label="Play IZZA GAME">🎮 Play IZZA GAME</a>
       </div>
 
-      <!-- New note -->
+      <!-- GAME ENTRY -->
+      <div class="stack" style="margin-top:12px">
+        <!-- Renamed primary entry -->
+        <a class="ip-btn" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City">🏙️ Enter IZZA City</a>
+
+        <!-- New Mini Games entry -->
+        <a class="ip-btn ghost" href="/izza-game/auth?dest=minigames" aria-label="Play Mini Games">🎯 Play Mini Games</a>
+        <p class="cta-note">* Earn item crafting credits and in-game currency</p>
+      </div>
+
+      <!-- Notes -->
       <p class="muted" style="margin-top:6px;font-size:13px">
         * Sales can be viewed through your merchant dashboard. Authorize with Pi above!
       </p>
       <p class="muted" style="margin-top:6px;font-size:13px">
-        🎮 You can jump into IZZA GAME any time. If you are not signed in, you will be asked to authorize with Pi first.
+        🎮 If you’re not signed in when entering the game, you’ll be asked to authorize with Pi first.
       </p>
 
       <p id="msg" class="muted"></p>
@@ -140,7 +150,7 @@
   })();
   </script>
 
-  <!-- ADDITIVE: Language selector chip (persists to localStorage.izzaLang and reloads) -->
+  <!-- Language selector chip -->
   <script>
   (function(){
     var KEY='izzaLang';
@@ -174,7 +184,7 @@
   })();
   </script>
 
-  <!-- ADDITIVE: Translation stub + auto-translate bootstrap -->
+  <!-- Translation bootstrap -->
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
@@ -189,7 +199,7 @@
       return text;
     }
   };
-</script>
+  </script>
   <script>
   (function(){
     const LANG_KEY='izzaLang';
