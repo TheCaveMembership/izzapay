@@ -57,7 +57,7 @@
         <div class="wallet">
           <span class="pill">IZZA Coins: <strong id="coins">{{ coins|default(0) }}</strong></span>
           <span class="pill">Craft Credits: <strong id="craft">{{ crafting|default(0) }}</strong></span>
-          <a class="btn" href="/izza-game/play">Enter IZZA City</a>
+          <a class="btn" id="enterCityBtn" href="/izza-game/play">Enter IZZA City</a>
         </div>
       </div>
 
@@ -144,14 +144,25 @@
 
   <script>
   (function(){
+    // --- NEW: token helpers (kept minimal) ---
+    const T   = new URLSearchParams(location.search).get('t') || '';
+    const TQ  = T ? `?t=${encodeURIComponent(T)}` : '';
+    const withT = (path) => {
+      if (!T) return path;
+      const hasQ = path.includes('?');
+      return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
+    };
+
     async function ensureCharacter(){
       try{
-        const r = await fetch('/izza-game/api/character', { credentials:'include' });
+        // pass t to hydrate session via @before_request
+        const r = await fetch('/izza-game/api/character'+TQ, { credentials:'include' });
         if(!r.ok) throw new Error('not-auth');
         const j = await r.json();
         if(j && j.hasCharacter) return j;
       }catch(_){}
-      const next = encodeURIComponent('/izza-game/minigames');
+      // preserve t inside the "next" param so we come back with it
+      const next = encodeURIComponent(withT('/izza-game/minigames'));
       location.replace('/izza-game/create?next='+next);
       throw new Error('redirecting');
     }
@@ -181,7 +192,8 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0').padStart?.(2,'0')??s.b.toString(16).padStart(2,'0'); };
+      // fix for some browsers lacking optional chaining in padStart above:
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
@@ -295,21 +307,29 @@
         avatarWrap.addEventListener('pointermove',(e)=>{ if(!active) return; setAvatarPos(e.clientX-startX+window.scrollX, e.clientY-startY+window.scrollY); });
         const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
       }
+
+      // Ensure all game "enter" links carry t
       document.querySelectorAll('.enter-btn').forEach(a=>{
+        a.href = withT(a.getAttribute('href') || '#');
         a.addEventListener('click',(ev)=>{ ev.preventDefault(); const href=a.getAttribute('href'); animateAvatarTo(a,()=>{ location.href=href; }); });
       });
+
+      // Also fix the top "Enter IZZA City" button
+      const cityBtn = document.getElementById('enterCityBtn');
+      if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
     }
 
     (async function boot(){
       try{
-        const profile=await ensureCharacter();  // redirects if missing
+        const profile=await ensureCharacter();  // redirects if missing; preserves t
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
         await buildAvatarCanvas(actx,96,profile);
 
         if(isTouch) setAvatarPos(16,16); else setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
 
+        // fetch wallet with t so session hydrates on first load
         try{
-          const r=await fetch('/izza-game/api/wallet',{credentials:'include'});
+          const r=await fetch('/izza-game/api/wallet'+TQ,{credentials:'include'});
           if(r.ok){ const j=await r.json(); elCoins.textContent=j.coins??'0'; elCraft.textContent=j.crafting??'0'; }
         }catch(_){}
 
