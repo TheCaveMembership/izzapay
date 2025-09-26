@@ -32,10 +32,9 @@
     .wallet{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
     .wallet .pill strong{font-weight:700}
 
-    /* Make the avatar look like it's standing on the logo on phones:
-       add vertical offset above the topbar and stack wallet neatly. */
+    /* phone layout: leave room for the fixed avatar and tighten wallet stack */
     @media (max-width: 640px){
-      .topbar{margin-top:56px;}              /* pushes logo under the fixed avatar */
+      .topbar{margin-top:56px;}
       .wallet{flex-direction:column; align-items:flex-end;}
       .wallet .btn{width:auto;}
     }
@@ -62,7 +61,7 @@
       <div class="topbar">
         <div class="left">
           <img src="/static/izzapay-word.svg" class="brand-word" alt="IZZA wordmark">
-          <span class="muted">Mini Game Arena</span>
+        <span class="muted">Mini Game Arena</span>
         </div>
         <div class="wallet">
           <span class="pill">IZZA Coins: <strong id="coins">{{ coins|default(0) }}</strong></span>
@@ -154,7 +153,7 @@
 
   <script>
   (function(){
-    // --- token helpers (unchanged) ---
+    // token helpers
     const T   = new URLSearchParams(location.search).get('t') || '';
     const TQ  = T ? `?t=${encodeURIComponent(T)}` : '';
     const withT = (path) => {
@@ -190,7 +189,7 @@
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722;b
+    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;  /* <-- FIXED */
 
     function extractThreeToneRamp(img){
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
