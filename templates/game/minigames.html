@@ -25,6 +25,7 @@
     .btn:hover{filter:brightness(1.08)}
     .earn{font-size:12px;color:var(--muted)}
 
+    /* top bar */
     .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px; margin-top:24px;}
     .topbar .left{display:flex;flex-direction:column;align-items:flex-start;gap:4px; position:relative;}
     .brand-word{height:40px;filter:brightness(1.06) contrast(1.02);}
@@ -32,19 +33,21 @@
     .wallet{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
     .wallet .pill strong{font-weight:700}
 
+    /* phone layout */
     @media (max-width: 640px){
       .topbar .left{ padding-top:96px; }
       .wallet{flex-direction:column; align-items:flex-end; margin-top:-10px;}
       .wallet .btn{width:auto;}
     }
 
+    /* avatar cursor */
     .avatar-wrap{position:fixed; left:16px; top:16px; width:96px; height:96px; z-index:9999; pointer-events:none; transform:translate3d(0,0,0);}
     canvas#avatarCursor{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
     .avatar-bounce{animation:bob .9s ease-in-out infinite}
     @keyframes bob{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
 
     .draggable{pointer-events:auto; touch-action:none}
-    .net{position:absolute;right:12px;top:12px;width:48px;height:48px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.15)}
+    .net{position:absolute;right:12px;top:12px;width:48px;height:48px;border-radius:6px;border:1px solid(var(--line));background:rgba(0,0,0,.15)}
     .road{position:absolute;left:0;right:0;bottom:0;height:36px;background:repeating-linear-gradient(90deg, rgba(255,255,255,.18) 0 10px, transparent 10px 20px)}
     .stars{position:absolute;inset:0;background:
       radial-gradient(circle at 20% 30%, rgba(255,255,255,.35) 1px, transparent 1px) 0 0/40px 40px,
@@ -149,25 +152,17 @@
     <canvas id="avatarCursor" width="96" height="96"></canvas>
   </div>
 
-  <!-- (optional but recommended) Persist: instant wallet hydrate + live change events -->
-  <script>
-    window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';
-  </script>
-  <script src="/static/izza-persist.js"></script>
-
   <script>
   (function(){
-    // ----- TOKEN: read, save, auto-attach everywhere -----
+    /* --------- t param: save, restore, and attach where needed (no global rewrites) --------- */
     const T_KEY = 'izzaTokenT';
     let T = new URLSearchParams(location.search).get('t') || '';
-
     try{
       if (T) {
         localStorage.setItem(T_KEY, T);
       } else {
         const saved = localStorage.getItem(T_KEY) || '';
         if (saved) {
-          // add t to URL silently so history/back/refresh keep it forever
           const url = new URL(location.href);
           url.searchParams.set('t', saved);
           history.replaceState(null, '', url.toString());
@@ -175,34 +170,12 @@
         }
       }
     }catch(_){}
-
     const TQ  = T ? `?t=${encodeURIComponent(T)}` : '';
     const withT = (path) => {
       if (!T) return path;
-      try{
-        // absolute or relative
-        const u = new URL(path, location.origin);
-        if (u.origin !== location.origin) return path; // don't touch cross-origin
-        u.searchParams.set('t', T);
-        return u.pathname + (u.search ? u.search : '') + (u.hash || '');
-      }catch{
-        // fallback for simple relative strings
-        const hasQ = path.includes('?');
-        return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
-      }
+      const hasQ = path.includes('?');
+      return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
     };
-
-    // rewrite all same-origin anchors to carry t; keep doing it for dynamic content
-    function rewriteAllLinks(){
-      document.querySelectorAll('a[href]').forEach(a=>{
-        const href = a.getAttribute('href') || '';
-        if (!href || /^https?:\/\//i.test(href)) return; // leave cross-origin
-        a.setAttribute('href', withT(href));
-      });
-    }
-    rewriteAllLinks();
-    const mo = new MutationObserver(()=> rewriteAllLinks());
-    mo.observe(document.documentElement, { childList:true, subtree:true, attributes:true, attributeFilter:['href'] });
 
     async function ensureCharacter(){
       try{
@@ -356,20 +329,19 @@
         const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
       }
 
-      // Ensure all game "enter" links carry t
+      // Ensure all game "enter" links carry t (and keep your original animated click)
       document.querySelectorAll('.enter-btn').forEach(a=>{
         a.href = withT(a.getAttribute('href') || '#');
         a.addEventListener('click',(ev)=>{ ev.preventDefault(); const href=a.getAttribute('href'); animateAvatarTo(a,()=>{ location.href=href; }); });
       });
 
-      // Also fix the top "Enter IZZA City" button
+      // Top "Enter IZZA City" button
       const cityBtn = document.getElementById('enterCityBtn');
       if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
     }
 
-    // ====== Wallet helpers with anti-zero-clobber ======
+    /* ====== Wallet helpers with anti-zero-clobber ====== */
     const toNum = (v)=>{ const n = Number(v); return Number.isFinite(n) ? n : 0; };
-
     function readLocalWallet(){
       let coins = toNum(localStorage.getItem('izzaCoins'));
       let craft = toNum(
@@ -379,24 +351,17 @@
       );
       return { coins, crafting: craft };
     }
-
-    // remember last non-zero so stray events/fetches can’t drop display to 0
     let LAST_WALLET = readLocalWallet();
-
     function renderWallet(obj){
       if (!obj) return;
       let coins = toNum(obj.coins);
       let crafting = toNum(obj.crafting);
-
       if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
       if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
-
       if (elCoins) elCoins.textContent = String(coins);
       if (elCraft) elCraft.textContent = String(crafting);
-
       LAST_WALLET = { coins, crafting };
     }
-
     function parseWalletResponse(j){
       if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
       if ('coins' in j || 'crafting' in j || 'credits' in j){
@@ -409,11 +374,11 @@
 
     (async function boot(){
       try{
-        const profile=await ensureCharacter();
+        const profile=await ensureCharacter();  // redirects if missing; preserves t
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
         await buildAvatarCanvas(actx,96,profile);
 
-        // place avatar sensibly
+        // place avatar
         const logo = document.getElementById('brandWord');
         if (isTouch && logo){
           const r = logo.getBoundingClientRect();
@@ -427,16 +392,14 @@
         // 1) paint any cached values immediately
         renderWallet(LAST_WALLET);
 
-        // 2) fetch authoritative wallet (with bearer if present) — keep t
+        // 2) fetch authoritative wallet (preserve t + include bearer if available)
         try{
           const headers = { 'content-type':'application/json' };
           try{
             const bearer = localStorage.getItem('izzaBearer') || '';
             if (bearer) headers['authorization'] = 'Bearer ' + bearer;
           }catch(_){}
-
           const r = await fetch('/izza-game/api/wallet'+TQ, { credentials:'include', headers });
-
           if (r.ok){
             let j = {};
             try{ j = await r.json(); }catch(_){}
@@ -453,17 +416,16 @@
           console.warn('Wallet fetch error', e);
         }
 
-        // 3) react to app-wide wallet changes (and protect against zero overwrite)
+        // 3) react to app-wide wallet changes
         window.addEventListener('izza-wallet-changed', (ev)=>{
           const d = ev && ev.detail ? ev.detail : {};
           const local = readLocalWallet();
-          renderWallet({ coins: (d.coins ?? local.coins), crafting: (d.crafting ?? d.credits ?? local.crafting) });
+          renderWallet({ coins: d.coins ?? local.coins, crafting: d.crafting ?? d.credits ?? local.crafting });
         }, { passive:true });
-
         window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
         window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
 
-        // On tab focus, refresh wallet (helps when coming back from the City)
+        // On focus, refresh from local (when coming back from city)
         document.addEventListener('visibilitychange', ()=>{
           if (!document.hidden) renderWallet(readLocalWallet());
         }, { passive:true });
