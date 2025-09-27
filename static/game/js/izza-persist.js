@@ -1,22 +1,15 @@
 /* IZZA Persist v2.4.2 — coins = WALLET (on-hand), bank saved separately; missions + hearts */
 (function(){
-  const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
-  if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
-
-  /* === shared cookie helpers for cross-path/sub-app persistence === */
-  function _readCookie(name){
-    return (document.cookie.split('; ').find(s => s.startsWith(name+'=')) || '')
-      .split('=').slice(1).join('=') || '';
+  // --- FIX: make BASE robust so the script runs in both mini-games and IZZA City ---
+  let BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
+  if (!BASE) {
+    try {
+      // With DispatcherMiddleware, we want the ROOT app (izzapay) for /api/state
+      // Falling back to origin works whether we're under / or /izza-game
+      BASE = location.origin;
+    } catch {}
   }
-  function _writeCookie(name, value){
-    try{
-      // IMPORTANT: share across izzapay.onrender.com and izzagame.onrender.com
-      // (matches the Crafting UI cookie behavior)
-      const domain = '.onrender.com';
-      document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Domain=${domain}; Max-Age=${60*60*24*365}; SameSite=Lax`;
-    }catch(_){}
-  }
-  /* ===================================================================== */
+  if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing and no origin fallback'); return; }
 
   // ----- user key same way Diagnostics resolves it -----
   function userKey(){
@@ -51,26 +44,18 @@
   function readCoinsOnHand(){
     try{
       if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
-      // take max(localStorage, cookie) so another sub-app can't show 0
-      const rawLS = localStorage.getItem('izzaCoins');
-      const rawCK = _readCookie('izzaCoins');
-      const a = parseInt(rawLS,10), b = parseInt(rawCK,10);
-      const best = Math.max(Number.isFinite(a)?a:0, Number.isFinite(b)?b:0);
-      return best|0;
+      const raw = localStorage.getItem('izzaCoins'); return raw? (parseInt(raw,10)||0) : 0;
     }catch{ return 0; }
   }
   // NEW: crafting credits reader (matches arena & UI keys)
   function readCraftingCredits(){
     try{
-      // consider cookie mirror too
-      const rawLS =
+      const raw =
         localStorage.getItem('izzaCrafting') ??
         localStorage.getItem('craftingCredits') ??
         localStorage.getItem('izzaCraftCredits');
-      const rawCK = _readCookie('izzaCrafting');
-      const a = parseInt(rawLS, 10), b = parseInt(rawCK, 10);
-      const best = Math.max(Number.isFinite(a)?a:0, Number.isFinite(b)?b:0);
-      return best|0;
+      const v = parseInt(raw, 10);
+      return Number.isFinite(v) ? Math.max(0, v|0) : 0;
     }catch{ return 0; }
   }
   function readMissions(){
@@ -110,7 +95,7 @@
     const u      = userKey();
     const bank   = readBank(u);
     const inv    = readInventory();
-    aconst onHand = readCoinsOnHand();
+    const onHand = readCoinsOnHand();
     const crafting = readCraftingCredits(); // NEW
     const pos    = readPlayerXY();
     const heartsSegs = readHeartsSegs();
@@ -193,7 +178,6 @@
           const nextCoins  = Math.max(localCoins, seed.coins|0);
           if (IZZA?.api?.setCoins) IZZA.api.setCoins(nextCoins);
           else localStorage.setItem('izzaCoins', String(nextCoins));
-          _writeCookie('izzaCoins', String(nextCoins)); // cookie mirror
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
       }
@@ -206,7 +190,6 @@
           localStorage.setItem('izzaCrafting',      String(nextCraft));
           localStorage.setItem('craftingCredits',   String(nextCraft));
           localStorage.setItem('izzaCraftCredits',  String(nextCraft));
-          _writeCookie('izzaCrafting', String(nextCraft)); // cookie mirror
           try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
         }catch(e){ console.warn('[persist] crafting hydrate failed', e); }
       }
@@ -432,10 +415,6 @@
       console.log('[persist] still blank', reason);
       return;
     }
-
-    // mirror to cookies on every save tick so other sub-apps see it immediately
-    _writeCookie('izzaCoins', String(snap.coins|0));
-    _writeCookie('izzaCrafting', String(snap.crafting|0));
 
     lastGood = snap;
 
