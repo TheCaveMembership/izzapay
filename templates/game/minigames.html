@@ -396,6 +396,71 @@
     }
     // One-time normalize on load (keeps City & Arena perfectly in sync)
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
+/* === Crafting credits: immediate deduction on successful mint === */
+/* Place this right after normalizeCraft(); */
+
+(function(){
+  // Defensive: tiny parser for credits-like payloads
+  function parseCreditsFromJson(j){
+    if (!j || typeof j !== 'object') return null;
+    if (Number.isFinite(j.credits))   return j.credits|0;
+    if (Number.isFinite(j.crafting))  return j.crafting|0;
+    if (j.wallet && (Number.isFinite(j.wallet.credits) || Number.isFinite(j.wallet.crafting))){
+      return (j.wallet.credits ?? j.wallet.crafting)|0;
+    }
+    if (j.balance && (Number.isFinite(j.balance.credits) || Number.isFinite(j.balance.crafting))){
+      return (j.balance.credits ?? j.balance.crafting)|0;
+    }
+    return null;
+  }
+
+  // Only wrap once
+  if (!window.__IZZA_CRAFT_FETCH_WRAP__){
+    window.__IZZA_CRAFT_FETCH_WRAP__ = true;
+
+    const origFetch = window.fetch;
+    window.fetch = async function(input, init){
+      const res = await origFetch(input, init);
+      try{
+        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+
+        // When the UI asks the server for current credits, mirror them to LS
+        if (res.ok && url.includes('/api/crafting/credits')){
+          res.clone().json().then(j=>{
+            const cr = parseCreditsFromJson(j);
+            if (Number.isFinite(cr)) {
+              writeCraftAll(cr);
+              window.dispatchEvent(new Event('izza-crafting-changed'));
+            }
+          }).catch(()=>{});
+        }
+
+        // When a mint succeeds, immediately update mirrored credits
+        if (res.ok && url.includes('/api/crafting/mint')){
+          res.clone().json().then(j=>{
+            const got = parseCreditsFromJson(j);
+            if (Number.isFinite(got)) {
+              // Server told us the authoritative new credits
+              writeCraftAll(got);
+            } else {
+              // Fallback: decrement by 1 if server didn’t echo credits
+              const cur = (function(){ 
+                for (const k of ['izzaCrafting','craftingCredits','izzaCraftCredits']){
+                  const v = parseInt(localStorage.getItem(k)||'0',10);
+                  if (Number.isFinite(v) && v>0) return v|0;
+                }
+                return parseInt(localStorage.getItem('izzaCrafting')||'0',10) || 0;
+              })();
+              writeCraftAll(Math.max(0, cur - 1));
+            }
+            window.dispatchEvent(new Event('izza-crafting-changed'));
+          }).catch(()=>{});
+        }
+      }catch(_){/* ignore */}
+      return res;
+    };
+  }
+})();
 
     function readLocalWallet(){
       let coins = toNum(localStorage.getItem('izzaCoins'));
