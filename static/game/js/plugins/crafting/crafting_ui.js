@@ -1842,14 +1842,19 @@ function getCraftingCredits(){
   }catch{ return 0; }
 }
 
-function setCraftingCredits(n){
+// Only increase unless mode === 'burn'
+function setCraftingCredits(n, mode){
   try{
-    const v = Math.max(0, n|0);
+    const incoming = Math.max(0, n|0);
+    const current  = getCraftingCredits(); // reads max(local, cookie)
+    const value    = (mode === 'burn' || incoming > current) ? incoming : current;
+
     // write both local and cookie mirrors
-    localStorage.setItem('izzaCrafting', String(v));
-    localStorage.setItem('craftingCredits', String(v));
-    localStorage.setItem('izzaCraftCredits', String(v));
-    _writeCookie('izzaCrafting', String(v));
+    localStorage.setItem('izzaCrafting',       String(value));
+    localStorage.setItem('craftingCredits',    String(value));
+    localStorage.setItem('izzaCraftCredits',   String(value));
+    _writeCookie('izzaCrafting', String(value));
+
     window.dispatchEvent(new Event('izza-crafting-changed'));
   }catch{}
 }
@@ -2382,7 +2387,7 @@ function bindInside(){
         }
         STATE.canUseVisuals = totalMintCredits() > 0;
         // Persist singles to storage + refresh header badge now that we burned a credit
-        setCraftingCredits(STATE.mintCredits | 0);   // writes local + cookie + emits event
+        setCraftingCredits(STATE.mintCredits | 0, 'burn');   // allow downgrade only on burn
         updateTabsHeaderCredits();                   // updates the “Create Item” badge
         _syncVisualsTabStyle();                      // reflect whether Visuals should be enabled
 
