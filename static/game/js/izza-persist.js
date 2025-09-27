@@ -163,19 +163,25 @@
         }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
 
-      // WALLET COINS (on-hand)
+      // WALLET COINS (on-hand) — NEVER DOWNGRADE local with an empty/stale server
       if (Number.isFinite(seed.coins)){
         try{
-          if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
-          else localStorage.setItem('izzaCoins', String(seed.coins|0));
+          const localCoins = readCoinsOnHand()|0;
+          const nextCoins  = Math.max(localCoins, seed.coins|0);
+          if (IZZA?.api?.setCoins) IZZA.api.setCoins(nextCoins);
+          else localStorage.setItem('izzaCoins', String(nextCoins));
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
       }
 
-      // NEW: CRAFTING CREDITS (on-hand)
+      // NEW: CRAFTING CREDITS (on-hand) — NEVER DOWNGRADE; mirror all LS keys used by UI
       if (Number.isFinite(seed.crafting)){
         try{
-          localStorage.setItem('izzaCrafting', String(seed.crafting|0));
+          const localCraft = readCraftingCredits()|0;
+          const nextCraft  = Math.max(localCraft, seed.crafting|0);
+          localStorage.setItem('izzaCrafting',      String(nextCraft));
+          localStorage.setItem('craftingCredits',   String(nextCraft));
+          localStorage.setItem('izzaCraftCredits',  String(nextCraft));
           try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
         }catch(e){ console.warn('[persist] crafting hydrate failed', e); }
       }
