@@ -1989,8 +1989,8 @@ async function mount(rootSel){
 
   loadDraft();
 
-  // Best-effort server reconcile first (doesn't mutate local if it fails)
-  await reconcileCraftCredits();
+  // Best-effort reconcile (non-blocking). Local always wins.
+reconcileCraftCredits?.(); // fire-and-forget, safe no-op if missing
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
