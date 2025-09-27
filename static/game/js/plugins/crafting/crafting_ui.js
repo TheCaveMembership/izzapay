@@ -1865,6 +1865,23 @@ async function mount(rootSel){
   STATE.root = root;
   STATE.mounted = true;
 
+  // 1) Seed credits immediately from persisted storage (survive close/reopen)
+  try{
+    const persisted =
+      (typeof getCraftingCredits === 'function')
+        ? (getCraftingCredits() | 0)
+        : (
+            parseInt(
+              localStorage.getItem('izzaCrafting') ??
+              localStorage.getItem('craftingCredits') ??
+              localStorage.getItem('izzaCraftCredits') ?? '0',
+              10
+            ) | 0
+          );
+    STATE.mintCredits   = persisted;
+    STATE.canUseVisuals = persisted > 0;
+  }catch{}
+
   loadDraft();
 
   // Best-effort server reconcile first (doesn't mutate local if it fails)
@@ -1873,7 +1890,8 @@ async function mount(rootSel){
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
   const tabsHost = root.querySelector('#craftTabs');
 
-  let initialTab = 'packages';
+  // If you already have credits, land on Create immediately
+  let initialTab = ((STATE.mintCredits|0) > 0) ? 'create' : 'packages';
 
   // ---- SAFE CREDIT SEEDING (do not let server zero-out local) ----
   try{
@@ -1914,6 +1932,7 @@ async function mount(rootSel){
         STATE.mintCredits   = local;
         STATE.canUseVisuals = local > 0;
       }
+      updateTabsHeaderCredits();
     }
   }catch(_){
     // network/parse error -> stick with local
@@ -1934,6 +1953,7 @@ async function mount(rootSel){
       STATE.mintCredits   = local;
       STATE.canUseVisuals = local > 0;
     }
+    updateTabsHeaderCredits();
   }
   // ----------------------------------------------------------------
 
@@ -1951,6 +1971,7 @@ async function mount(rootSel){
     if(name==='mine'){     tabsHost.innerHTML = renderMine(); hydrateMine(); }
 
     bindInside();
+    _syncVisualsTabStyle(); // reflect seeded/updated credits on the Visuals sub-tab
 
     if (name === 'create') {
       try {
