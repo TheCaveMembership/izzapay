@@ -2372,6 +2372,10 @@ function bindInside(){
           STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
         }
         STATE.canUseVisuals = totalMintCredits() > 0;
+        // Persist singles to storage + refresh header badge now that we burned a credit
+        setCraftingCredits(STATE.mintCredits | 0);   // writes local + cookie + emits event
+        updateTabsHeaderCredits();                   // updates the “Create Item” badge
+        _syncVisualsTabStyle();                      // reflect whether Visuals should be enabled
 
         // Persist + get craftedId (from inject OR server)
         let craftedId = injected.id || null;
