@@ -3,15 +3,17 @@
   const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
   if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
 
-  /* === added: shared cookie helpers for cross-path/sub-app persistence === */
+  /* === shared cookie helpers for cross-path/sub-app persistence === */
   function _readCookie(name){
     return (document.cookie.split('; ').find(s => s.startsWith(name+'=')) || '')
       .split('=').slice(1).join('=') || '';
   }
   function _writeCookie(name, value){
     try{
-      // share across the whole host (incl. /izza-game)
-      document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${60*60*24*365}; SameSite=Lax`;
+      // IMPORTANT: share across izzapay.onrender.com and izzagame.onrender.com
+      // (matches the Crafting UI cookie behavior)
+      const domain = '.onrender.com';
+      document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Domain=${domain}; Max-Age=${60*60*24*365}; SameSite=Lax`;
     }catch(_){}
   }
   /* ===================================================================== */
@@ -49,7 +51,7 @@
   function readCoinsOnHand(){
     try{
       if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
-      /* === changed: take max(localStorage, cookie) so we never show 0 on another sub-app === */
+      // take max(localStorage, cookie) so another sub-app can't show 0
       const rawLS = localStorage.getItem('izzaCoins');
       const rawCK = _readCookie('izzaCoins');
       const a = parseInt(rawLS,10), b = parseInt(rawCK,10);
@@ -60,7 +62,7 @@
   // NEW: crafting credits reader (matches arena & UI keys)
   function readCraftingCredits(){
     try{
-      /* === changed: consider cookie mirror too === */
+      // consider cookie mirror too
       const rawLS =
         localStorage.getItem('izzaCrafting') ??
         localStorage.getItem('craftingCredits') ??
@@ -108,7 +110,7 @@
     const u      = userKey();
     const bank   = readBank(u);
     const inv    = readInventory();
-    const onHand = readCoinsOnHand();
+    aconst onHand = readCoinsOnHand();
     const crafting = readCraftingCredits(); // NEW
     const pos    = readPlayerXY();
     const heartsSegs = readHeartsSegs();
@@ -191,7 +193,7 @@
           const nextCoins  = Math.max(localCoins, seed.coins|0);
           if (IZZA?.api?.setCoins) IZZA.api.setCoins(nextCoins);
           else localStorage.setItem('izzaCoins', String(nextCoins));
-          _writeCookie('izzaCoins', String(nextCoins)); /* === added: cookie mirror === */
+          _writeCookie('izzaCoins', String(nextCoins)); // cookie mirror
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
       }
@@ -204,7 +206,7 @@
           localStorage.setItem('izzaCrafting',      String(nextCraft));
           localStorage.setItem('craftingCredits',   String(nextCraft));
           localStorage.setItem('izzaCraftCredits',  String(nextCraft));
-          _writeCookie('izzaCrafting', String(nextCraft)); /* === added: cookie mirror === */
+          _writeCookie('izzaCrafting', String(nextCraft)); // cookie mirror
           try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
         }catch(e){ console.warn('[persist] crafting hydrate failed', e); }
       }
@@ -431,10 +433,9 @@
       return;
     }
 
-    /* === added: mirror to cookies on every save tick so other sub-apps see it immediately === */
+    // mirror to cookies on every save tick so other sub-apps see it immediately
     _writeCookie('izzaCoins', String(snap.coins|0));
     _writeCookie('izzaCrafting', String(snap.crafting|0));
-    /* ===================================================================== */
 
     lastGood = snap;
 
