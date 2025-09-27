@@ -1654,14 +1654,14 @@ async function hydrateMine(){
     }, { passive:true });
   });
 
-  host.querySelectorAll('[data-stats]').forEach(btn=>{
+    host.querySelectorAll('[data-stats]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
-});
+  });
 
-}
+} // end hydrateMine
 
 /* ---------- Marketplace (internal) ---------- */
 async function fetchMarketplace(){
@@ -1709,12 +1709,13 @@ async function mount(rootSel){
   if (!root) return;
   STATE.root = root;
   STATE.mounted = true;
-if (!window.__izzaCraftLSHook){
-  window.addEventListener('izza-crafting-changed', updateTabsHeaderCredits, { passive:true });
-  window.__izzaCraftLSHook = true;
-}
-  loadDraft();
 
+  if (!window.__izzaCraftLSHook){
+    window.addEventListener('izza-crafting-changed', updateTabsHeaderCredits, { passive:true });
+    window.__izzaCraftLSHook = true;
+  }
+
+  loadDraft();
   await reconcileCraftCredits();
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
@@ -1763,6 +1764,8 @@ if (!window.__izzaCraftLSHook){
         const el = document.getElementById('aiLeft2');
         if (el) el.textContent = STATE.aiAttemptsLeft;
       } catch {}
+      // Ensure meters/pills are interactive on first load:
+      bindFeatureMeters(STATE.root);
     }
   };
 
@@ -1810,7 +1813,7 @@ async function handleBuySingle(kind, enforceForm){
     updateTabsHeaderCredits();
     STATE.createSub = 'setup';
     const host = STATE.root?.querySelector('#craftTabs');
-    if (host){ host.innerHTML = renderCreate(); bindInside(); }
+    if (host){ host.innerHTML = renderCreate(); bindInside(); bindFeatureMeters(STATE.root); }
   } else {
     if (status) status.textContent='Payment failed.';
   }
@@ -1871,7 +1874,7 @@ function bindInside(){
         createTabBtn.click();
       } else {
         const host = STATE.root?.querySelector('#craftTabs');
-        if (host){ host.innerHTML = renderCreate(); bindInside(); }
+        if (host){ host.innerHTML = renderCreate(); bindInside(); bindFeatureMeters(STATE.root); }
       }
     }, { passive:true });
   }
@@ -1899,7 +1902,7 @@ function bindInside(){
           if (createBtn) createBtn.click();
           else {
             const host = STATE.root?.querySelector('#craftTabs');
-            if (host){ host.innerHTML = renderCreate(); bindInside(); }
+            if (host){ host.innerHTML = renderCreate(); bindInside(); bindFeatureMeters(STATE.root); }
           }
         } catch {}
       } else {
@@ -2018,3 +2021,164 @@ function bindInside(){
       STATE.featureLevels = {};
       saveDraft();
       updatePayButtonsState();
+
+      const host = root.querySelector('#craftTabs');
+      if (host){
+        const saveScroll = host.scrollTop;
+        host.innerHTML = renderCreate();
+        bindInside();
+        bindFeatureMeters(STATE.root);
+        host.scrollTop = saveScroll;
+      }
+    }, { passive:true });
+
+    // keep part in sync & react to changes
+    partSel.value = STATE.currentPart;
+    partSel.addEventListener('change', e=>{
+      STATE.currentPart = e.target.value;
+      // reset feature flags/levels that may be invalid for new part
+      STATE.featureFlags = Object.fromEntries(Object.keys(STATE.featureFlags).map(k=>[k,false]));
+      STATE.featureLevels = {};
+      saveDraft();
+      updatePayButtonsState();
+
+      const host = root.querySelector('#craftTabs');
+      if (host){
+        const saveScroll = host.scrollTop;
+        host.innerHTML = renderCreate();
+        bindInside();
+        bindFeatureMeters(STATE.root);
+        host.scrollTop = saveScroll;
+      }
+    }, { passive:true });
+
+    updatePayButtonsState();
+    _syncVisualsTabStyle();
+  } // end if (catSel && partSel)
+
+  // ===== Visuals actions =====
+  const aiBtn      = root.querySelector('#btnAI');
+  const previewBtn = root.querySelector('#btnPreview');
+  const mintBtn    = root.querySelector('#btnMint');
+  const svgIn      = root.querySelector('#svgIn');
+  const aiPrompt   = root.querySelector('#aiPrompt');
+
+  if (aiBtn){
+    aiBtn.addEventListener('click', async ()=>{
+      const prompt = (aiPrompt?.value || '').trim();
+      if (!prompt) return;
+      const status = root.querySelector('#craftStatus');
+      aiBtn.disabled = true;
+      if (status) status.textContent = 'Generating…';
+      let svg = '';
+      try{
+        svg = await aiToSVG(prompt);
+      } finally {
+        aiBtn.disabled = false;
+      }
+      if (svg){
+        STATE.currentSVG = normalizeSvgForSlot(svg, STATE.currentPart);
+        saveDraft();
+        if (svgIn) svgIn.value = STATE.currentSVG;
+        const prev = root.querySelector('#svgPreview');
+        if (prev) prev.innerHTML = STATE.currentSVG;
+        const left = root.querySelector('#aiLeft2');
+        if (left) left.textContent = STATE.aiAttemptsLeft;
+        if (status) status.textContent = 'Preview updated.';
+        if (mintBtn && totalMintCredits()>0 && isCreateFormValid()){
+          mintBtn.style.display = '';
+        }
+      } else {
+        if (status) status.textContent = 'No SVG produced.';
+      }
+    }, { passive:true });
+  }
+
+  if (previewBtn){
+    previewBtn.addEventListener('click', ()=>{
+      const status = root.querySelector('#craftStatus');
+      const text = svgIn?.value || '';
+      if (!text.trim()){
+        if (status) status.textContent = 'Paste or generate SVG first.';
+        return;
+      }
+      const safe = normalizeSvgForSlot(text, STATE.currentPart);
+      if (!safe){
+        if (status) status.textContent = 'SVG rejected.';
+        return;
+      }
+      STATE.currentSVG = safe;
+      saveDraft();
+      const prev = root.querySelector('#svgPreview');
+      if (prev) prev.innerHTML = safe;
+      if (status) status.textContent = 'Preview updated.';
+      if (mintBtn && totalMintCredits()>0 && isCreateFormValid()){
+        mintBtn.style.display = '';
+      }
+    }, { passive:true });
+  }
+
+  if (mintBtn){
+    mintBtn.addEventListener('click', async ()=>{
+      const status = root.querySelector('#craftStatus');
+      if (!isCreateFormValid()){
+        if (status) status.textContent = 'Fill Category, Part/Type, and Item Name first.';
+        return;
+      }
+      if (!STATE.currentSVG){
+        if (status) status.textContent = 'Generate or paste an SVG first.';
+        return;
+      }
+
+      if (status) status.textContent = 'Minting…';
+      let j = null;
+      try{
+        j = await serverJSON(gameApi('/api/crafting/mint'), {
+          method:'POST',
+          body: JSON.stringify({
+            name: STATE.currentName,
+            category: STATE.currentCategory,
+            part: STATE.currentPart,
+            svg: STATE.currentSVG,
+            shop: {
+              priceIC: parseInt(document.getElementById('shopPrice')?.value||'100',10),
+              listInShop: !!document.getElementById('sellInShop')?.checked,
+              listInPi: !!document.getElementById('sellInPi')?.checked
+            },
+            features: {
+              flags:  STATE.featureFlags,
+              levels: STATE.featureLevels,
+              fx: { tracer: STATE.tracerPreset, swing: STATE.swingPreset }
+            }
+          })
+        });
+      }catch(e){
+        if (status) status.textContent = 'Server error.';
+        return;
+      }
+
+      if (j && j.ok){
+        applyCreditState((STATE.mintCredits|0) - 1); // spend 1 credit
+        if (status) status.textContent = 'Minted ✓';
+
+        addMintToMineLocal(j.item || {
+          id: j.id || ('craft_'+Date.now()),
+          name: STATE.currentName,
+          category: STATE.currentCategory,
+          part: STATE.currentPart,
+          svg: STATE.currentSVG
+        });
+
+        __applyStatsToNewestCraft();
+      } else {
+        if (status) status.textContent = 'Mint failed.';
+      }
+    }, { passive:true });
+  }
+
+} // end bindInside()
+
+// Make it mountable from outside
+window.CraftingUI = { mount, unmount };
+
+})(); // end IIFE that started after composeAIPrompt
