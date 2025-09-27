@@ -1,15 +1,7 @@
 /* IZZA Persist v2.4.2 — coins = WALLET (on-hand), bank saved separately; missions + hearts */
 (function(){
-  // --- FIX: make BASE robust so the script runs in both mini-games and IZZA City ---
-  let BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
-  if (!BASE) {
-    try {
-      // With DispatcherMiddleware, we want the ROOT app (izzapay) for /api/state
-      // Falling back to origin works whether we're under / or /izza-game
-      BASE = location.origin;
-    } catch {}
-  }
-  if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing and no origin fallback'); return; }
+  const BASE = (window.IZZA_PERSIST_BASE || '').replace(/\/+$/,'');
+  if (!BASE) { console.warn('[persist] IZZA_PERSIST_BASE missing'); return; }
 
   // ----- user key same way Diagnostics resolves it -----
   function userKey(){
@@ -45,17 +37,6 @@
     try{
       if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
       const raw = localStorage.getItem('izzaCoins'); return raw? (parseInt(raw,10)||0) : 0;
-    }catch{ return 0; }
-  }
-  // NEW: crafting credits reader (matches arena & UI keys)
-  function readCraftingCredits(){
-    try{
-      const raw =
-        localStorage.getItem('izzaCrafting') ??
-        localStorage.getItem('craftingCredits') ??
-        localStorage.getItem('izzaCraftCredits');
-      const v = parseInt(raw, 10);
-      return Number.isFinite(v) ? Math.max(0, v|0) : 0;
     }catch{ return 0; }
   }
   function readMissions(){
@@ -96,7 +77,6 @@
     const bank   = readBank(u);
     const inv    = readInventory();
     const onHand = readCoinsOnHand();
-    const crafting = readCraftingCredits(); // NEW
     const pos    = readPlayerXY();
     const heartsSegs = readHeartsSegs();
     const missions   = readMissions();
@@ -108,7 +88,6 @@
       version: 1,
       player: { x: pos.x|0, y: pos.y|0, heartsSegs },
       coins: onHand|0,             // WALLET ONLY lives here
-      crafting: crafting|0,        // NEW: persist crafting credits
       missions: missions|0,
       missionState: missionState || {},
       inventory: inv || {},
@@ -171,27 +150,13 @@
         }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
 
-      // WALLET COINS (on-hand) — NEVER DOWNGRADE local with an empty/stale server
+      // WALLET COINS (on-hand)
       if (Number.isFinite(seed.coins)){
         try{
-          const localCoins = readCoinsOnHand()|0;
-          const nextCoins  = Math.max(localCoins, seed.coins|0);
-          if (IZZA?.api?.setCoins) IZZA.api.setCoins(nextCoins);
-          else localStorage.setItem('izzaCoins', String(nextCoins));
+          if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
+          else localStorage.setItem('izzaCoins', String(seed.coins|0));
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
-      }
-
-      // NEW: CRAFTING CREDITS (on-hand) — NEVER DOWNGRADE; mirror all LS keys used by UI
-      if (Number.isFinite(seed.crafting)){
-        try{
-          const localCraft = readCraftingCredits()|0;
-          const nextCraft  = Math.max(localCraft, seed.crafting|0);
-          localStorage.setItem('izzaCrafting',      String(nextCraft));
-          localStorage.setItem('craftingCredits',   String(nextCraft));
-          localStorage.setItem('izzaCraftCredits',  String(nextCraft));
-          try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
-        }catch(e){ console.warn('[persist] crafting hydrate failed', e); }
       }
 
       // BANK (per-user key)
@@ -257,8 +222,7 @@
         (!s.bank.items || !Object.keys(s.bank.items).length) &&
         (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
       );
-      // NEW: wallet is "zero" only if BOTH coins and crafting are zero
-      const walletZero = ((s.coins|0)===0) && ((s.crafting|0)===0);
+      const walletZero = (s.coins|0)===0;
       const heartsUnknown = (s.player?.heartsSegs==null);
       return walletZero && bankEmpty && invEmpty && heartsUnknown;
     }catch{ return true; }
@@ -440,8 +404,6 @@
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
   window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
   window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
-  // NEW: persist on crafting changes
-  window.addEventListener('izza-crafting-changed', ()=> tryKick('crafting'));
   if (window.IZZA?.on) {
     IZZA.on('missions-updated', ()=> tryKick('missions'));
   }
