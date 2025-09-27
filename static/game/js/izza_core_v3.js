@@ -419,6 +419,52 @@ function setHearts(n){
   try{ window.dispatchEvent(new Event('izza-hearts-changed')); }catch{}
 }
 
+  // ===== Crafting Credits (persist like coins) =====
+const LS_CREDITS = 'izzaCraftingCredits';
+
+function _readCreditsMap(){
+  try { return JSON.parse(localStorage.getItem(LS_CREDITS) || '{}') || {}; }
+  catch { return {}; }
+}
+function _writeCreditsMap(map){
+  try {
+    localStorage.setItem(LS_CREDITS, JSON.stringify(map || {}));
+    try { window.dispatchEvent(new Event('izza-credits-changed')); } catch {}
+    // optional: trigger your server persist, same as missions/inventory
+    try { if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') IZZA_PERSIST.save(); } catch {}
+  } catch {}
+}
+function _currentUserKey(){
+  return (IZZA && IZZA.api && IZZA.api.user && IZZA.api.user.username) ? IZZA.api.user.username : 'guest';
+}
+
+function getCraftingCredits(){
+  const map = _readCreditsMap();
+  const u = _currentUserKey();
+  return Math.max(0, (map[u] | 0));
+}
+function setCraftingCredits(n){
+  const v = Math.max(0, n | 0);
+  const map = _readCreditsMap();
+  map[_currentUserKey()] = v;
+  _writeCreditsMap(map);
+
+  // Update any credit pill if present (same pattern as coins)
+  const el = document.getElementById('creditPill') || document.querySelector('.pill.credits');
+  if (el) el.textContent = `Credits: ${v}`;
+}
+
+// Expose to plugins/UIs
+IZZA.api.getCraftingCredits = getCraftingCredits;
+IZZA.api.setCraftingCredits = setCraftingCredits;
+
+// Initialize pill on boot (mirrors setCoins(getCoins()))
+try {
+  const v = getCraftingCredits();
+  const el = document.getElementById('creditPill') || document.querySelector('.pill.credits');
+  if (el) el.textContent = `Credits: ${v}`;
+} catch {}
+
 /* ========= NEW: mission persistence (generalized) =========
    Shape stored in localStorage[izzaMissionState], e.g.:
    {
