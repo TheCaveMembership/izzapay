@@ -233,7 +233,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
@@ -306,7 +306,7 @@
         const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
         const swap=paletteSwap(hair, detected, target, 4000);
         let hairCanvas=swap.canvas;
-        if(swap.changedPixels<8){ hairCanvas=overlayTint(hair, target[1], 1.0); }
+        if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
         const hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
         dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
       }
@@ -356,7 +356,25 @@
       });
 
       const cityBtn = document.getElementById('enterCityBtn');
-      if (cityBtn) cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
+      if (cityBtn) {
+        cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
+
+        // NEW: push a persist save BEFORE navigating so City hydrates correct wallet
+        cityBtn.addEventListener('click', async (ev)=>{
+          ev.preventDefault();
+          const href = cityBtn.getAttribute('href');
+
+          try {
+            if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
+              await IZZA_PERSIST.save();
+            } else if (typeof window._izzaForceSave === 'function') {
+              window._izzaForceSave();
+            }
+          } catch(_) {}
+
+          setTimeout(()=>{ location.href = href; }, 120);
+        }, {passive:false});
+      }
     }
 
     /* ====== Wallet helpers ====== */
@@ -476,6 +494,10 @@
             try{
               localStorage.setItem('izzaCoins', String(toNum(parsed.coins)));
               writeCraftAll(toNum(parsed.crafting)); // mirror all crafting keys
+
+              // NEW: immediately tell izza-persist (and anyone listening) that values changed
+              window.dispatchEvent(new Event('izza-coins-changed'));
+              window.dispatchEvent(new Event('izza-crafting-changed'));
             }catch(_){}
           } else {
             console.warn('Wallet fetch failed', r.status);
