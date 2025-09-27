@@ -1829,6 +1829,7 @@ async function mount(rootSel){
 
   loadDraft();
 
+  // Best-effort server reconcile first (doesn't mutate local if it fails)
   await reconcileCraftCredits();
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
@@ -1836,18 +1837,67 @@ async function mount(rootSel){
 
   let initialTab = 'packages';
 
+  // ---- SAFE CREDIT SEEDING (do not let server zero-out local) ----
   try{
+    // Read local persisted credits (works even if getCraftingCredits helper isn't present)
+    const local =
+      (typeof getCraftingCredits === 'function')
+        ? (getCraftingCredits() | 0)
+        : (
+            parseInt(
+              localStorage.getItem('izzaCrafting') ??
+              localStorage.getItem('craftingCredits') ??
+              localStorage.getItem('izzaCraftCredits') ?? '0',
+              10
+            ) | 0
+          );
+
     const s = await serverJSON(gameApi('/api/crafting/credits/status')); // { ok:true, credits:number }
-    if (s && s.ok){
-      applyCreditState(s.credits|0);
+    if (s && s.ok && Number.isFinite(s.credits)){
+      const server = s.credits | 0;
+      const effective = Math.max(local, server);   // <- never downgrade
+      if (typeof applyCreditState === 'function'){
+        applyCreditState(effective);               // also persists via your helper, if implemented
+      } else {
+        STATE.mintCredits   = effective;
+        STATE.canUseVisuals = effective > 0;
+      }
       updateTabsHeaderCredits();
-      if (STATE.mintCredits > 0){
+      if (effective > 0){
         STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
         STATE.createSub = 'setup';
         initialTab = 'create';
       }
+    } else {
+      // server not ok -> stick with local
+      if (typeof applyCreditState === 'function'){
+        applyCreditState(local);
+      } else {
+        STATE.mintCredits   = local;
+        STATE.canUseVisuals = local > 0;
+      }
     }
-  }catch(_){}
+  }catch(_){
+    // network/parse error -> stick with local
+    const local =
+      (typeof getCraftingCredits === 'function')
+        ? (getCraftingCredits() | 0)
+        : (
+            parseInt(
+              localStorage.getItem('izzaCrafting') ??
+              localStorage.getItem('craftingCredits') ??
+              localStorage.getItem('izzaCraftCredits') ?? '0',
+              10
+            ) | 0
+          );
+    if (typeof applyCreditState === 'function'){
+      applyCreditState(local);
+    } else {
+      STATE.mintCredits   = local;
+      STATE.canUseVisuals = local > 0;
+    }
+  }
+  // ----------------------------------------------------------------
 
   if (!window.__izzaReconHook){
     document.addEventListener('visibilitychange', ()=>{
