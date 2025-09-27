@@ -4,8 +4,16 @@
   <meta charset="utf-8">
   <title>Mini Game Arena — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Persist: point to mounted app, then load the single shared file -->
+  <script>
+    window.IZZA_PERSIST_BASE = '/izza-game';
+  </script>
+  <script src="/static/izza-persist.js" defer></script>
+
   <link rel="stylesheet" href="/static/themes.css">
   <style>
+    /* ... your styles unchanged ... */
     :root{ --tile-bg: var(--card); --tile-line: var(--line); --tile-hover: rgba(255,255,255,.04); }
     body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
     .wrap{max-width:1100px;margin:0 auto;padding:16px}
