@@ -1820,43 +1820,33 @@ function _writeCookie(name, value){
   }catch(_){}
 }
 
+// ---------- Credits (delegate to IZZA.api) ----------
 function getCraftingCredits(){
-  try{
-    // 1) local fast path
-    const rawLocal =
-      localStorage.getItem('izzaCrafting') ??
-      localStorage.getItem('craftingCredits') ??
-      localStorage.getItem('izzaCraftCredits');
-
-    // 2) cookie fallback (cross-subdomain)
-    const rawCookie = _readCookie('izzaCrafting');
-
-    const nLocal  = parseInt(rawLocal, 10);
-    const nCookie = parseInt(rawCookie, 10);
-
-    const n = Math.max(
-      Number.isFinite(nLocal)  ? nLocal  : 0,
-      Number.isFinite(nCookie) ? nCookie : 0
-    );
-    return Math.max(0, n|0);
-  }catch{ return 0; }
+  try {
+    if (window.IZZA?.api?.getCraftingCredits) {
+      return window.IZZA.api.getCraftingCredits()|0;
+    }
+  }catch{}
+  return 0;
 }
 
-// Only increase unless mode === 'burn'
 function setCraftingCredits(n, mode){
-  try{
-    const incoming = Math.max(0, n|0);
-    const current  = getCraftingCredits(); // reads max(local, cookie)
-    const value    = (mode === 'burn' || incoming > current) ? incoming : current;
-
-    // write both local and cookie mirrors
-    localStorage.setItem('izzaCrafting',       String(value));
-    localStorage.setItem('craftingCredits',    String(value));
-    localStorage.setItem('izzaCraftCredits',   String(value));
-    _writeCookie('izzaCrafting', String(value));
-
-    window.dispatchEvent(new Event('izza-crafting-changed'));
+  try {
+    if (window.IZZA?.api?.setCraftingCredits) {
+      window.IZZA.api.setCraftingCredits(n|0, mode);
+      // bubble a cross-window event for anything listening
+      window.dispatchEvent(new Event('izza-credits-changed'));
+    }
   }catch{}
+}
+
+// keep alias compatibility for code that calls applyCreditState()
+function applyCreditState(n){
+  const next = Math.max(0, n|0);
+  STATE.mintCredits   = next;
+  STATE.canUseVisuals = next > 0;
+  setCraftingCredits(next);    // IZZA.api path
+  updateTabsHeaderCredits();
 }
 /* ---------- Mount / Unmount ---------- */
 async function mount(rootSel){
@@ -1870,14 +1860,7 @@ async function mount(rootSel){
     const persisted =
       (typeof getCraftingCredits === 'function')
         ? (getCraftingCredits() | 0)
-        : (
-            parseInt(
-              localStorage.getItem('izzaCrafting') ??
-              localStorage.getItem('craftingCredits') ??
-              localStorage.getItem('izzaCraftCredits') ?? '0',
-              10
-            ) | 0
-          );
+        : 0;
     STATE.mintCredits   = persisted;
     STATE.canUseVisuals = persisted > 0;
   }catch{}
@@ -1895,18 +1878,11 @@ async function mount(rootSel){
 
   // ---- SAFE CREDIT SEEDING (do not let server zero-out local) ----
   try{
-    // Read local persisted credits (works even if getCraftingCredits helper isn't present)
+    // Read local persisted credits (via IZZA.api)
     const local =
       (typeof getCraftingCredits === 'function')
         ? (getCraftingCredits() | 0)
-        : (
-            parseInt(
-              localStorage.getItem('izzaCrafting') ??
-              localStorage.getItem('craftingCredits') ??
-              localStorage.getItem('izzaCraftCredits') ?? '0',
-              10
-            ) | 0
-          );
+        : 0;
 
     const s = await serverJSON(gameApi('/api/crafting/credits/status')); // { ok:true, credits:number }
     if (s && s.ok && Number.isFinite(s.credits)){
@@ -1939,14 +1915,7 @@ async function mount(rootSel){
     const local =
       (typeof getCraftingCredits === 'function')
         ? (getCraftingCredits() | 0)
-        : (
-            parseInt(
-              localStorage.getItem('izzaCrafting') ??
-              localStorage.getItem('craftingCredits') ??
-              localStorage.getItem('izzaCraftCredits') ?? '0',
-              10
-            ) | 0
-          );
+        : 0;
     if (typeof applyCreditState === 'function'){
       applyCreditState(local);
     } else {
@@ -2489,6 +2458,20 @@ function bindInside(){
 
   _syncVisualsTabStyle();
 } // <-- closes bindInside()
+
+// --- Global listener to refresh badge when credits change elsewhere
+window.addEventListener('izza-credits-changed', ()=>{
+  try {
+    const cur =
+      (typeof getCraftingCredits === 'function')
+        ? (getCraftingCredits() | 0)
+        : 0;
+    STATE.mintCredits   = cur;
+    STATE.canUseVisuals = cur > 0;
+    updateTabsHeaderCredits();
+    _syncVisualsTabStyle();
+  } catch {}
+});
 
 /* ---------- Public API ---------- */
 window.CraftingUI = { mount, unmount };
