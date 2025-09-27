@@ -70,15 +70,6 @@
     }catch{}
     return {x:0,y:0};
   }
-  function readCraftingCredits(){
-  try{
-    const v = localStorage.getItem('izzaCrafting')
-          ?? localStorage.getItem('craftingCredits')
-          ?? localStorage.getItem('izzaCraftCredits')
-          ?? '0';
-    return (parseInt(v,10) || 0);
-  }catch{ return 0; }
-}
 
   // ---------- snapshot builder ----------
   function buildSnapshot(){
@@ -97,7 +88,6 @@
       version: 1,
       player: { x: pos.x|0, y: pos.y|0, heartsSegs },
       coins: onHand|0,             // WALLET ONLY lives here
-      crafting: readCraftingCredits()|0,
       missions: missions|0,
       missionState: missionState || {},
       inventory: inv || {},
@@ -160,29 +150,13 @@
         }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
 
-            // WALLET COINS (on-hand)
+      // WALLET COINS (on-hand)
       if (Number.isFinite(seed.coins)){
         try{
           if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
           else localStorage.setItem('izzaCoins', String(seed.coins|0));
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
-      }
-
-      // NEW: CRAFTING CREDITS
-      if (Number.isFinite(seed.crafting)){
-        try{
-          const cc = seed.crafting|0;
-          if (IZZA?.api?.setCraftingCredits) {
-            IZZA.api.setCraftingCredits(cc);
-          } else {
-            // write to the canonical key and mirrors so older pages see it
-            localStorage.setItem('izzaCrafting', String(cc));
-            localStorage.setItem('craftingCredits', String(cc));
-            localStorage.setItem('izzaCraftCredits', String(cc));
-          }
-          try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
-        }catch(e){ console.warn('[persist] crafting hydrate failed', e); }
       }
 
       // BANK (per-user key)
@@ -430,7 +404,6 @@
   window.addEventListener('izza-inventory-changed',()=> tryKick('inv'));
   window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
   window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
-  window.addEventListener('izza-crafting-changed', ()=> tryKick('crafting'));
   if (window.IZZA?.on) {
     IZZA.on('missions-updated', ()=> tryKick('missions'));
   }
@@ -446,15 +419,11 @@
   }, 2000);
 
   // Also react if another tab changes the hearts LS key
-    window.addEventListener('storage', (e)=>{
+  window.addEventListener('storage', (e)=>{
     const u=userKey();
     if (e && (e.key===`izzaCurHeartSegments_${u}` || e.key==='izzaCurHeartSegments')){
       _lastHearts = readHeartsSegs();
       tryKick('hearts-storage');
-    }
-    // NEW: craft credits mirrors
-    if (e && (e.key==='izzaCrafting' || e.key==='craftingCredits' || e.key==='izzaCraftCredits')){
-      tryKick('crafting-storage');
     }
   });
 
