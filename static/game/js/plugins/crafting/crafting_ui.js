@@ -1659,6 +1659,8 @@ async function hydrateMine(){
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
+});
+
 }
 
 /* ---------- Marketplace (internal) ---------- */
