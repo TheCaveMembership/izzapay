@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <title>IZZA GAME — Play</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script>
+  // point to your mounted app, not just origin
+  window.IZZA_PERSIST_BASE = '/izza-game';
+</script>
+<script src="/static/izza-persist.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
   <style>
     :root{ --ui:rgba(255,255,255,.9); --bg0:#0b0f17; --card:#141a23; --line:#263042; }
@@ -547,9 +552,6 @@
 <script src="/static/game/js/plugins/v1_free_drive_plugin.js"></script>
   <script src="/static/game/js/plugins/guns.js?v=1.4"></script>
 
-  <!-- Persistence -->
-  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
-  <script src="/static/game/js/izza-persist.js"></script>
   <script>
   (function(){
     const btn = document.getElementById('btnSave');
