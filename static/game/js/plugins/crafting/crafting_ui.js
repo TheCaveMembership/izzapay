@@ -756,7 +756,7 @@ function __applyStatsToNewestCraft(){
     const key = Object.keys(inv).reverse().find(k=>{
       if(!/^craft_/.test(k)) return false;
       const e=inv[k]||{};
-      return (String(e.name||'').toLowerCase()===wantName) && (String(e.part||'').toLowerCase()===wantPart || wantPart==='gun' || wantPart==='melee');
+      return (String(e.name||'').toLowerCase()===wantName) && (String(e.part||e.slot||'').toLowerCase()===wantPart || wantPart==='gun' || wantPart==='melee');
     });
     if(!key) return;
     attachCraftStats(key, inv[key]);
@@ -775,7 +775,181 @@ if (_origMirrorToMine){
   };
 }
 
-/* ===================== WALLET SYNC (IC + Craft Credits) ===================== */
+/* Credit badge helpers */
+function applyCreditState(n){
+  const next = Math.max(0, n|0);
+  STATE.mintCredits   = next;
+  STATE.canUseVisuals = next > 0;
+  setCraftingCredits(next);           // <— persist + notify
+  updateTabsHeaderCredits();
+}
+function totalMintCredits(){
+  const singles = (STATE.mintCredits | 0);
+  const pkg = (STATE.packageCredits && (STATE.packageCredits.items | 0)) || 0;
+  return singles + pkg;
+}
+function updateTabsHeaderCredits(){
+  try{
+    const wrap = STATE.root?.querySelector('[data-tab="create"]');
+    if (!wrap) return;
+    const have = totalMintCredits();
+    const label = 'Create Item';
+
+    const old = wrap.querySelector('.cl-credit-badge');
+    if (old) old.remove();
+
+    if (have > 0){
+      const b = document.createElement('span');
+      b.className = 'cl-credit-badge';
+      b.textContent = String(have);
+      b.style.cssText = `
+        display:inline-block; margin-left:6px; padding:0 6px; min-width:18px; height:18px;
+        line-height:18px; font-size:11px; font-weight:700; border-radius:6px;
+        background:#0b2b17; border:1px solid #1bd760; color:#b8ffd1; vertical-align:middle;
+      `;
+      if (!/Create Item/i.test(wrap.textContent)) wrap.textContent = label;
+      wrap.appendChild(b);
+    } else {
+      wrap.textContent = label;
+    }
+  }catch(_){}
+}
+
+/* (Kept: name moderation + sanitizers + helpers) */
+const BAD_WORDS = ['badword1','badword2','slur1','slur2'];
+function moderateName(name){
+  const s = String(name||'').trim();
+  if (s.length < 3 || s.length > 28) return { ok:false, reason:'Name must be 3–28 chars' };
+  const low = s.toLowerCase();
+  if (BAD_WORDS.some(w => low.includes(w))) return { ok:false, reason:'Inappropriate name' };
+  return { ok:true };
+}
+
+function sanitizeSVG(svg){
+  try{
+    const txt = String(svg||'');
+    if (txt.length > 200_000) throw new Error('SVG too large');
+    if (/script|onload|onerror|foreignObject|iframe/i.test(txt)) throw new Error('Disallowed elements/attrs');
+
+    // base clean
+    let cleaned = txt
+      .replace(/xlink:href\s*=\s*["'][^"']*["']/gi,'')
+      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi,'')
+      .replace(/href\s*=\s*["']\s*(?!#)[^"']*["']/gi,'')
+      .replace(/(javascript:|data:)/gi,'')
+      .replace(/<metadata[\s\S]*?<\/metadata>/gi,'')
+      .replace(/<!DOCTYPE[^>]*>/gi,'')
+      .replace(/<\?xml[\s\S]*?\?>/gi,'');
+
+    // strip "background" fills to keep transparency
+    cleaned = cleaned.replace(
+      /(<svg\b[^>]*\sstyle\s*=\s*["'][^"']*)\bbackground(?:-color)?\s*:[^;"']+;?/i,
+      (_, pre)=> pre
+    );
+
+    cleaned = cleaned.replace(
+      /<rect\b[^>]*width\s*=\s*["']\s*100%\s*["'][^>]*height\s*=\s*["']\s*100%\s*["'][^>]*\/?>/gi,
+      ''
+    );
+
+    const vb = /viewBox\s*=\s*["'][^"']*?(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/i.exec(cleaned);
+    if (vb){
+      const w = String(parseFloat(vb[3]));
+      const h = String(parseFloat(vb[4]));
+      const fullRectRe = new RegExp(
+        `<rect\\b[^>]*x\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*y\\s*=\\s*['"]?0(?:\\.0+)?['"]?[^>]*width\\s*=\\s*['"]?(?:${w}|${Math.round(+w)})['"]?[^>]*height\\s*=\\s*['"]?(?:${h}|${Math.round(+h)})['"]?[^>]*\\/?>`,
+        'gi'
+      );
+      cleaned = cleaned.replace(fullRectRe, '');
+    } else {
+      cleaned = cleaned.replace(
+        /<rect\b[^>]*x\s*=\s*["']?0(?:\.0+)?["']?[^>]*y\s*=\s*["']?0(?:\.0+)?["']?[^>]*width\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*height\s*=\s*["']?(?:128|256|512|1024)["']?[^>]*\/?>/gi,
+        ''
+      );
+    }
+
+    cleaned = cleaned.replace(/<rect\b[^>]*(id|class)\s*=\s*["'][^"']*(?:\bbg\b|\bbackground\b|\bbackdrop\b)[^"']*["'][^>]*\/?>/gi,'');
+
+    return cleaned;
+  }catch(e){ return ''; }
+}
+
+/* Mirror the armoury-injected inventory entry into "My Creations" */
+function mirrorInjectedInventoryToMine(injected){
+  try{
+    const apiObj = (window.IZZA && IZZA.api) ? IZZA.api : null;
+    if (!apiObj || typeof apiObj.getInventory !== 'function') return;
+
+    const inv = apiObj.getInventory() || {};
+
+    // Prefer an explicit id/key returned by the injector (best case)
+    let id = injected && (injected.id || injected.key) || '';
+
+    // Fallback: find the new craft_* by name/part if injector didn't return an id
+    if (!id){
+      const wantName = String(STATE.currentName||'').toLowerCase();
+      const wantPart = String(STATE.currentPart||'').toLowerCase();
+      id = Object.keys(inv).find(k=>{
+        if (!/^craft_/.test(k)) return false;
+        const e = inv[k];
+        const nm = String(e?.name||'').toLowerCase();
+        const pt = String(e?.part||'').toLowerCase();
+        return (nm === wantName) && (!pt || pt === wantPart);
+      }) || '';
+    }
+
+    const entry = id && inv[id];
+    if (!entry) return; // nothing to mirror
+
+    // Pick an icon/overlay the player will actually see in the card
+    const svg = entry.overlaySvg || entry.iconSvg || STATE.currentSVG || '';
+
+    addMintToMineLocal({
+      id,
+      name: entry.name || STATE.currentName || 'Untitled',
+      category: entry.category || STATE.currentCategory || 'armour',
+      part: entry.part || STATE.currentPart || 'helmet',
+      svg
+    });
+  }catch(e){
+    console.warn('[craft] mirrorInjectedInventoryToMine failed', e);
+  }
+}
+if (_origMirrorToMine){
+  window.mirrorInjectedInventoryToMine = function(injected){
+    _origMirrorToMine(injected);
+    setTimeout(__applyStatsToNewestCraft, 0);
+    __scheduleAutoEnforce(); // <-- add this line
+  };
+}
+/* --- UI helpers for AI wait state --- */
+const MIN_AI_WAIT_MS = 10_000;
+const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
+
+function showWait(text){
+  const el = document.createElement('div');
+  el.id = 'izza-ai-wait';
+  el.style.cssText = `
+    position:fixed; inset:0; z-index:99999;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.45); backdrop-filter:saturate(120%) blur(2px);
+  `;
+  el.innerHTML = `
+    <div style="
+      background:#0f1522; color:#e7ecff; border:1px solid #2a3550;
+      border-radius:12px; padding:14px 16px; font-size:14px;
+      min-width:220px; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.35);
+    ">
+      <div style="font-weight:700; margin-bottom:6px">Generating…</div>
+      <div style="opacity:.85">${text||'Please wait while we create your preview.'}</div>
+    </div>`;
+  document.body.appendChild(el);
+  return el;
+}
+function hideWait(node){
+  try{ node && node.parentNode && node.parentNode.removeChild(node); }catch{}
+}
+
 function getIC(){
   try{ return parseInt(localStorage.getItem('izzaCoins')||'0',10)||0; }catch{ return 0; }
 }
@@ -786,7 +960,7 @@ function setIC(v){
   }catch{}
 }
 
-// NEW: Crafting credits helpers (persist + event so other pages reflect immediately)
+  /* ===== CRAFTING CREDITS PERSISTENCE ===== */
 function getCraftingCredits(){
   try{
     const raw =
@@ -801,12 +975,13 @@ function setCraftingCredits(n){
   try{
     const v = Math.max(0, n|0);
     localStorage.setItem('izzaCrafting', String(v));
-    // keep legacy aliases coherent (best-effort)
+    // keep legacy keys echoed for older screens
     localStorage.setItem('craftingCredits', String(v));
     localStorage.setItem('izzaCraftCredits', String(v));
     window.dispatchEvent(new Event('izza-crafting-changed'));
   }catch{}
 }
+/* ======================================== */
 
 /* Generic JSON helper (credentials included) */
 async function serverJSON(url, opts = {}) {
@@ -1122,64 +1297,7 @@ push('autoFire','Automatic (hold to fire)'); // <— NEW
        ${blocks.join('<br/>')}`
     : '';
 }
-/* ---- Credit badge helpers (persist + UI) ---- */
-function totalMintCredits(){
-  const singles = (STATE.mintCredits | 0);
-  const pkg = (STATE.packageCredits && (STATE.packageCredits.items | 0)) || 0;
-  return singles + pkg;
-}
 
-function updateTabsHeaderCredits(){
-  try{
-    const btn = STATE.root?.querySelector('[data-tab="create"]');
-    if (!btn) return;
-    const have = totalMintCredits();
-
-    // Strip any existing badge
-    const old = btn.querySelector('.cl-credit-badge');
-    if (old) old.remove();
-
-    // Always reset label text (in case innerHTML was replaced earlier)
-    const base = 'Create Item';
-    // If button has other children, just ensure text node exists at start:
-    if (!/Create Item/.test(btn.textContent)) btn.firstChild ? (btn.firstChild.textContent = base) : (btn.textContent = base);
-
-    if (have > 0){
-      const b = document.createElement('span');
-      b.className = 'cl-credit-badge';
-      b.textContent = String(have);
-      b.style.cssText = `
-        display:inline-block;margin-left:6px;padding:0 6px;min-width:18px;height:18px;line-height:18px;
-        font-size:11px;font-weight:700;border-radius:6px;background:#0b2b17;border:1px solid #1bd760;color:#b8ffd1;vertical-align:middle;
-      `;
-      btn.appendChild(b);
-    }
-  }catch(_){}
-}
-
-function applyCreditState(n){
-  const next = Math.max(0, n|0);
-  STATE.mintCredits   = next;
-  STATE.canUseVisuals = totalMintCredits() > 0;
-  setCraftingCredits(next);          // persist locally + fire 'izza-crafting-changed'
-  updateTabsHeaderCredits();         // refresh badge
-}
-
-/* Upgrade reconcile to also refresh local+badge */
-async function reconcileCraftCredits(){
-  try{
-    await fetch(gameApi('/api/crafting/credits/reconcile'), {
-      method:'POST',
-      headers:{ 'content-type':'application/json' },
-      credentials:'include'
-    });
-  }catch(_){ /* soft-fail */ }
-
-  try{
-    const s = await serverJSON(gameApi('/api/crafting/credits/status'));
-    if (s && s.ok && Number.isFinite(s.credits)) applyCreditState(s.credits|0);
-  }catch(_){}
-}
 function renderTabs(){
   const have = totalMintCredits();
   const badge = (have > 0)
@@ -1654,14 +1772,13 @@ async function hydrateMine(){
     }, { passive:true });
   });
 
-    host.querySelectorAll('[data-stats]').forEach(btn=>{
+  host.querySelectorAll('[data-stats]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
   });
-
-} // end hydrateMine
+}
 
 /* ---------- Marketplace (internal) ---------- */
 async function fetchMarketplace(){
@@ -1710,12 +1827,8 @@ async function mount(rootSel){
   STATE.root = root;
   STATE.mounted = true;
 
-  if (!window.__izzaCraftLSHook){
-    window.addEventListener('izza-crafting-changed', updateTabsHeaderCredits, { passive:true });
-    window.__izzaCraftLSHook = true;
-  }
-
   loadDraft();
+
   await reconcileCraftCredits();
 
   root.innerHTML = `${renderTabs()}<div id="craftTabs"></div>`;
@@ -1723,26 +1836,18 @@ async function mount(rootSel){
 
   let initialTab = 'packages';
 
-  // Seed from server; on fail, fall back to local crafting credits
-  let seededFromServer = false;
   try{
     const s = await serverJSON(gameApi('/api/crafting/credits/status')); // { ok:true, credits:number }
     if (s && s.ok){
-      applyCreditState(s.credits|0);           // <- writes to LS + fires event
-      seededFromServer = true;
-      if ((STATE.mintCredits|0) > 0){
+      applyCreditState(s.credits|0);
+      updateTabsHeaderCredits();
+      if (STATE.mintCredits > 0){
         STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
         STATE.createSub = 'setup';
         initialTab = 'create';
       }
     }
   }catch(_){}
-
-  if (!seededFromServer) {
-    // Fallback to whatever the wallet last knew (persists across reloads)
-    const local = getCraftingCredits();
-    applyCreditState(local);
-  }
 
   if (!window.__izzaReconHook){
     document.addEventListener('visibilitychange', ()=>{
@@ -1764,8 +1869,6 @@ async function mount(rootSel){
         const el = document.getElementById('aiLeft2');
         if (el) el.textContent = STATE.aiAttemptsLeft;
       } catch {}
-      // Ensure meters/pills are interactive on first load:
-      bindFeatureMeters(STATE.root);
     }
   };
 
@@ -1807,13 +1910,13 @@ async function handleBuySingle(kind, enforceForm){
 
   const status = document.getElementById('payStatus');
   if (res && res.ok){
-    applyCreditState((STATE.mintCredits|0) + 1); // <- persists + event
+    applyCreditState((STATE.mintCredits|0) + 1);
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
     if (status) status.textContent = 'Paid ✓ — visual credit granted.';
     updateTabsHeaderCredits();
     STATE.createSub = 'setup';
     const host = STATE.root?.querySelector('#craftTabs');
-    if (host){ host.innerHTML = renderCreate(); bindInside(); bindFeatureMeters(STATE.root); }
+    if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
     if (status) status.textContent='Payment failed.';
   }
@@ -1874,7 +1977,7 @@ function bindInside(){
         createTabBtn.click();
       } else {
         const host = STATE.root?.querySelector('#craftTabs');
-        if (host){ host.innerHTML = renderCreate(); bindInside(); bindFeatureMeters(STATE.root); }
+        if (host){ host.innerHTML = renderCreate(); bindInside(); }
       }
     }, { passive:true });
   }
@@ -1902,7 +2005,7 @@ function bindInside(){
           if (createBtn) createBtn.click();
           else {
             const host = STATE.root?.querySelector('#craftTabs');
-            if (host){ host.innerHTML = renderCreate(); bindInside(); bindFeatureMeters(STATE.root); }
+            if (host){ host.innerHTML = renderCreate(); bindInside(); }
           }
         } catch {}
       } else {
@@ -2021,8 +2124,7 @@ function bindInside(){
       STATE.featureLevels = {};
       saveDraft();
       updatePayButtonsState();
-
-      const host = root.querySelector('#craftTabs');
+      const host = STATE.root?.querySelector('#craftTabs');
       if (host){
         const saveScroll = host.scrollTop;
         host.innerHTML = renderCreate();
@@ -2031,18 +2133,18 @@ function bindInside(){
         host.scrollTop = saveScroll;
       }
     }, { passive:true });
+  }
 
-    // keep part in sync & react to changes
+  if (partSel){
     partSel.value = STATE.currentPart;
     partSel.addEventListener('change', e=>{
       STATE.currentPart = e.target.value;
-      // reset feature flags/levels that may be invalid for new part
+      // Reset flags/levels for invalid ones on part change
       STATE.featureFlags = Object.fromEntries(Object.keys(STATE.featureFlags).map(k=>[k,false]));
       STATE.featureLevels = {};
       saveDraft();
       updatePayButtonsState();
-
-      const host = root.querySelector('#craftTabs');
+      const host = STATE.root?.querySelector('#craftTabs');
       if (host){
         const saveScroll = host.scrollTop;
         host.innerHTML = renderCreate();
@@ -2051,134 +2153,230 @@ function bindInside(){
         host.scrollTop = saveScroll;
       }
     }, { passive:true });
+  }
 
-    updatePayButtonsState();
-    _syncVisualsTabStyle();
-  } // end if (catSel && partSel)
+  updatePayButtonsState();
 
-  // ===== Visuals actions =====
-  const aiBtn      = root.querySelector('#btnAI');
-  const previewBtn = root.querySelector('#btnPreview');
-  const mintBtn    = root.querySelector('#btnMint');
-  const svgIn      = root.querySelector('#svgIn');
-  const aiPrompt   = root.querySelector('#aiPrompt');
+  const aiLeft = ()=> {
+    const a = document.getElementById('aiLeft');  if (a) a.textContent = STATE.aiAttemptsLeft;
+    const b = document.getElementById('aiLeft2'); if (b) b.textContent = STATE.aiAttemptsLeft;
+  };
 
-  if (aiBtn){
-    aiBtn.addEventListener('click', async ()=>{
-      const prompt = (aiPrompt?.value || '').trim();
-      if (!prompt) return;
-      const status = root.querySelector('#craftStatus');
-      aiBtn.disabled = true;
-      if (status) status.textContent = 'Generating…';
-      let svg = '';
-      try{
-        svg = await aiToSVG(prompt);
-      } finally {
-        aiBtn.disabled = false;
+  const btnAI    = root.querySelector('#btnAI');
+  const aiPrompt = root.querySelector('#aiPrompt');
+  const svgIn    = root.querySelector('#svgIn');
+  const btnPrev  = root.querySelector('#btnPreview');
+  const btnMint  = root.querySelector('#btnMint');
+  const prevHost = root.querySelector('#svgPreview');
+  const craftStatus = root.querySelector('#craftStatus');
+
+  if (svgIn && STATE.currentSVG){
+    svgIn.value = STATE.currentSVG;
+    prevHost && (prevHost.innerHTML = STATE.currentSVG);
+  }
+
+  // Sub-tab switching
+  root.querySelectorAll('[data-sub]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const next = b.dataset.sub;
+      if (next === 'visuals' && !STATE.canUseVisuals) return;
+      STATE.createSub = next;
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){
+        host.innerHTML = renderCreate();
+        bindInside();
+        bindFeatureMeters(STATE.root);
+        _syncVisualsTabStyle();
       }
-      if (svg){
-        STATE.currentSVG = normalizeSvgForSlot(svg, STATE.currentPart);
-        saveDraft();
-        if (svgIn) svgIn.value = STATE.currentSVG;
-        const prev = root.querySelector('#svgPreview');
-        if (prev) prev.innerHTML = STATE.currentSVG;
-        const left = root.querySelector('#aiLeft2');
-        if (left) left.textContent = STATE.aiAttemptsLeft;
-        if (status) status.textContent = 'Preview updated.';
-        if (mintBtn && totalMintCredits()>0 && isCreateFormValid()){
-          mintBtn.style.display = '';
+    }, { passive:true });
+  });
+
+  // ===== Handlers =====
+  btnAI && btnAI.addEventListener('click', async ()=>{
+    if (!btnAI) return;
+    const prompt = String(aiPrompt?.value||'').trim();
+    if (!prompt) return;
+
+    btnAI.disabled = true;
+    btnAI.setAttribute('aria-busy','true');
+    btnAI.textContent = 'Generating…';
+    const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+
+    try{
+      const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
+      if (svgIn) svgIn.value = svg;
+      if (prevHost) {
+        prevHost.innerHTML = svg;
+        const s = prevHost.querySelector('svg');
+        if (s) {
+          s.setAttribute('preserveAspectRatio','xMidYMid meet');
+          s.style.maxWidth='100%';
+          s.style.height='auto';
+          s.style.display='block';
         }
-      } else {
-        if (status) status.textContent = 'No SVG produced.';
+        prevHost.scrollTop = prevHost.scrollHeight;
+        prevHost.scrollIntoView({block:'nearest'});
       }
-    }, { passive:true });
-  }
-
-  if (previewBtn){
-    previewBtn.addEventListener('click', ()=>{
-      const status = root.querySelector('#craftStatus');
-      const text = svgIn?.value || '';
-      if (!text.trim()){
-        if (status) status.textContent = 'Paste or generate SVG first.';
-        return;
-      }
-      const safe = normalizeSvgForSlot(text, STATE.currentPart);
-      if (!safe){
-        if (status) status.textContent = 'SVG rejected.';
-        return;
-      }
-      STATE.currentSVG = safe;
+      STATE.currentSVG = svg;
       saveDraft();
-      const prev = root.querySelector('#svgPreview');
-      if (prev) prev.innerHTML = safe;
-      if (status) status.textContent = 'Preview updated.';
-      if (mintBtn && totalMintCredits()>0 && isCreateFormValid()){
-        mintBtn.style.display = '';
-      }
-    }, { passive:true });
-  }
+      const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+      aiLeft();
+    }catch(e){
+      alert('AI failed: ' + (e?.message || e));
+    }finally{
+      hideWait(waitEl);
+      btnAI.disabled = false;
+      btnAI.removeAttribute('aria-busy');
+      btnAI.textContent = 'AI → SVG';
+    }
+  });
 
-  if (mintBtn){
-    mintBtn.addEventListener('click', async ()=>{
-      const status = root.querySelector('#craftStatus');
-      if (!isCreateFormValid()){
-        if (status) status.textContent = 'Fill Category, Part/Type, and Item Name first.';
-        return;
+  btnPrev && btnPrev.addEventListener('click', ()=>{
+    const cleaned = sanitizeSVG(svgIn?.value);
+    if (!cleaned){ alert('SVG failed moderation/sanitize'); return; }
+    if (prevHost) {
+      prevHost.innerHTML = cleaned;
+      const s = prevHost.querySelector('svg');
+      if (s) {
+        s.setAttribute('preserveAspectRatio','xMidYMid meet');
+        s.style.maxWidth='100%';
+        s.style.height='auto';
+        s.style.display='block';
       }
-      if (!STATE.currentSVG){
-        if (status) status.textContent = 'Generate or paste an SVG first.';
-        return;
-      }
+      prevHost.scrollTop = prevHost.scrollHeight;
+      prevHost.scrollIntoView({block:'nearest'});
+    }
+    STATE.currentSVG = cleaned;
+    saveDraft();
+    const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
+  });
 
-      if (status) status.textContent = 'Minting…';
-      let j = null;
-      try{
-        j = await serverJSON(gameApi('/api/crafting/mint'), {
-          method:'POST',
-          body: JSON.stringify({
+  btnMint && btnMint.addEventListener('click', async ()=>{
+    craftStatus.textContent = '';
+
+    const nm = moderateName(STATE.currentName);
+    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+
+    const hasCredit  = totalMintCredits() > 0;
+    if (!hasCredit){
+      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+      return;
+    }
+    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+
+    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+
+    try{
+      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+
+      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+        ? window.ArmourPacks.injectCraftedItem({
             name: STATE.currentName,
             category: STATE.currentCategory,
             part: STATE.currentPart,
-            svg: STATE.currentSVG,
-            shop: {
-              priceIC: parseInt(document.getElementById('shopPrice')?.value||'100',10),
-              listInShop: !!document.getElementById('sellInShop')?.checked,
-              listInPi: !!document.getElementById('sellInPi')?.checked
-            },
-            features: {
-              flags:  STATE.featureFlags,
-              levels: STATE.featureLevels,
-              fx: { tracer: STATE.tracerPreset, swing: STATE.swingPreset }
-            }
+            svg: normalizedForSlot,
+            priceIC,
+            sellInShop,
+            sellInPi,
+            featureFlags: STATE.featureFlags,
+            tracerPreset: STATE.tracerPreset,
+            swingPreset: STATE.swingPreset
           })
-        });
-      }catch(e){
-        if (status) status.textContent = 'Server error.';
-        return;
-      }
+        : { ok:false, reason:'armour-packs-hook-missing' };
 
-      if (j && j.ok){
-        applyCreditState((STATE.mintCredits|0) - 1); // spend 1 credit
-        if (status) status.textContent = 'Minted ✓';
+      if (injected && injected.ok){
+        // ---- SUCCESS: Minted ----
+        craftStatus.textContent = 'Crafted ✓';
 
-        addMintToMineLocal(j.item || {
-          id: j.id || ('craft_'+Date.now()),
-          name: STATE.currentName,
-          category: STATE.currentCategory,
-          part: STATE.currentPart,
-          svg: STATE.currentSVG
-        });
+        // Handle credit burn (single or package)
+        if (STATE.packageCredits && STATE.packageCredits.items > 0){
+          STATE.packageCredits.items -= 1;
+          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+        } else if (typeof STATE.mintCredits === 'number') {
+          STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
+        }
+        STATE.canUseVisuals = totalMintCredits() > 0;
 
-        __applyStatsToNewestCraft();
+        // Persist + get craftedId (from inject OR server)
+        let craftedId = injected.id || null;
+        try {
+          const u = encodeURIComponent(
+            (window?.IZZA?.player?.username)
+            || (window?.IZZA?.me?.username)
+            || localStorage.getItem('izzaPlayer')
+            || localStorage.getItem('pi_username')
+            || ''
+          );
+          if (u) {
+            const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
+              method: 'POST',
+              body: JSON.stringify({
+                                name: STATE.currentName,
+                category: STATE.currentCategory,
+                part: STATE.currentPart,
+                svg: normalizedForSlot,
+                sku: '',
+                image: ''
+              })
+            });
+            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
+          }
+        } catch(e) {
+          console.warn('[craft] persist failed:', e);
+        }
+
+        // Mirror into My Creations + optional refresh
+        try { mirrorInjectedInventoryToMine(injected); } catch {}
+        try { hydrateMine(); } catch {}
+
+        // After a successful Mint: return to Setup
+        STATE.createSub = 'setup';
+        const host = STATE.root?.querySelector('#craftTabs');
+        if (host){
+          host.innerHTML = renderCreate();
+          bindInside();
+          bindFeatureMeters(STATE.root);
+          _syncVisualsTabStyle();
+        }
+
+        // Optional IZZA Pay merchant handoff
+        if (sellInPi && craftedId) {
+          const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+          try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
+          const qs = new URLSearchParams({ attach: String(craftedId) });
+          try {
+            const t = localStorage.getItem('izzaBearer') || '';
+            if (t) qs.set('t', t);
+          } catch {}
+          location.href = `/merchant?${qs.toString()}`;
+        }
       } else {
-        if (status) status.textContent = 'Mint failed.';
+        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
       }
-    }, { passive:true });
-  }
+    }catch(e){
+      craftStatus.textContent = 'Error crafting: ' + e.message;
+    }
+  }); // <-- closes btnMint handler
 
-} // end bindInside()
+  // finally, wire sliders/meters + presets on initial render
+  bindFeatureMeters(STATE.root);
 
-// Make it mountable from outside
+  // Make sure totals reflect any persisted draft immediately
+  const totals = calcDynamicPrice();
+  const piTotal = root.querySelector('#totalPiDisp');
+  const icTotal = root.querySelector('#totalIcDisp');
+  if (piTotal) piTotal.textContent = `${totals.pi} Pi`;
+  if (icTotal) icTotal.textContent = `${totals.ic.toLocaleString()} IC`;
+  const icBtn = document.getElementById('payIC');
+  if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
+  const piBtn = document.getElementById('payPi');
+  if (piBtn) piBtn.textContent = `Pay ${totals.pi} Pi`;
+
+  _syncVisualsTabStyle();
+} // <-- closes bindInside()
+
+/* ---------- Public API ---------- */
 window.CraftingUI = { mount, unmount };
-
-})(); // end IIFE that started after composeAIPrompt
+})(); // <-- closes IIFE
