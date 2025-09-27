@@ -960,27 +960,7 @@ function setIC(v){
   }catch{}
 }
 
-  /* ===== CRAFTING CREDITS PERSISTENCE ===== */
-function getCraftingCredits(){
-  try{
-    const raw =
-      localStorage.getItem('izzaCrafting') ??
-      localStorage.getItem('craftingCredits') ??
-      localStorage.getItem('izzaCraftCredits');
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) ? Math.max(0, n|0) : 0;
-  }catch{ return 0; }
-}
-function setCraftingCredits(n){
-  try{
-    const v = Math.max(0, n|0);
-    localStorage.setItem('izzaCrafting', String(v));
-    // keep legacy keys echoed for older screens
-    localStorage.setItem('craftingCredits', String(v));
-    localStorage.setItem('izzaCraftCredits', String(v));
-    window.dispatchEvent(new Event('izza-crafting-changed'));
-  }catch{}
-}
+  
 /* ======================================== */
 
 /* Generic JSON helper (credentials included) */
@@ -1819,7 +1799,51 @@ async function hydrateMarketplace(){
     });
   });
 }
+/* ===== CRAFTING CREDITS PERSISTENCE (cookie-mirrored) ===== */
+function _readCookie(name){
+  return (document.cookie.split('; ').find(s => s.startsWith(name+'=')) || '')
+    .split('=').slice(1).join('=') || '';
+}
+function _writeCookie(name, value){
+  try{
+    // Share across subdomains: .onrender.com  (adjust if you use a custom domain)
+    document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=Lax`;
+  }catch(_){}
+}
 
+function getCraftingCredits(){
+  try{
+    // 1) local fast path
+    const rawLocal =
+      localStorage.getItem('izzaCrafting') ??
+      localStorage.getItem('craftingCredits') ??
+      localStorage.getItem('izzaCraftCredits');
+
+    // 2) cookie fallback (cross-subdomain)
+    const rawCookie = _readCookie('izzaCrafting');
+
+    const nLocal  = parseInt(rawLocal, 10);
+    const nCookie = parseInt(rawCookie, 10);
+
+    const n = Math.max(
+      Number.isFinite(nLocal)  ? nLocal  : 0,
+      Number.isFinite(nCookie) ? nCookie : 0
+    );
+    return Math.max(0, n|0);
+  }catch{ return 0; }
+}
+
+function setCraftingCredits(n){
+  try{
+    const v = Math.max(0, n|0);
+    // write both local and cookie mirrors
+    localStorage.setItem('izzaCrafting', String(v));
+    localStorage.setItem('craftingCredits', String(v));
+    localStorage.setItem('izzaCraftCredits', String(v));
+    _writeCookie('izzaCrafting', String(v));
+    window.dispatchEvent(new Event('izza-crafting-changed'));
+  }catch{}
+}
 /* ---------- Mount / Unmount ---------- */
 async function mount(rootSel){
   const root = (typeof rootSel==='string') ? document.querySelector(rootSel) : rootSel;
