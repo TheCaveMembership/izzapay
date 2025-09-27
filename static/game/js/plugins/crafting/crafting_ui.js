@@ -1806,8 +1806,17 @@ function _readCookie(name){
 }
 function _writeCookie(name, value){
   try{
-    // Share across subdomains: .onrender.com  (adjust if you use a custom domain)
-    document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=Lax`;
+    const v    = encodeURIComponent(String(value));
+    const base = `${name}=${v}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+
+    // Always set for the current host
+    document.cookie = base;
+
+    // If we're on a subdomain of onrender.com, also set the parent domain
+    const host = location.hostname;
+    if (host.endsWith('.onrender.com')) {
+      document.cookie = `${name}=${v}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+    }
   }catch(_){}
 }
 
