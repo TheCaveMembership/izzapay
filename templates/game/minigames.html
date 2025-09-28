@@ -449,7 +449,7 @@
     /* ---- Silent priming via City (hidden iframe, once per session) ---- */
     const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
 
-    function primeViaCityIframe({maxWaitMs=6000, pollMs=120} = {}){
+    function primeViaCityIframe({maxWaitMs=10000, pollMs=120} = {}){
       return new Promise((resolve) => {
         let done = false, softTimer = null, hardTimer = null, pollTimer = null, lsTimer = null;
         let f = null;
