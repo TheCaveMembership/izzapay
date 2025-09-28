@@ -583,37 +583,36 @@ async function fetchCharacterFresh(){
 /* ====== Boot ====== */
 (async function boot(){
   try{
-    // If this is the FIRST page in this browser session, begin silent prime IMMEDIATELY.
-    const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
-    const primePromise = shouldPrime ? primeViaCityIframe() : Promise.resolve('skip');
-
-    // Auth/character gate (may redirect to /create if truly first-time ever)
+    // 1) Auth/character first (ensures server session + username for City snapshot)
     const profilePre = await ensureCharacter();
     try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){}
 
-    // Wait for prime (if started) → hydrate from snapshot
+    // 2) FIRST session load? → silently prime City (now authenticated), then hydrate
+    const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
     let primeResult = 'skip';
-    try { primeResult = await primePromise; } catch(_){}
-    try { await hydrateFromSnapshot(); } catch(_){}
-
-    // Only mark as primed if we actually have data or iframe load succeeded
     if (shouldPrime){
-      const after = readLocalWallet();
-      const primedNow = (after.coins > 0) || (after.crafting > 0) || (primeResult === 'iframe-direct-load' || primeResult === 'postMessage');
-      try { if (primedNow) sessionStorage.setItem(SESSION_PRIME_KEY, '1'); } catch(_){}
+      try { primeResult = await primeViaCityIframe({ maxWaitMs: 10000, pollMs: 120 }); } catch(_){}
     }
 
-    // Paint wallet from LS
+    // 3) Pull snapshot into this page (server -> LS), then mark primed if it actually changed
+    try { await hydrateFromSnapshot(); } catch(_){}
+    if (shouldPrime){
+      const w = readLocalWallet();
+      const primed = (w.coins > 0) || (w.crafting > 0) || (primeResult === 'iframe-direct-load' || primeResult === 'postMessage');
+      try { if (primed) sessionStorage.setItem(SESSION_PRIME_KEY, '1'); } catch(_){}
+    }
+
+    // 4) Paint wallet from LS
     renderWallet(readLocalWallet());
 
-    // IMPORTANT: fetch fresh character again AFTER snapshot so we get equipped items/armoury
-    const profileFresh = (await fetchCharacterFresh()) || profilePre;
+    // 5) Fetch character again AFTER snapshot so equips/armoury are reflected
+    const profileFresh = (await fetchCharacterFresh()) || profilePre || {};
     try{ localStorage.setItem('izzaCharacter', JSON.stringify(profileFresh)); }catch(_){}
 
-    // Draw avatar with equipped state
-    await buildAvatarCanvas(actx, 96, profileFresh);
+    // 6) Draw avatar (defensive: handle empty profile too)
+    try { await buildAvatarCanvas(actx, 96, profileFresh); } catch(_){ /* no-op */ }
 
-    // Place avatar nicely
+    // 7) Place avatar
     const logo = document.getElementById('brandWord');
     if (isTouch && logo){
       const r = logo.getBoundingClientRect();
@@ -624,7 +623,7 @@ async function fetchCharacterFresh(){
       setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
     }
 
-    // Authoritative wallet -> write LS -> repaint (avoids flicker)
+    // 8) Authoritative wallet → write LS → repaint
     try{
       const r = await fetch('/izza-game/api/wallet' + TQ, { credentials:'include', headers: bearerHeaders() });
       if (r.ok){
@@ -641,26 +640,25 @@ async function fetchCharacterFresh(){
       }
     }catch(_){}
 
-    // Keep in sync with app-wide changes
+    // 9) Sync listeners
     window.addEventListener('izza-wallet-changed', (ev)=>{
       const d = ev && ev.detail ? ev.detail : {};
       const local = readLocalWallet();
       renderWallet({ coins: d.coins ?? local.coins, crafting: d.crafting ?? d.credits ?? local.crafting });
     }, { passive:true });
+
     window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
     window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
 
-    // Back/visibility: re-hydrate & repaint
     document.addEventListener('visibilitychange', async ()=>{
       if (!document.hidden){
         try{ await hydrateFromSnapshot(); }catch(_){}
         const pf = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-        await buildAvatarCanvas(actx,96,pf);
+        try { await buildAvatarCanvas(actx,96,pf); } catch(_){}
         renderWallet(readLocalWallet());
       }
     }, { passive:true });
 
-    // Update if LS changes in another tab/page
     window.addEventListener('storage', (e)=>{
       if (!e) return;
       if (e.key === 'izzaCoins' || CRAFT_KEYS.includes(e.key)) {
@@ -668,10 +666,11 @@ async function fetchCharacterFresh(){
       }
     }, { passive:true });
 
-    // iOS BFCache restore
     window.addEventListener('pageshow', ()=> renderWallet(readLocalWallet()), { passive:true });
 
+    // 10) Pointer + City button wiring (unchanged; preserves /izza-game/play)
     wirePointer();
+
   }catch(e){
     if (String(e.message) !== 'redirecting'){
       console.error('Arena init error', e);
