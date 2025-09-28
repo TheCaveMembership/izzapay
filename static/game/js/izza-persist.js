@@ -453,6 +453,7 @@ if (Number.isFinite(seed.craftingCredits)){
   window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
   window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
   window.addEventListener('izza-crafting-changed', ()=> tryKick('craft-credits'));
+  window.addEventListener('izza-credits-changed', ()=> tryKick('craft-credits-core'));
   if (window.IZZA?.on) {
     IZZA.on('missions-updated', ()=> tryKick('missions'));
   }
