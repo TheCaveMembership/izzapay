@@ -13,46 +13,34 @@
   <style>
     :root{
       --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b;
-      --arcade:#ffed8a;
+      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
     }
     *{box-sizing:border-box}
-    body{margin:0;background:#102; color:var(--txt); font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;background:#102;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
          background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
     .btn:hover{filter:brightness(1.06)}
-
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#79c0ff;overflow:hidden}
-    /* HUD */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:8px;z-index:6}
     .hud .left,.hud .right{display:flex;gap:10px;align-items:center}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:8px 14px;border-radius:999px;font-size:14px;font-weight:700;letter-spacing:.3px;display:flex;gap:8px;align-items:center}
     .pill strong{font-size:18px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-
-    /* optional avatar badge (tiny) */
     .avatarBadge{width:42px;height:42px;border-radius:8px;overflow:hidden;border:1px solid var(--hudLine)}
     .avatarCanvas{width:42px;height:42px;image-rendering:pixelated;display:block}
-
-    /* SVG input */
     .aim{position:absolute;inset:0;z-index:3;touch-action:none}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
             pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
-    .scoreGlow{color:var(--ok)}
-    .miss{color:var(--bad)}
+    .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
-
-    /* subtle vignette for arcade feel */
-    .vignette:after{
-      content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
-      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);
-    }
+    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
+      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -63,7 +51,6 @@
     </div>
 
     <div class="arena vignette" id="arena">
-      <!-- HUD -->
       <div class="hud">
         <div class="left">
           <div class="pill">SCORE: <strong id="score" class="arc">0</strong></div>
@@ -76,17 +63,14 @@
         </div>
       </div>
 
-      <!-- Scene -->
+      <!-- Scene SVG (sky, fence, floor, hoop, ball) -->
       <svg id="court" class="aim" viewBox="0 0 1100 700" preserveAspectRatio="none" aria-label="Court">
-        <!-- sky -->
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#8bd1ff"/>
-            <stop offset="100%" stop-color="#bfe6ff"/>
+            <stop offset="0%" stop-color="#8bd1ff"/><stop offset="100%" stop-color="#bfe6ff"/>
           </linearGradient>
           <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#e6b77a"/>
-            <stop offset="100%" stop-color="#c78f4a"/>
+            <stop offset="0%" stop-color="#e6b77a"/><stop offset="100%" stop-color="#c78f4a"/>
           </linearGradient>
           <pattern id="fence" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="skewX(-10)">
             <path d="M0 10 L20 10" stroke="#cfd7e0" stroke-width="2" opacity=".55"/>
@@ -96,55 +80,34 @@
         </defs>
 
         <rect x="0" y="0" width="1100" height="700" fill="url(#sky)"/>
-
-        <!-- hills -->
         <ellipse cx="250" cy="520" rx="320" ry="140" fill="#8ed47d" opacity=".9"/>
         <ellipse cx="880" cy="520" rx="300" ry="130" fill="#89d074" opacity=".9"/>
-
-        <!-- trees (simple) -->
         <g opacity=".9">
-          <rect x="210" y="420" width="18" height="90" fill="#7c5a3a"/>
-          <circle cx="220" cy="420" r="60" fill="#5bbd5a"/>
-          <rect x="920" y="420" width="18" height="90" fill="#7c5a3a"/>
-          <circle cx="930" cy="420" r="60" fill="#5bbd5a"/>
+          <rect x="210" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="220" cy="420" r="60" fill="#5bbd5a"/>
+          <rect x="920" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="930" cy="420" r="60" fill="#5bbd5a"/>
         </g>
-
-        <!-- side rails -->
-        <g>
-          <polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
-          <polygon points="0,520 1100,520 1100,560 0,560" fill="#547fa8"/>
-        </g>
-
-        <!-- fence -->
+        <g><polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
+           <polygon points="0,520 1100,520 1100,560 0,560" fill="#547fa8"/></g>
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
-        <!-- backboard + rim (centered) -->
         <g id="hoop" transform="translate(475, 280)">
-          <!-- post -->
           <rect x="75" y="-25" width="10" height="70" fill="#b7c7d8"/>
-          <!-- backboard -->
           <rect x="40" y="-80" width="80" height="60" rx="6" ry="6" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
           <rect x="58" y="-66" width="44" height="32" fill="none" stroke="#ff7a00" stroke-width="4"/>
-          <!-- rim -->
           <circle id="rim" cx="80" cy="-34" r="20" fill="none" stroke="#ff7a00" stroke-width="6"/>
-          <!-- net -->
           <path d="M96 -32 q-8 34 -16 68 q-8 -34 -16 -68" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
         </g>
 
-        <!-- court floor (perspective) -->
         <g>
           <polygon points="100,560 1000,560 1100,700 0,700" fill="url(#wood)"/>
-          <!-- paint / arcs -->
           <ellipse cx="550" cy="560" rx="170" ry="24" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
           <ellipse cx="550" cy="560" rx="110" ry="16" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
-        <!-- ball -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
-              <stop offset="0%" stop-color="#ffb44d"/>
-              <stop offset="100%" stop-color="#e06724"/>
+              <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
           <circle id="ball" cx="550" cy="560" r="22" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="3"/>
@@ -152,7 +115,6 @@
           <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 550 560" to="360 550 560" dur=".7s" repeatCount="indefinite"/>
         </g>
 
-        <!-- aim line -->
         <line id="aimLine" x1="550" y1="560" x2="650" y2="500" stroke="rgba(255,255,255,.6)" stroke-width="3" stroke-dasharray="8 8"/>
       </svg>
 
@@ -170,7 +132,7 @@
 
   <script>
   (function(){
-    /* --------- carry t param --------- */
+    /* ---------------- t param (same as Arena) ---------------- */
     const T_KEY='izzaTokenT';
     let T=new URLSearchParams(location.search).get('t')||'';
     try{
@@ -186,10 +148,54 @@
       }
     }catch(_){}
     const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
+    // rewrite links (we’ll also intercept click below to save first)
     document.getElementById('backBtn').href=withT('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
 
-    /* --------- Persist hydrate first --------- */
+    /* ---------------- helpers mirrored from Arena ---------------- */
+    function bearerHeaders(base = {}) {
+      const headers = Object.assign({ 'content-type':'application/json' }, base || {});
+      try{
+        const bearer = localStorage.getItem('izzaBearer') || '';
+        if (bearer) headers['authorization'] = 'Bearer ' + bearer;
+      }catch(_){}
+      return headers;
+    }
+
+    async function fetchCharacterFresh(){
+      try{
+        const q = T ? `?t=${encodeURIComponent(T)}` : '';
+        const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
+        if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
+      }catch(_){}
+      return null;
+    }
+
+    async function ensureCharacter(){
+      const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
+      const isAdminLocal = (()=> {
+        try{
+          const role=(localStorage.getItem('izzaRole')||'').toLowerCase();
+          const user=(localStorage.getItem('izzaUser')||'').toLowerCase();
+          return role==='admin'||user==='cammac';
+        }catch(_){ return false; }
+      })();
+
+      const fresh = await fetchCharacterFresh();
+      if (fresh && (fresh.hasCharacter || fresh.isAdmin || (fresh.user && fresh.user.isAdmin))) return fresh;
+
+      if (isAdminLocal) {
+        const fallback = lsProfile && typeof lsProfile === 'object'
+          ? lsProfile
+          : { hasCharacter:true, body_type:'male', skin_tone:'light', sprite_skin:'default' };
+        return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
+      }
+
+      const next = encodeURIComponent(withT('/izza-game/minigames/basketball'));
+      location.replace('/izza-game/create?next='+next);
+      throw new Error('redirecting');
+    }
+
     function waitForPersistReady({timeout=3000, interval=40} = {}){
       return new Promise((res)=>{
         const t0=performance.now();
@@ -202,20 +208,46 @@
         else{ check(); }
       });
     }
+
     async function hydrateFromSnapshot(){
-      try{ await waitForPersistReady(); if(window.IZZA_PERSIST && typeof IZZA_PERSIST.load==='function'){ await IZZA_PERSIST.load(); } }catch(_){}
+      try{
+        await waitForPersistReady();
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+          await IZZA_PERSIST.load(); // server → LS
+        }
+      }catch(_){}
+      try{ writeCraftAll(readCraftAny()); }catch(_){}
     }
 
-    /* --------- Tiny avatar badge (same tint logic as Arena, trimmed) --------- */
+    /* ---- wallet helpers (identical logic) ---- */
+    const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+    function readCraftAny(){
+      for(const k of CRAFT_KEYS){
+        const v=parseInt(localStorage.getItem(k)||'0',10);
+        if(Number.isFinite(v)&&v>0) return v|0;
+      }
+      return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0;
+    }
+    function writeCraftAll(v){
+      const n=Math.max(0,v|0);
+      for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
+      try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
+    }
+
+    /* ---- tiny avatar render (same ramp/tint as before) ---- */
     const tinyCtx=document.getElementById('avatarTiny').getContext('2d'); tinyCtx.imageSmoothingEnabled=false;
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
     function paletteSwap(img, fromHex, toHex, tol=4000){
       const from=fromHex.map(hexToRgb), to=toHex.map(hexToRgb);
-      const c=document.createElement('canvas'); c.width=img.width; c.height=img.height; const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
+      const c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
+      const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
       const d=g.getImageData(0,0,c.width,c.height); const p=d.data;
-      for(let i=0;i<p.length;i+=4){ if(p[i+3]===0) continue; const q={r:p[i],g:p[i+1],b:p[i+2]}; let k=-1,sc=1e9; for(let j=0;j<from.length;j++){ const s=dist2(q,from[j]); if(s<sc){sc=s;k=j;} } if(sc<=tol){ const t=to[k]||to[1]||to[0]; p[i]=t.r;p[i+1]=t.g;p[i+2]=t.b; } }
+      for(let i=0;i<p.length;i+=4){ if(p[i+3]===0) continue;
+        const q={r:p[i],g:p[i+1],b:p[i+2]}; let k=-1,sc=1e9;
+        for(let j=0;j<from.length;j++){ const s=dist2(q,from[j]); if(s<sc){sc=s;k=j;} }
+        if(sc<=tol){ const t=to[k]||to[1]||to[0]; p[i]=t.r;p[i+1]=t.g;p[i+2]=t.b; } }
       g.putImageData(d,0,0); return c;
     }
     const SPRITES={ body:{default:"/static/game/sprites/body/default.png"}, hair:{short:"/static/game/sprites/hair/short.png"}, outfit:{street:"/static/game/sprites/outfit/street.png"} };
@@ -226,6 +258,11 @@
     async function drawTinyAvatar(){
       let profile={};
       try{ profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){}
+      // if empty, fetch once so hair/skin are correct on first load
+      if(!profile || !profile.sprite_skin){
+        const fresh = await fetchCharacterFresh();
+        if (fresh) { profile=fresh; try{ localStorage.setItem('izzaCharacter', JSON.stringify(fresh)); }catch(_){} }
+      }
       const tone=profile.skin_tone||'light', hairCol=profile.hair_color||'black';
       const body= await loadImg(SPRITES.body.default);
       const hair= await loadImg(SPRITES.hair.short);
@@ -236,7 +273,7 @@
       if(hair){ tinyCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], (HAIR_TO[hairCol]||HAIR_TO.black)), 0,0,42,42); }
     }
 
-    /* --------- Game logic (first-person lane) --------- */
+    /* ---------------- Game (unchanged mechanics) ---------------- */
     const svg = document.getElementById('court');
     const ball = document.getElementById('ball');
     const aimLine = document.getElementById('aimLine');
@@ -264,26 +301,12 @@
 
     function setHoopDistance(step){
       game.distanceStep = step;
-      const dx = step*26;               // pushes hoop “deeper”
+      const dx = step*26;
       hoop.setAttribute('transform', `translate(${game.hoopX+dx}, ${game.hoopY-dx*0.25})`);
     }
-
     function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
-
-    function showMsg(txt, cls){
-      bigmsg.textContent = txt;
-      bigmsg.className = 'bigmsg show ' + (cls||'');
-      setTimeout(()=> bigmsg.className='bigmsg', 520);
-    }
-
-    function startTimer(){
-      if(game.timerId) clearInterval(game.timerId);
-      game.timerId = setInterval(()=>{
-        game.timeLeft--;
-        timeEl.textContent = game.timeLeft;
-        if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); }
-      }, 1000);
-    }
+    function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
+    function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
 
     function resetBall(){
       if(game.ended) return;
@@ -299,11 +322,9 @@
       game.vx *= game.drag; game.vy *= game.drag;
       game.x += game.vx*dt; game.y += game.vy*dt;
 
-      // side walls
       if(game.x < 110){ game.x=110; game.vx*=-0.6; }
       if(game.x > 990){ game.x=990; game.vx*=-0.6; }
 
-      // floor bounce
       const floorY = toXY(0,560).y;
       if(game.y>floorY){
         game.y=floorY; game.vy*=-0.55; game.vx*=0.88;
@@ -314,7 +335,6 @@
     }
 
     function checkHoop(){
-      // simple screen-space ring pass
       const rimPt = rim.getBoundingClientRect();
       const ballPt = ball.getBoundingClientRect();
       const rx = rimPt.left + rimPt.width/2;
@@ -333,9 +353,7 @@
     }
 
     function scoreShot(swish){
-      const base = 200;                 // arcade points
-      const coinsBase = 2;
-      const bonus = swish ? 150 : 0;
+      const base = 200, coinsBase = 2, bonus = swish ? 150 : 0;
       game.score += base + bonus;
       game.streak += 1;
 
@@ -353,7 +371,6 @@
       setTimeout(resetBall, 260);
     }
 
-    // drag-to-shoot
     (function wireAim(){
       let dragging=false;
       const start = (e)=>{
@@ -361,8 +378,7 @@
         const b = ball.getBoundingClientRect();
         const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
         if(!inside || !game.canShoot || game.ended) return;
-        dragging=true;
-        aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
+        dragging=true; aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
       };
       const move = (e)=>{
         if(!dragging) return;
@@ -376,7 +392,7 @@
         const rect = svg.getBoundingClientRect();
         const pt = (e.changedTouches?e.changedTouches[0]:e);
         const x = pt.clientX - rect.left, y = pt.clientY - rect.top;
-        const k = 3.4; // power
+        const k = 3.4;
         game.vx = (game.x - x)*k;
         game.vy = (game.y - y)*k;
         game.launched = true;
@@ -391,7 +407,6 @@
       svg.addEventListener('touchend', end, {passive:true});
     })();
 
-    // loop
     let lastT = performance.now();
     function loop(t){
       const dt = Math.min(0.033, (t - lastT) / 1000);
@@ -400,10 +415,26 @@
       if (!game.ended) requestAnimationFrame(loop);
     }
 
-    /* --------- End of run: grant rewards & persist --------- */
-    const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-    const readCraftAny=()=>{ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; };
-    const writeCraftAll=(v)=>{ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){} };
+    /* ---------------- End-of-run + persist ---------------- */
+    async function persistWalletAndSave(){
+      try{
+        // normalize craft LS keys and emit
+        writeCraftAll(readCraftAny());
+        // give baseline hearts if missing (mirrors Arena)
+        try{
+          const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
+          if (!Number.isFinite(h) || h<=0) {
+            localStorage.setItem('izzaHearts','5');
+            window.dispatchEvent(new Event('izza-hearts-changed'));
+          }
+        }catch(_){}
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+          await IZZA_PERSIST.save();
+        } else if (typeof window._izzaForceSave === 'function') {
+          window._izzaForceSave();
+        }
+      }catch(_){}
+    }
 
     async function endRun(){
       if (game.ended) return;
@@ -419,13 +450,7 @@
       try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
       try{ window.dispatchEvent(new Event('izza-wallet-changed'), { detail:{ coins:coinsNew, crafting:craftNew } }); }catch(_){}
 
-      try{
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-          await IZZA_PERSIST.save();
-        } else if (typeof window._izzaForceSave === 'function') {
-          window._izzaForceSave();
-        }
-      }catch(_){}
+      await persistWalletAndSave();
 
       document.getElementById('finalScore').textContent = game.score;
       document.getElementById('finalCoins').textContent = game.coins;
@@ -434,20 +459,43 @@
       showMsg('Time!', 'miss');
     }
 
-    /* --------- Boot --------- */
+    /* ---------------- wire nav like Arena (hydrate→save→go) ---------------- */
+    function interceptNav(a){
+      if(!a) return;
+      a.addEventListener('click', async (ev)=>{
+        ev.preventDefault();
+        const href = withT(a.getAttribute('href') || '/izza-game/play');
+        try{
+          await hydrateFromSnapshot();          // pull latest snapshot before saving deltas
+          await persistWalletAndSave();         // push our game deltas
+        }catch(_){}
+        location.href = href;
+      }, {passive:false});
+    }
+    interceptNav(document.getElementById('cityBtn'));
+    interceptNav(document.getElementById('cityBtn2'));
+    interceptNav(document.getElementById('backBtn'));
+    interceptNav(document.getElementById('againBtn'));
+
+    /* ---------------- Boot (mirrors Arena order) ---------------- */
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
     window.addEventListener('resize', onResize, {passive:true});
     document.addEventListener('visibilitychange', () => { lastT = performance.now(); });
 
     (async function boot(){
+      try{
+        const profilePre = await ensureCharacter(); // may redirect to /create
+        try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){}
+      }catch(e){ if(String(e.message)==='redirecting') return; }
+
       await hydrateFromSnapshot();
       await drawTinyAvatar();
+
       resetBall();
       setHoopDistance(0);
       startTimer();
       requestAnimationFrame(loop);
     })();
-
   })();
   </script>
 </body>
