@@ -39,10 +39,10 @@
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
 
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
             pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
-    .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
+    .bigmsg.show{opacity:1;transform:translate(-50%, -56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
     .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
@@ -225,13 +225,25 @@
       });
     }
 
+    /* ---------- Snapshot hydrate with COINS MERGE ---------- */
+    function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+    function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
+
     async function hydrateFromSnapshot(){
+      const localBefore = readCoinsLS();
       try{
         await waitForPersistReady();
         if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-          await IZZA_PERSIST.load(); // server → LS
+          await IZZA_PERSIST.load(); // server → LS (may be stale)
         }
       }catch(_){}
+      // Merge: keep the larger of local-before vs server-after
+      const serverAfter = readCoinsLS();
+      if (localBefore > serverAfter){
+        writeCoinsLS(localBefore);
+        try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+      }
+      // keep crafting credits sync exactly as snapshot already does
       try{ writeCraftAll(readCraftAny()); }catch(_){}
     }
 
@@ -550,13 +562,11 @@
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
         scoreShot(swish);
         game._scored = true;
-        // block any MISS for a short window after score so UI never shows both
         game.noMissUntil = performance.now() + 350;
         setTimeout(()=>{ game._scored=false; }, 300);
         return;
       }
 
-      // Fast MISS: ball has fallen well below the rim area and is moving down (but don't trigger during the no-miss window)
       if(game.launched && !game._scored && game.vy>0 && performance.now() > game.noMissUntil){
         if (by > (ry + MISS_BAND_PX)){
           quickMiss();
@@ -565,7 +575,7 @@
     }
 
     function quickMiss(){
-      if (game._scored || performance.now() < game.noMissUntil) return; // never show MISS over a recent score
+      if (game._scored || performance.now() < game.noMissUntil) return;
       game.launched=false;
       showMsg('MISS!', 'miss');
       setTimeout(resetBall, 220);
@@ -575,12 +585,7 @@
     let walletDirty = false;
     let hasLoadedSnapshot = false;
 
-    function readCoinsLS(){
-      return parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
-    }
     function syncCoinsHUD(){
-      // Show current wallet on HUD when not in the middle of showing "run coins" updates
-      // (This keeps first-load after refresh correct; scoreShot still updates run display.)
       if (!game.launched && game.coins === 0){
         coinsRunEl.textContent = String(readCoinsLS());
       }
@@ -638,7 +643,7 @@
 
       scoreEl.textContent = game.score;
       streakEl.textContent = game.goals;
-      coinsRunEl.textContent = game.coins; // keep this as "coins earned this run"
+      coinsRunEl.textContent = game.coins; // coins earned this run
 
       setTimeout(resetBall, 260);
     }
@@ -665,6 +670,28 @@
       }catch(_){}
     }
 
+    // NEW: commit, re-load, and confirm server snapshot reflects local coins before navigating
+    const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+    async function commitWalletAndConfirm({retries=5, delay=140} = {}){
+      const target = readCoinsLS();
+      try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+      for(let i=0;i<retries;i++){
+        try{
+          if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+        }catch(_){}
+        const after = readCoinsLS();
+        if (after >= target){
+          walletDirty = false;
+          return true;
+        }
+        // If server snapshot came back lower, re-assert local and try again.
+        writeCoinsLS(target);
+        try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+        await sleep(delay);
+      }
+      return false; // even if false, we've tried our best; navigation still proceeds
+    }
+
     async function endRun(){
       if (game.ended) return;
       game.ended = true;
@@ -685,7 +712,8 @@
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
         try{
-          await persistWalletAndSave(); // ensure server has latest wallet
+          // 1) Save  2) Confirm server reflects local so City won't roll back on hydrate
+          await commitWalletAndConfirm();
         }catch(_){}
         location.href = href;
       }, {passive:false});
@@ -711,11 +739,8 @@
       if (document.hidden){
         if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
       } else {
-        if (!hasLoadedSnapshot && !walletDirty){
-          try{ await hydrateFromSnapshot(); hasLoadedSnapshot = true; }catch(_){}
-        } else if (walletDirty){
-          try{ await persistWalletAndSave(); }catch(_){}
-        }
+        // Re-hydrate with merge so coins never roll back after returning
+        try{ await hydrateFromSnapshot(); hasLoadedSnapshot = true; }catch(_){}
         syncCoinsHUD();
       }
     });
@@ -733,6 +758,7 @@
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){}
       }catch(e){ if(String(e.message)==='redirecting') return; }
 
+      // First load after refresh: hydrate with COINS MERGE
       await hydrateFromSnapshot();
       hasLoadedSnapshot = true;
 
