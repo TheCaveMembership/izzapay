@@ -91,17 +91,13 @@
         <!-- fence around court -->
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
-        <!-- hoop (closer & larger at start) -->
-        <g id="hoop" transform="translate(520, 310) scale(1)">
-          <!-- post -->
-          <rect x="90" y="-20" width="12" height="76" fill="#b7c7d8"/>
-          <!-- backboard (bigger) -->
-          <rect x="40" y="-92" width="120" height="84" rx="8" ry="8" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
-          <rect x="66" y="-74" width="68" height="44" fill="none" stroke="#ff7a00" stroke-width="4"/>
-          <!-- rim (bigger) -->
-          <circle id="rim" cx="100" cy="-40" r="28" fill="none" stroke="#ff7a00" stroke-width="6"/>
-          <!-- net -->
-          <path d="M124 -38 q-10 40 -24 82 q-12 -42 -24 -82" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
+        <!-- hoop -->
+        <g id="hoop" transform="translate(475, 280)">
+          <rect x="75" y="-25" width="10" height="70" fill="#b7c7d8"/>
+          <rect x="40" y="-80" width="80" height="60" rx="6" ry="6" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
+          <rect x="58" y="-66" width="44" height="32" fill="none" stroke="#ff7a00" stroke-width="4"/>
+          <circle id="rim" cx="80" cy="-34" r="20" fill="none" stroke="#ff7a00" stroke-width="6"/>
+          <path d="M96 -32 q-8 34 -16 68 q-8 -34 -16 -68" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
         </g>
 
         <!-- court floor + lines -->
@@ -111,15 +107,16 @@
           <ellipse cx="550" cy="560" rx="110" ry="16" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
-        <!-- ball (bigger; no spin) -->
+        <!-- ball -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
               <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
-          <circle id="ball" cx="550" cy="560" r="30" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="3"/>
-          <path d="M526 560 h48 M550 536 v48" stroke="#8a3b12" stroke-width="2"/>
+          <circle id="ball" cx="550" cy="560" r="22" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="3"/>
+          <path d="M528 560 h44 M550 538 v44" stroke="#8a3b12" stroke-width="2"/>
+          <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 550 560" to="360 550 560" dur=".7s" repeatCount="indefinite"/>
         </g>
 
         <!-- guide -->
@@ -299,20 +296,18 @@
     const toXY = (cx,cy) => ({x: cx/1100*W, y: cy/700*H});
 
     let game = {
-      x:550, y:560, vx:0, vy:0, r:30,
+      x:550, y:560, vx:0, vy:0, r:22,
       gravity: 1500, drag: 0.995,
       launched:false, canShoot:true,
       score:0, streak:0, coins:0, timeLeft:60,
-      hoopX:520, hoopY:310, distanceStep:0,
+      hoopX:475, hoopY:280, distanceStep:0,
       timerId:null, ended:false
     };
 
     function setHoopDistance(step){
       game.distanceStep = step;
-      // scale down & move up as distance increases (feels farther)
-      const s = Math.max(0.6, 1 - step*0.07);
-      const y = game.hoopY - step*26;
-      hoop.setAttribute('transform', `translate(${game.hoopX}, ${y}) scale(${s})`);
+      const dx = step*26;
+      hoop.setAttribute('transform', `translate(${game.hoopX+dx}, ${game.hoopY-dx*0.25})`);
     }
     function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
     function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
