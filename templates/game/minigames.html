@@ -418,7 +418,7 @@
     // Tiny, local crafting-bridge: mirror all three keys (no server changes)
     const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){
-            for(const k of CRAFT_KEYS){
+      for(const k of CRAFT_KEYS){
         const v = parseInt(localStorage.getItem(k)||'0',10);
         if (Number.isFinite(v) && v>0) return v|0;
       }
@@ -434,9 +434,27 @@
     // One-time normalize on load (keeps City & Arena perfectly in sync)
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
 
+    /* --- Wait for izza-persist to be ready (new) --- */
+    function waitForPersistReady({timeout=1500, interval=40} = {}){
+      return new Promise((res)=> {
+        const t0 = performance.now();
+        const check = () => {
+          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+          if (performance.now() - t0 > timeout) return res(false);
+          setTimeout(check, interval);
+        };
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', check, {once:true});
+        } else {
+          check();
+        }
+      });
+    }
+
     /* ---- Load snapshot on every Arena entry ---- */
     async function hydrateFromSnapshot(){
       try{
+        await waitForPersistReady(); /* new */
         if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
           await IZZA_PERSIST.load(); // pulls server snapshot -> localStorage
         }
@@ -535,7 +553,7 @@
       return { coins:0, crafting:0 };
     }
 
-    /* ====== Boot ====== */
+        /* ====== Boot ====== */
     (async function boot(){
       try{
         const profile = await ensureCharacter();  // redirects if missing
@@ -544,8 +562,8 @@
         // 1) Always hydrate snapshot on Arena entry so cold opens are correct
         await hydrateFromSnapshot();
 
-        // 2) Paint with whatever we have now
-        renderWallet(LAST_WALLET);
+        // 2) Paint with whatever we have now (fresh from LS)
+        renderWallet(readLocalWallet());
 
         // 3) Draw avatar
         await buildAvatarCanvas(actx,96,profile);
