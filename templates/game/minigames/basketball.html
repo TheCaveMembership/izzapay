@@ -79,36 +79,38 @@
           <filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity=".35"/></filter>
         </defs>
 
+        <!-- sky + background -->
         <rect x="0" y="0" width="1100" height="700" fill="url(#sky)"/>
         <ellipse cx="250" cy="520" rx="320" ry="140" fill="#8ed47d" opacity=".9"/>
         <ellipse cx="880" cy="520" rx="300" ry="130" fill="#89d074" opacity=".9"/>
+
+        <!-- shrubs -->
         <g opacity=".9">
           <rect x="210" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="220" cy="420" r="60" fill="#5bbd5a"/>
           <rect x="920" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="930" cy="420" r="60" fill="#5bbd5a"/>
         </g>
+
+        <!-- horizon layers -->
         <g><polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
            <polygon points="0,520 1100,520 1100,560 0,560" fill="#547fa8"/></g>
+
         <!-- fence around court -->
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
         <!-- hoop (closer & larger at start) -->
-        <g id="hoop" transform="translate(520, 310) scale(1)">
-          <!-- post -->
+        <g id="hoop" transform="translate(520, 350) scale(1.1)">
           <rect x="90" y="-20" width="12" height="76" fill="#b7c7d8"/>
-          <!-- backboard (bigger) -->
           <rect x="40" y="-92" width="120" height="84" rx="8" ry="8" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
           <rect x="66" y="-74" width="68" height="44" fill="none" stroke="#ff7a00" stroke-width="4"/>
-          <!-- rim (bigger) -->
           <circle id="rim" cx="100" cy="-40" r="28" fill="none" stroke="#ff7a00" stroke-width="6"/>
-          <!-- net -->
           <path d="M124 -38 q-10 40 -24 82 q-12 -42 -24 -82" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
         </g>
 
         <!-- court floor + lines -->
         <g>
           <polygon points="100,560 1000,560 1100,700 0,700" fill="url(#wood)"/>
-          <ellipse cx="550" cy="560" rx="170" ry="24" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
-          <ellipse cx="550" cy="560" rx="110" ry="16" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
+          <ellipse cx="550" cy="560" rx="190" ry="28" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
+          <ellipse cx="550" cy="560" rx="120" ry="18" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
         <!-- ball (bigger; no spin) -->
@@ -118,11 +120,11 @@
               <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
-          <circle id="ball" cx="550" cy="560" r="30" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="3"/>
-          <path d="M526 560 h48 M550 536 v48" stroke="#8a3b12" stroke-width="2"/>
+          <circle id="ball" cx="550" cy="560" r="34" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="3"/>
+          <path d="M528 560 h44 M550 538 v44" stroke="#8a3b12" stroke-width="2"/>
         </g>
 
-        <!-- guide -->
+        <!-- aim guide (points toward throw) -->
         <line id="aimLine" x1="550" y1="560" x2="650" y2="500" stroke="rgba(255,255,255,.6)" stroke-width="3" stroke-dasharray="8 8"/>
       </svg>
 
@@ -156,7 +158,7 @@
       }
     }catch(_){}
     const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
-    // rewrite links (we’ll also intercept click below to save first)
+    // rewrite links
     document.getElementById('backBtn').href=withT('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
 
@@ -266,7 +268,6 @@
     async function drawTinyAvatar(){
       let profile={};
       try{ profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){}
-      // if empty, fetch once so hair/skin are correct on first load
       if(!profile || !profile.sprite_skin){
         const fresh = await fetchCharacterFresh();
         if (fresh) { profile=fresh; try{ localStorage.setItem('izzaCharacter', JSON.stringify(fresh)); }catch(_){} }
@@ -299,19 +300,18 @@
     const toXY = (cx,cy) => ({x: cx/1100*W, y: cy/700*H});
 
     let game = {
-      x:550, y:560, vx:0, vy:0, r:30,
-      gravity: 1500, drag: 0.995,
+      x:550, y:560, vx:0, vy:0, r:34,
+      gravity: 1700, drag: 0.995,
       launched:false, canShoot:true,
-      score:0, streak:0, coins:0, timeLeft:60,
-      hoopX:520, hoopY:310, distanceStep:0,
+      score:0, goals:0, timeLeft:60,
+      hoopX:520, hoopY:350, distanceStep:0,
       timerId:null, ended:false
     };
 
     function setHoopDistance(step){
       game.distanceStep = step;
-      // scale down & move up as distance increases (feels farther)
-      const s = Math.max(0.6, 1 - step*0.07);
-      const y = game.hoopY - step*26;
+      const s = Math.max(0.6, 1.1 - step*0.08);   // scale down as it gets farther
+      const y = game.hoopY - step*28;             // move up away from player
       hoop.setAttribute('transform', `translate(${game.hoopX}, ${y}) scale(${s})`);
     }
     function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
@@ -338,7 +338,7 @@
       const floorY = toXY(0,560).y;
       if(game.y>floorY){
         game.y=floorY; game.vy*=-0.55; game.vx*=0.88;
-        if(Math.abs(game.vy)<60){ game.vy=0; game.launched=false; setTimeout(resetBall, 350); }
+        if(Math.abs(game.vy)<60){ game.vy=0; game.launched=false; setTimeout(resetBall, 320); }
       }
       setBall(game.x, game.y);
       checkHoop();
@@ -354,42 +354,45 @@
       const rRing = rimPt.width/2;
       const d = Math.hypot(bx-rx, by-ry);
 
-      if(!game._scored && d < rRing-3 && game.vy>0){
-        const swish = d < rRing*0.55 && Math.abs(game.vx) < 520;
-        scoreShot(swish);
+      if(!game._scored && d < rRing-4 && game.vy>0){
+        scoreShot(d < rRing*0.55);
         game._scored = true;
-        setTimeout(()=>{ game._scored=false; }, 280);
+        setTimeout(()=>{ game._scored=false; }, 260);
       }
     }
 
+    // +200 score & coins per goal; move hoop every 2 goals
     function scoreShot(swish){
-      const base = 200, coinsBase = 2, bonus = swish ? 150 : 0;
-      game.score += base + bonus;
-      game.streak += 1;
-
-      const distMult = 1 + (game.distanceStep*0.25);
-      const streakMult = 1 + Math.min(2, game.streak*0.06);
-      const coins = Math.round((coinsBase + (swish?3:0)) * distMult * streakMult);
-      game.coins += coins;
+      const add = 200;
+      game.score += add;
+      game.goals += 1;
 
       scoreEl.textContent = game.score;
-      streakEl.textContent = game.streak;
-      coinsRunEl.textContent = game.coins;
+      coinsRunEl.textContent = game.score;   // 1 coin per score point in this game
+      streakEl.textContent = game.goals;
 
-      showMsg(swish ? 'GOAL! +'+(base+bonus) : 'SCORE! +'+base, swish ? 'scoreGlow' : '');
-      if(game.streak % 3 === 0) setHoopDistance(Math.min(7, game.distanceStep+1));
-      setTimeout(resetBall, 260);
+      showMsg('SCORE! +'+add, swish ? 'scoreGlow' : '');
+      if(game.goals % 2 === 0) setHoopDistance(Math.min(8, game.distanceStep+1));
+      setTimeout(resetBall, 240);
     }
 
-    /* === Pokémon-style drag-back then flick-forward === */
+    /* === Pokémon-style drag-back then flick-forward (simple) === */
     (function wireAim(){
-      const samples=[];                  // recent pointer samples {x,y,t}
-      const MAX_WINDOW_MS=140;           // last ~140ms defines release velocity
-      const MIN_PATH_PX=40;              // reject tiny taps
-      const POWER_SCALE=1.05;            // scale motion → initial velocity
-      const MIN_UP_VY=-450;              // must be moving upward at least this fast
+      const samples=[];
+      const MAX_WINDOW_MS=140;
+      const MIN_PATH_PX=40;
+      const POWER_SCALE=1.05;
+      const MIN_UP_VY=-460;
 
       let dragging=false, startRect=null, startFirst=null;
+
+      function setGuideTowardThrow(px,py){
+        // Show guide in the throw direction (opposite of drag)
+        const tx = game.x + (game.x - px);
+        const ty = game.y + (game.y - py);
+        aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
+        aimLine.setAttribute('x2', tx);     aimLine.setAttribute('y2', ty);
+      }
 
       function addSample(pt){
         const now=performance.now();
@@ -397,7 +400,7 @@
         const y=pt.clientY - startRect.top;
         samples.push({x,y,t:now});
         while(samples.length && now - samples[0].t > 220) samples.shift();
-        aimLine.setAttribute('x2',x); aimLine.setAttribute('y2',y);
+        setGuideTowardThrow(x,y);
       }
 
       const start = (e)=>{
@@ -407,14 +410,10 @@
         if(!inside || !game.canShoot || game.ended) return;
         dragging=true; samples.length=0; startRect=svg.getBoundingClientRect();
         startFirst={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top, t: performance.now()};
-        aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
-        addSample(pt);
+        setGuideTowardThrow(startFirst.x, startFirst.y);
       };
 
-      const move = (e)=>{
-        if(!dragging) return;
-        addSample(e.touches?e.touches[0]:e);
-      };
+      const move = (e)=>{ if(dragging) addSample(e.touches?e.touches[0]:e); };
 
       const end = (e)=>{
         if(!dragging) return; dragging=false;
@@ -429,9 +428,8 @@
 
         const a=samples[0], b=samples[samples.length-1];
         const dt=Math.max(1,b.t-a.t)/1000;
-        let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt;
-
-        // upward throw requirement (toward hoop)
+        // velocity of drag → throw opposite
+        let vx=(a.x-b.x)/dt, vy=(a.y-b.y)/dt;
         if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
 
         game.vx=vx*POWER_SCALE;
@@ -439,7 +437,7 @@
 
         game.launched=true;
         game.canShoot=false;
-        setTimeout(()=> game.canShoot=true, 160);
+        setTimeout(()=> game.canShoot=true, 140);
       };
 
       svg.addEventListener('mousedown', start, {passive:true});
@@ -461,9 +459,7 @@
     /* ---------------- End-of-run + persist ---------------- */
     async function persistWalletAndSave(){
       try{
-        // normalize craft LS keys and emit
         writeCraftAll(readCraftAny());
-        // give baseline hearts if missing (mirrors Arena)
         try{
           const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
           if (!Number.isFinite(h) || h<=0) {
@@ -483,8 +479,13 @@
       if (game.ended) return;
       game.ended = true;
 
-      const craftEarn = Math.max(0, Math.floor(game.coins / 5));
-      const coinsNew  = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + game.coins;
+      // Coins = final score (200 per goal)
+      const coinsEarn = game.score|0;
+
+      // Crafting: +1 per 10 goals this run
+      const craftEarn = Math.floor((game.goals||0)/10);
+
+      const coinsNew  = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + coinsEarn;
       const craftNew  = (readCraftAny()|0) + craftEarn;
 
       localStorage.setItem('izzaCoins', String(coinsNew));
@@ -496,7 +497,7 @@
       await persistWalletAndSave();
 
       document.getElementById('finalScore').textContent = game.score;
-      document.getElementById('finalCoins').textContent = game.coins;
+      document.getElementById('finalCoins').textContent = coinsEarn;
       document.getElementById('finalCraft').textContent = craftEarn;
       document.getElementById('finish').style.display = 'flex';
       showMsg('Time!', 'miss');
@@ -509,10 +510,11 @@
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
         try{
-          await hydrateFromSnapshot();          // pull latest snapshot before saving deltas
-          await persistWalletAndSave();         // push our game deltas
+          await hydrateFromSnapshot();
+          await persistWalletAndSave();
         }catch(_){}
-        location.href = href;
+        // hard fallback so buttons always work
+        setTimeout(()=>{ location.href = href; }, 60);
       }, {passive:false});
     }
     interceptNav(document.getElementById('cityBtn'));
