@@ -24,7 +24,7 @@
     .btn:hover{filter:brightness(1.06)}
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#79c0ff;overflow:hidden}
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:8px;z-index:6}
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:8px;z-index:6;padding-right:12px}
     .hud .left,.hud .right{display:flex;gap:10px;align-items:center}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:8px 14px;border-radius:999px;font-size:14px;font-weight:700;letter-spacing:.3px;display:flex;gap:8px;align-items:center}
@@ -93,14 +93,10 @@
 
         <!-- hoop (closer & larger at start) -->
         <g id="hoop" transform="translate(520, 310) scale(1)">
-          <!-- post -->
           <rect x="90" y="-20" width="12" height="76" fill="#b7c7d8"/>
-          <!-- backboard (bigger) -->
           <rect x="40" y="-92" width="120" height="84" rx="8" ry="8" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
           <rect x="66" y="-74" width="68" height="44" fill="none" stroke="#ff7a00" stroke-width="4"/>
-          <!-- rim (bigger) -->
           <circle id="rim" cx="100" cy="-40" r="28" fill="none" stroke="#ff7a00" stroke-width="6"/>
-          <!-- net -->
           <path d="M124 -38 q-10 40 -24 82 q-12 -42 -24 -82" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
         </g>
 
@@ -242,7 +238,7 @@
       try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
     }
 
-    /* ---- tiny avatar render (same ramp/tint as before) ---- */
+    /* ---- tiny avatar render ---- */
     const tinyCtx=document.getElementById('avatarTiny').getContext('2d'); tinyCtx.imageSmoothingEnabled=false;
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
@@ -266,7 +262,6 @@
     async function drawTinyAvatar(){
       let profile={};
       try{ profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){}
-      // if empty, fetch once so hair/skin are correct on first load
       if(!profile || !profile.sprite_skin){
         const fresh = await fetchCharacterFresh();
         if (fresh) { profile=fresh; try{ localStorage.setItem('izzaCharacter', JSON.stringify(fresh)); }catch(_){} }
@@ -291,7 +286,7 @@
     const arenaEl = document.getElementById('arena');
 
     const scoreEl = document.getElementById('score');
-    const streakEl = document.getElementById('streak');
+    const streakEl = document.getElementById('streak'); // shows total goals
     const timeEl = document.getElementById('time');
     const coinsRunEl = document.getElementById('coinsRun');
 
@@ -302,14 +297,14 @@
       x:550, y:560, vx:0, vy:0, r:30,
       gravity: 1500, drag: 0.995,
       launched:false, canShoot:true,
-      score:0, streak:0, coins:0, timeLeft:60,
+      score:0, goals:0, coins:0, timeLeft:60,
       hoopX:520, hoopY:310, distanceStep:0,
-      timerId:null, ended:false
+      timerId:null, ended:false,
+      creditsEarned:0
     };
 
     function setHoopDistance(step){
       game.distanceStep = step;
-      // scale down & move up as distance increases (feels farther)
       const s = Math.max(0.6, 1 - step*0.07);
       const y = game.hoopY - step*26;
       hoop.setAttribute('transform', `translate(${game.hoopX}, ${y}) scale(${s})`);
@@ -362,22 +357,34 @@
       }
     }
 
+    /* === SCORING RULES ===
+       - Every made basket: +200 coins (also +200 to SCORE)
+       - Every 10 goals within the 60s run: +1 Craft Credit (awarded at 10, 20, …)
+    */
     function scoreShot(swish){
-      const base = 200, coinsBase = 2, bonus = swish ? 150 : 0;
-      game.score += base + bonus;
-      game.streak += 1;
+      const coinsPerGoal = 200;
 
-      const distMult = 1 + (game.distanceStep*0.25);
-      const streakMult = 1 + Math.min(2, game.streak*0.06);
-      const coins = Math.round((coinsBase + (swish?3:0)) * distMult * streakMult);
-      game.coins += coins;
+      game.score += coinsPerGoal;
+      game.goals += 1;
+      game.coins += coinsPerGoal;
 
+      // live HUD
       scoreEl.textContent = game.score;
-      streakEl.textContent = game.streak;
+      streakEl.textContent = game.goals;
       coinsRunEl.textContent = game.coins;
 
-      showMsg(swish ? 'GOAL! +'+(base+bonus) : 'SCORE! +'+base, swish ? 'scoreGlow' : '');
-      if(game.streak % 3 === 0) setHoopDistance(Math.min(7, game.distanceStep+1));
+      // craft credit each 10th goal
+      const creditsNow = Math.floor(game.goals / 10);
+      if (creditsNow > game.creditsEarned){
+        game.creditsEarned = creditsNow;
+        showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
+      } else {
+        showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
+      }
+
+      // make the hoop drift back every 3 goals to add difficulty
+      if(game.goals % 3 === 0) setHoopDistance(Math.min(7, game.distanceStep+1));
+
       setTimeout(resetBall, 260);
     }
 
@@ -431,7 +438,6 @@
         const dt=Math.max(1,b.t-a.t)/1000;
         let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt;
 
-        // upward throw requirement (toward hoop)
         if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
 
         game.vx=vx*POWER_SCALE;
@@ -461,9 +467,7 @@
     /* ---------------- End-of-run + persist ---------------- */
     async function persistWalletAndSave(){
       try{
-        // normalize craft LS keys and emit
         writeCraftAll(readCraftAny());
-        // give baseline hearts if missing (mirrors Arena)
         try{
           const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
           if (!Number.isFinite(h) || h<=0) {
@@ -483,7 +487,7 @@
       if (game.ended) return;
       game.ended = true;
 
-      const craftEarn = Math.max(0, Math.floor(game.coins / 5));
+      const craftEarn = Math.max(0, game.creditsEarned|0); // 1 per 10 goals
       const coinsNew  = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + game.coins;
       const craftNew  = (readCraftAny()|0) + craftEarn;
 
