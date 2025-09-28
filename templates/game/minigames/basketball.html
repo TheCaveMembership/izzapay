@@ -494,8 +494,8 @@
     })();
 
     // Allow higher arcs before calling a top-out miss
-    const TOP_OUT = -240;     // was -120 (more negative = allow higher travel)
-    const MISS_BAND_PX = 120; // was 40 (allow deeper drop before miss)
+    const TOP_OUT = -400;     // was -120 (more negative = allow higher travel)
+    const MISS_BAND_PX = 200; // was 40 (allow deeper drop before miss)
 
     function physics(dt){
       if(!game.launched || game.ended) return;
