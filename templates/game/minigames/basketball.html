@@ -88,8 +88,10 @@
         </g>
         <g><polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
            <polygon points="0,520 1100,520 1100,560 0,560" fill="#547fa8"/></g>
+        <!-- fence around court -->
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
+        <!-- hoop -->
         <g id="hoop" transform="translate(475, 280)">
           <rect x="75" y="-25" width="10" height="70" fill="#b7c7d8"/>
           <rect x="40" y="-80" width="80" height="60" rx="6" ry="6" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
@@ -98,12 +100,14 @@
           <path d="M96 -32 q-8 34 -16 68 q-8 -34 -16 -68" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
         </g>
 
+        <!-- court floor + lines -->
         <g>
           <polygon points="100,560 1000,560 1100,700 0,700" fill="url(#wood)"/>
           <ellipse cx="550" cy="560" rx="170" ry="24" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
           <ellipse cx="550" cy="560" rx="110" ry="16" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
+        <!-- ball -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
@@ -115,6 +119,7 @@
           <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 550 560" to="360 550 560" dur=".7s" repeatCount="indefinite"/>
         </g>
 
+        <!-- guide -->
         <line id="aimLine" x1="550" y1="560" x2="650" y2="500" stroke="rgba(255,255,255,.6)" stroke-width="3" stroke-dasharray="8 8"/>
       </svg>
 
@@ -273,7 +278,7 @@
       if(hair){ tinyCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], (HAIR_TO[hairCol]||HAIR_TO.black)), 0,0,42,42); }
     }
 
-    /* ---------------- Game (unchanged mechanics) ---------------- */
+    /* ---------------- Game (mechanics) ---------------- */
     const svg = document.getElementById('court');
     const ball = document.getElementById('ball');
     const aimLine = document.getElementById('aimLine');
@@ -371,34 +376,67 @@
       setTimeout(resetBall, 260);
     }
 
+    /* === Pokémon-style drag-back then flick-forward === */
     (function wireAim(){
-      let dragging=false;
+      const samples=[];                  // recent pointer samples {x,y,t}
+      const MAX_WINDOW_MS=140;           // last ~140ms defines release velocity
+      const MIN_PATH_PX=40;              // reject tiny taps
+      const POWER_SCALE=1.05;            // scale motion → initial velocity
+      const MIN_UP_VY=-450;              // must be moving upward at least this fast
+
+      let dragging=false, startRect=null, startFirst=null;
+
+      function addSample(pt){
+        const now=performance.now();
+        const x=pt.clientX - startRect.left;
+        const y=pt.clientY - startRect.top;
+        samples.push({x,y,t:now});
+        while(samples.length && now - samples[0].t > 220) samples.shift();
+        aimLine.setAttribute('x2',x); aimLine.setAttribute('y2',y);
+      }
+
       const start = (e)=>{
-        const pt = (e.touches?e.touches[0]:e);
-        const b = ball.getBoundingClientRect();
+        const pt=(e.touches?e.touches[0]:e);
+        const b=ball.getBoundingClientRect();
         const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
         if(!inside || !game.canShoot || game.ended) return;
-        dragging=true; aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
+        dragging=true; samples.length=0; startRect=svg.getBoundingClientRect();
+        startFirst={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top, t: performance.now()};
+        aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
+        addSample(pt);
       };
+
       const move = (e)=>{
         if(!dragging) return;
-        const rect = svg.getBoundingClientRect();
-        const pt = (e.touches?e.touches[0]:e);
-        const x = pt.clientX - rect.left, y = pt.clientY - rect.top;
-        aimLine.setAttribute('x2', x); aimLine.setAttribute('y2', y);
+        addSample(e.touches?e.touches[0]:e);
       };
+
       const end = (e)=>{
         if(!dragging) return; dragging=false;
-        const rect = svg.getBoundingClientRect();
-        const pt = (e.changedTouches?e.changedTouches[0]:e);
-        const x = pt.clientX - rect.left, y = pt.clientY - rect.top;
-        const k = 3.4;
-        game.vx = (game.x - x)*k;
-        game.vy = (game.y - y)*k;
-        game.launched = true;
-        game.canShoot = false;
+        const now=performance.now();
+        while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
+        if(samples.length<2) return;
+
+        const firstTotal=startFirst;
+        const last=samples[samples.length-1];
+        const pathLen=Math.hypot(last.x-firstTotal.x,last.y-firstTotal.y);
+        if(pathLen<MIN_PATH_PX) return;
+
+        const a=samples[0], b=samples[samples.length-1];
+        const dt=Math.max(1,b.t-a.t)/1000;
+        let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt;
+
+        // upward throw requirement (toward hoop)
+        if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
+
+        game.vx=vx*POWER_SCALE;
+        game.vy=vy*POWER_SCALE;
+
+        game.launched=true;
+        game.canShoot=false;
         setTimeout(()=> game.canShoot=true, 160);
       };
+
       svg.addEventListener('mousedown', start, {passive:true});
       svg.addEventListener('mousemove', move, {passive:true});
       window.addEventListener('mouseup', end, {passive:true});
