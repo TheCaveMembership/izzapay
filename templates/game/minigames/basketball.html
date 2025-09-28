@@ -118,15 +118,15 @@
           <ellipse cx="550" cy="640" rx="180" ry="26" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
-        <!-- Ball starts in front of avatar -->
+        <!-- Ball starts in front of avatar (smaller) -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
               <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
-          <circle id="ball" cx="550" cy="700" r="84" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
-          <path d="M466 700 h168 M550 616 v168" stroke="#8a3b12" stroke-width="3"/>
+          <circle id="ball" cx="550" cy="700" r="76" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
+          <path d="M474 700 h152 M550 624 v152" stroke="#8a3b12" stroke-width="3"/>
         </g>
       </svg>
 
@@ -379,17 +379,10 @@
       const leftCrop = Math.max(0, (drawnW - W) / 2);
       return { x: cx * scale - leftCrop, y: cy * scale };
     }
-    function fromPX(px, py){
-      const vbW = 1100, vbH = 760;
-      const scale = H / vbH;
-      const drawnW = vbW * scale;
-      const leftCrop = Math.max(0, (drawnW - W) / 2);
-      return { cx: (px + leftCrop) / scale, cy: (py) / scale };
-    }
 
     // start positions (ball near player)
     let game = {
-      x:550, y:700, vx:0, vy:0, r:84,
+      x:550, y:700, vx:0, vy:0, r:76,
       gravity: 1700, drag: 0.996,
       launched:false, dragging:false,
       score:0, goals:0, coins:0, timeLeft:60,
@@ -434,12 +427,12 @@
       function addSample(pt){
         const now=performance.now();
         const x=pt.clientX - startRect.left;
-        const y=pt.clientY - startRect.top;
-        samples.push({x,y,t:now});
+        theY=pt.clientY - startRect.top;
+        samples.push({x,y:theY,t:now});
         while(samples.length && now - samples[0].t > 260) samples.shift();
 
         if(game.dragging && !game.launched){
-          const dx=x - startPos.x, dy=y - startPos.y;
+          const dx=x - startPos.x, dy=theY - startPos.y;
           const pullMax=220; const d=Math.hypot(dx,dy);
           const k=d>pullMax ? pullMax/d : 1;
           setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
@@ -501,6 +494,9 @@
       svg.addEventListener('touchend', end, {passive:true});
     })();
 
+    // simple top limit in viewBox units
+    const TOP_OUT = -120;
+
     function physics(dt){
       if(!game.launched || game.ended) return;
 
@@ -517,43 +513,27 @@
       game.vx *= game.drag; game.vy *= game.drag;
       game.x += game.vx*dt; game.y += game.vy*dt;
 
-      // --- Backboard collision (AABB vs circle via rect overlap) ---
-      const bb = backboard.getBoundingClientRect();
-      const b = ball.getBoundingClientRect();
-      const overlap =
-        !(b.right < bb.left || b.left > bb.right || b.bottom < bb.top || b.top > bb.bottom);
-      if (overlap){
-        // choose the shallowest horizontal resolution (board is vertical)
-        const hitFromLeft = (b.right - bb.left) < (bb.right - b.left);
-        const px = hitFromLeft ? (b.right - bb.left) : (bb.right - b.left); // penetration in px
-        const centerY = b.top + b.height/2;
-        // nudge out in viewBox units
-        const nudge = fromPX(px, 0).cx;
-        if (hitFromLeft){
-          game.x -= nudge + 1;
-          game.vx = -Math.abs(game.vx) * 0.55;
-        }else{
-          game.x += nudge + 1;
-          game.vx =  Math.abs(game.vx) * 0.55;
-        }
-        game.vy *= 0.9; // take a little energy on bounce
-        setBall(game.x, game.y);
-      }
-
       // side walls (in viewBox coords)
       if(game.x < 110){ game.x=110; game.vx*=-0.6; }
       if(game.x > 990){ game.x=990; game.vx*=-0.6; }
 
+      // if flicked way off the top, count as miss and reset fast
+      if(game.y < TOP_OUT){
+        quickMiss();
+        return;
+      }
+
       const floorY = toXY(0,720).y;
       if(game.y>floorY){
         game.y=floorY; game.vy=0; game.vx=0; game.launched=false;
-        setTimeout(resetBall, 320);
+        setTimeout(resetBall, 280);
       }
+
       setBall(game.x, game.y);
-      checkHoop();
+      checkHoopOrMiss();
     }
 
-    function checkHoop(){
+    function checkHoopOrMiss(){
       const rimPt = rim.getBoundingClientRect();
       const ballPt = ball.getBoundingClientRect();
       const rx = rimPt.left + rimPt.width/2;
@@ -565,12 +545,29 @@
 
       // slightly easier make
       const fudge = rRing * 0.18;
+
+      // Score check (while moving downward)
       if(!game._scored && d < (rRing + fudge) && game.vy>0){
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
         scoreShot(swish);
         game._scored = true;
         setTimeout(()=>{ game._scored=false; }, 300);
+        return;
       }
+
+      // Fast MISS: ball has fallen below the rim area and is moving down → reset quick
+      // use viewBox Y for threshold; rim is at cy ~ (300 + (-38))*1.6 relative to group, but
+      // we can use screen coords already computed above.
+      const missBandPx = 40; // allows a little grace under the rim
+      if(game.launched && game.vy>0 && by > (ry + missBandPx)){
+        quickMiss();
+      }
+    }
+
+    function quickMiss(){
+      game.launched=false;
+      showMsg('MISS!', 'miss');
+      setTimeout(resetBall, 220);
     }
 
     /* === Wallet === */
@@ -611,7 +608,6 @@
       streakEl.textContent = game.goals;
       coinsRunEl.textContent = game.coins;
 
-      /* mechanics fixed; no distance scaling */
       setTimeout(resetBall, 260);
     }
 
@@ -656,7 +652,7 @@
         const href = withT(a.getAttribute('href') || '/izza-game/play');
         try{
           await persistWalletAndSave();
-          // removed hydrateFromSnapshot() here to avoid overwriting just-saved coins
+          // avoid reloading snapshot here to prevent overwriting just-saved coins
         }catch(_){}
         location.href = href;
       }, {passive:false});
