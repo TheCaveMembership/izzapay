@@ -192,49 +192,45 @@
       return headers;
     }
 
-    /* --- auth/character (admin-safe) --- */
-async function ensureCharacter(){
-  // quick local checks
-  const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
-  const isAdminLocal = (()=> {
-    try{
-      const role = (localStorage.getItem('izzaRole')||'').toLowerCase();
-      const user = (localStorage.getItem('izzaUser')||'').toLowerCase();
-      return role === 'admin' || user === 'cammac';
-    }catch(_){ return false; }
-  })();
+    /* --- auth/character (admin-safe, no priming here) --- */
+    async function ensureCharacter(){
+      const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
+      const isAdminLocal = (()=> {
+        try{
+          const role = (localStorage.getItem('izzaRole')||'').toLowerCase();
+          const user = (localStorage.getItem('izzaUser')||'').toLowerCase();
+          return role === 'admin' || user === 'cammac';
+        }catch(_){ return false; }
+      })();
 
-  try{
-    const r = await fetch('/izza-game/api/character'+TQ, {
-      credentials:'include',
-      headers: bearerHeaders()
-    });
-    if(r.ok){
-      const j = await r.json();
-      if (j && j.hasCharacter) return j;
-      // If the server knows we're admin, trust that too
-      if (j && (j.isAdmin || (j.user && j.user.isAdmin))) {
-        // prime from City to hydrate local wallet/credits and proceed
-        try{ await primeFromCity({ timeoutMs: 1200 }); }catch(_){}
-        return j; // allow boot to continue without touching /create
+      try{
+        const r = await fetch('/izza-game/api/character'+TQ, {
+          credentials:'include',
+          headers: bearerHeaders()
+        });
+        if(r.ok){
+          const j = await r.json();
+          if (j && j.hasCharacter) return j;
+          // If server says admin, allow boot to proceed without /create redirect
+          if (j && (j.isAdmin || (j.user && j.user.isAdmin))) {
+            return j;
+          }
+        }
+      }catch(_){ /* fall through */ }
+
+      // If we’re admin but the endpoint didn’t confirm a character, don’t redirect to /create
+      if (isAdminLocal) {
+        const fallback = lsProfile && typeof lsProfile === 'object'
+          ? lsProfile
+          : { hasCharacter:true, body_type:'male', skin_tone:'light', sprite_skin:'default' };
+        return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
       }
+
+      // Non-admin: keep existing behavior (redirect to create)
+      const next = encodeURIComponent(withT('/izza-game/minigames'));
+      location.replace('/izza-game/create?next='+next);
+      throw new Error('redirecting');
     }
-  }catch(_){ /* fall through */ }
-
-  // If we’re admin but the endpoint didn’t confirm a character,
-  // do NOT redirect to /create (that flow may reset wallet).
-  if (isAdminLocal) {
-    try{ await primeFromCity({ timeoutMs: 1200 }); }catch(_){}
-    // synthesize a minimal profile so downstream avatar build doesn’t break
-    const fallback = lsProfile && typeof lsProfile === 'object' ? lsProfile : { hasCharacter:true, body_type:'male', skin_tone:'light', sprite_skin:'default' };
-    return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
-  }
-
-  // Non-admin: keep existing behavior (redirect to create)
-  const next = encodeURIComponent(withT('/izza-game/minigames'));
-  location.replace('/izza-game/create?next='+next);
-  throw new Error('redirecting');
-}
 
     /* --- avatar assets (unchanged) --- */
     const SPRITES = {
@@ -387,7 +383,7 @@ async function ensureCharacter(){
       if (cityBtn) {
         cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
 
-        // NEW: push a persist save BEFORE navigating so City hydrates correct wallet
+        // push a persist save BEFORE navigating so City hydrates correct wallet
         cityBtn.addEventListener('click', async (ev)=>{
           ev.preventDefault();
           const href = cityBtn.getAttribute('href');
@@ -435,71 +431,64 @@ async function ensureCharacter(){
     }
     // One-time normalize on load (keeps City & Arena perfectly in sync)
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
-/* === Crafting credits: immediate deduction on successful mint === */
-/* Place this right after normalizeCraft(); */
 
-(function(){
-  // Defensive: tiny parser for credits-like payloads
-  function parseCreditsFromJson(j){
-    if (!j || typeof j !== 'object') return null;
-    if (Number.isFinite(j.credits))   return j.credits|0;
-    if (Number.isFinite(j.crafting))  return j.crafting|0;
-    if (j.wallet && (Number.isFinite(j.wallet.credits) || Number.isFinite(j.wallet.crafting))){
-      return (j.wallet.credits ?? j.wallet.crafting)|0;
-    }
-    if (j.balance && (Number.isFinite(j.balance.credits) || Number.isFinite(j.balance.crafting))){
-      return (j.balance.credits ?? j.balance.crafting)|0;
-    }
-    return null;
-  }
-
-  // Only wrap once
-  if (!window.__IZZA_CRAFT_FETCH_WRAP__){
-    window.__IZZA_CRAFT_FETCH_WRAP__ = true;
-
-    const origFetch = window.fetch;
-    window.fetch = async function(input, init){
-      const res = await origFetch(input, init);
-      try{
-        const url = (typeof input === 'string') ? input : (input && input.url) || '';
-
-        // When the UI asks the server for current credits, mirror them to LS
-        if (res.ok && url.includes('/api/crafting/credits')){
-          res.clone().json().then(j=>{
-            const cr = parseCreditsFromJson(j);
-            if (Number.isFinite(cr)) {
-              writeCraftAll(cr);
-              window.dispatchEvent(new Event('izza-crafting-changed'));
-            }
-          }).catch(()=>{});
+    /* === Crafting credits: immediate deduction on successful mint === */
+    (function(){
+      function parseCreditsFromJson(j){
+        if (!j || typeof j !== 'object') return null;
+        if (Number.isFinite(j.credits))   return j.credits|0;
+        if (Number.isFinite(j.crafting))  return j.crafting|0;
+        if (j.wallet && (Number.isFinite(j.wallet.credits) || Number.isFinite(j.wallet.crafting))){
+          return (j.wallet.credits ?? j.wallet.crafting)|0;
         }
+        if (j.balance && (Number.isFinite(j.balance.credits) || Number.isFinite(j.balance.crafting))){
+          return (j.balance.credits ?? j.balance.crafting)|0;
+        }
+        return null;
+      }
 
-        // When a mint succeeds, immediately update mirrored credits
-        if (res.ok && url.includes('/api/crafting/mint')){
-          res.clone().json().then(j=>{
-            const got = parseCreditsFromJson(j);
-            if (Number.isFinite(got)) {
-              // Server told us the authoritative new credits
-              writeCraftAll(got);
-            } else {
-              // Fallback: decrement by 1 if server didn’t echo credits
-              const cur = (function(){ 
-                for (const k of ['izzaCrafting','craftingCredits','izzaCraftCredits']){
-                  const v = parseInt(localStorage.getItem(k)||'0',10);
-                  if (Number.isFinite(v) && v>0) return v|0;
+      if (!window.__IZZA_CRAFT_FETCH_WRAP__){
+        window.__IZZA_CRAFT_FETCH_WRAP__ = true;
+
+        const origFetch = window.fetch;
+        window.fetch = async function(input, init){
+          const res = await origFetch(input, init);
+          try{
+            const url = (typeof input === 'string') ? input : (input && input.url) || '';
+
+            if (res.ok && url.includes('/api/crafting/credits')){
+              res.clone().json().then(j=>{
+                const cr = parseCreditsFromJson(j);
+                if (Number.isFinite(cr)) {
+                  writeCraftAll(cr);
+                  window.dispatchEvent(new Event('izza-crafting-changed'));
                 }
-                return parseInt(localStorage.getItem('izzaCrafting')||'0',10) || 0;
-              })();
-              writeCraftAll(Math.max(0, cur - 1));
+              }).catch(()=>{});
             }
-            window.dispatchEvent(new Event('izza-crafting-changed'));
-          }).catch(()=>{});
-        }
-      }catch(_){/* ignore */}
-      return res;
-    };
-  }
-})();
+
+            if (res.ok && url.includes('/api/crafting/mint')){
+              res.clone().json().then(j=>{
+                const got = parseCreditsFromJson(j);
+                if (Number.isFinite(got)) {
+                  writeCraftAll(got);
+                } else {
+                  const cur = (function(){
+                    for (const k of ['izzaCrafting','craftingCredits','izzaCraftCredits']){
+                      const v = parseInt(localStorage.getItem(k)||'0',10);
+                      if (Number.isFinite(v) && v>0) return v|0;
+                    }
+                    return parseInt(localStorage.getItem('izzaCrafting')||'0',10) || 0;
+                  })();
+                  writeCraftAll(Math.max(0, cur - 1));
+                }
+                window.dispatchEvent(new Event('izza-crafting-changed'));
+              }).catch(()=>{});
+            }
+          }catch(_){}
+          return res;
+        };
+      }
+    })();
 
     function readLocalWallet(){
       let coins = toNum(localStorage.getItem('izzaCoins'));
@@ -513,7 +502,6 @@ async function ensureCharacter(){
       if (!obj) return;
       let coins = toNum(obj.coins);
       let crafting = toNum(obj.crafting);
-      // Don't flash to 0 if LS isn't populated yet
       if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
       if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
       if (elCoins) elCoins.textContent = String(coins);
@@ -574,12 +562,9 @@ async function ensureCharacter(){
         // Paint whatever we have right away
         renderWallet(LAST_WALLET);
 
-        // Silent prime from City to capture latest LS, then repaint (only if local is empty)
-        if (!hasLocalWallet()){
-          try{ await primeFromCity(); renderWallet(readLocalWallet()); }catch(_){}
-        }
+        // NOTE: we intentionally DO NOT primeFromCity() on cold load anymore
 
-        // Draw avatar (after prime so equipment colors are current)
+        // Draw avatar
         await buildAvatarCanvas(actx,96,profile);
 
         // Place avatar nicely
@@ -608,7 +593,7 @@ async function ensureCharacter(){
               localStorage.setItem('izzaCoins', String(toNum(parsed.coins)));
               writeCraftAll(toNum(parsed.crafting)); // mirror all crafting keys
 
-              // NEW: immediately tell izza-persist (and anyone listening) that values changed
+              // tell izza-persist (and anyone listening) that values changed
               window.dispatchEvent(new Event('izza-coins-changed'));
               window.dispatchEvent(new Event('izza-crafting-changed'));
             }catch(_){}
@@ -628,7 +613,7 @@ async function ensureCharacter(){
         window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
         window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
 
-        // When coming back from City/tab, re-prime quickly and repaint (only if local is empty)
+        // When coming back from City/tab: optionally re-prime if local is empty
         document.addEventListener('visibilitychange', async ()=>{
           if (!document.hidden){
             if (!hasLocalWallet()){
