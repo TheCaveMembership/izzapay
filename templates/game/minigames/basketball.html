@@ -572,19 +572,50 @@
     }
 
     /* === Wallet === */
+    let walletDirty = false;
+    let hasLoadedSnapshot = false;
+
+    function readCoinsLS(){
+      return parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
+    }
+    function syncCoinsHUD(){
+      // Show current wallet on HUD when not in the middle of showing "run coins" updates
+      // (This keeps first-load after refresh correct; scoreShot still updates run display.)
+      if (!game.launched && game.coins === 0){
+        coinsRunEl.textContent = String(readCoinsLS());
+      }
+    }
+
     async function applyCoins(amount){
       const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (amount|0);
       localStorage.setItem('izzaCoins', String(cur));
+      walletDirty = true;
       try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); } }catch(_){}
-      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
+      try{
+        if (window.IZZA_PERSIST?.save){
+          await IZZA_PERSIST.save();  // push immediately
+          walletDirty = false;
+        }
+      }catch(_){}
+      try{
+        window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } }));
+      }catch(_){}
       return cur;
     }
+
     async function applyCraftDelta(delta){
       const val = readCraftAny() + (delta|0);
       writeCraftAll(val);
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); } }catch(_){}
-      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: parseInt(localStorage.getItem('izzaCoins')||'0',10)|0, crafting:val } })); }catch(_){}
+      walletDirty = true;
+      try{
+        if (window.IZZA_PERSIST?.save){
+          await IZZA_PERSIST.save();
+          walletDirty = false;
+        }
+      }catch(_){}
+      try{
+        window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } }));
+      }catch(_){}
     }
 
     async function scoreShot(swish){
@@ -607,7 +638,7 @@
 
       scoreEl.textContent = game.score;
       streakEl.textContent = game.goals;
-      coinsRunEl.textContent = game.coins;
+      coinsRunEl.textContent = game.coins; // keep this as "coins earned this run"
 
       setTimeout(resetBall, 260);
     }
@@ -626,8 +657,10 @@
         writeCraftAll(readCraftAny());
         if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
           await IZZA_PERSIST.save();
+          walletDirty = false;
         } else if (typeof window._izzaForceSave === 'function') {
           window._izzaForceSave();
+          walletDirty = false;
         }
       }catch(_){}
     }
@@ -652,7 +685,7 @@
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
         try{
-          await persistWalletAndSave();
+          await persistWalletAndSave(); // ensure server has latest wallet
         }catch(_){}
         location.href = href;
       }, {passive:false});
@@ -662,13 +695,35 @@
     interceptNav(document.getElementById('backBtn'));
     interceptNav(document.getElementById('againBtn'));
 
-    /* ---------------- Boot ---------------- */
+    /* ---------------- Boot & lifecycle ---------------- */
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
     window.addEventListener('resize', onResize, {passive:true});
+
+    // Keep HUD coins correct when other tabs or the City change the wallet
+    window.addEventListener('storage', (e)=>{
+      if (e && e.key === 'izzaCoins') syncCoinsHUD();
+    });
+    window.addEventListener('izza-coins-changed', syncCoinsHUD);
+    window.addEventListener('izza-wallet-changed', syncCoinsHUD);
+
     document.addEventListener('visibilitychange', async () => {
       lastT = performance.now();
-      if (!document.hidden){
-        try{ await hydrateFromSnapshot(); await persistWalletAndSave(); }catch(_){}
+      if (document.hidden){
+        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
+      } else {
+        if (!hasLoadedSnapshot && !walletDirty){
+          try{ await hydrateFromSnapshot(); hasLoadedSnapshot = true; }catch(_){}
+        } else if (walletDirty){
+          try{ await persistWalletAndSave(); }catch(_){}
+        }
+        syncCoinsHUD();
+      }
+    });
+
+    // Use pagehide for reliable mobile/iOS backgrounding
+    window.addEventListener('pagehide', () => {
+      if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+        try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
       }
     });
 
@@ -679,6 +734,10 @@
       }catch(e){ if(String(e.message)==='redirecting') return; }
 
       await hydrateFromSnapshot();
+      hasLoadedSnapshot = true;
+
+      // Show hydrated wallet immediately on first load after refresh
+      syncCoinsHUD();
 
       // Build avatar using Arena/Mini-Game painter (proper tints)
       try{
