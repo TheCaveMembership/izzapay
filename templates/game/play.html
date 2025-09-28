@@ -481,7 +481,6 @@
 
   <!-- ===== LOAD ORDER ===== -->
   <script src="/static/game/js/izza_core_v3.js?v=12"></script>
-  <script src="/static/game/js/izza_core_v3_credits_hotfix.js?v=1"></script>
   <script src="/static/game/js/plugins/v_chasing.js"></script>
   <script src="/static/game/js/plugins/izza-userkey-and-migration.plugin.js"></script>
   <script src="/static/game/js/plugins/izza-ls-wrapper.plugin.js"></script>
@@ -524,6 +523,10 @@
   <script src="/static/game/js/plugins/day_night_lighting.plugin.js"></script>
 <script src="/static/game/js/plugins/seasonal_decals.plugin.js"></script>
   <script src="/static/game/js/plugins/crafting/crafting_ui.js"></script>
+
+  <!-- Hydrate plugins run AFTER map expander -->
+  <script src="/static/game/js/plugins/izza-hydrate-core-save.plugin.js"></script>
+  <script src="/static/game/js/plugins/izza-hydrate-bank-and-inventory.plugin.js" defer></script>
 
   <!-- Store + extras -->
   <script src="/static/game/js/plugins/v0_ui_icon_fallbacks.js"></script>
