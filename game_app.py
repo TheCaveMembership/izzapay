@@ -568,7 +568,17 @@ def minigames_page():
         pass
 
     return render_template("game/minigames.html", coins=coins, crafting=crafting)
-
+# ---- Dynamic minigame loader ----
+@APP.route("/minigames/<name>")
+def minigame(name):
+    """
+    Serve a specific minigame HTML template from templates/game/minigames/<name>.html
+    Example: /izza-game/minigames/basketball → templates/game/minigames/basketball.html
+    """
+    try:
+        return render_template(f"game/minigames/{name}.html")
+    except Exception:
+        return "<h2>Mini-game not found</h2>", 404
 
 # ---- JSON: character (used by arena/minigames page boot) ----
 @APP.get("/api/character")
