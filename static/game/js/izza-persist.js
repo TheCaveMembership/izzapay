@@ -92,32 +92,31 @@
 
   // ---------- snapshot builder ----------
   function buildSnapshot(){
-    const u      = userKey();
-    const bank   = readBank(u);
-    const inv    = readInventory();
-    const onHand = readCoinsOnHand();
-    const pos    = readPlayerXY();
-    const heartsSegs = readHeartsSegs();
-    const missions   = readMissions();
-    const missionState = IZZA?.api?.getMissionState
-      ? IZZA.api.getMissionState()
-      : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
+  const u      = userKey();
+  const bank   = readBank(u);
+  const inv    = readInventory();
+  const onHand = readCoinsOnHand();
+  const pos    = readPlayerXY();
+  const heartsSegs = readHeartsSegs();
+  const missions   = readMissions();
+  const missionState = IZZA?.api?.getMissionState
+    ? IZZA.api.getMissionState()
+    : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
 
-    return {
-      const craftingCredits = readCraftingCredits();
-return {
-  version: 1,
-  player: { x: pos.x|0, y: pos.y|0, heartsSegs },
-  coins: onHand|0,
-  missions: missions|0,
-  missionState: missionState || {},
-  inventory: inv || {},
-  bank: bank || { coins:0, items:{}, ammo:{} },
-  craftingCredits: craftingCredits|0,   // <— NEW
-  timestamp: Date.now()
-};
-  } // end buildSnapshot
+  const craftingCredits = readCraftingCredits();   // <-- move here
 
+  return {
+    version: 1,
+    player: { x: pos.x|0, y: pos.y|0, heartsSegs },
+    coins: onHand|0,
+    missions: missions|0,
+    missionState: missionState || {},
+    inventory: inv || {},
+    bank: bank || { coins:0, items:{}, ammo:{} },
+    craftingCredits: craftingCredits|0,            // <-- included
+    timestamp: Date.now()
+  };
+}
   // ---- hydrate missions from server + keep all counters in sync
   function applyServerMissions(seed){
     try{
