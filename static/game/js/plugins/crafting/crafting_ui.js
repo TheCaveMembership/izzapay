@@ -767,13 +767,19 @@ function __applyStatsToNewestCraft(){
 }
 
 /* Hook your existing mirror step — call right after you mirror the craft */
-const _origMirrorToMine = (typeof mirrorInjectedInventoryToMine==='function') ? mirrorInjectedInventoryToMine : null;
-if (_origMirrorToMine){
-  window.mirrorInjectedInventoryToMine = function(injected){
-    _origMirrorToMine(injected);
-    setTimeout(__applyStatsToNewestCraft, 0);
-  };
-}
+(function(){
+  const _origMirrorToMine = (typeof mirrorInjectedInventoryToMine==='function') ? mirrorInjectedInventoryToMine : null;
+  if (_origMirrorToMine){
+    window.mirrorInjectedInventoryToMine = function(injected){
+      // Always run the original first
+      _origMirrorToMine(injected);
+
+      // Then apply stat stamping and auto‐fire enforcement deterministically
+      setTimeout(__applyStatsToNewestCraft, 0);
+      __scheduleAutoEnforce();
+    };
+  }
+})();
 
 /* Credit badge helpers */
 function applyCreditState(n){
