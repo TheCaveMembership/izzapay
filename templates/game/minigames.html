@@ -365,6 +365,17 @@
           const href = cityBtn.getAttribute('href');
 
           try {
+            // ensure crafting is mirrored across all keys first
+            try { writeCraftAll(readCraftAny()); } catch(_){}
+            // seed a harmless non-empty value so snapshot isn't "empty" on cold start
+            try {
+              const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
+              if (!Number.isFinite(h) || h<=0) {
+                localStorage.setItem('izzaHearts','5');
+                window.dispatchEvent(new Event('izza-hearts-changed'));
+              }
+            } catch(_) {}
+
             if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
               await IZZA_PERSIST.save();
             } else if (typeof window._izzaForceSave === 'function') {
@@ -492,6 +503,13 @@
       return { coins:0, crafting:0 };
     }
 
+    // Treat local as source of truth if we already have anything
+    function hasLocalWallet(){
+      const w = readLocalWallet();
+      const inv = (localStorage.getItem('izzaInventory')||'').trim();
+      return (w.coins>0) || (w.crafting>0) || (inv && inv!=='{}');
+    }
+
     /* ====== Silent prime from IZZA City (hidden iframe, same-origin) ====== */
     function primeFromCity({ timeoutMs=2500 } = {}){
       return new Promise((resolve)=>{
@@ -528,8 +546,10 @@
         // Paint whatever we have right away
         renderWallet(LAST_WALLET);
 
-        // Silent prime from City to capture latest LS, then repaint
-        try{ await primeFromCity(); renderWallet(readLocalWallet()); }catch(_){}
+        // Silent prime from City to capture latest LS, then repaint (only if local is empty)
+        if (!hasLocalWallet()){
+          try{ await primeFromCity(); renderWallet(readLocalWallet()); }catch(_){}
+        }
 
         // Draw avatar (after prime so equipment colors are current)
         await buildAvatarCanvas(actx,96,profile);
@@ -580,10 +600,12 @@
         window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
         window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
 
-        // When coming back from City/tab, re-prime quickly and repaint
+        // When coming back from City/tab, re-prime quickly and repaint (only if local is empty)
         document.addEventListener('visibilitychange', async ()=>{
           if (!document.hidden){
-            try{ await primeFromCity({ timeoutMs:1200 }); }catch(_){}
+            if (!hasLocalWallet()){
+              try{ await primeFromCity({ timeoutMs:1200 }); }catch(_){}
+            }
             renderWallet(readLocalWallet());
           }
         }, { passive:true });
