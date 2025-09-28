@@ -383,7 +383,7 @@
     // start positions (ball near player)
     let game = {
       x:550, y:700, vx:0, vy:0, r:76,
-      gravity: 1700, drag: 0.996,
+      gravity: 2300, drag: 0.992,
       launched:false, dragging:false,
       score:0, goals:0, coins:0, timeLeft:60,
       hoopX:390, hoopY:300, distanceStep:0,
@@ -419,7 +419,7 @@
     (function wireAim(){
       const samples=[];
       const MAX_WINDOW_MS=150;
-      const POWER_SCALE=1.04;
+      const POWER_SCALE=0.94;
       const MIN_UP_VY=-520;
 
       let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
