@@ -192,21 +192,49 @@
       return headers;
     }
 
-    /* --- auth/character --- */
-    async function ensureCharacter(){
-      try{
-        const r = await fetch('/izza-game/api/character'+TQ, {
-          credentials:'include',
-          headers: bearerHeaders()
-        });
-        if(!r.ok) throw new Error('not-auth');
-        const j = await r.json();
-        if(j && j.hasCharacter) return j;
-      }catch(_){}
-      const next = encodeURIComponent(withT('/izza-game/minigames'));
-      location.replace('/izza-game/create?next='+next);
-      throw new Error('redirecting');
+    /* --- auth/character (admin-safe) --- */
+async function ensureCharacter(){
+  // quick local checks
+  const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
+  const isAdminLocal = (()=> {
+    try{
+      const role = (localStorage.getItem('izzaRole')||'').toLowerCase();
+      const user = (localStorage.getItem('izzaUser')||'').toLowerCase();
+      return role === 'admin' || user === 'cammac';
+    }catch(_){ return false; }
+  })();
+
+  try{
+    const r = await fetch('/izza-game/api/character'+TQ, {
+      credentials:'include',
+      headers: bearerHeaders()
+    });
+    if(r.ok){
+      const j = await r.json();
+      if (j && j.hasCharacter) return j;
+      // If the server knows we're admin, trust that too
+      if (j && (j.isAdmin || (j.user && j.user.isAdmin))) {
+        // prime from City to hydrate local wallet/credits and proceed
+        try{ await primeFromCity({ timeoutMs: 1200 }); }catch(_){}
+        return j; // allow boot to continue without touching /create
+      }
     }
+  }catch(_){ /* fall through */ }
+
+  // If we’re admin but the endpoint didn’t confirm a character,
+  // do NOT redirect to /create (that flow may reset wallet).
+  if (isAdminLocal) {
+    try{ await primeFromCity({ timeoutMs: 1200 }); }catch(_){}
+    // synthesize a minimal profile so downstream avatar build doesn’t break
+    const fallback = lsProfile && typeof lsProfile === 'object' ? lsProfile : { hasCharacter:true, body_type:'male', skin_tone:'light', sprite_skin:'default' };
+    return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
+  }
+
+  // Non-admin: keep existing behavior (redirect to create)
+  const next = encodeURIComponent(withT('/izza-game/minigames'));
+  location.replace('/izza-game/create?next='+next);
+  throw new Error('redirecting');
+}
 
     /* --- avatar assets (unchanged) --- */
     const SPRITES = {
