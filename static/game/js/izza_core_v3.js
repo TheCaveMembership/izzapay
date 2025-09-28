@@ -434,8 +434,20 @@ function _writeCreditsMap(map){
     try { if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') IZZA_PERSIST.save(); } catch {}
   } catch {}
 }
+// Replace the whole function
 function _currentUserKey(){
-  return (IZZA && IZZA.api && IZZA.api.user && IZZA.api.user.username) ? IZZA.api.user.username : 'guest';
+  try{
+    // mirror izza-persist userKey()
+    const p = (window.__IZZA_PROFILE__||{});
+    let u = (p.username || p.user || '').toString();
+    if(!u){
+      const raw = localStorage.getItem('piAuthUser');
+      if(raw){ try{ u=(JSON.parse(raw)||{}).username||''; }catch{} }
+    }
+    if(!u && window.izzaUserKey?.get) u = izzaUserKey.get();
+    if(!u) u='guest';
+    return u.toString().trim().replace(/^@+/,'').toLowerCase();
+  }catch{ return 'guest'; }
 }
 
 function getCraftingCredits(){
