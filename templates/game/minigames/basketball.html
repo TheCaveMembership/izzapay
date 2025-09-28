@@ -30,8 +30,9 @@
           padding:8px 14px;border-radius:999px;font-size:14px;font-weight:700;letter-spacing:.3px;display:flex;gap:8px;align-items:center}
     .pill strong{font-size:18px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-    .avatarBadge{width:42px;height:42px;border-radius:8px;overflow:hidden;border:1px solid var(--hudLine)}
-    .avatarCanvas{width:42px;height:42px;image-rendering:pixelated;display:block}
+    /* hide the HUD avatar; we place it under the ball instead */
+    .hud .avatarBadge{display:none}
+
     .aim{position:absolute;inset:0;z-index:3;touch-action:none}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
@@ -41,6 +42,11 @@
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
     .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
       background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
+
+    /* scene avatar placed under the ball start */
+    .avatarBadge{width:48px;height:48px;border-radius:8px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.15)}
+    .avatarCanvas{width:48px;height:48px;image-rendering:pixelated;display:block}
+    .avatarScene{position:absolute;z-index:4;pointer-events:none}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -58,12 +64,11 @@
           <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
         </div>
         <div class="right">
-          <div class="avatarBadge"><canvas id="avatarTiny" class="avatarCanvas" width="42" height="42"></canvas></div>
           <div class="pill">COINS: <strong id="coinsRun" class="arc">0</strong></div>
         </div>
       </div>
 
-      <!-- Scene SVG (sky, fence, floor, hoop, ball) -->
+      <!-- Scene SVG -->
       <svg id="court" class="aim" viewBox="0 0 1100 700" preserveAspectRatio="none" aria-label="Court">
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
@@ -88,39 +93,44 @@
         </g>
         <g><polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
            <polygon points="0,520 1100,520 1100,560 0,560" fill="#547fa8"/></g>
-        <!-- fence around court -->
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
-        <!-- hoop (closer & larger at start) -->
-        <g id="hoop" transform="translate(520, 310) scale(1)">
+        <!-- BIG, CLOSE hoop like your screenshot -->
+        <g id="hoop" transform="translate(480, 285) scale(1.25)">
           <rect x="90" y="-20" width="12" height="76" fill="#b7c7d8"/>
-          <rect x="40" y="-92" width="120" height="84" rx="8" ry="8" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="4" filter="url(#shadow)"/>
-          <rect x="66" y="-74" width="68" height="44" fill="none" stroke="#ff7a00" stroke-width="4"/>
-          <circle id="rim" cx="100" cy="-40" r="28" fill="none" stroke="#ff7a00" stroke-width="6"/>
-          <path d="M124 -38 q-10 40 -24 82 q-12 -42 -24 -82" stroke="rgba(255,255,255,.9)" stroke-width="2" fill="none"/>
+          <rect x="20" y="-110" width="160" height="108" rx="10" ry="10" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="5" filter="url(#shadow)"/>
+          <rect x="62" y="-78" width="76" height="52" fill="none" stroke="#ff7a00" stroke-width="5"/>
+          <circle id="rim" cx="100" cy="-40" r="30" fill="none" stroke="#ff7a00" stroke-width="7"/>
+          <path d="M126 -38 q-11 44 -26 88 q-13 -44 -26 -88" stroke="rgba(255,255,255,.9)" stroke-width="2.4" fill="none"/>
         </g>
 
-        <!-- court floor + lines -->
+        <!-- floor + target rings -->
         <g>
           <polygon points="100,560 1000,560 1100,700 0,700" fill="url(#wood)"/>
-          <ellipse cx="550" cy="560" rx="170" ry="24" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
-          <ellipse cx="550" cy="560" rx="110" ry="16" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
+          <ellipse cx="550" cy="560" rx="200" ry="28" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
+          <ellipse cx="550" cy="560" rx="138" ry="20" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
+          <line x1="550" y1="520" x2="550" y2="600" stroke="rgba(0,0,0,.4)" stroke-width="2"/>
         </g>
 
-        <!-- ball (bigger; no spin) -->
+        <!-- BIG ball like your screenshot -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
               <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
-          <circle id="ball" cx="550" cy="560" r="30" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="3"/>
-          <path d="M526 560 h48 M550 536 v48" stroke="#8a3b12" stroke-width="2"/>
+          <circle id="ball" cx="550" cy="560" r="82" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
+          <path d="M468 560 h164 M550 478 v164" stroke="#8a3b12" stroke-width="3"/>
         </g>
 
-        <!-- guide -->
+        <!-- dotted aim line -->
         <line id="aimLine" x1="550" y1="560" x2="650" y2="500" stroke="rgba(255,255,255,.6)" stroke-width="3" stroke-dasharray="8 8"/>
       </svg>
+
+      <!-- avatar under the ball -->
+      <div id="avatarScene" class="avatarBadge avatarScene">
+        <canvas id="avatarTiny" class="avatarCanvas" width="48" height="48"></canvas>
+      </div>
 
       <div id="bigmsg" class="bigmsg" aria-live="polite">GOAL!</div>
     </div>
@@ -152,7 +162,6 @@
       }
     }catch(_){}
     const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
-    // rewrite links (we’ll also intercept click below to save first)
     document.getElementById('backBtn').href=withT('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
 
@@ -223,7 +232,7 @@
       try{ writeCraftAll(readCraftAny()); }catch(_){}
     }
 
-    /* ---- wallet helpers (identical logic) ---- */
+    /* ---- wallet helpers ---- */
     const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){
       for(const k of CRAFT_KEYS){
@@ -270,10 +279,10 @@
       const body= await loadImg(SPRITES.body.default);
       const hair= await loadImg(SPRITES.hair.short);
       const outfit= await loadImg(SPRITES.outfit.street);
-      tinyCtx.clearRect(0,0,42,42);
-      if(body){ tinyCtx.drawImage(paletteSwap(body, SKIN_BASE, (SKIN_TO[tone]||SKIN_TO.light)), 0,0,42,42); }
-      if(outfit){ tinyCtx.drawImage(outfit, 0,0,42,42); }
-      if(hair){ tinyCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], (HAIR_TO[hairCol]||HAIR_TO.black)), 0,0,42,42); }
+      tinyCtx.clearRect(0,0,48,48);
+      if(body){ tinyCtx.drawImage(paletteSwap(body, SKIN_BASE, (SKIN_TO[tone]||SKIN_TO.light)), 0,0,48,48); }
+      if(outfit){ tinyCtx.drawImage(outfit, 0,0,48,48); }
+      if(hair){ tinyCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], (HAIR_TO[hairCol]||HAIR_TO.black)), 0,0,48,48); }
     }
 
     /* ---------------- Game (mechanics) ---------------- */
@@ -284,9 +293,10 @@
     const rim = document.getElementById('rim');
     const bigmsg = document.getElementById('bigmsg');
     const arenaEl = document.getElementById('arena');
+    const avatarScene = document.getElementById('avatarScene');
 
     const scoreEl = document.getElementById('score');
-    const streakEl = document.getElementById('streak'); // shows total goals
+    const streakEl = document.getElementById('streak'); // total goals
     const timeEl = document.getElementById('time');
     const coinsRunEl = document.getElementById('coinsRun');
 
@@ -294,24 +304,32 @@
     const toXY = (cx,cy) => ({x: cx/1100*W, y: cy/700*H});
 
     let game = {
-      x:550, y:560, vx:0, vy:0, r:30,
+      x:550, y:560, vx:0, vy:0, r:82,
       gravity: 1500, drag: 0.995,
       launched:false, canShoot:true,
       score:0, goals:0, coins:0, timeLeft:60,
-      hoopX:520, hoopY:310, distanceStep:0,
+      hoopX:480, hoopY:285, distanceStep:0,
       timerId:null, ended:false,
       creditsEarned:0
     };
 
     function setHoopDistance(step){
       game.distanceStep = step;
-      const s = Math.max(0.6, 1 - step*0.07);
+      const s = Math.max(0.6, 1.25 - step*0.07);
       const y = game.hoopY - step*26;
       hoop.setAttribute('transform', `translate(${game.hoopX}, ${y}) scale(${s})`);
     }
-    function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
+    function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); positionAvatarUnderBall(); }
     function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
+
+    function positionAvatarUnderBall(){
+      // place centered under ball, slightly below its bottom
+      const px = toXY(game.x, game.y).x;
+      const py = toXY(game.x, game.y).y + game.r + 10;
+      avatarScene.style.left = (px - 24) + 'px';
+      avatarScene.style.top  = (py - 24) + 'px';
+    }
 
     function resetBall(){
       if(game.ended) return;
@@ -319,6 +337,7 @@
       setBall(game.x, game.y);
       aimLine.setAttribute('x1',game.x); aimLine.setAttribute('y1',game.y);
       aimLine.setAttribute('x2',game.x+90); aimLine.setAttribute('y2',game.y-70);
+      positionAvatarUnderBall();
     }
 
     function physics(dt){
@@ -357,45 +376,48 @@
       }
     }
 
-    /* === SCORING RULES ===
-       - Every made basket: +200 coins (also +200 to SCORE)
-       - Every 10 goals within the 60s run: +1 Craft Credit (awarded at 10, 20, …)
-    */
-    function scoreShot(swish){
-      const coinsPerGoal = 200;
+    /* === +200 coins per goal; +1 craft credit every 10 goals === */
+    async function scoreShot(swish){
+      const COINS_PER_GOAL = 200;
 
-      game.score += coinsPerGoal;
+      game.score += COINS_PER_GOAL;
       game.goals += 1;
-      game.coins += coinsPerGoal;
+      game.coins += COINS_PER_GOAL;
 
-      // live HUD
-      scoreEl.textContent = game.score;
-      streakEl.textContent = game.goals;
-      coinsRunEl.textContent = game.coins;
+      // Update wallet immediately (persist now so "Back" keeps progress)
+      const curCoins = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + COINS_PER_GOAL;
+      localStorage.setItem('izzaCoins', String(curCoins));
+      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
 
       // craft credit each 10th goal
       const creditsNow = Math.floor(game.goals / 10);
       if (creditsNow > game.creditsEarned){
         game.creditsEarned = creditsNow;
+        writeCraftAll(readCraftAny()+1);
         showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
       } else {
         showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
       }
 
-      // make the hoop drift back every 3 goals to add difficulty
+      // HUD
+      scoreEl.textContent = game.score;
+      streakEl.textContent = game.goals;
+      coinsRunEl.textContent = game.coins;
+
+      // difficulty ramp
       if(game.goals % 3 === 0) setHoopDistance(Math.min(7, game.distanceStep+1));
+
+      // persist snapshot right away
+      try{
+        if (window.IZZA_PERSIST?.save) { await IZZA_PERSIST.save(); }
+      }catch(_){}
 
       setTimeout(resetBall, 260);
     }
 
-    /* === Pokémon-style drag-back then flick-forward === */
+    /* === Drag-back then flick-forward aiming === */
     (function wireAim(){
-      const samples=[];                  // recent pointer samples {x,y,t}
-      const MAX_WINDOW_MS=140;           // last ~140ms defines release velocity
-      const MIN_PATH_PX=40;              // reject tiny taps
-      const POWER_SCALE=1.05;            // scale motion → initial velocity
-      const MIN_UP_VY=-450;              // must be moving upward at least this fast
-
+      const samples=[]; const MAX_WINDOW_MS=140; const MIN_PATH_PX=40; const POWER_SCALE=1.05; const MIN_UP_VY=-450;
       let dragging=false, startRect=null, startFirst=null;
 
       function addSample(pt){
@@ -418,21 +440,13 @@
         addSample(pt);
       };
 
-      const move = (e)=>{
-        if(!dragging) return;
-        addSample(e.touches?e.touches[0]:e);
-      };
+      const move = (e)=>{ if(!dragging) return; addSample(e.touches?e.touches[0]:e); };
 
       const end = (e)=>{
         if(!dragging) return; dragging=false;
         const now=performance.now();
         while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
         if(samples.length<2) return;
-
-        const firstTotal=startFirst;
-        const last=samples[samples.length-1];
-        const pathLen=Math.hypot(last.x-firstTotal.x,last.y-firstTotal.y);
-        if(pathLen<MIN_PATH_PX) return;
 
         const a=samples[0], b=samples[samples.length-1];
         const dt=Math.max(1,b.t-a.t)/1000;
@@ -487,35 +501,28 @@
       if (game.ended) return;
       game.ended = true;
 
-      const craftEarn = Math.max(0, game.creditsEarned|0); // 1 per 10 goals
-      const coinsNew  = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + game.coins;
-      const craftNew  = (readCraftAny()|0) + craftEarn;
+      // coins already applied per goal; don't add again
+      const coinsLS = parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
 
-      localStorage.setItem('izzaCoins', String(coinsNew));
-      writeCraftAll(craftNew);
-
-      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-      try{ window.dispatchEvent(new Event('izza-wallet-changed'), { detail:{ coins:coinsNew, crafting:craftNew } }); }catch(_){}
+      // credits already incremented at each 10th goal; just read
+      const craftLS = readCraftAny()|0;
 
       await persistWalletAndSave();
 
       document.getElementById('finalScore').textContent = game.score;
       document.getElementById('finalCoins').textContent = game.coins;
-      document.getElementById('finalCraft').textContent = craftEarn;
+      document.getElementById('finalCraft').textContent = (craftLS - (readCraftAny()-0)) || game.creditsEarned; // show run credits
       document.getElementById('finish').style.display = 'flex';
       showMsg('Time!', 'miss');
     }
 
-    /* ---------------- wire nav like Arena (hydrate→save→go) ---------------- */
+    /* ---------------- nav (hydrate→save→go) ---------------- */
     function interceptNav(a){
       if(!a) return;
       a.addEventListener('click', async (ev)=>{
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
-        try{
-          await hydrateFromSnapshot();          // pull latest snapshot before saving deltas
-          await persistWalletAndSave();         // push our game deltas
-        }catch(_){}
+        try{ await hydrateFromSnapshot(); await persistWalletAndSave(); }catch(_){}
         location.href = href;
       }, {passive:false});
     }
@@ -524,10 +531,13 @@
     interceptNav(document.getElementById('backBtn'));
     interceptNav(document.getElementById('againBtn'));
 
-    /* ---------------- Boot (mirrors Arena order) ---------------- */
-    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
+    /* ---------------- Boot ---------------- */
+    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarUnderBall(); }
     window.addEventListener('resize', onResize, {passive:true});
-    document.addEventListener('visibilitychange', () => { lastT = performance.now(); });
+    document.addEventListener('visibilitychange', async () => {
+      lastT = performance.now();
+      if (!document.hidden){ try{ await hydrateFromSnapshot(); if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){ } }
+    });
 
     (async function boot(){
       try{
