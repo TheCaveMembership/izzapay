@@ -36,7 +36,7 @@
     .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
 
-    .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%} /* ensure full coverage */
+    .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
             pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
@@ -67,7 +67,7 @@
       </div>
 
       <!-- Scene SVG -->
-      <svg id="court" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="none" aria-label="Court">
+      <svg id="court" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Court">
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#8bd1ff"/><stop offset="100%" stop-color="#bfe6ff"/>
@@ -366,7 +366,18 @@
     const coinsRunEl = document.getElementById('coinsRun');
 
     let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
-    const toXY = (cx,cy) => ({x: cx/1100*W, y: cy/760*H});
+
+    // UPDATED: viewBox -> CSS px mapping for `xMidYMid slice`
+    function toXY(cx, cy){
+      const vbW = 1100, vbH = 760;
+      const scale = H / vbH;               // height fits exactly with slice
+      const drawnW = vbW * scale;          // scaled width
+      const leftCrop = Math.max(0, (drawnW - W) / 2); // pixels cropped off left
+      return {
+        x: cx * scale - leftCrop,
+        y: cy * scale
+      };
+    }
 
     // start positions (ball near player)
     let game = {
@@ -391,7 +402,6 @@
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
 
     function positionAvatarFixed(){
-      // pixel-accurate anchor from bottom so it always sits on the court
       const bottomOffset = 84; // px from bottom of arena
       const left = (W/2) - 27;
       const top  = H - bottomOffset - 54; // 54px avatar height
@@ -500,7 +510,7 @@
       game.vx *= game.drag; game.vy *= game.drag;
       game.x += game.vx*dt; game.y += game.vy*dt;
 
-      // side walls
+      // side walls (in viewBox coords)
       if(game.x < 110){ game.x=110; game.vx*=-0.6; }
       if(game.x > 990){ game.x=990; game.vx*=-0.6; }
 
