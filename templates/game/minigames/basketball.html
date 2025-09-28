@@ -24,23 +24,19 @@
     .btn:hover{filter:brightness(1.06)}
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#79c0ff;overflow:hidden}
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:8px;z-index:6;padding-right:12px;flex-wrap:wrap}
-    .hud .left,.hud .right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:6px;z-index:6;padding-right:12px;flex-wrap:nowrap}
+    .hud .left,.hud .right{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:8px 14px;border-radius:999px;font-size:14px;font-weight:700;letter-spacing:.3px;display:flex;gap:8px;align-items:center}
-    .pill strong{font-size:18px}
+          padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.3px;display:flex;gap:6px;align-items:center;white-space:nowrap}
+    .pill strong{font-size:15px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-    @media (max-width: 420px){
-      .pill{padding:6px 10px;font-size:13px}
-      .pill strong{font-size:16px}
-    }
 
     /* avatar shown in scene (under ball start) */
     .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
     .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
 
-    .aim{position:absolute;inset:0;z-index:3;touch-action:none}
+    .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%} /* ensure full coverage */
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
             pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
@@ -102,7 +98,7 @@
         </g>
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
-        <!-- BIG/close hoop (slightly larger/closer) -->
+        <!-- Hoop (close) -->
         <g id="hoop" transform="translate(460, 300) scale(1.6)">
           <rect x="90" y="-20" width="12" height="86" fill="#b7c7d8"/>
           <rect x="8"  y="-126" width="184" height="122" rx="12" ry="12" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="6" filter="url(#shadow)"/>
@@ -111,25 +107,23 @@
           <path d="M132 -36 q-12 52 -28 104 q-14 -52 -28 -104" stroke="rgba(255,255,255,.9)" stroke-width="2.8" fill="none"/>
         </g>
 
-        <!-- Extended court to the bottom (no more hidden under blue) -->
+        <!-- Floor: guarantee full bottom coverage -->
         <g>
-          <!-- ensure solid fill from mid-screen to bottom -->
-          <rect x="0" y="520" width="1100" height="240" fill="url(#wood)"/>
-          <!-- perspective wedge & lines -->
-          <polygon points="70,570 1030,570 1100,760 0,760" fill="url(#wood)"/>
+          <rect x="0" y="520" width="1100" height="240" fill="url(#wood)"/>  <!-- solid base -->
+          <polygon points="70,560 1030,560 1100,760 0,760" fill="url(#wood)"/> <!-- perspective wedge -->
           <ellipse cx="550" cy="640" rx="260" ry="36" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
           <ellipse cx="550" cy="640" rx="180" ry="26" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
-        <!-- Ball starts lower/near avatar -->
+        <!-- Ball starts in front of avatar -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
               <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
-          <circle id="ball" cx="550" cy="690" r="92" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
-          <path d="M458 690 h184 M550 598 v184" stroke="#8a3b12" stroke-width="3"/>
+          <circle id="ball" cx="550" cy="700" r="92" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
+          <path d="M458 700 h184 M550 608 v184" stroke="#8a3b12" stroke-width="3"/>
         </g>
       </svg>
 
@@ -168,7 +162,6 @@
       }
     }catch(_){}
     const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
-    // rewrite links AND intercept clicks to save before nav
     document.getElementById('backBtn').href=withT('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
 
@@ -377,7 +370,7 @@
 
     // start positions (ball near player)
     let game = {
-      x:550, y:690, vx:0, vy:0, r:92,
+      x:550, y:700, vx:0, vy:0, r:92,
       gravity: 1700, drag: 0.996,
       launched:false, dragging:false,
       score:0, goals:0, coins:0, timeLeft:60,
@@ -398,17 +391,17 @@
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
 
     function positionAvatarFixed(){
-      // fixed under the start position, clamped inside the arena
-      const pt = toXY(550, 690 + game.r + 10);
-      const x = pt.x - 27;
-      const y = Math.min(pt.y - 27, H - 86); // keep fully visible above bottom
-      avatarScene.style.left = x + 'px';
-      avatarScene.style.top  = Math.max(12, y) + 'px';
+      // pixel-accurate anchor from bottom so it always sits on the court
+      const bottomOffset = 84; // px from bottom of arena
+      const left = (W/2) - 27;
+      const top  = H - bottomOffset - 54; // 54px avatar height
+      avatarScene.style.left = Math.max(8, left) + 'px';
+      avatarScene.style.top  = Math.max(12, top) + 'px';
     }
 
     function resetBall(){
       if(game.ended) return;
-      Object.assign(game, { x:550, y:690, vx:0, vy:0, launched:false, dragging:false, spin:0 });
+      Object.assign(game, { x:550, y:700, vx:0, vy:0, launched:false, dragging:false, spin:0 });
       setBall(game.x, game.y);
     }
 
@@ -432,7 +425,7 @@
           const dx=x - startPos.x, dy=y - startPos.y;
           const pullMax=220; const d=Math.hypot(dx,dy);
           const k=d>pullMax ? pullMax/d : 1;
-          setBall(game.x = 550 + dx*k*0.9, game.y = 690 + dy*k*0.9);
+          setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
 
           const ang = Math.atan2(dy,dx);
           if(lastAngle!=null){
@@ -511,7 +504,7 @@
       if(game.x < 110){ game.x=110; game.vx*=-0.6; }
       if(game.x > 990){ game.x=990; game.vx*=-0.6; }
 
-      const floorY = toXY(0,700).y;
+      const floorY = toXY(0,720).y;
       if(game.y>floorY){
         game.y=floorY; game.vy=0; game.vx=0; game.launched=false;
         setTimeout(resetBall, 320);
@@ -530,7 +523,7 @@
       const rRing = rimPt.width/2;
       const d = Math.hypot(bx-rx, by-ry);
 
-      // slightly easier make: small positive fudge
+      // slightly easier make
       const fudge = rRing * 0.18;
       if(!game._scored && d < (rRing + fudge) && game.vy>0){
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
@@ -540,7 +533,7 @@
       }
     }
 
-    /* === Wallet: +200 per goal; +1 craft credit every 10 goals === */
+    /* === Wallet === */
     async function applyCoins(amount){
       const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (amount|0);
       localStorage.setItem('izzaCoins', String(cur));
@@ -615,7 +608,7 @@
       showMsg('Time!', 'miss');
     }
 
-    /* ---------------- Nav: SAVE FIRST → then navigate ---------------- */
+    /* ---------------- Nav ---------------- */
     function interceptNav(a){
       if(!a) return;
       a.addEventListener('click', async (ev)=>{
