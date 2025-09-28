@@ -921,13 +921,7 @@ function mirrorInjectedInventoryToMine(injected){
     console.warn('[craft] mirrorInjectedInventoryToMine failed', e);
   }
 }
-if (_origMirrorToMine){
-  window.mirrorInjectedInventoryToMine = function(injected){
-    _origMirrorToMine(injected);
-    setTimeout(__applyStatsToNewestCraft, 0);
-    __scheduleAutoEnforce(); // <-- add this line
-  };
-}
+
 /* --- UI helpers for AI wait state --- */
 const MIN_AI_WAIT_MS = 10_000;
 const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
