@@ -389,7 +389,8 @@
       hoopX:390, hoopY:300, distanceStep:0,
       timerId:null, ended:false,
       creditsEarned:0,
-      spin:0, spinDecay:0.985
+      spin:0, spinDecay:0.985,
+      noMissUntil: 0
     };
 
     // keep hoop fixed (no scaling or distance changes during run)
@@ -401,8 +402,7 @@
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
 
     function positionAvatarFixed(){
-      /* move down so feet sit at bottom of the cross */
-      const bottomOffset = 68; /* was 84 */
+      const bottomOffset = 68;
       const left = (W/2) - 27;
       const top  = H - bottomOffset - 54; // 54px avatar height
       avatarScene.style.left = Math.max(8, left) + 'px';
@@ -427,12 +427,12 @@
       function addSample(pt){
         const now=performance.now();
         const x=pt.clientX - startRect.left;
-        theY=pt.clientY - startRect.top;
-        samples.push({x,y:theY,t:now});
+        const y=pt.clientY - startRect.top;
+        samples.push({x,y,t:now});
         while(samples.length && now - samples[0].t > 260) samples.shift();
 
         if(game.dragging && !game.launched){
-          const dx=x - startPos.x, dy=theY - startPos.y;
+          const dx=x - startPos.x, dy=y - startPos.y;
           const pullMax=220; const d=Math.hypot(dx,dy);
           const k=d>pullMax ? pullMax/d : 1;
           setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
@@ -479,7 +479,6 @@
         game.vx=vx*POWER_SCALE;
         game.vy=vy*POWER_SCALE;
 
-        // Only allow curve if spin is CLEARLY intentional
         const SPIN_THRESHOLD = 0.60; // ~34°
         game.spin = (Math.abs(spinAccum) > SPIN_THRESHOLD) ? spinAccum : 0;
 
@@ -494,8 +493,9 @@
       svg.addEventListener('touchend', end, {passive:true});
     })();
 
-    // simple top limit in viewBox units
-    const TOP_OUT = -120;
+    // Allow higher arcs before calling a top-out miss
+    const TOP_OUT = -240;     // was -120 (more negative = allow higher travel)
+    const MISS_BAND_PX = 120; // was 40 (allow deeper drop before miss)
 
     function physics(dt){
       if(!game.launched || game.ended) return;
@@ -503,7 +503,7 @@
       // gravity & drag
       game.vy += game.gravity*dt;
 
-      // curve ONLY when user applied spin; decay over time
+      // intentional curve
       if(Math.abs(game.spin) > 0.001){
         const side = Math.max(-900, Math.min(900, game.spin*260));
         game.vx += (side * dt);
@@ -518,7 +518,7 @@
       if(game.x > 990){ game.x=990; game.vx*=-0.6; }
 
       // if flicked way off the top, count as miss and reset fast
-      if(game.y < TOP_OUT){
+      if(game.y < TOP_OUT && performance.now() > game.noMissUntil){
         quickMiss();
         return;
       }
@@ -543,7 +543,6 @@
       const rRing = rimPt.width/2;
       const d = Math.hypot(bx-rx, by-ry);
 
-      // slightly easier make
       const fudge = rRing * 0.18;
 
       // Score check (while moving downward)
@@ -551,20 +550,22 @@
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
         scoreShot(swish);
         game._scored = true;
+        // block any MISS for a short window after score so UI never shows both
+        game.noMissUntil = performance.now() + 350;
         setTimeout(()=>{ game._scored=false; }, 300);
         return;
       }
 
-      // Fast MISS: ball has fallen below the rim area and is moving down → reset quick
-      // use viewBox Y for threshold; rim is at cy ~ (300 + (-38))*1.6 relative to group, but
-      // we can use screen coords already computed above.
-      const missBandPx = 40; // allows a little grace under the rim
-      if(game.launched && game.vy>0 && by > (ry + missBandPx)){
-        quickMiss();
+      // Fast MISS: ball has fallen well below the rim area and is moving down (but don't trigger during the no-miss window)
+      if(game.launched && !game._scored && game.vy>0 && performance.now() > game.noMissUntil){
+        if (by > (ry + MISS_BAND_PX)){
+          quickMiss();
+        }
       }
     }
 
     function quickMiss(){
+      if (game._scored || performance.now() < game.noMissUntil) return; // never show MISS over a recent score
       game.launched=false;
       showMsg('MISS!', 'miss');
       setTimeout(resetBall, 220);
@@ -652,7 +653,6 @@
         const href = withT(a.getAttribute('href') || '/izza-game/play');
         try{
           await persistWalletAndSave();
-          // avoid reloading snapshot here to prevent overwriting just-saved coins
         }catch(_){}
         location.href = href;
       }, {passive:false});
