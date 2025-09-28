@@ -59,6 +59,9 @@
       radial-gradient(circle at 70% 60%, rgba(255,255,255,.25) 1.5px, transparent 1.5px) 0 0/60px 60px}
 
     @media (pointer:fine){ body{ cursor:none; } a, button{ cursor:none; } }
+
+    /* --- FIRST PAINT GATE: dim values until hydrated --- */
+    .val[data-loading="1"]{ opacity:.35 }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -70,8 +73,8 @@
           <span class="muted">Mini Game Arena</span>
         </div>
         <div class="wallet">
-          <span class="pill">IZZA Coins: <strong id="coins">{{ coins|default(0) }}</strong></span>
-          <span class="pill">Craft Credits: <strong id="craft">{{ crafting|default(0) }}</strong></span>
+          <span class="pill">IZZA Coins: <strong id="coins" class="val" data-loading="1">{{ coins|default(0) }}</strong></span>
+          <span class="pill">Craft Credits: <strong id="craft" class="val" data-loading="1">{{ crafting|default(0) }}</strong></span>
           <a class="btn" id="enterCityBtn" href="/izza-game/play">Enter IZZA City</a>
         </div>
       </div>
@@ -434,12 +437,28 @@
     // One-time normalize on load (keeps City & Arena perfectly in sync)
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
 
-    /* --- Wait for izza-persist to be ready (new) --- */
-    function waitForPersistReady({timeout=1500, interval=40} = {}){
+    /* --- Wait for izza-persist to be ready; wrap .load to emit an event --- */
+    function waitForPersistReady({timeout=3000, interval=40} = {}){
       return new Promise((res)=> {
+        let wrapped = false;
         const t0 = performance.now();
+        const wrapIfPossible = () => {
+          try{
+            if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function' && !wrapped){
+              wrapped = true;
+              const origLoad = IZZA_PERSIST.load.bind(IZZA_PERSIST);
+              IZZA_PERSIST.load = async function(...args){
+                const r = await origLoad(...args);
+                try{ window.dispatchEvent(new Event('izza-persist-loaded')); }catch(_){}
+                return r;
+              };
+              return true;
+            }
+          }catch(_){}
+          return false;
+        };
         const check = () => {
-          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+          if (wrapIfPossible()) return res(true);
           if (performance.now() - t0 > timeout) return res(false);
           setTimeout(check, interval);
         };
@@ -454,7 +473,7 @@
     /* ---- Load snapshot on every Arena entry ---- */
     async function hydrateFromSnapshot(){
       try{
-        await waitForPersistReady(); /* new */
+        await waitForPersistReady();
         if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
           await IZZA_PERSIST.load(); // pulls server snapshot -> localStorage
         }
@@ -535,11 +554,13 @@
       if (!obj) return;
       let coins = Number(obj.coins)||0;
       let crafting = Number(obj.crafting)||0;
+
       // Don't flash to 0 if LS isn't populated yet
       if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
       if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
-      if (elCoins) elCoins.textContent = String(coins);
-      if (elCraft) elCraft.textContent = String(crafting);
+
+      if (elCoins) { elCoins.textContent = String(coins); elCoins.removeAttribute('data-loading'); }
+      if (elCraft) { elCraft.textContent = String(crafting); elCraft.removeAttribute('data-loading'); }
       LAST_WALLET = { coins, crafting };
     }
 
@@ -553,7 +574,7 @@
       return { coins:0, crafting:0 };
     }
 
-        /* ====== Boot ====== */
+    /* ====== Boot ====== */
     (async function boot(){
       try{
         const profile = await ensureCharacter();  // redirects if missing
@@ -562,8 +583,17 @@
         // 1) Always hydrate snapshot on Arena entry so cold opens are correct
         await hydrateFromSnapshot();
 
+        // 1b) Extra insurance: repaint once the persist layer itself signals done
+        window.addEventListener('izza-persist-loaded', ()=> {
+          renderWallet(readLocalWallet());
+        }, { once:true, passive:true });
+
         // 2) Paint with whatever we have now (fresh from LS)
         renderWallet(readLocalWallet());
+
+        // 2b) Cover late writes: two staged repaints
+        requestAnimationFrame(()=> renderWallet(readLocalWallet()));
+        setTimeout(()=> renderWallet(readLocalWallet()), 200);
 
         // 3) Draw avatar
         await buildAvatarCanvas(actx,96,profile);
@@ -613,7 +643,7 @@
         window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
         window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
 
-        // When coming back from City/tab, just repaint from LS (no iframe priming)
+        // When coming back from City/tab, re-hydrate & repaint
         document.addEventListener('visibilitychange', async ()=>{
           if (!document.hidden){
             try{ await hydrateFromSnapshot(); }catch(_){}
