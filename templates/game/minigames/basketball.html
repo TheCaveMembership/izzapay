@@ -27,7 +27,9 @@
       linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.4)),
       repeating-linear-gradient(90deg, rgba(255,255,255,.07) 0 12px, transparent 12px 24px)}
     .avatar{position:absolute;left:18px;bottom:140px; width:112px;height:112px; image-rendering:pixelated}
-    .aim{position:absolute; pointer-events:none; z-index:3}
+    /* allow input on the SVG */
+    .aim{position:absolute; z-index:3}
+    #court{ touch-action:none; }
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:700;letter-spacing:.5px;font-size:42px;opacity:.0;transition:opacity .2s, transform .2s;pointer-events:none;text-shadow:0 8px 30px rgba(0,0,0,.65)}
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.02)}
     .scoreGlow{color:var(--ok)}
@@ -56,7 +58,7 @@
       <canvas class="avatar" id="avatar" width="112" height="112"></canvas>
 
       <!-- SVG Court -->
-      <svg id="court" class="aim" width="100%" height="100%" viewBox="0 0 1100 700" preserveAspectRatio="none">
+      <svg id="court" class="aim" width="100%" height="100%" viewBox="0 0 1100 700" preserveAspectRatio="none" aria-label="Court">
         <!-- backboard + rim (group moves back as difficulty) -->
         <g id="hoop" transform="translate(760, 340)">
           <rect x="-6" y="-90" width="12" height="180" fill="rgba(255,255,255,.14)"/>
@@ -78,7 +80,7 @@
         <line id="aimLine" x1="120" y1="420" x2="220" y2="360" stroke="rgba(255,255,255,.35)" stroke-width="2" stroke-dasharray="6 6"/>
       </svg>
 
-      <div id="bigmsg" class="bigmsg">SWISH!</div>
+      <div id="bigmsg" class="bigmsg" aria-live="polite">SWISH!</div>
 
       <div class="floor"></div>
     </div>
@@ -97,51 +99,165 @@
     /* --------- carry t param --------- */
     const T_KEY='izzaTokenT';
     let T=new URLSearchParams(location.search).get('t')||'';
-    try{ if(T){localStorage.setItem(T_KEY,T);} else {const s=localStorage.getItem(T_KEY)||''; if(s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }}}catch(_){}
+    try{
+      if(T){ localStorage.setItem(T_KEY,T); }
+      else{
+        const s=localStorage.getItem(T_KEY)||'';
+        if(s){
+          const url=new URL(location.href);
+          url.searchParams.set('t',s);
+          history.replaceState(null,'',url.toString());
+          T=s;
+        }
+      }
+    }catch(_){}
     const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
     document.getElementById('backBtn').href=withT('/izza-game/minigames');
-    document.querySelectorAll('#cityBtn,#cityBtn2').forEach(a=>a.href=withT('/izza-game/play'));
+    document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
+
+    /* --------- Persist hydrate (so avatar reads the latest LS) --------- */
+    function waitForPersistReady({timeout=3000, interval=40} = {}){
+      return new Promise((res)=>{
+        const t0=performance.now();
+        const check=()=>{
+          if(window.IZZA_PERSIST && typeof IZZA_PERSIST.load==='function') return res(true);
+          if(performance.now()-t0>timeout) return res(false);
+          setTimeout(check, interval);
+        };
+        if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', check, {once:true}); }
+        else{ check(); }
+      });
+    }
+    async function hydrateFromSnapshot(){
+      try{
+        await waitForPersistReady();
+        if(window.IZZA_PERSIST && typeof IZZA_PERSIST.load==='function'){ await IZZA_PERSIST.load(); }
+      }catch(_){}
+    }
 
     /* --------- Wallet helpers (mirror Arena) --------- */
     const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
     const readCraftAny=()=>{ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; };
     const writeCraftAll=(v)=>{ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){} };
 
-    /* --------- Build player avatar from stored profile --------- */
+    /* --------- Avatar renderer (same logic as Arena) --------- */
     const avatarCtx=document.getElementById('avatar').getContext('2d'); avatarCtx.imageSmoothingEnabled=false;
-    // minimal loader + palette swap used in Arena (trimmed)
+
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-    function paletteSwap(img, fromHex, toHex, tol=4000){
-      const from=fromHex.map(hexToRgb), to=toHex.map(hexToRgb);
-      const c=document.createElement('canvas'); c.width=img.width; c.height=img.height; const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
-      const d=g.getImageData(0,0,c.width,c.height); const p=d.data;
-      for(let i=0;i<p.length;i+=4){ if(p[i+3]===0) continue; const q={r:p[i],g:p[i+1],b:p[i+2]}; let k=-1,sc=1e9; for(let j=0;j<from.length;j++){ const s=dist2(q,from[j]); if(s<sc){sc=s;k=j;} } if(sc<=tol){ const t=to[k]||to[1]||to[0]; p[i]=t.r;p[i+1]=t.g;p[i+2]=t.b; } }
-      g.putImageData(d,0,0); return c;
+    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+
+    function extractThreeToneRamp(img){
+      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
+      const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
+      const d=g.getImageData(0,0,w,h).data, s=[];
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],gg=d[i+1],b=d[i+2]; s.push({r, g:gg, b, L:lum(r,gg,b)}); }
+      if(s.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+      s.sort((a,b)=>a.L-b.L);
+      const pick=q=>{ const idx=Math.max(0,Math.min(s.length-1,Math.floor(q*(s.length-1)))); const p=s[idx];
+        return '#'+p.r.toString(16).padStart(2,'0')+p.g.toString(16).padStart(2,'0')+p.b.toString(16).padStart(2,'0'); };
+      return [pick(0.2),pick(0.55),pick(0.85)];
     }
-    const SPRITES={ body:{default:"/static/game/sprites/body/default.png"}, hair:{short:"/static/game/sprites/hair/short.png"}, outfit:{street:"/static/game/sprites/outfit/street.png"} };
+
+    function paletteSwap(img, fromRampHex, toRampHex, tolerance=4000){
+      const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
+      const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
+      const id=g.getImageData(0,0,w,h), d=id.data;
+      for(let i=0;i<d.length;i+=4){
+        if(d[i+3]===0) continue;
+        const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
+        for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+        if(score<=tolerance){ const t=to[best]||to[1]||to[0]; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+      }
+      g.putImageData(id,0,0);
+      return c;
+    }
+
+    function overlayTint(img, hex, strength=1.0){
+      const w=img.width,h=img.height,c=document.createElement('canvas'); c.width=w;c.height=h;
+      const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
+      const id=g.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+      function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+        const r=ov(d[i],t.r), gg=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+        d[i]=Math.round(d[i]*(1-strength)+r*strength);
+        d[i+1]=Math.round(d[i+1]*(1-strength)+gg*strength);
+        d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+      }
+      g.putImageData(id,0,0);
+      return c;
+    }
+
+    const SPRITES={
+      body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
+      hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
+      outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
+    };
     const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
-    const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"] };
+    const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+    const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
+    const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+
+    async function buildAvatarCanvas(dstCtx, size, profile){
+      const DW=size,DH=size,X=0,Y=0;
+      const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+      const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+      const femaleOut=profile.female_outfit_color||'blue';
+
+      let body=null;
+      if(type==='female'){
+        const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
+        const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
+        body = await loadImg(femaleWide) || await loadImg(femaleSlim);
+      }
+      if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
+
+      const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
+
+      let bodyCanvas;
+      if(body){
+        const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+        const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+        bodyCanvas=swapped;
+      }
+
+      if(type==='female' && bodyCanvas){
+        const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+        bodyCanvas=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+      }
+
+      dstCtx.clearRect(0,0,DW,DH);
+      if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+      if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+      if(hair){
+        const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+        const hairCanvas=paletteSwap(hair, detected, target, 4000);
+        const hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
+        dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
+      }
+    }
 
     async function drawAvatar(){
-      let profile={};
+      // prefer LS (arena stores it), else hit API as fallback
+      let profile = {};
       try{ profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){}
-      const tone=profile.skin_tone||'light', hairCol=profile.hair_color||'black';
-      const body= await loadImg(SPRITES.body.default);
-      const hair= await loadImg(SPRITES.hair.short);
-      const outfit= await loadImg(SPRITES.outfit.street);
-      avatarCtx.clearRect(0,0,112,112);
-      if(body){ avatarCtx.drawImage(paletteSwap(body, SKIN_BASE, (SKIN_TO[tone]||SKIN_TO.light)), 0,0,112,112); }
-      if(outfit){ avatarCtx.drawImage(outfit, 0,0,112,112); }
-      if(hair){ avatarCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], (HAIR_TO[hairCol]||HAIR_TO.black)), 0,0,112,112); }
+      if(!profile || !profile.sprite_skin){
+        try{
+          const r = await fetch('/izza-game/api/character'+(T?('?t='+encodeURIComponent(T)):''),
+            {credentials:'include'});
+          if(r.ok){ const j=await r.json(); if(j && j.hasCharacter){ profile=j; } }
+        }catch(_){}
+      }
+      await buildAvatarCanvas(avatarCtx,112,profile||{});
     }
 
     /* --------- Game logic --------- */
     const svg = document.getElementById('court');
     const ball = document.getElementById('ball');
-    const ballGrp = document.getElementById('ballGrp');
     const aimLine = document.getElementById('aimLine');
     const hoop = document.getElementById('hoop');
     const rim = document.getElementById('rim');
@@ -168,20 +284,18 @@
       timeLeft:60,
       hoopX:760, // group base
       hoopY:340,
-      distanceStep:0
+      distanceStep:0,
+      timerId:null,
+      ended:false
     };
 
     function setHoopDistance(step){
-      // each step pushes hoop 40px right in SVG coords
       game.distanceStep = step;
-      const dx = 0 + step*40;
+      const dx = step*40; // push hoop back
       hoop.setAttribute('transform', `translate(${game.hoopX+dx}, ${game.hoopY})`);
     }
 
-    function setBall(cx,cy){
-      ball.setAttribute('cx', cx);
-      ball.setAttribute('cy', cy);
-    }
+    function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
 
     function showMsg(txt, cls){
       bigmsg.textContent = txt;
@@ -190,14 +304,16 @@
     }
 
     function startTimer(){
-      const t = setInterval(()=>{
+      if(game.timerId) clearInterval(game.timerId);
+      game.timerId = setInterval(()=>{
         game.timeLeft--;
         timeEl.textContent = game.timeLeft;
-        if(game.timeLeft<=0){ clearInterval(t); endRun(); }
+        if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); }
       }, 1000);
     }
 
     function resetBall(){
+      if(game.ended) return;
       game.x=120; game.y=420; game.vx=0; game.vy=0; game.launched=false; game.canShoot=true;
       setBall(game.x, game.y);
       aimLine.setAttribute('x1',game.x); aimLine.setAttribute('y1',game.y);
@@ -205,19 +321,21 @@
     }
 
     function physics(dt){
-      if(!game.launched) return;
+      if(!game.launched || game.ended) return;
       game.vy += game.gravity*dt;
       game.vx *= game.drag; game.vy *= game.drag;
       game.x += game.vx*dt; game.y += game.vy*dt;
-      // floor bounce
+
       const floorY = toXY(0,560).y;
-      if(game.y>floorY){ game.y=floorY; game.vy*=-0.55; game.vx*=0.88; if(Math.abs(game.vy)<60){ game.vy=0; game.launched=false; setTimeout(resetBall, 350); } }
+      if(game.y>floorY){
+        game.y=floorY; game.vy*=-0.55; game.vx*=0.88;
+        if(Math.abs(game.vy)<60){ game.vy=0; game.launched=false; setTimeout(resetBall, 350); }
+      }
       setBall(game.x, game.y);
       checkHoop();
     }
 
     function checkHoop(){
-      // simple circle-in-ring: detect crossing through rim circle area with downward velocity
       const rimPt = rim.getBoundingClientRect();
       const ballPt = ball.getBoundingClientRect();
       const rx = rimPt.left + rimPt.width/2;
@@ -227,9 +345,7 @@
       const rRing = rimPt.width/2;
       const d = Math.hypot(bx-rx, by-ry);
 
-      // "through" if center enters ring and is moving down
       if(!game._scored && d < rRing-4 && game.vy>0){
-        // swish: center passes without touching rim stroke – approximate by speed & path angle
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 520;
         scoreShot(swish);
         game._scored = true;
@@ -239,11 +355,10 @@
 
     function scoreShot(swish){
       const base = 2;
-      const bonus = swish ? 3 : 0; // swish bonus coins
-      game.score += swish ? 3 : 2; // scoreboard points (visual)
+      const bonus = swish ? 3 : 0;
+      game.score += swish ? 3 : 2;
       game.streak += 1;
 
-      // coins grow with streak and distance
       const distMult = 1 + (game.distanceStep*0.25);
       const streakMult = 1 + Math.min(2, game.streak*0.06);
       const coins = Math.round((base+bonus)*distMult*streakMult);
@@ -254,23 +369,21 @@
       coinsRunEl.textContent = game.coins;
 
       showMsg(swish ? 'SWISH! +'+coins : 'SCORE! +'+coins, swish ? 'scoreGlow' : '');
-      // move hoop back a bit every 3 made shots
       if(game.streak % 3 === 0) setHoopDistance(Math.min(7, game.distanceStep+1));
-      // quick reset ball after a make
       setTimeout(resetBall, 260);
     }
 
     // aim + shoot (drag from ball)
     (function wireAim(){
-      let dragging=false, sx=0, sy=0;
+      let dragging=false;
       const start = (e)=>{
         const pt = (e.touches?e.touches[0]:e);
         const rect = svg.getBoundingClientRect();
         const x = pt.clientX - rect.left, y = pt.clientY - rect.top;
         const b = ball.getBoundingClientRect();
         const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
-        if(!inside || !game.canShoot) return;
-        dragging=true; sx=x; sy=y;
+        if(!inside || !game.canShoot || game.ended) return;
+        dragging=true;
         aimLine.setAttribute('x1', game.x); aimLine.setAttribute('y1', game.y);
         aimLine.setAttribute('x2', x); aimLine.setAttribute('y2', y);
       };
@@ -282,42 +395,43 @@
         aimLine.setAttribute('x2', x); aimLine.setAttribute('y2', y);
       };
       const end = (e)=>{
-        if(!dragging) return;
-        dragging=false;
+        if(!dragging) return; dragging=false;
         const rect = svg.getBoundingClientRect();
         const pt = (e.changedTouches?e.changedTouches[0]:e);
         const x = pt.clientX - rect.left, y = pt.clientY - rect.top;
-        // velocity opposite to drag vector
-        const k = 3.3; // power scale
+        const k = 3.3;
         game.vx = (game.x - x)*k;
         game.vy = (game.y - y)*k;
         game.launched = true;
         game.canShoot = false;
-        setTimeout(()=> game.canShoot=true, 180); // small debounce
+        setTimeout(()=> game.canShoot=true, 180);
       };
       svg.addEventListener('mousedown', start, {passive:true});
       svg.addEventListener('mousemove', move, {passive:true});
       window.addEventListener('mouseup', end, {passive:true});
-
       svg.addEventListener('touchstart', start, {passive:true});
       svg.addEventListener('touchmove', move, {passive:true});
       svg.addEventListener('touchend', end, {passive:true});
     })();
 
-    // loop
-    let lastT=performance.now();
+        // loop
+    let lastT = performance.now();
     function loop(t){
-      const dt=Math.min(0.033, (t-lastT)/1000); lastT=t;
+      const dt = Math.min(0.033, (t - lastT) / 1000);
+      lastT = t;
       physics(dt);
-      requestAnimationFrame(loop);
+      if (!game.ended) requestAnimationFrame(loop);
     }
 
     /* --------- End of run: grant rewards & persist --------- */
     async function endRun(){
+      if (game.ended) return;
+      game.ended = true;
+
       // Simple mapping: more points → more coins; also small craft drip
-      const craftEarn = Math.max(0, Math.floor(game.coins/5));
-      const coinsNew = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + game.coins;
-      const craftNew = (readCraftAny()|0) + craftEarn;
+      const craftEarn = Math.max(0, Math.floor(game.coins / 5));
+      const coinsNew  = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + game.coins;
+      const craftNew  = (readCraftAny()|0) + craftEarn;
 
       localStorage.setItem('izzaCoins', String(coinsNew));
       writeCraftAll(craftNew);
@@ -338,15 +452,24 @@
       document.getElementById('finalScore').textContent = game.score;
       document.getElementById('finalCoins').textContent = game.coins;
       document.getElementById('finalCraft').textContent = craftEarn;
-      document.getElementById('finish').style.display='flex';
+      document.getElementById('finish').style.display = 'flex';
       showMsg('Time!', 'miss');
     }
 
     /* --------- Boot --------- */
-    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
+    function onResize(){
+      W = arenaEl.clientWidth;
+      H = arenaEl.clientHeight;
+    }
     window.addEventListener('resize', onResize, {passive:true});
 
+    // Pause physics if the tab is hidden (saves battery)
+    document.addEventListener('visibilitychange', () => {
+      lastT = performance.now();
+    });
+
     (async function boot(){
+      await hydrateFromSnapshot();   // pull latest snapshot so avatar/colors are correct
       await drawAvatar();
       resetBall();
       setHoopDistance(0);
