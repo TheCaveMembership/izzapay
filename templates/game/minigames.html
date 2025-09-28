@@ -60,8 +60,11 @@
 
     @media (pointer:fine){ body{ cursor:none; } a, button{ cursor:none; } }
 
-    /* --- FIRST PAINT GATE: dim values until hydrated --- */
+    /* FIRST-PAINT gating */
     .val[data-loading="1"]{ opacity:.35 }
+
+    /* Hidden iframe for silent priming */
+    #izzaPrimeFrame{ position:fixed; width:0; height:0; opacity:0; pointer-events:none; inset:auto auto 0 0; border:0 }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -195,7 +198,7 @@
       return headers;
     }
 
-    /* --- auth/character (admin-safe, no priming here) --- */
+    /* --- auth/character --- */
     async function ensureCharacter(){
       const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
       const isAdminLocal = (()=> {
@@ -214,9 +217,7 @@
         if(r.ok){
           const j = await r.json();
           if (j && j.hasCharacter) return j;
-          if (j && (j.isAdmin || (j.user && j.user.isAdmin))) {
-            return j;
-          }
+          if (j && (j.isAdmin || (j.user && j.user.isAdmin))) return j;
         }
       }catch(_){ /* fall through */ }
 
@@ -227,6 +228,7 @@
         return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
       }
 
+      // First-time ever: go make a character (not silent)
       const next = encodeURIComponent(withT('/izza-game/minigames'));
       location.replace('/izza-game/create?next='+next);
       throw new Error('redirecting');
@@ -389,12 +391,8 @@
           const href = cityBtn.getAttribute('href');
 
           try {
-            // ALWAYS ensure latest snapshot is loaded before any save on this hop
             await hydrateFromSnapshot();
-
-            // ensure crafting is mirrored across all keys first
             try { writeCraftAll(readCraftAny()); } catch(_){}
-            // seed a harmless non-empty value so snapshot isn't "empty" on cold start
             try {
               const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
               if (!Number.isFinite(h) || h<=0) {
@@ -416,9 +414,6 @@
     }
 
     /* ====== Wallet helpers ====== */
-    const toNum = (v)=>{ const n = Number(v); return Number.isFinite(n) ? n : 0; };
-
-    // Tiny, local crafting-bridge: mirror all three keys (no server changes)
     const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){
       for(const k of CRAFT_KEYS){
@@ -427,38 +422,19 @@
       }
       return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10) || 0)|0;
     }
-
     function writeCraftAll(v){
       const n = Math.max(0, v|0);
       for(const k of CRAFT_KEYS) localStorage.setItem(k, String(n));
       try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
     }
-
-    // One-time normalize on load (keeps City & Arena perfectly in sync)
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
 
-    /* --- Wait for izza-persist to be ready; wrap .load to emit an event --- */
+    /* --- Wait for izza-persist to be ready --- */
     function waitForPersistReady({timeout=3000, interval=40} = {}){
       return new Promise((res)=> {
-        let wrapped = false;
         const t0 = performance.now();
-        const wrapIfPossible = () => {
-          try{
-            if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function' && !wrapped){
-              wrapped = true;
-              const origLoad = IZZA_PERSIST.load.bind(IZZA_PERSIST);
-              IZZA_PERSIST.load = async function(...args){
-                const r = await origLoad(...args);
-                try{ window.dispatchEvent(new Event('izza-persist-loaded')); }catch(_){}
-                return r;
-              };
-              return true;
-            }
-          }catch(_){}
-          return false;
-        };
         const check = () => {
-          if (wrapIfPossible()) return res(true);
+          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
           if (performance.now() - t0 > timeout) return res(false);
           setTimeout(check, interval);
         };
@@ -470,76 +446,57 @@
       });
     }
 
-    /* ---- Load snapshot on every Arena entry ---- */
+    /* ---- Silent priming via City (hidden iframe, once per session) ---- */
+    const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
+    function primeViaCityIframe(maxWaitMs=3500){
+      return new Promise((resolve)=>{
+        let done = false;
+        const finish = (why='')=>{
+          if (done) return;
+          done = true;
+          cleanup();
+          resolve(why||'ok');
+        };
+
+        // Detect LS seeded by City (coins or crafting write)
+        function storageWatcher(e){
+          if (!e) return;
+          if (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key))) {
+            finish('storage');
+          }
+        }
+        window.addEventListener('storage', storageWatcher, {passive:true});
+
+        // Build iframe silently
+        const src = withT('/izza-game/play?prime=1&silent=1');
+        const f = document.createElement('iframe');
+        f.id='izzaPrimeFrame';
+        f.src = src;
+        document.body.appendChild(f);
+
+        // Fallback timers: first check + hard cap
+        const soft = setTimeout(()=>finish('soft-timeout'), 1200);
+        const hard = setTimeout(()=>finish('hard-timeout'), Math.max(1200, maxWaitMs));
+
+        function cleanup(){
+          try{ window.removeEventListener('storage', storageWatcher, {passive:true}); }catch(_){}
+          try{ clearTimeout(soft); clearTimeout(hard);}catch(_){}
+          try{ f.remove(); }catch(_){}
+        }
+      });
+    }
+
+    /* ---- Load snapshot (persist layer) ---- */
     async function hydrateFromSnapshot(){
       try{
         await waitForPersistReady();
         if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-          await IZZA_PERSIST.load(); // pulls server snapshot -> localStorage
+          await IZZA_PERSIST.load();
         }
       }catch(_){}
-      // After load, mirror crafting across known keys and repaint
       try{ writeCraftAll(readCraftAny()); }catch(_){}
       renderWallet(readLocalWallet());
     }
-
-    /* === Crafting credits: immediate deduction on successful mint === */
-    (function(){
-      function parseCreditsFromJson(j){
-        if (!j || typeof j !== 'object') return null;
-        if (Number.isFinite(j.credits))   return j.credits|0;
-        if (Number.isFinite(j.crafting))  return j.crafting|0;
-        if (j.wallet && (Number.isFinite(j.wallet.credits) || Number.isFinite(j.wallet.crafting))){
-          return (j.wallet.credits ?? j.wallet.crafting)|0;
-        }
-        if (j.balance && (Number.isFinite(j.balance.credits) || Number.isFinite(j.balance.crafting))){
-          return (j.balance.credits ?? j.balance.crafting)|0;
-        }
-        return null;
-      }
-
-      if (!window.__IZZA_CRAFT_FETCH_WRAP__){
-        window.__IZZA_CRAFT_FETCH_WRAP__ = true;
-
-        const origFetch = window.fetch;
-        window.fetch = async function(input, init){
-          const res = await origFetch(input, init);
-          try{
-            const url = (typeof input === 'string') ? input : (input && input.url) || '';
-
-            if (res.ok && url.includes('/api/crafting/credits')){
-              res.clone().json().then(j=>{
-                const cr = parseCreditsFromJson(j);
-                if (Number.isFinite(cr)) {
-                  writeCraftAll(cr);
-                  window.dispatchEvent(new Event('izza-crafting-changed'));
-                }
-              }).catch(()=>{});
-            }
-
-            if (res.ok && url.includes('/api/crafting/mint')){
-              res.clone().json().then(j=>{
-                const got = parseCreditsFromJson(j);
-                if (Number.isFinite(got)) {
-                  writeCraftAll(got);
-                } else {
-                  const cur = (function(){
-                    for (const k of ['izzaCrafting','craftingCredits','izzaCraftCredits']){
-                      const v = parseInt(localStorage.getItem(k)||'0',10);
-                      if (Number.isFinite(v) && v>0) return v|0;
-                    }
-                    return parseInt(localStorage.getItem('izzaCrafting')||'0',10) || 0;
-                  })();
-                  writeCraftAll(Math.max(0, cur - 1));
-                }
-                window.dispatchEvent(new Event('izza-crafting-changed'));
-              }).catch(()=>{});
-            }
-          }catch(_){}
-          return res;
-        };
-      }
-    })();
 
     function readLocalWallet(){
       const coins = Number.isFinite(Number(localStorage.getItem('izzaCoins')))
@@ -554,11 +511,8 @@
       if (!obj) return;
       let coins = Number(obj.coins)||0;
       let crafting = Number(obj.crafting)||0;
-
-      // Don't flash to 0 if LS isn't populated yet
       if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
       if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
-
       if (elCoins) { elCoins.textContent = String(coins); elCoins.removeAttribute('data-loading'); }
       if (elCraft) { elCraft.textContent = String(crafting); elCraft.removeAttribute('data-loading'); }
       LAST_WALLET = { coins, crafting };
@@ -577,28 +531,28 @@
     /* ====== Boot ====== */
     (async function boot(){
       try{
-        const profile = await ensureCharacter();  // redirects if missing
+        const profile = await ensureCharacter();  // redirects to create if first-time ever
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profile)); }catch(_){}
 
-        // 1) Always hydrate snapshot on Arena entry so cold opens are correct
-        await hydrateFromSnapshot();
+        // FIRST session load: silently prime via City, then hydrate
+        const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
+        if (shouldPrime){
+          // keep UI here; silently run City in a hidden iframe
+          try{ await primeViaCityIframe(); }catch(_){}
+          try{ await hydrateFromSnapshot(); }catch(_){}
+          try{ sessionStorage.setItem(SESSION_PRIME_KEY, '1'); }catch(_){}
+        } else {
+          // Normal entry: just hydrate (fast) then paint
+          try{ await hydrateFromSnapshot(); }catch(_){}
+        }
 
-        // 1b) Extra insurance: repaint once the persist layer itself signals done
-        window.addEventListener('izza-persist-loaded', ()=> {
-          renderWallet(readLocalWallet());
-        }, { once:true, passive:true });
-
-        // 2) Paint with whatever we have now (fresh from LS)
+        // Paint with latest LS
         renderWallet(readLocalWallet());
 
-        // 2b) Cover late writes: two staged repaints
-        requestAnimationFrame(()=> renderWallet(readLocalWallet()));
-        setTimeout(()=> renderWallet(readLocalWallet()), 200);
-
-        // 3) Draw avatar
+        // Draw avatar
         await buildAvatarCanvas(actx,96,profile);
 
-        // 4) Place avatar nicely
+        // Place avatar nicely
         const logo = document.getElementById('brandWord');
         if (isTouch && logo){
           const r = logo.getBoundingClientRect();
@@ -609,7 +563,7 @@
           setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
         }
 
-        // 5) Fetch authoritative wallet; repaint & persist to LS
+        // Authoritative wallet (server), then persist to LS
         try{
           const r = await fetch('/izza-game/api/wallet'+TQ, {
             credentials:'include',
@@ -623,7 +577,6 @@
             try{
               localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
               writeCraftAll(Number(parsed.crafting)||0);
-
               window.dispatchEvent(new Event('izza-coins-changed'));
               window.dispatchEvent(new Event('izza-crafting-changed'));
             }catch(_){}
@@ -651,7 +604,7 @@
           }
         }, { passive:true });
 
-        // Update immediately if LS changes in another tab or page
+        // Update if LS changes in another tab/page
         window.addEventListener('storage', (e)=>{
           if (!e) return;
           if (e.key==='izzaCoins' || CRAFT_KEYS.includes(e.key)) {
@@ -659,7 +612,7 @@
           }
         }, { passive:true });
 
-        // Refresh on iOS BFCache restore
+        // iOS BFCache restore
         window.addEventListener('pageshow', ()=> renderWallet(readLocalWallet()), { passive:true });
 
         wirePointer();
