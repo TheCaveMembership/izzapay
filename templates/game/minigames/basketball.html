@@ -82,18 +82,23 @@
           <filter id="shadow"><feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity=".35"/></filter>
         </defs>
 
+        <!-- sky -->
         <rect x="0" y="0" width="1100" height="760" fill="url(#sky)"/>
+
+        <!-- background hills + fence + platforms -->
         <ellipse cx="250" cy="520" rx="320" ry="140" fill="#8ed47d" opacity=".9"/>
         <ellipse cx="880" cy="520" rx="300" ry="130" fill="#89d074" opacity=".9"/>
         <g opacity=".9">
           <rect x="210" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="220" cy="420" r="60" fill="#5bbd5a"/>
           <rect x="920" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="930" cy="420" r="60" fill="#5bbd5a"/>
         </g>
-        <g><polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
-           <polygon points="0,520 1100,520 1100,570 0,570" fill="#547fa8"/></g>
+        <g>
+          <polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
+          <polygon points="0,520 1100,520 1100,570 0,570" fill="#547fa8"/>
+        </g>
         <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
 
-        <!-- BIG/close hoop to match screenshot -->
+        <!-- BIG/close hoop -->
         <g id="hoop" transform="translate(460, 280) scale(1.42)">
           <rect x="90" y="-20" width="12" height="86" fill="#b7c7d8"/>
           <rect x="8"  y="-126" width="184" height="122" rx="12" ry="12" fill="#f2f6fa" stroke="#9fb0c2" stroke-width="6" filter="url(#shadow)"/>
@@ -102,23 +107,25 @@
           <path d="M132 -36 q-12 52 -28 104 q-14 -52 -28 -104" stroke="rgba(255,255,255,.9)" stroke-width="2.8" fill="none"/>
         </g>
 
-        <!-- much longer floor toward the player -->
+        <!-- extended court: fill bottom fully, then perspective ring -->
         <g>
+          <!-- solid wood to bottom so it never hides under blue -->
+          <rect x="0" y="560" width="1100" height="200" fill="url(#wood)"/>
+          <!-- perspective wedge & lines -->
           <polygon points="70,570 1030,570 1100,760 0,760" fill="url(#wood)"/>
           <ellipse cx="550" cy="620" rx="260" ry="36" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
           <ellipse cx="550" cy="620" rx="180" ry="26" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
-          <line x1="550" y1="590" x2="550" y2="654" stroke="rgba(0,0,0,.35)" stroke-width="2"/>
         </g>
 
-        <!-- BIG ball; start closer to player -->
+        <!-- BIG ball; start close to avatar -->
         <g id="ballGrp">
           <defs>
             <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
               <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
             </radialGradient>
           </defs>
-          <circle id="ball" cx="550" cy="620" r="96" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
-          <path d="M454 620 h192 M550 524 v192" stroke="#8a3b12" stroke-width="3"/>
+          <circle id="ball" cx="550" cy="670" r="92" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
+          <path d="M458 670 h184 M550 578 v184" stroke="#8a3b12" stroke-width="3"/>
         </g>
       </svg>
 
@@ -157,7 +164,6 @@
       }
     }catch(_){}
     const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
-    // rewrite links AND also intercept clicks to snapshot before nav
     document.getElementById('backBtn').href=withT('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
 
@@ -243,53 +249,106 @@
       try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
     }
 
-    /* ---- tiny avatar render (more robust color mapping) ---- */
-    const tinyCtx=document.getElementById('avatarTiny').getContext('2d'); tinyCtx.imageSmoothingEnabled=false;
-    function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-    const hexToRgb=h=>{ const m=String(h||'').replace('#',''); if(!/^[0-9a-fA-F]{6}$/.test(m)) return {r:0,g:0,b:0}; const n=parseInt(m,16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
-    const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-    function paletteSwap(img, fromHex, toHex, tol=4000){
-      const from=fromHex.map(hexToRgb), to=toHex.map(hexToRgb);
-      const c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
-      const g=c.getContext('2d',{willReadFrequently:true}); g.imageSmoothingEnabled=false; g.drawImage(img,0,0);
-      const d=g.getImageData(0,0,c.width,c.height); const p=d.data;
-      for(let i=0;i<p.length;i+=4){ if(p[i+3]===0) continue;
-        const q={r:p[i],g:p[i+1],b:p[i+2]}; let k=-1,sc=1e9;
-        for(let j=0;j<from.length;j++){ const s=dist2(q,from[j]); if(s<sc){sc=s;k=j;} }
-        if(sc<=tol){ const t=to[k]||to[1]||to[0]; p[i]=t.r;p[i+1]=t.g;p[i+2]=t.b; } }
-      g.putImageData(d,0,0); return c;
-    }
-    const SPRITES={ body:{default:"/static/game/sprites/body/default.png"}, hair:{short:"/static/game/sprites/hair/short.png"}, outfit:{street:"/static/game/sprites/outfit/street.png"} };
+    /* ---------- AVATAR: same pipeline as mini-game page ---------- */
+    const SPRITES = {
+      body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
+      hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
+      outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
+    };
     const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
-    const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"] };
+    const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+    const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
+    const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 
-    async function drawTinyAvatar(){
-      let profile={};
-      try{ profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){}
-      if(!profile || !profile.sprite_skin){
-        const fresh = await fetchCharacterFresh();
-        if (fresh) { profile=fresh; try{ localStorage.setItem('izzaCharacter', JSON.stringify(fresh)); }catch(_){} }
+    function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
+    const hexToRgb=h=>{ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+    const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+
+    function extractThreeToneRamp(img){
+      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const d=c.getImageData(0,0,w,h).data, samples=[];
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; samples.push({r,g,b,L:lum(r,g,b)}); }
+      if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+      samples.sort((a,b)=>a.L-b.L);
+      const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+      return [pick(0.2),pick(0.55),pick(0.85)];
+    }
+
+    function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
+      const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const id=c.getImageData(0,0,w,h), d=id.data; let changed=0;
+      for(let i=0;i<d.length;i+=4){
+        if(d[i+3]===0) continue;
+        const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
+        for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+        if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
       }
-      const tone=profile.skin_tone||'light';
-      const hairColHex = profile.hair_color_hex || profile.hair_hex || null;
-      const hairColName = (profile.hair_color||'black').toLowerCase();
+      c.putImageData(id,0,0);
+      return {canvas:oc, changedPixels:changed};
+    }
 
-      const body= await loadImg(SPRITES.body.default);
-      const hair= await loadImg(SPRITES.hair.short);
-      const outfit= await loadImg(SPRITES.outfit.street);
+    function overlayTint(img, hex, strength=1.0){
+      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+      const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+      function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+        const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+        d[i]=Math.round(d[i]*(1-strength)+r*strength);
+        d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+        d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+      }
+      c.putImageData(id,0,0);
+      return oc;
+    }
 
-      tinyCtx.clearRect(0,0,54,54);
-      if(body){ tinyCtx.drawImage(paletteSwap(body, SKIN_BASE, (SKIN_TO[tone]||SKIN_TO.light)), 0,0,54,54); }
-      if(outfit){ tinyCtx.drawImage(outfit, 0,0,54,54); }
+    async function buildAvatarCanvas(dstCtx, size, profile){
+      const DW=size,DH=size,X=0,Y=0;
+      const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+      const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+      const femaleOut=profile.female_outfit_color||'blue';
+
+      let body=null;
+      if(type==='female'){
+        const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
+        const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
+        body = await loadImg(femaleWide) || await loadImg(femaleSlim);
+      }
+      if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
+
+      const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
+
+      let bodyCanvas;
+      if(body){
+        const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+        const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+        bodyCanvas=swapped.canvas;
+        if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
+      }
+
+      if(type==='female' && bodyCanvas){
+        const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+        const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+        bodyCanvas=reDress.canvas;
+        if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
+      }
+
+      dstCtx.clearRect(0,0,DW,DH);
+      if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+      if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
       if(hair){
-        if(hairColHex){
-          // direct tint by mapping grayscale to single hex hue set
-          const col=[hairColHex, hairColHex, hairColHex];
-          tinyCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], col), 0,0,54,54);
-        } else {
-          tinyCtx.drawImage(paletteSwap(hair, ["#C8C8C8","#9C9C9C","#6E6E6E"], (HAIR_TO[hairColName]||HAIR_TO.black)), 0,0,54,54);
-        }
+        const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+        const swap=paletteSwap(hair, detected, target, 4000);
+        let hairCanvas=swap.canvas;
+        if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
+        dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
       }
     }
 
@@ -301,6 +360,7 @@
     const bigmsg = document.getElementById('bigmsg');
     const arenaEl = document.getElementById('arena');
     const avatarScene = document.getElementById('avatarScene');
+    const tinyCtx=document.getElementById('avatarTiny').getContext('2d'); tinyCtx.imageSmoothingEnabled=false;
 
     const scoreEl = document.getElementById('score');
     const streakEl = document.getElementById('streak');
@@ -312,14 +372,14 @@
 
     // start positions (ball near player)
     let game = {
-      x:550, y:620, vx:0, vy:0, r:96,
+      x:550, y:670, vx:0, vy:0, r:92,
       gravity: 1700, drag: 0.996,
       launched:false, dragging:false,
       score:0, goals:0, coins:0, timeLeft:60,
       hoopX:460, hoopY:280, distanceStep:0,
       timerId:null, ended:false,
       creditsEarned:0,
-      spin:0 // side spin magnitude; affects horizontal drift
+      spin:0, spinDecay:0.985
     };
 
     function setHoopDistance(step){
@@ -333,27 +393,26 @@
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
 
     function positionAvatarFixed(){
-      // fixed under the start position; do not follow ball once thrown
-      const p = toXY(550, 620 + game.r + 16);
+      const p = toXY(550, 670 + game.r + 14);
       avatarScene.style.left = (p.x - 27) + 'px';
       avatarScene.style.top  = (p.y - 27) + 'px';
     }
 
     function resetBall(){
       if(game.ended) return;
-      Object.assign(game, { x:550, y:620, vx:0, vy:0, launched:false, dragging:false, spin:0 });
+      Object.assign(game, { x:550, y:670, vx:0, vy:0, launched:false, dragging:false, spin:0 });
       setBall(game.x, game.y);
     }
 
-    // ---- Pokémon-Go style drag+flick (no visible aim line) ----
+    // ---- Pokémon-Go style drag+flick (no line) ----
     (function wireAim(){
-      const samples=[];             // recent pointer samples {x,y,t}
-      const MAX_WINDOW_MS=150;      // last ~150ms defines release velocity
-      const MIN_PATH_PX=40;         // ignore tiny taps
-      const POWER_SCALE=1.04;       // velocity scale
-      const MIN_UP_VY=-520;         // minimum upward speed
+      const samples=[];
+      const MAX_WINDOW_MS=150;
+      const MIN_PATH_PX=40;
+      const POWER_SCALE=1.04;
+      const MIN_UP_VY=-520;
 
-      let startRect=null, startPos=null, lastAngle=null;
+      let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
 
       function addSample(pt){
         const now=performance.now();
@@ -362,22 +421,18 @@
         samples.push({x,y,t:now});
         while(samples.length && now - samples[0].t > 260) samples.shift();
 
-        // while dragging: move the ball with the finger (clamped a bit)
         if(game.dragging && !game.launched){
           const dx=x - startPos.x, dy=y - startPos.y;
-          // pull radius clamp → don't let ball pass too far
           const pullMax=220; const d=Math.hypot(dx,dy);
           const k=d>pullMax ? pullMax/d : 1;
-          setBall(game.x = 550 + dx*k*0.9, game.y = 620 + dy*k*0.9);
+          setBall(game.x = 550 + dx*k*0.9, game.y = 670 + dy*k*0.9);
 
-          // track spin from angular change around the ball center
           const ang = Math.atan2(dy,dx);
           if(lastAngle!=null){
             let da = ang - lastAngle;
-            // wrap
             if(da> Math.PI) da-=2*Math.PI;
             if(da<-Math.PI) da+=2*Math.PI;
-            game.spin += da; // accumulate
+            spinAccum += da;
           }
           lastAngle = ang;
         }
@@ -391,7 +446,7 @@
         if(!inside) return;
         startRect=svg.getBoundingClientRect();
         startPos={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top};
-        samples.length=0; lastAngle=null; game.spin=0;
+        samples.length=0; lastAngle=null; spinAccum=0;
         game.dragging=true; game.launched=false;
         addSample(pt);
       };
@@ -413,6 +468,11 @@
 
         game.vx=vx*POWER_SCALE;
         game.vy=vy*POWER_SCALE;
+
+        // Only enable curve if spin is clearly intentional
+        const SPIN_THRESHOLD = 0.35; // ~20°
+        game.spin = (Math.abs(spinAccum) > SPIN_THRESHOLD) ? spinAccum : 0;
+
         game.launched=true;
       };
 
@@ -430,9 +490,12 @@
       // gravity & drag
       game.vy += game.gravity*dt;
 
-      // simple "Magnus" side force from spin (curves shot)
-      const side = Math.max(-900, Math.min(900, game.spin*260));
-      game.vx += (side * dt);
+      // curve ONLY when user applied spin; decay over time
+      if(Math.abs(game.spin) > 0.001){
+        const side = Math.max(-900, Math.min(900, game.spin*260));
+        game.vx += (side * dt);
+        game.spin *= Math.pow(game.spinDecay, Math.max(1, dt*60));
+      }
 
       game.vx *= game.drag; game.vy *= game.drag;
       game.x += game.vx*dt; game.y += game.vy*dt;
@@ -441,11 +504,10 @@
       if(game.x < 110){ game.x=110; game.vx*=-0.6; }
       if(game.x > 990){ game.x=990; game.vx*=-0.6; }
 
-      const floorY = toXY(0,620).y;
+      const floorY = toXY(0,670).y;
       if(game.y>floorY){
-        // hit floor → stop then reset shortly (no prolonged bouncing)
         game.y=floorY; game.vy=0; game.vx=0; game.launched=false;
-        setTimeout(resetBall, 350);
+        setTimeout(resetBall, 320);
       }
       setBall(game.x, game.y);
       checkHoop();
@@ -469,18 +531,21 @@
       }
     }
 
-    /* === +200 coins per goal; +1 craft credit every 10 goals === */
+    /* === Wallet: +200 per goal; +1 craft credit every 10 goals === */
     async function applyCoins(amount){
       const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (amount|0);
       localStorage.setItem('izzaCoins', String(cur));
       try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
       try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); } }catch(_){}
+      // also broadcast combined wallet change like Arena
+      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
       return cur;
     }
-
     async function applyCraftDelta(delta){
-      writeCraftAll(readCraftAny()+ (delta|0));
+      const val = readCraftAny() + (delta|0);
+      writeCraftAll(val);
       try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); } }catch(_){}
+      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: parseInt(localStorage.getItem('izzaCoins')||'0',10)|0, crafting:val } })); }catch(_){}
     }
 
     async function scoreShot(swish){
@@ -490,10 +555,8 @@
       game.goals += 1;
       game.coins += COINS_PER_GOAL;
 
-      // wallet immediately (mirror loot behavior)
       await applyCoins(COINS_PER_GOAL);
 
-      // craft credit each 10th goal
       const creditsNow = Math.floor(game.goals / 10);
       if (creditsNow > game.creditsEarned){
         game.creditsEarned = creditsNow;
@@ -503,14 +566,11 @@
         showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
       }
 
-      // HUD now
       scoreEl.textContent = game.score;
       streakEl.textContent = game.goals;
       coinsRunEl.textContent = game.coins;
 
-      // make the hoop drift back every 3 goals to add difficulty
       if(game.goals % 3 === 0) setHoopDistance(Math.min(7, game.distanceStep+1));
-
       setTimeout(resetBall, 260);
     }
 
@@ -547,15 +607,16 @@
       showMsg('Time!', 'miss');
     }
 
-    /* ---------------- wire nav like Arena (hydrate→save→go) ---------------- */
+    /* ---------------- Nav: SAVE FIRST → then navigate ---------------- */
     function interceptNav(a){
       if(!a) return;
       a.addEventListener('click', async (ev)=>{
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
         try{
-          await hydrateFromSnapshot();          // pull snapshot
-          await persistWalletAndSave();         // push our deltas
+          await persistWalletAndSave();         // push our deltas first
+          // Optionally hydrate after save (no-op if server already has it)
+          try{ await hydrateFromSnapshot(); }catch(_){}
         }catch(_){}
         location.href = href;
       }, {passive:false});
@@ -582,7 +643,12 @@
       }catch(e){ if(String(e.message)==='redirecting') return; }
 
       await hydrateFromSnapshot();
-      await drawTinyAvatar();
+
+      // Build avatar using the same painter as Arena/Mini-Game page
+      try{
+        const prof = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+        await buildAvatarCanvas(tinyCtx, 54, prof);
+      }catch(_){}
 
       resetBall();
       setHoopDistance(0);
