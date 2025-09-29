@@ -300,7 +300,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
@@ -564,7 +564,7 @@
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
         scoreShot(swish);
         game._scored = true;
-        game.noMissUntil = performance.now() + 350;
+               game.noMissUntil = performance.now() + 350;
         setTimeout(()=>{ game._scored=false; }, 300);
         return;
       }
@@ -672,9 +672,9 @@
       }catch(_){}
     }
 
-    /* --- (Old) Commit loop kept for reference but not used for nav --- */
+    /* --- Commit & confirm BOTH coins and craft before navigation --- */
     const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
-    async function commitWalletAndConfirm({retries=6, delay=160} = {}){
+    async function commitWalletAndConfirm({retries=12, delay=160} = {}){
       const targetCoins = readCoinsLS();
       const targetCraft = readCraftAny();
       try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
@@ -686,6 +686,7 @@
           walletDirty = false;
           return true;
         }
+        // Re-assert local max and try again
         if (afterCoins < targetCoins) writeCoinsLS(targetCoins);
         if (afterCraft < targetCraft) writeCraftAll(targetCraft);
         try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
@@ -755,10 +756,9 @@
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
 
-        // Fast, non-blocking save: try briefly, then navigate
+        // **Strong** commit: ensure server snapshot is >= local before leaving.
         try{
-          const quick = persistWalletAndSave();               // fire
-          await Promise.race([quick, sleep(200)]);            // don't wait long
+          await commitWalletAndConfirm({retries:12, delay:160});
         }catch(_){}
         location.href = href;
       }, {passive:false});
