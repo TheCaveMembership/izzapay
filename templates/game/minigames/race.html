@@ -66,7 +66,7 @@
 
   const HUD = {
     speed: document.getElementById('speed'),
-    dist: document.getElementById('dist'),
+    dist : document.getElementById('dist'),
     coins: document.getElementById('coinsRun')
   };
 
@@ -78,10 +78,10 @@
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width  = Math.floor(CSS_W * dpr);
     canvas.height = Math.floor(CSS_H * dpr);
-    canvas.style.width = CSS_W + 'px';
+    canvas.style.width  = CSS_W + 'px';
     canvas.style.height = CSS_H + 'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    rebuildBgFrames(); // make sure pre-scaled frames match the screen size
+    rebuildBgFrames(); // pre-scale frames to the exact screen size
   }
   window.addEventListener('resize', resize, {passive:true});
 
@@ -91,9 +91,7 @@
   const sprites = {
     player   : img('/static/game/sprites/tracks/coupe.png'),
     underglow: img('/static/game/sprites/tracks/underglow.png'),
-    cockpit  : img('/static/game/sprites/tracks/cockpit.png'),
-    zone1    : img('/static/game/sprites/tracks/night_zone1.png'),
-    // (traffic sheets are present but not used yet)
+    zone1    : img('/static/game/sprites/tracks/night_zone1.png')
   };
 
   // preserve car aspect
@@ -119,8 +117,7 @@
     if(!bg.ready || CSS_W === 0 || CSS_H === 0) return;
 
     bg.frames = [];
-    const order = [0,1,2,3,4,5,6,7,8]; // row-major: TL→TR, then next row
-    for (const i of order){
+    for (let i=0;i<9;i++){
       const c = document.createElement('canvas');
       c.width = CSS_W; c.height = CSS_H;
       const g = c.getContext('2d');
@@ -132,17 +129,16 @@
       const sx = col * bg.frameW;
       const sy = row * bg.frameH;
 
-      // cover-fit draw into the offscreen canvas (no warping)
+      // cover-fit draw into the offscreen canvas (no warp, no seams)
       const scale = Math.max(CSS_W / bg.frameW, CSS_H / bg.frameH);
       const dw = Math.ceil(bg.frameW * scale);
       const dh = Math.ceil(bg.frameH * scale);
-      const dx = ((CSS_W - dw) / 2) | 0;     // snap to integers to avoid seams
+      const dx = ((CSS_W - dw) / 2) | 0;
       const dy = ((CSS_H - dh) / 2) | 0;
 
       g.drawImage(bg.sheet, sx, sy, bg.frameW, bg.frameH, dx, dy, dw, dh);
       bg.frames.push(c);
     }
-    // keep offset consistent when resizing
     bg.offsetY = Math.min(bg.offsetY, CSS_H-1);
   }
 
@@ -151,7 +147,7 @@
 
     bg.offsetY += bg.speed * dt;
 
-    // when exactly a full screen has passed, advance to next frame
+    // on each full screen passed, go to the next frame
     while (bg.offsetY >= CSS_H){
       bg.offsetY -= CSS_H;
       bg.idx = (bg.idx + 1) % 9;
@@ -159,9 +155,8 @@
 
     const nextIdx = (bg.idx + 1) % 9;
 
-    // current frame starts at -offset, next starts immediately after
-    const y0 = -bg.offsetY | 0;
-    const y1 = (CSS_H - bg.offsetY) | 0;
+    const y0 = -bg.offsetY | 0;          // current frame offset
+    const y1 = (CSS_H - bg.offsetY) | 0; // next frame starts exactly after
 
     ctx.drawImage(bg.frames[bg.idx], 0, y0);
     ctx.drawImage(bg.frames[nextIdx], 0, y1);
@@ -186,15 +181,15 @@
     if(e.key==='ArrowLeft' || e.key==='ArrowRight') steer.x=0;
   });
 
-  // ---- player, tint & cockpit overlay ----
-  const tint = { r: 80, g: 180, b: 255, base: 0.22 }; // car paint tint (multiplies)
+  // ---- player & tint (third-person only) ----
+  const tint = { r: 80, g: 180, b: 255, base: 0.22 };
   let nitroLeft = 0;
 
   function drawPlayer(speed){
     const W = CSS_W, H = CSS_H;
     const sway = steer.x * 26;
 
-    // underglow pulse with nitro/speed
+    // underglow pulse
     const ugW = Math.min(W*0.72, 440), ugH = ugW*0.24;
     const ugY = H*0.78;
     const ugAlpha = 0.35 + 0.35*Math.min(1, speed/220) + (nitroLeft>0?0.25:0);
@@ -211,33 +206,13 @@
 
     ctx.drawImage(sprites.player, Math.round(carX), Math.round(carY), Math.round(carW), Math.round(carH));
 
-    // tint car using multiply
+    // paint tint
     ctx.save();
     ctx.globalCompositeOperation = 'multiply';
     const a = tint.base + (nitroLeft>0 ? 0.18 : 0);
     ctx.fillStyle = `rgba(${tint.r},${tint.g},${tint.b},${a})`;
     ctx.fillRect(Math.round(carX), Math.round(carY), Math.round(carW), Math.round(carH));
     ctx.restore();
-
-    // cockpit interior overlay (subtle vignette that shifts with steer)
-    if (sprites.cockpit.complete){
-      const scale = Math.max(W / sprites.cockpit.width, H / sprites.cockpit.height);
-      const dw = sprites.cockpit.width * scale;
-      const dh = sprites.cockpit.height * scale;
-      const dx = ((W - dw) / 2 + sway*0.08) | 0;
-      const dy = ((H - dh) / 2) | 0;
-
-      // base cockpit art
-      ctx.drawImage(sprites.cockpit, dx, dy, dw, dh);
-
-      // add dynamic tint + shading as you drive
-      const shade = Math.min(0.35, 0.15 + speed/1000) + (nitroLeft>0?0.15:0);
-      ctx.save();
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = `rgba(10,12,20,${shade})`;
-      ctx.fillRect(0,0,W,H);
-      ctx.restore();
-    }
   }
 
   // ---- state & loop ----
@@ -258,7 +233,6 @@
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
 
-    // acceleration towards target (nitro bumps target)
     const target = 180 + (nitroLeft>0 ? 120 : 0);
     state.speed += (target - state.speed)*0.08;
     state.dist  += state.speed * dt;
