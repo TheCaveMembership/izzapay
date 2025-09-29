@@ -12,47 +12,43 @@
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
     .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
-           border-left:1px solid rgba(255,255,255,.08);
-           border-right:1px solid rgba(255,255,255,.08);
-           background:var(--panel);overflow:hidden}
+      border-left:1px solid rgba(255,255,255,.08);
+      border-right:1px solid rgba(255,255,255,.08);
+      background:var(--panel);overflow:hidden}
     .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
-             background:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35));}
+      background:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35));}
     .card{background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18);border-radius:14px;
-          padding:16px 18px;display:flex;flex-direction:column;gap:10px;width:min(92%,440px)}
+      padding:16px 18px;display:flex;flex-direction:column;gap:10px;width:min(92%,440px)}
     .preview{height:160px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;
-             display:flex;align-items:center;justify-content:center;overflow:hidden}
+      display:flex;align-items:center;justify-content:center;overflow:hidden}
     .startBtn{padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
-              background:rgba(255,255,255,.08);font-weight:800;color:white}
+      background:rgba(255,255,255,.08);font-weight:800;color:white}
     .hud{position:absolute;top:8px;left:8px;right:8px;z-index:6;display:flex;justify-content:space-between;font-size:12px}
     .nitroBtn{position:absolute;right:10px;bottom:14px;z-index:7;border-radius:999px;
-              border:1px solid rgba(255,255,255,.1);background:#222;padding:10px 14px;font-weight:800;color:white}
+      border:1px solid rgba(255,255,255,.1);background:#222;padding:10px 14px;font-weight:800;color:white}
     canvas{display:block;width:100%;height:100%}
   </style>
 </head>
 <body>
   <div class="arena" id="arena">
-    <!-- HUD -->
     <div class="hud">
       <div>SPEED: <span id="speed">0</span> km/h</div>
       <div>DIST: <span id="dist">0</span> m</div>
       <div>COINS: <span id="coinsRun">0</span></div>
     </div>
 
-    <!-- Garage Overlay -->
     <div id="startOverlay" class="overlay">
       <div class="card">
         <h3>Street Race</h3>
         <div class="preview">
+          <!-- NOTE: all assets live in /tracks in your repo -->
           <img id="garageCar" src="/static/game/sprites/tracks/coupe.png" alt="Car preview" style="height:100%"/>
         </div>
         <button id="startBtn" class="startBtn">START</button>
       </div>
     </div>
 
-    <!-- Nitro UI -->
     <button class="nitroBtn" id="nitroBtn">NITRO</button>
-
-    <!-- Game Scene -->
     <canvas id="scene"></canvas>
   </div>
 
@@ -61,157 +57,135 @@
   const arena = document.getElementById('arena');
   const canvas = document.getElementById('scene');
   const ctx = canvas.getContext('2d');
+
   const HUD = {
     speed: document.getElementById('speed'),
     dist: document.getElementById('dist'),
     coins: document.getElementById('coinsRun')
   };
 
-  // --- Responsive portrait canvas ---
-  function resize() {
+  // DPR-aware sizing (portrait)
+  function resize(){
     const w = arena.clientWidth;
     const h = arena.clientHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width  = Math.floor(w * dpr);
+    canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
-    canvas.style.width  = w + 'px';
+    canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
   }
   window.addEventListener('resize', resize, {passive:true});
   resize();
 
-  // --- Assets (all currently in /tracks/) ---
+  // ---- assets (your files are under /tracks) ----
   const img = (src)=>{ const i=new Image(); i.src=src; return i; };
+
   const sprites = {
-    player:    img('/static/game/sprites/tracks/coupe.png'),
+    player: img('/static/game/sprites/tracks/coupe.png'),
     underglow: img('/static/game/sprites/tracks/underglow.png'),
-    zone1:     img('/static/game/sprites/tracks/night_zone1.png'),
-    suv:       img('/static/game/sprites/tracks/suv_sheet.png'),
-    sedan:     img('/static/game/sprites/tracks/sedan_sheet.png'),
-    cockpit:   img('/static/game/sprites/tracks/cockpit.png') // not drawn yet; ready for future
+    zone1: img('/static/game/sprites/tracks/night_zone1.png'),
   };
 
-  // --- Player sprite aspect (avoid squish) ---
-  const playerAR = { w:1, h:1, ready:false };
-  sprites.player.onload = () => {
-    playerAR.w = sprites.player.width;
-    playerAR.h = sprites.player.height;
-    playerAR.ready = true;
-  };
+  // preserve car aspect once loaded
+  let carRatio = 0.5; // fallback
+  sprites.player.onload = ()=>{ carRatio = sprites.player.height / sprites.player.width; };
 
-  // --- Background sheet slicer (3×3) ---
+  // ---- background: strict frame-by-frame vertical scroll ----
   const bg = {
     img: sprites.zone1, rows:3, cols:3,
-    index: 0,                // 0..8
-    scroll: 0,               // pixels inside current frame
-    speed: 280,              // px/sec
+    idx: 0,            // 0..8
+    offsetY: 0,        // how many px of the current frame already scrolled
+    speed: 240,        // px/s of on-screen scroll
     frameW: 0, frameH: 0,
     ready: false
   };
+
   sprites.zone1.onload = ()=>{
-    bg.frameW = sprites.zone1.width  / bg.cols;
+    bg.frameW = sprites.zone1.width / bg.cols;
     bg.frameH = sprites.zone1.height / bg.rows;
     bg.ready = true;
   };
 
-  // --- Game state ---
-  const state = {
-    running:false, ended:false,
-    speed:0, dist:0,
-    steer:0,         // -1..1
-    nitro:0, coins:0,
-    tint: { r: 30, g: 170, b: 255, a: 0.0 } // car tint amount; change a in [0..0.7]
-  };
+  // helper to draw a single frame (cover fit, centered)
+  function drawFrame(frameIndex, dy){
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
 
-  // --- Input (tap halves + arrows) ---
-  function onPointer(e){
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    state.steer = (x < rect.width/2) ? -1 : 1;
+    const col = frameIndex % bg.cols;
+    const row = Math.floor(frameIndex / bg.cols);
+    const sx = col * bg.frameW;
+    const sy = row * bg.frameH;
+
+    // cover-fit scaling without warping
+    const scale = Math.max(W / bg.frameW, H / bg.frameH);
+    const dw = bg.frameW * scale;
+    const dh = bg.frameH * scale;
+    const dx = (W - dw) * 0.5;
+    const dyTop = dy; // where to place this frame vertically
+
+    ctx.drawImage(bg.img, sx, sy, bg.frameW, bg.frameH, dx, dyTop, dw, dh);
   }
-  function stopPointer(){ state.steer = 0; }
-  canvas.addEventListener('pointerdown', onPointer);
-  canvas.addEventListener('pointermove', onPointer);
-  window.addEventListener('pointerup', stopPointer);
-  window.addEventListener('keydown', e=>{
-    if(e.key==='ArrowLeft')  state.steer=-1;
-    if(e.key==='ArrowRight') state.steer= 1;
-  });
-  window.addEventListener('keyup', e=>{
-    if(e.key==='ArrowLeft' || e.key==='ArrowRight') state.steer=0;
-  });
 
-  // --- BG drawing with frame-correct vertical scrolling ---
   function drawBackground(dt){
     if(!bg.ready) return;
-    const W = canvas.width  / (window.devicePixelRatio||1);
-    const H = canvas.height / (window.devicePixelRatio||1);
 
-    // advance inside current frame
-    bg.scroll += bg.speed * dt;
-    while (bg.scroll >= bg.frameH) {
-      bg.scroll -= bg.frameH;
-      bg.index = (bg.index + 1) % (bg.rows * bg.cols);
+    const H = canvas.clientHeight;
+
+    // advance strictly within the current frame
+    bg.offsetY += bg.speed * dt;
+
+    // when we've scrolled exactly one screen height, move to next frame
+    while (bg.offsetY >= H){
+      bg.offsetY -= H;
+      bg.idx = (bg.idx + 1) % (bg.rows * bg.cols);
     }
 
-    const nextIndex = (bg.index + 1) % (bg.rows * bg.cols);
-    const col = idx => idx % bg.cols;
-    const row = idx => (idx / bg.cols) | 0;
+    // draw current frame (partially scrolled) and the next frame stacked below it
+    const nextIdx = (bg.idx + 1) % (bg.rows * bg.cols);
 
-    // small horizontal sway for steering parallax
-    const sway = state.steer * 10;
-
-    // Draw two layers: current frame (shifted up by scroll) then next frame below it.
-    // Current frame crop: full frame
-    const sx0 = col(bg.index) * bg.frameW,  sy0 = row(bg.index) * bg.frameH;
-    const sx1 = col(nextIndex) * bg.frameW, sy1 = row(nextIndex) * bg.frameH;
-
-    // 1) current frame
-    ctx.drawImage(bg.img, sx0, sy0, bg.frameW, bg.frameH, sway, -bg.scroll, W, H);
-    // 2) next frame stacked below to cover gap
-    ctx.drawImage(bg.img, sx1, sy1, bg.frameW, bg.frameH, sway, -bg.scroll + H, W, H);
+    // current frame starts at y = -offset (scrolling upward)
+    drawFrame(bg.idx, -bg.offsetY);
+    // next frame begins exactly after the bottom of screen portion
+    drawFrame(nextIdx, H - bg.offsetY);
   }
 
-  // --- Player + tint ---
+  // ---- player + tint ----
+  const playerTint = { r: 40, g: 160, b: 255, a: 0.25 }; // change to taste
+
   function drawPlayer(){
-    const W = canvas.width  / (window.devicePixelRatio||1);
-    const H = canvas.height / (window.devicePixelRatio||1);
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+
     const baseY = H * 0.78;
-    const baseX = W * 0.5 + state.steer * 28;
+    const baseX = W * 0.5;
 
     // underglow
-    const ugW = Math.min(W*0.7, 420), ugH = ugW*0.25;
+    const ugW = Math.min(W*0.7, 420);
+    const ugH = ugW * 0.25;
     ctx.save();
-    ctx.translate(baseX, baseY);
-    ctx.globalAlpha = 0.85;
-    ctx.drawImage(sprites.underglow, -ugW/2, -ugH/2, ugW, ugH);
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(sprites.underglow, baseX - ugW/2, baseY - ugH/2 + 8, ugW, ugH);
     ctx.restore();
 
-    // car (preserve image aspect ratio)
-    let carW = Math.min(W*0.6, 320);
-    if (playerAR.ready && playerAR.w > 0) {
-      const ar = playerAR.w / playerAR.h;
-      const carH = carW / ar;
-      const x = baseX - carW/2;
-      const y = baseY - carH*0.95;
-      ctx.drawImage(sprites.player, x, y, carW, carH);
+    // car – preserve source aspect
+    const carW = Math.min(W*0.62, 320);
+    const carH = carW * carRatio;
+    const carX = baseX - carW/2;
+    const carY = baseY - carH*0.92;
 
-      // optional tint (multiply style)
-      if (state.tint.a > 0) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.globalAlpha = state.tint.a;
-        ctx.fillStyle = `rgb(${state.tint.r},${state.tint.g},${state.tint.b})`;
-        ctx.fillRect(x, y, carW, carH);
-        ctx.restore();
-      }
-    } else {
-      // fallback estimate before onload
-      const carH = carW * 0.5;
-      ctx.drawImage(sprites.player, baseX - carW/2, baseY - carH*0.95, carW, carH);
-    }
+    ctx.drawImage(sprites.player, carX, carY, carW, carH);
+
+    // simple tint overlay (works well on grayscale base)
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgba(${playerTint.r},${playerTint.g},${playerTint.b},${playerTint.a})`;
+    ctx.fillRect(carX, carY, carW, carH);
+    ctx.restore();
   }
+
+  // ---- state & loop ----
+  const state = { running:false, speed:0, dist:0 };
 
   function draw(dt){
     ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -219,37 +193,27 @@
     drawPlayer();
     HUD.speed.textContent = Math.round(state.speed);
     HUD.dist.textContent  = Math.round(state.dist);
-    HUD.coins.textContent = state.coins;
   }
 
-  // --- Loop ---
   let last = performance.now();
   function loop(now){
     if(!state.running) return;
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
 
-    // smooth accel
-    const target = 180 + (state.nitro>0 ? 120 : 0);
-    state.speed += (target - state.speed) * 0.08;
+    const target = 180;
+    state.speed += (target - state.speed)*0.08;
     state.dist  += state.speed * dt;
 
     draw(dt);
     requestAnimationFrame(loop);
   }
 
-  document.getElementById('startBtn').addEventListener('click',()=>{
+  document.getElementById('startBtn').addEventListener('click', ()=>{
     document.getElementById('startOverlay').style.display='none';
     state.running = true; state.speed = 60; state.dist = 0;
     last = performance.now();
     loop(last);
-  });
-
-  // quick: press "N" to toggle tint demo
-  window.addEventListener('keydown', e=>{
-    if(e.key.toLowerCase()==='n'){
-      state.tint.a = state.tint.a ? 0 : 0.35; // toggle
-    }
   });
 })();
 </script>
