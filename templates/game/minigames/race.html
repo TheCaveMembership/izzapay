@@ -1,196 +1,103 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   <title>Street Race — IZZA GAME</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 
-  <!-- Persist (same as Arena / Basketball) -->
-  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
-
-  <!-- Seed username before izza-persist.js (identical pattern to Basketball) -->
-  <script>
-    (function(){
-      try{
-        const params = new URLSearchParams(location.search);
-        let u = (params.get('u') || '').toString().trim();
-        if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
-        if (!u) {
-          const raw = localStorage.getItem('piAuthUser');
-          if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
-        }
-        if (u) {
-          u = u.replace(/^@+/, '').toLowerCase();
-          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-          window.izzaUserKey = { get: () => u };
-          try { localStorage.setItem('izzaUserU', u); } catch(_){}
-          try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
-        }
-      }catch(_){}
-    })();
-  </script>
-
+  <!-- Persist (unchanged) -->
+  <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
 
-  <link rel="stylesheet" href="/static/themes.css">
+  <link rel="stylesheet" href="/static/themes.css" />
   <style>
     :root{
       --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
-      --txt:#e8eef7; --bg:#0a0c12; --line:rgba(255,255,255,.1); --chip-bg:rgba(255,255,255,.06);
-      --blue:#6ecbff; --neon:#00f5ff; --mag:#ff3bd1; --gold:#ffd36b;
+      --txt:#e8eef7; --bg:#06080e; --line:rgba(255,255,255,.1);
+      --ok:#72ff9d; --gold:#ffd36b; --neon:#00f5ff;
     }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--txt);font-family:Arial,Helvetica,sans-serif}
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,Arial,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
-         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
-    .btn:hover{filter:brightness(1.06)}
+         background:rgba(255,255,255,.06);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+
     .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
-           border-radius:14px;background:radial-gradient(120% 120% at 50% 10%, #101626 0%, #06080e 70%);overflow:hidden}
-
-    /* HUD */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:8px;flex-wrap:nowrap}
-    .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
-    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
-    .pill strong{font-size:13px}
-    .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-    .pill .ok{color:var(--ok)} .pill .bad{color:var(--bad)} .pill .gold{color:var(--gold)}
-
-    /* Start overlay + Garage */
-    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
-      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.45));}
-    .card{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:16px 18px;
-      display:flex;flex-direction:column;gap:10px;align-items:stretch; max-width:680px; width:min(92%,680px)}
-    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between}
-    .seg{display:flex;gap:6px;flex-wrap:wrap}
-    .seg .chip{border:1px solid var(--line); background:var(--chip-bg); padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer}
-    .seg .chip[aria-pressed="true"]{outline:2px solid var(--neon)}
-    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
-    .preview{height:160px;border:1px dashed var(--hudLine);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-
-    /* Nitro button (mobile thumb) */
-    .nitroBtn{position:absolute; right:10px; bottom:14px; z-index:7; border-radius:999px; border:1px solid var(--line);
-      background:radial-gradient(circle at 30% 30%, rgba(255,255,255,.18), rgba(0,0,0,.3)); padding:10px 14px; font-weight:800}
-    .nitroBar{position:absolute; right:10px; bottom:64px; width:14px; height:120px; border-radius:10px; border:1px solid var(--hudLine); background:rgba(0,0,0,.35); overflow:hidden}
-    .nitroFill{position:absolute; left:0; right:0; bottom:0; height:0%; background:linear-gradient(180deg, #93ffff, #00a6ff)}
-
-    /* Scene SVG covers whole arena */
-    .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
-            font-weight:900;letter-spacing:.6px;font-size:48px;opacity:.0;transition:opacity .2s, transform .2s;
-            pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
-    .bigmsg.show{opacity:1;transform:translate(-50%, -56%) scale(1.04)}
-    .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
-
-    .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+           border-radius:14px;overflow:hidden;background:#0a0f1a}
+    .aim{position:absolute;inset:0;width:100%;height:100%;z-index:3;touch-action:none}
     .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
-      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
+      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%)}
 
-    @media (max-width:700px){
-      .seg .chip{padding:8px 12px}
-      .preview{height:140px}
-    }
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;z-index:6;gap:6px}
+    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
+      padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800;display:flex;gap:6px;align-items:center}
+    .seg{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{border:1px solid var(--line);background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;cursor:pointer}
+    .chip[aria-pressed="true"]{outline:2px solid var(--neon)}
+
+    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
+      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.5))}
+    .card{background:rgba(0,0,0,.58);border:1px solid var(--hudLine);border-radius:14px;padding:16px;display:flex;gap:12px;flex-direction:column;width:min(92%,720px)}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.06);font-weight:900;align-self:flex-end}
+
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-56%) scale(1.0);
+      font-weight:1000;letter-spacing:.6px;font-size:44px;opacity:0;transition:opacity .18s,transform .18s;
+      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--gold);z-index:7}
+    .bigmsg.show{opacity:1;transform:translate(-50%,-61%) scale(1.04)}
+
+    /* input UI */
+    .nitroBtn{position:absolute;right:10px;bottom:12px;z-index:7;border:1px solid var(--line);
+      border-radius:999px;background:rgba(255,255,255,.08);padding:10px 14px;font-weight:900}
+    .nitroBar{position:absolute;right:10px;bottom:64px;width:14px;height:120px;border:1px solid var(--hudLine);
+      background:rgba(0,0,0,.35);border-radius:10px;overflow:hidden;z-index:7}
+    .nitroFill{position:absolute;left:0;right:0;bottom:0;height:0%;background:linear-gradient(180deg,#93ffff,#008cff)}
   </style>
 </head>
-<body class="cw-blue theme-a">
+<body>
   <div class="wrap">
     <div class="top">
       <a class="btn" id="backBtn" href="/izza-game/minigames">← Back to Arena</a>
+      <div class="seg">
+        <button class="chip" id="viewThird" aria-pressed="true">Third-Person</button>
+        <button class="chip" id="viewFirst" aria-pressed="false">First-Person</button>
+      </div>
       <a class="btn" id="cityBtn" href="/izza-game/play">Enter IZZA City</a>
     </div>
 
     <div class="arena vignette" id="arena">
       <!-- HUD -->
       <div class="hud">
-        <div class="left">
-          <div class="pill">SPEED: <strong id="speed" class="arc">0</strong>km/h</div>
-          <div class="pill">DIST: <strong id="dist" class="arc">0</strong>m</div>
-          <div class="pill">NEAR: <strong id="combo" class="arc">0</strong>x</div>
+        <div class="seg">
+          <div class="pill">SPEED: <strong id="speed">0</strong> km/h</div>
+          <div class="pill">DIST: <strong id="dist">0</strong> m</div>
+          <div class="pill">NEAR: <strong id="combo">0</strong> x</div>
         </div>
-        <div class="right">
-          <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
+        <div class="seg">
+          <div class="pill">COINS: <strong id="coinsRun">0</strong></div>
           <button id="pauseBtn" class="btn" aria-label="Pause">⋯</button>
         </div>
       </div>
 
-      <!-- Start / Garage overlay -->
-      <div id="startOverlay" class="overlay" aria-live="polite">
+      <!-- Start / Garage -->
+      <div id="startOverlay" class="overlay">
         <div class="card">
-          <h3 style="margin:0 0 6px">Street Race</h3>
+          <h3 style="margin:0">Street Race</h3>
           <div class="row">
-            <div><small class="muted">Pick your track</small></div>
+            <div>Track</div>
             <div class="seg" id="trackSeg">
-              <button class="chip" data-track="night" aria-pressed="true">Neo Tokyo (Night)</button>
-              <button class="chip" data-track="day">City Circuit (Day)</button>
+              <button class="chip" data-track="day" aria-pressed="true">City Day</button>
+              <button class="chip" data-track="night">Neo Night</button>
             </div>
           </div>
           <div class="row">
-            <div><small class="muted">Garage</small></div>
+            <div>Car</div>
             <div class="seg" id="carSeg">
               <button class="chip" data-body="coupe" aria-pressed="true">Coupe</button>
               <button class="chip" data-body="hatch">Hatch</button>
               <button class="chip" data-body="muscle">Muscle</button>
             </div>
-          </div>
-          <div class="row">
-            <div class="seg" id="paintSeg">
-              <button class="chip" data-paint="#00d1ff" aria-pressed="true">Cyan</button>
-              <button class="chip" data-paint="#ff3bd1">Magenta</button>
-              <button class="chip" data-paint="#ffd36b">Gold</button>
-              <button class="chip" data-paint="#a8ff72">Lime</button>
-              <button class="chip" data-paint="#ffffff">White</button>
-              <button class="chip" data-paint="#444444">Graphite</button>
-            </div>
-            <div class="seg" id="glowSeg">
-              <button class="chip" data-glow="#00f5ff" aria-pressed="true">Underglow Cyan</button>
-              <button class="chip" data-glow="#ff00aa">Underglow Pink</button>
-              <button class="chip" data-glow="#7dff6e">Underglow Green</button>
-              <button class="chip" data-glow="none">No Glow</button>
-            </div>
-          </div>
-
-          <div class="preview">
-            <svg id="garagePreview" viewBox="0 0 600 200" width="100%" height="100%" aria-label="Car Preview">
-              <defs>
-                <filter id="softShadow"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity=".55"/></filter>
-                <linearGradient id="shine" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stop-color="#fff" stop-opacity=".08"/>
-                  <stop offset="50%" stop-color="#fff" stop-opacity=".2"/>
-                  <stop offset="100%" stop-color="#fff" stop-opacity=".05"/>
-                </linearGradient>
-              </defs>
-              <rect x="0" y="0" width="600" height="200" fill="url(#bgPrev)"></rect>
-              <g id="carPreview" transform="translate(80,70)">
-                <g id="bodyCoupe" filter="url(#softShadow)">
-                  <path id="bodyCoupePaint" d="M20 40 q40 -34 130 -34 h80 q46 0 78 26 q24 18 30 42 l4 14 q-6 12 -38 12 h-260 q-16 0 -24 -6 q-10 -8 0 -22 z" fill="#00d1ff"/>
-                  <rect x="110" y="18" width="120" height="22" rx="6" fill="black" opacity=".7"/>
-                  <path d="M120 18 h110 l10 16 h-134 z" fill="url(#shine)"/>
-                </g>
-                <g id="bodyHatch" style="display:none" filter="url(#softShadow)">
-                  <path id="bodyHatchPaint" d="M10 48 q60 -36 150 -36 h60 q48 0 80 18 q20 10 28 28 l10 16 q0 16 -32 18 h-280 q-18 0 -24 -6 q-10 -8 -2 -18 z" fill="#00d1ff"/>
-                  <rect x="98" y="22" width="118" height="22" rx="6" fill="black" opacity=".7"/>
-                  <path d="M106 22 h108 l10 16 h-128 z" fill="url(#shine)"/>
-                </g>
-                <g id="bodyMuscle" style="display:none" filter="url(#softShadow)">
-                  <path id="bodyMusclePaint" d="M16 56 q60 -44 160 -44 h90 q60 0 96 18 q24 12 32 30 l6 18 q-2 16 -44 18 h-302 q-24 0 -32 -8 q-10 -10 -6 -20 z" fill="#00d1ff"/>
-                  <rect x="130" y="20" width="126" height="24" rx="6" fill="black" opacity=".7"/>
-                  <path d="M138 20 h116 l10 16 h-136 z" fill="url(#shine)"/>
-                </g>
-                <g id="wheels">
-                  <circle cx="90" cy="84" r="16" fill="#111" stroke="#444" stroke-width="4"/>
-                  <circle cx="270" cy="84" r="16" fill="#111" stroke="#444" stroke-width="4"/>
-                </g>
-                <ellipse id="underglow" cx="180" cy="98" rx="110" ry="10" fill="#00f5ff" opacity=".35" style="display:block"/>
-                <g id="avatarBubble" transform="translate(225,10)">
-                  <circle cx="0" cy="0" r="12" fill="#0a0b12" stroke="rgba(255,255,255,.25)"/>
-                  <text id="avatarInitPrev" x="0" y="5" text-anchor="middle" font-size="12" fill="#e8eef7" font-weight="900">U</text>
-                </g>
-              </g>
-            </svg>
           </div>
           <div class="row" style="justify-content:flex-end">
             <button id="startBtn" class="startBtn">START</button>
@@ -198,14 +105,13 @@
         </div>
       </div>
 
-      <!-- Nitro UI -->
+      <!-- Input helpers -->
       <button class="nitroBtn" id="nitroBtn">NITRO</button>
-      <div class="nitroBar" aria-hidden="true"><div id="nitroFill" class="nitroFill"></div></div>
+      <div class="nitroBar"><div id="nitroFill" class="nitroFill"></div></div>
 
-      <!-- Scene SVG (the game) -->
+      <!-- === VISUAL SCENE ONLY (no logic) === -->
       <svg id="scene" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Track">
         <defs>
-          <filter id="glowCyan"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
           <linearGradient id="roadGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#2a2f39"/><stop offset="100%" stop-color="#1b1f27"/>
           </linearGradient>
@@ -213,66 +119,57 @@
             <stop offset="0%" stop-color="rgba(255,255,255,.8)"/>
             <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
           </linearGradient>
+          <filter id="glowCyan"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         </defs>
 
-        <!-- BACKDROP layers swap per track -->
-        <g id="bgNight" opacity="1">
+        <!-- Backgrounds -->
+        <g id="bgNight" opacity="0">
+          <linearGradient id="nightSky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#0f1631"/><stop offset="100%" stop-color="#06101a"/>
+          </linearGradient>
           <rect x="0" y="0" width="1100" height="760" fill="url(#nightSky)"/>
-          <defs>
-            <linearGradient id="nightSky" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#0f1631"/><stop offset="100%" stop-color="#06101a"/>
-            </linearGradient>
-          </defs>
-          <g id="skylineNight" opacity=".9"><g id="towersN"></g></g>
-          <g id="signsN"></g>
+          <g id="towersN"></g>
         </g>
 
-        <g id="bgDay" opacity="0">
+        <g id="bgDay" opacity="1">
           <linearGradient id="daySky" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#bde0ff"/><stop offset="100%" stop-color="#eaf5ff"/>
           </linearGradient>
           <rect x="0" y="0" width="1100" height="760" fill="url(#daySky)"/>
-          <g id="buildingsDay" opacity=".85"><g id="towersD"></g></g>
-          <g id="sceneryDay"></g>
+          <g id="towersD"></g>
         </g>
 
-        <!-- ROAD -->
+        <!-- Road + lanes -->
         <g id="roadGroup">
-          <polygon id="leftGrass" points="0,760 300,420 340,420 0,760" fill="#0b3a1f" opacity=".8"></polygon>
+          <polygon id="leftGrass"  points="0,760 300,420 340,420 0,760"   fill="#0b3a1f" opacity=".8"></polygon>
           <polygon id="rightGrass" points="1100,760 800,420 760,420 1100,760" fill="#0b3a1f" opacity=".8"></polygon>
           <polygon id="road" points="340,420 760,420 1100,760 0,760" fill="url(#roadGrad)"></polygon>
           <g id="lanes"></g>
-          <g id="boostPads"></g>
         </g>
 
-        <!-- TRAFFIC + PICKUPS -->
+        <!-- Dynamic groups the logic file will populate -->
         <g id="traffic"></g>
+        <g id="pads"></g>
         <g id="pickups"></g>
 
-        <!-- PLAYER CAR (side view kept for player only) -->
-        <g id="player" transform="translate(550,640) scale(1)">
-          <g id="carShadow"><ellipse cx="0" cy="42" rx="90" ry="18" fill="black" opacity=".35"/></g>
+        <!-- Player car model (hidden in first-person) -->
+        <g id="player" transform="translate(550,640)">
+          <ellipse cx="0" cy="42" rx="90" ry="18" fill="black" opacity=".35"></ellipse>
           <g id="carBody">
             <path id="carPaint" d="M-160 0 q90 -58 220 -58 h120 q62 0 110 34 q28 20 34 40 l6 16 q-6 22 -56 22 h-400 q-24 0 -34 -10 q-12 -12 0 -26 z" fill="#00d1ff"/>
             <rect x="-10" y="-34" width="170" height="32" rx="8" fill="rgba(0,0,0,.7)"/>
-            <g id="carWheels">
-              <circle cx="-70" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
-              <circle cx="130" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
-            </g>
-            <g id="avatarBubbleRace" transform="translate(64,-18)">
-              <circle cx="0" cy="0" r="14" fill="#0a0b12" stroke="rgba(255,255,255,.25)"/>
-              <text id="avatarInit" x="0" y="5" text-anchor="middle" font-size="14" fill="#e8eef7" font-weight="900">U</text>
-            </g>
+            <circle cx="-70" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
+            <circle cx="130" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
             <ellipse id="carGlow" cx="20" cy="68" rx="140" ry="18" fill="#00f5ff" opacity=".30" filter="url(#glowCyan)"/>
           </g>
         </g>
       </svg>
 
-      <div id="bigmsg" class="bigmsg" aria-live="polite">BOOST!</div>
+      <div id="bigmsg" class="bigmsg">BOOST!</div>
     </div>
 
     <!-- Finish strip -->
-    <div class="finish" id="finish" style="display:none">
+    <div class="seg" id="finish" style="display:none;margin-top:12px;flex-wrap:wrap">
       <span class="pill">Run Score: <strong id="finalScore">0</strong></span>
       <span class="pill">Coins Awarded: <strong id="finalCoins">0</strong></span>
       <span class="pill">Craft Credits: <strong id="finalCraft">0</strong></span>
@@ -281,723 +178,7 @@
     </div>
   </div>
 
-  <script>
-  (function(){
-    /* -------- t & u params / links (same as Basketball) -------- */
-    const T_KEY='izzaTokenT', U_KEY='izzaUserU';
-    const urlParams = new URLSearchParams(location.search);
-    let T = urlParams.get('t') || '';
-    let U = (urlParams.get('u') || '').toString().trim();
-
-    try{
-      if (T) localStorage.setItem(T_KEY, T);
-      else {
-        const s = localStorage.getItem(T_KEY)||'';
-        if (s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }
-      }
-    }catch(_){}
-
-    function publishUsername(u){
-      if (!u) return;
-      u = u.replace(/^@+/, '').toLowerCase();
-      try{ localStorage.setItem(U_KEY, u); }catch(_){}
-      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-      window.izzaUserKey = { get: () => u };
-      try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
-      return u;
-    }
-
-    try{
-      if (U) publishUsername(U);
-      else {
-        const su = (localStorage.getItem(U_KEY)||'').toString().trim();
-        if (su){
-          const url=new URL(location.href); url.searchParams.set('u',su);
-          history.replaceState(null,'',url.toString()); U = publishUsername(su);
-        }
-      }
-    }catch(_){}
-
-    function withAuth(href){
-      const url = new URL(href, location.origin);
-      if (T) url.searchParams.set('t', T);
-      if (U) url.searchParams.set('u', U);
-      return url.pathname + (url.search ? url.search : '');
-    }
-    document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
-    document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
-
-    /* -------- helpers -------- */
-    function bearerHeaders(base = {}) {
-      const headers = Object.assign({ 'content-type':'application/json' }, base || {});
-      try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
-      return headers;
-    }
-    function parseWalletResponse(j){
-      if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
-      if ('coins' in j || 'crafting' in j || 'credits' in j){
-        return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
-      }
-      if (j.wallet)   return parseWalletResponse(j.wallet);
-      if (j.balance)  return parseWalletResponse(j.balance);
-      return { coins:0, crafting:0 };
-    }
-    const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-    function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
-    function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
-    function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
-
-    /* -------- Handoff from Arena -------- */
-    function consumeWalletHandoff(maxAgeMs = 120000){
-      try{
-        const raw = sessionStorage.getItem('izzaWalletHandoff');
-        if(!raw) return null;
-        const s = JSON.parse(raw);
-        if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
-
-        if (s.user){
-          const u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
-          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-          window.izzaUserKey = { get: () => u };
-          try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
-          U = u;
-        }
-        localStorage.setItem('izzaCoins', String(s.coins|0));
-        localStorage.setItem('izzaCrafting', String(s.craft|0));
-        return { coins:s.coins|0, craft:s.craft|0 };
-      }catch(_){ return null; }
-    }
-
-    /* -------- Hidden City iframe -------- */
-    function primeViaCityIframe({maxWaitMs=8000, pollMs=120} = {}){
-      return new Promise((resolve)=>{
-        let f=null, done=false, hard=null, poll=null;
-        const finish=(why)=>{ if(done) return; done=true;
-          try{ clearTimeout(hard); clearInterval(poll); f && f.remove(); }catch(_){}
-          resolve(why||'ok');
-        };
-        const src = withAuth('/izza-game/play?prime=1&silent=1');
-        f=document.createElement('iframe'); f.src=src;
-        Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
-        document.body.appendChild(f);
-        f.addEventListener('load', ()=>{
-          try{
-            const w=f.contentWindow; let tick=0;
-            poll=setInterval(async ()=>{
-              try{
-                if (w?.IZZA_PERSIST?.load && tick<1){ tick++; await w.IZZA_PERSIST.load(); finish('iframe-load'); }
-              }catch(_){}
-            }, pollMs);
-          }catch(_){}
-        }, {once:true});
-        hard=setTimeout(()=>finish('timeout'), maxWaitMs);
-      });
-    }
-
-    /* -------- Persist readiness & snapshot -------- */
-    function waitForPersistReady({timeout=3000, interval=40} = {}){
-      return new Promise((res)=> {
-        const t0 = performance.now();
-        const check = () => {
-          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
-          if (performance.now() - t0 > timeout) return res(false);
-          setTimeout(check, interval);
-        };
-        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
-        else check();
-      });
-    }
-    async function hydrateFromSnapshot(){
-      try{
-        await waitForPersistReady();
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-          await IZZA_PERSIST.load();  // server → LS
-        }
-      }catch(_){}
-      try{ writeCraftAll(readCraftAny()); }catch(_){}
-      return readCoinsLS();
-    }
-
-    /* -------- Optional: best-effort session check -------- */
-    async function ensureSession(){
-      try{
-        const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-        if (r.ok){
-          const j = await r.json().catch(()=> ({}));
-          const uname = (j.user && j.user.username) || j.username || j.handle || '';
-          if (uname) { U = publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){} }
-        }
-      }catch(_){}
-    }
-
-    /* ========= GAME ========= */
-    const scene = document.getElementById('scene');
-    const player = document.getElementById('player');
-    const carPaint = document.getElementById('carPaint');
-    const carGlow  = document.getElementById('carGlow');
-    const lanesG   = document.getElementById('lanes');
-    const trafficG = document.getElementById('traffic');
-    const padsG    = document.getElementById('boostPads');
-    const pickupsG = document.getElementById('pickups');
-    const bigmsg   = document.getElementById('bigmsg');
-
-    const coinsRunEl = document.getElementById('coinsRun');
-    const speedEl = document.getElementById('speed');
-    const distEl  = document.getElementById('dist');
-    const comboEl = document.getElementById('combo');
-    const nitroBtn = document.getElementById('nitroBtn');
-    const nitroFill = document.getElementById('nitroFill');
-
-    const bgNight = document.getElementById('bgNight');
-    const bgDay   = document.getElementById('bgDay');
-
-    const garagePreview = document.getElementById('garagePreview');
-    const avatarInitPrev = document.getElementById('avatarInitPrev');
-    const avatarInit = document.getElementById('avatarInit');
-
-    /* Paint HUD coins immediately from LS so it never flashes 0 */
-    try { coinsRunEl.textContent = String(Math.max(0, readCoinsLS()||0)); } catch(_){}
-
-    // Garage UI toggles
-    function segToggle(groupId, attr, onPick){
-      const seg = document.getElementById(groupId);
-      seg.addEventListener('click', (e)=>{
-        const b = e.target.closest('.chip'); if(!b) return;
-        seg.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed','false'));
-        b.setAttribute('aria-pressed','true');
-        onPick && onPick(b.dataset);
-      }, {passive:true});
-    }
-
-    let settings = { track:'night', body:'coupe', paint:'#00d1ff', glow:'#00f5ff' };
-
-    segToggle('trackSeg', 'track', (d)=>{ settings.track = d.track; updateTrackPreview(); });
-    segToggle('carSeg',   'body',  (d)=>{ settings.body  = d.body;  updateCarPreview(); });
-    segToggle('paintSeg', 'paint', (d)=>{ settings.paint = d.paint; updateCarPreview(); });
-    segToggle('glowSeg',  'glow',  (d)=>{ settings.glow  = d.glow;  updateCarPreview(); });
-
-    function initialsFromUser(u){
-      if(!u) return 'U';
-      const s=u.replace(/[^a-z0-9 ]/gi,' ').trim().split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase();
-      return s || 'U';
-    }
-    avatarInit.textContent = initialsFromUser((window.__IZZA_PROFILE__||{}).username||'');
-    avatarInitPrev.textContent = avatarInit.textContent;
-
-    function updateCarPreview(){
-      [['coupe','bodyCoupe','bodyCoupePaint'],['hatch','bodyHatch','bodyHatchPaint'],['muscle','bodyMuscle','bodyMusclePaint']]
-      .forEach(([key,gid,pid])=>{
-        const g = document.getElementById(gid), p = document.getElementById(pid);
-        g.style.display = (settings.body===key)?'block':'none';
-        if (p) p.setAttribute('fill', settings.paint);
-      });
-      const ug = document.getElementById('underglow');
-      if (settings.glow==='none'){ ug.style.display='none'; }
-      else { ug.style.display='block'; ug.setAttribute('fill', settings.glow); }
-      carPaint.setAttribute('fill', settings.paint);
-      if (settings.glow==='none'){ carGlow.style.display='none'; }
-      else { carGlow.style.display='block'; carGlow.setAttribute('fill', settings.glow); }
-    }
-    function updateTrackPreview(){
-      const night = settings.track==='night';
-      bgNight.setAttribute('opacity', night? '1':'0');
-      bgDay.setAttribute('opacity', night? '0':'1');
-    }
-    updateCarPreview(); updateTrackPreview();
-
-    /* -------- Geometry / control -------- */
-    const arenaEl = document.getElementById('arena');
-    let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
-    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
-    window.addEventListener('resize', onResize, {passive:true});
-
-    // Control: thumb steer left/right; nitro button
-    let input = { steer:0, touching:false, nitro:false };
-    scene.addEventListener('touchstart', (e)=>{ input.touching=true; e.preventDefault(); }, {passive:false});
-    scene.addEventListener('touchmove', (e)=>{
-      if (!e.touches || !e.touches[0]) return;
-      const t=e.touches[0];
-      const mid = W/2;
-      const rect = arenaEl.getBoundingClientRect();
-      const y = t.clientY-rect.top;
-      if (y < H*0.35) return;
-      const x = t.clientX-rect.left;
-      input.steer = Math.max(-1, Math.min(1, ((x - mid) / (W*0.45))));
-      e.preventDefault();
-    }, {passive:false});
-    scene.addEventListener('touchend', ()=>{ input.touching=false; input.steer=0; }, {passive:true});
-    nitroBtn.addEventListener('touchstart', ()=>{ input.nitro=true; }, {passive:true});
-    nitroBtn.addEventListener('touchend', ()=>{ input.nitro=false; }, {passive:true});
-    nitroBtn.addEventListener('mousedown', ()=>{ input.nitro=true; });
-    window.addEventListener('mouseup', ()=>{ input.nitro=false; });
-
-    /* -------- Game state -------- */
-    const L = { left: 340, right: 760, yHorizon: 420 };
-    function laneX(norm){ const w = (L.right - L.left); return L.left + (norm*0.5 + 0.5) * w; }
-
-    let game = {
-      running:false, ended:false,
-      px: 0,
-      speed: 0,
-      z: 0,
-      combo:0, nitro:0, nitroMax:100, nitroActive:false,
-      coinsEarned:0, craftEarned:0,
-      laneMarks:[], cars:[], pads:[], items:[],
-      lastSpawnByLane: { '-0.8':-999, '-0.25':-999, '0.25':-999, '0.8':-999 }
-    };
-
-    /* ---- Procedural background ---- */
-    function seedNight(){
-      const towersN = document.getElementById('towersN'); towersN.innerHTML='';
-      for(let i=0;i<24;i++){
-        const x = Math.random()*1100, w = 30+Math.random()*60, h = 80+Math.random()*140;
-        const c = ['#2fd7ff','#7a6bff','#ff3bd1','#00ffa6'][i%4];
-        const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-        g.setAttribute('opacity', String(0.35 + Math.random()*0.4));
-        g.innerHTML = `<rect x="${x}" y="${L.yHorizon-h}" width="${w}" height="${h}" fill="#0d1424"/>
-                       <rect x="${x+6}" y="${L.yHorizon-h+8}" width="${w-12}" height="4" fill="${c}" opacity=".8"/>
-                       <rect x="${x+6}" y="${L.yHorizon-h+30}" width="${w-12}" height="3" fill="${c}" opacity=".6"/>`;
-        towersN.appendChild(g);
-      }
-      const signs = document.getElementById('signsN'); signs.innerHTML='';
-      for(let i=0;i<6;i++){
-        const x = 120 + i*160 + (Math.random()*60-30), y = L.yHorizon-60 - (i%2)*40;
-        const txt = ['IZZA','NEON','DRIFT','BOOST','TOKYO','GO!'][i%6];
-        const c = ['#00f5ff','#ff3bd1','#ffd36b'][i%3];
-        const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-        g.setAttribute('opacity','.9');
-        g.innerHTML = `<rect x="${x-40}" y="${y-16}" width="80" height="24" rx="6" fill="${c}" opacity=".25"/>
-                       <text x="${x}" y="${y}" text-anchor="middle" font-size="12" fill="${c}" filter="url(#glowCyan)" font-weight="900">${txt}</text>`;
-        signs.appendChild(g);
-      }
-    }
-    function seedDay(){
-      const towersD = document.getElementById('towersD'); towersD.innerHTML='';
-      for(let i=0;i<22;i++){
-        const x = Math.random()*1100, w = 30+Math.random()*80, h = 80+Math.random()*160;
-        const c = ['#9bbad6','#b7c7d8','#d6e4f0'][i%3];
-        const g = document.createElementNS('http://www.w3.org/2000/svg','rect');
-        g.setAttribute('x',x); g.setAttribute('y', String(L.yHorizon-h));
-        g.setAttribute('width', w); g.setAttribute('height', h); g.setAttribute('fill', c);
-        g.setAttribute('opacity', String(0.55 + Math.random()*0.35));
-        towersD.appendChild(g);
-      }
-      const scenery = document.getElementById('sceneryDay'); scenery.innerHTML='';
-      for(let i=0;i<6;i++){
-        const x = 200 + i*130;
-        scenery.innerHTML += `<g opacity=".9">
-          <polygon points="${x},${L.yHorizon-6} ${x+8},${L.yHorizon-28} ${x+16},${L.yHorizon-6}" fill="#ff7a00"/>
-          <rect x="${x+4}" y="${L.yHorizon-10}" width="8" height="3" fill="#fff"/>
-        </g>`;
-      }
-    }
-    seedNight(); seedDay();
-
-    /* ---- Lane marks ---- */
-    function makeLaneMark(y){
-      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-      [-0.5, 0, 0.5].forEach(p=>{
-        const x = laneX(p), h=40, w=6;
-        const r = document.createElementNS('http://www.w3.org/2000/svg','rect');
-        r.setAttribute('x', x - w/2); r.setAttribute('y', y);
-        r.setAttribute('width', w);    r.setAttribute('height', h);
-        r.setAttribute('fill', 'url(#laneFade)');
-        g.appendChild(r);
-      });
-      lanesG.appendChild(g);
-      return g;
-    }
-    for(let i=0;i<12;i++){ game.laneMarks.push(makeLaneMark(460 + i*60)); }
-
-        /* ---- Entities (top-down look) ---- */
-    function makeTrafficCar(color){
-      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-      // top-down capsule body (tall in Y so it reads as pointing forward)
-      g.innerHTML = `
-        <ellipse cx="0" cy="34" rx="22" ry="8" fill="black" opacity=".25"/>
-        <rect x="-18" y="-36" width="36" height="72" rx="14" fill="${color}" />
-        <rect x="-12" y="-34" width="24" height="6" rx="3" fill="#cfe9ff" opacity=".8"/>
-        <rect x="-10" y="26"  width="20" height="6" rx="3" fill="#ffdf7a" opacity=".9"/>
-        <rect x="-10" y="-16" width="20" height="32" rx="6" fill="rgba(0,0,0,.25)"/>
-      `;
-      return g;
-    }
-
-    function spawnTraffic(){
-      const lanes = [-0.8,-0.25,0.25,0.8];
-      const lane = lanes[Math.floor(Math.random()*lanes.length)];
-      const y = L.yHorizon + 30;
-
-      // lane safety so spawns aren't stacked
-      const lastY = game.lastSpawnByLane[String(lane)] || -999;
-      if (y - lastY < 260) return null;
-      game.lastSpawnByLane[String(lane)] = y;
-
-      const color = ['#ff5470','#7dd3fc','#ffd36b','#a8ff72','#ffffff'][Math.floor(Math.random()*5)];
-      const g = makeTrafficCar(color);
-      trafficG.appendChild(g);
-      return { g, lane, y, speed: 80 + Math.random()*50, alive:true };
-    }
-
-    function spawnPad(){
-      const lane = [-0.8,-0.25,0.25,0.8][Math.floor(Math.random()*4)];
-      const y = L.yHorizon + 20;
-      const pad = document.createElementNS('http://www.w3.org/2000/svg','g');
-      pad.innerHTML = `
-        <ellipse cx="0" cy="60" rx="90" ry="16" fill="#00f5ff" opacity=".35" filter="url(#glowCyan)"/>
-        <rect x="-34" y="42" width="68" height="7" rx="4" fill="#93ffff"/>
-      `;
-      padsG.appendChild(pad);
-      return { g: pad, lane, y, alive:true };
-    }
-
-    function spawnPickup(){
-      const lane = [-0.8,-0.25,0.25,0.8][Math.floor(Math.random()*4)];
-      const coin = Math.random() < 0.8; // easy mode: mostly coins
-      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-      if (coin){
-        g.innerHTML = `<circle cx="0" cy="40" r="12" fill="#ffd36b" stroke="#a97b1f" stroke-width="3"/>`;
-      }else{
-        g.innerHTML = `<rect x="-10" y="28" width="20" height="24" rx="4" fill="#00a6ff"/><rect x="-8" y="30" width="16" height="6" rx="2" fill="#93ffff"/>`;
-      }
-      pickupsG.appendChild(g);
-      return { g, lane, y: L.yHorizon + 24, type: coin ? 'coin':'nitro', alive:true };
-    }
-
-    /* ---- Wallet / HUD (same behavior as Basketball; no regress) ---- */
-    let walletDirty = false, WALLET_READY = false, runStartCoins = 0;
-
-    function paintCoinsHUD(n){
-      const val = Math.max(0, n|0);
-      if (coinsRunEl) coinsRunEl.textContent = String(val);
-    }
-    function updateCoinsHUD(){
-      if(!WALLET_READY) return;
-      const cur = readCoinsLS();
-      const shown = parseInt(coinsRunEl.textContent||'0',10)||0;
-      paintCoinsHUD((cur===0 && shown>0) ? shown : cur);
-    }
-    function syncCoinsHUD(){ updateCoinsHUD(); }
-
-    async function applyCoins(amount){
-      const cur = (readCoinsLS()|0) + (amount|0);
-      writeCoinsLS(cur); walletDirty = true;
-      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
-      WALLET_READY = true; updateCoinsHUD(); return cur;
-    }
-    async function applyCraftDelta(delta){
-      const val = readCraftAny() + (delta|0);
-      writeCraftAll(val); walletDirty = true;
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
-    }
-    async function persistWalletAndSave(){
-      try{
-        writeCraftAll(readCraftAny());
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ await IZZA_PERSIST.save(); walletDirty = false; }
-        else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
-      }catch(_){}
-    }
-
-    /* ---- Scoring ---- */
-    function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
-    function addDistanceScore(dMeters){
-      // Easy mode: 1 coin every 6m
-      const coins = Math.floor(dMeters/6);
-      if (coins>0){ applyCoins(coins); game.coinsEarned += coins; }
-    }
-    function onNearMiss(){
-      game.combo++;
-      if (game.combo%2===0){ // easier, more nitro
-        game.nitro = Math.min(game.nitroMax, game.nitro + 20);
-        showMsg('NEAR MISS +NITRO', 'scoreGlow');
-      }
-    }
-    function pickup(item){
-      if(item.type==='coin'){
-        applyCoins(30); game.coinsEarned += 30; showMsg('+30 COINS','scoreGlow');
-      }else{
-        game.nitro = Math.min(game.nitroMax, game.nitro + 50);
-        showMsg('NITRO +50','scoreGlow');
-      }
-    }
-    function useNitro(active){ game.nitroActive = active && game.nitro>0; }
-
-    /* ---- Loop (easier, forward-only traffic, smaller crash box) ---- */
-    let lastT = performance.now();
-    function loop(t){
-      if(!game.running) return;
-      const dt = Math.min(0.033, (t - lastT)/1000); lastT=t;
-
-      // speed & steering (easy)
-      const targetSpeed = game.nitroActive ? 220 : 160;
-      game.speed += (targetSpeed - game.speed) * (game.nitroActive ? 0.22 : 0.12);
-      if (!input.touching) game.px *= 0.92; else game.px += input.steer * 0.035;
-      game.px = Math.max(-0.98, Math.min(0.98, game.px));
-
-      // nitro drain
-      if (game.nitroActive){ game.nitro = Math.max(0, game.nitro - 18*dt); }
-      nitroFill.style.height = (game.nitro/game.nitroMax*100)+'%';
-
-      // distance
-      const mps = game.speed/3.6;
-      const advance = mps * dt;
-      game.z += advance;
-      distEl.textContent = String(Math.floor(game.z));
-      speedEl.textContent = String(Math.round(game.speed));
-      comboEl.textContent = String(game.combo);
-
-      // lane marks
-      game.laneMarks.forEach((g,i)=>{
-        const y = 460 + ((i*60 + (game.z%60))% (60*game.laneMarks.length));
-        g.setAttribute('transform', `translate(0, ${y-60})`);
-      });
-
-      // spawns (easy mode: fewer cars, more goodies)
-      if (Math.random() < 0.008){ const c = spawnTraffic(); if (c) game.cars.push(c); }
-      if (Math.random() < 0.012) game.pads.push(spawnPad());
-      if (Math.random() < 0.020) game.items.push(spawnPickup());
-
-      // update entities
-      function moveEntity(E, scaleBase=1){
-        E.y += advance*0.9;
-        const y = E.y;
-        const s = Math.max(0.4, Math.min(2.2, 0.35 + (y - L.yHorizon)/260)) * scaleBase;
-        const x = laneX(E.lane); // remove parallax to avoid sideways feel
-        E.g.setAttribute('transform', `translate(${x}, ${y}) scale(${s})`);
-        if (y>800) E.alive=false;
-      }
-      game.cars.forEach(C=>moveEntity(C,1.0));
-      game.pads.forEach(P=>moveEntity(P,1.0));
-      game.items.forEach(I=>moveEntity(I,0.9));
-      game.cars  = game.cars.filter(c=>c.alive);
-      game.pads  = game.pads.filter(p=>p.alive);
-      game.items = game.items.filter(i=>i.alive);
-
-      // collisions
-      const carX = laneX(game.px), carY = 640;
-      const close = (a,b,t)=> Math.abs(a-b) < t;
-
-      // pads
-      game.pads.forEach(p=>{
-        if (!p.alive) return;
-        if (close(p.y, carY, 32) && close(laneX(p.lane), carX, 84)){
-          p.alive=false; game.nitro = Math.min(game.nitroMax, game.nitro+35);
-          showMsg('BOOST PAD +35','scoreGlow');
-        }
-      });
-
-      // pickups
-      game.items.forEach(i=>{
-        if (!i.alive) return;
-        if (close(i.y, carY, 30) && close(laneX(i.lane), carX, 60)){
-          i.alive=false; pickup(i);
-        }
-      });
-
-      // traffic (smaller crash box, generous near-miss)
-      let crashed = false;
-      game.cars.forEach(c=>{
-        if (!c.alive) return;
-        const dx = laneX(c.lane) - carX;
-        const dy = c.y - carY;
-
-        if (Math.abs(dy) < 26 && Math.abs(dx) < 52){
-          crashed = true; c.alive = false;
-        } else if (!c.nearDone){
-          if (Math.abs(dx) < 120 && dy < 40 && dy > -130){
-            c.nearDone = true;
-            onNearMiss();
-            applyCoins(5); game.coinsEarned += 5;
-          }
-        }
-      });
-
-      if (crashed){
-        game.speed *= 0.35;
-        showMsg('CRASH!', 'miss');
-        endRun(); return;
-      }
-
-      // distance coins (easy)
-      game._coinGate = (game._coinGate||0) + advance;
-      if (game._coinGate >= 6){
-        const chunks = Math.floor(game._coinGate / 6);
-        addDistanceScore(chunks*6);
-        game._coinGate -= chunks*6;
-      }
-
-      // craft credit milestones (every 700m, slower)
-      game._craftGate = (game._craftGate||0) + advance;
-      if (game._craftGate >= 700){
-        const steps = Math.floor(game._craftGate / 700);
-        game._craftGate -= steps*700;
-        game.craftEarned += steps;
-        applyCraftDelta(steps);
-        showMsg(`+${steps} CRAFT CREDIT`, 'scoreGlow');
-      }
-
-      requestAnimationFrame(loop);
-    }
-
-    /* ---- End / Finish ---- */
-    async function endRun(){
-      if (game.ended) return;
-      game.ended = true;
-      game.running = false;
-      nitroBtn.disabled = true;
-
-      const coinsNow = readCoinsLS();
-      const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
-
-      document.getElementById('finalScore').textContent = Math.floor(game.z);
-      document.getElementById('finalCoins').textContent = coinsAwarded;
-      document.getElementById('finalCraft').textContent = game.craftEarned|0;
-      document.getElementById('finish').style.display = 'flex';
-
-      try{
-        const p = persistWalletAndSave();
-        await Promise.race([p, new Promise(r=>setTimeout(r, 220))]);
-      }catch(_){}
-    }
-
-    /* ---- Pause ---- */
-    const pauseBtn = document.getElementById('pauseBtn');
-    let paused = false;
-    pauseBtn.addEventListener('click', ()=>{
-      if (game.ended) return;
-      paused = !paused;
-      if (paused){ game.running = false; pauseBtn.textContent = '▶︎'; }
-      else { if (!game.ended){ game.running = true; pauseBtn.textContent = '⋯'; lastT = performance.now(); requestAnimationFrame(loop); } }
-    }, {passive:true});
-
-    /* ---- START button: handoff → prime → snapshot → API (never regress coins) ---- */
-    function paintCoinsHUDSafeAfterSnapshot(snapCoins){
-      const shown = parseInt((coinsRunEl.textContent||'0'), 10) || 0;
-      const safe = Math.max(shown, snapCoins, readCoinsLS()||0);
-      paintCoinsHUD(safe);
-    }
-
-    document.getElementById('startBtn').addEventListener('click', async ()=>{
-      try{
-        const handoff = consumeWalletHandoff();
-        if (handoff){ paintCoinsHUD(handoff.coins); }
-
-        try{ await primeViaCityIframe(); }catch(_){}
-        try{ await ensureSession(); }catch(_){}
-
-        const snapCoins = await hydrateFromSnapshot();
-        paintCoinsHUDSafeAfterSnapshot(snapCoins);
-
-        try{
-          const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
-          if (r.ok){
-            const parsed = parseWalletResponse(await r.json().catch(()=>({})));
-            const apiCoins = Number(parsed.coins)||0;
-            const apiCraft = Number(parsed.crafting)||0;
-            const shown = parseInt((coinsRunEl.textContent||'0'), 10) || 0;
-            const nextCoins = Math.max(shown, apiCoins);
-            try{
-              localStorage.setItem('izzaCoins', String(nextCoins));
-              if (apiCraft>=0) writeCraftAll(apiCraft);
-              window.dispatchEvent(new Event('izza-coins-changed'));
-              window.dispatchEvent(new Event('izza-crafting-changed'));
-            }catch(_){}
-            paintCoinsHUD(nextCoins);
-          }
-        }catch(_){}
-
-        WALLET_READY = true;
-        runStartCoins = parseInt((coinsRunEl.textContent||'0'), 10) || (readCoinsLS()||0);
-        document.getElementById('startOverlay').style.display='none';
-
-        // visuals
-        if (settings.track==='night'){ bgNight.setAttribute('opacity','1'); bgDay.setAttribute('opacity','0'); }
-        else { bgNight.setAttribute('opacity','0'); bgDay.setAttribute('opacity','1'); }
-
-        carPaint.setAttribute('fill', settings.paint);
-        if (settings.glow==='none'){ carGlow.style.display='none'; }
-        else { carGlow.style.display='block'; carGlow.setAttribute('fill', settings.glow); }
-
-        const bodyMul = (settings.body==='muscle')?1.18:(settings.body==='hatch'?0.92:1.0);
-        document.getElementById('carBody').setAttribute('transform', `scale(${bodyMul},1)`);
-
-        // easy start values
-        game.ended=false; game.running=true; paused=false; pauseBtn.textContent='⋯';
-        game.speed = 30; game.nitro = 60; game.combo=0; game.z=0; game.coinsEarned=0; game.craftEarned=0;
-        lastT = performance.now();
-        requestAnimationFrame(loop);
-      }catch(e){ console.error('start failed', e); }
-    }, {passive:true});
-
-    /* ---- Nitro interactions ---- */
-    nitroBtn.addEventListener('touchstart', ()=> useNitro(true), {passive:true});
-    nitroBtn.addEventListener('touchend',   ()=> useNitro(false), {passive:true});
-    nitroBtn.addEventListener('mousedown',  ()=> useNitro(true));
-    window.addEventListener('mouseup',      ()=> useNitro(false));
-
-    /* ---- Keep HUD coins synced during the run ---- */
-    window.addEventListener('izza-coins-changed',  syncCoinsHUD, {passive:true});
-    window.addEventListener('izza-wallet-changed', syncCoinsHUD, {passive:true});
-    window.addEventListener('izza-crafting-changed', syncCoinsHUD, {passive:true});
-    window.addEventListener('storage', (e)=>{
-      if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
-    });
-
-    /* ---- Page lifecycle safety ---- */
-    document.addEventListener('visibilitychange', async () => {
-      if (document.hidden){
-        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
-      } else { updateCoinsHUD(); }
-    }, {passive:true});
-    window.addEventListener('pagehide', () => {
-      if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-        try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
-      }
-    });
-
-    /* ---- Access links carry auth ---- */
-    function rewriteAuthLinks(){
-      document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
-      document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{
-        a.href = withAuth(a.getAttribute('href'));
-      });
-    }
-    rewriteAuthLinks();
-/* ---- BOOT / UNBOOT hooks ---- */
-window.IZZA_BOOT = async function bootRace(opts = {}) {
-  try {
-    await waitForPersistReady();
-    const snapCoins = await hydrateFromSnapshot();
-    paintCoinsHUDSafeAfterSnapshot(snapCoins);
-
-    // Warm session (non-blocking)
-    primeViaCityIframe().catch(()=>{});
-    ensureSession().catch(()=>{});
-
-    // Keep auth params on nav links
-    rewriteAuthLinks();
-
-    return { ok: true, track: settings.track, coins: readCoinsLS()|0 };
-  } catch (e) {
-    console.error('IZZA_BOOT error', e);
-    return { ok: false, error: String(e) };
-  }
-};
-
-window.IZZA_UNBOOT = function unbootRace() {
-  try {
-    game.running = false;
-    game.ended = true;
-    if (walletDirty) { persistWalletAndSave().catch(()=>{}); }
-  } catch (e) {
-    console.warn('IZZA_UNBOOT warn', e);
-  }
-};
-  })();
-  </script>
+  <!-- GAME LOGIC LIVES HERE -->
+  <script type="module" src="/static/game/js/race.logic.js"></script>
 </body>
 </html>
