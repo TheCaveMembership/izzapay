@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>Street Race — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <!-- Persist helper you already host -->
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
@@ -15,17 +16,23 @@
       border-left:1px solid rgba(255,255,255,.08);
       border-right:1px solid rgba(255,255,255,.08);
       background:var(--panel);overflow:hidden}
+    .hud{position:absolute;top:8px;left:8px;right:8px;z-index:6;display:flex;justify-content:space-between;font-size:12px}
+    .nitroBtn{position:absolute;right:10px;bottom:14px;z-index:7;border-radius:999px;
+      border:1px solid rgba(255,255,255,.1);background:#222;padding:10px 14px;font-weight:800;color:white}
+
+    /* Garage */
     .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
-      background:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35));}
+      background:linear-gradient(to bottom, rgba(0,0,0,.65), rgba(0,0,0,.45));}
     .card{background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18);border-radius:14px;
-      padding:16px 18px;display:flex;flex-direction:column;gap:10px;width:min(92%,440px)}
+      padding:16px 18px;display:flex;flex-direction:column;gap:12px;width:min(92%,460px)}
+    .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+    .pill{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.12);font-weight:700}
     .preview{height:160px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;
       display:flex;align-items:center;justify-content:center;overflow:hidden}
     .startBtn{padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
       background:rgba(255,255,255,.08);font-weight:800;color:white}
-    .hud{position:absolute;top:8px;left:8px;right:8px;z-index:6;display:flex;justify-content:space-between;font-size:12px}
-    .nitroBtn{position:absolute;right:10px;bottom:14px;z-index:7;border-radius:999px;
-      border:1px solid rgba(255,255,255,.1);background:#222;padding:10px 14px;font-weight:800;color:white}
+    .slider{width:100%}
     canvas{display:block;width:100%;height:100%}
   </style>
 </head>
@@ -38,18 +45,30 @@
       <div>COINS: <span id="coinsRun">0</span></div>
     </div>
 
-    <!-- Garage -->
+    <!-- Garage (wallet + tint) -->
     <div id="startOverlay" class="overlay">
       <div class="card">
-        <h3>Street Race</h3>
+        <h3 style="margin:0 0 2px">Garage</h3>
+        <div class="row">
+          <div class="pill">Coins: <span id="walletCoins">–</span></div>
+          <div class="pill">Crafting: <span id="walletCraft">–</span></div>
+        </div>
         <div class="preview">
-          <img src="/static/game/sprites/tracks/coupe.png" alt="Car" style="height:100%"/>
+          <img id="garageCar" src="/static/game/sprites/tracks/coupe.png" alt="Car" style="height:100%"/>
+        </div>
+        <div class="row" style="gap:8px">
+          <label style="font-size:12px;opacity:.85">Paint tint</label>
+          <input id="tintHue" class="slider" type="range" min="0" max="360" value="200">
+          <input id="tintAmt" class="slider" type="range" min="0" max="60" value="22">
         </div>
         <button id="startBtn" class="startBtn">START</button>
       </div>
     </div>
 
+    <!-- Nitro -->
     <button class="nitroBtn" id="nitroBtn">NITRO</button>
+
+    <!-- Scene -->
     <canvas id="scene"></canvas>
   </div>
 
@@ -67,8 +86,30 @@
     coins: document.getElementById('coinsRun')
   };
 
-  // --- DPR sizing ---
+  // Wallet fetch (uses your izza-persist if present; falls back to localStorage)
+  async function loadWallet(){
+    try{
+      // If your helper exposes a getter, try a couple of common shapes:
+      if (window.IZZA?.persist?.getJSON){
+        const w = await window.IZZA.persist.getJSON('/wallet/balances');
+        return { coins: w?.coins ?? 0, craft: w?.craft ?? w?.credits ?? 0 };
+      }
+      if (window.IZZA?.get){
+        const coins = await window.IZZA.get('coins'); 
+        const craft = await window.IZZA.get('craft');
+        return { coins: +coins||0, craft:+craft||0 };
+      }
+    }catch(e){}
+    // Fallback to localStorage keys if you use them
+    return {
+      coins: +(localStorage.getItem('izza.coins')||0),
+      craft: +(localStorage.getItem('izza.craft')||0)
+    };
+  }
+
+  // --- DPR sizing & perspective ---
   let dpr=1, W=0, H=0;
+  let horizonY=0, roadBottomHalf=0, roadTopHalf=0, skylineY=0;
   function resize(){
     W = arena.clientWidth;
     H = arena.clientHeight;
@@ -79,23 +120,28 @@
     canvas.style.height = H + 'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
 
-    // perspective params depend on size
-    horizonY = H*0.22;
-    roadBottomHalf = W*0.44;   // road half-width at bottom
-    roadTopHalf    = W*0.10;   // at horizon
-
-    // parallax layers
-    skylineY = Math.max(40, horizonY - 6);
+    // deep vanishing point like your reference
+    horizonY = H*0.20;
+    roadBottomHalf = W*0.47;   // wide foreground
+    roadTopHalf    = W*0.11;   // narrow near horizon
+    skylineY = horizonY - 8;
   }
   window.addEventListener('resize', resize, {passive:true});
 
-  // --- Assets (car only) ---
+  // --- Assets ---
   const carImg = new Image();
   carImg.src = '/static/game/sprites/tracks/coupe.png';
   let carRatio = 0.5;
   carImg.onload = ()=>{ carRatio = carImg.height / carImg.width; };
 
-  // --- Input (tap left/right half; arrow keys) ---
+  // Player tint (from Garage)
+  const tint = { hue:200, amt:0.22 };
+  const tintHue = document.getElementById('tintHue');
+  const tintAmt = document.getElementById('tintAmt');
+  tintHue.oninput = ()=>{ tint.hue = +tintHue.value; };
+  tintAmt.oninput = ()=>{ tint.amt = (+tintAmt.value)/100; };
+
+  // --- Input ---
   const steer = { x:0 };
   function onPointer(e){
     const r = canvas.getBoundingClientRect();
@@ -114,174 +160,80 @@
     if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
   });
 
-  // --- Road & world params ---
-  let horizonY=0, roadBottomHalf=0, roadTopHalf=0, skylineY=0;
-  const sideLineColor   = 'rgba(240,245,255,0.95)';
-  const shoulderColor   = '#0d121b';
-  const asphaltTop      = '#141a23';
-  const asphaltBot      = '#0c1119';
-
-  let nitroLeft = 0;
-  let worldZ = 0;                 // meters forward
-  const mpsFromKmh = (k)=>k/3.6;
-
-  // projection depth -> screen
+  // --- Projection utilities ---
   const lerp = (a,b,t)=>a+(b-a)*t;
   function project(z){
-    const k = 0.012;                 // perspective strength
-    const t = 1 - Math.exp(-k*z);    // 0..1
+    // exponential mapping gives long, smooth depth like the reference shot
+    const k = 0.0105;                      // perspective strength
+    const t = 1 - Math.exp(-k*z);          // 0..1
     const y = lerp(horizonY, H, t);
     const half = lerp(roadTopHalf, roadBottomHalf, t);
     return { y, half, t };
   }
 
-  // --- Environment zones (looping): Chinatown → small town → big city ---
-  // change the roadside mix every N meters
-  const ZONE_LEN = 800; // meters each slice
+  // --- Visual palette to match the photo-y reference (stylized night highway) ---
+  const sideLineColor   = 'rgba(245,248,255,0.95)';
+  const asphaltTop      = '#121722';
+  const asphaltBot      = '#0b1018';
+  const railColor       = 'rgba(170,185,205,0.55)';
+  const ledColor        = 'rgba(255,110,60,0.9)';
+
+  // --- World state ---
+  let worldZ = 0;                 // meters forward
+  let nitroLeft = 0;
+
+  // Procedural roadside objects (now sorted back->front each frame)
+  const objects = [];             // unified list; each has {side,type,z}
+  const ZONE_LEN = 900;
+  const MAX_DEPTH = 1400;
+
   function zoneAt(dist){
     const i = Math.floor(dist / ZONE_LEN) % 3;
     return ['chinatown','suburb','city'][i];
   }
 
-  // --- Procedural objects (spawned near road edges) ---
-  const leftObjs = [], rightObjs = [];
-  function spawnObj(side, zAhead, zone){
-    // type mix by zone
-    let types;
-    if(zone==='chinatown'){
-      types = ['shop','neon','tree','shop','neon','tree'];
-    }else if(zone==='suburb'){
-      types = ['tree','tree','house','tree','house','sign'];
-    }else{
-      types = ['tower','tower','neon','tower','sign'];
-    }
+  function spawnOne(side, zAhead, zone){
+    const types = zone==='chinatown' ? ['shop','neon','shop','sign','tree']
+                : zone==='suburb'   ? ['tree','house','tree','house','sign']
+                                    : ['tower','tower','neon','sign','tree'];
     const type = types[(Math.random()*types.length)|0];
-    const base = {
-      type,
-      z: worldZ + zAhead,
-      // world lateral offset from road edge (+ outwards)
-      off: (side==='L' ? -1 : 1) * (2 + Math.random()*2),
-      // world size hint
-      w:  type==='tree'? 2.4 : type==='house'? 4.0 : type==='shop'? 5.0 :
-          type==='tower'? 7.0 : 2.2,
-      color: `hsl(${200+Math.random()*20}, 25%, ${type==='neon'?60:35}%)`,
-      glow : type==='neon' || type==='sign'
-    };
-    (side==='L'?leftObjs:rightObjs).push(base);
+    const off  = (side==='L'?-1:1) * (2 + Math.random()*2.5);
+    objects.push({ side, type, z: worldZ + zAhead, off });
   }
 
-  function sweepAndSpawn(dt, speedMps){
-    const maxDepth = 1200;   // meters we render forward
-    // purge that passed camera
-    function purge(arr){
-      while(arr.length && arr[0].z < worldZ - 10) arr.shift();
-    }
-    purge(leftObjs); purge(rightObjs);
+  let nextSpawnL = 0, nextSpawnR = 0;
+  function tickSpawns(){
+    // purge behind camera
+    for (let i=objects.length-1;i>=0;i--) if (objects[i].z < worldZ-8) objects.splice(i,1);
 
-    // spacing (denser in city/chinatown)
-    const z = worldZ;
-    const zoneNow = zoneAt(z);
-    const gap = (zoneNow==='suburb'? 28 : 18);
-
-    // ensure next spawn at least every gap meters per side
-    if (!leftObjs.length || leftObjs[leftObjs.length-1].z - z > gap){
-      spawnObj('L', 55 + Math.random()*25, zoneNow);
-    }
-    if (!rightObjs.length || rightObjs[rightObjs.length-1].z - z > gap){
-      spawnObj('R', 55 + Math.random()*25, zoneNow);
-    }
+    const zone = zoneAt(worldZ);
+    const gap = (zone==='suburb'? 26 : 18); // meters
+    if (worldZ >= nextSpawnL){ spawnOne('L', 62 + Math.random()*24, zone); nextSpawnL = worldZ + gap; }
+    if (worldZ >= nextSpawnR){ spawnOne('R', 62 + Math.random()*24, zone); nextSpawnR = worldZ + gap; }
   }
 
-  // --- Drawing helpers for “3D-ish” objects ---
-  function drawTree(p, side){
-    // bulb foliage with tiny trunk; size from depth
-    const size = lerp(26, 6, p.t); // pixels radius-ish
-    const x = (W/2) + (side==='L'? -1:1) * (p.half + 10 + size*0.2);
-    // trunk
-    ctx.fillStyle = '#2b2b2b';
-    ctx.fillRect(x-2, p.y-2, 4, size*0.9);
-    // foliage
-    const g = ctx.createRadialGradient(x, p.y-size*0.6, size*0.2, x, p.y-size*0.2, size*1.05);
-    g.addColorStop(0, 'rgba(40,110,70,0.95)');
-    g.addColorStop(1, 'rgba(18,40,30,0.95)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(x, p.y-size*0.6, size*0.9, size*0.7, 0, 0, Math.PI*2);
-    ctx.fill();
-  }
+  // --- Drawing helpers (painter’s algorithm) ---
+  function drawSkylineAndFog(){
+    // night sky
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#0d1220'); g.addColorStop(0.25,'#0f1523'); g.addColorStop(1,'#090d14');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  function drawShop(p, side, neon=false){
-    // low block with awning; looks good in “chinatown”
-    const depthScale = lerp(1.2, 0.35, p.t);
-    const w = 80*depthScale, h = 60*depthScale;
-    const x = (W/2) + (side==='L'? -1:1) * (p.half + 12 + w*0.15);
-    const y = p.y - h;
-    // body
-    const grad = ctx.createLinearGradient(0,y,0,y+h);
-    grad.addColorStop(0, '#1a2230'); grad.addColorStop(1, '#0f141d');
-    ctx.fillStyle = grad;
-    ctx.fillRect(x - (side==='L'?w:0), y, w, h);
-    // windows
-    ctx.fillStyle = 'rgba(130,200,255,0.28)';
-    for(let i=0;i<3;i++){ ctx.fillRect(x - (side==='L'?w:0)+6+i*(w/3), y+8, w/3-10, h*0.38); }
-    // awning
-    ctx.fillStyle = '#0a0e16';
-    ctx.fillRect(x - (side==='L'?w:0), y+h*0.55, w, 6);
-    if (neon){
-      ctx.save();
-      ctx.shadowColor = '#19f5ff';
-      ctx.shadowBlur = 18*depthScale;
-      ctx.fillStyle = '#38f0ff';
-      const sx = x - (side==='L'?w:0) + w*0.12, sy = y+h*0.25;
-      ctx.fillRect(sx, sy, w*0.22, 10);
+    // distant silhouettes (two parallax bands)
+    function band(y, scale, alpha){
+      ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = '#0a1322';
+      let x=-20, step = 44*scale;
+      while(x<W+40){ const w=(step+Math.random()*step)*0.8, h=40*scale+Math.random()*120*scale;
+        ctx.fillRect(x, y-h, w, h); x += w + 12*scale; }
       ctx.restore();
     }
-  }
+    band(skylineY+6, 0.9, 0.35);
+    band(skylineY+10, 1.2, 0.22);
 
-  function drawHouse(p, side){
-    const depthScale = lerp(1.2, 0.35, p.t);
-    const w = 72*depthScale, h = 54*depthScale;
-    const x = (W/2) + (side==='L'? -1:1) * (p.half + 14 + w*0.15);
-    const y = p.y - h;
-    ctx.fillStyle = '#18202a'; ctx.fillRect(x - (side==='L'?w:0), y, w, h);
-    ctx.fillStyle = 'rgba(255,230,160,0.18)'; ctx.fillRect(x - (side==='L'?w:0)+10, y+12, w*0.4, h*0.35);
-  }
-
-  function drawTower(p, side){
-    const depthScale = lerp(1.4, 0.45, p.t);
-    const w = 54*depthScale, h = 200*depthScale;
-    const x = (W/2) + (side==='L'? -1:1) * (p.half + 24 + w*0.25);
-    const y = p.y - h;
-    // body
-    const g = ctx.createLinearGradient(x, y, x, y+h);
-    g.addColorStop(0, '#132033'); g.addColorStop(1, '#0b1422');
-    ctx.fillStyle = g;
-    ctx.fillRect(x - (side==='L'?w:0), y, w, h);
-    // windows grid
-    ctx.fillStyle = 'rgba(140,200,255,0.16)';
-    const gw = Math.max(6, 10*depthScale);
-    for(let yy=y+6; yy<y+h-6; yy+=gw+4){
-      for(let xx=(x - (side==='L'?w:0))+6; xx<x - (side==='L'?w:0)+w-6; xx+=gw+6){
-        ctx.fillRect(xx, yy, gw, gw*0.55);
-      }
-    }
-  }
-
-  function drawSign(p, side){
-    const depthScale = lerp(1.3, 0.45, p.t);
-    const w = 26*depthScale, h = 60*depthScale;
-    const x = (W/2) + (side==='L'? -1:1) * (p.half + 8);
-    const y = p.y - h;
-    // pole
-    ctx.fillStyle = '#2c2f39';
-    ctx.fillRect(x + (side==='L'?-2:2), y, 3, h);
-    // panel with glow
-    ctx.save();
-    ctx.shadowColor = (side==='L')? '#ff6bd8' : '#18f0ff';
-    ctx.shadowBlur = 16*depthScale;
-    ctx.fillStyle = (side==='L')? '#ff6bd8' : '#38f0ff';
-    ctx.fillRect(x - (side==='L'?w:0), y+8, w, h*0.55);
-    ctx.restore();
+    // horizon glow
+    const fog = ctx.createLinearGradient(0, horizonY-40, 0, horizonY+140);
+    fog.addColorStop(0,'rgba(130,170,230,0.10)'); fog.addColorStop(1,'rgba(130,170,230,0.00)');
+    ctx.fillStyle = fog; ctx.fillRect(0, horizonY-40, W, 180);
   }
 
   function drawRoad(){
@@ -293,145 +245,149 @@
     ctx.lineTo(W/2 - roadBottomHalf, H);
     ctx.closePath();
     const g = ctx.createLinearGradient(0,horizonY,0,H);
-    g.addColorStop(0, asphaltTop);
-    g.addColorStop(1, asphaltBot);
-    ctx.fillStyle = g;
-    ctx.fill();
+    g.addColorStop(0, asphaltTop); g.addColorStop(1, asphaltBot);
+    ctx.fillStyle = g; ctx.fill();
 
-    // shoulders outside
-    ctx.save();
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.fillStyle = shoulderColor;
-    ctx.fillRect(0,horizonY,W,H-horizonY);
-    ctx.restore();
-
-    // side lane lines (white) – no center line per your ask
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = sideLineColor;
+    // side lane lines (white), no center line
+    ctx.lineWidth = 2; ctx.strokeStyle = sideLineColor;
     ctx.beginPath();
-    ctx.moveTo(W/2 - roadTopHalf, horizonY);
-    ctx.lineTo(W/2 - roadBottomHalf, H);
-    ctx.moveTo(W/2 + roadTopHalf, horizonY);
-    ctx.lineTo(W/2 + roadBottomHalf, H);
+    ctx.moveTo(W/2 - roadTopHalf, horizonY); ctx.lineTo(W/2 - roadBottomHalf, H);
+    ctx.moveTo(W/2 + roadTopHalf, horizonY); ctx.lineTo(W/2 + roadBottomHalf, H);
     ctx.stroke();
 
-    // guard-rails hint + red LEDs
-    ctx.strokeStyle = 'rgba(120,130,150,0.55)';
-    ctx.lineWidth = 1.5;
+    // guardrails + LEDs
+    ctx.strokeStyle = railColor; ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(W/2 - roadTopHalf*1.1, horizonY);
-    ctx.lineTo(W/2 - roadBottomHalf*1.1, H);
-    ctx.moveTo(W/2 + roadTopHalf*1.1, horizonY);
-    ctx.lineTo(W/2 + roadBottomHalf*1.1, H);
+    ctx.moveTo(W/2 - roadTopHalf*1.10, horizonY); ctx.lineTo(W/2 - roadBottomHalf*1.10, H);
+    ctx.moveTo(W/2 + roadTopHalf*1.10, horizonY); ctx.lineTo(W/2 + roadBottomHalf*1.10, H);
     ctx.stroke();
 
-    // tiny LEDs along rails to sell motion
-    ctx.fillStyle = 'rgba(255,90,50,0.85)';
-    const spacingM = 16;
-    let z = Math.floor((worldZ % spacingM)) * -1;
-    for (; z < 900; z += spacingM){
-      const p = project(Math.max(0,z));
-      if (p.y>H) break; if (p.y<horizonY) continue;
+    ctx.fillStyle = ledColor;
+    const spacingM = 16; let z = Math.floor((worldZ % spacingM)) * -1;
+    for (; z < 1100; z += spacingM){
+      const p = project(Math.max(0,z)); if (p.y>H) break; if (p.y<horizonY) continue;
       const r = Math.max(1, 3 * (1 - (p.y - horizonY)/(H-horizonY)));
-      ctx.beginPath(); ctx.arc(W/2 - p.half*1.1 - 8, p.y, r, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(W/2 + p.half*1.1 + 8, p.y, r, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(W/2 - p.half*1.10 - 8, p.y, r, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(W/2 + p.half*1.10 + 8, p.y, r, 0, Math.PI*2); ctx.fill();
     }
-  }
 
-  function drawSkyAndFog(){
-    // sky
-    const g = ctx.createLinearGradient(0,0,0,H);
-    g.addColorStop(0, '#0e1320');
-    g.addColorStop(0.25, '#0f1522');
-    g.addColorStop(1, '#090d14');
-    ctx.fillStyle = g;
-    ctx.fillRect(0,0,W,H);
-
-    // parallax skyline silhouettes (two layers)
-    function skyline(y, scale, alpha){
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#0b1322';
-      const step = 42*scale;
-      let x= -20;
-      while(x < W+40){
-        const w = (step + Math.random()*step)*0.8;
-        const h = 40*scale + Math.random()*120*scale;
-        ctx.fillRect(x, y-h, w, h);
-        x += w + 10*scale;
-      }
-      ctx.restore();
+    // motion streaks on asphalt (subtle, sells speed)
+    const laneStreakCycle = 20; // m
+    let z2 = Math.floor((worldZ % laneStreakCycle))*-1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 10; ctx.lineCap='round';
+    for(; z2<900; z2+=laneStreakCycle){
+      const p0 = project(Math.max(0, z2)), p1 = project(Math.max(0, z2+6));
+      if (p1.y<horizonY) continue; if (p0.y>H&&p1.y>H) break;
+      // draw three soft streaks per lane area
+      const offs = [-W*0.12, 0, W*0.12];
+      offs.forEach(dx=>{
+        ctx.beginPath();
+        const x = W/2 + dx * (1 - p0.t*0.5);
+        ctx.moveTo(x, p0.y); ctx.lineTo(x, p1.y); ctx.stroke();
+      });
     }
-    skyline(skylineY+6, 0.8, 0.35);
-    skyline(skylineY+10, 1.1, 0.20);
-
-    // horizon glow
-    const fog = ctx.createLinearGradient(0, horizonY-40, 0, horizonY+120);
-    fog.addColorStop(0, 'rgba(120,160,220,0.10)');
-    fog.addColorStop(1, 'rgba(120,160,220,0.00)');
-    ctx.fillStyle = fog;
-    ctx.fillRect(0, horizonY-40, W, 160);
-
-    // bottom vignette
-    const vig = ctx.createLinearGradient(0, H*0.60, 0, H);
-    vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.38)');
-    ctx.fillStyle = vig;
-    ctx.fillRect(0, H*0.60, W, H*0.40);
   }
 
   function drawObjects(){
-    function drawList(arr, side){
-      for (let i=0;i<arr.length;i++){
-        const o = arr[i];
-        const p = project(Math.max(0, o.z - worldZ));
-        if (p.y>H) continue; if (p.y<horizonY-6) continue;
+    // sort by depth so far items paint first (fixes the “stacking” issue)
+    const toDraw = [];
+    for (const o of objects){
+      const dz = o.z - worldZ;
+      if (dz < 0 || dz > MAX_DEPTH) continue;
+      const p = project(dz);
+      if (p.y<horizonY-6 || p.y>H) continue;
+      toDraw.push({o,p});
+    }
+    toDraw.sort((a,b)=> (a.o.z - b.o.z)); // far -> near
 
-        // Choose renderer
-        if (o.type==='tree') drawTree(p, side);
-        else if (o.type==='shop') drawShop(p, side, false);
-        else if (o.type==='house') drawHouse(p, side);
-        else if (o.type==='tower') drawTower(p, side);
-        else if (o.type==='neon') drawShop(p, side, true);
-        else if (o.type==='sign') drawSign(p, side);
+    // render
+    for (const {o,p} of toDraw){
+      const side = o.side, t = p.t;
+      if (o.type==='tree'){
+        const size = lerp(26, 6, t), x = (W/2)+(side==='L'?-1:1)*(p.half+10+size*0.2);
+        ctx.fillStyle = '#2b2b2b'; ctx.fillRect(x-2, p.y-2, 4, size*0.9);
+        const g = ctx.createRadialGradient(x, p.y-size*0.6, size*0.2, x, p.y-size*0.2, size*1.05);
+        g.addColorStop(0,'rgba(40,110,70,0.95)'); g.addColorStop(1,'rgba(18,40,30,0.95)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(x, p.y-size*0.6, size*0.9, size*0.7,0,0,Math.PI*2); ctx.fill();
+      }
+      else if (o.type==='house'){
+        const s = lerp(1.15,0.38,t), w=72*s,h=58*s, x=(W/2)+(side==='L'?-1:1)*(p.half+14+w*0.15), y=p.y-h;
+        ctx.fillStyle='#18202a'; ctx.fillRect(x-(side==='L'?w:0), y, w,h);
+        ctx.fillStyle='rgba(255,230,160,0.18)'; ctx.fillRect(x-(side==='L'?w:0)+10, y+12, w*0.42, h*0.35);
+      }
+      else if (o.type==='shop' || o.type==='neon'){
+        const s = lerp(1.2,0.35,t), w=86*s,h=62*s, x=(W/2)+(side==='L'?-1:1)*(p.half+12+w*0.15), y=p.y-h;
+        const grad = ctx.createLinearGradient(0,y,0,y+h); grad.addColorStop(0,'#1a2230'); grad.addColorStop(1,'#0f141d');
+        ctx.fillStyle=grad; ctx.fillRect(x-(side==='L'?w:0),y,w,h);
+        ctx.fillStyle='rgba(130,200,255,0.26)';
+        for(let i=0;i<3;i++){ ctx.fillRect(x-(side==='L'?w:0)+6+i*(w/3), y+8, w/3-10, h*0.38); }
+        ctx.fillStyle='#0a0e16'; ctx.fillRect(x-(side==='L'?w:0), y+h*0.58, w, 6);
+        if (o.type==='neon'){ ctx.save(); ctx.shadowColor = side==='L'?'#ff6bd8':'#19f5ff'; ctx.shadowBlur = 18*s;
+          ctx.fillStyle = side==='L'?'#ff6bd8':'#38f0ff'; ctx.fillRect(x-(side==='L'?w:0)+w*0.12, y+h*0.24, w*0.22, 10); ctx.restore(); }
+      }
+      else if (o.type==='tower'){
+        const s = lerp(1.35,0.46,t), w=56*s,h=210*s, x=(W/2)+(side==='L'?-1:1)*(p.half+24+w*0.25), y=p.y-h;
+        const g = ctx.createLinearGradient(x,y,x,y+h); g.addColorStop(0,'#132033'); g.addColorStop(1,'#0b1422');
+        ctx.fillStyle=g; ctx.fillRect(x-(side==='L'?w:0),y,w,h);
+        ctx.fillStyle='rgba(140,200,255,0.16)';
+        const gw=Math.max(6,10*s);
+        for(let yy=y+6; yy<y+h-6; yy+=gw+4){ for(let xx=(x-(side==='L'?w:0))+6; xx<x-(side==='L'?w:0)+w-6; xx+=gw+6){ ctx.fillRect(xx,yy,gw,gw*0.55);} }
+      }
+      else if (o.type==='sign'){
+        const s = lerp(1.25,0.45,t), w=28*s,h=64*s, x=(W/2)+(side==='L'?-1:1)*(p.half+8), y=p.y-h;
+        ctx.fillStyle='#2c2f39'; ctx.fillRect(x+(side==='L'?-2:2), y, 3, h);
+        ctx.save(); ctx.shadowColor = side==='L'?'#ff6bd8':'#18f0ff'; ctx.shadowBlur = 16*s;
+        ctx.fillStyle = side==='L'?'#ff6bd8':'#38f0ff'; ctx.fillRect(x-(side==='L'?w:0), y+8, w, h*0.55); ctx.restore();
       }
     }
-    drawList(leftObjs,'L');
-    drawList(rightObjs,'R');
+  }
+
+  function drawVignette(){
+    const vig = ctx.createLinearGradient(0, H*0.60, 0, H);
+    vig.addColorStop(0,'rgba(0,0,0,0)'); vig.addColorStop(1,'rgba(0,0,0,0.40)');
+    ctx.fillStyle = vig; ctx.fillRect(0, H*0.60, W, H*0.40);
   }
 
   function drawCar(){
-    // centered car; remove center line already handled
     const sway = steer.x * 18;
     const carW = Math.min(W*0.62, 340);
     const carH = carW * carRatio;
     const x = Math.round((W - carW)/2 + sway);
     const y = Math.round(H*0.78 - carH*0.92);
     ctx.drawImage(carImg, x, y, Math.round(carW), Math.round(carH));
+
+    // tint overlay from garage
+    if (tint.amt>0){
+      ctx.save();
+      ctx.globalCompositeOperation='multiply';
+      ctx.fillStyle = `hsla(${tint.hue}, 70%, 55%, ${tint.amt})`;
+      ctx.fillRect(x, y, Math.round(carW), Math.round(carH));
+      ctx.restore();
+    }
   }
 
-  // --- State & loop ---
-  const state = { running:false, speed:0, dist:0 }; // speed km/h
+  // --- Game loop ---
+  const state = { running:false, speed:0, dist:0 }; // km/h
+  let last = performance.now();
 
   function frame(now){
     if (!state.running) return;
-    const dt = Math.min(0.033, (now - last)/1000);
-    last = now;
+    const dt = Math.min(0.033, (now - last)/1000); last = now;
 
     const target = 180 + (nitroLeft>0 ? 120 : 0);
     state.speed += (target - state.speed) * 0.08;
-    const mps = mpsFromKmh(state.speed);
+    const mps = state.speed/3.6;
     worldZ += mps * dt;
     state.dist += mps * dt;
 
-    // update roadside content
-    sweepAndSpawn(dt, mps);
+    tickSpawns();
 
     // draw
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawSkyAndFog();
+    drawSkylineAndFog();
     drawRoad();
     drawObjects();
+    drawVignette();
     drawCar();
 
     // HUD
@@ -446,21 +402,22 @@
   // Nitro
   document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 2.0; });
 
-  // Start
-  let last = performance.now();
-  document.getElementById('startBtn').addEventListener('click',()=>{
+  // Start (Garage -> Race)
+  document.getElementById('startBtn').addEventListener('click', async ()=>{
     document.getElementById('startOverlay').style.display='none';
     resize();
-    state.running = true;
-    state.speed = 60;
-    state.dist = 0;
-    worldZ = 0;
-    leftObjs.length = rightObjs.length = 0;
-    last = performance.now();
+    state.running = true; state.speed = 60; state.dist = 0; worldZ = 0;
+    objects.length = 0; nextSpawnL = nextSpawnR = 0; last = performance.now();
     requestAnimationFrame(frame);
   });
 
-  resize();
+  // Init UI + wallet
+  (async function init(){
+    resize();
+    const w = await loadWallet();
+    document.getElementById('walletCoins').textContent = w.coins;
+    document.getElementById('walletCraft').textContent = w.craft;
+  })();
 })();
 </script>
 </body>
