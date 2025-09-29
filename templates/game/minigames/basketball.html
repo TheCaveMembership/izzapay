@@ -689,36 +689,41 @@ function parseWalletResponse(j){
       });
     }
     async function hydrateFromSnapshot(){
-  // 1) Try persist → brings City snapshot into LS
+  // Remember last known good local values BEFORE touching persist
+  const beforeCoins = readCoinsLS()|0;
+  const beforeCraft = readCraftAny()|0;
+
+  // 1) Try persist (may side-effect LS)
   try{
     await waitForPersistReady();
     if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-      await IZZA_PERSIST.load(); // server → LS
+      await IZZA_PERSIST.load(); // server → LS (may be unauth and write zeros)
     }
   }catch(_){}
 
-  // Current local values after snapshot
+  // If persist zeroed us out but we had a valid value, restore it (anti-stomp)
+  const afterCoins = readCoinsLS()|0;
+  const afterCraft = readCraftAny()|0;
+  if (beforeCoins > 0 && afterCoins === 0) writeCoinsLS(beforeCoins);
+  if (beforeCraft > 0 && afterCraft === 0) writeCraftAll(beforeCraft);
+
+  // Snapshot after the (possibly restored) persist stage
   const localCoins = readCoinsLS()|0;
   const localCraft = readCraftAny()|0;
 
-  // 2) Hit API once (authoritative when it returns >0)
+  // 2) Hit API (authoritative only when it returns >0)
   try{
     const q = T ? `?t=${encodeURIComponent(T)}` : '';
     const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
     if (r.ok){
-      let j = {};
-      try{ j = await r.json(); }catch(_){}
+      let j={}; try{ j = await r.json(); }catch(_){}
       const parsed = parseWalletResponse(j);
+      const coins = Number(parsed.coins)|0;
+      const craft = Number(parsed.crafting)|0;
 
-      // --- NO-STOMP RULE ---
-      const coins = (Number(parsed.coins)|0);
-      const craft = (Number(parsed.crafting)|0);
-
-      // Only write if API gave us a positive number (or it’s greater than what we have)
+      // Only adopt positive values from API
       if (coins > 0 && coins !== localCoins) writeCoinsLS(coins);
       if (craft > 0 && craft !== localCraft) writeCraftAll(craft);
-
-      // If API returned 0/0, keep the local snapshot values; do not overwrite.
     }
   }catch(_){}
 
