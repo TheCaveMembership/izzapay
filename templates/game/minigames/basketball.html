@@ -24,20 +24,15 @@
     .btn:hover{filter:brightness(1.06)}
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#79c0ff;overflow:hidden}
-
-    /* HUD: slightly smaller so it fits better */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:8px;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
     .pill strong{font-size:13px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-
-    /* avatar shown in scene (under ball start) */
     .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
     .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
-
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
@@ -64,7 +59,6 @@
           <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
         </div>
         <div class="right">
-          <!-- DO NOT hard-code 0 here -->
           <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
         </div>
       </div>
@@ -196,7 +190,51 @@
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
-    /* ---------- AVATAR (unchanged painter stubs) ---------- */
+    /* ---------- IMAGE/PALETTE HELPERS (these were missing and broke the avatar) ---------- */
+    function hexToRgb(h){ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
+    function dist2(a,b){const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
+    function overlayTint(img, hex, strength=1){
+      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
+      const id=ctx.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+      function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+      for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+        const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+        d[i]=Math.round(d[i]*(1-strength)+r*strength);
+        d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+        d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+      }
+      ctx.putImageData(id,0,0); return c;
+    }
+    function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
+      const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
+      const id=ctx.getImageData(0,0,w,h), d=id.data; let changed=0;
+      for(let i=0;i<d.length;i+=4){
+        if(d[i+3]===0) continue;
+        const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
+        for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+        if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
+          d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+      }
+      ctx.putImageData(id,0,0); return {canvas:c, changedPixels:changed};
+    }
+    // Simple ramp extractor fallback (used for hair if needed)
+    function extractThreeToneRamp(img){
+      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
+      const d=ctx.getImageData(0,0,w,h).data; let Ls=[];
+      function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
+      for(let i=0;i<d.length;i+=16){ if(d[i+3]<10) continue; Ls.push({L:lum(d[i],d[i+1],d[i+2]), r:d[i], g:d[i+1], b:d[i+2]}); }
+      if(Ls.length<3) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+      Ls.sort((a,b)=>a.L-b.L);
+      const pick=q=>{ const idx=Math.max(0,Math.min(Ls.length-1,Math.floor(q*(Ls.length-1)))); const s=Ls[idx];
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+      return [pick(0.2),pick(0.55),pick(0.85)];
+    }
+
+    /* ---------- AVATAR ---------- */
     const SPRITES = {
       body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
       hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -208,9 +246,6 @@
     const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
     const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-    const hexToRgb=h=>{ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
-    const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-    const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
 
     async function buildAvatarCanvas(dstCtx, size, profile){
       const DW=size,DH=size,X=0,Y=0;
@@ -248,7 +283,8 @@
       if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
       if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
       if(hair){
-        const detected=["#C8C8C8","#9C9C9C","#6E6E6E"], target=HAIR_TO[hairCol]||HAIR_TO.black;
+        const detected=extractThreeToneRamp(hair);
+        const target=HAIR_TO[hairCol]||HAIR_TO.black;
         const swap=paletteSwap(hair, detected, target, 4000);
         let hairCanvas=swap.canvas;
         if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
@@ -295,9 +331,7 @@
       noMissUntil: 0
     };
 
-    function setHoopDistance(){
-      hoop.setAttribute('transform', `translate(${game.hoopX}, ${game.hoopY}) scale(1.6)`);
-    }
+    function setHoopDistance(){ hoop.setAttribute('transform', `translate(${game.hoopX}, ${game.hoopY}) scale(1.6)`); }
     function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
     function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
@@ -463,13 +497,10 @@
 
     /* === Wallet / HUD === */
     let walletDirty = false;
-    let WALLET_READY = false; // control when we allow repaint
+    let WALLET_READY = false;
 
-    function paintCoinsHUD(n){
-      coinsRunEl.textContent = String(Math.max(0, n|0));
-    }
+    function paintCoinsHUD(n){ coinsRunEl.textContent = String(Math.max(0, n|0)); }
 
-    // Never overwrite a non-zero pill with 0
     function updateCoinsHUD(){
       if(!WALLET_READY) return;
       const cur = readCoinsLS();
@@ -484,16 +515,11 @@
       writeCoinsLS(cur);
       walletDirty = true;
       try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-      try{
-        if (window.IZZA_PERSIST?.save){
-          await IZZA_PERSIST.save();
-          walletDirty = false;
-        }
-      }catch(_){}
+      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
       try{
         window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } }));
       }catch(_){}
-      WALLET_READY = true; // ready after we touch wallet
+      WALLET_READY = true;
       updateCoinsHUD();
       return cur;
     }
@@ -502,12 +528,7 @@
       const val = readCraftAny() + (delta|0);
       writeCraftAll(val);
       walletDirty = true;
-      try{
-        if (window.IZZA_PERSIST?.save){
-          await IZZA_PERSIST.save();
-          walletDirty = false;
-        }
-      }catch(_){}
+      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
       try{
         window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } }));
       }catch(_){}
@@ -582,7 +603,7 @@
       }catch(_){}
     }
 
-    /* ---------------- Background City priming (kept; not awaited) ---------------- */
+    /* ---------------- Background City priming (non-blocking) ---------------- */
     const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
     function primeViaCityIframe({maxWaitMs=10000, pollMs=120} = {}){
       return new Promise((resolve) => {
@@ -631,7 +652,7 @@
 
     /* ---------------- Boot & lifecycle ---------------- */
 
-    // FIRST paint: read the current wallet RIGHT NOW from localStorage and show it.
+    // FIRST paint: read wallet from localStorage and show it immediately.
     let startCoins = 0;
     try{
       const raw = localStorage.getItem('izzaCoins');
@@ -643,7 +664,6 @@
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
     window.addEventListener('resize', onResize, {passive:true});
 
-    // Keep HUD coins correct; never let zeros stomp a non-zero shown value
     window.addEventListener('storage', (e)=>{
       if (e && (e.key === 'izzaCoins' || (e.key && ['izzaCrafting','craftingCredits','izzaCraftCredits'].includes(e.key)))) {
         updateCoinsHUD();
@@ -675,17 +695,17 @@
           try{ sessionStorage.setItem(SESSION_PRIME_KEY,'1'); }catch(_){}
         }
 
-        // Character gate (best-effort; non-blocking)
+        // Character (best-effort)
         try{
           const q = T ? `?t=${encodeURIComponent(T)}` : '';
           const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
           if(r.ok){ const j=await r.json(); if (j && typeof j==='object') localStorage.setItem('izzaCharacter', JSON.stringify(j)); }
         }catch(_){}
 
-        // Allow HUD updates now (after first-paint value is set)
+        // Enable HUD updates after first-paint
         setTimeout(()=>{ WALLET_READY = true; updateCoinsHUD(); }, 0);
 
-        // Snapshot wallet baseline for end-of-run
+        // Snapshot for end-of-run award calc
         runStartCoins = startCoins;
 
         // Build avatar
