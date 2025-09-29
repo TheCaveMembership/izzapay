@@ -11,42 +11,28 @@
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{
-      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
-    }
+    :root{ --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18); --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a; }
     *{box-sizing:border-box}
     body{margin:0;background:#102;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
-         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
     .btn:hover{filter:brightness(1.06)}
-    .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
-           border-radius:14px;background:#79c0ff;overflow:hidden}
-
-    /* HUD smaller so everything fits one row */
+    .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);border-radius:14px;background:#79c0ff;overflow:hidden}
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:12px;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
-    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
+    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
     .pill strong{font-size:14px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-
-    /* avatar shown in scene (under ball start) */
     .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
     .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
-
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
-            font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
-            pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
     .bigmsg.show{opacity:1;transform:translate(-50%, -56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
-    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
-      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
+    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -300,7 +286,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
@@ -564,7 +550,7 @@
         const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
         scoreShot(swish);
         game._scored = true;
-               game.noMissUntil = performance.now() + 350;
+        game.noMissUntil = performance.now() + 350;
         setTimeout(()=>{ game._scored=false; }, 300);
         return;
       }
@@ -672,42 +658,6 @@
       }catch(_){}
     }
 
-    /* --- Commit & confirm BOTH coins and craft before navigation --- */
-    const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
-    async function commitWalletAndConfirm({retries=12, delay=160} = {}){
-      const targetCoins = readCoinsLS();
-      const targetCraft = readCraftAny();
-      try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
-      for(let i=0;i<retries;i++){
-        try{ if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
-        const afterCoins = readCoinsLS();
-        const afterCraft = readCraftAny();
-        if (afterCoins >= targetCoins && afterCraft >= targetCraft){
-          walletDirty = false;
-          return true;
-        }
-        // Re-assert local max and try again
-        if (afterCoins < targetCoins) writeCoinsLS(targetCoins);
-        if (afterCraft < targetCraft) writeCraftAll(targetCraft);
-        try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
-        await sleep(delay);
-      }
-      return false;
-    }
-
-    async function endRun(){
-      if (game.ended) return;
-      game.ended = true;
-
-      await persistWalletAndSave();
-
-      document.getElementById('finalScore').textContent = game.score;
-      document.getElementById('finalCoins').textContent = game.coins;
-      document.getElementById('finalCraft').textContent = game.creditsEarned;
-      document.getElementById('finish').style.display = 'flex';
-      showMsg('Time!', 'miss');
-    }
-
     /* ---------------- Background City priming (matches Arena) ---------------- */
     const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
     function primeViaCityIframe({maxWaitMs=10000, pollMs=120} = {}){
@@ -756,9 +706,10 @@
         ev.preventDefault();
         const href = withT(a.getAttribute('href') || '/izza-game/play');
 
-        // **Strong** commit: ensure server snapshot is >= local before leaving.
+        // Fast, non-blocking save (short race) — City will max-merge on hydrate
         try{
-          await commitWalletAndConfirm({retries:12, delay:160});
+          const quick = persistWalletAndSave();
+          await Promise.race([quick, new Promise(r=>setTimeout(r,220))]);
         }catch(_){}
         location.href = href;
       }, {passive:false});
