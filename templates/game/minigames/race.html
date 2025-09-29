@@ -1,184 +1,109 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8">
   <title>Street Race — IZZA GAME</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 
-  <!-- Persist (unchanged) -->
-  <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
+  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
 
-  <link rel="stylesheet" href="/static/themes.css" />
+  <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{
-      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --txt:#e8eef7; --bg:#06080e; --line:rgba(255,255,255,.1);
-      --ok:#72ff9d; --gold:#ffd36b; --neon:#00f5ff;
-    }
-    *{box-sizing:border-box} html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,Arial,sans-serif}
-    .wrap{max-width:1100px;margin:0 auto;padding:12px}
-    .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
-         background:rgba(255,255,255,.06);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
-
-    .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
-           border-radius:14px;overflow:hidden;background:#0a0f1a}
-    .aim{position:absolute;inset:0;width:100%;height:100%;z-index:3;touch-action:none}
-    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
-      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%)}
-
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;z-index:6;gap:6px}
-    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-      padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800;display:flex;gap:6px;align-items:center}
-    .seg{display:flex;gap:8px;flex-wrap:wrap}
-    .chip{border:1px solid var(--line);background:rgba(255,255,255,.06);padding:6px 10px;border-radius:999px;cursor:pointer}
-    .chip[aria-pressed="true"]{outline:2px solid var(--neon)}
-
+    body{margin:0;background:#0a0c12;color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
+    .arena{position:relative;height:74vh;min-height:560px;border:1px solid rgba(255,255,255,.1);
+           border-radius:14px;background:#06080e;overflow:hidden}
     .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
-      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.5))}
-    .card{background:rgba(0,0,0,.58);border:1px solid var(--hudLine);border-radius:14px;padding:16px;display:flex;gap:12px;flex-direction:column;width:min(92%,720px)}
-    .row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.06);font-weight:900;align-self:flex-end}
-
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-56%) scale(1.0);
-      font-weight:1000;letter-spacing:.6px;font-size:44px;opacity:0;transition:opacity .18s,transform .18s;
-      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--gold);z-index:7}
-    .bigmsg.show{opacity:1;transform:translate(-50%,-61%) scale(1.04)}
-
-    /* input UI */
-    .nitroBtn{position:absolute;right:10px;bottom:12px;z-index:7;border:1px solid var(--line);
-      border-radius:999px;background:rgba(255,255,255,.08);padding:10px 14px;font-weight:900}
-    .nitroBar{position:absolute;right:10px;bottom:64px;width:14px;height:120px;border:1px solid var(--hudLine);
-      background:rgba(0,0,0,.35);border-radius:10px;overflow:hidden;z-index:7}
-    .nitroFill{position:absolute;left:0;right:0;bottom:0;height:0%;background:linear-gradient(180deg,#93ffff,#008cff)}
+      background:rgba(0,0,0,.45);}
+    .card{background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:16px 18px;
+      display:flex;flex-direction:column;gap:10px;align-items:stretch; max-width:680px; width:min(92%,680px)}
+    .preview{height:160px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);font-weight:800}
+    .hud{position:absolute;top:10px;left:10px;z-index:6;color:white;font-size:12px}
+    .nitroBtn{position:absolute; right:10px; bottom:14px; z-index:7; border-radius:999px; border:1px solid rgba(255,255,255,.1);
+      background:#222; padding:10px 14px; font-weight:800; color:white}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="top">
-      <a class="btn" id="backBtn" href="/izza-game/minigames">← Back to Arena</a>
-      <div class="seg">
-        <button class="chip" id="viewThird" aria-pressed="true">Third-Person</button>
-        <button class="chip" id="viewFirst" aria-pressed="false">First-Person</button>
-      </div>
-      <a class="btn" id="cityBtn" href="/izza-game/play">Enter IZZA City</a>
+  <div class="arena" id="arena">
+    <!-- HUD -->
+    <div class="hud">
+      SPEED: <span id="speed">0</span> km/h |
+      DIST: <span id="dist">0</span> m |
+      COINS: <span id="coinsRun">0</span>
     </div>
 
-    <div class="arena vignette" id="arena">
-      <!-- HUD -->
-      <div class="hud">
-        <div class="seg">
-          <div class="pill">SPEED: <strong id="speed">0</strong> km/h</div>
-          <div class="pill">DIST: <strong id="dist">0</strong> m</div>
-          <div class="pill">NEAR: <strong id="combo">0</strong> x</div>
+    <!-- Garage Overlay -->
+    <div id="startOverlay" class="overlay">
+      <div class="card">
+        <h3>Street Race</h3>
+        <div class="preview">
+          <img id="garageCar" src="/static/game/sprites/garage/coupe.png" alt="Car preview" style="height:100%"/>
         </div>
-        <div class="seg">
-          <div class="pill">COINS: <strong id="coinsRun">0</strong></div>
-          <button id="pauseBtn" class="btn" aria-label="Pause">⋯</button>
-        </div>
+        <button id="startBtn" class="startBtn">START</button>
       </div>
-
-      <!-- Start / Garage -->
-      <div id="startOverlay" class="overlay">
-        <div class="card">
-          <h3 style="margin:0">Street Race</h3>
-          <div class="row">
-            <div>Track</div>
-            <div class="seg" id="trackSeg">
-              <button class="chip" data-track="day" aria-pressed="true">City Day</button>
-              <button class="chip" data-track="night">Neo Night</button>
-            </div>
-          </div>
-          <div class="row">
-            <div>Car</div>
-            <div class="seg" id="carSeg">
-              <button class="chip" data-body="coupe" aria-pressed="true">Coupe</button>
-              <button class="chip" data-body="hatch">Hatch</button>
-              <button class="chip" data-body="muscle">Muscle</button>
-            </div>
-          </div>
-          <div class="row" style="justify-content:flex-end">
-            <button id="startBtn" class="startBtn">START</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Input helpers -->
-      <button class="nitroBtn" id="nitroBtn">NITRO</button>
-      <div class="nitroBar"><div id="nitroFill" class="nitroFill"></div></div>
-
-      <!-- === VISUAL SCENE ONLY (no logic) === -->
-      <svg id="scene" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Track">
-        <defs>
-          <linearGradient id="roadGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#2a2f39"/><stop offset="100%" stop-color="#1b1f27"/>
-          </linearGradient>
-          <linearGradient id="laneFade" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="rgba(255,255,255,.8)"/>
-            <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
-          </linearGradient>
-          <filter id="glowCyan"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        </defs>
-
-        <!-- Backgrounds -->
-        <g id="bgNight" opacity="0">
-          <linearGradient id="nightSky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#0f1631"/><stop offset="100%" stop-color="#06101a"/>
-          </linearGradient>
-          <rect x="0" y="0" width="1100" height="760" fill="url(#nightSky)"/>
-          <g id="towersN"></g>
-        </g>
-
-        <g id="bgDay" opacity="1">
-          <linearGradient id="daySky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#bde0ff"/><stop offset="100%" stop-color="#eaf5ff"/>
-          </linearGradient>
-          <rect x="0" y="0" width="1100" height="760" fill="url(#daySky)"/>
-          <g id="towersD"></g>
-        </g>
-
-        <!-- Road + lanes -->
-        <g id="roadGroup">
-          <polygon id="leftGrass"  points="0,760 300,420 340,420 0,760"   fill="#0b3a1f" opacity=".8"></polygon>
-          <polygon id="rightGrass" points="1100,760 800,420 760,420 1100,760" fill="#0b3a1f" opacity=".8"></polygon>
-          <polygon id="road" points="340,420 760,420 1100,760 0,760" fill="url(#roadGrad)"></polygon>
-          <g id="lanes"></g>
-        </g>
-
-        <!-- Dynamic groups the logic file will populate -->
-        <g id="traffic"></g>
-        <g id="pads"></g>
-        <g id="pickups"></g>
-
-        <!-- Player car model (hidden in first-person) -->
-        <g id="player" transform="translate(550,640)">
-          <ellipse cx="0" cy="42" rx="90" ry="18" fill="black" opacity=".35"></ellipse>
-          <g id="carBody">
-            <path id="carPaint" d="M-160 0 q90 -58 220 -58 h120 q62 0 110 34 q28 20 34 40 l6 16 q-6 22 -56 22 h-400 q-24 0 -34 -10 q-12 -12 0 -26 z" fill="#00d1ff"/>
-            <rect x="-10" y="-34" width="170" height="32" rx="8" fill="rgba(0,0,0,.7)"/>
-            <circle cx="-70" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
-            <circle cx="130" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
-            <ellipse id="carGlow" cx="20" cy="68" rx="140" ry="18" fill="#00f5ff" opacity=".30" filter="url(#glowCyan)"/>
-          </g>
-        </g>
-      </svg>
-
-      <div id="bigmsg" class="bigmsg">BOOST!</div>
     </div>
 
-    <!-- Finish strip -->
-    <div class="seg" id="finish" style="display:none;margin-top:12px;flex-wrap:wrap">
-      <span class="pill">Run Score: <strong id="finalScore">0</strong></span>
-      <span class="pill">Coins Awarded: <strong id="finalCoins">0</strong></span>
-      <span class="pill">Craft Credits: <strong id="finalCraft">0</strong></span>
-      <a class="btn" href="/izza-game/minigames" id="againBtn">Play Again</a>
-      <a class="btn" href="/izza-game/play" id="cityBtn2">Go to City</a>
-    </div>
+    <!-- Nitro UI -->
+    <button class="nitroBtn" id="nitroBtn">NITRO</button>
+
+    <!-- Game Scene -->
+    <canvas id="scene" width="1100" height="760"></canvas>
   </div>
 
-  <!-- GAME LOGIC LIVES HERE -->
-  <script type="module" src="/static/game/js/race.logic.js"></script>
+  <script>
+  (function(){
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+    let W = canvas.width, H = canvas.height;
+
+    // Load sprites
+    const sprites = {
+      player: new Image(),
+      traffic: [new Image(), new Image()],
+      underglow: new Image(),
+      bg: new Image()
+    };
+    sprites.player.src = '/static/game/sprites/player/coupe.png';
+    sprites.traffic[0].src = '/static/game/sprites/traffic/red.png';
+    sprites.traffic[1].src = '/static/game/sprites/traffic/blue.png';
+    sprites.underglow.src = '/static/game/sprites/effects/underglow.png';
+    sprites.bg.src = '/static/game/sprites/tracks/night.png';
+
+    const state = {
+      running:false, ended:false,
+      speed:0, dist:0, px:0,
+      nitro:0, coins:0,
+      cars:[], items:[]
+    };
+
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      ctx.drawImage(sprites.bg,0,0,W,H);
+      ctx.save();
+      ctx.translate(W/2 + state.px*200, H-160);
+      ctx.drawImage(sprites.underglow,-120,40,240,40);
+      ctx.drawImage(sprites.player,-80,-40,160,80);
+      ctx.restore();
+    }
+
+    function loop(){
+      if(!state.running) return;
+      state.speed += (160 - state.speed)*0.1;
+      state.dist += state.speed/60;
+      document.getElementById('speed').textContent = Math.round(state.speed);
+      document.getElementById('dist').textContent = Math.round(state.dist);
+      document.getElementById('coinsRun').textContent = state.coins;
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.getElementById('startBtn').addEventListener('click',()=>{
+      document.getElementById('startOverlay').style.display='none';
+      state.running=true; state.speed=30; state.dist=0;
+      loop();
+    });
+  })();
+  </script>
 </body>
 </html>
