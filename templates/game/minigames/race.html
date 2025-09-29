@@ -31,17 +31,19 @@
 </head>
 <body>
   <div class="arena" id="arena">
+    <!-- HUD -->
     <div class="hud">
       <div>SPEED: <span id="speed">0</span> km/h</div>
       <div>DIST: <span id="dist">0</span> m</div>
       <div>COINS: <span id="coinsRun">0</span></div>
     </div>
 
+    <!-- Garage Overlay -->
     <div id="startOverlay" class="overlay">
       <div class="card">
         <h3>Street Race</h3>
         <div class="preview">
-          <img id="garageCar" src="/static/game/sprites/tracks/coupe.png" alt="Car" style="height:100%"/>
+          <img id="garageCar" src="/static/game/sprites/tracks/coupe.png" alt="Car preview" style="height:100%"/>
         </div>
         <button id="startBtn" class="startBtn">START</button>
       </div>
@@ -56,6 +58,8 @@
   const arena  = document.getElementById('arena');
   const canvas = document.getElementById('scene');
   const ctx    = canvas.getContext('2d', { alpha:true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   const HUD = {
     speed: document.getElementById('speed'),
@@ -63,72 +67,31 @@
     coins: document.getElementById('coinsRun')
   };
 
-  // DPR sizing
-  let dpr=1, CSS_W=0, CSS_H=0;
+  // --- DPR sizing ---
+  let dpr=1, W=0, H=0;
   function resize(){
-    CSS_W = arena.clientWidth;
-    CSS_H = arena.clientHeight;
+    W = arena.clientWidth;
+    H = arena.clientHeight;
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width  = Math.floor(CSS_W * dpr);
-    canvas.height = Math.floor(CSS_H * dpr);
-    canvas.style.width  = CSS_W + 'px';
-    canvas.style.height = CSS_H + 'px';
+    canvas.width  = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    // recompute perspective params that depend on size
+    horizonY = H*0.22;
+    roadBottomHalf = W*0.44;
+    roadTopHalf = W*0.10;
   }
   window.addEventListener('resize', resize, {passive:true});
 
-  // ---- assets ----
-  function img(src){ const i=new Image(); i.src=src; return i; }
-
-  const sprites = {
-    // place one of the provided PNGs here
-    bgTile   : img('/static/game/sprites/tracks/road_loop_tile.png'),
-    player   : img('/static/game/sprites/tracks/coupe.png')
-  };
-
-  // keep car aspect
+  // --- Assets ---
+  const carImg = new Image();
+  carImg.src = '/static/game/sprites/tracks/coupe.png';
   let carRatio = 0.5;
-  sprites.player.onload = ()=>{ carRatio = sprites.player.height / sprites.player.width; };
+  carImg.onload = ()=>{ carRatio = carImg.height / carImg.width; };
 
-  // background scrolling state
-  const bg = {
-    tile: sprites.bgTile,
-    offset: 0,        // vertical offset of the current tile
-    speed: 260,       // px/s screen space
-    ready: false,
-    dw: 0, dh: 0, dx: 0, dy: 0 // cover-fit draw rect
-  };
-
-  sprites.bgTile.onload = ()=>{
-    bg.ready = true;
-    computeCover();
-  };
-
-  function computeCover(){
-    if (!bg.ready) return;
-    // cover-fit the tile to the canvas size (no warp)
-    const scale = Math.max(CSS_W / sprites.bgTile.width, CSS_H / sprites.bgTile.height);
-    bg.dw = Math.ceil(sprites.bgTile.width * scale);
-    bg.dh = Math.ceil(sprites.bgTile.height * scale);
-    bg.dx = ((CSS_W - bg.dw) / 2) | 0;
-    bg.dy = ((CSS_H - bg.dh) / 2) | 0;
-  }
-
-  function drawBackground(dt){
-    if(!bg.ready) return;
-
-    // advance offset in screen pixels
-    bg.offset = (bg.offset + bg.speed * dt) % bg.dh;
-
-    // draw two copies to cover the screen
-    const y0 = ((-bg.offset) | 0) + bg.dy;
-    const y1 = y0 + bg.dh;
-
-    ctx.drawImage(sprites.bgTile, bg.dx, y0, bg.dw, bg.dh);
-    ctx.drawImage(sprites.bgTile, bg.dx, y1, bg.dw, bg.dh);
-  }
-
-  // simple input (left/right half)
+  // --- Input (tap left/right half; arrow keys) ---
   const steer = { x:0 };
   function onPointer(e){
     const r = canvas.getBoundingClientRect();
@@ -147,26 +110,171 @@
     if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
   });
 
-  // draw player
-  function drawPlayer(){
-    const W=CSS_W, H=CSS_H;
-    const sway = steer.x * 26;
+  // --- Procedural road params ---
+  // These are in screen space; we just recompute on resize.
+  let horizonY        = 0;   // y position of horizon
+  let roadBottomHalf  = 0;   // half width of road at the bottom of the screen
+  let roadTopHalf     = 0;   // half width of road at the horizon
+  const centerLineColor = '#ffd463';
+  const sideLineColor   = 'rgba(230,235,245,0.9)';
+  const shoulderColor   = '#0d121b';
+  const asphaltTop      = '#151b24';
+  const asphaltBot      = '#0e131b';
 
-    const carW = Math.min(W*0.62, 340);
-    const carH = carW * carRatio;
-    const carX = Math.round((W - carW)/2 + sway);
-    const carY = Math.round(H*0.78 - carH*0.92);
+  // Scrolling world distance (meters) and conversion to visual dash speed
+  let worldZ = 0;                // meters advanced since start
+  const dashLenM = 9;            // length of a center dash segment (m)
+  const gapLenM  = 9;            // gap between dashes (m)
+  const sidePostSpacingM = 18;   // side reflectors spacing
 
-    ctx.drawImage(sprites.player, carX, carY, Math.round(carW), Math.round(carH));
+  // helper: linear interpolate
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  // Given a depth z (meters from camera), get the screen y and half road width
+  function project(z){
+    // simple perspective: y grows nonlinearly with depth; tweak k for feel
+    const k = 0.012; // perspective strength
+    const t = 1 - Math.exp(-k*z); // 0..1 mapping of depth to screen
+    const y = lerp(horizonY, H, t);
+    const half = lerp(roadTopHalf, roadBottomHalf, t);
+    return { y, half };
   }
 
-  // state & loop
-  const state = { running:false, speed:0, dist:0 };
+  function drawBackgroundGradient(){
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0, '#0e1320');
+    g.addColorStop(0.22, '#0e1623');
+    g.addColorStop(0.5, '#0b1018');
+    g.addColorStop(1, '#090d14');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+  }
 
-  function draw(dt){
+  function drawRoad(){
+    // road polygon
+    ctx.beginPath();
+    ctx.moveTo(W/2 - roadTopHalf, horizonY);
+    ctx.lineTo(W/2 + roadTopHalf, horizonY);
+    ctx.lineTo(W/2 + roadBottomHalf, H);
+    ctx.lineTo(W/2 - roadBottomHalf, H);
+    ctx.closePath();
+
+    // asphalt with vertical gradient
+    const g = ctx.createLinearGradient(0,horizonY,0,H);
+    g.addColorStop(0, asphaltTop);
+    g.addColorStop(1, asphaltBot);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // subtle shoulder outside the white side lines
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = shoulderColor;
+    ctx.fillRect(0,horizonY,W,H-horizonY);
+    ctx.restore();
+
+    // side lines (white)
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = sideLineColor;
+    ctx.beginPath();
+    ctx.moveTo(W/2 - roadTopHalf, horizonY);
+    ctx.lineTo(W/2 - roadBottomHalf, H);
+    ctx.moveTo(W/2 + roadTopHalf, horizonY);
+    ctx.lineTo(W/2 + roadBottomHalf, H);
+    ctx.stroke();
+  }
+
+  function drawCenterDashes(){
+    // We draw many segments along depth, clipping at screen edges
+    ctx.strokeStyle = centerLineColor;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+
+    // start depth so dashes wrap nicely with worldZ
+    const cycle = dashLenM + gapLenM;
+    let z = Math.floor((worldZ % cycle)) * -1; // start a bit before camera
+
+    // step in meters
+    for (; z < 1000; z += 4){ // large enough depth
+      const z0 = z;
+      const z1 = z + dashLenM;
+      const p0 = project(Math.max(0, z0));
+      const p1 = project(Math.max(0, z1));
+
+      // keep inside screen
+      if (p0.y > H && p1.y > H) break;
+      if (p1.y < horizonY) continue;
+
+      ctx.beginPath();
+      ctx.moveTo(W/2, p0.y);
+      ctx.lineTo(W/2, p1.y);
+      ctx.stroke();
+      z += gapLenM; // skip the gap
+    }
+  }
+
+  function drawSidePosts(){
+    // Little blue reflectors along each side for motion cues
+    ctx.fillStyle = 'rgba(120,200,255,.75)';
+    const cycle = sidePostSpacingM;
+    let z = Math.floor((worldZ % cycle)) * -1;
+
+    for (; z < 1000; z += cycle){
+      const p = project(Math.max(0, z));
+      if (p.y > H) break;
+      if (p.y < horizonY) continue;
+      const r = Math.max(1.2, 3.6 * (1 - (p.y - horizonY)/(H - horizonY))); // size tapers
+      ctx.beginPath();
+      ctx.arc(W/2 - p.half - 6, p.y, r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(W/2 + p.half + 6, p.y, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawFogVignette(){
+    // soft fog near horizon and dark vignette bottom
+    const fog = ctx.createLinearGradient(0, horizonY-40, 0, horizonY+120);
+    fog.addColorStop(0, 'rgba(180,200,220,0.12)');
+    fog.addColorStop(1, 'rgba(180,200,220,0.00)');
+    ctx.fillStyle = fog;
+    ctx.fillRect(0, horizonY-40, W, 160);
+
+    const vig = ctx.createLinearGradient(0, H*0.6, 0, H);
+    vig.addColorStop(0, 'rgba(0,0,0,0.0)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, H*0.6, W, H*0.4);
+  }
+
+  function drawCar(){
+    const sway = steer.x * 22;
+    const carW = Math.min(W*0.62, 340);
+    const carH = carW * carRatio;
+    const x = Math.round((W - carW)/2 + sway);
+    const y = Math.round(H*0.78 - carH*0.92);
+    ctx.drawImage(carImg, x, y, Math.round(carW), Math.round(carH));
+  }
+
+  // --- State & loop ---
+  const state = { running:false, speed:0, dist:0 }; // speed in km/h
+
+  function drawFrame(dt){
+    // world advance (convert km/h -> m/s)
+    const mps = state.speed / 3.6;
+    worldZ += mps * dt;
+    state.dist += mps * dt;
+
+    // paint scene
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawBackground(dt);
-    drawPlayer();
+    drawBackgroundGradient();
+    drawRoad();
+    drawCenterDashes();
+    drawSidePosts();
+    drawFogVignette();
+    drawCar();
+
     HUD.speed.textContent = Math.round(state.speed);
     HUD.dist.textContent  = Math.round(state.dist);
     HUD.coins.textContent = 0;
@@ -178,27 +286,31 @@
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
 
-    const target = 180;
-    state.speed += (target - state.speed)*0.08;
-    state.dist  += state.speed * dt;
+    // ease to cruise speed (press nitro to bump temporarily)
+    const target = 180 + (nitroLeft>0 ? 120 : 0);
+    state.speed += (target - state.speed) * 0.08;
 
-    draw(dt);
+    if (nitroLeft > 0) nitroLeft -= dt;
+
+    drawFrame(dt);
     requestAnimationFrame(loop);
   }
 
-  // UI
+  // Nitro (optional glow only for now)
+  let nitroLeft = 0;
+  document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 2.0; });
+
+  // Start
   document.getElementById('startBtn').addEventListener('click',()=>{
     document.getElementById('startOverlay').style.display='none';
     resize();
-    computeCover();
     state.running = true;
-    state.speed = 60; state.dist = 0;
+    state.speed = 60;
+    state.dist = 0;
+    worldZ = 0;
     last = performance.now();
     loop(last);
   });
-
-  // Nitro button is inert for now (kept for future)
-  document.getElementById('nitroBtn').addEventListener('click', ()=>{});
 
   resize();
 })();
