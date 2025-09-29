@@ -931,7 +931,6 @@
     }, {passive:true});
 
     /* ---- START button: EXACT wallet handoff → prime → snapshot → API (no regression) ---- */
-    let WALLET_READY = false, runStartCoins = 0;
 
     function paintCoinsHUDSafeAfterSnapshot(snapCoins){
       const shown = parseInt((coinsRunEl.textContent||'0'), 10) || 0;
