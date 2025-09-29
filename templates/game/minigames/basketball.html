@@ -5,7 +5,7 @@
   <title>Street Basketball — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <!-- DO NOT CHANGE PERSIST SETUP -->
+  <!-- Persist (same as Arena) -->
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
 
@@ -24,15 +24,20 @@
     .btn:hover{filter:brightness(1.06)}
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#79c0ff;overflow:hidden}
+
+    /* HUD */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:8px;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
     .pill strong{font-size:13px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
+
+    /* avatar under ball */
     .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
     .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
+
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
             font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
@@ -42,6 +47,13 @@
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
     .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
       background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
+
+    /* Start overlay */
+    .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
+      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.45));}
+    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:16px 18px;
+      display:flex;flex-direction:column;gap:10px;align-items:center}
+    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -63,6 +75,14 @@
         </div>
       </div>
 
+      <!-- START overlay -->
+      <div id="startOverlay" class="startOverlay" aria-live="polite">
+        <div class="startCard">
+          <div class="pill">Wallet loaded: <strong id="startCoins" class="arc">…</strong></div>
+          <button id="startBtn" class="startBtn">START</button>
+        </div>
+      </div>
+
       <!-- Scene SVG -->
       <svg id="court" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Court">
         <defs>
@@ -79,10 +99,7 @@
           <filter id="shadow"><feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity=".35"/></filter>
         </defs>
 
-        <!-- Sky -->
         <rect x="0" y="0" width="1100" height="760" fill="url(#sky)"/>
-
-        <!-- Hills + water band -->
         <ellipse cx="250" cy="520" rx="320" ry="140" fill="#8ed47d" opacity=".9"/>
         <ellipse cx="880" cy="520" rx="300" ry="130" fill="#89d074" opacity=".9"/>
         <g opacity=".9">
@@ -125,7 +142,7 @@
         </g>
       </svg>
 
-      <!-- avatar under the ball (fixed; never follows the shot) -->
+      <!-- avatar under ball -->
       <div id="avatarScene" class="avatarBadge avatarScene">
         <canvas id="avatarTiny" class="avatarCanvas" width="54" height="54"></canvas>
       </div>
@@ -144,7 +161,7 @@
 
   <script>
   (function(){
-    /* ---------------- t param (same as Arena) ---------------- */
+    /* ---------------- t param / links ---------------- */
     const T_KEY='izzaTokenT';
     let T=new URLSearchParams(location.search).get('t')||'';
     try{
@@ -190,7 +207,7 @@
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
-    /* ---------- IMAGE/PALETTE HELPERS (these were missing and broke the avatar) ---------- */
+    /* ---------- IMAGE/PALETTE HELPERS (for avatar) ---------- */
     function hexToRgb(h){ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
     function dist2(a,b){const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
     function overlayTint(img, hex, strength=1){
@@ -220,7 +237,6 @@
       }
       ctx.putImageData(id,0,0); return {canvas:c, changedPixels:changed};
     }
-    // Simple ramp extractor fallback (used for hair if needed)
     function extractThreeToneRamp(img){
       const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
       const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
@@ -306,9 +322,10 @@
     const streakEl = document.getElementById('streak');
     const timeEl = document.getElementById('time');
     const coinsRunEl = document.getElementById('coinsRun');
+    const startCoinsEl = document.getElementById('startCoins');
 
     let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
-    let runStartCoins = 0;  // snapshot of wallet at start of this run
+    let runStartCoins = 0;
 
     function toXY(cx, cy){
       const vbW = 1100, vbH = 760;
@@ -499,7 +516,7 @@
     let walletDirty = false;
     let WALLET_READY = false;
 
-    function paintCoinsHUD(n){ coinsRunEl.textContent = String(Math.max(0, n|0)); }
+    function paintCoinsHUD(n){ coinsRunEl.textContent = String(Math.max(0, n|0)); if(startCoinsEl) startCoinsEl.textContent=String(Math.max(0,n|0)); }
 
     function updateCoinsHUD(){
       if(!WALLET_READY) return;
@@ -650,16 +667,46 @@
     interceptNav(document.getElementById('backBtn'));
     interceptNav(document.getElementById('againBtn'));
 
-    /* ---------------- Boot & lifecycle ---------------- */
+    /* ---------------- Hydration helpers (same idea as Arena) ---------------- */
+    function waitForPersistReady({timeout=3000, interval=40} = {}){
+      return new Promise((res)=> {
+        const t0 = performance.now();
+        const check = () => {
+          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+          if (performance.now() - t0 > timeout) return res(false);
+          setTimeout(check, interval);
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
+        else check();
+      });
+    }
+    async function hydrateFromSnapshot(){
+      try{
+        await waitForPersistReady();
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+          await IZZA_PERSIST.load(); // server -> LS
+        }
+      }catch(_){}
+      // also pull from API once (authoritative), like Arena
+      try{
+        const q = T ? `?t=${encodeURIComponent(T)}` : '';
+        const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
+        if (r.ok){
+          const j = await r.json();
+          const coins = Number((j && (j.coins ?? (j.wallet?.coins) ?? (j.balance?.coins))) || 0)|0;
+          const craft = Number((j && (j.crafting ?? j.credits ?? j.wallet?.crafting)) || 0)|0;
+          writeCoinsLS(coins); writeCraftAll(craft);
+          window.dispatchEvent(new Event('izza-coins-changed'));
+          window.dispatchEvent(new Event('izza-crafting-changed'));
+        }
+      }catch(_){}
+      const now = readCoinsLS();
+      paintCoinsHUD(now);
+      return now;
+    }
 
-    // FIRST paint: read wallet from localStorage and show it immediately.
+    /* ---------------- Boot ---------------- */
     let startCoins = 0;
-    try{
-      const raw = localStorage.getItem('izzaCoins');
-      const n = parseInt(raw||'0',10);
-      startCoins = Number.isFinite(n) ? n : 0;
-      coinsRunEl.textContent = String(startCoins);
-    }catch(_){ coinsRunEl.textContent = '0'; }
 
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
     window.addEventListener('resize', onResize, {passive:true});
@@ -690,35 +737,43 @@
     (async function boot(){
       try{
         const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
-        if (shouldPrime){
-          try{ await primeViaCityIframe(); }catch(_){}
+        if (shouldPrime){ try{ await primeViaCityIframe(); }catch(_){}
           try{ sessionStorage.setItem(SESSION_PRIME_KEY,'1'); }catch(_){}
         }
 
-        // Character (best-effort)
+        // Hydrate from snapshot immediately (so coins show correct value before start)
+        startCoins = await hydrateFromSnapshot();
+        WALLET_READY = true;
+        runStartCoins = startCoins;
+
+        // Build avatar (profile best-effort)
         try{
           const q = T ? `?t=${encodeURIComponent(T)}` : '';
           const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
-          if(r.ok){ const j=await r.json(); if (j && typeof j==='object') localStorage.setItem('izzaCharacter', JSON.stringify(j)); }
+          const prof = r.ok ? (await r.json()) : JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+          try{ localStorage.setItem('izzaCharacter', JSON.stringify(prof||{})); }catch(_){}
+          await buildAvatarCanvas(tinyCtx, 54, prof||{});
         }catch(_){}
 
-        // Enable HUD updates after first-paint
-        setTimeout(()=>{ WALLET_READY = true; updateCoinsHUD(); }, 0);
+        // Paint HUD/overlay coins
+        paintCoinsHUD(startCoins);
 
-        // Snapshot for end-of-run award calc
-        runStartCoins = startCoins;
-
-        // Build avatar
-        try{
-          const prof = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-          await buildAvatarCanvas(tinyCtx, 54, prof);
-        }catch(_){}
-
+        // Place avatar and scene, but DO NOT start timer yet
         resetBall();
         setHoopDistance();
         positionAvatarFixed();
-        startTimer();
-        requestAnimationFrame(loop);
+
+        // Start overlay button
+        document.getElementById('startBtn').addEventListener('click', async ()=>{
+          // re-hydrate right before starting to be safe
+          startCoins = await hydrateFromSnapshot();
+          WALLET_READY = true;
+          runStartCoins = startCoins;
+          document.getElementById('startOverlay').style.display='none';
+          startTimer();
+          requestAnimationFrame(loop);
+        }, {passive:true});
+
       }catch(e){
         if(String(e.message)!=='redirecting'){
           console.error('Basketball init error', e);
