@@ -729,16 +729,17 @@ function parseWalletResponse(j){
 
     /* ---------------- Nav ---------------- */
     function interceptNav(a){
-      if(!a) return;
-      a.addEventListener('click', async (ev)=>{
-        ev.preventDefault();
-        const href = withAuth(a.getAttribute('href') || '/izza-game/play');
-          const quick = persistWalletAndSave();
-          await Promise.race([quick, new Promise(r=>setTimeout(r,220))]);
-        }catch(_){}
-        location.href = href;
-      }, {passive:false});
-    }
+  if(!a) return;
+  a.addEventListener('click', async (ev)=>{
+    ev.preventDefault();
+    const href = withAuth(a.getAttribute('href') || '/izza-game/play');
+    try{
+      const quick = persistWalletAndSave();
+      await Promise.race([quick, new Promise(r=>setTimeout(r,220))]);
+    }catch(_){}
+    location.href = href;
+  }, {passive:false});
+}
     interceptNav(document.getElementById('cityBtn'));
     interceptNav(document.getElementById('cityBtn2'));
     interceptNav(document.getElementById('backBtn'));
