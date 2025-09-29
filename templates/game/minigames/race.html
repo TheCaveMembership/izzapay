@@ -31,24 +31,28 @@
 </head>
 <body>
   <div class="arena" id="arena">
+    <!-- HUD -->
     <div class="hud">
       <div>SPEED: <span id="speed">0</span> km/h</div>
       <div>DIST: <span id="dist">0</span> m</div>
       <div>COINS: <span id="coinsRun">0</span></div>
     </div>
 
+    <!-- Garage Overlay -->
     <div id="startOverlay" class="overlay">
       <div class="card">
         <h3>Street Race</h3>
         <div class="preview">
-          <!-- NOTE: all assets live in /tracks in your repo -->
           <img id="garageCar" src="/static/game/sprites/tracks/coupe.png" alt="Car preview" style="height:100%"/>
         </div>
         <button id="startBtn" class="startBtn">START</button>
       </div>
     </div>
 
+    <!-- Nitro UI -->
     <button class="nitroBtn" id="nitroBtn">NITRO</button>
+
+    <!-- Game Scene -->
     <canvas id="scene"></canvas>
   </div>
 
@@ -56,7 +60,9 @@
 (function(){
   const arena = document.getElementById('arena');
   const canvas = document.getElementById('scene');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha:true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   const HUD = {
     speed: document.getElementById('speed'),
@@ -65,123 +71,173 @@
   };
 
   // DPR-aware sizing (portrait)
+  let dpr = 1, CSS_W = 0, CSS_H = 0;
   function resize(){
-    const w = arena.clientWidth;
-    const h = arena.clientHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
+    CSS_W = arena.clientWidth;
+    CSS_H = arena.clientHeight;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width  = Math.floor(CSS_W * dpr);
+    canvas.height = Math.floor(CSS_H * dpr);
+    canvas.style.width = CSS_W + 'px';
+    canvas.style.height = CSS_H + 'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    rebuildBgFrames(); // make sure pre-scaled frames match the screen size
   }
   window.addEventListener('resize', resize, {passive:true});
-  resize();
 
-  // ---- assets (your files are under /tracks) ----
+  // ---- assets (all in /tracks) ----
   const img = (src)=>{ const i=new Image(); i.src=src; return i; };
 
   const sprites = {
-    player: img('/static/game/sprites/tracks/coupe.png'),
+    player   : img('/static/game/sprites/tracks/coupe.png'),
     underglow: img('/static/game/sprites/tracks/underglow.png'),
-    zone1: img('/static/game/sprites/tracks/night_zone1.png'),
+    cockpit  : img('/static/game/sprites/tracks/cockpit.png'),
+    zone1    : img('/static/game/sprites/tracks/night_zone1.png'),
+    // (traffic sheets are present but not used yet)
   };
 
-  // preserve car aspect once loaded
-  let carRatio = 0.5; // fallback
+  // preserve car aspect
+  let carRatio = 0.5;
   sprites.player.onload = ()=>{ carRatio = sprites.player.height / sprites.player.width; };
 
-  // ---- background: strict frame-by-frame vertical scroll ----
+  // ---- background (strict frame-by-frame) ----
   const bg = {
-    img: sprites.zone1, rows:3, cols:3,
-    idx: 0,            // 0..8
-    offsetY: 0,        // how many px of the current frame already scrolled
-    speed: 240,        // px/s of on-screen scroll
-    frameW: 0, frameH: 0,
-    ready: false
+    sheet: sprites.zone1, rows:3, cols:3,
+    frameW:0, frameH:0, ready:false,
+    idx:0, offsetY:0, speed:260,
+    frames: []  // array of 9 offscreen canvases, each exactly CSS_W × CSS_H
   };
 
   sprites.zone1.onload = ()=>{
     bg.frameW = sprites.zone1.width / bg.cols;
     bg.frameH = sprites.zone1.height / bg.rows;
     bg.ready = true;
+    rebuildBgFrames();
   };
 
-  // helper to draw a single frame (cover fit, centered)
-  function drawFrame(frameIndex, dy){
-    const W = canvas.clientWidth;
-    const H = canvas.clientHeight;
+  function rebuildBgFrames(){
+    if(!bg.ready || CSS_W === 0 || CSS_H === 0) return;
 
-    const col = frameIndex % bg.cols;
-    const row = Math.floor(frameIndex / bg.cols);
-    const sx = col * bg.frameW;
-    const sy = row * bg.frameH;
+    bg.frames = [];
+    const order = [0,1,2,3,4,5,6,7,8]; // row-major: TL→TR, then next row
+    for (const i of order){
+      const c = document.createElement('canvas');
+      c.width = CSS_W; c.height = CSS_H;
+      const g = c.getContext('2d');
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = 'high';
 
-    // cover-fit scaling without warping
-    const scale = Math.max(W / bg.frameW, H / bg.frameH);
-    const dw = bg.frameW * scale;
-    const dh = bg.frameH * scale;
-    const dx = (W - dw) * 0.5;
-    const dyTop = dy; // where to place this frame vertically
+      const col = i % bg.cols;
+      const row = (i / bg.cols) | 0;
+      const sx = col * bg.frameW;
+      const sy = row * bg.frameH;
 
-    ctx.drawImage(bg.img, sx, sy, bg.frameW, bg.frameH, dx, dyTop, dw, dh);
+      // cover-fit draw into the offscreen canvas (no warping)
+      const scale = Math.max(CSS_W / bg.frameW, CSS_H / bg.frameH);
+      const dw = Math.ceil(bg.frameW * scale);
+      const dh = Math.ceil(bg.frameH * scale);
+      const dx = ((CSS_W - dw) / 2) | 0;     // snap to integers to avoid seams
+      const dy = ((CSS_H - dh) / 2) | 0;
+
+      g.drawImage(bg.sheet, sx, sy, bg.frameW, bg.frameH, dx, dy, dw, dh);
+      bg.frames.push(c);
+    }
+    // keep offset consistent when resizing
+    bg.offsetY = Math.min(bg.offsetY, CSS_H-1);
   }
 
   function drawBackground(dt){
-    if(!bg.ready) return;
+    if(!bg.ready || bg.frames.length !== 9) return;
 
-    const H = canvas.clientHeight;
-
-    // advance strictly within the current frame
     bg.offsetY += bg.speed * dt;
 
-    // when we've scrolled exactly one screen height, move to next frame
-    while (bg.offsetY >= H){
-      bg.offsetY -= H;
-      bg.idx = (bg.idx + 1) % (bg.rows * bg.cols);
+    // when exactly a full screen has passed, advance to next frame
+    while (bg.offsetY >= CSS_H){
+      bg.offsetY -= CSS_H;
+      bg.idx = (bg.idx + 1) % 9;
     }
 
-    // draw current frame (partially scrolled) and the next frame stacked below it
-    const nextIdx = (bg.idx + 1) % (bg.rows * bg.cols);
+    const nextIdx = (bg.idx + 1) % 9;
 
-    // current frame starts at y = -offset (scrolling upward)
-    drawFrame(bg.idx, -bg.offsetY);
-    // next frame begins exactly after the bottom of screen portion
-    drawFrame(nextIdx, H - bg.offsetY);
+    // current frame starts at -offset, next starts immediately after
+    const y0 = -bg.offsetY | 0;
+    const y1 = (CSS_H - bg.offsetY) | 0;
+
+    ctx.drawImage(bg.frames[bg.idx], 0, y0);
+    ctx.drawImage(bg.frames[nextIdx], 0, y1);
   }
 
-  // ---- player + tint ----
-  const playerTint = { r: 40, g: 160, b: 255, a: 0.25 }; // change to taste
+  // ---- simple input (left/right half screen) ----
+  const steer = { x:0 };
+  function onPointer(e){
+    const r = canvas.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    steer.x = (x < r.width/2) ? -1 : 1;
+  }
+  function stopPointer(){ steer.x = 0; }
+  canvas.addEventListener('pointerdown', onPointer);
+  canvas.addEventListener('pointermove', onPointer);
+  window.addEventListener('pointerup', stopPointer);
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') steer.x=-1;
+    if(e.key==='ArrowRight') steer.x=1;
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.key==='ArrowLeft' || e.key==='ArrowRight') steer.x=0;
+  });
 
-  function drawPlayer(){
-    const W = canvas.clientWidth;
-    const H = canvas.clientHeight;
+  // ---- player, tint & cockpit overlay ----
+  const tint = { r: 80, g: 180, b: 255, base: 0.22 }; // car paint tint (multiplies)
+  let nitroLeft = 0;
 
-    const baseY = H * 0.78;
-    const baseX = W * 0.5;
+  function drawPlayer(speed){
+    const W = CSS_W, H = CSS_H;
+    const sway = steer.x * 26;
 
-    // underglow
-    const ugW = Math.min(W*0.7, 420);
-    const ugH = ugW * 0.25;
+    // underglow pulse with nitro/speed
+    const ugW = Math.min(W*0.72, 440), ugH = ugW*0.24;
+    const ugY = H*0.78;
+    const ugAlpha = 0.35 + 0.35*Math.min(1, speed/220) + (nitroLeft>0?0.25:0);
     ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.drawImage(sprites.underglow, baseX - ugW/2, baseY - ugH/2 + 8, ugW, ugH);
+    ctx.globalAlpha = ugAlpha;
+    ctx.drawImage(sprites.underglow, W*0.5 - ugW/2 + sway*0.2, ugY-ugH/2+8, ugW, ugH);
     ctx.restore();
 
-    // car – preserve source aspect
-    const carW = Math.min(W*0.62, 320);
+    // car (preserve aspect)
+    const carW = Math.min(W*0.62, 340);
     const carH = carW * carRatio;
-    const carX = baseX - carW/2;
-    const carY = baseY - carH*0.92;
+    const carX = (W - carW)/2 + sway;
+    const carY = H*0.78 - carH*0.92;
 
-    ctx.drawImage(sprites.player, carX, carY, carW, carH);
+    ctx.drawImage(sprites.player, Math.round(carX), Math.round(carY), Math.round(carW), Math.round(carH));
 
-    // simple tint overlay (works well on grayscale base)
+    // tint car using multiply
     ctx.save();
     ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = `rgba(${playerTint.r},${playerTint.g},${playerTint.b},${playerTint.a})`;
-    ctx.fillRect(carX, carY, carW, carH);
+    const a = tint.base + (nitroLeft>0 ? 0.18 : 0);
+    ctx.fillStyle = `rgba(${tint.r},${tint.g},${tint.b},${a})`;
+    ctx.fillRect(Math.round(carX), Math.round(carY), Math.round(carW), Math.round(carH));
     ctx.restore();
+
+    // cockpit interior overlay (subtle vignette that shifts with steer)
+    if (sprites.cockpit.complete){
+      const scale = Math.max(W / sprites.cockpit.width, H / sprites.cockpit.height);
+      const dw = sprites.cockpit.width * scale;
+      const dh = sprites.cockpit.height * scale;
+      const dx = ((W - dw) / 2 + sway*0.08) | 0;
+      const dy = ((H - dh) / 2) | 0;
+
+      // base cockpit art
+      ctx.drawImage(sprites.cockpit, dx, dy, dw, dh);
+
+      // add dynamic tint + shading as you drive
+      const shade = Math.min(0.35, 0.15 + speed/1000) + (nitroLeft>0?0.15:0);
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = `rgba(10,12,20,${shade})`;
+      ctx.fillRect(0,0,W,H);
+      ctx.restore();
+    }
   }
 
   // ---- state & loop ----
@@ -190,9 +246,10 @@
   function draw(dt){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     drawBackground(dt);
-    drawPlayer();
+    drawPlayer(state.speed);
     HUD.speed.textContent = Math.round(state.speed);
     HUD.dist.textContent  = Math.round(state.dist);
+    HUD.coins.textContent = 0;
   }
 
   let last = performance.now();
@@ -201,20 +258,33 @@
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
 
-    const target = 180;
+    // acceleration towards target (nitro bumps target)
+    const target = 180 + (nitroLeft>0 ? 120 : 0);
     state.speed += (target - state.speed)*0.08;
     state.dist  += state.speed * dt;
+
+    if (nitroLeft > 0) nitroLeft -= dt;
 
     draw(dt);
     requestAnimationFrame(loop);
   }
 
-  document.getElementById('startBtn').addEventListener('click', ()=>{
+  // --- UI hooks ---
+  document.getElementById('startBtn').addEventListener('click',()=>{
     document.getElementById('startOverlay').style.display='none';
-    state.running = true; state.speed = 60; state.dist = 0;
+    resize(); // ensure frames are built at first start
+    state.running = true;
+    state.speed = 60; state.dist = 0;
     last = performance.now();
     loop(last);
   });
+
+  document.getElementById('nitroBtn').addEventListener('click', ()=>{
+    nitroLeft = 2.2; // seconds
+  });
+
+  // initial size
+  resize();
 })();
 </script>
 </body>
