@@ -567,48 +567,60 @@
 
     /* -------- START button: no re-auth; handoff → prime → snapshot → API -------- */
     document.getElementById('startBtn').addEventListener('click', async ()=>{
-      try{
-        // 0) If Arena handed us a fresh wallet, use it instantly
-        const handoff = consumeWalletHandoff();
-        if (handoff){ paintCoinsHUD(handoff.coins); }
+  try{
+    // 0) If Arena handed us a fresh wallet, use it instantly
+    const handoff = consumeWalletHandoff();
+    if (handoff){ paintCoinsHUD(handoff.coins); }
 
-        // 1) Warm session & Persist via hidden City frame (non-blocking with timeout inside)
-        try{ await primeViaCityIframe(); }catch(_){}
+    // 1) Warm session & Persist via hidden City frame (non-blocking with timeout inside)
+    try{ await primeViaCityIframe(); }catch(_){}
 
-        // 2) Best-effort session check (does NOT redirect)
-        try{ await ensureSession(); }catch(_){}
+    // 2) Best-effort session check (does NOT redirect)
+    try{ await ensureSession(); }catch(_){}
 
-        // 3) Hydrate from Persist snapshot (server → LS), then paint
-        const snapCoins = await hydrateFromSnapshot();
-        paintCoinsHUD(snapCoins);
+    // 3) Hydrate from Persist snapshot (server → LS)
+    const snapCoins = await hydrateFromSnapshot();
 
-        // 4) Authoritative wallet fetch; adopt if >0 or differs
+    // --- FIX #1: do NOT regress the shown value after snapshot ---
+    {
+      const shown = parseInt((coinsRunEl.textContent||'0'), 10) || 0;
+      const safe = Math.max(shown, snapCoins, readCoinsLS()||0);
+      paintCoinsHUD(safe);
+    }
+
+    // 4) Authoritative wallet fetch; adopt without decreasing
+    try{
+      const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
+      if (r.ok){
+        const parsed = parseWalletResponse(await r.json().catch(()=>({})));
+        const apiCoins = Number(parsed.coins)||0;
+        const apiCraft = Number(parsed.crafting)||0;
+
+        // --- FIX #2: never write a smaller coin value than what we show ---
+        const shown = parseInt((coinsRunEl.textContent||'0'), 10) || 0;
+        const nextCoins = Math.max(shown, apiCoins);
+
         try{
-          const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
-          if (r.ok){
-            const parsed = parseWalletResponse(await r.json().catch(()=>({})));
-            const apiCoins = Number(parsed.coins)||0;
-            const apiCraft = Number(parsed.crafting)||0;
-            try{
-              if (apiCoins>=0) localStorage.setItem('izzaCoins', String(apiCoins));
-              if (apiCraft>=0) writeCraftAll(apiCraft);
-              window.dispatchEvent(new Event('izza-coins-changed'));
-              window.dispatchEvent(new Event('izza-crafting-changed'));
-            }catch(_){}
-            paintCoinsHUD(readCoinsLS());
-          }
+          localStorage.setItem('izzaCoins', String(nextCoins));
+          if (apiCraft>=0) writeCraftAll(apiCraft);
+          window.dispatchEvent(new Event('izza-coins-changed'));
+          window.dispatchEvent(new Event('izza-crafting-changed'));
         }catch(_){}
 
-        // 5) Lock run baseline & start game
-        WALLET_READY = true;
-        runStartCoins = readCoinsLS() || 0;
-        document.getElementById('startOverlay').style.display='none';
-        setHoopDistance(); resetBall();
-        startTimer(); requestAnimationFrame(loop);
-      }catch(e){
-        console.error('start failed', e);
+        paintCoinsHUD(nextCoins);
       }
-    }, {passive:true});
+    }catch(_){}
+
+    // 5) Lock run baseline & start game
+    WALLET_READY = true;
+    runStartCoins = parseInt((coinsRunEl.textContent||'0'), 10) || (readCoinsLS()||0);
+    document.getElementById('startOverlay').style.display='none';
+    setHoopDistance(); resetBall();
+    startTimer(); requestAnimationFrame(loop);
+  }catch(e){
+    console.error('start failed', e);
+  }
+}, {passive:true});
   })();
   </script>
 </body>
