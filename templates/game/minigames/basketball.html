@@ -783,8 +783,7 @@ function parseWalletResponse(j){
 
   // 2) Hit API (authoritative only when it returns >0)
   try{
-    const q = T ? `?t=${encodeURIComponent(T)}` : '';
-    const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
+    const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
     if (r.ok){
       let j={}; try{ j = await r.json(); }catch(_){}
       const parsed = parseWalletResponse(j);
@@ -844,8 +843,7 @@ function parseWalletResponse(j){
 
         // Build avatar (profile best-effort)
         try{
-          const q = T ? `?t=${encodeURIComponent(T)}` : '';
-          const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
+          const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
           const prof = r.ok ? (await r.json()) : JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
           try{ localStorage.setItem('izzaCharacter', JSON.stringify(prof||{})); }catch(_){}
           await buildAvatarCanvas(tinyCtx, 54, prof||{});
