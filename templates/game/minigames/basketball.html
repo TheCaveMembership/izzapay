@@ -177,7 +177,15 @@
       }catch(_){}
       return headers;
     }
-
+function parseWalletResponse(j){
+  if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
+  if ('coins' in j || 'crafting' in j || 'credits' in j){
+    return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
+  }
+  if (j.wallet)   return parseWalletResponse(j.wallet);
+  if (j.balance)  return parseWalletResponse(j.balance);
+  return { coins:0, crafting:0 };
+}
     async function fetchCharacterFresh(){
       try{
         const q = T ? `?t=${encodeURIComponent(T)}` : '';
@@ -803,7 +811,26 @@ function syncCoinsHUD(){ updateCoinsHUD(); }
 
       // CHANGED: show current wallet immediately (not just run coins)
       updateCoinsHUD();
-
+// Authoritative wallet fetch (server -> LS -> HUD), just like Arena
+try{
+  const q = T ? `?t=${encodeURIComponent(T)}` : '';
+  const r = await fetch('/izza-game/api/wallet'+q, {
+    credentials:'include',
+    headers: bearerHeaders()
+  });
+  if (r.ok){
+    let j = {};
+    try{ j = await r.json(); }catch(_){}
+    const parsed = parseWalletResponse(j);
+    try{
+      localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
+      writeCraftAll(Number(parsed.crafting)||0);
+      window.dispatchEvent(new Event('izza-coins-changed'));
+      window.dispatchEvent(new Event('izza-crafting-changed'));
+    }catch(_){}
+    updateCoinsHUD(); // repaint HUD with authoritative wallet
+  }
+}catch(_){}
       // Build avatar
       try{
         const prof = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
