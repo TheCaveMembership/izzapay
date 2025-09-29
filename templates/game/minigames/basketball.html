@@ -256,48 +256,6 @@
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
     const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
 
-    function extractThreeToneRamp(img){
-      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-      const d=c.getImageData(0,0,w,h).data, samples=[];
-      for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; samples.push({r,g,b,L:lum(r,g,b)}); }
-      if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
-      samples.sort((a,b)=>a.L-b.L);
-      const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
-      return [pick(0.2),pick(0.55),pick(0.85)];
-    }
-
-    function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
-      const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
-      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-      const id=c.getImageData(0,0,w,h), d=id.data; let changed=0;
-      for(let i=0;i<d.length;i+=4){
-        if(d[i+3]===0) continue;
-        const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
-        for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
-        if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
-      }
-      c.putImageData(id,0,0);
-      return {canvas:oc, changedPixels:changed};
-    }
-
-    function overlayTint(img, hex, strength=1.0){
-      const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-      const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-      const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
-      function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
-      for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
-        const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
-        d[i]=Math.round(d[i]*(1-strength)+r*strength);
-        d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
-        d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
-      }
-      c.putImageData(id,0,0);
-      return oc;
-    }
-
     async function buildAvatarCanvas(dstCtx, size, profile){
       const DW=size,DH=size,X=0,Y=0;
       const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
@@ -334,7 +292,7 @@
       if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
       if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
       if(hair){
-        const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+        const detected=["#C8C8C8","#9C9C9C","#6E6E6E"], target=HAIR_TO[hairCol]||HAIR_TO.black;
         const swap=paletteSwap(hair, detected, target, 4000);
         let hairCanvas=swap.canvas;
         if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
@@ -358,6 +316,7 @@
     const coinsRunEl = document.getElementById('coinsRun');
 
     let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
+    let runStartCoins = 0;  // <- snapshot of wallet at start of this run
 
     function toXY(cx, cy){
       const vbW = 1100, vbH = 760;
@@ -371,7 +330,8 @@
       x:550, y:700, vx:0, vy:0, r:76,
       gravity: 2300, drag: 0.992,
       launched:false, dragging:false,
-      score:0, goals:0, coins:0, timeLeft:60,
+      score:0, goals:0,               // <-- no game.coins here
+      timeLeft:60,
       hoopX:390, hoopY:300, distanceStep:0,
       timerId:null, ended:false,
       creditsEarned:0,
@@ -557,7 +517,7 @@
     function syncCoinsHUD(){ updateCoinsHUD(); }
 
     async function applyCoins(amount){
-      const cur = (readCoinsLS()|0) + (amount|0);
+      const cur = (readCoinsLS()|0) + (amount|0);  // always update true wallet
       writeCoinsLS(cur);
       walletDirty = true;
       try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
@@ -594,9 +554,8 @@
 
       game.score += COINS_PER_GOAL;
       game.goals += 1;
-      game.coins += COINS_PER_GOAL;
 
-      await applyCoins(COINS_PER_GOAL);
+      await applyCoins(COINS_PER_GOAL);  // <- add directly to wallet
 
       const creditsNow = Math.floor(game.goals / 10);
       if (creditsNow > game.creditsEarned){
@@ -644,8 +603,11 @@
       game.launched = false;
       game.dragging = false;
 
+      const coinsNow = readCoinsLS();
+      const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
+
       document.getElementById('finalScore').textContent = game.score;
-      document.getElementById('finalCoins').textContent = game.coins;
+      document.getElementById('finalCoins').textContent = coinsAwarded;
       document.getElementById('finalCraft').textContent = game.creditsEarned;
       document.getElementById('finish').style.display = 'flex';
       showMsg('Time!', 'miss');
@@ -715,7 +677,7 @@
 
     /* ---------------- Boot & lifecycle ---------------- */
 
-    // Paint the HUD **immediately** with whatever is already in LS (prevents any 0 flicker)
+    // Paint the HUD immediately with whatever is already in LS
     paintCoinsHUD(readCoinsLS());
 
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
@@ -753,24 +715,18 @@
           try{ sessionStorage.setItem(SESSION_PRIME_KEY,'1'); }catch(_){}
         }
 
-        // Character gate (may redirect to /create)
+        // Character gate (best-effort; non-blocking if missing)
         try{
-          const profilePre = await (async ()=>{
-            try{
-              const q = T ? `?t=${encodeURIComponent(T)}` : '';
-              const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
-              if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
-            }catch(_){}
-            return null;
-          })();
-          if (profilePre){ try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){} }
-        }catch(e){ if(String(e.message)==='redirecting') return; }
+          const q = T ? `?t=${encodeURIComponent(T)}` : '';
+          const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
+          if(r.ok){ const j=await r.json(); if (j && typeof j==='object') localStorage.setItem('izzaCharacter', JSON.stringify(j)); }
+        }catch(_){}
 
         // Hydrate snapshot (max-merge), then repaint HUD from LS
         await hydrateFromSnapshot();
         updateCoinsHUD();
 
-        // Authoritative wallet fetch — **only adopt if server > local** (prevents 0 overwrite)
+        // Authoritative wallet fetch — adopt only if server > local
         try{
           const q = T ? `?t=${encodeURIComponent(T)}` : '';
           const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
@@ -784,16 +740,13 @@
             const localCoins = readCoinsLS();
             const localCraft = readCraftAny();
 
-            // Coins: only lift if server is higher; never clobber to 0
             if (serverCoins > localCoins){
               writeCoinsLS(serverCoins);
               try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
             } else if (serverCoins < localCoins){
-              // Push our higher local up to server
               try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
             }
 
-            // Crafting credits: same rule
             if (serverCraft > localCraft){
               writeCraftAll(serverCraft);
             } else if (serverCraft < localCraft){
@@ -804,16 +757,12 @@
           }
         }catch(_){}
 
+        // Snapshot wallet **after** hydrate + server lift: this is our run baseline
+        runStartCoins = readCoinsLS();
+
         // Build avatar
         try{
-          const prof = (await (async ()=>{
-            try{
-              const q = T ? `?t=${encodeURIComponent(T)}` : '';
-              const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
-              if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
-            }catch(_){}
-            return null;
-          })()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+          const prof = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
           await buildAvatarCanvas(tinyCtx, 54, prof);
         }catch(_){}
 
