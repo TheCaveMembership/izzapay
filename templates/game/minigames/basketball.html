@@ -6,8 +6,45 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Persist (same as Arena) -->
-  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
-  <script src="/static/game/js/izza-persist.js"></script>
+<script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
+
+<!-- ⬇️ NEW: ensure username is known before izza-persist.js loads -->
+<script>
+  (function(){
+    try{
+      const params = new URLSearchParams(location.search);
+      let u = (params.get('u') || '').toString().trim();
+      // if no ?u=, try a cached value (set later below)
+      if (!u) {
+        u = (localStorage.getItem('izzaUserU') || '').toString().trim();
+      }
+      // if still missing, try the auth mirror (some shells isolate LS)
+      if (!u) {
+        const raw = localStorage.getItem('piAuthUser');
+        if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
+      }
+      // if we found a username, publish it for izza-persist's userKey()
+      if (u) {
+        // normalize like Diagnostics: no leading @ and lowercased
+        u = u.replace(/^@+/, '').toLowerCase();
+        // make Persist pick it up
+        window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+        // secondary hook used by userKey() if needed
+        window.izzaUserKey = { get: () => u };
+        // keep a small cache so refreshes retain it
+        try { localStorage.setItem('izzaUserU', u); } catch(_){}
+        // optional: seed auth mirror if empty (never overwrite a real one)
+        try {
+          if (!localStorage.getItem('piAuthUser')) {
+            localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
+          }
+        } catch(_){}
+      }
+    }catch(_){}
+  })();
+</script>
+
+<script src="/static/game/js/izza-persist.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
@@ -161,9 +198,35 @@
 
   <script>
   (function(){
-    /* ---------------- t param / links ---------------- */
-    const T_KEY='izzaTokenT';
-    let T=new URLSearchParams(location.search).get('t')||'';
+    /* ---------------- t & u params / links ---------------- */
+const T_KEY='izzaTokenT';
+const U_KEY='izzaUserU';
+const urlParams = new URLSearchParams(location.search);
+
+let T = urlParams.get('t') || '';
+let U = (urlParams.get('u') || '').toString().trim();
+    try {
+  // save/restore ?u= like you already do for ?t=
+  if (U) {
+    localStorage.setItem('izzaUserU', U);
+  } else {
+    const su = localStorage.getItem('izzaUserU') || '';
+    if (su) {
+      const url = new URL(location.href);
+      url.searchParams.set('u', su);
+      history.replaceState(null, '', url.toString());
+      U = su;
+    }
+  }
+
+  // publish to Persist’s userKey() (redundant to the <head> bootstrap, but
+  // helps on soft reloads or SPA navigations)
+  if (U) {
+    U = U.replace(/^@+/, '').toLowerCase();
+    window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: U });
+    window.izzaUserKey = { get: () => U };
+  }
+} catch(_) {}
     try{
       if(T){ localStorage.setItem(T_KEY,T); }
       else{
@@ -176,9 +239,16 @@
         }
       }
     }catch(_){}
-    const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
-    document.getElementById('backBtn').href=withT('/izza-game/minigames');
-    document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
+    function withAuth(href){
+  const url = new URL(href, location.origin);
+  if (T) url.searchParams.set('t', T);
+  if (U) url.searchParams.set('u', U);
+  return url.pathname + (url.search ? url.search : '');
+}
+document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
+document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{
+  a.href = withAuth(a.getAttribute('href'));
+});
 
     /* ---------------- helpers ---------------- */
     function bearerHeaders(base = {}) {
@@ -636,7 +706,7 @@ function parseWalletResponse(j){
         const finish=(why)=>{ if(done) return; done=true; cleanup(); resolve(why||'ok'); };
         const cleanup=()=>{ try{ clearTimeout(softTimer); clearTimeout(hardTimer); clearInterval(pollTimer);}catch(_){}
                            try{ f && f.remove(); f=null; }catch(_){} };
-        const src = withT('/izza-game/play?prime=1&silent=1');
+        const src = withAuth('/izza-game/play?prime=1&silent=1');
         f=document.createElement('iframe'); f.id='izzaPrimeFrame'; f.src=src;
         f.style.position='fixed'; f.style.width='0'; f.style.height='0'; f.style.opacity='0'; f.style.pointerEvents='none'; f.style.border='0';
         document.body.appendChild(f);
@@ -662,8 +732,7 @@ function parseWalletResponse(j){
       if(!a) return;
       a.addEventListener('click', async (ev)=>{
         ev.preventDefault();
-        const href = withT(a.getAttribute('href') || '/izza-game/play');
-        try{
+        const href = withAuth(a.getAttribute('href') || '/izza-game/play');
           const quick = persistWalletAndSave();
           await Promise.race([quick, new Promise(r=>setTimeout(r,220))]);
         }catch(_){}
