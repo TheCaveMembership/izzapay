@@ -205,6 +205,18 @@
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
     /* ---------- Snapshot hydrate with COINS + CRAFT MERGE ---------- */
+    async function waitForPersistReady({timeout=3000, interval=40} = {}){
+      return new Promise((res)=>{
+        const t0=performance.now();
+        const check=()=>{
+          if(window.IZZA_PERSIST && typeof IZZA_PERSIST.load==='function') return res(true);
+          if(performance.now()-t0>timeout) return res(false);
+          setTimeout(check, interval);
+        };
+        if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', check, {once:true}); }
+        else{ check(); }
+      });
+    }
     async function hydrateFromSnapshot(){
       const localCoinsBefore = readCoinsLS();
       const localCraftBefore = readCraftAny();
@@ -214,6 +226,7 @@
           await IZZA_PERSIST.load(); // server → LS (may be stale)
         }
       }catch(_){}
+      // After load, compare and keep the larger of local-before vs server-after (for both coins & craft)
       const serverCoinsAfter = readCoinsLS();
       const serverCraftAfter = readCraftAny();
       let changed = false;
@@ -226,7 +239,7 @@
       }
     }
 
-    /* ---------- AVATAR painter (unchanged) ---------- */
+    /* ---------- AVATAR (unchanged painter) ---------- */
     const SPRITES = {
       body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
       hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -237,10 +250,12 @@
     const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
     const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
     const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
     const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+
     function extractThreeToneRamp(img){
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
       const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -249,9 +264,10 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16,'0')+s.b.toString(16,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
+
     function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
       const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
@@ -266,6 +282,7 @@
       c.putImageData(id,0,0);
       return {canvas:oc, changedPixels:changed};
     }
+
     function overlayTint(img, hex, strength=1.0){
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
       const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -279,6 +296,50 @@
       }
       c.putImageData(id,0,0);
       return oc;
+    }
+
+    async function buildAvatarCanvas(dstCtx, size, profile){
+      const DW=size,DH=size,X=0,Y=0;
+      const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+      const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+      const femaleOut=profile.female_outfit_color||'blue';
+
+      let body=null;
+      if(type==='female'){
+        const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
+        const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
+        body = await loadImg(femaleWide) || await loadImg(femaleSlim);
+      }
+      if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
+
+      const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
+
+      let bodyCanvas;
+      if(body){
+        const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+        const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+        bodyCanvas=swapped.canvas;
+        if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
+      }
+
+      if(type==='female' && bodyCanvas){
+        const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+        const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+        bodyCanvas=reDress.canvas;
+        if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
+      }
+
+      dstCtx.clearRect(0,0,DW,DH);
+      if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+      if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+      if(hair){
+        const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+        const swap=paletteSwap(hair, detected, target, 4000);
+        let hairCanvas=swap.canvas;
+        if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
+        dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
+      }
     }
 
     /* ---------------- Game (mechanics) ---------------- */
@@ -458,6 +519,7 @@
       const by = ballPt.top + ballPt.height/2;
       const rRing = rimPt.width/2;
       const d = Math.hypot(bx-rx, by-ry);
+
       const fudge = rRing * 0.18;
 
       if(!game._scored && d < (rRing + fudge) && game.vy>0){
@@ -483,21 +545,20 @@
       setTimeout(resetBall, 220);
     }
 
-    /* === Wallet === */
+    /* === Wallet / HUD === */
     let walletDirty = false;
 
-    // --- HUD helpers (FIX: paint immediately, keep in sync) ---
+    function paintCoinsHUD(n){
+      coinsRunEl.textContent = String(Math.max(0, n|0));
+    }
     function updateCoinsHUD(){
-      coinsRunEl.textContent = String(readCoinsLS());
+      paintCoinsHUD(readCoinsLS());
     }
     function syncCoinsHUD(){ updateCoinsHUD(); }
 
-    // Paint ASAP from localStorage before any async work (prevents "0" flash)
-    updateCoinsHUD();
-
     async function applyCoins(amount){
-      const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (amount|0);
-      localStorage.setItem('izzaCoins', String(cur));
+      const cur = (readCoinsLS()|0) + (amount|0);
+      writeCoinsLS(cur);
       walletDirty = true;
       try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
       try{
@@ -530,9 +591,11 @@
 
     async function scoreShot(swish){
       const COINS_PER_GOAL = 200;
+
       game.score += COINS_PER_GOAL;
       game.goals += 1;
       game.coins += COINS_PER_GOAL;
+
       await applyCoins(COINS_PER_GOAL);
 
       const creditsNow = Math.floor(game.goals / 10);
@@ -576,6 +639,7 @@
     async function endRun(){
       if (game.ended) return;
       game.ended = true;
+
       try{ if (game.timerId) clearInterval(game.timerId); }catch(_){}
       game.launched = false;
       game.dragging = false;
@@ -650,18 +714,9 @@
     interceptNav(document.getElementById('againBtn'));
 
     /* ---------------- Boot & lifecycle ---------------- */
-    function waitForPersistReady({timeout=3000, interval=40} = {}){
-      return new Promise((res)=>{
-        const t0=performance.now();
-        const check=()=>{
-          if(window.IZZA_PERSIST && typeof IZZA_PERSIST.load==='function') return res(true);
-          if(performance.now()-t0>timeout) return res(false);
-          setTimeout(check, interval);
-        };
-        if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', check, {once:true}); }
-        else{ check(); }
-      });
-    }
+
+    // Paint the HUD **immediately** with whatever is already in LS (prevents any 0 flicker)
+    paintCoinsHUD(readCoinsLS());
 
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
     window.addEventListener('resize', onResize, {passive:true});
@@ -676,13 +731,13 @@
     window.addEventListener('izza-crafting-changed', syncCoinsHUD);
 
     document.addEventListener('visibilitychange', async () => {
-      if (!document.hidden){
+      if (document.hidden){
+        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
+      } else {
         try{ await hydrateFromSnapshot(); }catch(_){}
         syncCoinsHUD();
       }
-    }, { passive:true });
-
-    window.addEventListener('pageshow', ()=> syncCoinsHUD(), { passive:true });
+    });
 
     window.addEventListener('pagehide', () => {
       if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
@@ -691,85 +746,87 @@
     });
 
     (async function boot(){
-      // FIX: paint immediately (already done above), then prime/hydrate/fetch and repaint each step
-
       try{
         const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
         if (shouldPrime){
           try{ await primeViaCityIframe(); }catch(_){}
           try{ sessionStorage.setItem(SESSION_PRIME_KEY,'1'); }catch(_){}
         }
-      }catch(_){}
 
-      // Character gate (kept)
-      async function fetchCharacterFresh(){
+        // Character gate (may redirect to /create)
+        try{
+          const profilePre = await (async ()=>{
+            try{
+              const q = T ? `?t=${encodeURIComponent(T)}` : '';
+              const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
+              if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
+            }catch(_){}
+            return null;
+          })();
+          if (profilePre){ try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){} }
+        }catch(e){ if(String(e.message)==='redirecting') return; }
+
+        // Hydrate snapshot (max-merge), then repaint HUD from LS
+        await hydrateFromSnapshot();
+        updateCoinsHUD();
+
+        // Authoritative wallet fetch — **only adopt if server > local** (prevents 0 overwrite)
         try{
           const q = T ? `?t=${encodeURIComponent(T)}` : '';
-          const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
-          if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
+          const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
+          if (r.ok){
+            let j = {};
+            try{ j = await r.json(); }catch(_){}
+            const parsed = parseWalletResponse(j);
+            const serverCoins = Number(parsed.coins)||0;
+            const serverCraft = Number(parsed.crafting)||0;
+
+            const localCoins = readCoinsLS();
+            const localCraft = readCraftAny();
+
+            // Coins: only lift if server is higher; never clobber to 0
+            if (serverCoins > localCoins){
+              writeCoinsLS(serverCoins);
+              try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+            } else if (serverCoins < localCoins){
+              // Push our higher local up to server
+              try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+            }
+
+            // Crafting credits: same rule
+            if (serverCraft > localCraft){
+              writeCraftAll(serverCraft);
+            } else if (serverCraft < localCraft){
+              try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+            }
+
+            updateCoinsHUD();
+          }
         }catch(_){}
-        return null;
-      }
-      async function ensureCharacter(){
-        const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
-        const isAdminLocal = (()=> {
-          try{
-            const role=(localStorage.getItem('izzaRole')||'').toLowerCase();
-            const user=(localStorage.getItem('izzaUser')||'').toLowerCase();
-            return role==='admin'||user==='cammac';
-          }catch(_){ return false; }
-        })();
-        const fresh = await fetchCharacterFresh();
-        if (fresh && (fresh.hasCharacter || fresh.isAdmin || (fresh.user && fresh.user.isAdmin))) return fresh;
-        if (isAdminLocal) {
-          const fallback = lsProfile && typeof lsProfile === 'object'
-            ? lsProfile
-            : { hasCharacter:true, body_type:'male', skin_tone:'light', sprite_skin:'default' };
-          return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
+
+        // Build avatar
+        try{
+          const prof = (await (async ()=>{
+            try{
+              const q = T ? `?t=${encodeURIComponent(T)}` : '';
+              const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
+              if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
+            }catch(_){}
+            return null;
+          })()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+          await buildAvatarCanvas(tinyCtx, 54, prof);
+        }catch(_){}
+
+        resetBall();
+        setHoopDistance();
+        positionAvatarFixed();
+        startTimer();
+        requestAnimationFrame(loop);
+      }catch(e){
+        if(String(e.message)!=='redirecting'){
+          console.error('Basketball init error', e);
         }
-        const next = encodeURIComponent(withT('/izza-game/minigames/basketball'));
-        location.replace('/izza-game/create?next='+next);
-        throw new Error('redirecting');
       }
-
-      try{
-        const profilePre = await ensureCharacter();
-        try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){}
-      }catch(e){ if(String(e.message)==='redirecting') return; }
-
-      // 1) Hydrate snapshot (merge-max) then repaint
-      await hydrateFromSnapshot();
-      updateCoinsHUD();
-
-      // 2) Authoritative wallet fetch -> LS -> repaint
-      try{
-        const q = T ? `?t=${encodeURIComponent(T)}` : '';
-        const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
-        if (r.ok){
-          let j = {};
-          try{ j = await r.json(); }catch(_){}
-          const parsed = parseWalletResponse(j);
-          try{
-            localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
-            writeCraftAll(Number(parsed.crafting)||0);
-            window.dispatchEvent(new Event('izza-coins-changed'));
-            window.dispatchEvent(new Event('izza-crafting-changed'));
-          }catch(_){}
-          updateCoinsHUD();
-        }
-      }catch(_){}
-
-      // Build avatar (after possible equip hydrate)
-      try{
-        const prof = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-        await buildAvatarCanvas(tinyCtx, 54, prof);
-      }catch(_){}
-
-      resetBall();
-      setHoopDistance();
-      positionAvatarFixed();
-      startTimer();
-      requestAnimationFrame(loop);
     })();
   })();
   </script>
