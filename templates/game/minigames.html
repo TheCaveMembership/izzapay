@@ -6,6 +6,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
+  <!-- Ensure username is known before izza-persist.js loads -->
+<script>
+  (function(){
+    try{
+      const params = new URLSearchParams(location.search);
+      let u = (params.get('u') || '').toString().trim();
+      if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
+      if (!u) {
+        const raw = localStorage.getItem('piAuthUser');
+        if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
+      }
+      if (u) {
+        u = u.replace(/^@+/, '').toLowerCase();
+        window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+        window.izzaUserKey = { get: () => u };
+        try { localStorage.setItem('izzaUserU', u); } catch(_){}
+        try {
+          if (!localStorage.getItem('piAuthUser')) {
+            localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
+          }
+        } catch(_){}
+      }
+    }catch(_){}
+  })();
+</script>
 <script src="/static/game/js/izza-persist.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
@@ -181,12 +206,33 @@
       }
     }catch(_){}
     const TQ  = T ? `?t=${encodeURIComponent(T)}` : '';
-    const withT = (path) => {
-      if (!T) return path;
-      const hasQ = path.includes('?');
-      return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
-    };
-
+function withAuth(path){
+  const url = new URL(path, location.origin);
+  if (T) url.searchParams.set('t', T);
+  if (U) url.searchParams.set('u', U);
+  return url.pathname + (url.search ? url.search : '');
+}
+// Username param (u): save/restore and publish to Persist hooks
+const U_KEY = 'izzaUserU';
+let U = new URLSearchParams(location.search).get('u') || '';
+try{
+  if (U) {
+    U = U.replace(/^@+/, '').toLowerCase();
+    localStorage.setItem(U_KEY, U);
+  } else {
+    const savedU = (localStorage.getItem(U_KEY) || '').toString().trim();
+    if (savedU) {
+      const url = new URL(location.href);
+      url.searchParams.set('u', savedU);
+      history.replaceState(null, '', url.toString());
+      U = savedU;
+    }
+  }
+  if (U) {
+    window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: U });
+    window.izzaUserKey = { get: () => U };
+  }
+}catch(_){}
     /* --- headers helper --- */
     function bearerHeaders(base = {}) {
       const headers = Object.assign({ 'content-type':'application/json' }, base || {});
@@ -233,8 +279,8 @@
       }
 
       // Truly first-time ever: go make a character (not silent)
-      const next = encodeURIComponent(withT('/izza-game/minigames'));
-      location.replace('/izza-game/create?next='+next);
+      const next = encodeURIComponent(withAuth('/izza-game/minigames'));
+location.replace('/izza-game/create?next=' + next);
       throw new Error('redirecting');
     }
 
@@ -379,39 +425,46 @@
         const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
       }
 
-      // Ensure "enter" links carry t (and animate)
-      document.querySelectorAll('.enter-btn').forEach(a=>{
-        a.href = withT(a.getAttribute('href') || '#');
-        a.addEventListener('click',(ev)=>{ ev.preventDefault(); const href=a.getAttribute('href'); animateAvatarTo(a,()=>{ location.href=href; }); });
-      });
+      // Ensure "enter" links carry t & u (and animate)
+document.querySelectorAll('.enter-btn').forEach(a=>{
+  a.href = withAuth(a.getAttribute('href') || '#');
+  a.addEventListener('click',(ev)=>{
+    ev.preventDefault();
+    const href = a.getAttribute('href'); // already rewritten with t & u
+    animateAvatarTo(a,()=>{ location.href = href; });
+  });
+});
 
       const cityBtn = document.getElementById('enterCityBtn');
-      if (cityBtn) {
-        cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
-        cityBtn.addEventListener('click', async (ev)=>{
-          ev.preventDefault();
-          const href = cityBtn.getAttribute('href');
-          try {
-            await hydrateFromSnapshot();
-            try { writeCraftAll(readCraftAny()); } catch(_){}
-            try {
-              const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
-              if (!Number.isFinite(h) || h<=0) {
-                localStorage.setItem('izzaHearts','5');
-                window.dispatchEvent(new Event('izza-hearts-changed'));
-              }
-            } catch(_) {}
-            if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
-              await IZZA_PERSIST.save();
-            } else if (typeof window._izzaForceSave === 'function') {
-              window._izzaForceSave();
-            }
-          } catch(_) {}
-          setTimeout(()=>{ location.href = href; }, 120);
-        }, {passive:false});
-      }
-    }
+if (cityBtn) {
+  // rewrite the href to include both t & u
+  cityBtn.href = withAuth(cityBtn.getAttribute('href') || '/izza-game/play');
 
+  cityBtn.addEventListener('click', async (ev)=>{
+    ev.preventDefault();
+    const href = cityBtn.getAttribute('href'); // already includes t & u
+
+    try {
+      await hydrateFromSnapshot();
+      try { writeCraftAll(readCraftAny()); } catch(_) {}
+      try {
+        const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
+        if (!Number.isFinite(h) || h<=0) {
+          localStorage.setItem('izzaHearts','5');
+          window.dispatchEvent(new Event('izza-hearts-changed'));
+        }
+      } catch(_) {}
+      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
+        await IZZA_PERSIST.save();
+      } else if (typeof window._izzaForceSave === 'function') {
+        window._izzaForceSave();
+      }
+    } catch(_) {}
+
+    setTimeout(()=>{ location.href = href; }, 120);
+    }, {passive:false});
+  }
+}
     /* ====== Wallet helpers ====== */
     const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){
@@ -476,7 +529,7 @@
         };
         window.addEventListener('message', onMsg, false);
 
-        const src = withT('/izza-game/play?prime=1&silent=1');
+        const src = withAuth('/izza-game/play?prime=1&silent=1');
         f = document.createElement('iframe');
         f.id = 'izzaPrimeFrame';
         f.src = src;
