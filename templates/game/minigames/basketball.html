@@ -240,27 +240,51 @@
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
-    /* -------- Auth like Arena (no SDK here) -------- */
-    async function ensurePiAuthOrRedirect(){
+    /* -------- Handoff from Arena (no re-auth; paint instantly) -------- */
+    function consumeWalletHandoff(maxAgeMs = 120000){
       try{
-        const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-        if (r.ok){
-          const j = await r.json().catch(()=> ({}));
-          const uname = (j.user && j.user.username) || j.username || j.handle || '';
-          if (uname) { U = publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-            return true;
-          }
+        const raw = sessionStorage.getItem('izzaWalletHandoff');
+        if(!raw) return null;
+        const s = JSON.parse(raw);
+        if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
+
+        if (s.user){
+          const u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+          window.izzaUserKey = { get: () => u };
+          try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+          U = u;
         }
-        if (r && r.status === 401) {
-          location.href = withAuth('/izza-game/auth?dest=minigames');  // same auth page as Arena
-          throw new Error('redirecting');
-        }
-      }catch(e){
-        if (String(e.message)==='redirecting') throw e;
-      }
-      // If no OK session but not 401, still bounce to auth
-      location.href = withAuth('/izza-game/auth?dest=minigames');
-      throw new Error('redirecting');
+        localStorage.setItem('izzaCoins', String(s.coins|0));
+        localStorage.setItem('izzaCrafting', String(s.craft|0));
+        return { coins:s.coins|0, craft:s.craft|0 };
+      }catch(_){ return null; }
+    }
+
+    /* -------- Hidden City iframe to warm session (no SDK) -------- */
+    function primeViaCityIframe({maxWaitMs=8000, pollMs=120} = {}){
+      return new Promise((resolve)=>{
+        let f=null, done=false, hard=null, poll=null;
+        const finish=(why)=>{ if(done) return; done=true;
+          try{ clearTimeout(hard); clearInterval(poll); f && f.remove(); }catch(_){}
+          resolve(why||'ok');
+        };
+        const src = withAuth('/izza-game/play?prime=1&silent=1');
+        f=document.createElement('iframe'); f.src=src;
+        Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
+        document.body.appendChild(f);
+        f.addEventListener('load', ()=>{
+          try{
+            const w=f.contentWindow; let tick=0;
+            poll=setInterval(async ()=>{
+              try{
+                if (w?.IZZA_PERSIST?.load && tick<1){ tick++; await w.IZZA_PERSIST.load(); finish('iframe-load'); }
+              }catch(_){}
+            }, pollMs);
+          }catch(_){}
+        }, {once:true});
+        hard=setTimeout(()=>finish('timeout'), maxWaitMs);
+      });
     }
 
     /* -------- Persist readiness & snapshot -------- */
@@ -287,7 +311,19 @@
       return readCoinsLS();
     }
 
-    /* -------- UI refs -------- */
+    /* -------- Optional: best-effort session check (no redirect) -------- */
+    async function ensureSession(){
+      try{
+        const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
+        if (r.ok){
+          const j = await r.json().catch(()=> ({}));
+          const uname = (j.user && j.user.username) || j.username || j.handle || '';
+          if (uname) { U = publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){} }
+        }
+      }catch(_){}
+    }
+
+        /* -------- UI refs -------- */
     const svg = document.getElementById('court');
     const ball = document.getElementById('ball');
     const hoop = document.getElementById('hoop');
@@ -300,6 +336,7 @@
     const timeEl = document.getElementById('time');
     const coinsRunEl = document.getElementById('coinsRun');
 
+    /* -------- Geometry helpers -------- */
     let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
     function toXY(cx, cy){
       const vbW = 1100, vbH = 760;
@@ -309,6 +346,7 @@
       return { x: cx * scale - leftCrop, y: cy * scale };
     }
 
+    /* -------- Game state -------- */
     let game = {
       x:550, y:700, vx:0, vy:0, r:76,
       gravity:2300, drag:0.992,
@@ -328,7 +366,7 @@
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
     function resetBall(){ if(game.ended) return; Object.assign(game,{ x:550, y:700, vx:0, vy:0, launched:false, dragging:false, spin:0 }); setBall(game.x, game.y); }
 
-    /* ---- Drag + flick (unchanged) ---- */
+    /* ---- Drag + flick ---- */
     (function wireAim(){
       const samples=[]; const MAX_WINDOW_MS=150; const POWER_SCALE=0.94; const MIN_UP_VY=-520;
       let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
@@ -374,6 +412,7 @@
       svg.addEventListener('touchend', end, {passive:true});
     })();
 
+    /* ---- Physics / scoring ---- */
     const TOP_OUT = -600;
     const MISS_BAND_PX = 400;
 
@@ -503,7 +542,7 @@
       try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 200))]); }catch(_){}
     }
 
-    /* -------- Boot -------- */
+    /* -------- Boot / listeners -------- */
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
     window.addEventListener('resize', onResize, {passive:true});
     window.addEventListener('storage', (e)=>{
@@ -526,34 +565,48 @@
       }
     });
 
-    // Defer auth + hydration to START click
+    /* -------- START button: no re-auth; handoff → prime → snapshot → API -------- */
     document.getElementById('startBtn').addEventListener('click', async ()=>{
       try{
-        await ensurePiAuthOrRedirect();               // ensures session or redirects
-        const localCoins = await hydrateFromSnapshot(); // persists → LS
-        // Authoritative wallet fetch
+        // 0) If Arena handed us a fresh wallet, use it instantly
+        const handoff = consumeWalletHandoff();
+        if (handoff){ paintCoinsHUD(handoff.coins); }
+
+        // 1) Warm session & Persist via hidden City frame (non-blocking with timeout inside)
+        try{ await primeViaCityIframe(); }catch(_){}
+
+        // 2) Best-effort session check (does NOT redirect)
+        try{ await ensureSession(); }catch(_){}
+
+        // 3) Hydrate from Persist snapshot (server → LS), then paint
+        const snapCoins = await hydrateFromSnapshot();
+        paintCoinsHUD(snapCoins);
+
+        // 4) Authoritative wallet fetch; adopt if >0 or differs
         try{
           const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
           if (r.ok){
             const parsed = parseWalletResponse(await r.json().catch(()=>({})));
+            const apiCoins = Number(parsed.coins)||0;
+            const apiCraft = Number(parsed.crafting)||0;
             try{
-              localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
-              writeCraftAll(Number(parsed.crafting)||0);
+              if (apiCoins>=0) localStorage.setItem('izzaCoins', String(apiCoins));
+              if (apiCraft>=0) writeCraftAll(apiCraft);
               window.dispatchEvent(new Event('izza-coins-changed'));
               window.dispatchEvent(new Event('izza-crafting-changed'));
             }catch(_){}
+            paintCoinsHUD(readCoinsLS());
           }
         }catch(_){}
-        WALLET_READY = true;
-        runStartCoins = readCoinsLS() || localCoins;
-        paintCoinsHUD(runStartCoins);
 
-        // hide overlay and start game
+        // 5) Lock run baseline & start game
+        WALLET_READY = true;
+        runStartCoins = readCoinsLS() || 0;
         document.getElementById('startOverlay').style.display='none';
         setHoopDistance(); resetBall();
         startTimer(); requestAnimationFrame(loop);
       }catch(e){
-        if (String(e.message)!=='redirecting') console.error('start failed', e);
+        console.error('start failed', e);
       }
     }, {passive:true});
   })();
