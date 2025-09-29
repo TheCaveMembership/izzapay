@@ -2,192 +2,173 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Mini Game Arena — IZZA GAME</title>
+  <title>Street Basketball — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
+  <!-- DO NOT CHANGE PERSIST SETUP -->
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
-<script src="/static/game/js/izza-persist.js"></script>
+  <script src="/static/game/js/izza-persist.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{ --tile-bg: var(--card); --tile-line: var(--line); --tile-hover: rgba(255,255,255,.04); }
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
-    .muted{color:var(--muted)}
-    h1{margin:0 0 6px}
-    .lead{margin:6px 0 0}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:12px}
-    .tile{background:var(--tile-bg);border:1px solid var(--tile-line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;transition:background .15s ease, transform .1s ease;}
-    .tile:hover{background:var(--tile-hover); transform:translateY(-1px)}
-    .tile .thumb{height:130px; border-radius:8px; border:1px solid var(--tile-line); display:flex;align-items:center;justify-content:center;overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.06)); position:relative;}
-    .tile h3{margin:0;font-size:18px}
-    .tile p{margin:0;font-size:13px;color:var(--muted)}
-    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
-    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:11px;background:var(--chip-bg); white-space:nowrap;}
-    .btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);cursor:pointer;text-decoration:none;color:inherit; white-space:nowrap;}
-    .btn:hover{filter:brightness(1.08)}
-    .earn{font-size:12px;color:var(--muted)}
-
-    /* top bar */
-    .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px; margin-top:24px;}
-    .topbar .left{display:flex;flex-direction:column;align-items:flex-start;gap:4px; position:relative;}
-    .brand-word{height:40px;filter:brightness(1.06) contrast(1.02);}
-
-    .wallet{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
-    .wallet .pill strong{font-weight:700}
-
-    /* phone layout */
-    @media (max-width: 640px){
-      .topbar .left{ padding-top:96px; }
-      .wallet{flex-direction:column; align-items:flex-end; margin-top:-10px;}
-      .wallet .btn{width:auto;}
+    :root{
+      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
+      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
     }
+    *{box-sizing:border-box}
+    body{margin:0;background:#102;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
+    .wrap{max-width:1100px;margin:0 auto;padding:12px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+    .btn:hover{filter:brightness(1.06)}
+    .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
+           border-radius:14px;background:#79c0ff;overflow:hidden}
 
-    /* avatar cursor */
-    .avatar-wrap{position:fixed; left:16px; top:16px; width:96px; height:96px; z-index:9999; pointer-events:none; transform:translate3d(0,0,0);}
-    canvas#avatarCursor{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
-    .avatar-bounce{animation:bob .9s ease-in-out infinite}
-    @keyframes bob{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
+    /* HUD smaller so everything fits one row */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:12px;flex-wrap:nowrap}
+    .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
+    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
+          padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
+    .pill strong{font-size:14px}
+    .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
 
-    .draggable{pointer-events:auto; touch-action:none}
-    .net{position:absolute;right:12px;top:12px;width:48px;height:48px;border-radius:6px;border:1px solid(var(--line));background:rgba(0,0,0,.15)}
-    .road{position:absolute;left:0;right:0;bottom:0;height:36px;background:repeating-linear-gradient(90deg, rgba(255,255,255,.18) 0 10px, transparent 10px 20px)}
-    .stars{position:absolute;inset:0;background:
-      radial-gradient(circle at 20% 30%, rgba(255,255,255,.35) 1px, transparent 1px) 0 0/40px 40px,
-      radial-gradient(circle at 70% 60%, rgba(255,255,255,.25) 1.5px, transparent 1.5px) 0 0/60px 60px}
+    /* avatar shown in scene (under ball start) */
+    .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
+    .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
+    .avatarScene{position:absolute;z-index:4;pointer-events:none}
 
-    @media (pointer:fine){ body{ cursor:none; } a, button{ cursor:none; } }
-
-    /* FIRST-PAINT gating */
-    .val[data-loading="1"]{ opacity:.35 }
-
-    /* Hidden iframe for silent priming */
-    #izzaPrimeFrame{ position:fixed; width:0; height:0; opacity:0; pointer-events:none; inset:auto auto 0 0; border:0 }
+    .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
+            font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
+            pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
+    .bigmsg.show{opacity:1;transform:translate(-50%, -56%) scale(1.04)}
+    .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
+    .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
+      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
   </style>
 </head>
 <body class="cw-blue theme-a">
   <div class="wrap">
-    <div class="card">
-      <div class="topbar">
-        <div class="left">
-          <img src="/static/izzapay-word.svg" id="brandWord" class="brand-word" alt="IZZA wordmark">
-          <span class="muted">Mini Game Arena</span>
-        </div>
-        <div class="wallet">
-          <span class="pill">IZZA Coins: <strong id="coins" class="val" data-loading="1">{{ coins|default(0) }}</strong></span>
-          <span class="pill">Craft Credits: <strong id="craft" class="val" data-loading="1">{{ crafting|default(0) }}</strong></span>
-          <a class="btn" id="enterCityBtn" href="/izza-game/play">Enter IZZA City</a>
-        </div>
-      </div>
-
-      <h1>Pick a game</h1>
-      <p class="lead muted">Earn IZZA Coins &amp; Item Crafting Credits by playing mini games. Your character is used as the player avatar.</p>
-
-      <div class="grid" id="gameGrid">
-        <div class="tile" data-game="basketball">
-          <div class="thumb"><div class="net"></div></div>
-          <h3>Street Basketball</h3>
-          <p>Time your shots, rack up combos, beat the buzzer.</p>
-          <div class="row"><span class="pill">Arcade</span><span class="pill">Solo</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/basketball" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-
-        <div class="tile" data-game="racing">
-          <div class="thumb"><div class="road"></div></div>
-          <h3>Street Race</h3>
-          <p>Dodge traffic, hit boosts, and set a new record.</p>
-          <div class="row"><span class="pill">Racing</span><span class="pill">Solo</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/race" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-
-        <div class="tile" data-game="jetman">
-          <div class="thumb"><div class="stars"></div></div>
-          <h3>Jetman Rooftops</h3>
-          <p>Tap to thrust, weave through neon towers, survive.</p>
-          <div class="row"><span class="pill">Endless</span><span class="pill">Skill</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/jetman" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-
-        <div class="tile" data-game="puzzle">
-          <div class="thumb"></div>
-          <h3>Puzzle Dash</h3>
-          <p>Chain matches before the timer runs out.</p>
-          <div class="row"><span class="pill">Brain</span><span class="pill">Solo</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/puzzle" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-
-        <div class="tile" data-game="targets">
-          <div class="thumb"></div>
-          <h3>Target Range</h3>
-          <p>Precision taps, streak multipliers, high scores.</p>
-          <div class="row"><span class="pill">Skill</span><span class="pill">Solo</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/targets" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-
-        <div class="tile" data-game="runner">
-          <div class="thumb"></div>
-          <h3>Subway Runner</h3>
-          <p>Swipe to dodge, collect tokens, go the distance.</p>
-          <div class="row"><span class="pill">Endless</span><span class="pill">Solo</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/runner" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-      </div>
-
-      <p class="muted" style="margin-top:10px;font-size:13px">
-        Tip: On desktop, move your mouse — your character follows as the cursor. On mobile, drag your character around the screen.
-      </p>
+    <div class="top">
+      <a class="btn" id="backBtn" href="/izza-game/minigames">← Back to Arena</a>
+      <a class="btn" id="cityBtn" href="/izza-game/play">Enter IZZA City</a>
     </div>
-  </div>
 
-  <div class="avatar-wrap draggable" id="avatarWrap" aria-hidden="true">
-    <canvas id="avatarCursor" width="96" height="96"></canvas>
+    <div class="arena vignette" id="arena">
+      <div class="hud">
+        <div class="left">
+          <div class="pill">SCORE: <strong id="score" class="arc">0</strong></div>
+          <div class="pill">GOALS: <strong id="streak" class="arc">0</strong></div>
+          <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
+        </div>
+        <div class="right">
+          <div class="pill">COINS: <strong id="coinsRun" class="arc">0</strong></div>
+        </div>
+      </div>
+
+      <!-- Scene SVG -->
+      <svg id="court" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Court">
+        <defs>
+          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#8bd1ff"/><stop offset="100%" stop-color="#bfe6ff"/>
+          </linearGradient>
+          <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#e6b77a"/><stop offset="100%" stop-color="#c78f4a"/>
+          </linearGradient>
+          <pattern id="fence" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="skewX(-10)">
+            <path d="M0 10 L20 10" stroke="#cfd7e0" stroke-width="2" opacity=".55"/>
+            <path d="M10 0 L10 20" stroke="#cfd7e0" stroke-width="2" opacity=".55"/>
+          </pattern>
+          <filter id="shadow"><feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity=".35"/></filter>
+        </defs>
+
+        <!-- Sky -->
+        <rect x="0" y="0" width="1100" height="760" fill="url(#sky)"/>
+
+        <!-- Hills + water band -->
+        <ellipse cx="250" cy="520" rx="320" ry="140" fill="#8ed47d" opacity=".9"/>
+        <ellipse cx="880" cy="520" rx="300" ry="130" fill="#89d074" opacity=".9"/>
+        <g opacity=".9">
+          <rect x="210" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="220" cy="420" r="60" fill="#5bbd5a"/>
+          <rect x="920" y="420" width="18" height="90" fill="#7c5a3a"/><circle cx="930" cy="420" r="60" fill="#5bbd5a"/>
+        </g>
+        <g>
+          <polygon points="0,470 1100,470 1100,520 0,520" fill="#6ea0cf"/>
+          <polygon points="0,520 1100,520 1100,570 0,570" fill="#547fa8"/>
+        </g>
+        <rect x="0" y="260" width="1100" height="210" fill="url(#fence)" opacity=".55"/>
+
+        <!-- Hoop -->
+        <g id="hoop" transform="translate(390, 300) scale(1.6)">
+          <rect x="90" y="-20" width="12" height="86" fill="#b7c7d8"/>
+          <rect id="backboard" x="8" y="-126" width="184" height="122" rx="12" ry="12"
+                fill="#f2f6fa" stroke="#9fb0c2" stroke-width="6" filter="url(#shadow)"/>
+          <rect x="54" y="-86" width="92" height="60" fill="none" stroke="#ff7a00" stroke-width="6"/>
+          <circle id="rim" cx="100" cy="-38" r="36" fill="none" stroke="#ff7a00" stroke-width="8"/>
+          <path d="M132 -36 q-12 52 -28 104 q-14 -52 -28 -104" stroke="rgba(255,255,255,.9)" stroke-width="2.8" fill="none"/>
+        </g>
+
+        <!-- Floor -->
+        <g>
+          <rect x="0" y="520" width="1100" height="240" fill="url(#wood)"/>
+          <polygon points="70,560 1030,560 1100,760 0,760" fill="url(#wood)"/>
+          <ellipse cx="550" cy="640" rx="260" ry="36" fill="none" stroke="rgba(255,165,0,.65)" stroke-width="6"/>
+          <ellipse cx="550" cy="640" rx="180" ry="26" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
+        </g>
+
+        <!-- Ball -->
+        <g id="ballGrp">
+          <defs>
+            <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
+              <stop offset="0%" stop-color="#ffb44d"/><stop offset="100%" stop-color="#e06724"/>
+            </radialGradient>
+          </defs>
+          <circle id="ball" cx="550" cy="700" r="76" fill="url(#ballGrad)" stroke="#8a3b12" stroke-width="4"/>
+          <path d="M474 700 h152 M550 624 v152" stroke="#8a3b12" stroke-width="3"/>
+        </g>
+      </svg>
+
+      <!-- avatar under the ball (fixed; never follows the shot) -->
+      <div id="avatarScene" class="avatarBadge avatarScene">
+        <canvas id="avatarTiny" class="avatarCanvas" width="54" height="54"></canvas>
+      </div>
+
+      <div id="bigmsg" class="bigmsg" aria-live="polite">GOAL!</div>
+    </div>
+
+    <div class="finish" id="finish" style="display:none">
+      <span class="pill">Run Score: <strong id="finalScore">0</strong></span>
+      <span class="pill">Coins Awarded: <strong id="finalCoins">0</strong></span>
+      <span class="pill">Craft Credits: <strong id="finalCraft">0</strong></span>
+      <a class="btn" href="/izza-game/minigames" id="againBtn">Play Again</a>
+      <a class="btn" href="/izza-game/play" id="cityBtn2">Go to City</a>
+    </div>
   </div>
 
   <script>
   (function(){
-    /* --------- t param: save, restore, and attach where needed --------- */
-    const T_KEY = 'izzaTokenT';
-    let T = new URLSearchParams(location.search).get('t') || '';
+    /* ---------------- t param (same as Arena) ---------------- */
+    const T_KEY='izzaTokenT';
+    let T=new URLSearchParams(location.search).get('t')||'';
     try{
-      if (T) {
-        localStorage.setItem(T_KEY, T);
-      } else {
-        const saved = localStorage.getItem(T_KEY) || '';
-        if (saved) {
-          const url = new URL(location.href);
-          url.searchParams.set('t', saved);
-          history.replaceState(null, '', url.toString());
-          T = saved;
+      if(T){ localStorage.setItem(T_KEY,T); }
+      else{
+        const s=localStorage.getItem(T_KEY)||'';
+        if(s){
+          const url=new URL(location.href);
+          url.searchParams.set('t',s);
+          history.replaceState(null,'',url.toString());
+          T=s;
         }
       }
     }catch(_){}
-    const TQ  = T ? `?t=${encodeURIComponent(T)}` : '';
-    const withT = (path) => {
-      if (!T) return path;
-      const hasQ = path.includes('?');
-      return `${path}${hasQ ? '&' : '?'}t=${encodeURIComponent(T)}`;
-    };
+    const withT=(href)=>{ if(!T) return href; const hasQ=href.includes('?'); return href+(hasQ?'&':'?')+'t='+encodeURIComponent(T); };
+    document.getElementById('backBtn').href=withT('/izza-game/minigames');
+    document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>a.href=withT(a.getAttribute('href')));
 
-    /* --- headers helper --- */
+    /* ---------------- helpers mirrored from Arena ---------------- */
     function bearerHeaders(base = {}) {
       const headers = Object.assign({ 'content-type':'application/json' }, base || {});
       try{
@@ -197,17 +178,11 @@
       return headers;
     }
 
-    /* --- auth/character (server) --- */
     async function fetchCharacterFresh(){
       try{
-        const r = await fetch('/izza-game/api/character'+TQ, {
-          credentials:'include',
-          headers: bearerHeaders()
-        });
-        if(r.ok){
-          const j = await r.json();
-          return j && typeof j === 'object' ? j : null;
-        }
+        const q = T ? `?t=${encodeURIComponent(T)}` : '';
+        const r = await fetch('/izza-game/api/character'+q, { credentials:'include', headers: bearerHeaders() });
+        if(r.ok){ const j=await r.json(); return j && typeof j==='object' ? j : null; }
       }catch(_){}
       return null;
     }
@@ -216,9 +191,9 @@
       const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
       const isAdminLocal = (()=> {
         try{
-          const role = (localStorage.getItem('izzaRole')||'').toLowerCase();
-          const user = (localStorage.getItem('izzaUser')||'').toLowerCase();
-          return role === 'admin' || user === 'cammac';
+          const role=(localStorage.getItem('izzaRole')||'').toLowerCase();
+          const user=(localStorage.getItem('izzaUser')||'').toLowerCase();
+          return role==='admin'||user==='cammac';
         }catch(_){ return false; }
       })();
 
@@ -232,13 +207,75 @@
         return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
       }
 
-      // Truly first-time ever: go make a character (not silent)
-      const next = encodeURIComponent(withT('/izza-game/minigames'));
+      const next = encodeURIComponent(withT('/izza-game/minigames/basketball'));
       location.replace('/izza-game/create?next='+next);
       throw new Error('redirecting');
     }
 
-    /* --- avatar assets (unchanged) --- */
+    function waitForPersistReady({timeout=3000, interval=40} = {}){
+      return new Promise((res)=>{
+        const t0=performance.now();
+        const check=()=>{
+          if(window.IZZA_PERSIST && typeof IZZA_PERSIST.load==='function') return res(true);
+          if(performance.now()-t0>timeout) return res(false);
+          setTimeout(check, interval);
+        };
+        if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', check, {once:true}); }
+        else{ check(); }
+      });
+    }
+
+    /* ---- wallet helpers ---- */
+    const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+    function readCraftAny(){
+      for(const k of CRAFT_KEYS){
+        const v=parseInt(localStorage.getItem(k)||'0',10);
+        if(Number.isFinite(v)&&v>0) return v|0;
+      }
+      return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0;
+    }
+    function writeCraftAll(v){
+      const n=Math.max(0,v|0);
+      for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
+      try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
+    }
+
+    /* === COINS/CRAFT READ/WRITE === */
+    function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+    function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
+
+    /* ---------- Snapshot hydrate with COINS + CRAFT MERGE ---------- */
+    async function hydrateFromSnapshot(){
+      const localCoinsBefore = readCoinsLS();
+      const localCraftBefore = readCraftAny();
+      try{
+        await waitForPersistReady();
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+          await IZZA_PERSIST.load(); // server → LS (may be stale)
+        }
+      }catch(_){}
+      // After load, compare and keep the larger of local-before vs server-after (for both coins & craft)
+      const serverCoinsAfter = readCoinsLS();
+      const serverCraftAfter = readCraftAny();
+
+      let changed = false;
+      if (localCoinsBefore > serverCoinsAfter){
+        writeCoinsLS(localCoinsBefore);
+        changed = true;
+      }
+      if (localCraftBefore > serverCraftAfter){
+        writeCraftAll(localCraftBefore);
+        changed = true;
+      }
+      if (changed){
+        try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+      } else {
+        // normalize craft keys if server had the higher value
+        try{ writeCraftAll(readCraftAny()); }catch(_){}
+      }
+    }
+
+    /* ---------- AVATAR (unchanged painter) ---------- */
     const SPRITES = {
       body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
       hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -251,7 +288,7 @@
     const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-    const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+    const hexToRgb=h=>{ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
     const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
 
@@ -337,332 +374,412 @@
         const swap=paletteSwap(hair, detected, target, 4000);
         let hairCanvas=swap.canvas;
         if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
-        const hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
-        dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
+        dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
       }
     }
 
-    /* ====== UI & motion ====== */
-    const avatarWrap=document.getElementById('avatarWrap');
-    const avatarCanvas=document.getElementById('avatarCursor');
-    const actx=avatarCanvas.getContext('2d'); actx.imageSmoothingEnabled=false;
-    const elCoins=document.getElementById('coins'); const elCraft=document.getElementById('craft');
-    let isTouch=window.matchMedia('(pointer:coarse)').matches;
-    function setAvatarPos(x,y){ avatarWrap.style.transform=`translate3d(${x}px,${y}px,0)`; }
+    /* ---------------- Game (mechanics) ---------------- */
+    const svg = document.getElementById('court');
+    const ball = document.getElementById('ball');
+    const hoop = document.getElementById('hoop');
+    const rim = document.getElementById('rim');
+    const bigmsg = document.getElementById('bigmsg');
+    const arenaEl = document.getElementById('arena');
+    const avatarScene = document.getElementById('avatarScene');
+    const tinyCtx=document.getElementById('avatarTiny').getContext('2d'); tinyCtx.imageSmoothingEnabled=false;
 
-    function animateAvatarTo(el,cb){
-      const r=el.getBoundingClientRect();
-      const targetX=r.left + r.width/2 - 48 + window.scrollX;
-      const targetY=r.top + r.height/2 - 48 + window.scrollY;
-      const start=avatarWrap.getBoundingClientRect();
-      const sx=start.left + window.scrollX, sy=start.top + window.scrollY;
-      const duration=280, t0=performance.now();
-      function tick(t){
-        const k=Math.min(1,(t-t0)/duration), e=1-Math.pow(1-k,3);
-        const x=sx+(targetX-sx)*e, y=sy+(targetY-sy)*e;
-        setAvatarPos(x,y);
-        if(k<1) requestAnimationFrame(tick);
-        else { avatarWrap.classList.add('avatar-bounce'); setTimeout(()=>{ avatarWrap.classList.remove('avatar-bounce'); cb&&cb(); }, 420); }
-      }
-      requestAnimationFrame(tick);
+    const scoreEl = document.getElementById('score');
+    const streakEl = document.getElementById('streak');
+    const timeEl = document.getElementById('time');
+    const coinsRunEl = document.getElementById('coinsRun');
+
+    let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
+
+    function toXY(cx, cy){
+      const vbW = 1100, vbH = 760;
+      const scale = H / vbH;
+      const drawnW = vbW * scale;
+      const leftCrop = Math.max(0, (drawnW - W) / 2);
+      return { x: cx * scale - leftCrop, y: cy * scale };
     }
 
-    function wirePointer(){
-      if(!isTouch){
-        document.addEventListener('mousemove',(e)=>{ setAvatarPos(e.clientX-48+window.scrollX, e.clientY-48+window.scrollY); },{passive:true});
-      }else{
-        avatarWrap.style.pointerEvents='auto';
-        let startX=0,startY=0,active=false;
-        avatarWrap.addEventListener('pointerdown',(e)=>{ active=true; avatarWrap.setPointerCapture(e.pointerId);
-          const rect=avatarWrap.getBoundingClientRect(); startX=e.clientX-rect.left; startY=e.clientY-rect.top; });
-        avatarWrap.addEventListener('pointermove',(e)=>{ if(!active) return; setAvatarPos(e.clientX-startX+window.scrollX, e.clientY-startY+window.scrollY); });
-        const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
-      }
+    let game = {
+      x:550, y:700, vx:0, vy:0, r:76,
+      gravity: 2300, drag: 0.992,
+      launched:false, dragging:false,
+      score:0, goals:0, coins:0, timeLeft:60,
+      hoopX:390, hoopY:300, distanceStep:0,
+      timerId:null, ended:false,
+      creditsEarned:0,
+      spin:0, spinDecay:0.985,
+      noMissUntil: 0
+    };
 
-      // Ensure "enter" links carry t (and animate)
-      document.querySelectorAll('.enter-btn').forEach(a=>{
-        a.href = withT(a.getAttribute('href') || '#');
-        a.addEventListener('click',(ev)=>{ ev.preventDefault(); const href=a.getAttribute('href'); animateAvatarTo(a,()=>{ location.href=href; }); });
-      });
+    function setHoopDistance(){
+      hoop.setAttribute('transform', `translate(${game.hoopX}, ${game.hoopY}) scale(1.6)`);
+    }
+    function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
+    function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
+    function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
 
-      const cityBtn = document.getElementById('enterCityBtn');
-      if (cityBtn) {
-        cityBtn.href = withT(cityBtn.getAttribute('href') || '/izza-game/play');
-        cityBtn.addEventListener('click', async (ev)=>{
-          ev.preventDefault();
-          const href = cityBtn.getAttribute('href');
-          try {
-            await hydrateFromSnapshot();
-            try { writeCraftAll(readCraftAny()); } catch(_){}
-            try {
-              const h = parseInt(localStorage.getItem('izzaHearts')||'0',10);
-              if (!Number.isFinite(h) || h<=0) {
-                localStorage.setItem('izzaHearts','5');
-                window.dispatchEvent(new Event('izza-hearts-changed'));
-              }
-            } catch(_) {}
-            if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
-              await IZZA_PERSIST.save();
-            } else if (typeof window._izzaForceSave === 'function') {
-              window._izzaForceSave();
-            }
-          } catch(_) {}
-          setTimeout(()=>{ location.href = href; }, 120);
-        }, {passive:false});
-      }
+    function positionAvatarFixed(){
+      const bottomOffset = 68;
+      const left = (W/2) - 27;
+      const top  = H - bottomOffset - 54;
+      avatarScene.style.left = Math.max(8, left) + 'px';
+      avatarScene.style.top  = Math.max(12, top) + 'px';
     }
 
-    /* ====== Wallet helpers ====== */
-    const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
-    function readCraftAny(){
-      for(const k of CRAFT_KEYS){
-        const v = parseInt(localStorage.getItem(k)||'0',10);
-        if (Number.isFinite(v) && v>0) return v|0;
-      }
-      return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10) || 0)|0;
-    }
-    function writeCraftAll(v){
-      const n = Math.max(0, v|0);
-      for(const k of CRAFT_KEYS) localStorage.setItem(k, String(n));
-      try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
-    }
-    (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
-
-    /* --- Wait for izza-persist to be ready --- */
-    function waitForPersistReady({timeout=3000, interval=40} = {}){
-      return new Promise((res)=> {
-        const t0 = performance.now();
-        const check = () => {
-          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
-          if (performance.now() - t0 > timeout) return res(false);
-          setTimeout(check, interval);
-        };
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', check, {once:true});
-        } else {
-          check();
-        }
-      });
+    function resetBall(){
+      if(game.ended) return;
+      Object.assign(game, { x:550, y:700, vx:0, vy:0, launched:false, dragging:false, spin:0 });
+      setBall(game.x, game.y);
     }
 
-    /* ---- Silent priming via City (hidden iframe, once per session) ---- */
-    const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
+    /* ---- Drag + flick ---- */
+    (function wireAim(){
+      const samples=[];
+      const MAX_WINDOW_MS=150;
+      const POWER_SCALE=0.94;
+      const MIN_UP_VY=-520;
 
-    function primeViaCityIframe({maxWaitMs=10000, pollMs=120} = {}){
-      return new Promise((resolve) => {
-        let done = false, softTimer = null, hardTimer = null, pollTimer = null, lsTimer = null;
-        let f = null;
+      let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
 
-        const finish = (reason)=>{
-          if (done) return;
-          done = true;
-          cleanup();
-          resolve(reason || 'ok');
-        };
-        const cleanup = ()=>{
-          try{ window.removeEventListener('message', onMsg); }catch(_){}
-          try{ clearTimeout(softTimer); clearTimeout(hardTimer);}catch(_){}
-          try{ clearInterval(pollTimer); clearInterval(lsTimer);}catch(_){}
-          try{ f && f.remove(); f = null; }catch(_){}
-        };
-        const onMsg = (e)=>{
-          try{
-            if (typeof e.data === 'string' && e.data.indexOf('izza-city-snapshot-ready') !== -1){
-              finish('postMessage');
-            } else if (e.data && e.data.type === 'izza-city-snapshot-ready'){
-              finish('postMessage');
-            }
-          }catch(_){}
-        };
-        window.addEventListener('message', onMsg, false);
+      function addSample(pt){
+        const now=performance.now();
+        const x=pt.clientX - startRect.left;
+        const y=pt.clientY - startRect.top;
+        samples.push({x,y,t:now});
+        while(samples.length && now - samples[0].t > 260) samples.shift();
 
-        const src = withT('/izza-game/play?prime=1&silent=1');
-        f = document.createElement('iframe');
-        f.id = 'izzaPrimeFrame';
-        f.src = src;
-        f.setAttribute('aria-hidden','true');
-        f.style.position='fixed'; f.style.width='0'; f.style.height='0';
-        f.style.opacity='0'; f.style.pointerEvents='none'; f.style.border='0';
-        document.body.appendChild(f);
+        if(game.dragging && !game.launched){
+          const dx=x - startPos.x, dy=y - startPos.y;
+          const pullMax=220; const d=Math.hypot(dx,dy);
+          const k=d>pullMax ? pullMax/d : 1;
+          setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
 
-        // Kick City to load snapshot ASAP (active trigger + LS deltas)
-        f.addEventListener('load', ()=>{
-          try{
-            const w = f.contentWindow;
-
-            // Ask City politely (supports message-based priming if implemented there)
-            try{ w.postMessage({ type:'izza-prime-request' }, '*'); }catch(_){}
-
-            // Poll for IZZA_PERSIST and call load() once available
-            let called = false;
-            pollTimer = setInterval(async ()=>{
-              try{
-                if (!called && w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load === 'function'){
-                  called = true;
-                  await w.IZZA_PERSIST.load();
-                  finish('iframe-direct-load');
-                  return;
-                }
-                // Also succeed on LS delta
-                const coins = Number(localStorage.getItem('izzaCoins')||'0')|0;
-                const craft = readCraftAny()|0;
-                if (coins>0 || craft>0){ finish('iframe-poll-ls'); }
-              }catch(_){}
-            }, pollMs);
-          }catch(_){}
-        }, {once:true});
-
-        // LocalStorage baseline polling (Safari quirk)
-        const baseline = { coins: Number(localStorage.getItem('izzaCoins')||'0')|0, craft: readCraftAny()|0 };
-        lsTimer = setInterval(()=>{
-          const now = { coins: Number(localStorage.getItem('izzaCoins')||'0')|0, craft: readCraftAny()|0 };
-          if (now.coins !== baseline.coins || now.craft !== baseline.craft){
-            finish('ls-poll');
+          const ang = Math.atan2(dy,dx);
+          if(lastAngle!=null){
+            let da = ang - lastAngle;
+            if(da> Math.PI) da-=2*Math.PI;
+            if(da<-Math.PI) da+=2*Math.PI;
+            spinAccum += da;
           }
-        }, Math.max(100, pollMs));
+          lastAngle = ang;
+        }
+      }
 
-        // safety caps
-        softTimer = setTimeout(()=>finish('soft-timeout'), 1500);
-        hardTimer = setTimeout(()=>finish('hard-timeout'), maxWaitMs);
-      });
+      const start = (e)=>{
+        if(game.ended) return;
+        const pt=(e.touches?e.touches[0]:e);
+        const b=ball.getBoundingClientRect();
+        const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
+        if(!inside) return;
+        startRect=svg.getBoundingClientRect();
+        startPos={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top};
+        samples.length=0; lastAngle=null; spinAccum=0;
+        game.dragging=true; game.launched=false;
+        addSample(pt);
+      };
+
+      const move = (e)=>{ if(!game.dragging) return; addSample(e.touches?e.touches[0]:e); };
+
+      const end = ()=>{
+        if(!game.dragging) return; game.dragging=false;
+
+        const now=performance.now();
+        while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
+        if(samples.length<2){ resetBall(); return; }
+
+        const a=samples[0], b=samples[samples.length-1];
+        const dt=Math.max(1,b.t-a.t)/1000;
+        let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt;
+
+        if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
+
+        game.vx=vx*POWER_SCALE;
+        game.vy=vy*POWER_SCALE;
+
+        const SPIN_THRESHOLD = 0.60;
+        game.spin = (Math.abs(spinAccum) > SPIN_THRESHOLD) ? spinAccum : 0;
+
+        game.launched=true;
+      };
+
+      svg.addEventListener('mousedown', start, {passive:true});
+      svg.addEventListener('mousemove', move, {passive:true});
+      window.addEventListener('mouseup', end, {passive:true});
+      svg.addEventListener('touchstart', start, {passive:true});
+      svg.addEventListener('touchmove', move, {passive:true});
+      svg.addEventListener('touchend', end, {passive:true});
+    })();
+
+    const TOP_OUT = -600;
+    const MISS_BAND_PX = 400;
+
+    function physics(dt){
+      if(!game.launched || game.ended) return;
+
+      game.vy += game.gravity*dt;
+
+      if(Math.abs(game.spin) > 0.001){
+        const side = Math.max(-900, Math.min(900, game.spin*260));
+        game.vx += (side * dt);
+        game.spin *= Math.pow(game.spinDecay, Math.max(1, dt*60));
+      }
+
+      game.vx *= game.drag; game.vy *= game.drag;
+      game.x += game.vx*dt; game.y += game.vy*dt;
+
+      if(game.x < 110){ game.x=110; game.vx*=-0.6; }
+      if(game.x > 990){ game.x=990; game.vx*=-0.6; }
+
+      if(game.y < TOP_OUT && performance.now() > game.noMissUntil){
+        quickMiss(); return;
+      }
+
+      const floorY = toXY(0,720).y;
+      if(game.y>floorY){
+        game.y=floorY; game.vy=0; game.vx=0; game.launched=false;
+        setTimeout(resetBall, 280);
+      }
+
+      setBall(game.x, game.y);
+      checkHoopOrMiss();
     }
 
-    /* ---- Load snapshot (persist layer) ---- */
-    async function hydrateFromSnapshot(){
+    function checkHoopOrMiss(){
+      const rimPt = rim.getBoundingClientRect();
+      const ballPt = ball.getBoundingClientRect();
+      const rx = rimPt.left + rimPt.width/2;
+      const ry = rimPt.top + rimPt.height/2;
+      const bx = ballPt.left + ballPt.width/2;
+      const by = ballPt.top + ballPt.height/2;
+      const rRing = rimPt.width/2;
+      const d = Math.hypot(bx-rx, by-ry);
+
+      const fudge = rRing * 0.18;
+
+      if(!game._scored && d < (rRing + fudge) && game.vy>0){
+        const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
+        scoreShot(swish);
+        game._scored = true;
+        game.noMissUntil = performance.now() + 350;
+        setTimeout(()=>{ game._scored=false; }, 300);
+        return;
+      }
+
+      if(game.launched && !game._scored && game.vy>0 && performance.now() > game.noMissUntil){
+        if (by > (ry + MISS_BAND_PX)){
+          quickMiss();
+        }
+      }
+    }
+
+    function quickMiss(){
+      if (game._scored || performance.now() < game.noMissUntil) return;
+      game.launched=false;
+      showMsg('MISS!', 'miss');
+      setTimeout(resetBall, 220);
+    }
+
+    /* === Wallet === */
+    let walletDirty = false;
+    let hasLoadedSnapshot = false;
+
+    function syncCoinsHUD(){
+      if (!game.launched && game.coins === 0){
+        coinsRunEl.textContent = String(readCoinsLS());
+      }
+    }
+
+    async function applyCoins(amount){
+      const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (amount|0);
+      localStorage.setItem('izzaCoins', String(cur));
+      walletDirty = true;
+      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
       try{
-        await waitForPersistReady();
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-          await IZZA_PERSIST.load();  // server -> localStorage
+        if (window.IZZA_PERSIST?.save){
+          await IZZA_PERSIST.save();
+          walletDirty = false;
         }
       }catch(_){}
-      try{ writeCraftAll(readCraftAny()); }catch(_){}
-      renderWallet(readLocalWallet());
+      try{
+        window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } }));
+      }catch(_){}
+      return cur;
     }
 
-    function readLocalWallet(){
-      const coins = Number.isFinite(Number(localStorage.getItem('izzaCoins')))
-        ? Number(localStorage.getItem('izzaCoins')) : 0;
-      const craft = readCraftAny();
-      return { coins, crafting: craft };
+    async function applyCraftDelta(delta){
+      const val = readCraftAny() + (delta|0);
+      writeCraftAll(val);
+      walletDirty = true;
+      try{
+        if (window.IZZA_PERSIST?.save){
+          await IZZA_PERSIST.save();
+          walletDirty = false;
+        }
+      }catch(_){}
+      try{
+        window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } }));
+      }catch(_){}
     }
 
-    let LAST_WALLET = readLocalWallet();
+    async function scoreShot(swish){
+      const COINS_PER_GOAL = 200;
 
-    function renderWallet(obj){
-      if (!obj) return;
-      let coins = Number(obj.coins)||0;
-      let crafting = Number(obj.crafting)||0;
-      if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
-      if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
-      if (elCoins) { elCoins.textContent = String(coins); elCoins.removeAttribute('data-loading'); }
-      if (elCraft) { elCraft.textContent = String(crafting); elCraft.removeAttribute('data-loading'); }
-      LAST_WALLET = { coins, crafting };
-    }
+      game.score += COINS_PER_GOAL;
+      game.goals += 1;
+      game.coins += COINS_PER_GOAL;
 
-    function parseWalletResponse(j){
-      if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
-      if ('coins' in j || 'crafting' in j || 'credits' in j){
-        return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
+      await applyCoins(COINS_PER_GOAL);
+
+      const creditsNow = Math.floor(game.goals / 10);
+      if (creditsNow > game.creditsEarned){
+        game.creditsEarned = creditsNow;
+        await applyCraftDelta(1);
+        showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
+      } else {
+        showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
       }
-      if (j.wallet)   return parseWalletResponse(j.wallet);
-      if (j.balance)  return parseWalletResponse(j.balance);
-      return { coins:0, crafting:0 };
+
+      scoreEl.textContent = game.score;
+      streakEl.textContent = game.goals;
+      coinsRunEl.textContent = game.coins;
+
+      setTimeout(resetBall, 260);
     }
 
-    /* ====== Boot ====== */
+    let lastT = performance.now();
+    function loop(t){
+      const dt = Math.min(0.033, (t - lastT) / 1000);
+      lastT = t;
+      physics(dt);
+      if (!game.ended) requestAnimationFrame(loop);
+    }
+
+    /* ---------------- End-of-run + persist ---------------- */
+    async function persistWalletAndSave(){
+      try{
+        writeCraftAll(readCraftAny());
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+          await IZZA_PERSIST.save();
+          walletDirty = false;
+        } else if (typeof window._izzaForceSave === 'function') {
+          window._izzaForceSave();
+          walletDirty = false;
+        }
+      }catch(_){}
+    }
+
+    /* --- Commit & confirm BOTH coins and craft before navigation --- */
+    const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+    async function commitWalletAndConfirm({retries=6, delay=160} = {}){
+      const targetCoins = readCoinsLS();
+      const targetCraft = readCraftAny();
+      try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+      for(let i=0;i<retries;i++){
+        try{ if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
+        const afterCoins = readCoinsLS();
+        const afterCraft = readCraftAny();
+        if (afterCoins >= targetCoins && afterCraft >= targetCraft){
+          walletDirty = false;
+          return true;
+        }
+        // Re-assert local max and try again
+        if (afterCoins < targetCoins) writeCoinsLS(targetCoins);
+        if (afterCraft < targetCraft) writeCraftAll(targetCraft);
+        try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+        await sleep(delay);
+      }
+      return false;
+    }
+
+    async function endRun(){
+      if (game.ended) return;
+      game.ended = true;
+
+      await persistWalletAndSave();
+
+      document.getElementById('finalScore').textContent = game.score;
+      document.getElementById('finalCoins').textContent = game.coins;
+      document.getElementById('finalCraft').textContent = game.creditsEarned;
+      document.getElementById('finish').style.display = 'flex';
+      showMsg('Time!', 'miss');
+    }
+
+    /* ---------------- Nav ---------------- */
+    function interceptNav(a){
+      if(!a) return;
+      a.addEventListener('click', async (ev)=>{
+        ev.preventDefault();
+        const href = withT(a.getAttribute('href') || '/izza-game/play');
+        try{
+          // Save and confirm server snapshot reflects local so City won't roll back on hydrate
+          await commitWalletAndConfirm();
+        }catch(_){}
+        location.href = href;
+      }, {passive:false});
+    }
+    interceptNav(document.getElementById('cityBtn'));
+    interceptNav(document.getElementById('cityBtn2'));
+    interceptNav(document.getElementById('backBtn'));
+    interceptNav(document.getElementById('againBtn'));
+
+    /* ---------------- Boot & lifecycle ---------------- */
+    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
+    window.addEventListener('resize', onResize, {passive:true});
+
+    // Keep HUD coins correct when other tabs or the City change the wallet
+    window.addEventListener('storage', (e)=>{
+      if (e && e.key === 'izzaCoins') syncCoinsHUD();
+      if (e && (e.key && ['izzaCrafting','craftingCredits','izzaCraftCredits'].includes(e.key))) syncCoinsHUD();
+    });
+    window.addEventListener('izza-coins-changed', syncCoinsHUD);
+    window.addEventListener('izza-wallet-changed', syncCoinsHUD);
+    window.addEventListener('izza-crafting-changed', syncCoinsHUD);
+
+    document.addEventListener('visibilitychange', async () => {
+      lastT = performance.now();
+      if (document.hidden){
+        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
+      } else {
+        // Re-hydrate with merge so values never roll back after returning
+        try{ await hydrateFromSnapshot(); hasLoadedSnapshot = true; }catch(_){}
+        syncCoinsHUD();
+      }
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+        try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
+      }
+    });
+
     (async function boot(){
       try{
-        // If this is the FIRST page in this browser session, begin silent prime IMMEDIATELY.
-        const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
-        const primePromise = shouldPrime ? primeViaCityIframe() : Promise.resolve('skip');
-
-        // Auth/character gate (may redirect to /create if truly first-time ever)
-        const profilePre = await ensureCharacter();
+        const profilePre = await ensureCharacter(); // may redirect to /create
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){}
+      }catch(e){ if(String(e.message)==='redirecting') return; }
 
-        // Wait for the prime if we started it; then hydrate from snapshot
-        try{ await primePromise; }catch(_){}
-        try{ await hydrateFromSnapshot(); }catch(_){}
-        if (shouldPrime){ try{ sessionStorage.setItem(SESSION_PRIME_KEY, '1'); }catch(_){ } }
+      // First load after refresh: hydrate with COINS+CRAFT MERGE
+      await hydrateFromSnapshot();
+      hasLoadedSnapshot = true;
 
-        // Paint wallet from LS
-        renderWallet(readLocalWallet());
+      // Show hydrated wallet immediately on first load after refresh
+      syncCoinsHUD();
 
-        // IMPORTANT: fetch fresh character again AFTER snapshot so we get equipped items/armoury
-        const profileFresh = (await fetchCharacterFresh()) || profilePre;
-        try{ localStorage.setItem('izzaCharacter', JSON.stringify(profileFresh)); }catch(_){}
+      // Build avatar
+      try{
+        const prof = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+        await buildAvatarCanvas(tinyCtx, 54, prof);
+      }catch(_){}
 
-        // Draw avatar with equipped state
-        await buildAvatarCanvas(actx,96,profileFresh);
-
-        // Place avatar nicely
-        const logo = document.getElementById('brandWord');
-        if (isTouch && logo){
-          const r = logo.getBoundingClientRect();
-          const y = r.top + window.scrollY - 6 - 96;
-          const x = r.left + window.scrollX - 24;
-          setAvatarPos(Math.max(8, x), Math.max(8, y));
-        } else {
-          setAvatarPos(window.innerWidth/2-48, window.innerHeight/2-48);
-        }
-
-        // Authoritative wallet -> write LS -> repaint (avoids flicker)
-        try{
-          const r = await fetch('/izza-game/api/wallet'+TQ, {
-            credentials:'include',
-            headers: bearerHeaders()
-          });
-          if (r.ok){
-            let j = {};
-            try{ j = await r.json(); }catch(_){}
-            const parsed = parseWalletResponse(j);
-            try{
-              localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
-              writeCraftAll(Number(parsed.crafting)||0);
-              window.dispatchEvent(new Event('izza-coins-changed'));
-              window.dispatchEvent(new Event('izza-crafting-changed'));
-            }catch(_){}
-            renderWallet(parsed);
-          }
-        }catch(_){}
-
-        // Keep in sync with app-wide changes
-        window.addEventListener('izza-wallet-changed', (ev)=>{
-          const d = ev && ev.detail ? ev.detail : {};
-          const local = readLocalWallet();
-          renderWallet({ coins: d.coins ?? local.coins, crafting: d.crafting ?? d.credits ?? local.crafting });
-        }, { passive:true });
-        window.addEventListener('izza-coins-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
-        window.addEventListener('izza-crafting-changed', ()=> renderWallet(readLocalWallet()), { passive:true });
-
-        // Back/visibility: re-hydrate & repaint
-        document.addEventListener('visibilitychange', async ()=>{
-          if (!document.hidden){
-            try{ await hydrateFromSnapshot(); }catch(_){}
-            // also refresh equipped look
-            const pf = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-            await buildAvatarCanvas(actx,96,pf);
-            renderWallet(readLocalWallet());
-          }
-        }, { passive:true });
-
-        // Update if LS changes in another tab/page
-        window.addEventListener('storage', (e)=>{
-          if (!e) return;
-          if (e.key==='izzaCoins' || CRAFT_KEYS.includes(e.key)) {
-            renderWallet(readLocalWallet());
-          }
-        }, { passive:true });
-
-        // iOS BFCache restore
-        window.addEventListener('pageshow', ()=> renderWallet(readLocalWallet()), { passive:true });
-
-        wirePointer();
-      }catch(e){
-        if(String(e.message)!=='redirecting'){
-          console.error('Arena init error',e);
-        }
-      }
+      resetBall();
+      setHoopDistance();
+      positionAvatarFixed();
+      startTimer();
+      requestAnimationFrame(loop);
     })();
   })();
   </script>
