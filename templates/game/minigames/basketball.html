@@ -470,7 +470,7 @@
       }
 
       const start = (e)=>{
-        if(game.ended) return;                 /* guard: no input after end */
+        if(game.ended) return;                 /* CHANGED: guard no input after end */
         const pt=(e.touches?e.touches[0]:e);
         const b=ball.getBoundingClientRect();
         const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
@@ -585,10 +585,14 @@
     let walletDirty = false;
     let hasLoadedSnapshot = false;
 
+    // CHANGED: unified HUD updater — always show full wallet (base + run)
+    function updateCoinsHUD(){
+      coinsRunEl.textContent = String(readCoinsLS());
+    }
+
+    // CHANGED: keep HUD synced even during play
     function syncCoinsHUD(){
-      if (!game.launched && game.coins === 0){
-        coinsRunEl.textContent = String(readCoinsLS());
-      }
+      updateCoinsHUD();
     }
 
     async function applyCoins(amount){
@@ -643,7 +647,7 @@
 
       scoreEl.textContent = game.score;
       streakEl.textContent = game.goals;
-      coinsRunEl.textContent = game.coins;
+      updateCoinsHUD();                          // CHANGED
 
       setTimeout(resetBall, 260);
     }
@@ -670,30 +674,26 @@
       }catch(_){}
     }
 
-    // >>> CHANGED: make endRun instant (UI shows first; save is non-blocking)
+    // CHANGED: endRun is instant; disables input and shows buttons right away
     async function endRun(){
       if (game.ended) return;
       game.ended = true;
 
-      // stop gameplay immediately
       try{ if (game.timerId) clearInterval(game.timerId); }catch(_){}
       game.launched = false;
       game.dragging = false;
 
-      // show results/buttons right away
       document.getElementById('finalScore').textContent = game.score;
       document.getElementById('finalCoins').textContent = game.coins;
       document.getElementById('finalCraft').textContent = game.creditsEarned;
       document.getElementById('finish').style.display = 'flex';
       showMsg('Time!', 'miss');
 
-      // kick a quick, non-blocking persist
       try{
         const p = persistWalletAndSave();
         await Promise.race([p, new Promise(r=>setTimeout(r, 200))]);
       }catch(_){}
     }
-    // <<< END change
 
     /* ---------------- Background City priming (matches Arena) ---------------- */
     const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
@@ -725,7 +725,6 @@
         }, {once:true});
         softTimer=setTimeout(()=>finish('soft-timeout'),1500);
         hardTimer=setTimeout(()=>finish('hard-timeout'),maxWaitMs);
-        // baseline LS change watcher
         const baseCoins = Number(localStorage.getItem('izzaCoins')||'0')|0;
         const baseCraft = readCraftAny()|0;
         lsTimer=setInterval(()=>{
@@ -788,7 +787,6 @@
 
     (async function boot(){
       try{
-        // Prime City once per session for fast exit & fresh snapshot (matches Arena)
         const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
         if (shouldPrime){
           try{ await primeViaCityIframe(); }catch(_){}
@@ -804,8 +802,8 @@
       await hydrateFromSnapshot();
       hasLoadedSnapshot = true;
 
-      // Show hydrated wallet immediately on first load after refresh
-      syncCoinsHUD();
+      // CHANGED: show current wallet immediately (not just run coins)
+      updateCoinsHUD();
 
       // Build avatar
       try{
