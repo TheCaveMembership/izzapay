@@ -189,7 +189,15 @@
       }catch(_){}
       return headers;
     }
-
+function parseWalletResponse(j){
+  if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
+  if ('coins' in j || 'crafting' in j || 'credits' in j){
+    return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
+  }
+  if (j.wallet)   return parseWalletResponse(j.wallet);
+  if (j.balance)  return parseWalletResponse(j.balance);
+  return { coins:0, crafting:0 };
+}
     /* ---- wallet helpers ---- */
     const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){
@@ -681,30 +689,43 @@
       });
     }
     async function hydrateFromSnapshot(){
-      try{
-        await waitForPersistReady();
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-          await IZZA_PERSIST.load(); // server -> LS
-        }
-      }catch(_){}
-      // also pull from API once (authoritative), like Arena
-      try{
-        const q = T ? `?t=${encodeURIComponent(T)}` : '';
-        const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
-        if (r.ok){
-          const j = await r.json();
-          const coins = Number((j && (j.coins ?? (j.wallet?.coins) ?? (j.balance?.coins))) || 0)|0;
-          const craft = Number((j && (j.crafting ?? j.credits ?? j.wallet?.crafting)) || 0)|0;
-          writeCoinsLS(coins); writeCraftAll(craft);
-          window.dispatchEvent(new Event('izza-coins-changed'));
-          window.dispatchEvent(new Event('izza-crafting-changed'));
-        }
-      }catch(_){}
-      const now = readCoinsLS();
-      paintCoinsHUD(now);
-      return now;
+  // 1) Try persist → brings City snapshot into LS
+  try{
+    await waitForPersistReady();
+    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+      await IZZA_PERSIST.load(); // server → LS
     }
+  }catch(_){}
 
+  // Current local values after snapshot
+  const localCoins = readCoinsLS()|0;
+  const localCraft = readCraftAny()|0;
+
+  // 2) Hit API once (authoritative when it returns >0)
+  try{
+    const q = T ? `?t=${encodeURIComponent(T)}` : '';
+    const r = await fetch('/izza-game/api/wallet'+q, { credentials:'include', headers: bearerHeaders() });
+    if (r.ok){
+      let j = {};
+      try{ j = await r.json(); }catch(_){}
+      const parsed = parseWalletResponse(j);
+
+      // --- NO-STOMP RULE ---
+      const coins = (Number(parsed.coins)|0);
+      const craft = (Number(parsed.crafting)|0);
+
+      // Only write if API gave us a positive number (or it’s greater than what we have)
+      if (coins > 0 && coins !== localCoins) writeCoinsLS(coins);
+      if (craft > 0 && craft !== localCraft) writeCraftAll(craft);
+
+      // If API returned 0/0, keep the local snapshot values; do not overwrite.
+    }
+  }catch(_){}
+
+  const now = readCoinsLS()|0;
+  paintCoinsHUD(now);
+  return now;
+}
     /* ---------------- Boot ---------------- */
     let startCoins = 0;
 
