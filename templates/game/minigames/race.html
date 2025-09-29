@@ -967,7 +967,36 @@
       });
     }
     rewriteAuthLinks();
+/* ---- BOOT / UNBOOT hooks ---- */
+window.IZZA_BOOT = async function bootRace(opts = {}) {
+  try {
+    await waitForPersistReady();
+    const snapCoins = await hydrateFromSnapshot();
+    paintCoinsHUDSafeAfterSnapshot(snapCoins);
 
+    // Warm session (non-blocking)
+    primeViaCityIframe().catch(()=>{});
+    ensureSession().catch(()=>{});
+
+    // Keep auth params on nav links
+    rewriteAuthLinks();
+
+    return { ok: true, track: settings.track, coins: readCoinsLS()|0 };
+  } catch (e) {
+    console.error('IZZA_BOOT error', e);
+    return { ok: false, error: String(e) };
+  }
+};
+
+window.IZZA_UNBOOT = function unbootRace() {
+  try {
+    game.running = false;
+    game.ended = true;
+    if (walletDirty) { persistWalletAndSave().catch(()=>{}); }
+  } catch (e) {
+    console.warn('IZZA_UNBOOT warn', e);
+  }
+};
   })();
   </script>
 </body>
