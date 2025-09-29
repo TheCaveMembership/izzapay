@@ -6,45 +6,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Persist (same as Arena) -->
-<script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
+  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
 
-<!-- ⬇️ NEW: ensure username is known before izza-persist.js loads -->
-<script>
-  (function(){
-    try{
-      const params = new URLSearchParams(location.search);
-      let u = (params.get('u') || '').toString().trim();
-      // if no ?u=, try a cached value (set later below)
-      if (!u) {
-        u = (localStorage.getItem('izzaUserU') || '').toString().trim();
-      }
-      // if still missing, try the auth mirror (some shells isolate LS)
-      if (!u) {
-        const raw = localStorage.getItem('piAuthUser');
-        if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
-      }
-      // if we found a username, publish it for izza-persist's userKey()
-      if (u) {
-        // normalize like Diagnostics: no leading @ and lowercased
-        u = u.replace(/^@+/, '').toLowerCase();
-        // make Persist pick it up
-        window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-        // secondary hook used by userKey() if needed
-        window.izzaUserKey = { get: () => u };
-        // keep a small cache so refreshes retain it
-        try { localStorage.setItem('izzaUserU', u); } catch(_){}
-        // optional: seed auth mirror if empty (never overwrite a real one)
-        try {
-          if (!localStorage.getItem('piAuthUser')) {
-            localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
-          }
-        } catch(_){}
-      }
-    }catch(_){}
-  })();
-</script>
+  <!-- Ensure username is known before izza-persist.js loads (same pattern as Arena) -->
+  <script>
+    (function(){
+      try{
+        const params = new URLSearchParams(location.search);
+        let u = (params.get('u') || '').toString().trim();
+        if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
+        if (!u) {
+          const raw = localStorage.getItem('piAuthUser');
+          if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
+        }
+        if (u) {
+          u = u.replace(/^@+/, '').toLowerCase();
+          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+          window.izzaUserKey = { get: () => u };
+          try { localStorage.setItem('izzaUserU', u); } catch(_){}
+          try {
+            if (!localStorage.getItem('piAuthUser')) {
+              localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
+            }
+          } catch(_){}
+        }
+      }catch(_){}
+    })();
+  </script>
 
-<script src="/static/game/js/izza-persist.js"></script>
+  <script src="/static/game/js/izza-persist.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
@@ -69,11 +59,6 @@
           padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
     .pill strong{font-size:13px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-
-    /* avatar under ball */
-    .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
-    .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
-    .avatarScene{position:absolute;z-index:4;pointer-events:none}
 
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
@@ -179,10 +164,10 @@
         </g>
       </svg>
 
-      <!-- avatar under ball -->
-      <div id="avatarScene" class="avatarBadge avatarScene">
+      <!-- avatar under ball REMOVED -->
+      <!-- <div id="avatarScene" class="avatarBadge avatarScene">
         <canvas id="avatarTiny" class="avatarCanvas" width="54" height="54"></canvas>
-      </div>
+      </div> -->
 
       <div id="bigmsg" class="bigmsg" aria-live="polite">GOAL!</div>
     </div>
@@ -199,34 +184,31 @@
   <script>
   (function(){
     /* ---------------- t & u params / links ---------------- */
-const T_KEY='izzaTokenT';
-const U_KEY='izzaUserU';
-const urlParams = new URLSearchParams(location.search);
+    const T_KEY='izzaTokenT';
+    const U_KEY='izzaUserU';
+    const urlParams = new URLSearchParams(location.search);
+    let T = urlParams.get('t') || '';
+    let U = (urlParams.get('u') || '').toString().trim();
 
-let T = urlParams.get('t') || '';
-let U = (urlParams.get('u') || '').toString().trim();
     try {
-  // save/restore ?u= like you already do for ?t=
-  if (U) {
-    localStorage.setItem('izzaUserU', U);
-  } else {
-    const su = localStorage.getItem('izzaUserU') || '';
-    if (su) {
-      const url = new URL(location.href);
-      url.searchParams.set('u', su);
-      history.replaceState(null, '', url.toString());
-      U = su;
-    }
-  }
+      if (U) {
+        U = U.replace(/^@+/, '').toLowerCase();
+        localStorage.setItem('izzaUserU', U);
+      } else {
+        const su = (localStorage.getItem('izzaUserU') || '').toString().trim();
+        if (su) {
+          const url = new URL(location.href);
+          url.searchParams.set('u', su);
+          history.replaceState(null, '', url.toString());
+          U = su;
+        }
+      }
+      if (U) {
+        window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: U });
+        window.izzaUserKey = { get: () => U };
+      }
+    } catch(_) {}
 
-  // publish to Persist’s userKey() (redundant to the <head> bootstrap, but
-  // helps on soft reloads or SPA navigations)
-  if (U) {
-    U = U.replace(/^@+/, '').toLowerCase();
-    window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: U });
-    window.izzaUserKey = { get: () => U };
-  }
-} catch(_) {}
     try{
       if(T){ localStorage.setItem(T_KEY,T); }
       else{
@@ -240,15 +222,15 @@ let U = (urlParams.get('u') || '').toString().trim();
       }
     }catch(_){}
     function withAuth(href){
-  const url = new URL(href, location.origin);
-  if (T) url.searchParams.set('t', T);
-  if (U) url.searchParams.set('u', U);
-  return url.pathname + (url.search ? url.search : '');
-}
-document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
-document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{
-  a.href = withAuth(a.getAttribute('href'));
-});
+      const url = new URL(href, location.origin);
+      if (T) url.searchParams.set('t', T);
+      if (U) url.searchParams.set('u', U);
+      return url.pathname + (url.search ? url.search : '');
+    }
+    document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
+    document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{
+      a.href = withAuth(a.getAttribute('href'));
+    });
 
     /* ---------------- helpers ---------------- */
     function bearerHeaders(base = {}) {
@@ -259,132 +241,6 @@ document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{
       }catch(_){}
       return headers;
     }
-function parseWalletResponse(j){
-  if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
-  if ('coins' in j || 'crafting' in j || 'credits' in j){
-    return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
-  }
-  if (j.wallet)   return parseWalletResponse(j.wallet);
-  if (j.balance)  return parseWalletResponse(j.balance);
-  return { coins:0, crafting:0 };
-}
-    /* ---- wallet helpers ---- */
-    const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-    function readCraftAny(){
-      for(const k of CRAFT_KEYS){
-        const v=parseInt(localStorage.getItem(k)||'0',10);
-        if(Number.isFinite(v)&&v>0) return v|0;
-      }
-      return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0;
-    }
-    function writeCraftAll(v){
-      const n=Math.max(0,v|0);
-      for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
-      try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
-    }
-    function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
-    function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
-
-    /* ---------- IMAGE/PALETTE HELPERS (for avatar) ---------- */
-    function hexToRgb(h){ const n=parseInt(String(h||'').replace('#',''),16)||0; return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
-    function dist2(a,b){const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
-    function overlayTint(img, hex, strength=1){
-      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
-      const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
-      const id=ctx.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
-      function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
-      for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
-        const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
-        d[i]=Math.round(d[i]*(1-strength)+r*strength);
-        d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
-        d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
-      }
-      ctx.putImageData(id,0,0); return c;
-    }
-    function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
-      const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
-      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
-      const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
-      const id=ctx.getImageData(0,0,w,h), d=id.data; let changed=0;
-      for(let i=0;i<d.length;i+=4){
-        if(d[i+3]===0) continue;
-        const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
-        for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
-        if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
-          d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
-      }
-      ctx.putImageData(id,0,0); return {canvas:c, changedPixels:changed};
-    }
-    function extractThreeToneRamp(img){
-      const w=img.width,h=img.height, c=document.createElement('canvas'); c.width=w; c.height=h;
-      const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0);
-      const d=ctx.getImageData(0,0,w,h).data; let Ls=[];
-      function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
-      for(let i=0;i<d.length;i+=16){ if(d[i+3]<10) continue; Ls.push({L:lum(d[i],d[i+1],d[i+2]), r:d[i], g:d[i+1], b:d[i+2]}); }
-      if(Ls.length<3) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
-      Ls.sort((a,b)=>a.L-b.L);
-      const pick=q=>{ const idx=Math.max(0,Math.min(Ls.length-1,Math.floor(q*(Ls.length-1)))); const s=Ls[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
-      return [pick(0.2),pick(0.55),pick(0.85)];
-    }
-
-    /* ---------- AVATAR ---------- */
-    const SPRITES = {
-      body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
-      hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
-      outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
-    };
-    const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
-    const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
-    const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
-    const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
-    const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
-    function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-
-    async function buildAvatarCanvas(dstCtx, size, profile){
-      const DW=size,DH=size,X=0,Y=0;
-      const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
-      const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
-      const femaleOut=profile.female_outfit_color||'blue';
-
-      let body=null;
-      if(type==='female'){
-        const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
-        const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
-        body = await loadImg(femaleWide) || await loadImg(femaleSlim);
-      }
-      if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
-
-      const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
-      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
-
-      let bodyCanvas;
-      if(body){
-        const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
-        const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
-        bodyCanvas=swapped.canvas;
-        if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
-      }
-
-      if(type==='female' && bodyCanvas){
-        const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
-        const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
-        bodyCanvas=reDress.canvas;
-        if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
-      }
-
-      dstCtx.clearRect(0,0,DW,DH);
-      if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
-      if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
-      if(hair){
-        const detected=extractThreeToneRamp(hair);
-        const target=HAIR_TO[hairCol]||HAIR_TO.black;
-        const swap=paletteSwap(hair, detected, target, 4000);
-        let hairCanvas=swap.canvas;
-        if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
-        dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
-      }
-    }
 
     /* ---------------- Game (mechanics) ---------------- */
     const svg = document.getElementById('court');
@@ -393,8 +249,6 @@ function parseWalletResponse(j){
     const rim = document.getElementById('rim');
     const bigmsg = document.getElementById('bigmsg');
     const arenaEl = document.getElementById('arena');
-    const avatarScene = document.getElementById('avatarScene');
-    const tinyCtx=document.getElementById('avatarTiny').getContext('2d'); tinyCtx.imageSmoothingEnabled=false;
 
     const scoreEl = document.getElementById('score');
     const streakEl = document.getElementById('streak');
@@ -430,14 +284,6 @@ function parseWalletResponse(j){
     function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
     function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
     function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
-
-    function positionAvatarFixed(){
-      const bottomOffset = 68;
-      const left = (W/2) - 27;
-      const top  = H - bottomOffset - 54;
-      avatarScene.style.left = Math.max(8, left) + 'px';
-      avatarScene.style.top  = Math.max(12, top) + 'px';
-    }
 
     function resetBall(){
       if(game.ended) return;
@@ -590,57 +436,193 @@ function parseWalletResponse(j){
       setTimeout(resetBall, 220);
     }
 
-    /* === Wallet / HUD === */
-    let walletDirty = false;
-    let WALLET_READY = false;
+    /* ===== WALLET: Arena-parity (simple & identical) ===== */
+    (function(){
+      /* carry t & u like Arena already does */
+      function withAuthLocal(path){
+        const url = new URL(path, location.origin);
+        try{
+          const qs = new URLSearchParams(location.search);
+          const t  = qs.get('t') || localStorage.getItem('izzaTokenT') || '';
+          const u  = (qs.get('u') || localStorage.getItem('izzaUserU') || '').toString().trim();
+          if (t) url.searchParams.set('t', t);
+          if (u) url.searchParams.set('u', u);
+        }catch(_){}
+        return url.pathname + (url.search ? url.search : '');
+      }
 
-    function paintCoinsHUD(n){ coinsRunEl.textContent = String(Math.max(0, n|0)); if(startCoinsEl) startCoinsEl.textContent=String(Math.max(0,n|0)); }
+      function bearerHeadersLocal(base = {}) {
+        const headers = Object.assign({ 'content-type':'application/json' }, base || {});
+        try{
+          const bearer = localStorage.getItem('izzaBearer') || '';
+          if (bearer) headers['authorization'] = 'Bearer ' + bearer;
+        }catch(_){}
+        return headers;
+      }
 
-    function updateCoinsHUD(){
-      if(!WALLET_READY) return;
-      const cur = readCoinsLS();
-      const shown = parseInt(coinsRunEl.textContent||'0',10) || 0;
-      const val = (cur===0 && shown>0) ? shown : cur;
-      paintCoinsHUD(val);
-    }
-    function syncCoinsHUD(){ updateCoinsHUD(); }
+      const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
+      function readCraftAny(){
+        for(const k of CRAFT_KEYS){
+          const v = parseInt(localStorage.getItem(k)||'0',10);
+          if (Number.isFinite(v) && v>0) return v|0;
+        }
+        return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10) || 0)|0;
+      }
+      function writeCraftAll(v){
+        const n = Math.max(0, v|0);
+        for(const k of CRAFT_KEYS) localStorage.setItem(k, String(n));
+        try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+      }
+      (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
 
-    async function applyCoins(amount){
-      const cur = (readCoinsLS()|0) + (amount|0);
-      writeCoinsLS(cur);
-      walletDirty = true;
-      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-      try{
-        window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } }));
-      }catch(_){}
-      WALLET_READY = true;
-      updateCoinsHUD();
-      return cur;
-    }
+      function waitForPersistReady({timeout=3000, interval=40} = {}){
+        return new Promise((res)=> {
+          const t0 = performance.now();
+          const check = () => {
+            if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+            if (performance.now() - t0 > timeout) return res(false);
+            setTimeout(check, interval);
+          };
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
+          else check();
+        });
+      }
 
-    async function applyCraftDelta(delta){
-      const val = readCraftAny() + (delta|0);
-      writeCraftAll(val);
-      walletDirty = true;
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-      try{
-        window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } }));
-      }catch(_){}
-    }
+      function parseWalletResponse(j){
+        if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
+        if ('coins' in j || 'crafting' in j || 'credits' in j){
+          return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
+        }
+        if (j.wallet)   return parseWalletResponse(j.wallet);
+        if (j.balance)  return parseWalletResponse(j.balance);
+        return { coins:0, crafting:0 };
+      }
 
+      function readLocalWallet(){
+        const coins = Number.isFinite(Number(localStorage.getItem('izzaCoins')))
+          ? Number(localStorage.getItem('izzaCoins')) : 0;
+        const craft = readCraftAny();
+        return { coins, crafting: craft };
+      }
+
+      const coinsRunEl   = document.getElementById('coinsRun');
+      const startCoinsEl = document.getElementById('startCoins');
+      let LAST_WALLET = readLocalWallet();
+
+      function renderWallet(obj){
+        if (!obj) return;
+        let coins = Number(obj.coins)||0;
+        let crafting = Number(obj.crafting)||0;
+        if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
+        if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
+
+        if (coinsRunEl)   coinsRunEl.textContent   = String(coins);
+        if (startCoinsEl) startCoinsEl.textContent = String(coins);
+
+        LAST_WALLET = { coins, crafting };
+      }
+
+      async function hydrateFromSnapshot(){
+        try{
+          await waitForPersistReady();
+          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+            await IZZA_PERSIST.load();  // server -> localStorage
+          }
+        }catch(_){}
+        try{ writeCraftAll(readCraftAny()); }catch(_){}
+        renderWallet(readLocalWallet());
+      }
+
+      async function refreshWalletFromAPI(){
+        try{
+          const r = await fetch(withAuthLocal('/izza-game/api/wallet'), {
+            credentials:'include',
+            headers: bearerHeadersLocal()
+          });
+          if (r.ok){
+            let j={}; try{ j = await r.json(); }catch(_){}
+            const parsed = parseWalletResponse(j);
+            try{
+              localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
+              writeCraftAll(Number(parsed.crafting)||0);
+              window.dispatchEvent(new Event('izza-coins-changed'));
+              window.dispatchEvent(new Event('izza-crafting-changed'));
+            }catch(_){}
+            renderWallet(parsed);
+          } else {
+            renderWallet(readLocalWallet());
+          }
+        }catch(_){
+          renderWallet(readLocalWallet());
+        }
+      }
+
+      // tiny helpers that the game uses when awarding
+      window._izzaWallet = {
+        addCoins: async (delta)=>{
+          const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (delta|0);
+          localStorage.setItem('izzaCoins', String(cur));
+          try{
+            window.dispatchEvent(new Event('izza-coins-changed'));
+            window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } }));
+          }catch(_){}
+          renderWallet({ coins:cur, crafting:readCraftAny() });
+          try{ if (window.IZZA_PERSIST?.save) window.IZZA_PERSIST.save(); }catch(_){}
+          return cur;
+        },
+        addCraft: async (delta)=>{
+          const v = readCraftAny() + (delta|0);
+          writeCraftAll(v);
+          try{
+            window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:parseInt(localStorage.getItem('izzaCoins')||'0',10)|0, crafting:v } }));
+          }catch(_){}
+          try{ if (window.IZZA_PERSIST?.save) window.IZZA_PERSIST.save(); }catch(_){}
+        }
+      };
+
+      (async function bootWallet(){
+        try{ await hydrateFromSnapshot(); }catch(_){}
+        try{ await refreshWalletFromAPI(); }catch(_){}
+
+        // keep in sync (same as Arena)
+        window.addEventListener('izza-wallet-changed', (ev)=>{
+          const d = ev && ev.detail ? ev.detail : {};
+          const local = readLocalWallet();
+          renderWallet({ coins: d.coins ?? local.coins, crafting: d.crafting ?? d.credits ?? local.crafting });
+        }, { passive:true });
+
+        window.addEventListener('izza-coins-changed',   ()=> renderWallet(readLocalWallet()), { passive:true });
+        window.addEventListener('izza-crafting-changed',()=> renderWallet(readLocalWallet()), { passive:true });
+
+        window.addEventListener('storage', (e)=>{
+          if (!e) return;
+          if (e.key==='izzaCoins' || CRAFT_KEYS.includes(e.key)) renderWallet(readLocalWallet());
+        }, { passive:true });
+
+        document.addEventListener('visibilitychange', async ()=>{
+          if (!document.hidden){
+            try{ await hydrateFromSnapshot(); }catch(_){}
+            renderWallet(readLocalWallet());
+          }
+        }, { passive:true });
+
+        window.addEventListener('pageshow', ()=> renderWallet(readLocalWallet()), { passive:true });
+      })();
+    })();
+
+    /* ===== scoring uses wallet helpers ===== */
     async function scoreShot(swish){
       const COINS_PER_GOAL = 200;
 
       game.score += COINS_PER_GOAL;
       game.goals += 1;
 
-      await applyCoins(COINS_PER_GOAL);
+      await window._izzaWallet.addCoins(COINS_PER_GOAL);
 
       const creditsNow = Math.floor(game.goals / 10);
       if (creditsNow > game.creditsEarned){
         game.creditsEarned = creditsNow;
-        await applyCraftDelta(1);
+        await window._izzaWallet.addCraft(1);
         showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
       } else {
         showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
@@ -648,7 +630,6 @@ function parseWalletResponse(j){
 
       scoreEl.textContent = game.score;
       streakEl.textContent = game.goals;
-      updateCoinsHUD();
 
       setTimeout(resetBall, 260);
     }
@@ -661,20 +642,7 @@ function parseWalletResponse(j){
       if (!game.ended) requestAnimationFrame(loop);
     }
 
-    /* ---------------- End-of-run + persist ---------------- */
-    async function persistWalletAndSave(){
-      try{
-        writeCraftAll(readCraftAny());
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-          await IZZA_PERSIST.save();
-          walletDirty = false;
-        } else if (typeof window._izzaForceSave === 'function') {
-          window._izzaForceSave();
-          walletDirty = false;
-        }
-      }catch(_){}
-    }
-
+    /* ---------------- End-of-run ---------------- */
     async function endRun(){
       if (game.ended) return;
       game.ended = true;
@@ -683,7 +651,7 @@ function parseWalletResponse(j){
       game.launched = false;
       game.dragging = false;
 
-      const coinsNow = readCoinsLS();
+      const coinsNow = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0);
       const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
 
       document.getElementById('finalScore').textContent = game.score;
@@ -692,182 +660,42 @@ function parseWalletResponse(j){
       document.getElementById('finish').style.display = 'flex';
       showMsg('Time!', 'miss');
 
-      try{
-        const p = persistWalletAndSave();
-        await Promise.race([p, new Promise(r=>setTimeout(r, 200))]);
-      }catch(_){}
+      try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
     }
 
-    /* ---------------- Background City priming (non-blocking) ---------------- */
-    const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
-    function primeViaCityIframe({maxWaitMs=10000, pollMs=120} = {}){
-      return new Promise((resolve) => {
-        let done=false, f=null, softTimer=null, hardTimer=null, pollTimer=null;
-        const finish=(why)=>{ if(done) return; done=true; cleanup(); resolve(why||'ok'); };
-        const cleanup=()=>{ try{ clearTimeout(softTimer); clearTimeout(hardTimer); clearInterval(pollTimer);}catch(_){}
-                           try{ f && f.remove(); f=null; }catch(_){} };
-        const src = withAuth('/izza-game/play?prime=1&silent=1');
-        f=document.createElement('iframe'); f.id='izzaPrimeFrame'; f.src=src;
-        f.style.position='fixed'; f.style.width='0'; f.style.height='0'; f.style.opacity='0'; f.style.pointerEvents='none'; f.style.border='0';
-        document.body.appendChild(f);
-        f.addEventListener('load', ()=>{
-          try{
-            const w=f.contentWindow; let called=false;
-            pollTimer=setInterval(async ()=>{
-              try{
-                if (!called && w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load==='function'){
-                  called=true; await w.IZZA_PERSIST.load(); finish('iframe-direct-load'); return;
-                }
-              }catch(_){}
-            }, pollMs);
-          }catch(_){}
-        }, {once:true});
-        softTimer=setTimeout(()=>finish('soft-timeout'),1500);
-        hardTimer=setTimeout(()=>finish('hard-timeout'),maxWaitMs);
-      });
-    }
-
-    /* ---------------- Nav ---------------- */
+    /* ---------------- Nav (save best-effort before leaving) ---------------- */
     function interceptNav(a){
-  if(!a) return;
-  a.addEventListener('click', async (ev)=>{
-    ev.preventDefault();
-    const href = withAuth(a.getAttribute('href') || '/izza-game/play');
-    try{
-      const quick = persistWalletAndSave();
-      await Promise.race([quick, new Promise(r=>setTimeout(r,220))]);
-    }catch(_){}
-    location.href = href;
-  }, {passive:false});
-}
+      if(!a) return;
+      a.addEventListener('click', async (ev)=>{
+        ev.preventDefault();
+        const href = withAuth(a.getAttribute('href') || '/izza-game/play');
+        try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+        location.href = href;
+      }, {passive:false});
+    }
     interceptNav(document.getElementById('cityBtn'));
     interceptNav(document.getElementById('cityBtn2'));
     interceptNav(document.getElementById('backBtn'));
     interceptNav(document.getElementById('againBtn'));
 
-    /* ---------------- Hydration helpers (same idea as Arena) ---------------- */
-    function waitForPersistReady({timeout=3000, interval=40} = {}){
-      return new Promise((res)=> {
-        const t0 = performance.now();
-        const check = () => {
-          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
-          if (performance.now() - t0 > timeout) return res(false);
-          setTimeout(check, interval);
-        };
-        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
-        else check();
-      });
-    }
-    async function hydrateFromSnapshot(){
-  // Remember last known good local values BEFORE touching persist
-  const beforeCoins = readCoinsLS()|0;
-  const beforeCraft = readCraftAny()|0;
-
-  // 1) Try persist (may side-effect LS)
-  try{
-    await waitForPersistReady();
-    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-      await IZZA_PERSIST.load(); // server → LS (may be unauth and write zeros)
-    }
-  }catch(_){}
-
-  // If persist zeroed us out but we had a valid value, restore it (anti-stomp)
-  const afterCoins = readCoinsLS()|0;
-  const afterCraft = readCraftAny()|0;
-  if (beforeCoins > 0 && afterCoins === 0) writeCoinsLS(beforeCoins);
-  if (beforeCraft > 0 && afterCraft === 0) writeCraftAll(beforeCraft);
-
-  // Snapshot after the (possibly restored) persist stage
-  const localCoins = readCoinsLS()|0;
-  const localCraft = readCraftAny()|0;
-
-  // 2) Hit API (authoritative only when it returns >0)
-  try{
-    const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
-    if (r.ok){
-      let j={}; try{ j = await r.json(); }catch(_){}
-      const parsed = parseWalletResponse(j);
-      const coins = Number(parsed.coins)|0;
-      const craft = Number(parsed.crafting)|0;
-
-      // Only adopt positive values from API
-      if (coins > 0 && coins !== localCoins) writeCoinsLS(coins);
-      if (craft > 0 && craft !== localCraft) writeCraftAll(craft);
-    }
-  }catch(_){}
-
-  const now = readCoinsLS()|0;
-  paintCoinsHUD(now);
-  return now;
-}
     /* ---------------- Boot ---------------- */
-    let startCoins = 0;
-
-    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
+    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
     window.addEventListener('resize', onResize, {passive:true});
-
-    window.addEventListener('storage', (e)=>{
-      if (e && (e.key === 'izzaCoins' || (e.key && ['izzaCrafting','craftingCredits','izzaCraftCredits'].includes(e.key)))) {
-        updateCoinsHUD();
-      }
-    });
-    window.addEventListener('izza-coins-changed', syncCoinsHUD);
-    window.addEventListener('izza-wallet-changed', syncCoinsHUD);
-    window.addEventListener('izza-crafting-changed', syncCoinsHUD);
-
-    document.addEventListener('visibilitychange', async () => {
-      if (document.hidden){
-        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
-      } else {
-        updateCoinsHUD();
-      }
-    });
-
-    window.addEventListener('pagehide', () => {
-      if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-        try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
-      }
-    });
 
     (async function boot(){
       try{
-        const shouldPrime = !sessionStorage.getItem(SESSION_PRIME_KEY);
-        if (shouldPrime){ try{ await primeViaCityIframe(); }catch(_){}
-          try{ sessionStorage.setItem(SESSION_PRIME_KEY,'1'); }catch(_){}
-        }
-
-        // Hydrate from snapshot immediately (so coins show correct value before start)
-        startCoins = await hydrateFromSnapshot();
-        WALLET_READY = true;
-        runStartCoins = startCoins;
-
-        // Build avatar (profile best-effort)
-        try{
-          const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-          const prof = r.ok ? (await r.json()) : JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-          try{ localStorage.setItem('izzaCharacter', JSON.stringify(prof||{})); }catch(_){}
-          await buildAvatarCanvas(tinyCtx, 54, prof||{});
-        }catch(_){}
-
-        // Paint HUD/overlay coins
-        paintCoinsHUD(startCoins);
-
-        // Place avatar and scene, but DO NOT start timer yet
+        // Place scene
         resetBall();
         setHoopDistance();
-        positionAvatarFixed();
 
         // Start overlay button
         document.getElementById('startBtn').addEventListener('click', async ()=>{
-          // re-hydrate right before starting to be safe
-          startCoins = await hydrateFromSnapshot();
-          WALLET_READY = true;
-          runStartCoins = startCoins;
+          // snapshot current coins at the moment we start the run
+          runStartCoins = parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
           document.getElementById('startOverlay').style.display='none';
           startTimer();
           requestAnimationFrame(loop);
         }, {passive:true});
-
       }catch(e){
         if(String(e.message)!=='redirecting'){
           console.error('Basketball init error', e);
