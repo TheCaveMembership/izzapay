@@ -25,12 +25,12 @@
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#79c0ff;overflow:hidden}
 
-    /* HUD smaller so everything fits one row */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:12px;flex-wrap:nowrap}
+    /* HUD: smaller so it fits better */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:8px;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
-    .pill strong{font-size:14px}
+          padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
+    .pill strong{font-size:13px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
 
     /* avatar shown in scene (under ball start) */
@@ -64,7 +64,8 @@
           <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
         </div>
         <div class="right">
-          <div class="pill">COINS: <strong id="coinsRun" class="arc">0</strong></div>
+          <!-- Remove hard-coded "0" so we never paint the pill to 0 -->
+          <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
         </div>
       </div>
 
@@ -330,7 +331,7 @@
       x:550, y:700, vx:0, vy:0, r:76,
       gravity: 2300, drag: 0.992,
       launched:false, dragging:false,
-      score:0, goals:0,               // <-- no game.coins here
+      score:0, goals:0,
       timeLeft:60,
       hoopX:390, hoopY:300, distanceStep:0,
       timerId:null, ended:false,
@@ -677,8 +678,11 @@
 
     /* ---------------- Boot & lifecycle ---------------- */
 
-    // Paint the HUD immediately with whatever is already in LS
-    paintCoinsHUD(readCoinsLS());
+    // DO NOT paint to 0 on first paint. Show whatever is already in LS right away (from Arena snapshot).
+    try{
+      const pre = localStorage.getItem('izzaCoins');
+      if (pre != null) { coinsRunEl.textContent = pre; }
+    }catch(_){}
 
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; positionAvatarFixed(); }
     window.addEventListener('resize', onResize, {passive:true});
