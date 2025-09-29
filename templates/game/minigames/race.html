@@ -11,53 +11,50 @@
     :root { --bg:#0a0c12; --panel:#06080e; }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
-    .arena{position:relative; height:100vh; max-width:520px; margin:0 auto;
-           border-left:1px solid rgba(255,255,255,.08);
-           border-right:1px solid rgba(255,255,255,.08);
-           background:var(--panel); overflow:hidden}
-    .overlay{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:8;
-             background:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35));}
-    .card{background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.18); border-radius:14px;
-          padding:16px 18px; display:flex; flex-direction:column; gap:10px; width:min(92%,440px)}
-    .preview{height:160px; border:1px dashed rgba(255,255,255,.18); border-radius:12px;
-             display:flex; align-items:center; justify-content:center; overflow:hidden}
-    .startBtn{padding:12px 16px; border-radius:10px; border:1px solid rgba(255,255,255,.1);
-              background:rgba(255,255,255,.08); font-weight:800; color:white}
-    .hud{position:absolute; top:8px; left:8px; right:8px; z-index:6; display:flex; justify-content:space-between; font-size:12px}
-    .nitroBtn{position:absolute; right:10px; bottom:14px; z-index:7; border-radius:999px;
-              border:1px solid rgba(255,255,255,.1); background:#222; padding:10px 14px; font-weight:800; color:white}
-    canvas{display:block; width:100%; height:100%}
+    .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
+      border-left:1px solid rgba(255,255,255,.08);
+      border-right:1px solid rgba(255,255,255,.08);
+      background:var(--panel);overflow:hidden}
+    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
+      background:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35));}
+    .card{background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18);border-radius:14px;
+      padding:16px 18px;display:flex;flex-direction:column;gap:10px;width:min(92%,440px)}
+    .preview{height:160px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;
+      display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .startBtn{padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
+      background:rgba(255,255,255,.08);font-weight:800;color:white}
+    .hud{position:absolute;top:8px;left:8px;right:8px;z-index:6;display:flex;justify-content:space-between;font-size:12px}
+    .nitroBtn{position:absolute;right:10px;bottom:14px;z-index:7;border-radius:999px;
+      border:1px solid rgba(255,255,255,.1);background:#222;padding:10px 14px;font-weight:800;color:white}
+    canvas{display:block;width:100%;height:100%}
   </style>
 </head>
 <body>
   <div class="arena" id="arena">
-    <!-- HUD -->
     <div class="hud">
       <div>SPEED: <span id="speed">0</span> km/h</div>
       <div>DIST: <span id="dist">0</span> m</div>
       <div>COINS: <span id="coinsRun">0</span></div>
     </div>
 
-    <!-- Garage Overlay -->
     <div id="startOverlay" class="overlay">
       <div class="card">
         <h3>Street Race</h3>
         <div class="preview">
-          <img id="garageCar" src="/static/game/sprites/player/coupe.png" alt="Car preview" style="height:100%"/>
+          <!-- 🔧 matches your folder exactly -->
+          <img id="garageCar" src="/static/game/sprites/tracks/coupe.png" alt="Car preview" style="height:100%"/>
         </div>
         <button id="startBtn" class="startBtn">START</button>
       </div>
     </div>
 
-    <!-- Nitro UI -->
     <button class="nitroBtn" id="nitroBtn">NITRO</button>
-
-    <!-- Game Scene -->
     <canvas id="scene"></canvas>
   </div>
 
 <script>
 (function(){
+  // ---------- basic setup ----------
   const arena = document.getElementById('arena');
   const canvas = document.getElementById('scene');
   const ctx = canvas.getContext('2d');
@@ -66,160 +63,183 @@
     dist: document.getElementById('dist'),
     coins: document.getElementById('coinsRun')
   };
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
-  // --- Responsive portrait canvas ---
-  function resize() {
-    const w = arena.clientWidth;
-    const h = arena.clientHeight;
-    // match device pixels for crispness
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
-    ctx.setTransform(dpr,0,0,dpr,0,0);
+  function resize(){
+    const w = arena.clientWidth, h = arena.clientHeight;
+    canvas.width = Math.floor(w * DPR);
+    canvas.height = Math.floor(h * DPR);
+    canvas.style.width = w+'px';
+    canvas.style.height = h+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
   }
   window.addEventListener('resize', resize, {passive:true});
   resize();
 
-  // --- Assets ---
-  const img = (src)=>{ const i=new Image(); i.src=src; return i; };
+  // ---------- assets (all from /tracks) ----------
+  const A = '/static/game/sprites/tracks/';
+  const load = s => { const i = new Image(); i.src = s; return i; };
 
   const sprites = {
-    player: img('/static/game/sprites/player/coupe.png'),
-    underglow: img('/static/game/sprites/effects/underglow.png'),
-    // Zone 1: 3x3 grid (9 frames). We’ll add zone2..4 later.
-    zone1: img('/static/game/sprites/tracks/night_zone1.png'),
-    // traffic (hooked later)
-    suv: img('/static/game/sprites/traffic/suv_sheet.png'),
-    sedan: img('/static/game/sprites/traffic/sedan_sheet.png'),
+    car: load(A+'coupe.png'),
+    underglow: load(A+'underglow.png'),
+    bg_zone1: load(A+'night_zone1.png'),    // 3×3 sheet
+    suv: load(A+'suv_sheet.png'),           // not drawn yet (next step)
+    sedan: load(A+'sedan_sheet.png'),
+    cockpit: load(A+'cockpit.png')
   };
 
-  // --- Background sheet slicer (3x3) ---
+  // ---------- background: 3×3 vertical scroller ----------
   const bg = {
-    img: sprites.zone1,
-    rows: 3, cols: 3,
-    index: 0,
-    y: 0,
-    speed: 260, // px/sec scroll
-    ready: false,
-    frameW: 0, frameH: 0
+    img: sprites.bg_zone1,
+    rows: 3, cols: 3, index: 0,
+    y: 0, speed: 260, ready: false, fw: 0, fh: 0
   };
-
-  sprites.zone1.onload = ()=>{
-    bg.frameW = sprites.zone1.width / bg.cols;
-    bg.frameH = sprites.zone1.height / bg.rows;
+  sprites.bg_zone1.onload = () => {
+    bg.fw = sprites.bg_zone1.width / bg.cols;
+    bg.fh = sprites.bg_zone1.height / bg.rows;
     bg.ready = true;
   };
 
-  // --- Game state ---
+  // ---------- game state ----------
   const state = {
     running:false, ended:false,
-    speed:0, dist:0,
-    px:0,        // -1..1 steering
-    nitro:0, coins:0,
+    speed:0, dist:0, steer:0, nitro:0, coins:0,
+    tint: '#4fd1ff',        // player tint color (can change live)
+    cockpitOn: false
   };
 
-  // --- Input (tap left/right halves + arrows) ---
+  // ---------- input ----------
   function onPointer(e){
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    state.px = (x < rect.width/2) ? -1 : 1;
+    const r = canvas.getBoundingClientRect();
+    const x = (e.touches?e.touches[0].clientX:e.clientX) - r.left;
+    state.steer = (x < r.width/2) ? -1 : 1;
   }
-  function stopPointer(){ state.px = 0; }
+  function stopPointer(){ state.steer = 0; }
   canvas.addEventListener('pointerdown', onPointer);
   canvas.addEventListener('pointermove', onPointer);
   window.addEventListener('pointerup', stopPointer);
   window.addEventListener('keydown', e=>{
-    if(e.key==='ArrowLeft') state.px=-1;
-    else if(e.key==='ArrowRight') state.px=1;
+    if(e.key==='ArrowLeft') state.steer=-1;
+    if(e.key==='ArrowRight') state.steer=1;
+    if(e.key==='c' || e.key==='C') state.cockpitOn = !state.cockpitOn; // toggle cockpit overlay
   });
   window.addEventListener('keyup', e=>{
-    if(e.key==='ArrowLeft' || e.key==='ArrowRight') state.px=0;
+    if(e.key==='ArrowLeft' || e.key==='ArrowRight') state.steer=0;
   });
 
-  // --- Drawing ---
-  function drawBackground(dt) {
+  document.getElementById('nitroBtn').onclick = ()=>{
+    state.nitro = 1.5; // seconds
+  };
+
+  // ---------- drawing helpers ----------
+  function drawBackground(dt){
     if(!bg.ready) return;
-    const W = canvas.width / (window.devicePixelRatio||1);
-    const H = canvas.height / (window.devicePixelRatio||1);
+    const W = canvas.width / DPR, H = canvas.height / DPR;
 
-    // advance scroll
-    bg.y += bg.speed * dt;
-    // whenever a full screen passes, go to next frame (seamless)
-    while (bg.y >= H) {
-      bg.y -= H;
-      bg.index = (bg.index + 1) % (bg.rows * bg.cols);
-    }
+    bg.y += bg.speed * dt * (1 + (state.nitro>0 ? 0.6 : 0)); // faster when nitro
+    while(bg.y >= H){ bg.y -= H; bg.index = (bg.index+1)%(bg.rows*bg.cols); }
 
-    // compute current & next frames
-    const col = (idx)=> idx % bg.cols;
-    const row = (idx)=> Math.floor(idx / bg.cols);
-    const sx = (idx)=> col(idx) * bg.frameW;
-    const sy = (idx)=> row(idx) * bg.frameH;
+    const toXY = idx => ({ sx: (idx%bg.cols)*bg.fw, sy: Math.floor(idx/bg.cols)*bg.fh });
+    const next = (bg.index+1)%(bg.rows*bg.cols);
 
-    const nextIndex = (bg.index + 1) % (bg.rows * bg.cols);
-
-    // draw current frame (at y - H) and next frame (at y)
-    // apply slight horizontal offset from steering for parallax
-    const sway = state.px * 12; // pixels
-    ctx.drawImage(bg.img, sx(bg.index), sy(bg.index), bg.frameW, bg.frameH,
-                  sway, bg.y - H, W, H);
-    ctx.drawImage(bg.img, sx(nextIndex), sy(nextIndex), bg.frameW, bg.frameH,
-                  sway, bg.y, W, H);
+    const sway = state.steer * 12;
+    let a = toXY(bg.index);
+    ctx.drawImage(bg.img, a.sx, a.sy, bg.fw, bg.fh, sway, bg.y - H, W, H);
+    a = toXY(next);
+    ctx.drawImage(bg.img, a.sx, a.sy, bg.fw, bg.fh, sway, bg.y, W, H);
   }
 
-  function drawPlayer() {
-    const W = canvas.width / (window.devicePixelRatio||1);
-    const H = canvas.height / (window.devicePixelRatio||1);
+  function drawCarAndTint(){
+    const W = canvas.width / DPR, H = canvas.height / DPR;
+    const x = W*0.5 + state.steer*28;
+    const y = H*0.78;
 
-    const baseY = H * 0.78;
-    const baseX = W * 0.5 + state.px * 28; // steer
     // underglow
-    const ugW = Math.min(W*0.7, 420), ugH = ugW*0.25;
+    const ugW = Math.min(W*0.68, 420), ugH = ugW*0.25;
     ctx.save();
-    ctx.translate(baseX, baseY);
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.9;
+    ctx.translate(x, y);
     ctx.drawImage(sprites.underglow, -ugW/2, -ugH/2, ugW, ugH);
     ctx.restore();
 
-    // car
-    const carW = Math.min(W*0.6, 320), carH = carW * 0.5;
-    ctx.drawImage(sprites.player, baseX - carW/2, baseY - carH*0.95, carW, carH);
+    // car + tint overlay (multiply)
+    const carW = Math.min(W*0.6, 320), carH = carW*0.5;
+    const cx = x - carW/2, cy = y - carH*0.95;
+
+    ctx.drawImage(sprites.car, cx, cy, carW, carH);
+
+    // dynamic color & shading (speed/steer affect intensity)
+    const speedN = Math.min(1, state.speed/300);
+    const steerN = Math.abs(state.steer);
+
+    // color tint
+    ctx.save();
+    ctx.globalAlpha = 0.35 + 0.25*speedN;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = state.tint; // e.g. '#4fd1ff'
+    ctx.fillRect(cx, cy, carW, carH);
+    ctx.restore();
+
+    // highlight/shadow gradient
+    ctx.save();
+    ctx.globalCompositeOperation = 'soft-light';
+    const grd = ctx.createLinearGradient(cx, cy, cx+carW, cy);
+    grd.addColorStop(0, 'rgba(255,255,255,'+(0.20+0.15*speedN)+')');
+    grd.addColorStop(0.5, 'rgba(0,0,0,'+(0.18+0.25*steerN)+')');
+    grd.addColorStop(1, 'rgba(255,255,255,'+(0.10)+')');
+    ctx.fillStyle = grd;
+    ctx.fillRect(cx, cy, carW, carH);
+    ctx.restore();
+  }
+
+  function drawCockpitOverlay(){
+    if(!state.cockpitOn || !sprites.cockpit.complete) return;
+    const W = canvas.width / DPR, H = canvas.height / DPR;
+    // draw cockpit full bleed
+    ctx.drawImage(sprites.cockpit, 0, H - (W * sprites.cockpit.height/sprites.cockpit.width), W,
+                  W * sprites.cockpit.height/sprites.cockpit.width);
+
+    // slight tint so it reacts to speed (night light flicker)
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = 0.15 + 0.15*Math.min(1, state.speed/300);
+    ctx.fillStyle = state.tint;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   function draw(dt){
-    // clear
     ctx.clearRect(0,0,canvas.width,canvas.height);
     drawBackground(dt);
-    drawPlayer();
-    // HUD
+    drawCarAndTint();
+    drawCockpitOverlay();
+
     HUD.speed.textContent = Math.round(state.speed);
-    HUD.dist.textContent = Math.round(state.dist);
+    HUD.dist.textContent  = Math.round(state.dist);
     HUD.coins.textContent = state.coins;
   }
 
-  // --- Loop ---
+  // ---------- loop ----------
   let last = performance.now();
   function loop(now){
     if(!state.running) return;
-    const dt = Math.min(0.033, (now - last)/1000); // cap delta
+    const dt = Math.min(0.033, (now-last)/1000);
     last = now;
 
-    // simple accel to target speed
-    const target = 180 + (state.nitro>0 ? 120 : 0);
-    state.speed += (target - state.speed) * 0.08;
-    state.dist += state.speed * dt;
+    const target = 180 + (state.nitro>0 ? 140 : 0);
+    state.speed += (target - state.speed)*0.08;
+    state.dist += state.speed*dt;
+    if(state.nitro>0) state.nitro -= dt;
+
     draw(dt);
     requestAnimationFrame(loop);
   }
 
-  document.getElementById('startBtn').addEventListener('click',()=>{
+  document.getElementById('startBtn').addEventListener('click', ()=>{
     document.getElementById('startOverlay').style.display='none';
-    state.running = true;
-    state.speed = 60; state.dist = 0;
-    last = performance.now();
-    loop(last);
+    state.running = true; state.speed = 60; state.dist = 0;
+    last = performance.now(); loop(last);
   });
 
 })();
