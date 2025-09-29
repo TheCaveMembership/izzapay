@@ -244,6 +244,32 @@
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
+// --- BANK READER: match Arena badge math (wallet + bank) ---
+function getUserKey(){
+  // Try a few places the app stores the username; fall back to 'guest'
+  try{
+    const raw = localStorage.getItem('piAuthUser');        // used by IZZA
+    if (raw){
+      const j = JSON.parse(raw)||{};
+      if (j.username) return String(j.username).trim().toLowerCase();
+      if (j.user)     return String(j.user).trim().toLowerCase();
+    }
+  }catch(_){}
+  try{
+    const u = (window.__IZZA_PROFILE__?.username || window.__IZZA_PROFILE__?.user || '').toString();
+    if (u) return u.trim().toLowerCase();
+  }catch(_){}
+  return 'guest';
+}
+
+function readBankCoins(){
+  try{
+    const key = 'izzaBank_' + getUserKey();
+    const j = JSON.parse(localStorage.getItem(key) || 'null');
+    return (j && Number.isFinite(j.coins)) ? (j.coins|0) : 0;
+  }catch(_){ return 0; }
+}
+    
     /* ---------- Snapshot hydrate with COINS + CRAFT MERGE ---------- */
     async function hydrateFromSnapshot(){
       const localCoinsBefore = readCoinsLS();
@@ -585,15 +611,12 @@
     let walletDirty = false;
     let hasLoadedSnapshot = false;
 
-    // CHANGED: unified HUD updater — always show full wallet (base + run)
-    function updateCoinsHUD(){
-      coinsRunEl.textContent = String(readCoinsLS());
-    }
-
-    // CHANGED: keep HUD synced even during play
-    function syncCoinsHUD(){
-      updateCoinsHUD();
-    }
+    // COIN HUD — show Arena-equivalent total (wallet + bank)
+function updateCoinsHUD(){
+  const total = readCoinsLS() + readBankCoins();
+  coinsRunEl.textContent = String(total);
+}
+function syncCoinsHUD(){ updateCoinsHUD(); }
 
     async function applyCoins(amount){
       const cur = (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0) + (amount|0);
@@ -609,6 +632,7 @@
       try{
         window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } }));
       }catch(_){}
+      updateCoinsHUD();   // reflect the new total immediately
       return cur;
     }
 
