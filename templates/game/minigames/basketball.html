@@ -11,28 +11,42 @@
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{ --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18); --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a; }
+    :root{
+      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
+      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
+    }
     *{box-sizing:border-box}
     body{margin:0;background:#102;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
     .btn:hover{filter:brightness(1.06)}
-    .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);border-radius:14px;background:#79c0ff;overflow:hidden}
+    .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
+           border-radius:14px;background:#79c0ff;overflow:hidden}
+
+    /* HUD smaller so everything fits one row */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:6;padding-right:12px;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
-    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
+    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
+          padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;display:flex;gap:4px;align-items:center;white-space:nowrap}
     .pill strong{font-size:14px}
     .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
+
+    /* avatar shown in scene (under ball start) */
     .avatarBadge{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--hudLine);background:rgba(0,0,0,.18)}
     .avatarCanvas{width:54px;height:54px;image-rendering:pixelated;display:block}
     .avatarScene{position:absolute;z-index:4;pointer-events:none}
+
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
+            font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
+            pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:7}
     .bigmsg.show{opacity:1;transform:translate(-50%, -56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
-    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
+    .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
+      background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -456,7 +470,7 @@
       }
 
       const start = (e)=>{
-        if(game.ended) return;
+        if(game.ended) return;                 /* guard: no input after end */
         const pt=(e.touches?e.touches[0]:e);
         const b=ball.getBoundingClientRect();
         const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
@@ -469,9 +483,7 @@
       };
 
       const move = (e)=>{ if(!game.dragging) return; addSample(e.touches?e.touches[0]:e); };
-
-      const end = ()=>{
-        if(!game.dragging) return; game.dragging=false;
+      const end  = ()=>{ if(!game.dragging) return; game.dragging=false;
 
         const now=performance.now();
         while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
@@ -657,6 +669,31 @@
         }
       }catch(_){}
     }
+
+    // >>> CHANGED: make endRun instant (UI shows first; save is non-blocking)
+    async function endRun(){
+      if (game.ended) return;
+      game.ended = true;
+
+      // stop gameplay immediately
+      try{ if (game.timerId) clearInterval(game.timerId); }catch(_){}
+      game.launched = false;
+      game.dragging = false;
+
+      // show results/buttons right away
+      document.getElementById('finalScore').textContent = game.score;
+      document.getElementById('finalCoins').textContent = game.coins;
+      document.getElementById('finalCraft').textContent = game.creditsEarned;
+      document.getElementById('finish').style.display = 'flex';
+      showMsg('Time!', 'miss');
+
+      // kick a quick, non-blocking persist
+      try{
+        const p = persistWalletAndSave();
+        await Promise.race([p, new Promise(r=>setTimeout(r, 200))]);
+      }catch(_){}
+    }
+    // <<< END change
 
     /* ---------------- Background City priming (matches Arena) ---------------- */
     const SESSION_PRIME_KEY = 'izzaArenaPrimedThisSession';
