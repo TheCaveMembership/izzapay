@@ -8,7 +8,7 @@
   <!-- Persist (same as Arena) -->
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
 
-  <!-- Ensure username is known before izza-persist.js loads (same pattern as Arena) -->
+  <!-- Seed username before izza-persist.js (same pattern as Arena) -->
   <script>
     (function(){
       try{
@@ -38,10 +38,8 @@
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{
-      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
-    }
+    :root{ --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
+           --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a; }
     *{box-sizing:border-box}
     body{margin:0;background:#102;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
@@ -97,10 +95,9 @@
         </div>
       </div>
 
-      <!-- START overlay -->
+      <!-- START overlay (no "Wallet loaded" copy) -->
       <div id="startOverlay" class="startOverlay" aria-live="polite">
         <div class="startCard">
-          <div class="pill">Wallet loaded: <strong id="startCoins" class="arc">…</strong></div>
           <button id="startBtn" class="startBtn">START</button>
         </div>
       </div>
@@ -164,11 +161,6 @@
         </g>
       </svg>
 
-      <!-- avatar under ball REMOVED -->
-      <!-- <div id="avatarScene" class="avatarBadge avatarScene">
-        <canvas id="avatarTiny" class="avatarCanvas" width="54" height="54"></canvas>
-      </div> -->
-
       <div id="bigmsg" class="bigmsg" aria-live="polite">GOAL!</div>
     </div>
 
@@ -182,413 +174,389 @@
   </div>
 
   <script>
-(function(){
-  /* ---------------- t & u params / links (same as Arena) ---------------- */
-  const T_KEY='izzaTokenT', U_KEY='izzaUserU';
-  const urlParams = new URLSearchParams(location.search);
-  let T = urlParams.get('t') || '';
-  let U = (urlParams.get('u') || '').toString().trim();
+  (function(){
+    /* -------- t & u params / links (same as Arena) -------- */
+    const T_KEY='izzaTokenT', U_KEY='izzaUserU';
+    const urlParams = new URLSearchParams(location.search);
+    let T = urlParams.get('t') || '';
+    let U = (urlParams.get('u') || '').toString().trim();
 
-  try{
-    if (T) localStorage.setItem(T_KEY, T);
-    else {
-      const s = localStorage.getItem(T_KEY)||'';
-      if (s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }
-    }
-  }catch(_){}
-
-  function publishUsername(u){
-    if (!u) return;
-    u = u.replace(/^@+/, '').toLowerCase();
-    try{ localStorage.setItem(U_KEY, u); }catch(_){}
-    // publish for izza-persist userKey()
-    window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-    window.izzaUserKey = { get: () => u };
-    // mirror for shells that isolate LS
     try{
-      if (!localStorage.getItem('piAuthUser')) {
-        localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
+      if (T) localStorage.setItem(T_KEY, T);
+      else {
+        const s = localStorage.getItem(T_KEY)||'';
+        if (s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }
       }
     }catch(_){}
-    return u;
-  }
 
-  try{
-    if (U) publishUsername(U);
-    else {
-      const su = (localStorage.getItem(U_KEY)||'').toString().trim();
-      if (su){
-        const url=new URL(location.href); url.searchParams.set('u',su);
-        history.replaceState(null,'',url.toString()); U = publishUsername(su);
-      }
+    function publishUsername(u){
+      if (!u) return;
+      u = u.replace(/^@+/, '').toLowerCase();
+      try{ localStorage.setItem(U_KEY, u); }catch(_){}
+      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+      window.izzaUserKey = { get: () => u };
+      try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
+      return u;
     }
-  }catch(_){}
 
-  function withAuth(href){
-    const url = new URL(href, location.origin);
-    if (T) url.searchParams.set('t', T);
-    if (U) url.searchParams.set('u', U);
-    return url.pathname + (url.search ? url.search : '');
-  }
-  document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
-  document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
-
-  /* ---------------- helpers ---------------- */
-  function bearerHeaders(base = {}) {
-    const headers = Object.assign({ 'content-type':'application/json' }, base || {});
-    try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
-    return headers;
-  }
-  function parseWalletResponse(j){
-    if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
-    if ('coins' in j || 'crafting' in j || 'credits' in j){
-      return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
-    }
-    if (j.wallet)   return parseWalletResponse(j.wallet);
-    if (j.balance)  return parseWalletResponse(j.balance);
-    return { coins:0, crafting:0 };
-  }
-  const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-  function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-  function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
-  function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
-  function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
-
-  /* ---------------- PI Auth (new) ----------------
-     Hit /api/character to ensure we have a logged-in user, then seed LS username.
-  ------------------------------------------------*/
-  async function ensurePiAuth(){
     try{
-      const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-      if (r.ok){
-        const j = await r.json().catch(()=> ({}));
-        // Try to pull a username from a few shapes
-        const uname = (j.user && j.user.username) || j.username || j.handle || '';
-        if (uname) {
-          U = publishUsername(uname);
-          // cache the full profile (optional)
-          try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-          return j;
+      if (U) publishUsername(U);
+      else {
+        const su = (localStorage.getItem(U_KEY)||'').toString().trim();
+        if (su){
+          const url=new URL(location.href); url.searchParams.set('u',su);
+          history.replaceState(null,'',url.toString()); U = publishUsername(su);
         }
       }
     }catch(_){}
-    // No username from API: fall back to any cached one; if still none, stay anonymous (coins will stay 0)
-    return null;
-  }
 
-  /* ---------------- Persist readiness + snapshot (same as Arena) ---------------- */
-  function waitForPersistReady({timeout=3000, interval=40} = {}){
-    return new Promise((res)=> {
-      const t0 = performance.now();
-      const check = () => {
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
-        if (performance.now() - t0 > timeout) return res(false);
-        setTimeout(check, interval);
-      };
-      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
-      else check();
-    });
-  }
-  async function hydrateFromSnapshot(){
-    try{
-      await waitForPersistReady();
-      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-        await IZZA_PERSIST.load();  // server → LS
+    function withAuth(href){
+      const url = new URL(href, location.origin);
+      if (T) url.searchParams.set('t', T);
+      if (U) url.searchParams.set('u', U);
+      return url.pathname + (url.search ? url.search : '');
+    }
+    document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
+    document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
+
+    /* -------- helpers -------- */
+    function bearerHeaders(base = {}) {
+      const headers = Object.assign({ 'content-type':'application/json' }, base || {});
+      try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
+      return headers;
+    }
+    function parseWalletResponse(j){
+      if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
+      if ('coins' in j || 'crafting' in j || 'credits' in j){
+        return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
       }
-    }catch(_){}
-    // normalize craft key variants
-    try{ writeCraftAll(readCraftAny()); }catch(_){}
-    paintCoinsHUD(readCoinsLS());
-    return readCoinsLS();
-  }
-
-  /* ---------------- UI refs ---------------- */
-  const svg = document.getElementById('court');
-  const ball = document.getElementById('ball');
-  const hoop = document.getElementById('hoop');
-  const rim  = document.getElementById('rim');
-  const bigmsg = document.getElementById('bigmsg');
-  const arenaEl = document.getElementById('arena');
-
-  const scoreEl = document.getElementById('score');
-  const streakEl = document.getElementById('streak');
-  const timeEl = document.getElementById('time');
-  const coinsRunEl = document.getElementById('coinsRun');
-  const startCoinsEl = document.getElementById('startCoins');
-
-  let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
-  function toXY(cx, cy){
-    const vbW = 1100, vbH = 760;
-    const scale = H / vbH;
-    const drawnW = vbW * scale;
-    const leftCrop = Math.max(0, (drawnW - W) / 2);
-    return { x: cx * scale - leftCrop, y: cy * scale };
-  }
-
-  let game = {
-    x:550, y:700, vx:0, vy:0, r:76,
-    gravity:2300, drag:0.992,
-    launched:false, dragging:false,
-    score:0, goals:0,
-    timeLeft:60,
-    hoopX:390, hoopY:300, distanceStep:0,
-    timerId:null, ended:false,
-    creditsEarned:0,
-    spin:0, spinDecay:0.985,
-    noMissUntil:0
-  };
-
-  function setHoopDistance(){ hoop.setAttribute('transform', `translate(${game.hoopX}, ${game.hoopY}) scale(1.6)`); }
-  function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
-  function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
-  function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
-  function resetBall(){ if(game.ended) return; Object.assign(game,{ x:550, y:700, vx:0, vy:0, launched:false, dragging:false, spin:0 }); setBall(game.x, game.y); }
-
-  /* ---- Drag + flick (unchanged) ---- */
-  (function wireAim(){
-    const samples=[]; const MAX_WINDOW_MS=150; const POWER_SCALE=0.94; const MIN_UP_VY=-520;
-    let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
-    function addSample(pt){
-      const now=performance.now(), x=pt.clientX - startRect.left, y=pt.clientY - startRect.top;
-      samples.push({x,y,t:now}); while(samples.length && now - samples[0].t > 260) samples.shift();
-      if(game.dragging && !game.launched){
-        const dx=x - startPos.x, dy=y - startPos.y;
-        const pullMax=220; const d=Math.hypot(dx,dy); const k=d>pullMax ? pullMax/d : 1;
-        setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
-        const ang = Math.atan2(dy,dx);
-        if(lastAngle!=null){ let da = ang - lastAngle; if(da> Math.PI) da-=2*Math.PI; if(da<-Math.PI) da+=2*Math.PI; spinAccum += da; }
-        lastAngle = ang;
-      }
+      if (j.wallet)   return parseWalletResponse(j.wallet);
+      if (j.balance)  return parseWalletResponse(j.balance);
+      return { coins:0, crafting:0 };
     }
-    const start = (e)=>{
-      if(game.ended) return;
-      const pt=(e.touches?e.touches[0]:e);
-      const b=ball.getBoundingClientRect();
-      const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
-      if(!inside) return;
-      startRect=svg.getBoundingClientRect();
-      startPos={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top};
-      samples.length=0; lastAngle=null; spinAccum=0;
-      game.dragging=true; game.launched=false;
-      addSample(pt);
-    };
-    const move = (e)=>{ if(!game.dragging) return; addSample(e.touches?e.touches[0]:e); };
-    const end  = ()=>{ if(!game.dragging) return; game.dragging=false;
-      const now=performance.now(); while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
-      if(samples.length<2){ resetBall(); return; }
-      const a=samples[0], b=samples[samples.length-1], dt=Math.max(1,b.t-a.t)/1000;
-      let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt; if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
-      game.vx=vx*POWER_SCALE; game.vy=vy*POWER_SCALE;
-      const SPIN_THRESHOLD=0.60; game.spin = (Math.abs(spinAccum) > SPIN_THRESHOLD) ? spinAccum : 0;
-      game.launched=true;
-    };
-    svg.addEventListener('mousedown', start, {passive:true});
-    svg.addEventListener('mousemove', move, {passive:true});
-    window.addEventListener('mouseup', end, {passive:true});
-    svg.addEventListener('touchstart', start, {passive:true});
-    svg.addEventListener('touchmove', move, {passive:true});
-    svg.addEventListener('touchend', end, {passive:true});
-  })();
+    const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+    function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
+    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
+    function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+    function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
-  const TOP_OUT = -600;
-  const MISS_BAND_PX = 400;
-
-  function physics(dt){
-    if(!game.launched || game.ended) return;
-    game.vy += game.gravity*dt;
-    if(Math.abs(game.spin) > 0.001){
-      const side = Math.max(-900, Math.min(900, game.spin*260));
-      game.vx += (side * dt);
-      game.spin *= Math.pow(game.spinDecay, Math.max(1, dt*60));
-    }
-    game.vx *= game.drag; game.vy *= game.drag;
-    game.x += game.vx*dt; game.y += game.vy*dt;
-
-    if(game.x < 110){ game.x=110; game.vx*=-0.6; }
-    if(game.x > 990){ game.x=990; game.vx*=-0.6; }
-    if(game.y < TOP_OUT && performance.now() > game.noMissUntil){ quickMiss(); return; }
-
-    const floorY = toXY(0,720).y;
-    if(game.y>floorY){ game.y=floorY; game.vy=0; game.vx=0; game.launched=false; setTimeout(resetBall, 280); }
-
-    setBall(game.x, game.y);
-    checkHoopOrMiss();
-  }
-
-  function checkHoopOrMiss(){
-    const rimPt = rim.getBoundingClientRect();
-    const ballPt = ball.getBoundingClientRect();
-    const rx = rimPt.left + rimPt.width/2;
-    const ry = rimPt.top + rimPt.height/2;
-    const bx = ballPt.left + ballPt.width/2;
-    const by = ballPt.top + ballPt.height/2;
-    const rRing = rimPt.width/2;
-    const d = Math.hypot(bx-rx, by-ry);
-    const fudge = rRing * 0.18;
-
-    if(!game._scored && d < (rRing + fudge) && game.vy>0){
-      const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
-      scoreShot(swish);
-      game._scored = true;
-      game.noMissUntil = performance.now() + 350;
-      setTimeout(()=>{ game._scored=false; }, 300);
-      return;
-    }
-    if(game.launched && !game._scored && game.vy>0 && performance.now() > game.noMissUntil){
-      if (by > (ry + MISS_BAND_PX)){ quickMiss(); }
-    }
-  }
-
-  function quickMiss(){ if (game._scored || performance.now() < game.noMissUntil) return; game.launched=false; showMsg('MISS!', 'miss'); setTimeout(resetBall, 220); }
-
-  /* === Wallet / HUD === */
-  let walletDirty = false, WALLET_READY = false, runStartCoins = 0;
-
-  function paintCoinsHUD(n){
-    const val = Math.max(0, n|0);
-    if (coinsRunEl) coinsRunEl.textContent = String(val);
-    if (startCoinsEl) startCoinsEl.textContent = String(val);
-  }
-  function updateCoinsHUD(){
-    if(!WALLET_READY) return;
-    const cur = readCoinsLS();
-    const shown = parseInt(coinsRunEl.textContent||'0',10) || 0;
-    const val = (cur===0 && shown>0) ? shown : cur;
-    paintCoinsHUD(val);
-  }
-  function syncCoinsHUD(){ updateCoinsHUD(); }
-
-  async function applyCoins(amount){
-    const cur = (readCoinsLS()|0) + (amount|0);
-    writeCoinsLS(cur);
-    walletDirty = true;
-    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-    try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
-    WALLET_READY = true; updateCoinsHUD(); return cur;
-  }
-
-  async function applyCraftDelta(delta){
-    const val = readCraftAny() + (delta|0);
-    writeCraftAll(val);
-    walletDirty = true;
-    try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
-  }
-
-  async function scoreShot(swish){
-    const COINS_PER_GOAL = 200;
-    game.score += COINS_PER_GOAL; game.goals += 1;
-    await applyCoins(COINS_PER_GOAL);
-    const creditsNow = Math.floor(game.goals / 10);
-    if (creditsNow > game.creditsEarned){
-      game.creditsEarned = creditsNow; await applyCraftDelta(1); showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
-    } else {
-      showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
-    }
-    scoreEl.textContent = game.score; streakEl.textContent = game.goals; updateCoinsHUD();
-    setTimeout(resetBall, 260);
-  }
-
-  let lastT = performance.now();
-  function loop(t){
-    const dt = Math.min(0.033, (t - lastT) / 1000);
-    lastT = t; physics(dt);
-    if (!game.ended) requestAnimationFrame(loop);
-  }
-
-  async function persistWalletAndSave(){
-    try{
-      writeCraftAll(readCraftAny());
-      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ await IZZA_PERSIST.save(); walletDirty = false; }
-      else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
-    }catch(_){}
-  }
-
-  async function endRun(){
-    if (game.ended) return;
-    game.ended = true;
-    try{ if (game.timerId) clearInterval(game.timerId); }catch(_){}
-    game.launched = false; game.dragging = false;
-    const coinsNow = readCoinsLS();
-    const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
-    document.getElementById('finalScore').textContent = game.score;
-    document.getElementById('finalCoins').textContent = coinsAwarded;
-    document.getElementById('finalCraft').textContent = game.creditsEarned;
-    document.getElementById('finish').style.display = 'flex';
-    showMsg('Time!', 'miss');
-    try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 200))]); }catch(_){}
-  }
-
-  /* ---------------- Boot ---------------- */
-  function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
-  window.addEventListener('resize', onResize, {passive:true});
-
-  window.addEventListener('storage', (e)=>{
-    if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
-  });
-  window.addEventListener('izza-coins-changed', syncCoinsHUD);
-  window.addEventListener('izza-wallet-changed', syncCoinsHUD);
-  window.addEventListener('izza-crafting-changed', syncCoinsHUD);
-
-  document.addEventListener('visibilitychange', async () => {
-    if (document.hidden){
-      if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
-    } else {
-      updateCoinsHUD();
-    }
-  });
-  window.addEventListener('pagehide', () => {
-    if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-      try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
-    }
-  });
-
-  (async function boot(){
-    try{
-      // 1) Ensure PI auth here (THIS WAS MISSING)
-      await ensurePiAuth();
-
-      // 2) Hydrate from snapshot now that username is seeded
-      const startCoins = await hydrateFromSnapshot();
-      WALLET_READY = true;
-      runStartCoins = startCoins;
-
-      // 3) Paint initial HUD and place scene
-      paintCoinsHUD(startCoins);
-      resetBall(); setHoopDistance();
-
-      // 4) Authoritative wallet fetch (same as Arena) → write LS → repaint
+    /* -------- Auth like Arena (no SDK here) -------- */
+    async function ensurePiAuthOrRedirect(){
       try{
-        const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
+        const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
         if (r.ok){
-          let j = {}; try{ j = await r.json(); }catch(_){}
-          const parsed = parseWalletResponse(j);
-          try{
-            localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
-            writeCraftAll(Number(parsed.crafting)||0);
-            window.dispatchEvent(new Event('izza-coins-changed'));
-            window.dispatchEvent(new Event('izza-crafting-changed'));
-          }catch(_){}
-          paintCoinsHUD(readCoinsLS());
+          const j = await r.json().catch(()=> ({}));
+          const uname = (j.user && j.user.username) || j.username || j.handle || '';
+          if (uname) { U = publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
+            return true;
+          }
+        }
+        if (r && r.status === 401) {
+          location.href = withAuth('/izza-game/auth?dest=minigames');  // same auth page as Arena
+          throw new Error('redirecting');
+        }
+      }catch(e){
+        if (String(e.message)==='redirecting') throw e;
+      }
+      // If no OK session but not 401, still bounce to auth
+      location.href = withAuth('/izza-game/auth?dest=minigames');
+      throw new Error('redirecting');
+    }
+
+    /* -------- Persist readiness & snapshot -------- */
+    function waitForPersistReady({timeout=3000, interval=40} = {}){
+      return new Promise((res)=> {
+        const t0 = performance.now();
+        const check = () => {
+          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+          if (performance.now() - t0 > timeout) return res(false);
+          setTimeout(check, interval);
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
+        else check();
+      });
+    }
+    async function hydrateFromSnapshot(){
+      try{
+        await waitForPersistReady();
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+          await IZZA_PERSIST.load();  // server → LS
         }
       }catch(_){}
+      try{ writeCraftAll(readCraftAny()); }catch(_){}
+      return readCoinsLS();
+    }
 
-      // 5) Start overlay button
-      document.getElementById('startBtn').addEventListener('click', async ()=>{
-        // Re-hydrate once more just before game start
-        const coins = await hydrateFromSnapshot();
-        WALLET_READY = true; runStartCoins = coins;
-        document.getElementById('startOverlay').style.display='none';
-        startTimer(); requestAnimationFrame(loop);
-      }, {passive:true});
-    }catch(e){
-      if(String(e.message)!=='redirecting'){
-        console.error('Basketball init error', e);
+    /* -------- UI refs -------- */
+    const svg = document.getElementById('court');
+    const ball = document.getElementById('ball');
+    const hoop = document.getElementById('hoop');
+    const rim  = document.getElementById('rim');
+    const bigmsg = document.getElementById('bigmsg');
+    const arenaEl = document.getElementById('arena');
+
+    const scoreEl = document.getElementById('score');
+    const streakEl = document.getElementById('streak');
+    const timeEl = document.getElementById('time');
+    const coinsRunEl = document.getElementById('coinsRun');
+
+    let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
+    function toXY(cx, cy){
+      const vbW = 1100, vbH = 760;
+      const scale = H / vbH;
+      const drawnW = vbW * scale;
+      const leftCrop = Math.max(0, (drawnW - W) / 2);
+      return { x: cx * scale - leftCrop, y: cy * scale };
+    }
+
+    let game = {
+      x:550, y:700, vx:0, vy:0, r:76,
+      gravity:2300, drag:0.992,
+      launched:false, dragging:false,
+      score:0, goals:0,
+      timeLeft:60,
+      hoopX:390, hoopY:300, distanceStep:0,
+      timerId:null, ended:false,
+      creditsEarned:0,
+      spin:0, spinDecay:0.985,
+      noMissUntil:0
+    };
+
+    function setHoopDistance(){ hoop.setAttribute('transform', `translate(${game.hoopX}, ${game.hoopY}) scale(1.6)`); }
+    function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
+    function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
+    function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
+    function resetBall(){ if(game.ended) return; Object.assign(game,{ x:550, y:700, vx:0, vy:0, launched:false, dragging:false, spin:0 }); setBall(game.x, game.y); }
+
+    /* ---- Drag + flick (unchanged) ---- */
+    (function wireAim(){
+      const samples=[]; const MAX_WINDOW_MS=150; const POWER_SCALE=0.94; const MIN_UP_VY=-520;
+      let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
+      function addSample(pt){
+        const now=performance.now(), x=pt.clientX - startRect.left, y=pt.clientY - startRect.top;
+        samples.push({x,y,t:now}); while(samples.length && now - samples[0].t > 260) samples.shift();
+        if(game.dragging && !game.launched){
+          const dx=x - startPos.x, dy=y - startPos.y;
+          const pullMax=220; const d=Math.hypot(dx,dy); const k=d>pullMax ? pullMax/d : 1;
+          setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
+          const ang = Math.atan2(dy,dx);
+          if(lastAngle!=null){ let da = ang - lastAngle; if(da> Math.PI) da-=2*Math.PI; if(da<-Math.PI) da+=2*Math.PI; spinAccum += da; }
+          lastAngle = ang;
+        }
+      }
+      const start = (e)=>{
+        if(game.ended) return;
+        const pt=(e.touches?e.touches[0]:e);
+        const b=ball.getBoundingClientRect();
+        const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
+        if(!inside) return;
+        startRect=svg.getBoundingClientRect();
+        startPos={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top};
+        samples.length=0; lastAngle=null; spinAccum=0;
+        game.dragging=true; game.launched=false;
+        addSample(pt);
+      };
+      const move = (e)=>{ if(!game.dragging) return; addSample(e.touches?e.touches[0]:e); };
+      const end  = ()=>{ if(!game.dragging) return; game.dragging=false;
+        const now=performance.now(); while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
+        if(samples.length<2){ resetBall(); return; }
+        const a=samples[0], b=samples[samples.length-1], dt=Math.max(1,b.t-a.t)/1000;
+        let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt; if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
+        game.vx=vx*POWER_SCALE; game.vy=vy*POWER_SCALE;
+        const SPIN_THRESHOLD=0.60; game.spin = (Math.abs(spinAccum) > SPIN_THRESHOLD) ? spinAccum : 0;
+        game.launched=true;
+      };
+      svg.addEventListener('mousedown', start, {passive:true});
+      svg.addEventListener('mousemove', move, {passive:true});
+      window.addEventListener('mouseup', end, {passive:true});
+      svg.addEventListener('touchstart', start, {passive:true});
+      svg.addEventListener('touchmove', move, {passive:true});
+      svg.addEventListener('touchend', end, {passive:true});
+    })();
+
+    const TOP_OUT = -600;
+    const MISS_BAND_PX = 400;
+
+    function physics(dt){
+      if(!game.launched || game.ended) return;
+      game.vy += game.gravity*dt;
+      if(Math.abs(game.spin) > 0.001){
+        const side = Math.max(-900, Math.min(900, game.spin*260));
+        game.vx += (side * dt);
+        game.spin *= Math.pow(game.spinDecay, Math.max(1, dt*60));
+      }
+      game.vx *= game.drag; game.vy *= game.drag;
+      game.x += game.vx*dt; game.y += game.vy*dt;
+
+      if(game.x < 110){ game.x=110; game.vx*=-0.6; }
+      if(game.x > 990){ game.x=990; game.vx*=-0.6; }
+      if(game.y < TOP_OUT && performance.now() > game.noMissUntil){ quickMiss(); return; }
+
+      const floorY = toXY(0,720).y;
+      if(game.y>floorY){ game.y=floorY; game.vy=0; game.vx=0; game.launched=false; setTimeout(resetBall, 280); }
+
+      setBall(game.x, game.y);
+      checkHoopOrMiss();
+    }
+
+    function checkHoopOrMiss(){
+      const rimPt = rim.getBoundingClientRect();
+      const ballPt = ball.getBoundingClientRect();
+      const rx = rimPt.left + rimPt.width/2;
+      const ry = rimPt.top + rimPt.height/2;
+      const bx = ballPt.left + ballPt.width/2;
+      const by = ballPt.top + ballPt.height/2;
+      const rRing = rimPt.width/2;
+      const d = Math.hypot(bx-rx, by-ry);
+      const fudge = rRing * 0.18;
+
+      if(!game._scored && d < (rRing + fudge) && game.vy>0){
+        const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
+        scoreShot(swish);
+        game._scored = true;
+        game.noMissUntil = performance.now() + 350;
+        setTimeout(()=>{ game._scored=false; }, 300);
+        return;
+      }
+      if(game.launched && !game._scored && game.vy>0 && performance.now() > game.noMissUntil){
+        if (by > (ry + MISS_BAND_PX)){ quickMiss(); }
       }
     }
+
+    function quickMiss(){ if (game._scored || performance.now() < game.noMissUntil) return; game.launched=false; showMsg('MISS!', 'miss'); setTimeout(resetBall, 220); }
+
+    /* === Wallet / HUD === */
+    let walletDirty = false, WALLET_READY = false, runStartCoins = 0;
+
+    function paintCoinsHUD(n){
+      const val = Math.max(0, n|0);
+      if (coinsRunEl) coinsRunEl.textContent = String(val);
+    }
+    function updateCoinsHUD(){
+      if(!WALLET_READY) return;
+      const cur = readCoinsLS();
+      const shown = parseInt(coinsRunEl.textContent||'0',10) || 0;
+      const val = (cur===0 && shown>0) ? shown : cur;
+      paintCoinsHUD(val);
+    }
+    function syncCoinsHUD(){ updateCoinsHUD(); }
+
+    async function applyCoins(amount){
+      const cur = (readCoinsLS()|0) + (amount|0);
+      writeCoinsLS(cur);
+      walletDirty = true;
+      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
+      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
+      WALLET_READY = true; updateCoinsHUD(); return cur;
+    }
+
+    async function applyCraftDelta(delta){
+      const val = readCraftAny() + (delta|0);
+      writeCraftAll(val);
+      walletDirty = true;
+      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
+      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
+    }
+
+    async function scoreShot(swish){
+      const COINS_PER_GOAL = 200;
+      game.score += COINS_PER_GOAL; game.goals += 1;
+      await applyCoins(COINS_PER_GOAL);
+      const creditsNow = Math.floor(game.goals / 10);
+      if (creditsNow > game.creditsEarned){
+        game.creditsEarned = creditsNow; await applyCraftDelta(1); showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
+      } else {
+        showMsg(swish ? 'GOAL! +200' : 'SCORE! +200', swish ? 'scoreGlow' : '');
+      }
+      scoreEl.textContent = game.score; streakEl.textContent = game.goals; updateCoinsHUD();
+      setTimeout(resetBall, 260);
+    }
+
+    let lastT = performance.now();
+    function loop(t){
+      const dt = Math.min(0.033, (t - lastT) / 1000);
+      lastT = t; physics(dt);
+      if (!game.ended) requestAnimationFrame(loop);
+    }
+
+    async function persistWalletAndSave(){
+      try{
+        writeCraftAll(readCraftAny());
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ await IZZA_PERSIST.save(); walletDirty = false; }
+        else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
+      }catch(_){}
+    }
+
+    async function endRun(){
+      if (game.ended) return;
+      game.ended = true;
+      try{ if (game.timerId) clearInterval(game.timerId); }catch(_){}
+      game.launched = false; game.dragging = false;
+      const coinsNow = readCoinsLS();
+      const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
+      document.getElementById('finalScore').textContent = game.score;
+      document.getElementById('finalCoins').textContent = coinsAwarded;
+      document.getElementById('finalCraft').textContent = game.creditsEarned;
+      document.getElementById('finish').style.display = 'flex';
+      showMsg('Time!', 'miss');
+      try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 200))]); }catch(_){}
+    }
+
+    /* -------- Boot -------- */
+    function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
+    window.addEventListener('resize', onResize, {passive:true});
+    window.addEventListener('storage', (e)=>{
+      if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
+    });
+    window.addEventListener('izza-coins-changed', syncCoinsHUD);
+    window.addEventListener('izza-wallet-changed', syncCoinsHUD);
+    window.addEventListener('izza-crafting-changed', syncCoinsHUD);
+
+    document.addEventListener('visibilitychange', async () => {
+      if (document.hidden){
+        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
+      } else {
+        updateCoinsHUD();
+      }
+    });
+    window.addEventListener('pagehide', () => {
+      if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+        try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
+      }
+    });
+
+    // Defer auth + hydration to START click
+    document.getElementById('startBtn').addEventListener('click', async ()=>{
+      try{
+        await ensurePiAuthOrRedirect();               // ensures session or redirects
+        const localCoins = await hydrateFromSnapshot(); // persists → LS
+        // Authoritative wallet fetch
+        try{
+          const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
+          if (r.ok){
+            const parsed = parseWalletResponse(await r.json().catch(()=>({})));
+            try{
+              localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
+              writeCraftAll(Number(parsed.crafting)||0);
+              window.dispatchEvent(new Event('izza-coins-changed'));
+              window.dispatchEvent(new Event('izza-crafting-changed'));
+            }catch(_){}
+          }
+        }catch(_){}
+        WALLET_READY = true;
+        runStartCoins = readCoinsLS() || localCoins;
+        paintCoinsHUD(runStartCoins);
+
+        // hide overlay and start game
+        document.getElementById('startOverlay').style.display='none';
+        setHoopDistance(); resetBall();
+        startTimer(); requestAnimationFrame(loop);
+      }catch(e){
+        if (String(e.message)!=='redirecting') console.error('start failed', e);
+      }
+    }, {passive:true});
   })();
-})();
-</script>
+  </script>
 </body>
 </html>
