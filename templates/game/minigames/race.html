@@ -4,33 +4,38 @@
   <meta charset="utf-8">
   <title>Street Race — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-
-  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
+  <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
-
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    body{margin:0;background:#0a0c12;color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
-    .arena{position:relative;height:74vh;min-height:560px;border:1px solid rgba(255,255,255,.1);
-           border-radius:14px;background:#06080e;overflow:hidden}
-    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
-      background:rgba(0,0,0,.45);}
-    .card{background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:16px 18px;
-      display:flex;flex-direction:column;gap:10px;align-items:stretch; max-width:680px; width:min(92%,680px)}
-    .preview{height:160px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);font-weight:800}
-    .hud{position:absolute;top:10px;left:10px;z-index:6;color:white;font-size:12px}
-    .nitroBtn{position:absolute; right:10px; bottom:14px; z-index:7; border-radius:999px; border:1px solid rgba(255,255,255,.1);
-      background:#222; padding:10px 14px; font-weight:800; color:white}
+    :root { --bg:#0a0c12; --panel:#06080e; }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
+    .arena{position:relative; height:100vh; max-width:520px; margin:0 auto;
+           border-left:1px solid rgba(255,255,255,.08);
+           border-right:1px solid rgba(255,255,255,.08);
+           background:var(--panel); overflow:hidden}
+    .overlay{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:8;
+             background:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.35));}
+    .card{background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.18); border-radius:14px;
+          padding:16px 18px; display:flex; flex-direction:column; gap:10px; width:min(92%,440px)}
+    .preview{height:160px; border:1px dashed rgba(255,255,255,.18); border-radius:12px;
+             display:flex; align-items:center; justify-content:center; overflow:hidden}
+    .startBtn{padding:12px 16px; border-radius:10px; border:1px solid rgba(255,255,255,.1);
+              background:rgba(255,255,255,.08); font-weight:800; color:white}
+    .hud{position:absolute; top:8px; left:8px; right:8px; z-index:6; display:flex; justify-content:space-between; font-size:12px}
+    .nitroBtn{position:absolute; right:10px; bottom:14px; z-index:7; border-radius:999px;
+              border:1px solid rgba(255,255,255,.1); background:#222; padding:10px 14px; font-weight:800; color:white}
+    canvas{display:block; width:100%; height:100%}
   </style>
 </head>
 <body>
   <div class="arena" id="arena">
     <!-- HUD -->
     <div class="hud">
-      SPEED: <span id="speed">0</span> km/h |
-      DIST: <span id="dist">0</span> m |
-      COINS: <span id="coinsRun">0</span>
+      <div>SPEED: <span id="speed">0</span> km/h</div>
+      <div>DIST: <span id="dist">0</span> m</div>
+      <div>COINS: <span id="coinsRun">0</span></div>
     </div>
 
     <!-- Garage Overlay -->
@@ -38,7 +43,7 @@
       <div class="card">
         <h3>Street Race</h3>
         <div class="preview">
-          <img id="garageCar" src="/static/game/sprites/garage/coupe.png" alt="Car preview" style="height:100%"/>
+          <img id="garageCar" src="/static/game/sprites/player/coupe.png" alt="Car preview" style="height:100%"/>
         </div>
         <button id="startBtn" class="startBtn">START</button>
       </div>
@@ -48,62 +53,176 @@
     <button class="nitroBtn" id="nitroBtn">NITRO</button>
 
     <!-- Game Scene -->
-    <canvas id="scene" width="1100" height="760"></canvas>
+    <canvas id="scene"></canvas>
   </div>
 
-  <script>
-  (function(){
-    const canvas = document.getElementById('scene');
-    const ctx = canvas.getContext('2d');
-    let W = canvas.width, H = canvas.height;
+<script>
+(function(){
+  const arena = document.getElementById('arena');
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+  const HUD = {
+    speed: document.getElementById('speed'),
+    dist: document.getElementById('dist'),
+    coins: document.getElementById('coinsRun')
+  };
 
-    // Load sprites
-    const sprites = {
-      player: new Image(),
-      traffic: [new Image(), new Image()],
-      underglow: new Image(),
-      bg: new Image()
-    };
-    sprites.player.src = '/static/game/sprites/player/coupe.png';
-    sprites.traffic[0].src = '/static/game/sprites/traffic/red.png';
-    sprites.traffic[1].src = '/static/game/sprites/traffic/blue.png';
-    sprites.underglow.src = '/static/game/sprites/effects/underglow.png';
-    sprites.bg.src = '/static/game/sprites/tracks/night.png';
+  // --- Responsive portrait canvas ---
+  function resize() {
+    const w = arena.clientWidth;
+    const h = arena.clientHeight;
+    // match device pixels for crispness
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resize, {passive:true});
+  resize();
 
-    const state = {
-      running:false, ended:false,
-      speed:0, dist:0, px:0,
-      nitro:0, coins:0,
-      cars:[], items:[]
-    };
+  // --- Assets ---
+  const img = (src)=>{ const i=new Image(); i.src=src; return i; };
 
-    function draw(){
-      ctx.clearRect(0,0,W,H);
-      ctx.drawImage(sprites.bg,0,0,W,H);
-      ctx.save();
-      ctx.translate(W/2 + state.px*200, H-160);
-      ctx.drawImage(sprites.underglow,-120,40,240,40);
-      ctx.drawImage(sprites.player,-80,-40,160,80);
-      ctx.restore();
+  const sprites = {
+    player: img('/static/game/sprites/player/coupe.png'),
+    underglow: img('/static/game/sprites/effects/underglow.png'),
+    // Zone 1: 3x3 grid (9 frames). We’ll add zone2..4 later.
+    zone1: img('/static/game/sprites/tracks/night_zone1.png'),
+    // traffic (hooked later)
+    suv: img('/static/game/sprites/traffic/suv_sheet.png'),
+    sedan: img('/static/game/sprites/traffic/sedan_sheet.png'),
+  };
+
+  // --- Background sheet slicer (3x3) ---
+  const bg = {
+    img: sprites.zone1,
+    rows: 3, cols: 3,
+    index: 0,
+    y: 0,
+    speed: 260, // px/sec scroll
+    ready: false,
+    frameW: 0, frameH: 0
+  };
+
+  sprites.zone1.onload = ()=>{
+    bg.frameW = sprites.zone1.width / bg.cols;
+    bg.frameH = sprites.zone1.height / bg.rows;
+    bg.ready = true;
+  };
+
+  // --- Game state ---
+  const state = {
+    running:false, ended:false,
+    speed:0, dist:0,
+    px:0,        // -1..1 steering
+    nitro:0, coins:0,
+  };
+
+  // --- Input (tap left/right halves + arrows) ---
+  function onPointer(e){
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    state.px = (x < rect.width/2) ? -1 : 1;
+  }
+  function stopPointer(){ state.px = 0; }
+  canvas.addEventListener('pointerdown', onPointer);
+  canvas.addEventListener('pointermove', onPointer);
+  window.addEventListener('pointerup', stopPointer);
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') state.px=-1;
+    else if(e.key==='ArrowRight') state.px=1;
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.key==='ArrowLeft' || e.key==='ArrowRight') state.px=0;
+  });
+
+  // --- Drawing ---
+  function drawBackground(dt) {
+    if(!bg.ready) return;
+    const W = canvas.width / (window.devicePixelRatio||1);
+    const H = canvas.height / (window.devicePixelRatio||1);
+
+    // advance scroll
+    bg.y += bg.speed * dt;
+    // whenever a full screen passes, go to next frame (seamless)
+    while (bg.y >= H) {
+      bg.y -= H;
+      bg.index = (bg.index + 1) % (bg.rows * bg.cols);
     }
 
-    function loop(){
-      if(!state.running) return;
-      state.speed += (160 - state.speed)*0.1;
-      state.dist += state.speed/60;
-      document.getElementById('speed').textContent = Math.round(state.speed);
-      document.getElementById('dist').textContent = Math.round(state.dist);
-      document.getElementById('coinsRun').textContent = state.coins;
-      draw();
-      requestAnimationFrame(loop);
-    }
+    // compute current & next frames
+    const col = (idx)=> idx % bg.cols;
+    const row = (idx)=> Math.floor(idx / bg.cols);
+    const sx = (idx)=> col(idx) * bg.frameW;
+    const sy = (idx)=> row(idx) * bg.frameH;
 
-    document.getElementById('startBtn').addEventListener('click',()=>{
-      document.getElementById('startOverlay').style.display='none';
-      state.running=true; state.speed=30; state.dist=0;
-      loop();
-    });
-  })();
-  </script>
+    const nextIndex = (bg.index + 1) % (bg.rows * bg.cols);
+
+    // draw current frame (at y - H) and next frame (at y)
+    // apply slight horizontal offset from steering for parallax
+    const sway = state.px * 12; // pixels
+    ctx.drawImage(bg.img, sx(bg.index), sy(bg.index), bg.frameW, bg.frameH,
+                  sway, bg.y - H, W, H);
+    ctx.drawImage(bg.img, sx(nextIndex), sy(nextIndex), bg.frameW, bg.frameH,
+                  sway, bg.y, W, H);
+  }
+
+  function drawPlayer() {
+    const W = canvas.width / (window.devicePixelRatio||1);
+    const H = canvas.height / (window.devicePixelRatio||1);
+
+    const baseY = H * 0.78;
+    const baseX = W * 0.5 + state.px * 28; // steer
+    // underglow
+    const ugW = Math.min(W*0.7, 420), ugH = ugW*0.25;
+    ctx.save();
+    ctx.translate(baseX, baseY);
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(sprites.underglow, -ugW/2, -ugH/2, ugW, ugH);
+    ctx.restore();
+
+    // car
+    const carW = Math.min(W*0.6, 320), carH = carW * 0.5;
+    ctx.drawImage(sprites.player, baseX - carW/2, baseY - carH*0.95, carW, carH);
+  }
+
+  function draw(dt){
+    // clear
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawBackground(dt);
+    drawPlayer();
+    // HUD
+    HUD.speed.textContent = Math.round(state.speed);
+    HUD.dist.textContent = Math.round(state.dist);
+    HUD.coins.textContent = state.coins;
+  }
+
+  // --- Loop ---
+  let last = performance.now();
+  function loop(now){
+    if(!state.running) return;
+    const dt = Math.min(0.033, (now - last)/1000); // cap delta
+    last = now;
+
+    // simple accel to target speed
+    const target = 180 + (state.nitro>0 ? 120 : 0);
+    state.speed += (target - state.speed) * 0.08;
+    state.dist += state.speed * dt;
+    draw(dt);
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click',()=>{
+    document.getElementById('startOverlay').style.display='none';
+    state.running = true;
+    state.speed = 60; state.dist = 0;
+    last = performance.now();
+    loop(last);
+  });
+
+})();
+</script>
 </body>
 </html>
