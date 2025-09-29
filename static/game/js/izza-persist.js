@@ -28,24 +28,24 @@
     }catch{ return { coins:0, items:{}, ammo:{} }; }
   }
   function readCraftingCredits(){
-  try{
-    // LS aliases used by the crafting UI
-    const a = localStorage.getItem('izzaCrafting');
-    const b = localStorage.getItem('craftingCredits');
-    const c = localStorage.getItem('izzaCraftCredits');
-
-    // Cookie (cross-subdomain mirror)
-    let ck = 0;
     try{
-      const m = document.cookie.split('; ').find(s => s.startsWith('izzaCrafting='));
-      if (m) ck = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0;
-    }catch{}
+      // LS aliases used by the crafting UI
+      const a = localStorage.getItem('izzaCrafting');
+      const b = localStorage.getItem('craftingCredits');
+      const c = localStorage.getItem('izzaCraftCredits');
 
-    const nums = [a,b,c].map(v => parseInt(v||'0',10) || 0);
-    nums.push(ck);
-    return Math.max(...nums, 0)|0;
-  }catch{ return 0; }
-}
+      // Cookie (cross-subdomain mirror)
+      let ck = 0;
+      try{
+        const m = document.cookie.split('; ').find(s => s.startsWith('izzaCrafting='));
+        if (m) ck = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0;
+      }catch{}
+
+      const nums = [a,b,c].map(v => parseInt(v||'0',10) || 0);
+      nums.push(ck);
+      return Math.max(...nums, 0)|0;
+    }catch{ return 0; }
+  }
   function readInventory(){
     try{
       if (window.IZZA?.api?.getInventory) return JSON.parse(JSON.stringify(IZZA.api.getInventory()||{}));
@@ -92,31 +92,32 @@
 
   // ---------- snapshot builder ----------
   function buildSnapshot(){
-  const u      = userKey();
-  const bank   = readBank(u);
-  const inv    = readInventory();
-  const onHand = readCoinsOnHand();
-  const pos    = readPlayerXY();
-  const heartsSegs = readHeartsSegs();
-  const missions   = readMissions();
-  const missionState = IZZA?.api?.getMissionState
-    ? IZZA.api.getMissionState()
-    : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
+    const u      = userKey();
+    const bank   = readBank(u);
+    const inv    = readInventory();
+    const onHand = readCoinsOnHand();
+    const pos    = readPlayerXY();
+    const heartsSegs = readHeartsSegs();
+    const missions   = readMissions();
+    const missionState = IZZA?.api?.getMissionState
+      ? IZZA.api.getMissionState()
+      : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
 
-  const craftingCredits = readCraftingCredits();   // <-- move here
+    const craftingCredits = readCraftingCredits(); // already computed
 
-  return {
-    version: 1,
-    player: { x: pos.x|0, y: pos.y|0, heartsSegs },
-    coins: onHand|0,
-    missions: missions|0,
-    missionState: missionState || {},
-    inventory: inv || {},
-    bank: bank || { coins:0, items:{}, ammo:{} },
-    craftingCredits: craftingCredits|0,            // <-- included
-    timestamp: Date.now()
-  };
-}
+    return {
+      version: 1,
+      player: { x: pos.x|0, y: pos.y|0, heartsSegs },
+      coins: onHand|0,
+      missions: missions|0,
+      missionState: missionState || {},
+      inventory: inv || {},
+      bank: bank || { coins:0, items:{}, ammo:{} },
+      craftingCredits: craftingCredits|0,
+      timestamp: Date.now()
+    };
+  }
+
   // ---- hydrate missions from server + keep all counters in sync
   function applyServerMissions(seed){
     try{
@@ -171,16 +172,26 @@
         }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
 
-      // WALLET COINS (on-hand)
+      // WALLET COINS (on-hand) — take the GREATER of local vs server, then push up later if local won
       if (Number.isFinite(seed.coins)){
         try{
-          if (IZZA?.api?.setCoins) IZZA.api.setCoins(seed.coins|0);
-          else localStorage.setItem('izzaCoins', String(seed.coins|0));
+          const local = readCoinsOnHand()|0;
+          const serverVal = seed.coins|0;
+          const maxVal = Math.max(local, serverVal)|0;
+
+          if (IZZA?.api?.setCoins) IZZA.api.setCoins(maxVal);
+          else localStorage.setItem('izzaCoins', String(maxVal));
+
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+
+          // If local was higher, schedule a save to lift the server snapshot
+          if (local > serverVal){
+            tryKick('coins-raise');
+          }
         }catch(e){ console.warn('[persist] coins hydrate failed', e); }
       }
 
-      // BANK (per-user key)
+      // BANK (per-user key) — server is source of truth (leave as-is)
       if (seed.bank && typeof seed.bank === 'object'){
         try{
           const u = userKey();
@@ -193,33 +204,38 @@
         }catch(e){ console.warn('[persist] bank hydrate failed', e); }
       }
 
-      // CRAFTING CREDITS — mirror to all aliases + cookie, fire event
-if (Number.isFinite(seed.craftingCredits)){
-  try{
-    const n = Math.max(0, seed.craftingCredits|0);
-    // If the crafting UI helper exists, let it do the writes (also sets cookie + event)
-    if (typeof window.setCraftingCredits === 'function'){
-      window.setCraftingCredits(n);
-    } else {
-      // Manual mirror (aliases)
-      localStorage.setItem('izzaCrafting',     String(n));
-      localStorage.setItem('craftingCredits',  String(n));
-      localStorage.setItem('izzaCraftCredits', String(n));
-      // Cookie mirror (one year)
-      try{
-        const v = encodeURIComponent(String(n));
-        const base = `izzaCrafting=${v}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
-        document.cookie = base;
-        if (location.hostname.endsWith('.onrender.com')){
-          document.cookie = `izzaCrafting=${v}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
-        }
-      }catch{}
-      try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
-    }
-  }catch(e){ console.warn('[persist] credits hydrate failed', e); }
-}
+      // CRAFTING CREDITS — GREATER of local mirrors/cookie vs server, mirror to all
+      if (Number.isFinite(seed.craftingCredits)){
+        try{
+          const localCC = readCraftingCredits()|0;
+          const serverCC = seed.craftingCredits|0;
+          const n = Math.max(localCC, serverCC)|0;
 
-      // HEARTS (segments) — write BOTH keys (namespaced + global) to beat other plugins
+          if (typeof window.setCraftingCredits === 'function'){
+            window.setCraftingCredits(n);
+          } else {
+            localStorage.setItem('izzaCrafting',     String(n));
+            localStorage.setItem('craftingCredits',  String(n));
+            localStorage.setItem('izzaCraftCredits', String(n));
+            // Cookie mirror (one year)
+            try{
+              const v = encodeURIComponent(String(n));
+              const base = `izzaCrafting=${v}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+              document.cookie = base;
+              if (location.hostname.endsWith('.onrender.com')){
+                document.cookie = `izzaCrafting=${v}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+              }
+            }catch{}
+            try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch{}
+          }
+
+          if (localCC > serverCC){
+            tryKick('craft-credits-raise');
+          }
+        }catch(e){ console.warn('[persist] credits hydrate failed', e); }
+      }
+
+      // HEARTS (segments)
       if (seed.player && seed.player.heartsSegs != null){
         try{
           const segs = seed.player.heartsSegs|0;
@@ -231,7 +247,7 @@ if (Number.isFinite(seed.craftingCredits)){
         }catch(e){ console.warn('[persist] hearts hydrate failed', e); }
       }
 
-      // PLAYER POSITION (best-effort) — set player + camera, then teleport if available
+      // PLAYER POSITION
       if (seed.player && Number.isFinite(seed.player.x) && Number.isFinite(seed.player.y)){
         const tx = seed.player.x|0, ty = seed.player.y|0;
         try{
@@ -261,20 +277,20 @@ if (Number.isFinite(seed.craftingCredits)){
 
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   function looksEmpty(s){
-  try{
-    if (!s || typeof s!=='object') return true;
-    const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
-    const bankEmpty = !s.bank || (
-      ((s.bank.coins|0)===0) &&
-      (!s.bank.items || !Object.keys(s.bank.items).length) &&
-      (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
-    );
-    const walletZero   = (s.coins|0)===0;
-    const heartsUnknown= (s.player?.heartsSegs==null);
-    const creditsZero  = (s.craftingCredits|0)===0; // <— NEW
-    return walletZero && bankEmpty && invEmpty && heartsUnknown && creditsZero;
-  }catch{ return true; }
-}
+    try{
+      if (!s || typeof s!=='object') return true;
+      const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
+      const bankEmpty = !s.bank || (
+        ((s.bank.coins|0)===0) &&
+        (!s.bank.items || !Object.keys(s.bank.items).length) &&
+        (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
+      );
+      const walletZero   = (s.coins|0)===0;
+      const heartsUnknown= (s.player?.heartsSegs==null);
+      const creditsZero  = (s.craftingCredits|0)===0; // <— NEW
+      return walletZero && bankEmpty && invEmpty && heartsUnknown && creditsZero;
+    }catch{ return true; }
+  }
 
   const Persist = {
     async load(){
@@ -453,7 +469,7 @@ if (Number.isFinite(seed.craftingCredits)){
   window.addEventListener('izza-hearts-changed',   ()=> tryKick('hearts'));
   window.addEventListener('izza-missions-changed', ()=> tryKick('missions'));
   window.addEventListener('izza-crafting-changed', ()=> tryKick('craft-credits'));
-  window.addEventListener('izza-credits-changed', ()=> tryKick('craft-credits-core'));
+  window.addEventListener('izza-credits-changed',  ()=> tryKick('craft-credits-core'));
   if (window.IZZA?.on) {
     IZZA.on('missions-updated', ()=> tryKick('missions'));
   }
@@ -470,16 +486,16 @@ if (Number.isFinite(seed.craftingCredits)){
 
   // Also react if another tab changes the hearts LS key
   window.addEventListener('storage', (e)=>{
-  const u=userKey();
-  if (e && (e.key===`izzaCurHeartSegments_${u}` || e.key==='izzaCurHeartSegments')){
-    _lastHearts = readHeartsSegs();
-    tryKick('hearts-storage');
-  }
-  // Crafting credits mirrors
-  if (e && (e.key==='izzaCrafting' || e.key==='craftingCredits' || e.key==='izzaCraftCredits')){
-    tryKick('craft-credits-storage');
-  }
-});
+    const u=userKey();
+    if (e && (e.key===`izzaCurHeartSegments_${u}` || e.key==='izzaCurHeartSegments')){
+      _lastHearts = readHeartsSegs();
+      tryKick('hearts-storage');
+    }
+    // Crafting credits mirrors
+    if (e && (e.key==='izzaCrafting' || e.key==='craftingCredits' || e.key==='izzaCraftCredits')){
+      tryKick('craft-credits-storage');
+    }
+  });
 
   // periodic poll remains
   setInterval(()=> tryKick('poll'), 5000);
