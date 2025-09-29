@@ -24,11 +24,7 @@
           window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
           window.izzaUserKey = { get: () => u };
           try { localStorage.setItem('izzaUserU', u); } catch(_){}
-          try {
-            if (!localStorage.getItem('piAuthUser')) {
-              localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
-            }
-          } catch(_){}
+          try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
         }
       }catch(_){}
     })();
@@ -94,7 +90,6 @@
     .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
       background:radial-gradient(80% 70% at 50% 20%, rgba(0,0,0,0) 50%, rgba(0,0,0,.35) 100%);}
 
-    /* mobile ergonomics */
     @media (max-width:700px){
       .seg .chip{padding:8px 12px}
       .preview{height:140px}
@@ -170,7 +165,6 @@
               </defs>
               <rect x="0" y="0" width="600" height="200" fill="url(#bgPrev)"></rect>
               <g id="carPreview" transform="translate(80,70)">
-                <!-- body shape swaps by data-body -->
                 <g id="bodyCoupe" filter="url(#softShadow)">
                   <path id="bodyCoupePaint" d="M20 40 q40 -34 130 -34 h80 q46 0 78 26 q24 18 30 42 l4 14 q-6 12 -38 12 h-260 q-16 0 -24 -6 q-10 -8 0 -22 z" fill="#00d1ff"/>
                   <rect x="110" y="18" width="120" height="22" rx="6" fill="black" opacity=".7"/>
@@ -186,14 +180,11 @@
                   <rect x="130" y="20" width="126" height="24" rx="6" fill="black" opacity=".7"/>
                   <path d="M138 20 h116 l10 16 h-136 z" fill="url(#shine)"/>
                 </g>
-                <!-- wheels -->
                 <g id="wheels">
                   <circle cx="90" cy="84" r="16" fill="#111" stroke="#444" stroke-width="4"/>
                   <circle cx="270" cy="84" r="16" fill="#111" stroke="#444" stroke-width="4"/>
                 </g>
-                <!-- underglow -->
                 <ellipse id="underglow" cx="180" cy="98" rx="110" ry="10" fill="#00f5ff" opacity=".35" style="display:block"/>
-                <!-- avatar bubble in cockpit -->
                 <g id="avatarBubble" transform="translate(225,10)">
                   <circle cx="0" cy="0" r="12" fill="#0a0b12" stroke="rgba(255,255,255,.25)"/>
                   <text id="avatarInitPrev" x="0" y="5" text-anchor="middle" font-size="12" fill="#e8eef7" font-weight="900">U</text>
@@ -214,7 +205,6 @@
       <!-- Scene SVG (the game) -->
       <svg id="scene" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Track">
         <defs>
-          <!-- Common filters/gradients -->
           <filter id="glowCyan"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
           <linearGradient id="roadGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#2a2f39"/><stop offset="100%" stop-color="#1b1f27"/>
@@ -233,11 +223,7 @@
               <stop offset="0%" stop-color="#0f1631"/><stop offset="100%" stop-color="#06101a"/>
             </linearGradient>
           </defs>
-          <!-- Neon skyline -->
-          <g id="skylineNight" opacity=".9">
-            <g id="towersN"></g>
-          </g>
-          <!-- floating signs -->
+          <g id="skylineNight" opacity=".9"><g id="towersN"></g></g>
           <g id="signsN"></g>
         </g>
 
@@ -250,19 +236,12 @@
           <g id="sceneryDay"></g>
         </g>
 
-        <!-- ROAD (perspective) -->
+        <!-- ROAD -->
         <g id="roadGroup">
-          <!-- shoulders -->
           <polygon id="leftGrass" points="0,760 300,420 340,420 0,760" fill="#0b3a1f" opacity=".8"></polygon>
           <polygon id="rightGrass" points="1100,760 800,420 760,420 1100,760" fill="#0b3a1f" opacity=".8"></polygon>
-
-          <!-- asphalt -->
           <polygon id="road" points="340,420 760,420 1100,760 0,760" fill="url(#roadGrad)"></polygon>
-
-          <!-- lane lines (procedurally moved) -->
           <g id="lanes"></g>
-
-          <!-- boost pads -->
           <g id="boostPads"></g>
         </g>
 
@@ -270,25 +249,20 @@
         <g id="traffic"></g>
         <g id="pickups"></g>
 
-        <!-- PLAYER CAR -->
+        <!-- PLAYER CAR (side view kept for player only) -->
         <g id="player" transform="translate(550,640) scale(1)">
           <g id="carShadow"><ellipse cx="0" cy="42" rx="90" ry="18" fill="black" opacity=".35"/></g>
           <g id="carBody">
-            <!-- body shell (updates with garage) -->
             <path id="carPaint" d="M-160 0 q90 -58 220 -58 h120 q62 0 110 34 q28 20 34 40 l6 16 q-6 22 -56 22 h-400 q-24 0 -34 -10 q-12 -12 0 -26 z" fill="#00d1ff"/>
-            <!-- glass -->
             <rect x="-10" y="-34" width="170" height="32" rx="8" fill="rgba(0,0,0,.7)"/>
-            <!-- wheels -->
             <g id="carWheels">
               <circle cx="-70" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
               <circle cx="130" cy="48" r="22" fill="#111" stroke="#444" stroke-width="6"/>
             </g>
-            <!-- avatar bubble -->
             <g id="avatarBubbleRace" transform="translate(64,-18)">
               <circle cx="0" cy="0" r="14" fill="#0a0b12" stroke="rgba(255,255,255,.25)"/>
               <text id="avatarInit" x="0" y="5" text-anchor="middle" font-size="14" fill="#e8eef7" font-weight="900">U</text>
             </g>
-            <!-- underglow -->
             <ellipse id="carGlow" cx="20" cy="68" rx="140" ry="18" fill="#00f5ff" opacity=".30" filter="url(#glowCyan)"/>
           </g>
         </g>
@@ -309,7 +283,7 @@
 
   <script>
   (function(){
-    /* -------- t & u params / links (EXACT COPY BEHAVIOR from Basketball) -------- */
+    /* -------- t & u params / links (same as Basketball) -------- */
     const T_KEY='izzaTokenT', U_KEY='izzaUserU';
     const urlParams = new URLSearchParams(location.search);
     let T = urlParams.get('t') || '';
@@ -353,7 +327,7 @@
     document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
 
-    /* -------- helpers (COPY) -------- */
+    /* -------- helpers -------- */
     function bearerHeaders(base = {}) {
       const headers = Object.assign({ 'content-type':'application/json' }, base || {});
       try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
@@ -374,7 +348,7 @@
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
-    /* -------- Handoff from Arena (COPY) -------- */
+    /* -------- Handoff from Arena -------- */
     function consumeWalletHandoff(maxAgeMs = 120000){
       try{
         const raw = sessionStorage.getItem('izzaWalletHandoff');
@@ -395,7 +369,7 @@
       }catch(_){ return null; }
     }
 
-    /* -------- Hidden City iframe (COPY) -------- */
+    /* -------- Hidden City iframe -------- */
     function primeViaCityIframe({maxWaitMs=8000, pollMs=120} = {}){
       return new Promise((resolve)=>{
         let f=null, done=false, hard=null, poll=null;
@@ -421,7 +395,7 @@
       });
     }
 
-    /* -------- Persist readiness & snapshot (COPY) -------- */
+    /* -------- Persist readiness & snapshot -------- */
     function waitForPersistReady({timeout=3000, interval=40} = {}){
       return new Promise((res)=> {
         const t0 = performance.now();
@@ -445,7 +419,7 @@
       return readCoinsLS();
     }
 
-    /* -------- Optional: best-effort session check (COPY) -------- */
+    /* -------- Optional: best-effort session check -------- */
     async function ensureSession(){
       try{
         const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
@@ -482,6 +456,9 @@
     const avatarInitPrev = document.getElementById('avatarInitPrev');
     const avatarInit = document.getElementById('avatarInit');
 
+    /* Paint HUD coins immediately from LS so it never flashes 0 */
+    try { coinsRunEl.textContent = String(Math.max(0, readCoinsLS()||0)); } catch(_){}
+
     // Garage UI toggles
     function segToggle(groupId, attr, onPick){
       const seg = document.getElementById(groupId);
@@ -493,11 +470,8 @@
       }, {passive:true});
     }
 
-    let settings = {
-      track:'night', body:'coupe', paint:'#00d1ff', glow:'#00f5ff'
-    };
+    let settings = { track:'night', body:'coupe', paint:'#00d1ff', glow:'#00f5ff' };
 
-    // Garage binders
     segToggle('trackSeg', 'track', (d)=>{ settings.track = d.track; updateTrackPreview(); });
     segToggle('carSeg',   'body',  (d)=>{ settings.body  = d.body;  updateCarPreview(); });
     segToggle('paintSeg', 'paint', (d)=>{ settings.paint = d.paint; updateCarPreview(); });
@@ -512,12 +486,8 @@
     avatarInitPrev.textContent = avatarInit.textContent;
 
     function updateCarPreview(){
-      // hide/show body variants
-      [
-        ['coupe','bodyCoupe','bodyCoupePaint'],
-        ['hatch','bodyHatch','bodyHatchPaint'],
-        ['muscle','bodyMuscle','bodyMusclePaint']
-      ].forEach(([key,gid,pid])=>{
+      [['coupe','bodyCoupe','bodyCoupePaint'],['hatch','bodyHatch','bodyHatchPaint'],['muscle','bodyMuscle','bodyMusclePaint']]
+      .forEach(([key,gid,pid])=>{
         const g = document.getElementById(gid), p = document.getElementById(pid);
         g.style.display = (settings.body===key)?'block':'none';
         if (p) p.setAttribute('fill', settings.paint);
@@ -525,7 +495,6 @@
       const ug = document.getElementById('underglow');
       if (settings.glow==='none'){ ug.style.display='none'; }
       else { ug.style.display='block'; ug.setAttribute('fill', settings.glow); }
-      // main car
       carPaint.setAttribute('fill', settings.paint);
       if (settings.glow==='none'){ carGlow.style.display='none'; }
       else { carGlow.style.display='block'; carGlow.setAttribute('fill', settings.glow); }
@@ -550,10 +519,9 @@
       if (!e.touches || !e.touches[0]) return;
       const t=e.touches[0];
       const mid = W/2;
-      // relative steer based on position in lower half
       const rect = arenaEl.getBoundingClientRect();
       const y = t.clientY-rect.top;
-      if (y < H*0.35) return; // ignore top half for steering
+      if (y < H*0.35) return;
       const x = t.clientX-rect.left;
       input.steer = Math.max(-1, Math.min(1, ((x - mid) / (W*0.45))));
       e.preventDefault();
@@ -565,20 +533,18 @@
     window.addEventListener('mouseup', ()=>{ input.nitro=false; });
 
     /* -------- Game state -------- */
-    const L = { left: 340, right: 760, yHorizon: 420 }; // road near/top
-    function laneX(norm){ // -1..+1 across road width
-      const w = (L.right - L.left);
-      return L.left + (norm*0.5 + 0.5) * w;
-    }
+    const L = { left: 340, right: 760, yHorizon: 420 };
+    function laneX(norm){ const w = (L.right - L.left); return L.left + (norm*0.5 + 0.5) * w; }
 
     let game = {
-      running:false, ended:false, timerId:null,
-      px: 0, // -1..1 lateral
-      speed: 0, // km/h visual
-      z: 0, // distance meters
+      running:false, ended:false,
+      px: 0,
+      speed: 0,
+      z: 0,
       combo:0, nitro:0, nitroMax:100, nitroActive:false,
       coinsEarned:0, craftEarned:0,
-      laneMarks:[], cars:[], pads:[], items:[]
+      laneMarks:[], cars:[], pads:[], items:[],
+      lastSpawnByLane: { '-0.8':-999, '-0.25':-999, '0.25':-999, '0.8':-999 }
     };
 
     /* ---- Procedural background ---- */
@@ -618,7 +584,6 @@
         towersD.appendChild(g);
       }
       const scenery = document.getElementById('sceneryDay'); scenery.innerHTML='';
-      // construction cones
       for(let i=0;i<6;i++){
         const x = 200 + i*130;
         scenery.innerHTML += `<g opacity=".9">
@@ -626,32 +591,17 @@
           <rect x="${x+4}" y="${L.yHorizon-10}" width="8" height="3" fill="#fff"/>
         </g>`;
       }
-      // golf flags
-      for(let i=0;i<3;i++){
-        const x = 120 + i*320;
-        scenery.innerHTML += `<g opacity=".9">
-          <circle cx="${x}" cy="${L.yHorizon+40}" r="18" fill="#4abf4a"/>
-          <rect x="${x+2}" y="${L.yHorizon-10}" width="2" height="30" fill="#555"/>
-          <polygon points="${x+4},${L.yHorizon-6} ${x+24},${L.yHorizon-12} ${x+4},${L.yHorizon-18}" fill="#ff3b3b"/>
-        </g>`;
-      }
     }
     seedNight(); seedDay();
 
-    /* ---- Road lane marks ---- */
+    /* ---- Lane marks ---- */
     function makeLaneMark(y){
       const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-      // three dashed stripes down the center lanes
-      const parts = [-0.5, 0, 0.5];
-      parts.forEach(p=>{
-        const x = laneX(p);
-        const h = 40;
-        const w = 6;
+      [-0.5, 0, 0.5].forEach(p=>{
+        const x = laneX(p), h=40, w=6;
         const r = document.createElementNS('http://www.w3.org/2000/svg','rect');
-        r.setAttribute('x', x - w/2);
-        r.setAttribute('y', y);
-        r.setAttribute('width', w);
-        r.setAttribute('height', h);
+        r.setAttribute('x', x - w/2); r.setAttribute('y', y);
+        r.setAttribute('width', w);    r.setAttribute('height', h);
         r.setAttribute('fill', 'url(#laneFade)');
         g.appendChild(r);
       });
@@ -660,42 +610,51 @@
     }
     for(let i=0;i<12;i++){ game.laneMarks.push(makeLaneMark(460 + i*60)); }
 
-    function projectY(y){ // y in 420..760 -> perspective scale
-      // used to move objects forward (downscreen)
-      return y;
+        /* ---- Entities (top-down look) ---- */
+    function makeTrafficCar(color){
+      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+      // top-down capsule body (tall in Y so it reads as pointing forward)
+      g.innerHTML = `
+        <ellipse cx="0" cy="34" rx="22" ry="8" fill="black" opacity=".25"/>
+        <rect x="-18" y="-36" width="36" height="72" rx="14" fill="${color}" />
+        <rect x="-12" y="-34" width="24" height="6" rx="3" fill="#cfe9ff" opacity=".8"/>
+        <rect x="-10" y="26"  width="20" height="6" rx="3" fill="#ffdf7a" opacity=".9"/>
+        <rect x="-10" y="-16" width="20" height="32" rx="6" fill="rgba(0,0,0,.25)"/>
+      `;
+      return g;
     }
 
-    /* ---- Entities ---- */
     function spawnTraffic(){
-      // choose lane -1,0,1 and far y above horizon
-      const lane = [-0.8,-0.25,0.25,0.8][Math.floor(Math.random()*4)];
-      const speed = 60 + Math.random()*80; // km/h
+      const lanes = [-0.8,-0.25,0.25,0.8];
+      const lane = lanes[Math.floor(Math.random()*lanes.length)];
+      const y = L.yHorizon + 30;
+
+      // lane safety so spawns aren't stacked
+      const lastY = game.lastSpawnByLane[String(lane)] || -999;
+      if (y - lastY < 260) return null;
+      game.lastSpawnByLane[String(lane)] = y;
+
       const color = ['#ff5470','#7dd3fc','#ffd36b','#a8ff72','#ffffff'][Math.floor(Math.random()*5)];
-      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-      g.innerHTML = `
-        <ellipse cx="0" cy="40" rx="54" ry="12" fill="black" opacity=".3"/>
-        <rect x="-70" y="-6" width="140" height="20" rx="6" fill="rgba(0,0,0,.7)"/>
-        <path d="M-120 12 q60 -40 150 -40 h80 q48 0 84 24 q22 16 26 34 l4 12 q-8 18 -50 18 h-280 q-22 0 -30 -10 q-10 -12 0 -26 z" fill="${color}"/>
-        <circle cx="-60" cy="54" r="18" fill="#111" stroke="#444" stroke-width="5"/>
-        <circle cx="100" cy="54" r="18" fill="#111" stroke="#444" stroke-width="5"/>
-      `;
+      const g = makeTrafficCar(color);
       trafficG.appendChild(g);
-      return {g, lane, y:L.yHorizon+30, speed, alive:true};
+      return { g, lane, y, speed: 80 + Math.random()*50, alive:true };
     }
 
     function spawnPad(){
       const lane = [-0.8,-0.25,0.25,0.8][Math.floor(Math.random()*4)];
-      const y=L.yHorizon+20;
+      const y = L.yHorizon + 20;
       const pad = document.createElementNS('http://www.w3.org/2000/svg','g');
-      pad.innerHTML = `<ellipse cx="0" cy="60" rx="80" ry="14" fill="#00f5ff" opacity=".35" filter="url(#glowCyan)"/>
-                       <rect x="-30" y="40" width="60" height="6" rx="3" fill="#93ffff"/>`;
+      pad.innerHTML = `
+        <ellipse cx="0" cy="60" rx="90" ry="16" fill="#00f5ff" opacity=".35" filter="url(#glowCyan)"/>
+        <rect x="-34" y="42" width="68" height="7" rx="4" fill="#93ffff"/>
+      `;
       padsG.appendChild(pad);
-      return {g:pad, lane, y, alive:true};
+      return { g: pad, lane, y, alive:true };
     }
 
     function spawnPickup(){
       const lane = [-0.8,-0.25,0.25,0.8][Math.floor(Math.random()*4)];
-      const coin = Math.random()<0.7;
+      const coin = Math.random() < 0.8; // easy mode: mostly coins
       const g = document.createElementNS('http://www.w3.org/2000/svg','g');
       if (coin){
         g.innerHTML = `<circle cx="0" cy="40" r="12" fill="#ffd36b" stroke="#a97b1f" stroke-width="3"/>`;
@@ -703,13 +662,22 @@
         g.innerHTML = `<rect x="-10" y="28" width="20" height="24" rx="4" fill="#00a6ff"/><rect x="-8" y="30" width="16" height="6" rx="2" fill="#93ffff"/>`;
       }
       pickupsG.appendChild(g);
-      return {g, lane, y:L.yHorizon+24, type: coin ? 'coin':'nitro', alive:true};
+      return { g, lane, y: L.yHorizon + 24, type: coin ? 'coin':'nitro', alive:true };
     }
 
-    /* ---- Wallet / HUD (COPY + non-regression) ---- */
+    /* ---- Wallet / HUD (same behavior as Basketball; no regress) ---- */
     let walletDirty = false, WALLET_READY = false, runStartCoins = 0;
-    function paintCoinsHUD(n){ const val = Math.max(0, n|0); if (coinsRunEl) coinsRunEl.textContent = String(val); }
-    function updateCoinsHUD(){ if(!WALLET_READY) return; const cur=readCoinsLS(); const shown=parseInt(coinsRunEl.textContent||'0',10)||0; paintCoinsHUD((cur===0&&shown>0)?shown:cur); }
+
+    function paintCoinsHUD(n){
+      const val = Math.max(0, n|0);
+      if (coinsRunEl) coinsRunEl.textContent = String(val);
+    }
+    function updateCoinsHUD(){
+      if(!WALLET_READY) return;
+      const cur = readCoinsLS();
+      const shown = parseInt(coinsRunEl.textContent||'0',10)||0;
+      paintCoinsHUD((cur===0 && shown>0) ? shown : cur);
+    }
     function syncCoinsHUD(){ updateCoinsHUD(); }
 
     async function applyCoins(amount){
@@ -726,7 +694,6 @@
       try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
       try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
     }
-
     async function persistWalletAndSave(){
       try{
         writeCraftAll(readCraftAny());
@@ -738,52 +705,44 @@
     /* ---- Scoring ---- */
     function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
     function addDistanceScore(dMeters){
-      // 1 coin every 10m baseline, more via pickups & near-miss combos
-      const coins = Math.floor(dMeters/10);
+      // Easy mode: 1 coin every 6m
+      const coins = Math.floor(dMeters/6);
       if (coins>0){ applyCoins(coins); game.coinsEarned += coins; }
     }
-
     function onNearMiss(){
       game.combo++;
-      if (game.combo%3===0){ // streak bonus
-        game.nitro = Math.min(game.nitroMax, game.nitro + 15);
+      if (game.combo%2===0){ // easier, more nitro
+        game.nitro = Math.min(game.nitroMax, game.nitro + 20);
         showMsg('NEAR MISS +NITRO', 'scoreGlow');
       }
     }
-
     function pickup(item){
       if(item.type==='coin'){
-        applyCoins(50); game.coinsEarned += 50; showMsg('+50 COINS','scoreGlow');
+        applyCoins(30); game.coinsEarned += 30; showMsg('+30 COINS','scoreGlow');
       }else{
-        game.nitro = Math.min(game.nitroMax, game.nitro + 40);
-        showMsg('NITRO +40','scoreGlow');
+        game.nitro = Math.min(game.nitroMax, game.nitro + 50);
+        showMsg('NITRO +50','scoreGlow');
       }
     }
+    function useNitro(active){ game.nitroActive = active && game.nitro>0; }
 
-    function useNitro(active){
-      game.nitroActive = active && game.nitro>0;
-    }
-
-    /* ---- Loop ---- */
+    /* ---- Loop (easier, forward-only traffic, smaller crash box) ---- */
     let lastT = performance.now();
     function loop(t){
       if(!game.running) return;
       const dt = Math.min(0.033, (t - lastT)/1000); lastT=t;
 
-      // steering & speed
-      const targetSpeed = game.nitroActive ? 260 : 190; // km/h
-      game.speed += (targetSpeed - game.speed) * (game.nitroActive ? 0.25 : 0.15);
-      if (!input.touching) game.px *= 0.90; // auto-centre
-      else game.px += input.steer * 0.04;
+      // speed & steering (easy)
+      const targetSpeed = game.nitroActive ? 220 : 160;
+      game.speed += (targetSpeed - game.speed) * (game.nitroActive ? 0.22 : 0.12);
+      if (!input.touching) game.px *= 0.92; else game.px += input.steer * 0.035;
       game.px = Math.max(-0.98, Math.min(0.98, game.px));
 
-      // nitro drain/fill
-      if (game.nitroActive){
-        game.nitro = Math.max(0, game.nitro - 22*dt);
-      }
+      // nitro drain
+      if (game.nitroActive){ game.nitro = Math.max(0, game.nitro - 18*dt); }
       nitroFill.style.height = (game.nitro/game.nitroMax*100)+'%';
 
-      // distance advance
+      // distance
       const mps = game.speed/3.6;
       const advance = mps * dt;
       game.z += advance;
@@ -791,102 +750,91 @@
       speedEl.textContent = String(Math.round(game.speed));
       comboEl.textContent = String(game.combo);
 
-      // move lane marks
+      // lane marks
       game.laneMarks.forEach((g,i)=>{
-        const r = g.firstChild; // any child
         const y = 460 + ((i*60 + (game.z%60))% (60*game.laneMarks.length));
         g.setAttribute('transform', `translate(0, ${y-60})`);
       });
 
-      // spawn entities
-      if (Math.random() < 0.016) game.cars.push(spawnTraffic());
-      if (Math.random() < 0.010) game.pads.push(spawnPad());
-      if (Math.random() < 0.010) game.items.push(spawnPickup());
+      // spawns (easy mode: fewer cars, more goodies)
+      if (Math.random() < 0.008){ const c = spawnTraffic(); if (c) game.cars.push(c); }
+      if (Math.random() < 0.012) game.pads.push(spawnPad());
+      if (Math.random() < 0.020) game.items.push(spawnPickup());
 
-      // update entities (simple perspective along Y)
+      // update entities
       function moveEntity(E, scaleBase=1){
-        E.y += advance*0.9; // world scroll
+        E.y += advance*0.9;
         const y = E.y;
-        const s = Math.max(0.35, Math.min(2.2, 0.35 + (y - L.yHorizon)/260));
-        const x = laneX(E.lane) + (game.px*16); // parallax effect
-        E.g.setAttribute('transform', `translate(${x}, ${y}) scale(${s*scaleBase})`);
-        if (y>760+40) E.alive=false;
+        const s = Math.max(0.4, Math.min(2.2, 0.35 + (y - L.yHorizon)/260)) * scaleBase;
+        const x = laneX(E.lane); // remove parallax to avoid sideways feel
+        E.g.setAttribute('transform', `translate(${x}, ${y}) scale(${s})`);
+        if (y>800) E.alive=false;
       }
-      game.cars.forEach(C=>moveEntity(C,0.9));
+      game.cars.forEach(C=>moveEntity(C,1.0));
       game.pads.forEach(P=>moveEntity(P,1.0));
-      game.items.forEach(I=>moveEntity(I,0.8));
-      game.cars = game.cars.filter(c=>c.alive);
-      game.pads = game.pads.filter(p=>p.alive);
-      game.items= game.items.filter(i=>i.alive);
+      game.items.forEach(I=>moveEntity(I,0.9));
+      game.cars  = game.cars.filter(c=>c.alive);
+      game.pads  = game.pads.filter(p=>p.alive);
+      game.items = game.items.filter(i=>i.alive);
 
-      // collision checks
+      // collisions
       const carX = laneX(game.px), carY = 640;
-      function close(a,b,t){ return Math.abs(a-b) < t; }
+      const close = (a,b,t)=> Math.abs(a-b) < t;
 
       // pads
       game.pads.forEach(p=>{
         if (!p.alive) return;
-        const y = p.y;
-        if (close(y, carY, 30) && close(laneX(p.lane), carX, 80)){
-          p.alive=false; game.nitro = Math.min(game.nitroMax, game.nitro+30);
-          showMsg('BOOST PAD +30','scoreGlow');
+        if (close(p.y, carY, 32) && close(laneX(p.lane), carX, 84)){
+          p.alive=false; game.nitro = Math.min(game.nitroMax, game.nitro+35);
+          showMsg('BOOST PAD +35','scoreGlow');
         }
       });
 
       // pickups
       game.items.forEach(i=>{
         if (!i.alive) return;
-        const y = i.y;
-        if (close(y, carY, 30) && close(laneX(i.lane), carX, 60)){
+        if (close(i.y, carY, 30) && close(laneX(i.lane), carX, 60)){
           i.alive=false; pickup(i);
         }
       });
 
-      // traffic: near-miss or crash
+      // traffic (smaller crash box, generous near-miss)
       let crashed = false;
       game.cars.forEach(c=>{
         if (!c.alive) return;
-        const y=c.y;
         const dx = laneX(c.lane) - carX;
-        const dy = y - carY;
-                if (Math.abs(dy) < 34 && Math.abs(dx) < 74){
-          // CRASH!
-          crashed = true;
-          c.alive = false;
-        } else if (!c.nearDone) {
-          // Near-miss window: close lateral but not overlapping, and crossing past the player
-          if (Math.abs(dx) < 120 && dy < 36 && dy > -120){
+        const dy = c.y - carY;
+
+        if (Math.abs(dy) < 26 && Math.abs(dx) < 52){
+          crashed = true; c.alive = false;
+        } else if (!c.nearDone){
+          if (Math.abs(dx) < 120 && dy < 40 && dy > -130){
             c.nearDone = true;
             onNearMiss();
-            // tiny coin drip for near-miss
             applyCoins(5); game.coinsEarned += 5;
           }
         }
       });
 
       if (crashed){
-        // hit-stop
         game.speed *= 0.35;
         showMsg('CRASH!', 'miss');
-        endRun();
-        return;
+        endRun(); return;
       }
 
-      // trickle distance coins
-      if (!game._coinGate) game._coinGate = 0;
-      game._coinGate += advance;
-      if (game._coinGate >= 10){ // every 10m baseline → 1 coin
-        const chunks = Math.floor(game._coinGate / 10);
-        addDistanceScore(chunks*10);
-        game._coinGate -= chunks*10;
+      // distance coins (easy)
+      game._coinGate = (game._coinGate||0) + advance;
+      if (game._coinGate >= 6){
+        const chunks = Math.floor(game._coinGate / 6);
+        addDistanceScore(chunks*6);
+        game._coinGate -= chunks*6;
       }
 
-      // craft credit milestones (every 500m)
-      if (!game._craftGate) game._craftGate = 0;
-      game._craftGate += advance;
-      if (game._craftGate >= 500){
-        const steps = Math.floor(game._craftGate / 500);
-        game._craftGate -= steps*500;
+      // craft credit milestones (every 700m, slower)
+      game._craftGate = (game._craftGate||0) + advance;
+      if (game._craftGate >= 700){
+        const steps = Math.floor(game._craftGate / 700);
+        game._craftGate -= steps*700;
         game.craftEarned += steps;
         applyCraftDelta(steps);
         showMsg(`+${steps} CRAFT CREDIT`, 'scoreGlow');
@@ -916,22 +864,17 @@
       }catch(_){}
     }
 
-    /* ---- Pause (simple) ---- */
+    /* ---- Pause ---- */
     const pauseBtn = document.getElementById('pauseBtn');
     let paused = false;
     pauseBtn.addEventListener('click', ()=>{
       if (game.ended) return;
       paused = !paused;
-      if (paused){
-        game.running = false;
-        pauseBtn.textContent = '▶︎';
-      } else {
-        if (!game.ended){ game.running = true; pauseBtn.textContent = '⋯'; lastT = performance.now(); requestAnimationFrame(loop); }
-      }
+      if (paused){ game.running = false; pauseBtn.textContent = '▶︎'; }
+      else { if (!game.ended){ game.running = true; pauseBtn.textContent = '⋯'; lastT = performance.now(); requestAnimationFrame(loop); } }
     }, {passive:true});
 
-    /* ---- START button: EXACT wallet handoff → prime → snapshot → API (no regression) ---- */
-
+    /* ---- START button: handoff → prime → snapshot → API (never regress coins) ---- */
     function paintCoinsHUDSafeAfterSnapshot(snapCoins){
       const shown = parseInt((coinsRunEl.textContent||'0'), 10) || 0;
       const safe = Math.max(shown, snapCoins, readCoinsLS()||0);
@@ -940,23 +883,15 @@
 
     document.getElementById('startBtn').addEventListener('click', async ()=>{
       try{
-        // 0) Use Arena handoff instantly
         const handoff = consumeWalletHandoff();
         if (handoff){ paintCoinsHUD(handoff.coins); }
 
-        // 1) Warm session silently
         try{ await primeViaCityIframe(); }catch(_){}
-
-        // 2) Best-effort session check (no redirect)
         try{ await ensureSession(); }catch(_){}
 
-        // 3) Hydrate from Persist snapshot (server → LS)
         const snapCoins = await hydrateFromSnapshot();
-
-        // do NOT regress HUD
         paintCoinsHUDSafeAfterSnapshot(snapCoins);
 
-        // 4) Authoritative wallet fetch; never decrease
         try{
           const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
           if (r.ok){
@@ -975,32 +910,27 @@
           }
         }catch(_){}
 
-        // 5) Lock run baseline & start game
         WALLET_READY = true;
         runStartCoins = parseInt((coinsRunEl.textContent||'0'), 10) || (readCoinsLS()||0);
         document.getElementById('startOverlay').style.display='none';
 
-        // track swap visuals
+        // visuals
         if (settings.track==='night'){ bgNight.setAttribute('opacity','1'); bgDay.setAttribute('opacity','0'); }
         else { bgNight.setAttribute('opacity','0'); bgDay.setAttribute('opacity','1'); }
 
-        // apply garage choices to player car
         carPaint.setAttribute('fill', settings.paint);
         if (settings.glow==='none'){ carGlow.style.display='none'; }
         else { carGlow.style.display='block'; carGlow.setAttribute('fill', settings.glow); }
 
-        // body silhouette (simple width tweaks)
         const bodyMul = (settings.body==='muscle')?1.18:(settings.body==='hatch'?0.92:1.0);
         document.getElementById('carBody').setAttribute('transform', `scale(${bodyMul},1)`);
 
-        // init state and go
+        // easy start values
         game.ended=false; game.running=true; paused=false; pauseBtn.textContent='⋯';
-        game.speed = 30; game.nitro = 30; game.combo=0; game.z=0; game.coinsEarned=0; game.craftEarned=0;
+        game.speed = 30; game.nitro = 60; game.combo=0; game.z=0; game.coinsEarned=0; game.craftEarned=0;
         lastT = performance.now();
         requestAnimationFrame(loop);
-      }catch(e){
-        console.error('start failed', e);
-      }
+      }catch(e){ console.error('start failed', e); }
     }, {passive:true});
 
     /* ---- Nitro interactions ---- */
@@ -1010,7 +940,7 @@
     window.addEventListener('mouseup',      ()=> useNitro(false));
 
     /* ---- Keep HUD coins synced during the run ---- */
-    window.addEventListener('izza-coins-changed', syncCoinsHUD, {passive:true});
+    window.addEventListener('izza-coins-changed',  syncCoinsHUD, {passive:true});
     window.addEventListener('izza-wallet-changed', syncCoinsHUD, {passive:true});
     window.addEventListener('izza-crafting-changed', syncCoinsHUD, {passive:true});
     window.addEventListener('storage', (e)=>{
@@ -1021,9 +951,7 @@
     document.addEventListener('visibilitychange', async () => {
       if (document.hidden){
         if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
-      } else {
-        updateCoinsHUD();
-      }
+      } else { updateCoinsHUD(); }
     }, {passive:true});
     window.addEventListener('pagehide', () => {
       if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
