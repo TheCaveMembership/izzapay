@@ -207,7 +207,7 @@ function rebuildTintAndPreview(){
 
   pctx.drawImage(tintedSprite, x, y, w, h);
 
-  // soft glow in garage
+  // soft glow in garage (preview only)
   pctx.save();
   pctx.globalCompositeOperation = 'lighter';
   pctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},.6)`;
@@ -258,19 +258,48 @@ function drawSky(){
   ctx.fillStyle = fog; ctx.fillRect(0, horizonY-30, W, 160);
 }
 
+/* —— NEW road that follows LED rails and vanishes —— */
 function drawRoad(worldZ){
-  // asphalt filling entire bottom area
-  ctx.beginPath();
-  ctx.moveTo(W/2 - roadTopHalf, horizonY);
-  ctx.lineTo(W/2 + roadTopHalf, horizonY);
-  ctx.lineTo(W, H);
-  ctx.lineTo(0, H);
-  ctx.closePath();
-  const g = ctx.createLinearGradient(0,horizonY,0,H);
-  g.addColorStop(0, '#121821'); g.addColorStop(1, '#0a0f17');
-  ctx.fillStyle = g; ctx.fill();
+  // sample along depth using same rails as LEDs
+  const ptsLeft  = [];
+  const ptsRight = [];
 
-  // long, blurred lane streaks to infinity
+  const vanishY = horizonY - 140; // wedge tip (past the horizon)
+  const steps   = 36;
+  const railOff = 1.05;
+
+  for (let i=0; i<=steps; i++){
+    const z = i*120;
+    const p = project(z);
+    const y = (i===steps) ? vanishY : Math.max(p.y, vanishY);
+    const half = (i===steps) ? 0.0001 : p.half;
+    const lx = W/2 - half*railOff - 8;
+    const rx = W/2 + half*railOff + 8;
+    if (y >= vanishY) { ptsLeft.push([lx,y]); ptsRight.push([rx,y]); }
+  }
+
+  // asphalt polygon to the tip
+  const g = ctx.createLinearGradient(0, vanishY, 0, H);
+  g.addColorStop(0, '#0f141d');
+  g.addColorStop(1, '#0a0f17');
+  ctx.fillStyle = g;
+
+  ctx.beginPath();
+  ctx.moveTo(W/2, vanishY);                                 // tip
+  for (let i=ptsRight.length-1; i>=0; i--){                 // right edge down
+    const [x,y] = ptsRight[i];
+    if (y>H) break;
+    ctx.lineTo(Math.min(Math.max(x,-50),W+50), Math.min(y,H));
+  }
+  for (let i=0; i<ptsLeft.length; i++){                     // left edge up
+    const [x,y] = ptsLeft[i];
+    if (y<vanishY) continue;
+    ctx.lineTo(Math.min(Math.max(x,-50),W+50), Math.min(y,H));
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // blurred lane streaks to infinity
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap='round';
   const lanes = [-0.32, 0, 0.32];
@@ -278,14 +307,15 @@ function drawRoad(worldZ){
     for (let z = (worldZ%26)*-1; z<4000; z+=26){
       const p0 = project(Math.max(0,z));
       const p1 = project(Math.max(0,z+18));
-      if (p1.y<horizonY) continue; if (p0.y>H && p1.y>H) break;
+      if (p1.y<vanishY) continue; if (p0.y>H && p1.y>H) break;
       const x0 = W/2 + L * p0.half*1.6;
       const x1 = W/2 + L * p1.half*1.6;
-      ctx.beginPath(); ctx.moveTo(x0, p0.y); ctx.lineTo(x1, p1.y); ctx.stroke();
+      const y0 = Math.max(p0.y, vanishY), y1 = Math.max(p1.y, vanishY);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
   }
 
-  // optional white side lines — off by default
+  // optional white side lines — still off
   if (SHOW_SIDELINES){
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(250,255,255,.96)';
     ctx.beginPath();
@@ -294,16 +324,19 @@ function drawRoad(worldZ){
     ctx.stroke();
   }
 
-  // red LED rails (the reference vibe)
-  ctx.fillStyle = 'rgba(255,90,50,0.90)';
+  // red LED rails (define the same edges the asphalt uses)
+  ctx.fillStyle = 'rgba(255,90,50,0.92)';
   const spacingM = 16;
-  for (let z = (worldZ%spacingM)*-1; z < 1800; z += spacingM){
+  for (let z = (worldZ%spacingM)*-1; z < 2000; z += spacingM){
     const p = project(Math.max(0,z));
-    if (p.y>H) break; if (p.y<horizonY) continue;
-    const r = Math.max(1, 3 * (1 - (p.y - horizonY)/(H-horizonY)));
-    const lx = W/2 - p.half*1.05 - 8, rx = W/2 + p.half*1.05 + 8;
-    ctx.beginPath(); ctx.arc(lx, p.y, r, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(rx, p.y, r, 0, Math.PI*2); ctx.fill();
+    const y = Math.max(p.y, vanishY); if (y>H) break;
+    const r = Math.max(1, 3 * (1 - (y - vanishY)/(H-vanishY)));
+
+    const lx = W/2 - p.half*railOff - 8;
+    const rx = W/2 + p.half*railOff + 8;
+
+    ctx.beginPath(); ctx.arc(lx, y, r, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(rx, y, r, 0, Math.PI*2); ctx.fill();
   }
 }
 
@@ -317,22 +350,24 @@ function updateCarPlacement(){
   carY = Math.round(H - carH*1.02);
 }
 
-// replace your existing drawCar(...) with this:
-let time = 0; // keep your tick accumulator (or increment it in frame loop)
-
+let time = 0;
 function drawCar(nitroBoost){
-  // 1) draw tinted sprite (already alpha-masked offscreen)
   const src = tintedSprite || carImg;
   ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(src, carX, carY, carW, carH);
 
-  // 2) animated tail-lights (no rects anywhere)
+  /* Clip all emissive effects to the car bounds => no box ever */
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(carX, carY, carW, carH);
+  ctx.clip();
+
+  // tail-lights
   const flick = 0.75 + 0.25*Math.sin(time*12);
   const lightY = carY + carH*0.56;
   const leftX  = carX + carW*0.23;
   const rightX = carX + carW*0.73;
 
-  ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.shadowBlur = 24;
   ctx.shadowColor = `rgba(255,60,40,${0.85*flick})`;
@@ -344,12 +379,11 @@ function drawCar(nitroBoost){
     ctx.lineTo(x+18, lightY);
     ctx.lineTo(x+8,  lightY+10);
     ctx.lineTo(x-8,  lightY+10);
-    ctx.closePath();
-    ctx.fill();
+    ctx.closePath(); ctx.fill();
   };
   lamp(leftX); lamp(rightX);
 
-  // 3) exhaust flames (curved shapes only)
+  // exhaust flames
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(time*20));
   ctx.shadowBlur  = 28;
   ctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
@@ -360,14 +394,13 @@ function drawCar(nitroBoost){
     ctx.moveTo(x, carY + carH*0.86);
     ctx.quadraticCurveTo(x-12, carY + carH*0.96, x, carY + carH*1.08);
     ctx.quadraticCurveTo(x+12, carY + carH*0.96, x, carY + carH*0.86);
-    ctx.closePath();
-    ctx.fill();
+    ctx.closePath(); ctx.fill();
   };
   jet(carX + carW*0.38);
   jet(carX + carW*0.62);
 
-  ctx.restore();
-  ctx.globalCompositeOperation = 'source-over'; // reset just in case
+  ctx.restore();                          // end clip
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 /* ================= Input ================= */
@@ -400,7 +433,6 @@ function frame(now){
   const dt = Math.min(0.033, (now - last)/1000); last = now;
   time += dt;
 
-  // smooth speed target
   const target = 180 + (nitroLeft>0 ? 140 : 0);
   state.speed += (target - state.speed) * 0.08;
   if (nitroLeft>0) nitroLeft -= dt;
