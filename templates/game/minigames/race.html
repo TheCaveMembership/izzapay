@@ -32,7 +32,7 @@
     .swatches{display:flex;gap:10px;flex-wrap:wrap}
     .swatch{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.28);cursor:pointer}
     .swatch.active{box-shadow:0 0 0 3px rgba(255,255,255,.18) inset}
-    canvas{display:block;width:100%;height:100%}
+    canvas{display:block;width:100%;height:100%;background:transparent}
   </style>
 </head>
 <body>
@@ -97,7 +97,7 @@ const HUD = {
   coins: document.getElementById('coinsRun')
 };
 
-const SHOW_SIDELINES = false;
+const SHOW_SIDELINES = false; // keep off
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
@@ -113,7 +113,7 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // Low camera, huge foreground
+  // Low camera, big foreground
   horizonY       = H*0.26;
   roadBottomHalf = W*1.15;
   roadTopHalf    = W*0.12;
@@ -134,16 +134,16 @@ function makeTintedSprite(rgb){
   const o = off.getContext('2d');
   o.imageSmoothingEnabled = true;
 
-  // base
+  // 1) base
   o.drawImage(carImg, 0, 0);
-  // multiply tint
+  // 2) multiply tint
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   o.fillRect(0,0,off.width,off.height);
-  // mask to alpha (kills any box)
+  // 3) mask to alpha (NO boxes)
   o.globalCompositeOperation = 'destination-in';
   o.drawImage(carImg, 0, 0);
-  // preserve speculars a touch
+  // 4) keep speculars subtle
   o.globalCompositeOperation = 'overlay';
   o.fillStyle = 'rgba(255,255,255,0.08)';
   o.fillRect(0,0,off.width,off.height);
@@ -182,7 +182,6 @@ PAINTS.forEach(p=>{
 
 const prev = document.getElementById('garagePreview');
 const pctx = prev.getContext('2d');
-const GARAGE_GLOW = true; // set to false to remove even the ellipse
 
 function rebuildTintAndPreview(){
   tintedSprite = makeTintedSprite(paint);
@@ -197,17 +196,13 @@ function rebuildTintAndPreview(){
   const x = Math.round((prev.width - w)/2);
   const y = Math.round((prev.height - h)/2);
 
-  // soft elliptical ground glow (no rectangle)
-  if (GARAGE_GLOW){
-    const cx = x + w/2, cy = y + h*0.92, rx = w*0.42, ry = h*0.10;
-    const g = pctx.createRadialGradient(cx,cy,1,cx,cy,Math.max(rx,ry));
-    g.addColorStop(0, `rgba(${paint.r},${paint.g},${paint.b},.22)`);
-    g.addColorStop(1, `rgba(${paint.r},${paint.g},${paint.b},0)`);
-    pctx.fillStyle = g;
-    pctx.beginPath();
-    pctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);
-    pctx.fill();
-  }
+  // **Only** an ellipse glow (no rectangles)
+  const cx = x + w/2, cy = y + h*0.92, rx = w*0.42, ry = h*0.10;
+  const g = pctx.createRadialGradient(cx,cy,1,cx,cy,Math.max(rx,ry));
+  g.addColorStop(0, `rgba(${paint.r},${paint.g},${paint.b},.22)`);
+  g.addColorStop(1, `rgba(${paint.r},${paint.g},${paint.b},0)`);
+  pctx.fillStyle = g;
+  pctx.beginPath(); pctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); pctx.fill();
 
   pctx.drawImage(tintedSprite, x, y, w, h);
 }
@@ -216,7 +211,7 @@ carImg.onload = rebuildTintAndPreview;
 /* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
-  const k = 0.0105;                     // deep runway
+  const k = 0.0105;
   const t = 1 - Math.exp(-k*z);
   const y = lerp(horizonY, H, t);
   const half = lerp(roadTopHalf, roadBottomHalf, t);
@@ -225,6 +220,7 @@ function project(z){
 
 /* ============== Background & Road ============== */
 function drawSky(){
+  // no skyline, no horizon band
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, '#0c1120');
   g.addColorStop(0.35, '#0f1523');
@@ -232,14 +228,14 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* road uses same rails as LED dots and vanishes well past horizon */
+/* Road follows LED rails; runs to the very top; no band */
 function drawRoad(worldZ){
-  const vanishY = horizonY - 160;     // push tip up; no visible “horizon band”
+  const vanishY = -80;                 // push tip off-screen (no visible horizon)
   const railOff = 1.05;
 
-  // Build left/right edge points from near to far
+  // Build left/right edges from near to far
   const ptsLeft=[], ptsRight=[];
-  const steps = 40, stepZ = 120;
+  const steps = 42, stepZ = 120;
   for (let i=0;i<=steps;i++){
     const z = i*stepZ;
     const p = project(z);
@@ -247,29 +243,28 @@ function drawRoad(worldZ){
     const half = (i===steps) ? 0.0001 : p.half;
     const lx = W/2 - half*railOff - 8;
     const rx = W/2 + half*railOff + 8;
-    if (y >= vanishY){ ptsLeft.push([lx,y]); ptsRight.push([rx,y]); }
+    ptsLeft.push([lx,y]); ptsRight.push([rx,y]);
   }
 
-  // Asphalt polygon
+  // Asphalt polygon (fills whole bottom and tapers to tip at top)
   const g = ctx.createLinearGradient(0, vanishY, 0, H);
   g.addColorStop(0, '#0f141d');
   g.addColorStop(1, '#0a0f17');
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.moveTo(W/2, vanishY);
-  for (let i=ptsRight.length-1;i>=0;i--){ const [x,y]=ptsRight[i]; ctx.lineTo(x,y>H?H:y); }
-  for (let i=0;i<ptsLeft.length;i++){ const [x,y]=ptsLeft[i]; ctx.lineTo(x,y); }
+  for (let i=ptsRight.length-1;i>=0;i--){ const [x,y]=ptsRight[i]; ctx.lineTo(x, Math.min(y,H)); }
+  for (let i=0;i<ptsLeft.length;i++){ const [x,y]=ptsLeft[i]; ctx.lineTo(x, Math.min(y,H)); }
   ctx.closePath(); ctx.fill();
 
-  // Lane streaks to infinity
+  // Lane streaks (center + 2) to infinity, aligned with road
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap='round';
   const lanes = [-0.32, 0, 0.32];
   for (const L of lanes){
-    for (let z = (worldZ%26)*-1; z<4500; z+=26){
+    for (let z = (worldZ%26)*-1; z<5000; z+=26){
       const p0 = project(Math.max(0,z));
       const p1 = project(Math.max(0,z+18));
-      if (p1.y<vanishY) continue; if (p0.y>H && p1.y>H) break;
       const x0 = W/2 + L * p0.half*1.6;
       const x1 = W/2 + L * p1.half*1.6;
       const y0 = Math.max(p0.y, vanishY), y1 = Math.max(p1.y, vanishY);
@@ -285,10 +280,10 @@ function drawRoad(worldZ){
     ctx.stroke();
   }
 
-  // LED rails
+  // LED rails (define the same edges)
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   const spacingM = 16;
-  for (let z = (worldZ%spacingM)*-1; z < 2600; z += spacingM){
+  for (let z = (worldZ%spacingM)*-1; z < 3200; z += spacingM){
     const p = project(Math.max(0,z));
     const y = Math.max(p.y, vanishY); if (y>H) break;
     const r = Math.max(1, 3 * (1 - (y - vanishY)/(H-vanishY)));
@@ -309,7 +304,7 @@ function updateCarPlacement(){
   carY = Math.round(H - carH*1.02);
 }
 
-/* --- FX drawn into offscreen canvas to avoid any rect artifacts --- */
+/* Draw body, then FX in an offscreen buffer (prevents any box) */
 function buildCarFXCanvas(nitroBoost, t){
   const fx = document.createElement('canvas');
   fx.width = Math.max(2, Math.floor(carW));
@@ -317,7 +312,6 @@ function buildCarFXCanvas(nitroBoost, t){
   const c = fx.getContext('2d');
   c.imageSmoothingEnabled = true;
 
-  // Tail-lights
   const flick = 0.75 + 0.25*Math.sin(t*12);
   const lightY = carH*0.56;
   const leftX  = carW*0.23;
@@ -338,7 +332,6 @@ function buildCarFXCanvas(nitroBoost, t){
   };
   lamp(leftX); lamp(rightX);
 
-  // Exhaust flames
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
   c.shadowBlur  = 28;
   c.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
@@ -360,10 +353,11 @@ function buildCarFXCanvas(nitroBoost, t){
 let time = 0;
 function drawCar(nitroBoost){
   const src = tintedSprite || carImg;
-  ctx.drawImage(src, carX, carY, carW, carH);        // body (already alpha masked)
-  const fx = buildCarFXCanvas(nitroBoost, time);     // draw FX offscreen
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(src, carX, carY, carW, carH);   // body (alpha-masked)
+  const fx = buildCarFXCanvas(nitroBoost, time);
   ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(fx, carX, carY);                     // composite with light add
+  ctx.drawImage(fx, carX, carY);                // emissives
   ctx.globalCompositeOperation = 'source-over';
 }
 
