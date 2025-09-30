@@ -74,370 +74,360 @@
   </div>
 
 <script>
-(function(){
-  /* ---------- Wallet (best effort) ---------- */
-  async function loadWallet(){
-    let coins='—', craft='—';
-    try{
-      if (window.IZZA && typeof IZZA.get === 'function') {
-        const w = await IZZA.get('wallet');
-        if (w) { coins = w.coins ?? coins; craft = w.crafting ?? craft; }
-      } else if (localStorage.getItem('izza_wallet')){
-        const w = JSON.parse(localStorage.getItem('izza_wallet'));
-        coins = w.coins ?? coins; craft = w.crafting ?? craft;
-      }
-    }catch(e){}
-    document.getElementById('wCoins').textContent = coins;
-    document.getElementById('wCraft').textContent = craft;
-  }
-  loadWallet();
+(() => {
+/* ================= Wallet ================= */
+async function loadWallet(){
+  let coins='—', craft='—';
+  try{
+    if (window.IZZA && typeof IZZA.get === 'function') {
+      const w = await IZZA.get('wallet');
+      if (w) { coins = w.coins ?? coins; craft = w.crafting ?? craft; }
+    } else if (localStorage.getItem('izza_wallet')){
+      const w = JSON.parse(localStorage.getItem('izza_wallet'));
+      coins = w.coins ?? coins; craft = w.crafting ?? craft;
+    }
+  }catch(e){}
+  document.getElementById('wCoins').textContent = coins;
+  document.getElementById('wCraft').textContent = craft;
+}
+loadWallet();
 
-  /* ---------- Canvas & sizing ---------- */
-  const arena  = document.getElementById('arena');
-  const canvas = document.getElementById('scene');
-  const ctx    = canvas.getContext('2d', { alpha:true });
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+/* ================= Setup ================= */
+const arena  = document.getElementById('arena');
+const canvas = document.getElementById('scene');
+const ctx    = canvas.getContext('2d', { alpha:true });
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
 
-  const HUD = {
-    speed: document.getElementById('speed'),
-    dist : document.getElementById('dist'),
-    coins: document.getElementById('coinsRun')
+const HUD = {
+  speed: document.getElementById('speed'),
+  dist : document.getElementById('dist'),
+  coins: document.getElementById('coinsRun')
+};
+
+// toggle if you ever want the big white side lines back
+const SHOW_SIDELINES = false;
+
+/* ================= Sizing / Camera ================= */
+let dpr=1, W=0, H=0;
+let horizonY=0, roadBottomHalf=0, roadTopHalf=0, skylineY=0;
+
+function resize(){
+  W = arena.clientWidth;
+  H = arena.clientHeight;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width  = Math.floor(W * dpr);
+  canvas.height = Math.floor(H * dpr);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  // Low camera & massive foreground (as per refs)
+  horizonY       = H*0.26;
+  roadBottomHalf = W*1.15; // road fully fills bottom
+  roadTopHalf    = W*0.12;
+  skylineY       = horizonY - 8;
+
+  updateCarPlacement();
+}
+window.addEventListener('resize', resize, {passive:true});
+
+/* ================= Assets & Tint (offscreen) ================= */
+const carImg = new Image();
+carImg.src = '/static/game/sprites/tracks/coupe.png';
+
+function makeTintedSprite(rgb){
+  if (!carImg.complete || !carImg.width) return null;
+  const off = document.createElement('canvas');
+  off.width  = carImg.width;
+  off.height = carImg.height;
+  const o = off.getContext('2d');
+  o.imageSmoothingEnabled = true;
+
+  // base
+  o.drawImage(carImg, 0, 0);
+  // multiply tint
+  o.globalCompositeOperation = 'multiply';
+  o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+  o.fillRect(0,0,off.width,off.height);
+  // mask to alpha (removes any box)
+  o.globalCompositeOperation = 'destination-in';
+  o.drawImage(carImg, 0, 0);
+  // tiny overlay to keep speculars
+  o.globalCompositeOperation = 'overlay';
+  o.fillStyle = 'rgba(255,255,255,0.08)';
+  o.fillRect(0,0,off.width,off.height);
+  o.globalCompositeOperation = 'source-over';
+  return off;
+}
+
+/* ================= Garage Paint ================= */
+const PAINTS = [
+  {name:'Cherry',    r:255, g:70,  b:70 },
+  {name:'Sunburst',  r:255, g:190, b:40 },
+  {name:'Neo Blue',  r:90,  g:180, b:255},
+  {name:'Lime',      r:120, g:230, b:90 },
+  {name:'Violet',    r:170, g:120, b:255},
+  {name:'Graphite',  r:185, g:195, b:205}
+];
+let paint = JSON.parse(localStorage.getItem('izza_paint')||'null') || PAINTS[0];
+let tintedSprite = null;
+
+const swatches = document.getElementById('swatches');
+PAINTS.forEach(p=>{
+  const d = document.createElement('div');
+  d.className = 'swatch';
+  d.style.background = `rgb(${p.r},${p.g},${p.b})`;
+  if (p.name===paint.name) d.classList.add('active');
+  d.title = p.name;
+  d.onclick = ()=>{
+    paint = p;
+    localStorage.setItem('izza_paint', JSON.stringify(paint));
+    [...swatches.children].forEach(x=>x.classList.remove('active'));
+    d.classList.add('active');
+    rebuildTintAndPreview();
   };
+  swatches.appendChild(d);
+});
 
-  let dpr=1, W=0, H=0;
-  // “camera”/perspective params
-  let horizonY=0, roadBottomHalf=0, roadTopHalf=0, skylineY=0;
+const prev = document.getElementById('garagePreview');
+const pctx = prev.getContext('2d');
+function rebuildTintAndPreview(){
+  tintedSprite = makeTintedSprite(paint);
+  if (!tintedSprite) return;
 
-  function resize(){
-    W = arena.clientWidth;
-    H = arena.clientHeight;
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width  = Math.floor(W * dpr);
-    canvas.height = Math.floor(H * dpr);
-    canvas.style.width  = W + 'px';
-    canvas.style.height = H + 'px';
-    ctx.setTransform(dpr,0,0,dpr,0,0);
+  pctx.clearRect(0,0,prev.width,prev.height);
+  const pad = 8;
+  const availW = prev.width - pad*2;
+  const scale  = Math.min(availW / carImg.width, (prev.height-pad*2) / carImg.height);
+  const w = Math.round(carImg.width * scale);
+  const h = Math.round(carImg.height * scale);
+  const x = Math.round((prev.width - w)/2);
+  const y = Math.round((prev.height - h)/2);
 
-    // Lower camera + wide foreground (matches your samples)
-    horizonY       = H*0.28;  // low horizon
-    roadBottomHalf = W*1.10;  // road spans past both edges at bottom
-    roadTopHalf    = W*0.12;  // gentle convergence
-    skylineY       = horizonY - 8;
+  pctx.drawImage(tintedSprite, x, y, w, h);
 
-    // position recalc for car sprite size
-    updateCarPlacement();
-  }
-  window.addEventListener('resize', resize, {passive:true});
+  // soft glow in garage
+  pctx.save();
+  pctx.globalCompositeOperation = 'lighter';
+  pctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},.6)`;
+  pctx.shadowBlur = 22;
+  pctx.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},.20)`;
+  pctx.fillRect(x, y+h*0.82, w, h*0.18);
+  pctx.restore();
+}
+carImg.onload = rebuildTintAndPreview;
 
-  /* ---------- Assets ---------- */
-  const carImg = new Image();
-  carImg.src = '/static/game/sprites/tracks/coupe.png';
+/* ================= Projection ================= */
+const lerp = (a,b,t)=>a+(b-a)*t;
+function project(z){
+  // long runway, vanishing far away
+  const k = 0.0105;
+  const t = 1 - Math.exp(-k*z);
+  const y = lerp(horizonY, H, t);
+  const half = lerp(roadTopHalf, roadBottomHalf, t);
+  return { y, half, t };
+}
 
-  // Offscreen tinted sprite (so no rectangle leaks)
-  let tintedSprite = null;  // HTMLCanvasElement
-  function makeTintedSprite(rgb){
-    if (!carImg.complete) return null;
-    const off = document.createElement('canvas');
-    off.width  = carImg.width;
-    off.height = carImg.height;
-    const o = off.getContext('2d');
-    o.imageSmoothingEnabled = true;
-    // 1) base sprite
-    o.drawImage(carImg, 0, 0);
-    // 2) multiply a solid color over it
-    o.globalCompositeOperation = 'multiply';
-    o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
-    o.fillRect(0,0,off.width,off.height);
-    // 3) mask to the sprite alpha (eliminates any box)
-    o.globalCompositeOperation = 'destination-in';
-    o.drawImage(carImg, 0, 0);
-    // 4) slight highlight to keep speculars alive
-    o.globalCompositeOperation = 'overlay';
-    o.fillStyle = 'rgba(255,255,255,0.08)';
-    o.fillRect(0,0,off.width,off.height);
-    o.globalCompositeOperation = 'source-over';
-    return off;
-  }
+/* ================= Background & Road ================= */
+function drawSky(){
+  // minimal skyline/horizon
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, '#0c1120');
+  g.addColorStop(0.35, '#0f1523');
+  g.addColorStop(1, '#090d14');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  /* ---------- Garage tint choices ---------- */
-  const PAINTS = [
-    {name:'Cherry',    r:255, g:70,  b:70 },
-    {name:'Sunburst',  r:255, g:190, b:40 },
-    {name:'Neo Blue',  r:90,  g:180, b:255},
-    {name:'Lime',      r:120, g:230, b:90 },
-    {name:'Violet',    r:170, g:120, b:255},
-    {name:'Graphite',  r:185, g:195, b:205}
-  ];
-  let paint = JSON.parse(localStorage.getItem('izza_paint')||'null') || PAINTS[0];
-
-  const swatches = document.getElementById('swatches');
-  PAINTS.forEach(p=>{
-    const d = document.createElement('div');
-    d.className = 'swatch';
-    d.style.background = `rgb(${p.r},${p.g},${p.b})`;
-    if (p.name===paint.name) d.classList.add('active');
-    d.title = p.name;
-    d.onclick = ()=>{
-      paint = p;
-      localStorage.setItem('izza_paint', JSON.stringify(paint));
-      [...swatches.children].forEach(x=>x.classList.remove('active'));
-      d.classList.add('active');
-      rebuildTintAndPreview();
-    };
-    swatches.appendChild(d);
-  });
-
-  // Garage preview (uses the same offscreen tinting as gameplay)
-  const prev = document.getElementById('garagePreview');
-  const pctx = prev.getContext('2d');
-
-  function rebuildTintAndPreview(){
-    if (!carImg.complete) return;
-    tintedSprite = makeTintedSprite(paint);
-
-    // Draw preview
-    pctx.clearRect(0,0,prev.width,prev.height);
-    const pad = 8;
-    const availW = prev.width - pad*2;
-    const scale  = Math.min(availW / carImg.width, (prev.height-pad*2) / carImg.height);
-    const w = Math.round(carImg.width * scale);
-    const h = Math.round(carImg.height * scale);
-    const x = Math.round((prev.width - w)/2);
-    const y = Math.round((prev.height - h)/2);
-
-    pctx.drawImage(tintedSprite || carImg, x, y, w, h);
-
-    // subtle car glow in garage
-    pctx.save();
-    pctx.globalCompositeOperation = 'lighter';
-    pctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},.6)`;
-    pctx.shadowBlur = 22;
-    pctx.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},.20)`;
-    pctx.fillRect(x, y+h*0.82, w, h*0.18);
-    pctx.restore();
-  }
-  carImg.onload = rebuildTintAndPreview;
-
-  /* ---------- Projection & world ---------- */
-  const lerp = (a,b,t)=>a+(b-a)*t;
-  function project(z){
-    // exponential depth mapping: very long runway feel
-    const k = 0.0105;
-    const t = 1 - Math.exp(-k*z);
-    const y = lerp(horizonY, H, t);
-    const half = lerp(roadTopHalf, roadBottomHalf, t);
-    return { y, half, t };
-  }
-
-  /* ---------- Background / road ---------- */
-  function drawSky(){
-    const g = ctx.createLinearGradient(0,0,0,H);
-    g.addColorStop(0, '#0c1120');
-    g.addColorStop(0.35, '#0f1523');
-    g.addColorStop(1, '#090d14');
-    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
-
-    // distant city silhouettes (very subtle)
-    function skyline(y, scale, alpha){
-      ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = '#0b1322';
-      let x=-20;
-      while(x<W+40){
-        const w=(28+Math.random()*36)*scale, h=(60+Math.random()*160)*scale;
-        ctx.fillRect(x, y-h, w, h); x += w + 12*scale;
-      }
-      ctx.restore();
+  // very subtle silhouettes (kept but nearly invisible)
+  function skyline(y, scale, alpha){
+    ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = '#0b1322';
+    let x=-20;
+    while(x<W+40){
+      const w=(28+Math.random()*36)*scale, h=(60+Math.random()*160)*scale;
+      ctx.fillRect(x, y-h, w, h); x += w + 12*scale;
     }
-    skyline(skylineY+6, 0.9, 0.30);
-    skyline(skylineY+12, 1.3, 0.18);
-
-    // soft horizon glow (no solid band)
-    const fog = ctx.createLinearGradient(0, horizonY-30, 0, horizonY+130);
-    fog.addColorStop(0, 'rgba(140,180,240,0.10)');
-    fog.addColorStop(1, 'rgba(140,180,240,0.00)');
-    ctx.fillStyle = fog; ctx.fillRect(0, horizonY-30, W, 160);
-  }
-
-  function drawRoad(worldZ){
-    // asphalt (fills whole bottom)
-    ctx.beginPath();
-    ctx.moveTo(W/2 - roadTopHalf, horizonY);
-    ctx.lineTo(W/2 + roadTopHalf, horizonY);
-    ctx.lineTo(W, H);
-    ctx.lineTo(0, H);
-    ctx.closePath();
-    const g = ctx.createLinearGradient(0,horizonY,0,H);
-    g.addColorStop(0, '#121821'); g.addColorStop(1, '#0a0f17');
-    ctx.fillStyle = g; ctx.fill();
-
-    // side lane lines
-    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(250,255,255,.96)';
-    ctx.beginPath();
-    ctx.moveTo(W/2 - roadTopHalf, horizonY);
-    ctx.lineTo(0, H);
-    ctx.moveTo(W/2 + roadTopHalf, horizonY);
-    ctx.lineTo(W, H);
-    ctx.stroke();
-
-    // faint lane streaks to infinity
-    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-    ctx.lineWidth = 6; ctx.lineCap='round';
-    const lanes = [-0.32, 0, 0.32];
-    for (const L of lanes){
-      for (let z = (worldZ%26)*-1; z<4000; z+=26){
-        const p0 = project(Math.max(0,z));
-        const p1 = project(Math.max(0,z+18));
-        if (p1.y<horizonY) continue; if (p0.y>H && p1.y>H) break;
-        const x0 = W/2 + L * p0.half*1.6;
-        const x1 = W/2 + L * p1.half*1.6;
-        ctx.beginPath(); ctx.moveTo(x0, p0.y); ctx.lineTo(x1, p1.y); ctx.stroke();
-      }
-    }
-
-    // small red LEDs along “rails”
-    ctx.fillStyle = 'rgba(255,90,50,0.88)';
-    const spacingM = 16;
-    for (let z = (worldZ%spacingM)*-1; z < 1200; z += spacingM){
-      const p = project(Math.max(0,z));
-      if (p.y>H) break; if (p.y<horizonY) continue;
-      const r = Math.max(1, 3 * (1 - (p.y - horizonY)/(H-horizonY)));
-      const lx = W/2 - p.half*1.05 - 8, rx = W/2 + p.half*1.05 + 8;
-      ctx.beginPath(); ctx.arc(lx, p.y, r, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(rx, p.y, r, 0, Math.PI*2); ctx.fill();
-    }
-  }
-
-  /* ---------- Car placement & render ---------- */
-  let carW=0, carH=0, carX=0, carY=0;
-  function updateCarPlacement(){
-    // Big/close like reference
-    carW = Math.min(W*0.90, 520);
-    const ratio = carImg.height / carImg.width || (512/1024);
-    carH = carW * ratio;
-    carX = Math.round((W - carW)/2);
-    carY = Math.round(H - carH*1.02); // almost touching bottom
-  }
-
-  // tail-light + flame animation
-  let t = 0; // time accumulator
-
-  function drawCar(nitroBoost){
-    // draw tinted sprite
-    const src = tintedSprite || carImg;
-    ctx.drawImage(src, carX, carY, carW, carH);
-
-    // emissive tail-lights (flicker)
-    const flick = 0.7 + 0.3*Math.sin(t*12);
-    const lightY = carY + carH*0.56;
-    const leftX  = carX + carW*0.23;
-    const rightX = carX + carW*0.73;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.shadowBlur = 24;
-    ctx.shadowColor = `rgba(255,60,40,${0.8*flick})`;
-    ctx.fillStyle = `rgba(255,70,50,${0.55*flick})`;
-
-    // simple trapezoids for lamps
-    function lamp(x){ 
-      ctx.beginPath();
-      ctx.moveTo(x-18, lightY);
-      ctx.lineTo(x+18, lightY);
-      ctx.lineTo(x+8,  lightY+10);
-      ctx.lineTo(x-8,  lightY+10);
-      ctx.closePath(); ctx.fill();
-    }
-    lamp(leftX); lamp(rightX);
-
-    // flames (stronger with nitro)
-    const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
-    ctx.shadowBlur = 28;
-    ctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
-    ctx.fillStyle  = `rgba(${paint.r},${paint.g},${paint.b},${0.20+0.35*flame})`;
-
-    function jet(x){
-      ctx.beginPath();
-      ctx.moveTo(x, carY + carH*0.86);
-      ctx.quadraticCurveTo(x-12, carY + carH*0.96, x, carY + carH*1.08);
-      ctx.quadraticCurveTo(x+12, carY + carH*0.96, x, carY + carH*0.86);
-      ctx.closePath(); ctx.fill();
-    }
-    jet(carX + carW*0.38);
-    jet(carX + carW*0.62);
-
     ctx.restore();
   }
+  skyline(skylineY+6, 0.9, 0.12);
+  skyline(skylineY+12, 1.3, 0.08);
 
-  /* ---------- Input ---------- */
-  const steer = { x:0 };
-  canvas.addEventListener('pointerdown', e=>{
-    const x = e.clientX - canvas.getBoundingClientRect().left;
-    steer.x = (x < W/2) ? -1 : 1;
-  });
-  canvas.addEventListener('pointermove', e=>{
-    if (e.buttons) {
-      const x = e.clientX - canvas.getBoundingClientRect().left;
-      steer.x = (x < W/2) ? -1 : 1;
+  // faint glow – no visible “band”
+  const fog = ctx.createLinearGradient(0, horizonY-30, 0, horizonY+130);
+  fog.addColorStop(0, 'rgba(140,180,240,0.08)');
+  fog.addColorStop(1, 'rgba(140,180,240,0.00)');
+  ctx.fillStyle = fog; ctx.fillRect(0, horizonY-30, W, 160);
+}
+
+function drawRoad(worldZ){
+  // asphalt filling entire bottom area
+  ctx.beginPath();
+  ctx.moveTo(W/2 - roadTopHalf, horizonY);
+  ctx.lineTo(W/2 + roadTopHalf, horizonY);
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0,horizonY,0,H);
+  g.addColorStop(0, '#121821'); g.addColorStop(1, '#0a0f17');
+  ctx.fillStyle = g; ctx.fill();
+
+  // long, blurred lane streaks to infinity
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 6; ctx.lineCap='round';
+  const lanes = [-0.32, 0, 0.32];
+  for (const L of lanes){
+    for (let z = (worldZ%26)*-1; z<4000; z+=26){
+      const p0 = project(Math.max(0,z));
+      const p1 = project(Math.max(0,z+18));
+      if (p1.y<horizonY) continue; if (p0.y>H && p1.y>H) break;
+      const x0 = W/2 + L * p0.half*1.6;
+      const x1 = W/2 + L * p1.half*1.6;
+      ctx.beginPath(); ctx.moveTo(x0, p0.y); ctx.lineTo(x1, p1.y); ctx.stroke();
     }
-  });
-  window.addEventListener('pointerup', ()=>{ steer.x=0; });
-  window.addEventListener('keydown', e=>{
-    if(e.key==='ArrowLeft')  steer.x=-1;
-    if(e.key==='ArrowRight') steer.x=1;
-  });
-  window.addEventListener('keyup', e=>{
-    if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
-  });
-
-  /* ---------- Loop ---------- */
-  let worldZ = 0, nitroLeft = 0, last = performance.now();
-  const state = { running:false, speed:0, dist:0 };
-
-  function frame(now){
-    if(!state.running) return;
-    const dt = Math.min(0.033, (now - last)/1000); last = now;
-    t += dt;
-
-    // speed target
-    const target = 180 + (nitroLeft>0 ? 140 : 0);
-    state.speed += (target - state.speed) * 0.08;
-    if (nitroLeft>0) nitroLeft -= dt;
-
-    const mps = state.speed / 3.6;
-    worldZ += mps * dt;
-    state.dist += mps * dt;
-
-    // draw
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawSky();
-    drawRoad(worldZ);
-    // slight lateral sway from steering
-    carX += steer.x * 0.9; carX = Math.max(0, Math.min(W-carW, carX));
-    drawCar(nitroLeft>0);
-
-    // HUD
-    HUD.speed.textContent = Math.round(state.speed);
-    HUD.dist.textContent  = Math.round(state.dist);
-    HUD.coins.textContent = 0;
-
-    requestAnimationFrame(frame);
   }
 
-  document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 2.0; });
+  // optional white side lines — off by default
+  if (SHOW_SIDELINES){
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(250,255,255,.96)';
+    ctx.beginPath();
+    ctx.moveTo(W/2 - roadTopHalf, horizonY); ctx.lineTo(0, H);
+    ctx.moveTo(W/2 + roadTopHalf, horizonY); ctx.lineTo(W, H);
+    ctx.stroke();
+  }
 
-  document.getElementById('startBtn').addEventListener('click',()=>{
-    document.getElementById('startOverlay').style.display='none';
-    resize();
-    // build tinted sprite with chosen color
-    tintedSprite = makeTintedSprite(paint);
-    state.running = true;
-    state.speed = 90; state.dist = 0; worldZ = 0; last = performance.now();
-    requestAnimationFrame(frame);
-  });
+  // red LED rails (the reference vibe)
+  ctx.fillStyle = 'rgba(255,90,50,0.90)';
+  const spacingM = 16;
+  for (let z = (worldZ%spacingM)*-1; z < 1800; z += spacingM){
+    const p = project(Math.max(0,z));
+    if (p.y>H) break; if (p.y<horizonY) continue;
+    const r = Math.max(1, 3 * (1 - (p.y - horizonY)/(H-horizonY)));
+    const lx = W/2 - p.half*1.05 - 8, rx = W/2 + p.half*1.05 + 8;
+    ctx.beginPath(); ctx.arc(lx, p.y, r, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(rx, p.y, r, 0, Math.PI*2); ctx.fill();
+  }
+}
 
-  // initial
+/* ================= Car ================= */
+let carW=0, carH=0, carX=0, carY=0;
+function updateCarPlacement(){
+  carW = Math.min(W*0.92, 540);
+  const ratio = (carImg.height||512) / (carImg.width||1024);
+  carH = carW * ratio;
+  carX = Math.round((W - carW)/2);
+  carY = Math.round(H - carH*1.02);
+}
+
+let time = 0;
+function drawCar(nitroBoost){
+  const src = tintedSprite || carImg;
+  ctx.drawImage(src, carX, carY, carW, carH);
+
+  // animated tail-lights + flames (SVG-like glow via canvas)
+  const flick = 0.75 + 0.25*Math.sin(time*12);
+  const lightY = carY + carH*0.56;
+  const leftX  = carX + carW*0.23;
+  const rightX = carX + carW*0.73;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.shadowBlur = 24;
+  ctx.shadowColor = `rgba(255,60,40,${0.85*flick})`;
+  ctx.fillStyle = `rgba(255,70,50,${0.55*flick})`;
+  function lamp(x){
+    ctx.beginPath();
+    ctx.moveTo(x-18, lightY);
+    ctx.lineTo(x+18, lightY);
+    ctx.lineTo(x+8,  lightY+10);
+    ctx.lineTo(x-8,  lightY+10);
+    ctx.closePath(); ctx.fill();
+  }
+  lamp(leftX); lamp(rightX);
+
+  const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(time*20));
+  ctx.shadowBlur = 28;
+  ctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
+  ctx.fillStyle  = `rgba(${paint.r},${paint.g},${paint.b},${0.20+0.35*flame})`;
+  function jet(x){
+    ctx.beginPath();
+    ctx.moveTo(x, carY + carH*0.86);
+    ctx.quadraticCurveTo(x-12, carY + carH*0.96, x, carY + carH*1.08);
+    ctx.quadraticCurveTo(x+12, carY + carH*0.96, x, carY + carH*0.86);
+    ctx.closePath(); ctx.fill();
+  }
+  jet(carX + carW*0.38);
+  jet(carX + carW*0.62);
+  ctx.restore();
+}
+
+/* ================= Input ================= */
+const steer = { x:0 };
+canvas.addEventListener('pointerdown', e=>{
+  const x = e.clientX - canvas.getBoundingClientRect().left;
+  steer.x = (x < W/2) ? -1 : 1;
+});
+canvas.addEventListener('pointermove', e=>{
+  if (e.buttons) {
+    const x = e.clientX - canvas.getBoundingClientRect().left;
+    steer.x = (x < W/2) ? -1 : 1;
+  }
+});
+window.addEventListener('pointerup', ()=>{ steer.x=0; });
+window.addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft')  steer.x=-1;
+  if(e.key==='ArrowRight') steer.x=1;
+});
+window.addEventListener('keyup', e=>{
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
+});
+
+/* ================= Loop ================= */
+let worldZ = 0, nitroLeft = 0, last = performance.now();
+const state = { running:false, speed:0, dist:0 };
+
+function frame(now){
+  if(!state.running) return;
+  const dt = Math.min(0.033, (now - last)/1000); last = now;
+  time += dt;
+
+  // smooth speed target
+  const target = 180 + (nitroLeft>0 ? 140 : 0);
+  state.speed += (target - state.speed) * 0.08;
+  if (nitroLeft>0) nitroLeft -= dt;
+
+  const mps = state.speed / 3.6;
+  worldZ += mps * dt;
+  state.dist += mps * dt;
+
+  // draw
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawSky();
+  drawRoad(worldZ);
+  carX += steer.x * 0.9; carX = Math.max(0, Math.min(W-carW, carX));
+  drawCar(nitroLeft>0);
+
+  // HUD
+  HUD.speed.textContent = Math.round(state.speed);
+  HUD.dist.textContent  = Math.round(state.dist);
+  HUD.coins.textContent = 0;
+
+  requestAnimationFrame(frame);
+}
+
+document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 2.0; });
+
+document.getElementById('startBtn').addEventListener('click',()=>{
+  document.getElementById('startOverlay').style.display='none';
   resize();
-  rebuildTintAndPreview();
+  tintedSprite = makeTintedSprite(paint);
+  state.running = true;
+  state.speed = 90; state.dist = 0; worldZ = 0; last = performance.now();
+  requestAnimationFrame(frame);
+});
+
+/* init */
+resize();
+rebuildTintAndPreview();
+
 })();
 </script>
 </body>
