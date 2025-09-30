@@ -97,7 +97,7 @@ const HUD = {
   coins: document.getElementById('coinsRun')
 };
 
-const SHOW_SIDELINES = false; // keep off
+const SHOW_SIDELINES = false;
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
@@ -113,7 +113,6 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // Low camera, big foreground
   horizonY       = H*0.26;
   roadBottomHalf = W*1.15;
   roadTopHalf    = W*0.12;
@@ -140,13 +139,14 @@ function makeTintedSprite(rgb){
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   o.fillRect(0,0,off.width,off.height);
-  // 3) mask to alpha (NO boxes)
+  // 3) mask to alpha
   o.globalCompositeOperation = 'destination-in';
   o.drawImage(carImg, 0, 0);
-  // 4) keep speculars subtle
-  o.globalCompositeOperation = 'overlay';
+  // 4) subtle highlight ONLY where car has alpha (the previous bug)
+  o.globalCompositeOperation = 'source-atop';
   o.fillStyle = 'rgba(255,255,255,0.08)';
   o.fillRect(0,0,off.width,off.height);
+  // done
   o.globalCompositeOperation = 'source-over';
   return off;
 }
@@ -196,7 +196,7 @@ function rebuildTintAndPreview(){
   const x = Math.round((prev.width - w)/2);
   const y = Math.round((prev.height - h)/2);
 
-  // **Only** an ellipse glow (no rectangles)
+  // soft ellipse only (no rects)
   const cx = x + w/2, cy = y + h*0.92, rx = w*0.42, ry = h*0.10;
   const g = pctx.createRadialGradient(cx,cy,1,cx,cy,Math.max(rx,ry));
   g.addColorStop(0, `rgba(${paint.r},${paint.g},${paint.b},.22)`);
@@ -220,7 +220,6 @@ function project(z){
 
 /* ============== Background & Road ============== */
 function drawSky(){
-  // no skyline, no horizon band
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, '#0c1120');
   g.addColorStop(0.35, '#0f1523');
@@ -228,12 +227,12 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* Road follows LED rails; runs to the very top; no band */
+/* Road, lines, and LEDs all the way to the tip */
 function drawRoad(worldZ){
-  const vanishY = -80;                 // push tip off-screen (no visible horizon)
+  const vanishY = -80;            // put the tip off-screen
   const railOff = 1.05;
 
-  // Build left/right edges from near to far
+  // Build edges
   const ptsLeft=[], ptsRight=[];
   const steps = 42, stepZ = 120;
   for (let i=0;i<=steps;i++){
@@ -246,7 +245,7 @@ function drawRoad(worldZ){
     ptsLeft.push([lx,y]); ptsRight.push([rx,y]);
   }
 
-  // Asphalt polygon (fills whole bottom and tapers to tip at top)
+  // Asphalt polygon
   const g = ctx.createLinearGradient(0, vanishY, 0, H);
   g.addColorStop(0, '#0f141d');
   g.addColorStop(1, '#0a0f17');
@@ -257,7 +256,7 @@ function drawRoad(worldZ){
   for (let i=0;i<ptsLeft.length;i++){ const [x,y]=ptsLeft[i]; ctx.lineTo(x, Math.min(y,H)); }
   ctx.closePath(); ctx.fill();
 
-  // Lane streaks (center + 2) to infinity, aligned with road
+  // Lane streaks (continue to tip; add a tiny cap at the very top)
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap='round';
   const lanes = [-0.32, 0, 0.32];
@@ -265,22 +264,20 @@ function drawRoad(worldZ){
     for (let z = (worldZ%26)*-1; z<5000; z+=26){
       const p0 = project(Math.max(0,z));
       const p1 = project(Math.max(0,z+18));
-      const x0 = W/2 + L * p0.half*1.6;
-      const x1 = W/2 + L * p1.half*1.6;
-      const y0 = Math.max(p0.y, vanishY), y1 = Math.max(p1.y, vanishY);
+      let x0 = W/2 + L * p0.half*1.6;
+      let x1 = W/2 + L * p1.half*1.6;
+      let y0 = Math.max(p0.y, vanishY), y1 = Math.max(p1.y, vanishY);
+      if (y0>H && y1>H) break;
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
-  }
-
-  if (SHOW_SIDELINES){
-    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(250,255,255,.96)';
+    // tiny cap segment at the very tip so there’s zero gap
     ctx.beginPath();
-    ctx.moveTo(W/2 - roadTopHalf, horizonY); ctx.lineTo(0, H);
-    ctx.moveTo(W/2 + roadTopHalf, horizonY); ctx.lineTo(W, H);
+    ctx.moveTo(W/2 + L*roadTopHalf*0.0, vanishY+1);
+    ctx.lineTo(W/2 + L*roadTopHalf*0.0, vanishY+4);
     ctx.stroke();
   }
 
-  // LED rails (define the same edges)
+  // LED rails (also up to the tip; add a final dot at vanishY)
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   const spacingM = 16;
   for (let z = (worldZ%spacingM)*-1; z < 3200; z += spacingM){
@@ -292,6 +289,8 @@ function drawRoad(worldZ){
     ctx.beginPath(); ctx.arc(lx, y, r, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(rx, y, r, 0, Math.PI*2); ctx.fill();
   }
+  // final tip dots
+  ctx.beginPath(); ctx.arc(W/2, vanishY, 1.2, 0, Math.PI*2); ctx.fill();
 }
 
 /* ============== Car ============== */
@@ -304,7 +303,7 @@ function updateCarPlacement(){
   carY = Math.round(H - carH*1.02);
 }
 
-/* Draw body, then FX in an offscreen buffer (prevents any box) */
+/* FX offscreen so no artifacts */
 function buildCarFXCanvas(nitroBoost, t){
   const fx = document.createElement('canvas');
   fx.width = Math.max(2, Math.floor(carW));
@@ -379,7 +378,7 @@ window.addEventListener('keydown', e=>{
   if(e.key==='ArrowRight') steer.x=1;
 });
 window.addEventListener('keyup', e=>{
-  if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
+  if(e.key==='ArrowLeft'||e.key==='Right') steer.x=0;
 });
 
 /* ============== Loop ============== */
