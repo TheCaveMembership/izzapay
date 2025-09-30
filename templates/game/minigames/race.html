@@ -110,19 +110,19 @@ const nitroWrap = document.getElementById('nitroWrap');
 const nitroFill = document.getElementById('nitroFill');
 
 /* ======= Tunables (motion-forward) ======= */
-const OVERLAY_ALPHA = 0.10; // very light tint so the bg art stays visible
+const OVERLAY_ALPHA = 0.10; // very light so the bg art stays visible
 
-// Aurora + horizon glow (unchanged)
+// Aurora + horizon glow (subtle)
 let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
 
-// **Motion Boosters**
-let STREAK_ALPHA  = 0.32;   // was 0.16 — brighter streaks
-let STREAK_SPEED  = 0.85;   // was 0.42 — more streak length & wobble
-let SMEAR_ALPHA   = 0.30;   // was 0.18 — heavier side smears
-let ASPHALT_ALPHA = 0.18;   // asphalt noise visibility
+// Motion boosters (much more visible now)
+let STREAK_ALPHA  = 0.42;
+let STREAK_SPEED  = 1.10;
+let SMEAR_ALPHA   = 0.38;
+let ASPHALT_ALPHA = 0.26;
 
-// Spawns (kept same)
+// Spawns
 const SPAWN_EVERY_MS = 900;
 const COIN_CHANCE = 0.55, NITRO_CHANCE = 0.25, BOMB_CHANCE = 0.20;
 
@@ -145,7 +145,7 @@ function resize(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
   horizonY       = H*0.26;
-  roadBottomHalf = W*0.95;
+  roadBottomHalf = W*1.00;   // tiny widen to give more lateral feel
   roadTopHalf    = W*0.08;
 
   VANISH_Y = -Math.max(H * 0.8, 600);
@@ -173,7 +173,6 @@ function makeTintedSprite(rgb){
   off.width  = carImg.width;
   off.height = carImg.height;
   const o = off.getContext('2d');
-  o.imageSmoothingEnabled = true;
   o.drawImage(carImg, 0, 0);
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
@@ -242,7 +241,7 @@ carImg.onload = rebuildTintAndPreview;
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
   const k = 0.0105;
-  const t = 1 - Math.exp(-k*z);
+  const t = 1 - Math.exp(-k*z);  // z=0 => at horizon, grows toward player
   const y   = lerp(VANISH_Y, H, t);
   const half= lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
@@ -276,7 +275,7 @@ function drawBackground(){
   }
 }
 
-/* ---------- Subtle FX: aurora + horizon glow ---------- */
+/* ---------- Aurora + horizon glow ---------- */
 function drawAurora(t){
   const topH = H*0.42;
   ctx.save();
@@ -304,11 +303,11 @@ function drawAurora(t){
   ctx.restore();
 }
 function drawVanishingGlow(t){
-  const rBase = Math.min(W,H)*0.065;
+  const rBase = Math.min(W,H)*0.070;
   const pulse = 1 + 0.06*Math.sin(t*3.2);
   const r2 = rBase*4.8*pulse;
   const g = ctx.createRadialGradient(VPT_X, VPT_Y, 1, VPT_X, VPT_Y, r2);
-  g.addColorStop(0,   'rgba(0,255,255,0.68)');
+  g.addColorStop(0,   'rgba(0,255,255,0.70)');
   g.addColorStop(0.4, 'rgba(0,200,255,0.30)');
   g.addColorStop(1,   'rgba(0,200,255,0.00)');
   ctx.save();
@@ -326,63 +325,62 @@ function buildNoise(){
   noiseCanvas.width = noiseW; noiseCanvas.height = noiseH;
   noiseCtx = noiseCanvas.getContext('2d');
   noiseCtx.clearRect(0,0,noiseW,noiseH);
-  // light grain + diagonal texture
+  // grain + diagonal texture
   noiseCtx.fillStyle = 'rgba(255,255,255,0.02)';
   noiseCtx.fillRect(0,0,noiseW,noiseH);
   const g = noiseCtx.createLinearGradient(0,0,noiseW,noiseH);
-  g.addColorStop(0,'rgba(255,255,255,0.09)');
+  g.addColorStop(0,'rgba(255,255,255,0.10)');
   g.addColorStop(1,'rgba(255,255,255,0.00)');
   noiseCtx.strokeStyle = g;
-  for(let i=0;i<120;i++){
+  for(let i=0;i<140;i++){
     const y = Math.random()*noiseH;
-    noiseCtx.globalAlpha = 0.06 + Math.random()*0.10;
+    noiseCtx.globalAlpha = 0.08 + Math.random()*0.10;
     noiseCtx.lineWidth = 1 + Math.random()*2;
     noiseCtx.beginPath();
     noiseCtx.moveTo(0,y);
-    noiseCtx.lineTo(noiseW, y - 24 - Math.random()*50);
+    noiseCtx.lineTo(noiseW, y - 30 - Math.random()*60);
     noiseCtx.stroke();
   }
 }
 
-/* ===== Motion streaks + side smears + asphalt scroll ===== */
+/* ===== Motion streaks + side smears + asphalt scroll + near-car rush ===== */
 function drawMotion(worldZ, speed){
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // 1) radial streaks from vanishing point
-  const count = 34;
+  // radial streaks from vanishing point (sky / far city)
+  const count = 36;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = STREAK_ALPHA;
-
   for (let i=0;i<count;i++){
-    const ang = (-0.40 + i/(count-1)*0.80); // a little wider fan
-    const len = H*1.05;
-    const wob = Math.sin((worldZ*0.025)+i)*8;   // stronger wobble
-    const x2 = VPT_X + Math.tan(ang)*(len*0.78) + wob;
-    const y2 = H + 20;
+    const ang = (-0.42 + i/(count-1)*0.84);
+    const len = H*1.08;
+    const wob = Math.sin((worldZ*0.028)+i)*9;
+    const x2 = VPT_X + Math.tan(ang)*(len*0.80) + wob;
+    const y2 = H + 30;
     const grad = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
     const base = (i%2===0)? 'rgba(0,255,255,' : 'rgba(255,0,200,';
-    grad.addColorStop(0.00, base + (0.60*k) + ')');
-    grad.addColorStop(0.28, base + (0.32*k) + ')');
+    grad.addColorStop(0.00, base + (0.66*k) + ')');
+    grad.addColorStop(0.25, base + (0.36*k) + ')');
     grad.addColorStop(1.00, base + '0)');
     ctx.strokeStyle = grad;
-    ctx.lineWidth = 2 + 10*k;
+    ctx.lineWidth = 2 + 12*k;
     ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.restore();
 
-  // 2) side smears (simulate building/trees blur)
-  const smearW = W*0.28;
+  // side smears (simulate building/trees blur)
+  const smearW = W*0.30;
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
-  smearG_L.addColorStop(0,   `rgba(0,0,0,${0.06 + SMEAR_ALPHA*0.9*k})`);
+  smearG_L.addColorStop(0,   `rgba(0,0,0,${0.08 + SMEAR_ALPHA*0.9*k})`);
   smearG_L.addColorStop(1.0, 'rgba(0,0,0,0)');
   const smearG_R = ctx.createLinearGradient(W,0,W-smearW,0);
-  smearG_R.addColorStop(0,   `rgba(0,0,0,${0.06 + SMEAR_ALPHA*0.9*k})`);
+  smearG_R.addColorStop(0,   `rgba(0,0,0,${0.08 + SMEAR_ALPHA*0.9*k})`);
   smearG_R.addColorStop(1.0, 'rgba(0,0,0,0)');
   ctx.fillStyle = smearG_L; ctx.fillRect(0,0,smearW,H);
   ctx.fillStyle = smearG_R; ctx.fillRect(W-smearW,0,smearW,H);
 
-  // 3) asphalt texture scroll (clipped to road)
+  // road polygon for clipping
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){ const e=edgesAt(z); L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
   ctx.save();
@@ -391,16 +389,37 @@ function drawMotion(worldZ, speed){
   for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
   ctx.closePath(); ctx.clip();
 
-  // Scroll faster with speed
-  const scroll = (worldZ * (1.6 + k*1.4)) % noiseH;
-  ctx.globalAlpha = ASPHALT_ALPHA;
+  // perspective asphalt scroll (heaviest near the player)
+  const scroll = (worldZ * (1.8 + k*1.6)) % noiseH;
   for(let y=-noiseH; y<H+noiseH; y+=noiseH){
+    const near = Math.min(1, Math.max(0, (y+noiseH - VPT_Y) / (H - VPT_Y + 1)));
+    ctx.globalAlpha = ASPHALT_ALPHA * (0.35 + 0.65*near); // stronger toward bottom
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
+  }
+
+  // near-car “rush” — short streaks around the bottom center
+  const cx = W*0.5, cy = H*0.92;
+  const rush = 10 + Math.round(24*k);
+  ctx.globalAlpha = 0.30 + 0.30*k;
+  ctx.globalCompositeOperation = 'lighter';
+  for(let i=0;i<rush;i++){
+    const off = (i-rush/2)/(rush/2);
+    const x0 = cx + off * W*0.42;
+    const x1 = cx + off * W*0.52;
+    const y0 = cy - 22 - Math.abs(off)*40;
+    const y1 = cy + 48 + Math.abs(off)*60;
+    const g = ctx.createLinearGradient(x0,y0,x1,y1);
+    g.addColorStop(0,'rgba(0,255,255,0)');
+    g.addColorStop(0.5,`rgba(0,255,255,${0.20+0.35*k})`);
+    g.addColorStop(1,'rgba(255,0,200,0)');
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 1 + 5*k*(1-Math.abs(off));
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
   }
   ctx.restore();
 }
 
-/* ============== Road overlays (no dashes/LEDs) ============== */
+/* ============== Road overlay (no dashes / LEDs) ============== */
 function drawRoad(){
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
@@ -408,8 +427,6 @@ function drawRoad(){
     if (e.y>H && L.length && R.length) break;
     L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
-
-  // very light darkening of the road polygon
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(W/2, VANISH_Y);
@@ -426,7 +443,7 @@ function drawRoad(){
   ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = 1;
 
-  // tiny horizon fade under HUD
+  // tiny horizon fade
   const topFade = ctx.createLinearGradient(0, 0, 0, TOP_FADE_PX);
   topFade.addColorStop(0, 'rgba(0,0,0,1)');
   topFade.addColorStop(1, 'rgba(0,0,0,0)');
@@ -440,44 +457,50 @@ function drawRoad(){
 /* ============== Pickups (coin, nitro, bomb) ============== */
 class Pickup {
   constructor(type, spawnZ, laneT){
-    this.type = type;
-    this.spawnZ = spawnZ;
-    this.laneT = laneT;
+    this.type = type;          // 'coin' | 'nitro' | 'bomb'
+    this.spawnZ = spawnZ;      // == worldZ at creation (horizon)
+    this.laneT = laneT;        // 0..1 across road
     this.spin = Math.random()*Math.PI*2;
     this.alive = true;
   }
-  // **Fix**: make z grow over time so items move from horizon → bottom
-  zRel(worldZ){ return worldZ - this.spawnZ; }
+  // items start at horizon (zRel=0) and move toward player as worldZ increases
+  zRel(worldZ){ return Math.max(0, worldZ - this.spawnZ); }
+
   draw(worldZ){
-    const z = Math.max(0, this.zRel(worldZ));
+    const z = this.zRel(worldZ);
     if (z>DEPTH_Z) return;
     const e = edgesAt(z);
     const x = e.lx + (e.rx-e.lx)*this.laneT;
     const y = e.y;
-    const s = 0.35 + e.t*0.9;
-    this.spin += 0.15 + (this.type==='coin'?0.2:0.1);
+
+    // slight easing makes them feel like they accelerate
+    const ease = (p)=>p*p*(3-2*p);
+    const s = 0.28 + ease(e.t) * 1.05;
+
+    this.spin += 0.15 + (this.type==='coin'?0.22:0.12);
 
     if (this.type==='coin') drawCoin(x,y,s,this.spin);
-    else if (this.type==='nitro') drawNitro(x,y,s*1.1,this.spin);
-    else drawBomb(x,y,s*1.2,this.spin);
+    else if (this.type==='nitro') drawNitro(x,y,s*1.08,this.spin);
+    else drawBomb(x,y,s*1.15,this.spin);
 
-    if (y>H+30) this.alive=false;
+    if (y>H+40) this.alive=false;
   }
+
   hitTest(carRect, worldZ){
-    const z = Math.max(0, this.zRel(worldZ));
+    const z = this.zRel(worldZ);
     const e = edgesAt(z);
     const x = e.lx + (e.rx-e.lx)*this.laneT;
     const y = e.y;
-    const r = 20 + 40*e.t;
+    const r = 18 + 42*e.t; // grows as it approaches
     const cx = x, cy = y;
     const nx = Math.max(carRect.x, Math.min(cx, carRect.x+carRect.w));
     const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
     const dx = cx-nx, dy = cy-ny;
-    return (dx*dx + dy*dy) < (r*r*0.8);
+    return (dx*dx + dy*dy) < (r*r*0.85);
   }
 }
 
-/* Procedural sprites */
+/* Procedural sprites (same look) */
 function drawCoin(x,y,s,ang){
   const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang)));
   ctx.save();
@@ -530,7 +553,8 @@ function drawBomb(x,y,s,ang){
 /* ============== Car ============== */
 let carW=0, carH=0, carX=0, carY=0;
 function updateCarPlacement(){
-  carW = Math.min(W*0.92, 540);
+  // smaller car for more play space
+  carW = Math.min(W*0.78, 480);
   const ratio = (carImg.height||512) / (carImg.width||1024);
   carH = carW * ratio;
   carX = Math.round((W - carW)/2);
@@ -543,6 +567,7 @@ function buildCarFXCanvas(nitroBoost, t){
   fx.width = Math.max(2, Math.floor(carW));
   fx.height = Math.max(2, Math.floor(carH));
   const c = fx.getContext('2d');
+
   const flick = 0.75 + 0.25*Math.sin(t*12);
   const lightY = carH*0.56;
   const leftX  = carW*0.23;
@@ -552,17 +577,33 @@ function buildCarFXCanvas(nitroBoost, t){
   c.shadowBlur = 24;
   c.shadowColor = `rgba(255,60,40,${0.85*flick})`;
   c.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
-  const lamp = (x) => { c.beginPath(); c.moveTo(x-18, lightY); c.lineTo(x+18, lightY); c.lineTo(x+8,  lightY+10); c.lineTo(x-8,  lightY+10); c.closePath(); c.fill(); };
+
+  const lamp = (x) => {
+    c.beginPath();
+    c.moveTo(x-18, lightY);
+    c.lineTo(x+18, lightY);
+    c.lineTo(x+8,  lightY+10);
+    c.lineTo(x-8,  lightY+10);
+    c.closePath(); c.fill();
+  };
   lamp(leftX); lamp(rightX);
 
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
   c.shadowBlur  = 28;
   c.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
   c.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.22+0.35*flame})`;
-  const jet = (x) => { c.beginPath(); c.moveTo(x, carH*0.86); c.quadraticCurveTo(x-12, carH*0.96, x, carH*1.08); c.quadraticCurveTo(x+12, carH*0.96, x, carH*0.86); c.closePath(); c.fill(); };
+
+  const jet = (x) => {
+    c.beginPath();
+    c.moveTo(x, carH*0.86);
+    c.quadraticCurveTo(x-12, carH*0.96, x, carH*1.08);
+    c.quadraticCurveTo(x+12, carH*0.96, x, carH*0.86);
+    c.closePath(); c.fill();
+  };
   jet(carW*0.38); jet(carW*0.62);
   return fx;
 }
+
 let time = 0;
 function drawCar(nitroBoost){
   const src = tintedSprite || carImg;
@@ -614,12 +655,12 @@ let nitro = 1.0; // 0..1 meter
 let nitroActive = false;
 let lastSpawn = 0;
 const pickups = [];
+const LANE_TS = [0.22, 0.50, 0.78];
 
 function spawnOne(){
   const r = Math.random();
-  const lane = [0.22,0.50,0.78][Math.floor(Math.random()*3)];
-  // **Fix**: spawn close to the horizon so it streams toward the player
-  const spawnZ = worldZ + 40; // was: worldZ + DEPTH_Z*0.95
+  const lane = LANE_TS[Math.floor(Math.random()*3)];
+  const spawnZ = worldZ; // **spawn at horizon**
   if (r < COIN_CHANCE) pickups.push(new Pickup('coin', spawnZ, lane));
   else if (r < COIN_CHANCE + NITRO_CHANCE) pickups.push(new Pickup('nitro', spawnZ, lane));
   else pickups.push(new Pickup('bomb', spawnZ, lane));
@@ -669,8 +710,10 @@ function frame(now){
   drawVanishingGlow(time);
   drawMotion(worldZ, state.speed);
 
-  // Car steering
-  carX += steer.x * 1.0; carX = Math.max(0, Math.min(W-carW, carX));
+  // Car steering — give enough lateral travel for L / M / R lanes
+  const steerSpeed = Math.max(2.5, W * 0.0055); // scaled for device width
+  carX += steer.x * steerSpeed;
+  carX = Math.max(0, Math.min(W - carW, carX));
   const cRect = carRect();
 
   // Pickups
@@ -679,13 +722,18 @@ function frame(now){
     p.draw(worldZ);
     if (p.hitTest(cRect, worldZ)) {
       p.alive = false;
-      if (p.type==='coin'){ state.coins += 100; }
-      else if (p.type==='nitro'){ nitro = Math.min(1, nitro + 0.25); }
-      else { state.bombsHit++; if (state.bombsHit>=3) { gameOver(); return; } }
+      if (p.type === 'coin') {
+        state.coins += 100;
+      } else if (p.type === 'nitro') {
+        nitro = Math.min(1, nitro + 0.25);
+      } else {
+        state.bombsHit++;
+        if (state.bombsHit >= 3) { gameOver(); return; }
+      }
     }
   }
   // cleanup
-  for (let i=pickups.length-1;i>=0;i--) if (!pickups[i].alive) pickups.splice(i,1);
+  for (let i = pickups.length - 1; i >= 0; i--) if (!pickups[i].alive) pickups.splice(i, 1);
 
   drawCar(nitroActive);
 
@@ -697,14 +745,21 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 
-document.getElementById('startBtn').addEventListener('click',()=>{
-  document.getElementById('startOverlay').style.display='none';
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('startOverlay').style.display = 'none';
   resize();
   tintedSprite = makeTintedSprite(paint);
-  state.running = true;
-  state.speed = 90; state.dist = 0; worldZ = 0; last = performance.now();
-  state.coins = 0; state.bombsHit = 0; nitro = 1.0; nitroFill.style.width='100%';
-  pickups.length = 0; lastSpawn = performance.now();
+  state.running   = true;
+  state.speed     = 90;
+  state.dist      = 0;
+  worldZ          = 0;
+  last            = performance.now();
+  state.coins     = 0;
+  state.bombsHit  = 0;
+  nitro           = 1.0;
+  nitroFill.style.width = '100%';
+  pickups.length  = 0;
+  lastSpawn       = performance.now();
   requestAnimationFrame(frame);
 });
 
