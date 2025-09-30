@@ -11,6 +11,17 @@
     :root { --bg:#0a0c12; --panel:#06080e; }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
+
+    /* Kill iOS selection/callouts on the play surface and controls */
+    .arena, canvas, .soundBtn, .startBtn, .nitroWrap, .swatch {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+
     .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
       border-left:1px solid rgba(255,255,255,.08);
       border-right:1px solid rgba(255,255,255,.08);
@@ -82,14 +93,20 @@
       <div class="nitroLabel">NITRO</div>
     </div>
 
-    <!-- Background music: replace src with your Suno MP3/OGG -->
-    <audio id="bgm" src="/static/game/audio/izza_race_theme.mp3" loop preload="auto"></audio>
+    <!-- Background music -->
+    <audio id="bgm" src="/static/game/audio/RACEBGM.wav" loop preload="auto" playsinline></audio>
 
     <canvas id="scene"></canvas>
   </div>
 
 <script>
 (() => {
+/* ===== Kill context menus / long-press selections (iOS) ===== */
+document.addEventListener('contextmenu', e=>e.preventDefault());
+['touchstart','touchend','gesturestart'].forEach(ev=>{
+  document.addEventListener(ev, ()=>{}, {passive:false});
+});
+
 /* ============== Wallet ============== */
 async function loadWallet(){
   let coins='—', craft='—';
@@ -133,12 +150,12 @@ let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
 
 // Motion boosters
-let STREAK_ALPHA  = 0.55;         // slightly stronger baseline
-let STREAK_SPEED  = 1.45;         // more aggressive spread baseline
+let STREAK_ALPHA  = 0.55;
+let STREAK_SPEED  = 1.45;
 let SMEAR_ALPHA   = 0.62;
 let ASPHALT_ALPHA = 0.36;
 
-// Hyperloop multipliers (while Nitro heat builds)
+// Hyperloop multipliers (Nitro)
 const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 
 /* ============== Sizing / Camera ============== */
@@ -159,7 +176,7 @@ function resize(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
   roadBottomHalf = W*1.02;
-  roadTopHalf    = W*0.10; // a touch wider near horizon for better lane read
+  roadTopHalf    = W*0.10;
 
   VANISH_Y = -Math.max(H * 0.8, 600);
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
@@ -366,13 +383,13 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
   // radial streaks from vanishing point
-  const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
+  const count = Math.round((hyper?58:48) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = STREAK_ALPHA*(hyper?1.08:1);
   for (let i=0;i<count;i++){
-    const ang = (-0.52 + i/(count-1)*1.04);    // more spread baseline
-    const len = H*(hyper?1.38:1.18);
+    const ang = (-0.56 + i/(count-1)*1.12);
+    const len = H*(hyper?1.42:1.22);
     const wob = Math.sin((worldZ*0.033)+i)*10*(hyper?1.6:1);
     const x2 = VPT_X + Math.tan(ang)*(len*0.82) + wob;
     const y2 = H + 36;
@@ -387,9 +404,9 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   }
   ctx.restore();
 
-  // side smears (buildings/trees blur)
-  const smearW = W*(hyper?0.46:0.38);
-  const smearAlpha = (0.16 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
+  // side smears
+  const smearW = W*(hyper?0.46:0.40);
+  const smearAlpha = (0.18 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
   smearG_L.addColorStop(0,   `rgba(0,0,0,${smearAlpha})`);
   smearG_L.addColorStop(1.0, 'rgba(0,0,0,0)');
@@ -406,10 +423,10 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   ctx.beginPath(); ctx.moveTo(W/2, VANISH_Y);
   for(let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
   for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
-  ctx.closePath(); 
+  ctx.closePath();
   ctx.clip();
 
-  // perspective asphalt scroll (heaviest near the player)
+  // perspective asphalt scroll
   const scroll = (worldZ * (2.0 + k*1.7) * hyperK.asphalt) % noiseH;
   for(let y=-noiseH; y<H+noiseH; y+=noiseH){
     const near = Math.min(1, Math.max(0, (y+noiseH - VPT_Y) / (H - VPT_Y + 1)));
@@ -417,7 +434,26 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // TWO soft tire beams, anchored to wheels so they follow the car
+  // extra edge speed lines (always on)
+  ctx.globalAlpha = 0.28 + 0.32*k;
+  ctx.globalCompositeOperation = 'lighter';
+  const runners = 14;
+  for (let i=0;i<runners;i++){
+    const z = (worldZ*0.5 + i*140) % DEPTH_Z;
+    const e = edgesAt(z);
+    const y1 = Math.min(H, Math.max(VPT_Y, e.y));
+    const y2 = H + 24;
+    const lw = 1 + (1 - i/(runners-1)) * 3.0;
+    // left
+    ctx.strokeStyle = 'rgba(0,255,255,0.55)';
+    ctx.lineWidth = lw;
+    ctx.beginPath(); ctx.moveTo(e.lx+4, y1); ctx.lineTo(e.lx+4, y2); ctx.stroke();
+    // right
+    ctx.beginPath(); ctx.moveTo(e.rx-4, y1); ctx.lineTo(e.rx-4, y2); ctx.stroke();
+  }
+  ctx.restore();
+
+  // tire beams
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -435,9 +471,8 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.fill();
   };
   lane(tireL); lane(tireR);
-  ctx.restore();
 
-  // hyperloop vignette (subtle baseline, stronger on nitro)
+  // hyperloop vignette
   ctx.save();
   const inner = Math.min(W,H)*0.10;
   const outer = Math.max(W,H)*(hyper?0.78:0.66)*(1-0.10*heat);
@@ -581,7 +616,6 @@ function burstNitro(x,y, count=12){
   }
 }
 function explodeBomb(x,y){
-  // flash ring
   for(let i=0;i<24;i++){
     const a = (i/24)*Math.PI*2;
     const s = 160 + Math.random()*220;
@@ -593,7 +627,6 @@ function explodeBomb(x,y){
       'rgba(255,120,40,1)', 14, 420
     ));
   }
-  // smoke
   for(let i=0;i<18;i++){
     const a = Math.random()*Math.PI*2;
     const s = 40 + Math.random()*90;
@@ -633,7 +666,31 @@ function clickStartAudio(){
 }
 let bgmStarted=false;
 
-// Procedural SFX (short + crisp)
+/* Nitro looped whoosh while held */
+let nitroSrc=null, nitroGain=null;
+function nitroWhooshStart(){
+  ensureAudio();
+  if (nitroSrc) return; // already running
+  const dur = 2.0;
+  const buf = AC.createBuffer(1, AC.sampleRate*dur, AC.sampleRate);
+  const ch  = buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ ch[i] = (Math.random()*2-1); } // white noise
+  const src = AC.createBufferSource(); src.buffer = buf; src.loop = true;
+  const bp  = AC.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=380; bp.Q.value=0.9;
+  const sh  = AC.createBiquadFilter(); sh.type='highshelf'; sh.frequency.value=1200; sh.gain.value=6;
+  nitroGain = AC.createGain(); nitroGain.gain.value = 0.0;
+  src.connect(bp); bp.connect(sh); sh.connect(nitroGain); nitroGain.connect(sfxGain);
+  src.start();
+  nitroSrc = src;
+}
+function nitroWhooshStop(){
+  if (!nitroSrc) return;
+  try{ nitroSrc.stop(); }catch(e){}
+  nitroSrc.disconnect(); nitroSrc=null;
+  if (nitroGain){ nitroGain.disconnect(); nitroGain=null; }
+}
+
+/* Procedural SFX (short) */
 function playCoin(){
   ensureAudio();
   const o = AC.createOscillator();
@@ -670,7 +727,7 @@ function playBomb(){
   s.start(); s.stop(AC.currentTime+0.52);
 }
 
-/* Sound toggle (button already exists in DOM) */
+/* Sound toggle */
 function applyMuteUI(){
   soundBtn.classList.toggle('muted', muted);
   soundLabel.textContent = muted? 'SOUND OFF' : 'SOUND ON';
@@ -724,6 +781,13 @@ class Pickup {
   }
 
   hitTest(carRect, worldZ){
+    // extra rule: middle-lane items require car centered in middle lane
+    if (Math.abs(this.laneT - 0.50) < 0.001){
+      const carCenter = carRect.x + carRect.w/2;
+      const centerTol = Math.max(8, W*0.03); // tighten as requested
+      if (Math.abs(carCenter - W/2) > centerTol) return false;
+    }
+
     const z = this.zRel(worldZ);
     const e = edgesAt(z);
     const x = e.lx + (e.rx-e.lx)*this.laneT;
@@ -738,7 +802,7 @@ class Pickup {
   }
 }
 
-/* Procedural sprites for pickups (same visuals as before) */
+/* Procedural sprites for pickups */
 function drawCoin(x,y,s,ang){
   const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang)));
   ctx.save();
@@ -844,37 +908,43 @@ function buildCarFXCanvas(nitroBoost, t){
 /* ============== INPUT ============== */
 let time = 0;
 const steer = { x:0, nitro:false };
+
 canvas.addEventListener('pointerdown', e=>{
+  e.preventDefault();
   const x = e.clientX - canvas.getBoundingClientRect().left;
-  steer.x = (x < W/2) ? -1 : 1;
+    steer.x = (x < W/2) ? -1 : 1;
   clickStartAudio();
 });
 canvas.addEventListener('pointermove', e=>{
-  if (e.buttons) {
-    const x = e.clientX - canvas.getBoundingClientRect().left;
-    steer.x = (x < W/2) ? -1 : 1;
-  }
+  if (!e.buttons) return;
+  e.preventDefault();
+  const x = e.clientX - canvas.getBoundingClientRect().left;
+  steer.x = (x < W/2) ? -1 : 1;
 });
-window.addEventListener('pointerup', ()=>{ steer.x=0; });
-window.addEventListener('keydown', e=>{
-  if(e.key==='ArrowLeft')  steer.x=-1;
-  if(e.key==='ArrowRight') steer.x=1;
-  if(e.key.toLowerCase()===' ') steer.nitro=true;
-  clickStartAudio();
-});
-window.addEventListener('keyup', e=>{
-  if(e.key==='ArrowLeft' || e.key==='ArrowRight') steer.x = 0;   // <-- change 'Right' to 'ArrowRight'
-  if(e.key.toLowerCase()===' ') steer.nitro=false;
-});
+window.addEventListener('pointerup', (e)=>{ e.preventDefault(); steer.x = 0; });
 
-/* Nitro meter hold */
+window.addEventListener('keydown', e=>{
+  if(e.key === 'ArrowLeft')  { steer.x = -1; e.preventDefault(); }
+  if(e.key === 'ArrowRight') { steer.x =  1; e.preventDefault(); }
+  if(e.key === ' ')          { steer.nitro = true; e.preventDefault(); nitroWhooshStart(); }
+  clickStartAudio();
+}, {passive:false});
+
+window.addEventListener('keyup', e=>{
+  if(e.key === 'ArrowLeft' || e.key === 'ArrowRight') steer.x = 0;
+  if(e.key === ' ') steer.nitro = false;
+}, {passive:false});
+
+window.addEventListener('blur', ()=>{ steer.x = 0; steer.nitro = false; });
+
+/* Nitro meter hold (button) */
 function bindNitroHold(el){
-  const on=()=>{ steer.nitro=true; clickStartAudio(); };
-  const off=()=>{ steer.nitro=false; };
-  el.addEventListener('pointerdown', e=>{ e.preventDefault(); on(); });
-  window.addEventListener('pointerup', off);
+  const on  = ()=>{ steer.nitro = true; clickStartAudio(); nitroWhooshStart(); };
+  const off = ()=>{ steer.nitro = false; };
+  el.addEventListener('pointerdown', e=>{ e.preventDefault(); on(); }, {passive:false});
+  window.addEventListener('pointerup', off, {passive:true});
   el.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
-  el.addEventListener('touchend', off);
+  el.addEventListener('touchend', off, {passive:true});
 }
 bindNitroHold(nitroWrap);
 
@@ -887,14 +957,12 @@ let nitroActive = false;
 let lastSpawn = 0;
 const pickups = [];
 
-/* Lanes tightened so left/right are on-screen and reachable */
+/* Lanes */
 const LANE_TS = [0.26, 0.50, 0.74];
-
-/* No stacking per-lane */
 const MIN_LANE_SEP_Z = 820;
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 
-/* Spawn controller (denser) */
+/* Spawn controller */
 function spawnOne(){
   const available = [];
   for (let i=0;i<LANE_TS.length;i++){
@@ -913,17 +981,39 @@ function spawnOne(){
   else                pickups.push(new Pickup('bomb',  spawnZ, laneT));
 }
 
+/* Nitro state + looped SFX gain ramp */
 function useNitro(dt){
-  const can = nitro>0.02;
+  const can = nitro > 0.02;
   nitroActive = steer.nitro && can;
-  if (nitroActive){ nitro = Math.max(0, nitro - dt*0.25); heat = Math.min(1, heat + dt*2.4); }
-  else            { heat = Math.max(0, heat - dt*1.6); }
+
+  if (nitroActive){
+    nitro = Math.max(0, nitro - dt*0.25);
+    heat  = Math.min(1, heat + dt*2.4);
+    nitroWhooshStart();
+    if (nitroGain){
+      try {
+        nitroGain.gain.cancelScheduledValues(AC.currentTime);
+        nitroGain.gain.setTargetAtTime(0.75, AC.currentTime, 0.06);
+      } catch(e){}
+    }
+  } else {
+    heat = Math.max(0, heat - dt*1.6);
+    if (nitroGain){
+      try {
+        nitroGain.gain.cancelScheduledValues(AC.currentTime);
+        nitroGain.gain.setTargetAtTime(0.0, AC.currentTime, 0.08);
+      } catch(e){}
+    }
+    // stop the loop once it has faded out
+    if (nitroGain && nitroGain.gain.value < 0.01) nitroWhooshStop();
+  }
   nitroFill.style.width = Math.round(nitro*100)+'%';
 }
 
 function gameOver(){
   state.running=false;
   try{ bgm.pause(); }catch(e){}
+  nitroWhooshStop();
   alert(`CRASHED 💥\nDistance: ${Math.round(state.dist)} m\nCoins: ${state.coins}`);
   document.getElementById('startOverlay').style.display='';
 }
@@ -953,7 +1043,7 @@ function frame(now){
   worldZ += mps * dt;
   state.dist += mps * dt;
 
-  // Spawns (faster)
+  // Spawns
   if (now - lastSpawn > 650*(0.80+Math.random()*0.35)) {
     lastSpawn = now; spawnOne();
   }
@@ -975,7 +1065,7 @@ function frame(now){
   drawVanishingGlow(time, heat);
   drawMotion(worldZ, state.speed, hyper, heat);
 
-  // Headlights on top
+  // Headlights
   drawHeadlights();
 
   // Colliders
@@ -988,7 +1078,6 @@ function frame(now){
     if (p.hitTest(cRect, worldZ)) {
       p.alive = false;
 
-      // screen-space coordinates = draw position at collision moment
       const ez = p.zRel(worldZ);
       const e  = edgesAt(ez);
       const x  = e.lx + (e.rx-e.lx)*p.laneT;
@@ -1029,7 +1118,8 @@ function frame(now){
 }
 
 /* ======= START ======= */
-document.getElementById('startBtn').addEventListener('click', () => {
+document.getElementById('startBtn').addEventListener('click', (e) => {
+  e.preventDefault();
   document.getElementById('startOverlay').style.display = 'none';
   resize();
   tintedSprite = makeTintedSprite(paint);
@@ -1048,11 +1138,11 @@ document.getElementById('startBtn').addEventListener('click', () => {
   laneLastSpawnZ[0]=laneLastSpawnZ[1]=laneLastSpawnZ[2]=-1e9;
   lastSpawn       = performance.now();
 
-  // music
+  // music (immediately on START)
   if (!muted){ clickStartAudio(); }
 
   requestAnimationFrame(frame);
-});
+}, {passive:false});
 
 /* init */
 resize();
