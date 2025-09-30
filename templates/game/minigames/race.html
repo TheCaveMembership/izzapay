@@ -10,7 +10,11 @@
   <style>
     :root { --bg:#0a0c12; --panel:#06080e; }
     html,body{height:100%}
-    body{margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
+    body{
+      margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif;
+      /* block all text selection / callouts */
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+    }
     .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
       border-left:1px solid rgba(255,255,255,.08);
       border-right:1px solid rgba(255,255,255,.08);
@@ -29,7 +33,8 @@
     .swatches{display:flex;gap:10px;flex-wrap:wrap}
     .swatch{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.28);cursor:pointer}
     .swatch.active{box-shadow:0 0 0 3px rgba(255,255,255,.18) inset}
-    canvas{display:block;width:100%;height:100%;background:transparent}
+    canvas{display:block;width:100%;height:100%;background:transparent;touch-action:none;
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
 
     /* Nitro meter */
     .nitroWrap{position:absolute;right:12px;bottom:16px;z-index:7;width:120px;height:40px;
@@ -82,14 +87,19 @@
       <div class="nitroLabel">NITRO</div>
     </div>
 
-    <!-- Background music: replace src with your Suno MP3/OGG -->
-    <audio id="bgm" src="/static/game/audio/izza_race_theme.mp3" loop preload="auto"></audio>
+    <!-- Background music (updated path) -->
+    <audio id="bgm" src="/static/game/audio/RACEBGM.wav" loop preload="auto"></audio>
 
     <canvas id="scene"></canvas>
   </div>
 
 <script>
 (() => {
+/* ====== hard-block selection/callouts while playing ====== */
+['contextmenu','selectstart','gesturestart'].forEach(ev=>{
+  window.addEventListener(ev, e=>e.preventDefault(), {passive:false});
+});
+
 /* ============== Wallet ============== */
 async function loadWallet(){
   let coins='—', craft='—';
@@ -133,19 +143,20 @@ let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
 
 // Motion boosters
-let STREAK_ALPHA  = 0.55;         // slightly stronger baseline
-let STREAK_SPEED  = 1.45;         // more aggressive spread baseline
+let STREAK_ALPHA  = 0.55;
+let STREAK_SPEED  = 1.45;
 let SMEAR_ALPHA   = 0.62;
 let ASPHALT_ALPHA = 0.36;
 
-// Hyperloop multipliers (while Nitro heat builds)
+// Hyperloop multipliers
 const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
 let VANISH_Y = -800;
 let TOP_FADE_PX=90;
-let VPT_X_BASE=0, VPT_X=0, VPT_Y=0;  // VPT_X drifts with steering
+/* We’ll compute VPT_X strictly from the car center so streaks/lighting follow exactly */
+let VPT_X=0, VPT_Y=0;
 let roadBottomHalf=0, roadTopHalf=0;
 
 function resize(){
@@ -159,13 +170,11 @@ function resize(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
   roadBottomHalf = W*1.02;
-  roadTopHalf    = W*0.10; // a touch wider near horizon for better lane read
+  roadTopHalf    = W*0.10;
 
   VANISH_Y = -Math.max(H * 0.8, 600);
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
 
-  VPT_X_BASE = W*0.5;
-  VPT_X = VPT_X_BASE;
   VPT_Y = H*0.62;
 
   buildNoise();
@@ -300,7 +309,7 @@ function drawAurora(t, hyperFactor=1){
   for (let i=0;i<3;i++){
     const phase = t*AURORA_SPEED*(i+1)*hyperFactor;
     const sway  = Math.sin(phase)*wob*(i?0.6:1);
-    const gx = W*0.5 + sway;
+    const gx = VPT_X + sway; /* follow car center */
     const gy0 = 0, gy1 = topH;
     const g = ctx.createLinearGradient(gx, gy0, gx, gy1);
     g.addColorStop(0.00, 'rgba(0,255,255,0.55)');
@@ -365,13 +374,13 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // radial streaks from vanishing point
+  // radial streaks from *car center* so they track perfectly
   const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = STREAK_ALPHA*(hyper?1.08:1);
   for (let i=0;i<count;i++){
-    const ang = (-0.52 + i/(count-1)*1.04);    // more spread baseline
+    const ang = (-0.52 + i/(count-1)*1.04);
     const len = H*(hyper?1.38:1.18);
     const wob = Math.sin((worldZ*0.033)+i)*10*(hyper?1.6:1);
     const x2 = VPT_X + Math.tan(ang)*(len*0.82) + wob;
@@ -409,15 +418,16 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   ctx.closePath(); 
   ctx.clip();
 
-  // perspective asphalt scroll (heaviest near the player)
-  const scroll = (worldZ * (2.0 + k*1.7) * hyperK.asphalt) % noiseH;
+  // perspective asphalt scroll
+  const kspd = (2.0 + k*1.7) * hyperK.asphalt;
+  const scroll = (worldZ * kspd) % noiseH;
   for(let y=-noiseH; y<H+noiseH; y+=noiseH){
     const near = Math.min(1, Math.max(0, (y+noiseH - VPT_Y) / (H - VPT_Y + 1)));
     ctx.globalAlpha = ASPHALT_ALPHA * (0.35 + 0.65*near) * (hyper?1.25:1);
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // TWO soft tire beams, anchored to wheels so they follow the car
+  // TWO soft tire beams, anchored to wheels (follows car)
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -437,7 +447,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   lane(tireL); lane(tireR);
   ctx.restore();
 
-  // hyperloop vignette (subtle baseline, stronger on nitro)
+  // hyperloop vignette
   ctx.save();
   const inner = Math.min(W,H)*0.10;
   const outer = Math.max(W,H)*(hyper?0.78:0.66)*(1-0.10*heat);
@@ -453,7 +463,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
 function drawHeadlights(){
   const leftRoot  = { x: carX + carW*0.32, y: carY + carH*0.74 };
   const rightRoot = { x: carX + carW*0.68, y: carY + carH*0.74 };
-  const aim = { x: VPT_X, y: VPT_Y - 12 };
+  const aim = { x: VPT_X, y: VPT_Y - 12 }; // aim moves with car center
 
   const drawBeam = (root, spread)=> {
     ctx.save();
@@ -581,7 +591,6 @@ function burstNitro(x,y, count=12){
   }
 }
 function explodeBomb(x,y){
-  // flash ring
   for(let i=0;i<24;i++){
     const a = (i/24)*Math.PI*2;
     const s = 160 + Math.random()*220;
@@ -593,7 +602,6 @@ function explodeBomb(x,y){
       'rgba(255,120,40,1)', 14, 420
     ));
   }
-  // smoke
   for(let i=0;i<18;i++){
     const a = Math.random()*Math.PI*2;
     const s = 40 + Math.random()*90;
@@ -618,7 +626,6 @@ function ensureAudio(){
   sfxGain = AC.createGain(); sfxGain.gain.value = 0.9; sfxGain.connect(master);
   musicGain = AC.createGain(); musicGain.gain.value = 0.6; musicGain.connect(master);
 
-  // connect <audio> element to WebAudio so mute affects it smoothly
   const src = AC.createMediaElementSource(bgm);
   src.connect(musicGain);
 }
@@ -633,7 +640,7 @@ function clickStartAudio(){
 }
 let bgmStarted=false;
 
-// Procedural SFX (short + crisp)
+/* short SFX */
 function playCoin(){
   ensureAudio();
   const o = AC.createOscillator();
@@ -670,7 +677,34 @@ function playBomb(){
   s.start(); s.stop(AC.currentTime+0.52);
 }
 
-/* Sound toggle (button already exists in DOM) */
+/* Continuous Nitro whooosh while holding */
+let nitroLoop = null;
+function setNitroWhoosh(on){
+  ensureAudio();
+  if (on){
+    if (nitroLoop) return;
+    // noise -> bandpass -> subtle compressor-like gain
+    const noiseBuf = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);
+    const ch = noiseBuf.getChannelData(0);
+    for(let i=0;i<ch.length;i++){ ch[i] = Math.random()*2-1; }
+    const src = AC.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const bp = AC.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 900; bp.Q.value = 0.9;
+    const g = AC.createGain(); g.gain.value = 0.0001;
+    src.connect(bp); bp.connect(g); g.connect(sfxGain);
+    const now = AC.currentTime;
+    g.gain.exponentialRampToValueAtTime(0.6, now+0.08); // quick rise
+    src.start();
+    nitroLoop = {src, g};
+  } else {
+    if (!nitroLoop) return;
+    const now = AC.currentTime;
+    nitroLoop.g.gain.exponentialRampToValueAtTime(0.0001, now+0.12);
+    try{ nitroLoop.src.stop(now+0.14); }catch(e){}
+    nitroLoop = null;
+  }
+}
+
+/* Sound toggle */
 function applyMuteUI(){
   soundBtn.classList.toggle('muted', muted);
   soundLabel.textContent = muted? 'SOUND OFF' : 'SOUND ON';
@@ -734,11 +768,20 @@ class Pickup {
     const nx = Math.max(carRect.x, Math.min(cx, carRect.x+carRect.w));
     const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
     const dx = cx-nx, dy = cy-ny;
+
+    /* STRICT center requirement for middle-lane objects */
+    const isMiddleLane = Math.abs(this.laneT - 0.50) < 1e-3;
+    if (isMiddleLane){
+      const carCenter = carX + carW*0.5;
+      const centerEps = Math.max(8, W*0.02); // ~2% of screen width tolerance
+      if (Math.abs(carCenter - W*0.5) > centerEps) return false;
+    }
+
     return (dx*dx + dy*dy) < (r*r*0.85);
   }
 }
 
-/* Procedural sprites for pickups (same visuals as before) */
+/* Procedural sprites for pickups (unchanged visuals) */
 function drawCoin(x,y,s,ang){
   const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang)));
   ctx.save();
@@ -796,6 +839,7 @@ function updateCarPlacement(){
   carH = carW * ratio;
   carX = Math.round((W - carW)/2);
   carY = Math.round(H - carH*1.02);
+  VPT_X = carX + carW*0.5; // anchor all light/motion to car center
 }
 function carRect(){ return {x:carX+carW*0.18, y:carY+carH*0.30, w:carW*0.64, h:carH*0.52}; }
 
@@ -863,7 +907,7 @@ window.addEventListener('keydown', e=>{
   clickStartAudio();
 });
 window.addEventListener('keyup', e=>{
-  if(e.key==='ArrowLeft' || e.key==='ArrowRight') steer.x = 0;   // <-- change 'Right' to 'ArrowRight'
+  if(e.key==='ArrowLeft' || e.key==='ArrowRight') steer.x = 0;
   if(e.key.toLowerCase()===' ') steer.nitro=false;
 });
 
@@ -887,14 +931,14 @@ let nitroActive = false;
 let lastSpawn = 0;
 const pickups = [];
 
-/* Lanes tightened so left/right are on-screen and reachable */
+/* Lanes */
 const LANE_TS = [0.26, 0.50, 0.74];
 
 /* No stacking per-lane */
 const MIN_LANE_SEP_Z = 820;
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 
-/* Spawn controller (denser) */
+/* Spawn controller */
 function spawnOne(){
   const available = [];
   for (let i=0;i<LANE_TS.length;i++){
@@ -915,15 +959,18 @@ function spawnOne(){
 
 function useNitro(dt){
   const can = nitro>0.02;
+  const wasActive = nitroActive;
   nitroActive = steer.nitro && can;
   if (nitroActive){ nitro = Math.max(0, nitro - dt*0.25); heat = Math.min(1, heat + dt*2.4); }
   else            { heat = Math.max(0, heat - dt*1.6); }
+  if (nitroActive !== wasActive) setNitroWhoosh(nitroActive);
   nitroFill.style.width = Math.round(nitro*100)+'%';
 }
 
 function gameOver(){
   state.running=false;
   try{ bgm.pause(); }catch(e){}
+  setNitroWhoosh(false);
   alert(`CRASHED 💥\nDistance: ${Math.round(state.dist)} m\nCoins: ${state.coins}`);
   document.getElementById('startOverlay').style.display='';
 }
@@ -953,19 +1000,17 @@ function frame(now){
   worldZ += mps * dt;
   state.dist += mps * dt;
 
-  // Spawns (faster)
+  // Spawns
   if (now - lastSpawn > 650*(0.80+Math.random()*0.35)) {
     lastSpawn = now; spawnOne();
   }
 
-  // steering + camera drift
+  // steering + anchor visuals to car center
   const steerSpeed = Math.max(2.5, W * 0.0066) * (hyper?1.06:1);
   carX += steer.x * steerSpeed;
   const off = carW*0.12;
   carX = Math.max(-off, Math.min(W - carW + off, carX));
-
-  const centerOffset = (carX + carW/2) - W/2;
-  VPT_X += ((VPT_X_BASE + centerOffset*0.18) - VPT_X) * 0.10;
+  VPT_X = carX + carW*0.5; // <- keep beams/streaks under car exactly
 
   // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -1048,7 +1093,6 @@ document.getElementById('startBtn').addEventListener('click', () => {
   laneLastSpawnZ[0]=laneLastSpawnZ[1]=laneLastSpawnZ[2]=-1e9;
   lastSpawn       = performance.now();
 
-  // music
   if (!muted){ clickStartAudio(); }
 
   requestAnimationFrame(frame);
