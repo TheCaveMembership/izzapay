@@ -67,16 +67,7 @@
 
 <script>
 (() => {
-/* ==================== TUNABLE LOOK KNOBS ==================== */
-let ROAD_BOTTOM_HALF_FACTOR = 0.95; // narrower bottom => stronger angle (was ~1.15)
-let ROAD_TOP_HALF_FACTOR    = 0.10; // slight tweak to distant width
-
-let TOP_FADE_PX   = 90;             // tiny horizon band
-let SIDE_FADE_PX  = 70;             // side background feather width
-let SIDE_FADE_YR  = 0.85;           // how far down the side fades reach (ratio of H)
-let SIDE_FADE_ALPHA = 0.90;         // strength of side fades near the top
-
-/* ==================== Wallet (unchanged) ==================== */
+/* ============== Wallet ============== */
 async function loadWallet(){
   let coins='—', craft='—';
   try{
@@ -93,7 +84,7 @@ async function loadWallet(){
 }
 loadWallet();
 
-/* ==================== Setup ==================== */
+/* ============== Setup ============== */
 const arena  = document.getElementById('arena');
 const canvas = document.getElementById('scene');
 const ctx    = canvas.getContext('2d', { alpha:true });
@@ -106,12 +97,16 @@ const HUD = {
   coins: document.getElementById('coinsRun')
 };
 
-/* ==================== Sizing / Camera ==================== */
+/* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
 let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
 
-// tip of the road (kept above the canvas so it clears the HUD)
+// Tip of the road stays above the canvas
 let VANISH_Y = -800;
+
+// Fade sizes (horizon + side)
+let TOP_FADE_PX   = 90;
+let SIDE_FADE_PX  = 70;
 
 function resize(){
   W = arena.clientWidth;
@@ -123,25 +118,23 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // only used to shape the curve, not to clamp anything
+  // Stronger perspective (⬇️ narrower road)
   horizonY       = H*0.26;
+  roadBottomHalf = W*0.95;  // ⟵ angle knob (bigger = wider)
+  roadTopHalf    = W*0.08;  // ⟵ angle knob (smaller = sharper)
 
-  // >>> road width/angle
-  roadBottomHalf = W * ROAD_BOTTOM_HALF_FACTOR; // tighter than before so you see the sides
-  roadTopHalf    = W * ROAD_TOP_HALF_FACTOR;
-
-  // keep the tip comfortably above the HUD on any device
+  // keep the tip comfortably above the HUD
   VANISH_Y = -Math.max(H * 0.8, 600);
 
-  // scale fades with screen
+  // Stronger side fade by default
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
-  SIDE_FADE_PX = Math.max(50, Math.min(90,  Math.round(W*0.12)));
+  SIDE_FADE_PX = Math.max(70, Math.min( Math.round(W*0.20), 140 )); // ⟵ wider
 
   updateCarPlacement();
 }
 window.addEventListener('resize', resize, {passive:true});
 
-/* ==================== Assets & Tint ==================== */
+/* ============== Assets & Tint (offscreen) ============== */
 const carImg = new Image();
 carImg.src = '/static/game/sprites/tracks/coupe.png';
 
@@ -166,7 +159,7 @@ function makeTintedSprite(rgb){
   return off;
 }
 
-/* ==================== Garage Paint ==================== */
+/* ============== Garage Paint ============== */
 const PAINTS = [
   {name:'Cherry',    r:255, g:70,  b:70 },
   {name:'Sunburst',  r:255, g:190, b:40 },
@@ -222,9 +215,8 @@ function rebuildTintAndPreview(){
 }
 carImg.onload = rebuildTintAndPreview;
 
-/* ==================== Projection ==================== */
+/* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
-// start from VANISH_Y so the road goes through the HUD
 function project(z){
   const k = 0.0105;
   const t = 1 - Math.exp(-k*z);
@@ -233,13 +225,13 @@ function project(z){
   return { y, half, t };
 }
 
-/* ==================== Road params ==================== */
+/* ======= Road params ======= */
 const DEPTH_Z    = 18000;
 const STEP_Z     = 60;
 const DASH_STEP  = 26;
 const DASH_LEN_Z = 18;
 const LED_STEP   = 16;
-const RAIL_SCALE = 1.05;
+const RAIL_SCALE = 1.08;  // ⟵ slight flare
 
 function edgesAt(z){
   const p = project(z);
@@ -248,7 +240,7 @@ function edgesAt(z){
   return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8 };
 }
 
-/* helper: X on an edge polyline at a given Y (for side wedges) */
+/* helper: find X on an edge polyline at a given Y (for the side wedges) */
 function xAtY(edge, y){
   for (let i=0;i<edge.length-1;i++){
     const y0=edge[i][1], y1=edge[i+1][1];
@@ -260,7 +252,7 @@ function xAtY(edge, y){
   return edge[edge.length-1][0];
 }
 
-/* ==================== Sky ==================== */
+/* ============== Sky ============== */
 function drawSky(){
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, '#0c1120');
@@ -269,9 +261,9 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* ==================== Road + fades ==================== */
+/* ============== Road + dashes + LEDs + tiny horizon & side wedges ============== */
 function drawRoad(worldZ){
-  // Build edge samples
+  // Build edge samples (near → far)
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
     const e = edgesAt(z);
@@ -292,40 +284,41 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.fill();
 
-  /* --- Angled side background wedges (visible again) --- */
+  /* ------- Angled side background wedges (stronger fade, longer reach) ------- */
   const y0 = 0;
-const y1 = Math.min(H * SIDE_FADE_YR, H*0.78);
+  const y1 = Math.min(H*0.82, H*0.88); // ⟵ fades extend lower
+  const xL0 = xAtY(L, y0);
+  const xL1 = xAtY(L, y1);
+  const xR0 = xAtY(R, y0);
+  const xR1 = xAtY(R, y1);
 
-// push the fades inward toward the center
-const SIDE_INSET_PX = 32; // try 24–40
-const xL0 = xAtY(L, y0) + SIDE_INSET_PX;
-const xL1 = xAtY(L, y1) + SIDE_INSET_PX;
-const xR0 = xAtY(R, y0) - SIDE_INSET_PX;
-const xR1 = xAtY(R, y1) - SIDE_INSET_PX;
-
-  // Left
-  let sideGrad = ctx.createLinearGradient(0, y0, 0, y1);
-  sideGrad.addColorStop(0, `rgba(0,0,0,${SIDE_FADE_ALPHA})`);
-  sideGrad.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sideGrad;
+  // left wedge
+  let gradL = ctx.createLinearGradient(0, y0, 0, y1);
+  gradL.addColorStop(0.00, 'rgba(0,0,0,0.85)'); // stronger at top
+  gradL.addColorStop(0.60, 'rgba(0,0,0,0.35)');
+  gradL.addColorStop(1.00, 'rgba(0,0,0,0.00)');
+  ctx.fillStyle = gradL;
   ctx.beginPath();
   ctx.moveTo(0, y0);
-  ctx.lineTo(xL0, y0);
-  ctx.lineTo(xL1, y1);
-  ctx.lineTo(0,  y1);
-  ctx.closePath(); ctx.fill();
+  ctx.lineTo(xL0 - SIDE_FADE_PX, y0);  // widen wedge
+  ctx.lineTo(xL1 - SIDE_FADE_PX*0.35, y1);
+  ctx.lineTo(0, y1);
+  ctx.closePath();
+  ctx.fill();
 
-  // Right
-  sideGrad = ctx.createLinearGradient(0, y0, 0, y1);
-  sideGrad.addColorStop(0, `rgba(0,0,0,${SIDE_FADE_ALPHA})`);
-  sideGrad.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sideGrad;
+  // right wedge
+  let gradR = ctx.createLinearGradient(0, y0, 0, y1);
+  gradR.addColorStop(0.00, 'rgba(0,0,0,0.85)');
+  gradR.addColorStop(0.60, 'rgba(0,0,0,0.35)');
+  gradR.addColorStop(1.00, 'rgba(0,0,0,0.00)');
+  ctx.fillStyle = gradR;
   ctx.beginPath();
-  ctx.moveTo(xR0, y0);
-  ctx.lineTo(W,   y0);
-  ctx.lineTo(W,   y1);
-  ctx.lineTo(xR1, y1);
-  ctx.closePath(); ctx.fill();
+  ctx.moveTo(xR0 + SIDE_FADE_PX, y0);
+  ctx.lineTo(W, y0);
+  ctx.lineTo(W, y1);
+  ctx.lineTo(xR1 + SIDE_FADE_PX*0.35, y1);
+  ctx.closePath();
+  ctx.fill();
 
   // Lane dashes
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
@@ -352,7 +345,7 @@ const xR1 = xAtY(R, y1) - SIDE_INSET_PX;
     ctx.beginPath(); ctx.arc(e.rx, e.y, r, 0, Math.PI*2); ctx.fill();
   }
 
-  /* --- Tiny horizon fade only on the road --- */
+  /* -------- Tiny horizon fade at the very top, only on the road -------- */
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(W/2, VANISH_Y);
@@ -372,7 +365,7 @@ const xR1 = xAtY(R, y1) - SIDE_INSET_PX;
   ctx.globalCompositeOperation = 'source-over';
 }
 
-/* ==================== Car ==================== */
+/* ============== Car ============== */
 let carW=0, carH=0, carX=0, carY=0;
 function updateCarPlacement(){
   carW = Math.min(W*0.92, 540);
@@ -438,7 +431,7 @@ function drawCar(nitroBoost){
   ctx.globalCompositeOperation = 'source-over';
 }
 
-/* ==================== Input ==================== */
+/* ============== Input ============== */
 const steer = { x:0 };
 canvas.addEventListener('pointerdown', e=>{
   const x = e.clientX - canvas.getBoundingClientRect().left;
@@ -459,7 +452,7 @@ window.addEventListener('keyup', e=>{
   if(e.key==='ArrowLeft'||e.key==='Right') steer.x=0;
 });
 
-/* ==================== Loop ==================== */
+/* ============== Loop ============== */
 let worldZ = 0, nitroLeft = 0, last = performance.now();
 const state = { running:false, speed:0, dist:0 };
 
