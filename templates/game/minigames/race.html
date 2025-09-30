@@ -97,17 +97,29 @@ const HUD = {
   coins: document.getElementById('coinsRun')
 };
 
-/* ======= Tunables ======= */
-const OVERLAY_ALPHA = 0.18; // how strong the translucent road gradient overlay is
-const DASH_ALPHA    = 0.12; // visibility of animated lane dashes
-const LED_ALPHA     = 0.85; // brightness of LED dots
+/* ======= Tunables (keep art dominant) ======= */
+const OVERLAY_ALPHA = 0.12; // translucent road tint
+const DASH_ALPHA    = 0.10; // lane dashes
+const LED_ALPHA     = 0.55; // LED dots
+
+// New subtle FX tunables
+const AURORA_ALPHA  = 0.16;
+const AURORA_SPEED  = 0.06;
+const AURORA_WOBBLE = 18;    // px side-to-side
+const GLOW_ALPHA    = 0.22;
+const STREAK_ALPHA  = 0.08;
+const STREAK_SPEED  = 0.25;  // scales with speed
+const SMEAR_ALPHA   = 0.12;
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
 let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
-let VANISH_Y = -800;  // tip stays above canvas
+let VANISH_Y = -800;
 let TOP_FADE_PX   = 90;
 let SIDE_FADE_PX  = 70;
+
+// Vanishing point for your image (cyan beam)
+let VPT_X=0, VPT_Y=0;
 
 function resize(){
   W = arena.clientWidth;
@@ -121,14 +133,17 @@ function resize(){
 
   // Perspective shape (angle knobs)
   horizonY       = H*0.26;
-  roadBottomHalf = W*0.95;  // bigger = wider near plane
-  roadTopHalf    = W*0.08;  // smaller = tighter far plane
+  roadBottomHalf = W*0.95;
+  roadTopHalf    = W*0.08;
 
   VANISH_Y = -Math.max(H * 0.8, 600);
 
-  // Side fades (kept for cohesion with UI)
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
   SIDE_FADE_PX = Math.max(90, Math.min( Math.round(W*0.24), 170 ));
+
+  // Where the cyan beam converges in your art:
+  VPT_X = W*0.5;
+  VPT_Y = H*0.62;
 
   updateCarPlacement();
 }
@@ -139,7 +154,7 @@ const carImg = new Image();
 carImg.src = '/static/game/sprites/tracks/coupe.png';
 
 const bgImg = new Image();
-bgImg.src = '/static/game/sprites/road_bg.jpg';  // <<—— your image path
+bgImg.src = '/static/game/sprites/road_bg.jpg';  // your image
 
 function makeTintedSprite(rgb){
   if (!carImg.complete || !carImg.width) return null;
@@ -147,6 +162,8 @@ function makeTintedSprite(rgb){
   off.width  = carImg.width;
   off.height = carImg.height;
   const o = off.getContext('2d');
+  o.imageSmoothingEnabled = true;
+
   o.drawImage(carImg, 0, 0);
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
@@ -251,18 +268,114 @@ function xAtY(edge, y){
 /* ============== Background ============== */
 function drawBackground(){
   if (bgImg.complete && bgImg.naturalWidth) {
-    ctx.drawImage(bgImg, 0, 0, W, H);
+    // cover (no stretch)
+    const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
+    const r  = Math.max(W/iw, H/ih);
+    const nw = iw*r, nh = ih*r;
+    const x  = (W - nw) / 2;
+    const y  = (H - nh) / 2;
+    ctx.drawImage(bgImg, x, y, nw, nh);
   } else {
-    // fallback if image hasn’t loaded yet
     const g = ctx.createLinearGradient(0,0,0,H);
     g.addColorStop(0, '#0c1120'); g.addColorStop(1, '#090d14');
     ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
   }
 }
 
+/* ---------- Subtle FX: aurora, vanishing glow, motion ---------- */
+function drawAurora(t){
+  // top-only additive ribbons that drift slightly
+  const topH = H*0.42;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = AURORA_ALPHA;
+
+  for (let i=0;i<3;i++){
+    const phase = t*AURORA_SPEED*(i+1);
+    const sway  = Math.sin(phase)*AURORA_WOBBLE*(i?0.6:1);
+    const gx = W*0.5 + sway;
+    const gy0 = 0, gy1 = topH;
+
+    const g = ctx.createLinearGradient(gx, gy0, gx, gy1);
+    // cyan-teal glow like the image
+    g.addColorStop(0.00, 'rgba(0,255,255,0.55)');
+    g.addColorStop(0.35, 'rgba(0,180,220,0.25)');
+    g.addColorStop(1.00, 'rgba(0,120,180,0.00)');
+
+    // softly feathered strip
+    ctx.fillStyle = g;
+    const w = W*0.32*(i?0.7:1);
+    ctx.beginPath();
+    ctx.moveTo(gx-w, gy0);
+    ctx.lineTo(gx+w, gy0);
+    ctx.lineTo(gx+w*0.7, gy1);
+    ctx.lineTo(gx-w*0.7, gy1);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawVanishingGlow(t){
+  // pulsing glow where the road disappears (center beam head)
+  const rBase = Math.min(W,H)*0.06;
+  const pulse = 1 + 0.05*Math.sin(t*3.2);
+  const r1 = rBase*pulse, r2 = r1*4.5;
+
+  const g = ctx.createRadialGradient(VPT_X, VPT_Y, 1, VPT_X, VPT_Y, r2);
+  g.addColorStop(0,   'rgba(0,255,255,0.65)');
+  g.addColorStop(0.4, 'rgba(0,200,255,0.28)');
+  g.addColorStop(1,   'rgba(0,200,255,0.00)');
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = GLOW_ALPHA;
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(VPT_X, VPT_Y, r2, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawMotion(worldZ, speed){
+  // faint radial streaks (cyan/magenta) emanating from vanishing point
+  const k = (speed/220) * STREAK_SPEED; // 0..~0.3
+  const count = 24;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = STREAK_ALPHA;
+
+  for (let i=0;i<count;i++){
+    const ang = (-0.35 + i/(count-1)*0.70); // fan across road
+    const len = H*0.9;
+    const wob = Math.sin((worldZ*0.02)+i)*6;
+    const x2 = VPT_X + Math.tan(ang)*(len*0.75) + wob;
+    const y2 = H + 10;
+
+    const grad = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
+    const color = (i%2===0)? 'rgba(0,255,255,' : 'rgba(255,0,200,';
+    grad.addColorStop(0.00, color + (0.35+0.25*k) + ')');
+    grad.addColorStop(0.35, color + (0.15+0.15*k) + ')');
+    grad.addColorStop(1.00, color + '0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2 + 6*k;
+    ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  ctx.restore();
+
+  // side “smear” over buildings/guardrails (very light)
+  const smearW = W*0.22;
+  const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
+  smearG_L.addColorStop(0,   `rgba(0,0,0,${SMEAR_ALPHA*0.8*k+0.02})`);
+  smearG_L.addColorStop(1.0, 'rgba(0,0,0,0)');
+  const smearG_R = ctx.createLinearGradient(W,0,W-smearW,0);
+  smearG_R.addColorStop(0,   `rgba(0,0,0,${SMEAR_ALPHA*0.8*k+0.02})`);
+  smearG_R.addColorStop(1.0, 'rgba(0,0,0,0)');
+
+  ctx.fillStyle = smearG_L; ctx.fillRect(0,0,smearW,H);
+  ctx.fillStyle = smearG_R; ctx.fillRect(W-smearW,0,smearW,H);
+}
+
 /* ============== Road overlays (keep image visible) ============== */
 function drawRoad(worldZ){
-  // collect edge samples
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
     const e = edgesAt(z);
@@ -270,7 +383,7 @@ function drawRoad(worldZ){
     L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
 
-  // Clip to road shape and lay a VERY LIGHT gradient so image still shows
+  // Clip to road shape; ultra-light asphalt tint
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(W/2, VANISH_Y);
@@ -282,12 +395,12 @@ function drawRoad(worldZ){
   const roadG = ctx.createLinearGradient(0, VANISH_Y, 0, H);
   roadG.addColorStop(0, 'rgba(15,20,29,1)');
   roadG.addColorStop(1, 'rgba(10,15,23,1)');
-  ctx.globalAlpha = OVERLAY_ALPHA;   // <<— tweak this to show more/less of your image
+  ctx.globalAlpha = OVERLAY_ALPHA;
   ctx.fillStyle = roadG;
   ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = 1;
 
-  // Lane dashes (light)
+  // Lane dashes (very light)
   ctx.strokeStyle = `rgba(255,255,255,${DASH_ALPHA})`;
   ctx.lineWidth = 6; ctx.lineCap = 'round';
   const LANE_T = [0.22, 0.50, 0.78];
@@ -314,25 +427,23 @@ function drawRoad(worldZ){
   }
   ctx.globalAlpha = 1;
 
-  // Tiny top fade on road (keeps “horizon under HUD” look)
-  const topFade = ctx.createLinearGradient(0, 0, 0, Math.max(60, Math.min(110, Math.round(H*0.10))));
+  // soft road-only horizon fade under HUD
+  const topFade = ctx.createLinearGradient(0, 0, 0, TOP_FADE_PX);
   topFade.addColorStop(0, 'rgba(0,0,0,1)');
   topFade.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.globalCompositeOperation = 'destination-out';
   ctx.fillStyle = topFade;
-  ctx.fillRect(0, 0, W, Math.max(60, Math.min(110, Math.round(H*0.10))));
+  ctx.fillRect(0, 0, W, TOP_FADE_PX);
   ctx.globalCompositeOperation = 'source-over';
-
   ctx.restore();
 
-  // Optional angled side wedges (kept subtle so the image remains dominant)
-  const y0 = 0;
-  const y1 = Math.min(H*0.88, H*0.92);
+  // side wedges (very faint so neon rails stay visible)
+  const y0 = 0, y1 = Math.min(H*0.88, H*0.92);
   const xL0 = xAtY(L, y0), xL1 = xAtY(L, y1);
   const xR0 = xAtY(R, y0), xR1 = xAtY(R, y1);
 
   let gradL = ctx.createLinearGradient(0, y0, 0, y1);
-  gradL.addColorStop(0.00, 'rgba(0,0,0,0.60)');
+  gradL.addColorStop(0.00, 'rgba(0,0,0,0.40)');
   gradL.addColorStop(1.00, 'rgba(0,0,0,0.00)');
   ctx.fillStyle = gradL;
   ctx.beginPath();
@@ -343,7 +454,7 @@ function drawRoad(worldZ){
   ctx.closePath(); ctx.fill();
 
   let gradR = ctx.createLinearGradient(0, y0, 0, y1);
-  gradR.addColorStop(0.00, 'rgba(0,0,0,0.60)');
+  gradR.addColorStop(0.00, 'rgba(0,0,0,0.40)');
   gradR.addColorStop(1.00, 'rgba(0,0,0,0.00)');
   ctx.fillStyle = gradR;
   ctx.beginPath();
@@ -456,6 +567,13 @@ function frame(now){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawBackground();
   drawRoad(worldZ);
+
+  // NEW subtle FX layers
+  const speed = state.speed;  // km/h
+  drawAurora(time);
+  drawVanishingGlow(time);
+  drawMotion(worldZ, speed);
+
   carX += steer.x * 0.9; carX = Math.max(0, Math.min(W-carW, carX));
   drawCar(nitroLeft>0);
 
