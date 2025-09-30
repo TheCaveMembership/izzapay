@@ -118,17 +118,17 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // Stronger perspective (⬇️ narrower road)
+  // Perspective shape (angle knobs)
   horizonY       = H*0.26;
-  roadBottomHalf = W*0.95;  // ⟵ angle knob (bigger = wider)
-  roadTopHalf    = W*0.08;  // ⟵ angle knob (smaller = sharper)
+  roadBottomHalf = W*0.95;  // bigger = wider near plane
+  roadTopHalf    = W*0.08;  // smaller = tighter far plane
 
   // keep the tip comfortably above the HUD
   VANISH_Y = -Math.max(H * 0.8, 600);
 
-  // Stronger side fade by default
+  // Stronger/wider side fade by default
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
-  SIDE_FADE_PX = Math.max(70, Math.min( Math.round(W*0.20), 140 )); // ⟵ wider
+  SIDE_FADE_PX = Math.max(90, Math.min( Math.round(W*0.24), 170 )); // wider sides
 
   updateCarPlacement();
 }
@@ -218,20 +218,20 @@ carImg.onload = rebuildTintAndPreview;
 /* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
-  const k = 0.0105;
+  const k = 0.0105; // perspective curve; bump slightly if you want more “speed”
   const t = 1 - Math.exp(-k*z);
   const y   = lerp(VANISH_Y, H, t);
   const half= lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
 
-/* ======= Road params ======= */
-const DEPTH_Z    = 18000;
-const STEP_Z     = 60;
-const DASH_STEP  = 26;
-const DASH_LEN_Z = 18;
-const LED_STEP   = 16;
-const RAIL_SCALE = 1.08;  // ⟵ slight flare
+/* ======= Road params (UPDATED) ======= */
+const DEPTH_Z    = 24000; // more visible distance
+const STEP_Z     = 48;    // smoother far edge
+const DASH_STEP  = 22;    // denser dashes
+const DASH_LEN_Z = 20;    // slightly longer dashes
+const LED_STEP   = 12;    // more LED ticks
+const RAIL_SCALE = 1.08;  // slight flare
 
 function edgesAt(z){
   const p = project(z);
@@ -284,9 +284,9 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.fill();
 
-  /* ------- Angled side background wedges (stronger fade, longer reach) ------- */
+  /* ------- Angled side background wedges (stronger + farther) ------- */
   const y0 = 0;
-  const y1 = Math.min(H*0.82, H*0.88); // ⟵ fades extend lower
+  const y1 = Math.min(H*0.88, H*0.92); // reach farther down the screen
   const xL0 = xAtY(L, y0);
   const xL1 = xAtY(L, y1);
   const xR0 = xAtY(R, y0);
@@ -294,29 +294,29 @@ function drawRoad(worldZ){
 
   // left wedge
   let gradL = ctx.createLinearGradient(0, y0, 0, y1);
-  gradL.addColorStop(0.00, 'rgba(0,0,0,0.85)'); // stronger at top
-  gradL.addColorStop(0.60, 'rgba(0,0,0,0.35)');
+  gradL.addColorStop(0.00, 'rgba(0,0,0,0.90)'); // stronger at top
+  gradL.addColorStop(0.55, 'rgba(0,0,0,0.40)');
   gradL.addColorStop(1.00, 'rgba(0,0,0,0.00)');
   ctx.fillStyle = gradL;
   ctx.beginPath();
   ctx.moveTo(0, y0);
-  ctx.lineTo(xL0 - SIDE_FADE_PX, y0);  // widen wedge
-  ctx.lineTo(xL1 - SIDE_FADE_PX*0.35, y1);
+  ctx.lineTo(xL0 - SIDE_FADE_PX*1.25, y0);     // wider
+  ctx.lineTo(xL1 - SIDE_FADE_PX*0.60, y1);     // carry width deeper
   ctx.lineTo(0, y1);
   ctx.closePath();
   ctx.fill();
 
   // right wedge
   let gradR = ctx.createLinearGradient(0, y0, 0, y1);
-  gradR.addColorStop(0.00, 'rgba(0,0,0,0.85)');
-  gradR.addColorStop(0.60, 'rgba(0,0,0,0.35)');
+  gradR.addColorStop(0.00, 'rgba(0,0,0,0.90)');
+  gradR.addColorStop(0.55, 'rgba(0,0,0,0.40)');
   gradR.addColorStop(1.00, 'rgba(0,0,0,0.00)');
   ctx.fillStyle = gradR;
   ctx.beginPath();
-  ctx.moveTo(xR0 + SIDE_FADE_PX, y0);
+  ctx.moveTo(xR0 + SIDE_FADE_PX*1.25, y0);
   ctx.lineTo(W, y0);
   ctx.lineTo(W, y1);
-  ctx.lineTo(xR1 + SIDE_FADE_PX*0.35, y1);
+  ctx.lineTo(xR1 + SIDE_FADE_PX*0.60, y1);
   ctx.closePath();
   ctx.fill();
 
