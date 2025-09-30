@@ -110,17 +110,17 @@ const nitroWrap = document.getElementById('nitroWrap');
 const nitroFill = document.getElementById('nitroFill');
 
 /* ======= Tunables (motion-forward) ======= */
-const OVERLAY_ALPHA = 0.10; // very light so the bg art stays visible
+const OVERLAY_ALPHA = 0.10;
 
 // Aurora + horizon glow (subtle)
 let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
 
-// Motion boosters (visible)
+// Motion boosters (stronger sides)
 let STREAK_ALPHA  = 0.46;
 let STREAK_SPEED  = 1.25;
-let SMEAR_ALPHA   = 0.42;
-let ASPHALT_ALPHA = 0.28;
+let SMEAR_ALPHA   = 0.52;      // up from .42
+let ASPHALT_ALPHA = 0.30;      // slight bump
 
 // Spawns
 const SPAWN_EVERY_MS = 900;
@@ -128,11 +128,10 @@ const COIN_CHANCE = 0.55, NITRO_CHANCE = 0.25, BOMB_CHANCE = 0.20;
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
-let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
 let VANISH_Y = -800;
-let TOP_FADE_PX   = 90;
-let SIDE_FADE_PX  = 70;
+let TOP_FADE_PX=90, SIDE_FADE_PX=70;
 let VPT_X=0, VPT_Y=0;
+let roadBottomHalf=0, roadTopHalf=0;
 
 function resize(){
   W = arena.clientWidth;
@@ -144,8 +143,7 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  horizonY       = H*0.26;
-  roadBottomHalf = W*1.02; // a touch wider for stronger perspective
+  roadBottomHalf = W*1.02;
   roadTopHalf    = W*0.08;
 
   VANISH_Y = -Math.max(H * 0.8, 600);
@@ -241,17 +239,14 @@ carImg.onload = rebuildTintAndPreview;
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
   const k = 0.0105;
-  const t = 1 - Math.exp(-k*z);  // z=0 => at horizon, grows toward player
+  const t = 1 - Math.exp(-k*z);
   const y   = lerp(VANISH_Y, H, t);
   const half= lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
 
 /* ======= Road params ======= */
-const DEPTH_Z    = 24000;
-const STEP_Z     = 48;
-const RAIL_SCALE = 1.08;
-
+const DEPTH_Z=24000, STEP_Z=48, RAIL_SCALE=1.08;
 function edgesAt(z){
   const p = project(z);
   const y = Math.max(p.y, VANISH_Y);
@@ -325,7 +320,6 @@ function buildNoise(){
   noiseCanvas.width = noiseW; noiseCanvas.height = noiseH;
   noiseCtx = noiseCanvas.getContext('2d');
   noiseCtx.clearRect(0,0,noiseW,noiseH);
-  // grain + diagonal texture
   noiseCtx.fillStyle = 'rgba(255,255,255,0.02)';
   noiseCtx.fillRect(0,0,noiseW,noiseH);
   const g = noiseCtx.createLinearGradient(0,0,noiseW,noiseH);
@@ -343,7 +337,7 @@ function buildNoise(){
   }
 }
 
-/* ===== Motion streaks + side smears + asphalt scroll + near-car rush ===== */
+/* ===== Motion streaks + side smears + asphalt scroll + near-car lanes ===== */
 function drawMotion(worldZ, speed){
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
@@ -369,13 +363,13 @@ function drawMotion(worldZ, speed){
   }
   ctx.restore();
 
-  // side smears (simulate building/trees blur)
-  const smearW = W*0.32;
+  // stronger/wider side smears
+  const smearW = W*0.36; // wider
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
-  smearG_L.addColorStop(0,   `rgba(0,0,0,${0.10 + SMEAR_ALPHA*0.9*k})`);
+  smearG_L.addColorStop(0,   `rgba(0,0,0,${0.14 + SMEAR_ALPHA*0.9*k})`);
   smearG_L.addColorStop(1.0, 'rgba(0,0,0,0)');
   const smearG_R = ctx.createLinearGradient(W,0,W-smearW,0);
-  smearG_R.addColorStop(0,   `rgba(0,0,0,${0.10 + SMEAR_ALPHA*0.9*k})`);
+  smearG_R.addColorStop(0,   `rgba(0,0,0,${0.14 + SMEAR_ALPHA*0.9*k})`);
   smearG_R.addColorStop(1.0, 'rgba(0,0,0,0)');
   ctx.fillStyle = smearG_L; ctx.fillRect(0,0,smearW,H);
   ctx.fillStyle = smearG_R; ctx.fillRect(W-smearW,0,smearW,H);
@@ -389,51 +383,48 @@ function drawMotion(worldZ, speed){
   for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
   ctx.closePath(); ctx.clip();
 
-  // perspective asphalt scroll (heaviest near the player)
-  const scroll = (worldZ * (1.9 + k*1.7)) % noiseH;
+  // perspective asphalt scroll
+  const scroll = (worldZ * (2.0 + k*1.7)) % noiseH;
   for(let y=-noiseH; y<H+noiseH; y+=noiseH){
     const near = Math.min(1, Math.max(0, (y+noiseH - VPT_Y) / (H - VPT_Y + 1)));
-    ctx.globalAlpha = ASPHALT_ALPHA * (0.35 + 0.65*near); // stronger toward bottom
+    ctx.globalAlpha = ASPHALT_ALPHA * (0.35 + 0.65*near);
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // near-car “rush” — short streaks around the bottom center
-  const cx = W*0.5, cy = H*0.92;
-  const rush = 18 + Math.round(30*k);
-  ctx.globalAlpha = 0.34 + 0.32*k;
+  // TWO soft vertical lanes under the car, aligned to tires (no textures)
+  const tireL = carX + carW*0.28;
+  const tireR = carX + carW*0.72;
+  const baseY = H*0.86;
+  const laneHeight = H*0.24;
+  ctx.globalAlpha = 0.26 + 0.28*k;
   ctx.globalCompositeOperation = 'lighter';
-  for(let i=0;i<rush;i++){
-    const off = (i-rush/2)/(rush/2);
-    const x0 = cx + off * W*0.44;
-    const x1 = cx + off * W*0.54;
-    const y0 = cy - 20 - Math.abs(off)*36;
-    const y1 = cy + 60 + Math.abs(off)*70;
-    const g = ctx.createLinearGradient(x0,y0,x1,y1);
-    g.addColorStop(0,'rgba(0,255,255,0)');
-    g.addColorStop(0.5,`rgba(0,255,255,${0.22+0.38*k})`);
-    g.addColorStop(1,'rgba(255,0,200,0)');
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 1 + 5.5*k*(1-Math.abs(off));
-    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
-  }
+  const lane = (x)=>{
+    const g = ctx.createLinearGradient(x, baseY, x, baseY+laneHeight);
+    g.addColorStop(0,'rgba(0,255,255,0.00)');
+    g.addColorStop(0.25,`rgba(0,255,255,${0.22+0.30*k})`);
+    g.addColorStop(1,'rgba(0,255,255,0.00)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x, baseY+laneHeight*0.55, W*0.06, laneHeight*0.55, 0, 0, Math.PI*2);
+    ctx.fill();
+  };
+  lane(tireL); lane(tireR);
   ctx.restore();
 }
 
 /* ======= Headlights attached to car (front-beam wedge) ======= */
 function drawHeadlights(){
   // beam roots at front bumper
-  const leftRoot  = { x: carX + carW*0.34, y: carY + carH*0.78 };
-  const rightRoot = { x: carX + carW*0.66, y: carY + carH*0.78 };
+  const leftRoot  = { x: carX + carW*0.32, y: carY + carH*0.74 };
+  const rightRoot = { x: carX + carW*0.68, y: carY + carH*0.74 };
 
-  // project a point near the vanishing point to aim toward
-  const aim = { x: VPT_X, y: VPT_Y+6 };
+  // aim higher toward vanishing point for attachment feeling
+  const aim = { x: VPT_X, y: VPT_Y - 12 };
 
-  // Draw two tight wedges with bright near-car core fading forward
   const drawBeam = (root, spread)=> {
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
-
-    // outer soft cone
+    // outer cone
     const gx = ctx.createLinearGradient(root.x, root.y, aim.x, aim.y);
     gx.addColorStop(0, 'rgba(120,220,255,0.55)');
     gx.addColorStop(0.25,'rgba(80,200,255,0.28)');
@@ -444,8 +435,7 @@ function drawHeadlights(){
     ctx.lineTo(root.x + spread, root.y);
     ctx.lineTo(aim.x + spread*0.35, aim.y);
     ctx.lineTo(aim.x - spread*0.35, aim.y);
-    ctx.closePath();
-    ctx.fill();
+    ctx.closePath(); ctx.fill();
 
     // inner hot core
     const gy = ctx.createLinearGradient(root.x, root.y, aim.x, aim.y);
@@ -458,9 +448,7 @@ function drawHeadlights(){
     ctx.lineTo(root.x + spread*0.45, root.y);
     ctx.lineTo(aim.x + spread*0.22, aim.y);
     ctx.lineTo(aim.x - spread*0.22, aim.y);
-    ctx.closePath();
-    ctx.fill();
-
+    ctx.closePath(); ctx.fill();
     ctx.restore();
   };
 
@@ -513,20 +501,21 @@ class Pickup {
     this.spin = Math.random()*Math.PI*2;
     this.alive = true;
   }
-  // items start at horizon (zRel=0) and move toward player as worldZ increases
   zRel(worldZ){ return Math.max(0, worldZ - this.spawnZ); }
 
   draw(worldZ){
     const z = this.zRel(worldZ);
     if (z>DEPTH_Z) return;
     const e = edgesAt(z);
-    // Lock to road: never above vanishing row
-    const y = Math.max(e.y, VPT_Y + 2);
+
+    // Spawn higher up the road so lanes read earlier
+    const startClamp = VPT_Y - H*0.10; // ~just above the apex of the road
+    const y = Math.max(e.y, startClamp);
     const x = e.lx + (e.rx-e.lx)*this.laneT;
 
-    // very small at spawn, grow toward player (no falling)
+    // Smaller overall; grow toward player
     const ease = (p)=>p*p*(3-2*p);
-    const s = 0.06 + ease(e.t) * 1.20;
+    const s = 0.035 + ease(e.t) * 0.95;
 
     this.spin += 0.15 + (this.type==='coin'?0.22:0.12);
 
@@ -541,9 +530,9 @@ class Pickup {
     const z = this.zRel(worldZ);
     const e = edgesAt(z);
     const x = e.lx + (e.rx-e.lx)*this.laneT;
-    const y = Math.max(e.y, VPT_Y + 2);
-    const r = 14 + 46*e.t; // grows as it approaches
-    const cx = x, cy = y;
+    const y = Math.max(e.y, VPT_Y - H*0.10);
+    const r = 12 + 40*e.t;
+    const cx=x, cy=y;
     const nx = Math.max(carRect.x, Math.min(cx, carRect.x+carRect.w));
     const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
     const dx = cx-nx, dy = cy-ny;
@@ -583,7 +572,7 @@ function drawNitro(x,y,s,ang){
       return this;
     };
   }
-    ctx.beginPath(); ctx.roundRect(-w/2,-h/2,w,h,6); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(-w/2,-h/2,w,h,6); ctx.fill(); ctx.stroke();
   ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fillRect(-w*0.45,-h*0.05,w*0.9,h*0.1);
   ctx.fillStyle='rgba(255,255,255,0.9)';
   ctx.font=`${Math.max(6,8*s)}px Arial Black`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('N2O',0,0);
@@ -619,13 +608,14 @@ function buildCarFXCanvas(nitroBoost, t){
   fx.height = Math.max(2, Math.floor(carH));
   const c = fx.getContext('2d');
 
+  // --- Tail-lights (moved UP and aligned wider) ---
   const flick = 0.75 + 0.25*Math.sin(t*12);
-  const lightY = carH*0.56;
-  const leftX  = carW*0.23;
-  const rightX = carW*0.73;
+  const lightY = carH*0.50;         // up from 0.56
+  const leftX  = carW*0.29;
+  const rightX = carW*0.71;
 
   c.globalCompositeOperation = 'lighter';
-  c.shadowBlur = 24;
+  c.shadowBlur = 22;
   c.shadowColor = `rgba(255,60,40,${0.85*flick})`;
   c.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
 
@@ -639,6 +629,7 @@ function buildCarFXCanvas(nitroBoost, t){
   };
   lamp(leftX); lamp(rightX);
 
+  // --- Exhaust jets (moved UP toward car and spread apart) ---
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
   c.shadowBlur  = 28;
   c.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
@@ -646,12 +637,14 @@ function buildCarFXCanvas(nitroBoost, t){
 
   const jet = (x) => {
     c.beginPath();
-    c.moveTo(x, carH*0.86);
-    c.quadraticCurveTo(x-12, carH*0.96, x, carH*1.08);
-    c.quadraticCurveTo(x+12, carH*0.96, x, carH*0.86);
+    c.moveTo(x, carH*0.82);                        // up from 0.86
+    c.quadraticCurveTo(x-12, carH*0.92, x, carH*1.02);
+    c.quadraticCurveTo(x+12, carH*0.92, x, carH*0.82);
     c.closePath(); c.fill();
   };
-  jet(carW*0.38); jet(carW*0.62);
+  jet(carW*0.33);                                   // wider apart
+  jet(carW*0.67);
+
   return fx;
 }
 
@@ -706,12 +699,12 @@ let nitro = 1.0; // 0..1 meter
 let nitroActive = false;
 let lastSpawn = 0;
 const pickups = [];
-const LANE_TS = [0.22, 0.50, 0.78];
+const LANE_TS = [0.20, 0.50, 0.80]; // slightly wider spacing
 
 function spawnOne(){
   const r = Math.random();
   const lane = LANE_TS[Math.floor(Math.random()*3)];
-  const spawnZ = worldZ; // spawn at current horizon
+  const spawnZ = worldZ; // spawn at horizon
   if (r < COIN_CHANCE) pickups.push(new Pickup('coin', spawnZ, lane));
   else if (r < COIN_CHANCE + NITRO_CHANCE) pickups.push(new Pickup('nitro', spawnZ, lane));
   else pickups.push(new Pickup('bomb', spawnZ, lane));
@@ -761,16 +754,16 @@ function frame(now){
   drawVanishingGlow(time);
   drawMotion(worldZ, state.speed);
 
-  // Headlights are under items but over the road so they look attached
+  // Headlights under items but over the road so they look attached
   drawHeadlights();
 
-  // Car steering — give enough lateral travel for L / M / R lanes
-  const steerSpeed = Math.max(2.5, W * 0.0055); // scaled for device width
+  // Car steering
+  const steerSpeed = Math.max(2.5, W * 0.0055);
   carX += steer.x * steerSpeed;
   carX = Math.max(0, Math.min(W - carW, carX));
   const cRect = carRect();
 
-  // Pickups (grow toward player; no falling)
+  // Pickups
   for (const p of pickups) {
     if (!p.alive) continue;
     p.draw(worldZ);
@@ -786,7 +779,6 @@ function frame(now){
       }
     }
   }
-  // cleanup
   for (let i = pickups.length - 1; i >= 0; i--) if (!pickups[i].alive) pickups.splice(i, 1);
 
   drawCar(nitroActive);
