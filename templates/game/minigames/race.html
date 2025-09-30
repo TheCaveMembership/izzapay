@@ -19,7 +19,16 @@
       border-right:1px solid rgba(255,255,255,.08);
       background:var(--panel);overflow:hidden}
     .hud{position:absolute;top:10px;left:12px;right:12px;z-index:9;
-      display:flex;justify-content:space-between;font-size:13px;letter-spacing:.3px}
+      display:flex;justify-content:space-between;align-items:center;
+      font-size:13px;letter-spacing:.3px}
+
+    /* mini HUD (car + 3 bombs) */
+    .strikeHud{display:flex;align-items:center;gap:8px}
+    .bombTray{display:flex;gap:4px;align-items:center}
+    .bombDot{width:12px;height:12px;border-radius:50%;
+      background:#3b3f4a;border:1px solid rgba(255,255,255,.18)}
+    .bombDot.hit{background:#ff3b3b;box-shadow:0 0 6px #ff3b3b}
+
     .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
       background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,.55));}
     .card{background:rgba(10,12,18,.95);border:1px solid rgba(255,255,255,.16);border-radius:14px;
@@ -57,6 +66,15 @@
       <div>SPEED: <span id="speed">0</span> km/h</div>
       <div>DIST: <span id="dist">0</span> m</div>
       <div>COINS: <span id="coinsRun">0</span></div>
+      <!-- Mini HUD -->
+      <div class="strikeHud">
+        <canvas id="miniCar" width="60" height="24" style="filter:drop-shadow(0 0 2px rgba(0,0,0,.5))"></canvas>
+        <div class="bombTray">
+          <div class="bombDot" id="b1" title="Strike 1"></div>
+          <div class="bombDot" id="b2" title="Strike 2"></div>
+          <div class="bombDot" id="b3" title="Strike 3"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Sound toggle -->
@@ -134,6 +152,11 @@ const bgm = document.getElementById('bgm');
 const soundBtn = document.getElementById('soundBtn');
 const soundLabel = document.getElementById('soundLabel');
 
+/* mini car canvas + strike dots */
+const miniCar = document.getElementById('miniCar');
+const miniCtx = miniCar.getContext('2d');
+const strikeDots = [document.getElementById('b1'), document.getElementById('b2'), document.getElementById('b3')];
+
 /* ======= Tunables ======= */
 const OVERLAY_ALPHA = 0.10;
 
@@ -187,7 +210,7 @@ carImg.src = '/static/game/sprites/tracks/coupe.png';
 const bgImg = new Image();
 bgImg.src = '/static/game/sprites/road_bg.jpg';
 
-/* Tinted sprite for garage preview */
+/* Tinted sprite for garage preview and mini car */
 function makeTintedSprite(rgb){
   if (!carImg.complete || !carImg.width) return null;
   const off = document.createElement('canvas');
@@ -232,6 +255,7 @@ PAINTS.forEach(p=>{
     [...swatches.children].forEach(x=>x.classList.remove('active'));
     d.classList.add('active');
     rebuildTintAndPreview();
+    drawMiniCar();
   };
   swatches.appendChild(d);
 });
@@ -256,7 +280,17 @@ function rebuildTintAndPreview(){
   pctx.beginPath(); pctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); pctx.fill();
   pctx.drawImage(tintedSprite, x, y, w, h);
 }
-carImg.onload = rebuildTintAndPreview;
+
+/* mini car drawer */
+function drawMiniCar(){
+  if (!tintedSprite) return;
+  miniCtx.clearRect(0,0,miniCar.width,miniCar.height);
+  const scale = Math.min(miniCar.width / tintedSprite.width, miniCar.height / tintedSprite.height);
+  const w = tintedSprite.width * scale;
+  const h = tintedSprite.height * scale;
+  miniCtx.drawImage(tintedSprite, (miniCar.width-w)/2, (miniCar.height-h)/2, w, h);
+}
+carImg.onload = ()=>{ rebuildTintAndPreview(); drawMiniCar(); };
 
 /* ============== Projection helpers ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
@@ -368,20 +402,17 @@ function buildNoise(){
   }
 }
 
-/* ======== NEW: Single-lane SPEED GRID (independent of car lighting) ======== */
+/* ======== SPEED GRID (no center dotted line) ======== */
 function drawSpeedGrid(worldZ, speed, hyper=false){
-  // Strength & color
   const baseAlpha = hyper ? 0.75 : 0.55;
   const edgeColor = `rgba(170,210,255,${baseAlpha})`;
-  const centerColor = `rgba(200,255,255,${baseAlpha*0.55})`;
 
-  // ----- Edges path (two converging dashed lines) -----
   ctx.save();
   ctx.lineWidth = 1.4;
   ctx.setLineDash([6,10]);                        // short dashes
   const dashShift = -(worldZ * (0.045 + speed/6000)); // scroll rate by speed
 
-  // Left edge path
+  // Left edge
   ctx.strokeStyle = edgeColor;
   ctx.lineDashOffset = dashShift;
   ctx.beginPath();
@@ -394,7 +425,7 @@ function drawSpeedGrid(worldZ, speed, hyper=false){
   }
   ctx.stroke();
 
-  // Right edge path
+  // Right edge
   ctx.beginPath();
   started=false;
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
@@ -405,38 +436,52 @@ function drawSpeedGrid(worldZ, speed, hyper=false){
   }
   ctx.stroke();
 
-  // Center guide
-  ctx.strokeStyle = centerColor;
-  ctx.lineWidth = 1.1;
-  ctx.setLineDash([5,12]);
-  ctx.lineDashOffset = dashShift*1.1;
-  ctx.beginPath();
-  for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
-    const e = edgesAt(z);
-    const cx = (e.lx+e.rx)/2;
-    if (z===0) ctx.moveTo(cx, Math.min(e.y,H));
-    else ctx.lineTo(cx, Math.min(e.y,H));
-    if (e.y>H) break;
-  }
-  ctx.stroke();
-
-  // ----- Perspective rungs (thin arcs widening toward camera) -----
-  const rungStep = 260;                 // distance between rungs
-  const rungOffset = worldZ % rungStep; // makes them flow
-  ctx.setLineDash([]);                  // solid
+  // Perspective rungs
+  const rungStep = 260;
+  const rungOffset = worldZ % rungStep;
+  ctx.setLineDash([]);
   for (let z=rungStep - rungOffset; z<=DEPTH_Z; z+=rungStep){
     const e = edgesAt(z);
-    if (e.y < VPT_Y + H*0.02) continue; // keep below horizon for clarity
+    if (e.y < VPT_Y + H*0.02) continue;
     const wL = e.lx, wR = e.rx;
     const alpha = Math.min(1, e.t*1.4) * (hyper ? 0.28 : 0.20);
     ctx.strokeStyle = `rgba(160,200,255,${alpha})`;
     ctx.lineWidth = 0.9 + e.t*1.2;
-    // gentle arc toward the vanishing point
     ctx.beginPath();
-    ctx.moveTo(wL + (wR-wL)*0.18, e.y);
-    ctx.quadraticCurveTo(VPT_X, e.y - 10 - 90*(1-e.t), wR - (wR-wL)*0.18, e.y);
+    ctx.moveTo(wL + (wR-wL)*0.16, e.y);
+    ctx.quadraticCurveTo(W*0.5, e.y - 10 - 90*(1-e.t), wR - (wR-wL)*0.16, e.y);
     ctx.stroke();
     if (e.y>H) break;
+  }
+  ctx.restore();
+}
+
+/* ======== NEW: Independent widened/longer color wave (NOT tied to steering) ======== */
+function drawIndependentWave(worldZ, speed, hyper=false, heat=0, t=0){
+  const apexX = W*0.5;           // does NOT follow car steering
+  const apexY = VPT_Y - 6;
+  const k = Math.min(1, (speed/240)) * (hyper?1.25:1.0);
+  const span = 0.90;             // wide fan
+  const count = 26;              // fewer, thicker beams
+  const len   = H * (hyper?1.85:1.65);  // reaches farther up the road
+  const wobAmp= 14*(hyper?1.2:1);
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  ctx.globalAlpha = 0.42 + 0.18*k; // moderate so it sits beneath white glow
+  for(let i=0;i<count;i++){
+    const ang = (-span/2) + (i/(count-1))*span;
+    const wob = Math.sin((worldZ*0.028) + t*3 + i*0.7) * wobAmp;
+    const x2 = apexX + Math.tan(ang)*(len*0.82) + wob;
+    const y2 = H + 40;
+    const grad = ctx.createLinearGradient(apexX, apexY, x2, y2);
+    // magenta/blue alternating, lighter than steering-tied ones
+    const base = (i%2===0)? 'rgba(235,60,255,' : 'rgba(70,200,255,';
+    grad.addColorStop(0.00, base + (0.55+0.25*heat) + ')');
+    grad.addColorStop(0.22, base + (0.32+0.18*heat) + ')');
+    grad.addColorStop(1.00, base + '0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 6 + 18*k*(hyper?1.15:1.0);
+    ctx.beginPath(); ctx.moveTo(apexX, apexY); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.restore();
 }
@@ -446,7 +491,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // radial streaks from car center (EXISTING — untouched)
+  // original, steering-locked radial streaks (UNCHANGED)
   const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -499,7 +544,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // tire glow beams (EXISTING — untouched)
+  // tire glow beams (UNCHANGED)
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -910,6 +955,7 @@ function updateCarPlacement(){
   carX = Math.round((W - carW)/2);
   carY = Math.round(H - carH*1.02);
   VPT_X = carX + carW*0.5; // anchor all light/motion to car center
+  drawMiniCar();
 }
 function carRect(){ return {x:carX+carW*0.18, y:carY+carH*0.30, w:carW*0.64, h:carH*0.52}; }
 
@@ -998,6 +1044,8 @@ const state = { running:false, speed:0, dist:0, coins:0, bombsHit:0 };
 let nitro = 1.0; // 0..1 meter
 let heat = 0;    // nitro “glow heat” 0..1
 let nitroActive = false;
+
+/* spawns */
 let lastSpawn = 0;
 const pickups = [];
 
@@ -1005,10 +1053,23 @@ const pickups = [];
 const LANE_TS = [0.26, 0.50, 0.74];
 
 /* No stacking per-lane */
-const MIN_LANE_SEP_Z = 820;
+const MIN_LANE_SEP_Z = 720; // slightly closer than before to feel denser
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 
-/* Spawn controller */
+/* dynamic spawn controller */
+function currentSpawnInterval(){
+  // base gets shorter with distance and more during nitro
+  const base = 520; // ms (denser)
+  const far  = Math.max(0, Math.min(1, state.dist/2500)); // 0..1 by 2.5km
+  const hyperCut = nitroActive ? 0.65 : 1.0; // faster when nitro
+  const jitter = 0.75 + Math.random()*0.35;
+  return base * (1.0 - 0.35*far) * hyperCut * jitter;
+}
+function bombChance(){
+  // starts modest and scales up with distance
+  const d = Math.max(0, Math.min(1, state.dist/4000)); // 0..1 by 4km
+  return 0.18 + d*0.40; // up to ~58%
+}
 function spawnOne(){
   const available = [];
   for (let i=0;i<LANE_TS.length;i++){
@@ -1021,12 +1082,18 @@ function spawnOne(){
   laneLastSpawnZ[li] = worldZ;
 
   const r = Math.random();
-  const spawnZ = worldZ;
-  if (r < 0.58)       pickups.push(new Pickup('coin',  spawnZ, laneT));
-  else if (r < 0.84)  pickups.push(new Pickup('nitro', spawnZ, laneT));
-  else                pickups.push(new Pickup('bomb',  spawnZ, laneT));
+  const pBomb  = bombChance();
+  const pNitro = 0.18 * (1 - Math.min(0.7, state.dist/6000)); // nitro a bit rarer later
+  if (r < pBomb) {
+    pickups.push(new Pickup('bomb', worldZ, laneT));
+  } else if (r < pBomb + pNitro) {
+    pickups.push(new Pickup('nitro', worldZ, laneT));
+  } else {
+    pickups.push(new Pickup('coin', worldZ, laneT));
+  }
 }
 
+/* Nitro consumption / heat */
 function useNitro(dt){
   const can = nitro>0.02;
   const wasActive = nitroActive;
@@ -1037,6 +1104,14 @@ function useNitro(dt){
   nitroFill.style.width = Math.round(nitro*100)+'%';
 }
 
+/* HUD: update strike dots */
+function updateStrikes(){
+  for(let i=0;i<3;i++){
+    const on = i < state.bombsHit;
+    strikeDots[i].classList.toggle('hit', on);
+  }
+}
+
 function gameOver(){
   state.running=false;
   try{ bgm.pause(); }catch(e){}
@@ -1045,6 +1120,7 @@ function gameOver(){
   document.getElementById('startOverlay').style.display='';
 }
 
+/* draw car last */
 function drawCar(nitroBoost){
   const src = tintedSprite || carImg;
   ctx.drawImage(src, carX, carY, carW, carH);
@@ -1062,16 +1138,16 @@ function frame(now){
 
   // Nitro & speed
   useNitro(dt);
-  const target = (nitroActive ? 260 : 190);
+  const target = (nitroActive ? 270 : 190); // slightly higher top with nitro
   state.speed += (target - state.speed) * 0.10;
 
   const hyper = nitroActive;
-  const mps = state.speed / 3.6 * (hyper?1.10:1);
+  const mps = state.speed / 3.6 * (hyper?1.22:1); // feels faster while nitro
   worldZ += mps * dt;
   state.dist += mps * dt;
 
-  // Spawns
-  if (now - lastSpawn > 650*(0.80+Math.random()*0.35)) {
+  // Spawns (dynamic)
+  if (now - lastSpawn > currentSpawnInterval()) {
     lastSpawn = now; spawnOne();
   }
 
@@ -1087,11 +1163,16 @@ function frame(now){
   drawBackground(hyper?HYPER.zoom:1);
   drawRoad();
 
-  // NEW: speed grid (independent layer), before aurora/motion/headlights and under car
+  // Independent widened color wave under glow (not steering-tied)
+  drawIndependentWave(worldZ, state.speed, hyper, heat, time);
+
+  // Speed grid with no center line
   drawSpeedGrid(worldZ, state.speed, hyper);
 
   drawAurora(time, hyper?1.25:1);
   drawVanishingGlow(time, heat);
+
+  // Steering-locked motion + everything car-attached stays as-is
   drawMotion(worldZ, state.speed, hyper, heat);
 
   // Headlights on top
@@ -1125,6 +1206,7 @@ function frame(now){
         playNitroPickup();
       } else {
         state.bombsHit++;
+        updateStrikes();
         explodeBomb(x,y);
         playBomb();
         if (state.bombsHit >= 3) { gameOver(); return; }
@@ -1161,6 +1243,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   last            = performance.now();
   state.coins     = 0;
   state.bombsHit  = 0;
+  updateStrikes();
   nitro           = 1.0;
   heat            = 0.0;
   nitroFill.style.width = '100%';
@@ -1177,6 +1260,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
 /* init */
 resize();
 rebuildTintAndPreview();
+drawMiniCar();
 })();
 </script>
 </body>
