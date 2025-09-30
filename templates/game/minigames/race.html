@@ -73,8 +73,8 @@ let ROAD_TOP_HALF_FACTOR    = 0.10; // slight tweak to distant width
 
 let TOP_FADE_PX   = 90;             // tiny horizon band
 let SIDE_FADE_PX  = 70;             // side background feather width
-let SIDE_FADE_YR  = 0.70;           // how far down the side fades reach (ratio of H)
-let SIDE_FADE_ALPHA = 0.75;         // strength of side fades near the top
+let SIDE_FADE_YR  = 0.85;           // how far down the side fades reach (ratio of H)
+let SIDE_FADE_ALPHA = 0.90;         // strength of side fades near the top
 
 /* ==================== Wallet (unchanged) ==================== */
 async function loadWallet(){
@@ -294,9 +294,14 @@ function drawRoad(worldZ){
 
   /* --- Angled side background wedges (visible again) --- */
   const y0 = 0;
-  const y1 = Math.min(H * SIDE_FADE_YR, H*0.78);
-  const xL0 = xAtY(L, y0), xL1 = xAtY(L, y1);
-  const xR0 = xAtY(R, y0), xR1 = xAtY(R, y1);
+const y1 = Math.min(H * SIDE_FADE_YR, H*0.78);
+
+// push the fades inward toward the center
+const SIDE_INSET_PX = 32; // try 24–40
+const xL0 = xAtY(L, y0) + SIDE_INSET_PX;
+const xL1 = xAtY(L, y1) + SIDE_INSET_PX;
+const xR0 = xAtY(R, y0) - SIDE_INSET_PX;
+const xR1 = xAtY(R, y1) - SIDE_INSET_PX;
 
   // Left
   let sideGrad = ctx.createLinearGradient(0, y0, 0, y1);
