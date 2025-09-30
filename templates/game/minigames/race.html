@@ -11,17 +11,6 @@
     :root { --bg:#0a0c12; --panel:#06080e; }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif}
-
-    /* Kill iOS selection/callouts on the play surface and controls */
-    .arena, canvas, .soundBtn, .startBtn, .nitroWrap, .swatch {
-      -webkit-touch-callout: none;
-      -webkit-user-select: none;
-      -ms-user-select: none;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: none;
-    }
-
     .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
       border-left:1px solid rgba(255,255,255,.08);
       border-right:1px solid rgba(255,255,255,.08);
@@ -93,20 +82,14 @@
       <div class="nitroLabel">NITRO</div>
     </div>
 
-    <!-- Background music -->
-    <audio id="bgm" src="/static/game/audio/RACEBGM.wav" loop preload="auto" playsinline></audio>
+    <!-- Background music: replace src with your Suno MP3/OGG -->
+    <audio id="bgm" src="/static/game/audio/izza_race_theme.mp3" loop preload="auto"></audio>
 
     <canvas id="scene"></canvas>
   </div>
 
 <script>
 (() => {
-/* ===== Kill context menus / long-press selections (iOS) ===== */
-document.addEventListener('contextmenu', e=>e.preventDefault());
-['touchstart','touchend','gesturestart'].forEach(ev=>{
-  document.addEventListener(ev, ()=>{}, {passive:false});
-});
-
 /* ============== Wallet ============== */
 async function loadWallet(){
   let coins='—', craft='—';
@@ -150,12 +133,12 @@ let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
 
 // Motion boosters
-let STREAK_ALPHA  = 0.55;
-let STREAK_SPEED  = 1.45;
+let STREAK_ALPHA  = 0.55;         // slightly stronger baseline
+let STREAK_SPEED  = 1.45;         // more aggressive spread baseline
 let SMEAR_ALPHA   = 0.62;
 let ASPHALT_ALPHA = 0.36;
 
-// Hyperloop multipliers (Nitro)
+// Hyperloop multipliers (while Nitro heat builds)
 const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 
 /* ============== Sizing / Camera ============== */
@@ -176,7 +159,7 @@ function resize(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
   roadBottomHalf = W*1.02;
-  roadTopHalf    = W*0.10;
+  roadTopHalf    = W*0.10; // a touch wider near horizon for better lane read
 
   VANISH_Y = -Math.max(H * 0.8, 600);
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
@@ -286,23 +269,19 @@ function edgesAt(z){
   return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8, t:p.t };
 }
 
-/* ============== Background (steer parallax + subtle scroll) ============== */
-let bgParallaxX = 0, bgTarget = 0, bgScroll = 0;
-function drawBackground(zoom=1, speed=0, z=0){
+/* ============== Background (steer parallax) ============== */
+let bgParallaxX = 0, bgTarget = 0;
+function drawBackground(zoom=1){
   const carCenter = (carX + carW/2) / W;
   bgTarget = (carCenter - 0.5) * 28;
   bgParallaxX += (bgTarget - bgParallaxX) * 0.08;
 
-  // gentle upward drift tied to speed/world travel for more motion feel
-  bgScroll += (speed/260) * 0.35 + (z*0.000002);
-  const yDrift = -Math.min(H*0.04, bgScroll % (H*0.08));
-
   if (bgImg.complete && bgImg.naturalWidth) {
     const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
-    const r  = Math.max(W/iw, H/ih) * (zoom + (speed>200?0.01:0));
+    const r  = Math.max(W/iw, H/ih) * zoom;
     const nw = iw*r, nh = ih*r;
     const x  = (W - nw) / 2 + bgParallaxX;
-    const y  = (H - nh) / 2 + yDrift;
+    const y  = (H - nh) / 2;
     ctx.drawImage(bgImg, x, y, nw, nh);
   } else {
     const g = ctx.createLinearGradient(0,0,0,H);
@@ -342,14 +321,14 @@ function drawAurora(t, hyperFactor=1){
 function drawVanishingGlow(t, heat){
   const rBase = Math.min(W,H)*0.070;
   const pulse = 1 + 0.06*Math.sin(t*3.2);
-  const r2 = rBase*(4.8 + heat*0.8)*pulse; // slightly tamer with heat to avoid white-out
+  const r2 = rBase*(4.8 + heat*1.0)*pulse;
   const g = ctx.createRadialGradient(VPT_X, VPT_Y, 1, VPT_X, VPT_Y, r2);
-  g.addColorStop(0,   `rgba(0,255,255,${0.55+0.18*heat})`);
-  g.addColorStop(0.4, `rgba(0,200,255,${0.22+0.15*heat})`);
+  g.addColorStop(0,   `rgba(0,255,255,${0.70+0.25*heat})`);
+  g.addColorStop(0.4, `rgba(0,200,255,${0.30+0.20*heat})`);
   g.addColorStop(1,   'rgba(0,200,255,0.00)');
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
-  ctx.globalAlpha = GLOW_ALPHA * (0.92 - 0.25*heat); // keep color, prevent big gray block
+  ctx.globalAlpha = GLOW_ALPHA;
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(VPT_X, VPT_Y, r2, 0, Math.PI*2); ctx.fill();
   ctx.restore();
@@ -386,31 +365,31 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // radial streaks from vanishing point (longer, wider, more of them)
-  const count = Math.round((hyper?68:56) * hyperK.streaks * (1+0.5*heat));
+  // radial streaks from vanishing point
+  const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = STREAK_ALPHA*(hyper?1.02:1);
+  ctx.globalAlpha = STREAK_ALPHA*(hyper?1.08:1);
   for (let i=0;i<count;i++){
-    const ang = (-0.66 + i/(count-1)*1.32);
-    const len = H*(hyper?1.62:1.42);
+    const ang = (-0.52 + i/(count-1)*1.04);    // more spread baseline
+    const len = H*(hyper?1.38:1.18);
     const wob = Math.sin((worldZ*0.033)+i)*10*(hyper?1.6:1);
-    const x2 = VPT_X + Math.tan(ang)*(len*0.86) + wob;
+    const x2 = VPT_X + Math.tan(ang)*(len*0.82) + wob;
     const y2 = H + 36;
     const grad = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
     const base = (i%2===0)? 'rgba(0,255,255,' : 'rgba(255,0,200,';
-    grad.addColorStop(0.00, base + (0.70*k) + ')');
-    grad.addColorStop(0.22, base + (0.42*k) + ')');
+    grad.addColorStop(0.00, base + (0.75*k) + ')');
+    grad.addColorStop(0.20, base + (0.45*k) + ')');
     grad.addColorStop(1.00, base + '0)');
     ctx.strokeStyle = grad;
-    ctx.lineWidth = 2 + 15*k*(hyper?1.35:1.1);
+    ctx.lineWidth = 2 + 14*k*(hyper?1.55:1.1);
     ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.restore();
 
-  // side smears (slightly wider)
-  const smearW = W*(hyper?0.50:0.44);
-  const smearAlpha = (0.18 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
+  // side smears (buildings/trees blur)
+  const smearW = W*(hyper?0.46:0.38);
+  const smearAlpha = (0.16 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
   smearG_L.addColorStop(0,   `rgba(0,0,0,${smearAlpha})`);
   smearG_L.addColorStop(1.0, 'rgba(0,0,0,0)');
@@ -427,10 +406,10 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   ctx.beginPath(); ctx.moveTo(W/2, VANISH_Y);
   for(let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
   for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
-  ctx.closePath();
+  ctx.closePath(); 
   ctx.clip();
 
-  // perspective asphalt scroll
+  // perspective asphalt scroll (heaviest near the player)
   const scroll = (worldZ * (2.0 + k*1.7) * hyperK.asphalt) % noiseH;
   for(let y=-noiseH; y<H+noiseH; y+=noiseH){
     const near = Math.min(1, Math.max(0, (y+noiseH - VPT_Y) / (H - VPT_Y + 1)));
@@ -438,26 +417,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // extra edge speed lines (always on)
-  ctx.globalAlpha = 0.28 + 0.32*k;
-  ctx.globalCompositeOperation = 'lighter';
-  const runners = 16;
-  for (let i=0;i<runners;i++){
-    const z = (worldZ*0.5 + i*140) % DEPTH_Z;
-    const e = edgesAt(z);
-    const y1 = Math.min(H, Math.max(VPT_Y, e.y));
-    const y2 = H + 24;
-    const lw = 1 + (1 - i/(runners-1)) * 3.2;
-    // left
-    ctx.strokeStyle = 'rgba(0,255,255,0.55)';
-    ctx.lineWidth = lw;
-    ctx.beginPath(); ctx.moveTo(e.lx+4, y1); ctx.lineTo(e.lx+4, y2); ctx.stroke();
-    // right
-    ctx.beginPath(); ctx.moveTo(e.rx-4, y1); ctx.lineTo(e.rx-4, y2); ctx.stroke();
-  }
-  ctx.restore();
-
-  // tire beams
+  // TWO soft tire beams, anchored to wheels so they follow the car
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -475,14 +435,15 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.fill();
   };
   lane(tireL); lane(tireR);
+  ctx.restore();
 
-  // hyperloop vignette
+  // hyperloop vignette (subtle baseline, stronger on nitro)
   ctx.save();
   const inner = Math.min(W,H)*0.10;
   const outer = Math.max(W,H)*(hyper?0.78:0.66)*(1-0.10*heat);
   const vg = ctx.createRadialGradient(VPT_X, VPT_Y, inner, VPT_X, VPT_Y, outer);
   vg.addColorStop(0,'rgba(0,0,0,0)');
-  vg.addColorStop(1,`rgba(0,0,0,${hyper? (0.36+0.10*heat) : 0.20})`);
+  vg.addColorStop(1,`rgba(0,0,0,${hyper? (0.40+0.12*heat) : 0.20})`);
   ctx.fillStyle = vg;
   ctx.fillRect(0,0,W,H);
   ctx.restore();
@@ -492,8 +453,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
 function drawHeadlights(){
   const leftRoot  = { x: carX + carW*0.32, y: carY + carH*0.74 };
   const rightRoot = { x: carX + carW*0.68, y: carY + carH*0.74 };
-  // Aim straight ahead from the CAR CENTER so the spot tracks steering precisely
-  const aim = { x: carX + carW*0.5, y: VPT_Y - 12 };
+  const aim = { x: VPT_X, y: VPT_Y - 12 };
 
   const drawBeam = (root, spread)=> {
     ctx.save();
@@ -621,6 +581,7 @@ function burstNitro(x,y, count=12){
   }
 }
 function explodeBomb(x,y){
+  // flash ring
   for(let i=0;i<24;i++){
     const a = (i/24)*Math.PI*2;
     const s = 160 + Math.random()*220;
@@ -632,6 +593,7 @@ function explodeBomb(x,y){
       'rgba(255,120,40,1)', 14, 420
     ));
   }
+  // smoke
   for(let i=0;i<18;i++){
     const a = Math.random()*Math.PI*2;
     const s = 40 + Math.random()*90;
@@ -671,31 +633,7 @@ function clickStartAudio(){
 }
 let bgmStarted=false;
 
-/* Nitro looped whoosh while held */
-let nitroSrc=null, nitroGain=null;
-function nitroWhooshStart(){
-  ensureAudio();
-  if (nitroSrc) return; // already running
-  const dur = 2.0;
-  const buf = AC.createBuffer(1, AC.sampleRate*dur, AC.sampleRate);
-  const ch  = buf.getChannelData(0);
-  for(let i=0;i<ch.length;i++){ ch[i] = (Math.random()*2-1); } // white noise
-  const src = AC.createBufferSource(); src.buffer = buf; src.loop = true;
-  const bp  = AC.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=380; bp.Q.value=0.9;
-  const sh  = AC.createBiquadFilter(); sh.type='highshelf'; sh.frequency.value=1200; sh.gain.value=6;
-  nitroGain = AC.createGain(); nitroGain.gain.value = 0.0;
-  src.connect(bp); bp.connect(sh); sh.connect(nitroGain); nitroGain.connect(sfxGain);
-  src.start();
-  nitroSrc = src;
-}
-function nitroWhooshStop(){
-  if (!nitroSrc) return;
-  try{ nitroSrc.stop(); }catch(e){}
-  nitroSrc.disconnect(); nitroSrc=null;
-  if (nitroGain){ nitroGain.disconnect(); nitroGain=null; }
-}
-
-/* Procedural SFX (short) */
+// Procedural SFX (short + crisp)
 function playCoin(){
   ensureAudio();
   const o = AC.createOscillator();
@@ -732,7 +670,7 @@ function playBomb(){
   s.start(); s.stop(AC.currentTime+0.52);
 }
 
-/* Sound toggle */
+/* Sound toggle (button already exists in DOM) */
 function applyMuteUI(){
   soundBtn.classList.toggle('muted', muted);
   soundLabel.textContent = muted? 'SOUND OFF' : 'SOUND ON';
@@ -786,13 +724,6 @@ class Pickup {
   }
 
   hitTest(carRect, worldZ){
-    // extra rule: middle-lane items require car centered in middle lane
-    if (Math.abs(this.laneT - 0.50) < 0.001){
-      const carCenter = carRect.x + carRect.w/2;
-      const centerTol = Math.max(8, W*0.03); // tighten as requested
-      if (Math.abs(carCenter - W/2) > centerTol) return false;
-    }
-
     const z = this.zRel(worldZ);
     const e = edgesAt(z);
     const x = e.lx + (e.rx-e.lx)*this.laneT;
@@ -807,7 +738,7 @@ class Pickup {
   }
 }
 
-/* Procedural sprites for pickups */
+/* Procedural sprites for pickups (same visuals as before) */
 function drawCoin(x,y,s,ang){
   const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang)));
   ctx.save();
@@ -880,9 +811,9 @@ function buildCarFXCanvas(nitroBoost, t){
   const rightX = carW*0.71;
 
   c.globalCompositeOperation = 'lighter';
-  c.shadowBlur = 18;
-  c.shadowColor = `rgba(255,60,40,${0.75*flick})`;
-  c.fillStyle   = `rgba(255,70,50,${0.45*flick})`;
+  c.shadowBlur = 22;
+  c.shadowColor = `rgba(255,60,40,${0.85*flick})`;
+  c.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
   const lamp = (x) => {
     c.beginPath();
     c.moveTo(x-18, lightY);
@@ -893,11 +824,10 @@ function buildCarFXCanvas(nitroBoost, t){
   };
   lamp(leftX); lamp(rightX);
 
-  // exhaust jets – keep saturated, avoid white-out during nitro
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
-  c.shadowBlur  = 24;
+  c.shadowBlur  = 28;
   c.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
-  c.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.18+0.22*flame})`;
+  c.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.22+0.35*flame})`;
   const jet = (x) => {
     c.beginPath();
     c.moveTo(x, carH*0.82);
@@ -914,43 +844,37 @@ function buildCarFXCanvas(nitroBoost, t){
 /* ============== INPUT ============== */
 let time = 0;
 const steer = { x:0, nitro:false };
-
 canvas.addEventListener('pointerdown', e=>{
-  e.preventDefault();
   const x = e.clientX - canvas.getBoundingClientRect().left;
-    steer.x = (x < W/2) ? -1 : 1;
+  steer.x = (x < W/2) ? -1 : 1;
   clickStartAudio();
 });
 canvas.addEventListener('pointermove', e=>{
-  if (!e.buttons) return;
-  e.preventDefault();
-  const x = e.clientX - canvas.getBoundingClientRect().left;
-  steer.x = (x < W/2) ? -1 : 1;
+  if (e.buttons) {
+    const x = e.clientX - canvas.getBoundingClientRect().left;
+    steer.x = (x < W/2) ? -1 : 1;
+  }
 });
-window.addEventListener('pointerup', (e)=>{ e.preventDefault(); steer.x = 0; });
-
+window.addEventListener('pointerup', ()=>{ steer.x=0; });
 window.addEventListener('keydown', e=>{
-  if(e.key === 'ArrowLeft')  { steer.x = -1; e.preventDefault(); }
-  if(e.key === 'ArrowRight') { steer.x =  1; e.preventDefault(); }
-  if(e.key === ' ')          { steer.nitro = true; e.preventDefault(); nitroWhooshStart(); }
+  if(e.key==='ArrowLeft')  steer.x=-1;
+  if(e.key==='ArrowRight') steer.x=1;
+  if(e.key.toLowerCase()===' ') steer.nitro=true;
   clickStartAudio();
-}, {passive:false});
-
+});
 window.addEventListener('keyup', e=>{
-  if(e.key === 'ArrowLeft' || e.key === 'ArrowRight') steer.x = 0;
-  if(e.key === ' ') steer.nitro = false;
-}, {passive:false});
+  if(e.key==='ArrowLeft' || e.key==='ArrowRight') steer.x = 0;   // <-- change 'Right' to 'ArrowRight'
+  if(e.key.toLowerCase()===' ') steer.nitro=false;
+});
 
-window.addEventListener('blur', ()=>{ steer.x = 0; steer.nitro = false; });
-
-/* Nitro meter hold (button) */
+/* Nitro meter hold */
 function bindNitroHold(el){
-  const on  = ()=>{ steer.nitro = true; clickStartAudio(); nitroWhooshStart(); };
-  const off = ()=>{ steer.nitro = false; };
-  el.addEventListener('pointerdown', e=>{ e.preventDefault(); on(); }, {passive:false});
-  window.addEventListener('pointerup', off, {passive:true});
+  const on=()=>{ steer.nitro=true; clickStartAudio(); };
+  const off=()=>{ steer.nitro=false; };
+  el.addEventListener('pointerdown', e=>{ e.preventDefault(); on(); });
+  window.addEventListener('pointerup', off);
   el.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
-  el.addEventListener('touchend', off, {passive:true});
+  el.addEventListener('touchend', off);
 }
 bindNitroHold(nitroWrap);
 
@@ -963,12 +887,14 @@ let nitroActive = false;
 let lastSpawn = 0;
 const pickups = [];
 
-/* Lanes */
+/* Lanes tightened so left/right are on-screen and reachable */
 const LANE_TS = [0.26, 0.50, 0.74];
+
+/* No stacking per-lane */
 const MIN_LANE_SEP_Z = 820;
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 
-/* Spawn controller */
+/* Spawn controller (denser) */
 function spawnOne(){
   const available = [];
   for (let i=0;i<LANE_TS.length;i++){
@@ -987,39 +913,17 @@ function spawnOne(){
   else                pickups.push(new Pickup('bomb',  spawnZ, laneT));
 }
 
-/* Nitro state + looped SFX gain ramp */
 function useNitro(dt){
-  const can = nitro > 0.02;
+  const can = nitro>0.02;
   nitroActive = steer.nitro && can;
-
-  if (nitroActive){
-    nitro = Math.max(0, nitro - dt*0.25);
-    heat  = Math.min(1, heat + dt*2.4);
-    nitroWhooshStart();
-    if (nitroGain){
-      try {
-        nitroGain.gain.cancelScheduledValues(AC.currentTime);
-        nitroGain.gain.setTargetAtTime(0.75, AC.currentTime, 0.06);
-      } catch(e){}
-    }
-  } else {
-    heat = Math.max(0, heat - dt*1.6);
-    if (nitroGain){
-      try {
-        nitroGain.gain.cancelScheduledValues(AC.currentTime);
-        nitroGain.gain.setTargetAtTime(0.0, AC.currentTime, 0.08);
-      } catch(e){}
-    }
-    // stop the loop once it has faded out
-    if (nitroGain && nitroGain.gain.value < 0.01) nitroWhooshStop();
-  }
+  if (nitroActive){ nitro = Math.max(0, nitro - dt*0.25); heat = Math.min(1, heat + dt*2.4); }
+  else            { heat = Math.max(0, heat - dt*1.6); }
   nitroFill.style.width = Math.round(nitro*100)+'%';
 }
 
 function gameOver(){
   state.running=false;
   try{ bgm.pause(); }catch(e){}
-  nitroWhooshStop();
   alert(`CRASHED 💥\nDistance: ${Math.round(state.dist)} m\nCoins: ${state.coins}`);
   document.getElementById('startOverlay').style.display='';
 }
@@ -1049,7 +953,7 @@ function frame(now){
   worldZ += mps * dt;
   state.dist += mps * dt;
 
-  // Spawns
+  // Spawns (faster)
   if (now - lastSpawn > 650*(0.80+Math.random()*0.35)) {
     lastSpawn = now; spawnOne();
   }
@@ -1065,13 +969,13 @@ function frame(now){
 
   // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  drawBackground(hyper?HYPER.zoom:1, state.speed, worldZ);
+  drawBackground(hyper?HYPER.zoom:1);
   drawRoad();
   drawAurora(time, hyper?1.25:1);
   drawVanishingGlow(time, heat);
   drawMotion(worldZ, state.speed, hyper, heat);
 
-  // Headlights
+  // Headlights on top
   drawHeadlights();
 
   // Colliders
@@ -1084,6 +988,7 @@ function frame(now){
     if (p.hitTest(cRect, worldZ)) {
       p.alive = false;
 
+      // screen-space coordinates = draw position at collision moment
       const ez = p.zRel(worldZ);
       const e  = edgesAt(ez);
       const x  = e.lx + (e.rx-e.lx)*p.laneT;
@@ -1124,8 +1029,7 @@ function frame(now){
 }
 
 /* ======= START ======= */
-document.getElementById('startBtn').addEventListener('click', (e) => {
-  e.preventDefault();
+document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startOverlay').style.display = 'none';
   resize();
   tintedSprite = makeTintedSprite(paint);
@@ -1144,11 +1048,11 @@ document.getElementById('startBtn').addEventListener('click', (e) => {
   laneLastSpawnZ[0]=laneLastSpawnZ[1]=laneLastSpawnZ[2]=-1e9;
   lastSpawn       = performance.now();
 
-  // music (immediately on START)
+  // music
   if (!muted){ clickStartAudio(); }
 
   requestAnimationFrame(frame);
-}, {passive:false});
+});
 
 /* init */
 resize();
