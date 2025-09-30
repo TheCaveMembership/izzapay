@@ -131,16 +131,12 @@ function makeTintedSprite(rgb){
   const o = off.getContext('2d');
   o.imageSmoothingEnabled = true;
 
-  // 1) base
   o.drawImage(carImg, 0, 0);
-  // 2) multiply tint
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   o.fillRect(0,0,off.width,off.height);
-  // 3) mask to alpha
   o.globalCompositeOperation = 'destination-in';
   o.drawImage(carImg, 0, 0);
-  // 4) subtle highlight only where car has alpha
   o.globalCompositeOperation = 'source-atop';
   o.fillStyle = 'rgba(255,255,255,0.08)';
   o.fillRect(0,0,off.width,off.height);
@@ -193,7 +189,6 @@ function rebuildTintAndPreview(){
   const x = Math.round((prev.width - w)/2);
   const y = Math.round((prev.height - h)/2);
 
-  // soft ellipse only (no rects)
   const cx = x + w/2, cy = y + h*0.92, rx = w*0.42, ry = h*0.10;
   const g = pctx.createRadialGradient(cx,cy,1,cx,cy,Math.max(rx,ry));
   g.addColorStop(0, `rgba(${paint.r},${paint.g},${paint.b},.22)`);
@@ -208,28 +203,28 @@ carImg.onload = rebuildTintAndPreview;
 /* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
-  const k = 0.0105;
+  const k = 0.0105;                      // perspective curve
   const t = 1 - Math.exp(-k*z);
   const y = lerp(horizonY, H, t);
   const half = lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
 
-/* ----- Road extents & fade control ----- */
-const DEPTH_Z    = 16000; // draw really far
+/* ======= Road params (no top fade, extend far beyond HUD) ======= */
+const DEPTH_Z    = 18000;
 const STEP_Z     = 60;
 const DASH_STEP  = 26;
 const DASH_LEN_Z = 18;
 const LED_STEP   = 16;
 
-const VANISH_Y   = -240;  // put the tip well above the screen
-const FADE_TOP   = -720;  // start fading even higher for a long fade
+// VANISH_Y is set relative to canvas height so it is always well above the HUD.
+let VANISH_Y = -800;        // will be updated in resize()
 const RAIL_SCALE = 1.05;
 
 function edgesAt(z){
   const p = project(z);
-  const y = Math.max(p.y, VANISH_Y);
-  const half = (y === VANISH_Y) ? 0.0001 : p.half; // collapse to a point at the tip
+  const y = Math.max(p.y, VANISH_Y);        // clamp to the tip (above screen)
+  const half = (y === VANISH_Y) ? 0.0001 : p.half;
   return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8 };
 }
 
@@ -242,13 +237,13 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* ============== Road + lines + LEDs (extends fully; fades only at the very top) ============== */
+/* ============== Road + dashes + LEDs (no fade, full length) ============== */
 function drawRoad(worldZ){
-  // Build polygon edges (near → far)
+  // Build edge samples
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
     const e = edgesAt(z);
-    if (e.y>H && L.length && R.length) break;
+    if (e.y>H && L.length && R.length) break; // off the bottom of the screen
     L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
 
@@ -265,7 +260,7 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.fill();
 
-  // Lane dashes — no horizon clamp; fade uses FADE_TOP→VANISH_Y only
+  // Lane dashes (constant alpha, up to tip)
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap = 'round';
   const LANE_T = [0.22, 0.50, 0.78];
@@ -275,57 +270,21 @@ function drawRoad(worldZ){
       const a = edgesAt(Math.max(0,z));
       const b = edgesAt(Math.max(0,z + DASH_LEN_Z));
       if (a.y>H && b.y>H) break;
-
       const x0 = a.lx + (a.rx - a.lx)*t;
       const x1 = b.lx + (b.rx - b.lx)*t;
-
-      let alpha = ((a.y + b.y)/2 - FADE_TOP) / (VANISH_Y - FADE_TOP);
-      alpha = Math.max(0, Math.min(1, alpha));
-      if (alpha <= 0) continue;
-
-      ctx.globalAlpha = alpha;
       ctx.beginPath(); ctx.moveTo(x0, a.y); ctx.lineTo(x1, b.y); ctx.stroke();
     }
   }
-  ctx.globalAlpha = 1;
 
-  // LED rails — same fade model
+  // LED rails (constant alpha, up to tip)
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   for (let z = (worldZ % LED_STEP) * -1; z < DEPTH_Z; z += LED_STEP){
     const e = edgesAt(Math.max(0,z));
     if (e.y>H) break;
-
-    let alpha = (e.y - FADE_TOP) / (VANISH_Y - FADE_TOP);
-    alpha = Math.max(0, Math.min(1, alpha));
-    if (alpha <= 0) continue;
-
     const r = Math.max(1, 3 * (1 - (e.y - VANISH_Y) / (H - VANISH_Y)));
-    ctx.globalAlpha = alpha;
     ctx.beginPath(); ctx.arc(e.lx, e.y, r, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(e.rx, e.y, r, 0, Math.PI*2); ctx.fill();
   }
-  ctx.globalAlpha = 1;
-
-  // Soft fade of the whole road at the tip (removes any hard “point”)
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(W/2, VANISH_Y);
-  for (let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1], H));
-  for (let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1], H));
-  ctx.closePath();
-  ctx.clip();
-
-  const fadeH = VANISH_Y - FADE_TOP;
-  const fade = ctx.createLinearGradient(0, 0, 0, VANISH_Y + fadeH);
-  fade.addColorStop(0, 'rgba(0,0,0,1)');
-  fade.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = fade;
-  ctx.fillRect(0, 0, W, VANISH_Y + fadeH);
-  ctx.restore();
-
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
 }
 
 /* ============== Car ============== */
@@ -388,10 +347,10 @@ let time = 0;
 function drawCar(nitroBoost){
   const src = tintedSprite || carImg;
   ctx.globalCompositeOperation = 'source-over';
-  ctx.drawImage(src, carX, carY, carW, carH);   // body (alpha-masked)
+  ctx.drawImage(src, carX, carY, carW, carH);
   const fx = buildCarFXCanvas(nitroBoost, time);
   ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(fx, carX, carY);                // emissives
+  ctx.drawImage(fx, carX, carY);
   ctx.globalCompositeOperation = 'source-over';
 }
 
@@ -413,7 +372,7 @@ window.addEventListener('keydown', e=>{
   if(e.key==='ArrowRight') steer.x=1;
 });
 window.addEventListener('keyup', e=>{
-  if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
+  if(e.key==='ArrowLeft'||e.key==='Right') steer.x=0;
 });
 
 /* ============== Loop ============== */
@@ -451,6 +410,7 @@ document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 
 document.getElementById('startBtn').addEventListener('click',()=>{
   document.getElementById('startOverlay').style.display='none';
   resize();
+  VANISH_Y = -Math.max(H, 800); // keep the tip comfortably above the HUD
   tintedSprite = makeTintedSprite(paint);
   state.running = true;
   state.speed = 90; state.dist = 0; worldZ = 0; last = performance.now();
@@ -459,6 +419,7 @@ document.getElementById('startBtn').addEventListener('click',()=>{
 
 /* init */
 resize();
+VANISH_Y = -Math.max(H, 800);
 rebuildTintAndPreview();
 })();
 </script>
