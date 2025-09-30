@@ -97,8 +97,6 @@ const HUD = {
   coins: document.getElementById('coinsRun')
 };
 
-const SHOW_SIDELINES = false;
-
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
 let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
@@ -218,15 +216,15 @@ function project(z){
 }
 
 /* ----- Road extents & fade control ----- */
-const DEPTH_Z    = 16000; // how far we simulate/draw the road
-const STEP_Z     = 60;    // tessellation step for asphalt (smaller = smoother)
-const DASH_STEP  = 26;    // spacing of lane dashes (world Z)
-const DASH_LEN_Z = 18;    // length of each dash (world Z)
-const LED_STEP   = 16;    // spacing of the red LEDs
+const DEPTH_Z    = 16000; // draw really far
+const STEP_Z     = 60;
+const DASH_STEP  = 26;
+const DASH_LEN_Z = 18;
+const LED_STEP   = 16;
 
-const VANISH_Y   = -80;   // Y where the tip sits (off-screen)
-const FADE_TOP   = -220;  // Y where alpha reaches 0 (more negative = longer fade)
-const RAIL_SCALE = 1.05;  // rails slightly wider than lanes
+const VANISH_Y   = -240;  // put the tip well above the screen
+const FADE_TOP   = -720;  // start fading even higher for a long fade
+const RAIL_SCALE = 1.05;
 
 function edgesAt(z){
   const p = project(z);
@@ -244,7 +242,7 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* ============== Road + lines + LEDs (extends to tip, then soft-fades) ============== */
+/* ============== Road + lines + LEDs (extends fully; fades only at the very top) ============== */
 function drawRoad(worldZ){
   // Build polygon edges (near → far)
   const L=[], R=[];
@@ -267,7 +265,7 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.fill();
 
-  // Lane dashes
+  // Lane dashes — no horizon clamp; fade uses FADE_TOP→VANISH_Y only
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap = 'round';
   const LANE_T = [0.22, 0.50, 0.78];
@@ -278,31 +276,27 @@ function drawRoad(worldZ){
       const b = edgesAt(Math.max(0,z + DASH_LEN_Z));
       if (a.y>H && b.y>H) break;
 
-      // fade lanes near the tip
-      const yMid = (a.y + b.y)/2;
-      let alpha = 1;
-      if (yMid < horizonY){
-        alpha = (yMid - FADE_TOP) / (VANISH_Y - FADE_TOP);
-        alpha = Math.max(0, Math.min(1, alpha));
-      }
-      if (alpha <= 0) continue;
-
       const x0 = a.lx + (a.rx - a.lx)*t;
       const x1 = b.lx + (b.rx - b.lx)*t;
+
+      let alpha = ((a.y + b.y)/2 - FADE_TOP) / (VANISH_Y - FADE_TOP);
+      alpha = Math.max(0, Math.min(1, alpha));
+      if (alpha <= 0) continue;
+
       ctx.globalAlpha = alpha;
       ctx.beginPath(); ctx.moveTo(x0, a.y); ctx.lineTo(x1, b.y); ctx.stroke();
     }
   }
   ctx.globalAlpha = 1;
 
-  // LED rails (follow road edges; same fade)
+  // LED rails — same fade model
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   for (let z = (worldZ % LED_STEP) * -1; z < DEPTH_Z; z += LED_STEP){
     const e = edgesAt(Math.max(0,z));
     if (e.y>H) break;
 
-    const yf = (e.y - FADE_TOP) / (VANISH_Y - FADE_TOP);
-    const alpha = Math.max(0, Math.min(1, yf));
+    let alpha = (e.y - FADE_TOP) / (VANISH_Y - FADE_TOP);
+    alpha = Math.max(0, Math.min(1, alpha));
     if (alpha <= 0) continue;
 
     const r = Math.max(1, 3 * (1 - (e.y - VANISH_Y) / (H - VANISH_Y)));
@@ -312,7 +306,7 @@ function drawRoad(worldZ){
   }
   ctx.globalAlpha = 1;
 
-  // Soft fade of the whole road shape at the very top (removes any hard “triangle” look)
+  // Soft fade of the whole road at the tip (removes any hard “point”)
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(W/2, VANISH_Y);
@@ -321,17 +315,19 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.clip();
 
-  const fade = ctx.createLinearGradient(0, 0, 0, VANISH_Y + (VANISH_Y - FADE_TOP));
-  fade.addColorStop(0, 'rgba(0,0,0,1)');   // fully remove at the tip
-  fade.addColorStop(1, 'rgba(0,0,0,0)');   // no removal after the fade distance
+  const fadeH = VANISH_Y - FADE_TOP;
+  const fade = ctx.createLinearGradient(0, 0, 0, VANISH_Y + fadeH);
+  fade.addColorStop(0, 'rgba(0,0,0,1)');
+  fade.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.globalCompositeOperation = 'destination-out';
   ctx.fillStyle = fade;
-  ctx.fillRect(0, 0, W, VANISH_Y + (VANISH_Y - FADE_TOP));
+  ctx.fillRect(0, 0, W, VANISH_Y + fadeH);
   ctx.restore();
 
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 }
+
 /* ============== Car ============== */
 let carW=0, carH=0, carX=0, carY=0;
 function updateCarPlacement(){
