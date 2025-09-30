@@ -286,19 +286,23 @@ function edgesAt(z){
   return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8, t:p.t };
 }
 
-/* ============== Background (steer parallax) ============== */
-let bgParallaxX = 0, bgTarget = 0;
-function drawBackground(zoom=1){
+/* ============== Background (steer parallax + subtle scroll) ============== */
+let bgParallaxX = 0, bgTarget = 0, bgScroll = 0;
+function drawBackground(zoom=1, speed=0, z=0){
   const carCenter = (carX + carW/2) / W;
   bgTarget = (carCenter - 0.5) * 28;
   bgParallaxX += (bgTarget - bgParallaxX) * 0.08;
 
+  // gentle upward drift tied to speed/world travel for more motion feel
+  bgScroll += (speed/260) * 0.35 + (z*0.000002);
+  const yDrift = -Math.min(H*0.04, bgScroll % (H*0.08));
+
   if (bgImg.complete && bgImg.naturalWidth) {
     const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
-    const r  = Math.max(W/iw, H/ih) * zoom;
+    const r  = Math.max(W/iw, H/ih) * (zoom + (speed>200?0.01:0));
     const nw = iw*r, nh = ih*r;
     const x  = (W - nw) / 2 + bgParallaxX;
-    const y  = (H - nh) / 2;
+    const y  = (H - nh) / 2 + yDrift;
     ctx.drawImage(bgImg, x, y, nw, nh);
   } else {
     const g = ctx.createLinearGradient(0,0,0,H);
@@ -338,14 +342,14 @@ function drawAurora(t, hyperFactor=1){
 function drawVanishingGlow(t, heat){
   const rBase = Math.min(W,H)*0.070;
   const pulse = 1 + 0.06*Math.sin(t*3.2);
-  const r2 = rBase*(4.8 + heat*1.0)*pulse;
+  const r2 = rBase*(4.8 + heat*0.8)*pulse; // slightly tamer with heat to avoid white-out
   const g = ctx.createRadialGradient(VPT_X, VPT_Y, 1, VPT_X, VPT_Y, r2);
-  g.addColorStop(0,   `rgba(0,255,255,${0.70+0.25*heat})`);
-  g.addColorStop(0.4, `rgba(0,200,255,${0.30+0.20*heat})`);
+  g.addColorStop(0,   `rgba(0,255,255,${0.55+0.18*heat})`);
+  g.addColorStop(0.4, `rgba(0,200,255,${0.22+0.15*heat})`);
   g.addColorStop(1,   'rgba(0,200,255,0.00)');
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
-  ctx.globalAlpha = GLOW_ALPHA;
+  ctx.globalAlpha = GLOW_ALPHA * (0.92 - 0.25*heat); // keep color, prevent big gray block
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(VPT_X, VPT_Y, r2, 0, Math.PI*2); ctx.fill();
   ctx.restore();
@@ -382,30 +386,30 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // radial streaks from vanishing point
-  const count = Math.round((hyper?58:48) * hyperK.streaks * (1+0.5*heat));
+  // radial streaks from vanishing point (longer, wider, more of them)
+  const count = Math.round((hyper?68:56) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = STREAK_ALPHA*(hyper?1.08:1);
+  ctx.globalAlpha = STREAK_ALPHA*(hyper?1.02:1);
   for (let i=0;i<count;i++){
-    const ang = (-0.56 + i/(count-1)*1.12);
-    const len = H*(hyper?1.42:1.22);
+    const ang = (-0.66 + i/(count-1)*1.32);
+    const len = H*(hyper?1.62:1.42);
     const wob = Math.sin((worldZ*0.033)+i)*10*(hyper?1.6:1);
-    const x2 = VPT_X + Math.tan(ang)*(len*0.82) + wob;
+    const x2 = VPT_X + Math.tan(ang)*(len*0.86) + wob;
     const y2 = H + 36;
     const grad = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
     const base = (i%2===0)? 'rgba(0,255,255,' : 'rgba(255,0,200,';
-    grad.addColorStop(0.00, base + (0.75*k) + ')');
-    grad.addColorStop(0.20, base + (0.45*k) + ')');
+    grad.addColorStop(0.00, base + (0.70*k) + ')');
+    grad.addColorStop(0.22, base + (0.42*k) + ')');
     grad.addColorStop(1.00, base + '0)');
     ctx.strokeStyle = grad;
-    ctx.lineWidth = 2 + 14*k*(hyper?1.55:1.1);
+    ctx.lineWidth = 2 + 15*k*(hyper?1.35:1.1);
     ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.restore();
 
-  // side smears
-  const smearW = W*(hyper?0.46:0.40);
+  // side smears (slightly wider)
+  const smearW = W*(hyper?0.50:0.44);
   const smearAlpha = (0.18 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
   smearG_L.addColorStop(0,   `rgba(0,0,0,${smearAlpha})`);
@@ -437,13 +441,13 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   // extra edge speed lines (always on)
   ctx.globalAlpha = 0.28 + 0.32*k;
   ctx.globalCompositeOperation = 'lighter';
-  const runners = 14;
+  const runners = 16;
   for (let i=0;i<runners;i++){
     const z = (worldZ*0.5 + i*140) % DEPTH_Z;
     const e = edgesAt(z);
     const y1 = Math.min(H, Math.max(VPT_Y, e.y));
     const y2 = H + 24;
-    const lw = 1 + (1 - i/(runners-1)) * 3.0;
+    const lw = 1 + (1 - i/(runners-1)) * 3.2;
     // left
     ctx.strokeStyle = 'rgba(0,255,255,0.55)';
     ctx.lineWidth = lw;
@@ -478,7 +482,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const outer = Math.max(W,H)*(hyper?0.78:0.66)*(1-0.10*heat);
   const vg = ctx.createRadialGradient(VPT_X, VPT_Y, inner, VPT_X, VPT_Y, outer);
   vg.addColorStop(0,'rgba(0,0,0,0)');
-  vg.addColorStop(1,`rgba(0,0,0,${hyper? (0.40+0.12*heat) : 0.20})`);
+  vg.addColorStop(1,`rgba(0,0,0,${hyper? (0.36+0.10*heat) : 0.20})`);
   ctx.fillStyle = vg;
   ctx.fillRect(0,0,W,H);
   ctx.restore();
@@ -488,7 +492,8 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
 function drawHeadlights(){
   const leftRoot  = { x: carX + carW*0.32, y: carY + carH*0.74 };
   const rightRoot = { x: carX + carW*0.68, y: carY + carH*0.74 };
-  const aim = { x: VPT_X, y: VPT_Y - 12 };
+  // Aim straight ahead from the CAR CENTER so the spot tracks steering precisely
+  const aim = { x: carX + carW*0.5, y: VPT_Y - 12 };
 
   const drawBeam = (root, spread)=> {
     ctx.save();
@@ -875,9 +880,9 @@ function buildCarFXCanvas(nitroBoost, t){
   const rightX = carW*0.71;
 
   c.globalCompositeOperation = 'lighter';
-  c.shadowBlur = 22;
-  c.shadowColor = `rgba(255,60,40,${0.85*flick})`;
-  c.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
+  c.shadowBlur = 18;
+  c.shadowColor = `rgba(255,60,40,${0.75*flick})`;
+  c.fillStyle   = `rgba(255,70,50,${0.45*flick})`;
   const lamp = (x) => {
     c.beginPath();
     c.moveTo(x-18, lightY);
@@ -888,10 +893,11 @@ function buildCarFXCanvas(nitroBoost, t){
   };
   lamp(leftX); lamp(rightX);
 
+  // exhaust jets – keep saturated, avoid white-out during nitro
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
-  c.shadowBlur  = 28;
+  c.shadowBlur  = 24;
   c.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
-  c.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.22+0.35*flame})`;
+  c.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.18+0.22*flame})`;
   const jet = (x) => {
     c.beginPath();
     c.moveTo(x, carH*0.82);
@@ -1059,7 +1065,7 @@ function frame(now){
 
   // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  drawBackground(hyper?HYPER.zoom:1);
+  drawBackground(hyper?HYPER.zoom:1, state.speed, worldZ);
   drawRoad();
   drawAurora(time, hyper?1.25:1);
   drawVanishingGlow(time, heat);
