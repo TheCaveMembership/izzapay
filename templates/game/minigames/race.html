@@ -317,12 +317,16 @@ function updateCarPlacement(){
   carY = Math.round(H - carH*1.02);
 }
 
-let time = 0;
+// replace your existing drawCar(...) with this:
+let time = 0; // keep your tick accumulator (or increment it in frame loop)
+
 function drawCar(nitroBoost){
+  // 1) draw tinted sprite (already alpha-masked offscreen)
   const src = tintedSprite || carImg;
+  ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(src, carX, carY, carW, carH);
 
-  // animated tail-lights + flames (SVG-like glow via canvas)
+  // 2) animated tail-lights (no rects anywhere)
   const flick = 0.75 + 0.25*Math.sin(time*12);
   const lightY = carY + carH*0.56;
   const leftX  = carX + carW*0.23;
@@ -332,31 +336,38 @@ function drawCar(nitroBoost){
   ctx.globalCompositeOperation = 'lighter';
   ctx.shadowBlur = 24;
   ctx.shadowColor = `rgba(255,60,40,${0.85*flick})`;
-  ctx.fillStyle = `rgba(255,70,50,${0.55*flick})`;
-  function lamp(x){
+  ctx.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
+
+  const lamp = (x) => {
     ctx.beginPath();
     ctx.moveTo(x-18, lightY);
     ctx.lineTo(x+18, lightY);
     ctx.lineTo(x+8,  lightY+10);
     ctx.lineTo(x-8,  lightY+10);
-    ctx.closePath(); ctx.fill();
-  }
+    ctx.closePath();
+    ctx.fill();
+  };
   lamp(leftX); lamp(rightX);
 
+  // 3) exhaust flames (curved shapes only)
   const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(time*20));
-  ctx.shadowBlur = 28;
+  ctx.shadowBlur  = 28;
   ctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
-  ctx.fillStyle  = `rgba(${paint.r},${paint.g},${paint.b},${0.20+0.35*flame})`;
-  function jet(x){
+  ctx.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.22+0.35*flame})`;
+
+  const jet = (x) => {
     ctx.beginPath();
     ctx.moveTo(x, carY + carH*0.86);
     ctx.quadraticCurveTo(x-12, carY + carH*0.96, x, carY + carH*1.08);
     ctx.quadraticCurveTo(x+12, carY + carH*0.96, x, carY + carH*0.86);
-    ctx.closePath(); ctx.fill();
-  }
+    ctx.closePath();
+    ctx.fill();
+  };
   jet(carX + carW*0.38);
   jet(carX + carW*0.62);
+
   ctx.restore();
+  ctx.globalCompositeOperation = 'source-over'; // reset just in case
 }
 
 /* ================= Input ================= */
