@@ -95,7 +95,7 @@
 
 <script>
 (() => {
-/* ====== hard-block selection/callouts while playing ====== */
+/* ====== block text selection/callouts while playing ====== */
 ['contextmenu','selectstart','gesturestart'].forEach(ev=>{
   window.addEventListener(ev, e=>e.preventDefault(), {passive:false});
 });
@@ -155,7 +155,7 @@ const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 let dpr=1, W=0, H=0;
 let VANISH_Y = -800;
 let TOP_FADE_PX=90;
-/* We’ll compute VPT_X strictly from the car center so streaks/lighting follow exactly */
+/* Anchor the vanishing point to the car so all beams follow the car perfectly */
 let VPT_X=0, VPT_Y=0;
 let roadBottomHalf=0, roadTopHalf=0;
 
@@ -374,7 +374,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // radial streaks from *car center* so they track perfectly
+  /* --- Original radial streaks (unchanged) --- */
   const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -396,7 +396,88 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   }
   ctx.restore();
 
-  // side smears (buildings/trees blur)
+  /* <<< ALWAYS-ON EXTRA MAGENTA STREAKS (match your pink guides) */
+  (function drawAlwaysPink(){
+    const n = 22; // denser but thin, to layer with current look
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    for(let i=0;i<n;i++){
+      const t = (i/(n-1))*1.04 - 0.52; // same angular spread
+      const bend = Math.sin(worldZ*0.004 + i)*12;
+      const x1 = VPT_X, y1 = VPT_Y;
+      const x2 = VPT_X + Math.tan(t)*(H*0.95) + bend;
+      const y2 = H + 10;
+
+      const g = ctx.createLinearGradient(x1,y1,x2,y2);
+      g.addColorStop(0,'rgba(255,45,180,0.85)');  // neon magenta
+      g.addColorStop(0.35,'rgba(255,45,180,0.45)');
+      g.addColorStop(1,'rgba(255,45,180,0.00)');
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 1.5 + 2.0*k;
+      ctx.beginPath(); ctx.moveTo(x1,y1);
+      // slight curve like your marks
+      const cx = (x1+x2)/2 + (t*60);
+      const cy = (y1+y2)/2 - 80;
+      ctx.quadraticCurveTo(cx, cy, x2, y2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    /* subtle building-edge zips (short horizontals on sides) */
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    ctx.lineWidth = 1.3 + 1.4*k;
+    ctx.strokeStyle = 'rgba(255,45,180,0.38)';
+    const rows = 6;
+    for(let r=0;r<rows;r++){
+      const y = H*0.35 + r*(H*0.065) + Math.sin(worldZ*0.01+r)*3;
+      const w = W*0.16 + r*8;
+      ctx.beginPath(); ctx.moveTo(16, y); ctx.lineTo(16+w, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(W-16, y+6); ctx.lineTo(W-16-w, y+6); ctx.stroke();
+    }
+    ctx.restore();
+  })();
+
+  /* <<< NITRO-ONLY LIME STREAKS (match your green guides) */
+  if (hyper){
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    const burst = 20 + Math.round(18*heat);
+    for(let i=0;i<burst;i++){
+      const ang = (-0.62 + i/(burst-1)*1.24);
+      const len = H*1.45;
+      const x2 = VPT_X + Math.tan(ang)*len;
+      const y2 = H + 20;
+      const g = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
+      g.addColorStop(0,'rgba(57,255,20,0.95)');   // lime neon
+      g.addColorStop(0.25,'rgba(57,255,20,0.60)');
+      g.addColorStop(1,'rgba(57,255,20,0.00)');
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 2.0 + 2.2*k;
+      ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y-6);
+      const cx = (VPT_X+x2)/2 + Math.sin(worldZ*0.02+i)*18;
+      const cy = (VPT_Y+y2)/2 - 110;
+      ctx.quadraticCurveTo(cx, cy, x2, y2);
+      ctx.stroke();
+    }
+
+    /* lime arcs toward top sky (your green curves) */
+    const arcs = 5;
+    for(let a=0;a<arcs;a++){
+      const span = W*0.32 + a*24;
+      const xL = VPT_X - span, xR = VPT_X + span;
+      const yT = H*0.06 + a*18;
+      ctx.strokeStyle = 'rgba(57,255,20,0.38)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(xL, yT+80);
+      ctx.quadraticCurveTo(VPT_X, yT, xR, yT+80);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* --- side smears (unchanged) --- */
   const smearW = W*(hyper?0.46:0.38);
   const smearAlpha = (0.16 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
@@ -427,7 +508,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // TWO soft tire beams, anchored to wheels (follows car)
+  // tire beams anchored to wheels
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -677,13 +758,12 @@ function playBomb(){
   s.start(); s.stop(AC.currentTime+0.52);
 }
 
-/* Continuous Nitro whooosh while holding */
+/* <<< Continuous Nitro whooosh while holding */
 let nitroLoop = null;
 function setNitroWhoosh(on){
   ensureAudio();
   if (on){
     if (nitroLoop) return;
-    // noise -> bandpass -> subtle compressor-like gain
     const noiseBuf = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);
     const ch = noiseBuf.getChannelData(0);
     for(let i=0;i<ch.length;i++){ ch[i] = Math.random()*2-1; }
@@ -692,7 +772,7 @@ function setNitroWhoosh(on){
     const g = AC.createGain(); g.gain.value = 0.0001;
     src.connect(bp); bp.connect(g); g.connect(sfxGain);
     const now = AC.currentTime;
-    g.gain.exponentialRampToValueAtTime(0.6, now+0.08); // quick rise
+    g.gain.exponentialRampToValueAtTime(0.6, now+0.08);
     src.start();
     nitroLoop = {src, g};
   } else {
@@ -754,7 +834,7 @@ class Pickup {
     else if (this.type==='nitro')drawNitro(x,y,s*1.06,this.spin);
     else                         drawBomb(x,y,s*1.12,this.spin);
 
-    if (y>H+40) this.alive=false;
+    if (y>H+40) this.alive=false;   // <<< fall off-screen cleanly
   }
 
   hitTest(carRect, worldZ){
@@ -769,11 +849,11 @@ class Pickup {
     const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
     const dx = cx-nx, dy = cy-ny;
 
-    /* STRICT center requirement for middle-lane objects */
+    /* <<< STRICT center requirement for middle-lane objects */
     const isMiddleLane = Math.abs(this.laneT - 0.50) < 1e-3;
     if (isMiddleLane){
       const carCenter = carX + carW*0.5;
-      const centerEps = Math.max(8, W*0.02); // ~2% of screen width tolerance
+      const centerEps = Math.max(8, W*0.02);
       if (Math.abs(carCenter - W*0.5) > centerEps) return false;
     }
 
@@ -963,7 +1043,7 @@ function useNitro(dt){
   nitroActive = steer.nitro && can;
   if (nitroActive){ nitro = Math.max(0, nitro - dt*0.25); heat = Math.min(1, heat + dt*2.4); }
   else            { heat = Math.max(0, heat - dt*1.6); }
-  if (nitroActive !== wasActive) setNitroWhoosh(nitroActive);
+  if (nitroActive !== wasActive) setNitroWhoosh(nitroActive); // <<< whoosh on/off
   nitroFill.style.width = Math.round(nitro*100)+'%';
 }
 
@@ -1068,7 +1148,7 @@ function frame(now){
   // HUD
   HUD.speed.textContent = Math.round(state.speed);
   HUD.dist.textContent  = Math.round(state.dist);
-  HUD.coins.textContent = state.coins;
+    HUD.coins.textContent = state.coins;
 
   requestAnimationFrame(frame);
 }
@@ -1078,6 +1158,8 @@ document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startOverlay').style.display = 'none';
   resize();
   tintedSprite = makeTintedSprite(paint);
+
+  // reset run state
   state.running   = true;
   state.speed     = 90;
   state.dist      = 0;
@@ -1087,11 +1169,14 @@ document.getElementById('startBtn').addEventListener('click', () => {
   state.bombsHit  = 0;
   nitro           = 1.0;
   heat            = 0.0;
+  nitroActive     = false;
+  setNitroWhoosh(false);
+
   nitroFill.style.width = '100%';
-  pickups.length  = 0;
-  particles.length= 0;
-  laneLastSpawnZ[0]=laneLastSpawnZ[1]=laneLastSpawnZ[2]=-1e9;
-  lastSpawn       = performance.now();
+  pickups.length   = 0;
+  particles.length = 0;
+  laneLastSpawnZ[0] = laneLastSpawnZ[1] = laneLastSpawnZ[2] = -1e9;
+  lastSpawn        = performance.now();
 
   if (!muted){ clickStartAudio(); }
 
