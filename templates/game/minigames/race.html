@@ -101,6 +101,9 @@ const HUD = {
 let dpr=1, W=0, H=0;
 let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
 
+// Tip of the road (must be above the canvas)
+let VANISH_Y = -800;
+
 function resize(){
   W = arena.clientWidth;
   H = arena.clientHeight;
@@ -111,9 +114,13 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
+  // Where the far road visually begins (not a clamp anymore)
   horizonY       = H*0.26;
   roadBottomHalf = W*1.15;
   roadTopHalf    = W*0.12;
+
+  // keep the tip comfortably above the HUD on any device
+  VANISH_Y = -Math.max(H * 0.8, 600);
 
   updateCarPlacement();
 }
@@ -202,28 +209,26 @@ carImg.onload = rebuildTintAndPreview;
 
 /* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
+
+// IMPORTANT: start from VANISH_Y (above the screen), not horizonY.
 function project(z){
-  const k = 0.0105;                      // perspective curve
+  const k = 0.0105;
   const t = 1 - Math.exp(-k*z);
-  const y = lerp(horizonY, H, t);
-  const half = lerp(roadTopHalf, roadBottomHalf, t);
+  const y   = lerp(VANISH_Y, H, t);                // <— fixed line
+  const half= lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
 
-/* ======= Road params (no top fade, extend far beyond HUD) ======= */
 const DEPTH_Z    = 18000;
 const STEP_Z     = 60;
 const DASH_STEP  = 26;
 const DASH_LEN_Z = 18;
 const LED_STEP   = 16;
-
-// VANISH_Y is set relative to canvas height so it is always well above the HUD.
-let VANISH_Y = -800;        // will be updated in resize()
 const RAIL_SCALE = 1.05;
 
 function edgesAt(z){
   const p = project(z);
-  const y = Math.max(p.y, VANISH_Y);        // clamp to the tip (above screen)
+  const y = Math.max(p.y, VANISH_Y);
   const half = (y === VANISH_Y) ? 0.0001 : p.half;
   return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8 };
 }
@@ -237,17 +242,16 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* ============== Road + dashes + LEDs (no fade, full length) ============== */
+/* ============== Road + dashes + LEDs (no top fade) ============== */
 function drawRoad(worldZ){
-  // Build edge samples
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
     const e = edgesAt(z);
-    if (e.y>H && L.length && R.length) break; // off the bottom of the screen
+    if (e.y>H && L.length && R.length) break;
     L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
 
-  // Asphalt polygon
+  // Asphalt
   const roadG = ctx.createLinearGradient(0, VANISH_Y, 0, H);
   roadG.addColorStop(0, '#0f141d');
   roadG.addColorStop(1, '#0a0f17');
@@ -260,13 +264,12 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.fill();
 
-  // Lane dashes (constant alpha, up to tip)
+  // Lane dashes
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap = 'round';
   const LANE_T = [0.22, 0.50, 0.78];
-
   for (const t of LANE_T){
-    for (let z = (worldZ % DASH_STEP) * -1; z < DEPTH_Z; z += DASH_STEP){
+    for (let z=(worldZ % DASH_STEP)*-1; z<DEPTH_Z; z+=DASH_STEP){
       const a = edgesAt(Math.max(0,z));
       const b = edgesAt(Math.max(0,z + DASH_LEN_Z));
       if (a.y>H && b.y>H) break;
@@ -276,9 +279,9 @@ function drawRoad(worldZ){
     }
   }
 
-  // LED rails (constant alpha, up to tip)
+  // LED rails
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
-  for (let z = (worldZ % LED_STEP) * -1; z < DEPTH_Z; z += LED_STEP){
+  for (let z=(worldZ % LED_STEP)*-1; z<DEPTH_Z; z+=LED_STEP){
     const e = edgesAt(Math.max(0,z));
     if (e.y>H) break;
     const r = Math.max(1, 3 * (1 - (e.y - VANISH_Y) / (H - VANISH_Y)));
@@ -297,7 +300,6 @@ function updateCarPlacement(){
   carY = Math.round(H - carH*1.02);
 }
 
-/* FX offscreen so no artifacts */
 function buildCarFXCanvas(nitroBoost, t){
   const fx = document.createElement('canvas');
   fx.width = Math.max(2, Math.floor(carW));
@@ -410,7 +412,6 @@ document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 
 document.getElementById('startBtn').addEventListener('click',()=>{
   document.getElementById('startOverlay').style.display='none';
   resize();
-  VANISH_Y = -Math.max(H, 800); // keep the tip comfortably above the HUD
   tintedSprite = makeTintedSprite(paint);
   state.running = true;
   state.speed = 90; state.dist = 0; worldZ = 0; last = performance.now();
@@ -419,7 +420,6 @@ document.getElementById('startBtn').addEventListener('click',()=>{
 
 /* init */
 resize();
-VANISH_Y = -Math.max(H, 800);
 rebuildTintAndPreview();
 })();
 </script>
