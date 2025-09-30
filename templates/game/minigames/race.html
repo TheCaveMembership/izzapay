@@ -216,28 +216,25 @@ function project(z){
   const half = lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
-// ----- Road extents & fade control -----
-const DEPTH_Z   = 12000;  // how far we simulate/draw the road
-const STEP_Z    = 60;     // tessellation step for asphalt strips (smaller = smoother)
-const DASH_STEP = 26;     // spacing between lane dashes (world Z)
-const DASH_LEN_Z= 18;     // length of each lane dash (world Z)
-const LED_STEP  = 16;     // spacing of the red LEDs
 
-const VANISH_Y  = -80;    // screen Y where the road tip sits (off-screen)
-const FADE_TOP  = -220;   // where the fade reaches 0 alpha (more negative = longer fade)
-const RAIL_SCALE= 1.05;   // how far LED rails sit from the lane edges
+/* ----- Road extents & fade control ----- */
+const DEPTH_Z    = 12000; // how far we simulate/draw the road
+const STEP_Z     = 60;    // tessellation step for asphalt (smaller = smoother)
+const DASH_STEP  = 26;    // spacing of lane dashes (world Z)
+const DASH_LEN_Z = 18;    // length of each dash (world Z)
+const LED_STEP   = 16;    // spacing of the red LEDs
 
-// Edge sampler at world Z
+const VANISH_Y   = -80;   // Y where the tip sits (off-screen)
+const FADE_TOP   = -220;  // Y where alpha reaches 0 (more negative = longer fade)
+const RAIL_SCALE = 1.05;  // rails slightly wider than lanes
+
 function edgesAt(z){
   const p = project(z);
   const y = Math.max(p.y, VANISH_Y);
   const half = (y === VANISH_Y) ? 0.0001 : p.half; // collapse to a point at the tip
-  return {
-    y,
-    lx: W/2 - half*RAIL_SCALE - 8,
-    rx: W/2 + half*RAIL_SCALE + 8
-  };
+  return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8 };
 }
+
 /* ============== Sky ============== */
 function drawSky(){
   const g = ctx.createLinearGradient(0,0,0,H);
@@ -247,44 +244,41 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* Road, lines, and LEDs — extend to the very top, then softly fade out */
+/* ============== Road + lines + LEDs (extends to tip, then soft-fades) ============== */
 function drawRoad(worldZ){
-  // ---- Asphalt polygon (base)
-  const ptsL = [], ptsR = [];
+  // Build polygon edges (near → far)
+  const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
     const e = edgesAt(z);
-    if (e.y>H && ptsL.length && ptsR.length) break; // once off bottom and we have some points, stop
-    ptsL.push([e.lx, e.y]); ptsR.push([e.rx, e.y]);
+    if (e.y>H && L.length && R.length) break;
+    L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
 
-  const g = ctx.createLinearGradient(0, VANISH_Y, 0, H);
-  g.addColorStop(0, '#0f141d');
-  g.addColorStop(1, '#0a0f17');
-  ctx.fillStyle = g;
+  // Asphalt polygon
+  const roadG = ctx.createLinearGradient(0, VANISH_Y, 0, H);
+  roadG.addColorStop(0, '#0f141d');
+  roadG.addColorStop(1, '#0a0f17');
+  ctx.fillStyle = roadG;
 
   ctx.beginPath();
   ctx.moveTo(W/2, VANISH_Y);
-  for (let i=ptsR.length-1;i>=0;i--) ctx.lineTo(ptsR[i][0], Math.min(ptsR[i][1], H));
-  for (let i=0;i<ptsL.length;i++)     ctx.lineTo(ptsL[i][0],  Math.min(ptsL[i][1],  H));
+  for (let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1], H));
+  for (let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1], H));
   ctx.closePath();
   ctx.fill();
 
-  // ---- Lane dashes (extend to DEPTH_Z and fade near the tip)
+  // Lane dashes
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx.lineWidth = 6;
-  ctx.lineCap = 'round';
+  ctx.lineWidth = 6; ctx.lineCap = 'round';
+  const LANE_T = [0.22, 0.50, 0.78];
 
-  const LANE_T = [0.22, 0.50, 0.78]; // left/center/right inside polygon
   for (const t of LANE_T){
     for (let z = (worldZ % DASH_STEP) * -1; z < DEPTH_Z; z += DASH_STEP){
-      const a = edgesAt(Math.max(0, z));
-      const b = edgesAt(Math.max(0, z + DASH_LEN_Z));
+      const a = edgesAt(Math.max(0,z));
+      const b = edgesAt(Math.max(0,z + DASH_LEN_Z));
       if (a.y>H && b.y>H) break;
 
-      const x0 = a.lx + (a.rx - a.lx)*t;
-      const x1 = b.lx + (b.rx - b.lx)*t;
-
-      // fade 0→1 between FADE_TOP..VANISH_Y
+      // fade lanes near the tip
       const yMid = (a.y + b.y)/2;
       let alpha = 1;
       if (yMid < horizonY){
@@ -293,16 +287,18 @@ function drawRoad(worldZ){
       }
       if (alpha <= 0) continue;
 
+      const x0 = a.lx + (a.rx - a.lx)*t;
+      const x1 = b.lx + (b.rx - b.lx)*t;
       ctx.globalAlpha = alpha;
       ctx.beginPath(); ctx.moveTo(x0, a.y); ctx.lineTo(x1, b.y); ctx.stroke();
     }
   }
   ctx.globalAlpha = 1;
 
-  // ---- LED rails (exact road edges, same fade)
+  // LED rails (follow road edges; same fade)
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   for (let z = (worldZ % LED_STEP) * -1; z < DEPTH_Z; z += LED_STEP){
-    const e = edgesAt(Math.max(0, z));
+    const e = edgesAt(Math.max(0,z));
     if (e.y>H) break;
 
     const yf = (e.y - FADE_TOP) / (VANISH_Y - FADE_TOP);
@@ -314,6 +310,26 @@ function drawRoad(worldZ){
     ctx.beginPath(); ctx.arc(e.lx, e.y, r, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(e.rx, e.y, r, 0, Math.PI*2); ctx.fill();
   }
+  ctx.globalAlpha = 1;
+
+  // Soft fade of the whole road shape at the very top (removes any hard “triangle” look)
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(W/2, VANISH_Y);
+  for (let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1], H));
+  for (let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1], H));
+  ctx.closePath();
+  ctx.clip();
+
+  const fade = ctx.createLinearGradient(0, 0, 0, VANISH_Y + (VANISH_Y - FADE_TOP));
+  fade.addColorStop(0, 'rgba(0,0,0,1)');   // fully remove at the tip
+  fade.addColorStop(1, 'rgba(0,0,0,0)');   // no removal after the fade distance
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, 0, W, VANISH_Y + (VANISH_Y - FADE_TOP));
+  ctx.restore();
+
+  ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 }
 /* ============== Car ============== */
