@@ -12,6 +12,7 @@
     html,body{height:100%}
     body{
       margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif;
+      /* block all text selection / callouts */
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
     .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
@@ -86,7 +87,7 @@
       <div class="nitroLabel">NITRO</div>
     </div>
 
-    <!-- Background music -->
+    <!-- Background music (updated path) -->
     <audio id="bgm" src="/static/game/audio/RACEBGM.wav" loop preload="auto"></audio>
 
     <canvas id="scene"></canvas>
@@ -94,7 +95,7 @@
 
 <script>
 (() => {
-/* ====== block text selection/callouts while playing ====== */
+/* ====== hard-block selection/callouts while playing ====== */
 ['contextmenu','selectstart','gesturestart'].forEach(ev=>{
   window.addEventListener(ev, e=>e.preventDefault(), {passive:false});
 });
@@ -147,14 +148,14 @@ let STREAK_SPEED  = 1.45;
 let SMEAR_ALPHA   = 0.62;
 let ASPHALT_ALPHA = 0.36;
 
-// Hyper multipliers
-const HYPER = { streaks:1.9, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
+// Hyperloop multipliers
+const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
 let VANISH_Y = -800;
 let TOP_FADE_PX=90;
-/* Car-anchored vanishing point for beams */
+/* We’ll compute VPT_X strictly from the car center so streaks/lighting follow exactly */
 let VPT_X=0, VPT_Y=0;
 let roadBottomHalf=0, roadTopHalf=0;
 
@@ -373,12 +374,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  /* anchor the new lines FURTHER UP the road */
-  const sX = VPT_X;
-  const sY = VPT_Y - H*0.22; // higher start than the old attachment
-  const endY = H + 36;
-
-  /* --- Original cyan/magenta mix (kept) but starting at new sY --- */
+  // radial streaks from *car center* so they track perfectly
   const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -387,117 +383,20 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     const ang = (-0.52 + i/(count-1)*1.04);
     const len = H*(hyper?1.38:1.18);
     const wob = Math.sin((worldZ*0.033)+i)*10*(hyper?1.6:1);
-    const x2 = sX + Math.tan(ang)*(len*0.82) + wob;
-    const grad = ctx.createLinearGradient(sX, sY, x2, endY);
+    const x2 = VPT_X + Math.tan(ang)*(len*0.82) + wob;
+    const y2 = H + 36;
+    const grad = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
     const base = (i%2===0)? 'rgba(0,255,255,' : 'rgba(255,0,200,';
     grad.addColorStop(0.00, base + (0.75*k) + ')');
     grad.addColorStop(0.20, base + (0.45*k) + ')');
     grad.addColorStop(1.00, base + '0)');
     ctx.strokeStyle = grad;
     ctx.lineWidth = 2 + 14*k*(hyper?1.55:1.1);
-    ctx.beginPath();
-    ctx.moveTo(sX, sY);
-    const cx = (sX+x2)/2 + Math.sin(worldZ*0.01+i)*16;
-    const cy = (sY+endY)/2 - (H*0.12);
-    ctx.quadraticCurveTo(cx, cy, x2, endY);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.restore();
 
-  /* --- ALWAYS-ON CURVED MAGENTA BEAMS (separate layer) --- */
-  ctx.save();
-  ctx.globalCompositeOperation='lighter';
-  const nMag = 26;
-  for(let i=0;i<nMag;i++){
-    const t = (i/(nMag-1))*1.04 - 0.52;
-    const bend = Math.sin(worldZ*0.004 + i)*14;
-    const x2 = sX + Math.tan(t)*(H*0.98) + bend;
-    const g = ctx.createLinearGradient(sX, sY, x2, endY);
-    g.addColorStop(0,'rgba(255,45,180,0.90)');
-    g.addColorStop(0.35,'rgba(255,45,180,0.50)');
-    g.addColorStop(1,'rgba(255,45,180,0.00)');
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 1.2 + 2.2*k;
-    ctx.beginPath();
-    ctx.moveTo(sX, sY);
-    const cx = (sX+x2)/2 + (t*70);
-    const cy = (sY+endY)/2 - (H*0.14);
-    ctx.quadraticCurveTo(cx, cy, x2, endY);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  /* --- NITRO-ONLY LIME STREAKS (denser + layered) --- */
-  if (hyper){
-    ctx.save();
-    ctx.globalCompositeOperation='lighter';
-
-    // Outer burst
-    const burst = 34 + Math.round(22*heat);
-    for(let i=0;i<burst;i++){
-      const ang = (-0.64 + i/(burst-1)*1.28);
-      const len = H*1.52;
-      const x2 = sX + Math.tan(ang)*len;
-      const g = ctx.createLinearGradient(sX, sY, x2, endY);
-      g.addColorStop(0,'rgba(57,255,20,0.95)');
-      g.addColorStop(0.25,'rgba(57,255,20,0.60)');
-      g.addColorStop(1,'rgba(57,255,20,0.00)');
-      ctx.strokeStyle = g;
-      ctx.lineWidth = 2.0 + 2.6*k;
-      ctx.beginPath();
-      ctx.moveTo(sX, sY-6);
-      const cx = (sX+x2)/2 + Math.sin(worldZ*0.02+i)*20;
-      const cy = (sY+endY)/2 - (H*0.16);
-      ctx.quadraticCurveTo(cx, cy, x2, endY);
-      ctx.stroke();
-    }
-
-    // Inner tight burst (adds density near core)
-    const inner = 18 + Math.round(18*heat);
-    for(let i=0;i<inner;i++){
-      const ang = (-0.36 + i/(inner-1)*0.72);
-      const len = H*1.25;
-      const x2 = sX + Math.tan(ang)*len;
-      const g2 = ctx.createLinearGradient(sX, sY, x2, endY);
-      g2.addColorStop(0,'rgba(170,255,120,0.90)');
-      g2.addColorStop(0.35,'rgba(170,255,120,0.45)');
-      g2.addColorStop(1,'rgba(170,255,120,0.00)');
-      ctx.strokeStyle = g2;
-      ctx.lineWidth = 1.2 + 2.0*k;
-      ctx.beginPath();
-      ctx.moveTo(sX, sY-4);
-      const cx = (sX+x2)/2 + Math.sin(worldZ*0.03+i)*14;
-      const cy = (sY+endY)/2 - (H*0.10);
-      ctx.quadraticCurveTo(cx, cy, x2, endY);
-      ctx.stroke();
-    }
-
-    /* Colored ribbons INSIDE the white nitro core */
-    const core = 24;
-    for(let i=0;i<core;i++){
-      const offset = (i - core/2) / (core/2); // -1..1
-      const xOff = offset * W * 0.02;
-      const yStart = sY + H*0.04;
-      const yEnd   = sY + H*0.36;
-      const gx = ctx.createLinearGradient(sX+xOff, yStart, sX+xOff, yEnd);
-      // magenta -> teal -> blue for nice color travel
-      gx.addColorStop(0.0,'rgba(255,45,180,0.55)');
-      gx.addColorStop(0.5,'rgba(50,255,220,0.55)');
-      gx.addColorStop(1.0,'rgba(60,180,255,0.35)');
-      ctx.strokeStyle = gx;
-      ctx.lineWidth = 1.6 + (1-Math.abs(offset))*1.2;
-      ctx.beginPath();
-      ctx.moveTo(sX+xOff, yStart);
-      const cx = sX + xOff*0.5;
-      const cy = (yStart+yEnd)/2 - H*0.05;
-      ctx.quadraticCurveTo(cx, cy, sX+xOff, yEnd);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  /* --- side smears (unchanged) --- */
+  // side smears (buildings/trees blur)
   const smearW = W*(hyper?0.46:0.38);
   const smearAlpha = (0.16 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
@@ -528,7 +427,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // tire beams anchored to wheels
+  // TWO soft tire beams, anchored to wheels (follows car)
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -696,8 +595,10 @@ function explodeBomb(x,y){
     const a = (i/24)*Math.PI*2;
     const s = 160 + Math.random()*220;
     particles.push(new Particle(
-      x, y, Math.cos(a)*s, Math.sin(a)*s,
-      0.55+Math.random()*0.35, 4+Math.random()*3,
+      x, y,
+      Math.cos(a)*s, Math.sin(a)*s,
+      0.55+Math.random()*0.35,
+      4+Math.random()*3,
       'rgba(255,120,40,1)', 14, 420
     ));
   }
@@ -705,8 +606,10 @@ function explodeBomb(x,y){
     const a = Math.random()*Math.PI*2;
     const s = 40 + Math.random()*90;
     particles.push(new Particle(
-      x, y, Math.cos(a)*s, Math.sin(a)*s - 30,
-      0.9+Math.random()*0.6, 6+Math.random()*4,
+      x, y,
+      Math.cos(a)*s, Math.sin(a)*s - 30,
+      0.9+Math.random()*0.6,
+      6+Math.random()*4,
       'rgba(60,60,70,0.9)', 0, 120
     ));
   }
@@ -774,12 +677,13 @@ function playBomb(){
   s.start(); s.stop(AC.currentTime+0.52);
 }
 
-/* Continuous Nitro whoosh while holding */
+/* Continuous Nitro whooosh while holding */
 let nitroLoop = null;
 function setNitroWhoosh(on){
   ensureAudio();
   if (on){
     if (nitroLoop) return;
+    // noise -> bandpass -> subtle compressor-like gain
     const noiseBuf = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);
     const ch = noiseBuf.getChannelData(0);
     for(let i=0;i<ch.length;i++){ ch[i] = Math.random()*2-1; }
@@ -788,7 +692,7 @@ function setNitroWhoosh(on){
     const g = AC.createGain(); g.gain.value = 0.0001;
     src.connect(bp); bp.connect(g); g.connect(sfxGain);
     const now = AC.currentTime;
-    g.gain.exponentialRampToValueAtTime(0.6, now+0.08);
+    g.gain.exponentialRampToValueAtTime(0.6, now+0.08); // quick rise
     src.start();
     nitroLoop = {src, g};
   } else {
@@ -865,10 +769,11 @@ class Pickup {
     const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
     const dx = cx-nx, dy = cy-ny;
 
+    /* STRICT center requirement for middle-lane objects */
     const isMiddleLane = Math.abs(this.laneT - 0.50) < 1e-3;
     if (isMiddleLane){
       const carCenter = carX + carW*0.5;
-      const centerEps = Math.max(8, W*0.02);
+      const centerEps = Math.max(8, W*0.02); // ~2% of screen width tolerance
       if (Math.abs(carCenter - W*0.5) > centerEps) return false;
     }
 
@@ -876,7 +781,7 @@ class Pickup {
   }
 }
 
-/* Procedural sprites */
+/* Procedural sprites for pickups (unchanged visuals) */
 function drawCoin(x,y,s,ang){
   const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang)));
   ctx.save();
@@ -934,7 +839,7 @@ function updateCarPlacement(){
   carH = carW * ratio;
   carX = Math.round((W - carW)/2);
   carY = Math.round(H - carH*1.02);
-  VPT_X = carX + carW*0.5; // beams follow car center
+  VPT_X = carX + carW*0.5; // anchor all light/motion to car center
 }
 function carRect(){ return {x:carX+carW*0.18, y:carY+carH*0.30, w:carW*0.64, h:carH*0.52}; }
 
@@ -1057,7 +962,7 @@ function useNitro(dt){
   const wasActive = nitroActive;
   nitroActive = steer.nitro && can;
   if (nitroActive){ nitro = Math.max(0, nitro - dt*0.25); heat = Math.min(1, heat + dt*2.4); }
-    else            { heat = Math.max(0, heat - dt*1.6); }
+  else            { heat = Math.max(0, heat - dt*1.6); }
   if (nitroActive !== wasActive) setNitroWhoosh(nitroActive);
   nitroFill.style.width = Math.round(nitro*100)+'%';
 }
@@ -1105,7 +1010,7 @@ function frame(now){
   carX += steer.x * steerSpeed;
   const off = carW*0.12;
   carX = Math.max(-off, Math.min(W - carW + off, carX));
-  VPT_X = carX + carW*0.5;
+  VPT_X = carX + carW*0.5; // <- keep beams/streaks under car exactly
 
   // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -1128,7 +1033,7 @@ function frame(now){
     if (p.hitTest(cRect, worldZ)) {
       p.alive = false;
 
-      // draw position at collision moment
+      // screen-space coordinates = draw position at collision moment
       const ez = p.zRel(worldZ);
       const e  = edgesAt(ez);
       const x  = e.lx + (e.rx-e.lx)*p.laneT;
@@ -1173,8 +1078,6 @@ document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startOverlay').style.display = 'none';
   resize();
   tintedSprite = makeTintedSprite(paint);
-
-  // reset run state
   state.running   = true;
   state.speed     = 90;
   state.dist      = 0;
@@ -1184,14 +1087,11 @@ document.getElementById('startBtn').addEventListener('click', () => {
   state.bombsHit  = 0;
   nitro           = 1.0;
   heat            = 0.0;
-  nitroActive     = false;
-  setNitroWhoosh(false);
-
   nitroFill.style.width = '100%';
-  pickups.length   = 0;
-  particles.length = 0;
-  laneLastSpawnZ[0] = laneLastSpawnZ[1] = laneLastSpawnZ[2] = -1e9;
-  lastSpawn        = performance.now();
+  pickups.length  = 0;
+  particles.length= 0;
+  laneLastSpawnZ[0]=laneLastSpawnZ[1]=laneLastSpawnZ[2]=-1e9;
+  lastSpawn       = performance.now();
 
   if (!muted){ clickStartAudio(); }
 
