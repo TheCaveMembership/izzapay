@@ -12,7 +12,6 @@
     html,body{height:100%}
     body{
       margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif;
-      /* block all text selection / callouts */
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
     .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
@@ -87,7 +86,7 @@
       <div class="nitroLabel">NITRO</div>
     </div>
 
-    <!-- Background music (updated path) -->
+    <!-- Background music -->
     <audio id="bgm" src="/static/game/audio/RACEBGM.wav" loop preload="auto"></audio>
 
     <canvas id="scene"></canvas>
@@ -142,7 +141,7 @@ const OVERLAY_ALPHA = 0.10;
 let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
 
-// Motion boosters
+// Motion boosters (existing)
 let STREAK_ALPHA  = 0.55;
 let STREAK_SPEED  = 1.45;
 let SMEAR_ALPHA   = 0.62;
@@ -155,7 +154,7 @@ const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 let dpr=1, W=0, H=0;
 let VANISH_Y = -800;
 let TOP_FADE_PX=90;
-/* We’ll compute VPT_X strictly from the car center so streaks/lighting follow exactly */
+/* Car-anchored vanishing-point X stays intact */
 let VPT_X=0, VPT_Y=0;
 let roadBottomHalf=0, roadTopHalf=0;
 
@@ -259,7 +258,7 @@ function rebuildTintAndPreview(){
 }
 carImg.onload = rebuildTintAndPreview;
 
-/* ============== Projection ============== */
+/* ============== Projection helpers ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
   const k = 0.0105;
@@ -278,7 +277,7 @@ function edgesAt(z){
   return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8, t:p.t };
 }
 
-/* ============== Background (steer parallax) ============== */
+/* ============== Background (parallax) ============== */
 let bgParallaxX = 0, bgTarget = 0;
 function drawBackground(zoom=1){
   const carCenter = (carX + carW/2) / W;
@@ -369,12 +368,85 @@ function buildNoise(){
   }
 }
 
+/* ======== NEW: Single-lane SPEED GRID (independent of car lighting) ======== */
+function drawSpeedGrid(worldZ, speed, hyper=false){
+  // Strength & color
+  const baseAlpha = hyper ? 0.75 : 0.55;
+  const edgeColor = `rgba(170,210,255,${baseAlpha})`;
+  const centerColor = `rgba(200,255,255,${baseAlpha*0.55})`;
+
+  // ----- Edges path (two converging dashed lines) -----
+  ctx.save();
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([6,10]);                        // short dashes
+  const dashShift = -(worldZ * (0.045 + speed/6000)); // scroll rate by speed
+
+  // Left edge path
+  ctx.strokeStyle = edgeColor;
+  ctx.lineDashOffset = dashShift;
+  ctx.beginPath();
+  let started=false;
+  for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
+    const e = edgesAt(z);
+    if (!started){ ctx.moveTo(e.lx, Math.min(e.y,H)); started=true; }
+    else ctx.lineTo(e.lx, Math.min(e.y,H));
+    if (e.y>H) break;
+  }
+  ctx.stroke();
+
+  // Right edge path
+  ctx.beginPath();
+  started=false;
+  for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
+    const e = edgesAt(z);
+    if (!started){ ctx.moveTo(e.rx, Math.min(e.y,H)); started=true; }
+    else ctx.lineTo(e.rx, Math.min(e.y,H));
+    if (e.y>H) break;
+  }
+  ctx.stroke();
+
+  // Center guide
+  ctx.strokeStyle = centerColor;
+  ctx.lineWidth = 1.1;
+  ctx.setLineDash([5,12]);
+  ctx.lineDashOffset = dashShift*1.1;
+  ctx.beginPath();
+  for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
+    const e = edgesAt(z);
+    const cx = (e.lx+e.rx)/2;
+    if (z===0) ctx.moveTo(cx, Math.min(e.y,H));
+    else ctx.lineTo(cx, Math.min(e.y,H));
+    if (e.y>H) break;
+  }
+  ctx.stroke();
+
+  // ----- Perspective rungs (thin arcs widening toward camera) -----
+  const rungStep = 260;                 // distance between rungs
+  const rungOffset = worldZ % rungStep; // makes them flow
+  ctx.setLineDash([]);                  // solid
+  for (let z=rungStep - rungOffset; z<=DEPTH_Z; z+=rungStep){
+    const e = edgesAt(z);
+    if (e.y < VPT_Y + H*0.02) continue; // keep below horizon for clarity
+    const wL = e.lx, wR = e.rx;
+    const alpha = Math.min(1, e.t*1.4) * (hyper ? 0.28 : 0.20);
+    ctx.strokeStyle = `rgba(160,200,255,${alpha})`;
+    ctx.lineWidth = 0.9 + e.t*1.2;
+    // gentle arc toward the vanishing point
+    ctx.beginPath();
+    ctx.moveTo(wL + (wR-wL)*0.18, e.y);
+    ctx.quadraticCurveTo(VPT_X, e.y - 10 - 90*(1-e.t), wR - (wR-wL)*0.18, e.y);
+    ctx.stroke();
+    if (e.y>H) break;
+  }
+  ctx.restore();
+}
+
 /* ===== Motion streaks + side smears + asphalt scroll + tire beams ===== */
 function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // radial streaks from *car center* so they track perfectly
+  // radial streaks from car center (EXISTING — untouched)
   const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -396,7 +468,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   }
   ctx.restore();
 
-  // side smears (buildings/trees blur)
+  // side smears
   const smearW = W*(hyper?0.46:0.38);
   const smearAlpha = (0.16 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
@@ -408,7 +480,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   ctx.fillStyle = smearG_L; ctx.fillRect(0,0,smearW,H);
   ctx.fillStyle = smearG_R; ctx.fillRect(W-smearW,0,smearW,H);
 
-  // road polygon for clipping
+  // road polygon clip
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){ const e=edgesAt(z); L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
   ctx.save();
@@ -427,7 +499,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // TWO soft tire beams, anchored to wheels (follows car)
+  // tire glow beams (EXISTING — untouched)
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -499,7 +571,7 @@ function drawHeadlights(){
   drawBeam(rightRoot, baseSpread);
 }
 
-/* ======= Road overlay ======= */
+/* ======= Road overlay shading ======= */
 function drawRoad(){
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
@@ -523,7 +595,6 @@ function drawRoad(){
   ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = 1;
 
-  // tiny horizon fade
   const topFade = ctx.createLinearGradient(0, 0, 0, TOP_FADE_PX);
   topFade.addColorStop(0, 'rgba(0,0,0,1)');
   topFade.addColorStop(1, 'rgba(0,0,0,0)');
@@ -625,7 +696,6 @@ function ensureAudio(){
   master = AC.createGain(); master.gain.value = muted?0:1; master.connect(AC.destination);
   sfxGain = AC.createGain(); sfxGain.gain.value = 0.9; sfxGain.connect(master);
   musicGain = AC.createGain(); musicGain.gain.value = 0.6; musicGain.connect(master);
-
   const src = AC.createMediaElementSource(bgm);
   src.connect(musicGain);
 }
@@ -677,13 +747,12 @@ function playBomb(){
   s.start(); s.stop(AC.currentTime+0.52);
 }
 
-/* Continuous Nitro whooosh while holding */
+/* Continuous Nitro whoosh while holding */
 let nitroLoop = null;
 function setNitroWhoosh(on){
   ensureAudio();
   if (on){
     if (nitroLoop) return;
-    // noise -> bandpass -> subtle compressor-like gain
     const noiseBuf = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);
     const ch = noiseBuf.getChannelData(0);
     for(let i=0;i<ch.length;i++){ ch[i] = Math.random()*2-1; }
@@ -692,7 +761,7 @@ function setNitroWhoosh(on){
     const g = AC.createGain(); g.gain.value = 0.0001;
     src.connect(bp); bp.connect(g); g.connect(sfxGain);
     const now = AC.currentTime;
-    g.gain.exponentialRampToValueAtTime(0.6, now+0.08); // quick rise
+    g.gain.exponentialRampToValueAtTime(0.6, now+0.08);
     src.start();
     nitroLoop = {src, g};
   } else {
@@ -730,7 +799,7 @@ class Pickup {
 
   draw(worldZ){
     const z = this.zRel(worldZ);
-    if (z>DEPTH_Z) return;
+    if (z>DEPTH_Z) { this.alive=false; return; }
     const e = edgesAt(z);
 
     // Clamp below horizon for readability
@@ -754,7 +823,8 @@ class Pickup {
     else if (this.type==='nitro')drawNitro(x,y,s*1.06,this.spin);
     else                         drawBomb(x,y,s*1.12,this.spin);
 
-    if (y>H+40) this.alive=false;
+    // HARD DESPAWN once clearly past car view, even if not collided
+    if (y > H*0.97 || e.t > 0.995) this.alive = false;
   }
 
   hitTest(carRect, worldZ){
@@ -773,7 +843,7 @@ class Pickup {
     const isMiddleLane = Math.abs(this.laneT - 0.50) < 1e-3;
     if (isMiddleLane){
       const carCenter = carX + carW*0.5;
-      const centerEps = Math.max(8, W*0.02); // ~2% of screen width tolerance
+      const centerEps = Math.max(8, W*0.02);
       if (Math.abs(carCenter - W*0.5) > centerEps) return false;
     }
 
@@ -1010,12 +1080,16 @@ function frame(now){
   carX += steer.x * steerSpeed;
   const off = carW*0.12;
   carX = Math.max(-off, Math.min(W - carW + off, carX));
-  VPT_X = carX + carW*0.5; // <- keep beams/streaks under car exactly
+  VPT_X = carX + carW*0.5;
 
   // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawBackground(hyper?HYPER.zoom:1);
   drawRoad();
+
+  // NEW: speed grid (independent layer), before aurora/motion/headlights and under car
+  drawSpeedGrid(worldZ, state.speed, hyper);
+
   drawAurora(time, hyper?1.25:1);
   drawVanishingGlow(time, heat);
   drawMotion(worldZ, state.speed, hyper, heat);
@@ -1030,10 +1104,12 @@ function frame(now){
   for (const p of pickups) {
     if (!p.alive) continue;
     p.draw(worldZ);
+    if (!p.alive) continue; // might have despawned during draw
+
     if (p.hitTest(cRect, worldZ)) {
       p.alive = false;
 
-      // screen-space coordinates = draw position at collision moment
+      // screen-space coordinates at collision moment
       const ez = p.zRel(worldZ);
       const e  = edgesAt(ez);
       const x  = e.lx + (e.rx-e.lx)*p.laneT;
