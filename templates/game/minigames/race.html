@@ -456,36 +456,81 @@ function drawSpeedGrid(worldZ, speed, hyper=false){
   ctx.restore();
 }
 
-/* ======== NEW: Independent widened/longer color wave (NOT tied to steering) ======== */
+/* ======== Independent color wave (NOT tied to steering) — tuned ======== */
 function drawIndependentWave(worldZ, speed, hyper=false, heat=0, t=0){
-  const apexX = W*0.5;           // does NOT follow car steering
-  const apexY = VPT_Y - 6;
-  const k = Math.min(1, (speed/240)) * (hyper?1.25:1.0);
-  const span = 0.90;             // wide fan
-  const count = 26;              // fewer, thicker beams
-  const len   = H * (hyper?1.85:1.65);  // reaches farther up the road
-  const wobAmp= 14*(hyper?1.2:1);
+  /* --------------------- EASY TWEAKS (edit these) --------------------- */
+  const APEX_LIFT = 22;              // ↑ move the start UP the image (px). Bigger = higher.
+  const FAN_SPAN  = 1.40;            // total angular spread in radians (was 0.90 → wider & quicker fan)
+  const FAN_COUNT = 30;              // number of beams (density). 24–36 is a good range.
+  const FAN_LEN   = H * 2.10;        // length without nitro (was ~1.65) — longer wave
+  const FAN_LEN_HYPER = H * 2.50;    // length with nitro (was ~1.85) — even longer
+  const WOBBLE_AMP = 16 * (hyper?1.2:1); // side wobble amplitude
+  const SPEED_K = Math.min(1, (speed/240)) * (hyper?1.25:1.0);
+
+  // Tip look/feel (no white). Starts transparent -> turquoise tip -> fades to base colors
+  const TIP_COLOR = { r: 80, g: 220, b: 255 }; // teal/turquoise near apex
+  const TIP_ALPHA = 0.40;          // how visible the tight tip becomes after the fade-in
+  const START_FADE = 0.08;         // how far from the apex (0..1 of stroke length) the color becomes visible
+  const MID_FADE   = 0.26;         // where the tip settles to a softer body brightness
+  const BODY_ALPHA = 0.28 + 0.18*heat; // body brightness; raise/lower overall “beam” intensity
+
+  // “Tighter tip” by skipping the very beginning of each beam (start further along the ray)
+  const START_CUT  = 0.12;         // 0..~0.2: trims the first portion so the tip looks very tight
+  const LINE_BASE  = 7;            // base thickness
+  const LINE_GAIN  = 20;           // thickness added with speed
+  /* -------------------------------------------------------------------- */
+
+  const apexX = W*0.5;
+  const apexY = (VPT_Y - 6) - APEX_LIFT;         // start further up the image
+  const span  = FAN_SPAN;
+  const count = FAN_COUNT;
+  const len   = hyper ? FAN_LEN_HYPER : FAN_LEN;
+
   ctx.save();
-  ctx.globalCompositeOperation='lighter';
-  ctx.globalAlpha = 0.42 + 0.18*k; // moderate so it sits beneath white glow
-  for(let i=0;i<count;i++){
-    const ang = (-span/2) + (i/(count-1))*span;
-    const wob = Math.sin((worldZ*0.028) + t*3 + i*0.7) * wobAmp;
-    const x2 = apexX + Math.tan(ang)*(len*0.82) + wob;
-    const y2 = H + 40;
-    const grad = ctx.createLinearGradient(apexX, apexY, x2, y2);
-    // magenta/blue alternating, lighter than steering-tied ones
-    const base = (i%2===0)? 'rgba(235,60,255,' : 'rgba(70,200,255,';
-    grad.addColorStop(0.00, base + (0.55+0.25*heat) + ')');
-    grad.addColorStop(0.22, base + (0.32+0.18*heat) + ')');
-    grad.addColorStop(1.00, base + '0)');
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.42 + 0.18*SPEED_K;
+  ctx.lineCap = 'butt';     // no rounded blob at the start
+  ctx.lineJoin = 'miter';
+
+  for (let i = 0; i < count; i++){
+    // Angle across the fan. Wider span = faster “fan out”
+    const u = i/(count-1);
+    const ang = (-span/2) + u*span;
+
+    // End point + wobble
+    const wob = Math.sin((worldZ*0.028) + t*3 + i*0.7) * WOBBLE_AMP;
+    const x2  = apexX + Math.tan(ang)*(len*0.85) + wob;
+    const y2  = H + 80;
+
+    // Trim the first bit so the tip is tight and starts slightly away from apex
+    const sx = apexX + (x2 - apexX)*START_CUT;
+    const sy = apexY + (y2 - apexY)*START_CUT;
+
+    // Gradient along the trimmed stroke (from sx,sy → x2,y2)
+    const grad = ctx.createLinearGradient(sx, sy, x2, y2);
+
+    // Teal/turquoise tip (no white), invisible right at the start
+    const tip = (a)=>`rgba(${TIP_COLOR.r},${TIP_COLOR.g},${TIP_COLOR.b},${a})`;
+    grad.addColorStop(0.00, tip(0.00));                              // fully transparent at start
+    grad.addColorStop(START_FADE, tip(TIP_ALPHA));                   // the tight turquoise tip appears
+    grad.addColorStop(MID_FADE, tip(Math.max(0.18, BODY_ALPHA)));   // blend into body brightness
+
+    // Body alternates cool hues; you can switch both to teal if you want a single-color wave
+    const base = (i%2===0)? `rgba(70,200,255,${BODY_ALPHA})` : `rgba(235,60,255,${BODY_ALPHA*0.9})`;
+    grad.addColorStop(0.60, base);
+    grad.addColorStop(1.00, 'rgba(0,0,0,0)');                        // fade out at the far end
+
     ctx.strokeStyle = grad;
-    ctx.lineWidth = 6 + 18*k*(hyper?1.15:1.0);
-    ctx.beginPath(); ctx.moveTo(apexX, apexY); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.lineWidth = LINE_BASE + LINE_GAIN*SPEED_K*(hyper?1.10:1.0);
+
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);      // note: we start after the apex for a tighter, non-blobby tip
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
   }
+
   ctx.restore();
 }
-
 /* ===== Motion streaks + side smears + asphalt scroll + tire beams ===== */
 function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
