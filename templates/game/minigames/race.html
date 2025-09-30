@@ -15,13 +15,20 @@
       border-left:1px solid rgba(255,255,255,.08);
       border-right:1px solid rgba(255,255,255,.08);
       background:var(--panel);overflow:hidden}
-    .hud{position:absolute;top:10px;left:12px;right:12px;z-index:6;display:flex;justify-content:space-between;font-size:13px;letter-spacing:.3px}
-    .nitroBtn{position:absolute;right:12px;bottom:16px;z-index:7;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:#182033;padding:12px 18px;font-weight:800;color:white}
-    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,.55));}
-    .card{background:rgba(10,12,18,.95);border:1px solid rgba(255,255,255,.16);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;width:min(92%,460px)}
+    .hud{position:absolute;top:10px;left:12px;right:12px;z-index:6;
+      display:flex;justify-content:space-between;font-size:13px;letter-spacing:.3px}
+    .nitroBtn{position:absolute;right:12px;bottom:16px;z-index:7;border-radius:999px;
+      border:1px solid rgba(255,255,255,.1);background:#182033;padding:12px 18px;
+      font-weight:800;color:white}
+    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
+      background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,.55));}
+    .card{background:rgba(10,12,18,.95);border:1px solid rgba(255,255,255,.16);border-radius:14px;
+      padding:16px 18px;display:flex;flex-direction:column;gap:12px;width:min(92%,460px)}
     .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
-    .preview{height:164px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .startBtn{padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.08);font-weight:800;color:white;width:100%}
+    .preview{height:164px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;
+      display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .startBtn{padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
+      background:rgba(255,255,255,.08);font-weight:800;color:white;width:100%}
     .swatches{display:flex;gap:10px;flex-wrap:wrap}
     .swatch{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.28);cursor:pointer}
     .swatch.active{box-shadow:0 0 0 3px rgba(255,255,255,.18) inset}
@@ -43,7 +50,9 @@
         <div class="row" style="opacity:.9;font-size:12px">
           Coins: <b id="wCoins">—</b> &nbsp; | &nbsp; Crafting: <b id="wCraft">—</b>
         </div>
-        <div class="preview"><canvas id="garagePreview" width="512" height="256"></canvas></div>
+        <div class="preview">
+          <canvas id="garagePreview" width="512" height="256"></canvas>
+        </div>
         <div>
           <div style="font-size:12px;margin:6px 0 8px">Paint (tint)</div>
           <div class="swatches" id="swatches"></div>
@@ -58,7 +67,7 @@
 
 <script>
 (() => {
-/* ================= Wallet ================= */
+/* ============== Wallet ============== */
 async function loadWallet(){
   let coins='—', craft='—';
   try{
@@ -75,7 +84,7 @@ async function loadWallet(){
 }
 loadWallet();
 
-/* ================= Setup ================= */
+/* ============== Setup ============== */
 const arena  = document.getElementById('arena');
 const canvas = document.getElementById('scene');
 const ctx    = canvas.getContext('2d', { alpha:true });
@@ -88,6 +97,9 @@ const HUD = {
   coins: document.getElementById('coinsRun')
 };
 
+const SHOW_SIDELINES = false;
+
+/* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
 let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
 
@@ -101,7 +113,7 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // Low camera; huge foreground
+  // Low camera, huge foreground
   horizonY       = H*0.26;
   roadBottomHalf = W*1.15;
   roadTopHalf    = W*0.12;
@@ -110,7 +122,7 @@ function resize(){
 }
 window.addEventListener('resize', resize, {passive:true});
 
-/* ================= Assets & Tint (offscreen) ================= */
+/* ============== Assets & Tint (offscreen) ============== */
 const carImg = new Image();
 carImg.src = '/static/game/sprites/tracks/coupe.png';
 
@@ -128,10 +140,10 @@ function makeTintedSprite(rgb){
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   o.fillRect(0,0,off.width,off.height);
-  // mask to alpha (removes any box)
+  // mask to alpha (kills any box)
   o.globalCompositeOperation = 'destination-in';
   o.drawImage(carImg, 0, 0);
-  // tiny overlay to keep speculars
+  // preserve speculars a touch
   o.globalCompositeOperation = 'overlay';
   o.fillStyle = 'rgba(255,255,255,0.08)';
   o.fillRect(0,0,off.width,off.height);
@@ -139,6 +151,7 @@ function makeTintedSprite(rgb){
   return off;
 }
 
+/* ============== Garage Paint ============== */
 const PAINTS = [
   {name:'Cherry',    r:255, g:70,  b:70 },
   {name:'Sunburst',  r:255, g:190, b:40 },
@@ -156,6 +169,7 @@ PAINTS.forEach(p=>{
   d.className = 'swatch';
   d.style.background = `rgb(${p.r},${p.g},${p.b})`;
   if (p.name===paint.name) d.classList.add('active');
+  d.title = p.name;
   d.onclick = ()=>{
     paint = p;
     localStorage.setItem('izza_paint', JSON.stringify(paint));
@@ -168,6 +182,8 @@ PAINTS.forEach(p=>{
 
 const prev = document.getElementById('garagePreview');
 const pctx = prev.getContext('2d');
+const GARAGE_GLOW = true; // set to false to remove even the ellipse
+
 function rebuildTintAndPreview(){
   tintedSprite = makeTintedSprite(paint);
   if (!tintedSprite) return;
@@ -180,106 +196,110 @@ function rebuildTintAndPreview(){
   const h = Math.round(carImg.height * scale);
   const x = Math.round((prev.width - w)/2);
   const y = Math.round((prev.height - h)/2);
-  pctx.drawImage(tintedSprite, x, y, w, h);
 
-  // subtle preview glow
-  pctx.save();
-  pctx.globalCompositeOperation = 'lighter';
-  pctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},.6)`;
-  pctx.shadowBlur = 22;
-  pctx.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},.20)`;
-  pctx.fillRect(x, y+h*0.82, w, h*0.18);
-  pctx.restore();
+  // soft elliptical ground glow (no rectangle)
+  if (GARAGE_GLOW){
+    const cx = x + w/2, cy = y + h*0.92, rx = w*0.42, ry = h*0.10;
+    const g = pctx.createRadialGradient(cx,cy,1,cx,cy,Math.max(rx,ry));
+    g.addColorStop(0, `rgba(${paint.r},${paint.g},${paint.b},.22)`);
+    g.addColorStop(1, `rgba(${paint.r},${paint.g},${paint.b},0)`);
+    pctx.fillStyle = g;
+    pctx.beginPath();
+    pctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);
+    pctx.fill();
+  }
+
+  pctx.drawImage(tintedSprite, x, y, w, h);
 }
 carImg.onload = rebuildTintAndPreview;
 
-/* ================= Projection ================= */
+/* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
 function project(z){
-  // long runway feel
-  const k = 0.0105;
+  const k = 0.0105;                     // deep runway
   const t = 1 - Math.exp(-k*z);
   const y = lerp(horizonY, H, t);
   const half = lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
 
-/* ================= Background & Road ================= */
+/* ============== Background & Road ============== */
 function drawSky(){
-  // Clean gradient only — no horizon band, no skyline
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0, '#0b111d');
+  g.addColorStop(0, '#0c1120');
+  g.addColorStop(0.35, '#0f1523');
   g.addColorStop(1, '#090d14');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-// road/lanes/LEDs extend to very top (vanish beyond canvas)
+/* road uses same rails as LED dots and vanishes well past horizon */
 function drawRoad(worldZ){
-  const vanishY = -80;        // tip off-screen above
+  const vanishY = horizonY - 160;     // push tip up; no visible “horizon band”
   const railOff = 1.05;
 
-  // Build left/right edge samples up to the top
-  const ptsLeft  = [], ptsRight = [];
-  const steps = 42;
-  for (let i=0; i<=steps; i++){
-    const z = i*120;
+  // Build left/right edge points from near to far
+  const ptsLeft=[], ptsRight=[];
+  const steps = 40, stepZ = 120;
+  for (let i=0;i<=steps;i++){
+    const z = i*stepZ;
     const p = project(z);
-    const y = Math.max(p.y, vanishY);
-    const half = (y<=vanishY+0.5) ? 0.0001 : p.half;
+    const y = (i===steps) ? vanishY : Math.max(p.y, vanishY);
+    const half = (i===steps) ? 0.0001 : p.half;
     const lx = W/2 - half*railOff - 8;
     const rx = W/2 + half*railOff + 8;
-    ptsLeft.push([lx,y]); ptsRight.push([rx,y]);
+    if (y >= vanishY){ ptsLeft.push([lx,y]); ptsRight.push([rx,y]); }
   }
 
   // Asphalt polygon
-  const g = ctx.createLinearGradient(0, 0, 0, H);
+  const g = ctx.createLinearGradient(0, vanishY, 0, H);
   g.addColorStop(0, '#0f141d');
   g.addColorStop(1, '#0a0f17');
   ctx.fillStyle = g;
-
   ctx.beginPath();
   ctx.moveTo(W/2, vanishY);
-  for (let i=ptsRight.length-1; i>=0; i--){
-    const [x,y] = ptsRight[i];
-    ctx.lineTo(Math.min(Math.max(x,-200),W+200), Math.min(Math.max(y,0),H));
-  }
-  for (let i=0; i<ptsLeft.length; i++){
-    const [x,y] = ptsLeft[i];
-    ctx.lineTo(Math.min(Math.max(x,-200),W+200), Math.min(Math.max(y,0),H));
-  }
+  for (let i=ptsRight.length-1;i>=0;i--){ const [x,y]=ptsRight[i]; ctx.lineTo(x,y>H?H:y); }
+  for (let i=0;i<ptsLeft.length;i++){ const [x,y]=ptsLeft[i]; ctx.lineTo(x,y); }
   ctx.closePath(); ctx.fill();
 
-  // Lane streaks (full length)
+  // Lane streaks to infinity
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap='round';
   const lanes = [-0.32, 0, 0.32];
   for (const L of lanes){
-    for (let z = (worldZ%26)*-1; z<5000; z+=26){
+    for (let z = (worldZ%26)*-1; z<4500; z+=26){
       const p0 = project(Math.max(0,z));
       const p1 = project(Math.max(0,z+18));
-      const y0 = Math.max(p0.y, 0);
-      const y1 = Math.max(p1.y, 0);
-      if (y0>H && y1>H) break;
+      if (p1.y<vanishY) continue; if (p0.y>H && p1.y>H) break;
       const x0 = W/2 + L * p0.half*1.6;
       const x1 = W/2 + L * p1.half*1.6;
+      const y0 = Math.max(p0.y, vanishY), y1 = Math.max(p1.y, vanishY);
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
   }
 
-  // Red LED rails (full length)
+  if (SHOW_SIDELINES){
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(250,255,255,.96)';
+    ctx.beginPath();
+    ctx.moveTo(W/2 - roadTopHalf, horizonY); ctx.lineTo(0, H);
+    ctx.moveTo(W/2 + roadTopHalf, horizonY); ctx.lineTo(W, H);
+    ctx.stroke();
+  }
+
+  // LED rails
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   const spacingM = 16;
-  for (let z = (worldZ%spacingM)*-1; z < 3000; z += spacingM){
+  for (let z = (worldZ%spacingM)*-1; z < 2600; z += spacingM){
     const p = project(Math.max(0,z));
-    const y = Math.max(p.y, 0); if (y>H) break;
-    const r = Math.max(1, 3 * (1 - (y)/(H)));
-    const lx = W/2 - p.half*railOff - 8, rx = W/2 + p.half*railOff + 8;
+    const y = Math.max(p.y, vanishY); if (y>H) break;
+    const r = Math.max(1, 3 * (1 - (y - vanishY)/(H-vanishY)));
+    const lx = W/2 - p.half*railOff - 8;
+    const rx = W/2 + p.half*railOff + 8;
     ctx.beginPath(); ctx.arc(lx, y, r, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(rx, y, r, 0, Math.PI*2); ctx.fill();
   }
 }
 
-/* ================= Car ================= */
+/* ============== Car ============== */
 let carW=0, carH=0, carX=0, carY=0;
 function updateCarPlacement(){
   carW = Math.min(W*0.92, 540);
@@ -289,64 +309,65 @@ function updateCarPlacement(){
   carY = Math.round(H - carH*1.02);
 }
 
-let time = 0;
-function drawCar(nitroBoost){
-  const base = tintedSprite || carImg;
-  ctx.drawImage(base, carX, carY, carW, carH);
-
-  // --- Offscreen FX buffer masked by car alpha (prevents any box) ---
+/* --- FX drawn into offscreen canvas to avoid any rect artifacts --- */
+function buildCarFXCanvas(nitroBoost, t){
   const fx = document.createElement('canvas');
-  fx.width = Math.ceil(carW);
-  fx.height = Math.ceil(carH);
-  const fxctx = fx.getContext('2d');
-  fxctx.imageSmoothingEnabled = true;
+  fx.width = Math.max(2, Math.floor(carW));
+  fx.height = Math.max(2, Math.floor(carH));
+  const c = fx.getContext('2d');
+  c.imageSmoothingEnabled = true;
 
-  // Tail lights
-  const flick = 0.75 + 0.25*Math.sin(time*12);
+  // Tail-lights
+  const flick = 0.75 + 0.25*Math.sin(t*12);
   const lightY = carH*0.56;
   const leftX  = carW*0.23;
   const rightX = carW*0.73;
 
-  fxctx.globalCompositeOperation = 'source-over';
-  fxctx.shadowBlur = 24;
-  fxctx.shadowColor = `rgba(255,60,40,${0.85*flick})`;
-  fxctx.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
+  c.globalCompositeOperation = 'lighter';
+  c.shadowBlur = 24;
+  c.shadowColor = `rgba(255,60,40,${0.85*flick})`;
+  c.fillStyle   = `rgba(255,70,50,${0.55*flick})`;
 
   const lamp = (x) => {
-    fxctx.beginPath();
-    fxctx.moveTo(x-18, lightY);
-    fxctx.lineTo(x+18, lightY);
-    fxctx.lineTo(x+8,  lightY+10);
-    fxctx.lineTo(x-8,  lightY+10);
-    fxctx.closePath(); fxctx.fill();
+    c.beginPath();
+    c.moveTo(x-18, lightY);
+    c.lineTo(x+18, lightY);
+    c.lineTo(x+8,  lightY+10);
+    c.lineTo(x-8,  lightY+10);
+    c.closePath(); c.fill();
   };
   lamp(leftX); lamp(rightX);
 
   // Exhaust flames
-  const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(time*20));
-  fxctx.shadowBlur  = 28;
-  fxctx.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
-  fxctx.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.22+0.35*flame})`;
+  const flame = (nitroBoost? 1.0 : 0.35) * (0.7+0.3*Math.sin(t*20));
+  c.shadowBlur  = 28;
+  c.shadowColor = `rgba(${paint.r},${paint.g},${paint.b},1)`;
+  c.fillStyle   = `rgba(${paint.r},${paint.g},${paint.b},${0.22+0.35*flame})`;
+
   const jet = (x) => {
-    fxctx.beginPath();
-    fxctx.moveTo(x, carH*0.86);
-    fxctx.quadraticCurveTo(x-12, carH*0.96, x, carH*1.08);
-    fxctx.quadraticCurveTo(x+12, carH*0.96, x, carH*0.86);
-    fxctx.closePath(); fxctx.fill();
+    c.beginPath();
+    c.moveTo(x, carH*0.86);
+    c.quadraticCurveTo(x-12, carH*0.96, x, carH*1.08);
+    c.quadraticCurveTo(x+12, carH*0.96, x, carH*0.86);
+    c.closePath(); c.fill();
   };
-  jet(carW*0.38); jet(carW*0.62);
+  jet(carW*0.38);
+  jet(carW*0.62);
 
-  // Mask FX to car alpha
-  fxctx.globalCompositeOperation = 'destination-in';
-  fxctx.drawImage(base, 0, 0, carW, carH);
+  return fx;
+}
 
-  // Add FX
+let time = 0;
+function drawCar(nitroBoost){
+  const src = tintedSprite || carImg;
+  ctx.drawImage(src, carX, carY, carW, carH);        // body (already alpha masked)
+  const fx = buildCarFXCanvas(nitroBoost, time);     // draw FX offscreen
   ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(fx, carX, carY);
+  ctx.drawImage(fx, carX, carY);                     // composite with light add
   ctx.globalCompositeOperation = 'source-over';
 }
 
-/* ================= Input ================= */
+/* ============== Input ============== */
 const steer = { x:0 };
 canvas.addEventListener('pointerdown', e=>{
   const x = e.clientX - canvas.getBoundingClientRect().left;
@@ -367,7 +388,7 @@ window.addEventListener('keyup', e=>{
   if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
 });
 
-/* ================= Loop ================= */
+/* ============== Loop ============== */
 let worldZ = 0, nitroLeft = 0, last = performance.now();
 const state = { running:false, speed:0, dist:0 };
 
@@ -398,6 +419,7 @@ function frame(now){
 }
 
 document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 2.0; });
+
 document.getElementById('startBtn').addEventListener('click',()=>{
   document.getElementById('startOverlay').style.display='none';
   resize();
