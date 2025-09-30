@@ -101,8 +101,12 @@ const HUD = {
 let dpr=1, W=0, H=0;
 let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
 
-// Tip of the road (must be above the canvas)
+// Tip of the road stays above the canvas
 let VANISH_Y = -800;
+
+// Fade sizes (the “tiny horizon/side”)
+let TOP_FADE_PX   = 90;   // ~ a slim band at the very top
+let SIDE_FADE_PX  = 70;   // feather at left/right edges (stronger near top)
 
 function resize(){
   W = arena.clientWidth;
@@ -114,13 +118,15 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // Where the far road visually begins (not a clamp anymore)
   horizonY       = H*0.26;
   roadBottomHalf = W*1.15;
   roadTopHalf    = W*0.12;
 
-  // keep the tip comfortably above the HUD on any device
   VANISH_Y = -Math.max(H * 0.8, 600);
+
+  // scale fades a touch with screen height
+  TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
+  SIDE_FADE_PX = Math.max(50, Math.min(90,  Math.round(W*0.12)));
 
   updateCarPlacement();
 }
@@ -209,16 +215,16 @@ carImg.onload = rebuildTintAndPreview;
 
 /* ============== Projection ============== */
 const lerp = (a,b,t)=>a+(b-a)*t;
-
-// IMPORTANT: start from VANISH_Y (above the screen), not horizonY.
+// Start from VANISH_Y so the road always extends past the HUD
 function project(z){
   const k = 0.0105;
   const t = 1 - Math.exp(-k*z);
-  const y   = lerp(VANISH_Y, H, t);                // <— fixed line
+  const y   = lerp(VANISH_Y, H, t);
   const half= lerp(roadTopHalf, roadBottomHalf, t);
   return { y, half, t };
 }
 
+/* ======= Road params ======= */
 const DEPTH_Z    = 18000;
 const STEP_Z     = 60;
 const DASH_STEP  = 26;
@@ -242,8 +248,9 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* ============== Road + dashes + LEDs (no top fade) ============== */
+/* ============== Road + dashes + LEDs ============== */
 function drawRoad(worldZ){
+  // Build edge samples
   const L=[], R=[];
   for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
     const e = edgesAt(z);
@@ -251,7 +258,7 @@ function drawRoad(worldZ){
     L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
 
-  // Asphalt
+  // Asphalt polygon
   const roadG = ctx.createLinearGradient(0, VANISH_Y, 0, H);
   roadG.addColorStop(0, '#0f141d');
   roadG.addColorStop(1, '#0a0f17');
@@ -264,7 +271,7 @@ function drawRoad(worldZ){
   ctx.closePath();
   ctx.fill();
 
-  // Lane dashes
+  // Lane dashes (full length)
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap = 'round';
   const LANE_T = [0.22, 0.50, 0.78];
@@ -279,7 +286,7 @@ function drawRoad(worldZ){
     }
   }
 
-  // LED rails
+  // LED rails (full length)
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
   for (let z=(worldZ % LED_STEP)*-1; z<DEPTH_Z; z+=LED_STEP){
     const e = edgesAt(Math.max(0,z));
@@ -288,6 +295,40 @@ function drawRoad(worldZ){
     ctx.beginPath(); ctx.arc(e.lx, e.y, r, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(e.rx, e.y, r, 0, Math.PI*2); ctx.fill();
   }
+
+  /* -------- Tiny horizon + side fades (visual only) -------- */
+  // Clip to the road so we only fade the road, not the whole sky
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(W/2, VANISH_Y);
+  for (let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1], H));
+  for (let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1], H));
+  ctx.closePath();
+  ctx.clip();
+
+  // 1) Top horizon fade (very subtle)
+  const topFade = ctx.createLinearGradient(0, 0, 0, TOP_FADE_PX);
+  topFade.addColorStop(0, 'rgba(0,0,0,1)');
+  topFade.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = topFade;
+  ctx.fillRect(0, 0, W, TOP_FADE_PX);
+
+  // 2) Side fades that are stronger near the top and vanish by mid-screen
+  const sideGradLeft  = ctx.createLinearGradient(0, 0, SIDE_FADE_PX, 0);
+  sideGradLeft.addColorStop(0, 'rgba(0,0,0,.75)');
+  sideGradLeft.addColorStop(1, 'rgba(0,0,0,0)');
+  const sideGradRight = ctx.createLinearGradient(W - SIDE_FADE_PX, 0, W, 0);
+  sideGradRight.addColorStop(0, 'rgba(0,0,0,0)');
+  sideGradRight.addColorStop(1, 'rgba(0,0,0,.75)');
+
+  // Fade strength decreases with Y (top strong, mid weak)
+  const sideHeight = Math.min(H*0.55, H*0.65);
+  ctx.fillStyle = sideGradLeft;  ctx.fillRect(0, 0, SIDE_FADE_PX, sideHeight);
+  ctx.fillStyle = sideGradRight; ctx.fillRect(W - SIDE_FADE_PX, 0, SIDE_FADE_PX, sideHeight);
+
+  ctx.restore();
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 /* ============== Car ============== */
