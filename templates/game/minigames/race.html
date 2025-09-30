@@ -142,11 +142,10 @@ function makeTintedSprite(rgb){
   // 3) mask to alpha
   o.globalCompositeOperation = 'destination-in';
   o.drawImage(carImg, 0, 0);
-  // 4) subtle highlight ONLY where car has alpha (the previous bug)
+  // 4) subtle highlight only where car has alpha
   o.globalCompositeOperation = 'source-atop';
   o.fillStyle = 'rgba(255,255,255,0.08)';
   o.fillRect(0,0,off.width,off.height);
-  // done
   o.globalCompositeOperation = 'source-over';
   return off;
 }
@@ -218,7 +217,7 @@ function project(z){
   return { y, half, t };
 }
 
-/* ============== Background & Road ============== */
+/* ============== Sky + Road ============== */
 function drawSky(){
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, '#0c1120');
@@ -227,21 +226,26 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 }
 
-/* Road, lines, and LEDs all the way to the tip */
+/* Road, lines, and LEDs snapped to the exact polygon edges */
 function drawRoad(worldZ){
-  const vanishY = -80;            // put the tip off-screen
+  const vanishY = -80;         // tip off-screen; no horizon band
   const railOff = 1.05;
 
-  // Build edges
+  // helper: road edges at a given z
+  const edgesAt = (z) => {
+    const p = project(z);
+    const y = Math.max(p.y, vanishY);
+    const half = (y===vanishY) ? 0.0001 : p.half;
+    const lx = W/2 - half*railOff - 8;
+    const rx = W/2 + half*railOff + 8;
+    return {y,lx,rx};
+  };
+
+  // Build edges (near → far)
   const ptsLeft=[], ptsRight=[];
   const steps = 42, stepZ = 120;
   for (let i=0;i<=steps;i++){
-    const z = i*stepZ;
-    const p = project(z);
-    const y = (i===steps) ? vanishY : Math.max(p.y, vanishY);
-    const half = (i===steps) ? 0.0001 : p.half;
-    const lx = W/2 - half*railOff - 8;
-    const rx = W/2 + half*railOff + 8;
+    const {y,lx,rx} = edgesAt(i*stepZ);
     ptsLeft.push([lx,y]); ptsRight.push([rx,y]);
   }
 
@@ -256,40 +260,36 @@ function drawRoad(worldZ){
   for (let i=0;i<ptsLeft.length;i++){ const [x,y]=ptsLeft[i]; ctx.lineTo(x, Math.min(y,H)); }
   ctx.closePath(); ctx.fill();
 
-  // Lane streaks (continue to tip; add a tiny cap at the very top)
+  // Lane streaks: derive X from edges (perfect alignment)
   ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 6; ctx.lineCap='round';
-  const lanes = [-0.32, 0, 0.32];
-  for (const L of lanes){
-    for (let z = (worldZ%26)*-1; z<5000; z+=26){
-      const p0 = project(Math.max(0,z));
-      const p1 = project(Math.max(0,z+18));
-      let x0 = W/2 + L * p0.half*1.6;
-      let x1 = W/2 + L * p1.half*1.6;
-      let y0 = Math.max(p0.y, vanishY), y1 = Math.max(p1.y, vanishY);
-      if (y0>H && y1>H) break;
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  const LANE_T = [0.22, 0.50, 0.78];   // left, center, right inside the edges
+  const dashStep = 26, dashLenZ = 18;
+
+  for (const t of LANE_T){
+    for (let z = (worldZ%dashStep)*-1; z<5000; z+=dashStep){
+      const e0 = edgesAt(Math.max(0,z));
+      const e1 = edgesAt(Math.max(0,z+dashLenZ));
+      if (e0.y>H && e1.y>H) break;
+      const x0 = lerp(e0.lx, e0.rx, t);
+      const x1 = lerp(e1.lx, e1.rx, t);
+      ctx.beginPath(); ctx.moveTo(x0, e0.y); ctx.lineTo(x1, e1.y); ctx.stroke();
     }
-    // tiny cap segment at the very tip so there’s zero gap
-    ctx.beginPath();
-    ctx.moveTo(W/2 + L*roadTopHalf*0.0, vanishY+1);
-    ctx.lineTo(W/2 + L*roadTopHalf*0.0, vanishY+4);
-    ctx.stroke();
+    // tiny cap at the tip to remove any perceptual gap
+    ctx.beginPath(); ctx.moveTo(lerp(W/2, W/2, t), vanishY+1); ctx.lineTo(lerp(W/2, W/2, t), vanishY+4); ctx.stroke();
   }
 
-  // LED rails (also up to the tip; add a final dot at vanishY)
+  // LED rails: exactly on the edges
   ctx.fillStyle = 'rgba(255,90,50,0.92)';
-  const spacingM = 16;
-  for (let z = (worldZ%spacingM)*-1; z < 3200; z += spacingM){
-    const p = project(Math.max(0,z));
-    const y = Math.max(p.y, vanishY); if (y>H) break;
-    const r = Math.max(1, 3 * (1 - (y - vanishY)/(H-vanishY)));
-    const lx = W/2 - p.half*railOff - 8;
-    const rx = W/2 + p.half*railOff + 8;
-    ctx.beginPath(); ctx.arc(lx, y, r, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(rx, y, r, 0, Math.PI*2); ctx.fill();
+  const ledStep = 16;
+  for (let z = (worldZ%ledStep)*-1; z < 3200; z += ledStep){
+    const e = edgesAt(Math.max(0,z));
+    if (e.y>H) break;
+    const r = Math.max(1, 3 * (1 - (e.y - vanishY)/(H-vanishY)));
+    ctx.beginPath(); ctx.arc(e.lx, e.y, r, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(e.rx, e.y, r, 0, Math.PI*2); ctx.fill();
   }
-  // final tip dots
+  // tip pair
   ctx.beginPath(); ctx.arc(W/2, vanishY, 1.2, 0, Math.PI*2); ctx.fill();
 }
 
@@ -378,7 +378,7 @@ window.addEventListener('keydown', e=>{
   if(e.key==='ArrowRight') steer.x=1;
 });
 window.addEventListener('keyup', e=>{
-  if(e.key==='ArrowLeft'||e.key==='Right') steer.x=0;
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight') steer.x=0;
 });
 
 /* ============== Loop ============== */
