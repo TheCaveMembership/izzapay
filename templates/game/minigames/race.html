@@ -17,9 +17,6 @@
       background:var(--panel);overflow:hidden}
     .hud{position:absolute;top:10px;left:12px;right:12px;z-index:6;
       display:flex;justify-content:space-between;font-size:13px;letter-spacing:.3px}
-    .nitroBtn{position:absolute;right:12px;bottom:16px;z-index:7;border-radius:999px;
-      border:1px solid rgba(255,255,255,.1);background:#182033;padding:12px 18px;
-      font-weight:800;color:white}
     .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
       background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,.55));}
     .card{background:rgba(10,12,18,.95);border:1px solid rgba(255,255,255,.16);border-radius:14px;
@@ -33,6 +30,13 @@
     .swatch{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.28);cursor:pointer}
     .swatch.active{box-shadow:0 0 0 3px rgba(255,255,255,.18) inset}
     canvas{display:block;width:100%;height:100%;background:transparent}
+
+    /* Nitro meter (replaces button) */
+    .nitroWrap{position:absolute;right:12px;bottom:16px;z-index:7;width:110px;height:38px;
+      border-radius:999px;border:1px solid rgba(255,255,255,.12);background:#121a2b;overflow:hidden;
+      display:flex;align-items:center;justify-content:center;font-weight:800;color:#e8eef7}
+    .nitroFill{position:absolute;left:2px;top:2px;bottom:2px;border-radius:999px;background:linear-gradient(180deg,#53ffb2,#1ecb7b);width:100%;}
+    .nitroLabel{position:relative;z-index:1;pointer-events:none}
   </style>
 </head>
 <body>
@@ -61,7 +65,12 @@
       </div>
     </div>
 
-    <button class="nitroBtn" id="nitroBtn">NITRO</button>
+    <!-- Nitro meter -->
+    <div class="nitroWrap" id="nitroWrap" title="Hold to boost">
+      <div class="nitroFill" id="nitroFill" style="width:100%"></div>
+      <div class="nitroLabel">NITRO</div>
+    </div>
+
     <canvas id="scene"></canvas>
   </div>
 
@@ -96,20 +105,23 @@ const HUD = {
   dist : document.getElementById('dist'),
   coins: document.getElementById('coinsRun')
 };
+const nitroWrap = document.getElementById('nitroWrap');
+const nitroFill = document.getElementById('nitroFill');
 
-/* ======= Tunables (keep art dominant) ======= */
-const OVERLAY_ALPHA = 0.12; // translucent road tint
+/* ======= Tunables (art-forward) ======= */
+const OVERLAY_ALPHA = 0.12; // asphalt tint
 const DASH_ALPHA    = 0.10; // lane dashes
 const LED_ALPHA     = 0.55; // LED dots
 
-// New subtle FX tunables
-const AURORA_ALPHA  = 0.16;
-const AURORA_SPEED  = 0.06;
-const AURORA_WOBBLE = 18;    // px side-to-side
-const GLOW_ALPHA    = 0.22;
-const STREAK_ALPHA  = 0.08;
-const STREAK_SPEED  = 0.25;  // scales with speed
-const SMEAR_ALPHA   = 0.12;
+// FX knobs (stronger motion than before)
+let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
+let GLOW_ALPHA    = 0.24;
+let STREAK_ALPHA  = 0.16, STREAK_SPEED = 0.42; // ↑ stronger
+let SMEAR_ALPHA   = 0.18;
+
+// Spawn rates
+const SPAWN_EVERY_MS = 900;   // average interval
+const COIN_CHANCE = 0.55, NITRO_CHANCE = 0.25, BOMB_CHANCE = 0.20;
 
 /* ============== Sizing / Camera ============== */
 let dpr=1, W=0, H=0;
@@ -117,8 +129,6 @@ let horizonY=0, roadBottomHalf=0, roadTopHalf=0;
 let VANISH_Y = -800;
 let TOP_FADE_PX   = 90;
 let SIDE_FADE_PX  = 70;
-
-// Vanishing point for your image (cyan beam)
 let VPT_X=0, VPT_Y=0;
 
 function resize(){
@@ -131,20 +141,18 @@ function resize(){
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 
-  // Perspective shape (angle knobs)
   horizonY       = H*0.26;
   roadBottomHalf = W*0.95;
   roadTopHalf    = W*0.08;
 
   VANISH_Y = -Math.max(H * 0.8, 600);
-
   TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
   SIDE_FADE_PX = Math.max(90, Math.min( Math.round(W*0.24), 170 ));
 
-  // Where the cyan beam converges in your art:
   VPT_X = W*0.5;
   VPT_Y = H*0.62;
 
+  buildNoise(); // refresh asphalt texture
   updateCarPlacement();
 }
 window.addEventListener('resize', resize, {passive:true});
@@ -152,10 +160,10 @@ window.addEventListener('resize', resize, {passive:true});
 /* ============== Assets ============== */
 const carImg = new Image();
 carImg.src = '/static/game/sprites/tracks/coupe.png';
-
 const bgImg = new Image();
-bgImg.src = '/static/game/sprites/road_bg.jpg';  // your image
+bgImg.src = '/static/game/sprites/road_bg.jpg';
 
+/* Tinted sprite for garage preview */
 function makeTintedSprite(rgb){
   if (!carImg.complete || !carImg.width) return null;
   const off = document.createElement('canvas');
@@ -163,7 +171,6 @@ function makeTintedSprite(rgb){
   off.height = carImg.height;
   const o = off.getContext('2d');
   o.imageSmoothingEnabled = true;
-
   o.drawImage(carImg, 0, 0);
   o.globalCompositeOperation = 'multiply';
   o.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
@@ -205,7 +212,6 @@ PAINTS.forEach(p=>{
   };
   swatches.appendChild(d);
 });
-
 const prev = document.getElementById('garagePreview');
 const pctx = prev.getContext('2d');
 function rebuildTintAndPreview(){
@@ -239,7 +245,7 @@ function project(z){
   return { y, half, t };
 }
 
-/* ======= Road params (distance/feel) ======= */
+/* ======= Road params ======= */
 const DEPTH_Z    = 24000;
 const STEP_Z     = 48;
 const DASH_STEP  = 22;
@@ -251,9 +257,8 @@ function edgesAt(z){
   const p = project(z);
   const y = Math.max(p.y, VANISH_Y);
   const half = (y === VANISH_Y) ? 0.0001 : p.half;
-  return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8 };
+  return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8, t:p.t };
 }
-
 function xAtY(edge, y){
   for (let i=0;i<edge.length-1;i++){
     const y0=edge[i][1], y1=edge[i+1][1];
@@ -268,7 +273,6 @@ function xAtY(edge, y){
 /* ============== Background ============== */
 function drawBackground(){
   if (bgImg.complete && bgImg.naturalWidth) {
-    // cover (no stretch)
     const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
     const r  = Math.max(W/iw, H/ih);
     const nw = iw*r, nh = ih*r;
@@ -284,25 +288,19 @@ function drawBackground(){
 
 /* ---------- Subtle FX: aurora, vanishing glow, motion ---------- */
 function drawAurora(t){
-  // top-only additive ribbons that drift slightly
   const topH = H*0.42;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = AURORA_ALPHA;
-
   for (let i=0;i<3;i++){
     const phase = t*AURORA_SPEED*(i+1);
     const sway  = Math.sin(phase)*AURORA_WOBBLE*(i?0.6:1);
     const gx = W*0.5 + sway;
     const gy0 = 0, gy1 = topH;
-
     const g = ctx.createLinearGradient(gx, gy0, gx, gy1);
-    // cyan-teal glow like the image
     g.addColorStop(0.00, 'rgba(0,255,255,0.55)');
     g.addColorStop(0.35, 'rgba(0,180,220,0.25)');
     g.addColorStop(1.00, 'rgba(0,120,180,0.00)');
-
-    // softly feathered strip
     ctx.fillStyle = g;
     const w = W*0.32*(i?0.7:1);
     ctx.beginPath();
@@ -315,18 +313,14 @@ function drawAurora(t){
   }
   ctx.restore();
 }
-
 function drawVanishingGlow(t){
-  // pulsing glow where the road disappears (center beam head)
-  const rBase = Math.min(W,H)*0.06;
-  const pulse = 1 + 0.05*Math.sin(t*3.2);
-  const r1 = rBase*pulse, r2 = r1*4.5;
-
+  const rBase = Math.min(W,H)*0.065;
+  const pulse = 1 + 0.06*Math.sin(t*3.2);
+  const r2 = rBase*4.5*pulse;
   const g = ctx.createRadialGradient(VPT_X, VPT_Y, 1, VPT_X, VPT_Y, r2);
   g.addColorStop(0,   'rgba(0,255,255,0.65)');
   g.addColorStop(0.4, 'rgba(0,200,255,0.28)');
   g.addColorStop(1,   'rgba(0,200,255,0.00)');
-
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
   ctx.globalAlpha = GLOW_ALPHA;
@@ -335,43 +329,79 @@ function drawVanishingGlow(t){
   ctx.restore();
 }
 
+/* Asphalt noise layer (scrolling) */
+let noiseCanvas=null, noiseCtx=null, noiseW=512, noiseH=512, noiseOffset=0;
+function buildNoise(){
+  noiseCanvas = document.createElement('canvas');
+  noiseCanvas.width = noiseW; noiseCanvas.height = noiseH;
+  noiseCtx = noiseCanvas.getContext('2d');
+  const g = noiseCtx.createLinearGradient(0,0,noiseW,noiseH);
+  g.addColorStop(0,'rgba(255,255,255,0.06)');
+  g.addColorStop(1,'rgba(255,255,255,0.00)');
+  noiseCtx.fillStyle = 'rgba(255,255,255,0.02)';
+  noiseCtx.fillRect(0,0,noiseW,noiseH);
+  noiseCtx.strokeStyle = g;
+  for(let i=0;i<90;i++){
+    const y = Math.random()*noiseH;
+    noiseCtx.globalAlpha = 0.05 + Math.random()*0.08;
+    noiseCtx.lineWidth = 1 + Math.random()*2;
+    noiseCtx.beginPath();
+    noiseCtx.moveTo(0,y);
+    noiseCtx.lineTo(noiseW,y - 20 - Math.random()*40);
+    noiseCtx.stroke();
+  }
+}
+
+/* Motion streaks + smears + scrolling asphalt */
 function drawMotion(worldZ, speed){
-  // faint radial streaks (cyan/magenta) emanating from vanishing point
-  const k = (speed/220) * STREAK_SPEED; // 0..~0.3
-  const count = 24;
+  const k = (speed/220) * STREAK_SPEED;
+  const count = 28;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = STREAK_ALPHA;
 
   for (let i=0;i<count;i++){
-    const ang = (-0.35 + i/(count-1)*0.70); // fan across road
-    const len = H*0.9;
+    const ang = (-0.36 + i/(count-1)*0.72);
+    const len = H*0.95;
     const wob = Math.sin((worldZ*0.02)+i)*6;
     const x2 = VPT_X + Math.tan(ang)*(len*0.75) + wob;
     const y2 = H + 10;
-
     const grad = ctx.createLinearGradient(VPT_X, VPT_Y, x2, y2);
     const color = (i%2===0)? 'rgba(0,255,255,' : 'rgba(255,0,200,';
-    grad.addColorStop(0.00, color + (0.35+0.25*k) + ')');
-    grad.addColorStop(0.35, color + (0.15+0.15*k) + ')');
+    grad.addColorStop(0.00, color + (0.45+0.25*k) + ')');
+    grad.addColorStop(0.35, color + (0.18+0.18*k) + ')');
     grad.addColorStop(1.00, color + '0)');
     ctx.strokeStyle = grad;
-    ctx.lineWidth = 2 + 6*k;
+    ctx.lineWidth = 2 + 7*k;
     ctx.beginPath(); ctx.moveTo(VPT_X, VPT_Y); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.restore();
 
-  // side “smear” over buildings/guardrails (very light)
-  const smearW = W*0.22;
+  // side smears
+  const smearW = W*0.24;
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
   smearG_L.addColorStop(0,   `rgba(0,0,0,${SMEAR_ALPHA*0.8*k+0.02})`);
   smearG_L.addColorStop(1.0, 'rgba(0,0,0,0)');
   const smearG_R = ctx.createLinearGradient(W,0,W-smearW,0);
   smearG_R.addColorStop(0,   `rgba(0,0,0,${SMEAR_ALPHA*0.8*k+0.02})`);
   smearG_R.addColorStop(1.0, 'rgba(0,0,0,0)');
-
   ctx.fillStyle = smearG_L; ctx.fillRect(0,0,smearW,H);
   ctx.fillStyle = smearG_R; ctx.fillRect(W-smearW,0,smearW,H);
+
+  // scrolling asphalt texture (clipped to road)
+  const L=[], R=[];
+  for (let z=0; z<=DEPTH_Z; z+=STEP_Z){ const e=edgesAt(z); L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(W/2, VANISH_Y);
+  for(let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
+  for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
+  ctx.closePath(); ctx.clip();
+  const scroll = (worldZ*1.2)%noiseH;
+  for(let y=-noiseH; y<H+noiseH; y+=noiseH){
+    ctx.globalAlpha = 0.10; // subtle
+    ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
+  }
+  ctx.restore();
 }
 
 /* ============== Road overlays (keep image visible) ============== */
@@ -383,7 +413,7 @@ function drawRoad(worldZ){
     L.push([e.lx, e.y]); R.push([e.rx, e.y]);
   }
 
-  // Clip to road shape; ultra-light asphalt tint
+  // Road tint
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(W/2, VANISH_Y);
@@ -400,7 +430,7 @@ function drawRoad(worldZ){
   ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = 1;
 
-  // Lane dashes (very light)
+  // Lane dashes
   ctx.strokeStyle = `rgba(255,255,255,${DASH_ALPHA})`;
   ctx.lineWidth = 6; ctx.lineCap = 'round';
   const LANE_T = [0.22, 0.50, 0.78];
@@ -415,7 +445,7 @@ function drawRoad(worldZ){
     }
   }
 
-  // LED rails (subtle)
+  // LED rails
   ctx.globalAlpha = LED_ALPHA;
   ctx.fillStyle = 'rgba(255,90,50,1)';
   for (let z=(worldZ % LED_STEP)*-1; z<DEPTH_Z; z+=LED_STEP){
@@ -427,7 +457,7 @@ function drawRoad(worldZ){
   }
   ctx.globalAlpha = 1;
 
-  // soft road-only horizon fade under HUD
+  // tiny horizon fade
   const topFade = ctx.createLinearGradient(0, 0, 0, TOP_FADE_PX);
   topFade.addColorStop(0, 'rgba(0,0,0,1)');
   topFade.addColorStop(1, 'rgba(0,0,0,0)');
@@ -436,32 +466,111 @@ function drawRoad(worldZ){
   ctx.fillRect(0, 0, W, TOP_FADE_PX);
   ctx.globalCompositeOperation = 'source-over';
   ctx.restore();
+}
 
-  // side wedges (very faint so neon rails stay visible)
-  const y0 = 0, y1 = Math.min(H*0.88, H*0.92);
-  const xL0 = xAtY(L, y0), xL1 = xAtY(L, y1);
-  const xR0 = xAtY(R, y0), xR1 = xAtY(R, y1);
+/* ============== Pickups (coin, nitro, bomb) ============== */
+class Pickup {
+  constructor(type, spawnZ, laneT){
+    this.type = type;               // 'coin' | 'nitro' | 'bomb'
+    this.spawnZ = spawnZ;           // at worldZ where it appears far
+    this.laneT = laneT;             // 0..1 position across road
+    this.spin = Math.random()*Math.PI*2;
+    this.alive = true;
+  }
+  zRel(worldZ){ return this.spawnZ - worldZ; }
+  draw(worldZ){
+    const z = Math.max(0, this.zRel(worldZ));
+    if (z>DEPTH_Z) return;
+    const e = edgesAt(z);
+    const x = e.lx + (e.rx-e.lx)*this.laneT;
+    const y = e.y;
 
-  let gradL = ctx.createLinearGradient(0, y0, 0, y1);
-  gradL.addColorStop(0.00, 'rgba(0,0,0,0.40)');
-  gradL.addColorStop(1.00, 'rgba(0,0,0,0.00)');
-  ctx.fillStyle = gradL;
-  ctx.beginPath();
-  ctx.moveTo(0, y0);
-  ctx.lineTo(xL0 - SIDE_FADE_PX, y0);
-  ctx.lineTo(xL1 - SIDE_FADE_PX*0.5, y1);
-  ctx.lineTo(0, y1);
-  ctx.closePath(); ctx.fill();
+    // scale with perspective
+    const s = 0.35 + e.t*0.9; // near gets larger
+    this.spin += 0.15 + (this.type==='coin'?0.2:0.1);
 
-  let gradR = ctx.createLinearGradient(0, y0, 0, y1);
-  gradR.addColorStop(0.00, 'rgba(0,0,0,0.40)');
-  gradR.addColorStop(1.00, 'rgba(0,0,0,0.00)');
-  ctx.fillStyle = gradR;
-  ctx.beginPath();
-  ctx.moveTo(xR0 + SIDE_FADE_PX, y0);
-  ctx.lineTo(W, y0); ctx.lineTo(W, y1);
-  ctx.lineTo(xR1 + SIDE_FADE_PX*0.5, y1);
-  ctx.closePath(); ctx.fill();
+    if (this.type==='coin') drawCoin(x,y,s,this.spin);
+    else if (this.type==='nitro') drawNitro(x,y,s*1.1,this.spin);
+    else drawBomb(x,y,s*1.2,this.spin);
+
+    // off-screen?
+    if (y>H+30) this.alive=false;
+  }
+  hitTest(carRect, worldZ){
+    const z = Math.max(0, this.zRel(worldZ));
+    const e = edgesAt(z);
+    const x = e.lx + (e.rx-e.lx)*this.laneT;
+    const y = e.y;
+    const r = 20 + 40*e.t; // approx sprite radius
+    // simple AABB vs circle
+    const cx = x, cy = y;
+    const nx = Math.max(carRect.x, Math.min(cx, carRect.x+carRect.w));
+    const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
+    const dx = cx-nx, dy = cy-ny;
+    return (dx*dx + dy*dy) < (r*r*0.8);
+  }
+}
+
+/* Procedural sprites (no external files) */
+function drawCoin(x,y,s,ang){
+  const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang))); // 3D flip
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.globalCompositeOperation='lighter';
+
+  // rim
+  ctx.fillStyle='rgba(255,214,70,0.95)';
+  ctx.beginPath(); ctx.ellipse(0,0,w,h,0,0,Math.PI*2); ctx.fill();
+
+  // face
+  ctx.fillStyle='rgba(255,186,0,1)';
+  ctx.beginPath(); ctx.ellipse(0,0,w*0.82,h*0.82,0,0,Math.PI*2); ctx.fill();
+
+  // IZZA logo (simple monogram)
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='rgba(40,28,0,0.7)';
+  ctx.font = `${Math.max(8,10*s)}px Arial Black`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('IZZA',0,0);
+  ctx.restore();
+}
+
+function drawNitro(x,y,s,ang){
+  const w = 16*s, h = 34*s;
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(Math.sin(ang)*0.25);
+  // bottle
+  const g = ctx.createLinearGradient(0,-h/2,0,h/2);
+  g.addColorStop(0,'#65ffd1'); g.addColorStop(1,'#17a56a');
+  ctx.fillStyle=g; ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.roundRect(-w/2,-h/2,w,h,6); ctx.fill(); ctx.stroke();
+  // label
+  ctx.fillStyle='rgba(0,0,0,0.25)';
+  ctx.fillRect(-w*0.45,-h*0.05,w*0.9,h*0.1);
+  ctx.fillStyle='rgba(255,255,255,0.9)';
+  ctx.font=`${Math.max(6,8*s)}px Arial Black`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('N2O',0,0);
+  // cap
+  ctx.fillStyle='#0e2130';
+  ctx.fillRect(-w*0.25,-h*0.62,w*0.5,h*0.14);
+  ctx.restore();
+}
+
+function drawBomb(x,y,s,ang){
+  const r = 16*s;
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(ang*0.7);
+  ctx.fillStyle='rgba(30,30,35,1)';
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+  // fuse glow
+  ctx.globalCompositeOperation='lighter';
+  const flick = 0.6+0.4*Math.sin(ang*3);
+  ctx.fillStyle=`rgba(255,120,20,${0.5+0.5*flick})`;
+  ctx.beginPath(); ctx.arc(r*0.6,-r*0.6,4+2*flick,0,Math.PI*2); ctx.fill();
+  ctx.restore();
 }
 
 /* ============== Car ============== */
@@ -473,6 +582,7 @@ function updateCarPlacement(){
   carX = Math.round((W - carW)/2);
   carY = Math.round(H - carH*1.02);
 }
+function carRect(){ return {x:carX+carW*0.18, y:carY+carH*0.30, w:carW*0.64, h:carH*0.52}; }
 
 function buildCarFXCanvas(nitroBoost, t){
   const fx = document.createElement('canvas');
@@ -527,7 +637,7 @@ function drawCar(nitroBoost){
 }
 
 /* ============== Input ============== */
-const steer = { x:0 };
+const steer = { x:0, nitro:false };
 canvas.addEventListener('pointerdown', e=>{
   const x = e.clientX - canvas.getBoundingClientRect().left;
   steer.x = (x < W/2) ? -1 : 1;
@@ -542,49 +652,114 @@ window.addEventListener('pointerup', ()=>{ steer.x=0; });
 window.addEventListener('keydown', e=>{
   if(e.key==='ArrowLeft')  steer.x=-1;
   if(e.key==='ArrowRight') steer.x=1;
+  if(e.key.toLowerCase()===' ') steer.nitro=true;
 });
 window.addEventListener('keyup', e=>{
   if(e.key==='ArrowLeft'||e.key==='Right') steer.x=0;
+  if(e.key.toLowerCase()===' ') steer.nitro=false;
 });
 
-/* ============== Loop ============== */
-let worldZ = 0, nitroLeft = 0, last = performance.now();
-const state = { running:false, speed:0, dist:0 };
+/* Nitro meter hold */
+function bindNitroHold(el){
+  const on=()=>{ steer.nitro=true; };
+  const off=()=>{ steer.nitro=false; };
+  el.addEventListener('pointerdown', e=>{ e.preventDefault(); on(); });
+  window.addEventListener('pointerup', off);
+  el.addEventListener('touchstart', e=>{ e.preventDefault(); on(); }, {passive:false});
+  el.addEventListener('touchend', off);
+}
+bindNitroHold(nitroWrap);
+
+/* ============== Loop, entities, game state ============== */
+let worldZ = 0, last = performance.now();
+const state = { running:false, speed:0, dist:0, coins:0, bombsHit:0 };
+let nitro = 1.0; // 0..1 meter
+let nitroActive = false;
+let lastSpawn = 0;
+const pickups = [];
+
+function spawnOne(){
+  const r = Math.random();
+  const lane = [0.22,0.50,0.78][Math.floor(Math.random()*3)];
+  const spawnZ = worldZ + DEPTH_Z*0.95;
+  if (r < COIN_CHANCE) pickups.push(new Pickup('coin', spawnZ, lane));
+  else if (r < COIN_CHANCE + NITRO_CHANCE) pickups.push(new Pickup('nitro', spawnZ, lane));
+  else pickups.push(new Pickup('bomb', spawnZ, lane));
+}
+
+function useNitro(dt){
+  const can = nitro>0.02;
+  nitroActive = steer.nitro && can;
+  if (nitroActive){
+    nitro = Math.max(0, nitro - dt*0.25); // drain
+  }
+  nitroFill.style.width = Math.round(nitro*100)+'%';
+}
+
+function gameOver(){
+  state.running=false;
+  const msg =
+`CRASHED 💥
+Distance: ${Math.round(state.dist)} m
+Coins: ${state.coins}`;
+  alert(msg);
+  document.getElementById('startOverlay').style.display='';
+}
 
 function frame(now){
   if(!state.running) return;
   const dt = Math.min(0.033, (now - last)/1000); last = now;
   time += dt;
 
-  const target = 180 + (nitroLeft>0 ? 140 : 0);
-  state.speed += (target - state.speed) * 0.08;
-  if (nitroLeft>0) nitroLeft -= dt;
+  // Nitro & speed
+  useNitro(dt);
+  const target = (nitroActive ? 260 : 190);
+  state.speed += (target - state.speed) * 0.10;
 
   const mps = state.speed / 3.6;
   worldZ += mps * dt;
   state.dist += mps * dt;
 
+  // Spawns
+  if (now - lastSpawn > SPAWN_EVERY_MS*(0.85+Math.random()*0.3)) {
+    lastSpawn = now; spawnOne();
+  }
+
+  // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawBackground();
   drawRoad(worldZ);
-
-  // NEW subtle FX layers
-  const speed = state.speed;  // km/h
   drawAurora(time);
   drawVanishingGlow(time);
-  drawMotion(worldZ, speed);
+  drawMotion(worldZ, state.speed);
 
-  carX += steer.x * 0.9; carX = Math.max(0, Math.min(W-carW, carX));
-  drawCar(nitroLeft>0);
+  // Car steering
+  carX += steer.x * 1.0; carX = Math.max(0, Math.min(W-carW, carX));
+  const cRect = carRect();
 
+  // Pickups
+  for (const p of pickups) {
+    if (!p.alive) continue;
+    p.draw(worldZ);
+    if (p.hitTest(cRect, worldZ)) {
+      p.alive = false;
+      if (p.type==='coin'){ state.coins += 100; }
+      else if (p.type==='nitro'){ nitro = Math.min(1, nitro + 0.25); }
+      else { state.bombsHit++; if (state.bombsHit>=3) { gameOver(); return; } }
+    }
+  }
+  // cleanup
+  for (let i=pickups.length-1;i>=0;i--) if (!pickups[i].alive) pickups.splice(i,1);
+
+  drawCar(nitroActive);
+
+  // HUD
   HUD.speed.textContent = Math.round(state.speed);
   HUD.dist.textContent  = Math.round(state.dist);
-  HUD.coins.textContent = 0;
+  HUD.coins.textContent = state.coins;
 
   requestAnimationFrame(frame);
 }
-
-document.getElementById('nitroBtn').addEventListener('click', ()=>{ nitroLeft = 2.0; });
 
 document.getElementById('startBtn').addEventListener('click',()=>{
   document.getElementById('startOverlay').style.display='none';
@@ -592,6 +767,8 @@ document.getElementById('startBtn').addEventListener('click',()=>{
   tintedSprite = makeTintedSprite(paint);
   state.running = true;
   state.speed = 90; state.dist = 0; worldZ = 0; last = performance.now();
+  state.coins = 0; state.bombsHit = 0; nitro = 1.0; nitroFill.style.width='100%';
+  pickups.length = 0; lastSpawn = performance.now();
   requestAnimationFrame(frame);
 });
 
