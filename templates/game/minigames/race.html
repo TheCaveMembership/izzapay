@@ -983,120 +983,7 @@ function drawCar(nitroBoost){
   ctx.drawImage(fx, carX, carY);
   ctx.globalCompositeOperation = 'source-over';
 }
-/* ===== ADD-ON: Side Rush + Sky Fog (standalone) ===== */
 
-/* Side-rush tunables (more opaque + more lines) */
-const SR = {
-  alpha: 0.85,   // overall opacity (was .55)
-  count: 24,     // more streaks per side (was 16)
-  width: 16,     // thicker near-camera (was 10)
-  tilt: 0.18,    // flare harder to edges (was .13)
-  len:  1.35,    // longer field (was 1.20)
-  hueL: 300,     // magenta left
-  hueR: 175,     // teal right
-  soften: 0.20   // a touch tighter falloff (was .25)
-};
-/* --- Fog texture (tiny tiled noise) --- */
-let fogTex=null, fogCtx=null, fogW=256, fogH=256, fogOffset=0;
-function buildFogTexture(){
-  fogTex = document.createElement('canvas');
-  fogTex.width = fogW; fogTex.height = fogH;
-  fogCtx = fogTex.getContext('2d');
-  fogCtx.clearRect(0,0,fogW,fogH);
-  // soft blobs
-  for(let i=0;i<140;i++){
-    const x = Math.random()*fogW, y=Math.random()*fogH;
-    const r = 8 + Math.random()*28;
-    const a = 0.05 + Math.random()*0.10;
-    const g = fogCtx.createRadialGradient(x,y,1,x,y,r);
-    g.addColorStop(0, `rgba(255,255,255,${a})`);
-    g.addColorStop(1, `rgba(255,255,255,0)`);
-    fogCtx.fillStyle = g;
-    fogCtx.beginPath(); fogCtx.arc(x,y,r,0,Math.PI*2); fogCtx.fill();
-  }
-}
-buildFogTexture();
-
-/* Side-rush: neon streaks with speed jitter + steer parallax */
-function drawSideRush(speed, hyper=false){
-  const k = Math.min(1, speed/260);
-  const length = H * (SR.len * (hyper?1.18:1));
-  const flare  = W * SR.tilt;
-
-  // motion: tiny lateral sway with steering + speed flicker
-  const steerParallax = (carX + carW/2 - W/2) * 0.06;  // follows car
-  const flick = 0.8 + 0.2*Math.sin(time*12*(1+0.4*k)); // subtle twinkle
-
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = SR.alpha * (0.65 + 0.45*k) * flick;
-  ctx.lineCap = 'round';
-  ctx.shadowBlur = 18 + 10*k;
-
-  function streaks(side){ // side=-1 left, +1 right
-    const hue = side<0 ? SR.hueL : SR.hueR;
-    const dir = side<0 ? -1 : 1;
-
-    for(let i=0;i<SR.count;i++){
-      const j = (i+0.5)/SR.count;                 // 0..1 along field
-      // speed-reactive wobble so lines “vibrate” at high speed
-      const wob = (Math.sin(time*18 + i*1.7) * 6 + Math.cos(time*11 + i)) * (0.5+1.1*k);
-
-      const sx = VPT_X + dir * (j*flare + wob) + steerParallax*0.8;
-      const sy = VPT_Y + j*length*0.36;
-
-      const ex = dir<0 ? -8 : W+8;                // off screen edges
-      const ey = VPT_Y + j*(H - VPT_Y) * (0.90 + 0.1*Math.random());
-
-      const w = SR.width * (0.8 + 0.9*(1-j)) * (1+0.7*k) * (hyper?1.15:1);
-      const g = ctx.createLinearGradient(sx,sy,ex,ey);
-      g.addColorStop(0, `hsl(${hue} 100% 60% / 0.95)`);
-      g.addColorStop(SR.soften, `hsl(${hue} 100% 60% / 0.60)`);
-      g.addColorStop(1, `hsl(${hue} 100% 60% / 0.00)`);
-      ctx.strokeStyle = g;
-      ctx.lineWidth = w;
-      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
-    }
-  }
-  streaks(-1); streaks(1);
-  ctx.restore();
-}
-/* --- Smoky fog that fades upward into skyline --- */
-function drawSkyFog(dt){
-  // drift + slow side float for “rolling” fog
-  fogOffset = (fogOffset + FOG.risePxPerSec*dt) % fogH;
-  const sideOffset = Math.sin(time*0.4) * 14;
-
-  ctx.save();
-  ctx.beginPath(); ctx.rect(0, 0, W, VPT_Y); ctx.clip();
-
-  // vertical haze
-  const g = ctx.createLinearGradient(0, 0, 0, VPT_Y);
-  g.addColorStop(0.00, `rgba(12,18,30,${FOG.topAlpha})`);
-  g.addColorStop(0.55, `rgba(12,18,30,${FOG.midAlpha})`);
-  g.addColorStop(1.00, 'rgba(12,18,30,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, VPT_Y);
-
-  // color tints from horizon
-  ctx.globalCompositeOperation = 'screen';
-  const r = Math.max(W,H)*0.95;
-  const rg1 = ctx.createRadialGradient(VPT_X, VPT_Y*0.98, r*0.06, VPT_X, VPT_Y*0.98, r);
-  rg1.addColorStop(0, FOG.tint1); rg1.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle = rg1; ctx.fillRect(0,0,W,VPT_Y);
-  const rg2 = ctx.createRadialGradient(VPT_X*0.32, VPT_Y*0.74, r*0.04, VPT_X*0.32, VPT_Y*0.74, r*0.9);
-  rg2.addColorStop(0, FOG.tint2); rg2.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle = rg2; ctx.fillRect(0,0,W,VPT_Y);
-
-  // grain tiles (add gentle sideways float)
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = FOG.grainAlpha;
-  for(let y=-fogH; y<VPT_Y+fogH; y+=fogH){
-    for(let x=-fogW; x<W+fogW; x+=fogW){
-      ctx.drawImage(fogTex, x + sideOffset, y + fogOffset - fogH, fogW, fogH);
-    }
-  }
-  ctx.restore();
-}
 /* ============== MAIN LOOP ============== */
 function frame(now){
   if(!state.running) return;
@@ -1125,17 +1012,12 @@ function frame(now){
   carX = Math.max(-off, Math.min(W - carW + off, carX));
   VPT_X = carX + carW*0.5; // <- keep beams/streaks under car exactly
 
-    // Draw
+  // Draw
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawBackground(hyper?HYPER.zoom:1);
   drawRoad();
   drawAurora(time, hyper?1.25:1);
   drawVanishingGlow(time, heat);
-
-  /* ADD-ON calls */
-  drawSideRush(state.speed, hyper);
-  drawSkyFog(dt);
-
   drawMotion(worldZ, state.speed, hyper, heat);
 
   // Headlights on top
