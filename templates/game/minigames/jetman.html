@@ -488,15 +488,17 @@ var worldZ=0, speed=110, time=0, last=performance.now();
 var corridorHalf=6.5; // meters half-width
 var corridorHeight=10; // meters
 var DEPTH=300; // meters of active world
-/* === EASY TEST CONFIG === */
-var TOP_Y = 3.3;              // ceiling world Y
-var BOT_Y = -3.0;             // ground world Y
-var WORLD_TO_PX = 16;         // worldY -> pixels mapping used in drawUI
 
-var SPAWN_INTERVAL = 1.8;     // seconds between bars (more spaced)
-var COLLISION_Z_NEAR = 0.35;  // only collide when bar is in this tight Z window
-var COLLISION_Z_FAR  = 0.85;  // (player "slice" near the camera)
-var HITBOX_HALF = 0.55;       // vertical half-height of avatar hitbox (smaller = easier)
+/* === EASY TEST CONFIG (visuals aligned with logic) === */
+var TOP_Y = 3.3;              // ceiling world Y (crash when y >= TOP_Y)
+var BOT_Y = -3.0;             // ground world Y  (crash when y <= BOT_Y)
+var WORLD_TO_PX = 28;         // UI drawing scale (bigger so guides/box read clearly)
+
+var SPAWN_INTERVAL = 2.2;     // seconds between bars (more spaced for testing)
+var COLLISION_Z_NEAR = 0.35;  // collide only when bar is very close in Z
+var COLLISION_Z_FAR  = 0.85;
+var HITBOX_HALF = 1.00;       // avatar collision half-height (matches red box)
+
 function init3D(){
   scene = new THREE.Scene();
   /* brighter background & lighter fog */
@@ -582,10 +584,9 @@ function layoutWalls(){
 /* Obstacles — ONLY NEON GREEN BARS (spaced out) */
 var obstacles=[];
 function spawnObstacle(){
-  // Always a crossbar spanning the corridor
   var w = corridorHalf*1.95;
   var t = THREE.MathUtils.lerp(0.18,0.28,Math.random());
-  var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random()); // vertical placement
+  var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random());
 
   var geo = new THREE.BoxGeometry(w, t, 1.2);
   var mat = new THREE.MeshStandardMaterial({
@@ -607,6 +608,7 @@ function spawnObstacle(){
   scene.add(group);
   obstacles.push({ mesh: group, type: 'bar' });
 }
+
 /* Recycle world: move everything forward instead of moving camera far */
 function advanceWorld(dz){
   // walls
@@ -722,11 +724,11 @@ function drawUI(){
   var cx = W/2;
   var py = H*0.62 + player.y*WORLD_TO_PX; // map world Y to pixels
 
-  // --- guide lines (top & bottom) ---
+  // --- guide lines (top & bottom) — EXACT crash bounds ---
   var topPx = H*0.62 + TOP_Y*WORLD_TO_PX;
   var botPx = H*0.62 + BOT_Y*WORLD_TO_PX;
   uiCtx.save();
-  uiCtx.strokeStyle = 'rgba(255,60,60,0.85)';
+  uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
   uiCtx.lineWidth = 2;
   uiCtx.setLineDash([6,6]);
   uiCtx.beginPath(); uiCtx.moveTo(0, topPx); uiCtx.lineTo(W, topPx); uiCtx.stroke();
@@ -743,11 +745,11 @@ function drawUI(){
   uiCtx.beginPath(); uiCtx.arc(cx,py,60,0,Math.PI*2); uiCtx.fill();
   uiCtx.restore();
 
-  // red hitbox rectangle (visualize collision band)
+  // red hitbox rectangle — EXACTLY matches collision band
   var hitH = (HITBOX_HALF*2)*WORLD_TO_PX;
-  var hitW = 96; // same width as sprite for clarity
+  var hitW = 110; // a bit wider so it visually wraps the sprite
   uiCtx.save();
-  uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
+  uiCtx.strokeStyle = 'rgba(255,60,60,0.95)';
   uiCtx.lineWidth = 2;
   uiCtx.setLineDash([8,6]);
   uiCtx.strokeRect(cx - hitW/2, py - hitH/2, hitW, hitH);
@@ -784,7 +786,7 @@ function frame(now){
   var ay = (thrust? -phys.thrust : phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
   var nextY = player.y + (player.vy*dt)/260;
-  if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; } // crash at bounds (clear & obvious)
+  if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; } // crash at bounds
   player.y = Math.max(BOT_Y, Math.min(TOP_Y, nextY));
 
   // advance world towards camera
@@ -792,22 +794,19 @@ function frame(now){
   worldZ += mps*dt;
   advanceWorld((mps*dt));
 
-  // --- REPLACE THIS SPAWN BLOCK ---
   // periodic obstacle spawns (more spaced out for easy testing)
   spawnTimer += dt;
   if (spawnTimer > SPAWN_INTERVAL){
     spawnTimer = 0;
-    spawnObstacle();              // no double-spawn; bars are calmer
+    spawnObstacle();
   }
-  // --- END REPLACEMENT ---
 
   // position/bank camera
   camera.position.y = player.y*0.6;
   camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, (thrust?-0.03:0.03), 0.15);
 
-  // --- REPLACE THIS COLLISION BLOCK ---
   // collisions with bars only, and only if the bar is very close in Z
-  var pxY = camera.position.y;
+  var pxY = player.y;                         // align to the avatar, not camera
   var bandTop = pxY + HITBOX_HALF;
   var bandBot = pxY - HITBOX_HALF;
 
@@ -818,10 +817,14 @@ function frame(now){
       var bar = o.mesh.children[0]; // central box
       var top = o.mesh.position.y + bar.geometry.parameters.height/2;
       var bot = o.mesh.position.y - bar.geometry.parameters.height/2;
-      if (!(bandTop < bot || bandBot > top)){ gameOver(); return; }
+
+      // small grace so grazes feel fair
+      var margin = 0.03;
+      if (!((bandTop - margin) < (bot + margin) || (bandBot + margin) > (top - margin))) {
+        gameOver(); return;
+      }
     }
   }
-  // --- END REPLACEMENT ---
 
   // score/coins
   var prevScore = game.score;
@@ -835,6 +838,7 @@ function frame(now){
 
   requestAnimationFrame(frame);
 }
+
 /* listeners */
 window.addEventListener('storage', function(e){
   if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.indexOf(e.key)>=0))) updateCoinsHUD();
