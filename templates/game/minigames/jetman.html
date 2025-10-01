@@ -41,12 +41,12 @@
   <link rel="stylesheet" href="/static/themes.css">
   <style>
     :root{ --hud:rgba(255,255,255,.10); --hudLine:rgba(255,255,255,.34); --arcade:#aef3ff; }
-    html,body{height:100%;margin:0;background:#0b1730;color:#e8eef7;font:14px/1.2 system-ui,Arial}
+    html,body{height:100%;margin:0;background:#071227;color:#e8eef7;font:14px/1.2 system-ui,Arial}
     /* brighter backdrop */
     body{
       background:
-        radial-gradient(140% 90% at 50% 10%, rgba(40,80,150,.35), rgba(7,10,18,1) 70%) no-repeat,
-        linear-gradient(#0e2141,#091427);
+        radial-gradient(140% 90% at 50% 10%, rgba(60,120,220,.42), rgba(5,8,16,1) 70%) no-repeat,
+        linear-gradient(#0f2c5a,#091427);
       caret-color: transparent;
     }
     .wrap{position:relative;max-width:480px;height:100svh;margin:0 auto;
@@ -97,7 +97,9 @@
     <div id="startOverlay" class="startOverlay" aria-live="polite">
       <div class="startCard">
         <div style="font-weight:900;letter-spacing:.4px">JETMAN ROOFTOPS</div>
-        <div style="font-size:12px;opacity:.95;text-align:center">Tap/hold to thrust up. Dodge rooftop units and crossbars.</div>
+        <div style="font-size:12px;opacity:.95;text-align:center">
+          Tap/hold to thrust up. <strong>Dodge neon bars</strong>. Touching a bar or the top/ground = crash.
+        </div>
         <div class="row">
           <a id="backBtn" class="btn" href="/izza-game/minigames">← Back</a>
           <button id="startBtn" class="btn" type="button">START</button>
@@ -472,7 +474,7 @@ ensureSized(); addEventListener('resize', function(){ ensureSized(); }, false);
 
 /* Player vertical motion (same feel) */
 var player = { y: 0, vy:0, r:18 };
-var phys = { g: 1600, thrust: 1900, maxVy: 880 };
+var phys = { g: 1500, thrust: 1850, maxVy: 820 }; // slightly gentler for easy testing
 player.y = 0; // world Y around corridor center
 var thrust=false; addEventListener('keydown',function(e){ if(e.code==='Space') thrust=true; }, false);
 addEventListener('keyup',function(e){ if(e.code==='Space') thrust=false; }, false);
@@ -480,9 +482,9 @@ uiCvs.addEventListener('pointerdown', function(){ thrust=true; }, false);
 addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* Three.js scene */
-var scene, camera, renderer, fogColor=0x102349;
-/* keep easier speed from your last version */
-var worldZ=0, speed=120, time=0, last=performance.now();
+var scene, camera, renderer;
+/* keep easier speed */
+var worldZ=0, speed=110, time=0, last=performance.now();
 var corridorHalf=6.5; // meters half-width
 var corridorHeight=10; // meters
 var DEPTH=300; // meters of active world
@@ -491,7 +493,7 @@ function init3D(){
   scene = new THREE.Scene();
   /* brighter background & lighter fog */
   scene.background = new THREE.Color(0x0e2141);
-  scene.fog = new THREE.FogExp2(0x0a1b35, 0.018);
+  scene.fog = new THREE.FogExp2(0x123061, 0.014);
 
   camera = new THREE.PerspectiveCamera(55, W/H, 0.1, 1000);
   camera.position.set(0, 0, 6);
@@ -500,21 +502,21 @@ function init3D(){
   renderer = new THREE.WebGLRenderer({canvas: glCvs, antialias: true, alpha: true});
   renderer.setPixelRatio(dpr); renderer.setSize(W,H,false);
 
-  // brighter lights
-  var hemi = new THREE.HemisphereLight(0xbfd9ff, 0x0a1020, 0.85); scene.add(hemi);
-  var amb = new THREE.AmbientLight(0xaecbff, .55); scene.add(amb);
-  var dir = new THREE.DirectionalLight(0xbfe6ff, 1.15); dir.position.set(-2,4,3); scene.add(dir);
+  // brighter lights overall
+  var hemi = new THREE.HemisphereLight(0xcfe6ff, 0x0a1020, 1.0); scene.add(hemi);
+  var amb = new THREE.AmbientLight(0xcfe7ff, 0.85); scene.add(amb);
+  var dir = new THREE.DirectionalLight(0xffffff, 1.35); dir.position.set(-2,4,3); scene.add(dir);
 
-  // floor (lighter)
+  // floor (lighter + emissive)
   var floorGeo = new THREE.PlaneGeometry(corridorHalf*2.4, DEPTH, 1, 1);
-  var floorMat = new THREE.MeshStandardMaterial({color:0x123059, roughness:.75, metalness:.12, emissive:0x112a55, emissiveIntensity:.25});
+  var floorMat = new THREE.MeshStandardMaterial({color:0x1b4f8f, roughness:.6, metalness:.15, emissive:0x144a94, emissiveIntensity:.45});
   var floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotateX(-Math.PI/2); floor.position.set(0,-corridorHeight*0.55, -DEPTH/2);
   scene.add(floor);
 
-  // glow cones at horizon (stronger)
-  var coneGeo = new THREE.ConeGeometry(2.3, 6.4, 18, 1, true);
-  var coneMat = new THREE.MeshBasicMaterial({color:0x24e0ff, transparent:true, opacity:.28, side:THREE.DoubleSide});
+  // soft horizon glow
+  var coneGeo = new THREE.ConeGeometry(2.6, 6.8, 18, 1, true);
+  var coneMat = new THREE.MeshBasicMaterial({color:0x48e0ff, transparent:true, opacity:.35, side:THREE.DoubleSide});
   var coneL = new THREE.Mesh(coneGeo, coneMat), coneR = new THREE.Mesh(coneGeo, coneMat);
   coneL.rotation.set(Math.PI/2.1, 0.1, 0); coneR.rotation.set(Math.PI/2.1, -0.1, 0);
   coneL.position.set(-corridorHalf*1.1, -1.5, -40); coneR.position.set(corridorHalf*1.1, -1.5, -40);
@@ -523,8 +525,8 @@ function init3D(){
   // speed streaks (brighter)
   var streaks = new THREE.Group();
   for(var i=0;i<60;i++){
-    var g = new THREE.PlaneGeometry(0.022, 0.9);
-    var m = new THREE.MeshBasicMaterial({color:0xb8f0ff, transparent:true, opacity:0.28, depthWrite:false});
+    var g = new THREE.PlaneGeometry(0.024, 1.0);
+    var m = new THREE.MeshBasicMaterial({color:0xccf6ff, transparent:true, opacity:0.36, depthWrite:false});
     var p = new THREE.Mesh(g,m);
     p.position.set((Math.random()-.5)*corridorHalf*2, (Math.random()-.5)*4, -Math.random()*60);
     p.rotation.y = (Math.random()-.5)*0.8;
@@ -532,19 +534,19 @@ function init3D(){
   }
   scene.add(streaks);
 
-  // left/right wall segment pools
+  // left/right wall segment pools — BRIGHTER "buildings"
   makeWalls();
 }
 
-/* Walls & rooftops (extruded boxes with varied height) */
-var wallPoolL=[], wallPoolR=[], wallLen=6, targetAhead=120;
+/* Walls ("side buildings") */
+var wallPoolL=[], wallPoolR=[], wallLen=6;
 function newWall(side){
-  var h = THREE.MathUtils.lerp(corridorHeight*0.35, corridorHeight*0.82, Math.random());
+  var h = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
   var geo = new THREE.BoxGeometry(1.2, h, wallLen, 1,1,1);
   var mat = new THREE.MeshStandardMaterial({
-    color: side==='L'?0x1b3563:0x173056,
-    roughness:.7, metalness:.18,
-    emissive:0x284a86, emissiveIntensity:0.35
+    color: 0x2ad4ff,                  // bright cyan
+    roughness:.5, metalness:.22,
+    emissive:0x00aaff, emissiveIntensity:1.15  // neon-ish
   });
   var m = new THREE.Mesh(geo, mat);
   m.castShadow=false; m.receiveShadow=false;
@@ -554,14 +556,14 @@ function newWall(side){
 }
 function makeWalls(){
   for(var i=0;i<28;i++){ wallPoolL.push(newWall('L')); wallPoolR.push(newWall('R')); }
-  layoutWalls(worldZ);
+  layoutWalls();
 }
-function layoutWalls(z0){
+function layoutWalls(){
   var z = -10;
   for(var i=0;i<wallPoolL.length;i++){
     var mL = wallPoolL[i], mR = wallPoolR[i];
-    var hL = THREE.MathUtils.lerp(corridorHeight*0.35, corridorHeight*0.82, Math.random());
-    var hR = THREE.MathUtils.lerp(corridorHeight*0.35, corridorHeight*0.82, Math.random());
+    var hL = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
+    var hR = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
     mL.scale.y = hL / mL.userData.h; mR.scale.y = hR / mR.userData.h;
     mL.position.set(-corridorHalf, -corridorHeight*0.5 + hL/2, z); 
     mR.position.set( corridorHalf, -corridorHeight*0.5 + hR/2, z);
@@ -569,38 +571,29 @@ function layoutWalls(z0){
   }
 }
 
-/* Obstacles — brighter, with emissive */
-var obstacles=[]; // {mesh,type,side?,laneT?,mountY}
+/* Obstacles — ONLY NEON GREEN BARS */
+var obstacles=[];
 function spawnObstacle(){
-  var isBar = Math.random()<0.12;
-  if(isBar){
-    // crossbar spanning corridor (brighter)
-    var w = corridorHalf*1.9, t = THREE.MathUtils.lerp(0.15,0.32,Math.random());
-    var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random()); // world Y
-    var geo = new THREE.BoxGeometry(w, t, 1.2);
-    var mat = new THREE.MeshStandardMaterial({
-      color:0xE6F3FF, roughness:.3, metalness:.25,
-      emissive:0x66ccff, emissiveIntensity:1.0
-    });
-    var m = new THREE.Mesh(geo, mat); m.position.set(0,h,-80);
-    scene.add(m);
-    obstacles.push({mesh:m,type:'bar'});
-  }else{
-    // rooftop unit sitting on L/R wall (brighter)
-    var onLeft = Math.random()<0.5;
-    var sizeT = THREE.MathUtils.lerp(0.6, 1.4, Math.random());
-    var geo2 = new THREE.BoxGeometry(1.2*sizeT, 0.9*sizeT, 1.2*sizeT);
-    var mat2 = new THREE.MeshStandardMaterial({
-      color:0xD8F0FF, roughness:.4, metalness:.25,
-      emissive:0x66ccff, emissiveIntensity:0.85
-    });
-    var m2 = new THREE.Mesh(geo2, mat2);
-    var wall = (onLeft?wallPoolL:wallPoolR)[ Math.floor(Math.random()*wallPoolL.length) ];
-    var mountY = wall.position.y + (wall.scale.y*wall.userData.h)/2;
-    m2.position.set(onLeft?-corridorHalf: corridorHalf, mountY + geo2.parameters.height/2, -80);
-    scene.add(m2);
-    obstacles.push({mesh:m2,type:'unit',side:onLeft?'L':'R'});
-  }
+  // Always a crossbar spanning the corridor
+  var w = corridorHalf*1.95;
+  var t = THREE.MathUtils.lerp(0.18,0.28,Math.random());  // fairly thin
+  var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random()); // vertical placement
+  var geo = new THREE.BoxGeometry(w, t, 1.2);
+  var mat = new THREE.MeshStandardMaterial({
+    color:0x00ff66, roughness:.2, metalness:.05,
+    emissive:0x00ff66, emissiveIntensity:2.0
+  });
+  var m = new THREE.Mesh(geo, mat);
+  // subtle glow planes to make it pop
+  var glowGeo = new THREE.PlaneGeometry(w*1.02, t*5.4);
+  var glowMat = new THREE.MeshBasicMaterial({color:0x00ff66, transparent:true, opacity:0.22, depthWrite:false});
+  var glow = new THREE.Mesh(glowGeo, glowMat); glow.rotation.x = Math.PI/2;
+  glow.position.z += 0.01;
+  var g2 = glow.clone(); g2.position.z -= 0.02;
+  var group = new THREE.Group(); group.add(m, glow, g2);
+  group.position.set(0,h,-80);
+  scene.add(group);
+  obstacles.push({mesh:group,type:'bar'});
 }
 
 /* Recycle world: move everything forward instead of moving camera far */
@@ -611,16 +604,15 @@ function advanceWorld(dz){
     var a=wallPoolL[i], b=wallPoolR[i];
     a.position.z += dz; b.position.z += dz;
     if(a.position.z > minZ){ a.position.z = maxZ; b.position.z = maxZ;
-      // vary heights to keep it fresh
-      var hL = THREE.MathUtils.lerp(corridorHeight*0.35, corridorHeight*0.82, Math.random());
-      var hR = THREE.MathUtils.lerp(corridorHeight*0.35, corridorHeight*0.82, Math.random());
+      var hL = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
+      var hR = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
       a.scale.y = hL / a.userData.h; b.scale.y = hR / b.userData.h;
       a.position.y = -corridorHeight*0.5 + hL/2;
       b.position.y = -corridorHeight*0.5 + hR/2;
     }
   }
   // obstacles
-  for(i=obstacles.length-1;i>=0;i--){
+  for(var i=obstacles.length-1;i>=0;i--){
     var o=obstacles[i]; o.mesh.position.z += dz;
     if(o.mesh.position.z > 5){ scene.remove(o.mesh); obstacles.splice(i,1); continue; }
   }
@@ -715,11 +707,11 @@ function gameOver(){
 function drawUI(){
   uiCtx.clearRect(0,0,W,H);
 
-  // player sprite + thruster (brighter, behind sprite)
+  // player sprite + thruster
   var spriteW = 96, spriteH = 96;
   var cx = W/2, py = H*0.62 + player.y*16; // map world Y to pixels
 
-  // soft glow disk behind avatar so it never feels "dark"
+  // soft glow behind avatar
   uiCtx.save();
   uiCtx.globalCompositeOperation='lighter';
   var glow = uiCtx.createRadialGradient(cx,py,6, cx,py,60);
@@ -728,19 +720,18 @@ function drawUI(){
   uiCtx.fillStyle = glow;
   uiCtx.beginPath(); uiCtx.arc(cx,py,60,0,Math.PI*2); uiCtx.fill();
 
-  // thruster plume (below/behind, not beside)
+  // thruster plume
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
   uiCtx.fillStyle='rgba(255,240,140,.95)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
-  // bluish exhaust highlight
   uiCtx.fillStyle='rgba(120,220,255,.65)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
   uiCtx.restore();
 
-  // avatar sprite (on top of everything UI-side)
+  // avatar sprite
   uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH/2, spriteW, spriteH);
 
-  // light rays (brighter but subtle)
+  // light rays
   uiCtx.save();
   uiCtx.globalCompositeOperation='lighter'; uiCtx.globalAlpha=.22;
   for(var i=0;i<24;i++){
@@ -757,43 +748,39 @@ function frame(now){
   if (game.ended) return;
   var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
-  // physics (vertical)
+  // physics (vertical) — kill on top/ground touch
   var ay = (thrust? -phys.thrust : phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
-  player.y  = Math.max(-3.0, Math.min(3.3, player.y + (player.vy*dt)/260)); // meters-ish
+  var nextY = player.y + (player.vy*dt)/260;
+  if(nextY <= -3.0 || nextY >= 3.3){ gameOver(); return; } // crash at bounds
+  player.y = Math.max(-3.0, Math.min(3.3, nextY)); // keep within corridor
 
   // advance world towards camera
-  var mps = (speed/3.6) * (thrust?1.18:1.0);
+  var mps = (speed/3.6) * (thrust?1.12:1.0);
   worldZ += mps*dt;
   advanceWorld((mps*dt)); // move all meshes forward (toward camera)
 
-  // periodic obstacle spawns (easier cadence)
+  // periodic obstacle spawns (calm cadence)
   spawnTimer += dt;
-  var base=0.6, faster=1.0;
-  if(spawnTimer > base*faster){
+  if(spawnTimer > 0.8){ // slower for easy testing
     spawnTimer = 0;
     spawnObstacle();
-    if(Math.random()<0.10) spawnObstacle(); // rarely double-spawn
+    if(Math.random()<0.06) spawnObstacle(); // rarely double-spawn
   }
 
-  // position/bank camera for a bit of life
+  // position/bank camera
   camera.position.y = player.y*0.6;
   camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, (thrust?-0.03:0.03), 0.15);
 
-  // collisions (approx): when obstacle passes z≈0 near center and y overlaps sprite band
+  // collisions with bars only
   var pxY = camera.position.y, bandTop = pxY + 0.9, bandBot = pxY - 0.9;
   for(var i=0;i<obstacles.length;i++){
     var o = obstacles[i]; var z = o.mesh.position.z;
-    if(z > 0.6 && z < 1.6){ // right at player slice
-      if(o.type==='bar'){
-        var top = o.mesh.position.y + o.mesh.geometry.parameters.height/2;
-        var bot = o.mesh.position.y - o.mesh.geometry.parameters.height/2;
-        if(!(bandTop < bot || bandBot > top)){ gameOver(); return; }
-      }else{
-        var top2 = o.mesh.position.y + o.mesh.geometry.parameters.height/2 + 0.3;
-        var bot2 = o.mesh.position.y - o.mesh.geometry.parameters.height/2 - 0.1;
-        if(!(bandTop < bot2 || bandBot > top2)){ gameOver(); return; }
-      }
+    if(z > 0.6 && z < 1.6){
+      var bar = o.mesh.children[0]; // central box
+      var top = o.mesh.position.y + bar.geometry.parameters.height/2;
+      var bot = o.mesh.position.y - bar.geometry.parameters.height/2;
+      if(!(bandTop < bot || bandBot > top)){ gameOver(); return; }
     }
   }
 
