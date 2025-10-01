@@ -459,7 +459,8 @@ addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* Three.js scene */
 var scene, camera, renderer, fogColor=0x0a1020;
-var worldZ=0, speed=190, time=0, last=performance.now();
+/* ↓↓↓ easier feel: slow the world so you can practice up/down (requested) */
+var worldZ=0, speed=120, time=0, last=performance.now();
 var corridorHalf=6.5; // meters half-width
 var corridorHeight=10; // meters
 var DEPTH=300; // meters of active world
@@ -546,22 +547,28 @@ function layoutWalls(z0){
 /* Obstacles */
 var obstacles=[]; // {mesh,type,side?,laneT?,mountY}
 function spawnObstacle(){
-  var isBar = Math.random()<0.18;
+  var isBar = Math.random()<0.12; /* ↓ fewer bars */
   if(isBar){
-    // crossbar spanning corridor
+    // crossbar spanning corridor (brighter)
     var w = corridorHalf*1.9, t = THREE.MathUtils.lerp(0.15,0.32,Math.random());
     var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random()); // world Y
     var geo = new THREE.BoxGeometry(w, t, 1.2);
-    var mat = new THREE.MeshStandardMaterial({color:0x9fb2cf, roughness:.7, metalness:.12});
+    var mat = new THREE.MeshStandardMaterial({
+      color:0xE6F3FF, roughness:.4, metalness:.2,
+      emissive:0x66ccff, emissiveIntensity:0.9
+    });
     var m = new THREE.Mesh(geo, mat); m.position.set(0,h,-80);
     scene.add(m);
     obstacles.push({mesh:m,type:'bar'});
   }else{
-    // rooftop unit sitting on L/R wall
+    // rooftop unit sitting on L/R wall (brighter)
     var onLeft = Math.random()<0.5;
     var sizeT = THREE.MathUtils.lerp(0.6, 1.4, Math.random());
     var geo2 = new THREE.BoxGeometry(1.2*sizeT, 0.9*sizeT, 1.2*sizeT);
-    var mat2 = new THREE.MeshStandardMaterial({color: Math.random()<0.5?0x9fb2cf:0x8cc0d6, roughness:.65, metalness:.12});
+    var mat2 = new THREE.MeshStandardMaterial({
+      color:0xD8F0FF, roughness:.45, metalness:.22,
+      emissive:0x66ccff, emissiveIntensity:0.75
+    });
     var m2 = new THREE.Mesh(geo2, mat2);
     var wall = (onLeft?wallPoolL:wallPoolR)[ Math.floor(Math.random()*wallPoolL.length) ];
     var mountY = wall.position.y + (wall.scale.y*wall.userData.h)/2;
@@ -722,13 +729,13 @@ function frame(now){
   worldZ += mps*dt;
   advanceWorld((mps*dt)); // move all meshes forward (toward camera)
 
-  // periodic obstacle spawns
+  // periodic obstacle spawns (fewer overall; easier)
   spawnTimer += dt;
-  var base=0.22, faster=Math.max(0.55, 1 - (game.score/1400));
+  var base=0.6, faster=1.0;
   if(spawnTimer > base*faster){
     spawnTimer = 0;
     spawnObstacle();
-    if(Math.random()<0.45) spawnObstacle();
+    if(Math.random()<0.10) spawnObstacle(); // rarely double-spawn
   }
 
   // position/bank camera for a bit of life
