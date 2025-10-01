@@ -40,25 +40,42 @@
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{ --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18); --arcade:#9ef5ff; }
-    html,body{height:100%;margin:0;background:#070a12;color:#e8eef7;font:14px/1.2 system-ui,Arial}
+    :root{ --hud:rgba(255,255,255,.10); --hudLine:rgba(255,255,255,.34); --arcade:#aef3ff; }
+    html,body{height:100%;margin:0;background:#0b1730;color:#e8eef7;font:14px/1.2 system-ui,Arial}
+    /* brighter backdrop */
+    body{
+      background:
+        radial-gradient(140% 90% at 50% 10%, rgba(40,80,150,.35), rgba(7,10,18,1) 70%) no-repeat,
+        linear-gradient(#0e2141,#091427);
+      caret-color: transparent;
+    }
     .wrap{position:relative;max-width:480px;height:100svh;margin:0 auto;
-          border-left:1px solid rgba(255,255,255,.06);border-right:1px solid rgba(255,255,255,.06);overflow:hidden}
+          border-left:1px solid rgba(255,255,255,.10);border-right:1px solid rgba(255,255,255,.10);overflow:hidden}
     canvas{display:block;width:100%;height:100%}
+    /* Disable text selection / callout / gestures on canvases (fix iOS bubble) */
+    html,body,canvas,.wrap{
+      -webkit-user-select:none; user-select:none;
+      -webkit-touch-callout:none; touch-action:none;
+    }
     /* Two stacked canvases: gl (3D) under, ui (avatar/FX) over */
     #gl{position:absolute;inset:0;z-index:1}
     #ui{position:absolute;inset:0;z-index:2}
     .hud{position:absolute;left:10px;right:10px;top:10px;display:flex;justify-content:space-between;gap:8px;z-index:5}
     .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800}
-    .pill strong{font-size:13px;color:var(--arcade)}
+    .pill{
+      background:var(--hud);
+      border:1px solid var(--hudLine);
+      backdrop-filter:blur(10px);
+      padding:4px 10px;border-radius:999px;font-size:12px;font-weight:800;
+      box-shadow:0 0 0 1px rgba(0,0,0,.15) inset, 0 2px 6px rgba(0,0,0,.25);
+    }
+    .pill strong{font-size:14px;color:var(--arcade); text-shadow:0 0 8px rgba(160,245,255,.75)}
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:6;
-      background:radial-gradient(120% 120% at 50% 70%, rgba(0,180,255,.08), rgba(0,0,0,.65)); transition:opacity .18s ease}
-    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:16px 18px;
-      display:flex;flex-direction:column;gap:12px;align-items:center;backdrop-filter:blur(6px)}
+      background:radial-gradient(120% 120% at 50% 70%, rgba(100,190,255,.18), rgba(0,0,0,.45)); transition:opacity .18s ease}
+    .startCard{background:rgba(15,25,48,.75);border:1px solid var(--hudLine);border-radius:14px;padding:16px 18px;
+      display:flex;flex-direction:column;gap:12px;align-items:center;backdrop-filter:blur(8px);box-shadow:0 12px 30px rgba(0,0,0,.35)}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:10px;border:1px solid var(--hudLine);
-         background:var(--chip-bg);color:inherit;text-decoration:none;font-weight:800}
+         background:rgba(255,255,255,.06);color:inherit;text-decoration:none;font-weight:800}
     .finish{position:absolute;left:10px;right:10px;bottom:10px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
     .finish .pill{font-size:12px}
   </style>
@@ -80,7 +97,7 @@
     <div id="startOverlay" class="startOverlay" aria-live="polite">
       <div class="startCard">
         <div style="font-weight:900;letter-spacing:.4px">JETMAN ROOFTOPS</div>
-        <div style="font-size:12px;opacity:.85;text-align:center">Tap/hold to thrust up. Dodge rooftop units and crossbars.</div>
+        <div style="font-size:12px;opacity:.95;text-align:center">Tap/hold to thrust up. Dodge rooftop units and crossbars.</div>
         <div class="row">
           <a id="backBtn" class="btn" href="/izza-game/minigames">← Back</a>
           <button id="startBtn" class="btn" type="button">START</button>
@@ -431,6 +448,11 @@ var glCvs = document.getElementById('gl');
 var uiCvs = document.getElementById('ui'), uiCtx = uiCvs.getContext('2d');
 uiCtx.imageSmoothingEnabled=false;
 
+/* Prevent long-press text/callout bubbles on iOS while playing */
+uiCvs.addEventListener('contextmenu', function(e){ e.preventDefault(); }, false);
+uiCvs.addEventListener('touchstart', function(e){ e.preventDefault(); }, {passive:false});
+uiCvs.addEventListener('pointerdown', function(e){ e.preventDefault(); }, false);
+
 var W=0,H=0,dpr=1;
 function hardResize(){
   var r = glCvs.getBoundingClientRect();
@@ -458,8 +480,8 @@ uiCvs.addEventListener('pointerdown', function(){ thrust=true; }, false);
 addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* Three.js scene */
-var scene, camera, renderer, fogColor=0x0a1020;
-/* ↓↓↓ easier feel: slow the world so you can practice up/down (requested) */
+var scene, camera, renderer, fogColor=0x102349;
+/* keep easier speed from your last version */
 var worldZ=0, speed=120, time=0, last=performance.now();
 var corridorHalf=6.5; // meters half-width
 var corridorHeight=10; // meters
@@ -467,8 +489,9 @@ var DEPTH=300; // meters of active world
 
 function init3D(){
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x070a12);
-  scene.fog = new THREE.FogExp2(0x061017, 0.06);
+  /* brighter background & lighter fog */
+  scene.background = new THREE.Color(0x0e2141);
+  scene.fog = new THREE.FogExp2(0x0a1b35, 0.018);
 
   camera = new THREE.PerspectiveCamera(55, W/H, 0.1, 1000);
   camera.position.set(0, 0, 6);
@@ -477,30 +500,31 @@ function init3D(){
   renderer = new THREE.WebGLRenderer({canvas: glCvs, antialias: true, alpha: true});
   renderer.setPixelRatio(dpr); renderer.setSize(W,H,false);
 
-  // lights
-  var amb = new THREE.AmbientLight(0x88aaff, .35); scene.add(amb);
-  var dir = new THREE.DirectionalLight(0x88ccff, .9); dir.position.set(-2,4,3); scene.add(dir);
+  // brighter lights
+  var hemi = new THREE.HemisphereLight(0xbfd9ff, 0x0a1020, 0.85); scene.add(hemi);
+  var amb = new THREE.AmbientLight(0xaecbff, .55); scene.add(amb);
+  var dir = new THREE.DirectionalLight(0xbfe6ff, 1.15); dir.position.set(-2,4,3); scene.add(dir);
 
-  // floor
+  // floor (lighter)
   var floorGeo = new THREE.PlaneGeometry(corridorHalf*2.4, DEPTH, 1, 1);
-  var floorMat = new THREE.MeshStandardMaterial({color:0x0b1220, roughness:.9, metalness:.05});
+  var floorMat = new THREE.MeshStandardMaterial({color:0x123059, roughness:.75, metalness:.12, emissive:0x112a55, emissiveIntensity:.25});
   var floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotateX(-Math.PI/2); floor.position.set(0,-corridorHeight*0.55, -DEPTH/2);
   scene.add(floor);
 
-  // glow cones at horizon
-  var coneGeo = new THREE.ConeGeometry(2.2, 6, 16, 1, true);
-  var coneMat = new THREE.MeshBasicMaterial({color:0x00eeff, transparent:true, opacity:.18, side:THREE.DoubleSide});
+  // glow cones at horizon (stronger)
+  var coneGeo = new THREE.ConeGeometry(2.3, 6.4, 18, 1, true);
+  var coneMat = new THREE.MeshBasicMaterial({color:0x24e0ff, transparent:true, opacity:.28, side:THREE.DoubleSide});
   var coneL = new THREE.Mesh(coneGeo, coneMat), coneR = new THREE.Mesh(coneGeo, coneMat);
   coneL.rotation.set(Math.PI/2.1, 0.1, 0); coneR.rotation.set(Math.PI/2.1, -0.1, 0);
   coneL.position.set(-corridorHalf*1.1, -1.5, -40); coneR.position.set(corridorHalf*1.1, -1.5, -40);
   scene.add(coneL, coneR);
 
-  // speed streaks (instanced lines)
+  // speed streaks (brighter)
   var streaks = new THREE.Group();
   for(var i=0;i<60;i++){
-    var g = new THREE.PlaneGeometry(0.02, 0.8);
-    var m = new THREE.MeshBasicMaterial({color:0x99e6ff, transparent:true, opacity:0.18, depthWrite:false});
+    var g = new THREE.PlaneGeometry(0.022, 0.9);
+    var m = new THREE.MeshBasicMaterial({color:0xb8f0ff, transparent:true, opacity:0.28, depthWrite:false});
     var p = new THREE.Mesh(g,m);
     p.position.set((Math.random()-.5)*corridorHalf*2, (Math.random()-.5)*4, -Math.random()*60);
     p.rotation.y = (Math.random()-.5)*0.8;
@@ -518,8 +542,9 @@ function newWall(side){
   var h = THREE.MathUtils.lerp(corridorHeight*0.35, corridorHeight*0.82, Math.random());
   var geo = new THREE.BoxGeometry(1.2, h, wallLen, 1,1,1);
   var mat = new THREE.MeshStandardMaterial({
-    color: side==='L'?0x0e192e:0x0c172a,
-    roughness:.85, metalness:.05, emissive:0x112233, emissiveIntensity:0.08
+    color: side==='L'?0x1b3563:0x173056,
+    roughness:.7, metalness:.18,
+    emissive:0x284a86, emissiveIntensity:0.35
   });
   var m = new THREE.Mesh(geo, mat);
   m.castShadow=false; m.receiveShadow=false;
@@ -544,18 +569,18 @@ function layoutWalls(z0){
   }
 }
 
-/* Obstacles */
+/* Obstacles — brighter, with emissive */
 var obstacles=[]; // {mesh,type,side?,laneT?,mountY}
 function spawnObstacle(){
-  var isBar = Math.random()<0.12; /* ↓ fewer bars */
+  var isBar = Math.random()<0.12;
   if(isBar){
     // crossbar spanning corridor (brighter)
     var w = corridorHalf*1.9, t = THREE.MathUtils.lerp(0.15,0.32,Math.random());
     var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random()); // world Y
     var geo = new THREE.BoxGeometry(w, t, 1.2);
     var mat = new THREE.MeshStandardMaterial({
-      color:0xE6F3FF, roughness:.4, metalness:.2,
-      emissive:0x66ccff, emissiveIntensity:0.9
+      color:0xE6F3FF, roughness:.3, metalness:.25,
+      emissive:0x66ccff, emissiveIntensity:1.0
     });
     var m = new THREE.Mesh(geo, mat); m.position.set(0,h,-80);
     scene.add(m);
@@ -566,8 +591,8 @@ function spawnObstacle(){
     var sizeT = THREE.MathUtils.lerp(0.6, 1.4, Math.random());
     var geo2 = new THREE.BoxGeometry(1.2*sizeT, 0.9*sizeT, 1.2*sizeT);
     var mat2 = new THREE.MeshStandardMaterial({
-      color:0xD8F0FF, roughness:.45, metalness:.22,
-      emissive:0x66ccff, emissiveIntensity:0.75
+      color:0xD8F0FF, roughness:.4, metalness:.25,
+      emissive:0x66ccff, emissiveIntensity:0.85
     });
     var m2 = new THREE.Mesh(geo2, mat2);
     var wall = (onLeft?wallPoolL:wallPoolR)[ Math.floor(Math.random()*wallPoolL.length) ];
@@ -602,10 +627,9 @@ function advanceWorld(dz){
 }
 
 /* HUD / hi */
-var hi=Number(localStorage.getItem('jet_hi')||0);
+var hi = Number(localStorage.getItem('jet_hi') || 0);
 document.getElementById('hi').textContent = hi;
-
-/* Score/coins mapping */
+/* Score/coins mapping (unchanged economy) */
 var COINS_PER_SCORE = 10;
 var COINS_PER_CREDIT = 1000;
 
@@ -619,7 +643,7 @@ var finalCraftEl = document.getElementById('finalCraft');
 var WALLET_READY=false, walletDirty=false, runStartCoins=0;
 var game = { score:0, creditsMinted:0, ended:false };
 
-/* Wallet ops */
+/* Wallet ops (unchanged logic) */
 function persistWalletAndSave(){
   return new Promise(function(resolve){ try{
     writeCraftAll(readCraftAny());
@@ -690,28 +714,42 @@ function gameOver(){
    ========================= */
 function drawUI(){
   uiCtx.clearRect(0,0,W,H);
-  // player sprite w/ thruster — keep identical look
+
+  // player sprite + thruster (brighter, behind sprite)
   var spriteW = 96, spriteH = 96;
   var cx = W/2, py = H*0.62 + player.y*16; // map world Y to pixels
-  // thruster
+
+  // soft glow disk behind avatar so it never feels "dark"
   uiCtx.save();
   uiCtx.globalCompositeOperation='lighter';
-  uiCtx.fillStyle='rgba(255,220,90,.85)';
-  var flame = thrust ? 16+10*Math.sin(time*40) : 8;
-  uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.52, py, flame, 7, 0, 0, Math.PI*2); uiCtx.fill();
+  var glow = uiCtx.createRadialGradient(cx,py,6, cx,py,60);
+  glow.addColorStop(0,'rgba(120,210,255,.55)');
+  glow.addColorStop(1,'rgba(0,0,0,0)');
+  uiCtx.fillStyle = glow;
+  uiCtx.beginPath(); uiCtx.arc(cx,py,60,0,Math.PI*2); uiCtx.fill();
+
+  // thruster plume (below/behind, not beside)
+  var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
+  uiCtx.fillStyle='rgba(255,240,140,.95)';
+  uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
+  // bluish exhaust highlight
+  uiCtx.fillStyle='rgba(120,220,255,.65)';
+  uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
   uiCtx.restore();
-  // avatar sprite
+
+  // avatar sprite (on top of everything UI-side)
   uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH/2, spriteW, spriteH);
 
-  // light rays
-  uiCtx.globalCompositeOperation='lighter'; uiCtx.globalAlpha=.16;
+  // light rays (brighter but subtle)
+  uiCtx.save();
+  uiCtx.globalCompositeOperation='lighter'; uiCtx.globalAlpha=.22;
   for(var i=0;i<24;i++){
     var a=(-0.55 + i/23*1.1), len=H*1.2, x2=cx + Math.tan(a)*len, y2=H+60;
     var g=uiCtx.createLinearGradient(cx,py,x2,y2);
-    g.addColorStop(0,'rgba(0,255,255,.6)'); g.addColorStop(1,'rgba(0,0,0,0)');
-    uiCtx.strokeStyle=g; uiCtx.lineWidth=1.5; uiCtx.beginPath(); uiCtx.moveTo(cx,py); uiCtx.lineTo(x2,y2); uiCtx.stroke();
+    g.addColorStop(0,'rgba(90,220,255,.9)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    uiCtx.strokeStyle=g; uiCtx.lineWidth=1.6; uiCtx.beginPath(); uiCtx.moveTo(cx,py); uiCtx.lineTo(x2,y2); uiCtx.stroke();
   }
-  uiCtx.globalAlpha=1; uiCtx.globalCompositeOperation='source-over';
+  uiCtx.restore();
 }
 
 var spawnTimer=0;
@@ -729,7 +767,7 @@ function frame(now){
   worldZ += mps*dt;
   advanceWorld((mps*dt)); // move all meshes forward (toward camera)
 
-  // periodic obstacle spawns (fewer overall; easier)
+  // periodic obstacle spawns (easier cadence)
   spawnTimer += dt;
   var base=0.6, faster=1.0;
   if(spawnTimer > base*faster){
