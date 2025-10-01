@@ -41,7 +41,7 @@
     html,body{height:100%;margin:0;background:#070a12;color:#e8eef7;font:14px/1.2 system-ui,Arial}
     .wrap{position:relative;max-width:480px;height:100svh;margin:0 auto;
           border-left:1px solid rgba(255,255,255,.06);border-right:1px solid rgba(255,255,255,.06);overflow:hidden}
-    svg{display:block;width:100%;height:100%}
+    canvas{display:block;width:100%;height:100%}
     .hud{position:absolute;left:10px;right:10px;top:10px;display:flex;justify-content:space-between;gap:8px;z-index:3}
     .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
@@ -83,73 +83,8 @@
       </div>
     </div>
 
-    <!-- GAME (SVG scene root) -->
-    <svg id="scene" viewBox="0 0 480 800" preserveAspectRatio="xMidYMid slice" aria-label="Jetman Rooftops">
-      <defs>
-        <!-- Sky gradient -->
-        <linearGradient id="gSky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#06080f"/>
-          <stop offset="1" stop-color="#0b1020"/>
-        </linearGradient>
-        <!-- Neon fog -->
-        <linearGradient id="gFog" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="rgba(0,255,255,.28)"/>
-          <stop offset=".4" stop-color="rgba(0,200,255,.12)"/>
-          <stop offset="1" stop-color="rgba(0,0,0,0)"/>
-        </linearGradient>
-        <!-- AC/duct face gradients -->
-        <linearGradient id="gFaceA" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#b8c9e3"/><stop offset="1" stop-color="#7f92b1"/>
-        </linearGradient>
-        <linearGradient id="gFaceB" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#9fb2cf"/><stop offset="1" stop-color="#6a7f9e"/>
-        </linearGradient>
-        <!-- Glow blur -->
-        <filter id="fGlow" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="4" result="b"/>
-          <feMerge>
-            <feMergeNode in="b"/><feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
-        <!-- Thruster blur -->
-        <filter id="fThruster" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="3"/>
-        </filter>
-        <!-- Shadow -->
-        <filter id="fSoft" x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity=".35"/>
-        </filter>
-      </defs>
-
-      <!-- Background layers -->
-      <g id="bg">
-        <rect id="sky" x="0" y="0" width="100%" height="100%" fill="url(#gSky)"/>
-        <!-- Parallax clouds -->
-        <g id="clouds" opacity=".5" filter="url(#fGlow)"></g>
-      </g>
-
-      <!-- World -->
-      <g id="world">
-        <!-- Floor corridor -->
-        <polygon id="floor" fill="#0b1220"></polygon>
-        <rect id="fog" x="0" y="0" width="100%" height="100%" fill="url(#gFog)" style="mix-blend-mode:screen"></rect>
-
-        <!-- Rooftop “walls” rising up the sides -->
-        <g id="roofsL"></g>
-        <g id="roofsR"></g>
-
-        <!-- Obstacles -->
-        <g id="obstacles"></g>
-      </g>
-
-      <!-- Player -->
-      <g id="player">
-        <ellipse id="thruster" rx="12" ry="5" fill="rgba(255,220,90,.9)" filter="url(#fThruster)" opacity=".9"></ellipse>
-        <image id="avatar" width="96" height="96" x="-48" y="-48" href="" filter="url(#fSoft)"></image>
-        <!-- light rays -->
-        <g id="rays" opacity=".16"></g>
-      </g>
-    </svg>
+    <!-- GAME -->
+    <canvas id="c"></canvas>
 
     <!-- FINISH strip -->
     <div class="finish" id="finish">
@@ -213,13 +148,10 @@ function withAuth(href){
   if (U) url.searchParams.set('u', U);
   return url.pathname + (url.search ? url.search : '');
 }
-
-/* === Wire links exactly like Basketball === */
-document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
-['cityBtn','cityBtn2','againBtn'].forEach(function(id){
-  var el = document.getElementById(id);
-  if (el) el.href = withAuth(el.getAttribute('href'));
-});
+document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
+document.getElementById('cityBtn').href   = withAuth('/izza-game/play');
+document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
+document.getElementById('againBtn').href  = withAuth('/izza-game/minigames');
 
 /* =========================
    Wallet helpers (shared)
@@ -360,7 +292,7 @@ function ensureSession(){
 }
 
 /* =========================
-   Avatar pipeline (same as Arena)
+   Avatar pipeline (same as Arena) — unchanged logic
    ========================= */
 var SPRITES = {
   body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
@@ -484,38 +416,23 @@ var jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
 function ensureAvatarSprite(){
   try{
     var profile = LAST_CHARACTER || JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
-    return buildAvatarCanvas(jetCtx, 96, profile).then(function(){
-      try{
-        var url = jetmanCanvas.toDataURL('image/png');
-        document.getElementById('avatar').setAttribute('href', url);
-      }catch(_){}
-    });
+    return buildAvatarCanvas(jetCtx, 96, profile);
   }catch(_){ return Promise.resolve(); }
 }
 
 /* =========================
-   GAME (SVG 3D)
+   GAME
    ========================= */
-var svg = document.getElementById('scene');
-var floorPoly = document.getElementById('floor');
-var fogRect = document.getElementById('fog');
-var roofsL = document.getElementById('roofsL');
-var roofsR = document.getElementById('roofsR');
-var obsLayer = document.getElementById('obstacles');
-var clouds = document.getElementById('clouds');
-var rays = document.getElementById('rays');
-var thruster = document.getElementById('thruster');
-var avatarNode = document.getElementById('avatar');
-
+var cvs = document.getElementById('c'), ctx = cvs.getContext('2d',{alpha:true});
 var W=0,H=0,dpr=1;
 function hardResize(){
-  var r = svg.getBoundingClientRect();
+  var r = cvs.getBoundingClientRect();
   var w = Math.max(1, Math.floor(r.width || window.innerWidth || 1));
   var h = Math.max(1, Math.floor(r.height || window.innerHeight || 1));
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (w !== W || h !== H){
     W=w; H=h;
-    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    cvs.width=W*dpr; cvs.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
     layout();
   }
 }
@@ -541,18 +458,18 @@ var phys = { g: 1600, thrust: 1900, maxVy: 880 };
 player.y = VPT_Y;
 var thrust=false; addEventListener('keydown',function(e){ if(e.code==='Space') thrust=true; }, false);
 addEventListener('keyup',function(e){ if(e.code==='Space') thrust=false; }, false);
-svg.addEventListener('pointerdown', function(){ thrust=true; }, false);
+cvs.addEventListener('pointerdown', function(){ thrust=true; }, false);
 addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* world */
 var time=0, last=performance.now(), worldZ=0, speed=190;
-var STEP_Z=120, DEPTH_Z=24000;
+var STEP_Z=72, DEPTH_Z=24000;
 
 /* dynamic rooftops (segments) */
 var sides = { LEFT:0, RIGHT:1 };
 var roofs = [[],[]];
-function randRoofHeight(){ return H* (0.12 + Math.random()*0.34); }
-function randRoofLen(){ return 260 + Math.random()*520; }
+function randRoofHeight(){ return H* (0.10 + Math.random()*0.32); }
+function randRoofLen(){ return 260 + Math.random()*480; }
 function ensureRoofSegments(toZ){
   for(var sideKey in sides){
     var side = sides[sideKey];
@@ -560,7 +477,7 @@ function ensureRoofSegments(toZ){
     var z = arr.length ? arr[arr.length-1].endZ : 0;
     while (z < toZ + DEPTH_Z){
       var len = randRoofLen();
-      arr.push({ startZ:z, endZ:z+len, h: randRoofHeight(), el:null });
+      arr.push({ startZ:z, endZ:z+len, h: randRoofHeight() });
       z += len;
     }
   }
@@ -577,15 +494,12 @@ function trimRoofSegments(zAbs){
   for(var sideKey in sides){
     var side = sides[sideKey];
     var arr = roofs[side];
-    while (arr.length && arr[0].endZ < zAbs - 200){
-      if(arr[0].el && arr[0].el.parentNode) arr[0].el.parentNode.removeChild(arr[0].el);
-      arr.shift();
-    }
+    while (arr.length && arr[0].endZ < zAbs - 200) arr.shift();
   }
 }
 
 /* obstacles on roofs/bars */
-var obstacles=[]; // {type, spawnZ, laneT, side, size, mountH, alive, el}
+var obstacles=[]; // {type, spawnZ, laneT, side, size, mountH}
 var lanes=[0.30,0.50,0.70];
 function chooseSideForLane(laneT){ return laneT<0.5 ? sides.LEFT : sides.RIGHT; }
 function spawnObstacle(z0){
@@ -596,13 +510,13 @@ function spawnObstacle(z0){
   if (type==='bar'){
     var size = 0.45 + Math.random()*0.4;
     var h = H*(0.22 + Math.random()*0.34);
-    obstacles.push({type:type, spawnZ:z0, laneT:lane, side:null, size:size, mountH:h, alive:true, el:null});
+    obstacles.push({type:type, spawnZ:z0, laneT:lane, side:null, size:size, mountH:h, alive:true});
     return;
   }
   var side = chooseSideForLane(lane);
   var mountH = roofHeightAt(side, z0);
   var size2 = 0.55 + Math.random()*0.5;
-  obstacles.push({type:type, spawnZ:z0, laneT:lane, side:side, size:size2, mountH:mountH, alive:true, el:null});
+  obstacles.push({type:type, spawnZ:z0, laneT:lane, side:side, size:size2, mountH:mountH, alive:true});
 }
 var lastSpawn = performance.now();
 function spawnTick(now){
@@ -617,131 +531,83 @@ function spawnTick(now){
 /* helpers */
 function edgesAt(z){ var p=project(z); var y=Math.max(p.y,VANISH_Y);
   var half=(y===VANISH_Y)?0.0001:p.half; return {y:y, lx:W/2-half-14, rx:W/2+half+14, t:p.t};}
-function setPoints(poly, pts){ poly.setAttribute('points', pts.map(function(p){return p[0]+','+p[1]}).join(' ')); }
 
-/* build static clouds once (parallax) */
-(function buildClouds(){
-  for(var i=0;i<18;i++){
-    var c=document.createElementNS('http://www.w3.org/2000/svg','ellipse');
-    c.setAttribute('rx', 20+Math.random()*28);
-    c.setAttribute('ry', 10+Math.random()*16);
-    c.setAttribute('fill','rgba(200,240,255,.35)');
-    clouds.appendChild(c);
-  }
-})();
-
-/* draw background dynamic parts */
+/* draw */
 function drawBackground(){
-  // move clouds along sides
-  var n=clouds.children.length, sway=Math.sin(time*0.8)*8;
-  for(var i=0;i<n;i++){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#06080f'); g.addColorStop(1,'#0b1020'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.18;
+  var gg=ctx.createRadialGradient(VPT_X,VPT_Y,50,VPT_X,VPT_Y,Math.max(W,H)*0.9);
+  gg.addColorStop(0,'rgba(0,255,255,.7)'); gg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=gg; ctx.fillRect(0,0,W,H); ctx.restore();
+
+  // side clouds
+  ctx.save();
+  var count = 24, sway = Math.sin(time*0.8)*8;
+  for (var i=0;i<count;i++){
     var z = (i*520 + (worldZ*1.2)%520);
     var e = edgesAt(z);
     var y = Math.min(H, Math.max(VPT_Y+8, e.y));
     var xL = e.lx - 18 + sway, xR = e.rx + 18 - sway;
-    var node=clouds.children[i];
-    var pickL = (i%2===0);
-    node.setAttribute('cx', pickL?xL:xR);
-    node.setAttribute('cy', y);
-    node.setAttribute('opacity', 0.18 + 0.35*e.t);
-    node.setAttribute('rx', (16 + 28*e.t)*1.4);
-    node.setAttribute('ry', (16 + 28*e.t));
-  }
-}
+    var r = 16 + 28*e.t;
+    ctx.globalAlpha = 0.18 + 0.35*e.t;
 
-/* draw floor corridor polygon */
+    ctx.beginPath(); ctx.ellipse(xL, y, r*1.4, r, 0, 0, Math.PI*2);
+    var gl = ctx.createRadialGradient(xL,y,2,xL,y,r*1.6);
+    gl.addColorStop(0,'rgba(200,240,255,.50)'); gl.addColorStop(1,'rgba(200,240,255,0)'); ctx.fillStyle = gl; ctx.fill();
+
+    ctx.beginPath(); ctx.ellipse(xR, y, r*1.4, r, 0, 0, Math.PI*2);
+    var gr = ctx.createRadialGradient(xR,y,2,xR,y,r*1.6);
+    gr.addColorStop(0,'rgba(200,240,255,.50)'); gr.addColorStop(1,'rgba(200,240,255,0)'); ctx.fillStyle = gr; ctx.fill();
+  }
+  ctx.restore();
+}
 function drawFloor(){
-  var L=[], R[]; /* <— FIXED: was `var L=[],R[];` */
-  for(var z=0; z<=DEPTH_Z; z+=STEP_Z){
-    var e=edgesAt(z);
-    if(e.y>H && L.length) break;
-    L.push([e.lx,e.y]); R.push([e.rx,e.y]);
-  }
-  var pts=[[W/2,VANISH_Y]];
-  for(var i=R.length-1;i>=0;i--) pts.push([R[i][0], Math.min(R[i][1],H)]);
-  for(var j=0;j<L.length;j++)   pts.push([L[j][0], Math.min(L[j][1],H)]);
-  setPoints(floorPoly, pts);
-}
+  var L=[],R=[]; for(var z=0; z<=DEPTH_Z; z+=STEP_Z){ var e=edgesAt(z);
+    if(e.y>H && L.length) break; L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(W/2,VANISH_Y);
+  for(var i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
+  for(var j=0;j<L.length;j++)    ctx.lineTo(L[j][0], Math.min(L[j][1],H));
+  ctx.closePath();
+  var g=ctx.createLinearGradient(0,VANISH_Y,0,H);
+  g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#0a1523');
+  ctx.fillStyle=g; ctx.fill();
 
-/* draw rooftop extrusions as vertical quads */
-function ensureRoofEls(){
-  function ensure(sideGroup, sideIdx){
-    var arr = roofs[sideIdx];
-    for(var i=0;i<arr.length;i++){
-      if (!arr[i].el){
-        var g=document.createElementNS('http://www.w3.org/2000/svg','polygon');
-        g.setAttribute('fill', sideIdx===0 ? '#101a2e' : '#0f192c');
-        g.setAttribute('opacity','1');
-        g.setAttribute('filter','url(#fSoft)');
-        sideGroup.appendChild(g);
-        arr[i].el=g;
-      }
-    }
-  }
-  ensure(roofsL, 0);
-  ensure(roofsR, 1);
+  var fog=ctx.createLinearGradient(0,VANISH_Y,0,H);
+  fog.addColorStop(0,'rgba(0,255,255,.28)'); fog.addColorStop(.4,'rgba(0,200,255,.12)'); fog.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.globalCompositeOperation='screen'; ctx.fillStyle=fog; ctx.fill();
+  ctx.globalCompositeOperation='source-over';
+  ctx.restore();
 }
-function drawRooftops(){
-  ensureRoofEls();
+function drawRooftopLips(){
+  ctx.save();
   for (var sideKey in sides){
-    var side = sides[sideKey]|0;
-    var arr = roofs[side];
-    for (var i=0;i<arr.length;i++){
-      var seg = arr[i];
-      var e0 = edgesAt(Math.max(0, worldZ - seg.startZ));
-      var e1 = edgesAt(Math.max(0, worldZ - seg.endZ));
-      if (e0.y>H && e1.y>H) continue;
-      var eNear = e0.t>e1.t?e0:e1, eFar = e0.t>e1.t?e1:e0;
-      var lipNear = seg.h * eNear.t;
-      var lipFar  = seg.h * eFar.t;
-      var xN = (side===0? eNear.lx : eNear.rx);
-      var xF = (side===0? eFar.lx  : eFar.rx);
-      var yN = Math.max(eNear.y, VPT_Y+8), yF = Math.max(eFar.y, VPT_Y+8);
-      var pts = side===0
-        ? [[xN, yN - lipNear],[xN- Math.max(6,12*eNear.t), yN],[xF- Math.max(6,12*eFar.t), yF],[xF, yF - lipFar]]
-        : [[xN+ Math.max(6,12*eNear.t), yN],[xN, yN - lipNear],[xF, yF - lipFar],[xF+ Math.max(6,12*eFar.t), yF]];
-      setPoints(seg.el, pts);
-
-      if(!seg.edge){
-        seg.edge=document.createElementNS('http://www.w3.org/2000/svg','rect');
-        seg.edge.setAttribute('width','2'); seg.edge.setAttribute('height','6');
-        seg.edge.setAttribute('fill','rgba(120,200,255,1)');
-        (side===0?roofsL:roofsR).appendChild(seg.edge);
+    var side = sides[sideKey];
+    for (var z=0; z<=DEPTH_Z; z+=STEP_Z){
+      var zAbs = worldZ + z;
+      var e = edgesAt(z);
+      var x = (side===sides.LEFT)? e.lx : e.rx;
+      var y = Math.min(H, Math.max(e.y, VPT_Y+8));
+      var lip = roofHeightAt(side, zAbs);
+      var yTop = y - lip * e.t;
+      if (yTop < y - 2){
+        var w = Math.max(6, 12*e.t);
+        ctx.fillStyle = (side===sides.LEFT)? '#101a2e' : '#0f192c';
+        ctx.fillRect(x - (side===sides.LEFT?w:0), yTop, w, y - yTop);
+        ctx.globalAlpha = 0.12 + 0.25*e.t;
+        ctx.fillStyle = 'rgba(120,200,255,1)';
+        ctx.fillRect(x - (side===sides.LEFT?1:0), yTop-2, 2, 6);
+        ctx.globalAlpha = 1;
       }
-      seg.edge.setAttribute('x', (side===0?xN-1:xN));
-      seg.edge.setAttribute('y', (yN - lipNear)-2);
-      seg.edge.setAttribute('opacity', 0.12 + 0.25*eNear.t);
+      if (e.y>H) break;
     }
   }
+  ctx.restore();
 }
-
-/* obstacle factories */
-function makeBar(){
-  var g=document.createElementNS('http://www.w3.org/2000/svg','g');
-  var rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
-  rect.setAttribute('rx','3'); rect.setAttribute('ry','3');
-  rect.setAttribute('fill','rgba(140,170,255,.85)');
-  rect.setAttribute('stroke','rgba(40,80,140,.6)'); rect.setAttribute('stroke-width','2');
-  g.appendChild(rect);
-  g._rect=rect;
-  return g;
-}
-function makeUnit(){
-  var g=document.createElementNS('http://www.w3.org/2000/svg','g');
-  var top=document.createElementNS('http://www.w3.org/2000/svg','polygon');
-  var front=document.createElementNS('http://www.w3.org/2000/svg','polygon');
-  top.setAttribute('fill','url(#gFaceB)');
-  front.setAttribute('fill','url(#gFaceA)');
-  top.setAttribute('opacity','0.9'); front.setAttribute('opacity','0.95');
-  g.appendChild(top); g.appendChild(front);
-  g._top=top; g._front=front;
-  return g;
-}
-
-/* draw or update a single obstacle */
 function drawObstacle(o){
   var zRel = Math.max(0, worldZ - o.spawnZ);
-  if(zRel>DEPTH_Z){ o.alive=false; if(o.el&&o.el.parentNode) o.el.parentNode.removeChild(o.el); return; }
+  if(zRel>DEPTH_Z){ o.alive=false; return; }
   var e = edgesAt(zRel);
   var x = e.lx + (e.rx-e.lx)*o.laneT;
   var floorY = Math.max(e.y, VPT_Y + H*0.02);
@@ -751,38 +617,22 @@ function drawObstacle(o){
     roofY = floorY - mountTopPx;
   }
 
-  if(!o.el){
-    o.el = (o.type==='bar') ? makeBar() : makeUnit();
-    o.el.setAttribute('filter','url(#fSoft)');
-    obsLayer.appendChild(o.el);
-  }
-
+  ctx.save(); ctx.translate(x, roofY);
   if(o.type==='bar'){
     var y = floorY - (o.mountH * e.t);
     var w = (e.rx-e.lx)*0.68, h = 10 + 26*e.t*o.size;
-    o.el._rect.setAttribute('x', x - w/2);
-    o.el._rect.setAttribute('y', y - h/2);
-    o.el._rect.setAttribute('width', w);
-    o.el._rect.setAttribute('height', h);
-    o.el.setAttribute('opacity','0.95');
+    ctx.translate(0, y - roofY);
+    ctx.fillStyle='rgba(140,170,255,.85)'; ctx.fillRect(-w/2, -h/2, w, h);
+    ctx.strokeStyle='rgba(40,80,140,.6)'; ctx.lineWidth=2; ctx.strokeRect(-w/2,-h/2,w,h);
   } else {
     var w2 = 40 + 220*e.t*o.size, h2 = 22 + 120*e.t*o.size;
-    var topDepth = Math.max(6, 10*e.t);
-    var pTop = [
-      [x - w2/2, roofY - h2],
-      [x + w2/2, roofY - h2],
-      [x + w2/2 + topDepth, roofY - h2 - topDepth],
-      [x - w2/2 + topDepth, roofY - h2 - topDepth]
-    ];
-    var pFront = [
-      [x - w2/2, roofY - h2],
-      [x + w2/2, roofY - h2],
-      [x + w2/2, roofY],
-      [x - w2/2, roofY]
-    ];
-    setPoints(o.el._top, pTop);
-    setPoints(o.el._front, pFront);
+    ctx.fillStyle=o.type==='ac'?'#9fb2cf':'#8cc0d6';
+    ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=2;
+    ctx.fillRect(-w2/2, -h2, w2, h2); ctx.strokeRect(-w2/2,-h2,w2,h2);
+    ctx.fillStyle='rgba(20,20,30,.8)'; ctx.fillRect(-w2*0.35, 0, w2*0.18, 4); ctx.fillRect( w2*0.17, 0, w2*0.18, 4);
+    ctx.globalAlpha=.25; ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(0,10,w2*0.55,10,0,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
   }
+  ctx.restore();
 
   // collision
   var px=W*0.5, py=player.y;
@@ -882,16 +732,6 @@ function gameOver(){
   finishEl.style.display = 'flex';
 }
 
-/* build light rays once */
-(function buildRays(){
-  for(var i=0;i<24;i++){
-    var ln=document.createElementNS('http://www.w3.org/2000/svg','line');
-    ln.setAttribute('stroke-width','1.5');
-    ln.setAttribute('stroke','url(#gFog)');
-    rays.appendChild(ln);
-  }
-})();
-
 /* main loop */
 function frame(now){
   if (game.ended) return;
@@ -917,37 +757,36 @@ function frame(now){
   trimRoofSegments(worldZ);
   spawnTick(now);
 
-  // render
+  ctx.clearRect(0,0,W,H);
   drawBackground();
   drawFloor();
-  drawRooftops();
-
+  drawRooftopLips();
   for(var i=obstacles.length-1;i>=0;i--){
     var o=obstacles[i]; if(!o.alive){ obstacles.splice(i,1); continue; } drawObstacle(o);
   }
 
-  // player avatar & thruster & rays
-  var px = W/2, py = player.y;
+  // player avatar with thruster
+  ctx.save();
+  var spriteW = 96, spriteH = 96;
+  var px = W/2 - spriteW/2, py = player.y - spriteH/2;
 
-  // thruster
+  ctx.globalCompositeOperation='lighter';
+  ctx.fillStyle='rgba(255,220,90,.85)';
   var flame = thrust ? 16+10*Math.sin(time*40) : 8;
-  thruster.setAttribute('cx', px-22);
-  thruster.setAttribute('cy', py+6);
-  thruster.setAttribute('rx', flame);
-  thruster.setAttribute('ry', 7);
+  ctx.beginPath(); ctx.ellipse(px-8, player.y, flame, 7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalCompositeOperation='source-over';
 
-  // avatar image (centered via x/y on <image> being -48,-48)
-  avatarNode.setAttribute('transform', 'translate('+px+','+py+')');
+  ctx.drawImage(jetmanCanvas, px, py, spriteW, spriteH);
+  ctx.restore();
 
-  // rays
-  for(var i=0;i<rays.children.length;i++){
-    var a=(-0.55 + i/(rays.children.length-1)*1.1), len=H*1.2, x2=VPT_X + Math.tan(a)*len, y2=H+60;
-    var ln=rays.children[i];
-    ln.setAttribute('x1', VPT_X);
-    ln.setAttribute('y1', py);
-    ln.setAttribute('x2', x2);
-    ln.setAttribute('y2', y2);
+  ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=.16;
+  for(i=0;i<24;i++){
+    var a=(-0.55 + i/23*1.1), len=H*1.2, x2=VPT_X + Math.tan(a)*len, y2=H+60;
+    var g=ctx.createLinearGradient(VPT_X,player.y,x2,y2);
+    g.addColorStop(0,'rgba(0,255,255,.6)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.strokeStyle=g; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(VPT_X,player.y); ctx.lineTo(x2,y2); ctx.stroke();
   }
+  ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
 
   requestAnimationFrame(frame);
 }
@@ -971,71 +810,58 @@ window.addEventListener('pagehide', function(){
 }, false);
 
 /* =========================
-   START button — SAME FLOW AS BASKETBALL
+   START button — Pi-safe boot
    ========================= */
 var startBtn = document.getElementById('startBtn');
-startBtn.addEventListener('click', startGame, false);
-startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
-
-/* Initial HUD values */
-updateCoinsHUD();
-
-async function startGame(){
+function startGame(){
   try{
     var overlay = document.getElementById('startOverlay');
+    overlay.style.opacity = '0.96';
 
-    // 0) If Arena handed us a fresh wallet, use it instantly
-    var handoff = consumeWalletHandoff();
-    if (handoff){ paintCoinsHUD(handoff.coins); }
+    var handoff = consumeWalletHandoff(); if (handoff){ paintCoinsHUD(handoff.coins); }
 
-    // 1) Warm session & Persist via hidden City frame (non-blocking)
-    try{ await primeViaCityIframe(); }catch(_){}
+    primeViaCityIframe({ maxWaitMs: 1500 });
+    ensureSession();
 
-    // 2) Best-effort session check (no redirect)
-    try{ await ensureSession(); }catch(_){}
-
-    // 3) Hydrate from Persist snapshot (server → LS)
-    var snapCoins = await hydrateFromSnapshot();
-
-    // Never regress the shown value after snapshot
-    (function(){
+    hydrateFromSnapshot().then(function(snapCoins){
       var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
-      var safe = Math.max(shown, snapCoins, readCoinsLS()||0);
-      paintCoinsHUD(safe);
+      paintCoinsHUD(Math.max(shown, snapCoins, readCoinsLS()||0));
+    });
+
+    (function(){
+      fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() })
+        .then(function(r){ if(!r.ok) return; return r.json().catch(function(){ return {}; }); })
+        .then(function(parsed){
+          if(!parsed) return;
+          parsed = parseWalletResponse(parsed);
+          var apiCoins = Number(parsed.coins)||0;
+          var apiCraft = Number(parsed.crafting)||0;
+          var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
+          var nextCoins = Math.max(shown, apiCoins);
+          try{
+            localStorage.setItem('izzaCoins', String(nextCoins));
+            if (apiCraft>=0) writeCraftAll(apiCraft);
+            window.dispatchEvent(new Event('izza-coins-changed'));
+            window.dispatchEvent(new Event('izza-crafting-changed'));
+          }catch(_){}
+          paintCoinsHUD(nextCoins);
+        }).catch(function(){});
     })();
 
-    // 4) Authoritative wallet fetch; adopt without decreasing
-    try{
-      var r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
-      if (r.ok){
-        var parsed = parseWalletResponse(await r.json().catch(function(){return{};}));
-        var apiCoins = Number(parsed.coins)||0;
-        var apiCraft = Number(parsed.crafting)||0;
-
-        var shown2 = parseInt((coinsHUD.textContent||'0'), 10) || 0;
-        var nextCoins = Math.max(shown2, apiCoins);
-
-        try{
-          localStorage.setItem('izzaCoins', String(nextCoins));
-          if (apiCraft>=0) writeCraftAll(apiCraft);
-          window.dispatchEvent(new Event('izza-coins-changed'));
-          window.dispatchEvent(new Event('izza-crafting-changed'));
-        }catch(_){}
-        paintCoinsHUD(nextCoins);
-      }
-    }catch(_){}
-
-    // 5) Lock run baseline & start game
     WALLET_READY = true;
     runStartCoins = parseInt((coinsHUD.textContent||'0'), 10) || (readCoinsLS()||0);
 
-    await ensureAvatarSprite();
+    ensureAvatarSprite();
 
     overlay.style.display = 'none';
     ensureSized();
     requestAnimationFrame(frame);
   }catch(e){ try{ console.error('start failed', e); }catch(_){} }
 }
+
+/* Wire multiple fallbacks */
+startBtn.addEventListener('click', startGame, false);
+startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
 
 })();
 </script>
