@@ -1465,11 +1465,19 @@ let lastMultiZ = -1e9;
 
 // Faster cadence (~100ms baseline) with mild scaling + nitro cut
 function currentSpawnInterval(){
-  const base = 25;                                 // was 420 → much quicker
-  const far  = Math.max(0, Math.min(1, state.dist/2500)); // keep your scaling
-  const hyperCut = nitroActive ? 0.50 : 1.0;        // slightly faster during nitro
-  const jitter = 0.90 + Math.random()*0.25;         // keep some randomness
-  return base * (1.0 - 0.25*far) * hyperCut * jitter;
+  const base = 25; // your baseline
+  const far  = Math.max(0, Math.min(1, state.dist/2500));
+
+  // Stronger ramp: up to ~55% faster at max 'far'
+  const ramp = 1.0 - 0.55 * far;
+
+  // Nitro further trims the interval (so “everything goes faster” while held)
+  const hyperCut = nitroActive ? 0.35 : 1.0;
+
+  const jitter = 0.90 + Math.random() * 0.25;
+
+  // Small floor so it never goes to 0 on unlucky jitter
+  return Math.max(8, base * ramp * hyperCut * jitter);
 }
 function bombChance(){
   // never block all lanes; this is just raw desire, planner enforces safety
@@ -1669,10 +1677,19 @@ function frame(now){
   worldZ += mps * dt;
   state.dist += mps * dt;
 
-  // Spawns (denser but safe)
-  if (now - lastSpawn > currentSpawnInterval()) {
-    lastSpawn = now; spawnOne();
+  // Spawns (catch up if overdue to avoid gaps)
+{
+  const maxBursts = 3; // small cap to prevent runaway bursts in one frame
+  for (let i=0; i<maxBursts; i++){
+    const iv = currentSpawnInterval();
+    if ((now - lastSpawn) >= iv){
+      lastSpawn += iv;     // advance by interval (keeps steady cadence)
+      spawnOne();
+    } else {
+      break;
+    }
   }
+}
 
   // steering + anchor visuals to car center
   const steerSpeed = Math.max(2.6, W * 0.0072) * (hyper?1.08:1);
