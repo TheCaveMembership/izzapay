@@ -1465,7 +1465,7 @@ let lastMultiZ = -1e9;
 
 // Faster cadence (~100ms baseline) with mild scaling + nitro cut
 function currentSpawnInterval(){
-  const base = 100;                                 // was 420 → much quicker
+  const base = 25;                                 // was 420 → much quicker
   const far  = Math.max(0, Math.min(1, state.dist/2500)); // keep your scaling
   const hyperCut = nitroActive ? 0.50 : 1.0;        // slightly faster during nitro
   const jitter = 0.90 + Math.random()*0.25;         // keep some randomness
