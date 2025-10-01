@@ -1,0 +1,347 @@
+<!doctype html>
+<meta charset="utf-8"/>
+<title>Jetman Rooftops — prototype</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
+<style>
+  html,body{height:100%;margin:0;background:#070a12;color:#e8eef7;font:14px/1.2 system-ui,Arial}
+  .wrap{position:relative;max-width:480px;height:100vh;margin:0 auto;
+        border-left:1px solid rgba(255,255,255,.06);border-right:1px solid rgba(255,255,255,.06)}
+  canvas{display:block;width:100%;height:100%}
+  .hud{position:absolute;left:0;right:0;top:8px;display:flex;justify-content:center;gap:12px;
+       font-weight:800;text-shadow:0 2px 10px #000}
+</style>
+<div class="wrap">
+  <div class="hud"><div>Score: <span id="score">0</span></div>
+                   <div>High: <span id="hi">0</span></div></div>
+  <canvas id="c"></canvas>
+</div>
+<script>
+(() => {
+  const cvs = document.getElementById('c'), ctx = cvs.getContext('2d',{alpha:true});
+  let W=0,H=0,dpr=1;
+  const resize=()=>{W=cvs.clientWidth;H=cvs.clientHeight;dpr=Math.min(devicePixelRatio||1,2);
+    cvs.width=W*dpr; cvs.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); layout();};
+  resize(); addEventListener('resize', resize,{passive:true});
+
+  /* ---------- camera / projection ---------- */
+  let VPT_X=0, VPT_Y=0, VANISH_Y=-600, roadBottomHalf=0, roadTopHalf=0;
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const project=(z)=>{ const k=0.0105, t=1-Math.exp(-k*z);
+    return { y:lerp(VANISH_Y,H,t), half:lerp(roadTopHalf,roadBottomHalf,t), t }; };
+  function layout(){ roadBottomHalf=W*0.55; roadTopHalf=W*0.08; VANISH_Y=-Math.max(520,H*0.75);
+    VPT_X=W*0.5; VPT_Y=H*0.62; }
+
+  /* ---------- player (jetman) ---------- */
+  const player = { y: 0, vy:0, r:18 };
+  const phys = { g: 1600, thrust: 1900, maxVy: 880 };
+  player.y = VPT_Y; // start near vanishing point
+  let thrust=false; addEventListener('keydown',e=>{ if(e.code==='Space') thrust=true; });
+  addEventListener('keyup',e=>{ if(e.code==='Space') thrust=false; });
+  cvs.addEventListener('pointerdown', ()=>{ thrust=true; });
+  addEventListener('pointerup', ()=>{ thrust=false; });
+
+  /* ---------- world state ---------- */
+  let time=0, last=performance.now(), worldZ=0, speed=190; // km/h-ish
+  const STEP_Z=72, DEPTH_Z=24000;
+
+  /* =======================================================
+     ROOFTOP SEGMENTS (NEW)
+     Two bands (left/right). Each segment has: startZ, endZ, heightPx.
+     heightPx is “how far above the floor” the rooftop lip sits in screen space.
+  ======================================================= */
+  const sides = { LEFT:0, RIGHT:1 };
+  const roofs = [[],[]];  // per-side ordered by Z
+  function randRoofHeight(){ return H* (0.10 + Math.random()*0.32); }   // 10%..42% of screen
+  function randRoofLen(){ return 260 + Math.random()*480; }             // world Z length
+  function ensureRoofSegments(toZ){
+    for(const side of [sides.LEFT,sides.RIGHT]){
+      const arr = roofs[side];
+      let z = arr.length ? arr[arr.length-1].endZ : 0;
+      while (z < toZ + DEPTH_Z){
+        const len = randRoofLen();
+        arr.push({ startZ:z, endZ:z+len, h: randRoofHeight() });
+        z += len;
+      }
+    }
+  }
+  function roofHeightAt(side, zAbs){
+    // find segment containing zAbs
+    const arr = roofs[side];
+    // small linear search (arrays stay short because we trim)
+    for (let i=0;i<arr.length;i++){
+      const s = arr[i];
+      if (zAbs >= s.startZ && zAbs < s.endZ) return s.h;
+    }
+    return H*0.2;
+  }
+  function trimRoofSegments(zAbs){
+    for(const side of [sides.LEFT,sides.RIGHT]){
+      const arr = roofs[side];
+      while (arr.length && arr[0].endZ < zAbs - 200) arr.shift();
+    }
+  }
+
+  /* ---------- obstacles, now mounted to roofs ---------- */
+  const obstacles=[]; // {type, spawnZ, laneT, side, size, mountH}
+  const lanes=[0.30,0.50,0.70];
+  function chooseSideForLane(laneT){ return laneT<0.5 ? sides.LEFT : sides.RIGHT; }
+
+  function spawnObstacle(z0=worldZ+420){
+    const lane = lanes[(Math.random()*lanes.length)|0];
+    const type = (Math.random()<0.16)?'bar' : (Math.random()<0.58?'ac':'duct');
+
+    if (type==='bar'){
+      // cross-bar between buildings, placed at some vertical opening
+      const size = 0.45 + Math.random()*0.4;
+      const h = H*(0.22 + Math.random()*0.34);   // how high above floor the bar sits
+      obstacles.push({type, spawnZ:z0, laneT:lane, side:null, size, mountH:h, alive:true});
+      return;
+    }
+
+    // rooftop unit -> pick side by lane; mount on that roof’s current height
+    const side = chooseSideForLane(lane);
+    const mountH = roofHeightAt(side, z0); // <- key: attach to roof at z0
+    const size = 0.55 + Math.random()*0.5;
+    obstacles.push({type, spawnZ:z0, laneT:lane, side, size, mountH, alive:true});
+  }
+
+  let lastSpawn = performance.now();
+  function spawnTick(now){
+    const base=210, faster= Math.max(0.50, 1 - (score/1400)); // pacing curve
+    const iv = base*faster;
+    if(now-lastSpawn>iv){
+      lastSpawn=now;
+      spawnObstacle();
+      if(Math.random()<0.45) spawnObstacle(worldZ+420);
+    }
+  }
+
+  /* ---------- helpers ---------- */
+  function edgesAt(z){ const p=project(z); const y=Math.max(p.y,VANISH_Y);
+    const half=(y===VANISH_Y)?0.0001:p.half; return {y, lx:W/2-half-14, rx:W/2+half+14, t:p.t};}
+
+  /* ---------- background + clouds ---------- */
+  function drawBackground(){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#06080f'); g.addColorStop(1,'#0b1020'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    // soft aurora at the vanishing point
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    ctx.globalAlpha=0.18;
+    const gg=ctx.createRadialGradient(VPT_X,VPT_Y,50,VPT_X,VPT_Y,Math.max(W,H)*0.9);
+    gg.addColorStop(0,'rgba(0,255,255,.7)'); gg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gg; ctx.fillRect(0,0,W,H);
+    ctx.restore();
+
+    // CLOUD BANKS along sides (billboards sweeping forward)
+    ctx.save();
+    const count = 24, sway = Math.sin(time*0.8)*8;
+    for (let i=0;i<count;i++){
+      const z = (i*520 + (worldZ*1.2)%520);
+      const e = edgesAt(z);
+      const y = Math.min(H, Math.max(VPT_Y+8, e.y));
+      const xL = e.lx - 18 + sway, xR = e.rx + 18 - sway;
+      const r = 16 + 28*e.t;
+
+      ctx.globalAlpha = 0.18 + 0.35*e.t;
+      // left puff
+      ctx.beginPath(); ctx.ellipse(xL, y, r*1.4, r, 0, 0, Math.PI*2);
+      const gl = ctx.createRadialGradient(xL,y,2,xL,y,r*1.6);
+      gl.addColorStop(0,'rgba(200,240,255,.50)');
+      gl.addColorStop(1,'rgba(200,240,255,0)');
+      ctx.fillStyle = gl; ctx.fill();
+
+      // right puff
+      ctx.beginPath(); ctx.ellipse(xR, y, r*1.4, r, 0, 0, Math.PI*2);
+      const gr = ctx.createRadialGradient(xR,y,2,xR,y,r*1.6);
+      gr.addColorStop(0,'rgba(200,240,255,.50)');
+      gr.addColorStop(1,'rgba(200,240,255,0)');
+      ctx.fillStyle = gr; ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* ---------- corridor floor ---------- */
+  function drawFloor(){
+    const L=[],R=[]; for(let z=0; z<=DEPTH_Z; z+=STEP_Z){ const e=edgesAt(z);
+      if(e.y>H && L.length) break; L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(W/2,VANISH_Y);
+    for(let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
+    for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
+    ctx.closePath();
+    const g=ctx.createLinearGradient(0,VANISH_Y,0,H);
+    g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#0a1523');
+    ctx.fillStyle=g; ctx.fill();
+
+    // horizon glow
+    const fog=ctx.createLinearGradient(0,VANISH_Y,0,H);
+    fog.addColorStop(0,'rgba(0,255,255,.28)');
+    fog.addColorStop(.4,'rgba(0,200,255,.12)');
+    fog.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.globalCompositeOperation='screen'; ctx.fillStyle=fog; ctx.fill();
+    ctx.globalCompositeOperation='source-over';
+    ctx.restore();
+  }
+
+  /* ---------- draw rising/falling ROOFTOP LIPS (NEW) ---------- */
+  function drawRooftopLips(){
+    ctx.save();
+    for (const side of [sides.LEFT,sides.RIGHT]){
+      // march forward; for each step, draw a short parapet cap offset by roof height
+      for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
+        const zAbs = worldZ + z;
+        const e = edgesAt(z);
+        const x = (side===sides.LEFT)? e.lx : e.rx;
+        const y = Math.min(H, Math.max(e.y, VPT_Y+8));
+        const lip = roofHeightAt(side, zAbs);        // <- segment height in px
+        const yTop = y - lip * e.t;                  // attenuate into distance
+
+        if (yTop < y - 2){
+          const w = Math.max(6, 12*e.t);
+          ctx.fillStyle = (side===sides.LEFT)? '#101a2e' : '#0f192c';
+          ctx.fillRect(x - (side===sides.LEFT?w:0), yTop, w, y - yTop);
+
+          // highlight edge
+          ctx.globalAlpha = 0.12 + 0.25*e.t;
+          ctx.fillStyle = 'rgba(120,200,255,1)';
+          ctx.fillRect(x - (side===sides.LEFT?1:0), yTop-2, 2, 6);
+          ctx.globalAlpha = 1;
+        }
+        if (e.y>H) break;
+      }
+    }
+    ctx.restore();
+  }
+
+  /* ---------- obstacle rendering (mounted) ---------- */
+  function drawObstacle(o){
+    const zRel = Math.max(0, worldZ - o.spawnZ);
+    if(zRel>DEPTH_Z){ o.alive=false; return; }
+    const e = edgesAt(zRel);
+    const x = e.lx + (e.rx-e.lx)*o.laneT;
+    const floorY = Math.max(e.y, VPT_Y + H*0.02);
+
+    // if mounted to a roof, compute the roof top at THIS z
+    let roofY = floorY;
+    if (o.side!=null){
+      const mountTopPx = roofHeightAt(o.side, worldZ) * e.t; // dynamic as we move into it
+      roofY = floorY - mountTopPx;
+    }
+
+    ctx.save();
+    ctx.translate(x, roofY);
+    if(o.type==='bar'){
+      // cross bar at fixed screen-space height above floor
+      const y = floorY - (o.mountH * e.t);
+      const w = (e.rx-e.lx)*0.68, h = 10 + 26*e.t*o.size;
+      ctx.translate(0, y - roofY);
+      ctx.fillStyle='rgba(140,170,255,.85)';
+      ctx.fillRect(-w/2, -h/2, w, h);
+      ctx.strokeStyle='rgba(40,80,140,.6)'; ctx.lineWidth=2; ctx.strokeRect(-w/2,-h/2,w,h);
+    } else {
+      // AC / duct sitting on rooftop
+      const w = 40 + 220*e.t*o.size, h = 22 + 120*e.t*o.size;
+      ctx.fillStyle=o.type==='ac'?'#9fb2cf':'#8cc0d6';
+      ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=2;
+      ctx.fillRect(-w/2, -h, w, h); ctx.strokeRect(-w/2,-h,w,h);
+
+      // little feet to sell that it's sitting on the roof
+      ctx.fillStyle='rgba(20,20,30,.8)';
+      ctx.fillRect(-w*0.35, 0, w*0.18, 4);
+      ctx.fillRect( w*0.17, 0, w*0.18, 4);
+
+      // shadow on roof
+      ctx.globalAlpha=.25; ctx.fillStyle='#000';
+      ctx.beginPath(); ctx.ellipse(0,10,w*0.55,10,0,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    // collision against player at screen center X
+    const px=W*0.5, py=player.y;
+    let hit=false;
+    if (o.type==='bar'){
+      const yBar = floorY - (o.mountH * e.t);
+      hit = (Math.abs(x - px) < (e.rx-e.lx)*0.32) && (Math.abs(py - yBar) < 22);
+    } else {
+      const yTop = roofY; // unit base sits right at roofY
+      const unitH = 40*e.t*o.size + 26;
+      hit = (Math.abs(x - px) < (e.rx-e.lx)*0.18) && (py > yTop - unitH) && (py < yTop + 18);
+    }
+    if(hit){ gameOver(); }
+  }
+
+  /* ---------- HUD / score ---------- */
+  let score=0, hi=Number(localStorage.getItem('jet_hi')||0);
+  const hudScore=document.getElementById('score'), hudHi=document.getElementById('hi');
+  hudHi.textContent=hi;
+
+  function gameOver(){
+    hi=Math.max(hi,Math.floor(score)); localStorage.setItem('jet_hi',hi);
+    hudHi.textContent=hi;
+    // reset
+    score=0; worldZ=0; obstacles.length=0; player.y=VPT_Y; player.vy=0;
+    roofs[0].length = roofs[1].length = 0; // rebuild fresh pattern
+  }
+
+  /* ---------- main loop ---------- */
+  function frame(now){
+    const dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
+
+    // physics
+    const ay = (thrust? -phys.thrust : phys.g);
+    player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
+    player.y  = Math.max(H*0.20, Math.min(H*0.86, player.y + player.vy*dt));
+
+    // world advance
+    const mps = (speed/3.6) * (thrust?1.18:1.0);
+    worldZ += mps*dt; score  += mps*dt;
+
+    // keep rooftop segments ahead & drop old ones
+    ensureRoofSegments(worldZ + DEPTH_Z*0.6);
+    trimRoofSegments(worldZ);
+
+    // spawns
+    spawnTick(now);
+
+    // draw
+    ctx.clearRect(0,0,W,H);
+    drawBackground();
+    drawFloor();
+    drawRooftopLips();     // <- rising/falling buildings along sides
+
+    // obstacles
+    for(let i=obstacles.length-1;i>=0;i--){
+      const o=obstacles[i]; if(!o.alive){ obstacles.splice(i,1); continue; } drawObstacle(o);
+    }
+
+    // player ship
+    ctx.save();
+    ctx.translate(W/2, player.y);
+    ctx.fillStyle='#ffffff'; ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(-24,10); ctx.lineTo(28,0); ctx.lineTo(-24,-10); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // thruster
+    ctx.globalCompositeOperation='lighter'; ctx.fillStyle='rgba(255,220,90,.85)';
+    const flame= thrust? 12+8*Math.sin(time*40) : 6; ctx.beginPath();
+    ctx.ellipse(-28,0,flame,6,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    // speed streaks
+    ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=.16;
+    for(let i=0;i<24;i++){
+      const a=(-0.55 + i/23*1.1), len=H*1.2, x2=VPT_X + Math.tan(a)*len, y2=H+60;
+      const g=ctx.createLinearGradient(VPT_X,player.y,x2,y2);
+      g.addColorStop(0,'rgba(0,255,255,.6)'); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.strokeStyle=g; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(VPT_X,player.y); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+    ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+
+    // HUD
+    hudScore.textContent = Math.floor(score);
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
