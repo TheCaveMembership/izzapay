@@ -1458,14 +1458,14 @@ const pickups = [];
 const LANE_TS = [0.26, 0.50, 0.74];
 
 /* Safety planner to avoid impossible collisions */
-const MIN_LANE_SEP_Z = 640;             // per-lane separation (slightly denser than before)
+const MIN_LANE_SEP_Z = 520;             // per-lane separation (slightly denser than before)
 const MIN_MULTI_SEP_Z = 380;            // avoid horizontal walling (keep items staggered in Z)
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 let lastMultiZ = -1e9;
 
 // Faster cadence (~100ms baseline) with mild scaling + nitro cut
 function currentSpawnInterval(){
-  const base = 25; // your baseline
+  const base = 10; // your baseline
   const far  = Math.max(0, Math.min(1, state.dist/2500));
 
   // Stronger ramp: up to ~55% faster at max 'far'
@@ -1503,7 +1503,7 @@ function spawnOne(z0 = worldZ){
   // --- tunables for spacing / cadence (keeps room to dodge) ---
   const DODGE_GAP_Z      = 170;   // stagger gap if we add a quick follow-up
   const BOMB_EXTRA_GAP_Z = 220;   // extra room after bombs
-  const MULTI_PROB       = 0.28;  // ↑ more frequent quick follow-ups
+  const MULTI_PROB       = 0.60;  // ↑ more frequent quick follow-ups
 
   // which lanes are available by per-lane spacing?
   const spaceOK = [];
@@ -1716,7 +1716,7 @@ function frame(now){
   const cRect = carRect();
 
   // Quick chain-spawn distance after a pickup (keeps flow continuous)
-  const CHAIN_GAP_Z = 140;
+  const CHAIN_GAP_Z = 85;
 
   // Pickups + collisions + FX
   for (const p of pickups) {
