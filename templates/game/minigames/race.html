@@ -1491,7 +1491,7 @@ function computeUnsafeLanes(targetZ){
   }
   return unsafe;
 }
-function spawnOne(){
+function spawnOne(z0 = worldZ){
   // --- tunables for spacing / cadence (keeps room to dodge) ---
   const DODGE_GAP_Z      = 170;   // stagger gap if we add a quick follow-up
   const BOMB_EXTRA_GAP_Z = 220;   // extra room after bombs
@@ -1500,18 +1500,18 @@ function spawnOne(){
   // which lanes are available by per-lane spacing?
   const spaceOK = [];
   for (let i=0;i<LANE_TS.length;i++){
-    if (worldZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) spaceOK.push(i);
+    if (z0 - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) spaceOK.push(i);
   }
   if (spaceOK.length === 0) return;
 
   // avoid same-Z lane walls near existing pickups
-  const unsafe = computeUnsafeLanes(worldZ);
+  const unsafe = computeUnsafeLanes(z0);
   let candidates = spaceOK.filter(i => !unsafe[i]);
   if (candidates.length === 0) {
     // pick the safest by largest gap since last spawn
     let best = 0, bestScore = -1e9;
     for (const i of spaceOK){
-      const score = worldZ - laneLastSpawnZ[i];
+      const score = z0 - laneLastSpawnZ[i];
       if (score > bestScore){ bestScore = score; best = i; }
     }
     candidates = [best];
@@ -1530,29 +1530,27 @@ function spawnOne(){
   else if (roll < pNitro + pBomb) type = 'bomb';
 
   // place primary item now
-  pickups.push(new Pickup(type, worldZ, laneT));
-  laneLastSpawnZ[li] = worldZ + (type==='bomb' ? BOMB_EXTRA_GAP_Z : 0); // hold lane a bit longer if bomb
+  pickups.push(new Pickup(type, z0, laneT));
+  laneLastSpawnZ[li] = z0 + (type==='bomb' ? BOMB_EXTRA_GAP_Z : 0); // hold lane a bit longer if bomb
 
   // --- occasional quick follow-up in another lane, staggered in Z ---
   if (Math.random() < MULTI_PROB){
-    // find a different lane that’s safe at the staggered Z
-    const targetZ = worldZ + DODGE_GAP_Z;
+    const targetZ = z0 + DODGE_GAP_Z;
     const unsafe2 = computeUnsafeLanes(targetZ);
-    const others = LANE_TS.map((_,i)=>i).filter(i => i!==li && (worldZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) && !unsafe2[i]);
+    const others = LANE_TS.map((_,i)=>i).filter(i =>
+      i!==li && (targetZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) && !unsafe2[i]
+    );
     if (others.length){
       const li2 = others[(Math.random()*others.length)|0];
       const laneT2 = LANE_TS[li2];
 
-      // second item type—keep simple (biased to coin so it feels rewarding)
       const roll2 = Math.random();
       let type2 = roll2 < 0.10 ? 'nitro' : (roll2 < 0.30 ? 'bomb' : 'coin');
-
-      // safety: don’t allow both items bombs (would feel unfair)
-      if (type==='bomb' && type2==='bomb') type2 = 'coin';
+      if (type==='bomb' && type2==='bomb') type2 = 'coin'; // don’t double-bomb
 
       pickups.push(new Pickup(type2, targetZ, laneT2));
       laneLastSpawnZ[li2] = targetZ + (type2==='bomb' ? BOMB_EXTRA_GAP_Z : 0);
-      lastMultiZ = targetZ; // remember last multi to help upstream logic if you use it elsewhere
+      lastMultiZ = targetZ;
     }
   }
 }
@@ -1682,6 +1680,9 @@ function frame(now){
   // Colliders
   const cRect = carRect();
 
+  // Quick chain-spawn distance after a pickup (keeps flow continuous)
+  const CHAIN_GAP_Z = 140;
+
   // Pickups + collisions + FX
   for (const p of pickups) {
     if (!p.alive) continue;
@@ -1716,6 +1717,16 @@ function frame(now){
           updateStrikes();
           endRun(); // will pop overlay after wallet/craft sync
           return;
+        }
+      }
+
+      // 🔗 Instant follow-up spawn(s) to reduce gaps between items.
+      // Spawn regardless of type, but avoid doing so if the run just ended.
+      if (state.bombsHit < 3) {
+        spawnOne(worldZ + CHAIN_GAP_Z);
+        // Extra occasional second follow-up for smooth chains when not a bomb
+        if (p.type !== 'bomb' && Math.random() < 0.25) {
+          spawnOne(worldZ + CHAIN_GAP_Z * 2);
         }
       }
     }
