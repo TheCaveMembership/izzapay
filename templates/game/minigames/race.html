@@ -4,50 +4,152 @@
   <meta charset="utf-8">
   <title>Street Race — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+  <!-- Persist base (same as Arena/Basketball) -->
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
+
+  <!-- Seed username before izza-persist.js (same pattern as Basketball) -->
+  <script>
+    (function(){
+      try{
+        const params = new URLSearchParams(location.search);
+        let u = (params.get('u') || '').toString().trim();
+        if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
+        if (!u) {
+          const raw = localStorage.getItem('piAuthUser');
+          if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
+        }
+        if (u) {
+          u = u.replace(/^@+/, '').toLowerCase();
+          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+          window.izzaUserKey = { get: () => u };
+          try { localStorage.setItem('izzaUserU', u); } catch(_){}
+          try {
+            if (!localStorage.getItem('piAuthUser')) {
+              localStorage.setItem('piAuthUser', JSON.stringify({ username: u }));
+            }
+          } catch(_){}
+        }
+      }catch(_){}
+    })();
+  </script>
+
   <script src="/static/game/js/izza-persist.js"></script>
   <link rel="stylesheet" href="/static/themes.css">
+
   <style>
-    :root { --bg:#0a0c12; --panel:#06080e; }
+    :root {
+      --bg:#0a0c12;
+      --panel:#06080e;
+      --hud:rgba(0,0,0,.55);
+      --hudLine:rgba(255,255,255,.18);
+      --arcade:#ffed8a;
+      --ok:#6bffa5;
+      --bad:#ff4b4b;
+      --muted:#9fb6d1;
+    }
+    *{box-sizing:border-box}
     html,body{height:100%}
     body{
       margin:0;background:var(--bg);color:#e8eef7;font-family:Arial,Helvetica,sans-serif;
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
-    .arena{position:relative;height:100vh;max-width:520px;margin:0 auto;
+    .arena{
+      position:relative;height:100vh;max-width:520px;margin:0 auto;
       border-left:1px solid rgba(255,255,255,.08);
       border-right:1px solid rgba(255,255,255,.08);
-      background:var(--panel);overflow:hidden}
-    .hud{position:absolute;top:10px;left:12px;right:12px;z-index:9;
-      display:flex;justify-content:space-between;align-items:center;
-      font-size:13px;letter-spacing:.3px}
+      background:var(--panel);overflow:hidden
+    }
 
-    /* mini HUD (car + 3 bombs) */
+    /* ======= HUD ======= */
+    .hud{
+      position:absolute;top:8px;left:8px;right:8px;z-index:9;
+      display:flex;justify-content:space-between;align-items:center;
+      gap:6px;font-size:13px;letter-spacing:.3px
+    }
+    .hud .left,.hud .right{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+    .pill{
+      background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
+      padding:4px 7px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.25px;
+      display:flex;gap:6px;align-items:center;white-space:nowrap
+    }
+    .pill .label{opacity:.9;color:var(--muted);font-weight:700}
+    .pill .val{font-size:13px;color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
+    .hudGroup{display:flex;gap:6px;align-items:center}
+
+    /* Speedometer (SVG) */
+    .speedo{width:112px;height:42px;display:inline-block}
+    .speedoWrap{
+      display:flex;align-items:center;gap:6px;
+      background:var(--hud);border:1px solid var(--hudLine);border-radius:999px;padding:2px 6px
+    }
+    .speedoWrap.shake{animation:spdshake .12s linear infinite}
+    @keyframes spdshake {
+      0%{ transform:translateY(0) }
+      50%{ transform:translateY(-1px) }
+      100%{ transform:translateY(0) }
+    }
+
+    /* mini HUD (car + 3 bomb SVGs) */
     .strikeHud{display:flex;align-items:center;gap:8px}
     .bombTray{display:flex;gap:4px;align-items:center}
-    .bombDot{width:12px;height:12px;border-radius:50%;
-      background:#3b3f4a;border:1px solid rgba(255,255,255,.18)}
-    .bombDot.hit{background:#ff3b3b;box-shadow:0 0 6px #ff3b3b}
+    .bombSvg{width:16px;height:16px;filter:drop-shadow(0 0 2px rgba(0,0,0,.5))}
+    .bombSvg .shell{fill:#3b3f4a;stroke:rgba(255,255,255,.18);stroke-width:1}
+    .bombSvg .fuse{fill:#ffb56b}
+    .bombSvg.hit .shell{fill:#ff3b3b;stroke:rgba(0,0,0,.25)}
+    .bombSvg.hit .fuse{fill:#ffed8a}
 
-    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
-      background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,.55));}
-    .card{background:rgba(10,12,18,.95);border:1px solid rgba(255,255,255,.16);border-radius:14px;
-      padding:16px 18px;display:flex;flex-direction:column;gap:12px;width:min(92%,460px)}
+    /* overlays */
+    .overlay{
+      position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:8;
+      background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,.55));
+    }
+    .card{
+      position:relative;
+      background:rgba(10,12,18,.95);
+      border:1px solid rgba(255,255,255,.16);border-radius:14px;
+      padding:16px 18px;display:flex;flex-direction:column;gap:12px;width:min(92%,480px);
+      overflow:hidden
+    }
+    .card.hasBG::before{
+      content:"";position:absolute;inset:0;background-size:cover;background-position:center;
+      opacity:.22;filter:brightness(1.05);pointer-events:none
+    }
+    .card .hRow{display:flex;align-items:center;justify-content:space-between;gap:8px}
     .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
-    .preview{height:164px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;
-      display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .startBtn{padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
-      background:rgba(255,255,255,.08);font-weight:800;color:white;width:100%}
+    .preview{
+      height:184px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;
+      display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative
+    }
+    .startBtn,.cityBtn{
+      padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
+      background:rgba(255,255,255,.08);font-weight:800;color:white;width:100%;cursor:pointer;
+      text-align:center
+    }
+    .startBtn:hover,.cityBtn:hover{filter:brightness(1.08)}
     .swatches{display:flex;gap:10px;flex-wrap:wrap}
     .swatch{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.28);cursor:pointer}
     .swatch.active{box-shadow:0 0 0 3px rgba(255,255,255,.18) inset}
+    .trackRow{display:flex;gap:8px;flex-wrap:wrap}
+    .trackBtn{
+      padding:6px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);
+      background:rgba(255,255,255,.06);cursor:pointer;font-size:12px;font-weight:800
+    }
+    .trackBtn.active{outline:2px solid rgba(255,255,255,.25)}
+    .garageHint{
+      position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.45);
+      border:1px solid rgba(255,255,255,.15);padding:4px 6px;border-radius:8px;font-size:10px
+    }
+
     canvas{display:block;width:100%;height:100%;background:transparent;touch-action:none;
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
 
     /* Nitro meter */
-    .nitroWrap{position:absolute;right:12px;bottom:16px;z-index:7;width:120px;height:40px;
+    .nitroWrap{
+      position:absolute;right:12px;bottom:16px;z-index:7;width:120px;height:40px;
       border-radius:999px;border:1px solid rgba(255,255,255,.12);background:#121a2b;overflow:hidden;
-      display:flex;align-items:center;justify-content:center;font-weight:800;color:#e8eef7}
+      display:flex;align-items:center;justify-content:center;font-weight:800;color:#e8eef7
+    }
     .nitroFill{position:absolute;left:2px;top:2px;bottom:2px;border-radius:999px;
       background:linear-gradient(180deg,#53ffb2,#1ecb7b);width:100%;}
     .nitroLabel{position:relative;z-index:1;pointer-events:none}
@@ -58,21 +160,89 @@
       border-radius:999px;padding:8px 12px;font-size:12px;cursor:pointer;user-select:none}
     .dot{width:10px;height:10px;border-radius:50%;background:#40ff8a;box-shadow:0 0 6px #40ff8a;}
     .soundBtn.muted .dot{background:#ff4b4b;box-shadow:0 0 6px #ff4b4b;}
+
+    /* END GAME POPUP */
+    .endOverlay{
+      position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:12;
+      background:linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,.65));
+    }
+    .endCard{
+      background:rgba(10,12,18,.96);border:1px solid rgba(255,255,255,.16);border-radius:14px;
+      padding:16px 18px;display:flex;flex-direction:column;gap:12px;width:min(92%,480px)
+    }
+    .endStats{display:flex;gap:8px;flex-wrap:wrap}
+    .endStats .pill .val{color:#fff}
+    .endTitle{margin:0 0 2px 0;font-size:18px}
+    .btnRow{display:flex;gap:8px;flex-wrap:wrap}
+    .cityBtn{background:#1e2a44}
+
   </style>
 </head>
 <body>
   <div class="arena" id="arena">
+    <!-- HUD -->
     <div class="hud">
-      <div>SPEED: <span id="speed">0</span> km/h</div>
-      <div>DIST: <span id="dist">0</span> m</div>
-      <div>COINS: <span id="coinsRun">0</span></div>
-      <!-- Mini HUD -->
-      <div class="strikeHud">
-        <canvas id="miniCar" width="60" height="24" style="filter:drop-shadow(0 0 2px rgba(0,0,0,.5))"></canvas>
-        <div class="bombTray">
-          <div class="bombDot" id="b1" title="Strike 1"></div>
-          <div class="bombDot" id="b2" title="Strike 2"></div>
-          <div class="bombDot" id="b3" title="Strike 3"></div>
+      <div class="left hudGroup">
+        <!-- Speedometer SVG pill -->
+        <div class="speedoWrap" id="speedoWrap" title="Speed">
+          <svg class="speedo" viewBox="0 0 140 52" aria-label="Speedometer">
+            <defs>
+              <linearGradient id="spdGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#9fe3ff"/><stop offset="100%" stop-color="#58a6ff"/>
+              </linearGradient>
+            </defs>
+            <!-- arc -->
+            <path d="M10,42 A60,60 0 0 1 130,42" fill="none" stroke="url(#spdGrad)" stroke-width="8" opacity=".4"/>
+            <!-- ticks -->
+            <g stroke="#cfe6ff" stroke-width="2" opacity=".55">
+              <path d="M20 42 L24 36"/>
+              <path d="M40 42 L43 34"/>
+              <path d="M60 42 L62 32"/>
+              <path d="M80 42 L81 32"/>
+              <path d="M100 42 L99 34"/>
+              <path d="M120 42 L116 36"/>
+            </g>
+            <!-- needle -->
+            <g id="needle" transform="translate(70,42) rotate(-90)">
+              <path d="M0 0 L3 -2 L46 0 L3 2 Z" fill="#ffed8a"/>
+              <circle cx="0" cy="0" r="4" fill="#ffe06b" stroke="#342" stroke-width="1"/>
+            </g>
+            <!-- speed text -->
+            <text id="speedTxt" x="70" y="18" font-size="12" text-anchor="middle" fill="#ffffff" style="font-weight:900;letter-spacing:.5px">0 km/h</text>
+          </svg>
+        </div>
+
+        <!-- Distance -->
+        <div class="pill" title="Distance">
+          <span class="label">DIST</span>
+          <span id="dist" class="val">0</span><span class="label">m</span>
+        </div>
+
+        <!-- Coins -->
+        <div class="pill" title="Coins (synced)">
+          <span class="label">COINS</span>
+          <span id="coinsRun" class="val">0</span>
+        </div>
+      </div>
+
+      <!-- Mini HUD: car + bomb strikes -->
+      <div class="right">
+        <div class="strikeHud">
+          <canvas id="miniCar" width="60" height="24" style="filter:drop-shadow(0 0 2px rgba(0,0,0,.5))" aria-label="Car"></canvas>
+          <div class="bombTray" aria-label="Strikes">
+            <svg class="bombSvg" id="b1" viewBox="0 0 24 24">
+              <circle class="shell" cx="12" cy="14" r="7"></circle>
+              <circle class="fuse" cx="17" cy="7" r="3"></circle>
+            </svg>
+            <svg class="bombSvg" id="b2" viewBox="0 0 24 24">
+              <circle class="shell" cx="12" cy="14" r="7"></circle>
+              <circle class="fuse" cx="17" cy="7" r="3"></circle>
+            </svg>
+            <svg class="bombSvg" id="b3" viewBox="0 0 24 24">
+              <circle class="shell" cx="12" cy="14" r="7"></circle>
+              <circle class="fuse" cx="17" cy="7" r="3"></circle>
+            </svg>
+          </div>
         </div>
       </div>
     </div>
@@ -82,18 +252,35 @@
 
     <!-- Garage -->
     <div id="startOverlay" class="overlay">
-      <div class="card">
+      <div class="card hasBG" id="garageCard">
         <h3 style="margin:0">Garage</h3>
-        <div class="row" style="opacity:.9;font-size:12px">
-          Coins: <b id="wCoins">—</b> &nbsp; | &nbsp; Crafting: <b id="wCraft">—</b>
+        <div class="hRow" style="opacity:.9;font-size:12px">
+          <div>Player: <b id="wUser">—</b></div>
+          <div>Coins: <b id="wCoins">—</b> &nbsp; | &nbsp; Crafting: <b id="wCraft">—</b></div>
         </div>
-        <div class="preview">
-          <canvas id="garagePreview" width="512" height="256"></canvas>
+
+        <div class="preview" id="garagePreviewWrap">
+          <canvas id="garagePreview" width="512" height="256" aria-label="Car Preview"></canvas>
+          <div class="garageHint" id="garageHint">Tap START to race</div>
         </div>
+
+        <!-- Track select -->
+        <div>
+          <div class="row" style="gap:8px;align-items:center">
+            <div style="font-size:12px;margin:6px 0 2px">Track</div>
+            <div class="trackRow">
+              <button type="button" class="trackBtn active" data-track="night" id="trackNightBtn">Night</button>
+              <button type="button" class="trackBtn" data-track="day" id="trackDayBtn">Day</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Paint tints -->
         <div>
           <div style="font-size:12px;margin:6px 0 8px">Paint (tint)</div>
           <div class="swatches" id="swatches"></div>
         </div>
+
         <button id="startBtn" class="startBtn">START</button>
       </div>
     </div>
@@ -104,6 +291,22 @@
       <div class="nitroLabel">NITRO</div>
     </div>
 
+    <!-- End of run popup -->
+    <div id="endOverlay" class="endOverlay" aria-live="polite">
+      <div class="endCard">
+        <h3 class="endTitle">RACE OVER</h3>
+        <div class="endStats">
+          <span class="pill">Distance: <span class="val" id="finalDist">0</span> m</span>
+          <span class="pill">Coins Earned: <span class="val" id="finalCoins">0</span></span>
+          <span class="pill">Craft Credits: <span class="val" id="finalCraft">0</span></span>
+        </div>
+        <div class="btnRow">
+          <button class="startBtn" id="againBtn">Play Again</button>
+          <a class="cityBtn" id="cityBtn" href="/izza-game/play">GO TO IZZA CITY</a>
+        </div>
+      </div>
+    </div>
+
     <!-- Background music -->
     <audio id="bgm" src="/static/game/audio/RACEBGM.wav" loop preload="auto"></audio>
 
@@ -112,29 +315,163 @@
 
 <script>
 (() => {
-/* ====== hard-block selection/callouts while playing ====== */
+/* ====== block selection/callouts while playing ====== */
 ['contextmenu','selectstart','gesturestart'].forEach(ev=>{
   window.addEventListener(ev, e=>e.preventDefault(), {passive:false});
 });
 
-/* ============== Wallet ============== */
-async function loadWallet(){
-  let coins='—', craft='—';
-  try{
-    if (window.IZZA && typeof IZZA.get === 'function') {
-      const w = await IZZA.get('wallet');
-      if (w) { coins = w.coins ?? coins; craft = w.crafting ?? craft; }
-    } else if (localStorage.getItem('izza_wallet')){
-      const w = JSON.parse(localStorage.getItem('izza_wallet'));
-      coins = w.coins ?? coins; craft = w.crafting ?? craft;
-    }
-  }catch(e){}
-  document.getElementById('wCoins').textContent = coins;
-  document.getElementById('wCraft').textContent = craft;
+/* ====== T & U params (auth passthrough like Basketball) ====== */
+const T_KEY='izzaTokenT', U_KEY='izzaUserU';
+const urlParams = new URLSearchParams(location.search);
+let T = urlParams.get('t') || '';
+let U = (urlParams.get('u') || '').toString().trim();
+try{
+  if (T) localStorage.setItem(T_KEY, T);
+  else {
+    const s = localStorage.getItem(T_KEY)||'';
+    if (s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }
+  }
+}catch(_){}
+function publishUsername(u){
+  if (!u) return '';
+  u = u.replace(/^@+/, '').toLowerCase();
+  try{ localStorage.setItem(U_KEY, u); }catch(_){}
+  window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+  window.izzaUserKey = { get: () => u };
+  try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
+  return u;
 }
-loadWallet();
+try{
+  if (U) publishUsername(U);
+  else {
+    const su = (localStorage.getItem(U_KEY)||'').toString().trim();
+    if (su){
+      const url=new URL(location.href); url.searchParams.set('u',su);
+      history.replaceState(null,'',url.toString()); U = publishUsername(su);
+    }
+  }
+}catch(_){}
+function withAuth(href){
+  const url = new URL(href, location.origin);
+  if (T) url.searchParams.set('t', T);
+  if (U) url.searchParams.set('u', U);
+  return url.pathname + (url.search ? url.search : '');
+}
+document.getElementById('cityBtn').href = withAuth('/izza-game/play');
 
-/* ============== Setup ============== */
+/* ====== Wallet helper funcs (same behavior as Basketball) ====== */
+function bearerHeaders(base = {}) {
+  const headers = Object.assign({ 'content-type':'application/json' }, base || {});
+  try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
+  return headers;
+}
+function parseWalletResponse(j){
+  if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
+  if ('coins' in j || 'crafting' in j || 'credits' in j){
+    return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
+  }
+  if (j.wallet)   return parseWalletResponse(j.wallet);
+  if (j.balance)  return parseWalletResponse(j.balance);
+  return { coins:0, crafting:0 };
+}
+const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
+function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
+function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
+function publishWalletToHUD(wallet){
+  const wCoins = document.getElementById('wCoins');
+  const wCraft = document.getElementById('wCraft');
+  if (wCoins) wCoins.textContent = (wallet && Number.isFinite(wallet.coins)) ? wallet.coins : '—';
+  if (wCraft) wCraft.textContent = (wallet && Number.isFinite(wallet.crafting)) ? wallet.crafting : '—';
+}
+function publishUser(){
+  const wUser = document.getElementById('wUser');
+  if (wUser) wUser.textContent = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ? '@' + window.__IZZA_PROFILE__.username : '—';
+}
+
+/* Wallet handoff (same pattern as Basketball) */
+function consumeWalletHandoff(maxAgeMs = 120000){
+  try{
+    const raw = sessionStorage.getItem('izzaWalletHandoff');
+    if(!raw) return null;
+    const s = JSON.parse(raw);
+    if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
+
+    if (s.user){
+      const u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+      window.izzaUserKey = { get: () => u };
+      try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+      U = u;
+    }
+    localStorage.setItem('izzaCoins', String(s.coins|0));
+    localStorage.setItem('izzaCrafting', String(s.craft|0));
+    return { coins:s.coins|0, craft:s.craft|0 };
+  }catch(_){ return null; }
+}
+
+/* Hidden City iframe priming (same behavior as Basketball) */
+function primeViaCityIframe({maxWaitMs=8000, pollMs=120} = {}){
+  return new Promise((resolve)=>{
+    let f=null, done=false, hard=null, poll=null;
+    const finish=(why)=>{ if(done) return; done=true;
+      try{ clearTimeout(hard); clearInterval(poll); f && f.remove(); }catch(_){}
+      resolve(why||'ok');
+    };
+    const src = withAuth('/izza-game/play?prime=1&silent=1');
+    f=document.createElement('iframe'); f.src=src;
+    Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
+    document.body.appendChild(f);
+    f.addEventListener('load', ()=>{
+      try{
+        const w=f.contentWindow; let tick=0;
+        poll=setInterval(async ()=>{
+          try{
+            if (w?.IZZA_PERSIST?.load && tick<1){ tick++; await w.IZZA_PERSIST.load(); finish('iframe-load'); }
+          }catch(_){}
+        }, pollMs);
+      }catch(_){}
+    }, {once:true});
+    hard=setTimeout(()=>finish('timeout'), maxWaitMs);
+  });
+}
+
+/* Snapshot hydration */
+function waitForPersistReady({timeout=3000, interval=40} = {}){
+  return new Promise((res)=> {
+    const t0 = performance.now();
+    const check = () => {
+      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+      if (performance.now() - t0 > timeout) return res(false);
+      setTimeout(check, interval);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
+    else check();
+  });
+}
+async function hydrateFromSnapshot(){
+  try{
+    await waitForPersistReady();
+    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+      await IZZA_PERSIST.load();  // server → LS
+    }
+  }catch(_){}
+  try{ writeCraftAll(readCraftAny()); }catch(_){}
+  return readCoinsLS();
+}
+async function ensureSession(){
+  try{
+    const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
+    if (r.ok){
+      const j = await r.json().catch(()=> ({}));
+      const uname = (j.user && j.user.username) || j.username || j.handle || '';
+      if (uname) { U = publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){} }
+    }
+  }catch(_){}
+}
+
+/* ====== Basic UI Refs ====== */
 const arena  = document.getElementById('arena');
 const canvas = document.getElementById('scene');
 const ctx    = canvas.getContext('2d', { alpha:true });
@@ -142,9 +479,11 @@ ctx.imageSmoothingEnabled = true;
 ctx.imageSmoothingQuality = 'high';
 
 const HUD = {
-  speed: document.getElementById('speed'),
   dist : document.getElementById('dist'),
-  coins: document.getElementById('coinsRun')
+  coins: document.getElementById('coinsRun'),
+  speedText: document.getElementById('speedTxt'),
+  needle: document.getElementById('needle'),
+  speedoWrap: document.getElementById('speedoWrap'),
 };
 const nitroWrap = document.getElementById('nitroWrap');
 const nitroFill = document.getElementById('nitroFill');
@@ -152,10 +491,10 @@ const bgm = document.getElementById('bgm');
 const soundBtn = document.getElementById('soundBtn');
 const soundLabel = document.getElementById('soundLabel');
 
-/* mini car canvas + strike dots */
+/* mini car canvas + strike SVGs */
 const miniCar = document.getElementById('miniCar');
 const miniCtx = miniCar.getContext('2d');
-const strikeDots = [document.getElementById('b1'), document.getElementById('b2'), document.getElementById('b3')];
+const strikeSvgs = [document.getElementById('b1'), document.getElementById('b2'), document.getElementById('b3')];
 
 /* ======= Tunables ======= */
 const OVERLAY_ALPHA = 0.10;
@@ -173,42 +512,53 @@ let ASPHALT_ALPHA = 0.36;
 // Hyperloop multipliers
 const HYPER = { streaks:1.8, smear:1.6, asphalt:1.7, auroraW:1.6, zoom:1.07 };
 
-/* ============== Sizing / Camera ============== */
-let dpr=1, W=0, H=0;
-let VANISH_Y = -800;
-let TOP_FADE_PX=90;
-/* Car-anchored vanishing-point X stays intact */
-let VPT_X=0, VPT_Y=0;
-let roadBottomHalf=0, roadTopHalf=0;
+/* Track assets */
+let TRACK = 'night'; // 'night' | 'day'
+const TRACK_BG = {
+  night: '/static/game/sprites/road_bg.jpg',
+  day:   '/static/game/sprites/daytrack_bg.jpg'
+};
+const GARAGE_BG = '/static/game/sprites/garage_bg.jpg';
 
-function resize(){
-  W = arena.clientWidth;
-  H = arena.clientHeight;
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width  = Math.floor(W * dpr);
-  canvas.height = Math.floor(H * dpr);
-  canvas.style.width  = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-
-  roadBottomHalf = W*1.02;
-  roadTopHalf    = W*0.10;
-
-  VANISH_Y = -Math.max(H * 0.8, 600);
-  TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
-
-  VPT_Y = H*0.62;
-
-  buildNoise();
-  updateCarPlacement();
-}
-window.addEventListener('resize', resize, {passive:true});
-
-/* ============== Assets ============== */
 const carImg = new Image();
 carImg.src = '/static/game/sprites/tracks/coupe.png';
 const bgImg = new Image();
-bgImg.src = '/static/game/sprites/road_bg.jpg';
+bgImg.src = TRACK_BG[TRACK];
+
+/* Garage card background */
+(function setGarageBG(){
+  const card = document.getElementById('garageCard');
+  card.style.setProperty('--garage-bg', `url(${GARAGE_BG})`);
+  card.style.backgroundImage = 'none';
+  card.classList.add('hasBG');
+  card.style.setProperty('--garage-bg-bright', '1');
+  card.style.setProperty('--garage-bg-alpha', '.22');
+  card.style.setProperty('--garage-bg-url', `url(${GARAGE_BG})`);
+  card.style.setProperty('background-image', `linear-gradient(to bottom, rgba(0,0,0,.12), rgba(0,0,0,.18)), url(${GARAGE_BG})`);
+})();
+
+/* Track selector buttons */
+const trackNightBtn = document.getElementById('trackNightBtn');
+const trackDayBtn   = document.getElementById('trackDayBtn');
+function setTrack(t){
+  if (t !== 'night' && t !== 'day') return;
+  TRACK = t;
+  bgImg.src = TRACK_BG[t];
+  trackNightBtn.classList.toggle('active', t==='night');
+  trackDayBtn.classList.toggle('active', t==='day');
+
+  // Brighten garage lighting on day track
+  const card = document.getElementById('garageCard');
+  if (t==='day'){
+    card.style.setProperty('filter', 'brightness(1.05)');
+    card.style.setProperty('background-image', `linear-gradient(to bottom, rgba(255,255,255,.06), rgba(0,0,0,.12)), url(${GARAGE_BG})`);
+  } else {
+    card.style.setProperty('filter', 'brightness(1.0)');
+    card.style.setProperty('background-image', `linear-gradient(to bottom, rgba(0,0,0,.12), rgba(0,0,0,.18)), url(${GARAGE_BG})`);
+  }
+}
+trackNightBtn.addEventListener('click', ()=> setTrack('night'));
+trackDayBtn.addEventListener('click',   ()=> setTrack('day'));
 
 /* Tinted sprite for garage preview and mini car */
 function makeTintedSprite(rgb){
@@ -230,7 +580,7 @@ function makeTintedSprite(rgb){
   return off;
 }
 
-/* ============== Garage Paint ============== */
+/* Garage Paint */
 const PAINTS = [
   {name:'Cherry',    r:255, g:70,  b:70 },
   {name:'Sunburst',  r:255, g:190, b:40 },
@@ -241,7 +591,6 @@ const PAINTS = [
 ];
 let paint = JSON.parse(localStorage.getItem('izza_paint')||'null') || PAINTS[0];
 let tintedSprite = null;
-
 const swatches = document.getElementById('swatches');
 PAINTS.forEach(p=>{
   const d = document.createElement('div');
@@ -292,24 +641,35 @@ function drawMiniCar(){
 }
 carImg.onload = ()=>{ rebuildTintAndPreview(); drawMiniCar(); };
 
-/* ============== Projection helpers ============== */
-const lerp = (a,b,t)=>a+(b-a)*t;
-function project(z){
-  const k = 0.0105;
-  const t = 1 - Math.exp(-k*z);
-  const y   = lerp(VANISH_Y, H, t);
-  const half= lerp(roadTopHalf, roadBottomHalf, t);
-  return { y, half, t };
-}
+/* ============== Sizing / Camera ============== */
+let dpr=1, W=0, H=0;
+let VANISH_Y = -800;
+let TOP_FADE_PX=90;
+let VPT_X=0, VPT_Y=0;
+let roadBottomHalf=0, roadTopHalf=0;
 
-/* ======= Road params ======= */
-const DEPTH_Z=24000, STEP_Z=48, RAIL_SCALE=1.08;
-function edgesAt(z){
-  const p = project(z);
-  const y = Math.max(p.y, VANISH_Y);
-  const half = (y === VANISH_Y) ? 0.0001 : p.half;
-  return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8, t:p.t };
+function resize(){
+  W = arena.clientWidth;
+  H = arena.clientHeight;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width  = Math.floor(W * dpr);
+  canvas.height = Math.floor(H * dpr);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  roadBottomHalf = W*1.02;
+  roadTopHalf    = W*0.10;
+
+  VANISH_Y = -Math.max(H * 0.8, 600);
+  TOP_FADE_PX  = Math.max(60, Math.min(110, Math.round(H*0.10)));
+
+  VPT_Y = H*0.62;
+
+  buildNoise();
+  updateCarPlacement();
 }
+window.addEventListener('resize', resize, {passive:true});
 
 /* ============== Background (parallax) ============== */
 let bgParallaxX = 0, bgTarget = 0;
@@ -342,7 +702,7 @@ function drawAurora(t, hyperFactor=1){
   for (let i=0;i<3;i++){
     const phase = t*AURORA_SPEED*(i+1)*hyperFactor;
     const sway  = Math.sin(phase)*wob*(i?0.6:1);
-    const gx = VPT_X + sway; /* follow car center */
+    const gx = VPT_X + sway;
     const gy0 = 0, gy1 = topH;
     const g = ctx.createLinearGradient(gx, gy0, gx, gy1);
     g.addColorStop(0.00, 'rgba(0,255,255,0.55)');
@@ -383,7 +743,6 @@ function buildNoise(){
   noiseCanvas.width = noiseW; noiseCanvas.height = noiseH;
   noiseCtx = noiseCanvas.getContext('2d');
 
-  // subtle diagonal grains for asphalt scroll
   noiseCtx.clearRect(0,0,noiseW,noiseH);
   noiseCtx.fillStyle = 'rgba(255,255,255,0.02)';
   noiseCtx.fillRect(0,0,noiseW,noiseH);
@@ -402,6 +761,25 @@ function buildNoise(){
   }
 }
 
+/* ======== Projection helpers ======== */
+const lerp = (a,b,t)=>a+(b-a)*t;
+function project(z){
+  const k = 0.0105;
+  const t = 1 - Math.exp(-k*z);
+  const y   = lerp(VANISH_Y, H, t);
+  const half= lerp(roadTopHalf, roadBottomHalf, t);
+  return { y, half, t };
+}
+
+/* ======= Road params ======= */
+const DEPTH_Z=24000, STEP_Z=48, RAIL_SCALE=1.08;
+function edgesAt(z){
+  const p = project(z);
+  const y = Math.max(p.y, VANISH_Y);
+  const half = (y === VANISH_Y) ? 0.0001 : p.half;
+  return { y, lx: W/2 - half*RAIL_SCALE - 8, rx: W/2 + half*RAIL_SCALE + 8, t:p.t };
+}
+
 /* ======== SPEED GRID (no center dotted line) ======== */
 function drawSpeedGrid(worldZ, speed, hyper=false){
   const baseAlpha = hyper ? 0.75 : 0.55;
@@ -409,8 +787,8 @@ function drawSpeedGrid(worldZ, speed, hyper=false){
 
   ctx.save();
   ctx.lineWidth = 1.4;
-  ctx.setLineDash([6,10]);                        // short dashes
-  const dashShift = -(worldZ * (0.045 + speed/6000)); // scroll rate by speed
+  ctx.setLineDash([6,10]);
+  const dashShift = -(worldZ * (0.045 + speed/6000));
 
   // Left edge
   ctx.strokeStyle = edgeColor;
@@ -456,32 +834,28 @@ function drawSpeedGrid(worldZ, speed, hyper=false){
   ctx.restore();
 }
 
-/* ======== Independent color wave (NOT tied to steering) — tuned ======== */
+/* ======== Independent color wave (as-is) ======== */
 function drawIndependentWave(worldZ, speed, hyper=false, heat=0, t=0){
-  /* --------------------- EASY TWEAKS (edit these) --------------------- */
-  const APEX_LIFT = 22;              // ↑ move the start UP the image (px). Bigger = higher.
-  const FAN_SPAN  = 1.40;            // total angular spread in radians (was 0.90 → wider & quicker fan)
-  const FAN_COUNT = 30;              // number of beams (density). 24–36 is a good range.
-  const FAN_LEN   = H * 2.10;        // length without nitro (was ~1.65) — longer wave
-  const FAN_LEN_HYPER = H * 2.50;    // length with nitro (was ~1.85) — even longer
-  const WOBBLE_AMP = 16 * (hyper?1.2:1); // side wobble amplitude
+  const APEX_LIFT = 22;
+  const FAN_SPAN  = 1.40;
+  const FAN_COUNT = 30;
+  const FAN_LEN   = H * 2.10;
+  const FAN_LEN_HYPER = H * 2.50;
+  const WOBBLE_AMP = 16 * (hyper?1.2:1);
   const SPEED_K = Math.min(1, (speed/240)) * (hyper?1.25:1.0);
 
-  // Tip look/feel (no white). Starts transparent -> turquoise tip -> fades to base colors
-  const TIP_COLOR = { r: 80, g: 220, b: 255 }; // teal/turquoise near apex
-  const TIP_ALPHA = 0.40;          // how visible the tight tip becomes after the fade-in
-  const START_FADE = 0.08;         // how far from the apex (0..1 of stroke length) the color becomes visible
-  const MID_FADE   = 0.26;         // where the tip settles to a softer body brightness
-  const BODY_ALPHA = 0.28 + 0.18*heat; // body brightness; raise/lower overall “beam” intensity
+  const TIP_COLOR = { r: 80, g: 220, b: 255 };
+  const TIP_ALPHA = 0.40;
+  const START_FADE = 0.08;
+  const MID_FADE   = 0.26;
+  const BODY_ALPHA = 0.28 + 0.18*heat;
 
-  // “Tighter tip” by skipping the very beginning of each beam (start further along the ray)
-  const START_CUT  = 0.12;         // 0..~0.2: trims the first portion so the tip looks very tight
-  const LINE_BASE  = 7;            // base thickness
-  const LINE_GAIN  = 20;           // thickness added with speed
-  /* -------------------------------------------------------------------- */
+  const START_CUT  = 0.12;
+  const LINE_BASE  = 7;
+  const LINE_GAIN  = 20;
 
   const apexX = W*0.5;
-  const apexY = (VPT_Y - 6) - APEX_LIFT;         // start further up the image
+  const apexY = (VPT_Y - 6) - APEX_LIFT;
   const span  = FAN_SPAN;
   const count = FAN_COUNT;
   const len   = hyper ? FAN_LEN_HYPER : FAN_LEN;
@@ -489,54 +863,47 @@ function drawIndependentWave(worldZ, speed, hyper=false, heat=0, t=0){
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = 0.42 + 0.18*SPEED_K;
-  ctx.lineCap = 'butt';     // no rounded blob at the start
+  ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
 
   for (let i = 0; i < count; i++){
-    // Angle across the fan. Wider span = faster “fan out”
     const u = i/(count-1);
     const ang = (-span/2) + u*span;
 
-    // End point + wobble
     const wob = Math.sin((worldZ*0.028) + t*3 + i*0.7) * WOBBLE_AMP;
     const x2  = apexX + Math.tan(ang)*(len*0.85) + wob;
     const y2  = H + 80;
 
-    // Trim the first bit so the tip is tight and starts slightly away from apex
     const sx = apexX + (x2 - apexX)*START_CUT;
     const sy = apexY + (y2 - apexY)*START_CUT;
 
-    // Gradient along the trimmed stroke (from sx,sy → x2,y2)
     const grad = ctx.createLinearGradient(sx, sy, x2, y2);
-
-    // Teal/turquoise tip (no white), invisible right at the start
     const tip = (a)=>`rgba(${TIP_COLOR.r},${TIP_COLOR.g},${TIP_COLOR.b},${a})`;
-    grad.addColorStop(0.00, tip(0.00));                              // fully transparent at start
-    grad.addColorStop(START_FADE, tip(TIP_ALPHA));                   // the tight turquoise tip appears
-    grad.addColorStop(MID_FADE, tip(Math.max(0.18, BODY_ALPHA)));   // blend into body brightness
+    grad.addColorStop(0.00, tip(0.00));
+    grad.addColorStop(START_FADE, tip(TIP_ALPHA));
+    grad.addColorStop(MID_FADE, tip(Math.max(0.18, BODY_ALPHA)));
 
-    // Body alternates cool hues; you can switch both to teal if you want a single-color wave
     const base = (i%2===0)? `rgba(70,200,255,${BODY_ALPHA})` : `rgba(235,60,255,${BODY_ALPHA*0.9})`;
     grad.addColorStop(0.60, base);
-    grad.addColorStop(1.00, 'rgba(0,0,0,0)');                        // fade out at the far end
+    grad.addColorStop(1.00, 'rgba(0,0,0,0)');
 
     ctx.strokeStyle = grad;
     ctx.lineWidth = LINE_BASE + LINE_GAIN*SPEED_K*(hyper?1.10:1.0);
 
     ctx.beginPath();
-    ctx.moveTo(sx, sy);      // note: we start after the apex for a tighter, non-blobby tip
+    ctx.moveTo(sx, sy);
     ctx.lineTo(x2, y2);
     ctx.stroke();
   }
 
   ctx.restore();
 }
+
 /* ===== Motion streaks + side smears + asphalt scroll + tire beams ===== */
 function drawMotion(worldZ, speed, hyper=false, heat=0){
   const hyperK = hyper ? HYPER : {streaks:1, smear:1, asphalt:1};
   const k = Math.min(1, (speed/240)) * STREAK_SPEED;
 
-  // original, steering-locked radial streaks (UNCHANGED)
   const count = Math.round((hyper?58:42) * hyperK.streaks * (1+0.5*heat));
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -558,7 +925,6 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   }
   ctx.restore();
 
-  // side smears
   const smearW = W*(hyper?0.46:0.38);
   const smearAlpha = (0.16 + SMEAR_ALPHA*0.9*k) * hyperK.smear * (1+0.25*heat);
   const smearG_L = ctx.createLinearGradient(0,0,smearW,0);
@@ -589,7 +955,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
     ctx.drawImage(noiseCanvas, 0, y + scroll, W, noiseH);
   }
 
-  // tire glow beams (UNCHANGED)
+  // tire glow beams
   const tireL = carX + carW*0.27;
   const tireR = carX + carW*0.73;
   const baseY = H*0.86;
@@ -609,7 +975,7 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   lane(tireL); lane(tireR);
   ctx.restore();
 
-  // hyperloop vignette
+  // hyper vignette
   ctx.save();
   const inner = Math.min(W,H)*0.10;
   const outer = Math.max(W,H)*(hyper?0.78:0.66)*(1-0.10*heat);
@@ -621,11 +987,11 @@ function drawMotion(worldZ, speed, hyper=false, heat=0){
   ctx.restore();
 }
 
-/* ======= Headlights (attached to car) ======= */
+/* ======= Headlights ======= */
 function drawHeadlights(){
   const leftRoot  = { x: carX + carW*0.32, y: carY + carH*0.74 };
   const rightRoot = { x: carX + carW*0.68, y: carY + carH*0.74 };
-  const aim = { x: VPT_X, y: VPT_Y - 12 }; // aim moves with car center
+  const aim = { x: VPT_X, y: VPT_Y - 12 };
 
   const drawBeam = (root, spread)=> {
     ctx.save();
@@ -789,7 +1155,6 @@ function ensureAudio(){
   const src = AC.createMediaElementSource(bgm);
   src.connect(musicGain);
 }
-
 function clickStartAudio(){
   ensureAudio();
   if (AC.state === 'suspended') AC.resume();
@@ -800,7 +1165,6 @@ function clickStartAudio(){
 }
 let bgmStarted=false;
 
-/* short SFX */
 function playCoin(){
   ensureAudio();
   const o = AC.createOscillator();
@@ -836,8 +1200,6 @@ function playBomb(){
   s.connect(f); f.connect(g); g.connect(sfxGain);
   s.start(); s.stop(AC.currentTime+0.52);
 }
-
-/* Continuous Nitro whoosh while holding */
 let nitroLoop = null;
 function setNitroWhoosh(on){
   ensureAudio();
@@ -913,7 +1275,7 @@ class Pickup {
     else if (this.type==='nitro')drawNitro(x,y,s*1.06,this.spin);
     else                         drawBomb(x,y,s*1.12,this.spin);
 
-    // HARD DESPAWN once clearly past car view, even if not collided
+    // HARD DESPAWN
     if (y > H*0.97 || e.t > 0.995) this.alive = false;
   }
 
@@ -929,7 +1291,7 @@ class Pickup {
     const ny = Math.max(carRect.y, Math.min(cy, carRect.y+carRect.h));
     const dx = cx-nx, dy = cy-ny;
 
-    /* STRICT center requirement for middle-lane objects */
+    /* Middle lane strict-center */
     const isMiddleLane = Math.abs(this.laneT - 0.50) < 1e-3;
     if (isMiddleLane){
       const carCenter = carX + carW*0.5;
@@ -941,7 +1303,7 @@ class Pickup {
   }
 }
 
-/* Procedural sprites for pickups (unchanged visuals) */
+/* Procedural sprites for pickups */
 function drawCoin(x,y,s,ang){
   const w = 26*s, h = 26*s*Math.max(0.28, Math.abs(Math.cos(ang)));
   ctx.save();
@@ -999,7 +1361,7 @@ function updateCarPlacement(){
   carH = carW * ratio;
   carX = Math.round((W - carW)/2);
   carY = Math.round(H - carH*1.02);
-  VPT_X = carX + carW*0.5; // anchor all light/motion to car center
+  VPT_X = carX + carW*0.5;
   drawMiniCar();
 }
 function carRect(){ return {x:carX+carW*0.18, y:carY+carH*0.30, w:carW*0.64, h:carH*0.52}; }
@@ -1085,56 +1447,114 @@ bindNitroHold(nitroWrap);
 
 /* ============== GAME STATE ============== */
 let worldZ = 0, last = performance.now();
-const state = { running:false, speed:0, dist:0, coins:0, bombsHit:0 };
+const state = { running:false, speed:0, dist:0, bombsHit:0 };
 let nitro = 1.0; // 0..1 meter
 let heat = 0;    // nitro “glow heat” 0..1
 let nitroActive = false;
 
-/* spawns */
+/* pickups & spawn controller */
 let lastSpawn = 0;
 const pickups = [];
-
-/* Lanes */
 const LANE_TS = [0.26, 0.50, 0.74];
 
-/* No stacking per-lane */
-const MIN_LANE_SEP_Z = 720; // slightly closer than before to feel denser
+/* Safety planner to avoid impossible collisions */
+const MIN_LANE_SEP_Z = 640;             // per-lane separation (slightly denser than before)
+const MIN_MULTI_SEP_Z = 380;            // avoid horizontal walling (keep items staggered in Z)
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
+let lastMultiZ = -1e9;
 
-/* dynamic spawn controller */
 function currentSpawnInterval(){
-  // base gets shorter with distance and more during nitro
-  const base = 520; // ms (denser)
+  // MORE ITEMS overall but still avoid chaos: slightly faster base, scales w/ distance and nitro
+  const base = 420; // ms (denser than before)
   const far  = Math.max(0, Math.min(1, state.dist/2500)); // 0..1 by 2.5km
-  const hyperCut = nitroActive ? 0.65 : 1.0; // faster when nitro
-  const jitter = 0.75 + Math.random()*0.35;
-  return base * (1.0 - 0.35*far) * hyperCut * jitter;
+  const hyperCut = nitroActive ? 0.62 : 1.0; // spawn feels faster in nitro
+  const jitter = 0.72 + Math.random()*0.30;
+  return base * (1.0 - 0.38*far) * hyperCut * jitter;
 }
 function bombChance(){
-  // starts modest and scales up with distance
-  const d = Math.max(0, Math.min(1, state.dist/4000)); // 0..1 by 4km
-  return 0.18 + d*0.40; // up to ~58%
+  // never block all lanes; this is just raw desire, planner enforces safety
+  const d = Math.max(0, Math.min(1, state.dist/4000));
+  return 0.22 + d*0.38; // up to ~60%
+}
+
+/* Decide safe lane mask near a given Z */
+function computeUnsafeLanes(targetZ){
+  // mark lanes that would conflict with MIN_MULTI_SEP_Z around targetZ
+  const unsafe=[false,false,false];
+  for (const p of pickups){
+    if (!p.alive) continue;
+    const z = p.spawnZ;
+    if (Math.abs(z - targetZ) < MIN_MULTI_SEP_Z){
+      const li = LANE_TS.indexOf(p.laneT);
+      if (li>=0) unsafe[li]=true;
+    }
+  }
+  return unsafe;
 }
 function spawnOne(){
-  const available = [];
+  // which lanes are available by per-lane spacing?
+  const spaceOK = [];
   for (let i=0;i<LANE_TS.length;i++){
-    if (worldZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) available.push(i);
+    if (worldZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) spaceOK.push(i);
   }
-  if (available.length===0) return;
+  if (spaceOK.length===0) return;
 
-  const li = available[Math.floor(Math.random()*available.length)];
-  const laneT = LANE_TS[li];
-  laneLastSpawnZ[li] = worldZ;
+  // Avoid horizontal walls: if last multi-lane spawn too close, force single-lane
+  const allowMulti = (worldZ - lastMultiZ) >= MIN_MULTI_SEP_Z;
 
-  const r = Math.random();
-  const pBomb  = bombChance();
-  const pNitro = 0.18 * (1 - Math.min(0.7, state.dist/6000)); // nitro a bit rarer later
-  if (r < pBomb) {
-    pickups.push(new Pickup('bomb', worldZ, laneT));
-  } else if (r < pBomb + pNitro) {
-    pickups.push(new Pickup('nitro', worldZ, laneT));
-  } else {
-    pickups.push(new Pickup('coin', worldZ, laneT));
+  // Compute unsafe lanes to keep at least one gap
+  const unsafe = computeUnsafeLanes(worldZ);
+  const candidates = spaceOK.filter(i=>!unsafe[i]);
+  if (candidates.length===0){
+    // if all lanes unsafe at this Z, pick the safest by furthest lastSpawnZ
+    let best = 0, bestScore=-1e9;
+    for (const i of spaceOK){
+      const score = worldZ - laneLastSpawnZ[i];
+      if (score>bestScore){ bestScore=score; best=i; }
+    }
+    candidates.push(best);
+  }
+
+  // choose 1 or 2 items, but never block all lanes simultaneously
+  const howMany = (allowMulti && Math.random()<0.35 && candidates.length>=2) ? 2 : 1;
+  if (howMany===2) lastMultiZ = worldZ;
+
+  const pickSet = [];
+  // randomize candidate order
+  for (let i=candidates.length-1;i>0;i--){
+    const j = (Math.random()*(i+1))|0; const tmp=candidates[i]; candidates[i]=candidates[j]; candidates[j]=tmp;
+  }
+  for (let k=0;k<howMany;k++){
+    if (!candidates.length) break;
+    const li = candidates.shift();
+    pickSet.push(li);
+  }
+
+  // Create items with safe types (convert bombs if it would make walls)
+  const desiredBomb = Math.random() < bombChance();
+  for (let idx=0; idx<pickSet.length; idx++){
+    const li = pickSet[idx];
+    const laneT = LANE_TS[li];
+    laneLastSpawnZ[li] = worldZ;
+
+    // Type selection:
+    // prioritize coins, sprinkle nitro, and only some bombs; never spawn bombs in all remaining lanes
+    let type = 'coin';
+    const roll = Math.random();
+    const pNitro = 0.16 * (1 - Math.min(0.7, state.dist/6000));
+    if (roll < pNitro) type = 'nitro';
+    else if (desiredBomb && roll < pNitro + 0.40) type = 'bomb';
+
+    // Safety: if this spawn would cause all lanes in ~same Z to be bombs, force coin
+    if (type==='bomb'){
+      const nearSameZ = pickups.filter(p => p.alive && p.type==='bomb' && Math.abs(p.spawnZ - worldZ) < MIN_MULTI_SEP_Z);
+      const bombLanes = new Set(nearSameZ.map(p=>p.laneT));
+      bombLanes.add(laneT);
+      if (bombLanes.size >= 3){
+        type = 'coin';
+      }
+    }
+    pickups.push(new Pickup(type, worldZ, laneT));
   }
 }
 
@@ -1147,22 +1567,33 @@ function useNitro(dt){
   else            { heat = Math.max(0, heat - dt*1.6); }
   if (nitroActive !== wasActive) setNitroWhoosh(nitroActive);
   nitroFill.style.width = Math.round(nitro*100)+'%';
+  HUD.speedoWrap.classList.toggle('shake', nitroActive);
 }
 
-/* HUD: update strike dots */
+/* Strikes: update SVG bombs */
 function updateStrikes(){
   for(let i=0;i<3;i++){
     const on = i < state.bombsHit;
-    strikeDots[i].classList.toggle('hit', on);
+    strikeSvgs[i].classList.toggle('hit', on);
   }
 }
 
-function gameOver(){
-  state.running=false;
-  try{ bgm.pause(); }catch(e){}
-  setNitroWhoosh(false);
-  alert(`CRASHED 💥\nDistance: ${Math.round(state.dist)} m\nCoins: ${state.coins}`);
-  document.getElementById('startOverlay').style.display='';
+/* Speedometer needle and text */
+function updateSpeedo(speed){
+  // map 0..300 km/h to -90..+90 deg
+  const clamped = Math.max(0, Math.min(300, speed));
+  const deg = -90 + (clamped/300)*180;
+  HUD.needle.setAttribute('transform', `translate(70,42) rotate(${deg.toFixed(1)})`);
+  HUD.speedText.textContent = Math.round(clamped) + ' km/h';
+}
+
+/* END GAME popup (called after 3rd strike) */
+function showEndPopup(coinsEarned, craftEarned){
+  const end = document.getElementById('endOverlay');
+  document.getElementById('finalDist').textContent  = Math.round(state.dist);
+  document.getElementById('finalCoins').textContent = coinsEarned|0;
+  document.getElementById('finalCraft').textContent = craftEarned|0;
+  end.style.display = 'flex';
 }
 
 /* draw car last */
@@ -1175,7 +1606,39 @@ function drawCar(nitroBoost){
   ctx.globalCompositeOperation = 'source-over';
 }
 
+/* ======= WALLET HUD ======= */
+let WALLET_READY = false, walletDirty=false, runStartCoins=0, runStartCraft=0;
+function paintCoinsHUD(n){
+  const val = Math.max(0, n|0);
+  HUD.coins.textContent = String(val);
+}
+function updateCoinsHUD(){
+  if(!WALLET_READY) return;
+  const cur = readCoinsLS();
+  const shown = parseInt(HUD.coins.textContent||'0',10) || 0;
+  const val = (cur===0 && shown>0) ? shown : cur;
+  paintCoinsHUD(val);
+}
+function syncCoinsHUD(){ updateCoinsHUD(); }
+async function applyCoins(amount){
+  const cur = (readCoinsLS()|0) + (amount|0);
+  writeCoinsLS(cur);
+  walletDirty = true;
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+  try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
+  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
+  WALLET_READY = true; updateCoinsHUD(); return cur;
+}
+async function applyCraftDelta(delta){
+  const val = readCraftAny() + (delta|0);
+  writeCraftAll(val);
+  walletDirty = true;
+  try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
+  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
+}
+
 /* ============== MAIN LOOP ============== */
+let coinsThisRun = 0;
 function frame(now){
   if(!state.running) return;
   const dt = Math.min(0.033, (now - last)/1000); last = now;
@@ -1183,21 +1646,22 @@ function frame(now){
 
   // Nitro & speed
   useNitro(dt);
-  const target = (nitroActive ? 270 : 190); // slightly higher top with nitro
+  const target = (nitroActive ? 270 : 190);
   state.speed += (target - state.speed) * 0.10;
+  updateSpeedo(state.speed);
 
   const hyper = nitroActive;
-  const mps = state.speed / 3.6 * (hyper?1.22:1); // feels faster while nitro
+  const mps = state.speed / 3.6 * (hyper?1.22:1);
   worldZ += mps * dt;
   state.dist += mps * dt;
 
-  // Spawns (dynamic)
+  // Spawns (denser but safe)
   if (now - lastSpawn > currentSpawnInterval()) {
     lastSpawn = now; spawnOne();
   }
 
   // steering + anchor visuals to car center
-  const steerSpeed = Math.max(2.5, W * 0.0066) * (hyper?1.06:1);
+  const steerSpeed = Math.max(2.6, W * 0.0072) * (hyper?1.08:1);
   carX += steer.x * steerSpeed;
   const off = carW*0.12;
   carX = Math.max(-off, Math.min(W - carW + off, carX));
@@ -1208,19 +1672,13 @@ function frame(now){
   drawBackground(hyper?HYPER.zoom:1);
   drawRoad();
 
-  // Independent widened color wave under glow (not steering-tied)
   drawIndependentWave(worldZ, state.speed, hyper, heat, time);
-
-  // Speed grid with no center line
   drawSpeedGrid(worldZ, state.speed, hyper);
 
   drawAurora(time, hyper?1.25:1);
   drawVanishingGlow(time, heat);
 
-  // Steering-locked motion + everything car-attached stays as-is
   drawMotion(worldZ, state.speed, hyper, heat);
-
-  // Headlights on top
   drawHeadlights();
 
   // Colliders
@@ -1230,19 +1688,19 @@ function frame(now){
   for (const p of pickups) {
     if (!p.alive) continue;
     p.draw(worldZ);
-    if (!p.alive) continue; // might have despawned during draw
+    if (!p.alive) continue;
 
     if (p.hitTest(cRect, worldZ)) {
       p.alive = false;
 
-      // screen-space coordinates at collision moment
+      // screen-space for particles
       const ez = p.zRel(worldZ);
       const e  = edgesAt(ez);
       const x  = e.lx + (e.rx-e.lx)*p.laneT;
       const y  = Math.max(e.y, VPT_Y + H*0.02);
 
       if (p.type === 'coin') {
-        state.coins += 100;
+        coinsThisRun += 100;
         burstCoins(x,y);
         playCoin();
       } else if (p.type === 'nitro') {
@@ -1254,7 +1712,13 @@ function frame(now){
         updateStrikes();
         explodeBomb(x,y);
         playBomb();
-        if (state.bombsHit >= 3) { gameOver(); return; }
+
+        if (state.bombsHit >= 3) {
+          // Show third red bomb first, then popup
+          updateStrikes();
+          endRun(); // will pop overlay after wallet/craft sync
+          return;
+        }
       }
     }
   }
@@ -1266,27 +1730,68 @@ function frame(now){
     particles[i].draw(ctx);
   }
 
+  // Apply coins in HUD smoothly from run pot (batch)
+  if (coinsThisRun >= 100){
+    const toApply = coinsThisRun - (coinsThisRun % 100);
+    coinsThisRun -= toApply;
+    applyCoins(toApply);
+  }
+
   drawCar(nitroActive);
 
   // HUD
-  HUD.speed.textContent = Math.round(state.speed);
   HUD.dist.textContent  = Math.round(state.dist);
-  HUD.coins.textContent = state.coins;
 
   requestAnimationFrame(frame);
 }
 
-/* ======= START ======= */
-document.getElementById('startBtn').addEventListener('click', () => {
-  document.getElementById('startOverlay').style.display = 'none';
-  resize();
+/* ======= START / END ======= */
+const startOverlay = document.getElementById('startOverlay');
+const endOverlay = document.getElementById('endOverlay');
+
+function softHide(el){ if(el) el.style.display='none'; }
+function softShow(el){ if(el) el.style.display='flex'; }
+
+async function persistWalletAndSave(){
+  try{
+    writeCraftAll(readCraftAny());
+    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ await IZZA_PERSIST.save(); walletDirty = false; }
+    else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
+  }catch(_){}
+}
+
+async function endRun(){
+  if (!state.running) return;
+  state.running=false;
+  try{ bgm.pause(); }catch(_){}
+  setNitroWhoosh(false);
+
+  // finalize run coins still buffered
+  if (coinsThisRun>0){
+    await applyCoins(coinsThisRun);
+    coinsThisRun = 0;
+  }
+
+  // Craft credits: every 1000 coins earned this run
+  const coinsNow = readCoinsLS();
+  const coinsEarned = Math.max(0, (coinsNow|0) - (runStartCoins|0));
+  const craftEarned = Math.floor(coinsEarned / 1000);
+  if (craftEarned>0) await applyCraftDelta(craftEarned);
+
+  // Save and show popup (but ensure third bomb was shown red already)
+  try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 180))]); }catch(_){}
+
+  // Publish stats
+  showEndPopup(coinsEarned, craftEarned);
+}
+
+function resetStateForRun(){
   tintedSprite = makeTintedSprite(paint);
   state.running   = true;
   state.speed     = 90;
   state.dist      = 0;
   worldZ          = 0;
   last            = performance.now();
-  state.coins     = 0;
   state.bombsHit  = 0;
   updateStrikes();
   nitro           = 1.0;
@@ -1296,16 +1801,134 @@ document.getElementById('startBtn').addEventListener('click', () => {
   particles.length= 0;
   laneLastSpawnZ[0]=laneLastSpawnZ[1]=laneLastSpawnZ[2]=-1e9;
   lastSpawn       = performance.now();
+  lastMultiZ      = -1e9;
+  coinsThisRun    = 0;
+}
 
-  if (!muted){ clickStartAudio(); }
-
-  requestAnimationFrame(frame);
+document.getElementById('againBtn').addEventListener('click', async ()=>{
+  endOverlay.style.display='none';
+  startOverlay.style.display='flex';
 });
 
-/* init */
+/* init sizing early */
 resize();
+
+/* ======= START button flow (like Basketball) ======= */
+document.getElementById('startBtn').addEventListener('click', async ()=>{
+  try{
+    // Player name on card
+    publishUser();
+
+    // 0) Wallet handoff from Arena if present
+    const handoff = consumeWalletHandoff();
+    if (handoff){ publishWalletToHUD({coins:handoff.coins, crafting:handoff.craft}); paintCoinsHUD(handoff.coins); }
+
+    // 1) Prime session via hidden City iframe
+    try{ await primeViaCityIframe(); }catch(_){}
+
+    // 2) Best-effort session check (no redirect)
+    try{ await ensureSession(); }catch(_){}
+    publishUser();
+
+    // 3) Hydrate from Persist snapshot (server → LS)
+    const snapCoins = await hydrateFromSnapshot();
+
+    // do not regress the shown value after snapshot
+    {
+      const shown = parseInt((HUD.coins.textContent||'0'), 10) || 0;
+      const safe = Math.max(shown, snapCoins, readCoinsLS()||0);
+      paintCoinsHUD(safe);
+    }
+
+    // 4) Authoritative wallet fetch; adopt without decreasing
+    try{
+      const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
+      if (r.ok){
+        const parsed = parseWalletResponse(await r.json().catch(()=>({})));
+        const apiCoins = Number(parsed.coins)||0;
+        const apiCraft = Number(parsed.crafting)||0;
+
+        const shown = parseInt((HUD.coins.textContent||'0'), 10) || 0;
+        const nextCoins = Math.max(shown, apiCoins);
+
+        try{
+          localStorage.setItem('izzaCoins', String(nextCoins));
+          if (apiCraft>=0) writeCraftAll(apiCraft);
+          window.dispatchEvent(new Event('izza-coins-changed'));
+          window.dispatchEvent(new Event('izza-crafting-changed'));
+        }catch(_){}
+
+        paintCoinsHUD(nextCoins);
+        publishWalletToHUD({coins:nextCoins, crafting:readCraftAny()});
+      } else {
+        publishWalletToHUD({coins:readCoinsLS(), crafting:readCraftAny()});
+      }
+    }catch(_){
+      publishWalletToHUD({coins:readCoinsLS(), crafting:readCraftAny()});
+    }
+
+    WALLET_READY = true;
+    runStartCoins = parseInt((HUD.coins.textContent||'0'), 10) || (readCoinsLS()||0);
+    runStartCraft = readCraftAny()|0;
+
+    // Apply track choice to background immediately
+    bgImg.src = TRACK_BG[TRACK];
+
+    // Enter race
+    startOverlay.style.display='none';
+    endOverlay.style.display='none';
+    resize();
+    resetStateForRun();
+
+    if (!muted){ clickStartAudio(); }
+    requestAnimationFrame(frame);
+  }catch(e){
+    console.error('start failed', e);
+  }
+}, {passive:true});
+
+/* Garage preview day/night hint */
+(function(){
+  const wrap = document.getElementById('garagePreviewWrap');
+  function paintHint(){
+    const hint = document.getElementById('garageHint');
+    hint.textContent = (TRACK==='day') ? 'Day track selected' : 'Night track selected';
+  }
+  trackNightBtn.addEventListener('click', paintHint);
+  trackDayBtn.addEventListener('click', paintHint);
+  paintHint();
+})();
+
+/* END overlay links keep auth */
+(function keepAuthOnCity(){
+  const a = document.getElementById('cityBtn');
+  a.setAttribute('href', withAuth(a.getAttribute('href')));
+})();
+
+/* Wallet listeners (as in Basketball) */
+window.addEventListener('storage', (e)=>{
+  if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
+});
+window.addEventListener('izza-coins-changed', syncCoinsHUD);
+window.addEventListener('izza-wallet-changed', syncCoinsHUD);
+window.addEventListener('izza-crafting-changed', syncCoinsHUD);
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden){
+    if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
+  } else {
+    updateCoinsHUD();
+  }
+});
+window.addEventListener('pagehide', () => {
+  if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+    try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
+  }
+});
+
+/* ======= INIT ======= */
 rebuildTintAndPreview();
 drawMiniCar();
+
 })();
 </script>
 </body>
