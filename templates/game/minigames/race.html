@@ -498,7 +498,7 @@ const strikeSvgs = [document.getElementById('b1'), document.getElementById('b2')
 
 /* ======= Tunables ======= */
 const OVERLAY_ALPHA = 0.10;
-
+const ITEM_SPEED_MULT = 2;   // ⬅️ double item/world motion
 // Aurora + horizon glow
 let AURORA_ALPHA  = 0.16, AURORA_SPEED = 0.06, AURORA_WOBBLE = 18;
 let GLOW_ALPHA    = 0.26;
@@ -1673,7 +1673,7 @@ function frame(now){
   updateSpeedo(state.speed);
 
   const hyper = nitroActive;
-  const mps = state.speed / 3.6 * (hyper?1.22:1);
+  const mps = state.speed / 3.6 * (hyper?1.22:1) * ITEM_SPEED_MULT;
   worldZ += mps * dt;
   state.dist += mps * dt;
 
