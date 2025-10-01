@@ -1495,7 +1495,7 @@ function spawnOne(z0 = worldZ){
   // --- tunables for spacing / cadence (keeps room to dodge) ---
   const DODGE_GAP_Z      = 170;   // stagger gap if we add a quick follow-up
   const BOMB_EXTRA_GAP_Z = 220;   // extra room after bombs
-  const MULTI_PROB       = 0.14;  // small chance to add a second, staggered item
+  const MULTI_PROB       = 0.28;  // ↑ more frequent quick follow-ups
 
   // which lanes are available by per-lane spacing?
   const spaceOK = [];
@@ -1529,6 +1529,14 @@ function spawnOne(z0 = worldZ){
   if (roll < pNitro) type = 'nitro';
   else if (roll < pNitro + pBomb) type = 'bomb';
 
+  // prevent three-bomb walls at ~same Z across all lanes
+  if (type === 'bomb'){
+    const nearSameZ = pickups.filter(p => p.alive && p.type==='bomb' && Math.abs(p.spawnZ - z0) < MIN_MULTI_SEP_Z);
+    const bombLanes = new Set(nearSameZ.map(p=>p.laneT));
+    bombLanes.add(laneT);
+    if (bombLanes.size >= 3) type = 'coin';
+  }
+
   // place primary item now
   pickups.push(new Pickup(type, z0, laneT));
   laneLastSpawnZ[li] = z0 + (type==='bomb' ? BOMB_EXTRA_GAP_Z : 0); // hold lane a bit longer if bomb
@@ -1546,7 +1554,17 @@ function spawnOne(z0 = worldZ){
 
       const roll2 = Math.random();
       let type2 = roll2 < 0.10 ? 'nitro' : (roll2 < 0.30 ? 'bomb' : 'coin');
-      if (type==='bomb' && type2==='bomb') type2 = 'coin'; // don’t double-bomb
+
+      // safety: don’t double-bomb in this pair
+      if (type==='bomb' && type2==='bomb') type2 = 'coin';
+
+      // safety: also forbid creating a three-bomb wall near targetZ
+      if (type2 === 'bomb'){
+        const near2 = pickups.filter(p => p.alive && p.type==='bomb' && Math.abs(p.spawnZ - targetZ) < MIN_MULTI_SEP_Z);
+        const bombLanes2 = new Set(near2.map(p=>p.laneT));
+        bombLanes2.add(laneT2);
+        if (bombLanes2.size >= 3) type2 = 'coin';
+      }
 
       pickups.push(new Pickup(type2, targetZ, laneT2));
       laneLastSpawnZ[li2] = targetZ + (type2==='bomb' ? BOMB_EXTRA_GAP_Z : 0);
@@ -1724,8 +1742,8 @@ function frame(now){
       // Spawn regardless of type, but avoid doing so if the run just ended.
       if (state.bombsHit < 3) {
         spawnOne(worldZ + CHAIN_GAP_Z);
-        // Extra occasional second follow-up for smooth chains when not a bomb
-        if (p.type !== 'bomb' && Math.random() < 0.25) {
+        // Extra occasional second follow-up for smoother chains when not a bomb
+        if (p.type !== 'bomb' && Math.random() < 0.45) {
           spawnOne(worldZ + CHAIN_GAP_Z * 2);
         }
       }
