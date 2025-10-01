@@ -12,17 +12,17 @@
   <script>
     (function(){
       try{
-        const params = new URLSearchParams(location.search);
-        let u = (params.get('u') || '').toString().trim();
+        var params = new URLSearchParams(location.search);
+        var u = (params.get('u') || '').toString().trim();
         if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
         if (!u) {
-          const raw = localStorage.getItem('piAuthUser');
+          var raw = localStorage.getItem('piAuthUser');
           if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
         }
         if (u) {
           u = u.replace(/^@+/, '').toLowerCase();
           window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-          window.izzaUserKey = { get: () => u };
+          window.izzaUserKey = { get: function(){ return u; } };
           try { localStorage.setItem('izzaUserU', u); } catch(_){}
           try {
             if (!localStorage.getItem('piAuthUser')) {
@@ -77,7 +77,7 @@
         <div style="font-size:12px;opacity:.85;text-align:center">Tap/hold to thrust up. Dodge rooftop units and crossbars.</div>
         <div class="row">
           <a id="backBtn" class="btn" href="/izza-game/minigames">← Back</a>
-          <button id="startBtn" class="btn">START</button>
+          <button id="startBtn" class="btn" type="button">START</button>
           <a id="cityBtn" class="btn" href="/izza-game/play">City</a>
         </div>
       </div>
@@ -98,19 +98,27 @@
 
 <script>
 (function(){
+/* ============ ES5 helpers (no optional chaining / nullish) ============ */
+function safeGet(obj, path){ try{
+  var cur=obj; for(var i=0;i<path.length;i++){ if(!cur || typeof cur!=='object') return undefined; cur=cur[path[i]]; }
+  return cur;
+}catch(_){ return undefined; }}
+
 /* =========================
    t & u propagation / links
    ========================= */
-const T_KEY='izzaTokenT', U_KEY='izzaUserU';
-const urlParams = new URLSearchParams(location.search);
-let T = urlParams.get('t') || '';
-let U = (urlParams.get('u') || '').toString().trim();
+var T_KEY='izzaTokenT', U_KEY='izzaUserU';
+var urlParams = new URLSearchParams(location.search);
+var T = urlParams.get('t') || '';
+var U = (urlParams.get('u') || '').toString().trim();
 
 try{
   if (T) localStorage.setItem(T_KEY, T);
   else {
-    const s = localStorage.getItem(T_KEY)||'';
-    if (s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }
+    var s = localStorage.getItem(T_KEY)||'';
+    if (s){
+      var url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s;
+    }
   }
 }catch(_){}
 
@@ -119,23 +127,23 @@ function publishUsername(u){
   u = u.replace(/^@+/, '').toLowerCase();
   try{ localStorage.setItem(U_KEY, u); }catch(_){}
   window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-  window.izzaUserKey = { get: () => u };
+  window.izzaUserKey = { get: function(){ return u; } };
   try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
   return u;
 }
 try{
   if (U) publishUsername(U);
   else {
-    const su = (localStorage.getItem(U_KEY)||'').toString().trim();
+    var su = (localStorage.getItem(U_KEY)||'').toString().trim();
     if (su){
-      const url=new URL(location.href); url.searchParams.set('u',su);
-      history.replaceState(null,'',url.toString()); U = publishUsername(su);
+      var url2=new URL(location.href); url2.searchParams.set('u',su);
+      history.replaceState(null,'',url2.toString()); U = publishUsername(su);
     }
   }
 }catch(_){}
 
 function withAuth(href){
-  const url = new URL(href, location.origin);
+  var url = new URL(href, location.origin);
   if (T) url.searchParams.set('t', T);
   if (U) url.searchParams.set('u', U);
   return url.pathname + (url.search ? url.search : '');
@@ -148,40 +156,53 @@ document.getElementById('againBtn').href  = withAuth('/izza-game/minigames');
 /* =========================
    Wallet helpers (shared)
    ========================= */
-function bearerHeaders(base = {}) {
-  const headers = Object.assign({ 'content-type':'application/json' }, base || {});
-  try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
+function bearerHeaders(base) {
+  var headers = Object.assign({ 'content-type':'application/json' }, base || {});
+  try{
+    var bearer = localStorage.getItem('izzaBearer') || '';
+    if (bearer) headers['authorization'] = 'Bearer ' + bearer;
+  }catch(_){}
   return headers;
 }
 function parseWalletResponse(j){
   if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
   if ('coins' in j || 'crafting' in j || 'credits' in j){
-    return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
+    var craft = (typeof j.crafting!=='undefined') ? j.crafting : j.credits;
+    return { coins: Number(j.coins)||0, crafting: Number(craft)||0 };
   }
   if (j.wallet)   return parseWalletResponse(j.wallet);
   if (j.balance)  return parseWalletResponse(j.balance);
   return { coins:0, crafting:0 };
 }
-const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
+var CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+function readCraftAny(){
+  for(var i=0;i<CRAFT_KEYS.length;i++){
+    var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10);
+    if(isFinite(v)&&v>0) return v|0;
+  }
+  var v0=parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0;
+  return v0|0;
+}
+function writeCraftAll(v){ var n=Math.max(0,v|0); for(var i=0;i<CRAFT_KEYS.length;i++) localStorage.setItem(CRAFT_KEYS[i],String(n));
+  try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){} }
 function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
 function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
-const coinsHUD = document.getElementById('coinsHUD');
+var coinsHUD = document.getElementById('coinsHUD');
 function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
 
 /* Handoff from Arena (instant paint) */
-function consumeWalletHandoff(maxAgeMs = 120000){
+function consumeWalletHandoff(maxAgeMs){
+  if(!maxAgeMs) maxAgeMs = 120000;
   try{
-    const raw = sessionStorage.getItem('izzaWalletHandoff');
+    var raw = sessionStorage.getItem('izzaWalletHandoff');
     if(!raw) return null;
-    const s = JSON.parse(raw);
+    var s = JSON.parse(raw);
     if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
 
     if (s.user){
-      const u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+      var u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
       window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-      window.izzaUserKey = { get: () => u };
+      window.izzaUserKey = { get: function(){ return u; } };
       try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
       U = u;
     }
@@ -191,123 +212,139 @@ function consumeWalletHandoff(maxAgeMs = 120000){
   }catch(_){ return null; }
 }
 
-/* Hidden City iframe to warm session */
-function primeViaCityIframe({maxWaitMs=8000, pollMs=120} = {}){
-  return new Promise((resolve)=>{
-    let f=null, done=false, hard=null, poll=null;
-    const finish=(why)=>{ if(done) return; done=true;
-      try{ clearTimeout(hard); clearInterval(poll); f && f.remove(); }catch(_){}
-      resolve(why||'ok');
-    };
-    const src = withAuth('/izza-game/play?prime=1&silent=1');
+/* Hidden City iframe to warm session (no optional chaining) */
+function primeViaCityIframe(opts){
+  opts = opts || {};
+  var maxWaitMs = opts.maxWaitMs || 8000;
+  var pollMs = opts.pollMs || 120;
+  return new Promise(function(resolve){
+    var f=null, done=false, hard=null, poll=null;
+    function finish(){ if(done) return; done=true;
+      try{ clearTimeout(hard); clearInterval(poll); if(f) f.parentNode && f.parentNode.removeChild(f); }catch(_){}
+      resolve('ok');
+    }
+    var src = withAuth('/izza-game/play?prime=1&silent=1');
     f=document.createElement('iframe'); f.src=src;
-    Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
+    var st=f.style; st.position='fixed'; st.width='0'; st.height='0'; st.opacity='0'; st.pointerEvents='none'; st.border='0';
     document.body.appendChild(f);
-    f.addEventListener('load', ()=>{
+    f.addEventListener('load', function(){
       try{
-        const w=f.contentWindow; let tick=0;
-        poll=setInterval(async ()=>{
+        var w=f.contentWindow; var tick=0;
+        poll=setInterval(function(){
           try{
-            if (w?.IZZA_PERSIST?.load && tick<1){ tick++; await w.IZZA_PERSIST.load(); finish('iframe-load'); }
+            var canLoad = w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load === 'function';
+            if (canLoad && tick<1){ tick++; w.IZZA_PERSIST.load().then(finish).catch(finish); }
           }catch(_){}
         }, pollMs);
       }catch(_){}
-    }, {once:true});
-    hard=setTimeout(()=>finish('timeout'), maxWaitMs);
+    }, false);
+    hard=setTimeout(finish, maxWaitMs);
   });
 }
 
 /* Persist readiness & snapshot */
-function waitForPersistReady({timeout=3000, interval=40} = {}){
-  return new Promise((res)=> {
-    const t0 = performance.now();
-    const check = () => {
+function waitForPersistReady(opts){
+  opts = opts || {};
+  var timeout = opts.timeout || 3000, interval = opts.interval || 40;
+  return new Promise(function(res){
+    var t0 = performance.now();
+    function check(){
       if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
       if (performance.now() - t0 > timeout) return res(false);
       setTimeout(check, interval);
-    };
+    }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
     else check();
   });
 }
-async function hydrateFromSnapshot(){
-  try{
-    await waitForPersistReady();
-    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-      await IZZA_PERSIST.load();  // server → LS
-    }
-  }catch(_){}
-  try{ writeCraftAll(readCraftAny()); }catch(_){}
-  return readCoinsLS();
+function hydrateFromSnapshot(){
+  return new Promise(function(resolve){
+    (function(){
+      waitForPersistReady().then(function(){
+        try{
+          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+            IZZA_PERSIST.load().then(function(){
+              try{ writeCraftAll(readCraftAny()); }catch(_){}
+              resolve(readCoinsLS());
+            }).catch(function(){ resolve(readCoinsLS()); });
+          } else {
+            resolve(readCoinsLS());
+          }
+        }catch(_){ resolve(readCoinsLS()); }
+      });
+    })();
+  });
 }
 
 /* Best-effort session ping (no redirect) + capture character */
-let LAST_CHARACTER = null;
-async function ensureSession(){
-  try{
-    const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-    if (r.ok){
-      const j = await r.json().catch(()=> ({}));
-      const uname = (j.user && j.user.username) || j.username || j.handle || '';
-      if (uname) { publishUsername(uname); }
-      LAST_CHARACTER = j || LAST_CHARACTER;
-      try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-    }
-  }catch(_){}
+var LAST_CHARACTER = null;
+function ensureSession(){
+  return fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() })
+    .then(function(r){
+      if(!r.ok) return;
+      return r.json().catch(function(){ return {}; }).then(function(j){
+        var uname = (j.user && j.user.username) || j.username || j.handle || '';
+        if (uname) { publishUsername(uname); }
+        LAST_CHARACTER = j || LAST_CHARACTER;
+        try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
+      });
+    }).catch(function(){});
 }
 
 /* =========================
-   Avatar pipeline (same as Arena)
+   Avatar pipeline (same as Arena) — unchanged logic
    ========================= */
-const SPRITES = {
+var SPRITES = {
   body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
   hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
   outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
 };
-const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
-const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
-const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
-const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
-const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+var SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
+var SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
+var FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+var FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
+var HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 
-function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
-const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+function loadImg(src){ return new Promise(function(res){ var i=new Image(); i.crossOrigin='anonymous'; i.onload=function(){res(i)}; i.onerror=function(){res(null)}; i.src=src; }); }
+function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
+function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
+function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
 
 function extractThreeToneRamp(img){
-  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-  const d=c.getImageData(0,0,w,h).data, samples=[];
-  for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; samples.push({r,g,b,L:lum(r,g,b)}); }
+  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  var d=c.getImageData(0,0,w,h).data, samples=[];
+  for(var i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; var r=d[i],g=d[i+1],b=d[i+2]; samples.push({r:r,g:g,b:b,L:lum(r,g,b)}); }
   if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
-  samples.sort((a,b)=>a.L-b.L);
-  const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+  samples.sort(function(a,b){return a.L-b.L;});
+  function pick(q){ var idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); var s=samples[idx];
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
   return [pick(0.2),pick(0.55),pick(0.85)];
 }
 
-function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
-  const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
-  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-  const id=c.getImageData(0,0,w,h), d=id.data; let changed=0;
-  for(let i=0;i<d.length;i+=4){
+function paletteSwap(img, fromRampHex, toRampHex, tolerance){
+  if(!tolerance) tolerance=2000;
+  var from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  var id=c.getImageData(0,0,w,h), d=id.data; var changed=0;
+  for(var i=0;i<d.length;i+=4){
     if(d[i+3]===0) continue;
-    const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
-    for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
-    if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+    var p={r:d[i],g:d[i+1],b:d[i+2]}; var best=-1,score=1e9;
+    for(var k=0;k<from.length;k++){ var s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+    if(score<=tolerance){ var t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
   }
   c.putImageData(id,0,0);
   return {canvas:oc, changedPixels:changed};
 }
-function overlayTint(img, hex, strength=1.0){
-  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-  const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
-  function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
-  for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
-    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+function overlayTint(img, hex, strength){
+  if(strength==null) strength=1.0;
+  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  var id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+  function ov(a,b){a/=255;b/=255;var o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+  for(var i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+    var r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
     d[i]=Math.round(d[i]*(1-strength)+r*strength);
     d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
     d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
@@ -316,71 +353,82 @@ function overlayTint(img, hex, strength=1.0){
   return oc;
 }
 
-async function buildAvatarCanvas(dstCtx, size, profile){
-  const DW=size,DH=size,X=0,Y=0;
-  const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
-  const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
-  const femaleOut=profile.female_outfit_color||'blue';
+function buildAvatarCanvas(dstCtx, size, profile){
+  return new Promise(function(resolve){
+    (function(){
+      var DW=size,DH=size,X=0,Y=0;
+      var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+      var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+      var femaleOut=profile.female_outfit_color||'blue';
 
-  let body=null;
-  if(type==='female'){
-    const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
-    const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
-    body = await loadImg(femaleWide) || await loadImg(femaleSlim);
-  }
-  if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
-
-  const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
-  const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
-
-  let bodyCanvas;
-  if(body){
-    const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
-    const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
-    bodyCanvas=swapped.canvas;
-    if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
-  }
-
-  if(type==='female' && bodyCanvas){
-    const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
-    const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
-    bodyCanvas=reDress.canvas;
-    if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
-  }
-
-  dstCtx.clearRect(0,0,DW,DH);
-  if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
-  if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
-  if(hair){
-    const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
-    const swap=paletteSwap(hair, detected, target, 4000);
-    let hairCanvas=swap.canvas;
-    if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
-    const hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
-    dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
-  }
+      var body=null;
+      function afterBody(){
+        Promise.all([
+          loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short),
+          (type==='female' ? Promise.resolve(null) : loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street))
+        ]).then(function(arr){
+          var hair=arr[0], outfit=arr[1];
+          var bodyCanvas;
+          if(body){
+            var targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+            var swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+            bodyCanvas=swapped.canvas;
+            if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
+          }
+          if(type==='female' && bodyCanvas){
+            var targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+            var reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+            bodyCanvas=reDress.canvas;
+            if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
+          }
+          dstCtx.clearRect(0,0,DW,DH);
+          if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+          if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+          if(hair){
+            var detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+            var swap=paletteSwap(hair, detected, target, 4000);
+            var hairCanvas=swap.canvas;
+            if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
+            var hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
+            dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
+          }
+          resolve();
+        });
+      }
+      if(type==='female'){
+        var femaleWide='/static/game/sprites/body/'+theme+'__female_wide.png';
+        var femaleSlim='/static/game/sprites/body/'+theme+'__female.png';
+        loadImg(femaleWide).then(function(img){
+          if(img) body=img;
+          return img ? img : loadImg(femaleSlim);
+        }).then(function(img){ if(img) body=img; afterBody(); });
+      } else {
+        loadImg(SPRITES.body[theme]||SPRITES.body.default).then(function(img){ body=img; afterBody(); });
+      }
+    })();
+  });
 }
 
 /* Prepare an offscreen canvas the game will draw each frame */
-const jetmanCanvas = document.createElement('canvas');
+var jetmanCanvas = document.createElement('canvas');
 jetmanCanvas.width = jetmanCanvas.height = 96;
-const jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
-async function ensureAvatarSprite(){
+var jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
+function ensureAvatarSprite(){
   try{
-    const profile = LAST_CHARACTER || JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
-    await buildAvatarCanvas(jetCtx, 96, profile);
-  }catch(_){}
+    var profile = LAST_CHARACTER || JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
+    return buildAvatarCanvas(jetCtx, 96, profile);
+  }catch(_){ return Promise.resolve(); }
 }
 
 /* =========================
    GAME
    ========================= */
-const cvs = document.getElementById('c'), ctx = cvs.getContext('2d',{alpha:true});
-let W=0,H=0,dpr=1;
+var cvs = document.getElementById('c'), ctx = cvs.getContext('2d',{alpha:true});
+var W=0,H=0,dpr=1;
 function hardResize(){
-  const r = cvs.getBoundingClientRect();
-  const w = Math.max(1, Math.floor(r.width || window.innerWidth || 1));
-  const h = Math.max(1, Math.floor(r.height || window.innerHeight || 1));
+  var r = cvs.getBoundingClientRect();
+  var w = Math.max(1, Math.floor(r.width || window.innerWidth || 1));
+  var h = Math.max(1, Math.floor(r.height || window.innerHeight || 1));
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (w !== W || h !== H){
     W=w; H=h;
@@ -388,88 +436,92 @@ function hardResize(){
     layout();
   }
 }
-function ensureSized(attempt=0){
+function ensureSized(attempt){
+  attempt = attempt||0;
   hardResize();
-  if ((W<2 || H<2) && attempt<10) setTimeout(()=>ensureSized(attempt+1), 60);
+  if ((W<2 || H<2) && attempt<10) setTimeout(function(){ ensureSized(attempt+1); }, 60);
 }
 ensureSized();
-addEventListener('resize', ()=>ensureSized(), {passive:true});
+addEventListener('resize', function(){ ensureSized(); }, false);
 
 /* camera / projection */
-let VPT_X=0, VPT_Y=0, VANISH_Y=-600, roadBottomHalf=0, roadTopHalf=0;
-const lerp=(a,b,t)=>a+(b-a)*t;
-const project=(z)=>{ const k=0.0105, t=1-Math.exp(-k*z);
-  return { y:lerp(VANISH_Y,H,t), half:lerp(roadTopHalf,roadBottomHalf,t), t }; };
+var VPT_X=0, VPT_Y=0, VANISH_Y=-600, roadBottomHalf=0, roadTopHalf=0;
+function lerp(a,b,t){ return a+(b-a)*t; }
+function project(z){ var k=0.0105, t=1-Math.exp(-k*z);
+  return { y:lerp(VANISH_Y,H,t), half:lerp(roadTopHalf,roadBottomHalf,t), t:t }; }
 function layout(){ roadBottomHalf=W*0.55; roadTopHalf=W*0.08; VANISH_Y=-Math.max(520,H*0.75);
   VPT_X=W*0.5; VPT_Y=H*0.62; }
 
 /* player */
-const player = { y: 0, vy:0, r:18 };
-const phys = { g: 1600, thrust: 1900, maxVy: 880 };
+var player = { y: 0, vy:0, r:18 };
+var phys = { g: 1600, thrust: 1900, maxVy: 880 };
 player.y = VPT_Y;
-let thrust=false; addEventListener('keydown',e=>{ if(e.code==='Space') thrust=true; });
-addEventListener('keyup',e=>{ if(e.code==='Space') thrust=false; });
-cvs.addEventListener('pointerdown', ()=>{ thrust=true; });
-addEventListener('pointerup', ()=>{ thrust=false; });
+var thrust=false; addEventListener('keydown',function(e){ if(e.code==='Space') thrust=true; }, false);
+addEventListener('keyup',function(e){ if(e.code==='Space') thrust=false; }, false);
+cvs.addEventListener('pointerdown', function(){ thrust=true; }, false);
+addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* world */
-let time=0, last=performance.now(), worldZ=0, speed=190;
-const STEP_Z=72, DEPTH_Z=24000;
+var time=0, last=performance.now(), worldZ=0, speed=190;
+var STEP_Z=72, DEPTH_Z=24000;
 
 /* dynamic rooftops (segments) */
-const sides = { LEFT:0, RIGHT:1 };
-const roofs = [[],[]];
+var sides = { LEFT:0, RIGHT:1 };
+var roofs = [[],[]];
 function randRoofHeight(){ return H* (0.10 + Math.random()*0.32); }
 function randRoofLen(){ return 260 + Math.random()*480; }
 function ensureRoofSegments(toZ){
-  for(const side of [sides.LEFT,sides.RIGHT]){
-    const arr = roofs[side];
-    let z = arr.length ? arr[arr.length-1].endZ : 0;
+  for(var sideKey in sides){
+    var side = sides[sideKey];
+    var arr = roofs[side];
+    var z = arr.length ? arr[arr.length-1].endZ : 0;
     while (z < toZ + DEPTH_Z){
-      const len = randRoofLen();
+      var len = randRoofLen();
       arr.push({ startZ:z, endZ:z+len, h: randRoofHeight() });
       z += len;
     }
   }
 }
 function roofHeightAt(side, zAbs){
-  const arr = roofs[side];
-  for (let i=0;i<arr.length;i++){
-    const s = arr[i];
+  var arr = roofs[side];
+  for (var i=0;i<arr.length;i++){
+    var s = arr[i];
     if (zAbs >= s.startZ && zAbs < s.endZ) return s.h;
   }
   return H*0.2;
 }
 function trimRoofSegments(zAbs){
-  for(const side of [sides.LEFT,sides.RIGHT]){
-    const arr = roofs[side];
+  for(var sideKey in sides){
+    var side = sides[sideKey];
+    var arr = roofs[side];
     while (arr.length && arr[0].endZ < zAbs - 200) arr.shift();
   }
 }
 
 /* obstacles on roofs/bars */
-const obstacles=[]; // {type, spawnZ, laneT, side, size, mountH}
-const lanes=[0.30,0.50,0.70];
+var obstacles=[]; // {type, spawnZ, laneT, side, size, mountH}
+var lanes=[0.30,0.50,0.70];
 function chooseSideForLane(laneT){ return laneT<0.5 ? sides.LEFT : sides.RIGHT; }
-function spawnObstacle(z0=worldZ+420){
-  const lane = lanes[(Math.random()*lanes.length)|0];
-  const type = (Math.random()<0.16)?'bar' : (Math.random()<0.58?'ac':'duct');
+function spawnObstacle(z0){
+  if(z0==null) z0 = worldZ+420;
+  var lane = lanes[(Math.random()*lanes.length)|0];
+  var type = (Math.random()<0.16)?'bar' : (Math.random()<0.58?'ac':'duct');
 
   if (type==='bar'){
-    const size = 0.45 + Math.random()*0.4;
-    const h = H*(0.22 + Math.random()*0.34);
-    obstacles.push({type, spawnZ:z0, laneT:lane, side:null, size, mountH:h, alive:true});
+    var size = 0.45 + Math.random()*0.4;
+    var h = H*(0.22 + Math.random()*0.34);
+    obstacles.push({type:type, spawnZ:z0, laneT:lane, side:null, size:size, mountH:h, alive:true});
     return;
   }
-  const side = chooseSideForLane(lane);
-  const mountH = roofHeightAt(side, z0);
-  const size = 0.55 + Math.random()*0.5;
-  obstacles.push({type, spawnZ:z0, laneT:lane, side, size, mountH, alive:true});
+  var side = chooseSideForLane(lane);
+  var mountH = roofHeightAt(side, z0);
+  var size2 = 0.55 + Math.random()*0.5;
+  obstacles.push({type:type, spawnZ:z0, laneT:lane, side:side, size:size2, mountH:mountH, alive:true});
 }
-let lastSpawn = performance.now();
+var lastSpawn = performance.now();
 function spawnTick(now){
-  const base=210, faster= Math.max(0.50, 1 - (game.score/1400));
-  const iv = base*faster;
+  var base=210, faster= Math.max(0.50, 1 - (game.score/1400));
+  var iv = base*faster;
   if(now-lastSpawn>iv){
     lastSpawn=now; spawnObstacle();
     if(Math.random()<0.45) spawnObstacle(worldZ+420);
@@ -477,52 +529,52 @@ function spawnTick(now){
 }
 
 /* helpers */
-function edgesAt(z){ const p=project(z); const y=Math.max(p.y,VANISH_Y);
-  const half=(y===VANISH_Y)?0.0001:p.half; return {y, lx:W/2-half-14, rx:W/2+half+14, t:p.t};}
+function edgesAt(z){ var p=project(z); var y=Math.max(p.y,VANISH_Y);
+  var half=(y===VANISH_Y)?0.0001:p.half; return {y:y, lx:W/2-half-14, rx:W/2+half+14, t:p.t};}
 
 /* draw */
 function drawBackground(){
-  const g=ctx.createLinearGradient(0,0,0,H);
+  var g=ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,'#06080f'); g.addColorStop(1,'#0b1020'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
   ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.18;
-  const gg=ctx.createRadialGradient(VPT_X,VPT_Y,50,VPT_X,VPT_Y,Math.max(W,H)*0.9);
+  var gg=ctx.createRadialGradient(VPT_X,VPT_Y,50,VPT_X,VPT_Y,Math.max(W,H)*0.9);
   gg.addColorStop(0,'rgba(0,255,255,.7)'); gg.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle=gg; ctx.fillRect(0,0,W,H); ctx.restore();
 
   // side clouds
   ctx.save();
-  const count = 24, sway = Math.sin(time*0.8)*8;
-  for (let i=0;i<count;i++){
-    const z = (i*520 + (worldZ*1.2)%520);
-    const e = edgesAt(z);
-    const y = Math.min(H, Math.max(VPT_Y+8, e.y));
-    const xL = e.lx - 18 + sway, xR = e.rx + 18 - sway;
-    const r = 16 + 28*e.t;
+  var count = 24, sway = Math.sin(time*0.8)*8;
+  for (var i=0;i<count;i++){
+    var z = (i*520 + (worldZ*1.2)%520);
+    var e = edgesAt(z);
+    var y = Math.min(H, Math.max(VPT_Y+8, e.y));
+    var xL = e.lx - 18 + sway, xR = e.rx + 18 - sway;
+    var r = 16 + 28*e.t;
     ctx.globalAlpha = 0.18 + 0.35*e.t;
 
     ctx.beginPath(); ctx.ellipse(xL, y, r*1.4, r, 0, 0, Math.PI*2);
-    const gl = ctx.createRadialGradient(xL,y,2,xL,y,r*1.6);
+    var gl = ctx.createRadialGradient(xL,y,2,xL,y,r*1.6);
     gl.addColorStop(0,'rgba(200,240,255,.50)'); gl.addColorStop(1,'rgba(200,240,255,0)'); ctx.fillStyle = gl; ctx.fill();
 
     ctx.beginPath(); ctx.ellipse(xR, y, r*1.4, r, 0, 0, Math.PI*2);
-    const gr = ctx.createRadialGradient(xR,y,2,xR,y,r*1.6);
+    var gr = ctx.createRadialGradient(xR,y,2,xR,y,r*1.6);
     gr.addColorStop(0,'rgba(200,240,255,.50)'); gr.addColorStop(1,'rgba(200,240,255,0)'); ctx.fillStyle = gr; ctx.fill();
   }
   ctx.restore();
 }
 function drawFloor(){
-  const L=[],R=[]; for(let z=0; z<=DEPTH_Z; z+=STEP_Z){ const e=edgesAt(z);
+  var L=[],R=[]; for(var z=0; z<=DEPTH_Z; z+=STEP_Z){ var e=edgesAt(z);
     if(e.y>H && L.length) break; L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
   ctx.save();
   ctx.beginPath(); ctx.moveTo(W/2,VANISH_Y);
-  for(let i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
-  for(let i=0;i<L.length;i++)    ctx.lineTo(L[i][0], Math.min(L[i][1],H));
+  for(var i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
+  for(var j=0;j<L.length;j++)    ctx.lineTo(L[j][0], Math.min(L[j][1],H));
   ctx.closePath();
-  const g=ctx.createLinearGradient(0,VANISH_Y,0,H);
+  var g=ctx.createLinearGradient(0,VANISH_Y,0,H);
   g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#0a1523');
   ctx.fillStyle=g; ctx.fill();
 
-  const fog=ctx.createLinearGradient(0,VANISH_Y,0,H);
+  var fog=ctx.createLinearGradient(0,VANISH_Y,0,H);
   fog.addColorStop(0,'rgba(0,255,255,.28)'); fog.addColorStop(.4,'rgba(0,200,255,.12)'); fog.addColorStop(1,'rgba(0,0,0,0)');
   ctx.globalCompositeOperation='screen'; ctx.fillStyle=fog; ctx.fill();
   ctx.globalCompositeOperation='source-over';
@@ -530,16 +582,17 @@ function drawFloor(){
 }
 function drawRooftopLips(){
   ctx.save();
-  for (const side of [sides.LEFT,sides.RIGHT]){
-    for (let z=0; z<=DEPTH_Z; z+=STEP_Z){
-      const zAbs = worldZ + z;
-      const e = edgesAt(z);
-      const x = (side===sides.LEFT)? e.lx : e.rx;
-      const y = Math.min(H, Math.max(e.y, VPT_Y+8));
-      const lip = roofHeightAt(side, zAbs);
-      const yTop = y - lip * e.t;
+  for (var sideKey in sides){
+    var side = sides[sideKey];
+    for (var z=0; z<=DEPTH_Z; z+=STEP_Z){
+      var zAbs = worldZ + z;
+      var e = edgesAt(z);
+      var x = (side===sides.LEFT)? e.lx : e.rx;
+      var y = Math.min(H, Math.max(e.y, VPT_Y+8));
+      var lip = roofHeightAt(side, zAbs);
+      var yTop = y - lip * e.t;
       if (yTop < y - 2){
-        const w = Math.max(6, 12*e.t);
+        var w = Math.max(6, 12*e.t);
         ctx.fillStyle = (side===sides.LEFT)? '#101a2e' : '#0f192c';
         ctx.fillRect(x - (side===sides.LEFT?w:0), yTop, w, y - yTop);
         ctx.globalAlpha = 0.12 + 0.25*e.t;
@@ -553,100 +606,114 @@ function drawRooftopLips(){
   ctx.restore();
 }
 function drawObstacle(o){
-  const zRel = Math.max(0, worldZ - o.spawnZ);
+  var zRel = Math.max(0, worldZ - o.spawnZ);
   if(zRel>DEPTH_Z){ o.alive=false; return; }
-  const e = edgesAt(zRel);
-  const x = e.lx + (e.rx-e.lx)*o.laneT;
-  const floorY = Math.max(e.y, VPT_Y + H*0.02);
-  let roofY = floorY;
+  var e = edgesAt(zRel);
+  var x = e.lx + (e.rx-e.lx)*o.laneT;
+  var floorY = Math.max(e.y, VPT_Y + H*0.02);
+  var roofY = floorY;
   if (o.side!=null){
-    const mountTopPx = roofHeightAt(o.side, worldZ) * e.t;
+    var mountTopPx = roofHeightAt(o.side, worldZ) * e.t;
     roofY = floorY - mountTopPx;
   }
 
   ctx.save(); ctx.translate(x, roofY);
   if(o.type==='bar'){
-    const y = floorY - (o.mountH * e.t);
-    const w = (e.rx-e.lx)*0.68, h = 10 + 26*e.t*o.size;
+    var y = floorY - (o.mountH * e.t);
+    var w = (e.rx-e.lx)*0.68, h = 10 + 26*e.t*o.size;
     ctx.translate(0, y - roofY);
     ctx.fillStyle='rgba(140,170,255,.85)'; ctx.fillRect(-w/2, -h/2, w, h);
     ctx.strokeStyle='rgba(40,80,140,.6)'; ctx.lineWidth=2; ctx.strokeRect(-w/2,-h/2,w,h);
   } else {
-    const w = 40 + 220*e.t*o.size, h = 22 + 120*e.t*o.size;
+    var w2 = 40 + 220*e.t*o.size, h2 = 22 + 120*e.t*o.size;
     ctx.fillStyle=o.type==='ac'?'#9fb2cf':'#8cc0d6';
     ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=2;
-    ctx.fillRect(-w/2, -h, w, h); ctx.strokeRect(-w/2,-h,w,h);
-    ctx.fillStyle='rgba(20,20,30,.8)'; ctx.fillRect(-w*0.35, 0, w*0.18, 4); ctx.fillRect( w*0.17, 0, w*0.18, 4);
-    ctx.globalAlpha=.25; ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(0,10,w*0.55,10,0,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+    ctx.fillRect(-w2/2, -h2, w2, h2); ctx.strokeRect(-w2/2,-h2,w2,h2);
+    ctx.fillStyle='rgba(20,20,30,.8)'; ctx.fillRect(-w2*0.35, 0, w2*0.18, 4); ctx.fillRect( w2*0.17, 0, w2*0.18, 4);
+    ctx.globalAlpha=.25; ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(0,10,w2*0.55,10,0,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
   }
   ctx.restore();
 
   // collision
-  const px=W*0.5, py=player.y;
-  let hit=false;
+  var px=W*0.5, py=player.y;
+  var hit=false;
   if (o.type==='bar'){
-    const yBar = floorY - (o.mountH * e.t);
+    var yBar = floorY - (o.mountH * e.t);
     hit = (Math.abs(x - px) < (e.rx-e.lx)*0.32) && (Math.abs(py - yBar) < 22);
   } else {
-    const yTop = roofY;
-    const unitH = 40*e.t*o.size + 26;
+    var yTop = roofY;
+    var unitH = 40*e.t*o.size + 26;
     hit = (Math.abs(x - px) < (e.rx-e.lx)*0.18) && (py > yTop - unitH) && (py < yTop + 18);
   }
   if(hit){ gameOver(); }
 }
 
 /* HUD / hi */
-let hi=Number(localStorage.getItem('jet_hi')||0);
+var hi=Number(localStorage.getItem('jet_hi')||0);
 document.getElementById('hi').textContent = hi;
 
 /* Score/coins mapping */
-const COINS_PER_SCORE = 10;            // distance → coins
-const COINS_PER_CREDIT = 1000;         // every 1000 coins => +1 craft credit
+var COINS_PER_SCORE = 10;
+var COINS_PER_CREDIT = 1000;
 
 /* game state */
-const scoreEl = document.getElementById('score');
-const finishEl = document.getElementById('finish');
-const finalScoreEl = document.getElementById('finalScore');
-const finalCoinsEl = document.getElementById('finalCoins');
-const finalCraftEl = document.getElementById('finalCraft');
+var scoreEl = document.getElementById('score');
+var finishEl = document.getElementById('finish');
+var finalScoreEl = document.getElementById('finalScore');
+var finalCoinsEl = document.getElementById('finalCoins');
+var finalCraftEl = document.getElementById('finalCraft');
 
-let WALLET_READY=false, walletDirty=false, runStartCoins=0;
-let game = { score:0, creditsMinted:0, ended:false };
+var WALLET_READY=false, walletDirty=false, runStartCoins=0;
+var game = { score:0, creditsMinted:0, ended:false };
 
 function awardFromProgress(deltaScore){
-  const addCoins = Math.max(0, Math.floor(deltaScore * COINS_PER_SCORE));
+  var addCoins = Math.max(0, Math.floor(deltaScore * COINS_PER_SCORE));
   if (addCoins>0) applyCoins(addCoins);
-  const totalCoins = readCoinsLS();
-  const creditsNow = Math.floor(totalCoins / COINS_PER_CREDIT);
+  var totalCoins = readCoinsLS();
+  var creditsNow = Math.floor(totalCoins / COINS_PER_CREDIT);
   if (creditsNow > game.creditsMinted){
-    const delta = creditsNow - game.creditsMinted;
+    var delta = creditsNow - game.creditsMinted;
     game.creditsMinted = creditsNow;
     applyCraftDelta(delta);
   }
 }
 
 /* wallet ops */
-async function persistWalletAndSave(){
-  try{
+function persistWalletAndSave(){
+  return new Promise(function(resolve){ try{
     writeCraftAll(readCraftAny());
-    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ await IZZA_PERSIST.save(); walletDirty = false; }
-    else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
-  }catch(_){}
+    var saver = safeGet(window, ['IZZA_PERSIST','save']);
+    if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(); }).catch(function(){ resolve(); }); }
+    else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty=false; resolve(); }
+    else resolve();
+  }catch(_){ resolve(); }});
 }
 function updateCoinsHUD(){ paintCoinsHUD(readCoinsLS()); }
-async function applyCoins(amount){
-  const cur = (readCoinsLS()|0) + (amount|0);
-  writeCoinsLS(cur); walletDirty = true;
-  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-  try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
-  WALLET_READY = true; updateCoinsHUD(); return cur;
+function applyCoins(amount){
+  return new Promise(function(resolve){
+    var cur = (readCoinsLS()|0) + (amount|0);
+    writeCoinsLS(cur); walletDirty = true;
+    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+    try{
+      var saver = safeGet(window, ['IZZA_PERSIST','save']);
+      if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(cur); }).catch(function(){ resolve(cur); }); }
+      else resolve(cur);
+    }catch(_){ resolve(cur); }
+    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
+    WALLET_READY = true; updateCoinsHUD();
+  });
 }
-async function applyCraftDelta(delta){
-  const val = readCraftAny() + (delta|0);
-  writeCraftAll(val); walletDirty = true;
-  try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
+function applyCraftDelta(delta){
+  return new Promise(function(resolve){
+    var val = readCraftAny() + (delta|0);
+    writeCraftAll(val); walletDirty = true;
+    try{
+      var saver = safeGet(window, ['IZZA_PERSIST','save']);
+      if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(); }).catch(function(){ resolve(); }); }
+      else resolve();
+    }catch(_){ resolve(); }
+    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
+  });
 }
 
 /* game over */
@@ -656,8 +723,8 @@ function gameOver(){
   hi=Math.max(hi,Math.floor(game.score)); localStorage.setItem('jet_hi',hi);
   document.getElementById('hi').textContent=hi;
 
-  const coinsNow = readCoinsLS();
-  const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
+  var coinsNow = readCoinsLS();
+  var coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
   finalScoreEl.textContent = Math.floor(game.score);
   finalCoinsEl.textContent = coinsAwarded;
   finalCraftEl.textContent = Math.floor(coinsNow / COINS_PER_CREDIT) - Math.floor(runStartCoins / COINS_PER_CREDIT);
@@ -668,60 +735,54 @@ function gameOver(){
 /* main loop */
 function frame(now){
   if (game.ended) return;
-  const dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
+  var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
   // physics
-  const ay = (thrust? -phys.thrust : phys.g);
+  var ay = (thrust? -phys.thrust : phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
   player.y  = Math.max(H*0.20, Math.min(H*0.86, player.y + player.vy*dt));
 
   // advance
-  const mps = (speed/3.6) * (thrust?1.18:1.0);
+  var mps = (speed/3.6) * (thrust?1.18:1.0);
   worldZ += mps*dt;
 
-  const prevScore = game.score;
-  game.score  += mps*dt;                       // distance == score
+  var prevScore = game.score;
+  game.score  += mps*dt;
   scoreEl.textContent = Math.floor(game.score);
 
-  // mint coins/credits from progress
-  const deltaScore = game.score - prevScore;
+  var deltaScore = game.score - prevScore;
   if (deltaScore > 0.001) awardFromProgress(deltaScore);
 
-  // rooftops upkeep and spawns
   ensureRoofSegments(worldZ + DEPTH_Z*0.6);
   trimRoofSegments(worldZ);
   spawnTick(now);
 
-  // draw
   ctx.clearRect(0,0,W,H);
   drawBackground();
   drawFloor();
   drawRooftopLips();
-  for(let i=obstacles.length-1;i>=0;i--){
-    const o=obstacles[i]; if(!o.alive){ obstacles.splice(i,1); continue; } drawObstacle(o);
+  for(var i=obstacles.length-1;i>=0;i--){
+    var o=obstacles[i]; if(!o.alive){ obstacles.splice(i,1); continue; } drawObstacle(o);
   }
 
   // player avatar with thruster
   ctx.save();
-  const spriteW = 96, spriteH = 96;
-  const px = W/2 - spriteW/2, py = player.y - spriteH/2;
+  var spriteW = 96, spriteH = 96;
+  var px = W/2 - spriteW/2, py = player.y - spriteH/2;
 
-  // flame behind avatar (keeps Jetman vibe)
   ctx.globalCompositeOperation='lighter';
   ctx.fillStyle='rgba(255,220,90,.85)';
-  const flame = thrust ? 16+10*Math.sin(time*40) : 8;
+  var flame = thrust ? 16+10*Math.sin(time*40) : 8;
   ctx.beginPath(); ctx.ellipse(px-8, player.y, flame, 7, 0, 0, Math.PI*2); ctx.fill();
   ctx.globalCompositeOperation='source-over';
 
-  // avatar sprite
   ctx.drawImage(jetmanCanvas, px, py, spriteW, spriteH);
   ctx.restore();
 
-  // speed streaks
   ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=.16;
-  for(let i=0;i<24;i++){
-    const a=(-0.55 + i/23*1.1), len=H*1.2, x2=VPT_X + Math.tan(a)*len, y2=H+60;
-    const g=ctx.createLinearGradient(VPT_X,player.y,x2,y2);
+  for(i=0;i<24;i++){
+    var a=(-0.55 + i/23*1.1), len=H*1.2, x2=VPT_X + Math.tan(a)*len, y2=H+60;
+    var g=ctx.createLinearGradient(VPT_X,player.y,x2,y2);
     g.addColorStop(0,'rgba(0,255,255,.6)'); g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.strokeStyle=g; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(VPT_X,player.y); ctx.lineTo(x2,y2); ctx.stroke();
   }
@@ -731,73 +792,76 @@ function frame(now){
 }
 
 /* listeners */
-window.addEventListener('storage', (e)=>{
-  if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
-});
-document.addEventListener('visibilitychange', async ()=>{
+window.addEventListener('storage', function(e){
+  if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.indexOf(e.key)>=0))) updateCoinsHUD();
+}, false);
+document.addEventListener('visibilitychange', function(){
   if (document.hidden){
-    if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
+    if (walletDirty) { persistWalletAndSave(); }
   } else {
     updateCoinsHUD();
   }
-});
-window.addEventListener('pagehide', () => {
-  if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-    try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
+}, false);
+window.addEventListener('pagehide', function(){
+  var saver = safeGet(window, ['IZZA_PERSIST','save']);
+  if (walletDirty && typeof saver === 'function'){
+    try{ saver(); walletDirty = false; }catch(_){}
   }
-});
+}, false);
 
 /* =========================
-   START button — non-blocking boot
+   START button — Pi-safe boot
    ========================= */
-document.getElementById('startBtn').addEventListener('click', async ()=>{
+var startBtn = document.getElementById('startBtn');
+function startGame(){
   try{
-    // Immediate visual feedback
-    const overlay = document.getElementById('startOverlay');
+    var overlay = document.getElementById('startOverlay');
     overlay.style.opacity = '0.96';
 
-    // Paint any handoff instantly
-    const handoff = consumeWalletHandoff();
-    if (handoff){ paintCoinsHUD(handoff.coins); }
+    var handoff = consumeWalletHandoff(); if (handoff){ paintCoinsHUD(handoff.coins); }
 
-    // Fire-and-forget priming/network work (do NOT await)
-    primeViaCityIframe({ maxWaitMs: 1500 }).catch(()=>{});
-    ensureSession().catch(()=>{});
-    (async ()=>{ try{
-      const snapCoins = await hydrateFromSnapshot();
-      const shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
+    primeViaCityIframe({ maxWaitMs: 1500 });
+    ensureSession();
+
+    hydrateFromSnapshot().then(function(snapCoins){
+      var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
       paintCoinsHUD(Math.max(shown, snapCoins, readCoinsLS()||0));
-    }catch(_){}})();
-    (async ()=>{ try{
-      const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
-      if (r.ok){
-        const parsed = parseWalletResponse(await r.json().catch(()=>({})));
-        const apiCoins = Number(parsed.coins)||0;
-        const apiCraft = Number(parsed.crafting)||0;
-        const shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
-        const nextCoins = Math.max(shown, apiCoins);
-        try{
-          localStorage.setItem('izzaCoins', String(nextCoins));
-          if (apiCraft>=0) writeCraftAll(apiCraft);
-          window.dispatchEvent(new Event('izza-coins-changed'));
-          window.dispatchEvent(new Event('izza-crafting-changed'));
-        }catch(_){}
-        paintCoinsHUD(nextCoins);
-      }
-    }catch(_){}})();
+    });
+
+    (function(){
+      fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() })
+        .then(function(r){ if(!r.ok) return; return r.json().catch(function(){ return {}; }); })
+        .then(function(parsed){
+          if(!parsed) return;
+          parsed = parseWalletResponse(parsed);
+          var apiCoins = Number(parsed.coins)||0;
+          var apiCraft = Number(parsed.crafting)||0;
+          var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
+          var nextCoins = Math.max(shown, apiCoins);
+          try{
+            localStorage.setItem('izzaCoins', String(nextCoins));
+            if (apiCraft>=0) writeCraftAll(apiCraft);
+            window.dispatchEvent(new Event('izza-coins-changed'));
+            window.dispatchEvent(new Event('izza-crafting-changed'));
+          }catch(_){}
+          paintCoinsHUD(nextCoins);
+        }).catch(function(){});
+    })();
 
     WALLET_READY = true;
     runStartCoins = parseInt((coinsHUD.textContent||'0'), 10) || (readCoinsLS()||0);
 
-    // Build avatar sprite in background; draw once ready
-    ensureAvatarSprite().catch(()=>{});
+    ensureAvatarSprite();
 
-    // Hide overlay and start immediately
     overlay.style.display = 'none';
     ensureSized();
     requestAnimationFrame(frame);
-  }catch(e){ console.error('start failed', e); }
-}, {passive:true});
+  }catch(e){ try{ console.error('start failed', e); }catch(_){} }
+}
+
+/* Wire multiple fallbacks */
+startBtn.addEventListener('click', startGame, false);
+startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
 
 })();
 </script>
