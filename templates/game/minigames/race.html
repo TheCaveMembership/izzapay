@@ -1464,12 +1464,12 @@ const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 let lastMultiZ = -1e9;
 
 function currentSpawnInterval(){
-  // MORE ITEMS overall but still avoid chaos: slightly faster base, scales w/ distance and nitro
-  const base = 420; // ms (denser than before)
+  // Much faster base, denser overall spawns
+  const base = 300; // was 420, lowered for more frequent items
   const far  = Math.max(0, Math.min(1, state.dist/2500)); // 0..1 by 2.5km
-  const hyperCut = nitroActive ? 0.62 : 1.0; // spawn feels faster in nitro
-  const jitter = 0.72 + Math.random()*0.30;
-  return base * (1.0 - 0.38*far) * hyperCut * jitter;
+  const hyperCut = nitroActive ? 0.55 : 1.0; // even faster during nitro
+  const jitter = 0.70 + Math.random()*0.25; // slightly tighter spread
+  return base * (1.0 - 0.45*far) * hyperCut * jitter;
 }
 function bombChance(){
   // never block all lanes; this is just raw desire, planner enforces safety
