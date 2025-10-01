@@ -488,7 +488,15 @@ var worldZ=0, speed=110, time=0, last=performance.now();
 var corridorHalf=6.5; // meters half-width
 var corridorHeight=10; // meters
 var DEPTH=300; // meters of active world
+/* === EASY TEST CONFIG === */
+var TOP_Y = 3.3;              // ceiling world Y
+var BOT_Y = -3.0;             // ground world Y
+var WORLD_TO_PX = 16;         // worldY -> pixels mapping used in drawUI
 
+var SPAWN_INTERVAL = 1.8;     // seconds between bars (more spaced)
+var COLLISION_Z_NEAR = 0.35;  // only collide when bar is in this tight Z window
+var COLLISION_Z_FAR  = 0.85;  // (player "slice" near the camera)
+var HITBOX_HALF = 0.55;       // vertical half-height of avatar hitbox (smaller = easier)
 function init3D(){
   scene = new THREE.Scene();
   /* brighter background & lighter fog */
@@ -571,31 +579,34 @@ function layoutWalls(){
   }
 }
 
-/* Obstacles — ONLY NEON GREEN BARS */
+/* Obstacles — ONLY NEON GREEN BARS (spaced out) */
 var obstacles=[];
 function spawnObstacle(){
   // Always a crossbar spanning the corridor
   var w = corridorHalf*1.95;
-  var t = THREE.MathUtils.lerp(0.18,0.28,Math.random());  // fairly thin
+  var t = THREE.MathUtils.lerp(0.18,0.28,Math.random());
   var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random()); // vertical placement
+
   var geo = new THREE.BoxGeometry(w, t, 1.2);
   var mat = new THREE.MeshStandardMaterial({
     color:0x00ff66, roughness:.2, metalness:.05,
     emissive:0x00ff66, emissiveIntensity:2.0
   });
-  var m = new THREE.Mesh(geo, mat);
+  var bar = new THREE.Mesh(geo, mat);
+
   // subtle glow planes to make it pop
   var glowGeo = new THREE.PlaneGeometry(w*1.02, t*5.4);
   var glowMat = new THREE.MeshBasicMaterial({color:0x00ff66, transparent:true, opacity:0.22, depthWrite:false});
-  var glow = new THREE.Mesh(glowGeo, glowMat); glow.rotation.x = Math.PI/2;
-  glow.position.z += 0.01;
-  var g2 = glow.clone(); g2.position.z -= 0.02;
-  var group = new THREE.Group(); group.add(m, glow, g2);
-  group.position.set(0,h,-80);
-  scene.add(group);
-  obstacles.push({mesh:group,type:'bar'});
-}
+  var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.01;
+  var glow2 = glow1.clone(); glow2.position.z -= 0.02;
 
+  var group = new THREE.Group();
+  group.add(bar, glow1, glow2);
+  group.position.set(0, h, -80);
+
+  scene.add(group);
+  obstacles.push({ mesh: group, type: 'bar' });
+}
 /* Recycle world: move everything forward instead of moving camera far */
 function advanceWorld(dz){
   // walls
@@ -707,11 +718,22 @@ function gameOver(){
 function drawUI(){
   uiCtx.clearRect(0,0,W,H);
 
-  // player sprite + thruster
   var spriteW = 96, spriteH = 96;
-  var cx = W/2, py = H*0.62 + player.y*16; // map world Y to pixels
+  var cx = W/2;
+  var py = H*0.62 + player.y*WORLD_TO_PX; // map world Y to pixels
 
-  // soft glow behind avatar
+  // --- guide lines (top & bottom) ---
+  var topPx = H*0.62 + TOP_Y*WORLD_TO_PX;
+  var botPx = H*0.62 + BOT_Y*WORLD_TO_PX;
+  uiCtx.save();
+  uiCtx.strokeStyle = 'rgba(255,60,60,0.85)';
+  uiCtx.lineWidth = 2;
+  uiCtx.setLineDash([6,6]);
+  uiCtx.beginPath(); uiCtx.moveTo(0, topPx); uiCtx.lineTo(W, topPx); uiCtx.stroke();
+  uiCtx.beginPath(); uiCtx.moveTo(0, botPx); uiCtx.lineTo(W, botPx); uiCtx.stroke();
+  uiCtx.restore();
+
+  // soft glow behind avatar (keep)
   uiCtx.save();
   uiCtx.globalCompositeOperation='lighter';
   var glow = uiCtx.createRadialGradient(cx,py,6, cx,py,60);
@@ -719,6 +741,17 @@ function drawUI(){
   glow.addColorStop(1,'rgba(0,0,0,0)');
   uiCtx.fillStyle = glow;
   uiCtx.beginPath(); uiCtx.arc(cx,py,60,0,Math.PI*2); uiCtx.fill();
+  uiCtx.restore();
+
+  // red hitbox rectangle (visualize collision band)
+  var hitH = (HITBOX_HALF*2)*WORLD_TO_PX;
+  var hitW = 96; // same width as sprite for clarity
+  uiCtx.save();
+  uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
+  uiCtx.lineWidth = 2;
+  uiCtx.setLineDash([8,6]);
+  uiCtx.strokeRect(cx - hitW/2, py - hitH/2, hitW, hitH);
+  uiCtx.restore();
 
   // thruster plume
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
@@ -726,12 +759,11 @@ function drawUI(){
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
   uiCtx.fillStyle='rgba(120,220,255,.65)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
-  uiCtx.restore();
 
   // avatar sprite
   uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH/2, spriteW, spriteH);
 
-  // light rays
+  // light rays (keep)
   uiCtx.save();
   uiCtx.globalCompositeOperation='lighter'; uiCtx.globalAlpha=.22;
   for(var i=0;i<24;i++){
@@ -752,37 +784,44 @@ function frame(now){
   var ay = (thrust? -phys.thrust : phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
   var nextY = player.y + (player.vy*dt)/260;
-  if(nextY <= -3.0 || nextY >= 3.3){ gameOver(); return; } // crash at bounds
-  player.y = Math.max(-3.0, Math.min(3.3, nextY)); // keep within corridor
+  if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; } // crash at bounds (clear & obvious)
+  player.y = Math.max(BOT_Y, Math.min(TOP_Y, nextY));
 
   // advance world towards camera
   var mps = (speed/3.6) * (thrust?1.12:1.0);
   worldZ += mps*dt;
-  advanceWorld((mps*dt)); // move all meshes forward (toward camera)
+  advanceWorld((mps*dt));
 
-  // periodic obstacle spawns (calm cadence)
+  // --- REPLACE THIS SPAWN BLOCK ---
+  // periodic obstacle spawns (more spaced out for easy testing)
   spawnTimer += dt;
-  if(spawnTimer > 0.8){ // slower for easy testing
+  if (spawnTimer > SPAWN_INTERVAL){
     spawnTimer = 0;
-    spawnObstacle();
-    if(Math.random()<0.06) spawnObstacle(); // rarely double-spawn
+    spawnObstacle();              // no double-spawn; bars are calmer
   }
+  // --- END REPLACEMENT ---
 
   // position/bank camera
   camera.position.y = player.y*0.6;
   camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, (thrust?-0.03:0.03), 0.15);
 
-  // collisions with bars only
-  var pxY = camera.position.y, bandTop = pxY + 0.9, bandBot = pxY - 0.9;
-  for(var i=0;i<obstacles.length;i++){
-    var o = obstacles[i]; var z = o.mesh.position.z;
-    if(z > 0.6 && z < 1.6){
+  // --- REPLACE THIS COLLISION BLOCK ---
+  // collisions with bars only, and only if the bar is very close in Z
+  var pxY = camera.position.y;
+  var bandTop = pxY + HITBOX_HALF;
+  var bandBot = pxY - HITBOX_HALF;
+
+  for (var i=0;i<obstacles.length;i++){
+    var o = obstacles[i];
+    var z = o.mesh.position.z;
+    if (z > COLLISION_Z_NEAR && z < COLLISION_Z_FAR){
       var bar = o.mesh.children[0]; // central box
       var top = o.mesh.position.y + bar.geometry.parameters.height/2;
       var bot = o.mesh.position.y - bar.geometry.parameters.height/2;
-      if(!(bandTop < bot || bandBot > top)){ gameOver(); return; }
+      if (!(bandTop < bot || bandBot > top)){ gameOver(); return; }
     }
   }
+  // --- END REPLACEMENT ---
 
   // score/coins
   var prevScore = game.score;
@@ -796,7 +835,6 @@ function frame(now){
 
   requestAnimationFrame(frame);
 }
-
 /* listeners */
 window.addEventListener('storage', function(e){
   if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.indexOf(e.key)>=0))) updateCoinsHUD();
