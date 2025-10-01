@@ -446,6 +446,7 @@ function hardResize(){
     uiCvs.width=W*dpr; uiCvs.height=H*dpr;
     uiCtx.setTransform(dpr,0,0,dpr,0,0);
     if(renderer){ renderer.setSize(W, H, false); renderer.setPixelRatio(dpr); }
+    updateScale();
   }
 }
 function ensureSized(attempt){ attempt = attempt||0; hardResize(); if ((W<2 || H<2) && attempt<10) setTimeout(function(){ ensureSized(attempt+1); }, 60); }
@@ -469,14 +470,30 @@ var DEPTH=300;
 /* === Physics bounds (stable; also used to draw guides) === */
 var TOP_Y = 3.3;   // ceiling world Y
 var BOT_Y = -3.0;  // ground world Y
-var WORLD_TO_PX = 16;   // worldY -> pixels in UI
-var CENTER_PX_FACTOR = 0.62; // vertical anchor for avatar/guides
+
+/* UI mapping: map entire screen height (minus small margins) to world range */
+var TOP_PX_MARGIN = 60;         // keep a little space for the sprite
+var BOT_PX_MARGIN = 60;
+var pixelsPerWorld = 1;
+function updateScale(){
+  var usable = Math.max(1, (H - TOP_PX_MARGIN - BOT_PX_MARGIN));
+  pixelsPerWorld = usable / (TOP_Y - BOT_Y);
+}
+function worldToPxY(y){
+  // BOT_Y -> bottom margin, TOP_Y -> top margin
+  var botPx = H - BOT_PX_MARGIN;
+  var dy = (y - BOT_Y) * pixelsPerWorld;
+  return botPx - dy; // invert because canvas y increases downward
+}
 
 /* Spawns/collision */
 var SPAWN_INTERVAL = 1.8;
 var COLLISION_Z_NEAR = 0.35;
 var COLLISION_Z_FAR  = 0.85;
 var HITBOX_HALF = 0.55;
+
+/* Impact preview for the next bar (drawn on UI) */
+var nextImpactY = null;
 
 function init3D(){
   scene = new THREE.Scene();
@@ -545,7 +562,7 @@ function layoutWalls(){
     var hL = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
     var hR = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
     mL.scale.y = hL / mL.userData.h; mR.scale.y = hR / mR.userData.h;
-    mL.position.set(-corridorHalf, -corridorHeight*0.5 + hL/2, z); 
+    mL.position.set(-corridorHalf, -corridorHeight*0.5 + hL/2, z);
     mR.position.set( corridorHalf, -corridorHeight*0.5 + hR/2, z);
     z -= wallLen;
   }
@@ -556,7 +573,12 @@ var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
   var t = THREE.MathUtils.lerp(0.18,0.28,Math.random());
-  var h = THREE.MathUtils.lerp(-1.2, 2.4, Math.random());
+
+  // Constrain h so every bar is passable given our hit band.
+  var margin = 0.10;
+  var maxH = TOP_Y - HITBOX_HALF - margin;
+  var minH = BOT_Y + HITBOX_HALF + margin;
+  var h = THREE.MathUtils.lerp(minH, maxH, Math.random());
 
   var geo = new THREE.BoxGeometry(w, t, 1.2);
   var mat = new THREE.MeshStandardMaterial({
@@ -674,10 +696,12 @@ function drawUI(){
 
   var spriteW = 96, spriteH = 96;
   var cx = W/2;
-  var py = H*CENTER_PX_FACTOR + player.y*WORLD_TO_PX;
+  var py = worldToPxY(player.y);
 
-  var topPx = H*CENTER_PX_FACTOR + TOP_Y*WORLD_TO_PX;
-  var botPx = H*CENTER_PX_FACTOR + BOT_Y*WORLD_TO_PX;
+  var topPx = worldToPxY(TOP_Y);
+  var botPx = worldToPxY(BOT_Y);
+
+  // ceiling/floor guides
   uiCtx.save();
   uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
   uiCtx.lineWidth = 2;
@@ -686,7 +710,19 @@ function drawUI(){
   uiCtx.beginPath(); uiCtx.moveTo(0, botPx); uiCtx.lineTo(W, botPx); uiCtx.stroke();
   uiCtx.restore();
 
-  var hitH = (HITBOX_HALF*2)*WORLD_TO_PX;
+  // impact preview of the next bar near the collision slice
+  if (nextImpactY !== null){
+    var yPx = worldToPxY(nextImpactY);
+    uiCtx.save();
+    uiCtx.strokeStyle = 'rgba(0,255,120,0.95)';
+    uiCtx.lineWidth = 3;
+    uiCtx.setLineDash([12,6]);
+    uiCtx.beginPath(); uiCtx.moveTo(0, yPx); uiCtx.lineTo(W, yPx); uiCtx.stroke();
+    uiCtx.restore();
+  }
+
+  // hit band rectangle (matches collision math)
+  var hitH = (HITBOX_HALF*2) * pixelsPerWorld;
   var hitW = 96;
   uiCtx.save();
   uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
@@ -695,6 +731,7 @@ function drawUI(){
   uiCtx.strokeRect(cx - hitW/2, py - hitH/2, hitW, hitH);
   uiCtx.restore();
 
+  // flame + sprite
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
   uiCtx.fillStyle='rgba(255,240,140,.95)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
@@ -732,14 +769,21 @@ function frame(now){
   // COLLISION uses player.y (matches red hitbox)
   var bandTop = player.y + HITBOX_HALF;
   var bandBot = player.y - HITBOX_HALF;
+
+  // Find the next approaching bar near the collision slice for the UI preview.
+  nextImpactY = null;
+  var nearestZ = Infinity;
   for (var i=0;i<obstacles.length;i++){
     var o = obstacles[i];
     var z = o.mesh.position.z;
+    if (z > COLLISION_Z_NEAR && z < 4){ // approaching or inside the collision window
+      if (z < nearestZ){ nearestZ = z; nextImpactY = o.mesh.position.y; }
+    }
     if (z > COLLISION_Z_NEAR && z < COLLISION_Z_FAR){
       var bar = o.mesh.children[0];
       var half = bar.geometry.parameters.height/2;
-      var top = o.mesh.position.y + half;
-      var bot = o.mesh.position.y - half;
+      var top  = o.mesh.position.y + half;
+      var bot  = o.mesh.position.y - half;
       if (!(bandTop < bot || bandBot > top)){ gameOver(); return; }
     }
   }
