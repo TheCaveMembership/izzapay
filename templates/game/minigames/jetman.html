@@ -48,7 +48,7 @@
           padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800}
     .pill strong{font-size:13px;color:var(--arcade)}
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4;
-      background:linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,.55));}
+      background:linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,.55)); transition:opacity .15s ease}
     .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:16px 18px;
       display:flex;flex-direction:column;gap:12px;align-items:center}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:10px;border:1px solid var(--hudLine);
@@ -614,10 +614,8 @@ let WALLET_READY=false, walletDirty=false, runStartCoins=0;
 let game = { score:0, creditsMinted:0, ended:false };
 
 function awardFromProgress(deltaScore){
-  // convert score delta → coins
   const addCoins = Math.max(0, Math.floor(deltaScore * COINS_PER_SCORE));
   if (addCoins>0) applyCoins(addCoins);
-  // credits from accumulated coins (global wallet based)
   const totalCoins = readCoinsLS();
   const creditsNow = Math.floor(totalCoins / COINS_PER_CREDIT);
   if (creditsNow > game.creditsMinted){
@@ -749,23 +747,28 @@ window.addEventListener('pagehide', () => {
   }
 });
 
-/* START button boot path (same technique as other games) */
+/* =========================
+   START button — non-blocking boot
+   ========================= */
 document.getElementById('startBtn').addEventListener('click', async ()=>{
   try{
+    // Immediate visual feedback
+    const overlay = document.getElementById('startOverlay');
+    overlay.style.opacity = '0.96';
+
+    // Paint any handoff instantly
     const handoff = consumeWalletHandoff();
     if (handoff){ paintCoinsHUD(handoff.coins); }
 
-    try{ await primeViaCityIframe(); }catch(_){}
-    try{ await ensureSession(); }catch(_){}
-
-    const snapCoins = await hydrateFromSnapshot();
-    { // never regress
+    // Fire-and-forget priming/network work (do NOT await)
+    primeViaCityIframe({ maxWaitMs: 1500 }).catch(()=>{});
+    ensureSession().catch(()=>{});
+    (async ()=>{ try{
+      const snapCoins = await hydrateFromSnapshot();
       const shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
       paintCoinsHUD(Math.max(shown, snapCoins, readCoinsLS()||0));
-    }
-
-    // Authoritative wallet
-    try{
+    }catch(_){}})();
+    (async ()=>{ try{
       const r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
       if (r.ok){
         const parsed = parseWalletResponse(await r.json().catch(()=>({})));
@@ -781,20 +784,22 @@ document.getElementById('startBtn').addEventListener('click', async ()=>{
         }catch(_){}
         paintCoinsHUD(nextCoins);
       }
-    }catch(_){}
+    }catch(_){}})();
 
     WALLET_READY = true;
     runStartCoins = parseInt((coinsHUD.textContent||'0'), 10) || (readCoinsLS()||0);
 
-    // Build avatar sprite and go!
-    await ensureAvatarSprite();
+    // Build avatar sprite in background; draw once ready
+    ensureAvatarSprite().catch(()=>{});
 
-    document.getElementById('startOverlay').style.display='none';
+    // Hide overlay and start immediately
+    overlay.style.display = 'none';
     ensureSized();
     requestAnimationFrame(frame);
   }catch(e){ console.error('start failed', e); }
 }, {passive:true});
 
-})();</script>
+})();
+</script>
 </body>
 </html>
