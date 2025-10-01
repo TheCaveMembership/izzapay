@@ -5,10 +5,9 @@
   <title>Jetman Rooftops — IZZA GAME</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
 
-  <!-- Persist base (same as Arena/Basketball/Race) -->
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
 
-  <!-- Ensure username is known before izza-persist.js loads -->
+  <!-- Preload username (like Basketball) -->
   <script>
     (function(){
       try{
@@ -98,15 +97,10 @@
 
 <script>
 (function(){
-/* ============ ES5 helpers (no optional chaining / nullish) ============ */
-function safeGet(obj, path){ try{
-  var cur=obj; for(var i=0;i<path.length;i++){ if(!cur || typeof cur!=='object') return undefined; cur=cur[path[i]]; }
-  return cur;
-}catch(_){ return undefined; }}
+/* ========= helpers ========= */
+function safeGet(obj, path){ try{ var cur=obj; for(var i=0;i<path.length;i++){ if(!cur || typeof cur!=='object') return; cur=cur[path[i]]; } return cur; }catch(_){ }}
 
-/* =========================
-   t & u propagation / links
-   ========================= */
+/* ====== t & u propagation (Basketball style) ====== */
 var T_KEY='izzaTokenT', U_KEY='izzaUserU';
 var urlParams = new URLSearchParams(location.search);
 var T = urlParams.get('t') || '';
@@ -114,12 +108,7 @@ var U = (urlParams.get('u') || '').toString().trim();
 
 try{
   if (T) localStorage.setItem(T_KEY, T);
-  else {
-    var s = localStorage.getItem(T_KEY)||'';
-    if (s){
-      var url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s;
-    }
-  }
+  else { var s = localStorage.getItem(T_KEY)||''; if (s){ var url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; } }
 }catch(_){}
 
 function publishUsername(u){
@@ -135,10 +124,7 @@ try{
   if (U) publishUsername(U);
   else {
     var su = (localStorage.getItem(U_KEY)||'').toString().trim();
-    if (su){
-      var url2=new URL(location.href); url2.searchParams.set('u',su);
-      history.replaceState(null,'',url2.toString()); U = publishUsername(su);
-    }
+    if (su){ var url2=new URL(location.href); url2.searchParams.set('u',su); history.replaceState(null,'',url2.toString()); U = publishUsername(su); }
   }
 }catch(_){}
 
@@ -149,19 +135,14 @@ function withAuth(href){
   return url.pathname + (url.search ? url.search : '');
 }
 document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
-document.getElementById('cityBtn').href   = withAuth('/izza-game/play');
-document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
-document.getElementById('againBtn').href  = withAuth('/izza-game/minigames');
+['cityBtn','cityBtn2','againBtn'].forEach(function(id){
+  var el=document.getElementById(id); if(el) el.href = withAuth(el.getAttribute('href'));
+});
 
-/* =========================
-   Wallet helpers (shared)
-   ========================= */
+/* ====== Wallet helpers ====== */
 function bearerHeaders(base) {
   var headers = Object.assign({ 'content-type':'application/json' }, base || {});
-  try{
-    var bearer = localStorage.getItem('izzaBearer') || '';
-    if (bearer) headers['authorization'] = 'Bearer ' + bearer;
-  }catch(_){}
+  try{ var bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
   return headers;
 }
 function parseWalletResponse(j){
@@ -170,35 +151,24 @@ function parseWalletResponse(j){
     var craft = (typeof j.crafting!=='undefined') ? j.crafting : j.credits;
     return { coins: Number(j.coins)||0, crafting: Number(craft)||0 };
   }
-  if (j.wallet)   return parseWalletResponse(j.wallet);
-  if (j.balance)  return parseWalletResponse(j.balance);
+  if (j.wallet)  return parseWalletResponse(j.wallet);
+  if (j.balance) return parseWalletResponse(j.balance);
   return { coins:0, crafting:0 };
 }
 var CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-function readCraftAny(){
-  for(var i=0;i<CRAFT_KEYS.length;i++){
-    var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10);
-    if(isFinite(v)&&v>0) return v|0;
-  }
-  var v0=parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0;
-  return v0|0;
-}
-function writeCraftAll(v){ var n=Math.max(0,v|0); for(var i=0;i<CRAFT_KEYS.length;i++) localStorage.setItem(CRAFT_KEYS[i],String(n));
-  try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){} }
+function readCraftAny(){ for(var i=0;i<CRAFT_KEYS.length;i++){ var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10); if(isFinite(v)&&v>0) return v|0; } return parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0; }
+function writeCraftAll(v){ var n=Math.max(0,v|0); for(var i=0;i<CRAFT_KEYS.length;i++) localStorage.setItem(CRAFT_KEYS[i],String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){ } }
 function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
 function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 var coinsHUD = document.getElementById('coinsHUD');
 function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
 
-/* Handoff from Arena (instant paint) */
+/* Handoff from Arena */
 function consumeWalletHandoff(maxAgeMs){
   if(!maxAgeMs) maxAgeMs = 120000;
   try{
-    var raw = sessionStorage.getItem('izzaWalletHandoff');
-    if(!raw) return null;
-    var s = JSON.parse(raw);
-    if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
-
+    var raw = sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+    var s = JSON.parse(raw); if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
     if (s.user){
       var u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
       window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
@@ -212,29 +182,23 @@ function consumeWalletHandoff(maxAgeMs){
   }catch(_){ return null; }
 }
 
-/* Hidden City iframe to warm session (no optional chaining) */
+/* Warm session via City iframe */
 function primeViaCityIframe(opts){
   opts = opts || {};
-  var maxWaitMs = opts.maxWaitMs || 8000;
-  var pollMs = opts.pollMs || 120;
+  var maxWaitMs = opts.maxWaitMs || 8000, pollMs = opts.pollMs || 120;
   return new Promise(function(resolve){
     var f=null, done=false, hard=null, poll=null;
-    function finish(){ if(done) return; done=true;
-      try{ clearTimeout(hard); clearInterval(poll); if(f) f.parentNode && f.parentNode.removeChild(f); }catch(_){}
-      resolve('ok');
-    }
+    function finish(){ if(done) return; done=true; try{ clearTimeout(hard); clearInterval(poll); if(f) f.parentNode && f.parentNode.removeChild(f); }catch(_){}
+      resolve('ok'); }
     var src = withAuth('/izza-game/play?prime=1&silent=1');
     f=document.createElement('iframe'); f.src=src;
     var st=f.style; st.position='fixed'; st.width='0'; st.height='0'; st.opacity='0'; st.pointerEvents='none'; st.border='0';
     document.body.appendChild(f);
     f.addEventListener('load', function(){
-      try{
-        var w=f.contentWindow; var tick=0;
+      try{ var w=f.contentWindow; var tick=0;
         poll=setInterval(function(){
-          try{
-            var canLoad = w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load === 'function';
-            if (canLoad && tick<1){ tick++; w.IZZA_PERSIST.load().then(finish).catch(finish); }
-          }catch(_){}
+          try{ var canLoad = w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load === 'function';
+               if (canLoad && tick<1){ tick++; w.IZZA_PERSIST.load().then(finish).catch(finish); } }catch(_){}
         }, pollMs);
       }catch(_){}
     }, false);
@@ -244,8 +208,7 @@ function primeViaCityIframe(opts){
 
 /* Persist readiness & snapshot */
 function waitForPersistReady(opts){
-  opts = opts || {};
-  var timeout = opts.timeout || 3000, interval = opts.interval || 40;
+  opts = opts || {}; var timeout = opts.timeout || 3000, interval = opts.interval || 40;
   return new Promise(function(res){
     var t0 = performance.now();
     function check(){
@@ -259,24 +222,20 @@ function waitForPersistReady(opts){
 }
 function hydrateFromSnapshot(){
   return new Promise(function(resolve){
-    (function(){
-      waitForPersistReady().then(function(){
-        try{
-          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-            IZZA_PERSIST.load().then(function(){
-              try{ writeCraftAll(readCraftAny()); }catch(_){}
-              resolve(readCoinsLS());
-            }).catch(function(){ resolve(readCoinsLS()); });
-          } else {
+    waitForPersistReady().then(function(){
+      try{
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+          IZZA_PERSIST.load().then(function(){
+            try{ writeCraftAll(readCraftAny()); }catch(_){}
             resolve(readCoinsLS());
-          }
-        }catch(_){ resolve(readCoinsLS()); }
-      });
-    })();
+          }).catch(function(){ resolve(readCoinsLS()); });
+        } else { resolve(readCoinsLS()); }
+      }catch(_){ resolve(readCoinsLS()); }
+    });
   });
 }
 
-/* Best-effort session ping (no redirect) + capture character */
+/* Session/character */
 var LAST_CHARACTER = null;
 function ensureSession(){
   return fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() })
@@ -291,9 +250,7 @@ function ensureSession(){
     }).catch(function(){});
 }
 
-/* =========================
-   Avatar pipeline (same as Arena) — unchanged logic
-   ========================= */
+/* ====== Avatar pipeline (offscreen to on-canvas) ====== */
 var SPRITES = {
   body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
   hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -309,7 +266,6 @@ function loadImg(src){ return new Promise(function(res){ var i=new Image(); i.cr
 function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
 function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
-
 function extractThreeToneRamp(img){
   var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
   var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -321,7 +277,6 @@ function extractThreeToneRamp(img){
     return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
   return [pick(0.2),pick(0.55),pick(0.85)];
 }
-
 function paletteSwap(img, fromRampHex, toRampHex, tolerance){
   if(!tolerance) tolerance=2000;
   var from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
@@ -352,7 +307,6 @@ function overlayTint(img, hex, strength){
   c.putImageData(id,0,0);
   return oc;
 }
-
 function buildAvatarCanvas(dstCtx, size, profile){
   return new Promise(function(resolve){
     (function(){
@@ -360,7 +314,6 @@ function buildAvatarCanvas(dstCtx, size, profile){
       var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       var femaleOut=profile.female_outfit_color||'blue';
-
       var body=null;
       function afterBody(){
         Promise.all([
@@ -399,8 +352,7 @@ function buildAvatarCanvas(dstCtx, size, profile){
         var femaleWide='/static/game/sprites/body/'+theme+'__female_wide.png';
         var femaleSlim='/static/game/sprites/body/'+theme+'__female.png';
         loadImg(femaleWide).then(function(img){
-          if(img) body=img;
-          return img ? img : loadImg(femaleSlim);
+          if(img) body=img; return img ? img : loadImg(femaleSlim);
         }).then(function(img){ if(img) body=img; afterBody(); });
       } else {
         loadImg(SPRITES.body[theme]||SPRITES.body.default).then(function(img){ body=img; afterBody(); });
@@ -409,7 +361,7 @@ function buildAvatarCanvas(dstCtx, size, profile){
   });
 }
 
-/* Prepare an offscreen canvas the game will draw each frame */
+/* Offscreen sprite */
 var jetmanCanvas = document.createElement('canvas');
 jetmanCanvas.width = jetmanCanvas.height = 96;
 var jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
@@ -420,10 +372,10 @@ function ensureAvatarSprite(){
   }catch(_){ return Promise.resolve(); }
 }
 
-/* =========================
-   GAME
-   ========================= */
+/* ====== GAME (Canvas 3D) ====== */
 var cvs = document.getElementById('c'), ctx = cvs.getContext('2d',{alpha:true});
+ctx.imageSmoothingEnabled = false;
+
 var W=0,H=0,dpr=1;
 function hardResize(){
   var r = cvs.getBoundingClientRect();
@@ -436,21 +388,14 @@ function hardResize(){
     layout();
   }
 }
-function ensureSized(attempt){
-  attempt = attempt||0;
-  hardResize();
-  if ((W<2 || H<2) && attempt<10) setTimeout(function(){ ensureSized(attempt+1); }, 60);
-}
-ensureSized();
-addEventListener('resize', function(){ ensureSized(); }, false);
+function ensureSized(attempt){ attempt = attempt||0; hardResize(); if ((W<2 || H<2) && attempt<10) setTimeout(function(){ ensureSized(attempt+1); }, 60); }
+ensureSized(); addEventListener('resize', function(){ ensureSized(); }, false);
 
 /* camera / projection */
 var VPT_X=0, VPT_Y=0, VANISH_Y=-600, roadBottomHalf=0, roadTopHalf=0;
 function lerp(a,b,t){ return a+(b-a)*t; }
-function project(z){ var k=0.0105, t=1-Math.exp(-k*z);
-  return { y:lerp(VANISH_Y,H,t), half:lerp(roadTopHalf,roadBottomHalf,t), t:t }; }
-function layout(){ roadBottomHalf=W*0.55; roadTopHalf=W*0.08; VANISH_Y=-Math.max(520,H*0.75);
-  VPT_X=W*0.5; VPT_Y=H*0.62; }
+function project(z){ var k=0.0105, t=1-Math.exp(-k*z); return { y:lerp(VANISH_Y,H,t), half:lerp(roadTopHalf,roadBottomHalf,t), t:t }; }
+function layout(){ roadBottomHalf=W*0.55; roadTopHalf=W*0.08; VANISH_Y=-Math.max(520,H*0.75); VPT_X=W*0.5; VPT_Y=H*0.62; }
 
 /* player */
 var player = { y: 0, vy:0, r:18 };
@@ -465,7 +410,7 @@ addEventListener('pointerup', function(){ thrust=false; }, false);
 var time=0, last=performance.now(), worldZ=0, speed=190;
 var STEP_Z=72, DEPTH_Z=24000;
 
-/* dynamic rooftops (segments) */
+/* rooftops */
 var sides = { LEFT:0, RIGHT:1 };
 var roofs = [[],[]];
 function randRoofHeight(){ return H* (0.10 + Math.random()*0.32); }
@@ -484,10 +429,7 @@ function ensureRoofSegments(toZ){
 }
 function roofHeightAt(side, zAbs){
   var arr = roofs[side];
-  for (var i=0;i<arr.length;i++){
-    var s = arr[i];
-    if (zAbs >= s.startZ && zAbs < s.endZ) return s.h;
-  }
+  for (var i=0;i<arr.length;i++){ var s = arr[i]; if (zAbs >= s.startZ && zAbs < s.endZ) return s.h; }
   return H*0.2;
 }
 function trimRoofSegments(zAbs){
@@ -498,8 +440,8 @@ function trimRoofSegments(zAbs){
   }
 }
 
-/* obstacles on roofs/bars */
-var obstacles=[]; // {type, spawnZ, laneT, side, size, mountH}
+/* obstacles */
+var obstacles=[]; // {type, spawnZ, laneT, side, size, mountH, alive}
 var lanes=[0.30,0.50,0.70];
 function chooseSideForLane(laneT){ return laneT<0.5 ? sides.LEFT : sides.RIGHT; }
 function spawnObstacle(z0){
@@ -532,16 +474,19 @@ function spawnTick(now){
 function edgesAt(z){ var p=project(z); var y=Math.max(p.y,VANISH_Y);
   var half=(y===VANISH_Y)?0.0001:p.half; return {y:y, lx:W/2-half-14, rx:W/2+half+14, t:p.t};}
 
-/* draw */
+/* 3D draws */
 function drawBackground(){
+  // sky gradient
   var g=ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,'#06080f'); g.addColorStop(1,'#0b1020'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+  // neon fog wash
   ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.18;
   var gg=ctx.createRadialGradient(VPT_X,VPT_Y,50,VPT_X,VPT_Y,Math.max(W,H)*0.9);
   gg.addColorStop(0,'rgba(0,255,255,.7)'); gg.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle=gg; ctx.fillRect(0,0,W,H); ctx.restore();
 
-  // side clouds
+  // side clouds parallax
   ctx.save();
   var count = 24, sway = Math.sin(time*0.8)*8;
   for (var i=0;i<count;i++){
@@ -565,20 +510,17 @@ function drawBackground(){
 function drawFloor(){
   var L=[],R=[]; for(var z=0; z<=DEPTH_Z; z+=STEP_Z){ var e=edgesAt(z);
     if(e.y>H && L.length) break; L.push([e.lx,e.y]); R.push([e.rx,e.y]); }
-  ctx.save();
-  ctx.beginPath(); ctx.moveTo(W/2,VANISH_Y);
+  ctx.save(); ctx.beginPath(); ctx.moveTo(W/2,VANISH_Y);
   for(var i=R.length-1;i>=0;i--) ctx.lineTo(R[i][0], Math.min(R[i][1],H));
   for(var j=0;j<L.length;j++)    ctx.lineTo(L[j][0], Math.min(L[j][1],H));
   ctx.closePath();
   var g=ctx.createLinearGradient(0,VANISH_Y,0,H);
-  g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#0a1523');
-  ctx.fillStyle=g; ctx.fill();
+  g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#0a1523'); ctx.fillStyle=g; ctx.fill();
 
   var fog=ctx.createLinearGradient(0,VANISH_Y,0,H);
   fog.addColorStop(0,'rgba(0,255,255,.28)'); fog.addColorStop(.4,'rgba(0,200,255,.12)'); fog.addColorStop(1,'rgba(0,0,0,0)');
   ctx.globalCompositeOperation='screen'; ctx.fillStyle=fog; ctx.fill();
-  ctx.globalCompositeOperation='source-over';
-  ctx.restore();
+  ctx.globalCompositeOperation='source-over'; ctx.restore();
 }
 function drawRooftopLips(){
   ctx.save();
@@ -595,8 +537,7 @@ function drawRooftopLips(){
         var w = Math.max(6, 12*e.t);
         ctx.fillStyle = (side===sides.LEFT)? '#101a2e' : '#0f192c';
         ctx.fillRect(x - (side===sides.LEFT?w:0), yTop, w, y - yTop);
-        ctx.globalAlpha = 0.12 + 0.25*e.t;
-        ctx.fillStyle = 'rgba(120,200,255,1)';
+        ctx.globalAlpha = 0.12 + 0.25*e.t; ctx.fillStyle = 'rgba(120,200,255,1)';
         ctx.fillRect(x - (side===sides.LEFT?1:0), yTop-2, 2, 6);
         ctx.globalAlpha = 1;
       }
@@ -652,7 +593,7 @@ function drawObstacle(o){
 var hi=Number(localStorage.getItem('jet_hi')||0);
 document.getElementById('hi').textContent = hi;
 
-/* Score/coins mapping */
+/* Score → coins mapping */
 var COINS_PER_SCORE = 10;
 var COINS_PER_CREDIT = 1000;
 
@@ -757,6 +698,7 @@ function frame(now){
   trimRoofSegments(worldZ);
   spawnTick(now);
 
+  // render
   ctx.clearRect(0,0,W,H);
   drawBackground();
   drawFloor();
@@ -765,7 +707,7 @@ function frame(now){
     var o=obstacles[i]; if(!o.alive){ obstacles.splice(i,1); continue; } drawObstacle(o);
   }
 
-  // player avatar with thruster
+  // player sprite + thruster + rays
   ctx.save();
   var spriteW = 96, spriteH = 96;
   var px = W/2 - spriteW/2, py = player.y - spriteH/2;
@@ -779,6 +721,7 @@ function frame(now){
   ctx.drawImage(jetmanCanvas, px, py, spriteW, spriteH);
   ctx.restore();
 
+  // light rays to horizon
   ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=.16;
   for(i=0;i<24;i++){
     var a=(-0.55 + i/23*1.1), len=H*1.2, x2=VPT_X + Math.tan(a)*len, y2=H+60;
@@ -796,30 +739,23 @@ window.addEventListener('storage', function(e){
   if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.indexOf(e.key)>=0))) updateCoinsHUD();
 }, false);
 document.addEventListener('visibilitychange', function(){
-  if (document.hidden){
-    if (walletDirty) { persistWalletAndSave(); }
-  } else {
-    updateCoinsHUD();
-  }
+  if (document.hidden){ if (walletDirty) { persistWalletAndSave(); } }
+  else { updateCoinsHUD(); }
 }, false);
 window.addEventListener('pagehide', function(){
   var saver = safeGet(window, ['IZZA_PERSIST','save']);
-  if (walletDirty && typeof saver === 'function'){
-    try{ saver(); walletDirty = false; }catch(_){}
-  }
+  if (walletDirty && typeof saver === 'function'){ try{ saver(); walletDirty = false; }catch(_){} }
 }, false);
 
-/* =========================
-   START button — Pi-safe boot
-   ========================= */
+/* ====== START button (same boot as Basketball) ====== */
 var startBtn = document.getElementById('startBtn');
+
 function startGame(){
   try{
     var overlay = document.getElementById('startOverlay');
     overlay.style.opacity = '0.96';
 
     var handoff = consumeWalletHandoff(); if (handoff){ paintCoinsHUD(handoff.coins); }
-
     primeViaCityIframe({ maxWaitMs: 1500 });
     ensureSession();
 
@@ -851,17 +787,20 @@ function startGame(){
     WALLET_READY = true;
     runStartCoins = parseInt((coinsHUD.textContent||'0'), 10) || (readCoinsLS()||0);
 
-    ensureAvatarSprite();
-
-    overlay.style.display = 'none';
-    ensureSized();
-    requestAnimationFrame(frame);
+    ensureAvatarSprite().then(function(){
+      overlay.style.display = 'none';
+      ensureSized();
+      requestAnimationFrame(frame);
+    });
   }catch(e){ try{ console.error('start failed', e); }catch(_){} }
 }
 
-/* Wire multiple fallbacks */
+/* wire the same way as Basketball */
 startBtn.addEventListener('click', startGame, false);
 startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
+
+/* Initial HUD paint (so coins show before START) */
+updateCoinsHUD();
 
 })();
 </script>
