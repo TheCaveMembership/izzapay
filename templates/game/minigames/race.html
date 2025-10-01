@@ -1463,13 +1463,13 @@ const MIN_MULTI_SEP_Z = 380;            // avoid horizontal walling (keep items 
 const laneLastSpawnZ = [ -1e9, -1e9, -1e9 ];
 let lastMultiZ = -1e9;
 
+// Faster cadence (~100ms baseline) with mild scaling + nitro cut
 function currentSpawnInterval(){
-  // Much faster base, denser overall spawns
-  const base = 300; // was 420, lowered for more frequent items
-  const far  = Math.max(0, Math.min(1, state.dist/2500)); // 0..1 by 2.5km
-  const hyperCut = nitroActive ? 0.55 : 1.0; // even faster during nitro
-  const jitter = 0.70 + Math.random()*0.25; // slightly tighter spread
-  return base * (1.0 - 0.45*far) * hyperCut * jitter;
+  const base = 100;                                 // was 420 → much quicker
+  const far  = Math.max(0, Math.min(1, state.dist/2500)); // keep your scaling
+  const hyperCut = nitroActive ? 0.50 : 1.0;        // slightly faster during nitro
+  const jitter = 0.90 + Math.random()*0.25;         // keep some randomness
+  return base * (1.0 - 0.25*far) * hyperCut * jitter;
 }
 function bombChance(){
   // never block all lanes; this is just raw desire, planner enforces safety
@@ -1492,72 +1492,70 @@ function computeUnsafeLanes(targetZ){
   return unsafe;
 }
 function spawnOne(){
+  // --- tunables for spacing / cadence (keeps room to dodge) ---
+  const DODGE_GAP_Z      = 170;   // stagger gap if we add a quick follow-up
+  const BOMB_EXTRA_GAP_Z = 220;   // extra room after bombs
+  const MULTI_PROB       = 0.14;  // small chance to add a second, staggered item
+
   // which lanes are available by per-lane spacing?
   const spaceOK = [];
   for (let i=0;i<LANE_TS.length;i++){
     if (worldZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) spaceOK.push(i);
   }
-  if (spaceOK.length===0) return;
+  if (spaceOK.length === 0) return;
 
-  // Avoid horizontal walls: if last multi-lane spawn too close, force single-lane
-  const allowMulti = (worldZ - lastMultiZ) >= MIN_MULTI_SEP_Z;
-
-  // Compute unsafe lanes to keep at least one gap
+  // avoid same-Z lane walls near existing pickups
   const unsafe = computeUnsafeLanes(worldZ);
-  const candidates = spaceOK.filter(i=>!unsafe[i]);
-  if (candidates.length===0){
-    // if all lanes unsafe at this Z, pick the safest by furthest lastSpawnZ
-    let best = 0, bestScore=-1e9;
+  let candidates = spaceOK.filter(i => !unsafe[i]);
+  if (candidates.length === 0) {
+    // pick the safest by largest gap since last spawn
+    let best = 0, bestScore = -1e9;
     for (const i of spaceOK){
       const score = worldZ - laneLastSpawnZ[i];
-      if (score>bestScore){ bestScore=score; best=i; }
+      if (score > bestScore){ bestScore = score; best = i; }
     }
-    candidates.push(best);
+    candidates = [best];
   }
 
-  // choose 1 or 2 items, but never block all lanes simultaneously
-  const howMany = (allowMulti && Math.random()<0.35 && candidates.length>=2) ? 2 : 1;
-  if (howMany===2) lastMultiZ = worldZ;
+  // --- choose ONE lane randomly for this tick ---
+  const li = candidates[(Math.random()*candidates.length)|0];
+  const laneT = LANE_TS[li];
 
-  const pickSet = [];
-  // randomize candidate order
-  for (let i=candidates.length-1;i>0;i--){
-    const j = (Math.random()*(i+1))|0; const tmp=candidates[i]; candidates[i]=candidates[j]; candidates[j]=tmp;
-  }
-  for (let k=0;k<howMany;k++){
-    if (!candidates.length) break;
-    const li = candidates.shift();
-    pickSet.push(li);
-  }
+  // type selection (mostly coins, some bombs, some nitro)
+  let type = 'coin';
+  const roll = Math.random();
+  const pNitro = 0.14 * (1 - Math.min(0.7, state.dist/6000));
+  const pBomb  = 0.22 + Math.min(0.28, state.dist/5000);
+  if (roll < pNitro) type = 'nitro';
+  else if (roll < pNitro + pBomb) type = 'bomb';
 
-  // Create items with safe types (convert bombs if it would make walls)
-  const desiredBomb = Math.random() < bombChance();
-  for (let idx=0; idx<pickSet.length; idx++){
-    const li = pickSet[idx];
-    const laneT = LANE_TS[li];
-    laneLastSpawnZ[li] = worldZ;
+  // place primary item now
+  pickups.push(new Pickup(type, worldZ, laneT));
+  laneLastSpawnZ[li] = worldZ + (type==='bomb' ? BOMB_EXTRA_GAP_Z : 0); // hold lane a bit longer if bomb
 
-    // Type selection:
-    // prioritize coins, sprinkle nitro, and only some bombs; never spawn bombs in all remaining lanes
-    let type = 'coin';
-    const roll = Math.random();
-    const pNitro = 0.16 * (1 - Math.min(0.7, state.dist/6000));
-    if (roll < pNitro) type = 'nitro';
-    else if (desiredBomb && roll < pNitro + 0.40) type = 'bomb';
+  // --- occasional quick follow-up in another lane, staggered in Z ---
+  if (Math.random() < MULTI_PROB){
+    // find a different lane that’s safe at the staggered Z
+    const targetZ = worldZ + DODGE_GAP_Z;
+    const unsafe2 = computeUnsafeLanes(targetZ);
+    const others = LANE_TS.map((_,i)=>i).filter(i => i!==li && (worldZ - laneLastSpawnZ[i] >= MIN_LANE_SEP_Z) && !unsafe2[i]);
+    if (others.length){
+      const li2 = others[(Math.random()*others.length)|0];
+      const laneT2 = LANE_TS[li2];
 
-    // Safety: if this spawn would cause all lanes in ~same Z to be bombs, force coin
-    if (type==='bomb'){
-      const nearSameZ = pickups.filter(p => p.alive && p.type==='bomb' && Math.abs(p.spawnZ - worldZ) < MIN_MULTI_SEP_Z);
-      const bombLanes = new Set(nearSameZ.map(p=>p.laneT));
-      bombLanes.add(laneT);
-      if (bombLanes.size >= 3){
-        type = 'coin';
-      }
+      // second item type—keep simple (biased to coin so it feels rewarding)
+      const roll2 = Math.random();
+      let type2 = roll2 < 0.10 ? 'nitro' : (roll2 < 0.30 ? 'bomb' : 'coin');
+
+      // safety: don’t allow both items bombs (would feel unfair)
+      if (type==='bomb' && type2==='bomb') type2 = 'coin';
+
+      pickups.push(new Pickup(type2, targetZ, laneT2));
+      laneLastSpawnZ[li2] = targetZ + (type2==='bomb' ? BOMB_EXTRA_GAP_Z : 0);
+      lastMultiZ = targetZ; // remember last multi to help upstream logic if you use it elsewhere
     }
-    pickups.push(new Pickup(type, worldZ, laneT));
   }
 }
-
 /* Nitro consumption / heat */
 function useNitro(dt){
   const can = nitro>0.02;
