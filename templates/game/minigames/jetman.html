@@ -213,10 +213,13 @@ function withAuth(href){
   if (U) url.searchParams.set('u', U);
   return url.pathname + (url.search ? url.search : '');
 }
-document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
-document.getElementById('cityBtn').href   = withAuth('/izza-game/play');
-document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
-document.getElementById('againBtn').href  = withAuth('/izza-game/minigames');
+
+/* === Wire links exactly like Basketball === */
+document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
+['cityBtn','cityBtn2','againBtn'].forEach(function(id){
+  var el = document.getElementById(id);
+  if (el) el.href = withAuth(el.getAttribute('href'));
+});
 
 /* =========================
    Wallet helpers (shared)
@@ -648,7 +651,7 @@ function drawBackground(){
 
 /* draw floor corridor polygon */
 function drawFloor(){
-  var L=[],R[];
+  var L=[], R[]; /* <— FIXED: was `var L=[],R[];` */
   for(var z=0; z<=DEPTH_Z; z+=STEP_Z){
     var e=edgesAt(z);
     if(e.y>H && L.length) break;
@@ -685,7 +688,6 @@ function drawRooftops(){
     var arr = roofs[side];
     for (var i=0;i<arr.length;i++){
       var seg = arr[i];
-      var zMid = (Math.max(0, worldZ - seg.startZ)+Math.max(0, worldZ - seg.endZ))/2;
       var e0 = edgesAt(Math.max(0, worldZ - seg.startZ));
       var e1 = edgesAt(Math.max(0, worldZ - seg.endZ));
       if (e0.y>H && e1.y>H) continue;
@@ -695,13 +697,11 @@ function drawRooftops(){
       var xN = (side===0? eNear.lx : eNear.rx);
       var xF = (side===0? eFar.lx  : eFar.rx);
       var yN = Math.max(eNear.y, VPT_Y+8), yF = Math.max(eFar.y, VPT_Y+8);
-      // vertical quad points: near top, near bottom, far bottom, far top
       var pts = side===0
         ? [[xN, yN - lipNear],[xN- Math.max(6,12*eNear.t), yN],[xF- Math.max(6,12*eFar.t), yF],[xF, yF - lipFar]]
         : [[xN+ Math.max(6,12*eNear.t), yN],[xN, yN - lipNear],[xF, yF - lipFar],[xF+ Math.max(6,12*eFar.t), yF]];
       setPoints(seg.el, pts);
 
-      // little cyan edge light
       if(!seg.edge){
         seg.edge=document.createElementNS('http://www.w3.org/2000/svg','rect');
         seg.edge.setAttribute('width','2'); seg.edge.setAttribute('height','6');
@@ -766,7 +766,6 @@ function drawObstacle(o){
     o.el._rect.setAttribute('height', h);
     o.el.setAttribute('opacity','0.95');
   } else {
-    // 3D-ish box: top (slanted) + front (vertical)
     var w2 = 40 + 220*e.t*o.size, h2 = 22 + 120*e.t*o.size;
     var topDepth = Math.max(6, 10*e.t);
     var pTop = [
@@ -928,7 +927,6 @@ function frame(now){
   }
 
   // player avatar & thruster & rays
-  var spriteW = 96, spriteH = 96;
   var px = W/2, py = player.y;
 
   // thruster
@@ -973,61 +971,71 @@ window.addEventListener('pagehide', function(){
 }, false);
 
 /* =========================
-   START button — Pi-safe boot
+   START button — SAME FLOW AS BASKETBALL
    ========================= */
 var startBtn = document.getElementById('startBtn');
-function startGame(){
+startBtn.addEventListener('click', startGame, false);
+startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
+
+/* Initial HUD values */
+updateCoinsHUD();
+
+async function startGame(){
   try{
     var overlay = document.getElementById('startOverlay');
-    overlay.style.opacity = '0.96';
 
-    var handoff = consumeWalletHandoff(); if (handoff){ paintCoinsHUD(handoff.coins); }
+    // 0) If Arena handed us a fresh wallet, use it instantly
+    var handoff = consumeWalletHandoff();
+    if (handoff){ paintCoinsHUD(handoff.coins); }
 
-    primeViaCityIframe({ maxWaitMs: 1500 });
-    ensureSession();
+    // 1) Warm session & Persist via hidden City frame (non-blocking)
+    try{ await primeViaCityIframe(); }catch(_){}
 
-    hydrateFromSnapshot().then(function(snapCoins){
-      var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
-      paintCoinsHUD(Math.max(shown, snapCoins, readCoinsLS()||0));
-    });
+    // 2) Best-effort session check (no redirect)
+    try{ await ensureSession(); }catch(_){}
 
+    // 3) Hydrate from Persist snapshot (server → LS)
+    var snapCoins = await hydrateFromSnapshot();
+
+    // Never regress the shown value after snapshot
     (function(){
-      fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() })
-        .then(function(r){ if(!r.ok) return; return r.json().catch(function(){ return {}; }); })
-        .then(function(parsed){
-          if(!parsed) return;
-          parsed = parseWalletResponse(parsed);
-          var apiCoins = Number(parsed.coins)||0;
-          var apiCraft = Number(parsed.crafting)||0;
-          var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
-          var nextCoins = Math.max(shown, apiCoins);
-          try{
-            localStorage.setItem('izzaCoins', String(nextCoins));
-            if (apiCraft>=0) writeCraftAll(apiCraft);
-            window.dispatchEvent(new Event('izza-coins-changed'));
-            window.dispatchEvent(new Event('izza-crafting-changed'));
-          }catch(_){}
-          paintCoinsHUD(nextCoins);
-        }).catch(function(){});
+      var shown = parseInt((coinsHUD.textContent||'0'), 10) || 0;
+      var safe = Math.max(shown, snapCoins, readCoinsLS()||0);
+      paintCoinsHUD(safe);
     })();
 
+    // 4) Authoritative wallet fetch; adopt without decreasing
+    try{
+      var r = await fetch(withAuth('/izza-game/api/wallet'), { credentials:'include', headers: bearerHeaders() });
+      if (r.ok){
+        var parsed = parseWalletResponse(await r.json().catch(function(){return{};}));
+        var apiCoins = Number(parsed.coins)||0;
+        var apiCraft = Number(parsed.crafting)||0;
+
+        var shown2 = parseInt((coinsHUD.textContent||'0'), 10) || 0;
+        var nextCoins = Math.max(shown2, apiCoins);
+
+        try{
+          localStorage.setItem('izzaCoins', String(nextCoins));
+          if (apiCraft>=0) writeCraftAll(apiCraft);
+          window.dispatchEvent(new Event('izza-coins-changed'));
+          window.dispatchEvent(new Event('izza-crafting-changed'));
+        }catch(_){}
+        paintCoinsHUD(nextCoins);
+      }
+    }catch(_){}
+
+    // 5) Lock run baseline & start game
     WALLET_READY = true;
     runStartCoins = parseInt((coinsHUD.textContent||'0'), 10) || (readCoinsLS()||0);
 
-    ensureAvatarSprite();
+    await ensureAvatarSprite();
 
     overlay.style.display = 'none';
     ensureSized();
     requestAnimationFrame(frame);
   }catch(e){ try{ console.error('start failed', e); }catch(_){} }
 }
-
-/* Wire multiple fallbacks */
-startBtn.addEventListener('click', startGame, false);
-startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
-
-/* Initial HUD values */
-updateCoinsHUD();
 
 })();
 </script>
