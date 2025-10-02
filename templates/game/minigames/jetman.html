@@ -320,7 +320,6 @@ function loadImg(src){ return new Promise(function(res){ var i=new Image(); i.cr
 function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
 function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
-
 function extractThreeToneRamp(img){
   var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
   var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -761,7 +760,10 @@ function frame(now){
   // THRUST UP: hold = accelerate upward; otherwise gravity pulls down
   var ay = (thrust ? +phys.thrust : -phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
-  var nextY = player.y + (player.vy*dt)/260;
+
+  // >>> increased movement so avatar actually moves <<< 
+  var nextY = player.y + (player.vy*dt)/60;
+
   if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
   player.y = Math.max(BOT_Y, Math.min(TOP_Y, nextY));
 
