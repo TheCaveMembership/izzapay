@@ -1168,6 +1168,69 @@ var moonCanvasTex = (function(){
   return c;
 })();
 
+// === Jet plume helper (2D "fake 3D") ===
+function drawJetPlume(ctx, x, y, len, baseW, t){
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  // Main tapered cone (hot → cool along length)
+  const grad = ctx.createLinearGradient(x, y-10, x, y+len);
+  grad.addColorStop(0.00,'rgba(255,255,255,0.95)');   // white-hot throat
+  grad.addColorStop(0.08,'rgba(255,240,180,0.95)');   // yellow
+  grad.addColorStop(0.35,'rgba(120,220,255,0.85)');   // cyan plasma
+  grad.addColorStop(0.75,'rgba(255,140,60,0.55)');    // orange
+  grad.addColorStop(1.00,'rgba(255,90,0,0.00)');      // fade
+  ctx.fillStyle = grad;
+
+  // Tapered polygon with a sharp tip
+  const tipY = y + len;
+  ctx.beginPath();
+  ctx.moveTo(x - baseW*0.55, y);
+  ctx.lineTo(x + baseW*0.55, y);
+  ctx.lineTo(x + baseW*0.10, tipY);
+  ctx.lineTo(x - baseW*0.10, tipY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Inner white core (narrower, flickers a bit)
+  const wobble = 0.12*baseW*Math.sin(t*60);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(x - baseW*0.28 + wobble*0.2, y+4);
+  ctx.lineTo(x + baseW*0.28 + wobble*0.2, y+4);
+  ctx.lineTo(x + baseW*0.04, tipY-6);
+  ctx.lineTo(x - baseW*0.04, tipY-6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Shock diamonds (Mach bands) to sell “jet” look
+  for (let i=0;i<4;i++){
+    const p = (i+1)/5;
+    const by = y + len*p;
+    const w  = baseW*(0.52*(1-p)+0.12);
+    const a  = 0.25*(1-p);
+    ctx.fillStyle = `rgba(255,240,180,${a})`;
+    ctx.beginPath();
+    ctx.moveTo(x - w*0.60, by-3);
+    ctx.lineTo(x + w*0.60, by-3);
+    ctx.lineTo(x + w*0.18, by+3);
+    ctx.lineTo(x - w*0.18, by+3);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Big halo to brighten the whole area
+  const halo = ctx.createRadialGradient(x, y+len*0.25, 0, x, y+len*0.25, len*1.2);
+  halo.addColorStop(0, 'rgba(255,255,200,0.28)');
+  halo.addColorStop(1, 'rgba(255,255,200,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.ellipse(x, y+len*0.25, baseW*1.6, len*0.9, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+  
 /* ===== UI draw ===== */
 function drawUI(){
   uiCtx.clearRect(0,0,W,H);
@@ -1178,14 +1241,15 @@ function drawUI(){
   var spriteW = 96, spriteH = 96;
   var cx = W/2;
   var py = worldToPxY(player.y);
-  var flameLen = thrust ? 22 + 12 * Math.sin(time * 40) : 10;
-  var flameY = py + spriteH/2;
+  // --- SHARP JET FLAMES (downward) ---
+if (thrust){
+  const len    = 80 + 18*Math.sin(time*9);     // long, tapered jet
+  const baseW  = 34 + 6*Math.sin(time*20);     // throat width + flicker
+  const flameY = py + spriteH*0.36;            // start just below the avatar
 
-  uiCtx.fillStyle='rgba(255,240,140,.95)';
-  uiCtx.beginPath(); uiCtx.ellipse(cx, flameY, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
-  uiCtx.fillStyle='rgba(120,220,255,.65)';
-  uiCtx.beginPath(); uiCtx.ellipse(cx, flameY, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
-
+  // draw plume BEFORE the sprite so the character sits on top of the source
+  drawJetPlume(uiCtx, cx, flameY, len, baseW, time);
+}
   uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.52, spriteW, spriteH);
 
   var grd = uiCtx.createRadialGradient(W/2, H*0.45, Math.min(W,H)*0.25, W/2, H/2, Math.max(W,H)*0.75);
