@@ -502,9 +502,14 @@ function init3D(){
       map:mapTex, color:0xffffff, roughness:0.58, metalness:0.18,
       emissive:0x1a2e57, emissiveIntensity:0.95, emissiveMap:emiss
     });
-    var plane=new THREE.Mesh(new THREE.PlaneGeometry(corridorHalf*1.2, DEPTH*4), mat); // very long
-    plane.rotateX(-Math.PI/2); plane.position.set(0,-corridorHeight*0.55 + 0.01, -DEPTH*2);
-    trafficGlow = plane; scene.add(plane);
+    var plane = new THREE.Mesh(
+  new THREE.PlaneGeometry(corridorHalf*1.2, DEPTH*20), // was DEPTH*4
+  mat
+);
+plane.rotateX(-Math.PI/2);
+plane.position.set(0, -corridorHeight*0.55 + 0.01, -DEPTH*10); // push farther back
+trafficGlow = plane;
+scene.add(plane);
   })();
 
   /* faint light rain */
