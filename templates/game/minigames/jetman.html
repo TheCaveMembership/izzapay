@@ -37,7 +37,12 @@
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{ --hud:rgba(255,255,255,.10); --hudLine:rgba(255,255,255,.34); --arcade:#aef3ff; }
+    :root{
+      --hud:rgba(255,255,255,.10); --hudLine:rgba(255,255,255,.34); --arcade:#aef3ff;
+      /* Expose iOS safe-area to JS via computed style */
+      padding-bottom: constant(safe-area-inset-bottom);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
     html,body{height:100%;margin:0;background:#071227;color:#e8eef7;font:14px/1.2 system-ui,Arial}
     body{
       background:
@@ -471,11 +476,35 @@ var DEPTH=300;
 var TOP_Y = 3.3;   // ceiling world Y
 var BOT_Y = -3.0;  // ground world Y
 
-/* UI mapping: FULL SCREEN (no margins) */
+/* ===== Margins + mapping ===== */
 var TOP_PX_MARGIN = 0;
 var BOT_PX_MARGIN = 0;
 var pixelsPerWorld = 1;
+
+function computeMargins(){
+  var top = 90;     // leave room for HUD
+  var bottom = 160; // leave room for iOS swipe bar / browser chrome
+
+  try{
+    var cs = getComputedStyle(document.documentElement);
+    var pb = parseInt(cs.getPropertyValue('padding-bottom')) || 0;
+    // Try to parse env(safe-area-inset-bottom) if available
+    var envVal = cs.getPropertyValue('env(safe-area-inset-bottom)') || '0';
+    var envNum = parseInt(envVal) || 0;
+    bottom += Math.max(pb, envNum);
+  }catch(_){}
+
+  if (window.visualViewport && window.innerHeight){
+    var hidden = Math.max(0, window.innerHeight - window.visualViewport.height);
+    bottom += Math.round(hidden);
+  }
+  return { top: top|0, bottom: bottom|0 };
+}
+
 function updateScale(){
+  var m = computeMargins();
+  TOP_PX_MARGIN = m.top;
+  BOT_PX_MARGIN = m.bottom;
   var usable = Math.max(1, (H - TOP_PX_MARGIN - BOT_PX_MARGIN));
   pixelsPerWorld = usable / (TOP_Y - BOT_Y);
 }
@@ -716,13 +745,19 @@ function drawUI(){
   uiCtx.strokeRect(cx - hitW/2, py - hitH/2, hitW, hitH);
   uiCtx.restore();
 
+  // Clamp sprite Y into the visible band and nudge it slightly upward so it never dips below the bottom edge
+  var minY = BOT_PX_MARGIN + spriteH/2 + 2;
+  var maxY = H - TOP_PX_MARGIN - spriteH/2 - 2;
+  py = Math.max(minY, Math.min(maxY, py));
+
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
   uiCtx.fillStyle='rgba(255,240,140,.95)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
   uiCtx.fillStyle='rgba(120,220,255,.65)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
 
-  uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH/2, spriteW, spriteH);
+  // Slight upward bias (0.58) so avatar never visually overlaps the ground line
+  uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.58, spriteW, spriteH);
 }
 
 /* Loop */
