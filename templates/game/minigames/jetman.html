@@ -562,13 +562,12 @@ const loader = new THREE.TextureLoader();
 function prepTex(t){
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 4;
-  t.encoding = THREE.sRGBEncoding;
+  t.colorSpace = THREE.SRGBColorSpace;  // ✅ instead of t.encoding = THREE.sRGBEncoding
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.magFilter = THREE.LinearFilter;
   t.generateMipmaps = true;
   return t;
 }
-const pickTex = arr => arr[(Math.random()*arr.length)|0];
 
 BUILDING_TEX = BUILDING_URLS.map(u => prepTex(loader.load(u)));
 VEHICLE_TEX  = VEHICLE_URLS.map(u => prepTex(loader.load(u)));
@@ -1052,17 +1051,26 @@ function makeSedan(dir, bodyColor){
   const y0 = -corridorHeight*0.55 + H/2 + 0.02;
 
   const body = new THREE.Mesh(
-  new THREE.BoxGeometry(W*0.96, H*0.55, L*0.78),
-  vehicleBodyMat(bodyColor)
-);
-const nose = new THREE.Mesh(
-  new THREE.CapsuleGeometry(W*0.18, L*0.10, 6, 10),
-  vehicleBodyMat(bodyColor)
-);
+    new THREE.BoxGeometry(W*0.96, H*0.55, L*0.78),
+    vehicleBodyMat(bodyColor)
+  );
+  body.position.y = y0;
+  group.add(body);
 
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(W*0.76, H*0.48, L*0.35),
-    new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
-  roof.position.set(0, y0+H*0.46, -L*0.06); group.add(roof);
+  const nose = new THREE.Mesh(
+    new THREE.CapsuleGeometry(W*0.18, L*0.10, 6, 10),
+    vehicleBodyMat(bodyColor)
+  );
+  nose.rotation.x = Math.PI/2;
+  nose.position.set(0, y0, (dir>0?1:-1)*L*0.34);
+  group.add(nose);
+
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.76, H*0.48, L*0.35),
+    new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5})
+  );
+  roof.position.set(0, y0+H*0.46, -L*0.06);
+  group.add(roof);
 
   const fz=(dir>0)?+L*0.42:-L*0.42, rz=-fz, lampY=y0+H*0.05;
   addLamp(group,LAMPS.head,0.40,0.40,fz,-W*0.30,lampY);
@@ -1070,28 +1078,37 @@ const nose = new THREE.Mesh(
   addLamp(group,LAMPS.tail,0.44,0.44,rz,-W*0.30,lampY);
   addLamp(group,LAMPS.tail,0.44,0.44,rz,+W*0.30,lampY);
   addUnderglow(group,W,L,y0-0.01);
+
   group.userData = {speed:THREE.MathUtils.lerp(8,15,Math.random()), dir};
   return group;
 }
+
 /* Pickup */
 function makePickup(dir, bodyColor){
   const group=new THREE.Group();
   const L=5.8,W=1.8,H=0.9;
-  const y0=-corridorHeight*0.55+H/2+0.02;
+  const y0=-corridorHalf*0.55+H/2+0.02;
 
   const cab = new THREE.Mesh(
-  new THREE.BoxGeometry(W, H*0.55, L*0.45),
-  vehicleBodyMat(bodyColor)
-);
-  cab.position.set(0,y0,-L*0.05); group.add(cab);
+    new THREE.BoxGeometry(W, H*0.55, L*0.45),
+    vehicleBodyMat(bodyColor)
+  );
+  cab.position.set(0,y0,-L*0.05);
+  group.add(cab);
 
-  const bed=new THREE.Mesh(new THREE.BoxGeometry(W*0.96,H*0.42,L*0.35),
-    new THREE.MeshStandardMaterial({color:0x152544, roughness:0.6, metalness:0.2}));
-  bed.position.set(0,y0,-L*0.35); group.add(bed);
+  const bed=new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.96,H*0.42,L*0.35),
+    new THREE.MeshStandardMaterial({color:0x152544, roughness:0.6, metalness:0.2})
+  );
+  bed.position.set(0,y0,-L*0.35);
+  group.add(bed);
 
-  const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.42,L*0.26),
-    new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
-  roof.position.set(0,y0+H*0.40,-L*0.12); group.add(roof);
+  const roof=new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.78,H*0.42,L*0.26),
+    new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5})
+  );
+  roof.position.set(0,y0+H*0.40,-L*0.12);
+  group.add(roof);
 
   const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.02;
   addLamp(group,LAMPS.head,0.42,0.42,fz,-W*0.32,lampY);
@@ -1099,9 +1116,11 @@ function makePickup(dir, bodyColor){
   addLamp(group,LAMPS.tail,0.46,0.46,rz,-W*0.32,lampY);
   addLamp(group,LAMPS.tail,0.46,0.46,rz,+W*0.32,lampY);
   addUnderglow(group,W,L,y0-0.01);
+
   group.userData={speed:THREE.MathUtils.lerp(7.5,13,Math.random()), dir};
   return group;
 }
+
 /* Van */
 function makeVan(dir, bodyColor){
   const group=new THREE.Group();
@@ -1109,14 +1128,18 @@ function makeVan(dir, bodyColor){
   const y0=-corridorHeight*0.55+H/2+0.02;
 
   const hull = new THREE.Mesh(
-  new THREE.BoxGeometry(W, H*0.7, L*0.80),
-  vehicleBodyMat(bodyColor)
-);
-  hull.position.y=y0; group.add(hull);
+    new THREE.BoxGeometry(W, H*0.7, L*0.80),
+    vehicleBodyMat(bodyColor)
+  );
+  hull.position.y=y0;
+  group.add(hull);
 
-  const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.9,H*0.35,L*0.45),
-    new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45}));
-  roof.position.set(0,y0+H*0.42,-L*0.1); group.add(roof);
+  const roof=new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.9,H*0.35,L*0.45),
+    new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45})
+  );
+  roof.position.set(0,y0+H*0.42,-L*0.1);
+  group.add(roof);
 
   const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.02;
   addLamp(group,LAMPS.head,0.44,0.44,fz,-W*0.34,lampY);
@@ -1124,28 +1147,39 @@ function makeVan(dir, bodyColor){
   addLamp(group,LAMPS.tail,0.50,0.50,rz,-W*0.34,lampY);
   addLamp(group,LAMPS.tail,0.50,0.50,rz,+W*0.34,lampY);
   addUnderglow(group,W,L,y0-0.01);
+
   group.userData={speed:THREE.MathUtils.lerp(7,12,Math.random()), dir};
   return group;
 }
+
 /* Semi (tractor + trailer) */
 function makeSemi(dir, bodyColor){
   const group=new THREE.Group();
   const L=11.0,W=2.0,H=1.2;
   const y0=-corridorHeight*0.55+H/2+0.02;
 
+  // Trailer (plain)
+  const trailer = new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.98, H*0.72, L*0.62),
+    new THREE.MeshStandardMaterial({color:0x16243f, roughness:0.65, metalness:0.15})
+  );
+  trailer.position.set(0, y0, -L*0.10);
+  group.add(trailer);
+
+  // Tractor (photo material)
   const tractor = new THREE.Mesh(
-  new THREE.BoxGeometry(W*0.90, H*0.70, L*0.22),
-  vehicleBodyMat(bodyColor)
-);
-  trailer.position.set(0,y0, -L*0.10); group.add(trailer);
+    new THREE.BoxGeometry(W*0.90, H*0.70, L*0.22),
+    vehicleBodyMat(bodyColor)
+  );
+  tractor.position.set(0, y0, (dir>0?1:-1)*L*0.34);
+  group.add(tractor);
 
-  const tractor=new THREE.Mesh(new THREE.BoxGeometry(W*0.90,H*0.70,L*0.22),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.40, metalness:0.45}));
-  tractor.position.set(0,y0, (dir>0?1:-1)*L*0.34); group.add(tractor);
-
-  const cab=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.42,L*0.12),
-    new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45}));
-  cab.position.set(0,y0+H*0.36, tractor.position.z - (dir>0?L*0.02:-L*0.02)); group.add(cab);
+  const cab=new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.78, H*0.42, L*0.12),
+    new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45})
+  );
+  cab.position.set(0, y0+H*0.36, tractor.position.z - (dir>0?L*0.02:-L*0.02));
+  group.add(cab);
 
   const fz=(dir>0)?+L*0.44:-L*0.44, rz=-fz, lampY=y0+H*0.00;
   addLamp(group,LAMPS.head,0.48,0.48,fz,-W*0.34,lampY);
@@ -1153,10 +1187,10 @@ function makeSemi(dir, bodyColor){
   addLamp(group,LAMPS.tail,0.54,0.54,rz,-W*0.36,lampY);
   addLamp(group,LAMPS.tail,0.54,0.54,rz,+W*0.36,lampY);
   addUnderglow(group,W,L,y0-0.01);
+
   group.userData={speed:THREE.MathUtils.lerp(6,10,Math.random()), dir};
   return group;
 }
-
 function makeAnyVehicle(dir){
   const color = VEHICLE_COLORS[(Math.random()*VEHICLE_COLORS.length)|0];
   const r = Math.random();
