@@ -562,7 +562,8 @@ function init3D(){
 /* Walls */
 var wallPoolL=[], wallPoolR=[], wallLen=6;
 function newWall(side){
-  var h = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
+  // CHANGE #1: full-height side walls (no random height)
+  var h = corridorHeight;
   var geo = new THREE.BoxGeometry(1.2, h, wallLen, 1,1,1);
   var mat = new THREE.MeshStandardMaterial({ color:0x2ad4ff, roughness:.5, metalness:.22,
     emissive:0x00aaff, emissiveIntensity:1.15 });
@@ -580,11 +581,10 @@ function layoutWalls(){
   var z = -10;
   for(var i=0;i<wallPoolL.length;i++){
     var mL = wallPoolL[i], mR = wallPoolR[i];
-    var hL = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
-    var hR = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
-    mL.scale.y = hL / mL.userData.h; mR.scale.y = hR / mR.userData.h;
-    mL.position.set(-corridorHalf, -corridorHeight*0.5 + hL/2, z);
-    mR.position.set( corridorHalf, -corridorHeight*0.5 + hR/2, z);
+    // full-height, fixed scale
+    mL.scale.y = 1; mR.scale.y = 1;
+    mL.position.set(-corridorHalf, -corridorHeight*0.5 + mL.userData.h/2, z);
+    mR.position.set( corridorHalf, -corridorHeight*0.5 + mR.userData.h/2, z);
     z -= wallLen;
   }
 }
@@ -616,7 +616,8 @@ function spawnObstacle(){
   group.position.set(0, h, -80);
 
   scene.add(group);
-  obstacles.push({ mesh: group, type: 'bar' });
+  // CHANGE #2 (part A): store bar half-height (thickness/2) for precise collision
+  obstacles.push({ mesh: group, type: 'bar', halfHeight: t/2 });
 }
 
 /* Recycle world */
@@ -625,12 +626,12 @@ function advanceWorld(dz){
   for(var i=0;i<wallPoolL.length;i++){
     var a=wallPoolL[i], b=wallPoolR[i];
     a.position.z += dz; b.position.z += dz;
-    if(a.position.z > minZ){ a.position.z = maxZ; b.position.z = maxZ;
-      var hL = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
-      var hR = THREE.MathUtils.lerp(corridorHeight*0.45, corridorHeight*0.9, Math.random());
-      a.scale.y = hL / a.userData.h; b.scale.y = hR / b.userData.h;
-      a.position.y = -corridorHeight*0.5 + hL/2;
-      b.position.y = -corridorHeight*0.5 + hR/2;
+    if(a.position.z > minZ){
+      a.position.z = maxZ; b.position.z = maxZ;
+      // keep full-height, fixed scale on recycle
+      a.scale.y = 1; b.scale.y = 1;
+      a.position.y = -corridorHeight*0.5 + a.userData.h/2;
+      b.position.y = -corridorHeight*0.5 + b.userData.h/2;
     }
   }
   for(var i=obstacles.length-1;i>=0;i--){
@@ -741,7 +742,7 @@ function drawUI(){
   uiCtx.restore();
 
   // --- flame at bottom center of sprite ---
-  var flameLen = thrust ? 22 + 12 * Math.sin(time * 40) : 10; // <-- define it
+  var flameLen = thrust ? 22 + 12 * Math.sin(time * 40) : 10;
   var flameY = py + spriteH/2; // bottom of sprite
 
   uiCtx.fillStyle='rgba(255,240,140,.95)';
@@ -797,10 +798,9 @@ function frame(now){
       if (z < nearestZ){ nearestZ = z; nextImpactY = o.mesh.position.y; }
     }
     if (z > COLLISION_Z_NEAR && z < COLLISION_Z_FAR){
-      var bar = o.mesh.children[0];
-      var half = bar.geometry.parameters.height/2;
-      var top  = o.mesh.position.y + half;
-      var bot  = o.mesh.position.y - half;
+      // CHANGE #2 (part B): precise collision using stored bar half-height
+      var top  = o.mesh.position.y + o.halfHeight;
+      var bot  = o.mesh.position.y - o.halfHeight;
       if (!(bandTop < bot || bandBot > top)){ gameOver(); return; }
     }
   }
