@@ -766,9 +766,10 @@ function frame(now){
   var ay = (thrust ? +phys.thrust : -phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
 
-  // >>> increased movement so avatar actually moves <<< 
-  var nextY = player.y + (player.vy*dt)/60;
+  // correct movement scale (no /60)
+  var nextY = player.y + player.vy*dt;
 
+  // clamp once, in world coords
   if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
   player.y = Math.max(BOT_Y, Math.min(TOP_Y, nextY));
 
