@@ -7,6 +7,7 @@
 
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
 
+  <!-- username bootstrap (unchanged) -->
   <script>
     (function(){
       try{
@@ -118,193 +119,61 @@
 
 <script>
 (function(){
-function safeGet(obj, path){ try{
-  var cur=obj; for(var i=0;i<path.length;i++){ if(!cur || typeof cur!=='object') return undefined; cur=cur[path[i]]; }
-  return cur;
-}catch(_){ return undefined; }}
-
-var T_KEY='izzaTokenT', U_KEY='izzaUserU';
-var urlParams = new URLSearchParams(location.search);
-var T = urlParams.get('t') || '';
-var U = (urlParams.get('u') || '').toString().trim();
-
-try{
-  if (T) localStorage.setItem(T_KEY, T);
-  else {
-    var s = localStorage.getItem(T_KEY)||'';
-    if (s){
-      var url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s;
-    }
-  }
-}catch(_){}
-
-function publishUsername(u){
-  if (!u) return '';
-  u = u.replace(/^@+/, '').toLowerCase();
-  try{ localStorage.setItem(U_KEY, u); }catch(_){}
+/* ========= util/base/state (unchanged) ========= */
+function safeGet(obj, path){ try{ var cur=obj; for(var i=0;i<path.length;i++){ if(!cur || typeof cur!=='object') return undefined; cur=cur[path[i]]; } return cur; }catch(_){ return undefined; }}
+var T_KEY='izzaTokenT', U_KEY='izzaUserU'; var urlParams = new URLSearchParams(location.search);
+var T = urlParams.get('t') || ''; var U = (urlParams.get('u') || '').toString().trim();
+try{ if (T) localStorage.setItem(T_KEY, T); else { var s = localStorage.getItem(T_KEY)||''; if (s){ var url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; } } }catch(_){}
+function publishUsername(u){ if (!u) return ''; u = u.replace(/^@+/, '').toLowerCase(); try{ localStorage.setItem(U_KEY, u); }catch(_){}
   window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
   window.izzaUserKey = { get: function(){ return u; } };
   try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
-  return u;
-}
-try{
-  if (U) publishUsername(U);
-  else {
-    var su = (localStorage.getItem(U_KEY)||'').toString().trim();
-    if (su){
-      var url2=new URL(location.href); url2.searchParams.set('u',su);
-      history.replaceState(null,'',url2.toString()); U = publishUsername(su);
-    }
-  }
-}catch(_){}
-
-function withAuth(href){
-  var url = new URL(href, location.origin);
-  if (T) url.searchParams.set('t', T);
-  if (U) url.searchParams.set('u', U);
-  return url.pathname + (url.search ? url.search : '');
-}
+  return u; }
+try{ if (U) publishUsername(U); else { var su = (localStorage.getItem(U_KEY)||'').toString().trim(); if (su){ var url2=new URL(location.href); url2.searchParams.set('u',su); history.replaceState(null,'',url2.toString()); U = publishUsername(su); } } }catch(_){}
+function withAuth(href){ var url = new URL(href, location.origin); if (T) url.searchParams.set('t', T); if (U) url.searchParams.set('u', U);
+  return url.pathname + (url.search ? url.search : ''); }
 document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
 document.getElementById('cityBtn').href   = withAuth('/izza-game/play');
 document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
 document.getElementById('againBtn').href  = withAuth('/izza-game/minigames');
 
-/* Wallet helpers */
-function bearerHeaders(base) {
-  var headers = Object.assign({ 'content-type':'application/json' }, base || {});
-  try{
-    var bearer = localStorage.getItem('izzaBearer') || '';
-    if (bearer) headers['authorization'] = 'Bearer ' + bearer;
-  }catch(_){}
-  return headers;
-}
-function parseWalletResponse(j){
-  if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
-  if ('coins' in j || 'crafting' in j || 'credits' in j){
-    var craft = (typeof j.crafting!=='undefined') ? j.crafting : j.credits;
-    return { coins: Number(j.coins)||0, crafting: Number(craft)||0 };
-  }
-  if (j.wallet)   return parseWalletResponse(j.wallet);
-  if (j.balance)  return parseWalletResponse(j.balance);
-  return { coins:0, crafting:0 };
-}
+function bearerHeaders(base) { var headers = Object.assign({ 'content-type':'application/json' }, base || {}); try{ var bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
+  return headers; }
+function parseWalletResponse(j){ if (!j || typeof j !== 'object') return { coins:0, crafting:0 }; if ('coins' in j || 'crafting' in j || 'credits' in j){
+  var craft = (typeof j.crafting!=='undefined') ? j.crafting : j.credits; return { coins: Number(j.coins)||0, crafting: Number(craft)||0 }; }
+  if (j.wallet)   return parseWalletResponse(j.wallet); if (j.balance)  return parseWalletResponse(j.balance); return { coins:0, crafting:0 }; }
 var CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-function readCraftAny(){
-  for(var i=0;i<CRAFT_KEYS.length;i++){
-    var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10);
-    if(isFinite(v)&&v>0) return v|0;
-  }
-  var v0=parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0;
-  return v0|0;
-}
+function readCraftAny(){ for(var i=0;i<CRAFT_KEYS.length;i++){ var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10); if(isFinite(v)&&v>0) return v|0; } var v0=parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0; return v0|0; }
 function writeCraftAll(v){ var n=Math.max(0,v|0); for(var i=0;i<CRAFT_KEYS.length;i++) localStorage.setItem(CRAFT_KEYS[i],String(n));
   try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){ } }
 function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
 function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
-var coinsHUD = document.getElementById('coinsHUD');
-function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
-
-/* Handoff from Arena */
-function consumeWalletHandoff(maxAgeMs){
-  if(!maxAgeMs) maxAgeMs = 120000;
-  try{
-    var raw = sessionStorage.getItem('izzaWalletHandoff');
-    if(!raw) return null;
-    var s = JSON.parse(raw);
-    if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
-    if (s.user){
-      var u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
-      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-      window.izzaUserKey = { get: function(){ return u; } };
-      try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
-      U = u;
-    }
-    localStorage.setItem('izzaCoins', String(s.coins|0));
-    localStorage.setItem('izzaCrafting', String(s.craft|0));
-    return { coins:s.coins|0, craft:s.craft|0 };
-  }catch(_){ return null; }
-}
-
-/* Hidden City iframe to warm session */
-function primeViaCityIframe(opts){
-  opts = opts || {};
-  var maxWaitMs = opts.maxWaitMs || 8000;
-  var pollMs = opts.pollMs || 120;
-  return new Promise(function(resolve){
-    var f=null, done=false, hard=null, poll=null;
-    function finish(){ if(done) return; done=true;
-      try{ clearTimeout(hard); clearInterval(poll); if(f) f.parentNode && f.parentNode.removeChild(f); }catch(_){}
-      resolve('ok');
-    }
-    var src = withAuth('/izza-game/play?prime=1&silent=1');
-    f=document.createElement('iframe'); f.src=src;
-    var st=f.style; st.position='fixed'; st.width='0'; st.height='0'; st.opacity='0'; st.pointerEvents='none'; st.border='0';
-    document.body.appendChild(f);
-    f.addEventListener('load', function(){
-      try{
-        var w=f.contentWindow; var tick=0;
-        poll=setInterval(function(){
-          try{
-            var canLoad = w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load === 'function';
-            if (canLoad && tick<1){ tick++; w.IZZA_PERSIST.load().then(finish).catch(finish); }
-          }catch(_){}
-        }, pollMs);
-      }catch(_){}
-    }, false);
-    hard=setTimeout(finish, maxWaitMs);
-  });
-}
-
-/* Persist readiness & snapshot */
-function waitForPersistReady(opts){
-  opts = opts || {};
-  var timeout = opts.timeout || 3000, interval = opts.interval || 40;
-  return new Promise(function(res){
-    var t0 = performance.now();
-    function check(){
-      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
-      if (performance.now() - t0 > timeout) return res(false);
-      setTimeout(check, interval);
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true});
-    else check();
-  });
-}
-function hydrateFromSnapshot(){
-  return new Promise(function(resolve){
-    (function(){
-      waitForPersistReady().then(function(){
-        try{
-          if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-            IZZA_PERSIST.load().then(function(){
-              try{ writeCraftAll(readCraftAny()); }catch(_){}
-              resolve(readCoinsLS());
-            }).catch(function(){ resolve(readCoinsLS()); });
-          } else {
-            resolve(readCoinsLS());
-          }
-        }catch(_){ resolve(readCoinsLS()); }
-      });
-    })();
-  });
-}
-
-/* Best-effort session ping + character */
+var coinsHUD = document.getElementById('coinsHUD'); function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
+function consumeWalletHandoff(maxAgeMs){ if(!maxAgeMs) maxAgeMs = 120000; try{ var raw = sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+  var s = JSON.parse(raw); if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null; if (s.user){ var u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+    window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u }); window.izzaUserKey = { get: function(){ return u; } };
+    try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+    U = u; } localStorage.setItem('izzaCoins', String(s.coins|0)); localStorage.setItem('izzaCrafting', String(s.craft|0)); return { coins:s.coins|0, craft:s.craft|0 }; }catch(_){ return null; } }
+function primeViaCityIframe(opts){ opts = opts || {}; var maxWaitMs = opts.maxWaitMs || 8000; var pollMs = opts.pollMs || 120; return new Promise(function(resolve){
+  var f=null, done=false, hard=null, poll=null; function finish(){ if(done) return; done=true; try{ clearTimeout(hard); clearInterval(poll); if(f) f.parentNode && f.parentNode.removeChild(f); }catch(_){}
+    resolve('ok'); } var src = withAuth('/izza-game/play?prime=1&silent=1'); f=document.createElement('iframe'); f.src=src;
+  var st=f.style; st.position='fixed'; st.width='0'; st.height='0'; st.opacity='0'; st.pointerEvents='none'; st.border='0'; document.body.appendChild(f);
+  f.addEventListener('load', function(){ try{ var w=f.contentWindow; var tick=0; poll=setInterval(function(){ try{
+    var canLoad = w && w.IZZA_PERSIST && typeof w.IZZA_PERSIST.load === 'function'; if (canLoad && tick<1){ tick++; w.IZZA_PERSIST.load().then(finish).catch(finish); } }catch(_){}
+  }, pollMs); }catch(_){ } }, false); hard=setTimeout(finish, maxWaitMs); }); }
+function waitForPersistReady(opts){ opts = opts || {}; var timeout = opts.timeout || 3000, interval = opts.interval || 40; return new Promise(function(res){
+  var t0 = performance.now(); function check(){ if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+    if (performance.now() - t0 > timeout) return res(false); setTimeout(check, interval); } if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true}); else check(); }); }
+function hydrateFromSnapshot(){ return new Promise(function(resolve){ (function(){ waitForPersistReady().then(function(){ try{
+  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){ IZZA_PERSIST.load().then(function(){ try{ writeCraftAll(readCraftAny()); }catch(_){}
+    resolve(readCoinsLS()); }).catch(function(){ resolve(readCoinsLS()); }); } else { resolve(readCoinsLS()); } }catch(_){ resolve(readCoinsLS()); } }); })(); }); }
 var LAST_CHARACTER = null;
-function ensureSession(){
-  return fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() })
-    .then(function(r){
-      if(!r.ok) return;
-      return r.json().catch(function(){ return {}; }).then(function(j){
-        var uname = (j.user && j.user.username) || j.username || j.handle || '';
-        if (uname) { publishUsername(uname); }
-        LAST_CHARACTER = j || LAST_CHARACTER;
-        try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-      });
-    }).catch(function(){});
-}
+function ensureSession(){ return fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() })
+  .then(function(r){ if(!r.ok) return; return r.json().catch(function(){ return {}; }).then(function(j){ var uname = (j.user && j.user.username) || j.username || j.handle || '';
+    if (uname) { publishUsername(uname); } LAST_CHARACTER = j || LAST_CHARACTER; try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
+  }); }).catch(function(){}); }
 
-/* Avatar pipeline */
+/* ========= avatar pipeline (unchanged) ========= */
 var SPRITES = {
   body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
   hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -313,9 +182,8 @@ var SPRITES = {
 var SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
 var SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
 var FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
-var FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
+var FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3AD","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
 var HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
-
 function loadImg(src){ return new Promise(function(res){ var i=new Image(); i.crossOrigin='anonymous'; i.onload=function(){res(i)}; i.onerror=function(){res(null)}; i.src=src; }); }
 function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
@@ -328,7 +196,7 @@ function extractThreeToneRamp(img){
   if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
   samples.sort(function(a,b){return a.L-b.L;});
   function pick(q){ var idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); var s=samples[idx];
-    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); }
   return [pick(0.2),pick(0.55),pick(0.85)];
 }
 function paletteSwap(img, fromRampHex, toRampHex, tolerance){
@@ -337,14 +205,11 @@ function paletteSwap(img, fromRampHex, toRampHex, tolerance){
   var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
   var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
   var id=c.getImageData(0,0,w,h), d=id.data; var changed=0;
-  for(var i=0;i<d.length;i+=4){
-    if(d[i+3]===0) continue;
+  for(var i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
     var p={r:d[i],g:d[i+1],b:d[i+2]}; var best=-1,score=1e9;
     for(var k=0;k<from.length;k++){ var s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
     if(score<=tolerance){ var t=to[best]||to[1]||to[0];
-      if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
-      d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
-    }
+      if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
   }
   c.putImageData(id,0,0);
   return {canvas:oc, changedPixels:changed};
@@ -371,7 +236,6 @@ function buildAvatarCanvas(dstCtx, size, profile){
       var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       var femaleOut=profile.female_outfit_color||'blue';
-
       var body=null;
       function afterBody(){
         Promise.all([
@@ -409,10 +273,8 @@ function buildAvatarCanvas(dstCtx, size, profile){
       if(type==='female'){
         var femaleWide='/static/game/sprites/body/'+theme+'__female_wide.png';
         var femaleSlim='/static/game/sprites/body/'+theme+'__female.png';
-        loadImg(femaleWide).then(function(img){
-          if(img) body=img;
-          return img ? img : loadImg(femaleSlim);
-        }).then(function(img){ if(img) body=img; afterBody(); });
+        loadImg(femaleWide).then(function(img){ if(img) body=img; return img ? img : loadImg(femaleSlim); })
+          .then(function(img){ if(img) body=img; afterBody(); });
       } else {
         loadImg(SPRITES.body[theme]||SPRITES.body.default).then(function(img){ body=img; afterBody(); });
       }
@@ -420,46 +282,24 @@ function buildAvatarCanvas(dstCtx, size, profile){
   });
 }
 
-/* Offscreen sprite -> UI canvas */
+/* ========= offscreen sprite canvas ========= */
 var jetmanCanvas = document.createElement('canvas');
 jetmanCanvas.width = jetmanCanvas.height = 96;
 var jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
 
-/* ===== Mapping + margins (physics band) ===== */
-var W=0,H=0,dpr=1;
-var TOP_Y = 4.8, BOT_Y = -5.3;
-var TOP_PX_MARGIN = 0, BOT_PX_MARGIN = 0, pixelsPerWorld = 1;
+/* ========= mapping / margins (unchanged) ========= */
+var W=0,H=0,dpr=1; var TOP_Y = 4.8, BOT_Y = -5.3; var TOP_PX_MARGIN = 0, BOT_PX_MARGIN = 0, pixelsPerWorld = 1;
+function computeMargins(){ var top = 90; var bottom = 160; try{
+  var cs = getComputedStyle(document.documentElement); var pb = parseInt(cs.getPropertyValue('padding-bottom')) || 0;
+  var envVal = cs.getPropertyValue('env(safe-area-inset-bottom)') || '0'; var envNum = parseInt(envVal) || 0; bottom += Math.max(pb, envNum);
+}catch(_){}
+  if (window.visualViewport && window.innerHeight){ var hidden = Math.max(0, window.innerHeight - window.visualViewport.height); bottom += Math.round(hidden); }
+  return { top: top|0, bottom: bottom|0 }; }
+function updateScale(){ var m = computeMargins(); TOP_PX_MARGIN = m.top|0; BOT_PX_MARGIN = m.bottom|0;
+  var usable = Math.max(160, Math.min(H-40, H - TOP_PX_MARGIN - BOT_PX_MARGIN)); pixelsPerWorld = usable / (TOP_Y - BOT_Y); }
+function worldToPxY(y){ var botPx = H - BOT_PX_MARGIN; var dy = (y - BOT_Y) * pixelsPerWorld; return botPx - dy; }
 
-function computeMargins(){
-  var top = 90;
-  var bottom = 160;
-  try{
-    var cs = getComputedStyle(document.documentElement);
-    var pb = parseInt(cs.getPropertyValue('padding-bottom')) || 0;
-    var envVal = cs.getPropertyValue('env(safe-area-inset-bottom)') || '0';
-    var envNum = parseInt(envVal) || 0;
-    bottom += Math.max(pb, envNum);
-  }catch(_){}
-  if (window.visualViewport && window.innerHeight){
-    var hidden = Math.max(0, window.innerHeight - window.visualViewport.height);
-    bottom += Math.round(hidden);
-  }
-  return { top: top|0, bottom: bottom|0 };
-}
-function updateScale(){
-  var m = computeMargins();
-  TOP_PX_MARGIN = m.top|0;
-  BOT_PX_MARGIN = m.bottom|0;
-  var usable = Math.max(160, Math.min(H-40, H - TOP_PX_MARGIN - BOT_PX_MARGIN));
-  pixelsPerWorld = usable / (TOP_Y - BOT_Y);
-}
-function worldToPxY(y){
-  var botPx = H - BOT_PX_MARGIN;
-  var dy = (y - BOT_Y) * pixelsPerWorld;
-  return botPx - dy;
-}
-
-/* ====== THREE / GAME ====== */
+/* ========= THREE / GAME ========= */
 var scene, camera, renderer;
 var glCvs = document.getElementById('gl');
 var uiCvs = document.getElementById('ui'), uiCtx = uiCvs.getContext('2d');
@@ -467,18 +307,14 @@ uiCtx.imageSmoothingEnabled=false;
 
 uiCvs.addEventListener('contextmenu', function(e){ e.preventDefault(); }, false);
 
-/* input: support mouse, pointer & touch explicitly */
-let thrust=false;
-function startThrust(){ thrust=true; }
-function stopThrust(){ thrust=false; }
-
+/* input (unchanged) */
+let thrust=false; function startThrust(){ thrust=true; } function stopThrust(){ thrust=false; }
 uiCvs.addEventListener('pointerdown', function(e){ e.preventDefault(); startThrust(); }, false);
 uiCvs.addEventListener('pointerup',   function(){ stopThrust(); }, false);
 uiCvs.addEventListener('pointercancel', function(){ stopThrust(); }, false);
 uiCvs.addEventListener('touchstart', function(e){ e.preventDefault(); startThrust(); }, {passive:false});
 uiCvs.addEventListener('touchend',   function(){ stopThrust(); }, false);
 uiCvs.addEventListener('touchcancel',function(){ stopThrust(); }, false);
-
 addEventListener('keydown',function(e){ if(e.code==='Space') startThrust(); }, false);
 addEventListener('keyup',  function(e){ if(e.code==='Space') stopThrust(); }, false);
 
@@ -488,43 +324,35 @@ function hardResize(){
   var h = Math.max(1, Math.floor(r.height || window.innerHeight || 1));
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (w !== W || h !== H){
-    W=w; H=h;
-    glCvs.width=W*dpr; glCvs.height=H*dpr;
-    uiCvs.width=W*dpr; uiCvs.height=H*dpr;
-    uiCtx.setTransform(dpr,0,0,dpr,0,0);
+    W=w; H=h; glCvs.width=W*dpr; glCvs.height=H*dpr; uiCvs.width=W*dpr; uiCvs.height=H*dpr; uiCtx.setTransform(dpr,0,0,dpr,0,0);
     if(renderer){ renderer.setSize(W, H, false); renderer.setPixelRatio(dpr); }
-  }
-  updateScale();
+  } updateScale();
 }
 function ensureSized(attempt){ attempt = attempt||0; hardResize(); if ((W<2 || H<2) && attempt<10) setTimeout(function(){ ensureSized(attempt+1); }, 60); }
 ensureSized(); addEventListener('resize', function(){ ensureSized(); }, false);
 
-/* Player vertical motion */
+/* player + physics (unchanged) */
 var player = { y: 0, vy:0, r:18 };
 var phys = { g: 1500, thrust: 1850, maxVy: 820 };
-
-/* Speed / world */
 var worldZ=0, speed=110, time=0, last=performance.now();
 var corridorHalf=6.5, corridorHeight=10, DEPTH=300;
 
-/* Spawns/collision */
-var SPAWN_INTERVAL = 1.8;
-var COLLISION_Z_NEAR = -0.4;
-var COLLISION_Z_FAR  =  1.8;
-var HITBOX_HALF = 0.55;
-
-/* Impact preview for the next bar (drawn on UI) */
+/* spawns/collision (unchanged logic) */
+var SPAWN_INTERVAL = 1.8; var COLLISION_Z_NEAR = -0.4; var COLLISION_Z_FAR  =  1.8; var HITBOX_HALF = 0.55;
 var nextImpactY = null;
 
-/* --- Building + cloud globals --- */
-var wallLen = 6; // reuse spacing as block depth
+/* --- Visual groups --- */
+var wallLen = 6;
 var buildingsL = null, buildingsR = null;
 var cloudGroupTop = null, cloudGroupBot = null;
+var hazeGroup = null, skylineFar = null;
+var trafficGlow = null;
 
+/* ===== init3D with cinematic look ===== */
 function init3D(){
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e2141);
-  scene.fog = new THREE.FogExp2(0x123061, 0.014);
+  scene.background = new THREE.Color(0x071629);
+  scene.fog = new THREE.FogExp2(0x0b1c33, 0.020);
 
   camera = new THREE.PerspectiveCamera(55, W/H, 0.1, 1000);
   camera.position.set(0, 0, 6);
@@ -532,91 +360,154 @@ function init3D(){
 
   renderer = new THREE.WebGLRenderer({canvas: glCvs, antialias: true, alpha: true});
   renderer.setPixelRatio(dpr); renderer.setSize(W,H,false);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
 
-  var hemi = new THREE.HemisphereLight(0xcfe6ff, 0x0a1020, 1.0); scene.add(hemi);
-  var amb = new THREE.AmbientLight(0xcfe7ff, 0.85); scene.add(amb);
-  var dir = new THREE.DirectionalLight(0xffffff, 1.35); dir.position.set(-2,4,3); scene.add(dir);
+  /* moonlight & cityfill */
+  var hemi = new THREE.HemisphereLight(0xbfdcff, 0x060b16, 0.9); scene.add(hemi);
+  var amb = new THREE.AmbientLight(0x0e2f55, 0.9); scene.add(amb);
+  var dir = new THREE.DirectionalLight(0xcfe6ff, 1.15); dir.position.set(-2,5,2); scene.add(dir);
 
-  var floorGeo = new THREE.PlaneGeometry(corridorHalf*2.4, DEPTH, 1, 1);
-  var floorMat = new THREE.MeshStandardMaterial({color:0x1b4f8f, roughness:.6, metalness:.15, emissive:0x144a94, emissiveIntensity:.45});
-  var floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotateX(-Math.PI/2); floor.position.set(0,-corridorHeight*0.55, -DEPTH/2);
-  scene.add(floor);
+  /* far sky gradient plane */
+  (function(){
+    var c=document.createElement('canvas'); c.width=2; c.height=256;
+    var x=c.getContext('2d'); var g=x.createLinearGradient(0,0,0,256);
+    g.addColorStop(0,'#06101f'); g.addColorStop(.5,'#0a203a'); g.addColorStop(1,'#0e2b51');
+    x.fillStyle=g; x.fillRect(0,0,2,256);
+    var tex=new THREE.CanvasTexture(c); tex.magFilter=THREE.LinearFilter; tex.minFilter=THREE.LinearMipmapLinearFilter;
+    var m=new THREE.MeshBasicMaterial({map:tex, depthWrite:false});
+    var p=new THREE.Mesh(new THREE.PlaneGeometry(80,60), m); p.position.set(0,2,-120);
+    scene.add(p);
+  })();
 
+  /* distant skyline silhouettes (adds depth) */
+  skylineFar = new THREE.Group();
+  (function(){
+    var g = new THREE.BoxGeometry(1,1,1); // reused
+    for(var i=0;i<26;i++){
+      var w = THREE.MathUtils.lerp(1.2,2.8,Math.random());
+      var h = THREE.MathUtils.lerp(8,18,Math.random());
+      var mx = (Math.random()<0.5?-1:1) * THREE.MathUtils.lerp(corridorHalf*1.4, corridorHalf*1.9, Math.random());
+      var mat = new THREE.MeshBasicMaterial({color:0x0a1c33});
+      var m = new THREE.Mesh(g, mat);
+      m.scale.set(w,h,2.0);
+      m.position.set(mx, -corridorHeight*0.5 + h/2, -THREE.MathUtils.lerp(80,110,Math.random()));
+      skylineFar.add(m);
+    }
+    scene.add(skylineFar);
+  })();
+
+  /* wet street (subtle emissive center line like traffic glow) */
+  (function(){
+    var c=document.createElement('canvas'); c.width=4; c.height=128;
+    var x=c.getContext('2d'); var g=x.createLinearGradient(2,0,2,128);
+    g.addColorStop(0,'rgba(255,80,40,0.65)');
+    g.addColorStop(.45,'rgba(255,150,100,0.25)');
+    g.addColorStop(1,'rgba(255,150,100,0.0)');
+    x.fillStyle=g; x.fillRect(0,0,4,128);
+    var tex=new THREE.CanvasTexture(c); tex.wrapT=THREE.RepeatWrapping; tex.repeat.y=30;
+    var mat=new THREE.MeshStandardMaterial({color:0x0c1f3d, roughness:0.45, metalness:0.25,
+      emissive:0x1a2e57, emissiveIntensity:0.6, emissiveMap:tex, transparent:true, opacity:0.95});
+    var plane=new THREE.Mesh(new THREE.PlaneGeometry(corridorHalf*1.2, DEPTH), mat);
+    plane.rotateX(-Math.PI/2); plane.position.set(0,-corridorHeight*0.55 + 0.01, -DEPTH/2);
+    trafficGlow = plane; scene.add(plane);
+  })();
+
+  /* cones at horizon (unchanged but retuned) */
   var coneGeo = new THREE.ConeGeometry(2.6, 6.8, 18, 1, true);
-  var coneMat = new THREE.MeshBasicMaterial({color:0x48e0ff, transparent:true, opacity:.35, side:THREE.DoubleSide});
+  var coneMat = new THREE.MeshBasicMaterial({color:0x48e0ff, transparent:true, opacity:.25, side:THREE.DoubleSide});
   var coneL = new THREE.Mesh(coneGeo, coneMat), coneR = new THREE.Mesh(coneGeo, coneMat);
   coneL.rotation.set(Math.PI/2.1, 0.1, 0); coneR.rotation.set(Math.PI/2.1, -0.1, 0);
   coneL.position.set(-corridorHalf*1.1, -1.5, -40); coneR.position.set(corridorHalf*1.1, -1.5, -40);
   scene.add(coneL, coneR);
 
+  /* light rain streaks */
   var streaks = new THREE.Group();
   for(var i=0;i<60;i++){
     var g = new THREE.PlaneGeometry(0.024, 1.0);
-    var m = new THREE.MeshBasicMaterial({color:0xccf6ff, transparent:true, opacity:0.36, depthWrite:false});
+    var m = new THREE.MeshBasicMaterial({color:0xccf6ff, transparent:true, opacity:0.30, depthWrite:false});
     var p = new THREE.Mesh(g,m);
     p.position.set((Math.random()-.5)*corridorHalf*2, (Math.random()-.5)*4, -Math.random()*60);
-    p.rotation.y = (Math.random()-.5)*0.8;
-    streaks.add(p);
+    p.rotation.y = (Math.random()-.5)*0.8; streaks.add(p);
   }
   scene.add(streaks);
 
-  /* Sun apex glow */
+  /* moon glow sprite (re-centered higher) */
   (function(){
     var c = document.createElement('canvas'); c.width = c.height = 256;
     var x = c.getContext('2d');
-    var g = x.createRadialGradient(128,128,10,128,128,128);
-    g.addColorStop(0,'rgba(255,220,120,0.95)');
-    g.addColorStop(0.5,'rgba(255,200,80,0.35)');
-    g.addColorStop(1,'rgba(255,180,60,0.0)');
-    x.fillStyle=g; x.fillRect(0,0,256,256);
-    var tex = new THREE.CanvasTexture(c); tex.needsUpdate=true;
+    x.clearRect(0,0,256,256);
+    x.fillStyle='#e8efff'; x.beginPath(); x.arc(128,120,48,0,Math.PI*2); x.fill();
+    var g = x.createRadialGradient(128,120,30,128,120,120);
+    g.addColorStop(0,'rgba(255,250,210,0.9)');
+    g.addColorStop(0.4,'rgba(180,220,255,0.25)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    x.fillStyle=g; x.beginPath(); x.arc(128,120,120,0,Math.PI*2); x.fill();
+    var tex = new THREE.CanvasTexture(c);
     var mat = new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
-    var sun = new THREE.Sprite(mat);
-    sun.scale.set(18,18,1);
-    sun.position.set(0, corridorHeight*0.9, -55);
-    scene.add(sun);
+    var moon = new THREE.Sprite(mat);
+    moon.scale.set(22,22,1);
+    moon.position.set(0, corridorHeight*1.0, -65);
+    scene.add(moon);
   })();
 
-  /* Buildings + clouds */
+  /* buildings + clouds + haze */
   buildingsL = new THREE.Group(); buildingsR = new THREE.Group();
-  scene.add(buildingsL, buildingsR);
-  makeBuildings();
+  scene.add(buildingsL, buildingsR); makeBuildings();
 
   cloudGroupTop = new THREE.Group(); cloudGroupBot = new THREE.Group();
-  scene.add(cloudGroupTop, cloudGroupBot);
-  seedCloudsSetup();
-  seedClouds(cloudGroupTop, 18,  corridorHeight*0.45);
-  seedClouds(cloudGroupBot, 22, -corridorHeight*0.62);
+  scene.add(cloudGroupTop, cloudGroupBot); seedCloudsSetup();
+  seedClouds(cloudGroupTop,  corridorHeight*0.45);
+  seedClouds(cloudGroupBot, -corridorHeight*0.62);
+
+  hazeGroup = new THREE.Group();
+  (function(){ // volumetric billboard haze layers along the street
+    for (var i=0;i<10;i++){
+      var hC = makeSoftCircle(256, [ [0,'rgba(120,180,220,0.10)'], [1,'rgba(120,180,220,0)'] ]);
+      var mat = new THREE.SpriteMaterial({ map:hC, transparent:true, depthWrite:false });
+      var s = new THREE.Sprite(mat);
+      var sc = THREE.MathUtils.lerp(10,18,Math.random());
+      s.scale.set(sc, sc*0.6, 1);
+      s.position.set(0, -corridorHeight*0.25, -THREE.MathUtils.lerp(10,110,Math.random()));
+      hazeGroup.add(s);
+    }
+    scene.add(hazeGroup);
+  })();
 }
 
-/* ===== Skyscraper canyon (procedural) ===== */
+/* helper to make soft sprite textures */
+function makeSoftCircle(size, stops){
+  var s=size||256, c=document.createElement('canvas'); c.width=c.height=s; var x=c.getContext('2d');
+  var g=x.createRadialGradient(s/2,s/2,s*0.05, s/2,s/2,s*0.5);
+  (stops||[[0,'rgba(255,255,255,.6)'],[1,'rgba(255,255,255,0)']]).forEach(function(st){ g.addColorStop(st[0], st[1]); });
+  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2,s/2,0,Math.PI*2); x.fill();
+  var t=new THREE.CanvasTexture(c); t.anisotropy=4; return t;
+}
+
+/* ===== skyscraper canyon (variation + rooftops) ===== */
 function makeWindowTexture(opts){
   opts = opts || {};
   var W = opts.w || 128, H = opts.h || 256;
   var c = document.createElement('canvas'); c.width=W; c.height=H;
   var ctx = c.getContext('2d');
-  ctx.fillStyle = opts.base || '#0b2b57';
+  ctx.fillStyle = opts.base || '#0a2a4f';
   ctx.fillRect(0,0,W,H);
+  // vertical panels
   for (var i=0;i<6;i++){
-    ctx.fillStyle = 'rgba(255,255,255,'+(0.012*i)+')';
+    ctx.fillStyle = 'rgba(200,230,255,'+(0.012*i)+')';
     ctx.fillRect((i/6)*W, 0, 2, H);
   }
-  var gx = opts.gx || 8, gy = opts.gy || 20;
-  var padX = 6, padY = 6;
+  var gx = opts.gx || 8, gy = opts.gy || 20, padX = 6, padY = 6;
   var cellW = (W - padX*2)/gx, cellH = (H - padY*2)/gy;
   for (var y=0;y<gy;y++){
     for (var x=0;x<gx;x++){
-      var on = Math.random() < (opts.lightProb || 0.55);
+      var on = Math.random() < (opts.lightProb || 0.56);
       ctx.fillStyle = on ? (opts.lit || '#aef3ff') : (opts.unlit || '#123c66');
       var rx = Math.round(padX + x*cellW + cellW*0.18);
       var ry = Math.round(padY + y*cellH + cellH*0.22);
       var rw = Math.round(cellW*0.64), rh = Math.round(cellH*0.42);
       ctx.fillRect(rx, ry, rw, rh);
-      if (on){
-        ctx.fillStyle = 'rgba(174,243,255,0.08)';
-        ctx.fillRect(rx-1, ry-1, rw+2, rh+2);
-      }
+      if (on){ ctx.fillStyle = 'rgba(174,243,255,0.08)'; ctx.fillRect(rx-1, ry-1, rw+2, rh+2); }
     }
   }
   var tex = new THREE.CanvasTexture(c);
@@ -625,56 +516,63 @@ function makeWindowTexture(opts){
   return tex;
 }
 
+function buildingMesh(w,h,mat,side){
+  var g = new THREE.BoxGeometry(w, h, wallLen, 1,1,1);
+  var uv = g.attributes.uv;
+  for (var k=0; k<uv.count; k++){
+    var u = uv.getX(k), v = uv.getY(k);
+    uv.setXY(k, u*THREE.MathUtils.lerp(1.4,2.0, Math.random()), v*THREE.MathUtils.lerp(2.2,3.4, Math.random()));
+  }
+  var m = new THREE.Mesh(g, mat);
+  var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(1.5,6.5, Math.random()) ) * (side==='L'?1:-1);
+  m.rotation.z = lean;
+  // occasional rooftop detail
+  if (Math.random()<0.35){
+    var roof = new THREE.Mesh(new THREE.BoxGeometry(w*THREE.MathUtils.lerp(.4,.8,Math.random()), w*THREE.MathUtils.lerp(.15,.28,Math.random()), wallLen*0.6),
+                              new THREE.MeshBasicMaterial({color:0x0f2747}));
+    roof.position.y = h/2 + roof.geometry.parameters.height/2;
+    roof.position.z = THREE.MathUtils.lerp(-wallLen*0.15, wallLen*0.15, Math.random());
+    m.add(roof);
+  }
+  return m;
+}
+
 function makeBuildings(){
+  if (!buildingsL || !buildingsR) return;
   while (buildingsL.children.length) buildingsL.remove(buildingsL.children[0]);
   while (buildingsR.children.length) buildingsR.remove(buildingsR.children[0]);
 
-  var winTexL = makeWindowTexture({ lightProb:0.58 });
+  var winTexL = makeWindowTexture({ lightProb:0.60 });
   var winTexR = makeWindowTexture({ lightProb:0.52 });
   var facadeMatL = new THREE.MeshStandardMaterial({
-    map: winTexL, color:0xffffff, roughness:0.55, metalness:0.08,
-    emissive:0x0e5aa6, emissiveMap: winTexL, emissiveIntensity:0.18
+    map: winTexL, color:0xffffff, roughness:0.55, metalness:0.10,
+    emissive:0x0e5aa6, emissiveMap: winTexL, emissiveIntensity:0.22
   });
   var facadeMatR = new THREE.MeshStandardMaterial({
-    map: winTexR, color:0xffffff, roughness:0.55, metalness:0.08,
-    emissive:0x0e5aa6, emissiveMap: winTexR, emissiveIntensity:0.18
+    map: winTexR, color:0xffffff, roughness:0.55, metalness:0.10,
+    emissive:0x0e5aa6, emissiveMap: winTexR, emissiveIntensity:0.22
   });
 
-  function buildingMesh(w,h,mat,side){
-    var g = new THREE.BoxGeometry(w, h, wallLen, 1,1,1);
-    var uv = g.attributes.uv;
-    for (var k=0; k<uv.count; k++){
-      var u = uv.getX(k), v = uv.getY(k);
-      uv.setXY(k, u*THREE.MathUtils.lerp(1.2,1.8, Math.random()*0.4), v*THREE.MathUtils.lerp(2.0,3.2, Math.random()*0.5));
-    }
-    var m = new THREE.Mesh(g, mat);
-    m.castShadow=false; m.receiveShadow=false;
-    var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(2,6, Math.random()) ) * (side==='L'?1:-1);
-    m.rotation.z = lean;
-    return m;
-  }
-
-  var z = -10;
-  var blocks = 40;
+  var z = -10, blocks = 40;
   for (var i=0;i<blocks;i++){
-    var depth = wallLen;
-    var widthL = THREE.MathUtils.lerp(0.9, 1.6, Math.random());
-    var widthR = THREE.MathUtils.lerp(0.9, 1.6, Math.random());
-    var hL = THREE.MathUtils.lerp(corridorHeight*0.9, corridorHeight*2.0, Math.random());
-    var hR = THREE.MathUtils.lerp(corridorHeight*0.9, corridorHeight*2.0, Math.random());
-
+    var widthL = THREE.MathUtils.lerp(0.9, 1.7, Math.random());
+    var widthR = THREE.MathUtils.lerp(0.9, 1.7, Math.random());
+    var hL = THREE.MathUtils.lerp(corridorHeight*0.95, corridorHeight*2.2, Math.random());
+    var hR = THREE.MathUtils.lerp(corridorHeight*0.95, corridorHeight*2.2, Math.random());
     var bL = buildingMesh(widthL, hL, facadeMatL, 'L');
     var bR = buildingMesh(widthR, hR, facadeMatR, 'R');
 
-    bL.position.set(-corridorHalf*1.02, -corridorHeight*0.5 + hL/2, z);
-    bR.position.set( corridorHalf*1.02, -corridorHeight*0.5 + hR/2, z);
+    // slight forward/back offset per block to break uniformity
+    var zOffset = THREE.MathUtils.lerp(-0.6, 0.6, Math.random());
+    bL.position.set(-corridorHalf*1.02, -corridorHeight*0.5 + hL/2, z + zOffset);
+    bR.position.set( corridorHalf*1.02, -corridorHeight*0.5 + hR/2, z - zOffset);
 
     buildingsL.add(bL); buildingsR.add(bR);
-    z -= depth;
+    z -= wallLen;
   }
 }
 
-/* Obstacles — neon bars (unchanged) */
+/* ===== Obstacles (unchanged gameplay) ===== */
 var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
@@ -686,8 +584,7 @@ function spawnObstacle(){
 
   var geo = new THREE.BoxGeometry(w, t, 1.6);
   var mat = new THREE.MeshStandardMaterial({
-    color:0x00ff66, roughness:.2, metalness:.05,
-    emissive:0x00ff66, emissiveIntensity:2.0
+    color:0x00ff66, roughness:.2, metalness:.05, emissive:0x00ff66, emissiveIntensity:2.0
   });
   var bar = new THREE.Mesh(geo, mat);
 
@@ -696,29 +593,23 @@ function spawnObstacle(){
   var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.02;
   var glow2 = glow1.clone(); glow2.position.z -= 0.02;
 
-  var group = new THREE.Group();
-  group.add(bar, glow1, glow2);
-  group.position.set(0, h, -80);
-
-  scene.add(group);
-  obstacles.push({ mesh: group, type: 'bar', halfHeight: t/2 });
+  var group = new THREE.Group(); group.add(bar, glow1, glow2); group.position.set(0, h, -80);
+  scene.add(group); obstacles.push({ mesh: group, type: 'bar', halfHeight: t/2 });
 }
 
-/* Clouds */
+/* ===== Clouds (billboard sprites + parallax) ===== */
 var _cloudTex = null;
 function seedCloudsSetup(){
   if (_cloudTex) return;
-  var s=256, c=document.createElement('canvas'); c.width=c.height=s;
-  var x=c.getContext('2d');
-  var g=x.createRadialGradient(s/2,s/2,30, s/2,s/2,s/2);
-  g.addColorStop(0,'rgba(255,255,255,0.75)');
-  g.addColorStop(0.6,'rgba(255,255,255,0.35)');
-  g.addColorStop(1,'rgba(255,255,255,0.0)');
-  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2,s/2,0,Math.PI*2); x.fill();
-  _cloudTex=new THREE.CanvasTexture(c); _cloudTex.needsUpdate=true; _cloudTex.anisotropy=4;
+  _cloudTex = makeSoftCircle(256, [
+    [0,'rgba(255,255,255,0.75)'],
+    [0.6,'rgba(220,240,255,0.35)'],
+    [1,'rgba(255,255,255,0.0)']
+  ]);
 }
 function seedClouds(group, y){
-  for (var i=0;i< (group===cloudGroupTop?18:22); i++){
+  var count = (group===cloudGroupTop?18:22);
+  for (var i=0;i<count;i++){
     var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:_cloudTex, transparent:true, depthWrite:false }));
     var sc = THREE.MathUtils.lerp(4, 10, Math.random());
     sp.scale.set(sc, sc, 1);
@@ -727,29 +618,36 @@ function seedClouds(group, y){
       y + THREE.MathUtils.lerp(-0.5, 0.8, Math.random()),
       -THREE.MathUtils.lerp(10, 110, Math.random())
     );
-    sp.material.opacity = THREE.MathUtils.lerp(0.25, 0.6, Math.random());
+    sp.material.opacity = THREE.MathUtils.lerp(0.22, 0.55, Math.random());
     group.add(sp);
   }
 }
 function tickClouds(dt, dz){
   var topPar = 0.5, botPar = 0.8;
   cloudGroupTop.children.forEach(function(s,i){
-    s.position.z += dz*topPar;
-    s.position.y += Math.sin(time*0.6 + i)*0.003;
+    s.position.z += dz*topPar; s.position.y += Math.sin(time*0.6 + i)*0.003;
     if (s.position.z > 5) s.position.z = -110;
   });
   cloudGroupBot.children.forEach(function(s,i){
-    s.position.z += dz*botPar;
-    s.position.y += Math.cos(time*0.5 + i)*0.003;
+    s.position.z += dz*botPar; s.position.y += Math.cos(time*0.5 + i)*0.003;
     if (s.position.z > 5) s.position.z = -110;
   });
+  // subtle window twinkle via emissive offset
+  if (buildingsL && buildingsL.children.length){
+    var e = (time*0.08)%1;
+    buildingsL.children.forEach(function(m){ if(m.material && m.material.emissiveMap){ m.material.emissiveMap.offset.y = e; m.material.emissiveMap.needsUpdate=true; }});
+    buildingsR.children.forEach(function(m){ if(m.material && m.material.emissiveMap){ m.material.emissiveMap.offset.y = 1-e; m.material.emissiveMap.needsUpdate=true; }});
+  }
+  // slow scroll of traffic glow texture
+  if (trafficGlow && trafficGlow.material && trafficGlow.material.emissiveMap){
+    trafficGlow.material.emissiveMap.offset.y -= dz*0.0008;
+    trafficGlow.material.emissiveMap.needsUpdate = true;
+  }
 }
 
-/* Recycle world */
+/* ===== recycle world (buildings/obstacles only) ===== */
 function advanceWorld(dz){
   var minZ = 5, maxZ = -120;
-
-  // slide buildings
   if (buildingsL && buildingsR){
     for(var i=0;i<buildingsL.children.length;i++){
       var a = buildingsL.children[i], b = buildingsR.children[i];
@@ -757,21 +655,17 @@ function advanceWorld(dz){
       if(a.position.z > minZ){ a.position.z = maxZ; b.position.z = maxZ; }
     }
   }
-
-  // move obstacles (unchanged)
   for(var i=obstacles.length-1;i>=0;i--){
     var o=obstacles[i]; o.mesh.position.z += dz;
     if(o.mesh.position.z > 5){ scene.remove(o.mesh); obstacles.splice(i,1); continue; }
   }
 }
 
-/* HUD / hi */
+/* ===== HUD / hi / wallet (unchanged) ===== */
 var hi = Number(localStorage.getItem('jet_hi') || 0);
 document.getElementById('hi').textContent = hi;
-var COINS_PER_SCORE = 10;
-var COINS_PER_CREDIT = 1000;
+var COINS_PER_SCORE = 10; var COINS_PER_CREDIT = 1000;
 
-/* game state */
 var scoreEl = document.getElementById('score');
 var finishEl = document.getElementById('finish');
 var finalScoreEl = document.getElementById('finalScore');
@@ -781,17 +675,13 @@ var finalCraftEl = document.getElementById('finalCraft');
 var WALLET_READY=false, walletDirty=false, runStartCoins=0;
 var game = { score:0, creditsMinted:0, ended:false };
 
-/* Wallet ops */
 function updateCoinsHUD(){ paintCoinsHUD(readCoinsLS()); }
 function applyCoins(amount){
   return new Promise(function(resolve){
     var cur = (readCoinsLS()|0) + (amount|0);
     writeCoinsLS(cur); walletDirty = true;
     try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-    try{
-      var saver = safeGet(window, ['IZZA_PERSIST','save']);
-      if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(cur); }).catch(function(){ resolve(cur); }); }
-      else resolve(cur);
+    try{ var saver = safeGet(window, ['IZZA_PERSIST','save']); if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(cur); }).catch(function(){ resolve(cur); }); } else resolve(cur);
     }catch(_){ resolve(cur); }
     try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
     WALLET_READY = true; updateCoinsHUD();
@@ -801,11 +691,8 @@ function applyCraftDelta(delta){
   return new Promise(function(resolve){
     var val = readCraftAny() + (delta|0);
     writeCraftAll(val); walletDirty = true;
-    try{
-      var saver = safeGet(window, ['IZZA_PERSIST','save']);
-      if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(); }).catch(function(){ resolve(); }); }
-      else resolve();
-    }catch(_){ resolve(); }
+    try{ var saver = safeGet(window, ['IZZA_PERSIST','save']); if (typeof saver === 'function'){ saver().then(function(){ walletDirty=false; resolve(); }).catch(function(){ resolve(); }); }
+      else resolve(); }catch(_){ resolve(); }
     try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
   });
 }
@@ -815,16 +702,10 @@ function awardFromProgress(deltaScore){
   if (addCoins>0) applyCoins(addCoins);
   var totalCoins = readCoinsLS();
   var creditsNow = Math.floor(totalCoins / COINS_PER_CREDIT);
-  if (creditsNow > game.creditsMinted){
-    var delta = creditsNow - game.creditsMinted;
-    game.creditsMinted = creditsNow;
-    applyCraftDelta(delta);
-  }
+  if (creditsNow > game.creditsMinted){ var delta = creditsNow - game.creditsMinted; game.creditsMinted = creditsNow; applyCraftDelta(delta); }
 }
-
 function gameOver(){
-  if (game.ended) return;
-  game.ended = true;
+  if (game.ended) return; game.ended = true;
   hi=Math.max(hi,Math.floor(game.score)); localStorage.setItem('jet_hi',hi);
   document.getElementById('hi').textContent=hi;
   var coinsNow = readCoinsLS();
@@ -835,22 +716,19 @@ function gameOver(){
   finishEl.style.display = 'flex';
 }
 
-/* ===== UI draw (guides reflect physics exactly) ===== */
+/* ===== UI draw (add vignette, keep guides) ===== */
 function drawUI(){
   uiCtx.clearRect(0,0,W,H);
 
   var spriteW = 96, spriteH = 96;
   var cx = W/2;
-
-  // world → screen Y
   var py = worldToPxY(player.y);
 
-  // band lines
   var topPx = worldToPxY(TOP_Y);
   var botPx = worldToPxY(BOT_Y);
 
   uiCtx.save();
-  uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
+    uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
   uiCtx.lineWidth = 2;
   uiCtx.setLineDash([6,6]);
   uiCtx.beginPath(); uiCtx.moveTo(0, topPx); uiCtx.lineTo(W, topPx); uiCtx.stroke();
@@ -866,9 +744,9 @@ function drawUI(){
   uiCtx.strokeRect(cx - 96/2, py - hitH/2, 96, hitH);
   uiCtx.restore();
 
-  // --- flame at bottom center of sprite ---
+  // flame under the sprite
   var flameLen = thrust ? 22 + 12 * Math.sin(time * 40) : 10;
-  var flameY = py + spriteH/2; // bottom of sprite
+  var flameY = py + spriteH/2;
 
   uiCtx.fillStyle='rgba(255,240,140,.95)';
   uiCtx.beginPath();
@@ -880,20 +758,28 @@ function drawUI(){
   uiCtx.ellipse(cx, flameY, flameLen*0.6, 6, 0, 0, Math.PI*2);
   uiCtx.fill();
 
-  // sprite
+  // 2D avatar sprite
   uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.52, spriteW, spriteH);
+
+  // cinematic vignette
+  var grd = uiCtx.createRadialGradient(W/2, H*0.45, Math.min(W,H)*0.25, W/2, H/2, Math.max(W,H)*0.75);
+  grd.addColorStop(0, 'rgba(0,0,0,0)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.32)');
+  uiCtx.fillStyle = grd;
+  uiCtx.fillRect(0,0,W,H);
 }
-/* Loop */
+
+/* ===== main loop ===== */
 var spawnTimer=0;
 function frame(now){
   if (game.ended) return;
   var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
-  // HOLD = UP (flip the sign), release = gravity down
+  // HOLD = UP, release = gravity down
   var ay = (thrust ? +phys.thrust : -phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
 
-  // keep the small motion scale to avoid instant crashes
+  // small motion scale to avoid instant crashes
   var nextY = player.y + (player.vy*dt)/260;
 
   if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
@@ -901,18 +787,18 @@ function frame(now){
 
   var mps = (speed/3.6) * (thrust?1.12:1.0);
   worldZ += mps*dt;
-  advanceWorld((mps*dt));
-  tickClouds(dt, (mps*dt)); // parallax clouds
+
+  var dz = (mps*dt);
+  advanceWorld(dz);
+  tickClouds(dt, dz);
 
   spawnTimer += dt;
-  if (spawnTimer > SPAWN_INTERVAL){
-    spawnTimer = 0;
-    spawnObstacle();
-  }
+  if (spawnTimer > SPAWN_INTERVAL){ spawnTimer = 0; spawnObstacle(); }
 
   camera.position.y = player.y*0.6;
   camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, (thrust?-0.03:0.03), 0.15);
 
+  // collisions
   var bandTop = player.y + HITBOX_HALF;
   var bandBot = player.y - HITBOX_HALF;
   nextImpactY = null;
@@ -930,6 +816,7 @@ function frame(now){
     }
   }
 
+  // score + wallet
   var prevScore = game.score;
   game.score += mps*dt;
   scoreEl.textContent = Math.floor(game.score);
@@ -942,20 +829,20 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 
-/* listeners */
+/* ===== listeners ===== */
 window.addEventListener('storage', function(e){
   if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.indexOf(e.key)>=0))) updateCoinsHUD();
 }, false);
 document.addEventListener('visibilitychange', function(){
   if (document.hidden){
-    // best-effort save
+    // best-effort save (no-op)
   } else {
     updateCoinsHUD();
-    ensureSized(); // recalc band if Safari chrome changes
+    ensureSized();
   }
 }, false);
 
-/* START */
+/* ===== start ===== */
 var startBtn = document.getElementById('startBtn');
 function ensureAvatarSprite(){
   try{
@@ -1017,3 +904,4 @@ updateCoinsHUD();
 </script>
 </body>
 </html>
+ 
