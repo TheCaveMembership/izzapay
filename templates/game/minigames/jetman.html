@@ -459,12 +459,12 @@ function init3D(){
     scene.add(skylineFar);
   })();
 
-  /* asphalt street + emissive */
+  /* asphalt street (single long plane) + center emissive (unchanged visuals) */
   (function(){
     var Wc=256,Hc=256,c=document.createElement('canvas'); c.width=Wc; c.height=Hc;
     var x=c.getContext('2d');
     x.fillStyle='#0a1426'; x.fillRect(0,0,Wc,Hc);
-    for(var i=0;i<1200;i++){
+    for(var i=0;i<1400;i++){
       var a=Math.random()*0.06+0.06;
       x.fillStyle='rgba(255,255,255,'+a+')';
       x.fillRect((Math.random()*Wc)|0,(Math.random()*Hc)|0,1,1);
@@ -508,48 +508,32 @@ function init3D(){
     scene.add(backCap);
   })();
 
-  /* neon dust — fewer + brighter + some hot sparks */
+  /* neon dust (replaces rain) */
   neonDustGroup = new THREE.Group();
   (function(){
-    function glowTexRGB(col, strong){
-      return makeSoftCircle(strong?192:128, [
+    function dustTex(col){
+      return makeSoftCircle(128, [
         [0, 'rgba('+col.join(',')+',1.0)'],
-        [0.35,'rgba('+col.join(',')+','+(strong?0.85:0.55)+')'],
+        [0.4,'rgba('+col.join(',')+',0.45)'],
         [1,  'rgba('+col.join(',')+',0.0)']
       ]);
     }
     var paletteRGB = [
-      [0,255,245],   // neon teal
-      [160,255,120], // lime
-      [255,210,80],  // amber
-      [255,120,220]  // neon pink
+      [255,210,80],   // gold
+      [0,255,245],    // neon teal
+      [255,120,220]   // neon pink
     ];
-    var COUNT = 84; // down from 160
-    for (var i=0;i<COUNT;i++){
+    for (var i=0;i<160;i++){
       var col = paletteRGB[(Math.random()*paletteRGB.length)|0];
-      var strong = Math.random() < 0.25;
-      var sTex = glowTexRGB(col, strong);
-      var m = new THREE.SpriteMaterial({
-        map:sTex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
-        opacity:THREE.MathUtils.lerp(0.65,1.0,Math.random())
-      });
+      var sTex = dustTex(col);
+      var m = new THREE.SpriteMaterial({ map:sTex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, opacity:THREE.MathUtils.lerp(0.4,0.85,Math.random()) });
       var p = new THREE.Sprite(m);
-      var sc = THREE.MathUtils.lerp(0.16, 0.42, Math.random());
-      p.scale.set(sc*4.5, sc*4.5, 1);
+      var sc = THREE.MathUtils.lerp(0.10, 0.35, Math.random());
+      p.scale.set(sc*4, sc*4, 1);
       p.position.set((Math.random()-.5)*corridorHalf*2.2, (Math.random()-.5)*4.2, -THREE.MathUtils.lerp(5,110,Math.random()));
-      p.userData.vx = THREE.MathUtils.lerp(-0.03,0.03,Math.random());
-      p.userData.vy = THREE.MathUtils.lerp(-0.06,0.06,Math.random());
+      p.userData.vx = THREE.MathUtils.lerp(-0.05,0.05,Math.random());
+      p.userData.vy = THREE.MathUtils.lerp(-0.08,0.08,Math.random());
       neonDustGroup.add(p);
-    }
-    // rare bright sparks
-    for (var s=0;s<10;s++){
-      var tex = makeSoftCircle(256, [[0,'rgba(255,255,255,1)'],[0.12,'rgba(255,255,255,0.95)'],[1,'rgba(255,255,255,0)']]);
-      var spr = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, opacity:1}));
-      spr.scale.set(0.8,0.8,1);
-      spr.position.set((Math.random()-.5)*corridorHalf*2.2, (Math.random()-.5)*4.2, -THREE.MathUtils.lerp(10,110,Math.random()));
-      spr.userData.vx = THREE.MathUtils.lerp(-0.02,0.02,Math.random());
-      spr.userData.vy = THREE.MathUtils.lerp(-0.02,0.02,Math.random());
-      neonDustGroup.add(spr);
     }
     scene.add(neonDustGroup);
   })();
@@ -565,7 +549,7 @@ function init3D(){
 
   hazeGroup = new THREE.Group();
   (function(){
-    for (var i=0;i<10;i++){
+    for (var i=0;i<12;i++){
       var hC = makeSoftCircle(256, [ [0,'rgba(120,180,220,0.10)'], [1,'rgba(120,180,220,0)'] ]);
       var mat = new THREE.SpriteMaterial({ map:hC, transparent:true, depthWrite:false, depthTest:false });
       var s = new THREE.Sprite(mat);
@@ -577,7 +561,7 @@ function init3D(){
     scene.add(hazeGroup);
   })();
 
-  /* ROOFLINE HAZE STRIP */
+  /* ROOFLINE HAZE STRIP — keeps horizon soft */
   roofHazeGroup = new THREE.Group();
   (function(){
     var tex = makeSoftCircle(512, [
@@ -612,7 +596,7 @@ function makeSoftCircle(size, stops){
   return t;
 }
 
-/* ===== window textures & brick (NEON WINDOWS w/ patterns) ===== */
+/* ===== window textures & brick (NEON WINDOWS) ===== */
 function makeWindowTexture(opts){
   opts = opts || {};
   var W = opts.w || 128, H = opts.h || 256;
@@ -634,11 +618,11 @@ function makeWindowTexture(opts){
   var gx = opts.gx || G.gx, gy = opts.gy || G.gy, padX = 6, padY = 6;
   var cellW = (W - padX*2)/gx, cellH = (H - padY*2)/gy;
 
-  // vibrant palette + lime/cyan/magenta/amber
-  var palette = ['#fff6c4','#ffd46b','#ffb640','#aefbff','#86e0ff','#66ffd9','#7bff7b','#ff77dd'];
+  // hotter palette + magenta accents
+  var palette = ['#fff6c4','#ffd46b','#ffb640','#aefbff','#86e0ff','#66ffd9','#ff77dd'];
   for (var y=0;y<gy;y++){
     for (var x=0;x<gx;x++){
-      var on = Math.random() < (opts.lightProb || 0.85);
+      var on = Math.random() < (opts.lightProb || 0.80);
       var col = on ? palette[(Math.random()*palette.length)|0] : (opts.unlit || '#0f2e53');
       ctx.fillStyle = col;
       var rx = Math.round(padX + x*cellW + cellW*THREE.MathUtils.lerp(0.12,0.22,Math.random()));
@@ -654,18 +638,6 @@ function makeWindowTexture(opts){
       }
     }
   }
-
-  // add a few animated neon strips/signs
-  ctx.globalCompositeOperation = 'screen';
-  var bandCount = 3 + (Math.random()*3)|0;
-  for (var b=0;b<bandCount;b++){
-    var by = Math.round(THREE.MathUtils.lerp(8, H-12, Math.random()));
-    var col = ['#66ffd9','#7bff7b','#aefbff','#ff77dd'][b%4];
-    ctx.fillStyle = col;
-    ctx.fillRect(6, by, W-12, 2);
-  }
-  ctx.globalCompositeOperation = 'source-over';
-
   var tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = 4; tex.generateMipmaps=false; tex.minFilter=THREE.LinearFilter;
@@ -689,21 +661,21 @@ function makeBrickTexture(){
   return t;
 }
 function randomFacadeMaterial(winTex, side){
-  if (Math.random() < 0.22){
+  if (Math.random() < 0.25){
     var brick=makeBrickTexture();
     return new THREE.MeshStandardMaterial({
       map: brick, color:0xffffff,
       roughness: 0.7, metalness: 0.06,
     });
   }
-  var hueTint = side==='L' ? 0x1272d0 : 0x0b4e94;
+  var hueTint = side==='L' ? 0x0e5aa6 : 0x0b4e94;
   return new THREE.MeshStandardMaterial({
     map: winTex, color:0xffffff,
     roughness: THREE.MathUtils.lerp(0.45,0.62,Math.random()),
     metalness: THREE.MathUtils.lerp(0.08,0.16,Math.random()),
     emissive: hueTint,
     emissiveMap: winTex,
-    emissiveIntensity: THREE.MathUtils.lerp(2.2, 3.1, Math.random())
+    emissiveIntensity: THREE.MathUtils.lerp(1.6, 2.6, Math.random())  // MUCH brighter window glow
   });
 }
 function buildingMesh(w,h,mat,side){
@@ -717,7 +689,6 @@ function buildingMesh(w,h,mat,side){
   var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(1.5,6.5, Math.random()) ) * (side==='L'?1:-1);
   m.rotation.z = lean;
 
-  // small roof/antenna details
   var r = Math.random();
   if (r<0.30){
     var roof = new THREE.Mesh(new THREE.BoxGeometry(w*THREE.MathUtils.lerp(.45,.85,Math.random()), w*THREE.MathUtils.lerp(.16,.28,Math.random()), wallLen*0.55),
@@ -746,8 +717,8 @@ function makeBuildings(){
   while (buildingsL.children.length) buildingsL.remove(buildingsL.children[0]);
   while (buildingsR.children.length) buildingsR.remove(buildingsR.children[0]);
 
-  var winTexL = makeWindowTexture({ lightProb:0.93 });
-  var winTexR = makeWindowTexture({ lightProb:0.90 });
+  var winTexL = makeWindowTexture({ lightProb:0.92 });
+  var winTexR = makeWindowTexture({ lightProb:0.88 });
   var z = -10, blocks = 40;
   for (var i=0;i<blocks;i++){
     var widthL = THREE.MathUtils.lerp(0.9, 1.8, Math.random());
@@ -767,29 +738,30 @@ function makeBuildings(){
   }
 }
 
-/* ===== Obstacles — NEON LIME BARS ===== */
+/* ===== Obstacles — yellow/green neon bars ===== */
 var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
-  var t = THREE.MathUtils.lerp(0.30,0.44,Math.random());
+  var t = THREE.MathUtils.lerp(0.28,0.42,Math.random());
   var margin = 0.10;
   var maxH = TOP_Y - HITBOX_HALF - margin;
   var minH = BOT_Y + HITBOX_HALF + margin*0.2;
   var h = THREE.MathUtils.lerp(minH, maxH, Math.random());
-  var geo = new THREE.BoxGeometry(w, t, 1.6);
+    var geo = new THREE.BoxGeometry(w, t, 1.6);
+  // bright yellow→green band
+  var hue = THREE.MathUtils.lerp(0.17, 0.33, Math.random()); // ~yellow→green
+  var neon = new THREE.Color().setHSL(hue, 1.0, 0.5);
 
-  // neon lime
-  var neon = new THREE.Color().setHSL(0.30, 1.0, 0.55); // lime-green
   var mat = new THREE.MeshStandardMaterial({
-    color: neon, roughness: .12, metalness: .06,
-    emissive: neon, emissiveIntensity: 4.0
+    color: neon, roughness: .15, metalness: .05,
+    emissive: neon, emissiveIntensity: 3.0
   });
   var bar = new THREE.Mesh(geo, mat);
 
-  // strong additive glow planes
-  var glowGeo = new THREE.PlaneGeometry(w*1.12, t*10.0);
+  // fat additive glow planes
+  var glowGeo = new THREE.PlaneGeometry(w*1.10, t*8.0);
   var glowMat = new THREE.MeshBasicMaterial({
-    color: neon, transparent:true, opacity:0.75, depthWrite:false,
+    color: neon, transparent:true, opacity:0.6, depthWrite:false,
     blending:THREE.AdditiveBlending
   });
   var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.03;
@@ -810,7 +782,7 @@ function seedCloudsSetup(){
   ]);
 }
 function seedClouds(group, y){
-  var count = (group===cloudGroupTop?16:18);
+  var count = (group===cloudGroupTop?18:22);
   for (var i=0;i<count;i++){
     var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:_cloudTex, transparent:true, depthWrite:false, depthTest:false }));
     var sc = THREE.MathUtils.lerp(4, 10, Math.random());
@@ -835,7 +807,7 @@ function tickClouds(dt, dz){
     if (s.position.z > 5) s.position.z = -110;
   });
 
-  // shimmer windows + band scroll
+  // shimmer windows
   if (buildingsL && buildingsL.children.length){
     var e = (time*0.14)%1;
     buildingsL.children.forEach(function(m){ if(m.material && m.material.emissiveMap){ m.material.emissiveMap.offset.y = e; m.material.emissiveMap.needsUpdate=true; }});
@@ -870,7 +842,7 @@ function tickClouds(dt, dz){
   }
 }
 
-/* ===== Traffic (smarter spacing, softened shapes) ===== */
+/* ===== Traffic (two wider lanes, reversed flow, varied vehicles/colors) ===== */
 const VEHICLE_COLORS = [
   0x1ec8ff, 0xff5ea1, 0xffd23c, 0x7dffb6, 0xa78bfa, 0x6ee7ff, 0xff8c3a, 0x66ffd9
 ];
@@ -887,7 +859,7 @@ function addLamp(group, tex, w, h, z, x, y){
   s.scale.set(w,h,1); s.position.set(x,y,z); group.add(s);
 }
 
-/* rounded helpers */
+/* — base body piece helpers — */
 function addUnderglow(group, w, l, y){
   if (Math.random() < 0.55){
     const col = UNDERGLOW_COLORS[(Math.random()*UNDERGLOW_COLORS.length)|0];
@@ -907,20 +879,15 @@ function makeSedan(dir, bodyColor){
   const group = new THREE.Group();
   const L=5.4, W=1.6, H=0.75;
   const y0 = -corridorHeight*0.55 + H/2 + 0.02;
-
-  // soften: use capsule hood + trunk and slightly inset box body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(W*0.96, H*0.52, L*0.75),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.34, metalness:0.52}));
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H*0.55, L*0.78),
+    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.35, metalness:0.5}));
   body.position.y = y0; group.add(body);
-  const hood = new THREE.Mesh(new THREE.CapsuleGeometry(W*0.22, L*0.10, 6, 12),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.32, metalness:0.55}));
-  hood.rotation.x=Math.PI/2; hood.position.set(0, y0, (dir>0?1:-1)*L*0.36); group.add(hood);
-  const trunk = hood.clone(); trunk.position.z *= -1; group.add(trunk);
-
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(W*0.78, H*0.46, L*0.35),
+  const nose = new THREE.Mesh(new THREE.CapsuleGeometry(W*0.18, L*0.10, 6, 10),
+    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.34, metalness:0.55}));
+  nose.rotation.x=Math.PI/2; nose.position.set(0, y0, (dir>0?1:-1)*L*0.34); group.add(nose);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(W*0.76, H*0.48, L*0.35),
     new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
   roof.position.set(0, y0+H*0.46, -L*0.06); group.add(roof);
-
   const fz=(dir>0)?+L*0.42:-L*0.42, rz=-fz, lampY=y0+H*0.05;
   addLamp(group,LAMPS.head,0.40,0.40,fz,-W*0.30,lampY);
   addLamp(group,LAMPS.head,0.40,0.40,fz,+W*0.30,lampY);
@@ -935,324 +902,346 @@ function makePickup(dir, bodyColor){
   const group=new THREE.Group();
   const L=5.8,W=1.8,H=0.9;
   const y0=-corridorHeight*0.55+H/2+0.02;
-  const cab=new THREE.Mesh(new THREE.BoxGeometry(W*0.98, H*0.52, L*0.45),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.36, metalness:0.5}));
+  const cab=new THREE.Mesh(new THREE.BoxGeometry(W, H*0.55, L*0.45),
+    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.38, metalness:0.5}));
   cab.position.set(0,y0,-L*0.05); group.add(cab);
-  const bed=new THREE.Mesh(new THREE.BoxGeometry(W*0.94,H*0.40,L*0.35),
+  const bed=new THREE.Mesh(new THREE.BoxGeometry(W*0.96,H*0.42,L*0.35),
     new THREE.MeshStandardMaterial({color:0x152544, roughness:0.6, metalness:0.2}));
   bed.position.set(0,y0,-L*0.35); group.add(bed);
-  const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.40,L*0.26),
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.42,L*0.26),
     new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
   roof.position.set(0,y0+H*0.40,-L*0.12); group.add(roof);
-      const bumperF = new THREE.Mesh(new THREE.CapsuleGeometry(W*0.22, L*0.08, 6, 12),
-      new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.32, metalness:0.55}));
-  bumperF.rotation.x = Math.PI/2; bumperF.position.set(0, y0, (dir>0?1:-1)*L*0.40); group.add(bumperF);
-  const bumperR = bumperF.clone(); bumperR.position.z *= -1; group.add(bumperR);
-
-  const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.05;
-  addLamp(group,LAMPS.head,0.46,0.46,fz,-W*0.34,lampY);
-  addLamp(group,LAMPS.head,0.46,0.46,fz,+W*0.34,lampY);
+  const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.02;
+  addLamp(group,LAMPS.head,0.42,0.42,fz,-W*0.32,lampY);
+  addLamp(group,LAMPS.head,0.42,0.42,fz,+W*0.32,lampY);
+  addLamp(group,LAMPS.tail,0.46,0.46,rz,-W*0.32,lampY);
+  addLamp(group,LAMPS.tail,0.46,0.46,rz,+W*0.32,lampY);
+  addUnderglow(group,W,L,y0-0.01);
+  group.userData={speed:THREE.MathUtils.lerp(7.5,13,Math.random()), dir};
+  return group;
+}
+/* Van / boxy */
+function makeVan(dir, bodyColor){
+  const group=new THREE.Group();
+  const L=6.2,W=1.9,H=1.1;
+  const y0=-corridorHeight*0.55+H/2+0.02;
+  const hull=new THREE.Mesh(new THREE.BoxGeometry(W,H*0.7,L*0.80),
+    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.42, metalness:0.45}));
+  hull.position.y=y0; group.add(hull);
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.9,H*0.35,L*0.45),
+    new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45}));
+  roof.position.set(0,y0+H*0.42,-L*0.1); group.add(roof);
+  const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.02;
+  addLamp(group,LAMPS.head,0.44,0.44,fz,-W*0.34,lampY);
+  addLamp(group,LAMPS.head,0.44,0.44,fz,+W*0.34,lampY);
   addLamp(group,LAMPS.tail,0.50,0.50,rz,-W*0.34,lampY);
   addLamp(group,LAMPS.tail,0.50,0.50,rz,+W*0.34,lampY);
   addUnderglow(group,W,L,y0-0.01);
-  group.userData = {speed:THREE.MathUtils.lerp(7,13,Math.random()), dir};
+  group.userData={speed:THREE.MathUtils.lerp(7,12,Math.random()), dir};
   return group;
 }
-
-/* Van */
-function makeVan(dir, bodyColor){
-  const group = new THREE.Group();
-  const L=6.2, W=2.0, H=1.25;
-  const y0 = -corridorHeight*0.55 + H/2 + 0.02;
-
-  const base = new THREE.Mesh(new THREE.BoxGeometry(W*0.98, H*0.55, L*0.70),
+/* Semi (tractor + trailer) */
+function makeSemi(dir, bodyColor){
+  const group=new THREE.Group();
+  const L=11.0,W=2.0,H=1.2;
+  const y0=-corridorHeight*0.55+H/2+0.02;
+  const trailer=new THREE.Mesh(new THREE.BoxGeometry(W*0.98,H*0.72,L*0.62),
+    new THREE.MeshStandardMaterial({color:0x16243f, roughness:0.65, metalness:0.15}));
+  trailer.position.set(0,y0, -L*0.10); group.add(trailer);
+  const tractor=new THREE.Mesh(new THREE.BoxGeometry(W*0.90,H*0.70,L*0.22),
     new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.40, metalness:0.45}));
-  base.position.set(0,y0,-L*0.05); group.add(base);
-
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(W*0.86, H*0.60, L*0.38),
-    new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
-  roof.position.set(0, y0+H*0.50, -L*0.10);
-  group.add(roof);
-
-  const fz=(dir>0)?+L*0.48:-L*0.48, rz=-fz, lampY=y0+H*0.02;
-  addLamp(group,LAMPS.head,0.50,0.50,fz,-W*0.34,lampY);
-  addLamp(group,LAMPS.head,0.50,0.50,fz,+W*0.34,lampY);
-  addLamp(group,LAMPS.tail,0.56,0.56,rz,-W*0.34,lampY);
-  addLamp(group,LAMPS.tail,0.56,0.56,rz,+W*0.34,lampY);
+  tractor.position.set(0,y0, (dir>0?1:-1)*L*0.34); group.add(tractor);
+  const cab=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.42,L*0.12),
+    new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45}));
+  cab.position.set(0,y0+H*0.36, tractor.position.z - (dir>0?L*0.02:-L*0.02)); group.add(cab);
+  const fz=(dir>0)?+L*0.44:-L*0.44, rz=-fz, lampY=y0+H*0.00;
+  addLamp(group,LAMPS.head,0.48,0.48,fz,-W*0.34,lampY);
+  addLamp(group,LAMPS.head,0.48,0.48,fz,+W*0.34,lampY);
+  addLamp(group,LAMPS.tail,0.54,0.54,rz,-W*0.36,lampY);
+  addLamp(group,LAMPS.tail,0.54,0.54,rz,+W*0.36,lampY);
   addUnderglow(group,W,L,y0-0.01);
-  group.userData = {speed:THREE.MathUtils.lerp(6,11,Math.random()), dir};
+  group.userData={speed:THREE.MathUtils.lerp(6,10,Math.random()), dir};
   return group;
 }
 
-/* Seed traffic (two opposing lanes) */
-function seedTraffic(){
-  if (!trafficGroup) return;
-  while (trafficGroup.children.length) trafficGroup.remove(trafficGroup.children[0]);
+function makeAnyVehicle(dir){
+  const color = VEHICLE_COLORS[(Math.random()*VEHICLE_COLORS.length)|0];
+  const r = Math.random();
+  if (r < 0.50)  return makeSedan(dir, color);
+  if (r < 0.75)  return makePickup(dir, color);
+  if (r < 0.92)  return makeVan(dir, color);
+  return makeSemi(dir, color);
+}
 
-  const makers = [makeSedan, makePickup, makeVan];
-  const laneX = [ -corridorHalf*0.46, +corridorHalf*0.46 ];
-  for (let lane=0; lane<2; lane++){
-    const dir = (lane===0) ? +1 : -1;
-    const count = 10;
-    let z = -10 - Math.random()*10;
-    for (let i=0;i<count;i++){
-      const mk = makers[(Math.random()*makers.length)|0];
-      const color = VEHICLE_COLORS[(Math.random()*VEHICLE_COLORS.length)|0];
-      const m = mk(dir, color);
-      m.position.x = laneX[lane];
-      m.position.z = z - i*THREE.MathUtils.lerp(10,18,Math.random());
-      trafficGroup.add(m);
+// Reversed flow from previous build, wider lanes, anti-stacking spacing
+function seedTraffic(){
+  trafficGroup.clear();
+
+  const LANES = [
+    { x: -0.42, dir: +1 }, // LEFT lane now comes toward camera
+    { x: +0.42, dir: -1 }  // RIGHT lane goes away
+  ];
+  const carsPerLane = 9;          // fewer to keep spacing
+  const jitterZ = 4;
+  const laneDepth = DEPTH;        // spread over whole canyon
+  const minGap = 9;               // soft following distance
+
+  for (const lane of LANES){
+    let lastZ = 9999;
+    for (let i=0; i<carsPerLane; i++){
+      const car = makeAnyVehicle(lane.dir);
+      car.position.x = lane.x;
+
+      // evenly distribute then jitter
+      const baseZ = - (i * (laneDepth / carsPerLane));
+      car.position.z = baseZ - THREE.MathUtils.randFloatSpread(jitterZ);
+
+      // ensure not stacked at spawn
+      if (Math.abs(lastZ - car.position.z) < minGap) car.position.z -= minGap*1.1;
+      lastZ = car.position.z;
+
+      trafficGroup.add(car);
     }
   }
 }
+
+// Lane-follow movement + simple spacing rule to avoid stacking
 function tickTraffic(dt, dz){
-  if (!trafficGroup) return;
-  trafficGroup.children.forEach(function(v){
-    const meta = v.userData || {speed:10, dir:1};
-    v.position.z += dz + meta.dir * meta.speed * dt;
-    if (meta.dir>0 && v.position.z > 5) v.position.z = -110;
-    if (meta.dir<0 && v.position.z < -120) v.position.z = 4.5;
+  const laneBuckets = { left:[], right:[] };
+  trafficGroup.children.forEach(function(p){
+    (p.position.x < 0 ? laneBuckets.left : laneBuckets.right).push(p);
+  });
+  // sort by z in travel direction so we can apply a tiny slowdown if too close
+  [['left', +1], ['right', -1]].forEach(function([key, dir]){
+    laneBuckets[key].sort(function(a,b){ return dir>0 ? b.position.z - a.position.z : a.position.z - b.position.z; });
+    for (let i=0;i<laneBuckets[key].length;i++){
+      const p = laneBuckets[key][i];
+      let s = p.userData.speed;
+      // check car ahead
+      const ahead = laneBuckets[key][i-1];
+      if (ahead && ((dir>0 && (p.position.z > ahead.position.z - 8)) || (dir<0 && (p.position.z < ahead.position.z + 8)))){
+        s *= 0.85; // gentle slow
+      }
+      p.position.z += dt * s * p.userData.dir;
+
+      // recycle at bounds
+      if (p.userData.dir > 0 && p.position.z > 5){
+        p.position.z = -DEPTH - Math.random()*10;
+      } else if (p.userData.dir < 0 && p.position.z < -DEPTH){
+        p.position.z = 5 + Math.random()*10;
+      }
+    }
   });
 }
 
-/* ===== Game state ===== */
-let playing=false, crashed=false;
-let spawnTimer=0, spawnGap=SPAWN_BASE;
-let score=0, hi=0;
-let coinsRun=0, craftRun=0;
-let passedCount=0;
-
-const scoreEl=document.getElementById('score');
-const hiEl=document.getElementById('hi');
-const finalScoreEl=document.getElementById('finalScore');
-const finalCoinsEl=document.getElementById('finalCoins');
-const finalCraftEl=document.getElementById('finalCraft');
-
-function loadHi(){ try{ hi = parseInt(localStorage.getItem('jet_hi')||'0',10)|0; }catch(_){ hi=0; } hiEl.textContent=String(hi); }
-function saveHi(n){ try{ localStorage.setItem('jet_hi', String(n|0)); }catch(_){ } }
-
-/* ===== Obstacles tick/remove/collide ===== */
-function resetObstacles(){
-  obstacles.forEach(o=>{ try{ scene.remove(o.mesh); }catch(_){ } });
-  obstacles.length=0; spawnTimer=0; passedCount=0; nextImpactY=null;
-}
-function tickObstacles(dt, dz){
-  // spawn pacing by time with slight randomness
-  spawnTimer -= dt;
-  if (spawnTimer<=0){
-    spawnObstacle();
-    spawnGap = THREE.MathUtils.lerp(1.05,1.7,Math.random()) * (SPAWN_BASE * (110/speed));
-    spawnTimer = spawnGap;
-  }
-  // move + cleanup + score pass
-  for (let i=obstacles.length-1;i>=0;i--){
-    const o = obstacles[i];
-    o.mesh.position.z += dz*1.0;
-    if (o.mesh.position.z > 2){
-      scene.remove(o.mesh);
-      obstacles.splice(i,1);
-      score += 1;
-      scoreEl.textContent = String(score|0);
+/* ===== recycle world ===== */
+function advanceWorld(dz){
+  var minZ = 5, maxZ = -120;
+  if (buildingsL && buildingsR){
+    for(var i=0;i<buildingsL.children.length;i++){
+      var a = buildingsL.children[i], b = buildingsR.children[i];
+      a.position.z += dz; b.position.z += dz;
+      if(a.position.z > minZ){ a.position.z = maxZ; b.position.z = maxZ; }
     }
   }
-  // collision window
-  for (let i=0;i<obstacles.length;i++){
-    const o = obstacles[i];
-    const z = o.mesh.position.z;
-    if (z > COLLISION_Z_NEAR && z < COLLISION_Z_FAR){
-      // bar center y
-      const y = o.mesh.position.y;
-      const dy = Math.abs(player.y - y);
-      if (dy < (o.halfHeight + HITBOX_HALF)){
-        crashed = true;
-        nextImpactY = y;
-        AudioMgr.crash();
-        break;
-      }
-    }
+  for(var i=obstacles.length-1;i>=0;i--){
+    var o=obstacles[i]; o.mesh.position.z += dz;
+    if(o.mesh.position.z > 5){ scene.remove(o.mesh); obstacles.splice(i,1); continue; }
   }
 }
 
-/* ===== Player sprite drawing ===== */
-let avatarReady=false;
-function paintPlayer(){
-  const pxY = worldToPxY(player.y);
-  const cx = W*0.5, cy = pxY;
-  // clear UI
+/* ===== HUD / hi / wallet glue (unchanged) ===== */
+var hi = Number(localStorage.getItem('jet_hi') || 0);
+document.getElementById('hi').textContent = hi;
+
+var scoreEl = document.getElementById('score');
+var finishEl = document.getElementById('finish');
+var finalScoreEl = document.getElementById('finalScore');
+var finalCoinsEl = document.getElementById('finalCoins');
+var finalCraftEl = document.getElementById('finalCraft');
+
+var COINS_PER_CREDIT = 1000;
+var runStartCoins = 0;
+function paintCoinsHUDNow(){ try{ document.getElementById('coinsHUD').textContent = String(readCoinsLS()|0); }catch(_){} }
+paintCoinsHUDNow();
+
+function applyCoins(delta){
+  var cur = (readCoinsLS()|0) + (delta|0);
+  writeCoinsLS(cur); paintCoinsHUDNow();
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+  return cur;
+}
+
+/* award 1 coin per whole score point crossed */
+function awardFromProgress(deltaScore, game){
+  var add = (Math.floor(game.score) - Math.floor(game.score - deltaScore))|0;
+  if (add>0) applyCoins(add);
+}
+
+/* ===== Game over (unchanged) ===== */
+function gameOver(){
+  if (game.ended) return; game.ended = true;
+  AudioMgr.crash();
+
+  hi = Math.max(hi, Math.floor(game.score)); localStorage.setItem('jet_hi', hi);
+  document.getElementById('hi').textContent = hi;
+
+  var coinsNow = readCoinsLS()|0;
+  finalScoreEl.textContent = Math.floor(game.score);
+  finalCoinsEl.textContent = Math.max(0, coinsNow - (runStartCoins|0));
+  finalCraftEl.textContent = Math.floor(coinsNow/COINS_PER_CREDIT) - Math.floor((runStartCoins|0)/COINS_PER_CREDIT);
+  finishEl.style.display = 'flex';
+}
+
+/* ===== Moon on UI canvas (unchanged) ===== */
+var moonCanvasTex = (function(){
+  var s=256,c=document.createElement('canvas'); c.width=c.height=s; var x=c.getContext('2d');
+  x.clearRect(0,0,s,s);
+  x.fillStyle='#e8efff'; x.beginPath(); x.arc(s/2,s/2, s*0.34, 0, Math.PI*2); x.fill();
+  x.fillStyle='rgba(140,160,190,0.55)';
+  for(var i=0;i<18;i++){
+    var r=THREE.MathUtils.lerp(6,16,Math.random());
+    var a=THREE.MathUtils.randFloat(0,Math.PI*2);
+    var R=THREE.MathUtils.lerp(0, s*0.28, Math.random());
+    var cx=s/2 + Math.cos(a)*R, cy=s/2 + Math.sin(a)*R;
+    x.beginPath(); x.ellipse(cx,cy, r, r*THREE.MathUtils.lerp(0.7,1.0,Math.random()), THREE.MathUtils.randFloat(0,Math.PI), 0, Math.PI*2); x.fill();
+  }
+  var g=x.createRadialGradient(s/2,s/2, s*0.2, s/2,s/2, s*0.46);
+  g.addColorStop(0,'rgba(255,250,220,0.95)');
+  g.addColorStop(0.6,'rgba(200,220,255,0.30)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2,s*0.46,0,Math.PI*2); x.fill();
+  return c;
+})();
+
+/* ===== UI draw ===== */
+function drawUI(){
   uiCtx.clearRect(0,0,W,H);
 
-  // thrust plume
-  if (thrust){
-    uiCtx.save();
-    uiCtx.globalCompositeOperation = 'lighter';
-    const len = 24;
-    uiCtx.beginPath();
-    uiCtx.ellipse(cx-22, cy+4, 9, 5, 0, 0, Math.PI*2);
-    uiCtx.fillStyle = 'rgba(120,255,230,0.85)';
-    uiCtx.fill();
-    uiCtx.beginPath();
-    uiCtx.ellipse(cx-22-THREE.MathUtils.lerp(4,9,Math.random()), cy+4, 12, 6, 0, 0, Math.PI*2);
-    uiCtx.fillStyle = 'rgba(60,200,255,0.35)';
-    uiCtx.fill();
-    uiCtx.restore();
-  }
+  var moonW = Math.min(W*0.36, 200);
+  uiCtx.drawImage(moonCanvasTex, (W-moonW)/2, 8, moonW, moonW);
 
-  // shadow
-  uiCtx.save();
-  uiCtx.globalAlpha = 0.30;
-  uiCtx.beginPath();
-  uiCtx.ellipse(cx, cy+18, 32, 10, 0, 0, Math.PI*2);
-  uiCtx.fillStyle = '#021024';
-  uiCtx.fill();
-  uiCtx.restore();
+  var spriteW = 96, spriteH = 96;
+  var cx = W/2;
+  var py = worldToPxY(player.y);
+  var flameLen = thrust ? 22 + 12 * Math.sin(time * 40) : 10;
+  var flameY = py + spriteH/2;
 
-  // avatar
-  const scale = 1.0;
-  uiCtx.drawImage(jetmanCanvas, cx-jetmanCanvas.width*0.5*scale, cy-jetmanCanvas.height*0.5*scale, jetmanCanvas.width*scale, jetmanCanvas.height*scale);
+  uiCtx.fillStyle='rgba(255,240,140,.95)';
+  uiCtx.beginPath(); uiCtx.ellipse(cx, flameY, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
+  uiCtx.fillStyle='rgba(120,220,255,.65)';
+  uiCtx.beginPath(); uiCtx.ellipse(cx, flameY, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
+
+  uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.52, spriteW, spriteH);
+
+  var grd = uiCtx.createRadialGradient(W/2, H*0.45, Math.min(W,H)*0.25, W/2, H/2, Math.max(W,H)*0.75);
+  grd.addColorStop(0, 'rgba(0,0,0,0)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.32)');
+  uiCtx.fillStyle = grd; uiCtx.fillRect(0,0,W,H);
 }
 
-/* ===== Physics update ===== */
-function stepPhysics(dt){
-  // vertical motion
-  const acc = thrust ? (phys.thrust) : (-phys.g);
-  player.vy += acc * dt;
-  player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy));
-  player.y += (player.vy/300) * dt * 60; // tuned for our world scale
+/* ===== game state + loop (unchanged logic) ===== */
+var game = { score:0, ended:false };
+var SPAWN_BASE = 1.8;
 
-  // boundaries
-  const maxY = TOP_Y - HITBOX_HALF*0.9;
-  const minY = BOT_Y + HITBOX_HALF*0.9;
-  if (player.y > maxY){ player.y = maxY; crashed = true; nextImpactY = maxY; AudioMgr.crash(); }
-  if (player.y < minY){ player.y = minY; crashed = true; nextImpactY = minY; AudioMgr.crash(); }
-}
+var spawnTimer=0;
+function frame(now){
+  if (game.ended) return;
+  var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
-/* ===== Game Loop ===== */
-function loop(){
-  const now = performance.now();
-  const dt = Math.min(0.04, (now - last)/1000);
-  last = now; time += dt;
+  // physics
+  var ay = (thrust ? +phys.thrust : -phys.g);
+  player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
+  var nextY = player.y + (player.vy*dt)/260;
+  if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
+  player.y = Math.max(BOT_Y, Math.min(TOP_Y, nextY));
 
-  const dz = speed * dt * 0.55 * (DEPTH/600) * 0.02; // tuned forward motion factor
+  // forward motion
+  var mps = (speed/3.6) * (thrust?1.12:1.0);
+  worldZ += mps*dt;
+  var dz = (mps*dt);
 
-  if (playing && !crashed){
-    stepPhysics(dt);
-    tickObstacles(dt, dz);
-  }
-
+  advanceWorld(dz);
   tickClouds(dt, dz);
   tickTraffic(dt, dz);
 
-  if (renderer && camera) renderer.render(scene, camera);
-  paintPlayer();
+  // spawn obstacles (faster as score rises)
+  var difficulty = Math.max(0.55, 1.0 - (Math.floor(game.score)/1400));
+  var SPAWN_INTERVAL = SPAWN_BASE * difficulty;
+  spawnTimer += dt;
+  if (spawnTimer > SPAWN_INTERVAL){ spawnTimer = 0; spawnObstacle(); }
 
-  if (crashed){
-    playing=false;
-    showFinish();
+  // camera tilt
+  camera.position.y = player.y*0.6;
+  camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, (thrust?-0.03:0.03), 0.15);
+
+  // collisions
+  var bandTop = player.y + HITBOX_HALF;
+  var bandBot = player.y - HITBOX_HALF;
+  for (var i=0;i<obstacles.length;i++){
+    var o = obstacles[i];
+    var z = o.mesh.position.z;
+    if (z > COLLISION_Z_NEAR && z < COLLISION_Z_FAR){
+      var top  = o.mesh.position.y + o.halfHeight;
+      var bot  = o.mesh.position.y - o.halfHeight;
+      if (!(bandTop < bot || bandBot > top)){ gameOver(); return; }
+    }
   }
 
-  requestAnimationFrame(loop);
+  // score + coins
+  var prevScore = game.score;
+  game.score += mps*dt;
+  scoreEl.textContent = Math.floor(game.score);
+  var deltaScore = game.score - prevScore;
+  if (deltaScore > 0.0001) awardFromProgress(deltaScore, game);
+
+  // draw
+  renderer.render(scene, camera);
+  drawUI();
+
+  requestAnimationFrame(frame);
 }
 
-/* ===== UI + Flow ===== */
-const startOverlay = document.getElementById('startOverlay');
-const startBtn = document.getElementById('startBtn');
-const againBtn = document.getElementById('againBtn');
-const finishBox = document.getElementById('finish');
-
-function resetRun(){
-  crashed=false; playing=false;
-  player.y = 0; player.vy=0;
-  worldZ=0; score=0; scoreEl.textContent='0';
-  coinsRun=0; craftRun=0;
-  resetObstacles();
-}
-function startRun(){
-  resetRun();
-  startOverlay.style.opacity = '0';
-  setTimeout(function(){ startOverlay.style.display='none'; }, 180);
-  finishBox.style.display='none';
-  playing=true;
-}
-function showStart(){
-  startOverlay.style.display='flex';
-  startOverlay.style.opacity='1';
-  finishBox.style.display='none';
-}
-function awardAndPersist(){
-  // simple awards
-  coinsRun = Math.max(1, Math.floor(score*0.6));
-  craftRun = Math.max(0, Math.floor(score*0.15));
-
-  // local HUD update
+/* ===== start / restart ===== */
+function ensureAvatarSprite(){
   try{
-    const prev = readCoinsLS();
-    writeCoinsLS(prev + coinsRun);
-    writeCraftAll(readCraftAny() + craftRun);
-    paintCoinsHUD(prev + coinsRun);
-  }catch(_){}
-
-  // remote (best effort)
+    var profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
+    return buildAvatarCanvas(jetCtx, 96, profile);
+  }catch(_){ return Promise.resolve(); }
+}
+function startGame(){
   try{
-    fetch(withAuth('/izza-game/api/wallet/add'), {
-      method:'POST', credentials:'include',
-      headers: bearerHeaders(),
-      body: JSON.stringify({ coins: coinsRun, crafting: craftRun, source:'jetman' })
-    }).catch(function(){});
-  }catch(_){}
+    var overlay = document.getElementById('startOverlay');
+    overlay.style.display='none';
+    runStartCoins = readCoinsLS()|0;
+    ensureSized();
+    obstacles.length = 0; worldZ=0; time=0; player.y=0; player.vy=0; game={score:0,ended:false};
+    init3D();
+    ensureAvatarSprite().then(function(){ requestAnimationFrame(frame); });
+    AudioMgr.startBGM();
+  }catch(e){ try{ console.error('start failed', e); }catch(_){} }
 }
-function showFinish(){
-  playing=false;
-  awardAndPersist();
-  if (score>hi){ hi=score; saveHi(hi); hiEl.textContent=String(hi); }
-  finalScoreEl.textContent = String(score|0);
-  finalCoinsEl.textContent = String(coinsRun|0);
-  finalCraftEl.textContent = String(craftRun|0);
-  finishBox.style.display='flex';
-  startOverlay.style.display='flex';
-  startOverlay.style.opacity='1';
-}
+document.getElementById('startBtn').addEventListener('click', startGame, false);
+document.getElementById('startBtn').addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
 
-startBtn.addEventListener('click', function(){
-  startRun();
-}, false);
-againBtn.addEventListener('click', function(){
-  startRun();
+document.getElementById('againBtn').addEventListener('click', function(){
+  finishEl.style.display='none';
+  runStartCoins = readCoinsLS()|0;
+  if (scene){ while(scene.children.length) scene.remove(scene.children[0]); }
+  obstacles.length=0; worldZ=0; time=0; player.y=0; player.vy=0; game={score:0,ended:false};
+  init3D(); requestAnimationFrame(frame);
 }, false);
 
-/* ===== Boot sequence ===== */
-function buildAvatarFromCharacter(){
-  const profile = Object.assign({
-    body_type: 'male',
-    skin_tone: 'light',
-    hair: 'short',
-    hair_color: 'black',
-    outfit: 'street',
-    sprite_skin: 'default'
-  }, (LAST_CHARACTER && LAST_CHARACTER.appearance) || {});
-  return buildAvatarCanvas(jetCtx, 96, profile).then(function(){ avatarReady=true; });
-}
+/* keep HUD in sync when other tabs change coins */
+window.addEventListener('storage', function(e){
+  if (e && e.key === 'izzaCoins') paintCoinsHUDNow();
+}, false);
 
-function init(){
-  loadHi();
-  init3D();
-  hardResize();
-  ensureSession().then(function(){
-    hydrateFromSnapshot().then(function(){
-      paintCoinsHUD(readCoinsLS());
-      buildAvatarFromCharacter().then(function(){
-        showStart();
-        loop();
-      });
-    });
-  });
-}
+/* initial HUD paint */
+paintCoinsHUDNow();
 
-/* defer init until DOM is ready (in case) */
-if (document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', init, {once:true});
-} else {
-  init();
-}
+/* ===== Meta ===== */
+/* Last visual pass: 2025-10-02 — neon windows, neon dust, reversed/wider lanes, varied vehicles + underglow, yellow/green bars. */
 })();
 </script>
 </body>
