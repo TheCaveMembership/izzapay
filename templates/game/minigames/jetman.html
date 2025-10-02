@@ -1010,21 +1010,46 @@ function addLamp(group, tex, w, h, z, x, y){
   s.scale.set(w,h,1); s.position.set(x,y,z); group.add(s);
 }
 
+  function makeShadowTex(){
+  // soft dark oval
+  return makeSoftCircle(256, [
+    [0, 'rgba(0,0,0,0.55)'],
+    [0.5,'rgba(0,0,0,0.35)'],
+    [1,  'rgba(0,0,0,0.00)']
+  ]);
+}
+const SHADOW_TEX = makeShadowTex();
+
+function addContactShadow(group, w, l){
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: SHADOW_TEX,
+    transparent: true,
+    depthWrite: false,     // don’t cut other transparents
+    depthTest: true,       // still respect depth
+    blending: THREE.NormalBlending
+  }));
+  s.scale.set(w*2.2, l*1.2, 1);
+  s.position.set(0, -corridorHeight*0.55 + 0.002, 0); // just above road
+  s.rotateX(-Math.PI/2);
+  s.renderOrder = 2; // render above underglow
+  group.add(s);
+}
+
 /* — base body piece helpers — */
 function addUnderglow(group, w, l, y){
   if (Math.random() < 0.55){
     const col = UNDERGLOW_COLORS[(Math.random()*UNDERGLOW_COLORS.length)|0];
     const fog = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: makeSoftCircle(256, [[0,'rgba('+((col>>16)&255)+','+((col>>8)&255)+','+(col&255)+',0.45)'],[1,'rgba(0,0,0,0)']]),
+      map: makeSoftCircle(256, [[0,'rgba('+((col>>16)&255)+','+((col>>8)&255)+','+(col&255)+',0.35)'],[1,'rgba(0,0,0,0)']]),
       transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
     }));
-    fog.scale.set(w*3.2, l*1.8, 1);
+    fog.scale.set(w*3.0, l*1.6, 1);
     fog.position.set(0, y+0.001, 0);
     fog.rotateX(-Math.PI/2);
+    fog.renderOrder = 1; // under the shadow
     group.add(fog);
   }
 }
-
 function vehicleBodyMat(baseColor){
   if (VEHICLE_TEX.length){
     const t = pickTex(VEHICLE_TEX).clone();
@@ -1087,7 +1112,8 @@ function makeSedan(dir, bodyColor){
 function makePickup(dir, bodyColor){
   const group=new THREE.Group();
   const L=5.8,W=1.8,H=0.9;
-  const y0=-corridorHalf*0.55+H/2+0.02;
+  // ✅ match the road plane and other vehicles
+const y0 = -corridorHeight*0.55 + H/2 + 0.02;
 
   const cab = new THREE.Mesh(
     new THREE.BoxGeometry(W, H*0.55, L*0.45),
