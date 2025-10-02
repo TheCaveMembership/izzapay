@@ -667,6 +667,42 @@ function randomFacadeMaterial_glass(winTex){
   });
 }
 
+function buildingMesh(w,h,mat,side){
+  var g = new THREE.BoxGeometry(w, h, wallLen, 1,1,1);
+  var uv = g.attributes.uv;
+  for (var k=0; k<uv.count; k++){
+    var u = uv.getX(k), v = uv.getY(k);
+    uv.setXY(k, u*THREE.MathUtils.lerp(1.2,2.1, Math.random()), v*THREE.MathUtils.lerp(2.0,3.6, Math.random()));
+  }
+  var m = new THREE.Mesh(g, mat);
+  var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(1.5,6.5, Math.random()) ) * (side==='L'?1:-1);
+  m.rotation.z = lean;
+
+  // roof/antenna details
+  var r = Math.random();
+  if (r<0.30){
+    var roof = new THREE.Mesh(new THREE.BoxGeometry(w*THREE.MathUtils.lerp(.45,.85,Math.random()), w*THREE.MathUtils.lerp(.16,.28,Math.random()), wallLen*0.55),
+                              new THREE.MeshBasicMaterial({color:0x0f2747}));
+    roof.position.y = h/2 + roof.geometry.parameters.height/2;
+    roof.position.z = THREE.MathUtils.lerp(-wallLen*0.15, wallLen*0.15, Math.random());
+    m.add(roof);
+  } else if (r<0.55){
+    var antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,THREE.MathUtils.lerp(0.7,1.6,Math.random()),12),
+                                 new THREE.MeshBasicMaterial({color:0x7aa6ff}));
+    antenna.position.set(THREE.MathUtils.lerp(-w*0.2,w*0.2,Math.random()), h/2 + antenna.geometry.parameters.height/2, THREE.MathUtils.lerp(-0.2,0.2,Math.random()));
+    m.add(antenna);
+  } else if (r<0.75){
+    var step = new THREE.Mesh(new THREE.BoxGeometry(w*0.55, w*0.20, wallLen*0.6),
+                              new THREE.MeshBasicMaterial({color:0x10274a}));
+    step.position.set(0, h/2 + w*0.10, 0);
+    var spire = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.7, 8),
+                               new THREE.MeshBasicMaterial({color:0x6ea8ff}));
+    spire.position.set(0, step.position.y + 0.6, 0);
+    m.add(step, spire);
+  }
+  return m;
+}
+  
 /* Rebuild with glass textures (uses your existing buildingMesh) */
 function makeBuildings(){
   if (!buildingsL || !buildingsR) return;
