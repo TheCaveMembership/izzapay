@@ -200,6 +200,41 @@ document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
 document.getElementById('cityBtn').href   = withAuth('/izza-game/play');
 document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
 document.getElementById('arenaBtn').href = withAuth('/izza-game/minigames');
+  // --- wallet handoff + safe navigation ---
+function prepareWalletHandoff(){
+  try{
+    var u = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ||
+            (localStorage.getItem('izzaUserU')||'');
+    var payload = {
+      ts: Date.now(),
+      user: (u||'').toString().trim().replace(/^@+/, '').toLowerCase(),
+      coins: readCoinsLS()|0,
+      craft: readCraftAny()|0
+    };
+    sessionStorage.setItem('izzaWalletHandoff', JSON.stringify(payload));
+  }catch(_){}
+}
+function persistThenGo(href){
+  // 1) put latest wallet into sessionStorage so the next page can consume it immediately
+  prepareWalletHandoff();
+  // 2) fire-and-forget persist to server (best effort)
+  try{
+    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+      IZZA_PERSIST.save().catch(function(){});
+    }
+  }catch(_){}
+  // 3) navigate with auth params
+  location.href = withAuth(href);
+}
+// Hook all exit links so we persist before leaving
+['backBtn','arenaBtn','cityBtn','cityBtn2'].forEach(function(id){
+  var a = document.getElementById(id);
+  if (!a) return;
+  a.addEventListener('click', function(e){
+    e.preventDefault();
+    persistThenGo(a.getAttribute('href'));
+  }, false);
+});
 
 function bearerHeaders(base) { var headers = Object.assign({ 'content-type':'application/json' }, base || {}); try{ var bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
   return headers; }
@@ -218,6 +253,11 @@ function consumeWalletHandoff(maxAgeMs){ if(!maxAgeMs) maxAgeMs = 120000; try{ v
     window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u }); window.izzaUserKey = { get: function(){ return u; } };
     try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
     U = u; } localStorage.setItem('izzaCoins', String(s.coins|0)); localStorage.setItem('izzaCrafting', String(s.craft|0)); return { coins:s.coins|0, craft:s.craft|0 }; }catch(_){ return null; } }
+  // Pull through any wallet passed from a previous page (instant local sync)
+(function(){
+  var h = consumeWalletHandoff();
+  if (h) paintCoinsHUDNow();
+})();
 function primeViaCityIframe(opts){ opts = opts || {}; var maxWaitMs = opts.maxWaitMs || 8000; var pollMs = opts.pollMs || 120; return new Promise(function(resolve){
   var f=null, done=false, hard=null, poll=null; function finish(){ if(done) return; done=true; try{ clearTimeout(hard); clearInterval(poll); if(f) f.parentNode && f.parentNode.removeChild(f); }catch(_){}
     resolve('ok'); } var src = withAuth('/izza-game/play?prime=1&silent=1'); f=document.createElement('iframe'); f.src=src;
@@ -1192,6 +1232,7 @@ function gameOver(){
   finalCoinsEl.textContent = Math.max(0, coinsNow - (runStartCoins|0));
   finalCraftEl.textContent = Math.floor(coinsNow/COINS_PER_CREDIT) - Math.floor((runStartCoins|0)/COINS_PER_CREDIT);
   finishEl.style.display = 'flex';
+  persistWalletBestEffort();
 }
 
 /* ===== Moon on UI canvas (unchanged) ===== */
