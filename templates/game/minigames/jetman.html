@@ -796,84 +796,135 @@ function tickClouds(dt, dz){
   }
 }
 
-/* ===== Traffic (3× larger vehicles w/ bright lamps + fog) ===== */
-function makeVehicle(isRedDir){
+/* ===== Traffic (two lanes, one-way each; sleek rounded cars) ===== */
+
+// Car factory — same physical size as before (5.4 × 1.5 × 0.66), but rounded.
+function makeSleekCar(dir /* +1 toward camera, -1 away */){
   const group = new THREE.Group();
 
-  // — scale up dimensions 3× —
-  const L = 1.8 * 3;        // length
-  const Wd = 0.50 * 3;      // width
-  const Ht = 0.22 * 3;      // height
+  // Dimensions (kept from your 3× scale)
+  const L = 5.4;     // length
+  const W = 1.5;     // width
+  const H = 0.66;    // height
 
-  // chassis
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(Wd, Ht, L),
-    new THREE.MeshStandardMaterial({ color: isRedDir?0x1b2f57:0x274680, roughness:0.45, metalness:0.35 })
+  // Materials
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: dir>0 ? 0x274680 : 0x1b2f57,
+    roughness: 0.35,
+    metalness: 0.45
+  });
+  const roofMat = new THREE.MeshStandardMaterial({
+    color: 0x3a609f,
+    roughness: 0.32,
+    metalness: 0.50
+  });
+
+  // Rounded chassis: capsule along Z (rotate a Y-capsule onto Z)
+  const radius = Math.min(W, H) * 0.45;           // keep sides nicely curved
+  const cylLen = Math.max(0.01, L - radius*2);    // central length between domes
+  const chassis = new THREE.Mesh(
+    new THREE.CapsuleGeometry(radius, cylLen, 8, 12),
+    bodyMat
   );
-  body.position.y = -corridorHeight*0.55 + Ht/2 + 0.01;
-  group.add(body);
+  chassis.rotation.x = Math.PI / 2;               // align capsule along Z
+  chassis.scale.set( (W/(radius*2)), (H/(radius*2)), 1 ); // squash to exact W×H
+  chassis.position.y = -corridorHeight*0.55 + H/2 + 0.02;
+  group.add(chassis);
 
-  // cabin
+  // Curved roof “bubble”
   const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(Wd*0.72, Ht*0.72, L*0.42),
-    new THREE.MeshStandardMaterial({ color:0x3a609f, roughness:0.40, metalness:0.40 })
+    new THREE.SphereGeometry(1, 16, 12, 0, Math.PI*2, 0, Math.PI/2),
+    roofMat
   );
-  roof.position.set(0, body.position.y + Ht*0.60, -L*0.05);
+  roof.scale.set(W*0.52, H*0.75, L*0.36);
+  roof.position.set(0, chassis.position.y + H*0.40, -L*0.06);
   group.add(roof);
 
-  // lamp textures (brighter)
-  const headTex = makeSoftCircle(256, [[0,'rgba(255,255,255,1)'],[0.12,'rgba(255,255,255,0.95)'],[1,'rgba(255,255,255,0)']]);
-  const tailTex = makeSoftCircle(256, [[0,'rgba(80,255,140,1)'],[0.2,'rgba(80,255,140,0.9)'],[1,'rgba(80,255,140,0)']]); // neon-ish green reflection
-  const redTex  = makeSoftCircle(256, [[0,'rgba(255,60,40,1)'],[0.2,'rgba(255,60,40,0.9)'],[1,'rgba(255,60,40,0)']]);
+  // Soft lamp sprites
+  const headTex = makeSoftCircle(256, [
+    [0,'rgba(255,255,255,1)'],
+    [0.12,'rgba(255,255,255,0.95)'],
+    [1,'rgba(255,255,255,0)']
+  ]);
+  const tailTex = makeSoftCircle(256, [
+    [0,'rgba(255,60,40,1)'],
+    [0.2,'rgba(255,60,40,0.9)'],
+    [1,'rgba(255,60,40,0)']
+  ]);
 
   function lamp(tex, w, h, z, x){
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending}));
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    }));
     s.scale.set(w, h, 1);
-    s.position.set(x, body.position.y + Ht*0.25, z);
+    s.position.set(x, chassis.position.y + H*0.25, z);
     return s;
   }
 
-  // headlamps (white)
-  group.add(lamp(headTex, 0.42, 0.42, +L*0.52, -Wd*0.28));
-  group.add(lamp(headTex, 0.42, 0.42, +L*0.52, +Wd*0.28));
-  // taillamps (red)
-  group.add(lamp(redTex,  0.46, 0.46, -L*0.52, -Wd*0.28));
-  group.add(lamp(redTex,  0.46, 0.46, -L*0.52, +Wd*0.28));
+  // Place lamps on the *front* and *rear* based on travel direction.
+  const frontZ = (dir>0) ? +L*0.52 : -L*0.52;
+  const rearZ  = -frontZ;
+  // Headlights at front (white); taillights at rear (red)
+  group.add(lamp(headTex, 0.42, 0.42, frontZ, -W*0.28));
+  group.add(lamp(headTex, 0.42, 0.42, frontZ, +W*0.28));
+  group.add(lamp(tailTex, 0.46, 0.46, rearZ,  -W*0.28));
+  group.add(lamp(tailTex, 0.46, 0.46, rearZ,  +W*0.28));
 
-  // under-car fog/glow
-  const fogTex = makeSoftCircle(512, [[0,'rgba(140,170,210,0.32)'],[1,'rgba(140,170,210,0)']]);
-  const fog = new THREE.Sprite(new THREE.SpriteMaterial({map:fogTex, transparent:true, depthWrite:false}));
-  fog.scale.set(4.8, 2.2, 1);
-  fog.position.set(0, body.position.y + 0.001, 0);
+  // Under-car soft glow/fog for atmosphere
+  const fogTex = makeSoftCircle(512, [[0,'rgba(140,170,210,0.28)'],[1,'rgba(140,170,210,0)']]);
+  const fog = new THREE.Sprite(new THREE.SpriteMaterial({ map:fogTex, transparent:true, depthWrite:false }));
+  fog.scale.set(4.6, 2.0, 1);
+  fog.position.set(0, chassis.position.y + 0.002, 0);
   fog.rotateX(-Math.PI/2);
   group.add(fog);
 
   group.userData = {
-    speed: THREE.MathUtils.lerp(7, 15, Math.random()), // a bit slower now that cars are big
-    dir: isRedDir ? 1 : -1
+    speed: THREE.MathUtils.lerp(7, 15, Math.random()),
+    dir
   };
   return group;
 }
+
+// Two lanes: left lane goes away (red tails toward us); right lane comes toward us.
 function seedTraffic(){
   trafficGroup.clear();
-  const count = 18; // fewer, because each is bigger
-  for (let i=0;i<count;i++){
-    const isRed = Math.random()<0.55;
-    const car = makeVehicle(isRed);
-    car.position.set(THREE.MathUtils.lerp(-0.45,0.45,Math.random()), 0, -THREE.MathUtils.lerp(0,DEPTH,Math.random()));
-    trafficGroup.add(car);
-  }
-}
-function tickTraffic(dt, dz){
-  for (var i=0;i<trafficGroup.children.length;i++){
-    var p = trafficGroup.children[i];
-    var s = p.userData.speed;
-    p.position.z += dt * s * p.userData.dir;
-    if (p.position.z > 5) p.position.z = -DEPTH;
-    if (p.position.z < -DEPTH) p.position.z = 5;
+
+  const LANES = [
+    { x: -0.28, dir: -1 }, // left lane, going away (you’ll see RED tails)
+    { x: +0.28, dir: +1 }  // right lane, coming toward camera (white headlights)
+  ];
+
+  const carsPerLane = 10;      // total ~20 cars
+  const minGap = 10;           // target spacing along Z
+  const jitter = 6;
+
+  for (const lane of LANES){
+    for (let i=0; i<carsPerLane; i++){
+      const car = makeSleekCar(lane.dir);
+      car.position.x = lane.x;
+      // Stagger Z so they’re distributed along the whole depth
+      const baseZ = - (i * (DEPTH / carsPerLane));
+      car.position.z = baseZ - THREE.MathUtils.randFloatSpread(jitter);
+      trafficGroup.add(car);
+    }
   }
 }
 
+// Keep each car in its lane and recycle at bounds.
+function tickTraffic(dt, dz){
+  for (let i=0; i<trafficGroup.children.length; i++){
+    const p = trafficGroup.children[i];
+    const s = p.userData.speed * 1.0;
+    p.position.z += dt * s * p.userData.dir;
+
+    // Recycle when out of view
+    if (p.userData.dir > 0 && p.position.z > 5){
+      p.position.z = -DEPTH;
+    } else if (p.userData.dir < 0 && p.position.z < -DEPTH){
+      p.position.z = 5;
+    }
+  }
+}
 /* ===== recycle world ===== */
 function advanceWorld(dz){
   var minZ = 5, maxZ = -120;
