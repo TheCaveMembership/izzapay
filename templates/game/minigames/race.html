@@ -68,7 +68,7 @@
   display:block; pointer-events:none;
   z-index:2;                          /* ABOVE the 2D canvas */
   mix-blend-mode:screen;              /* additive-on-paper look */
-  opacity:.55;                        /* dial 0.70–0.90 to taste */
+  opacity:.82;                        /* dial 0.70–0.90 to taste */
   -webkit-transform:translateZ(0);    /* iOS: promote to its own layer */
   will-change:opacity, transform;     /* hint for Safari */
 }
@@ -314,8 +314,7 @@
         <div class="btnRow">
   <button class="startBtn" id="againBtn">Play Again</button>
   <a class="cityBtn" id="cityBtn" href="/izza-game/play">GO TO IZZA CITY</a>
-  <!-- in the END GAME POPUP button row -->
-<button class="cityBtn" id="arcadeBtn" type="button">RETURN TO IZZA ARCADE</button>
+  <a class="cityBtn" id="arcadeBtn" href="/izza-game/arena">RETURN TO IZZA ARCADE</a>
 </div>
       </div>
     </div>
@@ -374,38 +373,6 @@ function withAuth(href){
   return url.pathname + (url.search ? url.search : '');
 }
 document.getElementById('cityBtn').href = withAuth('/izza-game/play');
-
-  /* ---- Return to Arcade with wallet handoff + safe back ---- */
-function handoffToArcade() {
-  // 1) pack a short-lived handoff for Arena (same format you already consume)
-  try {
-    const u = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || '';
-    const payload = {
-      ts: Date.now(),
-      user: u,
-      coins: (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0),
-      craft: (parseInt(readCraftAny()||0,10)|0)
-    };
-    sessionStorage.setItem('izzaWalletHandoff', JSON.stringify(payload));
-  } catch(_) {}
-
-  // 2) best-effort persist snapshot before leaving
-  (async () => { try { await persistWalletAndSave(); } catch(_) {} })();
-
-  // 3) prefer real "back", else hard-navigate to arena with auth; finally fall back to City
-  const arenaHref = withAuth('/izza-game/arena');
-  const cityHref  = withAuth('/izza-game/play');
-  const ref = document.referrer || '';
-  if (/\/izza-game\/arena\b/.test(ref)) {
-    history.back();
-  } else {
-    // try arena first; if that route 404s on your server, City is a safe landing
-    location.href = arenaHref;
-    // simple timed fallback to City if arena doesn’t exist
-    setTimeout(() => { if (document.visibilityState !== 'hidden') location.href = cityHref; }, 1200);
-  }
-}
-document.getElementById('arcadeBtn')?.addEventListener('click', handoffToArcade);
 
 /* ====== Wallet helper funcs (same behavior as Basketball) ====== */
 function bearerHeaders(base = {}) {
@@ -654,34 +621,6 @@ void main(){
   attribute vec2 a_pos;
   void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
-  /* ----- Garage moving background (runs while in the Garage overlay) ----- */
-let garageLoopOn = false;
-let garageZ = 0;
-let garageTLast = performance.now();
-
-function garageFrame(now) {
-  if (!garageLoopOn) return;
-  const dt = Math.min(0.033, (now - garageTLast) / 1000);
-  garageTLast = now;
-
-  // gentle forward motion
-  const previewSpeed = 90; // km/h visual vibe for idle preview
-  garageZ += (previewSpeed / 3.6) * dt * ITEM_SPEED_MULT;
-
-  // center camera, no nitro, theme from TRACK
-  GLFX.render(now / 1000, garageZ, previewSpeed, 0.0, false, TRACK === 'day');
-
-  requestAnimationFrame(garageFrame);
-}
-
-// start/stop when Garage overlay is shown/hidden
-function startGarageBG() {
-  garageLoopOn = true;
-  garageTLast = performance.now();
-  requestAnimationFrame(garageFrame);
-}
-function stopGarageBG() { garageLoopOn = false; }
-
   function createGL(){
     canvasGL = document.getElementById('glfx');
     gl = canvasGL.getContext('webgl', { premultipliedAlpha:false, alpha:true, antialias:true });
@@ -856,14 +795,6 @@ function setTrack(t){
 }
 trackNightBtn.addEventListener('click', ()=> setTrack('night'));
 trackDayBtn.addEventListener('click',   ()=> setTrack('day'));
-  // keep the GL preview theme in sync while in Garage
-trackNightBtn.addEventListener('click', () => {
-  if (garageLoopOn) GLFX.render(performance.now()/1000, garageZ, 90, 0.0, false, false);
-});
-trackDayBtn.addEventListener('click', () => {
-  if (garageLoopOn) GLFX.render(performance.now()/1000, garageZ, 90, 0.0, false, true);
-});
-  
 
 /* Tinted sprite for garage preview and mini car */
 function makeTintedSprite(rgb){
@@ -2106,23 +2037,6 @@ const endOverlay = document.getElementById('endOverlay');
 
 function softHide(el){ if(el) el.style.display='none'; }
 function softShow(el){ if(el) el.style.display='flex'; }
-
-// When the page loads we’re in Garage → start the idle background
-startGarageBG();
-
-// On START (enter race) stop the idle background
-document.getElementById('startBtn').addEventListener('click', async ()=>{
-  // ...existing start flow...
-  stopGarageBG();                // <— add this
-  // then enter race and requestAnimationFrame(frame)
-}, {passive:true});
-
-// When “Play Again” returns you to the Garage
-document.getElementById('againBtn').addEventListener('click', async ()=>{
-  endOverlay.style.display='none';
-  startOverlay.style.display='flex';
-  startGarageBG();               // <— add this
-});
 
 async function persistWalletAndSave(){
   try{
