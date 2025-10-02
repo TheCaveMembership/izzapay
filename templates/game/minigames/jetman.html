@@ -39,7 +39,6 @@
   <style>
     :root{
       --hud:rgba(255,255,255,.10); --hudLine:rgba(255,255,255,.34); --arcade:#aef3ff;
-      /* Expose iOS safe-area to JS via computed style */
       padding-bottom: constant(safe-area-inset-bottom);
       padding-bottom: env(safe-area-inset-bottom);
     }
@@ -75,7 +74,7 @@
       display:flex;flex-direction:column;gap:12px;align-items:center;backdrop-filter:blur(8px);box-shadow:0 12px 30px rgba(0,0,0,.35)}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:10px;border:1px solid var(--hudLine);
          background:rgba(255,255,255,.06);color:inherit;text-decoration:none;font-weight:800}
-    .finish{position:absolute;left:10px;right:10px;bottom:10px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
+    .finish{position:absolute;left:10px;right:10px;bottom:18px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
     .finish .pill{font-size:12px}
   </style>
 </head>
@@ -322,113 +321,51 @@ function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&25
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
 function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
 
-function extractThreeToneRamp(img){
-  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-  var d=c.getImageData(0,0,w,h).data, samples=[];
-  for(var i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; var r=d[i],g=d[i+1],b=d[i+2]; samples.push({r:r,g:g,b:b,L:lum(r,g,b)}); }
-  if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
-  samples.sort(function(a,b){return a.L-b.L;});
-  function pick(q){ var idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); var s=samples[idx];
-    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
-  return [pick(0.2),pick(0.55),pick(0.85)];
-}
-function paletteSwap(img, fromRampHex, toRampHex, tolerance){
-  if(!tolerance) tolerance=2000;
-  var from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
-  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-  var id=c.getImageData(0,0,w,h), d=id.data; var changed=0;
-  for(var i=0;i<d.length;i+=4){
-    if(d[i+3]===0) continue;
-    var p={r:d[i],g:d[i+1],b:d[i+2]}; var best=-1,score=1e9;
-    for(var k=0;k<from.length;k++){ var s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
-    if(score<=tolerance){ var t=to[best]||to[1]||to[0];
-      if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
-      d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
-    }
+/* ===== Mapping + margins (FIXED) ===== */
+var W=0,H=0,dpr=1;
+var TOP_Y = 3.3, BOT_Y = -3.0; // world band
+var TOP_PX_MARGIN = 0, BOT_PX_MARGIN = 0, pixelsPerWorld = 1;
+
+function computeMargins(){
+  var top = 90;      // HUD space
+  var bottom = 140;  // base
+  try{
+    var envNum = parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0;
+    bottom += envNum;
+  }catch(_){}
+  if (window.visualViewport) {
+    var hidden = Math.max(0, Math.round(window.innerHeight - window.visualViewport.height));
+    var prev = Number(sessionStorage.getItem('vvHiddenMax')||0);
+    var vvMax = Math.max(prev, hidden);
+    sessionStorage.setItem('vvHiddenMax', String(vvMax));
+    bottom += vvMax;
   }
-  c.putImageData(id,0,0);
-  return {canvas:oc, changedPixels:changed};
-}
-function overlayTint(img, hex, strength){
-  if(strength==null) strength=1.0;
-  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
-  var id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
-  function ov(a,b){a/=255;b/=255;var o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
-  for(var i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
-    var r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
-    d[i]=Math.round(d[i]*(1-strength)+r*strength);
-    d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
-    d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
-  }
-  c.putImageData(id,0,0);
-  return oc;
+  return { top: top|0, bottom: bottom|0 };
 }
 
-function buildAvatarCanvas(dstCtx, size, profile){
-  return new Promise(function(resolve){
-    (function(){
-      var DW=size,DH=size,X=0,Y=0;
-      var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
-      var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
-      var femaleOut=profile.female_outfit_color||'blue';
+function updateScale(){
+  var m = computeMargins();
+  TOP_PX_MARGIN = m.top|0;
+  BOT_PX_MARGIN = m.bottom|0;
 
-      var body=null;
-      function afterBody(){
-        Promise.all([
-          loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short),
-          (type==='female' ? Promise.resolve(null) : loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street))
-        ]).then(function(arr){
-          var hair=arr[0], outfit=arr[1];
-          var bodyCanvas;
-          if(body){
-            var targetSkin=SKIN_TO[tone]||SKIN_TO.light;
-            var swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
-            bodyCanvas=swapped.canvas;
-            if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
-          }
-          if(type==='female' && bodyCanvas){
-            var targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
-            var reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
-            bodyCanvas=reDress.canvas;
-            if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
-          }
-          dstCtx.clearRect(0,0,DW,DH);
-          if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
-          if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
-          if(hair){
-            var detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
-            var swap=paletteSwap(hair, detected, target, 4000);
-            var hairCanvas=swap.canvas;
-            if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
-            var hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
-            dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
-          }
-          resolve();
-        });
-      }
-      if(type==='female'){
-        var femaleWide='/static/game/sprites/body/'+theme+'__female_wide.png';
-        var femaleSlim='/static/game/sprites/body/'+theme+'__female.png';
-        loadImg(femaleWide).then(function(img){
-          if(img) body=img;
-          return img ? img : loadImg(femaleSlim);
-        }).then(function(img){ if(img) body=img; afterBody(); });
-      } else {
-        loadImg(SPRITES.body[theme]||SPRITES.body.default).then(function(img){ body=img; afterBody(); });
-      }
-    })();
-  });
+  // usable must never collapse; guarantee a sane band
+  var usable = (H - TOP_PX_MARGIN - BOT_PX_MARGIN);
+  if (!isFinite(usable)) usable = H * 0.8;
+  usable = Math.max(160, Math.min(H - 40, usable)); // clamp to [160px, H-40]
+
+  pixelsPerWorld = usable / (TOP_Y - BOT_Y);
 }
 
-/* Offscreen sprite -> UI canvas */
-var jetmanCanvas = document.createElement('canvas');
-jetmanCanvas.width = jetmanCanvas.height = 96;
-var jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
+function worldToPxY(y){
+  // Map BOT_Y -> bottom usable pixel, TOP_Y -> top usable pixel
+  var botPx = H - BOT_PX_MARGIN;
+  var dy = (y - BOT_Y) * pixelsPerWorld;
+  return botPx - dy;
+}
 
-/* GAME */
+/* ====== THREE / GAME ====== */
+var scene, camera, renderer;
+
 var glCvs = document.getElementById('gl');
 var uiCvs = document.getElementById('ui'), uiCtx = uiCvs.getContext('2d');
 uiCtx.imageSmoothingEnabled=false;
@@ -436,9 +373,7 @@ uiCtx.imageSmoothingEnabled=false;
 uiCvs.addEventListener('contextmenu', function(e){ e.preventDefault(); }, false);
 uiCvs.addEventListener('touchstart', function(e){ e.preventDefault(); }, {passive:false});
 uiCvs.addEventListener('pointerdown', function(e){ e.preventDefault(); }, false);
-
-var W=0,H=0,dpr=1;
-var scene, camera, renderer;
+uiCvs.addEventListener('pointermove', function(e){ e.preventDefault(); }, {passive:false});
 
 function hardResize(){
   var r = glCvs.getBoundingClientRect();
@@ -451,16 +386,15 @@ function hardResize(){
     uiCvs.width=W*dpr; uiCvs.height=H*dpr;
     uiCtx.setTransform(dpr,0,0,dpr,0,0);
     if(renderer){ renderer.setSize(W, H, false); renderer.setPixelRatio(dpr); }
-    updateScale();
   }
+  updateScale();
 }
 function ensureSized(attempt){ attempt = attempt||0; hardResize(); if ((W<2 || H<2) && attempt<10) setTimeout(function(){ ensureSized(attempt+1); }, 60); }
-ensureSized(); updateScale(); addEventListener('resize', function(){ ensureSized(); }, false);
+ensureSized(); addEventListener('resize', function(){ ensureSized(); }, false);
 
 /* Player vertical motion */
 var player = { y: 0, vy:0, r:18 };
 var phys = { g: 1500, thrust: 1850, maxVy: 820 };
-player.y = 0;
 var thrust=false; addEventListener('keydown',function(e){ if(e.code==='Space') thrust=true; }, false);
 addEventListener('keyup',function(e){ if(e.code==='Space') thrust=false; }, false);
 uiCvs.addEventListener('pointerdown', function(){ thrust=true; }, false);
@@ -468,56 +402,12 @@ addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* Speed / world */
 var worldZ=0, speed=110, time=0, last=performance.now();
-var corridorHalf=6.5;
-var corridorHeight=10;
-var DEPTH=300;
-
-/* === Physics bounds (stable; also used to draw guides) === */
-var TOP_Y = 3.3;   // ceiling world Y
-var BOT_Y = -3.0;  // ground world Y
-
-/* ===== Margins + mapping ===== */
-var TOP_PX_MARGIN = 0;
-var BOT_PX_MARGIN = 0;
-var pixelsPerWorld = 1;
-
-function computeMargins(){
-  var top = 90;     // leave room for HUD
-  var bottom = 160; // leave room for iOS swipe bar / browser chrome
-
-  try{
-    var cs = getComputedStyle(document.documentElement);
-    var pb = parseInt(cs.getPropertyValue('padding-bottom')) || 0;
-    // Try to parse env(safe-area-inset-bottom) if available
-    var envVal = cs.getPropertyValue('env(safe-area-inset-bottom)') || '0';
-    var envNum = parseInt(envVal) || 0;
-    bottom += Math.max(pb, envNum);
-  }catch(_){}
-
-  if (window.visualViewport && window.innerHeight){
-    var hidden = Math.max(0, window.innerHeight - window.visualViewport.height);
-    bottom += Math.round(hidden);
-  }
-  return { top: top|0, bottom: bottom|0 };
-}
-
-function updateScale(){
-  var m = computeMargins();
-  TOP_PX_MARGIN = m.top;
-  BOT_PX_MARGIN = m.bottom;
-  var usable = Math.max(1, (H - TOP_PX_MARGIN - BOT_PX_MARGIN));
-  pixelsPerWorld = usable / (TOP_Y - BOT_Y);
-}
-function worldToPxY(y){
-  var botPx = H - BOT_PX_MARGIN;
-  var dy = (y - BOT_Y) * pixelsPerWorld;
-  return botPx - dy;
-}
+var corridorHalf=6.5, corridorHeight=10, DEPTH=300;
 
 /* Spawns/collision */
 var SPAWN_INTERVAL = 1.8;
-var COLLISION_Z_NEAR = 0.35;
-var COLLISION_Z_FAR  = 0.85;
+var COLLISION_Z_NEAR = -0.4;   // widened window
+var COLLISION_Z_FAR  =  1.8;
 var HITBOX_HALF = 0.55;
 
 /* Impact preview for the next bar (drawn on UI) */
@@ -600,24 +490,22 @@ function layoutWalls(){
 var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
-  var t = THREE.MathUtils.lerp(0.18,0.28,Math.random());
-
-  // Constrain h so every bar is passable given our hit band.
+  var t = THREE.MathUtils.lerp(0.28,0.42,Math.random());      // thicker
   var margin = 0.10;
   var maxH = TOP_Y - HITBOX_HALF - margin;
   var minH = BOT_Y + HITBOX_HALF + margin;
   var h = THREE.MathUtils.lerp(minH, maxH, Math.random());
 
-  var geo = new THREE.BoxGeometry(w, t, 1.2);
+  var geo = new THREE.BoxGeometry(w, t, 1.6);                 // deeper
   var mat = new THREE.MeshStandardMaterial({
     color:0x00ff66, roughness:.2, metalness:.05,
     emissive:0x00ff66, emissiveIntensity:2.0
   });
   var bar = new THREE.Mesh(geo, mat);
 
-  var glowGeo = new THREE.PlaneGeometry(w*1.02, t*5.4);
-  var glowMat = new THREE.MeshBasicMaterial({color:0x00ff66, transparent:true, opacity:0.22, depthWrite:false});
-  var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.01;
+  var glowGeo = new THREE.PlaneGeometry(w*1.06, t*6.0);
+  var glowMat = new THREE.MeshBasicMaterial({color:0x00ff66, transparent:true, opacity:0.34, depthWrite:false});
+  var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.02;
   var glow2 = glow1.clone(); glow2.position.z -= 0.02;
 
   var group = new THREE.Group();
@@ -664,7 +552,7 @@ var finalCraftEl = document.getElementById('finalCraft');
 var WALLET_READY=false, walletDirty=false, runStartCoins=0;
 var game = { score:0, creditsMinted:0, ended:false };
 
-/* Wallet ops (unchanged) */
+/* Wallet ops */
 function updateCoinsHUD(){ paintCoinsHUD(readCoinsLS()); }
 function applyCoins(amount){
   return new Promise(function(resolve){
@@ -728,6 +616,7 @@ function drawUI(){
 
   var topPx = worldToPxY(TOP_Y);
   var botPx = worldToPxY(BOT_Y);
+
   uiCtx.save();
   uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
   uiCtx.lineWidth = 2;
@@ -745,9 +634,9 @@ function drawUI(){
   uiCtx.strokeRect(cx - hitW/2, py - hitH/2, hitW, hitH);
   uiCtx.restore();
 
-  // Clamp sprite Y into the visible band and nudge it slightly upward so it never dips below the bottom edge
-  var minY = BOT_PX_MARGIN + spriteH/2 + 2;
-  var maxY = H - TOP_PX_MARGIN - spriteH/2 - 2;
+  // Clamp sprite into visible band
+  var minY = botPx - hitH/2 - 8;              // keep above bottom line
+  var maxY = topPx + hitH/2 + 8;              // keep below top line
   py = Math.max(minY, Math.min(maxY, py));
 
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
@@ -756,8 +645,7 @@ function drawUI(){
   uiCtx.fillStyle='rgba(120,220,255,.65)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
 
-  // Slight upward bias (0.58) so avatar never visually overlaps the ground line
-  uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.58, spriteW, spriteH);
+  uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.52, spriteW, spriteH);
 }
 
 /* Loop */
@@ -825,18 +713,19 @@ document.addEventListener('visibilitychange', function(){
     // best-effort save
   } else {
     updateCoinsHUD();
+    ensureSized(); // recalc band if Safari chrome changes
   }
 }, false);
 
 /* START */
 var startBtn = document.getElementById('startBtn');
+var LAST_CHARACTER = null;
 function ensureAvatarSprite(){
   try{
     var profile = LAST_CHARACTER || JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
     return buildAvatarCanvas(jetCtx, 96, profile);
   }catch(_){ return Promise.resolve(); }
 }
-
 function startGame(){
   try{
     var overlay = document.getElementById('startOverlay');
@@ -883,12 +772,10 @@ function startGame(){
     });
   }catch(e){ try{ console.error('start failed', e); }catch(_){} }
 }
-
 startBtn.addEventListener('click', startGame, false);
 startBtn.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
 
 updateCoinsHUD();
-
 })();
 </script>
 </body>
