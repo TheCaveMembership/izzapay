@@ -471,47 +471,55 @@ function init3D(){
   })();
 
   /* asphalt street (single long plane) + center emissive */
-  (function(){
-    var Wc=256,Hc=256,c=document.createElement('canvas'); c.width=Wc; c.height=Hc;
-    var x=c.getContext('2d');
-    x.fillStyle='#0a1426'; x.fillRect(0,0,Wc,Hc);
-    for(var i=0;i<1400;i++){
-      var a=Math.random()*0.06+0.06;
-      x.fillStyle='rgba(255,255,255,'+a+')';
-      x.fillRect((Math.random()*Wc)|0,(Math.random()*Hc)|0,1,1);
-    }
-    x.globalAlpha=0.15; x.fillStyle='#0a1426';
-    x.fillRect(0,Hc*0.28,Wc,Hc*0.10); x.fillRect(0,Hc*0.62,Wc,Hc*0.10);
-    x.globalAlpha=1;
+(function(){
+  var Wc=256,Hc=256,c=document.createElement('canvas'); c.width=Wc; c.height=Hc;
+  var x=c.getContext('2d');
+  x.fillStyle='#0a1426'; x.fillRect(0,0,Wc,Hc);
+  for(var i=0;i<1400;i++){
+    var a=Math.random()*0.06+0.06;
+    x.fillStyle='rgba(255,255,255,'+a+')';
+    x.fillRect((Math.random()*Wc)|0,(Math.random()*Hc)|0,1,1);
+  }
+  x.globalAlpha=0.15; x.fillStyle='#0a1426';
+  x.fillRect(0,Hc*0.28,Wc,Hc*0.10);
+  x.fillRect(0,Hc*0.62,Wc,Hc*0.10);
+  x.globalAlpha=1;
 
-    var mapTex=new THREE.CanvasTexture(c);
-    mapTex.wrapS=mapTex.wrapT=THREE.RepeatWrapping;
-    mapTex.repeat.set(2, 120);       // longer scroll; single plane
-    mapTex.anisotropy=4; mapTex.minFilter=THREE.LinearFilter; mapTex.generateMipmaps=false;
+  var mapTex=new THREE.CanvasTexture(c);
+  mapTex.wrapS=mapTex.wrapT=THREE.RepeatWrapping;
+  mapTex.repeat.set(2, 200);                 // longer scroll so no visible far edge
+  mapTex.anisotropy=4; mapTex.minFilter=THREE.LinearFilter; mapTex.generateMipmaps=false;
 
-    var eC=document.createElement('canvas'); eC.width=4; eC.height=128;
-    var ex=eC.getContext('2d'), g=ex.createLinearGradient(2,0,2,128);
-    g.addColorStop(0,'rgba(255,90,40,1.0)');
-    g.addColorStop(.5,'rgba(255,160,110,0.45)');
-    g.addColorStop(1,'rgba(255,160,110,0.0)');
-    ex.fillStyle=g; ex.fillRect(0,0,4,128);
-    var emiss=new THREE.CanvasTexture(eC); emiss.wrapT=THREE.RepeatWrapping; emiss.repeat.y=80;
-    emiss.minFilter=THREE.LinearFilter; emiss.generateMipmaps=false;
+  var eC=document.createElement('canvas'); eC.width=4; eC.height=128;
+  var ex=eC.getContext('2d'), g=ex.createLinearGradient(2,0,2,128);
+  g.addColorStop(0,'rgba(255,90,40,1.0)');
+  g.addColorStop(.5,'rgba(255,160,110,0.45)');
+  g.addColorStop(1,'rgba(255,160,110,0.0)');
+  ex.fillStyle=g; ex.fillRect(0,0,4,128);
+  var emiss=new THREE.CanvasTexture(eC);
+  emiss.wrapT=THREE.RepeatWrapping; emiss.repeat.y=150;
+  emiss.minFilter=THREE.LinearFilter; emiss.generateMipmaps=false;
 
-    var mat=new THREE.MeshStandardMaterial({
-      map:mapTex, color:0xffffff, roughness:0.58, metalness:0.18,
-      emissive:0x1a2e57, emissiveIntensity:0.95, emissiveMap:emiss
-    });
-    var plane = new THREE.Mesh(
-  new THREE.PlaneGeometry(corridorHalf*1.2, DEPTH*20), // was DEPTH*4
-  mat
-);
-plane.rotateX(-Math.PI/2);
-plane.position.set(0, -corridorHeight*0.55 + 0.01, -DEPTH*10); // push farther back
-trafficGlow = plane;
-scene.add(plane);
-  })();
+  var mat=new THREE.MeshStandardMaterial({
+    map:mapTex, color:0xffffff, roughness:0.58, metalness:0.18,
+    emissive:0x1a2e57, emissiveIntensity:0.95, emissiveMap:emiss
+  });
 
+  // Long plane, but keep its center reasonably close to avoid frustum cull
+  var plane = new THREE.Mesh(new THREE.PlaneGeometry(corridorHalf*1.2, DEPTH*8), mat);
+  plane.rotateX(-Math.PI/2);
+  plane.position.set(0, -corridorHeight*0.55 + 0.01, -DEPTH*3);
+  trafficGlow = plane;
+  scene.add(plane);
+
+  // OPTIONAL: dark panel behind the canyon — ensures no horizon seam at all
+  var backCap = new THREE.Mesh(
+    new THREE.PlaneGeometry(corridorHalf*3.0, corridorHeight*2.2),
+    new THREE.MeshBasicMaterial({ color: 0x081427, fog: false })
+  );
+  backCap.position.set(0, -corridorHeight*0.05, -DEPTH*3.9);
+  scene.add(backCap);
+})();
   /* faint light rain */
   var streaks = new THREE.Group();
   (function(){
@@ -799,64 +807,71 @@ function tickClouds(dt, dz){
   }
 }
 
-/* ===== Traffic (2× larger vehicles w/ glow + fog) ===== */
+/* ===== Traffic (3× larger vehicles w/ bright lamps + fog) ===== */
 function makeVehicle(isRedDir){
-  var group = new THREE.Group();
+  const group = new THREE.Group();
 
-  // chassis (simple low-poly)
-  var L = 1.2, Wd = 0.50, Ht = 0.22;         // ~2× the old footprint
-  var body = new THREE.Mesh(
+  // — scale up dimensions 3× —
+  const L = 1.8 * 3;        // length
+  const Wd = 0.50 * 3;      // width
+  const Ht = 0.22 * 3;      // height
+
+  // chassis
+  const body = new THREE.Mesh(
     new THREE.BoxGeometry(Wd, Ht, L),
-    new THREE.MeshStandardMaterial({ color: isRedDir?0x1c2d4f:0x253a63, roughness:0.6, metalness:0.15 })
+    new THREE.MeshStandardMaterial({ color: isRedDir?0x1b2f57:0x274680, roughness:0.45, metalness:0.35 })
   );
   body.position.y = -corridorHeight*0.55 + Ht/2 + 0.01;
   group.add(body);
 
-  // roof/cabin
-  var roof = new THREE.Mesh(
-    new THREE.BoxGeometry(Wd*0.7, Ht*0.7, L*0.45),
-    new THREE.MeshStandardMaterial({ color:0x304b7a, roughness:0.55, metalness:0.2 })
+  // cabin
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(Wd*0.72, Ht*0.72, L*0.42),
+    new THREE.MeshStandardMaterial({ color:0x3a609f, roughness:0.40, metalness:0.40 })
   );
-  roof.position.set(0, body.position.y + Ht*0.6, -L*0.06);
+  roof.position.set(0, body.position.y + Ht*0.60, -L*0.05);
   group.add(roof);
 
-  // headlights / taillights (billboards, additive)
-  var lightTex = makeSoftCircle(128, [[0,'rgba(255,255,255,1)'],[0.12,'rgba(255,255,255,0.9)'],[1,'rgba(255,255,255,0)']]);
-  var redTex   = makeSoftCircle(128, [[0,'rgba(255,60,40,1)'],[0.2,'rgba(255,60,40,0.8)'],[1,'rgba(255,60,40,0)']]);
-  function lamp(tex, w, h, z, x){
-    var s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending}));
-    s.scale.set(w,h,1); s.position.set(x, body.position.y+Ht*0.25, z); return s;
-  }
-  // front (white)
-  group.add(lamp(lightTex, 0.22,0.22, +L*0.52, -Wd*0.22));
-  group.add(lamp(lightTex, 0.22,0.22, +L*0.52, +Wd*0.22));
-  // rear (red)
-  group.add(lamp(redTex,   0.26,0.26, -L*0.52, -Wd*0.22));
-  group.add(lamp(redTex,   0.26,0.26, -L*0.52, +Wd*0.22));
+  // lamp textures (brighter)
+  const headTex = makeSoftCircle(256, [[0,'rgba(255,255,255,1)'],[0.12,'rgba(255,255,255,0.95)'],[1,'rgba(255,255,255,0)']]);
+  const tailTex = makeSoftCircle(256, [[0,'rgba(80,255,140,1)'],[0.2,'rgba(80,255,140,0.9)'],[1,'rgba(80,255,140,0)']]); // neon-ish green reflection
+  const redTex  = makeSoftCircle(256, [[0,'rgba(255,60,40,1)'],[0.2,'rgba(255,60,40,0.9)'],[1,'rgba(255,60,40,0)']]);
 
-  // ground glow/fog pod
-  var fogTex = makeSoftCircle(256, [[0,'rgba(130,160,200,0.28)'],[1,'rgba(130,160,200,0)']]);
-  var fog = new THREE.Sprite(new THREE.SpriteMaterial({map:fogTex, transparent:true, depthWrite:false}));
-  fog.scale.set(2.2, 1.2, 1);
+  function lamp(tex, w, h, z, x){
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending}));
+    s.scale.set(w, h, 1);
+    s.position.set(x, body.position.y + Ht*0.25, z);
+    return s;
+  }
+
+  // headlamps (white)
+  group.add(lamp(headTex, 0.42, 0.42, +L*0.52, -Wd*0.28));
+  group.add(lamp(headTex, 0.42, 0.42, +L*0.52, +Wd*0.28));
+  // taillamps (red)
+  group.add(lamp(redTex,  0.46, 0.46, -L*0.52, -Wd*0.28));
+  group.add(lamp(redTex,  0.46, 0.46, -L*0.52, +Wd*0.28));
+
+  // under-car fog/glow
+  const fogTex = makeSoftCircle(512, [[0,'rgba(140,170,210,0.32)'],[1,'rgba(140,170,210,0)']]);
+  const fog = new THREE.Sprite(new THREE.SpriteMaterial({map:fogTex, transparent:true, depthWrite:false}));
+  fog.scale.set(4.8, 2.2, 1);
   fog.position.set(0, body.position.y + 0.001, 0);
   fog.rotateX(-Math.PI/2);
   group.add(fog);
 
-  // motion params
   group.userData = {
-    speed: THREE.MathUtils.lerp(10, 20, Math.random()),   // cars are slower than light streaks
-    dir: isRedDir?1:-1
+    speed: THREE.MathUtils.lerp(7, 15, Math.random()), // a bit slower now that cars are big
+    dir: isRedDir ? 1 : -1
   };
   return group;
 }
 function seedTraffic(){
   trafficGroup.clear();
-  var count = 26; // fewer but larger
-  for (var i=0;i<count;i++){
-    var isRed = Math.random()<0.55;
-    var car = makeVehicle(isRed);
-    car.position.set(THREE.MathUtils.lerp(-0.35,0.35,Math.random()),
-                     0, -THREE.MathUtils.lerp(0,DEPTH,Math.random()));
+  const count = 18; // fewer, because each is bigger
+  for (let i=0;i<count;i++){
+    const isRed = Math.random()<0.55;
+    const car = makeVehicle(isRed);
+    car.position.set(THREE.MathUtils.lerp(-0.45,0.45,Math.random()), 0, -THREE.MathUtils.lerp(0,DEPTH,Math.random()));
     trafficGroup.add(car);
   }
 }
