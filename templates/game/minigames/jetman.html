@@ -516,6 +516,11 @@ var HITBOX_HALF = 0.55;
 /* Impact preview for the next bar (drawn on UI) */
 var nextImpactY = null;
 
+/* --- Building + cloud globals --- */
+var wallLen = 6; // reuse spacing as block depth
+var buildingsL = null, buildingsR = null;
+var cloudGroupTop = null, cloudGroupBot = null;
+
 function init3D(){
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e2141);
@@ -556,40 +561,120 @@ function init3D(){
   }
   scene.add(streaks);
 
-  makeWalls();
+  /* Sun apex glow */
+  (function(){
+    var c = document.createElement('canvas'); c.width = c.height = 256;
+    var x = c.getContext('2d');
+    var g = x.createRadialGradient(128,128,10,128,128,128);
+    g.addColorStop(0,'rgba(255,220,120,0.95)');
+    g.addColorStop(0.5,'rgba(255,200,80,0.35)');
+    g.addColorStop(1,'rgba(255,180,60,0.0)');
+    x.fillStyle=g; x.fillRect(0,0,256,256);
+    var tex = new THREE.CanvasTexture(c); tex.needsUpdate=true;
+    var mat = new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
+    var sun = new THREE.Sprite(mat);
+    sun.scale.set(18,18,1);
+    sun.position.set(0, corridorHeight*0.9, -55);
+    scene.add(sun);
+  })();
+
+  /* Buildings + clouds */
+  buildingsL = new THREE.Group(); buildingsR = new THREE.Group();
+  scene.add(buildingsL, buildingsR);
+  makeBuildings();
+
+  cloudGroupTop = new THREE.Group(); cloudGroupBot = new THREE.Group();
+  scene.add(cloudGroupTop, cloudGroupBot);
+  seedCloudsSetup();
+  seedClouds(cloudGroupTop, 18,  corridorHeight*0.45);
+  seedClouds(cloudGroupBot, 22, -corridorHeight*0.62);
 }
 
-/* Walls */
-var wallPoolL=[], wallPoolR=[], wallLen=6;
-function newWall(side){
-  // CHANGE #1: full-height side walls (no random height)
-  var h = corridorHeight;
-  var geo = new THREE.BoxGeometry(1.2, h, wallLen, 1,1,1);
-  var mat = new THREE.MeshStandardMaterial({ color:0x2ad4ff, roughness:.5, metalness:.22,
-    emissive:0x00aaff, emissiveIntensity:1.15 });
-  var m = new THREE.Mesh(geo, mat);
-  m.castShadow=false; m.receiveShadow=false;
-  m.userData.h = h;
-  scene.add(m);
-  return m;
+/* ===== Skyscraper canyon (procedural) ===== */
+function makeWindowTexture(opts){
+  opts = opts || {};
+  var W = opts.w || 128, H = opts.h || 256;
+  var c = document.createElement('canvas'); c.width=W; c.height=H;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle = opts.base || '#0b2b57';
+  ctx.fillRect(0,0,W,H);
+  for (var i=0;i<6;i++){
+    ctx.fillStyle = 'rgba(255,255,255,'+(0.012*i)+')';
+    ctx.fillRect((i/6)*W, 0, 2, H);
+  }
+  var gx = opts.gx || 8, gy = opts.gy || 20;
+  var padX = 6, padY = 6;
+  var cellW = (W - padX*2)/gx, cellH = (H - padY*2)/gy;
+  for (var y=0;y<gy;y++){
+    for (var x=0;x<gx;x++){
+      var on = Math.random() < (opts.lightProb || 0.55);
+      ctx.fillStyle = on ? (opts.lit || '#aef3ff') : (opts.unlit || '#123c66');
+      var rx = Math.round(padX + x*cellW + cellW*0.18);
+      var ry = Math.round(padY + y*cellH + cellH*0.22);
+      var rw = Math.round(cellW*0.64), rh = Math.round(cellH*0.42);
+      ctx.fillRect(rx, ry, rw, rh);
+      if (on){
+        ctx.fillStyle = 'rgba(174,243,255,0.08)';
+        ctx.fillRect(rx-1, ry-1, rw+2, rh+2);
+      }
+    }
+  }
+  var tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
 }
-function makeWalls(){
-  for(var i=0;i<28;i++){ wallPoolL.push(newWall('L')); wallPoolR.push(newWall('R')); }
-  layoutWalls();
-}
-function layoutWalls(){
+
+function makeBuildings(){
+  while (buildingsL.children.length) buildingsL.remove(buildingsL.children[0]);
+  while (buildingsR.children.length) buildingsR.remove(buildingsR.children[0]);
+
+  var winTexL = makeWindowTexture({ lightProb:0.58 });
+  var winTexR = makeWindowTexture({ lightProb:0.52 });
+  var facadeMatL = new THREE.MeshStandardMaterial({
+    map: winTexL, color:0xffffff, roughness:0.55, metalness:0.08,
+    emissive:0x0e5aa6, emissiveMap: winTexL, emissiveIntensity:0.18
+  });
+  var facadeMatR = new THREE.MeshStandardMaterial({
+    map: winTexR, color:0xffffff, roughness:0.55, metalness:0.08,
+    emissive:0x0e5aa6, emissiveMap: winTexR, emissiveIntensity:0.18
+  });
+
+  function buildingMesh(w,h,mat,side){
+    var g = new THREE.BoxGeometry(w, h, wallLen, 1,1,1);
+    var uv = g.attributes.uv;
+    for (var k=0; k<uv.count; k++){
+      var u = uv.getX(k), v = uv.getY(k);
+      uv.setXY(k, u*THREE.MathUtils.lerp(1.2,1.8, Math.random()*0.4), v*THREE.MathUtils.lerp(2.0,3.2, Math.random()*0.5));
+    }
+    var m = new THREE.Mesh(g, mat);
+    m.castShadow=false; m.receiveShadow=false;
+    var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(2,6, Math.random()) ) * (side==='L'?1:-1);
+    m.rotation.z = lean;
+    return m;
+  }
+
   var z = -10;
-  for(var i=0;i<wallPoolL.length;i++){
-    var mL = wallPoolL[i], mR = wallPoolR[i];
-    // full-height, fixed scale
-    mL.scale.y = 1; mR.scale.y = 1;
-    mL.position.set(-corridorHalf, -corridorHeight*0.5 + mL.userData.h/2, z);
-    mR.position.set( corridorHalf, -corridorHeight*0.5 + mR.userData.h/2, z);
-    z -= wallLen;
+  var blocks = 40;
+  for (var i=0;i<blocks;i++){
+    var depth = wallLen;
+    var widthL = THREE.MathUtils.lerp(0.9, 1.6, Math.random());
+    var widthR = THREE.MathUtils.lerp(0.9, 1.6, Math.random());
+    var hL = THREE.MathUtils.lerp(corridorHeight*0.9, corridorHeight*2.0, Math.random());
+    var hR = THREE.MathUtils.lerp(corridorHeight*0.9, corridorHeight*2.0, Math.random());
+
+    var bL = buildingMesh(widthL, hL, facadeMatL, 'L');
+    var bR = buildingMesh(widthR, hR, facadeMatR, 'R');
+
+    bL.position.set(-corridorHalf*1.02, -corridorHeight*0.5 + hL/2, z);
+    bR.position.set( corridorHalf*1.02, -corridorHeight*0.5 + hR/2, z);
+
+    buildingsL.add(bL); buildingsR.add(bR);
+    z -= depth;
   }
 }
 
-/* Obstacles — neon bars */
+/* Obstacles — neon bars (unchanged) */
 var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
@@ -616,24 +701,64 @@ function spawnObstacle(){
   group.position.set(0, h, -80);
 
   scene.add(group);
-  // CHANGE #2 (part A): store bar half-height (thickness/2) for precise collision
   obstacles.push({ mesh: group, type: 'bar', halfHeight: t/2 });
+}
+
+/* Clouds */
+var _cloudTex = null;
+function seedCloudsSetup(){
+  if (_cloudTex) return;
+  var s=256, c=document.createElement('canvas'); c.width=c.height=s;
+  var x=c.getContext('2d');
+  var g=x.createRadialGradient(s/2,s/2,30, s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,0.75)');
+  g.addColorStop(0.6,'rgba(255,255,255,0.35)');
+  g.addColorStop(1,'rgba(255,255,255,0.0)');
+  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2,s/2,0,Math.PI*2); x.fill();
+  _cloudTex=new THREE.CanvasTexture(c); _cloudTex.needsUpdate=true; _cloudTex.anisotropy=4;
+}
+function seedClouds(group, y){
+  for (var i=0;i< (group===cloudGroupTop?18:22); i++){
+    var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:_cloudTex, transparent:true, depthWrite:false }));
+    var sc = THREE.MathUtils.lerp(4, 10, Math.random());
+    sp.scale.set(sc, sc, 1);
+    sp.position.set(
+      (Math.random()-.5)*corridorHalf*2.2,
+      y + THREE.MathUtils.lerp(-0.5, 0.8, Math.random()),
+      -THREE.MathUtils.lerp(10, 110, Math.random())
+    );
+    sp.material.opacity = THREE.MathUtils.lerp(0.25, 0.6, Math.random());
+    group.add(sp);
+  }
+}
+function tickClouds(dt, dz){
+  var topPar = 0.5, botPar = 0.8;
+  cloudGroupTop.children.forEach(function(s,i){
+    s.position.z += dz*topPar;
+    s.position.y += Math.sin(time*0.6 + i)*0.003;
+    if (s.position.z > 5) s.position.z = -110;
+  });
+  cloudGroupBot.children.forEach(function(s,i){
+    s.position.z += dz*botPar;
+    s.position.y += Math.cos(time*0.5 + i)*0.003;
+    if (s.position.z > 5) s.position.z = -110;
+  });
 }
 
 /* Recycle world */
 function advanceWorld(dz){
   var minZ = 5, maxZ = -120;
-  for(var i=0;i<wallPoolL.length;i++){
-    var a=wallPoolL[i], b=wallPoolR[i];
-    a.position.z += dz; b.position.z += dz;
-    if(a.position.z > minZ){
-      a.position.z = maxZ; b.position.z = maxZ;
-      // keep full-height, fixed scale on recycle
-      a.scale.y = 1; b.scale.y = 1;
-      a.position.y = -corridorHeight*0.5 + a.userData.h/2;
-      b.position.y = -corridorHeight*0.5 + b.userData.h/2;
+
+  // slide buildings
+  if (buildingsL && buildingsR){
+    for(var i=0;i<buildingsL.children.length;i++){
+      var a = buildingsL.children[i], b = buildingsR.children[i];
+      a.position.z += dz; b.position.z += dz;
+      if(a.position.z > minZ){ a.position.z = maxZ; b.position.z = maxZ; }
     }
   }
+
+  // move obstacles (unchanged)
   for(var i=obstacles.length-1;i>=0;i--){
     var o=obstacles[i]; o.mesh.position.z += dz;
     if(o.mesh.position.z > 5){ scene.remove(o.mesh); obstacles.splice(i,1); continue; }
@@ -777,6 +902,7 @@ function frame(now){
   var mps = (speed/3.6) * (thrust?1.12:1.0);
   worldZ += mps*dt;
   advanceWorld((mps*dt));
+  tickClouds(dt, (mps*dt)); // parallax clouds
 
   spawnTimer += dt;
   if (spawnTimer > SPAWN_INTERVAL){
@@ -798,7 +924,6 @@ function frame(now){
       if (z < nearestZ){ nearestZ = z; nextImpactY = o.mesh.position.y; }
     }
     if (z > COLLISION_Z_NEAR && z < COLLISION_Z_FAR){
-      // CHANGE #2 (part B): precise collision using stored bar half-height
       var top  = o.mesh.position.y + o.halfHeight;
       var bot  = o.mesh.position.y - o.halfHeight;
       if (!(bandTop < bot || bandBot > top)){ gameOver(); return; }
