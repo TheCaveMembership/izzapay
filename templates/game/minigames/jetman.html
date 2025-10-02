@@ -525,6 +525,23 @@ var trafficGroup = null;
 var roofHazeGroup = null;
 var neonDustGroup = null;
 
+// === Real photo textures (JPG) ===
+// Put your images here (just a few is fine to start)
+const BUILDING_URLS = [
+  '/static/game/textures/buildings/b1.jpg',
+  '/static/game/textures/buildings/b2.jpg',
+  '/static/game/textures/buildings/b3.jpg'
+];
+const VEHICLE_URLS = [
+  '/static/game/textures/vehicles/v1.jpg',
+  '/static/game/textures/vehicles/v2.jpg',
+  '/static/game/textures/vehicles/v3.jpg'
+];
+
+let BUILDING_TEX = [];
+let VEHICLE_TEX  = [];
+const pickTex = arr => arr[(Math.random()*arr.length)|0];  // <-- move here (top-level)
+  
 /* ===== init3D ===== */
 function init3D(){
   scene = new THREE.Scene();
@@ -539,6 +556,22 @@ function init3D(){
   renderer.setPixelRatio(dpr); renderer.setSize(W,H,false);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
+
+  // Load textures now that renderer exists (for anisotropy caps)
+const loader = new THREE.TextureLoader();
+function prepTex(t){
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 4;
+  t.encoding = THREE.sRGBEncoding;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;
+  return t;
+}
+const pickTex = arr => arr[(Math.random()*arr.length)|0];
+
+BUILDING_TEX = BUILDING_URLS.map(u => prepTex(loader.load(u)));
+VEHICLE_TEX  = VEHICLE_URLS.map(u => prepTex(loader.load(u)));
 
   /* lights (unchanged) */
   var hemi = new THREE.HemisphereLight(0xbfdcff, 0x060b16, 0.9); scene.add(hemi);
@@ -770,6 +803,25 @@ function randomFacadeMaterial_glass(winTex){
   });
 }
 
+function facadeMaterial() {
+  if (BUILDING_TEX.length) {
+    const t = pickTex(BUILDING_TEX).clone(); // per-mesh instance so we can tweak repeat
+    t.repeat.set(
+      THREE.MathUtils.lerp(1.2, 2.2, Math.random()),
+      THREE.MathUtils.lerp(1.6, 3.2, Math.random())
+    );
+    t.needsUpdate = true;
+    return new THREE.MeshStandardMaterial({
+      map: t,
+      color: 0xffffff,
+      roughness: 0.6,
+      metalness: 0.12
+    });
+  }
+  // Fallback to your procedural glass if no JPGs present
+  return randomFacadeMaterial_glass(makeGlassFacadeTexture());
+}
+  
 function buildingMesh(w,h,mat,side){
   var g = new THREE.BoxGeometry(w, h, wallLen, 1,1,1);
   var uv = g.attributes.uv;
@@ -807,14 +859,18 @@ function buildingMesh(w,h,mat,side){
 }
   
 /* Rebuild with glass textures (uses your existing buildingMesh) */
+/* Rebuild with mixed façades */
 function makeBuildings(){
   if (!buildingsL || !buildingsR) return;
   while (buildingsL.children.length) buildingsL.remove(buildingsL.children[0]);
   while (buildingsR.children.length) buildingsR.remove(buildingsR.children[0]);
 
+  // keep your procedural textures for glass option
   var glassL = makeGlassFacadeTexture();
   var glassR = makeGlassFacadeTexture();
+
   var z = -10, blocks = 40;
+  var GLASS_RATIO = 0.5; // 0 = all photo, 1 = all your current glass
 
   for (var i=0;i<blocks;i++){
     var widthL = THREE.MathUtils.lerp(0.9, 1.8, Math.random());
@@ -822,8 +878,16 @@ function makeBuildings(){
     var hL = THREE.MathUtils.lerp(corridorHeight*0.95, corridorHeight*2.6, Math.random());
     var hR = THREE.MathUtils.lerp(corridorHeight*0.95, corridorHeight*2.6, Math.random());
 
-    var bL = buildingMesh(widthL, hL, randomFacadeMaterial_glass(glassL), 'L');
-    var bR = buildingMesh(widthR, hR, randomFacadeMaterial_glass(glassR), 'R');
+    // pick material per building
+    var matL = (Math.random() < GLASS_RATIO)
+      ? randomFacadeMaterial_glass(glassL)
+      : facadeMaterial();
+    var matR = (Math.random() < GLASS_RATIO)
+      ? randomFacadeMaterial_glass(glassR)
+      : facadeMaterial();
+
+    var bL = buildingMesh(widthL, hL, matL, 'L');
+    var bR = buildingMesh(widthR, hR, matR, 'R');
 
     var zOffset = THREE.MathUtils.lerp(-0.6, 0.6, Math.random());
     bL.position.set(-corridorHalf*1.02, -corridorHeight*0.5 + hL/2, z + zOffset);
@@ -962,19 +1026,39 @@ function addUnderglow(group, w, l, y){
   }
 }
 
+function vehicleBodyMat(baseColor){
+  if (VEHICLE_TEX.length){
+    const t = pickTex(VEHICLE_TEX).clone();
+    t.center.set(0.5, 0.5);
+    // Tiny randomization so multiple cars don’t look samey
+    t.rotation = THREE.MathUtils.degToRad((Math.random()<0.5)?0:180);
+    t.repeat.set(1.6, 1.2);
+    t.needsUpdate = true;
+    return new THREE.MeshStandardMaterial({
+      color: baseColor,
+      map: t,
+      roughness: 0.38,
+      metalness: 0.50
+    });
+  }
+  // Fallback: original plain material
+  return new THREE.MeshStandardMaterial({ color: baseColor, roughness:0.38, metalness:0.50 });
+}
+  
 /* Sedan / hatch */
 function makeSedan(dir, bodyColor){
   const group = new THREE.Group();
   const L=5.4, W=1.6, H=0.75;
   const y0 = -corridorHeight*0.55 + H/2 + 0.02;
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(W*0.96, H*0.55, L*0.78),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.35, metalness:0.5}));
-  body.position.y = y0; group.add(body);
-
-  const nose = new THREE.Mesh(new THREE.CapsuleGeometry(W*0.18, L*0.10, 6, 10),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.34, metalness:0.55}));
-  nose.rotation.x=Math.PI/2; nose.position.set(0, y0, (dir>0?1:-1)*L*0.34); group.add(nose);
+  const body = new THREE.Mesh(
+  new THREE.BoxGeometry(W*0.96, H*0.55, L*0.78),
+  vehicleBodyMat(bodyColor)
+);
+const nose = new THREE.Mesh(
+  new THREE.CapsuleGeometry(W*0.18, L*0.10, 6, 10),
+  vehicleBodyMat(bodyColor)
+);
 
   const roof = new THREE.Mesh(new THREE.BoxGeometry(W*0.76, H*0.48, L*0.35),
     new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
@@ -995,8 +1079,10 @@ function makePickup(dir, bodyColor){
   const L=5.8,W=1.8,H=0.9;
   const y0=-corridorHeight*0.55+H/2+0.02;
 
-  const cab=new THREE.Mesh(new THREE.BoxGeometry(W, H*0.55, L*0.45),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.38, metalness:0.5}));
+  const cab = new THREE.Mesh(
+  new THREE.BoxGeometry(W, H*0.55, L*0.45),
+  vehicleBodyMat(bodyColor)
+);
   cab.position.set(0,y0,-L*0.05); group.add(cab);
 
   const bed=new THREE.Mesh(new THREE.BoxGeometry(W*0.96,H*0.42,L*0.35),
@@ -1022,8 +1108,10 @@ function makeVan(dir, bodyColor){
   const L=6.2,W=1.9,H=1.1;
   const y0=-corridorHeight*0.55+H/2+0.02;
 
-  const hull=new THREE.Mesh(new THREE.BoxGeometry(W,H*0.7,L*0.80),
-    new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.42, metalness:0.45}));
+  const hull = new THREE.Mesh(
+  new THREE.BoxGeometry(W, H*0.7, L*0.80),
+  vehicleBodyMat(bodyColor)
+);
   hull.position.y=y0; group.add(hull);
 
   const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.9,H*0.35,L*0.45),
@@ -1045,8 +1133,10 @@ function makeSemi(dir, bodyColor){
   const L=11.0,W=2.0,H=1.2;
   const y0=-corridorHeight*0.55+H/2+0.02;
 
-  const trailer=new THREE.Mesh(new THREE.BoxGeometry(W*0.98,H*0.72,L*0.62),
-    new THREE.MeshStandardMaterial({color:0x16243f, roughness:0.65, metalness:0.15}));
+  const tractor = new THREE.Mesh(
+  new THREE.BoxGeometry(W*0.90, H*0.70, L*0.22),
+  vehicleBodyMat(bodyColor)
+);
   trailer.position.set(0,y0, -L*0.10); group.add(trailer);
 
   const tractor=new THREE.Mesh(new THREE.BoxGeometry(W*0.90,H*0.70,L*0.22),
