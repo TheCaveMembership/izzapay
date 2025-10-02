@@ -762,14 +762,13 @@ function frame(now){
   if (game.ended) return;
   var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
-  // THRUST UP: hold = accelerate upward; otherwise gravity pulls down
+  // HOLD = UP (flip the sign), release = gravity down
   var ay = (thrust ? +phys.thrust : -phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
 
-  // correct movement scale (no /60)
-  var nextY = player.y + player.vy*dt;
+  // keep the small motion scale to avoid instant crashes
+  var nextY = player.y + (player.vy*dt)/260;
 
-  // clamp once, in world coords
   if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
   player.y = Math.max(BOT_Y, Math.min(TOP_Y, nextY));
 
