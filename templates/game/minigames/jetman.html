@@ -74,7 +74,7 @@
       display:flex;flex-direction:column;gap:12px;align-items:center;backdrop-filter:blur(8px);box-shadow:0 12px 30px rgba(0,0,0,.35)}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border-radius:10px;border:1px solid var(--hudLine);
          background:rgba(255,255,255,.06);color:inherit;text-decoration:none;font-weight:800}
-    .finish{position:absolute;left:10px;right:10px;bottom:18px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
+    .finish{position:absolute;left:10px;right:10px;bottom:10px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
     .finish .pill{font-size:12px}
   </style>
 </head>
@@ -304,7 +304,7 @@ function ensureSession(){
     }).catch(function(){});
 }
 
-/* Avatar pipeline (unchanged) */
+/* Avatar pipeline */
 var SPRITES = {
   body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
   hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -321,43 +321,140 @@ function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&25
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
 function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
 
-/* ===== Mapping + margins (FIXED) ===== */
+function extractThreeToneRamp(img){
+  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  var d=c.getImageData(0,0,w,h).data, samples=[];
+  for(var i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; var r=d[i],g=d[i+1],b=d[i+2]; samples.push({r:r,g:g,b:b,L:lum(r,g,b)}); }
+  if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+  samples.sort(function(a,b){return a.L-b.L;});
+  function pick(q){ var idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); var s=samples[idx];
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
+  return [pick(0.2),pick(0.55),pick(0.85)];
+}
+function paletteSwap(img, fromRampHex, toRampHex, tolerance){
+  if(!tolerance) tolerance=2000;
+  var from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  var id=c.getImageData(0,0,w,h), d=id.data; var changed=0;
+  for(var i=0;i<d.length;i+=4){
+    if(d[i+3]===0) continue;
+    var p={r:d[i],g:d[i+1],b:d[i+2]}; var best=-1,score=1e9;
+    for(var k=0;k<from.length;k++){ var s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+    if(score<=tolerance){ var t=to[best]||to[1]||to[0];
+      if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
+      d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
+    }
+  }
+  c.putImageData(id,0,0);
+  return {canvas:oc, changedPixels:changed};
+}
+function overlayTint(img, hex, strength){
+  if(strength==null) strength=1.0;
+  var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  var id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+  function ov(a,b){a/=255;b/=255;var o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+  for(var i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+    var r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+    d[i]=Math.round(d[i]*(1-strength)+r*strength);
+    d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+    d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+  }
+  c.putImageData(id,0,0);
+  return oc;
+}
+function buildAvatarCanvas(dstCtx, size, profile){
+  return new Promise(function(resolve){
+    (function(){
+      var DW=size,DH=size,X=0,Y=0;
+      var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+      var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+      var femaleOut=profile.female_outfit_color||'blue';
+
+      var body=null;
+      function afterBody(){
+        Promise.all([
+          loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short),
+          (type==='female' ? Promise.resolve(null) : loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street))
+        ]).then(function(arr){
+          var hair=arr[0], outfit=arr[1];
+          var bodyCanvas;
+          if(body){
+            var targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+            var swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+            bodyCanvas=swapped.canvas;
+            if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
+          }
+          if(type==='female' && bodyCanvas){
+            var targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+            var reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+            bodyCanvas=reDress.canvas;
+            if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
+          }
+          dstCtx.clearRect(0,0,DW,DH);
+          if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+          if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+          if(hair){
+            var detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+            var swap=paletteSwap(hair, detected, target, 4000);
+            var hairCanvas=swap.canvas;
+            if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
+            var hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
+            dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
+          }
+          resolve();
+        });
+      }
+      if(type==='female'){
+        var femaleWide='/static/game/sprites/body/'+theme+'__female_wide.png';
+        var femaleSlim='/static/game/sprites/body/'+theme+'__female.png';
+        loadImg(femaleWide).then(function(img){
+          if(img) body=img;
+          return img ? img : loadImg(femaleSlim);
+        }).then(function(img){ if(img) body=img; afterBody(); });
+      } else {
+        loadImg(SPRITES.body[theme]||SPRITES.body.default).then(function(img){ body=img; afterBody(); });
+      }
+    })();
+  });
+}
+
+/* Offscreen sprite -> UI canvas */
+var jetmanCanvas = document.createElement('canvas');
+jetmanCanvas.width = jetmanCanvas.height = 96;
+var jetCtx = jetmanCanvas.getContext('2d'); jetCtx.imageSmoothingEnabled=false;
+
+/* ===== Mapping + margins (physics band) ===== */
 var W=0,H=0,dpr=1;
-var TOP_Y = 3.3, BOT_Y = -3.0; // world band
+var TOP_Y = 3.3, BOT_Y = -3.0;
 var TOP_PX_MARGIN = 0, BOT_PX_MARGIN = 0, pixelsPerWorld = 1;
 
 function computeMargins(){
-  var top = 90;      // HUD space
-  var bottom = 140;  // base
+  var top = 90;
+  var bottom = 160;
   try{
-    var envNum = parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0;
-    bottom += envNum;
+    var cs = getComputedStyle(document.documentElement);
+    var pb = parseInt(cs.getPropertyValue('padding-bottom')) || 0;
+    var envVal = cs.getPropertyValue('env(safe-area-inset-bottom)') || '0';
+    var envNum = parseInt(envVal) || 0;
+    bottom += Math.max(pb, envNum);
   }catch(_){}
-  if (window.visualViewport) {
-    var hidden = Math.max(0, Math.round(window.innerHeight - window.visualViewport.height));
-    var prev = Number(sessionStorage.getItem('vvHiddenMax')||0);
-    var vvMax = Math.max(prev, hidden);
-    sessionStorage.setItem('vvHiddenMax', String(vvMax));
-    bottom += vvMax;
+  if (window.visualViewport && window.innerHeight){
+    var hidden = Math.max(0, window.innerHeight - window.visualViewport.height);
+    bottom += Math.round(hidden);
   }
   return { top: top|0, bottom: bottom|0 };
 }
-
 function updateScale(){
   var m = computeMargins();
   TOP_PX_MARGIN = m.top|0;
   BOT_PX_MARGIN = m.bottom|0;
-
-  // usable must never collapse; guarantee a sane band
-  var usable = (H - TOP_PX_MARGIN - BOT_PX_MARGIN);
-  if (!isFinite(usable)) usable = H * 0.8;
-  usable = Math.max(160, Math.min(H - 40, usable)); // clamp to [160px, H-40]
-
+  var usable = Math.max(160, Math.min(H-40, H - TOP_PX_MARGIN - BOT_PX_MARGIN));
   pixelsPerWorld = usable / (TOP_Y - BOT_Y);
 }
-
 function worldToPxY(y){
-  // Map BOT_Y -> bottom usable pixel, TOP_Y -> top usable pixel
   var botPx = H - BOT_PX_MARGIN;
   var dy = (y - BOT_Y) * pixelsPerWorld;
   return botPx - dy;
@@ -365,7 +462,6 @@ function worldToPxY(y){
 
 /* ====== THREE / GAME ====== */
 var scene, camera, renderer;
-
 var glCvs = document.getElementById('gl');
 var uiCvs = document.getElementById('ui'), uiCtx = uiCvs.getContext('2d');
 uiCtx.imageSmoothingEnabled=false;
@@ -406,7 +502,7 @@ var corridorHalf=6.5, corridorHeight=10, DEPTH=300;
 
 /* Spawns/collision */
 var SPAWN_INTERVAL = 1.8;
-var COLLISION_Z_NEAR = -0.4;   // widened window
+var COLLISION_Z_NEAR = -0.4;
 var COLLISION_Z_FAR  =  1.8;
 var HITBOX_HALF = 0.55;
 
@@ -490,13 +586,13 @@ function layoutWalls(){
 var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
-  var t = THREE.MathUtils.lerp(0.28,0.42,Math.random());      // thicker
+  var t = THREE.MathUtils.lerp(0.28,0.42,Math.random());
   var margin = 0.10;
   var maxH = TOP_Y - HITBOX_HALF - margin;
   var minH = BOT_Y + HITBOX_HALF + margin;
   var h = THREE.MathUtils.lerp(minH, maxH, Math.random());
 
-  var geo = new THREE.BoxGeometry(w, t, 1.6);                 // deeper
+  var geo = new THREE.BoxGeometry(w, t, 1.6);
   var mat = new THREE.MeshStandardMaterial({
     color:0x00ff66, roughness:.2, metalness:.05,
     emissive:0x00ff66, emissiveIntensity:2.0
@@ -635,8 +731,8 @@ function drawUI(){
   uiCtx.restore();
 
   // Clamp sprite into visible band
-  var minY = botPx - hitH/2 - 8;              // keep above bottom line
-  var maxY = topPx + hitH/2 + 8;              // keep below top line
+  var minY = botPx - hitH/2 - 8;
+  var maxY = topPx + hitH/2 + 8;
   py = Math.max(minY, Math.min(maxY, py));
 
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
@@ -719,7 +815,6 @@ document.addEventListener('visibilitychange', function(){
 
 /* START */
 var startBtn = document.getElementById('startBtn');
-var LAST_CHARACTER = null;
 function ensureAvatarSprite(){
   try{
     var profile = LAST_CHARACTER || JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
