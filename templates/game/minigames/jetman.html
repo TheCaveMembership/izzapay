@@ -441,17 +441,6 @@ function init3D(){
   var amb = new THREE.AmbientLight(0x0e2f55, 0.9); scene.add(amb);
   var dir = new THREE.DirectionalLight(0xcfe6ff, 1.15); dir.position.set(-2,5,2); scene.add(dir);
 
-  /* far sky gradient plane */
-  (function(){
-    var c=document.createElement('canvas'); c.width=2; c.height=256;
-    var x=c.getContext('2d'); var g=x.createLinearGradient(0,0,0,256);
-    g.addColorStop(0,'#06101f'); g.addColorStop(.5,'#0a203a'); g.addColorStop(1,'#0e2b51');
-    x.fillStyle=g; x.fillRect(0,0,2,256);
-    var tex=new THREE.CanvasTexture(c); tex.magFilter=THREE.LinearFilter; tex.minFilter=THREE.LinearFilter; tex.generateMipmaps=false;
-    var m=new THREE.MeshBasicMaterial({map:tex, depthWrite:false});
-    var p=new THREE.Mesh(new THREE.PlaneGeometry(80,60), m); p.position.set(0,2,-120);
-    scene.add(p);
-  })();
 
   /* distant skyline silhouettes */
   skylineFar = new THREE.Group();
