@@ -77,6 +77,51 @@
          background:rgba(255,255,255,.06);color:inherit;text-decoration:none;font-weight:800; cursor:pointer}
     .finish{position:absolute;left:10px;right:10px;bottom:10px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
     .finish .pill{font-size:12px}
+    
+      .finish{position:absolute;left:10px;right:10px;bottom:10px;display:none;gap:8px;flex-wrap:wrap;z-index:7}
+    .finish .pill{font-size:12px}
+
+/* === HUD size/stacking tweaks (overrides) === */
+.hud{ gap:6px; }
+.row{ gap:6px; }
+
+.pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:var(--hud);
+  border:1px solid var(--hudLine);
+  backdrop-filter:blur(10px);
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+  line-height:1;
+  box-shadow:0 0 0 1px rgba(0,0,0,.15) inset, 0 2px 6px rgba(0,0,0,.25);
+}
+.pill strong{
+  display:inline-block;
+  font-size:13px;
+  color:var(--arcade);
+  text-shadow:0 0 8px rgba(160,245,255,.75);
+  font-variant-numeric: tabular-nums;
+  -moz-font-feature-settings:"tnum";
+  font-feature-settings:"tnum";
+  min-width:3.2ch;
+  text-align:right;
+}
+.btn{
+  padding:7px 12px;
+  border-radius:10px;
+  font-weight:800;
+  font-size:12px;
+}
+@media (max-width:380px){
+  .pill{ font-size:10px; padding:3px 7px; }
+  .pill strong{ font-size:12px; min-width:3ch; }
+}
+/* === end overrides === */
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -741,40 +786,21 @@ function spawnObstacle(){
   var h = THREE.MathUtils.lerp(minH, maxH, Math.random());
   var geo = new THREE.BoxGeometry(w, t, 1.6);
 
-  // pure neon green in linear space
-  var neon = new THREE.Color(0x39ff14).convertSRGBToLinear();
-
-  var mat = new THREE.MeshStandardMaterial({
+  // Solid neon green, unlit, unaffected by fog or tone mapping
+  var neon = 0x39ff14;
+  var mat = new THREE.MeshBasicMaterial({
     color: neon,
-    roughness: 0.10,
-    metalness: 0.05,
-    emissive: neon,
-    emissiveIntensity: 7.0
+    fog: false,
+    toneMapped: false
   });
   var bar = new THREE.Mesh(geo, mat);
 
-  // additive glow planes, not affected by fog/tone mapping
-  var glowGeo = new THREE.PlaneGeometry(w*1.12, t*10.0);
-  var glowMat = new THREE.MeshBasicMaterial({
-    color: neon,
-    transparent: true,
-    opacity: 0.85,
-    depthWrite: false,
-    fog: false,
-    toneMapped: false,
-    blending: THREE.AdditiveBlending
-  });
-  var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.03;
-  var glow2 = glow1.clone(); glow2.position.z -= 0.03;
+  // Place as a single mesh (no glow planes)
+  bar.position.set(0, h, -80);
+  scene.add(bar);
 
-  var group = new THREE.Group();
-  group.add(bar, glow1, glow2);
-  group.position.set(0, h, -80);
-
-  scene.add(group);
-  obstacles.push({ mesh: group, type: 'bar', halfHeight: t/2 });
+  obstacles.push({ mesh: bar, type: 'bar', halfHeight: t/2 });
 }
-
 /* ===== Clouds / Neon dust motion ===== */
 var _cloudTex = null;
 function seedCloudsSetup(){
