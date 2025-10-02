@@ -315,7 +315,8 @@
   <button class="startBtn" id="againBtn">Play Again</button>
   <a class="cityBtn" id="cityBtn" href="/izza-game/play">GO TO IZZA CITY</a>
   <!-- in the END GAME POPUP button row -->
-<button class="cityBtn" id="arcadeBtn" type="button">RETURN TO IZZA ARCADE</button>
+<!-- after -->
+<a class="cityBtn" id="arcadeBtn" href="/izza-game/minigames">RETURN TO IZZA ARCADE</a>
 </div>
       </div>
     </div>
@@ -376,8 +377,9 @@ function withAuth(href){
 document.getElementById('cityBtn').href = withAuth('/izza-game/play');
 
 /* ---- Return to Arcade with wallet handoff + safe back ---- */
+/* ---- Return to Arcade with wallet handoff + safe back ---- */
 function handoffToArcade() {
-  // 1) pack a short-lived handoff for Arena (same format you already consume)
+  // 1) pack a short-lived handoff (same as before)
   try {
     const u = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) || '';
     const payload = {
@@ -389,24 +391,35 @@ function handoffToArcade() {
     sessionStorage.setItem('izzaWalletHandoff', JSON.stringify(payload));
   } catch(_) {}
 
-  // 2) best-effort persist snapshot before leaving
+  // 2) best-effort persist
   (async () => { try { await persistWalletAndSave(); } catch(_) {} })();
 
-  // 3) prefer real "back", else hard-navigate to arena with auth; finally fall back to City
-  const arenaHref = withAuth('/izza-game/arena');
+  // 3) go to the Arena hub (same route as Basketball)
+  const arenaHref = withAuth('/izza-game/minigames');
   const cityHref  = withAuth('/izza-game/play');
+
   const ref = document.referrer || '';
-  if (/\/izza-game\/arena\b/.test(ref)) {
+  if (/\/izza-game\/minigames\b/.test(ref)) {
     history.back();
   } else {
-    // try arena first; if that route 404s on your server, City is a safe landing
     location.href = arenaHref;
-    // simple timed fallback to City if arena doesn’t exist
-    setTimeout(() => { if (document.visibilityState !== 'hidden') location.href = cityHref; }, 1200);
+    setTimeout(() => {
+      if (document.visibilityState !== 'hidden') location.href = cityHref;
+    }, 1200);
   }
 }
-document.getElementById('arcadeBtn')?.addEventListener('click', handoffToArcade);
 
+const arcadeLink = document.getElementById('arcadeBtn');
+arcadeLink?.addEventListener('click', (e) => { e.preventDefault(); handoffToArcade(); });
+
+/* END overlay links keep auth */
+(function keepAuthOnCity(){
+  const c = document.getElementById('cityBtn');
+  if (c) c.setAttribute('href', withAuth(c.getAttribute('href')));
+  const a = document.getElementById('arcadeBtn');
+  if (a) a.setAttribute('href', withAuth('/izza-game/minigames'));
+})();
+  
 /* ====== Wallet helper funcs (same behavior as Basketball) ====== */
 function bearerHeaders(base = {}) {
   const headers = Object.assign({ 'content-type':'application/json' }, base || {});
