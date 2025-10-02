@@ -714,43 +714,48 @@ function drawUI(){
   uiCtx.clearRect(0,0,W,H);
 
   var spriteW = 96, spriteH = 96;
-  var cx = W/2;
+var cx = W/2;
 
-  var topPx = worldToPxY(TOP_Y);
-  var botPx = worldToPxY(BOT_Y);
+// raw world→screen Y
+var pyRaw = worldToPxY(player.y);
 
-  // -- shared clamped Y for hitbox + sprite (kept perfectly in sync) --
-  var hitH = (HITBOX_HALF*2) * pixelsPerWorld;
-  var pyRaw = worldToPxY(player.y);
-  var py = Math.max(botPx - hitH/2 - 8, Math.min(topPx + hitH/2 + 8, pyRaw));
+var topPx = worldToPxY(TOP_Y);
+var botPx = worldToPxY(BOT_Y);
 
-  // band lines
-  uiCtx.save();
-  uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
-  uiCtx.lineWidth = 2;
-  uiCtx.setLineDash([6,6]);
-  uiCtx.beginPath(); uiCtx.moveTo(0, topPx); uiCtx.lineTo(W, topPx); uiCtx.stroke();
-  uiCtx.beginPath(); uiCtx.moveTo(0, botPx); uiCtx.lineTo(W, botPx); uiCtx.stroke();
-  uiCtx.restore();
+// hitbox size in pixels
+var hitH = (HITBOX_HALF*2) * pixelsPerWorld;
 
-  // hitbox (same clamped py)
-  uiCtx.save();
-  uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
-  uiCtx.lineWidth = 2;
-  uiCtx.setLineDash([8,6]);
-  uiCtx.strokeRect(cx - 96/2, py - hitH/2, 96, hitH);
-  uiCtx.restore();
+// clamp once, use everywhere (box + sprite)
+var minY = botPx - hitH/2 - 8;
+var maxY = topPx + hitH/2 + 8;
+var py = Math.max(minY, Math.min(maxY, pyRaw));
 
-  // sprite + flame (same clamped py)
-  var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
-  uiCtx.fillStyle='rgba(255,240,140,.95)';
-  uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
-  uiCtx.fillStyle='rgba(120,220,255,.65)';
-  uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
+// band lines
+uiCtx.save();
+uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
+uiCtx.lineWidth = 2;
+uiCtx.setLineDash([6,6]);
+uiCtx.beginPath(); uiCtx.moveTo(0, topPx); uiCtx.lineTo(W, topPx); uiCtx.stroke();
+uiCtx.beginPath(); uiCtx.moveTo(0, botPx); uiCtx.lineTo(W, botPx); uiCtx.stroke();
+uiCtx.restore();
 
-  uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.52, spriteW, spriteH);
+// red hitbox — now uses the same clamped py
+uiCtx.save();
+uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
+uiCtx.lineWidth = 2;
+uiCtx.setLineDash([8,6]);
+uiCtx.strokeRect(cx - 96/2, py - hitH/2, 96, hitH);
+uiCtx.restore();
+
+// sprite (same clamped py)
+var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
+uiCtx.fillStyle='rgba(255,240,140,.95)';
+uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
+uiCtx.fillStyle='rgba(120,220,255,.65)';
+uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.65, py+6, flameLen*0.6, 6, 0, 0, Math.PI*2); uiCtx.fill();
+
+uiCtx.drawImage(jetmanCanvas, cx - spriteW/2, py - spriteH*0.52, spriteW, spriteH);
 }
-
 /* Loop */
 var spawnTimer=0;
 function frame(now){
