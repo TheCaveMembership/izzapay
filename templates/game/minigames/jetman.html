@@ -320,6 +320,7 @@ function loadImg(src){ return new Promise(function(res){ var i=new Image(); i.cr
 function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
 function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
+
 function extractThreeToneRamp(img){
   var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
   var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -328,7 +329,7 @@ function extractThreeToneRamp(img){
   if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
   samples.sort(function(a,b){return a.L-b.L;});
   function pick(q){ var idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); var s=samples[idx];
-    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); }
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
   return [pick(0.2),pick(0.55),pick(0.85)];
 }
 function paletteSwap(img, fromRampHex, toRampHex, tolerance){
@@ -371,6 +372,7 @@ function buildAvatarCanvas(dstCtx, size, profile){
       var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       var femaleOut=profile.female_outfit_color||'blue';
+
       var body=null;
       function afterBody(){
         Promise.all([
@@ -465,9 +467,21 @@ var uiCvs = document.getElementById('ui'), uiCtx = uiCvs.getContext('2d');
 uiCtx.imageSmoothingEnabled=false;
 
 uiCvs.addEventListener('contextmenu', function(e){ e.preventDefault(); }, false);
-uiCvs.addEventListener('touchstart', function(e){ e.preventDefault(); }, {passive:false});
-uiCvs.addEventListener('pointerdown', function(e){ e.preventDefault(); }, false);
-uiCvs.addEventListener('pointermove', function(e){ e.preventDefault(); }, {passive:false});
+
+/* input: support mouse, pointer & touch explicitly */
+let thrust=false;
+function startThrust(){ thrust=true; }
+function stopThrust(){ thrust=false; }
+
+uiCvs.addEventListener('pointerdown', function(e){ e.preventDefault(); startThrust(); }, false);
+uiCvs.addEventListener('pointerup',   function(){ stopThrust(); }, false);
+uiCvs.addEventListener('pointercancel', function(){ stopThrust(); }, false);
+uiCvs.addEventListener('touchstart', function(e){ e.preventDefault(); startThrust(); }, {passive:false});
+uiCvs.addEventListener('touchend',   function(){ stopThrust(); }, false);
+uiCvs.addEventListener('touchcancel',function(){ stopThrust(); }, false);
+
+addEventListener('keydown',function(e){ if(e.code==='Space') startThrust(); }, false);
+addEventListener('keyup',  function(e){ if(e.code==='Space') stopThrust(); }, false);
 
 function hardResize(){
   var r = glCvs.getBoundingClientRect();
@@ -489,10 +503,6 @@ ensureSized(); addEventListener('resize', function(){ ensureSized(); }, false);
 /* Player vertical motion */
 var player = { y: 0, vy:0, r:18 };
 var phys = { g: 1500, thrust: 1850, maxVy: 820 };
-var thrust=false; addEventListener('keydown',function(e){ if(e.code==='Space') thrust=true; }, false);
-addEventListener('keyup',function(e){ if(e.code==='Space') thrust=false; }, false);
-uiCvs.addEventListener('pointerdown', function(){ thrust=true; }, false);
-addEventListener('pointerup', function(){ thrust=false; }, false);
 
 /* Speed / world */
 var worldZ=0, speed=110, time=0, last=performance.now();
@@ -710,7 +720,7 @@ function drawUI(){
   var topPx = worldToPxY(TOP_Y);
   var botPx = worldToPxY(BOT_Y);
 
-  // --- CLAMP FIRST so hitbox and sprite share the exact same Y ---
+  // -- shared clamped Y for hitbox + sprite (kept perfectly in sync) --
   var hitH = (HITBOX_HALF*2) * pixelsPerWorld;
   var pyRaw = worldToPxY(player.y);
   var py = Math.max(botPx - hitH/2 - 8, Math.min(topPx + hitH/2 + 8, pyRaw));
@@ -748,8 +758,8 @@ function frame(now){
   if (game.ended) return;
   var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
-  // FIX 1: thrust moves UP now
-  var ay = (thrust ? phys.thrust : -phys.g);
+  // THRUST UP: hold = accelerate upward; otherwise gravity pulls down
+  var ay = (thrust ? +phys.thrust : -phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
   var nextY = player.y + (player.vy*dt)/260;
   if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
