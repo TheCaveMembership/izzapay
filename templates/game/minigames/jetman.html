@@ -137,19 +137,36 @@
       </div>
     </div>
 
-    <div id="startOverlay" class="startOverlay" aria-live="polite">
-      <div class="startCard">
-        <div style="font-weight:900;letter-spacing:.4px">JETMAN ROOFTOPS</div>
-        <div style="font-size:12px;opacity:.95;text-align:center">
-          Tap/hold to thrust up. <strong>Dodge neon bars</strong>. Touching a bar or the top/ground = crash.
-        </div>
-        <div class="row">
-          <a id="backBtn" class="btn" href="/izza-game/minigames">← Back</a>
-          <button id="startBtn" class="btn" type="button">START</button>
-          <a id="cityBtn" class="btn" href="/izza-game/play">City</a>
-        </div>
-      </div>
+    <div id="startOverlay" class="startOverlay" aria-live="polite"
+     style="background:
+       url('/static/game/images/start_bg.jpg') center/cover no-repeat,
+       radial-gradient(120% 120% at 50% 70%, rgba(100,190,255,.18), rgba(0,0,0,.45));
+     ">
+  <div class="startCard" style="gap:14px; text-align:center">
+    <h1 style="
+      margin:0;
+      font-size:22px;
+      font-weight:900;
+      letter-spacing:1px;
+      color:#aef3ff;
+      text-shadow:0 0 10px rgba(50,150,255,.9), 0 0 20px rgba(0,255,255,.7);
+    ">
+      IZZA JET-MON
+    </h1>
+
+    <div style="font-size:12.5px;opacity:.98;line-height:1.35">
+      Tap &amp; hold to <strong>THRUST</strong>.<br/>
+      Thread the city and <strong style="color:#39ff14">dodge NEON BARS</strong>.<br/>
+      Touch a bar, the roof, or the street = 💥 crash!
     </div>
+
+    <div class="row" style="justify-content:center">
+      <a id="backBtn" class="btn" href="/izza-game/minigames">← Back</a>
+      <button id="startBtn" class="btn" type="button">START</button>
+      <a id="cityBtn" class="btn" href="/izza-game/play">City</a>
+    </div>
+  </div>
+</div>
 
     <canvas id="gl"></canvas>
     <canvas id="ui"></canvas>
@@ -182,6 +199,7 @@ function withAuth(href){ var url = new URL(href, location.origin); if (T) url.se
 document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
 document.getElementById('cityBtn').href   = withAuth('/izza-game/play');
 document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
+document.getElementById('arenaBtn').href = withAuth('/izza-game/minigames');
 
 function bearerHeaders(base) { var headers = Object.assign({ 'content-type':'application/json' }, base || {}); try{ var bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
   return headers; }
@@ -1343,6 +1361,7 @@ document.getElementById('startBtn').addEventListener('click', startGame, false);
 document.getElementById('startBtn').addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, false);
 
 document.getElementById('againBtn').addEventListener('click', function(){
+  
   finishEl.style.display='none';
   runStartCoins = readCoinsLS()|0;
   if (scene){ while(scene.children.length) scene.remove(scene.children[0]); }
