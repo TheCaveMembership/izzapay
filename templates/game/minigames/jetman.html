@@ -459,12 +459,12 @@ function init3D(){
     scene.add(skylineFar);
   })();
 
-  /* asphalt street (single long plane) + center emissive (unchanged visuals) */
+  /* asphalt street (single long plane) + center emissive */
   (function(){
     var Wc=256,Hc=256,c=document.createElement('canvas'); c.width=Wc; c.height=Hc;
     var x=c.getContext('2d');
     x.fillStyle='#0a1426'; x.fillRect(0,0,Wc,Hc);
-    for(var i=0;i<1400;i++){
+    for(var i=0;i<1200;i++){
       var a=Math.random()*0.06+0.06;
       x.fillStyle='rgba(255,255,255,'+a+')';
       x.fillRect((Math.random()*Wc)|0,(Math.random()*Hc)|0,1,1);
@@ -508,7 +508,7 @@ function init3D(){
     scene.add(backCap);
   })();
 
-  /* neon dust (replaces rain) */
+  /* neon dust — reduced amount */
   neonDustGroup = new THREE.Group();
   (function(){
     function dustTex(col){
@@ -523,12 +523,13 @@ function init3D(){
       [0,255,245],    // neon teal
       [255,120,220]   // neon pink
     ];
-    for (var i=0;i<160;i++){
+    var COUNT = 60; // reduced
+    for (var i=0;i<COUNT;i++){
       var col = paletteRGB[(Math.random()*paletteRGB.length)|0];
       var sTex = dustTex(col);
-      var m = new THREE.SpriteMaterial({ map:sTex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, opacity:THREE.MathUtils.lerp(0.4,0.85,Math.random()) });
+      var m = new THREE.SpriteMaterial({ map:sTex, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, opacity:THREE.MathUtils.lerp(0.35,0.75,Math.random()) });
       var p = new THREE.Sprite(m);
-      var sc = THREE.MathUtils.lerp(0.10, 0.35, Math.random());
+      var sc = THREE.MathUtils.lerp(0.10, 0.30, Math.random());
       p.scale.set(sc*4, sc*4, 1);
       p.position.set((Math.random()-.5)*corridorHalf*2.2, (Math.random()-.5)*4.2, -THREE.MathUtils.lerp(5,110,Math.random()));
       p.userData.vx = THREE.MathUtils.lerp(-0.05,0.05,Math.random());
@@ -549,7 +550,7 @@ function init3D(){
 
   hazeGroup = new THREE.Group();
   (function(){
-    for (var i=0;i<12;i++){
+    for (var i=0;i<10;i++){
       var hC = makeSoftCircle(256, [ [0,'rgba(120,180,220,0.10)'], [1,'rgba(120,180,220,0)'] ]);
       var mat = new THREE.SpriteMaterial({ map:hC, transparent:true, depthWrite:false, depthTest:false });
       var s = new THREE.Sprite(mat);
@@ -561,7 +562,7 @@ function init3D(){
     scene.add(hazeGroup);
   })();
 
-  /* ROOFLINE HAZE STRIP — keeps horizon soft */
+  /* ROOFLINE HAZE STRIP — soft horizon */
   roofHazeGroup = new THREE.Group();
   (function(){
     var tex = makeSoftCircle(512, [
@@ -596,48 +597,97 @@ function makeSoftCircle(size, stops){
   return t;
 }
 
-/* ===== window textures & brick (NEON WINDOWS) ===== */
+/* global neon palette for facades */
+const NEON_COLORS = ['#66ffd9','#7bff7b','#aefbff','#ff77dd','#ffd46b','#ff8c3a','#7aa6ff','#a78bfa'];
+
+/* ===== window textures & brick (larger realistic windows + multi-neon) ===== */
 function makeWindowTexture(opts){
   opts = opts || {};
-  var W = opts.w || 128, H = opts.h || 256;
+  var W = opts.w || 192, H = opts.h || 384;            // bigger texture = crisper windows
   var c = document.createElement('canvas'); c.width=W; c.height=H;
   var ctx = c.getContext('2d');
-  ctx.fillStyle = opts.base || '#0a2a4f';
+
+  // neutral base (remove blue hue)
+  ctx.fillStyle = opts.base || '#0b1a2e';
   ctx.fillRect(0,0,W,H);
 
   // subtle vertical banding
   for (var i=0;i<6;i++){
-    ctx.fillStyle = 'rgba(200,230,255,'+(0.012*i)+')';
+    ctx.fillStyle = 'rgba(220,235,255,'+(0.010*i)+')';
     ctx.fillRect(Math.round((i/6)*W), 0, 2, H);
   }
 
-  var grids = [
-    {gx:6, gy:16}, {gx:8, gy:20}, {gx:10, gy:24}
-  ];
-  var G = grids[(Math.random()*grids.length)|0];
-  var gx = opts.gx || G.gx, gy = opts.gy || G.gy, padX = 6, padY = 6;
+  // larger, squarer windows (reduced jitter)
+  var gx = opts.gx || 6, gy = opts.gy || 14;          // fewer = larger
+  var padX = 8, padY = 8;
   var cellW = (W - padX*2)/gx, cellH = (H - padY*2)/gy;
 
-  // hotter palette + magenta accents
-  var palette = ['#fff6c4','#ffd46b','#ffb640','#aefbff','#86e0ff','#66ffd9','#ff77dd'];
+  var palette = ['#fff6c4','#ffd46b','#ffb640','#aefbff','#86e0ff','#66ffd9','#7bff7b','#ff77dd'];
   for (var y=0;y<gy;y++){
     for (var x=0;x<gx;x++){
-      var on = Math.random() < (opts.lightProb || 0.80);
-      var col = on ? palette[(Math.random()*palette.length)|0] : (opts.unlit || '#0f2e53');
+      var on = Math.random() < (opts.lightProb || 0.86);
+      var col = on ? palette[(Math.random()*palette.length)|0] : (opts.unlit || '#0e2747');
       ctx.fillStyle = col;
-      var rx = Math.round(padX + x*cellW + cellW*THREE.MathUtils.lerp(0.12,0.22,Math.random()));
-      var ry = Math.round(padY + y*cellH + cellH*THREE.MathUtils.lerp(0.15,0.30,Math.random()));
-      var rw = Math.round(cellW*THREE.MathUtils.lerp(0.45,0.80,Math.random()));
-      var rh = Math.round(cellH*THREE.MathUtils.lerp(0.25,0.55,Math.random()));
+
+      // gentle alignment + constrained randomness
+      var rx = Math.round(padX + x*cellW + cellW*0.12);
+      var ry = Math.round(padY + y*cellH + cellH*0.12);
+      var rw = Math.round(cellW*THREE.MathUtils.lerp(0.65,0.90,Math.random())); // wider
+      var rh = Math.round(cellH*THREE.MathUtils.lerp(0.55,0.85,Math.random())); // taller
       ctx.fillRect(rx, ry, rw, rh);
+
       if (on){
         ctx.globalCompositeOperation = 'screen';
-        ctx.fillStyle = 'rgba(255,255,255,0.40)'; ctx.fillRect(rx-1, ry-1, rw+2, rh+2);
-        ctx.fillStyle = 'rgba(255,255,255,0.20)'; ctx.fillRect(rx-2, ry-2, rw+4, rh+4);
+        ctx.fillStyle = 'rgba(255,255,255,0.38)'; ctx.fillRect(rx-1, ry-1, rw+2, rh+2);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(rx-2, ry-2, rw+4, rh+4);
         ctx.globalCompositeOperation = 'source-over';
       }
     }
   }
+
+  // MULTI-COLOR VERTICAL NEON BANDS & EDGE GLOWS
+  ctx.globalCompositeOperation = 'screen';
+  var bandN = 3 + ((Math.random()*3)|0); // 3–6 bands
+  for (var i=0;i<bandN;i++){
+    var col = NEON_COLORS[(Math.random()*NEON_COLORS.length)|0];
+    var bx = Math.round(THREE.MathUtils.lerp(12, W-14, Math.random()));
+    var bw = Math.round(THREE.MathUtils.lerp(3, 6, Math.random())); // core
+    var glow = Math.round(bw * THREE.MathUtils.lerp(4.0, 6.0, Math.random()));
+
+    // core
+    ctx.fillStyle = col;
+    ctx.fillRect(bx, 6, bw, H-12);
+
+    // outer glow
+    var g1 = ctx.createLinearGradient(bx-glow,0,bx,0);
+    g1.addColorStop(0, col+'00'); g1.addColorStop(1, col+'cc');
+    ctx.fillStyle=g1; ctx.fillRect(bx-glow,0,glow,H);
+    var g2 = ctx.createLinearGradient(bx+bw,0,bx+bw+glow,0);
+    g2.addColorStop(0, col+'cc'); g2.addColorStop(1, col+'00');
+    ctx.fillStyle=g2; ctx.fillRect(bx+bw,0,glow,H);
+
+    // occasional gaps
+    if (Math.random()<0.55){
+      var gaps = 2 + ((Math.random()*3)|0);
+      for (var gk=0; gk<gaps; gk++){
+        var gy = Math.round(THREE.MathUtils.lerp(12, H-30, Math.random()));
+        var gh = Math.round(THREE.MathUtils.lerp(8, 24, Math.random()));
+        ctx.clearRect(bx-2, gy, bw+4, gh);
+      }
+    }
+  }
+  // Edge glows
+  var edgeW = Math.round(THREE.MathUtils.lerp(10, 18, Math.random()));
+  var leftCol  = NEON_COLORS[(Math.random()*NEON_COLORS.length)|0];
+  var rightCol = NEON_COLORS[(Math.random()*NEON_COLORS.length)|0];
+  var egL = ctx.createLinearGradient(0,0, edgeW,0);
+  egL.addColorStop(0, leftCol+'e0'); egL.addColorStop(1, leftCol+'00');
+  ctx.fillStyle = egL; ctx.fillRect(0, 0, edgeW, H);
+  var egR = ctx.createLinearGradient(W-edgeW,0, W,0);
+  egR.addColorStop(0, rightCol+'00'); egR.addColorStop(1, rightCol+'e0');
+  ctx.fillStyle = egR; ctx.fillRect(W-edgeW, 0, edgeW, H);
+  ctx.globalCompositeOperation = 'source-over';
+
   var tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = 4; tex.generateMipmaps=false; tex.minFilter=THREE.LinearFilter;
@@ -646,14 +696,14 @@ function makeWindowTexture(opts){
 function makeBrickTexture(){
   var W=128,H=128,c=document.createElement('canvas'); c.width=W; c.height=H;
   var x=c.getContext('2d'); x.fillStyle='#1a2540'; x.fillRect(0,0,W,H);
-  x.fillStyle='#243459';
+  x.fillStyle='#2a3b61';
   var h=12, w=28, gap=2;
   for(var row=0,y=0;y<H;y+=h+gap,row++){
     var offset = (row%2? (w/2)|0 : 0);
     for(var cx= -offset; cx<W; cx+=w+gap){
       x.fillRect(cx, y, w, h);
-      x.fillStyle='rgba(0,0,0,0.12)'; x.fillRect(cx, y+h-1, w, 1);
-      x.fillStyle='#243459';
+      x.fillStyle='rgba(0,0,0,0.14)'; x.fillRect(cx, y+h-1, w, 1);
+      x.fillStyle='#2a3b61';
     }
   }
   var t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(2,6);
@@ -661,21 +711,22 @@ function makeBrickTexture(){
   return t;
 }
 function randomFacadeMaterial(winTex, side){
-  if (Math.random() < 0.25){
+  // sometimes a dark brick (non-neon) for variety
+  if (Math.random() < 0.22){
     var brick=makeBrickTexture();
     return new THREE.MeshStandardMaterial({
       map: brick, color:0xffffff,
       roughness: 0.7, metalness: 0.06,
     });
   }
-  var hueTint = side==='L' ? 0x0e5aa6 : 0x0b4e94;
+  // remove blue tint: emissive white so neon/window colors show true
   return new THREE.MeshStandardMaterial({
     map: winTex, color:0xffffff,
     roughness: THREE.MathUtils.lerp(0.45,0.62,Math.random()),
     metalness: THREE.MathUtils.lerp(0.08,0.16,Math.random()),
-    emissive: hueTint,
+    emissive: 0xffffff,
     emissiveMap: winTex,
-    emissiveIntensity: THREE.MathUtils.lerp(1.6, 2.6, Math.random())  // MUCH brighter window glow
+    emissiveIntensity: THREE.MathUtils.lerp(2.4, 3.4, Math.random())
   });
 }
 function buildingMesh(w,h,mat,side){
@@ -689,6 +740,7 @@ function buildingMesh(w,h,mat,side){
   var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(1.5,6.5, Math.random()) ) * (side==='L'?1:-1);
   m.rotation.z = lean;
 
+  // roof/antenna details
   var r = Math.random();
   if (r<0.30){
     var roof = new THREE.Mesh(new THREE.BoxGeometry(w*THREE.MathUtils.lerp(.45,.85,Math.random()), w*THREE.MathUtils.lerp(.16,.28,Math.random()), wallLen*0.55),
@@ -717,8 +769,8 @@ function makeBuildings(){
   while (buildingsL.children.length) buildingsL.remove(buildingsL.children[0]);
   while (buildingsR.children.length) buildingsR.remove(buildingsR.children[0]);
 
-  var winTexL = makeWindowTexture({ lightProb:0.92 });
-  var winTexR = makeWindowTexture({ lightProb:0.88 });
+  var winTexL = makeWindowTexture({ lightProb:0.93 });
+  var winTexR = makeWindowTexture({ lightProb:0.90 });
   var z = -10, blocks = 40;
   for (var i=0;i<blocks;i++){
     var widthL = THREE.MathUtils.lerp(0.9, 1.8, Math.random());
@@ -738,30 +790,29 @@ function makeBuildings(){
   }
 }
 
-/* ===== Obstacles — yellow/green neon bars ===== */
+/* ===== Obstacles — NEON GREEN bars ===== */
 var obstacles=[];
 function spawnObstacle(){
   var w = corridorHalf*1.95;
-  var t = THREE.MathUtils.lerp(0.28,0.42,Math.random());
+  var t = THREE.MathUtils.lerp(0.30,0.44,Math.random());
   var margin = 0.10;
   var maxH = TOP_Y - HITBOX_HALF - margin;
   var minH = BOT_Y + HITBOX_HALF + margin*0.2;
   var h = THREE.MathUtils.lerp(minH, maxH, Math.random());
-    var geo = new THREE.BoxGeometry(w, t, 1.6);
-  // bright yellow→green band
-  var hue = THREE.MathUtils.lerp(0.17, 0.33, Math.random()); // ~yellow→green
-  var neon = new THREE.Color().setHSL(hue, 1.0, 0.5);
+  var geo = new THREE.BoxGeometry(w, t, 1.6);
 
+  // neon green (#39ff14)
+  var neon = new THREE.Color(0x39ff14);
   var mat = new THREE.MeshStandardMaterial({
-    color: neon, roughness: .15, metalness: .05,
-    emissive: neon, emissiveIntensity: 3.0
+    color: neon, roughness: .12, metalness: .06,
+    emissive: neon, emissiveIntensity: 4.0
   });
   var bar = new THREE.Mesh(geo, mat);
 
-  // fat additive glow planes
-  var glowGeo = new THREE.PlaneGeometry(w*1.10, t*8.0);
+  // strong additive glow planes
+  var glowGeo = new THREE.PlaneGeometry(w*1.12, t*10.0);
   var glowMat = new THREE.MeshBasicMaterial({
-    color: neon, transparent:true, opacity:0.6, depthWrite:false,
+    color: neon, transparent:true, opacity:0.75, depthWrite:false,
     blending:THREE.AdditiveBlending
   });
   var glow1 = new THREE.Mesh(glowGeo, glowMat); glow1.rotation.x = Math.PI/2; glow1.position.z += 0.03;
@@ -782,7 +833,7 @@ function seedCloudsSetup(){
   ]);
 }
 function seedClouds(group, y){
-  var count = (group===cloudGroupTop?18:22);
+  var count = (group===cloudGroupTop?16:18);
   for (var i=0;i<count;i++){
     var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:_cloudTex, transparent:true, depthWrite:false, depthTest:false }));
     var sc = THREE.MathUtils.lerp(4, 10, Math.random());
@@ -807,7 +858,7 @@ function tickClouds(dt, dz){
     if (s.position.z > 5) s.position.z = -110;
   });
 
-  // shimmer windows
+  // shimmer windows + band scroll
   if (buildingsL && buildingsL.children.length){
     var e = (time*0.14)%1;
     buildingsL.children.forEach(function(m){ if(m.material && m.material.emissiveMap){ m.material.emissiveMap.offset.y = e; m.material.emissiveMap.needsUpdate=true; }});
@@ -842,7 +893,7 @@ function tickClouds(dt, dz){
   }
 }
 
-/* ===== Traffic (two wider lanes, reversed flow, varied vehicles/colors) ===== */
+/* ===== Traffic (two separate lanes, never intersect) ===== */
 const VEHICLE_COLORS = [
   0x1ec8ff, 0xff5ea1, 0xffd23c, 0x7dffb6, 0xa78bfa, 0x6ee7ff, 0xff8c3a, 0x66ffd9
 ];
@@ -879,15 +930,19 @@ function makeSedan(dir, bodyColor){
   const group = new THREE.Group();
   const L=5.4, W=1.6, H=0.75;
   const y0 = -corridorHeight*0.55 + H/2 + 0.02;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H*0.55, L*0.78),
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W*0.96, H*0.55, L*0.78),
     new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.35, metalness:0.5}));
   body.position.y = y0; group.add(body);
+
   const nose = new THREE.Mesh(new THREE.CapsuleGeometry(W*0.18, L*0.10, 6, 10),
     new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.34, metalness:0.55}));
   nose.rotation.x=Math.PI/2; nose.position.set(0, y0, (dir>0?1:-1)*L*0.34); group.add(nose);
+
   const roof = new THREE.Mesh(new THREE.BoxGeometry(W*0.76, H*0.48, L*0.35),
     new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
   roof.position.set(0, y0+H*0.46, -L*0.06); group.add(roof);
+
   const fz=(dir>0)?+L*0.42:-L*0.42, rz=-fz, lampY=y0+H*0.05;
   addLamp(group,LAMPS.head,0.40,0.40,fz,-W*0.30,lampY);
   addLamp(group,LAMPS.head,0.40,0.40,fz,+W*0.30,lampY);
@@ -902,15 +957,19 @@ function makePickup(dir, bodyColor){
   const group=new THREE.Group();
   const L=5.8,W=1.8,H=0.9;
   const y0=-corridorHeight*0.55+H/2+0.02;
+
   const cab=new THREE.Mesh(new THREE.BoxGeometry(W, H*0.55, L*0.45),
     new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.38, metalness:0.5}));
   cab.position.set(0,y0,-L*0.05); group.add(cab);
+
   const bed=new THREE.Mesh(new THREE.BoxGeometry(W*0.96,H*0.42,L*0.35),
     new THREE.MeshStandardMaterial({color:0x152544, roughness:0.6, metalness:0.2}));
   bed.position.set(0,y0,-L*0.35); group.add(bed);
+
   const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.42,L*0.26),
     new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5}));
   roof.position.set(0,y0+H*0.40,-L*0.12); group.add(roof);
+
   const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.02;
   addLamp(group,LAMPS.head,0.42,0.42,fz,-W*0.32,lampY);
   addLamp(group,LAMPS.head,0.42,0.42,fz,+W*0.32,lampY);
@@ -920,17 +979,20 @@ function makePickup(dir, bodyColor){
   group.userData={speed:THREE.MathUtils.lerp(7.5,13,Math.random()), dir};
   return group;
 }
-/* Van / boxy */
+/* Van */
 function makeVan(dir, bodyColor){
   const group=new THREE.Group();
   const L=6.2,W=1.9,H=1.1;
   const y0=-corridorHeight*0.55+H/2+0.02;
+
   const hull=new THREE.Mesh(new THREE.BoxGeometry(W,H*0.7,L*0.80),
     new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.42, metalness:0.45}));
   hull.position.y=y0; group.add(hull);
+
   const roof=new THREE.Mesh(new THREE.BoxGeometry(W*0.9,H*0.35,L*0.45),
     new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45}));
   roof.position.set(0,y0+H*0.42,-L*0.1); group.add(roof);
+
   const fz=(dir>0)?+L*0.46:-L*0.46, rz=-fz, lampY=y0+H*0.02;
   addLamp(group,LAMPS.head,0.44,0.44,fz,-W*0.34,lampY);
   addLamp(group,LAMPS.head,0.44,0.44,fz,+W*0.34,lampY);
@@ -945,15 +1007,19 @@ function makeSemi(dir, bodyColor){
   const group=new THREE.Group();
   const L=11.0,W=2.0,H=1.2;
   const y0=-corridorHeight*0.55+H/2+0.02;
+
   const trailer=new THREE.Mesh(new THREE.BoxGeometry(W*0.98,H*0.72,L*0.62),
     new THREE.MeshStandardMaterial({color:0x16243f, roughness:0.65, metalness:0.15}));
   trailer.position.set(0,y0, -L*0.10); group.add(trailer);
+
   const tractor=new THREE.Mesh(new THREE.BoxGeometry(W*0.90,H*0.70,L*0.22),
     new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.40, metalness:0.45}));
   tractor.position.set(0,y0, (dir>0?1:-1)*L*0.34); group.add(tractor);
+
   const cab=new THREE.Mesh(new THREE.BoxGeometry(W*0.78,H*0.42,L*0.12),
     new THREE.MeshStandardMaterial({color:0x2b3b68, roughness:0.28, metalness:0.45}));
   cab.position.set(0,y0+H*0.36, tractor.position.z - (dir>0?L*0.02:-L*0.02)); group.add(cab);
+
   const fz=(dir>0)?+L*0.44:-L*0.44, rz=-fz, lampY=y0+H*0.00;
   addLamp(group,LAMPS.head,0.48,0.48,fz,-W*0.34,lampY);
   addLamp(group,LAMPS.head,0.48,0.48,fz,+W*0.34,lampY);
@@ -973,62 +1039,71 @@ function makeAnyVehicle(dir){
   return makeSemi(dir, color);
 }
 
-// Reversed flow from previous build, wider lanes, anti-stacking spacing
+// Seed two non-overlapping lanes and keep spacing so they never collide
 function seedTraffic(){
   trafficGroup.clear();
 
   const LANES = [
-    { x: -0.42, dir: +1 }, // LEFT lane now comes toward camera
-    { x: +0.42, dir: -1 }  // RIGHT lane goes away
+    { x: -corridorHalf*0.46, dir: +1 }, // toward camera (left)
+    { x:  +corridorHalf*0.46, dir: -1 } // away (right)
   ];
-  const carsPerLane = 9;          // fewer to keep spacing
-  const jitterZ = 4;
-  const laneDepth = DEPTH;        // spread over whole canyon
-  const minGap = 9;               // soft following distance
+  const carsPerLane = 10;
+  const jitterZ = 5;
+  const laneDepth = DEPTH;
+  const minGap = 10;
 
   for (const lane of LANES){
-    let lastZ = 9999;
-    for (let i=0; i<carsPerLane; i++){
-      const car = makeAnyVehicle(lane.dir);
-      car.position.x = lane.x;
+    let lastZ = Infinity * (lane.dir>0?1:-1);
+    for (let i=0;i<carsPerLane;i++){
+      const v = makeAnyVehicle(lane.dir);
+      v.position.x = lane.x;
 
-      // evenly distribute then jitter
+      // even spacing across depth + jitter
       const baseZ = - (i * (laneDepth / carsPerLane));
-      car.position.z = baseZ - THREE.MathUtils.randFloatSpread(jitterZ);
+      v.position.z = baseZ - THREE.MathUtils.randFloatSpread(jitterZ);
 
       // ensure not stacked at spawn
-      if (Math.abs(lastZ - car.position.z) < minGap) car.position.z -= minGap*1.1;
-      lastZ = car.position.z;
+      if (lane.dir>0){
+        if (!isFinite(lastZ) || (lastZ - v.position.z) < minGap) v.position.z -= (minGap*1.1);
+      } else {
+        if (!isFinite(lastZ) || (v.position.z - lastZ) < minGap) v.position.z += (minGap*1.1);
+      }
+      lastZ = v.position.z;
 
-      trafficGroup.add(car);
+      trafficGroup.add(v);
     }
   }
 }
 
-// Lane-follow movement + simple spacing rule to avoid stacking
+// Lane-follow movement + simple spacing rule to avoid overlap
 function tickTraffic(dt, dz){
   const laneBuckets = { left:[], right:[] };
   trafficGroup.children.forEach(function(p){
     (p.position.x < 0 ? laneBuckets.left : laneBuckets.right).push(p);
   });
-  // sort by z in travel direction so we can apply a tiny slowdown if too close
   [['left', +1], ['right', -1]].forEach(function([key, dir]){
+    // sort so we can check the vehicle ahead
     laneBuckets[key].sort(function(a,b){ return dir>0 ? b.position.z - a.position.z : a.position.z - b.position.z; });
     for (let i=0;i<laneBuckets[key].length;i++){
-      const p = laneBuckets[key][i];
-      let s = p.userData.speed;
-      // check car ahead
-      const ahead = laneBuckets[key][i-1];
-      if (ahead && ((dir>0 && (p.position.z > ahead.position.z - 8)) || (dir<0 && (p.position.z < ahead.position.z + 8)))){
-        s *= 0.85; // gentle slow
-      }
-      p.position.z += dt * s * p.userData.dir;
+      const car = laneBuckets[key][i];
+      let s = car.userData.speed;
 
-      // recycle at bounds
-      if (p.userData.dir > 0 && p.position.z > 5){
-        p.position.z = -DEPTH - Math.random()*10;
-      } else if (p.userData.dir < 0 && p.position.z < -DEPTH){
-        p.position.z = 5 + Math.random()*10;
+      // tiny slowdown if too close to car ahead
+      const ahead = laneBuckets[key][i-1];
+      if (ahead){
+        if ((dir>0 && car.position.z > ahead.position.z - 9) ||
+            (dir<0 && car.position.z < ahead.position.z + 9)){
+          s *= 0.85;
+        }
+      }
+
+      car.position.z += dt * s * car.userData.dir;
+
+      // recycle when out of view
+      if (car.userData.dir > 0 && car.position.z > 5){
+        car.position.z = -DEPTH - Math.random()*12;
+      } else if (car.userData.dir < 0 && car.position.z < -DEPTH){
+        car.position.z = 5 + Math.random()*12;
       }
     }
   });
@@ -1241,8 +1316,4 @@ window.addEventListener('storage', function(e){
 paintCoinsHUDNow();
 
 /* ===== Meta ===== */
-/* Last visual pass: 2025-10-02 — neon windows, neon dust, reversed/wider lanes, varied vehicles + underglow, yellow/green bars. */
-})();
-</script>
-</body>
-</html>
+/* Last visual pass: 2025-10-02 — larger realistic windows, multi-neon facades, dust reduced, two safe traffic lanes, neon-green bars, blue tint removed. */
