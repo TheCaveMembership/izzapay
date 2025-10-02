@@ -320,7 +320,6 @@ function loadImg(src){ return new Promise(function(res){ var i=new Image(); i.cr
 function hexToRgb(h){ var n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
 function dist2(a,b){var dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
 function lum(r,g,b){return 0.2126*r+0.7152*g+0.0722*b;}
-
 function extractThreeToneRamp(img){
   var w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
   var c=oc.getContext('2d'); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -329,7 +328,7 @@ function extractThreeToneRamp(img){
   if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
   samples.sort(function(a,b){return a.L-b.L;});
   function pick(q){ var idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); var s=samples[idx];
-    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); }
   return [pick(0.2),pick(0.55),pick(0.85)];
 }
 function paletteSwap(img, fromRampHex, toRampHex, tolerance){
@@ -372,7 +371,6 @@ function buildAvatarCanvas(dstCtx, size, profile){
       var type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       var femaleOut=profile.female_outfit_color||'blue';
-
       var body=null;
       function afterBody(){
         Promise.all([
@@ -708,11 +706,16 @@ function drawUI(){
 
   var spriteW = 96, spriteH = 96;
   var cx = W/2;
-  var py = worldToPxY(player.y);
 
   var topPx = worldToPxY(TOP_Y);
   var botPx = worldToPxY(BOT_Y);
 
+  // --- CLAMP FIRST so hitbox and sprite share the exact same Y ---
+  var hitH = (HITBOX_HALF*2) * pixelsPerWorld;
+  var pyRaw = worldToPxY(player.y);
+  var py = Math.max(botPx - hitH/2 - 8, Math.min(topPx + hitH/2 + 8, pyRaw));
+
+  // band lines
   uiCtx.save();
   uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
   uiCtx.lineWidth = 2;
@@ -721,20 +724,15 @@ function drawUI(){
   uiCtx.beginPath(); uiCtx.moveTo(0, botPx); uiCtx.lineTo(W, botPx); uiCtx.stroke();
   uiCtx.restore();
 
-  var hitH = (HITBOX_HALF*2) * pixelsPerWorld;
-  var hitW = 96;
+  // hitbox (same clamped py)
   uiCtx.save();
   uiCtx.strokeStyle = 'rgba(255,60,60,0.9)';
   uiCtx.lineWidth = 2;
   uiCtx.setLineDash([8,6]);
-  uiCtx.strokeRect(cx - hitW/2, py - hitH/2, hitW, hitH);
+  uiCtx.strokeRect(cx - 96/2, py - hitH/2, 96, hitH);
   uiCtx.restore();
 
-  // Clamp sprite into visible band
-  var minY = botPx - hitH/2 - 8;
-  var maxY = topPx + hitH/2 + 8;
-  py = Math.max(minY, Math.min(maxY, py));
-
+  // sprite + flame (same clamped py)
   var flameLen = thrust ? 22+12*Math.sin(time*40) : 10;
   uiCtx.fillStyle='rgba(255,240,140,.95)';
   uiCtx.beginPath(); uiCtx.ellipse(cx - spriteW*0.55, py+6, flameLen, 9, 0, 0, Math.PI*2); uiCtx.fill();
@@ -750,7 +748,8 @@ function frame(now){
   if (game.ended) return;
   var dt=Math.min(0.033,(now-last)/1000); last=now; time+=dt;
 
-  var ay = (thrust? -phys.thrust : phys.g);
+  // FIX 1: thrust moves UP now
+  var ay = (thrust ? phys.thrust : -phys.g);
   player.vy = Math.max(-phys.maxVy, Math.min(phys.maxVy, player.vy + ay*dt));
   var nextY = player.y + (player.vy*dt)/260;
   if(nextY <= BOT_Y || nextY >= TOP_Y){ gameOver(); return; }
