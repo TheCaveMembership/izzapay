@@ -1134,16 +1134,45 @@ var finalCraftEl = document.getElementById('finalCraft');
 
 var COINS_PER_CREDIT = 1000;
 var runStartCoins = 0;
+var runStartCraft = 0;
+
+function persistWalletBestEffort(){
+  try{
+    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+      IZZA_PERSIST.save(); // fire-and-forget
+    }
+  }catch(_){}
+}
 function paintCoinsHUDNow(){ try{ document.getElementById('coinsHUD').textContent = String(readCoinsLS()|0); }catch(_){} }
 paintCoinsHUDNow();
 
 function applyCoins(delta){
-  var cur = (readCoinsLS()|0) + (delta|0);
-  writeCoinsLS(cur); paintCoinsHUDNow();
-  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-  return cur;
-}
+  var before = readCoinsLS()|0;
+  var after  = before + (delta|0);
+  writeCoinsLS(after);
+  paintCoinsHUDNow();
 
+  // ---- NEW: auto-craft award every 1000 coins crossed ----
+  try{
+    var beforeBlocks = Math.floor(before / COINS_PER_CREDIT);
+    var afterBlocks  = Math.floor(after  / COINS_PER_CREDIT);
+    var creditDelta  = (afterBlocks - beforeBlocks) | 0;
+    if (creditDelta > 0){
+      writeCraftAll((readCraftAny()|0) + creditDelta);
+      try{
+        window.dispatchEvent(new CustomEvent('izza-wallet-changed', {
+          detail:{ coins: after, crafting: readCraftAny() }
+        }));
+        window.dispatchEvent(new Event('izza-crafting-changed'));
+      }catch(_){}
+      persistWalletBestEffort();
+    }
+  }catch(_){}
+
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+  persistWalletBestEffort();
+  return after;
+}
 /* award 1 coin per whole score point crossed */
 function awardFromProgress(deltaScore, game){
   var add = (Math.floor(game.score) - Math.floor(game.score - deltaScore))|0;
