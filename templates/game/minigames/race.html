@@ -60,12 +60,18 @@
       border-right:1px solid rgba(255,255,255,.08);
       background:var(--panel);overflow:hidden
     }
-/* stack order: glfx (back) < 2D scene < HUD/overlays */
+/* stack order: 2D scene base, GL layer lifts it, HUD already above */
+#scene{ position:absolute; inset:0; z-index:1; }
+
 #glfx{
   position:absolute; inset:0; width:100%; height:100%;
-  display:block; pointer-events:none; z-index:0;
+  display:block; pointer-events:none;
+  z-index:2;                          /* ABOVE the 2D canvas */
+  mix-blend-mode:screen;              /* additive-on-paper look */
+  opacity:.82;                        /* dial 0.70–0.90 to taste */
+  -webkit-transform:translateZ(0);    /* iOS: promote to its own layer */
+  will-change:opacity, transform;     /* hint for Safari */
 }
-#scene{ position:absolute; inset:0; z-index:1; }
     /* ======= HUD ======= */
     .hud{
       position:absolute;top:8px;left:8px;right:8px;z-index:9;
