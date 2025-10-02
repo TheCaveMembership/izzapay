@@ -682,14 +682,6 @@ function startGarageBG() {
 }
 function stopGarageBG() { garageLoopOn = false; }
 
-// keep the theme live as you toggle track buttons
-trackNightBtn.addEventListener('click', () => {
-  if (garageLoopOn) GLFX.render(performance.now()/1000, garageZ, 90, 0.0, false, false);
-});
-trackDayBtn.addEventListener('click', () => {
-  if (garageLoopOn) GLFX.render(performance.now()/1000, garageZ, 90, 0.0, false, true);
-});
-
   function createGL(){
     canvasGL = document.getElementById('glfx');
     gl = canvasGL.getContext('webgl', { premultipliedAlpha:false, alpha:true, antialias:true });
@@ -864,6 +856,14 @@ function setTrack(t){
 }
 trackNightBtn.addEventListener('click', ()=> setTrack('night'));
 trackDayBtn.addEventListener('click',   ()=> setTrack('day'));
+  // keep the GL preview theme in sync while in Garage
+trackNightBtn.addEventListener('click', () => {
+  if (garageLoopOn) GLFX.render(performance.now()/1000, garageZ, 90, 0.0, false, false);
+});
+trackDayBtn.addEventListener('click', () => {
+  if (garageLoopOn) GLFX.render(performance.now()/1000, garageZ, 90, 0.0, false, true);
+});
+  
 
 /* Tinted sprite for garage preview and mini car */
 function makeTintedSprite(rgb){
