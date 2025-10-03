@@ -150,20 +150,18 @@
           </linearGradient>
 
           <!-- Neon glow for the net -->
-<filter id="netNeonGlow" x="-20%" y="-20%" width="140%" height="160%">
-  <!-- crisp core -->
-  <feDropShadow dx="0" dy="0" stdDeviation="0.7" flood-color="#ffffff" flood-opacity="0.85"/>
-  <!-- cyan halo -->
-  <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#00eaff" flood-opacity="0.65"/>
-</filter>
+          <filter id="netNeonGlow" x="-20%" y="-20%" width="140%" height="160%">
+            <!-- crisp core -->
+            <feDropShadow dx="0" dy="0" stdDeviation="0.7" flood-color="#ffffff" flood-opacity="0.85"/>
+            <!-- cyan halo -->
+            <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#00eaff" flood-opacity="0.65"/>
+          </filter>
 
-          <!-- Neon glow for the net -->
-<filter id="netNeonGlow" x="-20%" y="-20%" width="140%" height="160%">
-  <!-- crisp core -->
-  <feDropShadow dx="0" dy="0" stdDeviation="0.7" flood-color="#ffffff" flood-opacity="0.85"/>
-  <!-- cyan halo -->
-  <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#00eaff" flood-opacity="0.65"/>
-</filter>
+          <!-- Mesh net bits (NEON) -->
+          <pattern id="netMesh" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <path d="M0 0 L0 8" stroke="#7dfcff" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M4 0 L4 8" stroke="#00eaff" stroke-width="1.3" stroke-linecap="round"/>
+          </pattern>
 
           <!-- Clip path for net shape (local hoop coords) -->
           <clipPath id="netClip">
@@ -373,7 +371,7 @@
         game.vx=vx*POWER_SCALE; game.vy=vy*POWER_SCALE; const SPIN_THRESHOLD=0.60; game.spin=(Math.abs(spinAccum)>SPIN_THRESHOLD)?spinAccum:0; game.launched=true;
       };
       svg.addEventListener('mousedown',start,{passive:true}); svg.addEventListener('mousemove',move,{passive:true}); window.addEventListener('mouseup',end,{passive:true});
-      svg.addEventListener('touchstart',start,{passive:true}); svg.addEventListener('touchmove',move,{passive:true}); svg.addEventListener('touchend',end,{passive:true});
+      svg.addEventListener('touchstart',start,{passive:true}); svg.addEventListener('touchmove',move',{passive:true}); svg.addEventListener('touchend',end,{passive:true});
     })();
 
     /* ===== Physics/scoring (unchanged logic, +FX hooks) ===== */
@@ -579,7 +577,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16,'0')+s.b.toString(16,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
