@@ -2100,7 +2100,75 @@ async function persistWalletAndSave(){
     else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
   }catch(_){}
 }
+// ===== Leaderboard date stamps (shared) =====
+function dailyStamp(){
+  const d = new Date(); const z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+}
+function monthStamp(){
+  const d = new Date(); const z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}`;
+}
+function yearStamp(){ return String(new Date().getFullYear()); }
 
+// ===== Local “best” bumps (per device) =====
+function bumpHigh(key, score){
+  const prev = parseInt(localStorage.getItem(key)||'0',10)||0;
+  if (score > prev){ localStorage.setItem(key, String(score)); }
+}
+
+// ===== Arena ledger (keeps a rolling top-20 for alltime/day/month/year) =====
+function upsertArenaLedger(gameId, score){
+  const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
+            || (localStorage.getItem('izzaUserU')||'').toLowerCase();
+  if(!u) return;
+  const row={u,s:score,ts:Date.now()};
+  const parts={day:dailyStamp(),month:monthStamp(),year:yearStamp()};
+  ['alltime','day','month','year'].forEach(k=>{
+    const key = k==='alltime' ? `lb::${gameId}::alltime` : `lb::${gameId}::${k}::${parts[k]}`;
+    let arr=[]; try{arr=JSON.parse(localStorage.getItem(key)||'[]')}catch(_){}
+    arr.push(row);
+    // sort by score desc, keep best per user, cap 20
+    arr=arr.sort((a,b)=>b.s-a.s).filter((v,i,self)=>self.findIndex(x=>x.u===v.u)===i).slice(0,20);
+    localStorage.setItem(key, JSON.stringify(arr));
+  });
+}
+
+// ===== Write to daily/monthly/yearly keys + POST to server =====
+function recordLeaderboards(score){
+  const now = new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const daily  = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const monthly= `${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+  const yearly = String(now.getFullYear());
+
+  bumpHigh('izza_lb_day_'+daily,     score);
+  bumpHigh('izza_lb_month_'+monthly, score);
+  bumpHigh('izza_lb_year_'+yearly,   score);
+
+  // Also mirror into Arena's local ledger under the "race" game id
+  upsertArenaLedger('race', score);
+
+  // Best-effort POST (auth carried by withAuth/bearerHeaders)
+  try{
+    fetch(withAuth('/izza-game/api/leaderboard'),{
+      method:'POST', headers: bearerHeaders(), credentials:'include',
+      body: JSON.stringify({ score, daily, monthly, yearly, game: 'race' })
+    }).catch(()=>{});
+  }catch(_){}
+}
+
+// Optional: snapshot reader if you want to inspect local bests
+function getLeaderboardsSnapshot(){
+  const out={daily:{},monthly:{},yearly:{}};
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i)||'';
+    if(k.startsWith('izza_lb_day_'))   out.daily[k.slice(12)]  = parseInt(localStorage.getItem(k)||'0',10)||0;
+    if(k.startsWith('izza_lb_month_')) out.monthly[k.slice(14)]= parseInt(localStorage.getItem(k)||'0',10)||0;
+    if(k.startsWith('izza_lb_year_'))  out.yearly[k.slice(13)] = parseInt(localStorage.getItem(k)||'0',10)||0;
+  }
+  return out;
+}
 async function endRun(){
   if (!state.running) return;
   state.running=false;
@@ -2122,8 +2190,11 @@ async function endRun(){
   // Save and show popup (but ensure third bomb was shown red already)
   try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 180))]); }catch(_){}
 
-  // Publish stats
-  showEndPopup(coinsEarned, craftEarned);
+  // Leaderboards: use distance in meters as the score
+try { recordLeaderboards(Math.round(state.dist)); } catch(_){}
+
+// Publish stats
+showEndPopup(coinsEarned, craftEarned);
 }
 
 function resetStateForRun(){
