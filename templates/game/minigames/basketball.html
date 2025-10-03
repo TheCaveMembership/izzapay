@@ -535,7 +535,19 @@
     }).catch(()=>{});
   }catch(_){}
 }
-
+function dailyStamp(){
+  const d = new Date();
+  const z = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+}
+function monthStamp(){
+  const d = new Date();
+  const z = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}`;
+}
+function yearStamp(){
+  return String(new Date().getFullYear());
+}
 function upsertArenaLedger(gameId, score){
   const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
             || (localStorage.getItem('izzaUserU')||'').toLowerCase();
