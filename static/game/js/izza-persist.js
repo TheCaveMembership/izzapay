@@ -316,6 +316,114 @@
     }
   };
   window.IZZA_PERSIST = Persist;
+    // ---------- Leaderboard shim (uses same endpoints mini-games/Arena expect) ----------
+  function bearerHeaders(base) {
+    const h = Object.assign({'content-type':'application/json'}, base||{});
+    try {
+      const b = localStorage.getItem('izzaBearer') || '';
+      if (b) h['authorization'] = 'Bearer ' + b;
+    } catch {}
+    return h;
+  }
+  function userParamPair() {
+    // keep it consistent with your username bootstrapper
+    try {
+      const u =
+        (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ||
+        (window.izzaUserKey && typeof window.izzaUserKey.get==='function' && window.izzaUserKey.get()) ||
+        (localStorage.getItem('izzaUserU')||'');
+      return encodeURIComponent((u||'').toString().trim().replace(/^@+/, '').toLowerCase());
+    } catch { return 'guest'; }
+  }
+  function urlWithTU(path) {
+    // helpful for same-origin calls that want t/u in the querystring
+    try{
+      const url = new URL(path, location.origin);
+      const T = localStorage.getItem('izzaTokenT') || '';
+      const U = userParamPair();
+      if (T) url.searchParams.set('t', T);
+      if (U) url.searchParams.set('u', U);
+      return url.pathname + (url.search ? url.search : '');
+    } catch { return path; }
+  }
+
+  async function postJSON(url, body, opts) {
+    const res = await fetch(url, Object.assign({
+      method:'POST',
+      mode: 'cors',
+      credentials: 'omit', // cross-origin to BASE
+      headers: bearerHeaders(),
+      body: JSON.stringify(body||{})
+    }, opts||{}));
+    let j={}; try{ j = await res.json(); }catch(_){}
+    return { ok: res.ok && (!!j.ok || !j.error), status: res.status, data: j };
+  }
+  async function getJSON(url, opts) {
+    const res = await fetch(url, Object.assign({
+      method:'GET',
+      mode: 'cors',
+      credentials: 'omit',
+      headers: bearerHeaders()
+    }, opts||{}));
+    let j={}; try{ j = await res.json(); }catch(_){}
+    return { ok: res.ok && (!j.error), status: res.status, data: j };
+  }
+
+  // Same paths your code already tries: same-origin first, then BASE mirrors.
+  const LB_ENDPOINTS = {
+    submit: () => ([
+      urlWithTU('/izza-game/api/leaderboard/submit'),
+      `${BASE}/izza-game/api/leaderboard/submit`,
+      `${BASE}/api/leaderboard/submit`
+    ]),
+    top: (qs) => ([
+      urlWithTU(`/izza-game/api/leaderboard${qs}`),
+      `${BASE}/izza-game/api/leaderboard${qs}`,
+      `${BASE}/api/leaderboard${qs}`
+    ])
+  };
+
+  async function tryMany(urls, fn) {
+    for (const u of urls) {
+      try {
+        const r = await fn(u);
+        if (r && r.ok) return r;
+      } catch (_){ /* try next */ }
+    }
+    // return the last attempt (or a generic error)
+    return { ok:false, status:0, data:{ error:'all endpoints failed' } };
+  }
+
+  const Leaderboard = {
+    // Submit a score: { game: 'jetman'|'race'|'basketball', score:Number, hi?:Number, coinsDelta?:Number }
+    async submit(payload) {
+      const body = Object.assign({
+        user: userParamPair(),
+        ts: Date.now(),
+        client: {
+          dpr: (window.devicePixelRatio||1),
+          w: (window.innerWidth||0)|0,
+          h: (window.innerHeight||0)|0,
+          ua: (navigator.userAgent||'')
+        }
+      }, payload||{});
+      return await tryMany(LB_ENDPOINTS.submit(), (u)=>postJSON(u, body));
+    },
+
+    // Top N: default game=all, limit=100, period can be 'all','day','week','month' if your backend supports it
+    async top({ game='all', limit=100, period='all' } = {}) {
+      const qs = `?game=${encodeURIComponent(game)}&limit=${limit|0}&period=${encodeURIComponent(period)}`;
+      return await tryMany(LB_ENDPOINTS.top(qs), (u)=>getJSON(u));
+    },
+
+    // Around a user’s rank: center on current user unless a different `user` is provided
+    async around({ game='all', user, limit=25 } = {}) {
+      const uu = encodeURIComponent(user || userParamPair());
+      const qs = `?game=${encodeURIComponent(game)}&around=${uu}&limit=${limit|0}`;
+      return await tryMany(LB_ENDPOINTS.top(qs), (u)=>getJSON(u));
+    }
+  };
+  window.IZZA_LEADERBOARD = Leaderboard;
 
   // ----- boot & save orchestration -----
   let serverSeed=null, loaded=false, ready=false, armed=false;
