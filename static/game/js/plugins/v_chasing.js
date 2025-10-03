@@ -277,7 +277,7 @@
     else reinforceAt = 0;
   });
 
-  // Reset internal timers/state on death/respawn
+    // Reset internal timers/state on death/respawn
   ;['player-death','player-died','player-respawn','respawn'].forEach(ev=>{
     IZZA.on(ev, ()=>{
       reinforceAt = 0;
@@ -289,4 +289,146 @@
       if (api && api.player) api.setWanted(0);
     });
   });
-})();
+
+  // --- Longest Police Chase timer + leaderboard submit -----------------------
+  (function(){
+    if (window.__IZZA_POLICE_CHASE_TIMER_BOUND) return;
+    window.__IZZA_POLICE_CHASE_TIMER_BOUND = true;
+
+    const LB_GAME_KEY = 'city_chase';        // <- leaderboard "game" id
+    const SHOW_RESULT_MS = 4500;             // how long to show the big result banner
+    const MIN_RECORD_MS = 1500;              // ignore micro “blips” shorter than this
+    const ROUND_MODE = 'seconds';            // 'seconds' or 'ms' (score units you want)
+
+    // ---- HUD elements (created on demand) -----------------------------------
+    let timerEl = null, bannerEl = null, rafId = 0;
+
+    function mkTimerHud(){
+      if (timerEl) return timerEl;
+      const el = document.createElement('div');
+      el.id = 'izzaChaseTimer';
+      Object.assign(el.style, {
+        position:'fixed', left:'50%', top:'18px', transform:'translateX(-50%)',
+        zIndex: 10050, padding:'6px 12px', borderRadius:'10px',
+        background: 'rgba(0,0,0,.5)', border:'1px solid rgba(255,255,255,.35)',
+        color:'#fff', font:'600 16px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+        letterSpacing:'0.4px', textShadow:'0 1px 2px rgba(0,0,0,.6)', display:'none'
+      });
+      el.textContent = 'POLICE CHASE — 0.0s';
+      document.body.appendChild(el);
+      timerEl = el;
+      return el;
+    }
+
+    function mkResultBanner(){
+      if (bannerEl) return bannerEl;
+      const el = document.createElement('div');
+      el.id = 'izzaChaseResult';
+      Object.assign(el.style, {
+        position:'fixed', left:'50%', top:'30%', transform:'translate(-50%, -30%)',
+        zIndex: 10060, padding:'16px 20px', borderRadius:'14px',
+        background:'linear-gradient(135deg, #07f 0%, #6f0 50%, #ff0 100%)',
+        boxShadow:'0 12px 40px rgba(0,0,0,.45)',
+        color:'#0a0a0a', font:'800 22px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+        letterSpacing:'0.6px', textAlign:'center', display:'none', border:'2px solid rgba(255,255,255,.85)'
+      });
+      el.innerHTML = `
+        <div style="font-size:14px; font-weight:700; opacity:.85; margin-bottom:6px; text-transform:uppercase;">
+          IZZA CITY
+        </div>
+        <div style="font-size:22px; font-weight:900; text-transform:uppercase;">
+          Police Chase <span style="white-space:nowrap;">TIME</span>:
+        </div>
+        <div id="izzaChaseResultTime" style="font-size:32px; font-weight:1000; margin-top:6px;">
+          0.0s
+        </div>
+      `;
+      document.body.appendChild(el);
+      bannerEl = el;
+      return el;
+    }
+
+    // ---- Timer state ---------------------------------------------------------
+    let chasing = false;
+    let startAt = 0;
+
+    function fmt(ms){
+      if (ROUND_MODE === 'ms') return `${ms|0} ms`;
+      return `${(ms/1000).toFixed(1)}s`;
+    }
+    function scoreFromMs(ms){
+      return ROUND_MODE === 'ms' ? (ms|0) : Math.round(ms/1000);
+    }
+
+    function startChase(){
+      if (chasing) return;
+      chasing = true;
+      startAt = performance.now();
+
+      const hud = mkTimerHud();
+      hud.style.display = 'block';
+      tickHud();
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(tickHud);
+    }
+
+    function tickHud(){
+      if (!chasing) return;
+      const now = performance.now();
+      const ms = now - startAt;
+      if (timerEl){
+        timerEl.textContent = `POLICE CHASE — ${fmt(ms)}`;
+      }
+      rafId = requestAnimationFrame(tickHud);
+    }
+
+    async function endChase(reason){
+      if (!chasing) return;
+      chasing = false;
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+
+      const elapsed = Math.max(0, performance.now() - startAt);
+      if (timerEl) timerEl.style.display = 'none';
+      if (elapsed < MIN_RECORD_MS) return;
+
+      const banner = mkResultBanner();
+      const timeEl = banner.querySelector('#izzaChaseResultTime');
+      if (timeEl) timeEl.textContent = fmt(elapsed);
+      banner.style.display = 'block';
+      setTimeout(()=>{ banner.style.display = 'none'; }, SHOW_RESULT_MS);
+
+      try{
+        if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit === 'function'){
+          await IZZA_LEADERBOARD.submit({
+            game: LB_GAME_KEY,
+            score: scoreFromMs(elapsed),
+            reason,
+            ts: Date.now()
+          });
+        }
+      }catch(e){
+        console.warn('[chase] leaderboard submit failed', e);
+      }
+
+      try{ (window.IZZA?.toast||window.IZZA_PERSIST?.toast||(()=>{}))(`Chase saved: ${fmt(elapsed)}`); }catch(_){}
+    }
+
+    // ---- Wiring to existing events -------------------------------------
+    IZZA.on('wanted-changed', ({from, to})=>{
+      const f = Number(from|0), t = Number(to|0);
+      if (!chasing && f===0 && t>0) startChase();
+      if (chasing && t===0) endChase('cleared');
+    });
+
+    ['player-death','player-died','respawn','player-respawn'].forEach(ev=>{
+      IZZA.on(ev, ()=>{ if (chasing) endChase('death'); });
+    });
+
+    IZZA.on('ready', (api)=>{
+      const w = Number(api?.player?.wanted|0);
+      if (w>0) startChase();
+    });
+  })();
+
+})(); // <— closes the outer chasing plugin IIFE
