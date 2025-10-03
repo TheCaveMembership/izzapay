@@ -809,6 +809,10 @@
         loadAndRender();
         renderPoliceChase();   // refresh chase block when tabs change
       }, {passive:true});
+      // Also refresh when game dropdown changes
+elGame.addEventListener('change', ()=>{
+  loadAndRender();      // reload leaderboard for the newly selected game
+}, {passive:true});
 
       function close(){ elModal.classList.remove('show'); }
       elOpen.addEventListener('click', open, {passive:true});
