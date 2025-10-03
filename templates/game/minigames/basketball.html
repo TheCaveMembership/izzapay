@@ -515,24 +515,41 @@
 
     /* ===== Leaderboards (daily / monthly / yearly) ===== */
     function recordLeaderboards(score){
-      const now=new Date();
-      const pad=n=>String(n).padStart(2,'0');
-      const daily=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-      const monthly=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;
-      const yearly=String(now.getFullYear());
-      bumpHigh('izza_lb_day_'+daily, score);
-      bumpHigh('izza_lb_month_'+monthly, score);
-      bumpHigh('izza_lb_year_'+yearly, score);
-      // expose for future arcade page
-      window.IZZA_LEADERBOARDS = getLeaderboardsSnapshot();
-      // optional POST if you add an endpoint later
-      try{
-        fetch(withAuth('/izza-game/api/leaderboard'),{
-          method:'POST',headers:bearerHeaders(),credentials:'include',
-          body:JSON.stringify({score, daily, monthly, yearly})
-        }).catch(()=>{});
-      }catch(_){}
-    }
+  const now = new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const daily=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const monthly=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+  const yearly=String(now.getFullYear());
+
+  bumpHigh('izza_lb_day_'+daily, score);
+  bumpHigh('izza_lb_month_'+monthly, score);
+  bumpHigh('izza_lb_year_'+yearly, score);
+
+  // also save to Arena ledger keys
+  upsertArenaLedger('basketball', score);
+
+  try{
+    fetch(withAuth('/izza-game/api/leaderboard'),{
+      method:'POST',headers:bearerHeaders(),credentials:'include',
+      body:JSON.stringify({score, daily, monthly, yearly})
+    }).catch(()=>{});
+  }catch(_){}
+}
+
+function upsertArenaLedger(gameId, score){
+  const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
+            || (localStorage.getItem('izzaUserU')||'').toLowerCase();
+  if(!u) return;
+  const row={u,s:score,ts:Date.now()};
+  const parts={day:dailyStamp(),month:monthStamp(),year:yearStamp()};
+  ['alltime','day','month','year'].forEach(k=>{
+    const key = k==='alltime' ? `lb::${gameId}::alltime` : `lb::${gameId}::${k}::${parts[k]}`;
+    let arr=[]; try{arr=JSON.parse(localStorage.getItem(key)||'[]')}catch(_){}
+    arr.push(row);
+    arr=arr.sort((a,b)=>b.s-a.s).filter((v,i,self)=>self.findIndex(x=>x.u===v.u)===i).slice(0,20);
+    localStorage.setItem(key, JSON.stringify(arr));
+  });
+}
     function bumpHigh(key, score){
       const prev=parseInt(localStorage.getItem(key)||'0',10)||0;
       if(score>prev){ localStorage.setItem(key, String(score)); }
