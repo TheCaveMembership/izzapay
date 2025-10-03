@@ -81,6 +81,21 @@
     .playerAvatar canvas{width:128px;height:128px;image-rendering:pixelated;image-rendering:crisp-edges}
     .avatar-bob{animation:avatarBob .35s ease-out 1}
     @keyframes avatarBob{0%{transform:translate(-50%,0)}50%{transform:translate(-50%,-10px)}100%{transform:translate(-50%,0)}}
+
+    /* Retro FX overlays */
+    .fx{position:absolute;inset:0;pointer-events:none;z-index:9;display:none}
+    .fx.show{display:block;animation:fx-fade .35s ease-out 1}
+    @keyframes fx-fade{0%{opacity:0}20%{opacity:1}100%{opacity:0}}
+    .fx .scan{position:absolute;left:0;right:0;top:0;bottom:0;
+      background-image:linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px);
+      background-size:100% 4px;mix-blend-mode:screen;opacity:.75}
+    .fx .glow{position:absolute;left:50%;top:32%;transform:translateX(-50%);width:320px;height:120px;border-radius:999px;filter:blur(18px);opacity:.7}
+    .fx.glow-green .glow{background:radial-gradient(circle, rgba(114,255,157,.8), rgba(114,255,157,0))}
+    .fx.glow-red .glow{background:radial-gradient(circle, rgba(255,107,107,.8), rgba(255,107,107,0))}
+    .fx .missSlide{position:absolute;right:12px;top:16%;padding:6px 10px;border-radius:8px;background:rgba(255,107,107,.12);
+      border:1px solid rgba(255,107,107,.5);color:#ff6b6b;font-weight:900;letter-spacing:.6px;
+      transform:translateX(140%);animation:miss-slide .48s cubic-bezier(.2,.9,.2,1) 1}
+    @keyframes miss-slide{to{transform:translateX(0)}}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -91,7 +106,7 @@
     </div>
 
     <div class="arena vignette" id="arena">
-      <!-- HUD (no background button here anymore) -->
+      <!-- HUD -->
       <div class="hud">
         <div class="left">
           <div class="pill">SCORE: <strong id="score" class="arc">0</strong></div>
@@ -103,19 +118,22 @@
         </div>
       </div>
 
-      <!-- START overlay with Custom BG -->
+      <!-- START overlay -->
       <div id="startOverlay" class="startOverlay" aria-live="polite">
         <div class="startCard">
           <div class="startBtns">
             <button id="chooseBgBtn" class="startBtn secondary">CUSTOM BACKGROUND</button>
             <button id="startBtn" class="startBtn">START</button>
           </div>
-          <!-- hidden file input -->
           <input id="bgUpload" type="file" accept="image/*" style="display:none">
         </div>
       </div>
 
-      <!-- Scene SVG (unchanged hoop/physics) -->
+      <!-- Retro FX layer -->
+      <div id="fxSwish" class="fx glow-green"><div class="glow"></div><div class="scan"></div></div>
+      <div id="fxMiss" class="fx glow-red"><div class="glow"></div><div class="missSlide">MISS!</div></div>
+
+      <!-- Scene SVG -->
       <svg id="court" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Court">
         <defs>
           <filter id="bgBlur"><feGaussianBlur stdDeviation="1.2"/></filter>
@@ -130,15 +148,37 @@
           <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#e6b77a"/><stop offset="100%" stop-color="#c78f4a"/>
           </linearGradient>
+
+          <!-- Mesh net bits -->
+          <pattern id="netMesh" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <path d="M0 0 L0 10" stroke="rgba(255,255,255,.85)" stroke-width="1.2"/>
+            <path d="M5 0 L5 10" stroke="rgba(255,255,255,.65)" stroke-width="1.0"/>
+          </pattern>
+
+          <!-- Clip path for net shape (local hoop coords) -->
+          <clipPath id="netClip">
+            <path d="M64 -34
+                     Q100 -46 136 -34
+                     L120 86
+                     Q100 104 80 86
+                     Z"/>
+          </clipPath>
+
+          <!-- Inner shadow to give depth -->
+          <filter id="netInner" x="-20%" y="-20%" width="140%" height="160%">
+            <feOffset dy="1" />
+            <feGaussianBlur stdDeviation="1.3" result="b"/>
+            <feComposite in="SourceGraphic" in2="b" operator="atop"/>
+          </filter>
         </defs>
 
-        
-<!-- centered 760×760 square in a 1100×760 viewBox -->
-<image id="bgImage"
-       href="/static/game/img/basketball/izza_city_bg.jpg"
-       x="170" y="0" width="760" height="760"
-       preserveAspectRatio="xMidYMid meet"
-       filter="url(#bgBlur)" opacity="0.94"/>
+        <!-- centered 760×760 square in a 1100×760 viewBox -->
+        <image id="bgImage"
+               href="/static/game/img/basketball/izza_city_bg.jpg"
+               x="170" y="0" width="760" height="760"
+               preserveAspectRatio="xMidYMid meet"
+               filter="url(#bgBlur)" opacity="0.94"/>
+
         <!-- Court floor -->
         <g>
           <rect x="0" y="520" width="1100" height="240" fill="url(#wood)"/>
@@ -147,18 +187,32 @@
           <ellipse cx="550" cy="640" rx="180" ry="26" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
-        <!-- Hoop (same transform as your original) -->
+        <!-- Hoop -->
         <g id="hoop" transform="translate(390, 300) scale(1.6)">
-          <rect x="90" y="-20" width="12" height="86" fill="#b7c7d8"/>
+          <!-- shorter pole (was height=86) -->
+          <rect x="90" y="-20" width="12" height="66" fill="#b7c7d8"/>
           <g id="boardGroup">
             <rect id="backboard" x="8" y="-126" width="184" height="122" rx="12" ry="12"
                   fill="#f2f6fa" stroke="#9fb0c2" stroke-width="6" filter="url(#shadow)"/>
             <rect x="54" y="-86" width="92" height="60" fill="none" stroke="#ff7a00" stroke-width="6"/>
           </g>
+
+          <!-- Rim -->
           <circle id="rim" cx="100" cy="-38" r="36" fill="none" stroke="#ff7a00" stroke-width="8"/>
-          <g id="net">
-            <path d="M132 -36 q-12 52 -28 104 q-14 -52 -28 -104" stroke="rgba(255,255,255,.9)" stroke-width="2.8" fill="none"/>
-            <path d="M116 -36 q-9 46 -20 92 M84 -36 q9 46 20 92" stroke="rgba(255,255,255,.6)" stroke-width="1.4" fill="none" opacity=".7"/>
+
+          <!-- Realistic NET -->
+          <g id="net" filter="url(#netInner)">
+            <!-- outer threads -->
+            <path d="M64 -34 Q100 -46 136 -34" stroke="rgba(255,255,255,.9)" stroke-width="2.4" fill="none"/>
+            <!-- mesh fill clipped to net -->
+            <g clip-path="url(#netClip)">
+              <rect x="62" y="-44" width="76" height="160" fill="url(#netMesh)"/>
+              <!-- vertical taper guides for a subtle convergence feel -->
+              <path d="M116 -36 Q108 40 100 104" stroke="rgba(255,255,255,.35)" stroke-width="1.2" fill="none"/>
+              <path d="M84 -36  Q92 40  100 104" stroke="rgba(255,255,255,.35)" stroke-width="1.2" fill="none"/>
+            </g>
+            <!-- bottom ring threads -->
+            <path d="M80 86 Q100 104 120 86" stroke="rgba(255,255,255,.8)" stroke-width="2" fill="none" opacity=".9"/>
           </g>
         </g>
 
@@ -185,6 +239,9 @@
       <a class="btn" href="/izza-game/play" id="cityBtn2">Go to City</a>
     </div>
   </div>
+
+  <!-- Audio elements -->
+  <audio id="bgm" src="/static/game/audio/basketballBGM.wav" preload="none" loop></audio>
 
   <script>
   (function(){
@@ -227,7 +284,7 @@
     async function ensureSession(){
       try{
         const r=await fetch(withAuth('/izza-game/api/character'),{credentials:'include',headers:bearerHeaders()});
-        if(r.ok){ const j=await r.json().catch(()=>({})); const uname=(j.user&&j.user.username)||j.username||j.handle||''; if(uname){ U=publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){} } return j; }
+        if(r.ok){ const j=await r.json().catch(()=>({})); const uname=(j.user&&j.user.username)||j.username||j.handle||''; if(uname){ U=publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){ } } return j; }
       }catch(_){}
       return null;
     }
@@ -238,12 +295,34 @@
     const bigmsg=document.getElementById('bigmsg'), arenaEl=document.getElementById('arena');
     const scoreEl=document.getElementById('score'), streakEl=document.getElementById('streak'), timeEl=document.getElementById('time'), coinsRunEl=document.getElementById('coinsRun');
     const startBtn=document.getElementById('startBtn'), chooseBgBtn=document.getElementById('chooseBgBtn'), bgUpload=document.getElementById('bgUpload');
+    const fxSwish=document.getElementById('fxSwish'), fxMiss=document.getElementById('fxMiss');
+    const bgmEl=document.getElementById('bgm');
 
     /* ===== Geometry ===== */
     let W=arenaEl.clientWidth, H=arenaEl.clientHeight;
     function toXY(cx,cy){ const vbW=1100,vbH=760, scale=H/vbH, drawnW=vbW*scale, leftCrop=Math.max(0,(drawnW-W)/2); return {x:cx*scale-leftCrop, y:cy*scale}; }
 
-    /* ===== Game state (unchanged) ===== */
+    /* ===== WebAudio retro sfx ===== */
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx=null, master=null;
+    function initAudio(){ if(audioCtx) return; audioCtx=new AudioCtx(); master=audioCtx.createGain(); master.gain.value=0.35; master.connect(audioCtx.destination); }
+    function bleep(type='score'){
+      if(!audioCtx) return;
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.connect(g); g.connect(master);
+      const now=audioCtx.currentTime;
+      if(type==='swish'){ o.type='triangle'; o.frequency.setValueAtTime(560, now); o.frequency.exponentialRampToValueAtTime(220, now+0.18); }
+      else if(type==='miss'){ o.type='sawtooth'; o.frequency.setValueAtTime(200, now); o.frequency.exponentialRampToValueAtTime(120, now+0.22); }
+      else { /* score */
+        o.type='square'; o.frequency.setValueAtTime(330, now); o.frequency.exponentialRampToValueAtTime(660, now+0.08);
+      }
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.exponentialRampToValueAtTime(0.5, now+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now+0.24);
+      o.start(now); o.stop(now+0.26);
+    }
+
+    /* ===== Game state (unchanged core) ===== */
     let game={ x:550,y:700,vx:0,vy:0,r:76, gravity:2300,drag:0.992, launched:false,dragging:false, score:0,goals:0, timeLeft:60,
                hoopX:390,hoopY:300,distanceStep:0, timerId:null,ended:false, creditsEarned:0, spin:0,spinDecay:0.985, noMissUntil:0 };
     function setHoopDistance(){ hoop.setAttribute('transform',`translate(${game.hoopX},${game.hoopY}) scale(1.6)`); }
@@ -287,7 +366,7 @@
       svg.addEventListener('touchstart',start,{passive:true}); svg.addEventListener('touchmove',move,{passive:true}); svg.addEventListener('touchend',end,{passive:true});
     })();
 
-    /* ===== Physics/scoring (unchanged logic, +juice) ===== */
+    /* ===== Physics/scoring (unchanged logic, +FX hooks) ===== */
     const TOP_OUT=-600, MISS_BAND_PX=400;
     function physics(dt){
       if(!game.launched||game.ended) return;
@@ -308,7 +387,9 @@
       }
       if(game.launched && !game._scored && game.vy>0 && performance.now()>game.noMissUntil){ if(by>(ry+MISS_BAND_PX)) quickMiss(); }
     }
-    function quickMiss(){ if(game._scored || performance.now()<game.noMissUntil) return; game.launched=false; showMsg('MISS!','miss'); setTimeout(resetBall,220); }
+    function flashFx(el){ if(!el) return; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 360); }
+    function quickMiss(){ if(game._scored || performance.now()<game.noMissUntil) return; game.launched=false; showMsg('MISS!','miss'); flashFx(fxMiss); try{ bleep('miss'); }catch(_){}
+      setTimeout(resetBall,220); }
 
     let walletDirty=false, WALLET_READY=false, runStartCoins=0;
     function paintCoinsHUD(n){ const val=Math.max(0,n|0); if(coinsRunEl) coinsRunEl.textContent=String(val); }
@@ -325,11 +406,21 @@
     async function scoreShot(swish){
       const NORMAL=200, award=swish?NORMAL*2:NORMAL;
       game.score+=award; game.goals+=1; await applyCoins(award);
-      try{ net.classList.remove('swish'); boardGroup.classList.remove('shake'); void net.offsetWidth; if(swish) net.classList.add('swish'); boardGroup.classList.add('shake'); setTimeout(()=>boardGroup.classList.remove('shake'),220); }catch(_){}
+
+      /* FX + sound */
+      try{
+        net.classList.remove('swish'); boardGroup.classList.remove('shake'); void net.offsetWidth;
+        if(swish){ net.classList.add('swish'); bleep('swish'); flashFx(fxSwish); }
+        else { bleep('score'); flashFx(fxSwish); }
+        boardGroup.classList.add('shake'); setTimeout(()=>boardGroup.classList.remove('shake'),220);
+      }catch(_){}
+
       const creditsNow=Math.floor(game.goals/10);
       if(creditsNow>game.creditsEarned){ game.creditsEarned=creditsNow; await applyCraftDelta(1); showMsg('+1 CRAFT CREDIT!','scoreGlow'); }
       else{ showMsg(swish?'SWISH! +400':'SCORE! +200', swish?'scoreGlow':''); }
-      scoreEl.textContent=game.score; streakEl.textContent=game.goals; updateCoinsHUD(); setTimeout(resetBall,260);
+
+      scoreEl.textContent=game.score; streakEl.textContent=game.goals; updateCoinsHUD();
+      setTimeout(resetBall,260);
     }
 
     let lastT=performance.now();
@@ -341,6 +432,42 @@
       document.getElementById('finalScore').textContent=game.score; document.getElementById('finalCoins').textContent=coinsAwarded; document.getElementById('finalCraft').textContent=game.creditsEarned;
       document.getElementById('finish').style.display='flex'; showMsg('Time!','miss');
       try{ const p=persistWalletAndSave(); await Promise.race([p,new Promise(r=>setTimeout(r,200))]); }catch(_){}
+      try{ recordLeaderboards(game.score); }catch(_){}
+    }
+
+    /* ===== Leaderboards (daily / monthly / yearly) ===== */
+    function recordLeaderboards(score){
+      const now=new Date();
+      const pad=n=>String(n).padStart(2,'0');
+      const daily=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+      const monthly=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+      const yearly=String(now.getFullYear());
+      bumpHigh('izza_lb_day_'+daily, score);
+      bumpHigh('izza_lb_month_'+monthly, score);
+      bumpHigh('izza_lb_year_'+yearly, score);
+      // expose for future arcade page
+      window.IZZA_LEADERBOARDS = getLeaderboardsSnapshot();
+      // optional POST if you add an endpoint later
+      try{
+        fetch(withAuth('/izza-game/api/leaderboard'),{
+          method:'POST',headers:bearerHeaders(),credentials:'include',
+          body:JSON.stringify({score, daily, monthly, yearly})
+        }).catch(()=>{});
+      }catch(_){}
+    }
+    function bumpHigh(key, score){
+      const prev=parseInt(localStorage.getItem(key)||'0',10)||0;
+      if(score>prev){ localStorage.setItem(key, String(score)); }
+    }
+    function getLeaderboardsSnapshot(){
+      const out={daily:{},monthly:{},yearly:{}};
+      for(let i=0;i<localStorage.length;i++){
+        const k=localStorage.key(i)||'';
+        if(k.startsWith('izza_lb_day_')) out.daily[k.slice(12)] = parseInt(localStorage.getItem(k)||'0',10)||0;
+        if(k.startsWith('izza_lb_month_')) out.monthly[k.slice(14)] = parseInt(localStorage.getItem(k)||'0',10)||0;
+        if(k.startsWith('izza_lb_year_')) out.yearly[k.slice(13)] = parseInt(localStorage.getItem(k)||'0',10)||0;
+      }
+      return out;
     }
 
     /* ===== Background handling (overlay only) ===== */
@@ -348,11 +475,10 @@
     function initBackgroundFromStorageOrParam(){
       const p=new URLSearchParams(location.search);
       const paramBg=p.get('bg');
-      const data=localStorage.getItem('izzaBallBgUserData')||''; // persists across sessions
+      const data=localStorage.getItem('izzaBallBgUserData')||'';
       const href = data || paramBg || '/static/game/img/basketball/izza_city_bg.jpg';
       setBgHref(href);
     }
-    // Choose BG button opens file dialog
     chooseBgBtn.addEventListener('click', ()=> bgUpload.click(), {passive:true});
     bgUpload.addEventListener('change', (e)=>{
       const f=e.target.files && e.target.files[0]; if(!f) return;
@@ -390,7 +516,7 @@
     // Early BG paint (even before pressing Start)
     initBackgroundFromStorageOrParam();
 
-    // START button (same flow + avatar paint)
+    // START button (same flow + avatar paint + audio start)
     startBtn.addEventListener('click', async ()=>{
       try{
         const handoff=consumeWalletHandoff(); if(handoff){ paintCoinsHUD(handoff.coins); }
@@ -403,6 +529,12 @@
         document.getElementById('startOverlay').style.display='none';
         setHoopDistance(); resetBall(); startTimer(); requestAnimationFrame(loop);
         try{ await buildAndPlaceAvatar(); }catch(_){}
+
+        // audio
+        try{
+          initAudio(); await audioCtx.resume();
+          bgmEl.volume=0.28; bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
+        }catch(_){}
       }catch(e){ console.error('start failed',e); }
     }, {passive:true});
 
