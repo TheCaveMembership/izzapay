@@ -2146,16 +2146,16 @@ function recordLeaderboards(score){
   bumpHigh('izza_lb_month_'+monthly, score);
   bumpHigh('izza_lb_year_'+yearly,   score);
 
-  // Also mirror into Arena's local ledger under the "race" game id
-  upsertArenaLedger('race', score);
+  // Mirror into Arena's local ledger under the Arena's game id
+upsertArenaLedger('racing', score);
 
-  // Best-effort POST (auth carried by withAuth/bearerHeaders)
-  try{
-    fetch(withAuth('/izza-game/api/leaderboard'),{
-      method:'POST', headers: bearerHeaders(), credentials:'include',
-      body: JSON.stringify({ score, daily, monthly, yearly, game: 'race' })
-    }).catch(()=>{});
-  }catch(_){}
+// Best-effort POST (auth carried by withAuth/bearerHeaders)
+try{
+  fetch(withAuth('/izza-game/api/leaderboard'), {
+    method:'POST', headers: bearerHeaders(), credentials:'include',
+    body: JSON.stringify({ score, daily, monthly, yearly, game: 'racing' })
+  }).catch(()=>{});
+}catch(_){}
 }
 
 // Optional: snapshot reader if you want to inspect local bests
