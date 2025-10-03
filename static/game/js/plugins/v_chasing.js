@@ -3,7 +3,7 @@
   if (window.__IZZA_CHASING_BOUND) return;
   window.__IZZA_CHASING_BOUND = true;
 
-  const BUILD = 'v1.3-chasing-plugin+10s-escalation';
+  const BUILD = 'v1.3-chasing-plugin+10s-escalation+lb-submit-t-u';
   console.log('[IZZA CHASING]', BUILD);
 
   // Signal to core/other plugins to disable any internal chasing logic.
@@ -277,7 +277,7 @@
     else reinforceAt = 0;
   });
 
-    // Reset internal timers/state on death/respawn
+  // Reset internal timers/state on death/respawn
   ;['player-death','player-died','player-respawn','respawn'].forEach(ev=>{
     IZZA.on(ev, ()=>{
       reinforceAt = 0;
@@ -382,6 +382,44 @@
       rafId = requestAnimationFrame(tickHud);
     }
 
+    // ---- Leaderboard submit helper (carries t & u, falls back to direct POST) ----
+    async function submitLeaderboard({game, score, ts, reason}){
+      // 1) Preferred: app-provided submitter (if present)
+      try{
+        if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit === 'function'){
+          await IZZA_LEADERBOARD.submit({ game, score, reason, ts });
+          return;
+        }
+      }catch(_){/* fall through to direct */ }
+
+      // 2) Direct POST to persist service
+      try{
+        const base = (window.IZZA_PERSIST_BASE || 'https://izzagame.onrender.com');
+        const url  = new URL('/izza-game/api/leaderboard/submit', base);
+
+        const T = (localStorage.getItem('izzaTokenT') || '').trim();
+        const U = ((localStorage.getItem('izzaUserU') || '')).toLowerCase().replace(/^@+/, '');
+        if (T) url.searchParams.set('t', T);
+        if (U) url.searchParams.set('u', U);
+
+        const headers = { 'content-type':'application/json' };
+        try{
+          const bearer = localStorage.getItem('izzaBearer') || '';
+          if (bearer) headers['authorization'] = 'Bearer ' + bearer;
+        }catch(_){}
+
+        const body = { game, score: (score|0), user: U || undefined, ts: (ts|0) };
+        await fetch(url.toString(), {
+          method:'POST',
+          credentials:'include',
+          headers,
+          body: JSON.stringify(body)
+        });
+      }catch(e){
+        console.warn('[chase] direct leaderboard POST failed', e);
+      }
+    }
+
     async function endChase(reason){
       if (!chasing) return;
       chasing = false;
@@ -398,15 +436,14 @@
       banner.style.display = 'block';
       setTimeout(()=>{ banner.style.display = 'none'; }, SHOW_RESULT_MS);
 
+      // Submit score with token/user and second-based timestamp
       try{
-        if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit === 'function'){
-          await IZZA_LEADERBOARD.submit({
-            game: LB_GAME_KEY,
-            score: scoreFromMs(elapsed),
-            reason,
-            ts: Math.floor(Date.now() / 1000) // seconds
-});
-        }
+        await submitLeaderboard({
+          game: LB_GAME_KEY,
+          score: scoreFromMs(elapsed),
+          reason,
+          ts: Math.floor(Date.now()/1000) // seconds
+        });
       }catch(e){
         console.warn('[chase] leaderboard submit failed', e);
       }
