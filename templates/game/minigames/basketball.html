@@ -98,6 +98,32 @@
       border:1px solid rgba(255,107,107,.5);color:#ff6b6b;font-weight:900;letter-spacing:.6px;
       transform:translateX(140%);animation:miss-slide .48s cubic-bezier(.2,.9,.2,1) 1}
     @keyframes miss-slide{to{transform:translateX(0)}}
+    /* --- HUD pill sizing helpers (add this) --- */
+
+/* make pills scale with viewport so they fit next to the new mute button */
+.hud .pill{
+  font-size: clamp(9px, 1.7vw, 10px);
+  padding: clamp(2px, 0.5vh, 3px) clamp(6px, 0.9vh, 7px);
+  letter-spacing: .15px;
+}
+.hud .pill strong{
+  font-size: clamp(11px, 2.2vw, 13px);
+}
+
+/* make the mute button super tight so it doesn’t push COINS offscreen */
+.hud .pill.button{
+  padding: 2px 6px;            /* tighter */
+  min-width: 28px;             /* tiny square-ish */
+  line-height: 1;
+}
+
+/* extra safety on very narrow phones */
+@media (max-width: 420px){
+  .hud{ left:8px; right:8px; } /* a little more room */
+  .hud .pill{ padding: 2px 5px; font-size: 9px; }
+  .hud .pill strong{ font-size: 11px; }
+  .hud .pill.button{ min-width: 26px; font-size: 12px; }
+}
   </style>
 </head>
 <body class="cw-blue theme-a">
