@@ -797,7 +797,19 @@
 
       if(!elModal||!elOpen||!elClose||!elBody||!elTabs||!elGame) return;
 
-      function open(){ elModal.classList.add('show'); loadAndRender(true); }
+      function open(){
+  elModal.classList.add('show');
+  loadAndRender(true);
+  renderPoliceChase();   // <--- call here
+}
+
+elTabs.addEventListener('click', (e)=>{
+  const b = e.target.closest('[data-period]'); if(!b) return;
+  period = b.getAttribute('data-period');
+  elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
+  loadAndRender();
+  renderPoliceChase();   // <--- and here
+}, {passive:true});
       function close(){ elModal.classList.remove('show'); }
       elOpen.addEventListener('click', open, {passive:true});
       elClose.addEventListener('click', close, {passive:true});
@@ -805,13 +817,7 @@
       document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); }, {passive:true});
 
       let period = 'day'; // default
-      elTabs.addEventListener('click', (e)=>{
-        const b = e.target.closest('[data-period]'); if(!b) return;
-        period = b.getAttribute('data-period');
-        elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
-        loadAndRender();
-      }, {passive:true});
-      elGame.addEventListener('change', ()=>loadAndRender(true), {passive:true});
+      
 
       /* ---------- Local ledger helpers: makes your own scores show up ---------- */
       function meUsername(){
@@ -919,6 +925,50 @@
         }catch(_){}
         return null;
       }
+
+      // Normalize rows { user, score } or { u, s } -> {u,s}
+function normRows(rows){
+  return (rows||[]).map(r => ({
+    u: (r.u ?? r.user ?? '—'),
+    s: (r.s ?? r.score ?? 0)|0
+  }));
+}
+
+async function renderPoliceChase(){
+  const wrap = document.getElementById('lbPoliceChase');
+  if (!wrap) return;
+
+  // reuse your existing fetch helper + current period tabs
+  let rows = await fetchServerLeaders('city_chase', period);
+  rows = normRows(rows);
+
+  if (!rows || !rows.length){
+    wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
+    return;
+  }
+
+  // Pretty “time” formatting (scores are seconds)
+  const fmt = s => `${Number(s|0)}s`;
+
+  const me = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
+             (localStorage.getItem('izzaUserU')||'').toLowerCase();
+
+  const html = [
+    `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr></thead><tbody>`
+  ];
+  rows.slice(0,20).forEach((r,i)=>{
+    const isMe = me && r.u && String(r.u).toLowerCase() === me;
+    html.push(
+      `<tr class="${isMe?'lb-row-me':''}">
+         <td>${i+1}</td>
+         <td>${r.u||'—'}</td>
+         <td>${fmt(r.s)}</td>
+       </tr>`
+    );
+  });
+  html.push(`</tbody></table>`);
+  wrap.innerHTML = html.join('');
+}
 
       function readLocalLeaders(gameId, periodKey){
         return readLocal(gameId, periodKey).slice(0,20);
