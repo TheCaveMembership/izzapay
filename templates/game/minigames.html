@@ -936,53 +936,65 @@
       }
 
       async function renderPoliceChase(){
-        const wrap = document.getElementById('lbPoliceChase');
-        if (!wrap) return;
+  const wrap = document.getElementById('lbPoliceChase');
+  if (!wrap) return;
 
-        // Always show all-time for police chase (scores are seconds)
-        let rows = await fetchServerLeaders('city_chase', 'alltime');
+  // Always show all-time for police chase (scores are seconds)
+  let rows = null;
+  try {
+    const r = await (window.IZZA_LEADERBOARD && IZZA_LEADERBOARD.top
+      ? IZZA_LEADERBOARD.top({ game: 'city_chase', limit: 20, period: 'all' })
+      : Promise.resolve({ ok:false }));
+    if (r && r.ok && r.data && Array.isArray(r.data.rows)) {
+      rows = r.data.rows;
+    }
+  } catch(_) { /* fall through to null */ }
 
-        // Normalize: { u|user, s|score } -> {u,s}
-        rows = (rows || []).map(r => ({
-          u: (r.u ?? r.user ?? '—'),
-          s: (r.s ?? r.score ?? 0) | 0
-        })).filter(r => r.s > 0);
+  if (!rows) {
+    // final fallback (same-origin, keeps existing behavior)
+    rows = await fetchServerLeaders('city_chase', 'alltime');
+  }
 
-        // Sort best-first and cap to top 20
-        rows.sort((a,b) => b.s - a.s);
-        rows = rows.slice(0, 20);
+  // Normalize: { u|user, s|score } -> {u,s}
+  rows = (rows || []).map(r => ({
+    u: (r.u ?? r.user ?? '—'),
+    s: (r.s ?? r.score ?? 0) | 0
+  })).filter(r => r.s > 0);
 
-        if (!rows.length){
-          wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
-          return;
-        }
+  // Sort best-first and cap to top 20
+  rows.sort((a,b) => b.s - a.s);
+  rows = rows.slice(0, 20);
 
-        const fmt = s => `${(s|0)}s`;
-        const me =
-          (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
-          (localStorage.getItem('izzaUserU')||'').toLowerCase();
+  if (!rows.length){
+    wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
+    return;
+  }
 
-        const html = [
-          `<table class="lb-table">
-             <thead>
-               <tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr>
-             </thead>
-             <tbody>`
-        ];
-        rows.forEach((r,i)=>{
-          const isMe = me && r.u && String(r.u).toLowerCase() === me;
-          html.push(
-            `<tr class="${isMe ? 'lb-row-me' : ''}">
-               <td>${i+1}</td>
-               <td>${r.u || '—'}</td>
-               <td>${fmt(r.s)}</td>
-             </tr>`
-          );
-        });
-        html.push(`</tbody></table>`);
-        wrap.innerHTML = html.join('');
-      }
+  const fmt = s => `${(s|0)}s`;
+  const me =
+    (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
+    (localStorage.getItem('izzaUserU')||'').toLowerCase();
 
+  const html = [
+    `<table class="lb-table">
+       <thead>
+         <tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr>
+       </thead>
+       <tbody>`
+  ];
+  rows.forEach((r,i)=>{
+    const isMe = me && r.u && String(r.u).toLowerCase() === me;
+    html.push(
+      `<tr class="${isMe ? 'lb-row-me' : ''}">
+         <td>${i+1}</td>
+         <td>${r.u || '—'}</td>
+         <td>${fmt(r.s)}</td>
+       </tr>`
+    );
+  });
+  html.push(`</tbody></table>`);
+  wrap.innerHTML = html.join('');
+}
       function readLocalLeaders(gameId, periodKey){
         return readLocal(gameId, periodKey).slice(0,20);
       }
