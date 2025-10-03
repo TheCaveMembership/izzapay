@@ -172,6 +172,9 @@
     .dot{width:10px;height:10px;border-radius:50%;background:#40ff8a;box-shadow:0 0 6px #40ff8a;}
     .soundBtn.muted .dot{background:#ff4b4b;box-shadow:0 0 6px #ff4b4b;}
 
+    /* put this near your other CSS */
+    .no-glfx #glfx{ display:none !important; }
+    
     /* END GAME POPUP */
     .endOverlay{
       position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:12;
@@ -829,7 +832,11 @@ function setTrack(t){
   trackNightBtn.classList.toggle('active', t==='night');
   trackDayBtn.classList.toggle('active', t==='day');
 
-  // Brighten garage lighting on day track
+  // NEW: hide WebGL overlay on DAY
+  const arenaEl = document.getElementById('arena');
+  if (arenaEl) arenaEl.classList.toggle('no-glfx', t==='day');
+
+  // existing garage brightness tweaks...
   const card = document.getElementById('garageCard');
   if (t==='day'){
     card.style.setProperty('filter', 'brightness(1.05)');
@@ -2069,7 +2076,9 @@ function frame(now){
 
     // ---- WebGL canyon background ----
   const centerNorm = ((carX + carW*0.5) - (W*0.5)) / Math.max(1, W*0.5); // -1..+1
-  GLFX.render(time, worldZ, state.speed, centerNorm, nitroActive, TRACK==='day');
+  if (TRACK !== 'day' && GLFX && GLFX.gl){
+  GLFX.render(time, worldZ, state.speed, centerNorm, nitroActive, false);
+}
 
   // HUD
   HUD.dist.textContent  = Math.round(state.dist);
