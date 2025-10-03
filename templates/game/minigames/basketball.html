@@ -371,7 +371,7 @@
         game.vx=vx*POWER_SCALE; game.vy=vy*POWER_SCALE; const SPIN_THRESHOLD=0.60; game.spin=(Math.abs(spinAccum)>SPIN_THRESHOLD)?spinAccum:0; game.launched=true;
       };
       svg.addEventListener('mousedown',start,{passive:true}); svg.addEventListener('mousemove',move,{passive:true}); window.addEventListener('mouseup',end,{passive:true});
-      svg.addEventListener('touchstart',start,{passive:true}); svg.addEventListener('touchmove',move',{passive:true}); svg.addEventListener('touchend',end,{passive:true});
+      svg.addEventListener('touchstart',start,{passive:true}); svg.addEventListener('touchmove',move,{passive:true}); svg.addEventListener('touchend',end,{passive:true});
     })();
 
     /* ===== Physics/scoring (unchanged logic, +FX hooks) ===== */
