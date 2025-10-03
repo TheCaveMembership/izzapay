@@ -404,8 +404,8 @@
             game: LB_GAME_KEY,
             score: scoreFromMs(elapsed),
             reason,
-            ts: Date.now()
-          });
+            ts: Math.floor(Date.now() / 1000) // seconds
+});
         }
       }catch(e){
         console.warn('[chase] leaderboard submit failed', e);
