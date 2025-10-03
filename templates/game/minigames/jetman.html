@@ -1384,7 +1384,58 @@ function awardFromProgress(deltaScore, game){
   var add = (Math.floor(game.score) - Math.floor(game.score - deltaScore))|0;
   if (add>0) applyCoins(add);
 }
+/* ===== Leaderboard submit (shared match key) ===== */
+function getMatchUser(){
+  try{
+    var u =
+      (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ||
+      (window.izzaUserKey && typeof window.izzaUserKey.get==='function' && window.izzaUserKey.get()) ||
+      (localStorage.getItem('izzaUserU')||'');
+    return (u||'').toString().trim().replace(/^@+/, '').toLowerCase();
+  }catch(_){ return ''; }
+}
+function submitJetmanScore(payload){
+  // Always include our canonical user match + defensive extras
+  var body = Object.assign({
+    game: 'jetman',
+    user: getMatchUser(),
+    ts: Date.now(),
+    client: {
+      dpr: (window.devicePixelRatio||1),
+      w: W|0, h: H|0,
+      ua: (navigator.userAgent||'')
+    }
+  }, payload||{});
 
+  // Candidate endpoints (same-origin first, then IZZA_PERSIST_BASE)
+  var endpoints = [];
+  try{
+    endpoints.push(withAuth('/izza-game/api/leaderboard/submit'));
+  }catch(_){}
+  try{
+    if (window.IZZA_PERSIST_BASE){
+      var base = window.IZZA_PERSIST_BASE.replace(/\/+$/,'');
+      endpoints.push(base + '/izza-game/api/leaderboard/submit');
+      endpoints.push(base + '/api/leaderboard/submit'); // alt shape
+    }
+  }catch(_){}
+
+  // Fire-and-forget attempts, stop on first 2xx
+  (async function(){
+    for (var i=0;i<endpoints.length;i++){
+      try{
+        var res = await fetch(endpoints[i], {
+          method: 'POST',
+          credentials: 'include',
+          mode: 'cors',
+          headers: bearerHeaders(),
+          body: JSON.stringify(body)
+        });
+        if (res && res.ok) return; // success: stop trying
+      }catch(_){ /* ignore and try next */ }
+    }
+  })();
+}
 /* ===== Game over (unchanged) ===== */
 function gameOver(){
   if (game.ended) return; game.ended = true;
@@ -1394,11 +1445,20 @@ function gameOver(){
   document.getElementById('hi').textContent = hi;
 
   var coinsNow = readCoinsLS()|0;
+  var runCoins = Math.max(0, coinsNow - (runStartCoins|0));
+
   finalScoreEl.textContent = Math.floor(game.score);
-  finalCoinsEl.textContent = Math.max(0, coinsNow - (runStartCoins|0));
+  finalCoinsEl.textContent = runCoins;
   finalCraftEl.textContent = Math.floor(coinsNow/COINS_PER_CREDIT) - Math.floor((runStartCoins|0)/COINS_PER_CREDIT);
   finishEl.style.display = 'flex';
   persistWalletBestEffort();
+
+  // ✅ submit to leaderboard with the SAME matching logic as the rest of the app
+  submitJetmanScore({
+    score: Math.floor(game.score)|0,
+    hi: hi|0,
+    coinsDelta: runCoins|0
+  });
 }
 
 /* ===== Moon on UI canvas (unchanged) ===== */
