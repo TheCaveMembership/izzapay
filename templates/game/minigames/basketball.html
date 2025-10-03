@@ -4,40 +4,35 @@
   <meta charset="utf-8">
   <title>Street Basketball — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
 
-  <!-- Persist (same as Arena) -->
-  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
-
-  <!-- Seed username before izza-persist.js (same pattern as Arena) -->
+  <!-- Seed username BEFORE izza-persist.js (unchanged) -->
   <script>
-    (function(){
-      try{
-        const params = new URLSearchParams(location.search);
-        let u = (params.get('u') || '').toString().trim();
-        if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
-        if (!u) {
-          const raw = localStorage.getItem('piAuthUser');
-          if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
-        }
-        if (u) {
-          u = u.replace(/^@+/, '').toLowerCase();
-          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-          window.izzaUserKey = { get: () => u };
-          try { localStorage.setItem('izzaUserU', u); } catch(_){}
-          try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
-        }
-      }catch(_){}
-    })();
+  (function(){
+    try{
+      const params = new URLSearchParams(location.search);
+      let u = (params.get('u')||'').toString().trim();
+      if(!u) u = (localStorage.getItem('izzaUserU')||'').toString().trim();
+      if(!u){
+        const raw = localStorage.getItem('piAuthUser');
+        if(raw){ try{ u = (JSON.parse(raw)||{}).username || ''; }catch(_){ } }
+      }
+      if(u){
+        u = u.replace(/^@+/, '').toLowerCase();
+        window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username:u });
+        window.izzaUserKey = { get: () => u };
+        try{ localStorage.setItem('izzaUserU', u); }catch(_){}
+        try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+      }
+    }catch(_){}
+  })();
   </script>
-
   <script src="/static/game/js/izza-persist.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{
-      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
-    }
+    :root{ --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
+           --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a; }
     *{box-sizing:border-box}
     body{margin:0;background:#102;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
@@ -45,62 +40,47 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
          background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
     .btn:hover{filter:brightness(1.06)}
-
     .arena{position:relative;height:74vh;min-height:540px;border:1px solid var(--line);
            border-radius:14px;background:#000;overflow:hidden}
 
-    /* HUD */
+    /* HUD (unchanged) */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:9;padding-right:8px;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap}
-    .pill strong{font-size:13px}
-    .pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
-    .pill input[type="file"]{font-size:10px}
+    .pill strong{font-size:13px}.pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
 
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
-            font-weight:900;letter-spacing:.6px;font-size:52px;opacity:.0;transition:opacity .2s, transform .2s;
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+            font-weight:900;letter-spacing:.6px;font-size:52px;opacity:0;transition:opacity .2s,transform .2s;
             pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:10}
-    .bigmsg.show{opacity:1;transform:translate(-50%, -56%) scale(1.04)}
+    .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .miss{color:var(--bad)}
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 
-    /* vignette */
     .vignette:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:8;
       background:radial-gradient(85% 70% at 50% 25%, rgba(0,0,0,0) 55%, rgba(0,0,0,.35) 100%);}
 
     /* Start overlay */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
       background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.45));}
-    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:16px 18px;
+    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
       display:flex;flex-direction:column;gap:10px;align-items:center}
+    .startBtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
     .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
+    .startBtn.secondary{opacity:.95}
 
-    /* NEW: swish animations */
-    @keyframes net-swish {
-      0% { transform: translateY(0) scaleY(1) rotate(0deg); }
-      35%{ transform: translateY(4px) scaleY(1.12) rotate(-2deg); }
-      65%{ transform: translateY(2px) scaleY(1.06) rotate(1deg); }
-      100%{transform: translateY(0) scaleY(1) rotate(0deg); }
-    }
-    @keyframes board-shake {
-      0%{ transform: translate(0,0); }
-      30%{ transform: translate(1px,0); }
-      60%{ transform: translate(-1px,0); }
-      100%{ transform: translate(0,0); }
-    }
-    .shake{ animation: board-shake .18s ease-out 1; }
-    .swish{ animation: net-swish .32s ease-out 1; transform-origin: 100px -38px; }
+    /* Swish juice */
+    @keyframes net-swish{0%{transform:translateY(0) scaleY(1) rotate(0)}35%{transform:translateY(4px) scaleY(1.12) rotate(-2deg)}65%{transform:translateY(2px) scaleY(1.06) rotate(1deg)}100%{transform:translateY(0) scaleY(1) rotate(0)}}
+    @keyframes board-shake{0%{transform:translate(0,0)}30%{transform:translate(1px,0)}60%{transform:translate(-1px,0)}100%{transform:translate(0,0)}}
+    .shake{animation:board-shake .18s ease-out 1}
+    .swish{animation:net-swish .32s ease-out 1; transform-origin: 100px -38px}
 
-    /* NEW: avatar at bottom center, half offscreen */
-    .playerAvatar{
-      position:absolute; left:50%; bottom:-36px; transform:translateX(-50%);
-      width:128px; height:128px; z-index:7; pointer-events:none;
-    }
-    .playerAvatar canvas{ width:128px; height:128px; image-rendering:pixelated; image-rendering:crisp-edges; }
-    .avatar-bob{ animation: avatarBob .35s ease-out 1; }
-    @keyframes avatarBob{ 0%{ transform:translate(-50%,0) } 50%{ transform:translate(-50%,-10px) } 100%{ transform:translate(-50%,0) } }
+    /* Avatar */
+    .playerAvatar{position:absolute;left:50%;bottom:-36px;transform:translateX(-50%);width:128px;height:128px;z-index:7;pointer-events:none}
+    .playerAvatar canvas{width:128px;height:128px;image-rendering:pixelated;image-rendering:crisp-edges}
+    .avatar-bob{animation:avatarBob .35s ease-out 1}
+    @keyframes avatarBob{0%{transform:translate(-50%,0)}50%{transform:translate(-50%,-10px)}100%{transform:translate(-50%,0)}}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -111,6 +91,7 @@
     </div>
 
     <div class="arena vignette" id="arena">
+      <!-- HUD (no background button here anymore) -->
       <div class="hud">
         <div class="left">
           <div class="pill">SCORE: <strong id="score" class="arc">0</strong></div>
@@ -119,65 +100,44 @@
         </div>
         <div class="right">
           <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
-          <!-- NEW: background swapper (file or URL param ?bg=) -->
-          <label class="pill" title="Swap BG (local preview)">
-            Background
-            <input type="file" id="bgUpload" accept="image/*">
-          </label>
         </div>
       </div>
 
-      <!-- START overlay -->
+      <!-- START overlay with Custom BG -->
       <div id="startOverlay" class="startOverlay" aria-live="polite">
         <div class="startCard">
-          <button id="startBtn" class="startBtn">START</button>
+          <div class="startBtns">
+            <button id="chooseBgBtn" class="startBtn secondary">CUSTOM BACKGROUND</button>
+            <button id="startBtn" class="startBtn">START</button>
+          </div>
+          <!-- hidden file input -->
+          <input id="bgUpload" type="file" accept="image/*" style="display:none">
         </div>
       </div>
 
-      <!-- Scene -->
+      <!-- Scene SVG (unchanged hoop/physics) -->
       <svg id="court" class="aim" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid slice" aria-label="Court">
         <defs>
-          <!-- NEW: background filter subtle depth -->
-          <filter id="bgBlur">
-            <feGaussianBlur stdDeviation="1.2"/>
-          </filter>
-
-          <!-- Ball look -->
+          <filter id="bgBlur"><feGaussianBlur stdDeviation="1.2"/></filter>
           <radialGradient id="ballGrad" cx="36%" cy="32%" r="68%">
             <stop offset="0%" stop-color="#ffc06a"/><stop offset="100%" stop-color="#d96424"/>
           </radialGradient>
-          <!-- NEW: leather dots pattern overlay -->
           <pattern id="ballPebble" width="6" height="6" patternUnits="userSpaceOnUse">
             <circle cx="1" cy="1" r="0.7" fill="rgba(0,0,0,.12)"/>
             <circle cx="4" cy="3.5" r="0.7" fill="rgba(0,0,0,.10)"/>
           </pattern>
-
-          <!-- Board shadow -->
           <filter id="shadow"><feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity=".35"/></filter>
-
-          <!-- Court wood stays same -->
           <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#e6b77a"/><stop offset="100%" stop-color="#c78f4a"/>
           </linearGradient>
         </defs>
 
-        <!-- NEW: Background image layer (behind everything) -->
-        <image id="bgImage"
-               href="/static/game/img/basketball/izza_city_bg.jpg"
+        <!-- BACKGROUND IMAGE SLOT -->
+        <image id="bgImage" href="/static/game/img/basketball/izza_city_bg.jpg"
                x="0" y="0" width="1100" height="760"
-               preserveAspectRatio="xMidYMid slice"
-               filter="url(#bgBlur)"
-               opacity="0.94"/>
-        <!-- Optional soft gradient on top of BG for readability -->
-        <rect x="0" y="0" width="1100" height="760" fill="url(#fadeTop)" opacity="0"/>
-        <defs>
-          <linearGradient id="fadeTop" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="rgba(0,0,0,.25)"/>
-            <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
-          </linearGradient>
-        </defs>
+               preserveAspectRatio="xMidYMid slice" filter="url(#bgBlur)" opacity="0.94"/>
 
-        <!-- Court floor (unchanged) -->
+        <!-- Court floor -->
         <g>
           <rect x="0" y="520" width="1100" height="240" fill="url(#wood)"/>
           <polygon points="70,560 1030,560 1100,760 0,760" fill="url(#wood)"/>
@@ -185,7 +145,7 @@
           <ellipse cx="550" cy="640" rx="180" ry="26" fill="none" stroke="rgba(255,165,0,.55)" stroke-width="6"/>
         </g>
 
-        <!-- Hoop: keep position/scale identical to yours -->
+        <!-- Hoop (same transform as your original) -->
         <g id="hoop" transform="translate(390, 300) scale(1.6)">
           <rect x="90" y="-20" width="12" height="86" fill="#b7c7d8"/>
           <g id="boardGroup">
@@ -194,30 +154,22 @@
             <rect x="54" y="-86" width="92" height="60" fill="none" stroke="#ff7a00" stroke-width="6"/>
           </g>
           <circle id="rim" cx="100" cy="-38" r="36" fill="none" stroke="#ff7a00" stroke-width="8"/>
-
-          <!-- NEW: separate net group so we can animate "swish" -->
           <g id="net">
-            <path d="M132 -36 q-12 52 -28 104 q-14 -52 -28 -104"
-                  stroke="rgba(255,255,255,.9)" stroke-width="2.8" fill="none"/>
-            <!-- subtle vertical threads for texture -->
-            <path d="M116 -36 q-9 46 -20 92 M84 -36 q9 46 20 92"
-                  stroke="rgba(255,255,255,.6)" stroke-width="1.4" fill="none" opacity=".7"/>
+            <path d="M132 -36 q-12 52 -28 104 q-14 -52 -28 -104" stroke="rgba(255,255,255,.9)" stroke-width="2.8" fill="none"/>
+            <path d="M116 -36 q-9 46 -20 92 M84 -36 q9 46 20 92" stroke="rgba(255,255,255,.6)" stroke-width="1.4" fill="none" opacity=".7"/>
           </g>
         </g>
 
         <!-- Ball -->
         <g id="ballGrp">
           <circle id="ball" cx="550" cy="700" r="76" fill="url(#ballGrad)" stroke="#7a3a18" stroke-width="4"/>
-          <!-- NEW: panel lines darker -->
           <path d="M474 700 h152 M550 624 v152" stroke="#5a2d12" stroke-width="4" opacity=".9"/>
-          <!-- NEW: leather pebble overlay -->
           <circle cx="550" cy="700" r="76" fill="url(#ballPebble)" opacity=".35"/>
-          <!-- NEW: specular highlight -->
-          <ellipse cx="520" cy="670" rx="20" ry="12" fill="rgba(255,255,255,.25)" />
+          <ellipse cx="520" cy="670" rx="20" ry="12" fill="rgba(255,255,255,.25)"/>
         </g>
       </svg>
 
-      <!-- NEW: Avatar canvas (bottom center, half off-screen) -->
+      <!-- Avatar -->
       <div class="playerAvatar" id="playerAvatar"><canvas id="avatarCanvas" width="128" height="128"></canvas></div>
 
       <div id="bigmsg" class="bigmsg" aria-live="polite">GOAL!</div>
@@ -234,458 +186,240 @@
 
   <script>
   (function(){
-    /* -------- t & u params / links (same as Arena) -------- */
+    /* ===== t & u plumbing (unchanged) ===== */
     const T_KEY='izzaTokenT', U_KEY='izzaUserU';
     const urlParams = new URLSearchParams(location.search);
-    let T = urlParams.get('t') || '';
-    let U = (urlParams.get('u') || '').toString().trim();
-
+    let T=urlParams.get('t')||''; let U=(urlParams.get('u')||'').toString().trim();
     try{
-      if (T) localStorage.setItem(T_KEY, T);
-      else {
-        const s = localStorage.getItem(T_KEY)||'';
-        if (s){ const url=new URL(location.href); url.searchParams.set('t',s); history.replaceState(null,'',url.toString()); T=s; }
-      }
+      if(T) localStorage.setItem(T_KEY,T);
+      else{ const s=localStorage.getItem(T_KEY)||''; if(s){ const u=new URL(location.href); u.searchParams.set('t',s); history.replaceState(null,'',u.toString()); T=s; } }
     }catch(_){}
-
     function publishUsername(u){
-      if (!u) return;
-      u = u.replace(/^@+/, '').toLowerCase();
-      try{ localStorage.setItem(U_KEY, u); }catch(_){}
-      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+      if(!u) return; u=u.replace(/^@+/, '').toLowerCase();
+      try{ localStorage.setItem(U_KEY,u); }catch(_){}
+      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username:u });
       window.izzaUserKey = { get: () => u };
-      try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
+      try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
       return u;
     }
-
     try{
-      if (U) publishUsername(U);
-      else {
-        const su = (localStorage.getItem(U_KEY)||'').toString().trim();
-        if (su){
-          const url=new URL(location.href); url.searchParams.set('u',su);
-          history.replaceState(null,'',url.toString()); U = publishUsername(su);
-        }
+      if(U) publishUsername(U);
+      else{
+        const su=(localStorage.getItem(U_KEY)||'').toString().trim();
+        if(su){ const u=new URL(location.href); u.searchParams.set('u',su); history.replaceState(null,'',u.toString()); U=publishUsername(su); }
       }
     }catch(_){}
-
-    function withAuth(href){
-      const url = new URL(href, location.origin);
-      if (T) url.searchParams.set('t', T);
-      if (U) url.searchParams.set('u', U);
-      return url.pathname + (url.search ? url.search : '');
-    }
+    function withAuth(href){ const u=new URL(href, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname + (u.search?u.search:''); }
     document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
     document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
 
-    /* -------- helpers -------- */
-    function bearerHeaders(base = {}) {
-      const headers = Object.assign({ 'content-type':'application/json' }, base || {});
-      try{ const bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
-      return headers;
-    }
-    function parseWalletResponse(j){
-      if (!j || typeof j !== 'object') return { coins:0, crafting:0 };
-      if ('coins' in j || 'crafting' in j || 'credits' in j){
-        return { coins: Number(j.coins)||0, crafting: Number(j.crafting ?? j.credits)||0 };
-      }
-      if (j.wallet)   return parseWalletResponse(j.wallet);
-      if (j.balance)  return parseWalletResponse(j.balance);
-      return { coins:0, crafting:0 };
-    }
+    /* ===== helpers & wallet (unchanged) ===== */
+    function bearerHeaders(b={}){ const h=Object.assign({'content-type':'application/json'},b||{}); try{ const tok=localStorage.getItem('izzaBearer')||''; if(tok) h.authorization='Bearer '+tok; }catch(_){ } return h; }
+    function parseWalletResponse(j){ if(!j||typeof j!=='object') return {coins:0,crafting:0}; if('coins' in j || 'crafting' in j || 'credits' in j) return {coins:Number(j.coins)||0, crafting:Number(j.crafting??j.credits)||0}; if(j.wallet) return parseWalletResponse(j.wallet); if(j.balance) return parseWalletResponse(j.balance); return {coins:0,crafting:0}; }
     const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
+    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){} }
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
-    /* -------- Handoff from Arena (unchanged) -------- */
-    function consumeWalletHandoff(maxAgeMs = 120000){
+    async function ensureSession(){
       try{
-        const raw = sessionStorage.getItem('izzaWalletHandoff');
-        if(!raw) return null;
-        const s = JSON.parse(raw);
-        if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
+        const r=await fetch(withAuth('/izza-game/api/character'),{credentials:'include',headers:bearerHeaders()});
+        if(r.ok){ const j=await r.json().catch(()=>({})); const uname=(j.user&&j.user.username)||j.username||j.handle||''; if(uname){ U=publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){} } return j; }
+      }catch(_){}
+      return null;
+    }
 
-        if (s.user){
-          const u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
-          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
-          window.izzaUserKey = { get: () => u };
-          try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
-          U = u;
+    /* ===== DOM refs ===== */
+    const svg=document.getElementById('court'), ball=document.getElementById('ball'), hoop=document.getElementById('hoop');
+    const rim=document.getElementById('rim'), net=document.getElementById('net'), boardGroup=document.getElementById('boardGroup'), bgImage=document.getElementById('bgImage');
+    const bigmsg=document.getElementById('bigmsg'), arenaEl=document.getElementById('arena');
+    const scoreEl=document.getElementById('score'), streakEl=document.getElementById('streak'), timeEl=document.getElementById('time'), coinsRunEl=document.getElementById('coinsRun');
+    const startBtn=document.getElementById('startBtn'), chooseBgBtn=document.getElementById('chooseBgBtn'), bgUpload=document.getElementById('bgUpload');
+
+    /* ===== Geometry ===== */
+    let W=arenaEl.clientWidth, H=arenaEl.clientHeight;
+    function toXY(cx,cy){ const vbW=1100,vbH=760, scale=H/vbH, drawnW=vbW*scale, leftCrop=Math.max(0,(drawnW-W)/2); return {x:cx*scale-leftCrop, y:cy*scale}; }
+
+    /* ===== Game state (unchanged) ===== */
+    let game={ x:550,y:700,vx:0,vy:0,r:76, gravity:2300,drag:0.992, launched:false,dragging:false, score:0,goals:0, timeLeft:60,
+               hoopX:390,hoopY:300,distanceStep:0, timerId:null,ended:false, creditsEarned:0, spin:0,spinDecay:0.985, noMissUntil:0 };
+    function setHoopDistance(){ hoop.setAttribute('transform',`translate(${game.hoopX},${game.hoopY}) scale(1.6)`); }
+    function setBall(cx,cy){ ball.setAttribute('cx',cx); ball.setAttribute('cy',cy); }
+    function showMsg(t,c){ bigmsg.textContent=t; bigmsg.className='bigmsg show '+(c||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
+    function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
+    function resetBall(){ if(game.ended) return; Object.assign(game,{x:550,y:700,vx:0,vy:0,launched:false,dragging:false,spin:0}); setBall(game.x,game.y); }
+
+    /* ===== Aim (unchanged) ===== */
+    (function wireAim(){
+      const samples=[]; const MAX_WINDOW_MS=150; const POWER_SCALE=0.94; const MIN_UP_VY=-520;
+      let startRect=null,startPos=null,lastAngle=null,spinAccum=0;
+      function addSample(pt){
+        const now=performance.now(), x=pt.clientX-startRect.left, y=pt.clientY-startRect.top;
+        samples.push({x,y,t:now}); while(samples.length && now-samples[0].t>260) samples.shift();
+        if(game.dragging && !game.launched){
+          const dx=x-startPos.x, dy=y-startPos.y, pullMax=220, d=Math.hypot(dx,dy), k=d>pullMax?pullMax/d:1;
+          setBall(game.x=550+dx*k*0.9, game.y=700+dy*k*0.9);
+          const ang=Math.atan2(dy,dx); if(lastAngle!=null){ let da=ang-lastAngle; if(da>Math.PI) da-=2*Math.PI; if(da<-Math.PI) da+=2*Math.PI; spinAccum+=da; } lastAngle=ang;
         }
+      }
+      const start=(e)=>{
+        if(game.ended) return;
+        const pt=(e.touches?e.touches[0]:e), b=ball.getBoundingClientRect();
+        const inside=pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
+        if(!inside) return;
+        startRect=svg.getBoundingClientRect(); startPos={x:pt.clientX-startRect.left, y:pt.clientY-startRect.top};
+        samples.length=0; lastAngle=null; spinAccum=0; game.dragging=true; game.launched=false;
+        try{ const avWrap=document.getElementById('playerAvatar'); avWrap.classList.remove('avatar-bob'); void avWrap.offsetWidth; avWrap.classList.add('avatar-bob'); }catch(_){}
+        addSample(pt);
+      };
+      const move=(e)=>{ if(!game.dragging) return; addSample(e.touches?e.touches[0]:e); };
+      const end=()=>{ if(!game.dragging) return; game.dragging=false;
+        const now=performance.now(); while(samples.length && now-samples[0].t>MAX_WINDOW_MS) samples.shift();
+        if(samples.length<2){ resetBall(); return; }
+        const a=samples[0], b=samples[samples.length-1], dt=Math.max(1,b.t-a.t)/1000;
+        let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt; if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
+        game.vx=vx*POWER_SCALE; game.vy=vy*POWER_SCALE; const SPIN_THRESHOLD=0.60; game.spin=(Math.abs(spinAccum)>SPIN_THRESHOLD)?spinAccum:0; game.launched=true;
+      };
+      svg.addEventListener('mousedown',start,{passive:true}); svg.addEventListener('mousemove',move,{passive:true}); window.addEventListener('mouseup',end,{passive:true});
+      svg.addEventListener('touchstart',start,{passive:true}); svg.addEventListener('touchmove',move,{passive:true}); svg.addEventListener('touchend',end,{passive:true});
+    })();
+
+    /* ===== Physics/scoring (unchanged logic, +juice) ===== */
+    const TOP_OUT=-600, MISS_BAND_PX=400;
+    function physics(dt){
+      if(!game.launched||game.ended) return;
+      game.vy+=game.gravity*dt;
+      if(Math.abs(game.spin)>0.001){ const side=Math.max(-900,Math.min(900,game.spin*260)); game.vx+=side*dt; game.spin*=Math.pow(game.spinDecay,Math.max(1,dt*60)); }
+      game.vx*=game.drag; game.vy*=game.drag; game.x+=game.vx*dt; game.y+=game.vy*dt;
+      if(game.x<110){ game.x=110; game.vx*=-0.6; } if(game.x>990){ game.x=990; game.vx*=-0.6; }
+      if(game.y<TOP_OUT && performance.now()>game.noMissUntil){ quickMiss(); return; }
+      const floorY=toXY(0,720).y; if(game.y>floorY){ game.y=floorY; game.vy=0; game.vx=0; game.launched=false; setTimeout(resetBall,280); }
+      setBall(game.x,game.y); checkHoopOrMiss();
+    }
+    function checkHoopOrMiss(){
+      const rimPt=rim.getBoundingClientRect(), ballPt=ball.getBoundingClientRect();
+      const rx=rimPt.left+rimPt.width/2, ry=rimPt.top+rimPt.height/2, bx=ballPt.left+ballPt.width/2, by=ballPt.top+ballPt.height/2, rRing=rimPt.width/2;
+      const d=Math.hypot(bx-rx,by-ry), fudge=rRing*0.18;
+      if(!game._scored && d<(rRing+fudge) && game.vy>0){
+        const swish = d<rRing*0.55 && Math.abs(game.vx)<900; scoreShot(swish); game._scored=true; game.noMissUntil=performance.now()+350; setTimeout(()=>{game._scored=false;},300); return;
+      }
+      if(game.launched && !game._scored && game.vy>0 && performance.now()>game.noMissUntil){ if(by>(ry+MISS_BAND_PX)) quickMiss(); }
+    }
+    function quickMiss(){ if(game._scored || performance.now()<game.noMissUntil) return; game.launched=false; showMsg('MISS!','miss'); setTimeout(resetBall,220); }
+
+    let walletDirty=false, WALLET_READY=false, runStartCoins=0;
+    function paintCoinsHUD(n){ const val=Math.max(0,n|0); if(coinsRunEl) coinsRunEl.textContent=String(val); }
+    function updateCoinsHUD(){ if(!WALLET_READY) return; const cur=readCoinsLS(); const shown=parseInt(coinsRunEl.textContent||'0',10)||0; const val=(cur===0 && shown>0)?shown:cur; paintCoinsHUD(val); }
+    function syncCoinsHUD(){ updateCoinsHUD(); }
+    async function applyCoins(amount){ const cur=(readCoinsLS()|0)+(amount|0); writeCoinsLS(cur); walletDirty=true; try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){}
+      try{ if(window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty=false; } }catch(_){}
+      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
+      WALLET_READY=true; updateCoinsHUD(); return cur; }
+    async function applyCraftDelta(delta){ const val=readCraftAny()+(delta|0); writeCraftAll(val); walletDirty=true;
+      try{ if(window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty=false; } }catch(_){}
+      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){} }
+
+    async function scoreShot(swish){
+      const NORMAL=200, award=swish?NORMAL*2:NORMAL;
+      game.score+=award; game.goals+=1; await applyCoins(award);
+      try{ net.classList.remove('swish'); boardGroup.classList.remove('shake'); void net.offsetWidth; if(swish) net.classList.add('swish'); boardGroup.classList.add('shake'); setTimeout(()=>boardGroup.classList.remove('shake'),220); }catch(_){}
+      const creditsNow=Math.floor(game.goals/10);
+      if(creditsNow>game.creditsEarned){ game.creditsEarned=creditsNow; await applyCraftDelta(1); showMsg('+1 CRAFT CREDIT!','scoreGlow'); }
+      else{ showMsg(swish?'SWISH! +400':'SCORE! +200', swish?'scoreGlow':''); }
+      scoreEl.textContent=game.score; streakEl.textContent=game.goals; updateCoinsHUD(); setTimeout(resetBall,260);
+    }
+
+    let lastT=performance.now();
+    function loop(t){ const dt=Math.min(0.033,(t-lastT)/1000); lastT=t; physics(dt); if(!game.ended) requestAnimationFrame(loop); }
+
+    async function persistWalletAndSave(){ try{ writeCraftAll(readCraftAny()); if(window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){ await IZZA_PERSIST.save(); walletDirty=false; } else if(typeof window._izzaForceSave==='function'){ window._izzaForceSave(); walletDirty=false; } }catch(_){} }
+    async function endRun(){ if(game.ended) return; game.ended=true; try{ if(game.timerId) clearInterval(game.timerId); }catch(_){}
+      game.launched=false; game.dragging=false; const coinsNow=readCoinsLS(); const coinsAwarded=Math.max(0,(coinsNow|0)-(runStartCoins|0));
+      document.getElementById('finalScore').textContent=game.score; document.getElementById('finalCoins').textContent=coinsAwarded; document.getElementById('finalCraft').textContent=game.creditsEarned;
+      document.getElementById('finish').style.display='flex'; showMsg('Time!','miss');
+      try{ const p=persistWalletAndSave(); await Promise.race([p,new Promise(r=>setTimeout(r,200))]); }catch(_){}
+    }
+
+    /* ===== Background handling (overlay only) ===== */
+    function setBgHref(href){ if(!href) return; try{ bgImage.setAttribute('href', href); }catch(_){} }
+    function initBackgroundFromStorageOrParam(){
+      const p=new URLSearchParams(location.search);
+      const paramBg=p.get('bg');
+      const data=localStorage.getItem('izzaBallBgUserData')||''; // persists across sessions
+      const href = data || paramBg || '/static/game/img/basketball/izza_city_bg.jpg';
+      setBgHref(href);
+    }
+    // Choose BG button opens file dialog
+    chooseBgBtn.addEventListener('click', ()=> bgUpload.click(), {passive:true});
+    bgUpload.addEventListener('change', (e)=>{
+      const f=e.target.files && e.target.files[0]; if(!f) return;
+      const reader=new FileReader();
+      reader.onload = () => {
+        const dataUrl=reader.result; setBgHref(dataUrl);
+        try{ localStorage.setItem('izzaBallBgUserData', dataUrl); }catch(_){}
+      };
+      reader.readAsDataURL(f);
+    }, {passive:true});
+
+    /* ===== Boot/listeners (unchanged + init bg here) ===== */
+    function consumeWalletHandoff(maxAgeMs=120000){
+      try{
+        const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+        const s=JSON.parse(raw); if(!s||!s.ts||(Date.now()-s.ts)>maxAgeMs) return null;
+        if(s.user){ const u=s.user.toString().trim().replace(/^@+/, '').toLowerCase(); window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u}); window.izzaUserKey={get:()=>u};
+          try{ localStorage.setItem('izzaUserU',u); localStorage.setItem('piAuthUser',JSON.stringify({username:u})); }catch(_){}
+          U=u; }
         localStorage.setItem('izzaCoins', String(s.coins|0));
         localStorage.setItem('izzaCrafting', String(s.craft|0));
         return { coins:s.coins|0, craft:s.craft|0 };
       }catch(_){ return null; }
     }
 
-    /* -------- Optional session check -------- */
-    async function ensureSession(){
-      try{
-        const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-        if (r.ok){
-          const j = await r.json().catch(()=> ({}));
-          const uname = (j.user && j.user.username) || j.username || j.handle || '';
-          if (uname) { U = publishUsername(uname); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){} }
-          return j;
-        }
-      }catch(_){}
-      return null;
-    }
-
-    /* -------- UI refs -------- */
-    const svg = document.getElementById('court');
-    const ball = document.getElementById('ball');
-    const hoop = document.getElementById('hoop');
-    const rim  = document.getElementById('rim');
-    const net  = document.getElementById('net');            // NEW
-    const boardGroup = document.getElementById('boardGroup'); // NEW
-    const bgImage = document.getElementById('bgImage');     // NEW
-    const bigmsg = document.getElementById('bigmsg');
-    const arenaEl = document.getElementById('arena');
-    const bgUpload = document.getElementById('bgUpload');   // NEW
-
-    const scoreEl = document.getElementById('score');
-    const streakEl = document.getElementById('streak');
-    const timeEl = document.getElementById('time');
-    const coinsRunEl = document.getElementById('coinsRun');
-
-    /* -------- Geometry helpers -------- */
-    let W = arenaEl.clientWidth, H = arenaEl.clientHeight;
-    function toXY(cx, cy){
-      const vbW = 1100, vbH = 760;
-      const scale = H / vbH;
-      const drawnW = vbW * scale;
-      const leftCrop = Math.max(0, (drawnW - W) / 2);
-      return { x: cx * scale - leftCrop, y: cy * scale };
-    }
-
-    /* -------- Game state -------- */
-    let game = {
-      x:550, y:700, vx:0, vy:0, r:76,
-      gravity:2300, drag:0.992,
-      launched:false, dragging:false,
-      score:0, goals:0,
-      timeLeft:60,
-      hoopX:390, hoopY:300, distanceStep:0,
-      timerId:null, ended:false,
-      creditsEarned:0,
-      spin:0, spinDecay:0.985,
-      noMissUntil:0
-    };
-
-    function setHoopDistance(){ hoop.setAttribute('transform', `translate(${game.hoopX}, ${game.hoopY}) scale(1.6)`); }
-    function setBall(cx,cy){ ball.setAttribute('cx', cx); ball.setAttribute('cy', cy); }
-    function showMsg(txt, cls){ bigmsg.textContent=txt; bigmsg.className='bigmsg show '+(cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
-    function startTimer(){ if(game.timerId) clearInterval(game.timerId); game.timerId=setInterval(()=>{ game.timeLeft--; timeEl.textContent=game.timeLeft; if(game.timeLeft<=0){ clearInterval(game.timerId); endRun(); } },1000); }
-    function resetBall(){ if(game.ended) return; Object.assign(game,{ x:550, y:700, vx:0, vy:0, launched:false, dragging:false, spin:0 }); setBall(game.x, game.y); }
-
-    /* ---- Drag + flick (unchanged) ---- */
-    (function wireAim(){
-      const samples=[]; const MAX_WINDOW_MS=150; const POWER_SCALE=0.94; const MIN_UP_VY=-520;
-      let startRect=null, startPos=null, lastAngle=null, spinAccum=0;
-      function addSample(pt){
-        const now=performance.now(), x=pt.clientX - startRect.left, y=pt.clientY - startRect.top;
-        samples.push({x,y,t:now}); while(samples.length && now - samples[0].t > 260) samples.shift();
-        if(game.dragging && !game.launched){
-          const dx=x - startPos.x, dy=y - startPos.y;
-          const pullMax=220; const d=Math.hypot(dx,dy); const k=d>pullMax ? pullMax/d : 1;
-          setBall(game.x = 550 + dx*k*0.9, game.y = 700 + dy*k*0.9);
-          const ang = Math.atan2(dy,dx);
-          if(lastAngle!=null){ let da = ang - lastAngle; if(da> Math.PI) da-=2*Math.PI; if(da<-Math.PI) da+=2*Math.PI; spinAccum += da; }
-          lastAngle = ang;
-        }
-      }
-      const start = (e)=>{
-        if(game.ended) return;
-        const pt=(e.touches?e.touches[0]:e);
-        const b=ball.getBoundingClientRect();
-        const inside = pt.clientX>=b.left && pt.clientX<=b.right && pt.clientY>=b.top && pt.clientY<=b.bottom;
-        if(!inside) return;
-        startRect=svg.getBoundingClientRect();
-        startPos={x: pt.clientX - startRect.left, y: pt.clientY - startRect.top};
-        samples.length=0; lastAngle=null; spinAccum=0;
-        game.dragging=true; game.launched=false;
-
-        // NEW: tiny avatar bob when you start a shot
-        try{
-          const avWrap = document.getElementById('playerAvatar');
-          avWrap.classList.remove('avatar-bob'); void avWrap.offsetWidth; avWrap.classList.add('avatar-bob');
-        }catch(_){}
-        addSample(pt);
-      };
-      const move = (e)=>{ if(!game.dragging) return; addSample(e.touches?e.touches[0]:e); };
-      const end  = ()=>{ if(!game.dragging) return; game.dragging=false;
-        const now=performance.now(); while(samples.length && now - samples[0].t > MAX_WINDOW_MS) samples.shift();
-        if(samples.length<2){ resetBall(); return; }
-        const a=samples[0], b=samples[samples.length-1], dt=Math.max(1,b.t-a.t)/1000;
-        let vx=(b.x-a.x)/dt, vy=(b.y-a.y)/dt; if(vy>-MIN_UP_VY) vy=MIN_UP_VY;
-        game.vx=vx*POWER_SCALE; game.vy=vy*POWER_SCALE;
-        const SPIN_THRESHOLD=0.60; game.spin = (Math.abs(spinAccum) > SPIN_THRESHOLD) ? spinAccum : 0;
-        game.launched=true;
-      };
-      svg.addEventListener('mousedown', start, {passive:true});
-      svg.addEventListener('mousemove', move, {passive:true});
-      window.addEventListener('mouseup', end, {passive:true});
-      svg.addEventListener('touchstart', start, {passive:true});
-      svg.addEventListener('touchmove', move, {passive:true});
-      svg.addEventListener('touchend', end, {passive:true});
-    })();
-
-    /* ---- Physics / scoring ---- */
-    const TOP_OUT = -600;
-    const MISS_BAND_PX = 400;
-
-    function physics(dt){
-      if(!game.launched || game.ended) return;
-      game.vy += game.gravity*dt;
-      if(Math.abs(game.spin) > 0.001){
-        const side = Math.max(-900, Math.min(900, game.spin*260));
-        game.vx += (side * dt);
-        game.spin *= Math.pow(game.spinDecay, Math.max(1, dt*60));
-      }
-      game.vx *= game.drag; game.vy *= game.drag;
-      game.x += game.vx*dt; game.y += game.vy*dt;
-
-      if(game.x < 110){ game.x=110; game.vx*=-0.6; }
-      if(game.x > 990){ game.x=990; game.vx*=-0.6; }
-      if(game.y < TOP_OUT && performance.now() > game.noMissUntil){ quickMiss(); return; }
-
-      const floorY = toXY(0,720).y;
-      if(game.y>floorY){ game.y=floorY; game.vy=0; game.vx=0; game.launched=false; setTimeout(resetBall, 280); }
-
-      setBall(game.x, game.y);
-      checkHoopOrMiss();
-    }
-
-    function checkHoopOrMiss(){
-      const rimPt = rim.getBoundingClientRect();
-      const ballPt = ball.getBoundingClientRect();
-      const rx = rimPt.left + rimPt.width/2;
-      const ry = rimPt.top + rimPt.height/2;
-      const bx = ballPt.left + ballPt.width/2;
-      const by = ballPt.top + ballPt.height/2;
-      const rRing = rimPt.width/2;
-      const d = Math.hypot(bx-rx, by-ry);
-      const fudge = rRing * 0.18;
-
-      if(!game._scored && d < (rRing + fudge) && game.vy>0){
-        const swish = d < rRing*0.55 && Math.abs(game.vx) < 900;
-        scoreShot(swish);
-        game._scored = true;
-        game.noMissUntil = performance.now() + 350;
-        setTimeout(()=>{ game._scored=false; }, 300);
-        return;
-      }
-      if(game.launched && !game._scored && game.vy>0 && performance.now() > game.noMissUntil){
-        if (by > (ry + MISS_BAND_PX)){ quickMiss(); }
-      }
-    }
-
-    function quickMiss(){ if (game._scored || performance.now() < game.noMissUntil) return; game.launched=false; showMsg('MISS!', 'miss'); setTimeout(resetBall, 220); }
-
-    /* === Wallet / HUD === */
-    let walletDirty = false, WALLET_READY = false, runStartCoins = 0;
-
-    function paintCoinsHUD(n){
-      const val = Math.max(0, n|0);
-      if (coinsRunEl) coinsRunEl.textContent = String(val);
-    }
-    function updateCoinsHUD(){
-      if(!WALLET_READY) return;
-      const cur = readCoinsLS();
-      const shown = parseInt(coinsRunEl.textContent||'0',10) || 0;
-      const val = (cur===0 && shown>0) ? shown : cur;
-      paintCoinsHUD(val);
-    }
-    function syncCoinsHUD(){ updateCoinsHUD(); }
-
-    async function applyCoins(amount){
-      const cur = (readCoinsLS()|0) + (amount|0);
-      writeCoinsLS(cur);
-      walletDirty = true;
-      try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:readCraftAny() } })); }catch(_){}
-      WALLET_READY = true; updateCoinsHUD(); return cur;
-    }
-
-    async function applyCraftDelta(delta){
-      const val = readCraftAny() + (delta|0);
-      writeCraftAll(val);
-      walletDirty = true;
-      try{ if (window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty = false; } }catch(_){}
-      try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: readCoinsLS(), crafting:val } })); }catch(_){}
-    }
-
-    // NEW: normal = 200, pure swish = double points (400)
-    async function scoreShot(swish){
-      const NORMAL = 200;
-      const award = swish ? NORMAL*2 : NORMAL;
-
-      game.score += award; game.goals += 1;
-      await applyCoins(award);
-
-      // net + backboard motion on score (extra juice if swish)
-      try{
-        net.classList.remove('swish'); boardGroup.classList.remove('shake'); void net.offsetWidth;
-        if (swish) { net.classList.add('swish'); }
-        boardGroup.classList.add('shake');
-        setTimeout(()=>boardGroup.classList.remove('shake'), 220);
-      }catch(_){}
-
-      const creditsNow = Math.floor(game.goals / 10);
-      if (creditsNow > game.creditsEarned){
-        game.creditsEarned = creditsNow; await applyCraftDelta(1); showMsg('+1 CRAFT CREDIT!', 'scoreGlow');
-      } else {
-        showMsg(swish ? 'SWISH! +400' : 'SCORE! +200', swish ? 'scoreGlow' : '');
-      }
-      scoreEl.textContent = game.score; streakEl.textContent = game.goals; updateCoinsHUD();
-      setTimeout(resetBall, 260);
-    }
-
-    let lastT = performance.now();
-    function loop(t){
-      const dt = Math.min(0.033, (t - lastT) / 1000);
-      lastT = t; physics(dt);
-      if (!game.ended) requestAnimationFrame(loop);
-    }
-
-    async function persistWalletAndSave(){
-      try{
-        writeCraftAll(readCraftAny());
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ await IZZA_PERSIST.save(); walletDirty = false; }
-        else if (typeof window._izzaForceSave === 'function'){ window._izzaForceSave(); walletDirty = false; }
-      }catch(_){}
-    }
-
-    async function endRun(){
-      if (game.ended) return;
-      game.ended = true;
-      try{ if (game.timerId) clearInterval(game.timerId); }catch(_){}
-      game.launched = false; game.dragging = false;
-      const coinsNow = readCoinsLS();
-      const coinsAwarded = Math.max(0, (coinsNow|0) - (runStartCoins|0));
-      document.getElementById('finalScore').textContent = game.score;
-      document.getElementById('finalCoins').textContent = coinsAwarded;
-      document.getElementById('finalCraft').textContent = game.creditsEarned;
-      document.getElementById('finish').style.display = 'flex';
-      showMsg('Time!', 'miss');
-      try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 200))]); }catch(_){}
-    }
-
-    /* -------- Boot / listeners -------- */
     function onResize(){ W=arenaEl.clientWidth; H=arenaEl.clientHeight; }
     window.addEventListener('resize', onResize, {passive:true});
-    window.addEventListener('storage', (e)=>{
-      if (e && (e.key === 'izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
-    });
+    window.addEventListener('storage', (e)=>{ if(e && (e.key==='izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD(); });
     window.addEventListener('izza-coins-changed', syncCoinsHUD);
     window.addEventListener('izza-wallet-changed', syncCoinsHUD);
     window.addEventListener('izza-crafting-changed', syncCoinsHUD);
+    document.addEventListener('visibilitychange', async ()=>{ if(document.hidden){ if(walletDirty){ try{ await persistWalletAndSave(); }catch(_){ } } } else { updateCoinsHUD(); } }, {passive:true});
+    window.addEventListener('pagehide', ()=>{ if(walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){ try{ IZZA_PERSIST.save(); walletDirty=false; }catch(_){} } });
 
-    document.addEventListener('visibilitychange', async () => {
-      if (document.hidden){
-        if (walletDirty) { try{ await persistWalletAndSave(); }catch(_){ } }
-      } else {
-        updateCoinsHUD();
-      }
-    });
-    window.addEventListener('pagehide', () => {
-      if (walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-        try{ IZZA_PERSIST.save(); walletDirty = false; }catch(_){}
-      }
-    });
+    // Early BG paint (even before pressing Start)
+    initBackgroundFromStorageOrParam();
 
-    /* -------- START: unchanged flow, plus BG + Avatar init -------- */
-    document.getElementById('startBtn').addEventListener('click', async ()=>{
+    // START button (same flow + avatar paint)
+    startBtn.addEventListener('click', async ()=>{
       try{
-        const handoff = consumeWalletHandoff();
-        if (handoff){ paintCoinsHUD(handoff.coins); }
-
-        // Warm session & persist
-        try{
-          // Hidden iframe strategy from Arena minimized here to keep behavior
-          const src = withAuth('/izza-game/play?prime=1&silent=1');
-          const f=document.createElement('iframe');
-          Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
-          f.src=src; document.body.appendChild(f);
-          await new Promise(r=>setTimeout(r,500));
-        }catch(_){}
-
+        const handoff=consumeWalletHandoff(); if(handoff){ paintCoinsHUD(handoff.coins); }
+        try{ const src=withAuth('/izza-game/play?prime=1&silent=1'); const f=document.createElement('iframe');
+             Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'}); f.src=src; document.body.appendChild(f);
+             await new Promise(r=>setTimeout(r,500)); }catch(_){}
         try{ await ensureSession(); }catch(_){}
-        try{ if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
-
-        // BG init (URL param or LS or default)
-        initBackgroundSwap();
-
-        WALLET_READY = true;
-        runStartCoins = parseInt((coinsRunEl.textContent||'0'), 10) || (readCoinsLS()||0);
+        try{ if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
+        WALLET_READY=true; runStartCoins=parseInt((coinsRunEl.textContent||'0'),10)||(readCoinsLS()||0);
         document.getElementById('startOverlay').style.display='none';
-        setHoopDistance(); resetBall();
-        startTimer(); requestAnimationFrame(loop);
-
-        // Avatar paint (after start so it never blocks gameplay)
+        setHoopDistance(); resetBall(); startTimer(); requestAnimationFrame(loop);
         try{ await buildAndPlaceAvatar(); }catch(_){}
-      }catch(e){ console.error('start failed', e); }
+      }catch(e){ console.error('start failed',e); }
     }, {passive:true});
 
-    /* =================== NEW: Background swap slot =================== */
-    function setBgHref(href){
-      if (!href) return;
-      try{ bgImage.setAttribute('href', href); }catch(_){}
-    }
-    function initBackgroundSwap(){
-      const p = new URLSearchParams(location.search);
-      const paramBg = p.get('bg');
-      const lsBg = localStorage.getItem('izzaBallBgUser') || '';
-      const href = paramBg || lsBg || '/static/game/img/basketball/izza_city_bg.jpg';
-      setBgHref(href);
-
-      if (bgUpload){
-        bgUpload.addEventListener('change', (e)=>{
-          const f = e.target.files && e.target.files[0];
-          if (!f) return;
-          const url = URL.createObjectURL(f);
-          setBgHref(url);
-          try{ localStorage.setItem('izzaBallBgUser', url); }catch(_){}
-        }, {passive:true});
-      }
-    }
-
-    /* =================== NEW: Avatar (same technique as Arena) =================== */
+    /* ===== Avatar build (same technique as Arena) ===== */
     async function buildAndPlaceAvatar(){
-      const cvs = document.getElementById('avatarCanvas');
-      const ctx = cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
-      const prof = await fetchCharacterFreshSafe();
-
-      await buildAvatarCanvas(ctx, 128, prof);
-
-      // keep it half offscreen bottom-center (CSS). Nothing else needed.
+      const cvs=document.getElementById('avatarCanvas'); const ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
+      const prof=await fetchCharacterFreshSafe(); await buildAvatarCanvas(ctx,128,prof);
     }
     async function fetchCharacterFreshSafe(){
-      try{
-        const r = await fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() });
-        if (r.ok){
-          const j = await r.json().catch(()=> ({}));
-          try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-          return j;
-        }
-      }catch(_){}
-      try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {}; }catch(_){ return {}; }
+      try{ const r=await fetch(withAuth('/izza-game/api/character'),{credentials:'include',headers:bearerHeaders()}); if(r.ok){ const j=await r.json().catch(()=>({})); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){ } return j; } }catch(_){}
+      try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){ return {}; }
     }
 
-    /* ==== Avatar sprite helpers (trimmed from Arena) ==== */
-    const SPRITES = {
-      body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
-      hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
-      outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
-    };
-    const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
-    const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
-    const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
-    const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
+    /* ===== Avatar sprite helpers (trimmed from Arena) ===== */
+    const SPRITES={ body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
+                    hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
+                    outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" } };
+    const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"], SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
+    const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"], FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
     const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
@@ -701,7 +435,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
@@ -735,59 +469,25 @@
       return oc;
     }
 
-    async function buildAvatarCanvas(dstCtx, size, profile){
+    async function buildAvatarCanvas(dstCtx,size,profile){
       const DW=size,DH=size,X=0,Y=0;
       const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       const femaleOut=profile.female_outfit_color||'blue';
-
       let body=null;
-      if(type==='female'){
-        const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
-        const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
-        body = await loadImg(femaleWide) || await loadImg(femaleSlim);
-      }
-      if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
-
-      const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
-      const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
-
+      if(type==='female'){ const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`; const femaleSlim=`/static/game/sprites/body/${theme}__female.png`; body=await loadImg(femaleWide)||await loadImg(femaleSlim); }
+      if(!body){ body=await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
+      const hair=await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+      const outfit=(type==='female')?null:(await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
       let bodyCanvas;
-      if(body){
-        const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
-        const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
-        bodyCanvas=swapped.canvas;
-        if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
-      }
-
-      if(type==='female' && bodyCanvas){
-        const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
-        const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
-        bodyCanvas=reDress.canvas;
-        if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
-      }
-
-      dstCtx.clearRect(0,0,DW,DH);
-      if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
-      if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
-      if(hair){
-        const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
-        const swap=paletteSwap(hair, detected, target, 4000);
-        let hairCanvas=swap.canvas;
-        if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
-        dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
-      }
+      if(body){ const targetSkin=SKIN_TO[tone]||SKIN_TO.light; const swapped=paletteSwap(body,SKIN_BASE,targetSkin,4000); bodyCanvas=swapped.canvas; if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body,targetSkin[1],0.98); } }
+      if(type==='female'&&bodyCanvas){ const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue; const reDress=paletteSwap(bodyCanvas,FEMALE_DRESS_BASE,targetDress,4000); bodyCanvas=reDress.canvas; if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas,targetDress[1],0.85); } }
+      dstCtx.clearRect(0,0,DW,DH); if(bodyCanvas) dstCtx.drawImage(bodyCanvas,X,Y,DW,DH); if(outfit) dstCtx.drawImage(outfit,X,Y,DW,DH);
+      if(hair){ const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black; const swap=paletteSwap(hair,detected,target,4000); let hairCanvas=swap.canvas; if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas,target[1],1.0); } dstCtx.drawImage(hairCanvas,X,Y,DW,DH); }
     }
 
-    /* ===== Back/visibility listeners stay ===== */
-
-    /* -------- BG param hotload at page view, even before Start (optional) -------- */
-    (function earlyBg(){
-      const p = new URLSearchParams(location.search);
-      const paramBg = p.get('bg');
-      if (paramBg) try{ bgImage.setAttribute('href', paramBg); }catch(_){}
-    })();
-
+    // Early query param support
+    (function earlyBg(){ const p=new URLSearchParams(location.search); const paramBg=p.get('bg'); if(paramBg) try{ bgImage.setAttribute('href', paramBg); }catch(_){} })();
   })();
   </script>
 </body>
