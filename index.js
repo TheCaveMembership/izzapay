@@ -155,6 +155,146 @@ app.post('/api/state/:username', async (req,res)=>{
   }
 });
 
+// ---------------- LEADERBOARD (file-backed) ----------------
+const LB_ROOT = process.env.LB_DIR || '/var/data/izza/leaderboards';
+async function ensureLbDir(){ await fs.mkdir(LB_ROOT, { recursive: true }); }
+function lbFile(game){ return path.join(LB_ROOT, `${game}.json`); }
+
+async function readLB(game){
+  await ensureLbDir();
+  try { return JSON.parse(await fs.readFile(lbFile(game), 'utf8')); } catch { return []; }
+}
+async function writeLB(game, rows){
+  await ensureLbDir();
+  await fs.writeFile(lbFile(game), JSON.stringify(rows, null, 2), 'utf8');
+}
+
+function normGame(g){
+  return String(g||'').toLowerCase().replace(/[^a-z0-9_\-\.]/g,'');
+}
+function sinceForPeriod(period){
+  const now = Date.now();
+  if (period === 'day')   return now - 24*60*60*1000;
+  if (period === 'week')  return now - 7*24*60*60*1000;
+  if (period === 'month') return now - 30*24*60*60*1000;
+  return 0; // 'all'
+}
+function rankify(rows){
+  // sort desc by score, then asc ts for determinism
+  rows.sort((a,b)=> b.score - a.score || a.ts - b.ts);
+  let lastScore = null, rank = 0, i = 0;
+  for (const r of rows){
+    i++;
+    if (r.score !== lastScore){ rank = i; lastScore = r.score; }
+    r.rank = rank;
+  }
+  return rows;
+}
+
+// POST /izza-game/api/leaderboard/submit
+// body: { game:'jetman'|'race'|'basketball', score:Number, user?:string, ts?:Number }
+app.post(['/izza-game/api/leaderboard/submit','/api/leaderboard/submit'], async (req,res)=>{
+  try{
+    let body = req.body;
+    if (typeof body === 'string'){ try{ body = JSON.parse(body); }catch{ body = {}; } }
+
+    const game  = normGame(body.game || 'unknown');
+    const user0 = (body.user || req.query.u || '').toString().trim().toLowerCase();
+    const user  = user0.replace(/^@+/,'').replace(/[^a-z0-9_\-\.]/g,'') || 'guest';
+    const score = Number(body.score) | 0;
+    const ts    = Number(body.ts) || Date.now();
+
+    if (!game || !Number.isFinite(score) || score < 0){
+      return res.status(400).json({ ok:false, error:'bad-input' });
+    }
+
+    const rows = await readLB(game);
+
+    // keep the user's best score; replace only if higher
+    const idx = rows.findIndex(r => r.user === user);
+    if (idx >= 0){
+      if (score > (rows[idx].score|0)){
+        rows[idx] = { user, score, ts };
+      } else {
+        // keep existing best
+      }
+    } else {
+      rows.push({ user, score, ts });
+    }
+
+    // keep last 500 (after sort)
+    const top = rankify(rows).slice(0, 500);
+    await writeLB(game, top);
+
+    res.json({ ok:true, saved:{ user, game, score } });
+  } catch(e){
+    console.error('LB submit error', e);
+    res.status(500).json({ ok:false, error:'server-error' });
+  }
+});
+
+// GET /izza-game/api/leaderboard?game=jetman&limit=100&period=all|day|week|month&around=<user>
+app.get(['/izza-game/api/leaderboard','/api/leaderboard'], async (req,res)=>{
+  try{
+    const game   = normGame(req.query.game || 'all');
+    const limit  = Math.min( Math.max(parseInt(req.query.limit||'100',10)||100, 1), 200);
+    const around = (req.query.around || '').toString().trim().toLowerCase().replace(/^@+/, '');
+    const period = (req.query.period || 'all').toString().toLowerCase();
+
+    const since  = sinceForPeriod(period);
+
+    // helper to load and filter one board
+    async function loadBoard(g){
+      let rows = await readLB(g);
+      if (since) rows = rows.filter(r => Number(r.ts||0) >= since);
+      return rankify(rows);
+    }
+
+    if (game !== 'all'){
+      const ranked = await loadBoard(game);
+      if (around){
+        const i = ranked.findIndex(r => r.user === around);
+        if (i === -1){
+          return res.json({ ok:true, game, rows: ranked.slice(0, limit) });
+        }
+        const half = Math.max(5, Math.floor(limit/2));
+        const start = Math.max(0, i - half);
+        const end   = Math.min(ranked.length, start + limit);
+        return res.json({ ok:true, game, rows: ranked.slice(start, end) });
+      }
+      return res.json({ ok:true, game, rows: ranked.slice(0, limit) });
+    }
+
+    // 'all' → combine best-per-user across known games
+    // You can expand this list if you add more games.
+    const games = ['jetman','race','basketball'];
+    const mapsByUser = new Map(); // user -> best score across games
+
+    for (const g of games){
+      const ranked = await loadBoard(g);
+      for (const r of ranked){
+        const cur = mapsByUser.get(r.user);
+        if (!cur || r.score > cur.score){
+          mapsByUser.set(r.user, { user:r.user, score:r.score, ts:r.ts, game:g });
+        }
+      }
+    }
+
+    const combined = rankify(Array.from(mapsByUser.values()));
+    if (around){
+      const i = combined.findIndex(r => r.user === around);
+      const half = Math.max(5, Math.floor(limit/2));
+      const start = i === -1 ? 0 : Math.max(0, i - half);
+      const end   = Math.min(combined.length, start + limit);
+      return res.json({ ok:true, game:'all', rows: combined.slice(start, end) });
+    }
+    res.json({ ok:true, game:'all', rows: combined.slice(0, limit) });
+  } catch(e){
+    console.error('LB get error', e);
+    res.status(500).json({ ok:false, error:'server-error' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // ADDED: Real AI SVG endpoint  (WITH OPTIONAL ANIMATION + PAYWALL)
 // ---------------------------------------------------------------------------
