@@ -1436,16 +1436,93 @@ function submitJetmanScore(payload){
     }
   })();
 }
+
+/* ===== Leaderboard stamps + local ledger (match Arena modal) ===== */
+function dailyStamp(){
+  const d=new Date(), z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+}
+function monthStamp(){
+  const d=new Date(), z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}`;
+}
+function yearStamp(){ return String(new Date().getFullYear()); }
+
+function readLocalLB(gameId, scope, stamp){
+  const key = scope==='alltime' ? `lb::${gameId}::alltime`
+                                : `lb::${gameId}::${scope}::${stamp}`;
+  try{ return JSON.parse(localStorage.getItem(key)||'[]'); }catch(_){ return []; }
+}
+function writeLocalLB(gameId, scope, stamp, rows){
+  const key = scope==='alltime' ? `lb::${gameId}::alltime`
+                                : `lb::${gameId}::${scope}::${stamp}`;
+  try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
+}
+function dedupeSortTop20(rows){
+  const best = {};
+  (rows||[]).forEach(r=>{
+    const u = (r&&r.u)||''; const s=(r&&r.s)|0;
+    if(!u) return;
+    if(!best[u] || s>best[u].s) best[u] = { u, s, ts:r.ts||Date.now() };
+  });
+  return Object.values(best).sort((a,b)=>b.s-a.s).slice(0,20);
+}
+function upsertArenaLedger(gameId, score){
+  const u = getMatchUser(); if(!u) return;
+  const row = { u, s:(score|0), ts:Date.now() };
+
+  // all-time
+  const all = dedupeSortTop20([ ...readLocalLB(gameId,'alltime',''), row ]);
+  writeLocalLB(gameId,'alltime','',all);
+
+  // stamped scopes the Arena modal uses
+  const d = dailyStamp(), m = monthStamp(), y = yearStamp();
+  ['day','month','year'].forEach(scope=>{
+    const stamp = scope==='day'?d : scope==='month'?m : y;
+    const merged = dedupeSortTop20([ ...readLocalLB(gameId,scope,stamp), row ]);
+    writeLocalLB(gameId, scope, stamp, merged);
+  });
+}
+
+/* ===== Server submit w/ stamps (basketball-compatible) ===== */
+async function recordLeaderboards(score){
+  try{
+    const daily=dailyStamp(), monthly=monthStamp(), yearly=yearStamp();
+    // local ledger (immediate visibility in modal)
+    upsertArenaLedger('jetman', score|0);
+
+    // server endpoint used by basketball page
+    const body = { score: score|0, daily, monthly, yearly, game:'jetman', user:getMatchUser(), ts:Date.now() };
+    const endpoints = [
+      withAuth('/izza-game/api/leaderboard'),
+      (window.IZZA_PERSIST_BASE||'').replace(/\/+$/,'') + '/izza-game/api/leaderboard',
+      (window.IZZA_PERSIST_BASE||'').replace(/\/+$/,'') + '/api/leaderboard'
+    ].filter(Boolean);
+
+    for (let i=0;i<endpoints.length;i++){
+      try{
+        const r = await fetch(endpoints[i],{
+          method:'POST',
+          credentials:'include',
+          mode:'cors',
+          headers: bearerHeaders(),
+          body: JSON.stringify(body)
+        });
+        if (r && r.ok) break;
+      }catch(_){}
+    }
+  }catch(_){}
+}
+  
 /* ===== Game over (unchanged) ===== */
 function gameOver(){
   if (game.ended) return; game.ended = true;
   AudioMgr.crash();
-
   hi = Math.max(hi, Math.floor(game.score)); localStorage.setItem('jet_hi', hi);
   document.getElementById('hi').textContent = hi;
 
-  var coinsNow = readCoinsLS()|0;
-  var runCoins = Math.max(0, coinsNow - (runStartCoins|0));
+  const coinsNow = readCoinsLS()|0;
+  const runCoins = Math.max(0, coinsNow - (runStartCoins|0));
 
   finalScoreEl.textContent = Math.floor(game.score);
   finalCoinsEl.textContent = runCoins;
@@ -1453,14 +1530,12 @@ function gameOver(){
   finishEl.style.display = 'flex';
   persistWalletBestEffort();
 
-  // ✅ submit to leaderboard with the SAME matching logic as the rest of the app
-  submitJetmanScore({
-    score: Math.floor(game.score)|0,
-    hi: hi|0,
-    coinsDelta: runCoins|0
-  });
-}
+  // ✅ keep your existing submit (device + UA info, etc)
+  submitJetmanScore({ score: Math.floor(game.score)|0, hi: hi|0, coinsDelta: runCoins|0 });
 
+  // ✅ NEW: write local + stamped API submit (what the Arena expects)
+  recordLeaderboards(Math.floor(game.score)|0);
+}
 /* ===== Moon on UI canvas (unchanged) ===== */
 var moonCanvasTex = (function(){
   var s=256,c=document.createElement('canvas'); c.width=c.height=s; var x=c.getContext('2d');
