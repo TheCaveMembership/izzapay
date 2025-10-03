@@ -128,6 +128,11 @@
       <h1>Pick a game</h1>
       <p class="lead muted">Earn IZZA Coins &amp; Item Crafting Credits by playing mini games. Your character is used as the player avatar.</p>
 
+      <!-- Leaderboard open button (moved to top of list) -->
+      <div class="row" style="justify-content:flex-end;margin:8px 0 4px">
+        <button id="openLbBtn" class="btn">🏆 IZZA Leaderboard</button>
+      </div>
+
       <div class="grid" id="gameGrid">
         <div class="tile" data-game="basketball">
           <div class="thumb"><div class="net"></div></div>
@@ -199,11 +204,6 @@
       <p class="muted" style="margin-top:10px;font-size:13px">
         Tip: On desktop, move your mouse — your character follows as the cursor. On mobile, drag your character around the screen.
       </p>
-
-      <!-- Leaderboard open button (added) -->
-      <div class="row" style="justify-content:flex-end;margin-top:12px">
-        <button id="openLbBtn" class="btn">🏆 IZZA Leaderboard</button>
-      </div>
     </div>
   </div>
 
@@ -797,7 +797,7 @@
 
       if(!elModal||!elOpen||!elClose||!elBody||!elTabs||!elGame) return;
 
-      function open(){ elModal.classList.add('show'); loadAndRender(); }
+      function open(){ elModal.classList.add('show'); loadAndRender(true); }
       function close(){ elModal.classList.remove('show'); }
       elOpen.addEventListener('click', open, {passive:true});
       elClose.addEventListener('click', close, {passive:true});
@@ -811,11 +811,105 @@
         elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
         loadAndRender();
       }, {passive:true});
-      elGame.addEventListener('change', loadAndRender, {passive:true});
+      elGame.addEventListener('change', ()=>loadAndRender(true), {passive:true});
 
-      async function fetchServerLeaders(gameId, period){
+      /* ---------- Local ledger helpers: makes your own scores show up ---------- */
+      function meUsername(){
+        return (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
+          || (localStorage.getItem('izzaUserU')||'').toLowerCase();
+      }
+      function nowParts(){
+        const d=new Date(); const z=n=>String(n).padStart(2,'0');
+        return {
+          day: `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
+          month: `${d.getFullYear()}-${z(d.getMonth()+1)}`,
+          year: String(d.getFullYear())
+        };
+      }
+      function saveLocal(gameId, periodKey, stamp, rows){
+        const key = periodKey==='alltime'
+          ? `lb::${gameId}::alltime`
+          : `lb::${gameId}::${periodKey}::${stamp}`;
+        try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
+      }
+      function readLocal(gameId, periodKey){
+        if(periodKey==='alltime'){
+          try{ return JSON.parse(localStorage.getItem(`lb::${gameId}::alltime`)||'[]'); }catch(_){ return []; }
+        }
+        const p=nowParts();
+        const map={day:p.day,month:p.month,year:p.year};
+        const key=`lb::${gameId}::${periodKey}::${map[periodKey]}`;
+        try{ return JSON.parse(localStorage.getItem(key)||'[]'); }catch(_){ return []; }
+      }
+      function dedupeAndSort(rows){
+        const bestByUser = {};
+        (rows||[]).forEach(r=>{
+          const u=(r&&r.u)||''; const s = (r&&r.s)|0;
+          if(!u) return;
+          if(!bestByUser[u] || s>bestByUser[u].s) bestByUser[u] = {u, s, ts:r.ts||Date.now()};
+        });
+        return Object.values(bestByUser).sort((a,b)=>b.s-a.s).slice(0,20);
+      }
+      function upsertLocalLedger(gameId, score){
+        const u = meUsername(); if(!u) return;
+        const row = { u, s: (score|0), ts: Date.now() };
+        const stamps = nowParts();
+
+        // all-time
+        const all = dedupeAndSort([ ...(readLocal(gameId,'alltime')||[]), row ]);
+        saveLocal(gameId, 'alltime', '', all);
+
+        // daily / monthly / yearly
+        ['day','month','year'].forEach(k=>{
+          const prior = readLocal(gameId,k)||[];
+          const merged = dedupeAndSort([ ...prior, row ]);
+          saveLocal(gameId, k, stamps[k], merged);
+        });
+      }
+      // Try to discover a player's best score saved by older/other pages.
+      function harvestLegacyScores(gameId){
+        let found = null;
+        const num = v => {
+          const n = typeof v==='string' ? parseInt(v,10) : (typeof v==='number'?v:NaN);
+          return Number.isFinite(n) && n>0 ? n|0 : null;
+        };
+        // 1) obvious keys
+        const tryKeys = [
+          `${gameId}HighScore`,`${gameId}:highscore`,`izza:${gameId}:highscore`,
+          `izza:${gameId}:best`,`minigame:${gameId}:best`,`score:${gameId}`,
+          `best:${gameId}`,`high:${gameId}`,`izza:${gameId}:score`,`izzaScore:${gameId}`,
+          `game:${gameId}:best`,`mg:${gameId}:best`
+        ];
+        for(const k of tryKeys){
+          const v = localStorage.getItem(k);
+          const n = num(v);
+          if(n!==null){ found = Math.max(found||0, n); }
+        }
+        // 2) scan JSON blobs that might contain {game,score}
         try{
-          const url = withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}&period=${encodeURIComponent(period)}&limit=20`);
+          for(let i=0;i<localStorage.length;i++){
+            const k = localStorage.key(i)||'';
+            if(!/score|best|high/i.test(k)) continue;
+            const raw = localStorage.getItem(k)||'';
+            if(raw && raw[0]==='{' || raw[0]==='['){
+              try{
+                const j = JSON.parse(raw);
+                const maybe = Array.isArray(j) ? j : [j];
+                maybe.forEach(it=>{
+                  if(it && (it.game===gameId || it.g===gameId) && (num(it.score??it.s)!=null)){
+                    found = Math.max(found||0, num(it.score??it.s));
+                  }
+                });
+              }catch(_){}
+            }
+          }
+        }catch(_){}
+        if(found!==null){ upsertLocalLedger(gameId, found); }
+      }
+
+      async function fetchServerLeaders(gameId, periodKey){
+        try{
+          const url = withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}&period=${encodeURIComponent(periodKey)}&limit=20`);
           const r = await fetch(url, { credentials:'include', headers: bearerHeaders() });
           if(r.ok){
             const j = await r.json();
@@ -826,34 +920,37 @@
         return null;
       }
 
-      function readLocalLeaders(gameId, period){
-        let keyPrefix = `lb::${gameId}::`;
-        if(period==='alltime'){
-          try{ return JSON.parse(localStorage.getItem(`${keyPrefix}alltime`)||'[]').slice(0,20); }catch(_){ return []; }
-        }
-        const now = new Date();
-        const pad = n=>String(n).padStart(2,'0');
-        const daily=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-        const monthly=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;
-        const yearly=String(now.getFullYear());
-        const map = { day: daily, month: monthly, year: yearly };
-        const key = `${keyPrefix}${period}::${map[period]}`;
-        try{ return JSON.parse(localStorage.getItem(key)||'[]').slice(0,20); }catch(_){ return []; }
+      function readLocalLeaders(gameId, periodKey){
+        return readLocal(gameId, periodKey).slice(0,20);
       }
 
-      async function loadAndRender(){
+      async function loadAndRender(seedFromLegacy=false){
         const gameId = elGame.value || 'basketball';
+        if(seedFromLegacy){ harvestLegacyScores(gameId); }
         elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
 
         let rows = await fetchServerLeaders(gameId, period);
-        if(!rows || !rows.length) rows = readLocalLeaders(gameId, period);
+        if((!rows || !rows.length)){
+          rows = readLocalLeaders(gameId, period);
+        }
+
+        // If still empty, last-ditch: look for a one-off "last score" and seed.
+        if((!rows || !rows.length) && seedFromLegacy){
+          try{
+            const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
+            if(hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
+              upsertLocalLedger(gameId, (hint.score||hint.s)|0);
+              rows = readLocalLeaders(gameId, period);
+            }
+          }catch(_){}
+        }
 
         if(!rows || !rows.length){
           elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
           return;
         }
 
-        const me = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get()) || (localStorage.getItem('izzaUserU')||'').toLowerCase();
+        const me = meUsername();
         const html = [
           `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead><tbody>`
         ];
