@@ -267,7 +267,7 @@ app.get(['/izza-game/api/leaderboard','/api/leaderboard'], async (req,res)=>{
 
     // 'all' → combine best-per-user across known games
     // You can expand this list if you add more games.
-    const games = ['jetman','race','basketball'];
+    const games = ['jetman','race','basketball','city_chase'];
     const mapsByUser = new Map(); // user -> best score across games
 
     for (const g of games){
