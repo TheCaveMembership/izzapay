@@ -49,6 +49,8 @@
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap}
     .pill strong{font-size:13px}.pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
+    /* added for mute button */
+    .pill.button{cursor:pointer}
 
     .aim{position:absolute;inset:0;z-index:3;touch-action:none;width:100%;height:100%}
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
@@ -114,6 +116,8 @@
           <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
         </div>
         <div class="right">
+          <!-- added mute button -->
+          <button id="muteBtn" class="pill button" type="button" aria-pressed="false" title="Mute/Unmute (M)">🔊</button>
           <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
         </div>
       </div>
@@ -331,6 +335,45 @@
       o.start(now); o.stop(now+0.26);
     }
 
+    /* ===== Mute / Unmute (added) ===== */
+    const muteBtn = document.getElementById('muteBtn');
+    let sfxMuted = false;
+    let desiredMasterGain = 0.35;  // current master target
+    let desiredBgmVol = 0.28;      // current bgm target
+
+    function applyMuteState(muted){
+      try{ localStorage.setItem('izzaMute',''+(muted?1:0)); }catch(_){}
+      if(muteBtn){
+        muteBtn.textContent = muted ? '🔇' : '🔊';
+        muteBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+      }
+      if(bgmEl){
+        bgmEl.muted = !!muted;
+        if(!muted && bgmEl.volume !== desiredBgmVol) bgmEl.volume = desiredBgmVol;
+      }
+      sfxMuted = !!muted;
+      try{ if(master){ master.gain.value = muted ? 0 : desiredMasterGain; } }catch(_){}
+    }
+
+    if(muteBtn){
+      muteBtn.addEventListener('click', ()=>{
+        const isMuted = muteBtn.getAttribute('aria-pressed') === 'true';
+        applyMuteState(!isMuted);
+      }, {passive:true});
+    }
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='m' || e.key==='M'){
+        e.preventDefault();
+        const isMuted = muteBtn && muteBtn.getAttribute('aria-pressed') === 'true';
+        applyMuteState(!isMuted);
+      }
+    }, {passive:false});
+
+    (function bootstrapMute(){
+      const saved = (localStorage.getItem('izzaMute') === '1');
+      applyMuteState(saved);
+    })();
+
     /* ===== Game state (unchanged core) ===== */
     let game={ x:550,y:700,vx:0,vy:0,r:76, gravity:2300,drag:0.992, launched:false,dragging:false, score:0,goals:0, timeLeft:60,
                hoopX:390,hoopY:300,distanceStep:0, timerId:null,ended:false, creditsEarned:0, spin:0,spinDecay:0.985, noMissUntil:0 };
@@ -542,7 +585,14 @@
         // audio
         try{
           initAudio(); await audioCtx.resume();
-          bgmEl.volume=0.28; bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
+
+          // apply saved mute state to master + bgm immediately
+          const savedMute = (localStorage.getItem('izzaMute')==='1');
+          if(master){ master.gain.value = savedMute ? 0 : desiredMasterGain; }
+          bgmEl.volume = desiredBgmVol;
+          bgmEl.muted = savedMute;
+          bgmEl.currentTime = 0;
+          bgmEl.play().catch(()=>{});
         }catch(_){}
       }catch(e){ console.error('start failed',e); }
     }, {passive:true});
