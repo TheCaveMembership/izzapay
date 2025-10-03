@@ -804,12 +804,15 @@ function randomFacadeMaterial_glass(winTex){
 
 function facadeMaterial() {
   if (BUILDING_TEX.length) {
-    const t = pickTex(BUILDING_TEX).clone(); // per-mesh instance so we can tweak repeat
-    t.repeat.set(
-      THREE.MathUtils.lerp(1.2, 2.2, Math.random()),
-      THREE.MathUtils.lerp(1.6, 3.2, Math.random())
-    );
+    const t = pickTex(BUILDING_TEX).clone();
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+
+    // Use the photo once across the width, 2–3 times up the height
+    t.repeat.set(1.0, (Math.random() < 0.5 ? 2 : 3));
+
+    t.center.set(0.5, 0.5);
     t.needsUpdate = true;
+
     return new THREE.MeshStandardMaterial({
       map: t,
       color: 0xffffff,
@@ -817,40 +820,53 @@ function facadeMaterial() {
       metalness: 0.12
     });
   }
-  // Fallback to your procedural glass if no JPGs present
   return randomFacadeMaterial_glass(makeGlassFacadeTexture());
 }
   
-function buildingMesh(w,h,mat,side){
-  var g = new THREE.BoxGeometry(w, h, wallLen, 1,1,1);
-  var uv = g.attributes.uv;
-  for (var k=0; k<uv.count; k++){
-    var u = uv.getX(k), v = uv.getY(k);
-    uv.setXY(k, u*THREE.MathUtils.lerp(1.2,2.1, Math.random()), v*THREE.MathUtils.lerp(2.0,3.6, Math.random()));
+function buildingMesh(w, h, mat, side){
+  const g = new THREE.BoxGeometry(w, h, wallLen, 1, 1, 1);
+
+  // --- UV control: 1x across, 2 or 3x vertically (no extra random spam)
+  const uv = g.attributes.uv;
+  const uScale = 1.0;                 // once across the width
+  const vScale = (Math.random() < 0.5 ? 2 : 3);  // 2 or 3 up the height
+  for (let k = 0; k < uv.count; k++){
+    const u = uv.getX(k), v = uv.getY(k);
+    uv.setXY(k, u * uScale, v * vScale);
   }
-  var m = new THREE.Mesh(g, mat);
-  var lean = THREE.MathUtils.degToRad( THREE.MathUtils.lerp(1.5,6.5, Math.random()) ) * (side==='L'?1:-1);
+
+  const m = new THREE.Mesh(g, mat);
+
+  // lean / roof bits (unchanged)
+  const lean = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(1.5, 6.5, Math.random())) * (side === 'L' ? 1 : -1);
   m.rotation.z = lean;
 
-  // roof/antenna details
-  var r = Math.random();
-  if (r<0.30){
-    var roof = new THREE.Mesh(new THREE.BoxGeometry(w*THREE.MathUtils.lerp(.45,.85,Math.random()), w*THREE.MathUtils.lerp(.16,.28,Math.random()), wallLen*0.55),
-                              new THREE.MeshBasicMaterial({color:0x0f2747}));
+  const r = Math.random();
+  if (r < 0.30){
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(w * THREE.MathUtils.lerp(.45,.85,Math.random()), w * THREE.MathUtils.lerp(.16,.28,Math.random()), wallLen * 0.55),
+      new THREE.MeshBasicMaterial({ color: 0x0f2747 })
+    );
     roof.position.y = h/2 + roof.geometry.parameters.height/2;
     roof.position.z = THREE.MathUtils.lerp(-wallLen*0.15, wallLen*0.15, Math.random());
     m.add(roof);
-  } else if (r<0.55){
-    var antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,THREE.MathUtils.lerp(0.7,1.6,Math.random()),12),
-                                 new THREE.MeshBasicMaterial({color:0x7aa6ff}));
-    antenna.position.set(THREE.MathUtils.lerp(-w*0.2,w*0.2,Math.random()), h/2 + antenna.geometry.parameters.height/2, THREE.MathUtils.lerp(-0.2,0.2,Math.random()));
+  } else if (r < 0.55){
+    const antenna = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, THREE.MathUtils.lerp(0.7, 1.6, Math.random()), 12),
+      new THREE.MeshBasicMaterial({ color: 0x7aa6ff })
+    );
+    antenna.position.set(THREE.MathUtils.lerp(-w*0.2, w*0.2, Math.random()), h/2 + antenna.geometry.parameters.height/2, THREE.MathUtils.lerp(-0.2, 0.2, Math.random()));
     m.add(antenna);
-  } else if (r<0.75){
-    var step = new THREE.Mesh(new THREE.BoxGeometry(w*0.55, w*0.20, wallLen*0.6),
-                              new THREE.MeshBasicMaterial({color:0x10274a}));
+  } else if (r < 0.75){
+    const step = new THREE.Mesh(
+      new THREE.BoxGeometry(w*0.55, w*0.20, wallLen*0.6),
+      new THREE.MeshBasicMaterial({ color: 0x10274a })
+    );
     step.position.set(0, h/2 + w*0.10, 0);
-    var spire = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.7, 8),
-                               new THREE.MeshBasicMaterial({color:0x6ea8ff}));
+    const spire = new THREE.Mesh(
+      new THREE.ConeGeometry(0.10, 0.7, 8),
+      new THREE.MeshBasicMaterial({ color: 0x6ea8ff })
+    );
     spire.position.set(0, step.position.y + 0.6, 0);
     m.add(step, spire);
   }
