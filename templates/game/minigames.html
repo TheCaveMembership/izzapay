@@ -938,30 +938,42 @@ async function renderPoliceChase(){
   const wrap = document.getElementById('lbPoliceChase');
   if (!wrap) return;
 
-  // reuse your existing fetch helper + current period tabs
-  let rows = await fetchServerLeaders('city_chase', period);
-  rows = normRows(rows);
+  // Always show all-time for police chase (scores are seconds)
+  let rows = await fetchServerLeaders('city_chase', 'alltime');
 
-  if (!rows || !rows.length){
+  // Normalize: { u|user, s|score } -> {u,s}
+  rows = (rows || []).map(r => ({
+    u: (r.u ?? r.user ?? '—'),
+    s: (r.s ?? r.score ?? 0) | 0
+  })).filter(r => r.s > 0);
+
+  // Sort best-first and cap to top 20
+  rows.sort((a,b) => b.s - a.s);
+  rows = rows.slice(0, 20);
+
+  if (!rows.length){
     wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
     return;
   }
 
-  // Pretty “time” formatting (scores are seconds)
-  const fmt = s => `${Number(s|0)}s`;
-
-  const me = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
-             (localStorage.getItem('izzaUserU')||'').toLowerCase();
+  const fmt = s => `${(s|0)}s`;
+  const me =
+    (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
+    (localStorage.getItem('izzaUserU')||'').toLowerCase();
 
   const html = [
-    `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr></thead><tbody>`
+    `<table class="lb-table">
+       <thead>
+         <tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr>
+       </thead>
+       <tbody>`
   ];
-  rows.slice(0,20).forEach((r,i)=>{
+  rows.forEach((r,i)=>{
     const isMe = me && r.u && String(r.u).toLowerCase() === me;
     html.push(
-      `<tr class="${isMe?'lb-row-me':''}">
+      `<tr class="${isMe ? 'lb-row-me' : ''}">
          <td>${i+1}</td>
-         <td>${r.u||'—'}</td>
+         <td>${r.u || '—'}</td>
          <td>${fmt(r.s)}</td>
        </tr>`
     );
