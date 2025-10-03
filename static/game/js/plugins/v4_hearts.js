@@ -90,7 +90,6 @@
 
     const keep = Math.floor(api.getCoins() / 3); // keep 1/3
     api.setCoins(keep);
-    loseAllItems();
     api.setWanted(0);
     cops.length = 0;
 
