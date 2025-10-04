@@ -459,6 +459,19 @@
         dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
       }
     }
+
+    // Baseline authoring size for the boxes below
+const ARENA_BASE_SIZE = 96;
+
+function _arenaScaleBox(box, k){
+  return {
+    w:  Math.round((box.w  ||0) * k),
+    h:  Math.round((box.h  ||0) * k),
+    ox: Math.round((box.ox ||0) * k),
+    oy: Math.round((box.oy ||0) * k),
+    scale: box.scale
+  };
+}
 // ======== EQUIPPED GEAR OVERLAY for 96×96 avatar cursor ========
 
 // Read the same inventory City uses
@@ -546,54 +559,46 @@ function _arenaWeaponFacingBox(base){
 
 // Main: build avatar + gear in one go (uses your existing base painter)
 async function buildAvatarCanvasWithGear(dstCtx, size, profile){
-  // 1) Base character (your existing function)
   await buildAvatarCanvas(dstCtx, size, profile);
 
-  // 2) Pull equipped items from the shared inventory
+  const k = (size > 0 ? size / ARENA_BASE_SIZE : 1); // <- scale factor
+
   const head  = _arenaEquippedIn('head');
   const chest = _arenaEquippedIn('chest');
   const arms  = _arenaEquippedIn('arms');
   const legs  = _arenaEquippedIn('legs');
-  const hands = _arenaEquippedIn('hands'); // weapon
+  const hands = _arenaEquippedIn('hands');
 
-  // 3) Draw order: legs → chest → arms → head → weapon
   if (legs){
-    const bx = Object.assign({}, ARENA_OVERLAY_BOX.legs);
-    const isCrafted = /^craft_/.test(legs.key);
-    const perItemScale = Number.isFinite(legs.it?.overlayScale) ? (+legs.it.overlayScale) : 1;
-    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
-    _arenaDrawOverlay(dstCtx, legs.svg, bx, perItemScale * mul);
+    const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.legs, k);
+    const per = Number.isFinite(legs.it?.overlayScale) ? (+legs.it.overlayScale) : 1;
+    const mul = /^craft_/.test(legs.key) ? 0.75 : 1;
+    _arenaDrawOverlay(dstCtx, legs.svg, bx, per * mul);
   }
   if (chest){
-    const bx = Object.assign({}, ARENA_OVERLAY_BOX.chest);
-    const isCrafted = /^craft_/.test(chest.key);
-    const perItemScale = Number.isFinite(chest.it?.overlayScale) ? (+chest.it.overlayScale) : 1;
-    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
-    _arenaDrawOverlay(dstCtx, chest.svg, bx, perItemScale * mul);
+    const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.chest, k);
+    const per = Number.isFinite(chest.it?.overlayScale) ? (+chest.it.overlayScale) : 1;
+    const mul = /^craft_/.test(chest.key) ? 0.75 : 1;
+    _arenaDrawOverlay(dstCtx, chest.svg, bx, per * mul);
   }
   if (arms){
-    const bx = Object.assign({}, ARENA_OVERLAY_BOX.arms);
-    const isCrafted = /^craft_/.test(arms.key);
-    const perItemScale = Number.isFinite(arms.it?.overlayScale) ? (+arms.it.overlayScale) : 1;
-    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
-    _arenaDrawOverlay(dstCtx, arms.svg, bx, perItemScale * mul);
+    const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.arms, k);
+    const per = Number.isFinite(arms.it?.overlayScale) ? (+arms.it.overlayScale) : 1;
+    const mul = /^craft_/.test(arms.key) ? 0.75 : 1;
+    _arenaDrawOverlay(dstCtx, arms.svg, bx, per * mul);
   }
   if (head){
-    const bx = Object.assign({}, ARENA_OVERLAY_BOX.head);
-    const isCrafted = /^craft_/.test(head.key);
-    const perItemScale = Number.isFinite(head.it?.overlayScale) ? (+head.it.overlayScale) : 1;
-    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
-    _arenaDrawOverlay(dstCtx, head.svg, bx, perItemScale * mul);
+    const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.head, k);
+    const per = Number.isFinite(head.it?.overlayScale) ? (+head.it.overlayScale) : 1;
+    const mul = /^craft_/.test(head.key) ? 0.75 : 1;
+    _arenaDrawOverlay(dstCtx, head.svg, bx, per * mul);
   }
   if (hands){
-    // Weapon gets a slightly different box (and boost)
-    const base = Object.assign({}, ARENA_OVERLAY_BOX.hands);
+    const base = _arenaScaleBox(ARENA_OVERLAY_BOX.hands, k);
     const bx   = _arenaWeaponFacingBox(base);
-    const perItemScale = Number.isFinite(hands.it?.overlayScale) ? (+hands.it.overlayScale) : 1;
-    const isCrafted = /^craft_/.test(hands.key) || !!hands.it?.meta?.crafted;
-    const mul = isCrafted ? CRAFTED_WEAPON_BOOST : 1;
-    const flipX = false; // set true if you want to mirror in some states
-    _arenaDrawOverlay(dstCtx, hands.svg, bx, perItemScale * mul, flipX);
+    const per  = Number.isFinite(hands.it?.overlayScale) ? (+hands.it.overlayScale) : 1;
+    const mul  = (/^craft_/.test(hands.key) || !!hands.it?.meta?.crafted) ? 0.85 : 1;
+    _arenaDrawOverlay(dstCtx, hands.svg, bx, per * mul, /*flipX=*/false);
   }
 }
 
