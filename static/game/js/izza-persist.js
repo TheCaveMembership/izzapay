@@ -93,13 +93,27 @@
 function readLeaderboardLocals(){
   const out = {};
   try{
+    // 1) Sweep all candidate keys
     for (let i = 0; i < localStorage.length; i++){
       const k = localStorage.key(i) || '';
-      // keep old lb/lb2, new izzaLb2, and the daily/monthly/yearly bump keys
       if (/^(izzaLb2::|lb2::|lb::|izza_lb_day_|izza_lb_month_|izza_lb_year_)/.test(k)) {
         out[k] = localStorage.getItem(k);
       }
     }
+
+    // 2) Mirror race <-> racing so both exist in the snapshot
+    const extras = {};
+    for (const k of Object.keys(out)){
+      if (k.startsWith('lb::race::')){
+        const kk = k.replace('lb::race::','lb::racing::');
+        if (!(kk in out)) extras[kk] = out[k];
+      } else if (k.startsWith('lb::racing::')){
+        const kk = k.replace('lb::racing::','lb::race::');
+        if (!(kk in out)) extras[kk] = out[k];
+      }
+    }
+    Object.assign(out, extras);
+
   }catch(_){}
   return out;
 }
