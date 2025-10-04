@@ -341,6 +341,7 @@ function buildAvatarCanvas(dstCtx, size, profile){
       var outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       var femaleOut=profile.female_outfit_color||'blue';
       var body=null;
+
       function afterBody(){
         Promise.all([
           loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short),
@@ -360,9 +361,11 @@ function buildAvatarCanvas(dstCtx, size, profile){
             bodyCanvas=reDress.canvas;
             if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
           }
+
           dstCtx.clearRect(0,0,DW,DH);
           if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
-          if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+          if(outfit)     dstCtx.drawImage(outfit,     X, Y, DW, DH);
+
           if(hair){
             var detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
             var swap=paletteSwap(hair, detected, target, 4000);
@@ -371,12 +374,15 @@ function buildAvatarCanvas(dstCtx, size, profile){
             var hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
             dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
           }
-          resolve();
+
+          // 👉 draw equipped items on top (scaled to sprite size)
+          drawEquippedOverlaysForAvatar(dstCtx, size).then(resolve).catch(function(){ resolve(); });
         });
       }
+
       if(type==='female'){
         var femaleWide='/static/game/sprites/body/'+theme+'__female_wide.png';
-        var femaleSlim='/static/game/sprites/body/'+theme+'__female.png';
+        var femaleSlim ='/static/game/sprites/body/'+theme+'__female.png';
         loadImg(femaleWide).then(function(img){ if(img) body=img; return img ? img : loadImg(femaleSlim); })
           .then(function(img){ if(img) body=img; afterBody(); });
       } else {
@@ -386,6 +392,122 @@ function buildAvatarCanvas(dstCtx, size, profile){
   });
 }
 
+/* ===== Equipped overlay helper (same system as basketball; auto-scales by size/128) ===== */
+(function(){
+  // Base boxes authored for a 128×128 sprite; we rescale by (size/128)
+  var BOX128 = {
+    head:  { w:36, h:42,  ox:64, oy:32,  scale:1.00 },
+    chest: { w:44, h:48,  ox:64, oy:60,  scale:1.00 },
+    arms:  { w:46, h:46,  ox:64, oy:60,  scale:1.00 },
+    legs:  { w:52, h:40,  ox:64, oy:88,  scale:1.00 },
+    hands: { w:44, h:44,  ox:86, oy:72,  scale:1.00 } // held/hand item
+  };
+
+  var CRAFT_ARMOUR = 0.75;  // subtle tweak for crafted armor
+  var CRAFT_WEAPON = 0.85;  // subtle tweak for crafted weapons
+
+  var _imgCache = new Map();
+  function imgFromSvg(svg){
+    if(!svg) return null;
+    if(_imgCache.has(svg)) return _imgCache.get(svg);
+    var i = new Image();
+    i.decoding = 'async';
+    i.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    _imgCache.set(svg, i);
+    return i;
+  }
+
+  function readInv(){
+    try{
+      var iz = window.IZZA && window.IZZA.api && window.IZZA.api.getInventory && window.IZZA.api.getInventory();
+      if(iz) return JSON.parse(JSON.stringify(iz));
+    }catch(_){}
+    try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; }
+  }
+  function isEquipped(it){
+    return !!(it && (it.equipped===true || it.equip===true || ((it.equippedCount|0)>0)));
+  }
+  function equippedIn(slot){
+    var inv = readInv();
+    for (var k in inv){
+      var it = inv[k]; if(!it) continue;
+      if((String(it.slot||'').toLowerCase()) !== slot) continue;
+      if(!isEquipped(it)) continue;
+      var svg = (it.overlaySvg && String(it.overlaySvg).trim()) || (it.iconSvg && String(it.iconSvg).trim()) || '';
+      return { key:k, it:it, svg:svg };
+    }
+    return null;
+  }
+
+  function drawOne(ctx, svg, box, mul, flipX){
+    if(mul==null) mul=1; if(!flipX) flipX=false;
+    var im = imgFromSvg(svg);
+    if(!im || !im.complete) return false;
+    var w = Math.max(8, box.w|0), h = Math.max(8, box.h|0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate((box.ox|0), (box.oy|0));
+    if(flipX) ctx.scale(-1, 1);
+    var s = (box.scale||1) * (mul||1);
+    if(s !== 1) ctx.scale(s, s);
+    try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w, h); }catch(_){}
+    ctx.restore();
+    return true;
+  }
+
+  async function drawEquippedOverlaysForAvatar(ctx, size){
+    var k = (size>0 ? (size/128) : 1);
+    function scaled(box){
+      return {
+        w: Math.round(box.w*k), h: Math.round(box.h*k),
+        ox: Math.round(box.ox*k), oy: Math.round(box.oy*k),
+        scale: box.scale
+      };
+    }
+
+    var head  = equippedIn('head');
+    var chest = equippedIn('chest');
+    var arms  = equippedIn('arms');
+    var legs  = equippedIn('legs');
+    var hands = equippedIn('hands');
+
+    var order = [
+      legs  && { part:legs,  box:scaled(BOX128.legs)  },
+      chest && { part:chest, box:scaled(BOX128.chest) },
+      arms  && { part:arms,  box:scaled(BOX128.arms)  },
+      head  && { part:head,  box:scaled(BOX128.head)  },
+      hands && { part:hands, box:scaled(BOX128.hands) }
+    ].filter(Boolean);
+
+    for (var i=0;i<order.length;i++){
+      var entry = order[i]; var part = entry.part, box = entry.box;
+      if(!part || !part.svg) continue;
+      var slot = String((part.it && part.it.slot) || 'chest').toLowerCase();
+
+      // allow per-item override scaling, else 1
+      var per = (typeof part.it.overlayScale === 'number' && isFinite(part.it.overlayScale)) ? part.it.overlayScale : 1;
+
+      // tiny crafted flourish
+      var crafted = /^craft_/i.test(part.key) || !!(part.it && part.it.meta && part.it.meta.crafted);
+      var mul = slot==='hands' ? (crafted ? CRAFT_WEAPON : 1) : (crafted ? CRAFT_ARMOUR : 1);
+
+      drawOne(ctx, part.svg, box, per*mul, false);
+    }
+  }
+
+  // expose to global so buildAvatarCanvas can call it
+  window.drawEquippedOverlaysForAvatar = drawEquippedOverlaysForAvatar;
+
+  // live refresh if inventory changes mid-run
+  window.addEventListener('izza-inventory-changed', function(){
+    try{
+      var cvs = jetmanCanvas; if(!cvs) return;
+      var ctx = cvs.getContext('2d',{willReadFrequently:true});
+      var prof = JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
+      buildAvatarCanvas(ctx, cvs.width||96, prof); // build draws overlays internally
+    }catch(_){}
+  }, { passive:true });
+})();
 /* ========= offscreen sprite canvas ========= */
 var jetmanCanvas = document.createElement('canvas');
 jetmanCanvas.width = jetmanCanvas.height = 96;
