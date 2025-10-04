@@ -172,13 +172,42 @@ async function writeLB(game, rows){
 function normGame(g){
   return String(g||'').toLowerCase().replace(/[^a-z0-9_\-\.]/g,'');
 }
+
+// --- add near normGame/sinceForPeriod ---
+const GAME_CANON = Object.freeze({
+  racing: 'race',
+  race: 'race',
+  jetman: 'jetman',
+  basketball: 'basketball',
+  puzzle: 'puzzle',
+  targets: 'targets',
+  runner: 'runner',
+  city_chase: 'city_chase',
+  all: 'all'
+});
+function canonGame(g){
+  const k = normGame(g);
+  return GAME_CANON[k] || k;
+}
+
+function canonPeriod(p){
+  const x = String(p||'all').toLowerCase();
+  if (x === 'alltime') return 'all';
+  if (x === 'year' || x === 'annual') return 'year';
+  return x;
+}
+
 function sinceForPeriod(period){
+  const p = canonPeriod(period);
   const now = Date.now();
-  if (period === 'day')   return now - 24*60*60*1000;
-  if (period === 'week')  return now - 7*24*60*60*1000;
-  if (period === 'month') return now - 30*24*60*60*1000;
+  if (p === 'day')   return now - 24*60*60*1000;
+  if (p === 'week')  return now - 7*24*60*60*1000;
+  if (p === 'month') return now - 30*24*60*60*1000;
+  if (p === 'year')  return now - 365*24*60*60*1000;
   return 0; // 'all'
 }
+
+
 function rankify(rows){
   // sort desc by score, then asc ts for determinism
   rows.sort((a,b)=> b.score - a.score || a.ts - b.ts);
@@ -198,7 +227,7 @@ app.post(['/izza-game/api/leaderboard/submit','/api/leaderboard/submit'], async 
     let body = req.body;
     if (typeof body === 'string'){ try{ body = JSON.parse(body); }catch{ body = {}; } }
 
-    const game  = normGame(body.game || 'unknown');
+    const game  = canonGame(body.game || 'unknown');
     const user0 = (body.user || req.query.u || '').toString().trim().toLowerCase();
     const user  = user0.replace(/^@+/,'').replace(/[^a-z0-9_\-\.]/g,'') || 'guest';
     const score = Number(body.score) | 0;
@@ -236,12 +265,12 @@ app.post(['/izza-game/api/leaderboard/submit','/api/leaderboard/submit'], async 
 // GET /izza-game/api/leaderboard?game=jetman&limit=100&period=all|day|week|month&around=<user>
 app.get(['/izza-game/api/leaderboard','/api/leaderboard'], async (req,res)=>{
   try{
-    const game   = normGame(req.query.game || 'all');
-    const limit  = Math.min( Math.max(parseInt(req.query.limit||'100',10)||100, 1), 200);
-    const around = (req.query.around || '').toString().trim().toLowerCase().replace(/^@+/, '');
-    const period = (req.query.period || 'all').toString().toLowerCase();
+    const game   = canonGame(req.query.game || 'all');
+const limit  = Math.min( Math.max(parseInt(req.query.limit||'100',10)||100, 1), 200);
+const around = (req.query.around || '').toString().trim().toLowerCase().replace(/^@+/, '');
+const period = canonPeriod(req.query.period || 'all');
 
-    const since  = sinceForPeriod(period);
+const since  = sinceForPeriod(period);
 
     // helper to load and filter one board
     async function loadBoard(g){
@@ -267,7 +296,7 @@ app.get(['/izza-game/api/leaderboard','/api/leaderboard'], async (req,res)=>{
 
     // 'all' → combine best-per-user across known games
     // You can expand this list if you add more games.
-    const games = ['jetman','race','basketball','city_chase'];
+    const games = ['jetman','race','basketball','puzzle','targets','runner','city_chase'];
     const mapsByUser = new Map(); // user -> best score across games
 
     for (const g of games){
