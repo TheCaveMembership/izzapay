@@ -2142,7 +2142,7 @@ function recordLeaderboards(score){
   bumpHigh('izza_lb_year_'  + yearStamp(),   score);
 
   // same local Arena ledger
-  upsertArenaLedger('race', score);
+  upsertArenaLedger('racing', score);
 
   // 🔸 add this, just like Basketball:
   if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
@@ -2155,7 +2155,7 @@ function recordLeaderboards(score){
       method:'POST',
       headers: bearerHeaders(),
       credentials:'include',
-      body: JSON.stringify({ game:'race', score })
+      body: JSON.stringify({ game:'racing', score })
     }).catch(()=>{});
   }catch(_){}
 }
