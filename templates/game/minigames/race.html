@@ -2122,15 +2122,32 @@ function upsertArenaLedger(gameId, score){
   const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
             || (localStorage.getItem('izzaUserU')||'').toLowerCase();
   if(!u) return;
-  const row={u,s:score,ts:Date.now()};
-  const parts={day:dailyStamp(),month:monthStamp(),year:yearStamp()};
-  ['alltime','day','month','year'].forEach(k=>{
-    const key = k==='alltime' ? `lb::${gameId}::alltime` : `lb::${gameId}::${k}::${parts[k]}`;
-    let arr=[]; try{arr=JSON.parse(localStorage.getItem(key)||'[]')}catch(_){}
-    arr.push(row);
-    // sort by score desc, keep best per user, cap 20
-    arr=arr.sort((a,b)=>b.s-a.s).filter((v,i,self)=>self.findIndex(x=>x.u===v.u)===i).slice(0,20);
-    localStorage.setItem(key, JSON.stringify(arr));
+
+  const row   = { u, s: (score|0), ts: Date.now() };
+  const parts = {
+    day:   (d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`)(new Date()),
+    month: (d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)(new Date()),
+    year:  String(new Date().getFullYear())
+  };
+
+  function saveSet(prefix, period, stamp){
+    const key = (period==='alltime')
+      ? `${prefix}::${gameId}::alltime`
+      : `${prefix}::${gameId}::${period}::${stamp}`;
+    let arr=[]; try{ arr = JSON.parse(localStorage.getItem(key)||'[]'); }catch(_){}
+    // dedupe best-by-user, cap 20
+    const best = {};
+    arr.concat([row]).forEach(r=>{ if(!r||!r.u) return; if(!best[r.u] || (r.s|0)>(best[r.u].s|0)) best[r.u]=r; });
+    const out = Object.values(best).sort((a,b)=>b.s-a.s).slice(0,20);
+    localStorage.setItem(key, JSON.stringify(out));
+  }
+
+  // ✅ Write to izza-prefixed (snapshot reads) AND legacy lb:: (UI/back-compat)
+  ['izzaLb2','lb'].forEach(prefix=>{
+    saveSet(prefix, 'alltime','');
+    saveSet(prefix, 'day',   parts.day);
+    saveSet(prefix, 'month', parts.month);
+    saveSet(prefix, 'year',  parts.year);
   });
 }
 
