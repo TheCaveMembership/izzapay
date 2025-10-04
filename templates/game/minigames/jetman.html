@@ -1621,6 +1621,14 @@ async function recordLeaderboards(score){
     const daily=dailyStamp(), monthly=monthStamp(), yearly=yearStamp();
     // local ledger (immediate visibility in modal)
     upsertArenaLedger('jetman', score|0);
+    // push the updated ledger into the shared persist so it survives close/reopen
+try{
+  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+    await IZZA_PERSIST.save();
+  } else if (typeof window._izzaForceSave === 'function'){
+    window._izzaForceSave();
+  }
+}catch(_){}
 
     // server endpoint used by basketball page
     const body = { score: score|0, daily, monthly, yearly, game:'jetman', user:getMatchUser(), ts:Date.now() };
