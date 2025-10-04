@@ -1,0 +1,673 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IZZA DASH — IZZA GAME</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
+
+  <!-- username before persist (same pattern as Arena/Basketball) -->
+  <script>
+  (function(){
+    try{
+      const q=new URLSearchParams(location.search);
+      let u=(q.get('u')||localStorage.getItem('izzaUserU')||'').toString().trim();
+      if(!u){
+        const raw=localStorage.getItem('piAuthUser'); if(raw){ try{u=(JSON.parse(raw)||{}).username||'';}catch{} }
+      }
+      if(u){
+        u=u.replace(/^@+/, '').toLowerCase();
+        window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+        window.izzaUserKey={ get:()=>u };
+        try{ localStorage.setItem('izzaUserU', u); }catch(_){}
+        try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+      }
+    }catch(_){}
+  })();
+  </script>
+  <script src="/static/game/js/izza-persist.js"></script>
+
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    :root{
+      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
+      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:#0b0f1a;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
+    .wrap{max-width:1100px;margin:0 auto;padding:12px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+    .btn:hover{filter:brightness(1.06)}
+    .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
+           border-radius:14px;background:#000;overflow:hidden}
+
+    /* HUD */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:4px;z-index:9;padding-right:8px;flex-wrap:nowrap}
+    .hud .left,.hud .right{display:flex;gap:4px;align-items:center;flex-wrap:nowrap}
+    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
+          padding:3px 7px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap}
+    .pill strong{font-size:13px}.pill .arc{color:var(--arcade);text-shadow:0 2px 12px rgba(0,0,0,.4)}
+    .pill.button{cursor:pointer}
+    /* small-screen fit */
+    .hud .pill{ font-size: clamp(9px, 1.7vw, 10px); padding: clamp(2px, 0.5vh, 3px) clamp(6px, .9vh, 7px); }
+    .hud .pill strong{ font-size: clamp(11px, 2.2vw, 13px); }
+    .hud .pill.button{ padding: 2px 6px; min-width: 28px; line-height:1; }
+
+    /* start overlay */
+    .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
+      background:linear-gradient(180deg,rgba(0,0,0,.25),rgba(0,0,0,.45));}
+    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
+      display:flex;flex-direction:column;gap:10px;align-items:center}
+    .startBtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
+
+    /* big message */
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      font-weight:900;letter-spacing:.6px;font-size:48px;opacity:0;transition:opacity .2s,transform .2s;
+      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:10}
+    .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
+    .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
+
+    /* avatar */
+    .playerAvatar{position:absolute;left:12px;bottom:12px;width:128px;height:128px;z-index:7;pointer-events:none}
+    .playerAvatar canvas{width:128px;height:128px;image-rendering:pixelated;image-rendering:crisp-edges}
+
+    /* webgl canvas + overlay */
+    #gl{position:absolute;inset:0;display:block}
+    .overlayUi{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:10px;padding:10px;z-index:8}
+    .chip{background:rgba(255,255,255,.06);border:1px solid var(--hudLine);padding:6px 10px;border-radius:999px;font-size:12px}
+
+    .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  </style>
+</head>
+<body class="cw-blue theme-a">
+  <div class="wrap">
+    <div class="top">
+      <a class="btn" id="backBtn" href="/izza-game/minigames">← Back to Arena</a>
+      <a class="btn" id="cityBtn" href="/izza-game/play">Enter IZZA City</a>
+    </div>
+
+    <div class="arena" id="arena">
+      <!-- HUD -->
+      <div class="hud">
+        <div class="left">
+          <div class="pill">SCORE: <strong id="score" class="arc">0</strong></div>
+          <div class="pill">COMBOS: <strong id="combos" class="arc">0</strong></div>
+          <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
+        </div>
+        <div class="right">
+          <button id="muteBtn" class="pill button" type="button" aria-pressed="false" title="Mute/Unmute (M)">🔊</button>
+          <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
+        </div>
+      </div>
+
+      <!-- start -->
+      <div id="startOverlay" class="startOverlay">
+        <div class="startCard">
+          <h3 style="margin:0 0 4px">IZZA DASH</h3>
+          <div class="startBtns">
+            <button id="startBtn" class="startBtn">START</button>
+          </div>
+          <small class="muted">Match 3+ blocks. Bigger chains = more coins. Drag to rotate the board, tap cubes to select.</small>
+        </div>
+      </div>
+
+      <!-- WebGL -->
+      <canvas id="gl" width="1280" height="720"></canvas>
+      <div class="overlayUi"><span class="chip">3D Board • Match-3 • Physics Drops</span></div>
+
+      <!-- Avatar -->
+      <div class="playerAvatar" id="playerAvatar"><canvas id="avatarCanvas" width="128" height="128"></canvas></div>
+
+      <div id="bigmsg" class="bigmsg" aria-live="polite">GO!</div>
+    </div>
+
+    <div class="finish" id="finish" style="display:none">
+      <span class="pill">Run Score: <strong id="finalScore">0</strong></span>
+      <span class="pill">Coins Awarded: <strong id="finalCoins">0</strong></span>
+      <span class="pill">Craft Credits: <strong id="finalCraft">0</strong></span>
+      <a class="btn" href="/izza-game/minigames" id="againBtn">Play Again</a>
+      <a class="btn" href="/izza-game/play" id="cityBtn2">Go to City</a>
+    </div>
+  </div>
+
+  <!-- Optional chill bgm (muted by default until user gesture) -->
+  <audio id="bgm" src="/static/game/audio/dash_bgm.mp3" preload="none" loop></audio>
+
+<script>
+/* =======================
+   Shared auth / links
+======================= */
+(function(){
+  const T_KEY='izzaTokenT', U_KEY='izzaUserU';
+  const qs=new URLSearchParams(location.search);
+  let T=qs.get('t')||''; let U=(qs.get('u')||'').toString().trim();
+  try{
+    if(T) localStorage.setItem(T_KEY,T);
+    else{ const s=localStorage.getItem(T_KEY)||''; if(s){ const u=new URL(location.href); u.searchParams.set('t',s); history.replaceState(null,'',u.toString()); T=s; } }
+  }catch(_){}
+  function publishU(u){ if(!u) return u; u=u.replace(/^@+/, '').toLowerCase();
+    try{ localStorage.setItem(U_KEY,u); }catch(_){}
+    window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+    window.izzaUserKey={get:()=>u};
+    try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+    return u;
+  }
+  try{
+    if(U) publishU(U);
+    else{
+      const su=(localStorage.getItem(U_KEY)||'').toString().trim();
+      if(su){ const u=new URL(location.href); u.searchParams.set('u',su); history.replaceState(null,'',u.toString()); U=publishU(su); }
+    }
+  }catch(_){}
+  function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
+  document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
+  document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
+  window._withAuth = withAuth;
+})();
+
+/* =======================
+   Wallet helpers (same behavior as Basketball)
+======================= */
+(function(){
+  const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+  function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
+  function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
+  function readCoins(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+  function writeCoins(v){ localStorage.setItem('izzaCoins', String((v|0))); try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){} }
+
+  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins };
+})();
+
+/* =======================
+   BGM + SFX
+======================= */
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx=null, master=null;
+const bgmEl=document.getElementById('bgm');
+let desiredMasterGain=0.35, desiredBgmVol=0.25;
+function initAudio(){ if(audioCtx) return; audioCtx=new AudioCtx(); master=audioCtx.createGain(); master.gain.value=desiredMasterGain; master.connect(audioCtx.destination); }
+function bleep(type='match'){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.connect(g); g.connect(master);
+  const now=audioCtx.currentTime;
+  if(type==='match'){ o.type='triangle'; o.frequency.setValueAtTime(420,now); o.frequency.exponentialRampToValueAtTime(720,now+0.08); }
+  else if(type==='explode'){ o.type='sawtooth'; o.frequency.setValueAtTime(180,now); o.frequency.exponentialRampToValueAtTime(90,now+0.18); }
+  else if(type==='tick'){ o.type='square'; o.frequency.setValueAtTime(680,now); o.frequency.exponentialRampToValueAtTime(520,now+0.05); }
+  g.gain.setValueAtTime(0.001,now);
+  g.gain.exponentialRampToValueAtTime(0.55,now+0.02);
+  g.gain.exponentialRampToValueAtTime(0.001,now+0.22);
+  o.start(now); o.stop(now+0.24);
+}
+const muteBtn=document.getElementById('muteBtn');
+function applyMuteState(m){
+  try{ localStorage.setItem('izzaMute',''+(m?1:0)); }catch(_){}
+  muteBtn.textContent = m ? '🔇' : '🔊';
+  muteBtn.setAttribute('aria-pressed', m?'true':'false');
+  if(bgmEl){ bgmEl.muted = !!m; if(!m) bgmEl.volume = desiredBgmVol; }
+  if(master){ master.gain.value = m?0:desiredMasterGain; }
+}
+muteBtn.addEventListener('click',()=>applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')), {passive:true});
+window.addEventListener('keydown',(e)=>{ if(e.key==='m'||e.key==='M'){ e.preventDefault(); applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')); }},{passive:false});
+applyMuteState(localStorage.getItem('izzaMute')==='1');
+
+/* =======================
+   IZZA snapshot hydration & session prime (same pattern)
+======================= */
+async function ensureSession(){
+  try{
+    const r=await fetch(_withAuth('/izza-game/api/character'),{credentials:'include',headers:{'content-type':'application/json'}});
+    if(r.ok){ const j=await r.json().catch(()=>({})); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
+      const uname=(j.user&&j.user.username)||j.username||j.handle||''; if(uname){ /* already seeded earlier */ }
+      return j;
+    }
+  }catch(_){}
+  return JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
+}
+
+/* =======================
+   UI bits
+======================= */
+const scoreEl = document.getElementById('score');
+const combosEl= document.getElementById('combos');
+const timeEl  = document.getElementById('time');
+const coinsRunEl=document.getElementById('coinsRun');
+const startBtn= document.getElementById('startBtn');
+const startOverlay=document.getElementById('startOverlay');
+const bigmsg = document.getElementById('bigmsg');
+const arenaEl= document.getElementById('arena');
+
+function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' + (cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
+function paintCoinsHUD(n){ coinsRunEl.textContent=String(Math.max(0, n|0)); }
+
+/* =======================
+   Avatar (same helpers as Arena/Basketball; trimmed to essentials)
+======================= */
+const SPRITES={ body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
+                hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
+                outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" } };
+const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
+const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
+const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
+const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
+const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+function extractThreeToneRamp(img){
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const d=c.getImageData(0,0,w,h).data, v=[];
+  for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; v.push({r,g,b,L:lum(r,g,b)}); }
+  if(v.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+  v.sort((a,b)=>a.L-b.L);
+  const pick=q=>{ const idx=Math.max(0,Math.min(v.length-1,Math.floor(q*(v.length-1)))); const s=v[idx]; return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+  return [pick(0.2),pick(0.55),pick(0.85)];
+}
+function paletteSwap(img, fromHex, toHex, tol=4000){
+  const from=fromHex.map(h=>hexToRgb(h)), to=toHex.map(h=>hexToRgb(h));
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const cx=oc.getContext('2d',{willReadFrequently:true}); cx.imageSmoothingEnabled=false; cx.drawImage(img,0,0);
+  const id=cx.getImageData(0,0,w,h),d=id.data;
+  function sd(a,b){const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]===0) continue; const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
+    for(let k=0;k<from.length;k++){ const s=sd(p,from[k]); if(s<score){score=s;best=k;} }
+    if(score<=tol){ const t=to[best]||to[1]||to[0]; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+  }
+  cx.putImageData(id,0,0); return oc;
+}
+async function buildAvatarCanvas(dstCtx,size,profile){
+  const DW=size,DH=size,X=0,Y=0;
+  const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+  const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+  const femaleOut=profile.female_outfit_color||'blue';
+  let body=null;
+  if(type==='female'){ const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`; const femaleSlim=`/static/game/sprites/body/${theme}__female.png`; body=await loadImg(femaleWide)||await loadImg(femaleSlim); }
+  if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
+  const hair=await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+  const outfit=(type==='female')?null:(await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
+  let bodyCanvas=null;
+  if(body){ const target=SKIN_TO[tone]||SKIN_TO.light; const ramp=paletteSwap(body, SKIN_BASE, target, 4000); bodyCanvas=ramp; }
+  if(type==='female'&&bodyCanvas){ const target=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue; bodyCanvas=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, target, 4000); }
+  dstCtx.clearRect(0,0,DW,DH);
+  if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+  if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+  if(hair){
+    const ramp=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+    const hairCanvas=paletteSwap(hair, ramp, target, 4000);
+    dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
+  }
+  try{ await drawEquippedOverlaysForAvatar(dstCtx, size); }catch(_){}
+}
+/* equipped overlay (same sizing as Basketball; uses inventory LS/IZZA) */
+(function(){
+  const BOX128=Object.freeze({ head:{w:59,h:59,ox:64,oy:32,scale:1.12}, chest:{w:61,h:61,ox:64,oy:60,scale:1.15}, arms:{w:75,h:59,ox:64,oy:60,scale:1.15}, legs:{w:72,h:61,ox:64,oy:88,scale:1.18}, hands:{w:85,h:61,ox:86,oy:72,scale:1.34} });
+  const cache=new Map(); const imgFromSvg=s=>{ if(!s) return null; if(cache.has(s)) return cache.get(s); const i=new Image(); i.decoding='async'; i.src='data:image/svg+xml;utf8,'+encodeURIComponent(s); cache.set(s,i); return i; };
+  function readInv(){ try{ const iz=window.IZZA?.api?.getInventory?.(); if(iz) return JSON.parse(JSON.stringify(iz)); }catch(_){}
+    try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; } }
+  function isEq(it){ return !!(it&&(it.equipped===true||it.equip===true||((it.equippedCount|0)>0))); }
+  function equippedIn(slot){ const inv=readInv(); for(const k in inv){ const it=inv[k]; if(!it) continue; if((it.slot||'').toLowerCase()!==slot) continue; if(!isEq(it)) continue; const svg=(it.overlaySvg&&String(it.overlaySvg).trim())||(it.iconSvg&&String(it.iconSvg).trim())||''; return {key:k,it,svg}; } return null; }
+  function drawOne(ctx, svg, box, mul=1){ const im=imgFromSvg(svg); if(!im||!im.complete) return false; const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0); ctx.save(); ctx.imageSmoothingEnabled=false; ctx.translate(box.ox|0, box.oy|0); const s=(box.scale||1)*mul; if(s!==1) ctx.scale(s,s); try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
+  async function drawEquippedOverlaysForAvatar(ctx, size){
+    const k=(size>0?size/128:1);
+    function scaled(b){ return { w:Math.round(b.w*k),h:Math.round(b.h*k),ox:Math.round(b.ox*k),oy:Math.round(b.oy*k),scale:b.scale }; }
+    const legs =equippedIn('legs');  if(legs ) drawOne(ctx, legs .svg, scaled(BOX128.legs ));
+    const chest=equippedIn('chest'); if(chest) drawOne(ctx, chest.svg, scaled(BOX128.chest));
+    const arms =equippedIn('arms');  if(arms ) drawOne(ctx, arms .svg, scaled(BOX128.arms ));
+    const head =equippedIn('head');  if(head ) drawOne(ctx, head .svg, scaled(BOX128.head ));
+    const hands=equippedIn('hands'); if(hands) drawOne(ctx, hands.svg, scaled(BOX128.hands));
+  }
+  window.drawEquippedOverlaysForAvatar=drawEquippedOverlaysForAvatar;
+})();
+
+/* =======================
+   WebGL — minimal engine (no libs)
+   - 6x6x1 grid of cubes
+   - click to select color region (flood fill in grid space)
+   - remove -> coins, score, sound, gravity drop, refill
+   - drag to orbit camera
+======================= */
+const glc = document.getElementById('gl');
+const gl = glc.getContext('webgl', { antialias:true, alpha:false, depth:true });
+let W=0,H=0;
+function resizeGL(){
+  const r=glc.getBoundingClientRect();
+  W=glc.width = Math.floor(r.width * window.devicePixelRatio);
+  H=glc.height= Math.floor(r.height* window.devicePixelRatio);
+  gl.viewport(0,0,W,H);
+}
+window.addEventListener('resize', resizeGL, {passive:true});
+
+const VSH = `
+attribute vec3 p; attribute vec3 n; attribute vec3 c;
+uniform mat4 mvp; varying vec3 vC; varying vec3 vN;
+void main(){ vC = c; vN = normalize(n); gl_Position = mvp * vec4(p,1.0); }
+`;
+const FSH = `
+precision mediump float; varying vec3 vC; varying vec3 vN;
+void main(){
+  vec3 L = normalize(vec3(0.4,0.8,0.6));
+  float d = max(0.0, dot(vN, L));
+  vec3 col = vC * (0.28 + 0.72*d);
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compile(type,src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(s)); } return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VSH));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FSH));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const loc = {
+  p: gl.getAttribLocation(prog,'p'),
+  n: gl.getAttribLocation(prog,'n'),
+  c: gl.getAttribLocation(prog,'c'),
+  mvp: gl.getUniformLocation(prog,'mvp')
+};
+
+// cube geo
+function cube(size=1){
+  const s=size/2;
+  const P=[],N=[],C=[];
+  function face(nx,ny,nz, ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz, col){
+    P.push(ax,ay,az, bx,by,bz, cx,cy,cz, ax,ay,az, cx,cy,cz, dx,dy,dz);
+    for(let i=0;i<6;i++){ N.push(nx,ny,nz); C.push(col[0],col[1],col[2]); }
+  }
+  // 6 faces
+  const cols = [[1,.58,.12],[.95,.07,.19],[.06,.66,.96],[.32,.94,.47],[.86,.23,.93],[.98,.84,.10]];
+  const faces = [
+    [ 1,0,0,  s,-s,-s, s,-s,s, s,s,s, s,s,-s, cols[0]],
+    [-1,0,0, -s,-s,s, -s,-s,-s, -s,s,-s, -s,s,s, cols[1]],
+    [0,1,0,  -s,s,-s, s,s,-s, s,s,s, -s,s,s, cols[2]],
+    [0,-1,0, -s,-s,s, s,-s,s, s,-s,-s, -s,-s,-s, cols[3]],
+    [0,0,1,  -s,-s,s, -s,s,s, s,s,s, s,-s,s, cols[4]],
+    [0,0,-1, s,-s,-s, s,s,-s, -s,s,-s, -s,-s,-s, cols[5]],
+  ];
+  faces.forEach(f=>face(...f));
+  return { P:new Float32Array(P), N:new Float32Array(N), C:new Float32Array(C), count:P.length/3 };
+}
+const baseCube = cube(0.9);
+
+// buffers
+function mkBuf(data, attrib, size){
+  const b=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,b); gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(attrib); gl.vertexAttribPointer(attrib,size,gl.FLOAT,false,0,0);
+  return b;
+}
+mkBuf(baseCube.P, loc.p, 3);
+mkBuf(baseCube.N, loc.n, 3);
+mkBuf(baseCube.C, loc.c, 3);
+
+// simple mat4
+function mul(a,b){ const r=new Float32Array(16);
+  for(let i=0;i<4;i++){ for(let j=0;j<4;j++){ r[i*4+j]=a[i*4+0]*b[0*4+j]+a[i*4+1]*b[1*4+j]+a[i*4+2]*b[2*4+j]+a[i*4+3]*b[3*4+j]; } }
+  return r;
+}
+function ident(){ const m=new Float32Array(16); for(let i=0;i<16;i++) m[i]=(i%5==0)?1:0; return m; }
+function persp(fovy,asp,near,far){ const f=1/Math.tan(fovy/2), nf=1/(near-far); const m=new Float32Array(16);
+  m[0]=f/asp; m[5]=f; m[10]=(far+near)*nf; m[11]=-1; m[14]=(2*far*near)*nf; return m;
+}
+function trans(x,y,z){ const m=ident(); m[12]=x; m[13]=y; m[14]=z; return m; }
+function rotY(a){ const c=Math.cos(a), s=Math.sin(a); const m=ident(); m[0]=c; m[2]=s; m[8]=-s; m[10]=c; return m; }
+function rotX(a){ const c=Math.cos(a), s=Math.sin(a); const m=ident(); m[5]=c; m[6]=-s; m[9]=s; m[10]=c; return m; }
+function scale(x,y,z){ const m=ident(); m[0]=x; m[5]=y; m[10]=z; return m; }
+
+// board state
+const COLS = 6, ROWS = 6;
+const COLORS = [
+  [1.00,0.67,0.12], // orange
+  [0.06,0.66,0.96], // blue
+  [0.32,0.94,0.47], // green
+  [0.95,0.07,0.19], // red
+  [0.86,0.23,0.93], // purple
+  [0.98,0.84,0.10], // yellow
+];
+const cell = (x,y)=> y*COLS+x;
+let grid = new Array(COLS*ROWS).fill(0).map(()=>Math.floor(Math.random()*COLORS.length));
+let falling = new Array(COLS*ROWS).fill(0); // y-offset anim
+let pulse = new Array(COLS*ROWS).fill(0);
+
+let cam = { rx: -0.8, ry: 0.6, dist: 9 }; // draggable
+let dragging=false, lastX=0,lastY=0;
+
+function drawBoard(t){
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT); gl.enable(gl.DEPTH_TEST);
+  const aspect = W/H; const P = persp(0.9, aspect, 0.1, 100);
+  const V = mul(rotX(cam.rx), mul(rotY(cam.ry), trans(0,0,-cam.dist)));
+  const base = mul(P,V);
+
+  const spacing = 1.1;
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      const idx=cell(x,y);
+      const offY = falling[idx];
+      const s = 1 + 0.10*Math.sin((t*0.006 + (x+y))*3) * pulse[idx];
+      const M = mul(trans((x-(COLS-1)/2)*spacing, (y-(ROWS-1)/2)*spacing + offY, 0), scale(s,s,s));
+      const MVP = mul(base, M);
+      gl.uniformMatrix4fv(loc.mvp,false,MVP);
+      gl.drawArrays(gl.TRIANGLES, 0, baseCube.count);
+    }
+  }
+}
+
+// input
+glc.addEventListener('mousedown', e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; }, {passive:true});
+glc.addEventListener('mousemove', e=>{
+  if(!dragging) return;
+  const dx=(e.clientX-lastX)*0.01, dy=(e.clientY-lastY)*0.01;
+  cam.ry+=dx; cam.rx+=dy; cam.rx=Math.max(-1.4, Math.min(0.2, cam.rx));
+  lastX=e.clientX; lastY=e.clientY;
+},{passive:true});
+window.addEventListener('mouseup', ()=>dragging=false, {passive:true});
+
+glc.addEventListener('click', e=>{
+  // pick by projecting screen point into board plane and finding nearest cell
+  const rect=glc.getBoundingClientRect();
+  const sx=( (e.clientX-rect.left)/rect.width )*2-1;
+  const sy=( (rect.height-(e.clientY-rect.top))/rect.height )*2-1;
+
+  // approximate inverse of P*V for our simple camera (fast pick)
+  // project a ray in view space
+  const aspect=W/H, f=1/Math.tan(0.9/2);
+  let rx = sx/aspect/f, ry = sy/f, rz = -1;
+  // rotate by camera
+  const cY=Math.cos(cam.ry), sY=Math.sin(cam.ry);
+  const cX=Math.cos(cam.rx), sX=Math.sin(cam.rx);
+  let vx = cY*rx - sY*rz;
+  let vz = sY*rx + cY*rz;
+  let vy = cX*ry + sX*vz;
+  vz = -sX*ry + cX*vz;
+
+  // intersect with z≈0 board plane in world (ray origin at camera)
+  const t = (0 - (-cam.dist)) / vz;
+  const px = vx*t;
+  const py = vy*t;
+
+  const spacing = 1.1;
+  const gx = Math.round(px/spacing + (COLS-1)/2);
+  const gy = Math.round(py/spacing + (ROWS-1)/2);
+  if(gx>=0 && gx<COLS && gy>=0 && gy<ROWS){
+    selectCell(gx, gy);
+  }
+},{passive:true});
+
+// flood fill selection
+function neighbors(x,y){
+  const out=[];
+  if(x>0) out.push([x-1,y]);
+  if(x<COLS-1) out.push([x+1,y]);
+  if(y>0) out.push([x,y-1]);
+  if(y<ROWS-1) out.push([x,y+1]);
+  return out;
+}
+function selectCell(x,y){
+  const idx=cell(x,y); const color = grid[idx];
+  const stack=[[x,y]]; const seen=new Set(); const selected=[];
+  while(stack.length){
+    const [cx,cy]=stack.pop(); const id=cell(cx,cy);
+    if(seen.has(id)) continue; seen.add(id);
+    if(grid[id]!==color) continue;
+    selected.push([cx,cy]);
+    neighbors(cx,cy).forEach(n=>stack.push(n));
+  }
+  if(selected.length<3){ pulse[idx]=1; setTimeout(()=>pulse[idx]=0, 250); return; }
+  // explode selected
+  for(const [cx,cy] of selected){
+    const id=cell(cx,cy);
+    grid[id]=-1; falling[id]+=0.0; pulse[id]=0;
+  }
+  try{ bleep('match'); }catch(_){}
+  scoreCombo(selected.length);
+  dropAndRefill();
+}
+function dropAndRefill(){
+  // for each column, collapse -1 upwards
+  for(let x=0;x<COLS;x++){
+    let write=0;
+    for(let y=0;y<ROWS;y++){
+      const id=cell(x,y);
+      if(grid[id]!==-1){
+        if(write!==y){
+          const src=cell(x,y), dst=cell(x,write);
+          grid[dst]=grid[src];
+          grid[src]=-1;
+          falling[dst]= (y-write)*1.1; // animate from above
+        }
+        write++;
+      }
+    }
+    // refill
+    for(let y=write;y<ROWS;y++){
+      const id=cell(x,y);
+      grid[id]=Math.floor(Math.random()*COLORS.length);
+      falling[id]=(ROWS-y)*1.1;
+    }
+  }
+}
+
+let score=0, combos=0, timeLeft=60, ended=false, runStartCoins=0, creditsEarned=0;
+function scoreCombo(n){
+  const base = 20 * n;               // coins
+  const bonus = (n>=5)? (n-4)*10 : 0;
+  const coins = base + bonus;
+  score += coins*2; // score points a bit higher than coins
+  combos++;
+  scoreEl.textContent = score;
+  combosEl.textContent= combos;
+  // coins & craft
+  (async ()=>{
+    _wallet.writeCoins(_wallet.readCoins()+coins);
+    try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+    paintCoinsHUD(_wallet.readCoins());
+    if(n>=7){ // reward big clears
+      creditsEarned++;
+      _wallet.writeCraftAll(_wallet.readCraftAny()+1);
+      try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+      showMsg('+1 CRAFT CREDIT!','scoreGlow');
+    }else{
+      showMsg('MATCH x'+n, 'scoreGlow');
+    }
+  })();
+}
+
+function tickTimer(){
+  if(ended) return;
+  timeLeft--;
+  timeEl.textContent=timeLeft;
+  try{ bleep('tick'); }catch(_){}
+  if(timeLeft<=0){ endRun(); }
+}
+
+function endRun(){
+  if(ended) return; ended=true;
+  const coinsNow=_wallet.readCoins();
+  const deltaCoins=Math.max(0, (coinsNow|0)-(runStartCoins|0));
+  document.getElementById('finalScore').textContent=score;
+  document.getElementById('finalCoins').textContent=deltaCoins;
+  document.getElementById('finalCraft').textContent=creditsEarned;
+  document.getElementById('finish').style.display='flex';
+  showMsg('TIME!','miss');
+  try{ bleep('explode'); }catch(_){}
+  try{ IZZA_PERSIST?.save?.(); }catch(_){}
+  // submit lightweight local leaderboard & server ping
+  try{
+    const row={u:(window.izzaUserKey?.get?.()||'guest'), s:score, ts:Date.now()};
+    const key='lb::puzzle::alltime';
+    let arr=[]; try{ arr=JSON.parse(localStorage.getItem(key)||'[]'); }catch(_){}
+    arr=[...arr, row].sort((a,b)=>b.s-a.s).filter((v,i,self)=>self.findIndex(x=>x.u===v.u)===i).slice(0,20);
+    localStorage.setItem(key, JSON.stringify(arr));
+    fetch(_withAuth('/izza-game/api/leaderboard'), { method:'POST', credentials:'include', headers:{'content-type':'application/json'}, body:JSON.stringify({game:'puzzle',score}) }).catch(()=>{});
+  }catch(_){}
+}
+
+/* =======================
+   Game loop
+======================= */
+let last=performance.now();
+function loop(t){
+  const dt=Math.min(0.033, (t-last)/1000); last=t;
+  // animate falling
+  for(let i=0;i<falling.length;i++){
+    if(falling[i]>0){
+      falling[i] -= dt*4.5;
+      if(falling[i]<0) falling[i]=0;
+    }
+  }
+  drawBoard(t);
+  if(!ended) requestAnimationFrame(loop);
+}
+
+/* =======================
+   Boot
+======================= */
+async function start(){
+  // session + snapshot hydrate
+  try{
+    await ensureSession();
+    if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+  }catch(_){}
+  // wallet HUD
+  paintCoinsHUD(_wallet.readCoins());
+  runStartCoins = _wallet.readCoins();
+
+  // avatar
+  try{
+    const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
+    const prof=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
+    await buildAvatarCanvas(ctx, 128, prof);
+  }catch(_){}
+
+  // audio
+  try{
+    initAudio(); await audioCtx.resume();
+    bgmEl.volume=desiredBgmVol; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
+  }catch(_){}
+
+  // timer
+  timeLeft=60; timeEl.textContent=timeLeft; ended=false; score=0; combos=0;
+  setInterval(()=>{ if(!ended) tickTimer(); }, 1000);
+
+  // kick render
+  resizeGL(); requestAnimationFrame(loop);
+  startOverlay.style.display='none';
+  showMsg('GO!');
+}
+
+startBtn.addEventListener('click', start, {passive:true});
+
+// keep HUD coins synced if other tabs alter wallet
+window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
+window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
+window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
+
+// safety: save on hide
+window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, {passive:true});
+</script>
+</body>
+</html>
