@@ -522,15 +522,13 @@ function _arenaSvgToImage(svg){
   return img;
 }
 
-// Default overlay box sizes for the cursor canvas (px)
-// Tuned to match IZZA City’s look on a 96×96 canvas
 // Arena-only overlay boxes — surgical adjustments
 const ARENA_OVERLAY_BOX = Object.freeze({
-  // slightly smaller helmet
-  head:  { w: 44, h: 44, ox: 48, oy: 22, scale: 1.12 },
+  // slightly smaller helmet, moved down a touch
+  head:  { w: 44, h: 44, ox: 48, oy: 24, scale: 1.12 },
 
-  // torso unchanged
-  chest: { w: 46, h: 46, ox: 48, oy: 46, scale: 1.15 },
+  // vest moved down a bit more
+  chest: { w: 46, h: 46, ox: 48, oy: 50, scale: 1.15 },
 
   // arms a bit wider (not taller)
   arms:  { w: 52, h: 44, ox: 48, oy: 46, scale: 1.15 },
@@ -538,8 +536,8 @@ const ARENA_OVERLAY_BOX = Object.freeze({
   // legs wider, keep lower position
   legs:  { w: 54, h: 46, ox: 48, oy: 74, scale: 1.18 },
 
-  // weapon: same width, a little shorter vertically
-  hands: { w: 64, h: 46, ox: 72, oy: 56, scale: 1.34 }
+  // weapon: closer to middle, slightly lower
+  hands: { w: 64, h: 46, ox: 64, oy: 60, scale: 1.34 }
 });
 
 // Crafted multipliers — keep 1:1 like City
