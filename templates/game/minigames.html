@@ -1022,20 +1022,32 @@ elGame.addEventListener('change', ()=>{
   return ''; // alltime
 }
       function saveLocal(gameId, periodKey, stamp, rows){
-        const key = periodKey==='alltime'
-          ? `lb::${gameId}::alltime`
-          : `lb::${gameId}::${periodKey}::${stamp}`;
-        try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
-      }
-      function readLocal(gameId, periodKey){
-        if(periodKey==='alltime'){
-          try{ return JSON.parse(localStorage.getItem(`lb::${gameId}::alltime`)||'[]'); }catch(_){ return []; }
-        }
-        const p=nowParts();
-        const map={day:p.day,month:p.month,year:p.year};
-        const key=`lb::${gameId}::${periodKey}::${map[periodKey]}`;
-        try{ return JSON.parse(localStorage.getItem(key)||'[]'); }catch(_){ return []; }
-      }
+  const key = periodKey==='alltime'
+    ? `lb2::${gameId}::alltime`
+    : `lb2::${gameId}::${periodKey}::${stamp}`;
+  try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
+}
+
+function readLocal(gameId, periodKey){
+  // prefer new lb2 keys; fall back to old lb keys if present
+  try{
+    if (periodKey==='alltime'){
+      const v2 = localStorage.getItem(`lb2::${gameId}::alltime`);
+      if (v2) return JSON.parse(v2);
+      const v1 = localStorage.getItem(`lb::${gameId}::alltime`);
+      return v1 ? JSON.parse(v1) : [];
+    }
+    const p = nowParts();
+    const stamp = periodKey==='day' ? p.day : periodKey==='month' ? p.month : p.year;
+    const k2 = `lb2::${gameId}::${periodKey}::${stamp}`;
+    const v2 = localStorage.getItem(k2);
+    if (v2) return JSON.parse(v2);
+
+    const k1 = `lb::${gameId}::${periodKey}::${stamp}`;
+    const v1 = localStorage.getItem(k1);
+    return v1 ? JSON.parse(v1) : [];
+  }catch(_){ return []; }
+}
       function dedupeAndSort(rows){
         const bestByUser = {};
         (rows||[]).forEach(r=>{
