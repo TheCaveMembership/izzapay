@@ -507,6 +507,98 @@
   // also give ample grace after any tier reloads
   setTimeout(()=>{ armOnce(); }, 7000);
 
+  /* ---- Legacy leaderboard POST adapter (keeps existing game code unchanged) ---- */
+(function(){
+  if (!window.fetch || !window.IZZA_LEADERBOARD) return;
+
+  const ORIG_FETCH = window.fetch;
+
+  // Heuristic: infer game id from URL/title so old pages don't need changes
+  function guessGameId(){
+    try{
+      const p = (location.pathname || '').toLowerCase();
+      if (p.includes('/minigames/basketball')) return 'basketball';
+      if (p.includes('/minigames/race'))       return 'racing';
+      if (p.includes('/minigames/jetman'))     return 'jetman';
+      if (p.includes('/minigames/puzzle'))     return 'puzzle';
+      if (p.includes('/minigames/targets'))    return 'targets';
+      if (p.includes('/minigames/runner'))     return 'runner';
+      // Arena modal can also submit; try reading selected tile if present
+      const sel = document.querySelector('.tile[data-game] h3, [data-game].is-active, [data-game].selected');
+      if (sel && sel.closest('[data-game]')) return (sel.closest('[data-game]').getAttribute('data-game')||'').toLowerCase();
+      // Title fallback
+      const t = (document.title||'').toLowerCase();
+      if (t.includes('basketball')) return 'basketball';
+      if (t.includes('driver'))     return 'racing';
+      if (t.includes('jet-mon'))    return 'jetman';
+      if (t.includes('puzzle'))     return 'puzzle';
+      if (t.includes('target'))     return 'targets';
+      if (t.includes('runner'))     return 'runner';
+    }catch(_){}
+    return 'unknown';
+  }
+
+  // Safely parse a JSON body (string | Blob | anything)
+  async function readJsonBody(body){
+    try{
+      if (typeof body === 'string') return JSON.parse(body);
+      if (body && typeof body.text === 'function') {
+        const txt = await body.text();
+        try{ return JSON.parse(txt); }catch{ return {}; }
+      }
+    }catch(_){}
+    return {};
+  }
+
+  // We only intercept legacy POSTs to /izza-game/api/leaderboard (no /submit)
+  function isLegacyLeaderboardPost(url, init){
+    try{
+      const u = new URL(url, location.origin);
+      const isPost = String((init && init.method) || 'GET').toUpperCase() === 'POST';
+      return isPost && u.pathname === '/izza-game/api/leaderboard';
+    }catch(_){ return false; }
+  }
+
+  window.fetch = async function(resource, init){
+    try{
+      const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+      if (isLegacyLeaderboardPost(url, init)){
+        const body = await readJsonBody((init||{}).body);
+        const payload = {
+          user:  (typeof userParamPair === 'function') ? userParamPair() : '',
+          game:  body.game || guessGameId(),
+          score: (body.score|0) || 0,
+          // keep legacy stamps if present (server may ignore or use them)
+          daily:   body.daily   || null,
+          monthly: body.monthly || null,
+          yearly:  body.yearly  || null,
+          ts: Date.now(),
+          client: {
+            dpr:(window.devicePixelRatio||1),
+            w:(window.innerWidth||0)|0,
+            h:(window.innerHeight||0)|0,
+            ua:(navigator.userAgent||'')
+          }
+        };
+
+        // Pass through the unified submit shim (tries same-origin & BASE mirrors)
+        const r = await window.IZZA_LEADERBOARD.submit(payload);
+
+        // Make it look like the legacy endpoint replied OK so callers don’t break
+        if (r && r.ok){
+          return new Response(JSON.stringify({ ok:true, data:r.data||{} }), {
+            status: 200,
+            headers: { 'content-type':'application/json' }
+          });
+        }
+        // Fall back to the original fetch if submit failed
+      }
+    }catch(_){ /* if anything goes wrong, fall through to original fetch */ }
+
+    return ORIG_FETCH.apply(this, arguments);
+  };
+})();
+
   (async function init(){
     const res = await Persist.load();
     if (res.ok) serverSeed = res.data;
