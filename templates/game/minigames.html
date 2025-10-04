@@ -1021,31 +1021,34 @@ elGame.addEventListener('change', ()=>{
   if (period==='year')  return p.year;
   return ''; // alltime
 }
-      function saveLocal(gameId, periodKey, stamp, rows){
+      // replace in the leaderboard block
+function saveLocal(gameId, periodKey, stamp, rows){
+  // ✅ write under izza-prefixed keys so izza-persist keeps them
   const key = periodKey==='alltime'
-    ? `lb2::${gameId}::alltime`
-    : `lb2::${gameId}::${periodKey}::${stamp}`;
+    ? `izzaLb2::${gameId}::alltime`
+    : `izzaLb2::${gameId}::${periodKey}::${stamp}`;
   try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
 }
 
 function readLocal(gameId, periodKey){
-  // prefer new lb2 keys; fall back to old lb keys if present
+  // prefer new izza-prefixed keys; then lb2; then old lb (back-compat)
   try{
+    const pick = (k)=>{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; };
+    const stamps = (()=>{ const d=new Date(), z=n=>String(n).padStart(2,'0');
+      return { day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
+               month:`${d.getFullYear()}-${z(d.getMonth()+1)}`,
+               year:String(d.getFullYear()) }; })();
     if (periodKey==='alltime'){
-      const v2 = localStorage.getItem(`lb2::${gameId}::alltime`);
-      if (v2) return JSON.parse(v2);
-      const v1 = localStorage.getItem(`lb::${gameId}::alltime`);
-      return v1 ? JSON.parse(v1) : [];
+      return pick(`izzaLb2::${gameId}::alltime`)
+          || pick(`lb2::${gameId}::alltime`)
+          || pick(`lb::${gameId}::alltime`)
+          || [];
     }
-    const p = nowParts();
-    const stamp = periodKey==='day' ? p.day : periodKey==='month' ? p.month : p.year;
-    const k2 = `lb2::${gameId}::${periodKey}::${stamp}`;
-    const v2 = localStorage.getItem(k2);
-    if (v2) return JSON.parse(v2);
-
-    const k1 = `lb::${gameId}::${periodKey}::${stamp}`;
-    const v1 = localStorage.getItem(k1);
-    return v1 ? JSON.parse(v1) : [];
+    const stamp = periodKey==='day' ? stamps.day : periodKey==='month' ? stamps.month : stamps.year;
+    return pick(`izzaLb2::${gameId}::${periodKey}::${stamp}`)
+        || pick(`lb2::${gameId}::${periodKey}::${stamp}`)
+        || pick(`lb::${gameId}::${periodKey}::${stamp}`)
+        || [];
   }catch(_){ return []; }
 }
       function dedupeAndSort(rows){
