@@ -2175,28 +2175,27 @@ async function endRun(){
   try{ bgm.pause(); }catch(_){}
   setNitroWhoosh(false);
 
-  // finalize run coins still buffered
   if (coinsThisRun>0){
     await applyCoins(coinsThisRun);
     coinsThisRun = 0;
   }
 
-  // Craft credits: every 1000 coins earned this run
   const coinsNow = readCoinsLS();
   const coinsEarned = Math.max(0, (coinsNow|0) - (runStartCoins|0));
   const craftEarned = Math.floor(coinsEarned / 1000);
   if (craftEarned>0) await applyCraftDelta(craftEarned);
 
-  // Save and show popup (but ensure third bomb was shown red already)
-  try{ const p = persistWalletAndSave(); await Promise.race([p, new Promise(r=>setTimeout(r, 180))]); }catch(_){}
+  // ✅ Write leaderboard rows FIRST so they appear in the snapshot
+  try { recordLeaderboards(Math.round(state.dist)); } catch(_) {}
 
-  // Leaderboards: use distance in meters as the score
-try { recordLeaderboards(Math.round(state.dist)); } catch(_){}
+  // Now persist (wallet + leaderboard rows together)
+  try {
+    const p = persistWalletAndSave();
+    await Promise.race([p, new Promise(r=>setTimeout(r, 180))]);
+  } catch(_){}
 
-// Publish stats
-showEndPopup(coinsEarned, craftEarned);
+  showEndPopup(coinsEarned, craftEarned);
 }
-
 function resetStateForRun(){
   tintedSprite = makeTintedSprite(paint);
   state.running   = true;
