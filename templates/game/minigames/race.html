@@ -2136,26 +2136,28 @@ function upsertArenaLedger(gameId, score){
 
 // ===== Write to daily/monthly/yearly keys + POST to server =====
 function recordLeaderboards(score){
-  const now = new Date();
-  const pad=n=>String(n).padStart(2,'0');
-  const daily  = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-  const monthly= `${now.getFullYear()}-${pad(now.getMonth()+1)}`;
-  const yearly = String(now.getFullYear());
+  // same three “bumpHigh” keys
+  bumpHigh('izza_lb_day_'   + dailyStamp(),  score);
+  bumpHigh('izza_lb_month_' + monthStamp(),  score);
+  bumpHigh('izza_lb_year_'  + yearStamp(),   score);
 
-  bumpHigh('izza_lb_day_'+daily,     score);
-  bumpHigh('izza_lb_month_'+monthly, score);
-  bumpHigh('izza_lb_year_'+yearly,   score);
+  // same local Arena ledger
+  upsertArenaLedger('racing', score);
 
-  // Mirror into Arena's local ledger under the Arena's game id
-upsertArenaLedger('racing', score);
+  // 🔸 add this, just like Basketball:
+  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
+    IZZA_PERSIST.save().catch(()=>{});
+  }
 
-// Best-effort POST (auth carried by withAuth/bearerHeaders)
-try{
-  fetch(withAuth('/izza-game/api/leaderboard'), {
-    method:'POST', headers: bearerHeaders(), credentials:'include',
-    body: JSON.stringify({ score, daily, monthly, yearly, game: 'racing' })
-  }).catch(()=>{});
-}catch(_){}
+  // optional server post (leave as-is)
+  try{
+    fetch(withAuth('/izza-game/api/leaderboard'), {
+      method:'POST',
+      headers: bearerHeaders(),
+      credentials:'include',
+      body: JSON.stringify({ game:'racing', score })
+    }).catch(()=>{});
+  }catch(_){}
 }
 
 // Optional: snapshot reader if you want to inspect local bests
