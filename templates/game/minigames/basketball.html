@@ -739,17 +739,18 @@ function upsertArenaLedger(gameId, score){
 
     /* ===== Equipped overlay helper (scales to canvas size; reads inventory from LS/IZZA) ===== */
     (function(){
-      // Base layout authored for 128×128; we scale by (size/128) for other sizes
-      const BOX128 = Object.freeze({
-        head:  { w:36, h:42,  ox:64, oy:32,  scale:1.00 },
-        chest: { w:44, h:48,  ox:64, oy:60,  scale:1.00 },
-        arms:  { w:46, h:46,  ox:64, oy:60,  scale:1.00 },
-        legs:  { w:52, h:40,  ox:64, oy:88,  scale:1.00 },
-        hands: { w:44, h:44,  ox:86, oy:72,  scale:1.00 } // held item
-      });
+      // Arena/Jet-mon-matched sizing on a 128×128 baseline (positions unchanged)
+const BOX128 = Object.freeze({
+  head:  { w: 59, h: 59, ox: 64, oy: 32, scale: 1.12 }, // slightly smaller, same spot
+  chest: { w: 61, h: 61, ox: 64, oy: 60, scale: 1.15 }, // vest bigger, same spot
+  arms:  { w: 75, h: 59, ox: 64, oy: 60, scale: 1.15 }, // wider arms, same spot
+  legs:  { w: 72, h: 61, ox: 64, oy: 88, scale: 1.18 }, // wider/taller legs, same spot
+  hands: { w: 85, h: 61, ox: 86, oy: 72, scale: 1.34 }  // shorter vertically but wider, same spot
+});
 
-      const CRAFT_ARMOUR = 0.75; // subtle shrink for crafted armour
-      const CRAFT_WEAPON = 0.85; // subtle boost for crafted weapons
+// Crafted multipliers: keep neutral (match Arena/Jet-mon)
+const CRAFT_ARMOUR = 1.00;
+const CRAFT_WEAPON = 1.00;
 
       const _imgCache = new Map();
       function imgFromSvg(svg){
