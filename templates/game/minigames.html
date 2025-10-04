@@ -514,18 +514,22 @@ function _arenaSvgToImage(svg){
   const img = new Image();
   img.decoding = 'async';
   img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+
+  // ⬇⬇ ensure we repaint once the image is ready
+  img.onload = () => { try { refreshArenaCursor(); } catch(_){} };
+
   _arenaSvgImgCache.set(svg, img);
   return img;
 }
 
 // Default overlay box sizes for the cursor canvas (px)
-// Match City’s authoring targets
+// Tuned to match IZZA City’s look on a 96×96 canvas
 const ARENA_OVERLAY_BOX = Object.freeze({
-  head:  { w: 38, h: 38, ox: 48, oy: 24, scale: 1.00 },
-  chest: { w: 40, h: 40, ox: 48, oy: 46, scale: 1.00 },
-  arms:  { w: 38, h: 38, ox: 48, oy: 46, scale: 1.00 },
-  legs:  { w: 40, h: 40, ox: 48, oy: 64, scale: 1.00 },
-  hands: { w: 36, h: 36, ox: 63, oy: 54, scale: 1.00 } // same as City default
+  head:  { w: 44, h: 44, ox: 48, oy: 22, scale: 1.00 }, // a touch higher + larger
+  chest: { w: 46, h: 46, ox: 48, oy: 46, scale: 1.00 },
+  arms:  { w: 44, h: 44, ox: 48, oy: 46, scale: 1.00 },
+  legs:  { w: 46, h: 46, ox: 48, oy: 66, scale: 1.00 }, // slightly lower
+  hands: { w: 54, h: 42, ox: 66, oy: 56, scale: 1.00 }  // BIGGER weapon box
 });
 
 // Crafted multipliers — keep 1:1 like City
