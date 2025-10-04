@@ -89,7 +89,20 @@
     }catch{}
     return {x:0,y:0};
   }
-
+// Read any locally-cached leaderboard rows so we can persist them in the snapshot
+function readLeaderboardLocals(){
+  const out = {};
+  try{
+    for (let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i) || '';
+      // keep both the new izza-prefixed keys and the old lb/lb2 keys
+      if (/^(izzaLb2::|lb2::|lb::)/.test(k)) {
+        out[k] = localStorage.getItem(k);
+      }
+    }
+  }catch(_){}
+  return out;
+}
   // ---------- snapshot builder ----------
   function buildSnapshot(){
     const u      = userKey();
@@ -114,6 +127,7 @@
       inventory: inv || {},
       bank: bank || { coins:0, items:{}, ammo:{} },
       craftingCredits: craftingCredits|0,
+      leaderboard: readLeaderboardLocals(),
       timestamp: Date.now()
     };
   }
@@ -274,7 +288,14 @@
       console.warn('[persist] applyServerCore failed', e);
     }
   }
-
+// ✅ Restore any locally-cached leaderboard rows from the server snapshot
+if (seed.leaderboard && typeof seed.leaderboard === 'object'){
+  try{
+    for (const [k, v] of Object.entries(seed.leaderboard)){
+      try { localStorage.setItem(k, String(v)); } catch(_){}
+    }
+  }catch(e){ console.warn('[persist] leaderboard hydrate failed', e); }
+}
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   function looksEmpty(s){
     try{
