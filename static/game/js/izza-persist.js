@@ -95,8 +95,8 @@ function readLeaderboardLocals(){
   try{
     for (let i = 0; i < localStorage.length; i++){
       const k = localStorage.key(i) || '';
-      // keep both the new izza-prefixed keys and the old lb/lb2 keys
-      if (/^(izzaLb2::|lb2::|lb::)/.test(k)) {
+      // keep old lb/lb2, new izzaLb2, and the daily/monthly/yearly bump keys
+      if (/^(izzaLb2::|lb2::|lb::|izza_lb_day_|izza_lb_month_|izza_lb_year_)/.test(k)) {
         out[k] = localStorage.getItem(k);
       }
     }
