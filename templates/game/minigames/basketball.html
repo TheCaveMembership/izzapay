@@ -717,7 +717,7 @@ function upsertArenaLedger(gameId, score){
       return oc;
     }
 
-    async function buildAvatarCanvas(dstCtx,size,profile){
+        async function buildAvatarCanvas(dstCtx,size,profile){
       const DW=size,DH=size,X=0,Y=0;
       const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
@@ -732,7 +732,128 @@ function upsertArenaLedger(gameId, score){
       if(type==='female'&&bodyCanvas){ const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue; const reDress=paletteSwap(bodyCanvas,FEMALE_DRESS_BASE,targetDress,4000); bodyCanvas=reDress.canvas; if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas,targetDress[1],0.85); } }
       dstCtx.clearRect(0,0,DW,DH); if(bodyCanvas) dstCtx.drawImage(bodyCanvas,X,Y,DW,DH); if(outfit) dstCtx.drawImage(outfit,X,Y,DW,DH);
       if(hair){ const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black; const swap=paletteSwap(hair,detected,target,4000); let hairCanvas=swap.canvas; if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas,target[1],1.0); } dstCtx.drawImage(hairCanvas,X,Y,DW,DH); }
+
+      /* --- draw equipped items on top (no changes to position/motion logic) --- */
+      try{ await drawEquippedOverlaysForAvatar(dstCtx, size); }catch(_){}
     }
+
+    /* ===== Equipped overlay helper (scales to canvas size; reads inventory from LS/IZZA) ===== */
+    (function(){
+      // Base layout authored for 128×128; we scale by (size/128) for other sizes
+      const BOX128 = Object.freeze({
+        head:  { w:36, h:42,  ox:64, oy:32,  scale:1.00 },
+        chest: { w:44, h:48,  ox:64, oy:60,  scale:1.00 },
+        arms:  { w:46, h:46,  ox:64, oy:60,  scale:1.00 },
+        legs:  { w:52, h:40,  ox:64, oy:88,  scale:1.00 },
+        hands: { w:44, h:44,  ox:86, oy:72,  scale:1.00 } // held item
+      });
+
+      const CRAFT_ARMOUR = 0.75; // subtle shrink for crafted armour
+      const CRAFT_WEAPON = 0.85; // subtle boost for crafted weapons
+
+      const _imgCache = new Map();
+      function imgFromSvg(svg){
+        if(!svg) return null;
+        if(_imgCache.has(svg)) return _imgCache.get(svg);
+        const i = new Image();
+        i.decoding = 'async';
+        i.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        _imgCache.set(svg, i);
+        return i;
+      }
+
+      function readInv(){
+        try{
+          const iz = window.IZZA?.api?.getInventory?.();
+          if(iz) return JSON.parse(JSON.stringify(iz));
+        }catch(_){}
+        try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; }
+      }
+      function isEquipped(it){
+        return !!(it && (it.equipped===true || it.equip===true || ((it.equippedCount|0)>0)));
+      }
+      function equippedIn(slot){
+        const inv = readInv();
+        for(const k in inv){
+          const it = inv[k]; if(!it) continue;
+          if((it.slot||'').toLowerCase() !== slot) continue;
+          if(!isEquipped(it)) continue;
+          const svg = (it.overlaySvg && String(it.overlaySvg).trim()) || (it.iconSvg && String(it.iconSvg).trim()) || '';
+          return { key:k, it, svg };
+        }
+        return null;
+      }
+
+      function drawOne(ctx, svg, box, mul=1, flipX=false){
+        const im = imgFromSvg(svg);
+        if(!im || !im.complete) return false;
+        const w = Math.max(8, box.w|0), h = Math.max(8, box.h|0);
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.translate((box.ox|0), (box.oy|0));
+        if(flipX) ctx.scale(-1, 1);
+        const s = (box.scale||1) * (mul||1);
+        if(s !== 1) ctx.scale(s, s);
+        try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w, h); }catch(_){}
+        ctx.restore();
+        return true;
+      }
+
+      async function drawEquippedOverlaysForAvatar(ctx, size){
+        const k = (size>0 ? (size/128) : 1);
+
+        function scaled(box){
+          return {
+            w: Math.round(box.w*k), h: Math.round(box.h*k),
+            ox: Math.round(box.ox*k), oy: Math.round(box.oy*k),
+            scale: box.scale
+          };
+        }
+
+        const head  = equippedIn('head');
+        const chest = equippedIn('chest');
+        const arms  = equippedIn('arms');
+        const legs  = equippedIn('legs');
+        const hands = equippedIn('hands');
+
+        const order = [
+          legs && { part:legs,  box:scaled(BOX128.legs)  },
+          chest&& { part:chest, box:scaled(BOX128.chest) },
+          arms && { part:arms,  box:scaled(BOX128.arms)  },
+          head && { part:head,  box:scaled(BOX128.head)  },
+          hands&& { part:hands, box:scaled(BOX128.hands) }
+        ].filter(Boolean);
+
+        for(const entry of order){
+          const { part, box } = entry;
+          if(!part || !part.svg) continue;
+          const slot = (part.it.slot||'chest').toLowerCase();
+
+          // per-item overlayScale support
+          const per = (typeof part.it?.overlayScale === 'number' && isFinite(part.it.overlayScale)) ? part.it.overlayScale : 1;
+
+          // crafted multiplier
+          const crafted = /^craft_/i.test(part.key) || !!part.it?.meta?.crafted;
+          const mul = slot==='hands' ? (crafted ? CRAFT_WEAPON : 1) : (crafted ? CRAFT_ARMOUR : 1);
+
+          drawOne(ctx, part.svg, box, per*mul, false);
+        }
+      }
+
+      // expose globally so our buildAvatarCanvas can call it
+      window.drawEquippedOverlaysForAvatar = drawEquippedOverlaysForAvatar;
+
+      // live refresh if inventory changes while the page is open
+      window.addEventListener('izza-inventory-changed', async ()=>{
+        try{
+          const cvs = document.getElementById('avatarCanvas'); if(!cvs) return;
+          const ctx = cvs.getContext('2d',{willReadFrequently:true});
+          const prof = JSON.parse(localStorage.getItem('izzaCharacter')||'{}') || {};
+          await buildAvatarCanvas(ctx, cvs.width||128, prof);     // repaint base exactly as before
+          await drawEquippedOverlaysForAvatar(ctx, cvs.width||128); // then overlays
+        }catch(_){}
+      }, { passive:true });
+    })();
 
     // Early query param support
     (function earlyBg(){ const p=new URLSearchParams(location.search); const paramBg=p.get('bg'); if(paramBg) try{ bgImage.setAttribute('href', paramBg); }catch(_){} })();
