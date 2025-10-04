@@ -282,7 +282,13 @@ function readLeaderboardLocals(){
           }
         }catch(e){ console.warn('[persist] pos hydrate failed', e); }
       }
-      // ✅ Restore any locally-cached leaderboard rows from the server snapshot
+
+      console.log('[persist] core hydrated');
+    }catch(e){
+      console.warn('[persist] applyServerCore failed', e);
+    }
+  }
+// ✅ Restore any locally-cached leaderboard rows from the server snapshot
 if (seed.leaderboard && typeof seed.leaderboard === 'object'){
   try{
     for (const [k, v] of Object.entries(seed.leaderboard)){
@@ -290,13 +296,6 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
     }
   }catch(e){ console.warn('[persist] leaderboard hydrate failed', e); }
 }
-
-      console.log('[persist] core hydrated');
-    }catch(e){
-      console.warn('[persist] applyServerCore failed', e);
-    }
-  }
-
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
   function looksEmpty(s){
     try{
