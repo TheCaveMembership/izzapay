@@ -46,8 +46,6 @@
     .tile{background:var(--tile-bg);border:1px solid var(--tile-line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;transition:background .15s ease, transform .1s ease;}
     .tile:hover{background:var(--tile-hover); transform:translateY(-1px)}
     .tile .thumb{height:130px; border-radius:8px; border:1px solid var(--tile-line); display:flex;align-items:center;justify-content:center;overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.06)); position:relative;}
-    /* make thumbnails fit the box */
-    .tile .thumb img{width:100%;height:100%;object-fit:cover;display:block}
     .tile h3{margin:0;font-size:18px}
     .tile p{margin:0;font-size:13px;color:var(--muted)}
     .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
@@ -110,16 +108,6 @@
     .lb-row-me{background:rgba(255,255,255,.03)}
     .lb-empty{border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center}
     .lb-extra{margin-top:12px;padding-top:8px;border-top:1px solid var(--line)}
-
-    /* ===== Retro arcade font (game titles + "Arcade" pill ONLY) ===== */
-    @font-face{
-      font-family:'IZZAArcade';
-      src:url('/static/fonts/press-start-2p.woff2') format('woff2'),
-          url('/static/fonts/press-start-2p.woff') format('woff');
-      font-display:swap;
-    }
-    .game-title{ font-family:'IZZAArcade', monospace; letter-spacing:0.5px; }
-    .pill.arcade{ font-family:'IZZAArcade', monospace; letter-spacing:0.5px; }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -128,7 +116,7 @@
       <div class="topbar">
         <div class="left">
           <img src="/static/izzapay-word.svg" id="brandWord" class="brand-word" alt="IZZA wordmark">
-          <span class="muted">Arcade</span>
+          <span class="muted">Mini Game Arena</span>
         </div>
         <div class="wallet">
           <span class="pill">IZZA Coins: <strong id="coins" class="val" data-loading="1">{{ coins|default(0) }}</strong></span>
@@ -146,41 +134,20 @@
       </div>
 
       <div class="grid" id="gameGrid">
-
-        <!-- 1) JETMAN (renamed, moved first) -->
-        <div class="tile" data-game="jetman">
-          <div class="thumb">
-            <img src="/static/game/thumbs/jetman.jpg" alt="IZZA JET-MON">
-          </div>
-          <h3 class="game-title">IZZA JET-MON</h3>
-          <p>Tap to thrust, weave through neon towers, survive.</p>
-          <div class="row"><span class="pill">Endless</span><span class="pill">Skill</span></div>
-          <div class="row" style="justify-content:space-between;align-items:center">
-            <span class="earn">* Earn Coins + Credits</span>
-            <a href="/izza-game/minigames/jetman" class="btn enter-btn">Enter to play</a>
-          </div>
-        </div>
-
-        <!-- 2) BASKETBALL (renamed, moved second) -->
         <div class="tile" data-game="basketball">
-          <div class="thumb">
-            <img src="/static/game/thumbs/basketball.jpg" alt="IZZA BASKETBALL">
-          </div>
-          <h3 class="game-title">IZZA BASKETBALL</h3>
+          <div class="thumb"><div class="net"></div></div>
+          <h3>Street Basketball</h3>
           <p>Time your shots, rack up combos, beat the buzzer.</p>
-          <div class="row"><span class="pill arcade">Arcade</span><span class="pill">Solo</span></div>
+          <div class="row"><span class="pill">Arcade</span><span class="pill">Solo</span></div>
           <div class="row" style="justify-content:space-between;align-items:center">
             <span class="earn">* Earn Coins + Credits</span>
             <a href="/izza-game/minigames/basketball" class="btn enter-btn">Enter to play</a>
           </div>
         </div>
 
-        <!-- 3) RACING (renamed, moved third) -->
         <div class="tile" data-game="racing">
-          <div class="thumb">
-            <img src="/static/game/thumbs/racing.jpg" alt="IZZA DRIVER">
-          </div>
-          <h3 class="game-title">IZZA DRIVER</h3>
+          <div class="thumb"><div class="road"></div></div>
+          <h3>Street Race</h3>
           <p>Dodge traffic, hit boosts, and set a new record.</p>
           <div class="row"><span class="pill">Racing</span><span class="pill">Solo</span></div>
           <div class="row" style="justify-content:space-between;align-items:center">
@@ -189,11 +156,19 @@
           </div>
         </div>
 
-        <!-- Remaining tiles unchanged names/order -->
-        <div class="tile" data-game="puzzle">
-          <div class="thumb">
-            <img src="/static/game/thumbs/puzzle.jpg" alt="Puzzle Dash">
+        <div class="tile" data-game="jetman">
+          <div class="thumb"><div class="stars"></div></div>
+          <h3>Jetman Rooftops</h3>
+          <p>Tap to thrust, weave through neon towers, survive.</p>
+          <div class="row"><span class="pill">Endless</span><span class="pill">Skill</span></div>
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <span class="earn">* Earn Coins + Credits</span>
+            <a href="/izza-game/minigames/jetman" class="btn enter-btn">Enter to play</a>
           </div>
+        </div>
+
+        <div class="tile" data-game="puzzle">
+          <div class="thumb"></div>
           <h3>Puzzle Dash</h3>
           <p>Chain matches before the timer runs out.</p>
           <div class="row"><span class="pill">Brain</span><span class="pill">Solo</span></div>
@@ -204,9 +179,7 @@
         </div>
 
         <div class="tile" data-game="targets">
-          <div class="thumb">
-            <img src="/static/game/thumbs/targets.jpg" alt="Target Range">
-          </div>
+          <div class="thumb"></div>
           <h3>Target Range</h3>
           <p>Precision taps, streak multipliers, high scores.</p>
           <div class="row"><span class="pill">Skill</span><span class="pill">Solo</span></div>
@@ -217,9 +190,7 @@
         </div>
 
         <div class="tile" data-game="runner">
-          <div class="thumb">
-            <img src="/static/game/thumbs/runner.jpg" alt="Subway Runner">
-          </div>
+          <div class="thumb"></div>
           <h3>Subway Runner</h3>
           <p>Swipe to dodge, collect tokens, go the distance.</p>
           <div class="row"><span class="pill">Endless</span><span class="pill">Solo</span></div>
@@ -251,9 +222,9 @@
       <div class="lb-controls">
         <label class="lb-label">Game</label>
         <select id="lbGameSel" class="lb-select">
-          <option value="jetman">IZZA JET-MON</option>
-          <option value="basketball">IZZA BASKETBALL</option>
-          <option value="racing">IZZA DRIVER</option>
+          <option value="basketball">Street Basketball</option>
+          <option value="racing">Street Race</option>
+          <option value="jetman">Jetman Rooftops</option>
           <option value="puzzle">Puzzle Dash</option>
           <option value="targets">Target Range</option>
           <option value="runner">Subway Runner</option>
@@ -272,11 +243,11 @@
       </div>
 
       <div class="lb-extra">
-        <h4 style="margin:12px 0 6px">IZZA City — Longest Police Chase</h4>
-        <div id="lbPoliceChase" class="lb-chase">
-          <div class="lb-empty muted">No data yet.</div>
-        </div>
-      </div>
+  <h4 style="margin:12px 0 6px">IZZA City — Longest Police Chase</h4>
+  <div id="lbPoliceChase" class="lb-chase">
+    <div class="lb-empty muted">No data yet.</div>
+  </div>
+</div>
     </div>
   </div>
 
@@ -839,9 +810,9 @@
         renderPoliceChase();   // refresh chase block when tabs change
       }, {passive:true});
       // Also refresh when game dropdown changes
-      elGame.addEventListener('change', ()=>{
-        loadAndRender();      // reload leaderboard for the newly selected game
-      }, {passive:true});
+elGame.addEventListener('change', ()=>{
+  loadAndRender();      // reload leaderboard for the newly selected game
+}, {passive:true});
 
       function close(){ elModal.classList.remove('show'); }
       elOpen.addEventListener('click', open, {passive:true});
@@ -968,65 +939,65 @@
       }
 
       async function renderPoliceChase(){
-        const wrap = document.getElementById('lbPoliceChase');
-        if (!wrap) return;
+  const wrap = document.getElementById('lbPoliceChase');
+  if (!wrap) return;
 
-        // Always show all-time for police chase (scores are seconds)
-        let rows = null;
-        try {
-          const r = await (window.IZZA_LEADERBOARD && IZZA_LEADERBOARD.top
-            ? IZZA_LEADERBOARD.top({ game: 'city_chase', limit: 20, period: 'all' })
-            : Promise.resolve({ ok:false }));
-          if (r && r.ok && r.data && Array.isArray(r.data.rows)) {
-            rows = r.data.rows;
-          }
-        } catch(_) { /* fall through to null */ }
+  // Always show all-time for police chase (scores are seconds)
+  let rows = null;
+  try {
+    const r = await (window.IZZA_LEADERBOARD && IZZA_LEADERBOARD.top
+      ? IZZA_LEADERBOARD.top({ game: 'city_chase', limit: 20, period: 'all' })
+      : Promise.resolve({ ok:false }));
+    if (r && r.ok && r.data && Array.isArray(r.data.rows)) {
+      rows = r.data.rows;
+    }
+  } catch(_) { /* fall through to null */ }
 
-        if (!rows) {
-          // final fallback (same-origin, keeps existing behavior)
-          rows = await fetchServerLeaders('city_chase', 'alltime');
-        }
+  if (!rows) {
+    // final fallback (same-origin, keeps existing behavior)
+    rows = await fetchServerLeaders('city_chase', 'alltime');
+  }
 
-        // Normalize: { u|user, s|score } -> {u,s}
-        rows = (rows || []).map(r => ({
-          u: (r.u ?? r.user ?? '—'),
-          s: (r.s ?? r.score ?? 0) | 0
-        })).filter(r => r.s > 0);
+  // Normalize: { u|user, s|score } -> {u,s}
+  rows = (rows || []).map(r => ({
+    u: (r.u ?? r.user ?? '—'),
+    s: (r.s ?? r.score ?? 0) | 0
+  })).filter(r => r.s > 0);
 
-        // Sort best-first and cap to top 20
-        rows.sort((a,b) => b.s - a.s);
-        rows = rows.slice(0, 20);
+  // Sort best-first and cap to top 20
+  rows.sort((a,b) => b.s - a.s);
+  rows = rows.slice(0, 20);
 
-        if (!rows.length){
-          wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
-          return;
-        }
+  if (!rows.length){
+    wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
+    return;
+  }
 
-        const fmt = s => `${(s|0)}s`;
-        const me =
-          (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
-          (localStorage.getItem('izzaUserU')||'').toLowerCase();
+  const fmt = s => `${(s|0)}s`;
+  const me =
+    (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
+    (localStorage.getItem('izzaUserU')||'').toLowerCase();
 
-        const html = [
-          `<table class="lb-table">
-             <thead>
-               <tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr>
-             </thead>
-             <tbody>`
-        ];
-        rows.forEach((r,i)=>{
-          const isMe = me && r.u && String(r.u).toLowerCase() === me;
-          html.push(
-            `<tr class="${isMe ? 'lb-row-me' : ''}">
-               <td>${i+1}</td>
-               <td>${r.u || '—'}</td>
-               <td>${fmt(r.s)}</td>
-             </tr>`
-          );
-        });
-        html.push(`</tbody></table>`);
-        wrap.innerHTML = html.join('');
-      }
+  const html = [
+    `<table class="lb-table">
+       <thead>
+         <tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr>
+       </thead>
+       <tbody>`
+  ];
+  rows.forEach((r,i)=>{
+    const isMe = me && r.u && String(r.u).toLowerCase() === me;
+    html.push(
+      `<tr class="${isMe ? 'lb-row-me' : ''}">
+         <td>${i+1}</td>
+         <td>${r.u || '—'}</td>
+         <td>${fmt(r.s)}</td>
+       </tr>`
+    );
+  });
+  html.push(`</tbody></table>`);
+  wrap.innerHTML = html.join('');
+}
       function readLocalLeaders(gameId, periodKey){
         return readLocal(gameId, periodKey).slice(0,20);
       }
