@@ -89,20 +89,21 @@
     }catch{}
     return {x:0,y:0};
   }
-// Read any locally-cached leaderboard rows so we can persist them in the snapshot
-function readLeaderboardLocals(){
-  const out = {};
-  try{
-    for (let i = 0; i < localStorage.length; i++){
-      const k = localStorage.key(i) || '';
-      // keep both the new izza-prefixed keys and the old lb/lb2 keys
-      if (/^(izzaLb2::|lb2::|lb::)/.test(k)) {
-        out[k] = localStorage.getItem(k);
+  // Read any locally-cached leaderboard rows so we can persist them in the snapshot
+  function readLeaderboardLocals(){
+    const out = {};
+    try{
+      for (let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i) || '';
+        // keep both the new izza-prefixed keys and the old lb/lb2 keys
+        if (/^(izzaLb2::|lb2::|lb::)/.test(k)) {
+          out[k] = localStorage.getItem(k);
+        }
       }
-    }
-  }catch(_){}
-  return out;
-}
+    }catch(_){}
+    return out;
+  }
+
   // ---------- snapshot builder ----------
   function buildSnapshot(){
     const u      = userKey();
@@ -186,19 +187,27 @@ function readLeaderboardLocals(){
         }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
 
-      // WALLET COINS (on-hand) — take the GREATER of local vs server, then push up later if local won
+      // WALLET COINS (on-hand) — take the GREATER of local vs server, guard against transient zero, then push up later if local won
       if (Number.isFinite(seed.coins)){
         try{
-          const local = readCoinsOnHand()|0;
+          const local     = readCoinsOnHand()|0;
           const serverVal = seed.coins|0;
-          const maxVal = Math.max(local, serverVal)|0;
+          const maxVal    = Math.max(local, serverVal)|0;
 
-          if (IZZA?.api?.setCoins) IZZA.api.setCoins(maxVal);
-          else localStorage.setItem('izzaCoins', String(maxVal));
+          // coin floor: remember last non-zero so a transient 0 can't win
+          const lastNZ = parseInt(localStorage.getItem('izzaCoinsLastNZ')||'0',10) || 0;
+          const guarded = Math.max(maxVal, lastNZ)|0;
+
+          if (IZZA?.api?.setCoins) IZZA.api.setCoins(guarded);
+          else localStorage.setItem('izzaCoins', String(guarded));
+
+          if (guarded > 0) {
+            try{ localStorage.setItem('izzaCoinsLastNZ', String(guarded)); }catch(_){}
+          }
 
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
 
-          // If local was higher, schedule a save to lift the server snapshot
+          // If local was higher than server, schedule a save to lift the server snapshot
           if (local > serverVal){
             tryKick('coins-raise');
           }
@@ -282,14 +291,15 @@ function readLeaderboardLocals(){
           }
         }catch(e){ console.warn('[persist] pos hydrate failed', e); }
       }
+
       // ✅ Restore any locally-cached leaderboard rows from the server snapshot
-if (seed.leaderboard && typeof seed.leaderboard === 'object'){
-  try{
-    for (const [k, v] of Object.entries(seed.leaderboard)){
-      try { localStorage.setItem(k, String(v)); } catch(_){}
-    }
-  }catch(e){ console.warn('[persist] leaderboard hydrate failed', e); }
-}
+      if (seed.leaderboard && typeof seed.leaderboard === 'object'){
+        try{
+          for (const [k, v] of Object.entries(seed.leaderboard)){
+            try { localStorage.setItem(k, String(v)); } catch(_){}
+          }
+        }catch(e){ console.warn('[persist] leaderboard hydrate failed', e); }
+      }
 
       console.log('[persist] core hydrated');
     }catch(e){
@@ -338,7 +348,8 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
     }
   };
   window.IZZA_PERSIST = Persist;
-    // ---------- Leaderboard shim (uses same endpoints mini-games/Arena expect) ----------
+
+  // ---------- Leaderboard shim (uses same endpoints mini-games/Arena expect) ----------
   function bearerHeaders(base) {
     const h = Object.assign({'content-type':'application/json'}, base||{});
     try {
@@ -560,99 +571,99 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
   setTimeout(()=>{ armOnce(); }, 7000);
 
   /* ---- Legacy leaderboard POST adapter (keeps existing game code unchanged) ---- */
-(function(){
-  if (!window.fetch || !window.IZZA_LEADERBOARD) return;
+  (function(){
+    if (!window.fetch || !window.IZZA_LEADERBOARD) return;
 
-  const ORIG_FETCH = window.fetch;
+    const ORIG_FETCH = window.fetch;
 
-  // Heuristic: infer game id from URL/title so old pages don't need changes
-  function guessGameId(){
-    try{
-      const p = (location.pathname || '').toLowerCase();
-      if (p.includes('/minigames/basketball')) return 'basketball';
-      if (p.includes('/minigames/race'))       return 'racing';
-      if (p.includes('/minigames/jetman'))     return 'jetman';
-      if (p.includes('/minigames/puzzle'))     return 'puzzle';
-      if (p.includes('/minigames/targets'))    return 'targets';
-      if (p.includes('/minigames/runner'))     return 'runner';
-      // Arena modal can also submit; try reading selected tile if present
-      const sel = document.querySelector('.tile[data-game] h3, [data-game].is-active, [data-game].selected');
-      if (sel && sel.closest('[data-game]')) return (sel.closest('[data-game]').getAttribute('data-game')||'').toLowerCase();
-      // Title fallback
-      const t = (document.title||'').toLowerCase();
-      if (t.includes('basketball')) return 'basketball';
-      if (t.includes('driver'))     return 'racing';
-      if (t.includes('jet-mon'))    return 'jetman';
-      if (t.includes('puzzle'))     return 'puzzle';
-      if (t.includes('target'))     return 'targets';
-      if (t.includes('runner'))     return 'runner';
-    }catch(_){}
-    return 'unknown';
-  }
+    // Heuristic: infer game id from URL/title so old pages don't need changes
+    function guessGameId(){
+      try{
+        const p = (location.pathname || '').toLowerCase();
+        if (p.includes('/minigames/basketball')) return 'basketball';
+        if (p.includes('/minigames/race'))       return 'racing';
+        if (p.includes('/minigames/jetman'))     return 'jetman';
+        if (p.includes('/minigames/puzzle'))     return 'puzzle';
+        if (p.includes('/minigames/targets'))    return 'targets';
+        if (p.includes('/minigames/runner'))     return 'runner';
+        // Arena modal can also submit; try reading selected tile if present
+        const sel = document.querySelector('.tile[data-game] h3, [data-game].is-active, [data-game].selected');
+        if (sel && sel.closest('[data-game]')) return (sel.closest('[data-game]').getAttribute('data-game')||'').toLowerCase();
+        // Title fallback
+        const t = (document.title||'').toLowerCase();
+        if (t.includes('basketball')) return 'basketball';
+        if (t.includes('driver'))     return 'racing';
+        if (t.includes('jet-mon'))    return 'jetman';
+        if (t.includes('puzzle'))     return 'puzzle';
+        if (t.includes('target'))     return 'targets';
+        if (t.includes('runner'))     return 'runner';
+      }catch(_){}
+      return 'unknown';
+    }
 
-  // Safely parse a JSON body (string | Blob | anything)
-  async function readJsonBody(body){
-    try{
-      if (typeof body === 'string') return JSON.parse(body);
-      if (body && typeof body.text === 'function') {
-        const txt = await body.text();
-        try{ return JSON.parse(txt); }catch{ return {}; }
-      }
-    }catch(_){}
-    return {};
-  }
-
-  // We only intercept legacy POSTs to /izza-game/api/leaderboard (no /submit)
-  function isLegacyLeaderboardPost(url, init){
-    try{
-      const u = new URL(url, location.origin);
-      const isPost = String((init && init.method) || 'GET').toUpperCase() === 'POST';
-      return isPost && u.pathname === '/izza-game/api/leaderboard';
-    }catch(_){ return false; }
-  }
-
-  window.fetch = async function(resource, init){
-    try{
-      const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
-      if (isLegacyLeaderboardPost(url, init)){
-        const body = await readJsonBody((init||{}).body);
-        const payload = {
-          user:  (typeof userParamPair === 'function') ? userParamPair() : '',
-          game:  body.game || guessGameId(),
-          score: (body.score|0) || 0,
-          // keep legacy stamps if present (server may ignore or use them)
-          daily:   body.daily   || null,
-          monthly: body.monthly || null,
-          yearly:  body.yearly  || null,
-          ts: Date.now(),
-          client: {
-            dpr:(window.devicePixelRatio||1),
-            w:(window.innerWidth||0)|0,
-            h:(window.innerHeight||0)|0,
-            ua:(navigator.userAgent||'')
-          }
-        };
-
-        /* PATCH: canonicalize game id for legacy posts */
-        payload.game = canonGameId(payload.game);
-
-        // Pass through the unified submit shim (tries same-origin & BASE mirrors)
-        const r = await window.IZZA_LEADERBOARD.submit(payload);
-
-        // Make it look like the legacy endpoint replied OK so callers don’t break
-        if (r && r.ok){
-          return new Response(JSON.stringify({ ok:true, data:r.data||{} }), {
-            status: 200,
-            headers: { 'content-type':'application/json' }
-          });
+    // Safely parse a JSON body (string | Blob | anything)
+    async function readJsonBody(body){
+      try{
+        if (typeof body === 'string') return JSON.parse(body);
+        if (body && typeof body.text === 'function') {
+          const txt = await body.text();
+          try{ return JSON.parse(txt); }catch{ return {}; }
         }
-        // Fall back to the original fetch if submit failed
-      }
-    }catch(_){ /* if anything goes wrong, fall through to original fetch */ }
+      }catch(_){}
+      return {};
+    }
 
-    return ORIG_FETCH.apply(this, arguments);
-  };
-})();
+    // We only intercept legacy POSTs to /izza-game/api/leaderboard (no /submit)
+    function isLegacyLeaderboardPost(url, init){
+      try{
+        const u = new URL(url, location.origin);
+        const isPost = String((init && init.method) || 'GET').toUpperCase() === 'POST';
+        return isPost && u.pathname === '/izza-game/api/leaderboard';
+      }catch(_){ return false; }
+    }
+
+    window.fetch = async function(resource, init){
+      try{
+        const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+        if (isLegacyLeaderboardPost(url, init)){
+          const body = await readJsonBody((init||{}).body);
+          const payload = {
+            user:  (typeof userParamPair === 'function') ? userParamPair() : '',
+            game:  body.game || guessGameId(),
+            score: (body.score|0) || 0,
+            // keep legacy stamps if present (server may ignore or use them)
+            daily:   body.daily   || null,
+            monthly: body.monthly || null,
+            yearly:  body.yearly  || null,
+            ts: Date.now(),
+            client: {
+              dpr:(window.devicePixelRatio||1),
+              w:(window.innerWidth||0)|0,
+              h:(window.innerHeight||0)|0,
+              ua:(navigator.userAgent||'')
+            }
+          };
+
+          /* PATCH: canonicalize game id for legacy posts */
+          payload.game = canonGameId(payload.game);
+
+          // Pass through the unified submit shim (tries same-origin & BASE mirrors)
+          const r = await window.IZZA_LEADERBOARD.submit(payload);
+
+          // Make it look like the legacy endpoint replied OK so callers don’t break
+          if (r && r.ok){
+            return new Response(JSON.stringify({ ok:true, data:r.data||{} }), {
+              status: 200,
+              headers: { 'content-type':'application/json' }
+            });
+          }
+          // Fall back to the original fetch if submit failed
+        }
+      }catch(_){ /* if anything goes wrong, fall through to original fetch */ }
+
+      return ORIG_FETCH.apply(this, arguments);
+    };
+  })();
 
   (async function init(){
     const res = await Persist.load();
@@ -749,6 +760,19 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
     // Crafting credits mirrors
     if (e && (e.key==='izzaCrafting' || e.key==='craftingCredits' || e.key==='izzaCraftCredits')){
       tryKick('craft-credits-storage');
+    }
+    // Wallet coin floor guard: prevent a stray 0 from clobbering recent non-zero
+    if (e && e.key === 'izzaCoins'){
+      try{
+        const lastNZ = parseInt(localStorage.getItem('izzaCoinsLastNZ')||'0',10) || 0;
+        const cur    = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
+        if (cur === 0 && lastNZ > 0){
+          localStorage.setItem('izzaCoins', String(lastNZ));
+          window.dispatchEvent(new Event('izza-coins-changed'));
+        } else if (cur > 0){
+          localStorage.setItem('izzaCoinsLastNZ', String(cur));
+        }
+      }catch(_){}
     }
   });
 
