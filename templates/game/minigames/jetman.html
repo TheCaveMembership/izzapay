@@ -394,17 +394,31 @@ function buildAvatarCanvas(dstCtx, size, profile){
 
 /* ===== Equipped overlay helper (same system as basketball; auto-scales by size/128) ===== */
 (function(){
+  // Optional global boost if you want Jet-mon a touch bigger than Arena (e.g. 1.04 = +4%)
+  const GLOBAL_OVERLAY_BOOST = 1.00;
+
   // Base boxes authored for a 128×128 sprite; we rescale by (size/128)
+  // Converted 1:1 from Arena’s 96px boxes → 128px (× 4/3), then rounded.
   var BOX128 = {
-    head:  { w:36, h:42,  ox:64, oy:32,  scale:1.00 },
-    chest: { w:44, h:48,  ox:64, oy:60,  scale:1.00 },
-    arms:  { w:46, h:46,  ox:64, oy:60,  scale:1.00 },
-    legs:  { w:52, h:40,  ox:64, oy:88,  scale:1.00 },
-    hands: { w:44, h:44,  ox:86, oy:72,  scale:1.00 } // held/hand item
+    // head: slightly smaller, a touch lower
+    head:  { w: 59, h: 59,  ox: 64, oy: 32,  scale: 1.12 },
+
+    // vest: moved down more
+    chest: { w: 61, h: 61,  ox: 64, oy: 75,  scale: 1.15 },
+
+    // arms: wider (not taller)
+    arms:  { w: 75, h: 59,  ox: 64, oy: 61,  scale: 1.15 },
+
+    // legs: wider and lower (to match City posture)
+    legs:  { w: 72, h: 61,  ox: 64, oy: 99,  scale: 1.18 },
+
+    // weapon: shorter vertically, slightly left and lower (more centered in hand)
+    hands: { w: 85, h: 61,  ox: 80, oy: 85,  scale: 1.34 }
   };
 
-  var CRAFT_ARMOUR = 0.75;  // subtle tweak for crafted armor
-  var CRAFT_WEAPON = 0.85;  // subtle tweak for crafted weapons
+  // Match Arena behavior (no special shrink for crafted items)
+  var CRAFT_ARMOUR = 1.00;
+  var CRAFT_WEAPON = 1.00;
 
   var _imgCache = new Map();
   function imgFromSvg(svg){
@@ -448,7 +462,7 @@ function buildAvatarCanvas(dstCtx, size, profile){
     ctx.imageSmoothingEnabled = false;
     ctx.translate((box.ox|0), (box.oy|0));
     if(flipX) ctx.scale(-1, 1);
-    var s = (box.scale||1) * (mul||1);
+    var s = (box.scale||1) * (mul||1) * GLOBAL_OVERLAY_BOOST; // ← tiny global nudge
     if(s !== 1) ctx.scale(s, s);
     try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w, h); }catch(_){}
     ctx.restore();
@@ -484,10 +498,7 @@ function buildAvatarCanvas(dstCtx, size, profile){
       if(!part || !part.svg) continue;
       var slot = String((part.it && part.it.slot) || 'chest').toLowerCase();
 
-      // allow per-item override scaling, else 1
       var per = (typeof part.it.overlayScale === 'number' && isFinite(part.it.overlayScale)) ? part.it.overlayScale : 1;
-
-      // tiny crafted flourish
       var crafted = /^craft_/i.test(part.key) || !!(part.it && part.it.meta && part.it.meta.crafted);
       var mul = slot==='hands' ? (crafted ? CRAFT_WEAPON : 1) : (crafted ? CRAFT_ARMOUR : 1);
 
@@ -495,10 +506,8 @@ function buildAvatarCanvas(dstCtx, size, profile){
     }
   }
 
-  // expose to global so buildAvatarCanvas can call it
   window.drawEquippedOverlaysForAvatar = drawEquippedOverlaysForAvatar;
 
-  // live refresh if inventory changes mid-run
   window.addEventListener('izza-inventory-changed', function(){
     try{
       var cvs = jetmanCanvas; if(!cvs) return;
