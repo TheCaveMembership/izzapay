@@ -515,23 +515,23 @@
 
     /* ===== Leaderboards (daily / monthly / yearly) ===== */
     function recordLeaderboards(score){
-  const now = new Date();
-  const pad=n=>String(n).padStart(2,'0');
-  const daily=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-  const monthly=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;
-  const yearly=String(now.getFullYear());
+  bumpHigh('izza_lb_day_'   + dailyStamp(),  score);
+  bumpHigh('izza_lb_month_' + monthStamp(),  score);
+  bumpHigh('izza_lb_year_'  + yearStamp(),   score);
 
-  bumpHigh('izza_lb_day_'+daily, score);
-  bumpHigh('izza_lb_month_'+monthly, score);
-  bumpHigh('izza_lb_year_'+yearly, score);
-
-  // also save to Arena ledger keys
   upsertArenaLedger('basketball', score);
 
+  // make sure leaderboard syncs to persistent storage
+  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
+    IZZA_PERSIST.save().catch(()=>{});
+  }
+
+  // optional: server post (safe to leave or remove)
   try{
-    fetch(withAuth('/izza-game/api/leaderboard'),{
-      method:'POST',headers:bearerHeaders(),credentials:'include',
-      body:JSON.stringify({score, daily, monthly, yearly})
+    fetch(withAuth('/izza-game/api/leaderboard'), {
+      method:'POST', credentials:'include',
+      headers:bearerHeaders(),
+      body:JSON.stringify({game:'basketball',score})
     }).catch(()=>{});
   }catch(_){}
 }
