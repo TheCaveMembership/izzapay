@@ -459,7 +459,156 @@
         dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
       }
     }
+// ======== EQUIPPED GEAR OVERLAY for 96×96 avatar cursor ========
 
+// Read the same inventory City uses
+function _arenaInvRead(){
+  try{
+    const iz = (window.IZZA && IZZA.api && IZZA.api.getInventory && IZZA.api.getInventory()) || null;
+    if (iz) return JSON.parse(JSON.stringify(iz));
+  }catch(_){}
+  try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; }
+}
+
+// Is item equipped?
+function _arenaIsEquipped(entry){
+  if(!entry) return false;
+  if (entry.equipped === true || entry.equip === true) return true;
+  if (typeof entry.equippedCount === 'number' && entry.equippedCount > 0) return true;
+  return false;
+}
+
+// Find equipped item by slot
+function _arenaEquippedIn(slot){
+  const inv = _arenaInvRead();
+  for (const k in inv){
+    const it = inv[k];
+    if (!it) continue;
+    if ((it.slot||'').toLowerCase() === slot && _arenaIsEquipped(it)){
+      // prefer overlaySvg (world art), fall back to iconSvg
+      const svg = (it.overlaySvg && String(it.overlaySvg).trim()) || (it.iconSvg && String(it.iconSvg).trim()) || '';
+      return { key:k, it, svg };
+    }
+  }
+  return null;
+}
+
+// Simple SVG -> <img> cache so overlays pop instantly once decoded
+const _arenaSvgImgCache = new Map();
+function _arenaSvgToImage(svg){
+  if (!svg) return null;
+  if (_arenaSvgImgCache.has(svg)) return _arenaSvgImgCache.get(svg);
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  _arenaSvgImgCache.set(svg, img);
+  return img;
+}
+
+// Default overlay box sizes for the cursor canvas (px)
+const ARENA_OVERLAY_BOX = Object.freeze({
+  head:  { w: 28, h: 32,  ox: 48, oy: 24,  scale: 1.00 },
+  chest: { w: 34, h: 36,  ox: 48, oy: 46,  scale: 1.00 },
+  arms:  { w: 36, h: 36,  ox: 48, oy: 46,  scale: 1.00 },
+  legs:  { w: 40, h: 32,  ox: 48, oy: 62,  scale: 1.00 },
+  hands: { w: 36, h: 36,  ox: 63, oy: 54,  scale: 1.05 } // “held” item near right side
+});
+
+// Crafted size multipliers (match City feel)
+const CRAFTED_ARMOUR_SHRINK = 0.75;
+const CRAFTED_WEAPON_BOOST  = 0.75;
+
+// Draw a single overlay image on the 96×96 canvas
+function _arenaDrawOverlay(ctx, svg, box, perItemScale=1, flipX=false){
+  if (!svg) return false;
+  const img = _arenaSvgToImage(svg);
+  if (!img || !img.complete) return false;
+
+  const w = Math.max(8, box.w|0);
+  const h = Math.max(8, box.h|0);
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(box.ox|0, box.oy|0);
+  if (flipX) ctx.scale(-1, 1);
+  const s = (box.scale || 1) * perItemScale;
+  if (s !== 1) ctx.scale(s, s);
+  try { ctx.drawImage(img, -w/2, -h/2, w, h); } catch(_){}
+  ctx.restore();
+  return true;
+}
+
+// Optional: nudge weapon position based on facing (if you store it)
+function _arenaWeaponFacingBox(base){
+  // You can make this smarter. For now, bias to the right (like facing "right")
+  return base;
+}
+
+// Main: build avatar + gear in one go (uses your existing base painter)
+async function buildAvatarCanvasWithGear(dstCtx, size, profile){
+  // 1) Base character (your existing function)
+  await buildAvatarCanvas(dstCtx, size, profile);
+
+  // 2) Pull equipped items from the shared inventory
+  const head  = _arenaEquippedIn('head');
+  const chest = _arenaEquippedIn('chest');
+  const arms  = _arenaEquippedIn('arms');
+  const legs  = _arenaEquippedIn('legs');
+  const hands = _arenaEquippedIn('hands'); // weapon
+
+  // 3) Draw order: legs → chest → arms → head → weapon
+  if (legs){
+    const bx = Object.assign({}, ARENA_OVERLAY_BOX.legs);
+    const isCrafted = /^craft_/.test(legs.key);
+    const perItemScale = Number.isFinite(legs.it?.overlayScale) ? (+legs.it.overlayScale) : 1;
+    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
+    _arenaDrawOverlay(dstCtx, legs.svg, bx, perItemScale * mul);
+  }
+  if (chest){
+    const bx = Object.assign({}, ARENA_OVERLAY_BOX.chest);
+    const isCrafted = /^craft_/.test(chest.key);
+    const perItemScale = Number.isFinite(chest.it?.overlayScale) ? (+chest.it.overlayScale) : 1;
+    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
+    _arenaDrawOverlay(dstCtx, chest.svg, bx, perItemScale * mul);
+  }
+  if (arms){
+    const bx = Object.assign({}, ARENA_OVERLAY_BOX.arms);
+    const isCrafted = /^craft_/.test(arms.key);
+    const perItemScale = Number.isFinite(arms.it?.overlayScale) ? (+arms.it.overlayScale) : 1;
+    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
+    _arenaDrawOverlay(dstCtx, arms.svg, bx, perItemScale * mul);
+  }
+  if (head){
+    const bx = Object.assign({}, ARENA_OVERLAY_BOX.head);
+    const isCrafted = /^craft_/.test(head.key);
+    const perItemScale = Number.isFinite(head.it?.overlayScale) ? (+head.it.overlayScale) : 1;
+    const mul = isCrafted ? CRAFTED_ARMOUR_SHRINK : 1;
+    _arenaDrawOverlay(dstCtx, head.svg, bx, perItemScale * mul);
+  }
+  if (hands){
+    // Weapon gets a slightly different box (and boost)
+    const base = Object.assign({}, ARENA_OVERLAY_BOX.hands);
+    const bx   = _arenaWeaponFacingBox(base);
+    const perItemScale = Number.isFinite(hands.it?.overlayScale) ? (+hands.it.overlayScale) : 1;
+    const isCrafted = /^craft_/.test(hands.key) || !!hands.it?.meta?.crafted;
+    const mul = isCrafted ? CRAFTED_WEAPON_BOOST : 1;
+    const flipX = false; // set true if you want to mirror in some states
+    _arenaDrawOverlay(dstCtx, hands.svg, bx, perItemScale * mul, flipX);
+  }
+}
+
+// Small helper you can call whenever inventory changes to repaint the cursor
+async function refreshArenaCursor(){
+  try{
+    const c = document.getElementById('avatarCursor');
+    if (!c) return;
+    const ctx = c.getContext('2d', { willReadFrequently:true });
+    const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+    await buildAvatarCanvasWithGear(ctx, c.width, profile);
+  }catch(_){}
+}
+window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:true });
+// ==============================================================
     /* ====== UI & motion ====== */
     const avatarWrap=document.getElementById('avatarWrap');
     const avatarCanvas=document.getElementById('avatarCursor');
@@ -719,7 +868,7 @@
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profileFresh)); }catch(_){}
 
         // Draw avatar with equipped state
-        await buildAvatarCanvas(actx,96,profileFresh);
+        await buildAvatarCanvasWithGear(actx, 96, profileFresh);
 
         // Place avatar nicely
         const logo = document.getElementById('brandWord');
@@ -767,7 +916,7 @@
             try{ await hydrateFromSnapshot(); }catch(_){}
             // also refresh equipped look
             const pf = (await fetchCharacterFresh()) || JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-            await buildAvatarCanvas(actx,96,pf);
+           await buildAvatarCanvasWithGear(actx,96,pf);
             renderWallet(readLocalWallet());
           }
         }, { passive:true });
