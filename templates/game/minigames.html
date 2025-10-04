@@ -1198,64 +1198,85 @@ elGame.addEventListener('change', ()=>{
         return readLocal(gameId, periodKey).slice(0,20);
       }
 
-      async function loadAndRender(seedFromLegacy=false){
+      // 1) helper: stamp for cache keys
+function stampFor(period){
+  const d = new Date(), z=n=>String(n).padStart(2,'0');
+  const day   = `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+  const month = `${d.getFullYear()}-${z(d.getMonth()+1)}`;
+  const year  = String(d.getFullYear());
+  return period==='day' ? day : period==='month' ? month : period==='year' ? year : '';
+}
+
+// 2) cache helpers (note the different prefix to avoid any snapshot collision)
+function lbKey(game, period){ 
+  return period==='alltime' ? `lb2::${game}::alltime`
+                            : `lb2::${game}::${period}::${stampFor(period)}`;
+}
+function lbSave(game, period, rows){ try{ localStorage.setItem(lbKey(game,period), JSON.stringify(rows||[])); }catch(_){} }
+function lbRead(game, period){ try{ return JSON.parse(localStorage.getItem(lbKey(game,period))||'[]'); }catch(_){ return []; } }
+
+// 3) fetch like the working URL (no creds, no Authorization)
+async function fetchServerLeaders(gameId, period){
+  try{
+    const url = new URL('/izza-game/api/leaderboard', location.origin);
+    url.searchParams.set('game', gameId);
+    if (period) url.searchParams.set('period', period);
+    url.searchParams.set('limit', '20');
+    // mirror your manual test exactly
+    const r = await fetch(url.toString(), { credentials:'omit', headers:{ 'content-type':'application/json' } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return Array.isArray(j) ? j : (j && Array.isArray(j.rows) ? j.rows : null);
+  }catch(_){ return null; }
+}
+
+// 4) normalize rows
+const normRows = rows => (rows||[]).map(r => ({ u: r.u ?? r.user ?? '—', s: (r.s ?? r.score ?? 0)|0 }));
+
+// 5) render flow: show cache first (persists reopen), then refresh from server
+async function loadAndRender(seedFromLegacy=false){
   const gameId = elGame.value || 'basketball';
-  if (seedFromLegacy){ harvestLegacyScores(gameId); }
-  elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
+  const period = document.querySelector('#lbTabs .is-active')?.dataset?.period || 'day';
 
-  // 1) Try server for the requested period
-  let rows = await fetchServerLeaders(gameId, period);
-
-  // 2) If server returned rows, cache them locally for persistence
-  if (rows && rows.length){
-    const norm = normRows(rows);
-    saveLocal(gameId, period, stampFor(period), norm);
+  // A) read cached rows for this period (works after cold reopen)
+  let rows = lbRead(gameId, period);
+  rows = normRows(rows);
+  if (rows.length){
+    renderTable(rows);
   } else {
-    // 3) If empty, fall back to our local cache for this period
-    rows = readLocalLeaders(gameId, period);
-
-    // 4) Still empty? Try server ALL-TIME, then cache locally for alltime
-    if (!rows || !rows.length){
-      const all = await fetchServerLeaders(gameId, 'alltime');
-      if (all && all.length){
-        const norm = normRows(all);
-        saveLocal(gameId, 'alltime', '', norm);
-        // If user is on Daily/Monthly/Yearly, we’ll still *show* something:
-        rows = norm;
-      }
-    }
-
-    // 5) Last-ditch: seed from legacy “last score”
-    if ((!rows || !rows.length) && seedFromLegacy){
-      try{
-        const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
-        if (hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
-          upsertLocalLedger(gameId, (hint.score||hint.s)|0);
-          rows = readLocalLeaders(gameId, period);
-        }
-      }catch(_){}
-    }
+    elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
   }
 
-  rows = normRows(rows||[]);
-  if(!rows.length){
-    elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
+  // B) fetch fresh from server; when it comes back, overwrite cache + re-render
+  const fresh = await fetchServerLeaders(gameId, period);
+  if (fresh && fresh.length){
+    const norm = normRows(fresh);
+    lbSave(gameId, period, norm);      // ⬅ persist with the period we requested
+    renderTable(norm);
     return;
   }
 
-  const me = meUsername();
+  // C) fallback: try all-time if period was empty on server, then render something
+  if (!rows.length){
+    const all = await fetchServerLeaders(gameId, 'alltime');
+    if (all && all.length){
+      const norm = normRows(all);
+      lbSave(gameId, 'alltime', norm);
+      renderTable(norm);
+      return;
+    }
+    elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
+  }
+}
+
+function renderTable(rows){
+  const me = (window.izzaUserKey?.get?.() || localStorage.getItem('izzaUserU') || '').toLowerCase();
   const html = [
     `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead><tbody>`
   ];
   rows.slice(0,20).forEach((r,i)=>{
     const isMe = me && r.u && String(r.u).toLowerCase()===me;
-    html.push(
-      `<tr class="${isMe?'lb-row-me':''}">
-         <td>${i+1}</td>
-         <td>${r.u||'—'}</td>
-         <td>${(r.s|0)}</td>
-       </tr>`
-    );
+    html.push(`<tr class="${isMe?'lb-row-me':''}"><td>${i+1}</td><td>${r.u||'—'}</td><td>${r.s|0}</td></tr>`);
   });
   html.push(`</tbody></table>`);
   elBody.innerHTML = html.join('');
