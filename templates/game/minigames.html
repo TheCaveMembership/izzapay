@@ -1014,6 +1014,13 @@ elGame.addEventListener('change', ()=>{
           year: String(d.getFullYear())
         };
       }
+      function stampFor(period){
+  const p = nowParts();
+  if (period==='day')   return p.day;
+  if (period==='month') return p.month;
+  if (period==='year')  return p.year;
+  return ''; // alltime
+}
       function saveLocal(gameId, periodKey, stamp, rows){
         const key = periodKey==='alltime'
           ? `lb::${gameId}::alltime`
@@ -1096,17 +1103,27 @@ elGame.addEventListener('change', ()=>{
       }
 
       async function fetchServerLeaders(gameId, periodKey){
-        try{
-          const url = withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}&period=${encodeURIComponent(periodKey)}&limit=20`);
-          const r = await fetch(url, { credentials:'include', headers: bearerHeaders() });
-          if(r.ok){
-            const j = await r.json();
-            if (Array.isArray(j)) return j;
-            if (j && Array.isArray(j.rows)) return j.rows;
-          }
-        }catch(_){}
-        return null;
+  try{
+    const qp = periodKey ? `&period=${encodeURIComponent(periodKey)}` : '';
+    const url = withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}${qp}&limit=20`);
+    const r = await fetch(url, { credentials:'include', headers: bearerHeaders() });
+    if(r.ok){
+      const j = await r.json();
+      const rows = Array.isArray(j) ? j : (j && Array.isArray(j.rows) ? j.rows : null);
+      if (rows && rows.length) return rows;
+
+      // if “alltime” didn’t return, try server default (no period)
+      if (periodKey === 'alltime'){
+        const r2 = await fetch(withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}&limit=20`), { credentials:'include', headers: bearerHeaders() });
+        if (r2.ok){
+          const j2 = await r2.json();
+          return Array.isArray(j2) ? j2 : (j2 && j2.rows) || null;
+        }
       }
+    }
+  }catch(_){}
+  return null;
+}
 
       // Normalize rows { user, score } or { u, s } -> {u,s}
       function normRows(rows){
@@ -1182,50 +1199,67 @@ elGame.addEventListener('change', ()=>{
       }
 
       async function loadAndRender(seedFromLegacy=false){
-        const gameId = elGame.value || 'basketball';
-        if(seedFromLegacy){ harvestLegacyScores(gameId); }
-        elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
+  const gameId = elGame.value || 'basketball';
+  if (seedFromLegacy){ harvestLegacyScores(gameId); }
+  elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
 
-        let rows = await fetchServerLeaders(gameId, period);
-        if((!rows || !rows.length)){
+  // 1) Try server for the requested period
+  let rows = await fetchServerLeaders(gameId, period);
+
+  // 2) If server returned rows, cache them locally for persistence
+  if (rows && rows.length){
+    const norm = normRows(rows);
+    saveLocal(gameId, period, stampFor(period), norm);
+  } else {
+    // 3) If empty, fall back to our local cache for this period
+    rows = readLocalLeaders(gameId, period);
+
+    // 4) Still empty? Try server ALL-TIME, then cache locally for alltime
+    if (!rows || !rows.length){
+      const all = await fetchServerLeaders(gameId, 'alltime');
+      if (all && all.length){
+        const norm = normRows(all);
+        saveLocal(gameId, 'alltime', '', norm);
+        // If user is on Daily/Monthly/Yearly, we’ll still *show* something:
+        rows = norm;
+      }
+    }
+
+    // 5) Last-ditch: seed from legacy “last score”
+    if ((!rows || !rows.length) && seedFromLegacy){
+      try{
+        const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
+        if (hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
+          upsertLocalLedger(gameId, (hint.score||hint.s)|0);
           rows = readLocalLeaders(gameId, period);
         }
+      }catch(_){}
+    }
+  }
 
-        // If still empty, last-ditch: look for a one-off "last score" and seed.
-        if((!rows || !rows.length) && seedFromLegacy){
-          try{
-            const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
-            if(hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
-              upsertLocalLedger(gameId, (hint.score||hint.s)|0);
-              rows = readLocalLeaders(gameId, period);
-            }
-          }catch(_){}
-        }
+  rows = normRows(rows||[]);
+  if(!rows.length){
+    elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
+    return;
+  }
 
-        rows = normRows(rows||[]);
-
-        if(!rows || !rows.length){
-          elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
-          return;
-        }
-
-        const me = meUsername();
-        const html = [
-          `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead><tbody>`
-        ];
-        rows.slice(0,20).forEach((r,i)=>{
-          const isMe = me && r.u && String(r.u).toLowerCase()===me;
-          html.push(
-            `<tr class="${isMe?'lb-row-me':''}">
-               <td>${i+1}</td>
-               <td>${r.u||'—'}</td>
-               <td>${(r.s|0)}</td>
-             </tr>`
-          );
-        });
-        html.push(`</tbody></table>`);
-        elBody.innerHTML = html.join('');
-      }
+  const me = meUsername();
+  const html = [
+    `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead><tbody>`
+  ];
+  rows.slice(0,20).forEach((r,i)=>{
+    const isMe = me && r.u && String(r.u).toLowerCase()===me;
+    html.push(
+      `<tr class="${isMe?'lb-row-me':''}">
+         <td>${i+1}</td>
+         <td>${r.u||'—'}</td>
+         <td>${(r.s|0)}</td>
+       </tr>`
+    );
+  });
+  html.push(`</tbody></table>`);
+  elBody.innerHTML = html.join('');
+}
     })();
   })();
   </script>
