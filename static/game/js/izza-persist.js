@@ -394,6 +394,27 @@
     return { ok:false, status:0, data:{ error:'all endpoints failed' } };
   }
 
+  /* PATCH: canonical game ids used by Arena (racing → race), and period normalization */
+  const GAME_CANON = Object.freeze({
+    racing: 'race',
+    race: 'race',
+    jetman: 'jetman',
+    basketball: 'basketball',
+    puzzle: 'puzzle',
+    targets: 'targets',
+    runner: 'runner',
+    city_chase: 'city_chase',
+    all: 'all' // harmless if ever passed
+  });
+  function canonGameId(id){
+    const k = String(id||'').toLowerCase();
+    return GAME_CANON[k] || k;
+  }
+  function canonPeriod(p){
+    const x = String(p||'all').toLowerCase();
+    return (x === 'alltime') ? 'all' : x;
+  }
+
   const Leaderboard = {
     // Submit a score: { game: 'jetman'|'race'|'basketball', score:Number, hi?:Number, coinsDelta?:Number }
     async submit(payload) {
@@ -407,19 +428,28 @@
           ua: (navigator.userAgent||'')
         }
       }, payload||{});
+
+      /* PATCH: canonicalize game id */
+      if (body.game) body.game = canonGameId(body.game);
+
       return await tryMany(LB_ENDPOINTS.submit(), (u)=>postJSON(u, body));
     },
 
     // Top N: default game=all, limit=100, period can be 'all','day','week','month' if your backend supports it
     async top({ game='all', limit=100, period='all' } = {}) {
-      const qs = `?game=${encodeURIComponent(game)}&limit=${limit|0}&period=${encodeURIComponent(period)}`;
+      /* PATCH: canonicalize both game and period */
+      const g = canonGameId(game);
+      const p = canonPeriod(period);
+      const qs = `?game=${encodeURIComponent(g)}&limit=${limit|0}&period=${encodeURIComponent(p)}`;
       return await tryMany(LB_ENDPOINTS.top(qs), (u)=>getJSON(u));
     },
 
     // Around a user’s rank: center on current user unless a different `user` is provided
     async around({ game='all', user, limit=25 } = {}) {
       const uu = encodeURIComponent(user || userParamPair());
-      const qs = `?game=${encodeURIComponent(game)}&around=${uu}&limit=${limit|0}`;
+      /* PATCH: canonicalize game */
+      const g = canonGameId(game);
+      const qs = `?game=${encodeURIComponent(g)}&around=${uu}&limit=${limit|0}`;
       return await tryMany(LB_ENDPOINTS.top(qs), (u)=>getJSON(u));
     }
   };
@@ -580,6 +610,9 @@
             ua:(navigator.userAgent||'')
           }
         };
+
+        /* PATCH: canonicalize game id for legacy posts */
+        payload.game = canonGameId(payload.game);
 
         // Pass through the unified submit shim (tries same-origin & BASE mirrors)
         const r = await window.IZZA_LEADERBOARD.submit(payload);
