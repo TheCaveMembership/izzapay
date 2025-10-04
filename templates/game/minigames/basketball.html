@@ -519,14 +519,13 @@
   bumpHigh('izza_lb_month_' + monthStamp(),  score);
   bumpHigh('izza_lb_year_'  + yearStamp(),   score);
 
+  // ✅ keep this line (it now dual-writes to IZZA + legacy keys)
   upsertArenaLedger('basketball', score);
 
-  // make sure leaderboard syncs to persistent storage
   if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
     IZZA_PERSIST.save().catch(()=>{});
   }
 
-  // optional: server post (safe to leave or remove)
   try{
     fetch(withAuth('/izza-game/api/leaderboard'), {
       method:'POST', credentials:'include',
@@ -552,14 +551,40 @@ function upsertArenaLedger(gameId, score){
   const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
             || (localStorage.getItem('izzaUserU')||'').toLowerCase();
   if(!u) return;
-  const row={u,s:score,ts:Date.now()};
-  const parts={day:dailyStamp(),month:monthStamp(),year:yearStamp()};
-  ['alltime','day','month','year'].forEach(k=>{
-    const key = k==='alltime' ? `lb::${gameId}::alltime` : `lb::${gameId}::${k}::${parts[k]}`;
-    let arr=[]; try{arr=JSON.parse(localStorage.getItem(key)||'[]')}catch(_){}
+
+  const row   = { u, s:score, ts:Date.now() };
+  const parts = { day:dailyStamp(), month:monthStamp(), year:yearStamp() };
+
+  // helper: read first existing list from any namespace
+  function readAny(keyBase){
+    const tryRead = k => { try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(_){ return null; } };
+    return (
+      tryRead(`izzaLb2::${keyBase}`) ||
+      tryRead(`lb2::${keyBase}`)     ||
+      tryRead(`lb::${keyBase}`)      ||
+      []
+    );
+  }
+  // helper: write the same rows to all namespaces
+  function writeAll(keyBase, rows){
+    try{ localStorage.setItem(`izzaLb2::${keyBase}`, JSON.stringify(rows)); }catch(_){}
+    try{ localStorage.setItem(`lb2::${keyBase}`,     JSON.stringify(rows)); }catch(_){}
+    try{ localStorage.setItem(`lb::${keyBase}`,      JSON.stringify(rows)); }catch(_){}
+  }
+
+  ['alltime','day','month','year'].forEach(period=>{
+    const keyBase = (period==='alltime')
+      ? `${gameId}::alltime`
+      : `${gameId}::${period}::${parts[period]}`;
+
+    let arr = readAny(keyBase);
     arr.push(row);
-    arr=arr.sort((a,b)=>b.s-a.s).filter((v,i,self)=>self.findIndex(x=>x.u===v.u)===i).slice(0,20);
-    localStorage.setItem(key, JSON.stringify(arr));
+    arr = arr
+      .sort((a,b)=>b.s-a.s)
+      .filter((v,i,self)=> self.findIndex(x=>x.u===v.u)===i )
+      .slice(0,20);
+
+    writeAll(keyBase, arr);
   });
 }
     function bumpHigh(key, score){
