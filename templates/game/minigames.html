@@ -519,18 +519,24 @@ function _arenaSvgToImage(svg){
 }
 
 // Default overlay box sizes for the cursor canvas (px)
+// Match City’s authoring targets
 const ARENA_OVERLAY_BOX = Object.freeze({
-  head:  { w: 28, h: 32,  ox: 48, oy: 24,  scale: 1.00 },
-  chest: { w: 34, h: 36,  ox: 48, oy: 46,  scale: 1.00 },
-  arms:  { w: 36, h: 36,  ox: 48, oy: 46,  scale: 1.00 },
-  legs:  { w: 40, h: 32,  ox: 48, oy: 62,  scale: 1.00 },
-  hands: { w: 36, h: 36,  ox: 63, oy: 54,  scale: 1.05 } // “held” item near right side
+  head:  { w: 38, h: 38, ox: 48, oy: 24, scale: 1.00 },
+  chest: { w: 40, h: 40, ox: 48, oy: 46, scale: 1.00 },
+  arms:  { w: 38, h: 38, ox: 48, oy: 46, scale: 1.00 },
+  legs:  { w: 40, h: 40, ox: 48, oy: 64, scale: 1.00 },
+  hands: { w: 36, h: 36, ox: 63, oy: 54, scale: 1.00 } // same as City default
 });
 
-// Crafted size multipliers (match City feel)
-const CRAFTED_ARMOUR_SHRINK = 0.75;
-const CRAFTED_WEAPON_BOOST  = 0.75;
+// Crafted multipliers — keep 1:1 like City
+const CRAFTED_ARMOUR_SHRINK = 1.00;
+const CRAFTED_WEAPON_BOOST  = 1.00;
 
+// (optional safety) clamp per-item overlayScale so bad data can’t miniaturize items
+function _clampScale(x, lo=0.8, hi=1.25){
+  x = Number(x);
+  return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : 1;
+}
 // Draw a single overlay image on the 96×96 canvas
 function _arenaDrawOverlay(ctx, svg, box, perItemScale=1, flipX=false){
   if (!svg) return false;
@@ -572,32 +578,32 @@ async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   if (legs){
     const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.legs, k);
     const per = Number.isFinite(legs.it?.overlayScale) ? (+legs.it.overlayScale) : 1;
-    const mul = /^craft_/.test(legs.key) ? 0.75 : 1;
+    const mul = 1;
     _arenaDrawOverlay(dstCtx, legs.svg, bx, per * mul);
   }
   if (chest){
     const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.chest, k);
     const per = Number.isFinite(chest.it?.overlayScale) ? (+chest.it.overlayScale) : 1;
-    const mul = /^craft_/.test(chest.key) ? 0.75 : 1;
+    const mul = 1;
     _arenaDrawOverlay(dstCtx, chest.svg, bx, per * mul);
   }
   if (arms){
     const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.arms, k);
     const per = Number.isFinite(arms.it?.overlayScale) ? (+arms.it.overlayScale) : 1;
-    const mul = /^craft_/.test(arms.key) ? 0.75 : 1;
+    const mul = 1;
     _arenaDrawOverlay(dstCtx, arms.svg, bx, per * mul);
   }
   if (head){
     const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.head, k);
     const per = Number.isFinite(head.it?.overlayScale) ? (+head.it.overlayScale) : 1;
-    const mul = /^craft_/.test(head.key) ? 0.75 : 1;
+    const mul = 1;
     _arenaDrawOverlay(dstCtx, head.svg, bx, per * mul);
   }
   if (hands){
     const base = _arenaScaleBox(ARENA_OVERLAY_BOX.hands, k);
     const bx   = _arenaWeaponFacingBox(base);
     const per  = Number.isFinite(hands.it?.overlayScale) ? (+hands.it.overlayScale) : 1;
-    const mul  = (/^craft_/.test(hands.key) || !!hands.it?.meta?.crafted) ? 0.85 : 1;
+    const mul = 1;
     _arenaDrawOverlay(dstCtx, hands.svg, bx, per * mul, /*flipX=*/false);
   }
 }
