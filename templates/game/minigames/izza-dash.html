@@ -51,17 +51,16 @@
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
 
-    /* HUD */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:none;justify-content:space-between;gap:8px;z-index:9;padding-right:8px;align-items:center}
+    /* HUD — allow wrap on small screens to avoid overlap */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:none;z-index:9;padding-right:8px}
     .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
+    .hud{display:flex;flex-wrap:wrap;align-items:flex-start;column-gap:8px;row-gap:6px}
+    .hud .left{flex:1 1 320px}
+    .hud .right{flex:1 1 200px;justify-content:flex-end}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto}
-    .pill strong{ font-size:14px; font-variant-numeric:tabular-nums; display:inline-block; max-width:none; overflow:visible; }
-    .pill.button{cursor:pointer}
-    .hud{flex-wrap:nowrap}
-    .hud .left,.hud .right{flex:1;min-width:0}
-    .hud .right{justify-content:flex-end}
-    .hud .pill.button{ min-width: 44px; }
+          padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+    .pill strong{ font-size:14px; font-variant-numeric:tabular-nums; display:inline-block; white-space:nowrap; }
+    .pill.button{cursor:pointer; min-width:44px; max-width:none;}
 
     /* overlays */
     .startOverlay,.endOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
@@ -462,17 +461,18 @@ function layoutLevel(){
     world.add(mesh); blocks.push(mesh);
   }
 
-  /* Incoming spheres — EXACTLY 2, falling from the top */
+  /* Incoming spheres — EXACTLY 2, falling from the TOP CORNERS */
   spheres.length=0;
-  for(let i=0;i<2;i++){
+  const yTop = 6 + Math.random()*1.2;
+  const zTop = -baseRingR * 0.45;       // back/top edge of board
+  const xOff = baseRingR * 0.9;
+  const corners = [ new THREE.Vector3(-xOff, yTop, zTop), new THREE.Vector3(xOff, yTop, zTop) ];
+  for(const pos of corners){
     const s=makeCrystal();
-    const x = (Math.random()*2-1) * baseRingR * 0.6;
-    const z = (Math.random()*2-1) * baseRingR * 0.35;
-    s.position.set(x, 6 + Math.random()*1.5, z); // start well above board
+    s.position.copy(pos);
     const target = new THREE.Vector3(0, 0, 0);
     const dir = target.clone().sub(s.position).normalize();
-    const rSspeedDamp = 1 / rS;
-    const speed = (0.6 + 0.04*level) * rSspeedDamp; // balanced by zoom
+    const speed = (0.75 + 0.05*level) / rS; // tuned against zoom so not too fast
     s.userData.v.copy(dir.multiplyScalar(speed));
     world.add(s); spheres.push(s);
   }
@@ -614,8 +614,12 @@ function fireMetal(e){
   const pScale = projScaleForLevel(level);
   const b=new THREE.Mesh(new THREE.SphereGeometry(0.18*pScale,20,16), metal());
   b.position.copy(origin);
-  b.userData.v=dir.multiplyScalar(4.2);
-  b.userData.ttl=2.2;
+
+  /* boost speed + lifetime so shots always reach */
+  const rS = ringScaleForLevel(level);
+  b.userData.v=dir.multiplyScalar(7.5*rS);
+  b.userData.ttl=5.0;
+
   b.castShadow=true; world.add(b); projectilePool.push(b);
 }
 glCanvas.addEventListener('click', fireMetal, {passive:true});
