@@ -51,16 +51,13 @@
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
 
-    /* HUD (hidden until START like Jetman) */
+    /* HUD */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:none;justify-content:space-between;gap:8px;z-index:9;padding-right:8px;align-items:center}
     .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto}
-    /* make room for values on small screens */
     .pill strong{ font-size:14px; font-variant-numeric:tabular-nums; display:inline-block; max-width:none; overflow:visible; }
     .pill.button{cursor:pointer}
-
-    /* Small-screen fit */
     .hud{flex-wrap:nowrap}
     .hud .left,.hud .right{flex:1;min-width:0}
     .hud .right{justify-content:flex-end}
@@ -75,7 +72,7 @@
     .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
 
     /* big message */
-    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);
       font-weight:900;letter-spacing:.6px;font-size:42px;opacity:0;transition:opacity .2s,transform .2s;
       pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.45);color:var(--arcade);z-index:10}
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
@@ -85,7 +82,7 @@
     .playerAvatar{position:absolute;left:12px;bottom:12px;width:96px;height:96px;z-index:7;pointer-events:none}
     .playerAvatar canvas{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
 
-    /* webgl canvas + overlay (force full fill) */
+    /* webgl canvas + overlay */
     #gl{position:absolute;inset:0;display:block;touch-action:none;width:100%;height:100%}
     .overlayUi{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:10px;padding:10px;z-index:8}
     .chip{background:rgba(255,255,255,.08);border:1px solid var(--hudLine);padding:6px 10px;border-radius:999px;font-size:12px}
@@ -314,7 +311,7 @@ async function buildAvatarCanvas(dstCtx,size,profile){
   }
   try{ await drawEquippedOverlaysForAvatar(dstCtx, size); }catch(_){}
 }
-/* equipped overlay (same sizing as Basketball) */
+/* equipped overlay */
 (function(){
   const BOX128=Object.freeze({ head:{w:59,h:59,ox:64,oy:32,scale:1.12}, chest:{w:61,h:61,ox:64,oy:60,scale:1.15}, arms:{w:75,h:59,ox:64,oy:60,scale:1.15}, legs:{w:72,h:61,ox:64,oy:88,scale:1.18}, hands:{w:85,h:61,ox:86,oy:72,scale:1.34} });
   const cache=new Map(); const imgFromSvg=s=>{ if(!s) return null; if(cache.has(s)) return cache.get(s); const i=new Image(); i.decoding='async'; i.src='data:image/svg+xml;utf8,'+encodeURIComponent(s); cache.set(s,i); return i; };
@@ -322,7 +319,9 @@ async function buildAvatarCanvas(dstCtx,size,profile){
     try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; } }
   function isEq(it){ return !!(it&&(it.equipped===true||it.equip===true||((it.equippedCount|0)>0))); }
   function equippedIn(slot){ const inv=readInv(); for(const k in inv){ const it=inv[k]; if(!it) continue; if((it.slot||'').toLowerCase()!==slot) continue; if(!isEq(it)) continue; const svg=(it.overlaySvg&&String(it.overlaySvg).trim())||(it.iconSvg&&String(it.iconSvg).trim())||''; return {key:k,it,svg}; } return null; }
-  function drawOne(ctx, svg, box, mul=1){ const im=imgFromSvg(svg); if(!im||!im.complete) return false; const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0); ctx.save(); ctx.imageSmoothingEnabled=false; ctx.translate(box.ox|0, box.oy|0); const s=(box.scale||1)*mul; if(s!==1) ctx.scale(s,s); try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
+  function drawOne(ctx, svg, box, mul=1){ const im=imgFromSvg(svg); if(!im||!im.complete) return false; const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0); const s=(box.scale||1)*mul;
+    ctx.save(); ctx.imageSmoothingEnabled=false; ctx.translate(box.ox|0, box.oy|0); if(s!==1) ctx.scale(s,s);
+    try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
   async function drawEquippedOverlaysForAvatar(ctx, size){
     const k=(size>0?size/128:1);
     function scaled(b){ return { w:Math.round(b.w*k),h:Math.round(b.h*k),ox:Math.round(b.ox*k),oy:Math.round(b.oy*k),scale:b.scale }; }
@@ -339,14 +338,14 @@ async function buildAvatarCanvas(dstCtx,size,profile){
    THREE.js — Basic Stack Game
 ======================= */
 const glCanvas = document.getElementById('gl');
-const arenaEl  = document.getElementById('arena'); /* <- for correct sizing */
+const arenaEl  = document.getElementById('arena');
 let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null;
 let world, floorRing, floorPlate, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0, score=0;
 
-/* zoom/scale helpers */
-function ringScaleForLevel(lv){ return 1 + 0.10 * Math.max(0, lv-1); }      // bigger ring each level
-function pieceScaleForLevel(lv){ return 1 / (1 + 0.06 * Math.max(0, lv-1)); } // blocks smaller
-function projScaleForLevel(lv){ return 1 / (1 + 0.06 * Math.max(0, lv-1)); }  // balls smaller
+/* per-level scaling */
+function ringScaleForLevel(lv){ return 1 + 0.10 * Math.max(0, lv-1); }
+function pieceScaleForLevel(lv){ return 1 / (1 + 0.06 * Math.max(0, lv-1)); }
+function projScaleForLevel(lv){ return 1 / (1 + 0.06 * Math.max(0, lv-1)); }
 function cameraForLevel(lv){
   const baseY=3.4, baseZ=9.8;
   const y=baseY + Math.min(lv*0.18, 3.5);
@@ -354,6 +353,8 @@ function cameraForLevel(lv){
   camera.position.set(0,y,z);
   camera.lookAt(0,0,0);
 }
+
+let currentPieceS=1, baseY= -0.5; // updated per level
 
 function hardResize(){
   const r = (arenaEl || glCanvas).getBoundingClientRect();
@@ -382,9 +383,7 @@ function glass(tint){
     emissiveIntensity: 0.25
   });
 }
-function metal(){
-  return new THREE.MeshStandardMaterial({ color: 0xb7c1cf, metalness: 0.95, roughness: 0.25 });
-}
+function metal(){ return new THREE.MeshStandardMaterial({ color: 0xb7c1cf, metalness: 0.95, roughness: 0.25 }); }
 const COLORS=[0x7fd4ff,0x6cf0b0,0xff9cff,0xffe266,0x9ae1ff,0x9dffcc];
 
 function makeCube(size=1,tint=0x7fd4ff){
@@ -398,7 +397,7 @@ function makeRectPrism(w=1.4,h=1,d=1,tint=0x7fd4ff){
   return m;
 }
 function makeCrystal(){
-  const s=new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 20), glass(0xcee9ff));
+  const s=new THREE.Mesh(new THREE.SphereGeometry(0.5,28,20), glass(0xcee9ff));
   s.castShadow=true; s.receiveShadow=true; s.userData.v=new THREE.Vector3();
   return s;
 }
@@ -415,7 +414,7 @@ function initThree(){
 
   world=new THREE.Group(); scene.add(world);
 
-  // base plate + ring (we scale them per level instead of remaking geometry)
+  // base plate + ring (scaled per level)
   floorPlate=new THREE.Mesh(new THREE.CircleGeometry(3.6,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
   floorPlate.rotation.x=-Math.PI/2; floorPlate.position.y=-1; floorPlate.receiveShadow=true; world.add(floorPlate);
   floorRing=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.9}));
@@ -443,35 +442,38 @@ function layoutLevel(){
   floorPlate.scale.set(rS,rS,1);
   floorRing.scale.set(rS,rS,rS);
 
-  const pieceS = pieceScaleForLevel(level);
+  currentPieceS = pieceScaleForLevel(level);
+  baseY = -0.5 * currentPieceS; // <-- board surface anchor
 
-  const pieceCount = Math.max(2, 1 + level); // 2,3,4,5,…
-  // safe radius in world units derived from ring (torus radius ~2.6)
+  const pieceCount = Math.max(2, 1 + level);
   const baseRingR = 2.6 * rS;
   const safeRadiusX = baseRingR*0.85, safeRadiusZ = baseRingR*0.50;
-  const spacing = 1.25*pieceS + 0.15; // match smaller pieces
+  const spacing = 1.25*currentPieceS + 0.15;
   const startX = -((pieceCount-1)/2)*spacing;
 
   for(let i=0;i<pieceCount;i++){
     const tint = COLORS[(Math.random()*COLORS.length)|0];
-    const mesh = (level>=4 && i===pieceCount-1) ? makeRectPrism(1.6*pieceS,1*pieceS,1*pieceS,tint) : makeCube(1*pieceS,tint);
+    const mesh = (level>=4 && i===pieceCount-1)
+      ? makeRectPrism(1.6*currentPieceS,1*currentPieceS,1*currentPieceS,tint)
+      : makeCube(1*currentPieceS,tint);
     const x = Math.max(-safeRadiusX, Math.min(safeRadiusX, startX + i*spacing));
     const z = Math.max(-safeRadiusZ, Math.min(safeRadiusZ, (Math.random()*2*safeRadiusZ - safeRadiusZ)));
-    mesh.position.set(x, -0.5*pieceS, z);
+    mesh.position.set(x, baseY, z);               // <-- sits flat on surface
     world.add(mesh); blocks.push(mesh);
   }
 
-  /* Incoming spheres — speed moderated by zoom so Level 6+ is fair */
-  const wave = (level===1)?2:Math.min(2+level,10);
-  const zoomDamp = 1 / rS; // larger board -> relatively slower approach
-  for(let i=0;i<wave;i++){
+  /* Incoming spheres — EXACTLY 2, falling from the top */
+  spheres.length=0;
+  for(let i=0;i<2;i++){
     const s=makeCrystal();
-    const R=10 + Math.random()*4;
-    const th=(Math.random()*Math.PI*2);
-    s.position.set(Math.cos(th)*R, -0.2+Math.random()*0.4, Math.sin(th)*R*0.25);
-    const center=new THREE.Vector3(0,0,0);
-    const base = (0.24 + Math.min(0.10*level, 1.0)) * zoomDamp;
-    s.userData.v.copy(center.clone().sub(s.position).normalize().multiplyScalar(base));
+    const x = (Math.random()*2-1) * baseRingR * 0.6;
+    const z = (Math.random()*2-1) * baseRingR * 0.35;
+    s.position.set(x, 6 + Math.random()*1.5, z); // start well above board
+    const target = new THREE.Vector3(0, 0, 0);
+    const dir = target.clone().sub(s.position).normalize();
+    const rSspeedDamp = 1 / rS;
+    const speed = (0.6 + 0.04*level) * rSspeedDamp; // balanced by zoom
+    s.userData.v.copy(dir.multiplyScalar(speed));
     world.add(s); spheres.push(s);
   }
 
@@ -540,7 +542,7 @@ function onMove(e){
   const baseRingR = 2.6 * rS;
   const safeX = THREE.MathUtils.clamp(h.x, -baseRingR*0.92, baseRingR*0.92);
   const safeZ = THREE.MathUtils.clamp(h.z, -baseRingR*0.55, baseRingR*0.55);
-  dragObj.position.set(safeX, 0, safeZ);
+  dragObj.position.set(safeX, baseY, safeZ);      // <-- stays on surface while dragging
 }
 
 /* helpers for stacking */
@@ -550,7 +552,7 @@ function hDistVec(a, b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.hypot(dx, dz)
 function onUp(){
   if(!dragging||!dragObj) return;
 
-  // magnetize to the nearest stack center in XZ
+  // magnetize to nearest stack center in XZ
   let best=null, bestD=1e9;
   for(const b of blocks){
     if(b===dragObj) continue;
@@ -572,12 +574,16 @@ function onUp(){
         if(topY > highestTopY) highestTopY = topY;
       }
     }
-    if(!Number.isFinite(highestTopY)){ highestTopY = best.position.y + halfH(best); }
+    // If no block exists at that spot, anchor to the floor (no floating base block)
+    if(!Number.isFinite(highestTopY)){ highestTopY = baseY + 0.0; }
 
     dragObj.position.x = baseX;
     dragObj.position.z = baseZ;
     dragObj.position.y = highestTopY + halfH(dragObj);
     try{ bleep('match'); }catch(_){}
+  }else{
+    // If no snap, ensure the block remains on the floor
+    dragObj.position.y = baseY;
   }
 
   dragging=false; dragObj=null;
@@ -587,16 +593,17 @@ glCanvas.addEventListener('pointerdown', onDown, {passive:true});
 glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
-/* ---------- Shoot metal balls (from avatar area & scaled) ---------- */
+/* ---------- Shoot metal balls (bottom-left of area) ---------- */
 function avatarOriginForLevel(){
-  // A fixed corner near the board; slight shift with ring scale so it "stays" by the avatar
   const rS = ringScaleForLevel(level);
-  return new THREE.Vector3(-2.9*rS, -0.25, 0.0);
+  const baseRingR = 2.6 * rS;
+  // bottom-left relative to the ring (−x, +z), slightly under board height
+  return new THREE.Vector3(-baseRingR*1.15, baseY+0.25, baseRingR*0.65);
 }
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
-  if(pickBlock(e)) return; // don't fire when grabbing a block
+  if(pickBlock(e)) return;
 
   ammo--; ammoEl.textContent=ammo;
 
@@ -607,7 +614,7 @@ function fireMetal(e){
   const pScale = projScaleForLevel(level);
   const b=new THREE.Mesh(new THREE.SphereGeometry(0.18*pScale,20,16), metal());
   b.position.copy(origin);
-  b.userData.v=dir.multiplyScalar(4.2); 
+  b.userData.v=dir.multiplyScalar(4.2);
   b.userData.ttl=2.2;
   b.castShadow=true; world.add(b); projectilePool.push(b);
 }
@@ -620,7 +627,7 @@ function checkWin(){
   const zOk = Math.max(...zs)-Math.min(...zs) < 0.05;
   if(!(xOk && zOk)) return;
   const ys=blocks.map(b=>b.position.y).sort((a,b)=>a-b);
-  for(let i=1;i<ys.length;i++){ if(ys[i]-ys[i-1] < 0.8) return; }
+  for(let i=1;i<ys.length;i++){ if(ys[i]-ys[i-1] < 0.8*currentPieceS) return; }
   awardAndNext();
 }
 function fail(){
@@ -636,20 +643,20 @@ function loop(t){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
     for(const b of blocks){
-      if(s.position.distanceTo(b.position) < 0.8){
+      if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
         fail();
         return requestAnimationFrame(loop);
       }
     }
     for(let j=projectilePool.length-1;j>=0;j--){
       const p=projectilePool[j];
-      if(p.position.distanceTo(s.position) < 0.56){
+      if(p.position.distanceTo(s.position) < 0.56*currentPieceS){
         world.remove(s); spheres.splice(i,1);
         try{ bleep('explode'); }catch(_){}
         break;
       }
     }
-    if(s.position.length()<0.35){ fail(); return requestAnimationFrame(loop); }
+    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board
   }
   for(let j=projectilePool.length-1;j>=0;j--){
     const p=projectilePool[j];
@@ -698,7 +705,7 @@ async function start(){
   runStartCoins=_wallet.readCoins();
   craftsGrantedThisRun = 0;
 
-  // avatar (+ retry once after a short delay so equipped overlays always show)
+  // avatar (+ retry once after a short delay)
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
 
   try{
