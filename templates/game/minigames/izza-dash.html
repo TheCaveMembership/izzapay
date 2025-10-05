@@ -5,84 +5,67 @@
   <title>IZZA DASH — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
-
-  <!-- username before persist (same pattern as Arena/Basketball) -->
-  <script>
-  (function(){
-    try{
-      const q=new URLSearchParams(location.search);
-      let u=(q.get('u')||localStorage.getItem('izzaUserU')||'').toString().trim();
-      if(!u){
-        const raw=localStorage.getItem('piAuthUser'); if(raw){ try{u=(JSON.parse(raw)||{}).username||'';}catch{} }
-      }
-      if(u){
-        u=u.replace(/^@+/, '').toLowerCase();
-        window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
-        window.izzaUserKey={ get:()=>u };
-        try{ localStorage.setItem('izzaUserU', u); }catch(_){}
-        try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
-      }
-    }catch(_){}
-  })();
-  </script>
   <script src="/static/game/js/izza-persist.js"></script>
-  <!-- Three.js (small, battle-tested) -->
+  <!-- Three.js -->
   <script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
     :root{
-      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
-      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
+      --hud:rgba(255,255,255,.65);
+      --hudLine:rgba(0,0,0,.18);
+      --ok:#25d07f; --warn:#ffcc55; --bad:#ff6b6b; --arcade:#2fd1ff;
     }
-    *{box-sizing:border-box}
-    body{margin:0;background:#0b0f1a;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
+    *{box-sizing:border-box; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none}
+    html,body{height:100%}
+    body{margin:0;background:#0f1c2e;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
-         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+         background:var(--chip-bg);padding:10px 14px;border-radius:12px;color:inherit;text-decoration:none}
     .btn:hover{filter:brightness(1.06)}
     .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
-           border-radius:14px;background:#000;overflow:hidden}
+           border-radius:14px;background:#0b1a2c;overflow:hidden}
 
     /* HUD */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:6px;z-index:9;padding-right:8px;align-items:center}
-    .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0}
-    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:4px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0}
-    .pill strong{font-size:13px;font-variant-numeric:tabular-nums}
-    .pill.button{cursor:pointer}
-    /* Small-screen fit (prevents weird wrapping) */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:8px;z-index:9;padding-right:8px;align-items:center}
+    .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
+    .pill{
+      background:var(--hud); border:1px solid var(--hudLine); backdrop-filter:blur(6px);
+      padding:6px 10px; border-radius:999px; font-weight:800; letter-spacing:.2px;
+      display:flex; gap:6px; align-items:center; white-space:nowrap; min-width:0;
+      font-size: clamp(11px,2.6vw,13px);
+    }
+    .pill strong{font-variant-numeric:tabular-nums; font-size: clamp(12px,2.9vw,15px)}
+    .pill.button{cursor:pointer; min-width:40px; justify-content:center}
     .hud{flex-wrap:nowrap}
     .hud .left,.hud .right{flex:1}
     .hud .right{justify-content:flex-end}
-    .hud .pill{ font-size: clamp(10px, 2.5vw, 12px); padding: 4px 8px; max-width: 42vw; overflow:hidden; text-overflow:ellipsis; }
-    .hud .pill strong{ font-size: clamp(12px, 2.8vw, 14px); }
-    .hud .pill.button{ padding: 4px 8px; min-width: 36px; }
 
-    /* start overlay */
+    /* Start overlay */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
-      background:linear-gradient(180deg,rgba(0,0,0,.25),rgba(0,0,0,.45));}
-    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
-      display:flex;flex-direction:column;gap:10px;align-items:center;max-width:90vw}
-    .startBtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
+      background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.15));}
+    .startCard{background:rgba(255,255,255,.8);color:#0a1524;border:1px solid rgba(0,0,0,.15);
+      border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:10px;align-items:center;max-width:92vw}
+    .startBtn{padding:12px 18px;border-radius:10px;border:1px solid rgba(0,0,0,.2);
+      background:#0f213a;color:#eaf6ff;font-weight:800}
 
-    /* big message */
+    /* Big message */
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-      font-weight:900;letter-spacing:.6px;font-size:42px;opacity:0;transition:opacity .2s,transform .2s;
-      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:10}
+      font-weight:900;letter-spacing:.6px;font-size:44px;opacity:0;transition:opacity .2s,transform .2s;
+      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.45);color:#2fd1ff;z-index:10}
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
-    .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
+    .scoreGlow{color:#28df8a} .warn{color:#ffd36b} .miss{color:#ff6b6b}
 
-    /* avatar */
-    .playerAvatar{position:absolute;left:12px;bottom:12px;width:96px;height:96px;z-index:7;pointer-events:none}
-    .playerAvatar canvas{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
+    /* Avatar (Jetman sizing) */
+    .playerAvatar{position:absolute;left:12px;bottom:12px;width:128px;height:128px;z-index:7;pointer-events:none}
+    .playerAvatar canvas{width:128px;height:128px;image-rendering:pixelated;image-rendering:crisp-edges}
 
-    /* webgl canvas + overlay */
+    /* Canvas */
     #gl{position:absolute;inset:0;display:block;touch-action:none}
+
     .overlayUi{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:10px;padding:10px;z-index:8}
-    .chip{background:rgba(255,255,255,.06);border:1px solid var(--hudLine);padding:6px 10px;border-radius:999px;font-size:12px}
+    .chip{background:rgba(255,255,255,.75);color:#0a1524;border:1px solid rgba(0,0,0,.15);padding:7px 12px;border-radius:999px;font-size:12px}
 
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
   </style>
@@ -95,7 +78,6 @@
     </div>
 
     <div class="arena" id="arena">
-      <!-- HUD -->
       <div class="hud">
         <div class="left">
           <div class="pill">LEVEL: <strong id="level" class="arc">1</strong></div>
@@ -104,29 +86,25 @@
         </div>
         <div class="right">
           <button id="muteBtn" class="pill button" type="button" aria-pressed="false" title="Mute/Unmute (M)">🔊</button>
-          <div class="pill">COINS: <strong id="coinsRun" class="arc"></strong></div>
+          <div class="pill">COINS: <strong id="coinsRun" class="arc">0</strong></div>
         </div>
       </div>
 
-      <!-- start -->
       <div id="startOverlay" class="startOverlay">
         <div class="startCard">
           <h3 style="margin:0 0 4px">IZZA DASH</h3>
-          <p style="margin:0;max-width:28ch;text-align:center">
-            Drag to stack the glass blocks. Tap to fire metal balls at incoming crystal spheres.
+          <p style="margin:0;max-width:30ch;text-align:center">
+            Drag to stack the glass blocks. Tap to fire metal balls from your avatar at the incoming spheres.
           </p>
-          <div class="startBtns">
-            <button id="startBtn" class="startBtn">START</button>
-          </div>
+          <button id="startBtn" class="startBtn">START</button>
         </div>
       </div>
 
-      <!-- WebGL -->
       <canvas id="gl" width="1280" height="720"></canvas>
       <div class="overlayUi"><span class="chip">Drag & Stack • Shatter the Spheres</span></div>
 
       <!-- Avatar -->
-      <div class="playerAvatar" id="playerAvatar"><canvas id="avatarCanvas" width="128" height="128"></canvas></div>
+      <div class="playerAvatar"><canvas id="avatarCanvas" width="128" height="128"></canvas></div>
 
       <div id="bigmsg" class="bigmsg" aria-live="polite">GO!</div>
     </div>
@@ -140,13 +118,10 @@
     </div>
   </div>
 
-  <!-- Optional chill bgm (muted by default until user gesture) -->
   <audio id="bgm" src="/static/game/audio/dash_bgm.mp3" preload="none" loop></audio>
 
 <script>
-/* =======================
-   Shared auth / links
-======================= */
+/* --------- auth/link helpers (unchanged) --------- */
 (function(){
   const T_KEY='izzaTokenT', U_KEY='izzaUserU';
   const qs=new URLSearchParams(location.search);
@@ -175,37 +150,31 @@
   window._withAuth = withAuth;
 })();
 
-/* =======================
-   Wallet helpers (same behavior as Basketball)
-======================= */
+/* --------- wallet helpers (unchanged) --------- */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
   function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
   function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
   function readCoins(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
   function writeCoins(v){ localStorage.setItem('izzaCoins', String((v|0))); try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){} }
-
   window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins };
 })();
 
-/* =======================
-   BGM + SFX
-======================= */
+/* --------- audio --------- */
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx=null, master=null;
 const bgmEl=document.getElementById('bgm');
-let desiredMasterGain=0.35, desiredBgmVol=0.25;
-function initAudio(){ if(audioCtx) return; audioCtx=new AudioCtx(); master=audioCtx.createGain(); master.gain.value=desiredMasterGain; master.connect(audioCtx.destination); }
+function initAudio(){ if(audioCtx) return; audioCtx=new AudioCtx(); master=audioCtx.createGain(); master.gain.value=0.45; master.connect(audioCtx.destination); }
 function bleep(type='match'){
   if(!audioCtx) return;
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
   o.connect(g); g.connect(master);
   const now=audioCtx.currentTime;
-  if(type==='match'){ o.type='triangle'; o.frequency.setValueAtTime(420,now); o.frequency.exponentialRampToValueAtTime(720,now+0.08); }
-  else if(type==='explode'){ o.type='sawtooth'; o.frequency.setValueAtTime(180,now); o.frequency.exponentialRampToValueAtTime(90,now+0.18); }
-  else if(type==='tick'){ o.type='square'; o.frequency.setValueAtTime(680,now); o.frequency.exponentialRampToValueAtTime(520,now+0.05); }
+  if(type==='match'){ o.type='triangle'; o.frequency.setValueAtTime(520,now); o.frequency.exponentialRampToValueAtTime(880,now+0.08); }
+  else if(type==='explode'){ o.type='sawtooth'; o.frequency.setValueAtTime(220,now); o.frequency.exponentialRampToValueAtTime(110,now+0.18); }
+  else if(type==='tick'){ o.type='square'; o.frequency.setValueAtTime(780,now); o.frequency.exponentialRampToValueAtTime(580,now+0.05); }
   g.gain.setValueAtTime(0.001,now);
-  g.gain.exponentialRampToValueAtTime(0.55,now+0.02);
+  g.gain.exponentialRampToValueAtTime(0.65,now+0.02);
   g.gain.exponentialRampToValueAtTime(0.001,now+0.22);
   o.start(now); o.stop(now+0.24);
 }
@@ -214,30 +183,25 @@ function applyMuteState(m){
   try{ localStorage.setItem('izzaMute',''+(m?1:0)); }catch(_){}
   muteBtn.textContent = m ? '🔇' : '🔊';
   muteBtn.setAttribute('aria-pressed', m?'true':'false');
-  if(bgmEl){ bgmEl.muted = !!m; if(!m) bgmEl.volume = desiredBgmVol; }
-  if(master){ master.gain.value = m?0:desiredMasterGain; }
+  if(bgmEl){ bgmEl.muted = !!m; if(!m) bgmEl.volume = 0.3; }
+  if(master){ master.gain.value = m?0:0.45; }
 }
 muteBtn.addEventListener('click',()=>applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')), {passive:true});
 window.addEventListener('keydown',(e)=>{ if(e.key==='m'||e.key==='M'){ e.preventDefault(); applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')); }},{passive:false});
 applyMuteState(localStorage.getItem('izzaMute')==='1');
 
-/* =======================
-   IZZA snapshot hydration & session prime (same pattern)
-======================= */
+/* --------- snapshot/session --------- */
 async function ensureSession(){
   try{
     const r=await fetch(_withAuth('/izza-game/api/character'),{credentials:'include',headers:{'content-type':'application/json'}});
     if(r.ok){ const j=await r.json().catch(()=>({})); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-      const uname=(j.user&&j.user.username)||j.username||j.handle||''; if(uname){ /* already seeded earlier */ }
       return j;
     }
   }catch(_){}
   return JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
 }
 
-/* =======================
-   UI bits
-======================= */
+/* --------- UI refs --------- */
 const levelEl = document.getElementById('level');
 const ammoEl  = document.getElementById('ammo');
 const timeEl  = document.getElementById('time');
@@ -245,13 +209,10 @@ const coinsRunEl=document.getElementById('coinsRun');
 const startBtn= document.getElementById('startBtn');
 const startOverlay=document.getElementById('startOverlay');
 const bigmsg = document.getElementById('bigmsg');
-
 function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' + (cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
 function paintCoinsHUD(n){ coinsRunEl.textContent=String(Math.max(0, n|0)); }
 
-/* =======================
-   Avatar (same helpers as Arena/Basketball; trimmed)
-======================= */
+/* --------- avatar drawing (same pipeline; Jetman size 128) --------- */
 const SPRITES={ body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
                 hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
                 outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" } };
@@ -309,7 +270,7 @@ async function buildAvatarCanvas(dstCtx,size,profile){
   }
   try{ await drawEquippedOverlaysForAvatar(dstCtx, size); }catch(_){}
 }
-/* equipped overlay (same sizing as Basketball) */
+/* equipped overlay (Jetman sizing kept) */
 (function(){
   const BOX128=Object.freeze({ head:{w:59,h:59,ox:64,oy:32,scale:1.12}, chest:{w:61,h:61,ox:64,oy:60,scale:1.15}, arms:{w:75,h:59,ox:64,oy:60,scale:1.15}, legs:{w:72,h:61,ox:64,oy:88,scale:1.18}, hands:{w:85,h:61,ox:86,oy:72,scale:1.34} });
   const cache=new Map(); const imgFromSvg=s=>{ if(!s) return null; if(cache.has(s)) return cache.get(s); const i=new Image(); i.decoding='async'; i.src='data:image/svg+xml;utf8,'+encodeURIComponent(s); cache.set(s,i); return i; };
@@ -330,21 +291,17 @@ async function buildAvatarCanvas(dstCtx,size,profile){
   window.drawEquippedOverlaysForAvatar=drawEquippedOverlaysForAvatar;
 })();
 
-/* =======================
-   THREE.js — Basic Stack Game
-======================= */
+/* --------- THREE.js basic stack game --------- */
 const glCanvas = document.getElementById('gl');
-let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null, dragOffsetZ=0;
-let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0, score=0;
-const big = document.getElementById('bigmsg');
-
+let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null;
+let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0;
+let blocks=[], projectilePool=[];
 function hardResize(){
   const r = glCanvas.getBoundingClientRect();
   const W = Math.max(1, Math.floor(r.width));
   const H = Math.max(1, Math.floor(r.height));
   const dpr = Math.min(window.devicePixelRatio||1, 2);
-  renderer.setSize(W,H,false);
-  renderer.setPixelRatio(dpr);
+  renderer.setSize(W,H,false); renderer.setPixelRatio(dpr);
   camera.aspect=W/H; camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', hardResize, {passive:true});
@@ -352,73 +309,64 @@ window.addEventListener('resize', hardResize, {passive:true});
 function glass(tint){
   return new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(tint),
-    metalness: 0.1, roughness: 0.03, transmission: 1.0, thickness: 0.5, ior: 1.45, envMapIntensity: 1.0
+    emissive: new THREE.Color(tint).multiplyScalar(0.15),
+    metalness: 0.15, roughness: 0.05, transmission: 1.0, thickness: 0.7, ior: 1.45, envMapIntensity: 1.4
   });
 }
 function metal(){
-  return new THREE.MeshStandardMaterial({ color: 0xb7c1cf, metalness: 0.95, roughness: 0.25 });
+  return new THREE.MeshStandardMaterial({ color: 0xd8e2ef, metalness: 0.95, roughness: 0.25, emissive: 0x1a1f26, emissiveIntensity: 0.2 });
 }
-const COLORS=[0x7fd4ff,0x6cf0b0,0xff9cff,0xffe266,0x9ae1ff,0x9dffcc];
+const COLORS=[0x9ad9ff,0x7bffbf,0xffb3ff,0xffe26a,0xace6ff,0xb7ffd9];
 
-function makeCube(size=1,tint=0x7fd4ff){
+function makeCube(size=1,tint=0x9ad9ff){
   const m=new THREE.Mesh(new THREE.BoxGeometry(size,size,size), glass(tint));
-  m.castShadow=true; m.receiveShadow=true;
-  m.userData.kind='cube';
-  return m;
+  m.castShadow=true; m.receiveShadow=true; m.userData.kind='cube'; return m;
 }
-function makeRectPrism(w=1.4,h=1,d=1,tint=0x7fd4ff){
+function makeRectPrism(w=1.6,h=1,d=1,tint=0x9ad9ff){
   const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), glass(tint));
-  m.castShadow=true; m.receiveShadow=true;
-  m.userData.kind='rect';
-  return m;
+  m.castShadow=true; m.receiveShadow=true; m.userData.kind='rect'; return m;
 }
 function makeCrystal(){
-  const s=new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 20), glass(0xeaf8ff));
-  s.castShadow=true; s.receiveShadow=true; s.userData.v=new THREE.Vector3();
-  return s;
+  const s=new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 20), glass(0xecf7ff));
+  s.castShadow=true; s.receiveShadow=true; s.userData.v=new THREE.Vector3(); return s;
 }
 
 function initThree(){
-  scene=new THREE.Scene(); scene.background=new THREE.Color(0x0a0f1c);
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x12304c);
   camera=new THREE.PerspectiveCamera(55,1,0.1,100); camera.position.set(0,3,9); camera.lookAt(0,0,0);
   renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha:false,powerPreference:'high-performance'});
-  renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.1;
+  renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.35;
 
-  scene.add(new THREE.AmbientLight(0x8aaaff,0.35));
-  const k=new THREE.DirectionalLight(0xcfe6ff,1.1); k.position.set(-4,7,6); k.castShadow=true; scene.add(k);
+  scene.add(new THREE.AmbientLight(0xd6ebff,0.7));
+  const k=new THREE.DirectionalLight(0xffffff,1.35); k.position.set(-4,7,6); k.castShadow=true; scene.add(k);
 
   world=new THREE.Group(); scene.add(world);
 
-  const floor=new THREE.Mesh(new THREE.CircleGeometry(5.2,64), new THREE.MeshStandardMaterial({color:0x081327,metalness:.1,roughness:.9}));
+  const floor=new THREE.Mesh(new THREE.CircleGeometry(5.2,64), new THREE.MeshStandardMaterial({color:0x1b3353,metalness:.2,roughness:.6}));
   floor.rotation.x=-Math.PI/2; floor.position.y=-1; floor.receiveShadow=true; world.add(floor);
-  floorRing=new THREE.Mesh(new THREE.TorusGeometry(4.2,0.02,16,100), new THREE.MeshBasicMaterial({color:0x69b6ff,transparent:true,opacity:.45}));
-  floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.98; world.add(floorRing);
+  floorRing=new THREE.Mesh(new THREE.TorusGeometry(4.2,0.06,16,100), new THREE.MeshBasicMaterial({color:0xa8e0ff,transparent:true,opacity:.9}));
+  floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.96; world.add(floorRing);
 
   raycaster=new THREE.Raycaster(); pointer=new THREE.Vector2();
   hardResize();
 }
 
-/* ---------- Level logic ---------- */
-let blocks=[], projectilePool=[];
+/* --- Level layout --- */
 function clearScene(){
   for(const m of blocks){ world.remove(m); }
   for(const s of spheres){ world.remove(s); }
   for(const p of projectilePool){ world.remove(p); }
   blocks.length=0; spheres.length=0; projectilePool.length=0;
 }
-
 function layoutLevel(){
   clearScene();
-  // pieces: 2 cubes for L1; add 1 piece per level; at L4 include a rectangular prism
-  const pieceCount = Math.max(2, 1 + level); // 2,3,4,5,…
+  const pieceCount = Math.max(2, 1 + level);
   for(let i=0;i<pieceCount;i++){
     const tint = COLORS[(Math.random()*COLORS.length)|0];
     const mesh = (level>=4 && i===pieceCount-1) ? makeRectPrism(1.6,1,1,tint) : makeCube(1,tint);
     mesh.position.set(-2 + i*1.6, -0.5, (Math.random()*0.6)-0.3);
     world.add(mesh); blocks.push(mesh);
   }
-  // goal pad (stack anywhere above ring center)
-  // enemies
   const wave = (level===1)?2:Math.min(2+level,10);
   for(let i=0;i<wave;i++){
     const s=makeCrystal();
@@ -434,8 +382,9 @@ function layoutLevel(){
   showMsg('LEVEL '+level,'');
 }
 
+/* --- Coins & advance --- */
 function awardAndNext(){
-  const coins = 100*level;  // 100,200,300…
+  const coins = 100*level;
   _wallet.writeCoins(_wallet.readCoins()+coins);
   paintCoinsHUD(_wallet.readCoins());
   showMsg('+'+coins+' IZZA', 'scoreGlow');
@@ -443,7 +392,7 @@ function awardAndNext(){
   setTimeout(()=>{ layoutLevel(); }, 420);
 }
 
-/* ---------- Drag & place ---------- */
+/* --- Pointer helpers --- */
 function screenToPlane(e, planeY=0){
   const rect=glCanvas.getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
@@ -460,24 +409,21 @@ function pickBlock(e){
   pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=raycaster.intersectObjects(blocks,false);
-  if(hits.length){ return hits[0].object; }
-  return null;
+  return (hits.length?hits[0].object:null);
 }
-function onDown(e){
-  if(ended) return;
-  const p=pickBlock(e);
-  if(p){ dragging=true; dragObj=p; dragOffsetZ = p.position.y; }
-}
+
+/* --- Drag to stack --- */
+let dragging=false, dragObj=null;
+function onDown(e){ if(dragObj || ended) return; const p=pickBlock(e); if(p){ dragging=true; dragObj=p; } }
 function onMove(e){
   if(!dragging||!dragObj) return;
   const h=screenToPlane(e, 0);
   dragObj.position.x = THREE.MathUtils.clamp(h.x, -4.0, 4.0);
   dragObj.position.z = THREE.MathUtils.clamp(h.z, -2.0, 2.0);
-  dragObj.position.y = 0; // keep on board while dragging
+  dragObj.position.y = 0;
 }
 function onUp(){
   if(!dragging||!dragObj) return;
-  // try to snap on top of nearest block (not itself)
   let best=null, bestD=1e9;
   for(const b of blocks){ if(b===dragObj) continue; const d=b.position.clone().sub(dragObj.position).length(); if(d<bestD){best=b;bestD=d;} }
   if(best && bestD<0.9){
@@ -494,57 +440,47 @@ glCanvas.addEventListener('pointerdown', onDown, {passive:true});
 glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
-/* ---------- Shoot metal balls ---------- */
+/* --- Fire metal balls FROM avatar --- */
+function avatarOriginWorld(){
+  // visually lines up with bottom-left avatar overlay
+  return new THREE.Vector3(-4.6, -0.6, 0.8);
+}
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
-  // if not clicking a block, fire
-  if(pickBlock(e)) return;
+  if(pickBlock(e)) return; // touching a block = drag, not fire
   ammo--; ammoEl.textContent=ammo;
-  const origin=new THREE.Vector3(-3.0,-0.2,0);
+  const origin=avatarOriginWorld();
   const tgt=screenToPlane(e, 0);
   const dir=tgt.clone().sub(origin).normalize();
   const b=new THREE.Mesh(new THREE.SphereGeometry(0.18,20,16), metal());
-  b.position.copy(origin); b.userData.v=dir.multiplyScalar(4.2); b.userData.ttl=2.2;
+  b.position.copy(origin); b.userData.v=dir.multiplyScalar(4.4); b.userData.ttl=2.2;
   b.castShadow=true; world.add(b); projectilePool.push(b);
 }
 glCanvas.addEventListener('click', fireMetal, {passive:true});
 
-/* ---------- Collisions / win / fail ---------- */
+/* --- Collisions / win / fail --- */
 function checkWin(){
-  // Win if all blocks share the same (x,z) within tolerance and are stacked increasing in Y
-  const tol=0.05;
   const xs=blocks.map(b=>b.position.x), zs=blocks.map(b=>b.position.z);
   const xOk = Math.max(...xs)-Math.min(...xs) < 0.05;
   const zOk = Math.max(...zs)-Math.min(...zs) < 0.05;
   if(!(xOk && zOk)) return;
-  // simple: stacked if all y are distinct and >= 0
   const ys=blocks.map(b=>b.position.y).sort((a,b)=>a-b);
   for(let i=1;i<ys.length;i++){ if(ys[i]-ys[i-1] < 0.8) return; }
   awardAndNext();
 }
 function fail(){
   showMsg('SMASHED!','miss');
-  // reset same level
   setTimeout(()=>layoutLevel(),420);
 }
 
-/* ---------- Loop ---------- */
-let last=performance.now();
+/* --- Loop --- */
 function loop(t){
-  const dt=Math.min(0.033,(t-last)/1000); last=t;
-  // spheres move + collide
+  const dt=0.016;
   for(let i=spheres.length-1;i>=0;i--){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
-    // hit any block?
-    for(const b of blocks){
-      if(s.position.distanceTo(b.position) < 0.8){
-        fail();
-        return requestAnimationFrame(loop);
-      }
-    }
-    // metal collisions
+    for(const b of blocks){ if(s.position.distanceTo(b.position) < 0.8){ fail(); return requestAnimationFrame(loop); } }
     for(let j=projectilePool.length-1;j>=0;j--){
       const p=projectilePool[j];
       if(p.position.distanceTo(s.position) < 0.56){
@@ -553,10 +489,8 @@ function loop(t){
         break;
       }
     }
-    // reached center failsafe
     if(s.position.length()<0.35){ fail(); return requestAnimationFrame(loop); }
   }
-  // update projectiles
   for(let j=projectilePool.length-1;j>=0;j--){
     const p=projectilePool[j];
     p.position.addScaledVector(p.userData.v, dt);
@@ -567,9 +501,7 @@ function loop(t){
   if(!ended) requestAnimationFrame(loop);
 }
 
-/* =======================
-   Timer + Boot
-======================= */
+/* --- Timer + Boot --- */
 function tickTimer(){
   if(ended) return;
   timeLeft--; timeEl.textContent=timeLeft;
@@ -585,31 +517,30 @@ async function start(){
   paintCoinsHUD(_wallet.readCoins());
   runStartCoins=_wallet.readCoins();
 
-  // avatar (smaller for mobile)
+  // avatar
   try{
     const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
     const prof=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
-    await buildAvatarCanvas(ctx, 96, prof);
+    await buildAvatarCanvas(ctx, 128, prof);
   }catch(_){}
 
   try{
     initAudio(); await audioCtx.resume();
-    bgmEl.volume=0.25; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
+    bgmEl.volume=0.3; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
   }catch(_){}
 
   // 3D
   initThree();
-  level=1; timeLeft=60; ended=false; score=0;
+  level=1; timeLeft=60; ended=false;
   layoutLevel();
   setInterval(()=>{ if(!ended) tickTimer(); }, 1000);
-
   startOverlay.style.display='none';
   showMsg('GO!');
   requestAnimationFrame(loop);
 }
-document.getElementById('startBtn').addEventListener('click', start, {passive:true});
+startBtn.addEventListener('click', start, {passive:true});
 
-/* keep HUD coins synced if other tabs alter wallet */
+/* keep HUD coins synced */
 window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
 window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
 window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
