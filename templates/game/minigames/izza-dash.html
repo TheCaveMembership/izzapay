@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>IZZA DASH — IZZA GAME</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
 
   <!-- username before persist (same pattern as Arena/Basketball) -->
@@ -37,33 +37,38 @@
     }
     *{box-sizing:border-box}
     body{margin:0;background:#0b0f1a;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
+
     .wrap{max-width:1100px;margin:0 auto;padding:12px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
          background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
     .btn:hover{filter:brightness(1.06)}
+
     .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
-           border-radius:14px;background:#000;overflow:hidden}
+           border-radius:14px;background:#000;overflow:hidden;
+           /* Never allow select/callout in the game area */
+           -webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
+    .arena *{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
 
     /* HUD */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:6px;z-index:9;padding-right:8px;align-items:center}
     .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:4px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0}
-    .pill strong{font-size:13px;font-variant-numeric:tabular-nums}
+          padding:4px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;flex:0 1 auto}
+    .pill strong{font-size:13px;font-variant-numeric:tabular-nums;min-width:0;max-width:22vw;overflow:hidden;text-overflow:ellipsis}
     .pill.button{cursor:pointer}
-    /* Small-screen fit (prevents weird wrapping) */
+
+    /* Small-screen fit (prevents weird wrapping/stacking) */
     .hud{flex-wrap:nowrap}
-    .hud .left,.hud .right{flex:1}
+    .hud .left,.hud .right{flex:1;min-width:0}
     .hud .right{justify-content:flex-end}
     .hud .pill{ font-size: clamp(10px, 2.5vw, 12px); padding: 4px 8px; max-width: 42vw; overflow:hidden; text-overflow:ellipsis; }
-    .hud .pill strong{ font-size: clamp(12px, 2.8vw, 14px); }
     .hud .pill.button{ padding: 4px 8px; min-width: 36px; }
 
     /* start overlay */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
-      background:linear-gradient(180deg,rgba(0,0,0,.25),rgba(0,0,0,.45));}
-    .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
+      background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.32));}
+    .startCard{background:rgba(0,0,0,.55);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
       display:flex;flex-direction:column;gap:10px;align-items:center;max-width:90vw}
     .startBtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
     .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
@@ -71,7 +76,7 @@
     /* big message */
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
       font-weight:900;letter-spacing:.6px;font-size:42px;opacity:0;transition:opacity .2s,transform .2s;
-      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.65);color:var(--arcade);z-index:10}
+      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.45);color:var(--arcade);z-index:10}
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
 
@@ -82,7 +87,7 @@
     /* webgl canvas + overlay */
     #gl{position:absolute;inset:0;display:block;touch-action:none}
     .overlayUi{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:10px;padding:10px;z-index:8}
-    .chip{background:rgba(255,255,255,.06);border:1px solid var(--hudLine);padding:6px 10px;border-radius:999px;font-size:12px}
+    .chip{background:rgba(255,255,255,.08);border:1px solid var(--hudLine);padding:6px 10px;border-radius:999px;font-size:12px}
 
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
   </style>
@@ -352,7 +357,8 @@ window.addEventListener('resize', hardResize, {passive:true});
 function glass(tint){
   return new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(tint),
-    metalness: 0.1, roughness: 0.03, transmission: 1.0, thickness: 0.5, ior: 1.45, envMapIntensity: 1.0
+    metalness: 0.1, roughness: 0.03, transmission: 1.0, thickness: 0.5, ior: 1.45, envMapIntensity: 1.0,
+    emissive: new THREE.Color(0x1a2230), emissiveIntensity: 0.35
   });
 }
 function metal(){
@@ -379,19 +385,21 @@ function makeCrystal(){
 }
 
 function initThree(){
-  scene=new THREE.Scene(); scene.background=new THREE.Color(0x0a0f1c);
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x0f182b); // brighter bg
   camera=new THREE.PerspectiveCamera(55,1,0.1,100); camera.position.set(0,3,9); camera.lookAt(0,0,0);
-  renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha:false,powerPreference:'high-performance'});
-  renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.1;
+  renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha=false,powerPreference:'high-performance'});
+  renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.8; // brighter
 
-  scene.add(new THREE.AmbientLight(0x8aaaff,0.35));
-  const k=new THREE.DirectionalLight(0xcfe6ff,1.1); k.position.set(-4,7,6); k.castShadow=true; scene.add(k);
+  // brighter light rig
+  scene.add(new THREE.AmbientLight(0x9fbfff,0.8));
+  const k=new THREE.DirectionalLight(0xd8ecff,1.6); k.position.set(-4,7,6); k.castShadow=true; scene.add(k);
+  const hemi=new THREE.HemisphereLight(0x89b4ff,0x102036,0.6); scene.add(hemi);
 
   world=new THREE.Group(); scene.add(world);
 
-  const floor=new THREE.Mesh(new THREE.CircleGeometry(5.2,64), new THREE.MeshStandardMaterial({color:0x081327,metalness:.1,roughness:.9}));
+  const floor=new THREE.Mesh(new THREE.CircleGeometry(5.2,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
   floor.rotation.x=-Math.PI/2; floor.position.y=-1; floor.receiveShadow=true; world.add(floor);
-  floorRing=new THREE.Mesh(new THREE.TorusGeometry(4.2,0.02,16,100), new THREE.MeshBasicMaterial({color:0x69b6ff,transparent:true,opacity:.45}));
+  floorRing=new THREE.Mesh(new THREE.TorusGeometry(4.2,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.8}));
   floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.98; world.add(floorRing);
 
   raycaster=new THREE.Raycaster(); pointer=new THREE.Vector2();
@@ -409,7 +417,6 @@ function clearScene(){
 
 function layoutLevel(){
   clearScene();
-  // pieces: 2 cubes for L1; add 1 piece per level; at L4 include a rectangular prism
   const pieceCount = Math.max(2, 1 + level); // 2,3,4,5,…
   for(let i=0;i<pieceCount;i++){
     const tint = COLORS[(Math.random()*COLORS.length)|0];
@@ -417,8 +424,6 @@ function layoutLevel(){
     mesh.position.set(-2 + i*1.6, -0.5, (Math.random()*0.6)-0.3);
     world.add(mesh); blocks.push(mesh);
   }
-  // goal pad (stack anywhere above ring center)
-  // enemies
   const wave = (level===1)?2:Math.min(2+level,10);
   for(let i=0;i<wave;i++){
     const s=makeCrystal();
@@ -477,7 +482,6 @@ function onMove(e){
 }
 function onUp(){
   if(!dragging||!dragObj) return;
-  // try to snap on top of nearest block (not itself)
   let best=null, bestD=1e9;
   for(const b of blocks){ if(b===dragObj) continue; const d=b.position.clone().sub(dragObj.position).length(); if(d<bestD){best=b;bestD=d;} }
   if(best && bestD<0.9){
@@ -498,7 +502,6 @@ window.addEventListener('pointerup', onUp, {passive:true});
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
-  // if not clicking a block, fire
   if(pickBlock(e)) return;
   ammo--; ammoEl.textContent=ammo;
   const origin=new THREE.Vector3(-3.0,-0.2,0);
@@ -512,20 +515,17 @@ glCanvas.addEventListener('click', fireMetal, {passive:true});
 
 /* ---------- Collisions / win / fail ---------- */
 function checkWin(){
-  // Win if all blocks share the same (x,z) within tolerance and are stacked increasing in Y
   const tol=0.05;
   const xs=blocks.map(b=>b.position.x), zs=blocks.map(b=>b.position.z);
   const xOk = Math.max(...xs)-Math.min(...xs) < 0.05;
   const zOk = Math.max(...zs)-Math.min(...zs) < 0.05;
   if(!(xOk && zOk)) return;
-  // simple: stacked if all y are distinct and >= 0
   const ys=blocks.map(b=>b.position.y).sort((a,b)=>a-b);
   for(let i=1;i<ys.length;i++){ if(ys[i]-ys[i-1] < 0.8) return; }
   awardAndNext();
 }
 function fail(){
   showMsg('SMASHED!','miss');
-  // reset same level
   setTimeout(()=>layoutLevel(),420);
 }
 
@@ -533,18 +533,15 @@ function fail(){
 let last=performance.now();
 function loop(t){
   const dt=Math.min(0.033,(t-last)/1000); last=t;
-  // spheres move + collide
   for(let i=spheres.length-1;i>=0;i--){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
-    // hit any block?
     for(const b of blocks){
       if(s.position.distanceTo(b.position) < 0.8){
         fail();
         return requestAnimationFrame(loop);
       }
     }
-    // metal collisions
     for(let j=projectilePool.length-1;j>=0;j--){
       const p=projectilePool[j];
       if(p.position.distanceTo(s.position) < 0.56){
@@ -553,10 +550,8 @@ function loop(t){
         break;
       }
     }
-    // reached center failsafe
     if(s.position.length()<0.35){ fail(); return requestAnimationFrame(loop); }
   }
-  // update projectiles
   for(let j=projectilePool.length-1;j>=0;j--){
     const p=projectilePool[j];
     p.position.addScaledVector(p.userData.v, dt);
@@ -613,6 +608,11 @@ document.getElementById('startBtn').addEventListener('click', start, {passive:tr
 window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
 window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
 window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
+
+/* Never allow long-press selection/callout in the game area */
+document.addEventListener('contextmenu', (e)=>{ if(e.target.closest('#arena')){ e.preventDefault(); } }, {passive:false});
+document.addEventListener('selectstart', (e)=>{ if(e.target.closest('#arena')){ e.preventDefault(); } }, {passive:false});
+
 window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, {passive:true});
 </script>
 </body>
