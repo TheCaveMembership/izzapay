@@ -51,19 +51,23 @@
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
 
-    /* HUD */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:6px;z-index:9;padding-right:8px;align-items:center}
+    /* HUD (hidden until START like Jetman) */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:none;justify-content:space-between;gap:6px;z-index:9;padding-right:8px;align-items:center}
     .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:4px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;flex:0 1 auto}
-    .pill strong{font-size:13px;font-variant-numeric:tabular-nums;min-width:0;max-width:22vw;overflow:hidden;text-overflow:ellipsis}
+    .pill strong{
+      font-size:13px;font-variant-numeric:tabular-nums;min-width:0;
+      max-width:12ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      display:inline-block;
+    }
     .pill.button{cursor:pointer}
 
     /* Small-screen fit (prevents weird wrapping/stacking) */
     .hud{flex-wrap:nowrap}
     .hud .left,.hud .right{flex:1;min-width:0}
     .hud .right{justify-content:flex-end}
-    .hud .pill{ font-size: clamp(10px, 2.5vw, 12px); padding: 4px 8px; max-width: 42vw; overflow:hidden; text-overflow:ellipsis; }
+    .hud .pill{ font-size: clamp(10px, 2.5vw, 12px); padding: 4px 8px; }
     .hud .pill.button{ padding: 4px 8px; min-width: 36px; }
 
     /* start overlay (clicks must pass through cleanly) */
@@ -85,8 +89,8 @@
     .playerAvatar{position:absolute;left:12px;bottom:12px;width:96px;height:96px;z-index:7;pointer-events:none}
     .playerAvatar canvas{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
 
-    /* webgl canvas + overlay */
-    #gl{position:absolute;inset:0;display:block;touch-action:none}
+    /* webgl canvas + overlay (force full fill) */
+    #gl{position:absolute;inset:0;display:block;touch-action:none;width:100%;height:100%}
     .overlayUi{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:10px;padding:10px;z-index:8}
     .chip{background:rgba(255,255,255,.08);border:1px solid var(--hudLine);padding:6px 10px;border-radius:999px;font-size:12px}
 
@@ -102,7 +106,7 @@
 
     <div class="arena" id="arena">
       <!-- HUD -->
-      <div class="hud">
+      <div class="hud" id="hud">
         <div class="left">
           <div class="pill">LEVEL: <strong id="level" class="arc">1</strong></div>
           <div class="pill">AMMO: <strong id="ammo" class="arc">0</strong></div>
@@ -251,8 +255,9 @@ const coinsRunEl=document.getElementById('coinsRun');
 const startBtn= document.getElementById('startBtn');
 const startOverlay=document.getElementById('startOverlay');
 const bigmsg = document.getElementById('bigmsg');
+const hudEl  = document.getElementById('hud');
 
-function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' + (cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
+function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' + (cls||''); setTimeout(()=>bigmsg.className='bigmsg',820); }
 function paintCoinsHUD(n){ coinsRunEl.textContent=String(Math.max(0, n|0)); }
 
 /* =======================
@@ -340,17 +345,23 @@ async function buildAvatarCanvas(dstCtx,size,profile){
    THREE.js — Basic Stack Game
 ======================= */
 const glCanvas = document.getElementById('gl');
+const arenaEl  = document.getElementById('arena'); /* <- for correct sizing */
 let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null, dragOffsetZ=0;
 let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0, score=0;
 
 function hardResize(){
-  const r = glCanvas.getBoundingClientRect();
+  /* Size from the ARENA container, not the canvas itself (prevents distortion & “top-only” fill) */
+  const r = (arenaEl || glCanvas).getBoundingClientRect();
   const W = Math.max(1, Math.floor(r.width));
   const H = Math.max(1, Math.floor(r.height));
   const dpr = Math.min(window.devicePixelRatio||1, 2);
-  renderer.setSize(W,H,false);
-  renderer.setPixelRatio(dpr);
-  camera.aspect=W/H; camera.updateProjectionMatrix();
+  if(renderer){
+    renderer.setSize(W,H,false);
+    renderer.setPixelRatio(dpr);
+  }
+  if(camera){
+    camera.aspect=W/H; camera.updateProjectionMatrix();
+  }
 }
 window.addEventListener('resize', hardResize, {passive:true});
 
@@ -443,14 +454,20 @@ function awardAndNext(){
   const coins = 100*level;  // 100,200,300…
   _wallet.writeCoins(_wallet.readCoins()+coins);
   paintCoinsHUD(_wallet.readCoins());
-  showMsg('+'+coins+' IZZA', 'scoreGlow');
-  level++;
-  setTimeout(()=>{ layoutLevel(); }, 420);
+
+  // Celebration + next level announce before spawning
+  const justBeat = level;
+  showMsg('LEVEL '+justBeat+' COMPLETE!', 'scoreGlow');
+  setTimeout(()=>{
+    level++;
+    showMsg('LEVEL '+level+' — GO!', '');
+    setTimeout(()=>{ layoutLevel(); }, 420);
+  }, 700);
 }
 
 /* ---------- Drag & place ---------- */
 function screenToPlane(e, planeY=0){
-  const rect=glCanvas.getBoundingClientRect();
+  const rect=(arenaEl||glCanvas).getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
   pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
@@ -460,7 +477,7 @@ function screenToPlane(e, planeY=0){
   return hit;
 }
 function pickBlock(e){
-  const rect=glCanvas.getBoundingClientRect();
+  const rect=(arenaEl||glCanvas).getBoundingClientRect();
   pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
   pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
@@ -598,6 +615,8 @@ async function start(){
   layoutLevel();
   setInterval(()=>{ if(!ended) tickTimer(); }, 1000);
 
+  // Reveal HUD only after start (Jetman behavior)
+  hudEl.style.display='flex';
   startOverlay.style.display='none';
   showMsg('GO!');
   requestAnimationFrame(loop);
