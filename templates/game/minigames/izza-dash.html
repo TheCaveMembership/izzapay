@@ -52,18 +52,19 @@
     }
 
     /* HUD (hidden until START like Jetman) */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:none;justify-content:space-between;gap:6px;z-index:9;padding-right:8px;align-items:center}
-    .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0}
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:none;justify-content:space-between;gap:8px;z-index:9;padding-right:8px;align-items:center}
+    .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto}
-    .pill strong{ font-size:14px; font-variant-numeric:tabular-nums; display:inline-block; }
+          padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto}
+    /* make room for values on small screens */
+    .pill strong{ font-size:14px; font-variant-numeric:tabular-nums; display:inline-block; max-width:none; overflow:visible; }
     .pill.button{cursor:pointer}
 
     /* Small-screen fit */
     .hud{flex-wrap:nowrap}
     .hud .left,.hud .right{flex:1;min-width:0}
     .hud .right{justify-content:flex-end}
-    .hud .pill.button{ min-width: 40px; }
+    .hud .pill.button{ min-width: 44px; }
 
     /* overlays */
     .startOverlay,.endOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
@@ -340,14 +341,16 @@ async function buildAvatarCanvas(dstCtx,size,profile){
 const glCanvas = document.getElementById('gl');
 const arenaEl  = document.getElementById('arena'); /* <- for correct sizing */
 let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null;
-let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0, score=0;
+let world, floorRing, floorPlate, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0, score=0;
 
 /* zoom/scale helpers */
-function adjustCameraForLevel(){
-  // Step the camera back & up a touch per level so the circle and stacks always fit.
+function ringScaleForLevel(lv){ return 1 + 0.10 * Math.max(0, lv-1); }      // bigger ring each level
+function pieceScaleForLevel(lv){ return 1 / (1 + 0.06 * Math.max(0, lv-1)); } // blocks smaller
+function projScaleForLevel(lv){ return 1 / (1 + 0.06 * Math.max(0, lv-1)); }  // balls smaller
+function cameraForLevel(lv){
   const baseY=3.4, baseZ=9.8;
-  const y=baseY + Math.min(level*0.18, 3.5);
-  const z=baseZ + Math.min(level*0.9, 22);
+  const y=baseY + Math.min(lv*0.18, 3.5);
+  const z=baseZ + Math.min(lv*0.9, 22);
   camera.position.set(0,y,z);
   camera.lookAt(0,0,0);
 }
@@ -402,7 +405,7 @@ function makeCrystal(){
 
 function initThree(){
   scene=new THREE.Scene(); scene.background=new THREE.Color(0x0f182b);
-  camera=new THREE.PerspectiveCamera(55,1,0.1,200); camera.position.set(0,3.4,9.8); camera.lookAt(0,0,0);
+  camera=new THREE.PerspectiveCamera(55,1,0.1,300); camera.position.set(0,3.4,9.8); camera.lookAt(0,0,0);
   renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha:false,powerPreference:'high-performance'});
   renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.8;
 
@@ -412,8 +415,9 @@ function initThree(){
 
   world=new THREE.Group(); scene.add(world);
 
-  const floor=new THREE.Mesh(new THREE.CircleGeometry(3.6,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
-  floor.rotation.x=-Math.PI/2; floor.position.y=-1; floor.receiveShadow=true; world.add(floor);
+  // base plate + ring (we scale them per level instead of remaking geometry)
+  floorPlate=new THREE.Mesh(new THREE.CircleGeometry(3.6,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
+  floorPlate.rotation.x=-Math.PI/2; floorPlate.position.y=-1; floorPlate.receiveShadow=true; world.add(floorPlate);
   floorRing=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.9}));
   floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.98; world.add(floorRing);
 
@@ -433,59 +437,67 @@ function clearScene(){
 function layoutLevel(){
   clearScene();
 
-  adjustCameraForLevel();
+  // camera & board scaling
+  cameraForLevel(level);
+  const rS = ringScaleForLevel(level);
+  floorPlate.scale.set(rS,rS,1);
+  floorRing.scale.set(rS,rS,rS);
+
+  const pieceS = pieceScaleForLevel(level);
 
   const pieceCount = Math.max(2, 1 + level); // 2,3,4,5,…
-  // lay pieces evenly across a safe span that fits inside the visible ring
-  const safeRadiusX = 2.2, safeRadiusZ = 1.3;      // inside the ring
-  const spacing = 1.25;                             // horizontal spacing
+  // safe radius in world units derived from ring (torus radius ~2.6)
+  const baseRingR = 2.6 * rS;
+  const safeRadiusX = baseRingR*0.85, safeRadiusZ = baseRingR*0.50;
+  const spacing = 1.25*pieceS + 0.15; // match smaller pieces
   const startX = -((pieceCount-1)/2)*spacing;
 
   for(let i=0;i<pieceCount;i++){
     const tint = COLORS[(Math.random()*COLORS.length)|0];
-    const mesh = (level>=4 && i===pieceCount-1) ? makeRectPrism(1.6,1,1,tint) : makeCube(1,tint);
+    const mesh = (level>=4 && i===pieceCount-1) ? makeRectPrism(1.6*pieceS,1*pieceS,1*pieceS,tint) : makeCube(1*pieceS,tint);
     const x = Math.max(-safeRadiusX, Math.min(safeRadiusX, startX + i*spacing));
     const z = Math.max(-safeRadiusZ, Math.min(safeRadiusZ, (Math.random()*2*safeRadiusZ - safeRadiusZ)));
-    mesh.position.set(x, -0.5, z);
+    mesh.position.set(x, -0.5*pieceS, z);
     world.add(mesh); blocks.push(mesh);
   }
 
-  /* Far-spawn incoming spheres with readable speed */
+  /* Incoming spheres — speed moderated by zoom so Level 6+ is fair */
   const wave = (level===1)?2:Math.min(2+level,10);
+  const zoomDamp = 1 / rS; // larger board -> relatively slower approach
   for(let i=0;i<wave;i++){
     const s=makeCrystal();
     const R=10 + Math.random()*4;
     const th=(Math.random()*Math.PI*2);
     s.position.set(Math.cos(th)*R, -0.2+Math.random()*0.4, Math.sin(th)*R*0.25);
     const center=new THREE.Vector3(0,0,0);
-    const base = 0.28 + Math.min(0.12*level, 1.2);
+    const base = (0.24 + Math.min(0.10*level, 1.0)) * zoomDamp;
     s.userData.v.copy(center.clone().sub(s.position).normalize().multiplyScalar(base));
     world.add(s); spheres.push(s);
   }
 
-  ammo = Math.min(2+level, 10);
+  ammo = Math.min(2+level, 12);
   ammoEl.textContent = ammo;
   levelEl.textContent = level;
   showMsg('LEVEL '+level,'');
 }
 
+/* ----- coin → craft awarding (additional) ----- */
+let craftsGrantedThisRun = 0;
+function maybeGrantCraftCredits(){
+  const gained = Math.max(0, _wallet.readCoins() - runStartCoins);
+  const shouldHave = Math.floor(gained / 1000);
+  if(shouldHave > craftsGrantedThisRun){
+    const delta = shouldHave - craftsGrantedThisRun;
+    _wallet.writeCraftAll(_wallet.readCraftAny() + delta);
+    craftsGrantedThisRun = shouldHave;
+  }
+}
+
 function awardAndNext(){
   const coinsWon = 100*level;
-  const before = _wallet.readCoins();
-  _wallet.writeCoins(before + coinsWon);
-  const after = _wallet.readCoins();
-  paintCoinsHUD(after);
-
-  // auto-convert every 1000 coins gained during the run into craft credits
-  const runCoins = after - runStartCoins;
-  const craftsShouldHave = Math.floor(runCoins / 1000);
-  const alreadyHave = _wallet.readCraftAny();
-  // We only add the delta relative to previous conversions in this session:
-  const baselineCraft = (parseInt(localStorage.getItem('izzaDashCraftBaseline')||alreadyHave,10)|0);
-  const toGive = Math.max(0, craftsShouldHave - Math.max(0, baselineCraft - alreadyHave));
-  if(toGive>0){ _wallet.writeCraftAll(alreadyHave + toGive); }
-  // keep a moving baseline to avoid double-award when continuing
-  try{ localStorage.setItem('izzaDashCraftBaseline', String(_wallet.readCraftAny())); }catch(_){}
+  _wallet.writeCoins(_wallet.readCoins()+coinsWon);
+  paintCoinsHUD(_wallet.readCoins());
+  maybeGrantCraftCredits();
 
   const justBeat = level;
   showMsg('LEVEL '+justBeat+' COMPLETE!', 'scoreGlow');
@@ -524,9 +536,10 @@ function onDown(e){
 function onMove(e){
   if(!dragging||!dragObj) return;
   const h=screenToPlane(e, 0);
-  // keep on board while dragging
-  const safeX=THREE.MathUtils.clamp(h.x, -2.4, 2.4);
-  const safeZ=THREE.MathUtils.clamp(h.z, -1.5, 1.5);
+  const rS = ringScaleForLevel(level);
+  const baseRingR = 2.6 * rS;
+  const safeX = THREE.MathUtils.clamp(h.x, -baseRingR*0.92, baseRingR*0.92);
+  const safeZ = THREE.MathUtils.clamp(h.z, -baseRingR*0.55, baseRingR*0.55);
   dragObj.position.set(safeX, 0, safeZ);
 }
 
@@ -574,8 +587,12 @@ glCanvas.addEventListener('pointerdown', onDown, {passive:true});
 glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
-/* ---------- Shoot metal balls (from avatar area) ---------- */
-const AVATAR_ORIGIN = new THREE.Vector3(-3.2, -0.35, 1.2); // bottom-left of board, near the avatar
+/* ---------- Shoot metal balls (from avatar area & scaled) ---------- */
+function avatarOriginForLevel(){
+  // A fixed corner near the board; slight shift with ring scale so it "stays" by the avatar
+  const rS = ringScaleForLevel(level);
+  return new THREE.Vector3(-2.9*rS, -0.25, 0.0);
+}
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
@@ -583,11 +600,15 @@ function fireMetal(e){
 
   ammo--; ammoEl.textContent=ammo;
 
-  const origin=AVATAR_ORIGIN.clone();
+  const origin=avatarOriginForLevel();
   const tgt=screenToPlane(e, 0);
   const dir=tgt.clone().sub(origin).normalize();
-  const b=new THREE.Mesh(new THREE.SphereGeometry(0.18,20,16), metal());
-  b.position.copy(origin); b.userData.v=dir.multiplyScalar(4.2); b.userData.ttl=2.2;
+
+  const pScale = projScaleForLevel(level);
+  const b=new THREE.Mesh(new THREE.SphereGeometry(0.18*pScale,20,16), metal());
+  b.position.copy(origin);
+  b.userData.v=dir.multiplyScalar(4.2); 
+  b.userData.ttl=2.2;
   b.castShadow=true; world.add(b); projectilePool.push(b);
 }
 glCanvas.addEventListener('click', fireMetal, {passive:true});
@@ -654,15 +675,18 @@ function showEndOverlay(){
   ended=true;
   const totalCoins = _wallet.readCoins();
   const runCoins = Math.max(0,totalCoins - runStartCoins);
-  const crafts = _wallet.readCraftAny();
-
   document.getElementById('finalScore').textContent = String(score|0);
   document.getElementById('finalCoins').textContent = String(runCoins|0);
-  // Show only the credits earned so far (not global): compute against baseline
-  const baseline=(parseInt(localStorage.getItem('izzaDashCraftStart')||_wallet.readCraftAny(),10)|0);
-  document.getElementById('finalCraft').textContent = String(Math.max(0, crafts - baseline));
-
+  document.getElementById('finalCraft').textContent = String(craftsGrantedThisRun|0);
   endOverlay.style.display='flex';
+}
+
+async function refreshAvatar(){
+  try{
+    const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
+    const prof=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
+    await buildAvatarCanvas(ctx, 96, prof);
+  }catch(_){}
 }
 
 async function start(){
@@ -672,14 +696,10 @@ async function start(){
   }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
   runStartCoins=_wallet.readCoins();
-  try{ localStorage.setItem('izzaDashCraftStart', String(_wallet.readCraftAny())); localStorage.setItem('izzaDashCraftBaseline', String(_wallet.readCraftAny())); }catch(_){}
+  craftsGrantedThisRun = 0;
 
-  // avatar
-  try{
-    const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
-    const prof=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
-    await buildAvatarCanvas(ctx, 96, prof);
-  }catch(_){}
+  // avatar (+ retry once after a short delay so equipped overlays always show)
+  await refreshAvatar(); setTimeout(refreshAvatar, 400);
 
   try{
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
