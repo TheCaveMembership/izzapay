@@ -583,6 +583,9 @@ function start(){
   if(started) return;
   started=true;
 
+  // Hide overlay immediately so it can't steal input
+  startOverlay.classList.add('hidden');
+
   // Audio FIRST (inside gesture)
   try{
     initAudio();
@@ -613,38 +616,12 @@ function start(){
   layoutLevel();
   setInterval(()=>{ if(!ended) tickTimer(); }, 1000);
 
-  // Hide overlay smoothly
-  startOverlay.classList.add('hidden');
   showMsg('GO!');
   requestAnimationFrame(loop);
 }
 
-/* Jetman-style "first gesture wins" armer (capture, passive:false) */
-(function(){
-  const armOnce = (fn)=>{ let done=false; return function(ev){ if(done) return; done=true; try{ ev && ev.preventDefault && ev.preventDefault(); ev && ev.stopPropagation && ev.stopPropagation(); }catch(_){}
-    fn(); }; };
-  const arm = armOnce(start);
-  const optsCap = { passive:false, capture:true };
-
-  // Button + overlay
-  startBtn.addEventListener('click', arm, optsCap);
-  startBtn.addEventListener('touchstart', arm, optsCap);
-  startOverlay.addEventListener('pointerdown', arm, optsCap);
-  startOverlay.addEventListener('touchstart', arm, optsCap);
-  startOverlay.addEventListener('mousedown', arm, optsCap);
-
-  // Canvas (so tapping game area also starts)
-  glCanvas.addEventListener('pointerdown', arm, optsCap);
-  glCanvas.addEventListener('touchstart', arm, optsCap);
-  glCanvas.addEventListener('mousedown', arm, optsCap);
-
-  // Keyboard fallback
-  addEventListener('keydown', function(e){
-    if(e.code==='Space' || e.code==='Enter'){ arm(e); }
-  }, { once:true, capture:true });
-
-  // Defensive no-op on visibility change (kept simple)
-})();
+/* --- Simple, reliable start button binding (like the working version) --- */
+startBtn.addEventListener('click', start, {passive:true});
 
 /* keep HUD coins synced */
 window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, false);
