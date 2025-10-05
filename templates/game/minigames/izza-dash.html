@@ -4,18 +4,85 @@
   <meta charset="utf-8">
   <title>IZZA DASH — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Persist base -->
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
+
+  <!-- --- AUTH / USERNAME PRE-SEED (runs first!) --- -->
+  <script>
+  (function(){
+    const T_KEY='izzaTokenT', U_KEY='izzaUserU';
+    const qs=new URLSearchParams(location.search);
+    let T=qs.get('t')||'';
+    let U=(qs.get('u')||'').toString().trim();
+
+    try{
+      // Try to read username from app cache if not in query
+      if(!U){
+        const raw=localStorage.getItem('izzaUserU')||'';
+        if(raw) U=raw;
+        if(!U){
+          const pi=localStorage.getItem('piAuthUser');
+          if(pi){ try{ U=(JSON.parse(pi)||{}).username||''; }catch{} }
+        }
+      }
+      // Normalize and publish
+      if(U){
+        U=U.replace(/^@+/, '').toLowerCase();
+        try{ localStorage.setItem(U_KEY, U); }catch(_){}
+        window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:U});
+        window.izzaUserKey={ get:()=>U };
+        try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:U })); }catch(_){}
+      }
+
+      // Token: prefer query, fall back to storage
+      if(T){ try{ localStorage.setItem(T_KEY,T); }catch(_){ } }
+      else { const s=localStorage.getItem(T_KEY)||''; if(s) T=s; }
+
+      // Ensure URL shows params (helps webviews)
+      const url=new URL(location.href);
+      if(T) url.searchParams.set('t',T);
+      if(U) url.searchParams.set('u',U);
+      if(url.toString()!==location.href){ history.replaceState(null,'',url.toString()); }
+
+      // Helper to add params to any path
+      function withAuth(href){
+        const u=new URL(href, location.origin);
+        if(T) u.searchParams.set('t',T);
+        if(U) u.searchParams.set('u',U);
+        return u.pathname+(u.search?u.search:'');
+      }
+      window._withAuth = withAuth;
+
+      // Rewrite nav links now and also just-in-time on click
+      function wireLink(id, path){
+        const a=document.getElementById(id); if(!a) return;
+        a.href=withAuth(path||a.getAttribute('href'));
+        a.addEventListener('click', function(e){
+          // rewrite again in case token/username appeared later
+          a.href=withAuth(path||a.getAttribute('href'));
+        }, {passive:true});
+      }
+      wireLink('backBtn','/izza-game/minigames');
+      wireLink('cityBtn','/izza-game/play');
+      wireLink('againBtn','/izza-game/minigames');
+      wireLink('cityBtn2','/izza-game/play');
+    }catch(_){}
+  })();
+  </script>
+
+  <!-- Persist + Three.js -->
   <script src="/static/game/js/izza-persist.js"></script>
-  <!-- Three.js -->
   <script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
 
   <link rel="stylesheet" href="/static/themes.css">
   <style>
     :root{
-      --hud:rgba(255,255,255,.65);
+      --hud:rgba(255,255,255,.72);
       --hudLine:rgba(0,0,0,.18);
       --ok:#25d07f; --warn:#ffcc55; --bad:#ff6b6b; --arcade:#2fd1ff;
     }
+
     *{box-sizing:border-box; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none}
     html,body{height:100%}
     body{margin:0;background:#0f1c2e;color:var(--txt);font-family:Arial,Helvetica,sans-serif}
@@ -23,7 +90,7 @@
     .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
          background:var(--chip-bg);padding:10px 14px;border-radius:12px;color:inherit;text-decoration:none}
-    .btn:hover{filter:brightness(1.06)}
+
     .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
            border-radius:14px;background:#0b1a2c;overflow:hidden}
 
@@ -34,9 +101,10 @@
       background:var(--hud); border:1px solid var(--hudLine); backdrop-filter:blur(6px);
       padding:6px 10px; border-radius:999px; font-weight:800; letter-spacing:.2px;
       display:flex; gap:6px; align-items:center; white-space:nowrap; min-width:0;
-      font-size: clamp(11px,2.6vw,13px);
+      font-size: clamp(10px, 2.2vw, 12px); line-height:1;
+      max-width: 42vw; overflow: hidden; text-overflow: ellipsis;
     }
-    .pill strong{font-variant-numeric:tabular-nums; font-size: clamp(12px,2.9vw,15px)}
+    .pill strong{font-variant-numeric:tabular-nums; font-size: clamp(11px, 2.4vw, 13px)}
     .pill.button{cursor:pointer; min-width:40px; justify-content:center}
     .hud{flex-wrap:nowrap}
     .hud .left,.hud .right{flex:1}
@@ -45,8 +113,8 @@
     /* Start overlay */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
       background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.15));}
-    .startCard{background:rgba(255,255,255,.8);color:#0a1524;border:1px solid rgba(0,0,0,.15);
-      border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:10px;align-items:center;max-width:92vw}
+    .startCard{background:rgba(255,255,255,.88);color:#0a1524;border:1px solid rgba(0,0,0,.15);
+      border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px;align-items:center;max-width:92vw}
     .startBtn{padding:12px 18px;border-radius:10px;border:1px solid rgba(0,0,0,.2);
       background:#0f213a;color:#eaf6ff;font-weight:800}
 
@@ -65,7 +133,7 @@
     #gl{position:absolute;inset:0;display:block;touch-action:none}
 
     .overlayUi{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:10px;padding:10px;z-index:8}
-    .chip{background:rgba(255,255,255,.75);color:#0a1524;border:1px solid rgba(0,0,0,.15);padding:7px 12px;border-radius:999px;font-size:12px}
+    .chip{background:rgba(255,255,255,.78);color:#0a1524;border:1px solid rgba(0,0,0,.15);padding:7px 12px;border-radius:999px;font-size:12px}
 
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
   </style>
@@ -82,7 +150,7 @@
         <div class="left">
           <div class="pill">LEVEL: <strong id="level" class="arc">1</strong></div>
           <div class="pill">AMMO: <strong id="ammo" class="arc">0</strong></div>
-          <div class="pill">TIME: <strong id="time" class="arc">60</strong>s</div>
+          <div class="pill">TIME: <strong id="time" class="arc">60s</strong></div>
         </div>
         <div class="right">
           <button id="muteBtn" class="pill button" type="button" aria-pressed="false" title="Mute/Unmute (M)">🔊</button>
@@ -90,13 +158,14 @@
         </div>
       </div>
 
+      <!-- Start -->
       <div id="startOverlay" class="startOverlay">
         <div class="startCard">
           <h3 style="margin:0 0 4px">IZZA DASH</h3>
           <p style="margin:0;max-width:30ch;text-align:center">
             Drag to stack the glass blocks. Tap to fire metal balls from your avatar at the incoming spheres.
           </p>
-          <button id="startBtn" class="startBtn">START</button>
+          <button id="startBtn" class="startBtn" type="button">START</button>
         </div>
       </div>
 
@@ -118,39 +187,13 @@
     </div>
   </div>
 
+  <!-- BGM -->
   <audio id="bgm" src="/static/game/audio/dash_bgm.mp3" preload="none" loop></audio>
 
 <script>
-/* --------- auth/link helpers (unchanged) --------- */
-(function(){
-  const T_KEY='izzaTokenT', U_KEY='izzaUserU';
-  const qs=new URLSearchParams(location.search);
-  let T=qs.get('t')||''; let U=(qs.get('u')||'').toString().trim();
-  try{
-    if(T) localStorage.setItem(T_KEY,T);
-    else{ const s=localStorage.getItem(T_KEY)||''; if(s){ const u=new URL(location.href); u.searchParams.set('t',s); history.replaceState(null,'',u.toString()); T=s; } }
-  }catch(_){}
-  function publishU(u){ if(!u) return u; u=u.replace(/^@+/, '').toLowerCase();
-    try{ localStorage.setItem(U_KEY,u); }catch(_){}
-    window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
-    window.izzaUserKey={get:()=>u};
-    try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
-    return u;
-  }
-  try{
-    if(U) publishU(U);
-    else{
-      const su=(localStorage.getItem(U_KEY)||'').toString().trim();
-      if(su){ const u=new URL(location.href); u.searchParams.set('u',su); history.replaceState(null,'',u.toString()); U=publishU(su); }
-    }
-  }catch(_){}
-  function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
-  document.getElementById('backBtn').href = withAuth('/izza-game/minigames');
-  document.querySelectorAll('#cityBtn,#cityBtn2,#againBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
-  window._withAuth = withAuth;
-})();
-
-/* --------- wallet helpers (unchanged) --------- */
+/* =======================
+   Wallet helpers
+======================= */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
   function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
@@ -160,7 +203,9 @@
   window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins };
 })();
 
-/* --------- audio --------- */
+/* =======================
+   Audio
+======================= */
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx=null, master=null;
 const bgmEl=document.getElementById('bgm');
@@ -190,18 +235,24 @@ muteBtn.addEventListener('click',()=>applyMuteState(!(muteBtn.getAttribute('aria
 window.addEventListener('keydown',(e)=>{ if(e.key==='m'||e.key==='M'){ e.preventDefault(); applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')); }},{passive:false});
 applyMuteState(localStorage.getItem('izzaMute')==='1');
 
-/* --------- snapshot/session --------- */
+/* =======================
+   Session hydrate (safe)
+======================= */
 async function ensureSession(){
   try{
-    const r=await fetch(_withAuth('/izza-game/api/character'),{credentials:'include',headers:{'content-type':'application/json'}});
-    if(r.ok){ const j=await r.json().catch(()=>({})); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-      return j;
+    if(window._withAuth){
+      const r=await fetch(_withAuth('/izza-game/api/character'),{credentials:'include',headers:{'content-type':'application/json'}});
+      if(r.ok){ const j=await r.json().catch(()=>({})); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
+        return j;
+      }
     }
   }catch(_){}
-  return JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
+  try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{}; }catch(_){ return {}; }
 }
 
-/* --------- UI refs --------- */
+/* =======================
+   UI refs
+======================= */
 const levelEl = document.getElementById('level');
 const ammoEl  = document.getElementById('ammo');
 const timeEl  = document.getElementById('time');
@@ -212,7 +263,9 @@ const bigmsg = document.getElementById('bigmsg');
 function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' + (cls||''); setTimeout(()=>bigmsg.className='bigmsg',520); }
 function paintCoinsHUD(n){ coinsRunEl.textContent=String(Math.max(0, n|0)); }
 
-/* --------- avatar drawing (same pipeline; Jetman size 128) --------- */
+/* =======================
+   Avatar pipeline (unchanged API)
+======================= */
 const SPRITES={ body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
                 hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
                 outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" } };
@@ -291,12 +344,15 @@ async function buildAvatarCanvas(dstCtx,size,profile){
   window.drawEquippedOverlaysForAvatar=drawEquippedOverlaysForAvatar;
 })();
 
-/* --------- THREE.js basic stack game --------- */
+/* =======================
+   THREE.js Stack Game
+======================= */
 const glCanvas = document.getElementById('gl');
-let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null;
-let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0;
+let scene, camera, renderer, raycaster, pointer;
+let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false;
 let blocks=[], projectilePool=[];
 function hardResize(){
+  if(!renderer||!camera) return;
   const r = glCanvas.getBoundingClientRect();
   const W = Math.max(1, Math.floor(r.width));
   const H = Math.max(1, Math.floor(r.height));
@@ -334,7 +390,7 @@ function makeCrystal(){
 function initThree(){
   scene=new THREE.Scene(); scene.background=new THREE.Color(0x12304c);
   camera=new THREE.PerspectiveCamera(55,1,0.1,100); camera.position.set(0,3,9); camera.lookAt(0,0,0);
-  renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha:false,powerPreference:'high-performance'});
+  renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha=false,powerPreference:'high-performance'});
   renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.35;
 
   scene.add(new THREE.AmbientLight(0xd6ebff,0.7));
@@ -441,13 +497,9 @@ glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
 /* --- Fire metal balls FROM avatar --- */
-function avatarOriginWorld(){
-  // visually lines up with bottom-left avatar overlay
-  return new THREE.Vector3(-4.6, -0.6, 0.8);
-}
+function avatarOriginWorld(){ return new THREE.Vector3(-4.6, -0.6, 0.8); }
 function fireMetal(e){
-  if(ended) return;
-  if(ammo<=0) return;
+  if(ended || ammo<=0) return;
   if(pickBlock(e)) return; // touching a block = drag, not fire
   ammo--; ammoEl.textContent=ammo;
   const origin=avatarOriginWorld();
@@ -475,8 +527,9 @@ function fail(){
 }
 
 /* --- Loop --- */
+let last=performance.now();
 function loop(t){
-  const dt=0.016;
+  const dt=Math.min(0.033,(t-last)/1000); last=t;
   for(let i=spheres.length-1;i>=0;i--){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
@@ -504,18 +557,16 @@ function loop(t){
 /* --- Timer + Boot --- */
 function tickTimer(){
   if(ended) return;
-  timeLeft--; timeEl.textContent=timeLeft;
+  timeLeft--; timeEl.textContent=timeLeft+'s';
   try{ bleep('tick'); }catch(_){}
   if(timeLeft<=0){ showMsg('TIME!','miss'); layoutLevel(); timeLeft=60; }
 }
 
 async function start(){
-  try{
-    await ensureSession();
-    if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
-  }catch(_){}
+  // Always start the game; never let optional calls block it
+  try{ await ensureSession(); }catch(_){}
+  try{ if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
-  runStartCoins=_wallet.readCoins();
 
   // avatar
   try{
@@ -524,6 +575,7 @@ async function start(){
     await buildAvatarCanvas(ctx, 128, prof);
   }catch(_){}
 
+  // audio
   try{
     initAudio(); await audioCtx.resume();
     bgmEl.volume=0.3; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
@@ -538,7 +590,7 @@ async function start(){
   showMsg('GO!');
   requestAnimationFrame(loop);
 }
-startBtn.addEventListener('click', start, {passive:true});
+document.getElementById('startBtn').addEventListener('click', start, {passive:true});
 
 /* keep HUD coins synced */
 window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
