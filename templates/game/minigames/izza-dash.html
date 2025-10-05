@@ -100,7 +100,7 @@
     .hud{
       position:absolute;left:12px;right:12px;top:12px;
       display:flex;justify-content:space-between;gap:8px;z-index:9;
-      padding-right:8px;align-items:center;flex-wrap:wrap; /* <-- allow wrap */
+      padding-right:8px;align-items:center;flex-wrap:wrap;
     }
     .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0;flex-wrap:wrap}
     .pill{
@@ -108,7 +108,6 @@
       padding:4px 8px; border-radius:999px; font-weight:800; letter-spacing:.2px;
       display:inline-flex; gap:6px; align-items:center; white-space:nowrap; line-height:1;
       font-size: clamp(9px, 2.5vw, 11px);
-      /* no max-width, no ellipsis — we let the row wrap instead */
       flex:0 0 auto;
       box-shadow:0 0 0 1px rgba(0,0,0,.06) inset;
     }
@@ -122,7 +121,9 @@
 
     /* Start overlay */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
-      background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.15));}
+      background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.15)); transition:opacity .18s ease}
+    .startOverlay.hidden{ opacity:0; pointer-events:none; }
+
     .startCard{background:rgba(255,255,255,.90);color:#0a1524;border:1px solid rgba(0,0,0,.15);
       border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;align-items:center;max-width:92vw}
     .startBtn{padding:12px 18px;border-radius:10px;border:1px solid rgba(0,0,0,.2);
@@ -577,23 +578,33 @@ function tickTimer(){
   if(timeLeft<=0){ showMsg('TIME!','miss'); layoutLevel(); timeLeft=60; }
 }
 
+let started=false;
 function start(){
-  // DO NOT block on anything that needs network. Gesture must return fast.
+  if(started) return;
+  started=true;
+
+  // Audio FIRST (inside gesture)
+  try{
+    initAudio();
+    audioCtx && audioCtx.resume && audioCtx.resume();
+    bgmEl.volume = 0.3;
+    bgmEl.muted  = (localStorage.getItem('izzaMute')==='1');
+    bgmEl.currentTime = 0;
+    bgmEl.play().catch(()=>{});
+  }catch(_){}
+
+  // Non-blocking session/persist
   try{ ensureSession(); }catch(_){}
   try{ if(window.IZZA_PERSIST?.load) IZZA_PERSIST.load(); }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
 
-  // avatar (best-effort)
+  // Avatar (best effort)
   try{
-    const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
+    const cvs=document.getElementById('avatarCanvas');
+    const ctx=cvs.getContext('2d',{willReadFrequently:true});
+    ctx.imageSmoothingEnabled=false;
     const prof=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
     buildAvatarCanvas(ctx, 128, prof);
-  }catch(_){}
-
-  // audio (resume on gesture)
-  try{
-    initAudio(); audioCtx.resume().catch(()=>{});
-    bgmEl.volume=0.3; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
   }catch(_){}
 
   // 3D
@@ -601,13 +612,39 @@ function start(){
   level=1; timeLeft=60; ended=false;
   layoutLevel();
   setInterval(()=>{ if(!ended) tickTimer(); }, 1000);
-  startOverlay.style.display='none';
+
+  // Hide overlay smoothly
+  startOverlay.classList.add('hidden');
   showMsg('GO!');
   requestAnimationFrame(loop);
 }
-const startGesture = (e)=>{ try{ if(e){ e.preventDefault?.(); e.stopPropagation?.(); } }catch(_){ } start(); };
-document.getElementById('startBtn').addEventListener('click', startGesture, false);
-document.getElementById('startBtn').addEventListener('touchstart', startGesture, false);
+
+/* Jetman-style "first gesture wins" armer (capture, passive:false) */
+(function(){
+  const armOnce = (fn)=>{ let done=false; return function(ev){ if(done) return; done=true; try{ ev && ev.preventDefault && ev.preventDefault(); ev && ev.stopPropagation && ev.stopPropagation(); }catch(_){}
+    fn(); }; };
+  const arm = armOnce(start);
+  const optsCap = { passive:false, capture:true };
+
+  // Button + overlay
+  startBtn.addEventListener('click', arm, optsCap);
+  startBtn.addEventListener('touchstart', arm, optsCap);
+  startOverlay.addEventListener('pointerdown', arm, optsCap);
+  startOverlay.addEventListener('touchstart', arm, optsCap);
+  startOverlay.addEventListener('mousedown', arm, optsCap);
+
+  // Canvas (so tapping game area also starts)
+  glCanvas.addEventListener('pointerdown', arm, optsCap);
+  glCanvas.addEventListener('touchstart', arm, optsCap);
+  glCanvas.addEventListener('mousedown', arm, optsCap);
+
+  // Keyboard fallback
+  addEventListener('keydown', function(e){
+    if(e.code==='Space' || e.code==='Enter'){ arm(e); }
+  }, { once:true, capture:true });
+
+  // Defensive no-op on visibility change (kept simple)
+})();
 
 /* keep HUD coins synced */
 window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, false);
