@@ -365,11 +365,16 @@ function hardResize(){
 }
 window.addEventListener('resize', hardResize, {passive:true});
 
+/* --- Materials (switch to stable translucent standard material to avoid “weird cube” look) --- */
 function glass(tint){
-  return new THREE.MeshPhysicalMaterial({
+  return new THREE.MeshStandardMaterial({
     color: new THREE.Color(tint),
-    metalness: 0.1, roughness: 0.03, transmission: 1.0, thickness: 0.5, ior: 1.45, envMapIntensity: 1.0,
-    emissive: new THREE.Color(0x1a2230), emissiveIntensity: 0.35
+    metalness: 0.15,
+    roughness: 0.35,
+    transparent: true,
+    opacity: 0.85,
+    emissive: new THREE.Color(0x0c1220),
+    emissiveIntensity: 0.25
   });
 }
 function metal(){
@@ -390,14 +395,14 @@ function makeRectPrism(w=1.4,h=1,d=1,tint=0x7fd4ff){
   return m;
 }
 function makeCrystal(){
-  const s=new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 20), glass(0xeaf8ff));
+  const s=new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 20), glass(0xcee9ff));
   s.castShadow=true; s.receiveShadow=true; s.userData.v=new THREE.Vector3();
   return s;
 }
 
 function initThree(){
   scene=new THREE.Scene(); scene.background=new THREE.Color(0x0f182b); // brighter bg
-  camera=new THREE.PerspectiveCamera(55,1,0.1,100); camera.position.set(0,3,9); camera.lookAt(0,0,0);
+  camera=new THREE.PerspectiveCamera(55,1,0.1,100); camera.position.set(0,3.4,9.8); camera.lookAt(0,0,0);
   renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha:false,powerPreference:'high-performance'});
   renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.8; // brighter
 
@@ -408,9 +413,10 @@ function initThree(){
 
   world=new THREE.Group(); scene.add(world);
 
-  const floor=new THREE.Mesh(new THREE.CircleGeometry(5.2,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
+  /* Smaller visible play circle */
+  const floor=new THREE.Mesh(new THREE.CircleGeometry(3.6,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
   floor.rotation.x=-Math.PI/2; floor.position.y=-1; floor.receiveShadow=true; world.add(floor);
-  floorRing=new THREE.Mesh(new THREE.TorusGeometry(4.2,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.8}));
+  floorRing=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.9}));
   floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.98; world.add(floorRing);
 
   raycaster=new THREE.Raycaster(); pointer=new THREE.Vector2();
@@ -435,15 +441,20 @@ function layoutLevel(){
     mesh.position.set(-2 + i*1.6, -0.5, (Math.random()*0.6)-0.3);
     world.add(mesh); blocks.push(mesh);
   }
+
+  /* Far-spawn incoming spheres with readable speed */
   const wave = (level===1)?2:Math.min(2+level,10);
   for(let i=0;i<wave;i++){
     const s=makeCrystal();
-    const R=6.2, th=(Math.random()*Math.PI*2);
-    s.position.set(Math.cos(th)*R, -0.2+Math.random()*0.4, Math.sin(th)*R*0.2);
+    const R=10 + Math.random()*4; // farther away
+    const th=(Math.random()*Math.PI*2);
+    s.position.set(Math.cos(th)*R, -0.2+Math.random()*0.4, Math.sin(th)*R*0.25);
     const center=new THREE.Vector3(0,0,0);
-    s.userData.v.copy(center.clone().sub(s.position).normalize().multiplyScalar(0.6 + Math.min(0.2*level,1.8)));
+    const base = 0.28 + Math.min(0.12*level, 1.2); // slower early, scales with level
+    s.userData.v.copy(center.clone().sub(s.position).normalize().multiplyScalar(base));
     world.add(s); spheres.push(s);
   }
+
   ammo = Math.min(2+level, 10);
   ammoEl.textContent = ammo;
   levelEl.textContent = level;
@@ -532,7 +543,6 @@ glCanvas.addEventListener('click', fireMetal, {passive:true});
 
 /* ---------- Collisions / win / fail ---------- */
 function checkWin(){
-  const tol=0.05;
   const xs=blocks.map(b=>b.position.x), zs=blocks.map(b=>b.position.z);
   const xOk = Math.max(...xs)-Math.min(...xs) < 0.05;
   const zOk = Math.max(...zs)-Math.min(...zs) < 0.05;
@@ -543,7 +553,7 @@ function checkWin(){
 }
 function fail(){
   showMsg('SMASHED!','miss');
-  setTimeout(()=>layoutLevel(),420);
+  setTimeout(()=>layoutLevel(),520);
 }
 
 /* ---------- Loop ---------- */
