@@ -45,10 +45,11 @@
     .btn:hover{filter:brightness(1.06)}
 
     .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
-           border-radius:14px;background:#000;overflow:hidden;
-           /* Never allow select/callout in the game area */
-           -webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
-    .arena *{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
+           border-radius:14px;background:#000;overflow:hidden}
+    /* prevent selection/callout ONLY inside the game surface */
+    .arena #gl, .arena .overlayUi, .arena .hud, .arena .playerAvatar{
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+    }
 
     /* HUD */
     .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:6px;z-index:9;padding-right:8px;align-items:center}
@@ -65,7 +66,7 @@
     .hud .pill{ font-size: clamp(10px, 2.5vw, 12px); padding: 4px 8px; max-width: 42vw; overflow:hidden; text-overflow:ellipsis; }
     .hud .pill.button{ padding: 4px 8px; min-width: 36px; }
 
-    /* start overlay */
+    /* start overlay (clicks must pass through cleanly) */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
       background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.32));}
     .startCard{background:rgba(0,0,0,.55);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
@@ -341,7 +342,6 @@ async function buildAvatarCanvas(dstCtx,size,profile){
 const glCanvas = document.getElementById('gl');
 let scene, camera, renderer, raycaster, pointer, dragging=false, dragObj=null, dragOffsetZ=0;
 let world, floorRing, spheres=[], ammo=0, level=1, timeLeft=60, ended=false, runStartCoins=0, score=0;
-const big = document.getElementById('bigmsg');
 
 function hardResize(){
   const r = glCanvas.getBoundingClientRect();
@@ -387,7 +387,7 @@ function makeCrystal(){
 function initThree(){
   scene=new THREE.Scene(); scene.background=new THREE.Color(0x0f182b); // brighter bg
   camera=new THREE.PerspectiveCamera(55,1,0.1,100); camera.position.set(0,3,9); camera.lookAt(0,0,0);
-  renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha=false,powerPreference:'high-performance'});
+  renderer=new THREE.WebGLRenderer({canvas:glCanvas,antialias:true,alpha:false,powerPreference:'high-performance'});
   renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.8; // brighter
 
   // brighter light rig
@@ -609,9 +609,11 @@ window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoi
 window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
 window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
 
-/* Never allow long-press selection/callout in the game area */
-document.addEventListener('contextmenu', (e)=>{ if(e.target.closest('#arena')){ e.preventDefault(); } }, {passive:false});
-document.addEventListener('selectstart', (e)=>{ if(e.target.closest('#arena')){ e.preventDefault(); } }, {passive:false});
+/* prevent long-press menu only inside the game display (not the START card) */
+document.getElementById('gl').addEventListener('contextmenu', e=>e.preventDefault(), {passive:false});
+document.getElementById('arena').addEventListener('selectstart', e=>{
+  if(e.target.id==='gl' || e.target.closest('#gl')) e.preventDefault();
+},{passive:false});
 
 window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, {passive:true});
 </script>
