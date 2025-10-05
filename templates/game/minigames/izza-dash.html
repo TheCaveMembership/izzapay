@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <title>IZZA DASH — IZZA GAME</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 
   <!-- Persist base -->
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
 
-  <!-- --- AUTH / USERNAME PRE-SEED (runs first!) --- -->
+  <!-- --- AUTH / USERNAME + LINK REWRITER (runs first) --- -->
   <script>
   (function(){
     const T_KEY='izzaTokenT', U_KEY='izzaUserU';
@@ -16,52 +16,53 @@
     let T=qs.get('t')||'';
     let U=(qs.get('u')||'').toString().trim();
 
+    function publishUsername(u){
+      if(!u) return '';
+      u=u.replace(/^@+/, '').toLowerCase();
+      try{ localStorage.setItem(U_KEY,u); }catch(_){}
+      window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+      window.izzaUserKey={ get:()=>u };
+      try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+      return u;
+    }
+
     try{
-      // Try to read username from app cache if not in query
       if(!U){
-        const raw=localStorage.getItem('izzaUserU')||'';
+        const raw=(localStorage.getItem(U_KEY)||'').toString().trim();
         if(raw) U=raw;
         if(!U){
           const pi=localStorage.getItem('piAuthUser');
-          if(pi){ try{ U=(JSON.parse(pi)||{}).username||''; }catch{} }
+          if(pi){ try{ U=(JSON.parse(pi)||{}).username||''; }catch(_){ } }
         }
       }
-      // Normalize and publish
-      if(U){
-        U=U.replace(/^@+/, '').toLowerCase();
-        try{ localStorage.setItem(U_KEY, U); }catch(_){}
-        window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:U});
-        window.izzaUserKey={ get:()=>U };
-        try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:U })); }catch(_){}
-      }
+      if(U) publishUsername(U);
 
-      // Token: prefer query, fall back to storage
       if(T){ try{ localStorage.setItem(T_KEY,T); }catch(_){ } }
       else { const s=localStorage.getItem(T_KEY)||''; if(s) T=s; }
 
-      // Ensure URL shows params (helps webviews)
+      // reflect in URL (helps native wrappers)
       const url=new URL(location.href);
       if(T) url.searchParams.set('t',T);
       if(U) url.searchParams.set('u',U);
       if(url.toString()!==location.href){ history.replaceState(null,'',url.toString()); }
 
-      // Helper to add params to any path
       function withAuth(href){
-        const u=new URL(href, location.origin);
+        const base = (location.origin || (location.protocol+'//'+location.host));
+        const u = new URL(href, base);
         if(T) u.searchParams.set('t',T);
         if(U) u.searchParams.set('u',U);
-        return u.pathname+(u.search?u.search:'');
+        return u.toString();
       }
       window._withAuth = withAuth;
 
-      // Rewrite nav links now and also just-in-time on click
       function wireLink(id, path){
         const a=document.getElementById(id); if(!a) return;
-        a.href=withAuth(path||a.getAttribute('href'));
-        a.addEventListener('click', function(e){
-          // rewrite again in case token/username appeared later
-          a.href=withAuth(path||a.getAttribute('href'));
-        }, {passive:true});
+        const target = path || a.getAttribute('href') || '/';
+        a.setAttribute('href', withAuth(target));
+        // Force navigation with absolute URL on both click and touch
+        const go = (e)=>{ try{ e.preventDefault(); location.href = withAuth(target); }catch(_){ location.assign(withAuth(target)); } };
+        a.addEventListener('click', go, false);
+        a.addEventListener('touchend', go, false);
       }
       wireLink('backBtn','/izza-game/minigames');
       wireLink('cityBtn','/izza-game/play');
@@ -81,6 +82,7 @@
       --hud:rgba(255,255,255,.72);
       --hudLine:rgba(0,0,0,.18);
       --ok:#25d07f; --warn:#ffcc55; --bad:#ff6b6b; --arcade:#2fd1ff;
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     *{box-sizing:border-box; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none}
@@ -95,28 +97,36 @@
            border-radius:14px;background:#0b1a2c;overflow:hidden}
 
     /* HUD */
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:8px;z-index:9;padding-right:8px;align-items:center}
-    .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
+    .hud{
+      position:absolute;left:12px;right:12px;top:12px;
+      display:flex;justify-content:space-between;gap:8px;z-index:9;
+      padding-right:8px;align-items:center;flex-wrap:wrap; /* <-- allow wrap */
+    }
+    .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0;flex-wrap:wrap}
     .pill{
       background:var(--hud); border:1px solid var(--hudLine); backdrop-filter:blur(6px);
-      padding:6px 10px; border-radius:999px; font-weight:800; letter-spacing:.2px;
-      display:flex; gap:6px; align-items:center; white-space:nowrap; min-width:0;
-      font-size: clamp(10px, 2.2vw, 12px); line-height:1;
-      max-width: 42vw; overflow: hidden; text-overflow: ellipsis;
+      padding:4px 8px; border-radius:999px; font-weight:800; letter-spacing:.2px;
+      display:inline-flex; gap:6px; align-items:center; white-space:nowrap; line-height:1;
+      font-size: clamp(9px, 2.5vw, 11px);
+      /* no max-width, no ellipsis — we let the row wrap instead */
+      flex:0 0 auto;
+      box-shadow:0 0 0 1px rgba(0,0,0,.06) inset;
     }
-    .pill strong{font-variant-numeric:tabular-nums; font-size: clamp(11px, 2.4vw, 13px)}
+    .pill strong{
+      display:inline-block;
+      font-variant-numeric:tabular-nums;
+      font-size: clamp(10px, 2.6vw, 12px);
+      min-width:3ch; text-align:right;
+    }
     .pill.button{cursor:pointer; min-width:40px; justify-content:center}
-    .hud{flex-wrap:nowrap}
-    .hud .left,.hud .right{flex:1}
-    .hud .right{justify-content:flex-end}
 
     /* Start overlay */
     .startOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:11;
       background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.15));}
-    .startCard{background:rgba(255,255,255,.88);color:#0a1524;border:1px solid rgba(0,0,0,.15);
-      border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px;align-items:center;max-width:92vw}
+    .startCard{background:rgba(255,255,255,.90);color:#0a1524;border:1px solid rgba(0,0,0,.15);
+      border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;align-items:center;max-width:92vw}
     .startBtn{padding:12px 18px;border-radius:10px;border:1px solid rgba(0,0,0,.2);
-      background:#0f213a;color:#eaf6ff;font-weight:800}
+      background:#0f213a;color:#eaf6ff;font-weight:800;cursor:pointer}
 
     /* Big message */
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
@@ -136,6 +146,10 @@
     .chip{background:rgba(255,255,255,.78);color:#0a1524;border:1px solid rgba(0,0,0,.15);padding:7px 12px;border-radius:999px;font-size:12px}
 
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    @media (max-width:380px){
+      .pill{ font-size:10px; padding:3px 7px; }
+      .pill strong{ font-size:11px; min-width:2.8ch; }
+    }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -231,12 +245,12 @@ function applyMuteState(m){
   if(bgmEl){ bgmEl.muted = !!m; if(!m) bgmEl.volume = 0.3; }
   if(master){ master.gain.value = m?0:0.45; }
 }
-muteBtn.addEventListener('click',()=>applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')), {passive:true});
-window.addEventListener('keydown',(e)=>{ if(e.key==='m'||e.key==='M'){ e.preventDefault(); applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')); }},{passive:false});
+muteBtn.addEventListener('click',()=>applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')), false);
+window.addEventListener('keydown',(e)=>{ if(e.key==='m'||e.key==='M'){ e.preventDefault(); applyMuteState(!(muteBtn.getAttribute('aria-pressed')==='true')); }}, false);
 applyMuteState(localStorage.getItem('izzaMute')==='1');
 
 /* =======================
-   Session hydrate (safe)
+   Session hydrate (safe; never blocks start)
 ======================= */
 async function ensureSession(){
   try{
@@ -360,7 +374,7 @@ function hardResize(){
   renderer.setSize(W,H,false); renderer.setPixelRatio(dpr);
   camera.aspect=W/H; camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', hardResize, {passive:true});
+window.addEventListener('resize', hardResize, false);
 
 function glass(tint){
   return new THREE.MeshPhysicalMaterial({
@@ -451,8 +465,8 @@ function awardAndNext(){
 /* --- Pointer helpers --- */
 function screenToPlane(e, planeY=0){
   const rect=glCanvas.getBoundingClientRect();
-  pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  pointer.x=((('clientX' in e?e.clientX:e.touches?.[0]?.clientX)-rect.left)/rect.width)*2-1;
+  pointer.y=-((('clientY' in e?e.clientY:e.touches?.[0]?.clientY)-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const plane=new THREE.Plane(new THREE.Vector3(0,1,0), -planeY);
   const hit=new THREE.Vector3();
@@ -461,8 +475,8 @@ function screenToPlane(e, planeY=0){
 }
 function pickBlock(e){
   const rect=glCanvas.getBoundingClientRect();
-  pointer.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointer.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  pointer.x=((('clientX' in e?e.clientX:e.touches?.[0]?.clientX)-rect.left)/rect.width)*2-1;
+  pointer.y=-((('clientY' in e?e.clientY:e.touches?.[0]?.clientY)-rect.top)/rect.height)*2+1;
   raycaster.setFromCamera(pointer,camera);
   const hits=raycaster.intersectObjects(blocks,false);
   return (hits.length?hits[0].object:null);
@@ -492,9 +506,9 @@ function onUp(){
   dragging=false; dragObj=null;
   checkWin();
 }
-glCanvas.addEventListener('pointerdown', onDown, {passive:true});
-glCanvas.addEventListener('pointermove', onMove, {passive:true});
-window.addEventListener('pointerup', onUp, {passive:true});
+glCanvas.addEventListener('pointerdown', onDown, false);
+glCanvas.addEventListener('pointermove', onMove, false);
+window.addEventListener('pointerup', onUp, false);
 
 /* --- Fire metal balls FROM avatar --- */
 function avatarOriginWorld(){ return new THREE.Vector3(-4.6, -0.6, 0.8); }
@@ -509,7 +523,8 @@ function fireMetal(e){
   b.position.copy(origin); b.userData.v=dir.multiplyScalar(4.4); b.userData.ttl=2.2;
   b.castShadow=true; world.add(b); projectilePool.push(b);
 }
-glCanvas.addEventListener('click', fireMetal, {passive:true});
+glCanvas.addEventListener('click', fireMetal, false);
+glCanvas.addEventListener('touchend', function(e){ fireMetal(e.changedTouches?{clientX:e.changedTouches[0].clientX, clientY:e.changedTouches[0].clientY}:e); }, false);
 
 /* --- Collisions / win / fail --- */
 function checkWin(){
@@ -562,22 +577,22 @@ function tickTimer(){
   if(timeLeft<=0){ showMsg('TIME!','miss'); layoutLevel(); timeLeft=60; }
 }
 
-async function start(){
-  // Always start the game; never let optional calls block it
-  try{ await ensureSession(); }catch(_){}
-  try{ if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
+function start(){
+  // DO NOT block on anything that needs network. Gesture must return fast.
+  try{ ensureSession(); }catch(_){}
+  try{ if(window.IZZA_PERSIST?.load) IZZA_PERSIST.load(); }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
 
-  // avatar
+  // avatar (best-effort)
   try{
     const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
     const prof=JSON.parse(localStorage.getItem('izzaCharacter')||'{}')||{};
-    await buildAvatarCanvas(ctx, 128, prof);
+    buildAvatarCanvas(ctx, 128, prof);
   }catch(_){}
 
-  // audio
+  // audio (resume on gesture)
   try{
-    initAudio(); await audioCtx.resume();
+    initAudio(); audioCtx.resume().catch(()=>{});
     bgmEl.volume=0.3; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
   }catch(_){}
 
@@ -590,13 +605,15 @@ async function start(){
   showMsg('GO!');
   requestAnimationFrame(loop);
 }
-document.getElementById('startBtn').addEventListener('click', start, {passive:true});
+const startGesture = (e)=>{ try{ if(e){ e.preventDefault?.(); e.stopPropagation?.(); } }catch(_){ } start(); };
+document.getElementById('startBtn').addEventListener('click', startGesture, false);
+document.getElementById('startBtn').addEventListener('touchstart', startGesture, false);
 
 /* keep HUD coins synced */
-window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
-window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
-window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
-window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, {passive:true});
+window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, false);
+window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), false);
+window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), false);
+window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, false);
 </script>
 </body>
 </html>
