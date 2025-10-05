@@ -56,9 +56,10 @@
     .hud .left,.hud .right{display:flex;gap:6px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
           padding:4px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;flex:0 1 auto}
+    /* ensure values inside pills never get truncated */
     .pill strong{
-      font-size:13px;font-variant-numeric:tabular-nums;min-width:0;
-      max-width:12ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-size:13px;font-variant-numeric:tabular-nums;min-width:auto;
+      max-width:none; overflow:visible; text-overflow:clip; white-space:nowrap;
       display:inline-block;
     }
     .pill.button{cursor:pointer}
@@ -508,17 +509,46 @@ function onMove(e){
   dragObj.position.z = THREE.MathUtils.clamp(h.z, -2.0, 2.0);
   dragObj.position.y = 0; // keep on board while dragging
 }
+
+/* helpers for stacking */
+function halfH(mesh){ return (mesh.geometry?.parameters?.height || 1) * 0.5; }
+function hDist(a, b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.hypot(dx, dz); }
+
 function onUp(){
   if(!dragging||!dragObj) return;
+
+  // 1) find closest block in XZ (ignore Y so stacked blocks count)
   let best=null, bestD=1e9;
-  for(const b of blocks){ if(b===dragObj) continue; const d=b.position.clone().sub(dragObj.position).length(); if(d<bestD){best=b;bestD=d;} }
-  if(best && bestD<0.9){
-    const atopY = (best.geometry.parameters.height||1)/2 + (dragObj.geometry.parameters.height||1)/2;
-    dragObj.position.x = best.position.x;
-    dragObj.position.z = best.position.z;
-    dragObj.position.y = best.position.y + atopY;
+  for(const b of blocks){
+    if(b===dragObj) continue;
+    const d = hDist(b.position, dragObj.position);
+    if(d < bestD){ best=b; bestD=d; }
+  }
+
+  // 2) snap if close
+  const SNAP_R = 1.05;     // touch-friendly
+  const STACK_TOL = 0.12;  // XZ tolerance for a stack center
+
+  if(best && bestD < SNAP_R){
+    const baseX = best.position.x, baseZ = best.position.z;
+    let highestTopY = -Infinity;
+
+    for(const b of blocks){
+      if(b===dragObj) continue;
+      if(hDist({x:baseX, z:baseZ}, b.position) < STACK_TOL){
+        const topY = b.position.y + halfH(b);
+        if(topY > highestTopY) highestTopY = topY;
+      }
+    }
+    if(!Number.isFinite(highestTopY)){ highestTopY = best.position.y + halfH(best); }
+
+    dragObj.position.x = baseX;
+    dragObj.position.z = baseZ;
+    dragObj.position.y = highestTopY + halfH(dragObj);
+
     try{ bleep('match'); }catch(_){}
   }
+
   dragging=false; dragObj=null;
   checkWin();
 }
