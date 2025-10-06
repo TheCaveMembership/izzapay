@@ -271,7 +271,7 @@ const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
 const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
 const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
 const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
-const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#2F2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 function paletteSwap(img, fromHex, toHex, tol=4000){
   const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
@@ -593,11 +593,7 @@ glCanvas.addEventListener('pointerdown', onDown, {passive:true});
 glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
-/* ---------- Shoot metal balls FROM TAP, with auto-aim at nearest sphere ---------- */
-/* NOTE: this fixes the “goes through” feel by:
-   1) spawning exactly where the player taps (on the arena plane),
-   2) aiming straight at the nearest falling sphere, and
-   3) using swept segment–sphere collisions each frame. */
+/* ---------- Shoot metal balls FROM TAP, and ensure they travel OUTWARD ---------- */
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
@@ -609,22 +605,28 @@ function fireMetal(e){
   const origin=screenToPlane(e, 0);
   origin.y = baseY + 0.1;
 
-  // Pick the nearest active sphere to this tap point (so the shot actually targets it)
+  // Aim at nearest sphere from this tap point
   let target = null, best=1e9;
   for(const s of spheres){
     const d = origin.distanceTo(s.position);
     if(d<best){best=d; target=s;}
   }
-  // If none (unlikely), just shoot upward
   const dir = target ? target.position.clone().sub(origin).normalize() : new THREE.Vector3(0,1,0);
 
   const pScale = projScaleForLevel(level);
   const b=new THREE.Mesh(new THREE.SphereGeometry(0.22*pScale,20,16), metal());
   b.position.copy(origin);
 
-  // Good speed and lifetime; scaled with zoom so it reaches every corner
+  // Base velocity towards target
   const rS = ringScaleForLevel(level);
-  b.userData.v=dir.multiplyScalar(9.0*rS);
+  let v = dir.multiplyScalar(9.0*rS);
+
+  // ✅ Ensure projectile moves OUTWARD (away from camera) rather than inward:
+  // if velocity is pointing back toward the camera, flip it.
+  const outDir = b.position.clone().sub(camera.position).normalize(); // from camera -> spawn
+  if (v.dot(outDir) < 0) v.multiplyScalar(-1);
+
+  b.userData.v=v;
   b.userData.ttl=5.0;
 
   b.castShadow=true; world.add(b); projectilePool.push(b);
@@ -642,8 +644,8 @@ function checkWin(){
   awardAndNext();
 }
 function fail(){
-  showMsg('SMASHED!','miss');
-  setTimeout(()=>layoutLevel(),520);
+  // 🔴 GAME OVER when a glass sphere smashes the stack
+  showEndOverlay();
 }
 
 /* --- geometric helper: distance from point C to segment AB --- */
@@ -668,7 +670,7 @@ function loop(t){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
 
-    // Block collision → fail
+    // Block collision → GAME OVER
     for(const b of blocks){
       if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
         fail();
@@ -689,7 +691,7 @@ function loop(t){
       }
     }
 
-    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board
+    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board → GAME OVER
   }
 
   for(let j=projectilePool.length-1;j>=0;j--){
@@ -709,7 +711,11 @@ function tickTimer(){
   if(ended) return;
   timeLeft--; timeEl.textContent=timeLeft;
   try{ bleep('tick'); }catch(_){}
-  if(timeLeft<=0){ showMsg('TIME!','miss'); layoutLevel(); timeLeft=60; }
+  if(timeLeft<=0){
+    // 🔴 TIME OUT → GAME OVER
+    showEndOverlay();
+    return;
+  }
 }
 
 /* ===== Leaderboard submit (uses IZZA_LEADERBOARD; game id = 'puzzle') ===== */
@@ -725,14 +731,42 @@ async function submitLeaderboard(finalScore){
         body:JSON.stringify({ game:'puzzle', score: finalScore|0 })
       }).catch(()=>{});
     }
-    // cache locally as well so it shows up offline/in snapshot
+    // cache locally for ALL periods (alltime + daily/monthly/yearly)
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:finalScore|0, ts:Date.now()};
-    const key='izzaLb2::puzzle::alltime';
+
+    // All-time
+    const allKey='izzaLb2::puzzle::alltime';
     try{
-      const cur=JSON.parse(localStorage.getItem(key)||'[]'); cur.push(row);
-      cur.sort((a,b)=>b.s-a.s); localStorage.setItem(key, JSON.stringify(cur.slice(0,20)));
+      const cur=JSON.parse(localStorage.getItem(allKey)||'[]'); cur.push(row);
+      cur.sort((a,b)=>b.s-a.s); localStorage.setItem(allKey, JSON.stringify(cur.slice(0,20)));
     }catch(_){}
+
+    // Daily / Monthly / Yearly (stamp format matches persist shim)
+    const d=new Date(), z=n=>String(n).padStart(2,'0');
+    const stamps = {
+      day: `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
+      month: `${d.getFullYear()}-${z(d.getMonth()+1)}`,
+      year: String(d.getFullYear())
+    };
+    function upsertPeriod(period, stamp){
+      const key = `izzaLb2::puzzle::${period}::${stamp}`;
+      try{
+        const cur=JSON.parse(localStorage.getItem(key)||'[]');
+        // keep best per user
+        const bestByUser = {};
+        [...cur, row].forEach(r=>{
+          const k=(r.u||'').toLowerCase();
+          if(!k) return;
+          if(!bestByUser[k] || (r.s|0) > (bestByUser[k].s|0)) bestByUser[k]=r;
+        });
+        const out=Object.values(bestByUser).sort((a,b)=>b.s-a.s).slice(0,20);
+        localStorage.setItem(key, JSON.stringify(out));
+      }catch(_){}
+    }
+    upsertPeriod('day',   stamps.day);
+    upsertPeriod('month', stamps.month);
+    upsertPeriod('year',  stamps.year);
   }catch(_){}
 }
 
