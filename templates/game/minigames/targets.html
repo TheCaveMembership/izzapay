@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
 
-  <!-- Make username available before persist loads (Arena pattern) -->
+  <!-- Publish username before persist loads -->
   <script>
   (function(){
     try{
@@ -35,8 +35,7 @@
       --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
       --safe-t: env(safe-area-inset-top, 0px);
       --safe-b: env(safe-area-inset-bottom, 0px);
-      /* these are computed by JS to guarantee 7 cols fit */
-      --cardW: 86px;
+      --cardW: 86px;                          /* set by JS to fit 7 cols */
       --cardH: calc(var(--cardW) * 1.45);
       --fanY:  calc(var(--cardH) * 0.26);
       --gutter: 10px;
@@ -52,7 +51,6 @@
     .btn:hover{filter:brightness(1.06)}
     .btn.small{padding:6px 10px;border-radius:10px;font-size:13px}
 
-    /* Arena fills the screen and respects the notch/home indicator */
     .arena{
       position:relative;
       height:calc(100vh - 110px - var(--safe-b));
@@ -64,20 +62,22 @@
       .arena{ height:calc(100vh - 96px - var(--safe-b)); min-height:520px; }
     }
 
-    /* HUD — wraps nicely on small screens */
-    .hud{position:absolute;left:10px;right:10px;top:calc(8px + var(--safe-t));z-index:9;display:flex;flex-wrap:wrap;gap:8px 8px;align-items:center}
-    .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0;flex-wrap:wrap}
-    .hud .left{flex:1 1 260px} .hud .right{flex:1 1 200px;justify-content:flex-end}
+    /* HUD compact so all pills share one row on phones */
+    .hud{position:absolute;left:10px;right:10px;top:calc(8px + var(--safe-t));z-index:9;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:nowrap}
+    .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
-          padding:6px 10px;border-radius:999px;font-size:12px;font-weight:800;letter-spacing:.2px;
+          padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.2px;
           display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
     .pill strong{font-variant-numeric:tabular-nums}
+    @media (max-width:420px){
+      .pill{font-size:10px;padding:3px 7px}
+    }
 
-    /* Board area under HUD, scrolls if extremely small screens */
+    /* Board area */
     .board{
-      position:absolute; inset:64px 12px 12px 12px;
+      position:absolute; inset:60px 10px 10px 10px;
       display:grid; gap:var(--gutter);
-      grid-template-rows:auto 1fr; /* top row, then tableau */
+      grid-template-rows:auto 1fr;
       overflow:auto; padding-bottom:calc(10px + var(--safe-b));
       border-radius:12px; background:#0e5b3f;
       box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
@@ -91,22 +91,24 @@
     .row .cell.stack{min-height:calc(var(--cardH) + var(--fanY) * 6)}
     .row .cell.foundation{background:rgba(255,255,255,.03)}
     .row .cell > span{
-      position:absolute; left:10px; top:8px; color:#9bd7b2; font-size:12px; pointer-events:none
+      position:absolute; left:8px; top:6px; color:#9bd7b2; font-size:10px; pointer-events:none;
+      letter-spacing:.5px
     }
+    .row .cell.foundation > span{opacity:.85}
     .pile{position:relative;width:100%;height:100%}
 
-    /* Cards: clean indexes and no bleed past rounded corners */
+    /* Cards */
     .card{
       position:absolute; width:var(--cardW); height:var(--cardH);
       border-radius:12px; background:#fff; border:1px solid rgba(0,0,0,.14);
       box-shadow:0 4px 12px rgba(0,0,0,.28); user-select:none; touch-action:none;
-      overflow:hidden; /* 🔒 stops pip text from leaking off edges */
+      overflow:hidden;
     }
     .card.back{
       background:linear-gradient(180deg,#184a86,#0f2c54);
       border-color:rgba(0,0,0,.28);
     }
-    .pip{position:absolute; font-weight:900; line-height:1; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial}
+    .pip{position:absolute; font-weight:900; line-height:1; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
     .pip.tl{left:8px; top:6px}
     .pip.br{right:8px; bottom:6px; transform:rotate(180deg)}
     .pip .rank{display:block; font-size:calc(var(--cardW) * 0.23)}
@@ -115,19 +117,15 @@
       font-size:calc(var(--cardW) * 0.45); opacity:.16}
     .red{color:#c31e2e} .black{color:#111}
 
-    /* tableau fanning handled by translateY */
-    .pile.tableau .card{will-change:transform}
+    .being-dragged{visibility:hidden}           /* originals hidden while a ghost is dragging */
+    #dragLayer{position:fixed;left:0;top:0;right:0;bottom:0;pointer-events:none;z-index:9998}
 
-    .ghost{opacity:.85; outline:2px dashed rgba(0,0,0,.25)}
-
-    /* Messages / overlays */
     .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:8;
       font-size:40px;font-weight:900;letter-spacing:.5px;color:var(--arcade);text-shadow:0 10px 32px rgba(0,0,0,.45);opacity:0;transition:opacity .18s,transform .18s}
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .endOverlay,.rulesOverlay{position:fixed;inset:0;display:none;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
     .endOverlay.show,.rulesOverlay.show{display:flex}
     .cardPanel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:92vw}
-
     .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
   </style>
 </head>
@@ -159,10 +157,10 @@
         <div class="row" id="rowTop">
           <div class="cell"><div class="pile" id="stock"></div><span>STOCK</span></div>
           <div class="cell"><div class="pile" id="waste"></div><span>WASTE</span></div>
-          <div class="cell foundation"><div class="pile" id="f1"></div><span>♠ FOUNDATION</span></div>
-          <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUNDATION</span></div>
-          <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUNDATION</span></div>
-          <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUNDATION</span></div>
+          <div class="cell foundation"><div class="pile" id="f1"></div><span>♠ FOUND.</span></div>
+          <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
+          <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
+          <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUND.</span></div>
           <div class="cell"></div>
         </div>
 
@@ -215,13 +213,14 @@
           </div>
         </div>
       </div>
+
+      <!-- dedicated drag layer -->
+      <div id="dragLayer" aria-hidden="true"></div>
     </div>
   </div>
 
 <script>
-/* =======================
-   Auth / withAuth like Arena
-======================= */
+/* ===== Auth / withAuth ===== */
 (function(){
   const T_KEY='izzaTokenT', U_KEY='izzaUserU';
   const qs=new URLSearchParams(location.search);
@@ -248,9 +247,7 @@
   window._withAuth = withAuth;
 })();
 
-/* =======================
-   Wallet helpers (Persist-synced)
-======================= */
+/* ===== Wallet helpers ===== */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
   const toInt=v=>{const n=parseInt(v,10);return Number.isFinite(n)?n:0;};
@@ -300,17 +297,12 @@
   window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon };
 })();
 
-/* =======================
-   Responsive card sizing: fit 7 cols exactly
-======================= */
+/* ===== Responsive 7-col sizing ===== */
 function sizeBoard(){
   const board = document.querySelector('.board');
   if (!board) return;
   const r = board.getBoundingClientRect();
-  const cols = 7;
-  const minW = 56;   // absolute floor
-  const maxW = 96;   // pleasant cap
-  const gutter = 10;
+  const cols = 7, gutter = 10, minW = 56, maxW = 96;
   let w = Math.floor((r.width - gutter * (cols - 1)) / cols);
   w = Math.max(minW, Math.min(maxW, w));
   document.documentElement.style.setProperty('--cardW', w + 'px');
@@ -322,9 +314,7 @@ function sizeBoard(){
 window.addEventListener('resize', sizeBoard, { passive:true });
 window.addEventListener('orientationchange', sizeBoard, { passive:true });
 
-/* =======================
-   UI refs / HUD paint
-======================= */
+/* ===== HUD refs ===== */
 const elCoins=document.getElementById('coinsHUD');
 const elCraft=document.getElementById('craftHUD');
 const elTime=document.getElementById('time');
@@ -333,9 +323,7 @@ function paintWallet(){ elCoins.textContent=String(_wallet.readCoins()); elCraft
 window.addEventListener('izza-coins-changed', paintWallet, {passive:true});
 window.addEventListener('izza-crafting-changed', paintWallet, {passive:true});
 
-/* =======================
-   Solitaire core (draw-1 Klondike)
-======================= */
+/* ===== Solitaire core ===== */
 const SUITS = ['♠','♥','♣','♦'];
 const COLORS = { '♠':'black', '♣':'black', '♥':'red', '♦':'red' };
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
@@ -352,34 +340,31 @@ function makeDeck(){
 }
 
 const P = { stock:[], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
-let dragSel=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
-let FAN=26; // will update from CSS var
+let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
+let FAN=26; // updated from CSS var
 
 function cssVarInt(name, fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
 function fmtTime(ms){ const s=Math.max(0,Math.floor(ms/1000)); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return `${String(m).padStart(2,'0')}:${ss}`; }
 
 function layoutNew(){
-  // reset
   for(let i=0;i<4;i++) P.f[i]=[];
   for(let i=0;i<7;i++) P.t[i]=[];
   P.waste=[]; P.stock=makeDeck();
   moves=0; ended=false; winTs=null;
   elMoves.textContent='0';
 
-  // update FAN from CSS
   FAN = cssVarInt('--fanY', 26);
 
-  // deal tableau (1..7), flip top of each
+  // deal tableau (1..7)
   for(let col=0; col<7; col++){
     for(let n=0; n<=col; n++){
       const c=P.stock.pop(); P.t[col].push(c);
       c.face = (n===col);
     }
   }
-  // remaining stay face-down in stock
+  // remaining face-down in stock
   P.stock.forEach(c=>c.face=false);
 
-  // start timer
   if(timerId) clearInterval(timerId);
   startTs=Date.now();
   elTime.textContent='00:00';
@@ -392,30 +377,32 @@ function layoutNew(){
 
 function showMsg(t){ const m=document.getElementById('bigmsg'); m.textContent=t; m.classList.add('show'); setTimeout(()=>m.classList.remove('show'),850); }
 
+/* ----- Rendering ----- */
 function renderAll(){
   const piles={ stock:'stock', waste:'waste', t:['t1','t2','t3','t4','t5','t6','t7'], f:['f1','f2','f3','f4'] };
-  // clear
   [...document.querySelectorAll('.pile')].forEach(p=>p.innerHTML='');
 
   // STOCK
   const sEl=document.getElementById(piles.stock);
   if(P.stock.length){
-    const card=spawnCardBack();
-    card.addEventListener('click', onDraw, {passive:true});
-    sEl.appendChild(card);
+    const back=spawnCardBack();
+    back.addEventListener('click', onDraw, {passive:true});
+    sEl.appendChild(back);
   }
-  // WASTE
+
+  // WASTE (top only interactive)
   const wEl=document.getElementById(piles.waste);
   if(P.waste.length){
     const top=P.waste[P.waste.length-1]; top.face=true;
     const el=spawnCard(top); el.style.zIndex=10; placeStack(el,0);
+    el.dataset.where='w';
     wEl.appendChild(el);
   }
 
   // FOUNDATIONS
   for(let i=0;i<4;i++){
     const fEl=document.getElementById(piles.f[i]);
-    P.f[i].forEach((c,k)=>{ const el=spawnCard(c); el.style.zIndex=k+1; placeStack(el,k*12); fEl.appendChild(el); });
+    P.f[i].forEach((c,k)=>{ const el=spawnCard(c); el.dataset.where='f'; el.dataset.fidx=String(i); el.style.zIndex=k+1; placeStack(el,k*12); fEl.appendChild(el); });
   }
 
   // TABLEAU
@@ -428,17 +415,8 @@ function renderAll(){
       placeStack(el,k*FAN);
       tEl.appendChild(el);
     });
-    // tap empty column: allow King run
-    tEl.parentElement.addEventListener('click', (e)=>{
-      if(e.target.closest('.card')) return;
-      if(!col.length){
-        const sel = dragSel && dragSel.cards ? dragSel.cards : null;
-        if(sel && sel[0] && +sel[0].dataset.rank===13){ moveRunToTableau(sel.map(cardFromDataset), i); }
-      }
-    }, {passive:true});
   }
 
-  // enable drag on face-up
   enableDrag();
 }
 
@@ -455,7 +433,6 @@ function spawnCard(c){
   el.dataset.id=c.id; el.dataset.rank=c.rank; el.dataset.suit=c.suit; el.dataset.color=c.color; el.dataset.face=String(!!c.face);
 
   if(c.face){
-    // proper pip layout: TL + BR (rotated), faint center suit
     const tl=document.createElement('div'); tl.className='pip tl';
     tl.innerHTML=`<span class="rank">${RANKS[c.rank-1]}</span><span class="suit">${c.suit}</span>`;
     const br=document.createElement('div'); br.className='pip br';
@@ -467,119 +444,12 @@ function spawnCard(c){
 }
 function placeStack(el, y){ el.style.transform=`translateY(${y}px)`; }
 
-/* ==== moves & rules ==== */
-function onDraw(){
-  if(!P.stock.length){
-    while(P.waste.length){ const c=P.waste.pop(); c.face=false; P.stock.push(c); }
-  }else{
-    const c=P.stock.pop(); c.face=true; P.waste.push(c);
-  }
-  bumpMoves(); renderAll();
-}
-
-function bumpMoves(){ moves++; elMoves.textContent=String(moves); }
-
-function cardFromDataset(el){
-  return { id:el.dataset.id, suit:el.dataset.suit, rank:+el.dataset.rank, face:(el.dataset.face==='true'), color:el.dataset.color };
-}
-function canStackOn(a,b){ return b && a.face && b.face && a.color!==b.color && a.rank===b.rank-1; }
+/* ----- Rules & helper checks ----- */
 function canGoFoundation(c, idx){
   const f=P.f[idx]; if(!c.face) return false;
   if(!f.length) return c.rank===1;
   const top=f[f.length-1];
   return c.suit===top.suit && c.rank===top.rank+1;
-}
-
-/* ---- drag basics (runs allowed) ---- */
-function enableDrag(){
-  document.querySelectorAll('.card').forEach(el=>{
-    if(el.classList.contains('back')) return;
-    el.style.touchAction='none';
-    el.onpointerdown = (e)=>{
-      if(ended) return;
-      const srcEl = e.currentTarget;
-      const where = srcEl.dataset.where || inferWhere(srcEl);
-      const run = collectRunFromElement(srcEl, where);
-      if(!run.cards.length) return;
-
-      dragSel={ cards: run.cards, from: run.from, col: run.col, dy: e.clientY, dx:e.clientX };
-      run.cards.forEach((cEl,i)=>{ cEl.classList.add('ghost'); cEl.style.zIndex=100+i; document.body.appendChild(cEl); followPointer(cEl, e); });
-      window.addEventListener('pointermove', onDragMove, {passive:false});
-      window.addEventListener('pointerup', onDragEnd, {once:true, passive:false});
-      e.preventDefault();
-    };
-  });
-}
-
-function inferWhere(el){
-  const p = el.closest('.pile');
-  if(!p) return '';
-  const id=p.id;
-  if(id==='waste') return 'w';
-  if(id[0]==='t') return 't';
-  if(id[0]==='f') return 'f';
-  return '';
-}
-function collectRunFromElement(el, where){
-  if(where==='w'){
-    const top=P.waste[P.waste.length-1]; if(!top || top.id!==el.dataset.id) return {cards:[],from:'w'};
-    return { cards:[el], from:'w' };
-  }
-  if(where==='f'){
-    return { cards:[], from:'f' }; // no pulling from foundations
-  }
-  if(where==='t'){
-    const col=+el.dataset.col; const pile=P.t[col];
-    const idx = pile.findIndex(c=>c.id===el.dataset.id);
-    const take = [];
-    for(let i=idx;i<pile.length;i++){
-      const c = pile[i];
-      if(!c.face){ return {cards:[],from:'t',col}; }
-      const el2 = findCardEl(c.id); if(el2) take.push(el2);
-    }
-    return { cards:take, from:'t', col };
-  }
-  return {cards:[],from:''};
-}
-function findCardEl(id){ return [...document.querySelectorAll('.card')].find(n=>n.dataset.id===id); }
-function followPointer(el, e){ el.style.position='fixed'; el.style.left=(e.clientX- el.offsetWidth/2)+'px'; el.style.top=(e.clientY- el.offsetHeight/2)+'px'; }
-function onDragMove(e){ if(!dragSel) return; dragSel.cards.forEach(el=>followPointer(el,e)); e.preventDefault(); }
-
-function hitPileId(e){
-  const el=document.elementFromPoint(e.clientX, e.clientY);
-  const pile = el && (el.closest('.pile') || (el.classList?.contains('pile')?el:null));
-  return pile ? pile.id : '';
-}
-function onDragEnd(e){
-  window.removeEventListener('pointermove', onDragMove);
-  const target=hitPileId(e);
-  let placed=false;
-
-  if(target.startsWith('t')){ // to tableau
-    const tIdx = +target.slice(1)-1;
-    placed = tryPlaceToTableau(dragSel.cards.map(cardFromDataset), tIdx);
-  }else if(target.startsWith('f') && dragSel.cards.length===1){ // to foundation
-    const fIdx = +target.slice(1)-1;
-    placed = tryPlaceToFoundation(cardFromDataset(dragSel.cards[0]), fIdx);
-  }
-
-  dragSel.cards.forEach(el=>el.classList.remove('ghost'));
-  dragSel=null;
-  renderAll();
-  if(placed){ bumpMoves(); flipIfNeeded(); checkWin(); }
-}
-
-function moveRunToTableau(cards, destIdx){
-  if(!cards || !cards.length) return false;
-  const ok = acceptOnTableau(cards, destIdx);
-  if(ok){ takeFromSource(cards[0].id); cards.forEach(c=>P.t[destIdx].push(c)); bumpMoves(); renderAll(); flipIfNeeded(); checkWin(); }
-  return ok;
-}
-function tryPlaceToTableau(cards, destIdx){
-  if(!cards.length) return false;
-  const ok= acceptOnTableau(cards, destIdx);
-  if(ok){ takeFromSource(cards[0].id); cards.forEach(c=>P.t[destIdx].push(c)); return true; }
-  return false;
 }
 function acceptOnTableau(cards, destIdx){
   const dest=P.t[destIdx];
@@ -589,24 +459,143 @@ function acceptOnTableau(cards, destIdx){
     const a=cards[i], b=cards[i+1];
     if(!(a.face && b.face && a.rank===b.rank+1 && a.color!==b.color)) return false;
   }
-  if(!dest.length) return head.rank===13; // K to empty
-  const top=dest[dest.length-1];
-  return head.color!==top.color && head.rank===top.rank-1;
+  if(!dest.length) return head.rank===13; // K only
+  const top=dest[destIdx]?.[P.t[destIdx].length-1] || dest[dest.length-1];
+  const t = dest[dest.length-1];
+  return head.color!==t.color && head.rank===t.rank-1;
 }
 
-function tryPlaceToFoundation(card, fIdx){
-  if(!card.face) return false;
-  if(canGoFoundation(card,fIdx)){
-    takeFromSource(card.id);
-    P.f[fIdx].push(card);
-    return true;
+/* ----- DRAW from stock ----- */
+function onDraw(){
+  if(!P.stock.length){
+    while(P.waste.length){ const c=P.waste.pop(); c.face=false; P.stock.push(c); }
+  }else{
+    const c=P.stock.pop(); c.face=true; P.waste.push(c);
   }
-  return false;
+  moves++; elMoves.textContent=String(moves);
+  renderAll();
+}
+
+/* ----- DRAG (ghost clones, strict drop) ----- */
+const dragLayer=document.getElementById('dragLayer');
+function enableDrag(){
+  document.querySelectorAll('.card').forEach(el=>{
+    if(el.classList.contains('back')) return;
+    el.onpointerdown = (e)=>{
+      if(ended) return;
+      const where = el.dataset.where || inferWhere(el);
+      const run = buildRunModel(el, where);
+      if(!run.cards.length) return;
+
+      startDrag(run, e);
+      e.preventDefault();
+    };
+  });
+}
+function inferWhere(el){
+  const p = el.closest('.pile');
+  if(!p) return '';
+  const id=p.id;
+  if(id==='waste') return 'w';
+  if(id[0]==='t') return 't';
+  if(id[0]==='f') return 'f';
+  return '';
+}
+function buildRunModel(el, where){
+  if(where==='w'){
+    const top=P.waste[P.waste.length-1];
+    if(!top || top.id!==el.dataset.id) return {cards:[],from:'w'};
+    return { cards:[top], from:'w' };
+  }
+  if(where==='f') return {cards:[], from:'f'}; // no pulling from foundations
+  if(where==='t'){
+    const col=+el.dataset.col; const pile=P.t[col];
+    const idx = pile.findIndex(c=>c.id===el.dataset.id);
+    const take = [];
+    for(let i=idx;i<pile.length;i++){
+      const c = pile[i];
+      if(!c.face) return {cards:[],from:'t',col};
+      take.push(c);
+    }
+    return { cards:take, from:'t', col };
+  }
+  return {cards:[],from:''};
+}
+
+function startDrag(run, e){
+  // mark originals hidden
+  const ids=new Set(run.cards.map(c=>c.id));
+  document.querySelectorAll('.card').forEach(n=>{ if(ids.has(n.dataset.id)) n.classList.add('being-dragged'); });
+
+  // build ghost
+  dragLayer.innerHTML='';
+  const ghost=document.createElement('div');
+  ghost.style.position='fixed'; ghost.style.left='0'; ghost.style.top='0'; ghost.style.pointerEvents='none';
+  ghost.style.zIndex='9999';
+  run.cards.forEach((c,i)=>{
+    const g=spawnCard(c); g.style.position='absolute'; g.style.left='0'; g.style.top=(i*cssVarInt('--fanY',26))+'px';
+    ghost.appendChild(g);
+  });
+  dragLayer.appendChild(ghost);
+
+  dragRun={ run, ghost, ox:e.clientX, oy:e.clientY };
+  moveGhost(e.clientX, e.clientY);
+
+  window.addEventListener('pointermove', onDragMove, {passive:false});
+  window.addEventListener('pointerup', onDragEnd, {once:true, passive:false});
+}
+function moveGhost(x,y){
+  const w = dragRun.ghost.firstChild?.offsetWidth||0;
+  const h = dragRun.ghost.firstChild?.offsetHeight||0;
+  dragRun.ghost.style.transform=`translate(${x - w/2}px, ${y - h/3}px)`;
+}
+function onDragMove(e){ if(!dragRun) return; moveGhost(e.clientX, e.clientY); e.preventDefault(); }
+
+function hitPileId(x,y){
+  const el=document.elementFromPoint(x, y);
+  const pile = el && (el.closest('.pile') || (el.classList?.contains('pile')?el:null));
+  return pile ? pile.id : '';
+}
+function onDragEnd(e){
+  window.removeEventListener('pointermove', onDragMove);
+  const target=hitPileId(e.clientX, e.clientY);
+  let placed=false;
+
+  if(target && target.startsWith('t')){
+    const tIdx = +target.slice(1)-1;
+    placed = tryPlaceToTableau(dragRun.run.cards, tIdx);
+  }else if(target && target.startsWith('f') && dragRun.run.cards.length===1){
+    const fIdx = +target.slice(1)-1;
+    placed = tryPlaceToFoundation(dragRun.run.cards[0], fIdx);
+  }
+
+  // cleanup ghosts + unhide originals
+  dragLayer.innerHTML='';
+  const ids=new Set(dragRun.run.cards.map(c=>c.id));
+  document.querySelectorAll('.card.being-dragged').forEach(n=>{ if(ids.has(n.dataset.id)) n.classList.remove('being-dragged'); });
+  dragRun=null;
+
+  // if invalid, nothing changes; if valid, bump + flip + render + win check
+  if(placed){ moves++; elMoves.textContent=String(moves); flipIfNeeded(); }
+  renderAll();
+  if(placed) checkWin();
+}
+
+function tryPlaceToTableau(cards, destIdx){
+  if(!cards.length) return false;
+  if(!acceptOnTableau(cards, destIdx)) return false;
+  takeFromSource(cards[0].id);
+  cards.forEach(c=>P.t[destIdx].push(c));
+  return true;
+}
+function tryPlaceToFoundation(card, fIdx){
+  if(!canGoFoundation(card, fIdx)) return false;
+  takeFromSource(card.id);
+  P.f[fIdx].push(card);
+  return true;
 }
 function takeFromSource(id){
-  // from waste?
   if(P.waste.length && P.waste[P.waste.length-1].id===id){ P.waste.pop(); return; }
-  // from tableau run head
   for(let i=0;i<7;i++){
     const pile=P.t[i];
     const idx=pile.findIndex(c=>c.id===id);
@@ -619,7 +608,8 @@ function flipIfNeeded(){
     if(pile.length && !pile[pile.length-1].face){ pile[pile.length-1].face=true; }
   }
 }
-/* Win if all foundations have 13 */
+
+/* Win check */
 function checkWin(){
   if(P.f.every(f=>f.length===13)){
     winTs = Date.now();
@@ -627,17 +617,11 @@ function checkWin(){
   }
 }
 
-/* =======================
-   Rewards & Leaderboard (WIN ONLY)
-======================= */
+/* ===== Rewards & Leaderboard (WIN ONLY) ===== */
 const COINS_ON_WIN = 1000;
 const CRAFT_ON_WIN = 1;
-/* IMPORTANT: use Target Range id for LB (per Arena/Persist mapping) */
+/* Leaderboard id uses Target Range mapping as requested */
 const LB_GAME_ID = 'targets';
-
-/* Rank by speed (faster is better). Convert to a high score:
-   score = (1h - elapsedMs) * 1000 + (1000 - min(1000,moves))
-*/
 function makeLeaderboardScore(elapsedMs, moves){
   const base = 3600000 - Math.max(0,elapsedMs|0);
   const tie  = Math.max(0, 1000 - Math.min(1000,moves|0));
@@ -654,7 +638,7 @@ async function submitLeaderboard(score){
         body:JSON.stringify({ game:LB_GAME_ID, score: score|0 })
       }).catch(()=>{});
     }
-    // Cache locally for snapshot/Arena modal
+    // local cache for offline/Arena
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:score|0, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
@@ -678,9 +662,7 @@ async function submitLeaderboard(score){
   }catch(_){}
 }
 
-/* =======================
-   End / overlay / controls
-======================= */
+/* ===== End / overlay ===== */
 const endEl=document.getElementById('end');
 const resText=document.getElementById('resText');
 const resTime=document.getElementById('resTime');
@@ -702,7 +684,6 @@ function endGame(won){
     _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
     _wallet.saveSoon();
 
-    // leaderboard submit (time-based rank)
     const score = makeLeaderboardScore(elapsed, moves);
     submitLeaderboard(score);
   }
@@ -726,7 +707,7 @@ document.getElementById('rulesBtn').addEventListener('click', ()=>rulesEl.classL
 document.getElementById('rulesClose').addEventListener('click', ()=>rulesEl.classList.remove('show'), {passive:true});
 rulesEl.addEventListener('click', (e)=>{ if(e.target===rulesEl) rulesEl.classList.remove('show'); }, {passive:true});
 
-/* Back to Arcade: try a save first so totals are fresh */
+/* Back to Arcade: save first */
 document.querySelectorAll('#backBtn,#backBtn2').forEach(a=>{
   a.addEventListener('click', async (e)=>{
     e.preventDefault();
@@ -735,12 +716,10 @@ document.querySelectorAll('#backBtn,#backBtn2').forEach(a=>{
   }, {passive:false});
 });
 
-/* =======================
-   Boot
-======================= */
+/* ===== Boot ===== */
 (async function(){
   try{ await _wallet.syncFromPersist(); }catch(_){}
-  sizeBoard();           // compute card size
+  sizeBoard();
   paintWallet();
   layoutNew();
 })();
