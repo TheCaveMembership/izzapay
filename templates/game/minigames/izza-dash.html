@@ -77,13 +77,17 @@
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
 
-    /* avatar — under AMMO pill, but render IN FRONT of HUD */
+    /* avatar — centered just above the stacking ring */
     .playerAvatar{
-      position:absolute; top:84px; left:12px;
-      width:64px; height:64px; z-index:12; pointer-events:none;
-      -webkit-transform: translateZ(0); transform: translateZ(0);
+      position:absolute;
+      left:50%;
+      top:58%;               /* a touch above the board/ring area */
+      transform:translate(-50%,-100%);
+      width:96px; height:96px;
+      z-index:12; pointer-events:none;
+      -webkit-transform: translate(-50%,-100%); /* ensure GPU comp */
     }
-    .playerAvatar canvas{width:64px;height:64px;image-rendering:pixelated;image-rendering:crisp-edges}
+    .playerAvatar canvas{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
 
     /* webgl canvas + overlay */
     #gl{position:absolute;inset:0;display:block;touch-action:none;width:100%;height:100%}
@@ -794,6 +798,28 @@ function showEndOverlay(){
   submitLeaderboard(score|0); // ensure IZZA DASH (puzzle) posts & persists
 }
 
+/* === NEW: wallet handoff from Arena (mirrors Basketball) === */
+function consumeWalletHandoff(maxAgeMs=120000){
+  try{
+    const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+    const s=JSON.parse(raw); if(!s||!s.ts||(Date.now()-s.ts)>maxAgeMs) return null;
+    if(s.user){
+      const u=s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+      window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+      window.izzaUserKey={get:()=>u};
+      try{
+        localStorage.setItem('izzaUserU',u);
+        localStorage.setItem('piAuthUser',JSON.stringify({username:u}));
+      }catch(_){}
+    }
+    localStorage.setItem('izzaCoins', String(s.coins|0));
+    localStorage.setItem('izzaCrafting', String(s.craft|0));
+    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+    try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+    return { coins:s.coins|0, craft:s.craft|0 };
+  }catch(_){ return null; }
+}
+
 async function refreshAvatar(){
   try{
     const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
@@ -804,6 +830,10 @@ async function refreshAvatar(){
 
 async function start(){
   try{
+    // hydrate from Arena handoff FIRST (same behavior as Basketball)
+    const handoff=consumeWalletHandoff();
+    if(handoff){ paintCoinsHUD(handoff.coins); }
+
     await ensureSession();
     if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
 
