@@ -186,19 +186,93 @@
   function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
   document.querySelectorAll('#cityBtn,#cityBtn2,#backBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
   window._withAuth = withAuth;
+  window._authTU = { getT:()=>T, getU:()=>U };
 })();
 
 /* =======================
-   Wallet helpers
+   Wallet helpers  (SYNCED WITH PERSIST)
 ======================= */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-  function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-  function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){ } }
-  function readCoins(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
-  function writeCoins(v){ localStorage.setItem('izzaCoins', String((v|0))); try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){} }
 
-  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins };
+  const toInt = v => { const n=parseInt(v,10); return Number.isFinite(n)?n:0; };
+
+  function readCraftAny(){
+    // prefer persist if present
+    try{
+      if(window.IZZA_PERSIST?.get){
+        const p = window.IZZA_PERSIST.get('craftingCredits') ?? window.IZZA_PERSIST.get('izzaCrafting');
+        if(p!=null) return toInt(p);
+      }
+    }catch(_){}
+    for(const k of CRAFT_KEYS){ const v=toInt(localStorage.getItem(k)||'0'); if(v>0) return v|0; }
+    return toInt(localStorage.getItem(CRAFT_KEYS[0])||'0')|0;
+  }
+
+  function writeCraftAll(v){
+    const n=Math.max(0,v|0);
+    for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
+    try{ if(window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('craftingCredits', n); }catch(_){}
+    try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
+    saveSoon();
+  }
+
+  function readCoins(){
+    // ALWAYS prefer the persist wallet if available (this is what Arena uses)
+    try{
+      if(window.IZZA_PERSIST?.get){
+        const c = window.IZZA_PERSIST.get('coins') ?? window.IZZA_PERSIST.get('izzaCoins') ?? window.IZZA_PERSIST.state?.coins;
+        if(c!=null) return toInt(c);
+      }
+    }catch(_){}
+    // fallback to any wallet snapshot Arena already left in LS
+    const z = localStorage.getItem('izzaWallet');
+    if(z){ try{ const w=JSON.parse(z); if(w&&w.coins!=null) return toInt(w.coins); }catch(_){ } }
+    return toInt(localStorage.getItem('izzaCoins')||'0');
+  }
+
+  function writeCoins(v){
+    const n=(v|0);
+    localStorage.setItem('izzaCoins', String(n));
+    // keep a structured wallet mirror some pages use
+    try{
+      const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
+      localStorage.setItem('izzaWallet', JSON.stringify(w));
+    }catch(_){}
+    try{ if(window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
+    try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){}
+    saveSoon();
+  }
+
+  // Pull from persist → local mirrors so HUD & Arena match exactly
+  async function syncFromPersist(){
+    try{
+      if(window.IZZA_PERSIST?.load) await window.IZZA_PERSIST.load();
+      const c = readCoins(); // now prefers persist
+      localStorage.setItem('izzaCoins', String(c));
+      try{
+        const w = { coins:c, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
+        localStorage.setItem('izzaWallet', JSON.stringify(w));
+      }catch(_){}
+      const craft = readCraftAny();
+      for(const k of CRAFT_KEYS) localStorage.setItem(k,String(craft));
+    }catch(_){}
+  }
+
+  // Debounced save that carries T & U so Arena sees updates instantly
+  let saveTimer=null;
+  function saveSoon(){
+    try{
+      if(saveTimer) clearTimeout(saveTimer);
+      saveTimer=setTimeout(async()=>{
+        try{
+          if(window.IZZA_PERSIST?.save) await window.IZZA_PERSIST.save();
+        }catch(_){}
+      }, 120);
+    }catch(_){}
+  }
+
+  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon };
 })();
 
 /* =======================
@@ -278,7 +352,7 @@ const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E
 const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 function paletteSwap(img, fromHex, toHex, tol=4000){
-  const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+  const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b=n&255}; };
   const from=fromHex.map(h=>hexToRgb(h)), to=toHex.map(h=>hexToRgb(h));
   const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
   const cx=oc.getContext('2d',{willReadFrequently:true}); cx.imageSmoothingEnabled=false; cx.drawImage(img,0,0);
@@ -327,7 +401,6 @@ async function buildAvatarCanvas(dstCtx,size,profile){
     try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
   async function drawEquippedOverlaysForAvatar(ctx, size){
     const k=(size>0?size/128:1);
-    /* >>> FIX: scale w/h by k so head overlay aligns at 96px just like Arena <<< */
     function scaled(b){ return { w:Math.round((b.w||0)*k), h:Math.round((b.h||0)*k), ox:Math.round((b.ox||0)*k), oy:Math.round((b.oy||0)*k), scale:b.scale }; }
     const legs =equippedIn('legs');  if(legs ) drawOne(ctx, legs .svg, scaled(BOX128.legs ));
     const chest=equippedIn('chest'); if(chest) drawOne(ctx, chest.svg, scaled(BOX128.chest));
@@ -667,51 +740,44 @@ function loop(t){
   const sRad = 0.5;
   const hitR = (pRad + sRad) * 1.35;
 
-  for (let i = spheres.length - 1; i >= 0; i--) {
-    const s = spheres[i];
+  for(let i=spheres.length-1;i>=0;i--){
+    const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
 
     // Any contact with any block → GAME OVER
-    for (const b of blocks) {
-      if (s.position.distanceTo(b.position) < 0.8 * currentPieceS) {
+    for(const b of blocks){
+      if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
         fail();
         return requestAnimationFrame(loop);
       }
     }
 
     // Projectile collision (swept)
-    for (let j = projectilePool.length - 1; j >= 0; j--) {
-      const p = projectilePool[j];
+    for(let j=projectilePool.length-1;j>=0;j--){
+      const p=projectilePool[j];
       const nextP = p.position.clone().addScaledVector(p.userData.v, dt);
       const d = distPointToSegment(s.position, p.position, nextP);
-      if (d < hitR) {
-        world.remove(s); spheres.splice(i, 1);
-        world.remove(p); projectilePool.splice(j, 1);
-        try { bleep('explode'); } catch (_) {}
+      if(d < hitR){
+        world.remove(s); spheres.splice(i,1);
+        world.remove(p); projectilePool.splice(j,1);
+        try{ bleep('explode'); }catch(_){}
         break;
       }
     }
 
-    // Reached board → GAME OVER
-    if (s.position.y <= baseY) {
-      fail();
-      return requestAnimationFrame(loop);
-    }
+    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board → GAME OVER
   }
 
-  for (let j = projectilePool.length - 1; j >= 0; j--) {
-    const p = projectilePool[j];
+  for(let j=projectilePool.length-1;j>=0;j--){
+    const p=projectilePool[j];
     p.position.addScaledVector(p.userData.v, dt);
     p.userData.ttl -= dt;
-    if (p.userData.ttl <= 0) {
-      world.remove(p);
-      projectilePool.splice(j, 1);
-    }
+    if(p.userData.ttl<=0){ world.remove(p); projectilePool.splice(j,1); }
   }
-
-  renderer.render(scene, camera);
-  if (!ended) requestAnimationFrame(loop);
+  renderer.render(scene,camera);
+  if(!ended) requestAnimationFrame(loop);
 }
+
 /* =======================
    Timer + Boot + End
 ======================= */
@@ -781,6 +847,7 @@ function showEndOverlay(){
   document.getElementById('finalCoins').textContent = String(runCoins|0);
   document.getElementById('finalCraft').textContent = String(craftsGrantedThisRun|0);
   endOverlay.style.display='flex';
+  try{ _wallet.saveSoon(); }catch(_){}
   submitLeaderboard(score|0); // ensure IZZA DASH (puzzle) posts & persists
 }
 
@@ -795,9 +862,11 @@ async function refreshAvatar(){
 async function start(){
   try{
     await ensureSession();
-    if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();  // <-- ensures starting balance matches Arena
+    // Pull latest wallet from Persist so we START with the Arena balance
+    await _wallet.syncFromPersist();
   }catch(_){}
-  // Start with EXACT current balance from Arena (stored in LS by Arena)
+
+  // Start with EXACT current balance from Arena (persist → mirrors)
   paintCoinsHUD(_wallet.readCoins());
   runStartCoins=_wallet.readCoins();
   craftsGrantedThisRun = 0;
@@ -830,10 +899,18 @@ document.getElementById('startBtn').addEventListener('click', start, {passive:tr
 /* “End Game” button -> popup with results */
 endBtn.addEventListener('click', (e)=>{ e.preventDefault(); showEndOverlay(); }, {passive:false});
 
+/* Return to Arcade — force persist save BEFORE navigating so Arena sees updated total immediately */
+document.getElementById('backBtn').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+  // ensure URL already has t/u (set earlier by withAuth)
+  location.href = e.currentTarget.href;
+},{passive:false});
+
 /* Play Again (reset state, restart run) */
 document.addEventListener('click', (e)=>{
-  const btn = e.target && e.target.id==='againBtn';
-  if(!btn) return;
+  const isAgain = e.target && e.target.id==='againBtn';
+  if(!isAgain) return;
   e.preventDefault();
   endOverlay.style.display='none';
   // reset run state
@@ -846,10 +923,13 @@ document.addEventListener('click', (e)=>{
   requestAnimationFrame(loop);
 }, {passive:false});
 
-/* keep HUD coins synced if other tabs alter wallet */
-window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
+/* keep HUD coins synced if other tabs alter wallet, or when returning from snapshots */
+window.addEventListener('storage', (e)=>{ if(e && (e.key==='izzaCoins' || e.key==='izzaWallet')){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
 window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
-window.addEventListener('pageshow', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
+window.addEventListener('pageshow', async ()=>{
+  try{ await _wallet.syncFromPersist(); }catch(_){}
+  paintCoinsHUD(_wallet.readCoins());
+}, {passive:true});
 
 /* prevent long-press menu only inside the game display (not the START card) */
 document.getElementById('gl').addEventListener('contextmenu', e=>e.preventDefault(), {passive:false});
@@ -857,7 +937,11 @@ document.getElementById('arena').addEventListener('selectstart', e=>{
   if(e.target.id==='gl' || e.target.closest('#gl')) e.preventDefault();
 },{passive:false});
 
+/* Save on hide/unload so Arena picks up new totals even if user leaves abruptly */
 window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, {passive:true});
+window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ try{ IZZA_PERSIST?.save?.(); }catch(_){} } }, {passive:true});
 </script>
 </body>
 </html>
+<!-- build: 2025-10-06 -->
+ 
