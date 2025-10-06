@@ -148,6 +148,11 @@
     }
     .chip input{appearance:none; width:14px; height:14px; border-radius:50%; border:1px solid var(--line); display:inline-block}
     .chip input:checked{background:#5bd68a}
+
+    /* --- Surgical: widen the WASTE cell to two slots on the top row --- */
+    #rowTop .cell.wasteWide{ grid-column: span 2; }
+    /* make sure the WASTE area can visually hold a wider fan */
+    #waste{ padding-right: 6px; }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -174,15 +179,16 @@
       </div>
 
       <div id="board" class="board" aria-label="Solitaire board">
-        <!-- Row 1: stock + waste + 4 foundations -->
+        <!-- Row 1: stock + waste(2 cols) + 4 foundations -->
         <div class="row" id="rowTop">
           <div class="cell"><div class="pile" id="stock"></div><span>STOCK</span></div>
-          <div class="cell"><div class="pile" id="waste"></div><span>WASTE</span></div>
+          <div class="cell wasteWide"><div class="pile" id="waste"></div><span>WASTE</span></div>
           <div class="cell foundation"><div class="pile" id="f1"></div><span>♠ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUND.</span></div>
-          <div class="cell"></div> <!-- FIXED missing quote -->
+          <!-- surgical: hide the previously unused extra slot to keep the grid on one row -->
+          <div class="cell" style="display:none"></div>
         </div>
 
         <!-- Row 2: seven tableau columns -->
@@ -451,19 +457,22 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (fan visible count based on draw mode; only top is interactive)
+  // WASTE (wider + bigger fan; only the top is interactive)
   const wEl=document.getElementById(piles.waste);
   if(P.waste.length){
-    const N=Math.min(getDrawPref(), P.waste.length);
+    const drawMode=getDrawPref();
+    const N=Math.min(drawMode, P.waste.length);
     const start=P.waste.length - N;
+    // wider horizontal spread for visibility, scaled to card width
+    const gap = (drawMode===3) ? Math.max(18, Math.round(cssVarInt('--cardW',86)*0.42)) : 0;
     for(let i=0;i<N;i++){
       const idx=start+i;
       const c=P.waste[idx]; c.face=true;
       const el=spawnCard(c);
       el.style.zIndex=10+i;
-      placeXY(el, i*14, 0); // small horizontal fan
+      placeXY(el, i*gap, 0); // more separation for draw-3
       el.dataset.where='w';
-      if(idx!==P.waste.length-1) el.dataset.locked='1'; // lock non-top
+      if(idx!==P.waste[P.waste.length-1]) el.dataset.locked='1'; // lock non-top
       wEl.appendChild(el);
     }
   }
