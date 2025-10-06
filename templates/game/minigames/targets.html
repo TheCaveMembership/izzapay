@@ -35,7 +35,7 @@
       --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
       --safe-t: env(safe-area-inset-top, 0px);
       --safe-b: env(safe-area-inset-bottom, 0px);
-      --cardW: 86px;                          /* set by JS to fit 7 cols */
+      --cardW: 86px;
       --cardH: calc(var(--cardW) * 1.45);
       --fanY:  calc(var(--cardH) * 0.26);
       --gutter: 10px;
@@ -134,7 +134,6 @@
       content:"";
       position:absolute; inset:0;
       background:url("/static/game/img/solitaire-start-bg.jpg") center/cover no-repeat;
-      /* ^^^ replace this with your background image path */
       filter:brightness(.8);
     }
     .startSheet{
@@ -183,7 +182,7 @@
           <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUND.</span></div>
-          <div class="cell"></div>
+          <div class="cell></div>
         </div>
 
         <!-- Row 2: seven tableau columns -->
@@ -216,7 +215,7 @@
             <a class="btn" id="startBack" href="/izza-game/minigames">Return to Arcade</a>
           </div>
           <p class="muted" style="margin:10px 0 0; font-size:12px">
-            You can drag from any column. Place cards on foundations when they’re the next rank of the same suit.
+            You can drag from any column. Tap a top card to auto-send it to its foundation when allowed.
           </p>
         </div>
       </div>
@@ -230,8 +229,8 @@
             <li>Only a King (K) may be moved to an empty tableau column.</li>
             <li>Foundations build up by suit from Ace → King.</li>
             <li>Tap the STOCK to flip to the WASTE (draw-1 or draw-3 based on your start choice).</li>
-            <li>When STOCK is empty, tap it to recycle the WASTE.</li>
-            <li>Drag a face-up run (e.g., 7♣-6♦-5♣) as a group; move cards to foundations when eligible.</li>
+            <li>When STOCK is empty and all tableau cards are face-up, the game auto-plays to the foundations.</li>
+            <li>Tap a top card to auto-move it to its foundation when legal—or drag it manually.</li>
           </ol>
           <div class="finish">
             <button class="btn" id="rulesClose">Close</button>
@@ -257,7 +256,6 @@
         </div>
       </div>
 
-      <!-- dedicated drag layer -->
       <div id="dragLayer" aria-hidden="true"></div>
     </div>
   </div>
@@ -378,6 +376,7 @@ function setDrawPref(n){ localStorage.setItem(DRAW_KEY, String(n===3?3:1)); }
 
 /* ===== Solitaire core ===== */
 const SUITS=['♠','♥','♣','♦'];
+const SUIT_FIDX={ '♠':0,'♥':1,'♣':2,'♦':3 }; // suit → foundation index
 const COLORS={ '♠':'black','♣':'black','♥':'red','♦':'red' };
 const RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 
@@ -485,6 +484,7 @@ function canGoFoundation(c, idx){
   const top=f[f.length-1];
   return c.suit===top.suit && c.rank===top.rank+1;
 }
+function foundationIndexForSuit(suit){ return SUIT_FIDX[suit]; }
 function acceptOnTableau(cards,destIdx){
   const dest=P.t[destIdx];
   const head=cards[0];
@@ -508,19 +508,82 @@ function onDraw(){
     const c=P.stock.pop(); c.face=true; P.waste.push(c); drew++;
   }
   if(drew>0){ moves++; elMoves.textContent=String(moves); renderAll(); }
+  maybeAutoPlay(); // in case stock is now empty and board is all face-up
 }
 
-/* ----- DRAG ----- */
+/* ----- Autoplay helpers ----- */
+function noHiddenCards(){
+  for(let i=0;i<7;i++){
+    const pile=P.t[i];
+    for(let k=0;k<pile.length;k++) if(!pile[k].face) return false;
+  }
+  return true;
+}
+function autoMoveCardToFoundation(cardId){
+  // decide suit foundation and move if legal
+  // locate source and card
+  let c=null, from=''; let col=-1;
+  if(P.waste.length && P.waste[P.waste.length-1].id===cardId){ c=P.waste[P.waste.length-1]; from='w'; }
+  if(!c){
+    for(let i=0;i<7;i++){
+      const pile=P.t[i];
+      if(pile.length && pile[pile.length-1].id===cardId){ c=pile[pile.length-1]; from='t'; col=i; break; }
+    }
+  }
+  if(!c) return false;
+  const fIdx=foundationIndexForSuit(c.suit);
+  if(!canGoFoundation(c, fIdx)) return false;
+  // move
+  takeFromSource(c.id);
+  P.f[fIdx].push(c);
+  moves++; elMoves.textContent=String(moves);
+  flipIfNeeded();
+  renderAll();
+  checkWin();
+  return true;
+}
+function autoPlayAll(){
+  // Repeatedly move any eligible top cards to foundations
+  let movedSomething=true;
+  while(movedSomething){
+    movedSomething=false;
+    // 1) waste top first
+    if(P.waste.length){
+      const top=P.waste[P.waste.length-1];
+      if(autoMoveCardToFoundation(top.id)){ movedSomething=true; continue; }
+    }
+    // 2) tableau tops (prefer Aces / low ranks first)
+    const tops=[];
+    for(let i=0;i<7;i++){
+      const pile=P.t[i]; if(pile.length && pile[pile.length-1].face) tops.push(pile[pile.length-1]);
+    }
+    // sort by rank to prefer moving low ranks first
+    tops.sort((a,b)=>a.rank-b.rank);
+    for(const t of tops){
+      if(autoMoveCardToFoundation(t.id)){ movedSomething=true; break; }
+    }
+  }
+}
+function maybeAutoPlay(){
+  if(P.stock.length===0 && noHiddenCards()){
+    autoPlayAll();
+  }
+}
+
+/* ----- DRAG + Tap-to-Foundation ----- */
 const dragLayer=document.getElementById('dragLayer');
+let dragging=false;
+
 function enableDrag(){
   document.querySelectorAll('.card').forEach(el=>{
     if(el.classList.contains('back')) return;
     el.onpointerdown=(e)=>{
       if(ended) return;
+      dragging=false;
       const where=el.dataset.where || inferWhere(el);
       const run=buildRunModel(el, where);
       if(!run.cards.length) return;
-      startDrag(run, e); e.preventDefault();
+      startDrag(run, e, el); e.preventDefault();
     };
   });
 }
@@ -546,7 +609,7 @@ function buildRunModel(el, where){
   }
   return {cards:[], from:''};
 }
-function startDrag(run,e){
+function startDrag(run,e,srcEl){
   const ids=new Set(run.cards.map(c=>c.id));
   document.querySelectorAll('.card').forEach(n=>{ if(ids.has(n.dataset.id)) n.classList.add('being-dragged'); });
 
@@ -556,7 +619,7 @@ function startDrag(run,e){
   run.cards.forEach((c,i)=>{ const g=spawnCard(c); g.style.position='absolute'; g.style.left='0'; g.style.top=(i*cssVarInt('--fanY',26))+'px'; ghost.appendChild(g); });
   dragLayer.appendChild(ghost);
 
-  dragRun={ run, ghost, ox:e.clientX, oy:e.clientY };
+  dragRun={ run, ghost, srcId:srcEl?.dataset?.id||null, moved:false };
   moveGhost(e.clientX, e.clientY);
 
   window.addEventListener('pointermove', onDragMove, {passive:false});
@@ -566,6 +629,7 @@ function moveGhost(x,y){
   const w=dragRun.ghost.firstChild?.offsetWidth||0;
   const h=dragRun.ghost.firstChild?.offsetHeight||0;
   dragRun.ghost.style.transform=`translate(${x - w/2}px, ${y - h/3}px)`;
+  dragRun.moved=true; // any movement marks as drag
 }
 function onDragMove(e){ if(!dragRun) return; moveGhost(e.clientX, e.clientY); e.preventDefault(); }
 
@@ -576,25 +640,39 @@ function hitPileId(x,y){
 }
 function onDragEnd(e){
   window.removeEventListener('pointermove', onDragMove);
-  const target=hitPileId(e.clientX, e.clientY);
   let placed=false;
 
-  if(target && target.startsWith('t')){
-    const tIdx=+target.slice(1)-1;
-    placed=tryPlaceToTableau(dragRun.run.cards, tIdx);
-  }else if(target && target.startsWith('f') && dragRun.run.cards.length===1){
-    const fIdx=+target.slice(1)-1;
-    placed=tryPlaceToFoundation(dragRun.run.cards[0], fIdx);
+  if(dragRun.moved){
+    const target=hitPileId(e.clientX, e.clientY);
+    if(target && target.startsWith('t')){
+      const tIdx=+target.slice(1)-1;
+      placed=tryPlaceToTableau(dragRun.run.cards, tIdx);
+    }else if(target && target.startsWith('f') && dragRun.run.cards.length===1){
+      const fIdx=+target.slice(1)-1;
+      placed=tryPlaceToFoundation(dragRun.run.cards[0], fIdx);
+    }
+  }else{
+    // Treat as TAP: try to auto-send this top card to foundation
+    const id=dragRun.srcId;
+    if(id) placed = autoMoveCardToFoundation(id); // this function already renders/checks
   }
 
+  // cleanup ghosts + unhide originals
   dragLayer.innerHTML='';
   const ids=new Set(dragRun.run.cards.map(c=>c.id));
   document.querySelectorAll('.card.being-dragged').forEach(n=>{ if(ids.has(n.dataset.id)) n.classList.remove('being-dragged'); });
   dragRun=null;
 
-  if(placed){ moves++; elMoves.textContent=String(moves); flipIfNeeded(); }
-  renderAll();
-  if(placed) checkWin();
+  // if drop placed by drag route:
+  if(placed && !ended){
+    flipIfNeeded();
+    renderAll();
+    checkWin();
+    maybeAutoPlay();
+  }else if(!placed && !ended && !dragRun){
+    // if tap failed, ensure the board is still interactive
+    renderAll();
+  }
 }
 
 function tryPlaceToTableau(cards,destIdx){
@@ -602,11 +680,14 @@ function tryPlaceToTableau(cards,destIdx){
   if(!acceptOnTableau(cards, destIdx)) return false;
   takeFromSource(cards[0].id);
   cards.forEach(c=>P.t[destIdx].push(c));
+  moves++; elMoves.textContent=String(moves);
   return true;
 }
 function tryPlaceToFoundation(card,fIdx){
   if(!canGoFoundation(card, fIdx)) return false;
-  takeFromSource(card.id); P.f[fIdx].push(card); return true;
+  takeFromSource(card.id); P.f[fIdx].push(card);
+  moves++; elMoves.textContent=String(moves);
+  return true;
 }
 function takeFromSource(id){
   if(P.waste.length && P.waste[P.waste.length-1].id===id){ P.waste.pop(); return; }
@@ -730,11 +811,9 @@ document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>{
   const startRules=document.getElementById('startRules');
   const radios=[...document.querySelectorAll('input[name="draw"]')];
 
-  // Initialize radio selection from pref
   const pref=getDrawPref();
   const r=radios.find(x=>+x.value===pref); if(r) r.checked=true;
 
-  // Start button applies choice and begins new deal
   startPlay?.addEventListener('click', ()=>{
     const chosen=+((radios.find(x=>x.checked)?.value)||pref);
     setDrawPref(chosen);
@@ -753,8 +832,7 @@ document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>{
   try{ await _wallet.syncFromPersist(); }catch(_){}
   sizeBoard();
   paintWallet();
-  // Do NOT auto-deal here; wait for Start to be pressed.
-  // Keep start overlay visible on first load; if returning via "Play Again", we call layoutNew().
+  // Wait for Start to be pressed
 })();
 </script>
 </body>
