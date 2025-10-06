@@ -593,31 +593,38 @@ glCanvas.addEventListener('pointerdown', onDown, {passive:true});
 glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
-/* ---------- Shoot metal balls (bottom-left of area) ---------- */
-function avatarOriginForLevel(){
-  const rS = ringScaleForLevel(level);
-  const baseRingR = 2.6 * rS;
-  // bottom-left relative to the ring (−x, +z), slightly under board height
-  return new THREE.Vector3(-baseRingR*1.15, baseY+0.25, baseRingR*0.65);
-}
+/* ---------- Shoot metal balls FROM TAP, with auto-aim at nearest sphere ---------- */
+/* NOTE: this fixes the “goes through” feel by:
+   1) spawning exactly where the player taps (on the arena plane),
+   2) aiming straight at the nearest falling sphere, and
+   3) using swept segment–sphere collisions each frame. */
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
-  if(pickBlock(e)) return;
+  if(pickBlock(e)) return; // let dragging win if user tapped a block
 
   ammo--; ammoEl.textContent=ammo;
 
-  const origin=avatarOriginForLevel();
-  const tgt=screenToPlane(e, 0);
-  const dir=tgt.clone().sub(origin).normalize();
+  // Spawn at tap point (on board plane), slightly above the surface
+  const origin=screenToPlane(e, 0);
+  origin.y = baseY + 0.1;
+
+  // Pick the nearest active sphere to this tap point (so the shot actually targets it)
+  let target = null, best=1e9;
+  for(const s of spheres){
+    const d = origin.distanceTo(s.position);
+    if(d<best){best=d; target=s;}
+  }
+  // If none (unlikely), just shoot upward
+  const dir = target ? target.position.clone().sub(origin).normalize() : new THREE.Vector3(0,1,0);
 
   const pScale = projScaleForLevel(level);
-  const b=new THREE.Mesh(new THREE.SphereGeometry(0.18*pScale,20,16), metal());
+  const b=new THREE.Mesh(new THREE.SphereGeometry(0.22*pScale,20,16), metal());
   b.position.copy(origin);
 
-  /* boost speed + lifetime so shots always reach */
+  // Good speed and lifetime; scaled with zoom so it reaches every corner
   const rS = ringScaleForLevel(level);
-  b.userData.v=dir.multiplyScalar(7.5*rS);
+  b.userData.v=dir.multiplyScalar(9.0*rS);
   b.userData.ttl=5.0;
 
   b.castShadow=true; world.add(b); projectilePool.push(b);
@@ -639,36 +646,52 @@ function fail(){
   setTimeout(()=>layoutLevel(),520);
 }
 
+/* --- geometric helper: distance from point C to segment AB --- */
+function distPointToSegment(c,a,b){
+  const ab = b.clone().sub(a);
+  const t = THREE.MathUtils.clamp(c.clone().sub(a).dot(ab)/ab.lengthSq(), 0, 1);
+  const proj = a.clone().add(ab.multiplyScalar(t));
+  return proj.distanceTo(c);
+}
+
 /* ---------- Loop ---------- */
 let last=performance.now();
 function loop(t){
   const dt=Math.min(0.033,(t-last)/1000); last=t;
 
   // precompute radii for accurate sphere-sphere hit test
-  const pRad = 0.18*projScaleForLevel(level);
+  const pRad = 0.22*projScaleForLevel(level);
   const sRad = 0.5;
-  const hitR = (pRad + sRad) * 1.15; // small cushion
+  const hitR = (pRad + sRad) * 1.35; // generous cushion so any visual touch counts
 
   for(let i=spheres.length-1;i>=0;i--){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
+
+    // Block collision → fail
     for(const b of blocks){
       if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
         fail();
         return requestAnimationFrame(loop);
       }
     }
+
+    // Projectile collision (swept)
     for(let j=projectilePool.length-1;j>=0;j--){
       const p=projectilePool[j];
-      if(p.position.distanceTo(s.position) < hitR){
+      const nextP = p.position.clone().addScaledVector(p.userData.v, dt);
+      const d = distPointToSegment(s.position, p.position, nextP);
+      if(d < hitR){
         world.remove(s); spheres.splice(i,1);
         world.remove(p); projectilePool.splice(j,1);
         try{ bleep('explode'); }catch(_){}
         break;
       }
     }
+
     if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board
   }
+
   for(let j=projectilePool.length-1;j>=0;j--){
     const p=projectilePool[j];
     p.position.addScaledVector(p.userData.v, dt);
@@ -689,6 +712,30 @@ function tickTimer(){
   if(timeLeft<=0){ showMsg('TIME!','miss'); layoutLevel(); timeLeft=60; }
 }
 
+/* ===== Leaderboard submit (uses IZZA_LEADERBOARD; game id = 'puzzle') ===== */
+async function submitLeaderboard(finalScore){
+  try{
+    if(window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit==='function'){
+      await IZZA_LEADERBOARD.submit({ game:'puzzle', score: finalScore|0 });
+    }else{
+      // legacy-compatible fallback; persist shim intercepts this too
+      await fetch(_withAuth('/izza-game/api/leaderboard/submit'),{
+        method:'POST',credentials:'include',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({ game:'puzzle', score: finalScore|0 })
+      }).catch(()=>{});
+    }
+    // cache locally as well so it shows up offline/in snapshot
+    const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
+    const row={u, s:finalScore|0, ts:Date.now()};
+    const key='izzaLb2::puzzle::alltime';
+    try{
+      const cur=JSON.parse(localStorage.getItem(key)||'[]'); cur.push(row);
+      cur.sort((a,b)=>b.s-a.s); localStorage.setItem(key, JSON.stringify(cur.slice(0,20)));
+    }catch(_){}
+  }catch(_){}
+}
+
 function showEndOverlay(){
   ended=true;
   const totalCoins = _wallet.readCoins();
@@ -697,6 +744,7 @@ function showEndOverlay(){
   document.getElementById('finalCoins').textContent = String(runCoins|0);
   document.getElementById('finalCraft').textContent = String(craftsGrantedThisRun|0);
   endOverlay.style.display='flex';
+  submitLeaderboard(score|0); // <- ensure IZZA DASH (puzzle) posts to leaderboard & persists
 }
 
 async function refreshAvatar(){
