@@ -77,20 +77,12 @@
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
 
-    /* avatar — moved to top-left under the Level pill and smaller (distance feel) */
+    /* avatar — moved to top-center and smaller to look distant */
     .playerAvatar{
-      position:absolute;
-      left:12px;
-      top:58px;      /* sits just under the first row of pills */
-      bottom:auto;
-      width:72px;    /* smaller */
-      height:72px;
-      z-index:7;
-      pointer-events:none;
-      opacity:.96;
-      transform:translateZ(0);
+      position:absolute; top:10px; left:50%; transform:translateX(-50%);
+      width:64px; height:64px; z-index:7; pointer-events:none
     }
-    .playerAvatar canvas{width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
+    .playerAvatar canvas{width:64px;height:64px;image-rendering:pixelated;image-rendering:crisp-edges}
 
     /* webgl canvas + overlay */
     #gl{position:absolute;inset:0;display:block;touch-action:none;width:100%;height:100%}
@@ -153,6 +145,7 @@
             <span class="pill">Craft Credits: <strong id="finalCraft">0</strong></span>
           </div>
           <div class="startBtns">
+            <button class="btn" id="againBtn">Play Again</button>
             <a class="btn" id="backBtn" href="/izza-game/minigames">Return to Arcade</a>
             <a class="btn" id="cityBtn2" href="/izza-game/play">Enter IZZA City</a>
           </div>
@@ -425,10 +418,7 @@ function initThree(){
   world=new THREE.Group(); scene.add(world);
 
   // base plate + ring (scaled per level)
-  floorPlate = new THREE.Mesh(
-  new THREE.CircleGeometry(3.6, 64),
-  new THREE.MeshStandardMaterial({ color: 0x0e2448, metalness: .2, roughness: .7 })
-);
+  floorPlate=new THREE.Mesh(new THREE.CircleGeometry(3.6,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
   floorPlate.rotation.x=-Math.PI/2; floorPlate.position.y=-1; floorPlate.receiveShadow=true; world.add(floorPlate);
   floorRing=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.9}));
   floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.98; world.add(floorRing);
@@ -607,7 +597,7 @@ glCanvas.addEventListener('pointerdown', onDown, {passive:true});
 glCanvas.addEventListener('pointermove', onMove, {passive:true});
 window.addEventListener('pointerup', onUp, {passive:true});
 
-/* ---------- Shoot metal balls FROM TAP, going OUTWARD toward the distance ---------- */
+/* ---------- Shoot metal balls FROM TAP, with auto-aim at nearest sphere ---------- */
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
@@ -619,16 +609,18 @@ function fireMetal(e){
   const origin=screenToPlane(e, 0);
   origin.y = baseY + 0.1;
 
-  // Direction: radial OUTWARD from arena center (0,0,0) toward the tap point
-  let dir = new THREE.Vector3(origin.x, 0, origin.z);
-  if (dir.lengthSq() < 1e-4) dir.set(0,0,1); // fallback if center is tapped
-  dir.normalize();
+  // Pick the nearest active sphere to this tap point
+  let target = null, best=1e9;
+  for(const s of spheres){
+    const d = origin.distanceTo(s.position);
+    if(d<best){best=d; target=s;}
+  }
+  const dir = target ? target.position.clone().sub(origin).normalize() : new THREE.Vector3(0,1,0);
 
   const pScale = projScaleForLevel(level);
   const b=new THREE.Mesh(new THREE.SphereGeometry(0.22*pScale,20,16), metal());
   b.position.copy(origin);
 
-  // Speed scaled with board zoom, shooting away from the center
   const rS = ringScaleForLevel(level);
   b.userData.v=dir.multiplyScalar(9.0*rS);
   b.userData.ttl=5.0;
@@ -647,12 +639,8 @@ function checkWin(){
   for(let i=1;i<ys.length;i++){ if(ys[i]-ys[i-1] < 0.8*currentPieceS) return; }
   awardAndNext();
 }
-
-/* --- GAME OVER: glass spheres smash blocks or reach board, OR timer runs out --- */
 function fail(){
-  if (ended) return;
-  showMsg('GAME OVER','miss');
-  showEndOverlay();
+  showEndOverlay(); /* GAME OVER when a sphere smashes the stack */
 }
 
 /* --- geometric helper: distance from point C to segment AB --- */
@@ -668,10 +656,9 @@ let last=performance.now();
 function loop(t){
   const dt=Math.min(0.033,(t-last)/1000); last=t;
 
-  // precompute radii for accurate sphere-sphere hit test
   const pRad = 0.22*projScaleForLevel(level);
   const sRad = 0.5;
-  const hitR = (pRad + sRad) * 1.35; // generous cushion so any visual touch counts
+  const hitR = (pRad + sRad) * 1.35;
 
   for(let i=spheres.length-1;i>=0;i--){
     const s=spheres[i];
@@ -681,7 +668,7 @@ function loop(t){
     for(const b of blocks){
       if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
         fail();
-        return; // stop loop; showEndOverlay handles ending
+        return requestAnimationFrame(loop);
       }
     }
 
@@ -698,11 +685,7 @@ function loop(t){
       }
     }
 
-    // If a sphere reaches the board surface → GAME OVER
-    if(s.position.y <= baseY){
-      fail();
-      return;
-    }
+    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board → GAME OVER
   }
 
   for(let j=projectilePool.length-1;j>=0;j--){
@@ -711,10 +694,8 @@ function loop(t){
     p.userData.ttl -= dt;
     if(p.userData.ttl<=0){ world.remove(p); projectilePool.splice(j,1); }
   }
-  if(!ended){
-    renderer.render(scene,camera);
-    requestAnimationFrame(loop);
-  }
+  renderer.render(scene,camera);
+  if(!ended) requestAnimationFrame(loop);
 }
 
 /* =======================
@@ -725,9 +706,8 @@ function tickTimer(){
   timeLeft--; timeEl.textContent=timeLeft;
   try{ bleep('tick'); }catch(_){}
   if(timeLeft<=0){
-    // TIMEOUT → GAME OVER
     showMsg('TIME!','miss');
-    fail();
+    showEndOverlay(); /* GAME OVER when time runs out */
   }
 }
 
@@ -747,33 +727,31 @@ async function submitLeaderboard(finalScore){
     // cache locally as well so it shows up offline/in snapshot
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:finalScore|0, ts:Date.now()};
+    const z=n=>String(n).padStart(2,'0'); const d=new Date();
+    const stamps={ day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear()) };
 
-    // All-time
-    const keyAll='izzaLb2::puzzle::alltime';
+    // all-time
     try{
-      const cur=JSON.parse(localStorage.getItem(keyAll)||'[]'); cur.push(row);
-      cur.sort((a,b)=>b.s-a.s); localStorage.setItem(keyAll, JSON.stringify(cur.slice(0,20)));
+      const keyAll='izzaLb2::puzzle::alltime';
+      const curAll=JSON.parse(localStorage.getItem(keyAll)||'[]'); curAll.push(row);
+      curAll.sort((a,b)=>b.s-a.s); localStorage.setItem(keyAll, JSON.stringify(curAll.slice(0,20)));
     }catch(_){}
 
-    // Daily / Monthly / Annual (year) — stamps
-    const d=new Date(), z=n=>String(n).padStart(2,'0');
-    const stamps={ day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
-                   month:`${d.getFullYear()}-${z(d.getMonth()+1)}`,
-                   year:String(d.getFullYear()) };
-    const addRow=(k)=>{
-      try{
-        const cur=JSON.parse(localStorage.getItem(k)||'[]'); cur.push(row);
-        cur.sort((a,b)=>b.s-a.s); localStorage.setItem(k, JSON.stringify(cur.slice(0,20)));
-      }catch(_){}
-    };
-    addRow(`izzaLb2::puzzle::day::${stamps.day}`);
-    addRow(`izzaLb2::puzzle::month::${stamps.month}`);
-    addRow(`izzaLb2::puzzle::year::${stamps.year}`);
+    // daily / monthly / annual
+    try{
+      const push = (k)=>{
+        const arr=JSON.parse(localStorage.getItem(k)||'[]'); arr.push(row);
+        arr.sort((a,b)=>b.s-a.s); localStorage.setItem(k, JSON.stringify(arr.slice(0,20)));
+      };
+      push(`izzaLb2::puzzle::day::${stamps.day}`);
+      push(`izzaLb2::puzzle::month::${stamps.month}`);
+      push(`izzaLb2::puzzle::year::${stamps.year}`);
+    }catch(_){}
   }catch(_){}
 }
 
 function showEndOverlay(){
-  if (ended) return;
+  if(ended) return;
   ended=true;
   const totalCoins = _wallet.readCoins();
   const runCoins = Math.max(0,totalCoins - runStartCoins);
@@ -781,7 +759,7 @@ function showEndOverlay(){
   document.getElementById('finalCoins').textContent = String(runCoins|0);
   document.getElementById('finalCraft').textContent = String(craftsGrantedThisRun|0);
   endOverlay.style.display='flex';
-  submitLeaderboard(score|0); // <- ensure IZZA DASH (puzzle) posts to leaderboard & persists
+  submitLeaderboard(score|0); // ensure IZZA DASH (puzzle) posts & persists
 }
 
 async function refreshAvatar(){
@@ -805,15 +783,12 @@ async function start(){
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
 
   try{
-  const AC = window.AudioContext || window.webkitAudioContext;
-  audioCtx = audioCtx || new AC();   // ensure the global `audioCtx` is set
-  initAudio();                       // sets up `master` etc.
-  await audioCtx.resume();
-  bgmEl.volume = 0.25;
-  bgmEl.muted = (localStorage.getItem('izzaMute') === '1');
-  bgmEl.currentTime = 0;
-  bgmEl.play().catch(()=>{});
-}catch(_){}
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    window.audioCtx = window.audioCtx || new AudioCtx();
+    await audioCtx.resume();
+    initAudio();
+    bgmEl.volume=0.25; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
+  }catch(_){}
 
   // 3D
   initThree();
@@ -831,6 +806,22 @@ document.getElementById('startBtn').addEventListener('click', start, {passive:tr
 
 /* “End Game” button -> popup with results */
 endBtn.addEventListener('click', (e)=>{ e.preventDefault(); showEndOverlay(); }, {passive:false});
+
+/* Play Again (reset state, restart run) */
+document.addEventListener('click', (e)=>{
+  const btn = e.target && e.target.id==='againBtn';
+  if(!btn) return;
+  e.preventDefault();
+  endOverlay.style.display='none';
+  // reset run state
+  score = 0; level = 1; timeLeft = 60; ended = false;
+  runStartCoins = _wallet.readCoins();
+  craftsGrantedThisRun = 0;
+  // clear scene if needed and layout level 1
+  if(!scene || !renderer) initThree();
+  layoutLevel();
+  requestAnimationFrame(loop);
+}, {passive:false});
 
 /* keep HUD coins synced if other tabs alter wallet */
 window.addEventListener('storage', (e)=>{ if(e && e.key==='izzaCoins'){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
