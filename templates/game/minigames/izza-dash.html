@@ -352,18 +352,27 @@ const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E
 const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 function paletteSwap(img, fromHex, toHex, tol=4000){
-  const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b=n&255}; };
-  const from=fromHex.map(h=>hexToRgb(h)), to=toHex.map(h=>hexToRgb(h));
-  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
-  const cx=oc.getContext('2d',{willReadFrequently:true}); cx.imageSmoothingEnabled=false; cx.drawImage(img,0,0);
-  const id=cx.getImageData(0,0,w,h),d=id.data;
-  function sd(a,b){const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;}
+  const hexToRgb = h => {
+    const n = parseInt(h.replace('#',''),16);
+    return { r: (n>>16)&255, g: (n>>8)&255, b: (n&255) };
+  };
+  const from = fromHex.map(h=>hexToRgb(h)), to = toHex.map(h=>hexToRgb(h));
+  const w = img.width, h = img.height, oc = document.createElement('canvas'); oc.width = w; oc.height = h;
+  const cx = oc.getContext('2d',{willReadFrequently:true}); cx.imageSmoothingEnabled = false; cx.drawImage(img,0,0);
+  const id = cx.getImageData(0,0,w,h), d = id.data;
+  function sd(a,b){ const dr=a.r-b.r, dg=a.g-b.g, db=a.b-b.b; return dr*dr + dg*dg + db*db; }
   for(let i=0;i<d.length;i+=4){
-    if(d[i+3]===0) continue; const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
-    for(let k=0;k<from.length;k++){ const s=sd(p,from[k]); if(s<score){score=s;best=k;} }
-    if(score<=tol){ const t=to[best]||to[1]||to[0]; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+    if(d[i+3]===0) continue;
+    const p = { r:d[i], g:d[i+1], b:d[i+2] };
+    let best=-1, score=1e9;
+    for(let k=0;k<from.length;k++){ const s=sd(p,from[k]); if(s<score){ score=s; best=k; } }
+    if(score<=tol){
+      const t = to[best] || to[1] || to[0];
+      d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
+    }
   }
-  cx.putImageData(id,0,0); return oc;
+  cx.putImageData(id,0,0);
+  return oc;
 }
 async function buildAvatarCanvas(dstCtx,size,profile){
   const DW=size,DH=size,X=0,Y=0;
