@@ -1,0 +1,732 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IZZA SOLITAIRE — IZZA GAME</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+  <!-- Persist base used across Arena/City -->
+  <script>window.IZZA_PERSIST_BASE='https://izzagame.onrender.com';</script>
+  <script>
+  /* Username before persist, same pattern as your other minigames */
+  (function(){
+    try{
+      const q=new URLSearchParams(location.search);
+      let u=(q.get('u')||localStorage.getItem('izzaUserU')||'').toString().trim();
+      if(!u){
+        const raw=localStorage.getItem('piAuthUser');
+        if(raw){ try{u=(JSON.parse(raw)||{}).username||'';}catch(_){ } }
+      }
+      if(u){
+        u=u.replace(/^@+/, '').toLowerCase();
+        window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+        window.izzaUserKey={ get:()=>u };
+        try{ localStorage.setItem('izzaUserU', u); }catch(_){}
+        try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+      }
+    }catch(_){}
+  })();
+  </script>
+  <script src="/static/game/js/izza-persist.js"></script>
+
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    :root{
+      --felt:#0a5a41;
+      --felt2:#0b6a4b;
+      --hud:rgba(0,0,0,.55); --hudLine:rgba(255,255,255,.18);
+      --ok:#72ff9d; --warn:#ffd36b; --bad:#ff6b6b; --arcade:#ffed8a;
+      --cardW: 86px; --cardH: 120px; --gap: 12px; --stackY: 28px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#081a14,#061811);color:var(--txt);font-family:Arial,Helvetica,sans-serif}
+    .wrap{max-width:1100px;margin:0 auto;padding:12px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+         background:var(--chip-bg);padding:8px 12px;border-radius:10px;color:inherit;text-decoration:none}
+    .btn:hover{filter:brightness(1.06)}
+
+    .arena{position:relative;height:78vh;min-height:620px;border:1px solid var(--line);
+           border-radius:14px;background:radial-gradient(120% 120% at 50% 0%, var(--felt2), var(--felt));overflow:hidden}
+    .felt{position:absolute;inset:0;opacity:.28;background:
+      radial-gradient(circle at 20% 30%, rgba(255,255,255,.08) 2px, transparent 2px) 0 0/60px 60px,
+      radial-gradient(circle at 70% 60%, rgba(255,255,255,.06) 2px, transparent 2px) 0 0/80px 80px}
+
+    /* HUD */
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;flex-wrap:wrap;align-items:flex-start;column-gap:8px;row-gap:6px;z-index:10}
+    .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
+    .hud .left{flex:1 1 320px}
+    .hud .right{flex:1 1 200px;justify-content:flex-end}
+    .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
+          padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2px;display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+    .pill strong{ font-size:14px; font-variant-numeric:tabular-nums; }
+
+    /* Board layout */
+    .table{position:absolute;inset:64px 12px 12px 12px; display:grid; grid-template-rows:auto 1fr; gap:18px}
+    .row{display:flex; gap:var(--gap); align-items:flex-start}
+    .slot{position:relative; width:var(--cardW); height:var(--cardH); border-radius:10px; border:1px dashed rgba(255,255,255,.18);
+          background:rgba(0,0,0,.2); box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+    .slot.label::after{content:attr(data-label); position:absolute; inset:auto 0 8px 0; text-align:center; font-size:11px; opacity:.7}
+    .pile{position:relative; width:var(--cardW); min-height:var(--cardH); }
+
+    /* Cards */
+    .card{position:absolute; width:var(--cardW); height:var(--cardH); border-radius:10px; background:#fff; color:#111;
+          border:1px solid #c4c4c4; box-shadow:0 6px 18px rgba(0,0,0,.35); user-select:none; touch-action:none; }
+    .card.faceup{}
+    .card.facedown{ background:linear-gradient(135deg,#0a326a,#0f4aa8); border-color:#0a326a; }
+    .card .inner{position:absolute; inset:6px; border-radius:8px; border:1px solid rgba(0,0,0,.06); display:flex; flex-direction:column; justify-content:space-between;}
+    .rank{font-weight:900; font-size:18px}
+    .suit{font-size:18px}
+    .tl{display:flex; flex-direction:column; align-items:flex-start; gap:2px}
+    .br{display:flex; flex-direction:column; align-items:flex-end; gap:2px; transform:rotate(180deg)}
+    .pips{ position:absolute; left:0; right:0; top:50%; transform:translateY(-50%); text-align:center; font-size:32px }
+    .red{ color:#c02020 }
+    .dragging{ transform:translate3d(var(--dx,0), var(--dy,0), 0) rotate(.3deg); z-index:5000; }
+    .lift{ transition:transform .08s ease; transform:translateY(-3px); }
+
+    /* Tableau stacking offset */
+    .pile .card{ position:absolute; left:0; }
+    .pile .card.faceup{ cursor:grab; }
+    .pile .card:active{ cursor:grabbing; }
+    .pile .card.facedown{ pointer-events:none; }
+
+    /* Overlay message */
+    .bigmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      font-weight:900;letter-spacing:.6px;font-size:42px;opacity:0;transition:opacity .2s,transform .2s;
+      pointer-events:none;text-shadow:0 10px 34px rgba(0,0,0,.45);color:var(--arcade);z-index:10}
+    .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
+    .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
+
+    /* End sheet */
+    .endOverlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:20;
+      background:linear-gradient(180deg,rgba(0,0,0,.25),rgba(0,0,0,.45));}
+    .endCard{background:rgba(0,0,0,.55);border:1px solid var(--hudLine);border-radius:14px;padding:18px;min-width:280px;
+      display:flex;flex-direction:column;gap:10px;align-items:center}
+    .finish{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+
+    /* Mobile tweaks */
+    @media (max-width: 780px){
+      :root{ --cardW: 66px; --cardH: 92px; --stackY: 22px; }
+      .table{ inset: 72px 8px 8px 8px; }
+    }
+  </style>
+</head>
+<body class="cw-blue theme-a">
+  <div class="wrap">
+    <div class="top">
+      <a class="btn" id="endBtn" href="#">End Game</a>
+      <a class="btn" id="backBtn" href="/izza-game/minigames">Return to Arcade</a>
+    </div>
+
+    <div class="arena" id="arena">
+      <div class="felt" aria-hidden="true"></div>
+
+      <!-- HUD -->
+      <div class="hud">
+        <div class="left">
+          <span class="pill">TIME: <strong id="time">00:00</strong></span>
+          <span class="pill">MOVES: <strong id="moves">0</strong></span>
+        </div>
+        <div class="right">
+          <span class="pill">COINS: <strong id="coinsRun" class="arc"></strong></span>
+          <span class="pill">CRAFT: <strong id="craftRun" class="arc"></strong></span>
+        </div>
+      </div>
+
+      <div class="table" id="table">
+        <!-- Top row: Stock, Waste, Foundations -->
+        <div class="row" id="rowTop">
+          <div class="slot label" id="stockSlot" data-label="STOCK"></div>
+          <div class="slot label" id="wasteSlot" data-label="WASTE"></div>
+          <div style="flex:1"></div>
+          <div class="slot label" id="f0" data-label="♠ FOUNDATION"></div>
+          <div class="slot label" id="f1" data-label="♥ FOUNDATION"></div>
+          <div class="slot label" id="f2" data-label="♣ FOUNDATION"></div>
+          <div class="slot label" id="f3" data-label="♦ FOUNDATION"></div>
+        </div>
+        <!-- Bottom row: 7 Tableau piles -->
+        <div class="row" id="rowBot">
+          <div class="pile" id="t0"></div>
+          <div class="pile" id="t1"></div>
+          <div class="pile" id="t2"></div>
+          <div class="pile" id="t3"></div>
+          <div class="pile" id="t4"></div>
+          <div class="pile" id="t5"></div>
+          <div class="pile" id="t6"></div>
+        </div>
+      </div>
+
+      <div id="bigmsg" class="bigmsg" aria-live="polite">GO!</div>
+
+      <!-- End overlay -->
+      <div id="endOverlay" class="endOverlay">
+        <div class="endCard">
+          <h3 style="margin:0 0 4px">Game Complete</h3>
+          <div class="finish">
+            <span class="pill">Time: <strong id="finalTime">00:00</strong></span>
+            <span class="pill">Moves: <strong id="finalMoves">0</strong></span>
+            <span class="pill">Coins Earned: <strong id="finalCoins">0</strong></span>
+            <span class="pill">Craft Credits: <strong id="finalCraft">0</strong></span>
+          </div>
+          <div class="row" style="gap:8px;margin-top:8px">
+            <button class="btn" id="againBtn">Play Again</button>
+            <a class="btn" id="cityBtn" href="/izza-game/play">Enter IZZA City</a>
+            <a class="btn" id="arcadeBtn" href="/izza-game/minigames">Back to Arcade</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* =======================
+   Auth / link helpers
+======================= */
+(function(){
+  const T_KEY='izzaTokenT', U_KEY='izzaUserU';
+  const qs=new URLSearchParams(location.search);
+  let T=qs.get('t')||''; let U=(qs.get('u')||'').toString().trim();
+  try{
+    if(T) localStorage.setItem(T_KEY,T);
+    else{ const s=localStorage.getItem(T_KEY)||''; if(s){ const u=new URL(location.href); u.searchParams.set('t',s); history.replaceState(null,'',u.toString()); T=s; } }
+  }catch(_){}
+  function publishU(u){ if(!u) return u; u=u.replace(/^@+/, '').toLowerCase();
+    try{ localStorage.setItem(U_KEY,u); }catch(_){}
+    window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+    window.izzaUserKey={get:()=>u};
+    try{ if(!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
+    return u;
+  }
+  try{
+    if(U) publishU(U);
+    else{
+      const su=(localStorage.getItem(U_KEY)||'').toString().trim();
+      if(su){ const u=new URL(location.href); u.searchParams.set('u',su); history.replaceState(null,'',u.toString()); U=publishU(su); }
+    }
+  }catch(_){}
+  function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
+  document.querySelectorAll('#backBtn,#arcadeBtn,#cityBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
+  window._withAuth = withAuth;
+  window._authTU = { getT:()=>T, getU:()=>U };
+})();
+
+/* =======================
+   Wallet helpers (persist-mirrored)
+======================= */
+(function(){
+  const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+  const toInt = v => { const n=parseInt(v,10); return Number.isFinite(n)?n:0; };
+
+  function readCraftAny(){
+    try{
+      if(window.IZZA_PERSIST?.get){
+        const p = window.IZZA_PERSIST.get('craftingCredits') ?? window.IZZA_PERSIST.get('izzaCrafting');
+        if(p!=null) return toInt(p);
+      }
+    }catch(_){}
+    for(const k of CRAFT_KEYS){ const v=toInt(localStorage.getItem(k)||'0'); if(v>0) return v|0; }
+    return toInt(localStorage.getItem(CRAFT_KEYS[0])||'0')|0;
+  }
+  function writeCraftAll(v){
+    const n=Math.max(0,v|0);
+    for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
+    try{ if(window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('craftingCredits', n); }catch(_){}
+    try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
+    saveSoon();
+  }
+
+  function readCoins(){
+    try{
+      if(window.IZZA_PERSIST?.get){
+        const c = window.IZZA_PERSIST.get('coins') ?? window.IZZA_PERSIST.get('izzaCoins') ?? window.IZZA_PERSIST.state?.coins;
+        if(c!=null) return toInt(c);
+      }
+    }catch(_){}
+    const z = localStorage.getItem('izzaWallet');
+    if(z){ try{ const w=JSON.parse(z); if(w&&w.coins!=null) return toInt(w.coins); }catch(_){ } }
+    return toInt(localStorage.getItem('izzaCoins')||'0');
+  }
+  function writeCoins(v){
+    const n=(v|0);
+    localStorage.setItem('izzaCoins', String(n));
+    try{
+      const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
+      localStorage.setItem('izzaWallet', JSON.stringify(w));
+    }catch(_){}
+    try{ if(window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
+    try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){}
+    saveSoon();
+  }
+
+  async function syncFromPersist(){
+    try{
+      if(window.IZZA_PERSIST?.load) await window.IZZA_PERSIST.load();
+      const c = readCoins(); localStorage.setItem('izzaCoins', String(c));
+      try{ const w = { coins:c, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) }; localStorage.setItem('izzaWallet', JSON.stringify(w)); }catch(_){}
+      const craft = readCraftAny();
+      for(const k of CRAFT_KEYS) localStorage.setItem(k,String(craft));
+    }catch(_){}
+  }
+
+  let saveTimer=null;
+  function saveSoon(){ try{ if(saveTimer) clearTimeout(saveTimer); saveTimer=setTimeout(async()=>{ try{ await window.IZZA_PERSIST?.save?.(); }catch(_){} }, 120);}catch(_){} }
+
+  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon };
+})();
+
+/* =======================
+   UI refs + HUD
+======================= */
+const timeEl = document.getElementById('time');
+const movesEl = document.getElementById('moves');
+const coinsRunEl = document.getElementById('coinsRun');
+const craftRunEl = document.getElementById('craftRun');
+const endBtn = document.getElementById('endBtn');
+const endOverlay = document.getElementById('endOverlay');
+const bigmsg = document.getElementById('bigmsg');
+function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' + (cls||''); setTimeout(()=>bigmsg.className='bigmsg',820); }
+function paintHUDWallet(){
+  try{
+    coinsRunEl.textContent = String(Math.max(0, _wallet.readCoins()|0));
+    craftRunEl.textContent = String(Math.max(0, _wallet.readCraftAny()|0));
+  }catch(_){}
+}
+
+/* =======================
+   Solitaire model (Klondike Draw-1)
+======================= */
+const SUITS = ['S','H','C','D']; // ♠ ♥ ♣ ♦
+const SUIT_CHAR = {S:'♠', H:'♥', C:'♣', D:'♦'};
+const SUIT_COLOR = {S:'black', C:'black', H:'red', D:'red'};
+const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+function makeDeck(){
+  const d=[];
+  for(const s of SUITS){ for(const r of RANKS){ d.push({suit:s, rank:r, value:RANKS.indexOf(r)+1, id:`${r}${s}-${Math.random().toString(36).slice(2,8)}`}); } }
+  // shuffle
+  for(let i=d.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [d[i],d[j]]=[d[j],d[i]]; }
+  return d;
+}
+function canPlaceOnTableau(src, dstTop){
+  if(!dstTop) return src.value===13; // empty pile: Kings only
+  if((SUIT_COLOR[src.suit]==='red')===(SUIT_COLOR[dstTop.suit]==='red')) return false;
+  return src.value === dstTop.value - 1;
+}
+function canPlaceOnFoundation(card, foundationTop){
+  if(!foundationTop) return card.value===1; // Ace to start
+  if(card.suit !== foundationTop.suit) return false;
+  return card.value === foundationTop.value + 1;
+}
+
+/* =======================
+   DOM build for a card
+======================= */
+function cardEl(card, faceup){
+  const el=document.createElement('div');
+  el.className='card '+(faceup?'faceup':'facedown');
+  el.dataset.id=card.id; el.dataset.suit=card.suit; el.dataset.rank=card.rank; el.dataset.value=card.value;
+  if(faceup){
+    const inner=document.createElement('div'); inner.className='inner';
+    const tl=document.createElement('div'); tl.className='tl';
+    const br=document.createElement('div'); br.className='br';
+    const p=document.createElement('div'); p.className='pips';
+    const rc=document.createElement('div'); rc.className='rank'; rc.textContent=card.rank;
+    const sc=document.createElement('div'); sc.className='suit'; sc.textContent=SUIT_CHAR[card.suit];
+    const rc2=rc.cloneNode(true), sc2=sc.cloneNode(true);
+    if(SUIT_COLOR[card.suit]==='red'){ rc.classList.add('red'); sc.classList.add('red'); rc2.classList.add('red'); sc2.classList.add('red'); p.classList.add('red'); }
+    tl.appendChild(rc); tl.appendChild(sc);
+    br.appendChild(rc2); br.appendChild(sc2);
+    p.textContent=SUIT_CHAR[card.suit];
+    inner.appendChild(tl); inner.appendChild(br); inner.appendChild(p);
+    el.appendChild(inner);
+  }
+  return el;
+}
+
+/* =======================
+   Game State + Layout
+======================= */
+const piles = { stock:[], waste:[], foundations:[[],[],[],[]], tableau:[[],[],[],[],[],[],[]] };
+const slots = {
+  stock: document.getElementById('stockSlot'),
+  waste: document.getElementById('wasteSlot'),
+  f: [document.getElementById('f0'),document.getElementById('f1'),document.getElementById('f2'),document.getElementById('f3')],
+  t: [document.getElementById('t0'),document.getElementById('t1'),document.getElementById('t2'),document.getElementById('t3'),document.getElementById('t4'),document.getElementById('t5'),document.getElementById('t6')]
+};
+let moves=0, startedAt=0, finished=false, elapsedMs=0;
+function fmtTime(ms){
+  const s=Math.floor(ms/1000); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return String(m).padStart(2,'0')+':'+ss;
+}
+function tickTimer(){
+  if(finished||!startedAt) return;
+  const ms=Date.now()-startedAt;
+  timeEl.textContent=fmtTime(ms);
+  requestAnimationFrame(tickTimer);
+}
+function incMoves(){ moves++; movesEl.textContent=String(moves); if(!startedAt){ startedAt=Date.now(); requestAnimationFrame(tickTimer); } }
+
+/* Deal */
+function deal(){
+  // reset
+  for(const k in piles){ if(Array.isArray(piles[k])) piles[k].length=0; }
+  piles.waste.length=0;
+  piles.foundations=[[],[],[],[]];
+  piles.tableau=[[],[],[],[],[],[],[]];
+  moves=0; finished=false; elapsedMs=0;
+  timeEl.textContent='00:00'; movesEl.textContent='0';
+
+  // fresh deck
+  const deck=makeDeck();
+
+  // tableau: 1..7, top card face up
+  for(let i=0;i<7;i++){
+    for(let j=0;j<=i;j++){ piles.tableau[i].push(deck.shift()); }
+  }
+  // rest to stock
+  piles.stock = deck;
+
+  layoutAll(true);
+}
+
+/* Layout: rebuild DOM positions */
+function layoutAll(initial=false){
+  // Clear containers
+  slots.stock.innerHTML=''; slots.waste.innerHTML='';
+  slots.f.forEach(el=>el.innerHTML='');
+  slots.t.forEach(el=>el.innerHTML='');
+
+  // Stock: top facedown only visible
+  if(piles.stock.length){
+    const top=piles.stock[piles.stock.length-1];
+    const el=cardEl(top,false);
+    el.style.left='0px'; el.style.top='0px';
+    slots.stock.appendChild(el);
+  }
+
+  // Waste: show last card face up
+  if(piles.waste.length){
+    const top=piles.waste[piles.waste.length-1];
+    const el=cardEl(top,true);
+    el.style.left='0px'; el.style.top='0px';
+    slots.waste.appendChild(el);
+    enableCardInteractions(el, 'waste', piles.waste.length-1);
+  }
+
+  // Foundations
+  for(let fi=0;fi<4;fi++){
+    const f=piles.foundations[fi];
+    if(f.length){
+      const top=f[f.length-1];
+      const el=cardEl(top,true);
+      el.style.left='0px'; el.style.top='0px';
+      slots.f[fi].appendChild(el);
+      enableCardInteractions(el, 'foundation', fi, true);
+    }
+  }
+
+  // Tableau (stack with offset)
+  for(let ti=0;ti<7;ti++){
+    const pile=piles.tableau[ti];
+    let y=0;
+    for(let pi=0;pi<pile.length;pi++){
+      const c=pile[pi];
+      const faceup = (pi===pile.length-1) || (c.faceup===true);
+      const el=cardEl(c, faceup);
+      el.style.top = y+'px';
+      el.style.left = '0px';
+      slots.t[ti].appendChild(el);
+      if(faceup) enableCardInteractions(el, 'tableau', ti, false, pi); // allow dragging runs
+      else el.classList.add('facedown');
+      y += (faceup ? parseInt(getComputedStyle(document.documentElement).getPropertyValue('--stackY')) : 16);
+    }
+  }
+
+  // Clicks on empty stock -> recycle waste to stock (keep order)
+  slots.stock.onclick = ()=>{
+    if(finished) return;
+    if(piles.stock.length>0){
+      // draw 1 to waste
+      const c=piles.stock.pop(); c.faceup=true; piles.waste.push(c); incMoves(); layoutAll();
+    }else{
+      // recycle: flip waste back to stock (face down), order reversed per standard (flip as a stack)
+      while(piles.waste.length){ const c=piles.waste.pop(); c.faceup=false; piles.stock.push(c); }
+      incMoves(); layoutAll();
+    }
+  };
+
+  // Auto-complete if appropriate (optional mild helper)
+  maybeAutoComplete();
+}
+
+/* =======================
+   Drag & drop + moves
+======================= */
+let dragState=null; // {from:'tableau'|'waste'|'foundation', fromIndex, startIdx, cards:[...], dx,dy, startX,startY}
+
+function enableCardInteractions(el, from, fromIndex, isFoundationTop=false, startIdx=null){
+  // Double-click/tap to auto-move to foundation if legal
+  el.addEventListener('dblclick', ()=>{ tryAutoToFoundation(el, from, fromIndex, startIdx); }, {passive:true});
+  el.addEventListener('click', (e)=>{
+    // on quick tap (mobile) emulate dblclick shortcut when only a single face-up card
+    if(from==='waste' || (from==='tableau' && startIdx===piles.tableau[fromIndex].length-1)){
+      tryAutoToFoundation(el, from, fromIndex, startIdx);
+    }
+  }, {passive:true});
+
+  // Drag start (only face-up cards)
+  if(!el.classList.contains('faceup')) return;
+
+  el.addEventListener('pointerdown', (e)=>{
+    if(finished) return;
+    el.setPointerCapture(e.pointerId);
+    const rect=el.getBoundingClientRect();
+    const ox=e.clientX-rect.left, oy=e.clientY-rect.top;
+
+    // pick run from tableau or single from waste/foundation top
+    let picked=[];
+    if(from==='tableau'){
+      const pile=piles.tableau[fromIndex];
+      const start = startIdx ?? (pile.length-1);
+      picked = pile.slice(start);
+      // ensure run is legal shape (alternating desc) – usually already so
+    }else if(from==='waste'){
+      picked=[piles.waste[piles.waste.length-1]];
+    }else if(from==='foundation'){
+      picked=[piles.foundations[fromIndex][piles.foundations[fromIndex].length-1]];
+    }
+
+    // build floating stack
+    const ghosts = picked.map((c,i)=>{
+      const g = cardEl(c,true); g.style.position='fixed';
+      g.style.left=(e.clientX-ox)+'px'; g.style.top=(e.clientY-oy + i*22)+'px'; g.style.pointerEvents='none';
+      g.classList.add('dragging','lift'); document.body.appendChild(g); return g;
+    });
+
+    dragState = { from, fromIndex, startIdx, cards:picked, ghosts, ox, oy };
+  }, {passive:false});
+
+  el.addEventListener('pointermove', (e)=>{
+    if(!dragState||!dragState.ghosts) return;
+    dragState.ghosts.forEach((g,i)=>{
+      g.style.left=(e.clientX-dragState.ox)+'px';
+      g.style.top =(e.clientY-dragState.oy + i*22)+'px';
+    });
+  }, {passive:true});
+
+  el.addEventListener('pointerup', (e)=>{
+    if(!dragState) return;
+    const drop = document.elementFromPoint(e.clientX, e.clientY);
+    const target = drop && drop.closest('.pile, .slot');
+    let placed=false;
+
+    function cleanup(){ dragState.ghosts.forEach(g=>g.remove()); dragState=null; }
+
+    if(target){
+      // Foundation drop?
+      const fi = slots.f.findIndex(n=>n===target);
+      if(fi>=0 && dragState.cards.length===1){
+        const card=dragState.cards[0];
+        const top = piles.foundations[fi][piles.foundations[fi].length-1]||null;
+        if(canPlaceOnFoundation(card, top)){
+          removeFromSource(dragState);
+          piles.foundations[fi].push(card);
+          incMoves(); placed=true; layoutAll();
+          checkWin(); cleanup(); return;
+        }
+      }
+      // Tableau drop?
+      const ti = slots.t.findIndex(n=>n===target);
+      if(ti>=0){
+        const cardRun=dragState.cards;
+        const dst=piles.tableau[ti];
+        const dstTop=dst.length?dst[dst.length-1]:null;
+        if(canPlaceOnTableau(cardRun[0], dstTop)){
+          removeFromSource(dragState);
+          cardRun.forEach(c=>dst.push(c));
+          incMoves(); placed=true; layoutAll();
+          cleanup(); return;
+        }
+      }
+    }
+
+    // If not placed, cancel drag
+    cleanup();
+  }, {passive:true});
+}
+
+function removeFromSource(st){
+  if(st.from==='tableau'){
+    const pile=piles.tableau[st.fromIndex];
+    pile.splice(st.startIdx, st.cards.length);
+    // flip new top if facedown
+    const top=pile[pile.length-1];
+    if(top && !top.faceup){ top.faceup=true; }
+  }else if(st.from==='waste'){
+    piles.waste.pop();
+  }else if(st.from==='foundation'){
+    piles.foundations[st.fromIndex].pop();
+  }
+}
+
+function tryAutoToFoundation(el, from, fromIndex, startIdx){
+  const cardId=el.dataset.id;
+  let card=null;
+  if(from==='waste'){ card=piles.waste[piles.waste.length-1]; if(!card||card.id!==cardId) return; }
+  else if(from==='tableau'){
+    const pile=piles.tableau[fromIndex];
+    if(!pile.length) return;
+    card=pile[pile.length-1]; if(!card||card.id!==cardId) return;
+  }else if(from==='foundation'){ return; }
+  // find foundation by suit
+  const fi = {S:0,H:1,C:2,D:3}[card.suit];
+  const top = piles.foundations[fi][piles.foundations[fi].length-1]||null;
+  if(canPlaceOnFoundation(card, top)){
+    // move
+    if(from==='waste') piles.waste.pop();
+    if(from==='tableau'){
+      piles.tableau[fromIndex].pop();
+      const nt=piles.tableau[fromIndex][piles.tableau[fromIndex].length-1];
+      if(nt && !nt.faceup) nt.faceup=true;
+    }
+    piles.foundations[fi].push(card);
+    incMoves(); layoutAll(); checkWin();
+  }
+}
+
+/* Optional: Auto-complete small helper – if only foundation moves remain */
+function maybeAutoComplete(){
+  // If every tableau pile is strictly ascending facedown except top, we avoid complexity; keep minimal (no forced auto)
+}
+
+/* Win check */
+function checkWin(){
+  const totalFound = piles.foundations.reduce((a,f)=>a+f.length,0);
+  if(totalFound===52 && !finished){
+    finished=true; elapsedMs = Date.now()-startedAt;
+    showWin();
+  }
+}
+
+/* =======================
+   End logic: awards + leaderboard
+======================= */
+const REWARD_COINS = 1000;
+const REWARD_CRAFT = 1;
+
+// Game ID for leaderboard (you can change if backend expects a specific id)
+const GAME_ID = 'solitaire';
+
+async function submitLeaderboardSolitaire(msElapsed){
+  const score = 1000000000 - Math.max(0, msElapsed|0); // higher is better for faster times
+  try{
+    if(window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit==='function'){
+      await IZZA_LEADERBOARD.submit({ game: GAME_ID, score });
+    }else{
+      await fetch(_withAuth('/izza-game/api/leaderboard/submit'),{
+        method:'POST',credentials:'include',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({ game: GAME_ID, score })
+      }).catch(()=>{});
+    }
+    // local cache (same scheme as Arena uses)
+    const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
+    const row={u, s:score|0, ts:Date.now()};
+    const z=n=>String(n).padStart(2,'0'); const d=new Date();
+    const stamps={ day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
+                   month:`${d.getFullYear()}-${z(d.getMonth()+1)}`,
+                   year:String(d.getFullYear()) };
+    function upsertHigh(key, r){
+      try{
+        const arr=JSON.parse(localStorage.getItem(key)||'[]');
+        let found=false;
+        for(let i=0;i<arr.length;i++){
+          if(arr[i] && arr[i].u===r.u){ found=true; if((arr[i].s|0) < (r.s|0)) arr[i]=r; break; }
+        }
+        if(!found) arr.push(r);
+        arr.sort((a,b)=>b.s-a.s);
+        localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
+      }catch(_){}
+    }
+    upsertHigh(`izzaLb2::${GAME_ID}::alltime`, row);
+    upsertHigh(`izzaLb2::${GAME_ID}::day::${stamps.day}`, row);
+    upsertHigh(`izzaLb2::${GAME_ID}::month::${stamps.month}`, row);
+    upsertHigh(`izzaLb2::${GAME_ID}::year::${stamps.year}`, row);
+  }catch(_){}
+}
+
+async function showWin(){
+  const tStr = fmtTime(elapsedMs);
+  document.getElementById('finalTime').textContent = tStr;
+  document.getElementById('finalMoves').textContent = String(moves);
+
+  // Awards
+  const beforeCoins = _wallet.readCoins(), beforeCraft=_wallet.readCraftAny();
+  _wallet.writeCoins(beforeCoins + REWARD_COINS);
+  _wallet.writeCraftAll(beforeCraft + REWARD_CRAFT);
+  paintHUDWallet();
+
+  // Save to persist first, then submit leaderboard
+  try{ await window.IZZA_PERSIST?.save?.(); }catch(_){}
+
+  submitLeaderboardSolitaire(elapsedMs);
+
+  // Paint end overlay with earned delta
+  document.getElementById('finalCoins').textContent = String(REWARD_COINS);
+  document.getElementById('finalCraft').textContent = String(REWARD_CRAFT);
+
+  endOverlay.style.display='flex';
+}
+
+/* =======================
+   Boot + wiring
+======================= */
+(async function boot(){
+  try{
+    await _wallet.syncFromPersist();
+  }catch(_){}
+  paintHUDWallet();
+  deal();
+  showMsg('GOOD LUCK!', '');
+
+  // navigation: save snapshot first
+  document.getElementById('arcadeBtn').addEventListener('click', async (e)=>{
+    e.preventDefault();
+    try{ await window.IZZA_PERSIST?.save?.(); }catch(_){}
+    location.href = e.currentTarget.href;
+  }, {passive:false});
+
+  document.getElementById('cityBtn').addEventListener('click', async (e)=>{
+    e.preventDefault();
+    try{ await window.IZZA_PERSIST?.save?.(); }catch(_){}
+    location.href = e.currentTarget.href;
+  }, {passive:false});
+
+  document.getElementById('endBtn').addEventListener('click', (e)=>{
+    e.preventDefault();
+    // no award on manual end
+    endOverlay.style.display='flex';
+    document.getElementById('finalTime').textContent = fmtTime(Date.now()-startedAt || 0);
+    document.getElementById('finalMoves').textContent = String(moves);
+    document.getElementById('finalCoins').textContent = '0';
+    document.getElementById('finalCraft').textContent = '0';
+  }, {passive:false});
+
+  document.getElementById('againBtn').addEventListener('click', (e)=>{
+    e.preventDefault();
+    endOverlay.style.display='none';
+    deal();
+  }, {passive:false});
+
+  // Waste click already wired in layoutAll()
+  // Listen for wallet changes from outside
+  window.addEventListener('izza-coins-changed', paintHUDWallet, {passive:true});
+  window.addEventListener('izza-crafting-changed', paintHUDWallet, {passive:true});
+  window.addEventListener('pageshow', paintHUDWallet, {passive:true});
+  window.addEventListener('storage', (e)=>{ if(!e) return; if(e.key==='izzaCoins' || e.key==='izzaWallet' || e.key==='izzaCrafting' || e.key==='craftingCredits' || e.key==='izzaCraftCredits') paintHUDWallet(); }, {passive:true});
+})();
+
+/* Prevent long-press menu on board */
+document.getElementById('arena').addEventListener('contextmenu', e=>e.preventDefault(), {passive:false});
+</script>
+</body>
+</html>
+<!-- build: 2025-10-06 -->
