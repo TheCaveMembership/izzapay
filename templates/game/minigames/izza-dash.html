@@ -327,7 +327,7 @@ async function buildAvatarCanvas(dstCtx,size,profile){
     try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
   async function drawEquippedOverlaysForAvatar(ctx, size){
     const k=(size>0?size/128:1);
-    function scaled(b){ return { w:Math.round(b.w*k),h:Math.round(b.h*k),ox:Math.round(b.ox*k),oy:Math.round(b.oy*k),scale:b.scale }; }
+    function scaled(b){ return { w:Math.round(b.w+k-k),h:Math.round(b.h+k-k),ox:Math.round(b.ox*k),oy:Math.round(b.oy*k),scale:b.scale }; }
     const legs =equippedIn('legs');  if(legs ) drawOne(ctx, legs .svg, scaled(BOX128.legs ));
     const chest=equippedIn('chest'); if(chest) drawOne(ctx, chest.svg, scaled(BOX128.chest));
     const arms =equippedIn('arms');  if(arms ) drawOne(ctx, arms .svg, scaled(BOX128.arms ));
@@ -730,29 +730,37 @@ async function submitLeaderboard(finalScore){
         body:JSON.stringify({ game:'puzzle', score: finalScore|0 })
       }).catch(()=>{});
     }
-    // cache locally as well so it shows up offline/in snapshot
+    // cache locally so it shows up offline/in snapshot — keep ONLY the user's highest score
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:finalScore|0, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
     const stamps={ day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear()) };
 
+    // helper to upsert by username, keeping the highest score only
+    function upsertHigh(key, r){
+      try{
+        const arr=JSON.parse(localStorage.getItem(key)||'[]');
+        let found=false;
+        for(let i=0;i<arr.length;i++){
+          if(arr[i] && arr[i].u===r.u){
+            found=true;
+            if((arr[i].s|0) < (r.s|0)) arr[i]=r; // replace only if higher
+            break;
+          }
+        }
+        if(!found){ arr.push(r); }
+        arr.sort((a,b)=>b.s-a.s);
+        localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
+      }catch(_){}
+    }
+
     // all-time
-    try{
-      const keyAll='izzaLb2::puzzle::alltime';
-      const curAll=JSON.parse(localStorage.getItem(keyAll)||'[]'); curAll.push(row);
-      curAll.sort((a,b)=>b.s-a.s); localStorage.setItem(keyAll, JSON.stringify(curAll.slice(0,20)));
-    }catch(_){}
+    upsertHigh('izzaLb2::puzzle::alltime', row);
 
     // daily / monthly / annual
-    try{
-      const push = (k)=>{
-        const arr=JSON.parse(localStorage.getItem(k)||'[]'); arr.push(row);
-        arr.sort((a,b)=>b.s-a.s); localStorage.setItem(k, JSON.stringify(arr.slice(0,20)));
-      };
-      push(`izzaLb2::puzzle::day::${stamps.day}`);
-      push(`izzaLb2::puzzle::month::${stamps.month}`);
-      push(`izzaLb2::puzzle::year::${stamps.year}`);
-    }catch(_){}
+    upsertHigh(`izzaLb2::puzzle::day::${stamps.day}`, row);
+    upsertHigh(`izzaLb2::puzzle::month::${stamps.month}`, row);
+    upsertHigh(`izzaLb2::puzzle::year::${stamps.year}`, row);
   }catch(_){}
 }
 
