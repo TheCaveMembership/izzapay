@@ -413,7 +413,7 @@ let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
 let FAN=26;
 
 // 5 minute hard cap
-const MAX_MS = 300000;
+const MAX_MS = 600000;
 
 function cssVarInt(name,fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
 function fmtTime(ms){ const s=Math.max(0,Math.floor(ms/1000)); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return `${String(m).padStart(2,'0')}:${ss}`; }
