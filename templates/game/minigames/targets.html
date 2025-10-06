@@ -103,11 +103,16 @@
       border-radius:12px; background:#fff; border:1px solid rgba(0,0,0,.14);
       box-shadow:0 4px 12px rgba(0,0,0,.28); user-select:none; touch-action:none;
       overflow:hidden;
+      /* --- surgical: kill selection/callout on iOS completely --- */
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
     .card.back{
       background:linear-gradient(180deg,#184a86,#0f2c54);
       border-color:rgba(0,0,0,.28);
     }
+    /* also make all text inside cards unselectable */
+    .card *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+
     .pip{position:absolute; font-weight:900; line-height:1; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
     .pip.tl{left:8px; top:6px}
     .pip.br{right:8px; bottom:6px; transform:rotate(180deg)}
@@ -149,10 +154,12 @@
     .chip input{appearance:none; width:14px; height:14px; border-radius:50%; border:1px solid var(--line); display:inline-block}
     .chip input:checked{background:#5bd68a}
 
-    /* --- Surgical: widen the WASTE cell to two slots on the top row --- */
+    /* --- WASTE area widened earlier --- */
     #rowTop .cell.wasteWide{ grid-column: span 2; }
-    /* make sure the WASTE area can visually hold a wider fan */
     #waste{ padding-right: 6px; }
+
+    /* Kill selection/callout for entire arena (extra safety) */
+    .arena, .arena *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -187,7 +194,6 @@
           <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUND.</span></div>
-          <!-- surgical: hide the previously unused extra slot to keep the grid on one row -->
           <div class="cell" style="display:none"></div>
         </div>
 
@@ -463,16 +469,24 @@ function renderAll(){
     const drawMode=getDrawPref();
     const N=Math.min(drawMode, P.waste.length);
     const start=P.waste.length - N;
-    // wider horizontal spread for visibility, scaled to card width
     const gap = (drawMode===3) ? Math.max(18, Math.round(cssVarInt('--cardW',86)*0.42)) : 0;
     for(let i=0;i<N;i++){
       const idx=start+i;
       const c=P.waste[idx]; c.face=true;
       const el=spawnCard(c);
       el.style.zIndex=10+i;
-      placeXY(el, i*gap, 0); // more separation for draw-3
+      placeXY(el, i*gap, 0);
       el.dataset.where='w';
-      if(idx!==P.waste[P.waste.length-1]) el.dataset.locked='1'; // lock non-top
+
+      // --- surgical: ensure only the top waste card can receive input ---
+      if (idx !== P.waste.length - 1) {
+        el.dataset.locked='1';
+        el.style.pointerEvents='none';   // non-top waste card never grabs the touch
+      } else {
+        el.style.pointerEvents='auto';   // top waste card is playable
+      }
+      // -------------------------------------------------------------------
+
       wEl.appendChild(el);
     }
   }
@@ -661,7 +675,7 @@ function moveGhost(x,y){
 function onDragMove(e){
   if(!dragRun) return;
   const dx=e.clientX - dragRun.sx, dy=e.clientY - dragRun.sy;
-  if(!dragRun.moved && (dx*dx + dy*dy) > 9) dragRun.moved=true; // only mark as drag after small movement
+  if(!dragRun.moved && (dx*dx + dy*dy) > 9) dragRun.moved=true;
   moveGhost(e.clientX, e.clientY);
   e.preventDefault();
 }
@@ -776,7 +790,7 @@ async function submitLeaderboard(score){
     upsertHigh(`${baseKey}::alltime`, row);
     upsertHigh(`${baseKey}::day::${stamps.day}`, row);
     upsertHigh(`${baseKey}::month::${stamps.month}`, row);
-    upsertHigh(`${baseKey}::year::${stamps.year}`, row);
+    upsertHigh(`${baseKey}::year::${stamps.year}`);
   }catch(_){}
 }
 
@@ -865,12 +879,10 @@ document.querySelectorAll('#backBtn,#backBtn2,#startBack,a').forEach(a=>{
 /* ===== Boot ===== */
 (async function(){
   try{
-    // Capture balances on entry and paint HUD with the *current* balances
     await _wallet.syncFromPersist();
   }catch(_){}
   sizeBoard();
-  paintWallet(); // ensures current balance shows before the first deal
-  // Wait for Start to be pressed
+  paintWallet();
 })();
 </script>
 </body>
