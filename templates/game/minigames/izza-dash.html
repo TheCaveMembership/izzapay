@@ -77,10 +77,10 @@
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
 
-    /* avatar — moved under the AMMO pill (left & down) */
+    /* avatar — under AMMO pill, but render IN FRONT of HUD */
     .playerAvatar{
       position:absolute; top:84px; left:12px;
-      width:64px; height:64px; z-index:10; pointer-events:none
+      width:64px; height:64px; z-index:12; pointer-events:none
     }
     .playerAvatar canvas{width:64px;height:64px;image-rendering:pixelated;image-rendering:crisp-edges}
 
@@ -186,6 +186,23 @@
   function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
   document.querySelectorAll('#cityBtn,#cityBtn2,#backBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
   window._withAuth = withAuth;
+
+  /* Seed totals coming from Mini Game Arena (coins/craft) if provided */
+  try{
+    const coinsParam = qs.get('coins') ?? qs.get('c');
+    if(coinsParam!=null && coinsParam!==''){
+      const n = Math.max(0, parseInt(coinsParam,10)|0);
+      const cur = parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
+      if(n!==cur){ localStorage.setItem('izzaCoins', String(n)); }
+    }
+    const craftParam = qs.get('craft') ?? qs.get('k');
+    if(craftParam!=null && craftParam!==''){
+      const n = Math.max(0, parseInt(craftParam,10)|0);
+      const keys=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+      const cur = parseInt(localStorage.getItem(keys[0])||'0',10)|0;
+      if(n!==cur){ for(const k of keys){ localStorage.setItem(k,String(n)); } }
+    }
+  }catch(_){}
 })();
 
 /* =======================
@@ -275,7 +292,7 @@ const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
 const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
 const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
 const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
-const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3A3A1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 function paletteSwap(img, fromHex, toHex, tol=4000){
   const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
