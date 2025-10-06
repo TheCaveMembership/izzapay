@@ -425,7 +425,10 @@ function initThree(){
   world=new THREE.Group(); scene.add(world);
 
   // base plate + ring (scaled per level)
-  floorPlate=new THREE.Mesh(new THREE.CilcleGeometry?.(3.6,64) || new THREE.CircleGeometry(3.6,64), new THREE.MeshStandardMaterial({color:0x0e2448,metalness:.2,roughness:.7}));
+  floorPlate = new THREE.Mesh(
+  new THREE.CircleGeometry(3.6, 64),
+  new THREE.MeshStandardMaterial({ color: 0x0e2448, metalness: .2, roughness: .7 })
+);
   floorPlate.rotation.x=-Math.PI/2; floorPlate.position.y=-1; floorPlate.receiveShadow=true; world.add(floorPlate);
   floorRing=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.03,16,100), new THREE.MeshBasicMaterial({color:0x7dc3ff,transparent:true,opacity:.9}));
   floorRing.rotation.x=Math.PI/2; floorRing.position.y=-0.98; world.add(floorRing);
@@ -802,12 +805,15 @@ async function start(){
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
 
   try{
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    window.audioCtx = window.audioCtx || new AudioCtx();
-    await audioCtx.resume();
-    initAudio();
-    bgmEl.volume=0.25; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
-  }catch(_){}
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx = audioCtx || new AC();   // ensure the global `audioCtx` is set
+  initAudio();                       // sets up `master` etc.
+  await audioCtx.resume();
+  bgmEl.volume = 0.25;
+  bgmEl.muted = (localStorage.getItem('izzaMute') === '1');
+  bgmEl.currentTime = 0;
+  bgmEl.play().catch(()=>{});
+}catch(_){}
 
   // 3D
   initThree();
