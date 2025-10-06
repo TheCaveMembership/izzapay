@@ -145,6 +145,7 @@
         <div class="left">
           <span class="pill">TIME: <strong id="time">00:00</strong></span>
           <span class="pill">MOVES: <strong id="moves">0</strong></span>
+          <span class="pill" id="drawToggle" title="Tap to switch, applies next deal">DRAW: <strong id="drawVal">1</strong></span>
         </div>
         <div class="right">
           <span class="pill">COINS: <strong id="coinsHUD">0</strong></span>
@@ -186,9 +187,9 @@
             <li>Build down in alternating colors on the 7 tableau columns (e.g., red 9 on black 10).</li>
             <li>Only a King (K) may be moved to an empty tableau column.</li>
             <li>Foundations build up by suit from Ace → King.</li>
-            <li>Tap the STOCK to flip cards to the WASTE (draw 1).</li>
-            <li>Drag a face-up run (e.g., 7♣-6♦-5♣) as a group.</li>
-            <li>Win by moving all cards to the four foundations.</li>
+            <li>Tap the STOCK to flip cards to the WASTE (<b>draw 1 or draw 3</b>, depending on the HUD toggle).</li>
+            <li>When STOCK is empty, tap it to <b>recycle the WASTE</b> back to STOCK.</li>
+            <li>Drag a face-up run (e.g., 7♣-6♦-5♣) as a group. Win by moving all cards to the four foundations.</li>
           </ol>
           <div class="finish">
             <button class="btn" id="rulesClose">Close</button>
@@ -323,6 +324,18 @@ function paintWallet(){ elCoins.textContent=String(_wallet.readCoins()); elCraft
 window.addEventListener('izza-coins-changed', paintWallet, {passive:true});
 window.addEventListener('izza-crafting-changed', paintWallet, {passive:true});
 
+/* ===== Draw mode preference (Draw-1 / Draw-3) ===== */
+const DRAW_KEY='izza_sol_draw';
+function getDrawPref(){
+  const v = parseInt(localStorage.getItem(DRAW_KEY)||'1',10);
+  return (v===3)?3:1;
+}
+function setDrawPref(n){
+  localStorage.setItem(DRAW_KEY, String(n===3?3:1));
+  document.getElementById('drawVal').textContent = String(getDrawPref());
+  showMsg('Draw mode will apply next deal');
+}
+
 /* ===== Solitaire core ===== */
 const SUITS = ['♠','♥','♣','♦'];
 const COLORS = { '♠':'black', '♣':'black', '♥':'red', '♦':'red' };
@@ -370,6 +383,8 @@ function layoutNew(){
   elTime.textContent='00:00';
   timerId=setInterval(()=>{ if(!ended){ elTime.textContent = fmtTime(Date.now()-startTs); } }, 250);
 
+  document.getElementById('drawVal').textContent = String(getDrawPref());
+
   renderAll();
   showMsg('GO!');
   paintWallet();
@@ -384,7 +399,7 @@ function renderAll(){
 
   // STOCK
   const sEl=document.getElementById(piles.stock);
-  if(P.stock.length){
+  if(P.stock.length || P.waste.length){              // clickable even when stock is empty (to recycle)
     const back=spawnCardBack();
     back.addEventListener('click', onDraw, {passive:true});
     sEl.appendChild(back);
@@ -460,20 +475,34 @@ function acceptOnTableau(cards, destIdx){
     if(!(a.face && b.face && a.rank===b.rank+1 && a.color!==b.color)) return false;
   }
   if(!dest.length) return head.rank===13; // K only
-  const top=dest[destIdx]?.[P.t[destIdx].length-1] || dest[dest.length-1];
   const t = dest[dest.length-1];
   return head.color!==t.color && head.rank===t.rank-1;
 }
 
-/* ----- DRAW from stock ----- */
+/* ----- DRAW from stock (with recycling + draw-1/3) ----- */
+function recycleWasteToStock(){
+  // Move all waste back to stock, turning face-down; preserve order by popping from waste.
+  while(P.waste.length){ const c=P.waste.pop(); c.face=false; P.stock.push(c); }
+}
 function onDraw(){
-  if(!P.stock.length){
-    while(P.waste.length){ const c=P.waste.pop(); c.face=false; P.stock.push(c); }
-  }else{
-    const c=P.stock.pop(); c.face=true; P.waste.push(c);
+  // If stock is empty, recycle first (only if there is anything to recycle)
+  if(!P.stock.length && P.waste.length){
+    recycleWasteToStock();
   }
-  moves++; elMoves.textContent=String(moves);
-  renderAll();
+
+  const DRAW_N = getDrawPref(); // 1 or 3
+  let drew=0;
+  for(let i=0;i<DRAW_N;i++){
+    if(!P.stock.length) break;
+    const c=P.stock.pop();
+    c.face=true;
+    P.waste.push(c);
+    drew++;
+  }
+  if(drew>0){
+    moves++; elMoves.textContent=String(moves);
+    renderAll();
+  }
 }
 
 /* ----- DRAG (ghost clones, strict drop) ----- */
@@ -620,22 +649,24 @@ function checkWin(){
 /* ===== Rewards & Leaderboard (WIN ONLY) ===== */
 const COINS_ON_WIN = 1000;
 const CRAFT_ON_WIN = 1;
-/* Leaderboard id uses Target Range mapping as requested */
+/* Leaderboard variant buckets (fairness by ruleset) */
 const LB_GAME_ID = 'targets';
+function lbVariant(){ return getDrawPref()===3 ? 'd3' : 'd1'; }
 function makeLeaderboardScore(elapsedMs, moves){
   const base = 3600000 - Math.max(0,elapsedMs|0);
   const tie  = Math.max(0, 1000 - Math.min(1000,moves|0));
   return (base*1000 + tie)|0;
 }
 async function submitLeaderboard(score){
+  const gameKey = `${LB_GAME_ID}::${lbVariant()}`;
   try{
     if(window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit==='function'){
-      await IZZA_LEADERBOARD.submit({ game:LB_GAME_ID, score: score|0 });
+      await IZZA_LEADERBOARD.submit({ game:gameKey, score: score|0 });
     }else{
       await fetch(_withAuth('/izza-game/api/leaderboard/submit'),{
         method:'POST',credentials:'include',
         headers:{'content-type':'application/json'},
-        body:JSON.stringify({ game:LB_GAME_ID, score: score|0 })
+        body:JSON.stringify({ game:gameKey, score: score|0 })
       }).catch(()=>{});
     }
     // local cache for offline/Arena
@@ -655,10 +686,11 @@ async function submitLeaderboard(score){
         localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
       }catch(_){}
     }
-    upsertHigh(`izzaLb2::${LB_GAME_ID}::alltime`, row);
-    upsertHigh(`izzaLb2::${LB_GAME_ID}::day::${stamps.day}`, row);
-    upsertHigh(`izzaLb2::${LB_GAME_ID}::month::${stamps.month}`, row);
-    upsertHigh(`izzaLb2::${LB_GAME_ID}::year::${stamps.year}`, row);
+    const baseKey = `izzaLb2::${gameKey}`;
+    upsertHigh(`${baseKey}::alltime`, row);
+    upsertHigh(`${baseKey}::day::${stamps.day}`, row);
+    upsertHigh(`${baseKey}::month::${stamps.month}`, row);
+    upsertHigh(`${baseKey}::year::${stamps.year}`, row);
   }catch(_){}
 }
 
@@ -716,11 +748,18 @@ document.querySelectorAll('#backBtn,#backBtn2').forEach(a=>{
   }, {passive:false});
 });
 
+/* Draw mode HUD toggle (applies next deal; cannot switch mid-deal) */
+document.getElementById('drawToggle').addEventListener('click', ()=>{
+  const next = getDrawPref()===1 ? 3 : 1;
+  setDrawPref(next);
+}, {passive:true});
+
 /* ===== Boot ===== */
 (async function(){
   try{ await _wallet.syncFromPersist(); }catch(_){}
   sizeBoard();
   paintWallet();
+  document.getElementById('drawVal').textContent = String(getDrawPref());
   layoutNew();
 })();
 </script>
