@@ -77,17 +77,12 @@
     .bigmsg.show{opacity:1;transform:translate(-50%,-56%) scale(1.04)}
     .scoreGlow{color:var(--ok)} .warn{color:var(--warn)} .miss{color:var(--bad)}
 
-    /* avatar — centered just above the stacking ring */
+    /* avatar — under the AMMO pill, down a touch */
     .playerAvatar{
-      position:absolute;
-      left:50%;
-      top:58%;               /* a touch above the board/ring area */
-      transform:translate(-50%,-100%);
-      width:96px; height:96px;
-      z-index:12; pointer-events:none;
-      -webkit-transform: translate(-50%,-100%); /* ensure GPU comp */
+      position:absolute; top:84px; left:12px;
+      width:64px; height:64px; z-index:7; pointer-events:none
     }
-    .playerAvatar canvas{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
+    .playerAvatar canvas{width:64px;height:64px;image-rendering:pixelated;image-rendering:crisp-edges}
 
     /* webgl canvas + overlay */
     #gl{position:absolute;inset:0;display:block;touch-action:none;width:100%;height:100%}
@@ -191,23 +186,6 @@
   function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
   document.querySelectorAll('#cityBtn,#cityBtn2,#backBtn').forEach(a=>{ a.href = withAuth(a.getAttribute('href')); });
   window._withAuth = withAuth;
-
-  /* Seed totals coming from Mini Game Arena (coins/craft) if provided */
-  try{
-    const coinsParam = qs.get('coins') ?? qs.get('c');
-    if(coinsParam!=null && coinsParam!==''){
-      const n = Math.max(0, parseInt(coinsParam,10)|0);
-      const cur = parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
-      if(n!==cur){ localStorage.setItem('izzaCoins', String(n)); }
-    }
-    const craftParam = qs.get('craft') ?? qs.get('k');
-    if(craftParam!=null && craftParam!==''){
-      const n = Math.max(0, parseInt(craftParam,10)|0);
-      const keys=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-      const cur = parseInt(localStorage.getItem(keys[0])||'0',10)|0;
-      if(n!==cur){ for(const k of keys){ localStorage.setItem(k,String(n)); } }
-    }
-  }catch(_){}
 })();
 
 /* =======================
@@ -297,7 +275,7 @@ const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
 const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#6A402A","#432818"] };
 const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
 const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
-const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3A3A1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 function paletteSwap(img, fromHex, toHex, tol=4000){
   const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
@@ -349,7 +327,8 @@ async function buildAvatarCanvas(dstCtx,size,profile){
     try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
   async function drawEquippedOverlaysForAvatar(ctx, size){
     const k=(size>0?size/128:1);
-    function scaled(b){ return { w:Math.round(b.w+k-k),h:Math.round(b.h+k-k),ox:Math.round(b.ox*k),oy:Math.round(b.oy*k),scale:b.scale }; }
+    /* >>> FIX: scale w/h by k so head overlay aligns at 96px just like Arena <<< */
+    function scaled(b){ return { w:Math.round((b.w||0)*k), h:Math.round((b.h||0)*k), ox:Math.round((b.ox||0)*k), oy:Math.round((b.oy||0)*k), scale:b.scale }; }
     const legs =equippedIn('legs');  if(legs ) drawOne(ctx, legs .svg, scaled(BOX128.legs ));
     const chest=equippedIn('chest'); if(chest) drawOne(ctx, chest.svg, scaled(BOX128.chest));
     const arms =equippedIn('arms');  if(arms ) drawOne(ctx, arms .svg, scaled(BOX128.arms ));
@@ -688,44 +667,51 @@ function loop(t){
   const sRad = 0.5;
   const hitR = (pRad + sRad) * 1.35;
 
-  for(let i=spheres.length-1;i>=0;i--){
-    const s=spheres[i];
+  for (let i = spheres.length - 1; i >= 0; i--) {
+    const s = spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
 
     // Any contact with any block → GAME OVER
-    for(const b of blocks){
-      if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
+    for (const b of blocks) {
+      if (s.position.distanceTo(b.position) < 0.8 * currentPieceS) {
         fail();
         return requestAnimationFrame(loop);
       }
     }
 
     // Projectile collision (swept)
-    for(let j=projectilePool.length-1;j>=0;j--){
-      const p=projectilePool[j];
+    for (let j = projectilePool.length - 1; j >= 0; j--) {
+      const p = projectilePool[j];
       const nextP = p.position.clone().addScaledVector(p.userData.v, dt);
       const d = distPointToSegment(s.position, p.position, nextP);
-      if(d < hitR){
-        world.remove(s); spheres.splice(i,1);
-        world.remove(p); projectilePool.splice(j,1);
-        try{ bleep('explode'); }catch(_){}
+      if (d < hitR) {
+        world.remove(s); spheres.splice(i, 1);
+        world.remove(p); projectilePool.splice(j, 1);
+        try { bleep('explode'); } catch (_) {}
         break;
       }
     }
 
-    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board → GAME OVER
+    // Reached board → GAME OVER
+    if (s.position.y <= baseY) {
+      fail();
+      return requestAnimationFrame(loop);
+    }
   }
 
-  for(let j=projectilePool.length-1;j>=0;j--){
-    const p=projectilePool[j];
+  for (let j = projectilePool.length - 1; j >= 0; j--) {
+    const p = projectilePool[j];
     p.position.addScaledVector(p.userData.v, dt);
     p.userData.ttl -= dt;
-    if(p.userData.ttl<=0){ world.remove(p); projectilePool.splice(j,1); }
+    if (p.userData.ttl <= 0) {
+      world.remove(p);
+      projectilePool.splice(j, 1);
+    }
   }
-  renderer.render(scene,camera);
-  if(!ended) requestAnimationFrame(loop);
-}
 
+  renderer.render(scene, camera);
+  if (!ended) requestAnimationFrame(loop);
+}
 /* =======================
    Timer + Boot + End
 ======================= */
@@ -798,28 +784,6 @@ function showEndOverlay(){
   submitLeaderboard(score|0); // ensure IZZA DASH (puzzle) posts & persists
 }
 
-/* === NEW: wallet handoff from Arena (mirrors Basketball) === */
-function consumeWalletHandoff(maxAgeMs=120000){
-  try{
-    const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
-    const s=JSON.parse(raw); if(!s||!s.ts||(Date.now()-s.ts)>maxAgeMs) return null;
-    if(s.user){
-      const u=s.user.toString().trim().replace(/^@+/, '').toLowerCase();
-      window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
-      window.izzaUserKey={get:()=>u};
-      try{
-        localStorage.setItem('izzaUserU',u);
-        localStorage.setItem('piAuthUser',JSON.stringify({username:u}));
-      }catch(_){}
-    }
-    localStorage.setItem('izzaCoins', String(s.coins|0));
-    localStorage.setItem('izzaCrafting', String(s.craft|0));
-    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-    try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
-    return { coins:s.coins|0, craft:s.craft|0 };
-  }catch(_){ return null; }
-}
-
 async function refreshAvatar(){
   try{
     const cvs=document.getElementById('avatarCanvas'), ctx=cvs.getContext('2d'); ctx.imageSmoothingEnabled=false;
@@ -830,33 +794,10 @@ async function refreshAvatar(){
 
 async function start(){
   try{
-    // hydrate from Arena handoff FIRST (same behavior as Basketball)
-    const handoff=consumeWalletHandoff();
-    if(handoff){ paintCoinsHUD(handoff.coins); }
-
     await ensureSession();
-    if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
-
-    /* <-- Reapply Arena snapshot AFTER persist load so it wins over stale cache */
-    try{
-      const qs=new URLSearchParams(location.search);
-      const coinsParam = qs.get('coins') ?? qs.get('c');
-      if(coinsParam!=null && coinsParam!==''){
-        const n = Math.max(0, parseInt(coinsParam,10)|0);
-        const cur = parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
-        if(n!==cur){ localStorage.setItem('izzaCoins', String(n)); }
-      }
-      const craftParam = qs.get('craft') ?? qs.get('k');
-      if(craftParam!=null && craftParam!==''){
-        const n = Math.max(0, parseInt(craftParam,10)|0);
-        const keys=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-        const cur = parseInt(localStorage.getItem(keys[0])||'0',10)|0;
-        if(n!==cur){ for(const k of keys){ localStorage.setItem(k,String(n)); } }
-      }
-      /* ensure persisted snapshot now matches Arena's numbers */
-      try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
-    }catch(_){}
+    if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();  // <-- ensures starting balance matches Arena
   }catch(_){}
+  // Start with EXACT current balance from Arena (stored in LS by Arena)
   paintCoinsHUD(_wallet.readCoins());
   runStartCoins=_wallet.readCoins();
   craftsGrantedThisRun = 0;
@@ -897,7 +838,7 @@ document.addEventListener('click', (e)=>{
   endOverlay.style.display='none';
   // reset run state
   score = 0; level = 1; timeLeft = 30; ended = false;
-  runStartCoins = _wallet.readCoins();
+  runStartCoins = _wallet.readCoins();             // <-- new run starts from current wallet
   craftsGrantedThisRun = 0;
   // clear scene if needed and layout level 1
   if(!scene || !renderer) initThree();
