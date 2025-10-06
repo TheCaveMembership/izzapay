@@ -643,6 +643,12 @@ function fail(){
 let last=performance.now();
 function loop(t){
   const dt=Math.min(0.033,(t-last)/1000); last=t;
+
+  // precompute radii for accurate sphere-sphere hit test
+  const pRad = 0.18*projScaleForLevel(level);
+  const sRad = 0.5;
+  const hitR = (pRad + sRad) * 1.15; // small cushion
+
   for(let i=spheres.length-1;i>=0;i--){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
@@ -654,8 +660,9 @@ function loop(t){
     }
     for(let j=projectilePool.length-1;j>=0;j--){
       const p=projectilePool[j];
-      if(p.position.distanceTo(s.position) < 0.56*currentPieceS){
+      if(p.position.distanceTo(s.position) < hitR){
         world.remove(s); spheres.splice(i,1);
+        world.remove(p); projectilePool.splice(j,1);
         try{ bleep('explode'); }catch(_){}
         break;
       }
