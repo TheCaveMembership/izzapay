@@ -283,6 +283,15 @@
     }
   }catch(_){}
   function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
+
+  // Ensure ALL nav links (arena/city/game) carry t & u
+  document.querySelectorAll('a').forEach(a=>{
+    const href=a.getAttribute('href')||'';
+    if(href.startsWith('/izza-game/') || href.startsWith('/izza-city') || href.startsWith('/izza')){
+      a.href = withAuth(href);
+    }
+  });
+
   document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>a.href = withAuth(a.getAttribute('href')));
   window._withAuth = withAuth;
 })();
@@ -391,6 +400,9 @@ const P={ stock:[], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
 let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
 let FAN=26;
 
+// 5 minute hard cap
+const MAX_MS = 300000;
+
 function cssVarInt(name,fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
 function fmtTime(ms){ const s=Math.max(0,Math.floor(ms/1000)); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return `${String(m).padStart(2,'0')}:${ss}`; }
 
@@ -413,16 +425,22 @@ function layoutNew(){
 
   if(timerId) clearInterval(timerId);
   startTs=Date.now(); elTime.textContent='00:00';
-  timerId=setInterval(()=>{ if(!ended) elTime.textContent=fmtTime(Date.now()-startTs); },250);
+  timerId=setInterval(()=>{
+    if(ended) return;
+    const elapsed = Date.now()-startTs;
+    elTime.textContent=fmtTime(elapsed);
+    if(elapsed >= MAX_MS){ endGame(false); }
+  },250);
 
   renderAll();
   showMsg('GO!');
-  paintWallet();
+  paintWallet(); // show current wallet on entry
 }
 
 function showMsg(t){ const m=document.getElementById('bigmsg'); m.textContent=t; m.classList.add('show'); setTimeout(()=>m.classList.remove('show'),850); }
 
 /* ----- Rendering ----- */
+function placeXY(el,x,y){ el.style.transform=`translate(${x}px, ${y}px)`; }
 function renderAll(){
   const piles={ stock:'stock', waste:'waste', t:['t1','t2','t3','t4','t5','t6','t7'], f:['f1','f2','f3','f4'] };
   [...document.querySelectorAll('.pile')].forEach(p=>p.innerHTML='');
@@ -433,12 +451,21 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (top only)
+  // WASTE (fan visible count based on draw mode; only top is interactive)
   const wEl=document.getElementById(piles.waste);
   if(P.waste.length){
-    const top=P.waste[P.waste.length-1]; top.face=true;
-    const el=spawnCard(top); el.style.zIndex=10; placeStack(el,0); el.dataset.where='w';
-    wEl.appendChild(el);
+    const N=Math.min(getDrawPref(), P.waste.length);
+    const start=P.waste.length - N;
+    for(let i=0;i<N;i++){
+      const idx=start+i;
+      const c=P.waste[idx]; c.face=true;
+      const el=spawnCard(c);
+      el.style.zIndex=10+i;
+      placeXY(el, i*14, 0); // small horizontal fan
+      el.dataset.where='w';
+      if(idx!==P.waste.length-1) el.dataset.locked='1'; // lock non-top
+      wEl.appendChild(el);
+    }
   }
 
   // FOUNDATIONS
@@ -519,12 +546,12 @@ function noHiddenCards(){
   return true;
 }
 function autoMoveCardToFoundation(cardId){
-  let c=null, from=''; let col=-1;
-  if(P.waste.length && P.waste[P.waste.length-1].id===cardId){ c=P.waste[P.waste.length-1]; from='w'; }
+  let c=null;
+  if(P.waste.length && P.waste[P.waste.length-1].id===cardId){ c=P.waste[P.waste.length-1]; }
   if(!c){
     for(let i=0;i<7;i++){
       const pile=P.t[i];
-      if(pile.length && pile[pile.length-1].id===cardId){ c=pile[pile.length-1]; from='t'; col=i; break; }
+      if(pile.length && pile[pile.length-1].id===cardId){ c=pile[pile.length-1]; break; }
     }
   }
   if(!c) return false;
@@ -568,6 +595,7 @@ const dragLayer=document.getElementById('dragLayer');
 function enableDrag(){
   document.querySelectorAll('.card').forEach(el=>{
     if(el.classList.contains('back')) return;
+    if(el.dataset.locked==='1') return; // non-top waste is visual only
     el.onpointerdown=(e)=>{
       if(ended) return;
       const where=el.dataset.where || inferWhere(el);
@@ -787,12 +815,18 @@ document.getElementById('rulesBtn').addEventListener('click', ()=>rulesEl.classL
 document.getElementById('rulesClose').addEventListener('click', ()=>rulesEl.classList.remove('show'), {passive:true});
 rulesEl.addEventListener('click', (e)=>{ if(e.target===rulesEl) rulesEl.classList.remove('show'); }, {passive:true});
 
-/* Back to Arcade: save first */
-document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>{
+/* Back to Arcade (and other pages): sync + save first, preserve auth */
+document.querySelectorAll('#backBtn,#backBtn2,#startBack,a').forEach(a=>{
   a.addEventListener('click', async (e)=>{
-    e.preventDefault();
-    try{ await _wallet.syncFromPersist(); await IZZA_PERSIST?.save?.(); }catch(_){}
-    location.href=a.href;
+    const href=a.getAttribute('href')||'';
+    if(href.startsWith('/')){
+      e.preventDefault();
+      try{
+        await _wallet.syncFromPersist();
+        await IZZA_PERSIST?.save?.();
+      }catch(_){}
+      location.href=_withAuth(href);
+    }
   }, {passive:false});
 });
 
@@ -821,9 +855,12 @@ document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>{
 
 /* ===== Boot ===== */
 (async function(){
-  try{ await _wallet.syncFromPersist(); }catch(_){}
+  try{
+    // Capture balances on entry and paint HUD with the *current* balances
+    await _wallet.syncFromPersist();
+  }catch(_){}
   sizeBoard();
-  paintWallet();
+  paintWallet(); // ensures current balance shows before the first deal
   // Wait for Start to be pressed
 })();
 </script>
