@@ -80,7 +80,8 @@
     /* avatar — under AMMO pill, but render IN FRONT of HUD */
     .playerAvatar{
       position:absolute; top:84px; left:12px;
-      width:64px; height:64px; z-index:12; pointer-events:none
+      width:64px; height:64px; z-index:12; pointer-events:none;
+      -webkit-transform: translateZ(0); transform: translateZ(0);
     }
     .playerAvatar canvas{width:64px;height:64px;image-rendering:pixelated;image-rendering:crisp-edges}
 
@@ -805,6 +806,26 @@ async function start(){
   try{
     await ensureSession();
     if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+
+    /* <-- Reapply Arena snapshot AFTER persist load so it wins over stale cache */
+    try{
+      const qs=new URLSearchParams(location.search);
+      const coinsParam = qs.get('coins') ?? qs.get('c');
+      if(coinsParam!=null && coinsParam!==''){
+        const n = Math.max(0, parseInt(coinsParam,10)|0);
+        const cur = parseInt(localStorage.getItem('izzaCoins')||'0',10)|0;
+        if(n!==cur){ localStorage.setItem('izzaCoins', String(n)); }
+      }
+      const craftParam = qs.get('craft') ?? qs.get('k');
+      if(craftParam!=null && craftParam!==''){
+        const n = Math.max(0, parseInt(craftParam,10)|0);
+        const keys=['izzaCrafting','craftingCredits','izzaCraftCredits'];
+        const cur = parseInt(localStorage.getItem(keys[0])||'0',10)|0;
+        if(n!==cur){ for(const k of keys){ localStorage.setItem(k,String(n)); } }
+      }
+      /* ensure persisted snapshot now matches Arena's numbers */
+      try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+    }catch(_){}
   }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
   runStartCoins=_wallet.readCoins();
