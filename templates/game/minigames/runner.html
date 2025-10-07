@@ -193,7 +193,7 @@ renderWalletFromLS();
   renderWalletFromLS();
 })();
 
-/* -------- Avatar builder (full, unchanged for visuals) -------- */
+/* -------- Avatar builder (unchanged for visuals) -------- */
 const SPRITES={body:{default:"/static/game/sprites/body/default.png",street_a:"/static/game/sprites/body/street_a.png",street_b:"/static/game/sprites/body/street_b.png"},hair:{short:"/static/game/sprites/hair/short.png",buzz:"/static/game/sprites/hair/buzz.png",long:"/static/game/sprites/hair/long.png"},outfit:{street:"/static/game/sprites/outfit/street.png",athletic:"/static/game/sprites/outfit/athletic.png",luxury:"/static/game/sprites/outfit/luxury.png"}};
 const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
 const SKIN_TO={light:["#FFE7D6","#F3C6A7","#D8A187"],medium:["#F1BD94","#D79A73","#B67955"],tan:["#E2A878","#C88756","#9F663C"],dark:["#B9825B","#9A6644","#714A31"],deep:["#8B5A3B","#432818"]};
@@ -241,6 +241,18 @@ const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,2000);
 camera.position.set(0,1.05,3.8);
 scene.fog=new THREE.Fog(0xbfe8ff,22,80);
 
+/* Texture loader + helpers (PNG-based skins) */
+const texLoader = new THREE.TextureLoader();
+function loadTex(path, repeatX=1, repeatY=1){
+  const t = texLoader.load(path);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeatX, repeatY);
+  t.anisotropy = 8;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  return t;
+}
+
 /* Sun + sky */
 {
   const hemi=new THREE.HemisphereLight(0xbfe8ff,0x22aa44,0.9);scene.add(hemi);
@@ -248,19 +260,25 @@ scene.fog=new THREE.Fog(0xbfe8ff,22,80);
   const sky=new THREE.Mesh(new THREE.SphereGeometry(900,24,16),new THREE.MeshBasicMaterial({color:0xbfe8ff,side:THREE.BackSide}));scene.add(sky);
 }
 
-/* Ground */
-const grassMat=new THREE.MeshLambertMaterial({color:0x27ff66});
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(40,2000),grassMat);
+/* Ground — textured grass */
+const GRASS_TEX = loadTex('/static/game/textures/runner/grass.png', 16, 200); // replace with final art later
+const ground=new THREE.Mesh(
+  new THREE.PlaneGeometry(40,2000),
+  new THREE.MeshLambertMaterial({map:GRASS_TEX})
+);
 ground.rotation.x=-Math.PI/2;ground.position.z=-1000;scene.add(ground);
 
-/* Path — endless ring */
+/* Path — textured segments (moving track) */
+const TRACK_TEX = loadTex('/static/game/textures/runner/track.png', 1, 1); // final art later
 const PATH_SEGMENTS=[],PATH_SPACING=5.0,PATH_COUNT=90,PATH_LOOP=PATH_SPACING*PATH_COUNT;
 (function buildPath(){
-  const mat=new THREE.MeshStandardMaterial({color:0xd7b97a,roughness:0.9,metalness:0.0});
+  const mat=new THREE.MeshBasicMaterial({map:TRACK_TEX, transparent:true, alphaTest:0.01});
   for(let i=0;i<PATH_COUNT;i++){
-    const seg=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.02,4.5),mat);
-    seg.position.set(0,0.01,-i*PATH_SPACING-5);
-    seg.userData.scroll = true; // scroll with world
+    // thin plane that reads the track PNG
+    const seg=new THREE.Mesh(new THREE.PlaneGeometry(1.6,4.6),mat);
+    seg.position.set(0,0.011,-i*PATH_SPACING-5);
+    seg.rotation.x = -Math.PI/2; // lay flat on ground
+    seg.userData.scroll = true;
     scene.add(seg);PATH_SEGMENTS.push(seg);
   }
 })();
@@ -279,27 +297,24 @@ const backTex=new THREE.CanvasTexture(backCanvasPlaceholder);backTex.minFilter=T
 const player=new THREE.Mesh(new THREE.PlaneGeometry(0.28,0.28),new THREE.MeshBasicMaterial({map:backTex,transparent:true}));
 player.position.set(0,0.78,0);scene.add(player);
 
-/* Coins */
+/* Coins (unchanged) */
 function makeCoinTexture(){const s=128,cnv=document.createElement('canvas');cnv.width=cnv.height=s;const ctx=cnv.getContext('2d');const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);g.addColorStop(0,'#fff5c4');g.addColorStop(.45,'#ffd86b');g.addColorStop(1,'#9a6d1c');ctx.fillStyle=g;ctx.beginPath();ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2);ctx.fill();ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.stroke();ctx.fillStyle='rgba(40,30,0,0.85)';ctx.font='700 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('IZ',s/2,s/2);return new THREE.CanvasTexture(cnv);}
 const coinTex=makeCoinTexture();coinTex.anisotropy=4;
 const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughness:0.3,emissive:0x2b1f00,emissiveIntensity:0.2});
 
 const obstacles=[],coins=[];
 
-/* Spawning — more space from the start + no overlap */
+/* PNG art placeholders for obstacles */
+const HAY_BALE_PNG = '/static/game/textures/runner/hay_bale.png';              // TODO: provide final art
+const OLD_TOWN_GATE_PNG = '/static/game/textures/runner/old_town_gate.png';    // TODO: provide final art
+
+/* Spawning — tuned spacing (scales with speed) */
 const TRACK_LOOP=900;
-const BASE_OBSTACLE_SPACING=36;
-const INITIAL_SPREAD_EXTRA=12;
-const MIN_OBSTACLE_GAP=14;         // hard minimum between obstacles (prevents "bale + gate together")
+const BASE_OBSTACLE_SPACING=42;       // a bit wider base spacing
+const INITIAL_SPREAD_EXTRA=16;        // safer early runway
+const MIN_OBSTACLE_GAP=18;            // never stack obstacles too close
 const COIN_CHANCE=0.6;
 const OBSTACLE_CHANCE=0.55;
-
-// Adaptive spacing helper — increases gap as speed rises
-function spacingForVel(v){
-  const base = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA;
-  const speedBonus = 22 + Math.pow(v*90, 1.15); // ramps up as game speeds up
-  return base + speedBonus + Math.random()*36;
-}
 
 function spawnCoin(z){
   const m=new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05,32),coinMat);
@@ -307,42 +322,76 @@ function spawnCoin(z){
   m.userData.kind='coin'; m.userData.scroll = true;
   scene.add(m);coins.push(m);
 }
+
+/* Obstacle helpers — billboarded PNGs with invisible collision boxes */
+function makeBillboard(path, w, h){
+  const tex = loadTex(path, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, alphaTest:0.01});
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat);
+  mesh.material.depthWrite = true;
+  mesh.material.side = THREE.DoubleSide;
+  return mesh;
+}
+
 function makeBale(z){
-  const bale=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),new THREE.MeshStandardMaterial({color:0xe6c15a,roughness:0.9,metalness:0.1}));
-  bale.position.set(0,0.275,z);
-  bale.userData={kind:'low',bounds:{sx:1.1,sy:0.55,sz:0.9,cy:0.275},scroll:true};
-  return bale;
+  // Visual: billboard PNG
+  const group = new THREE.Group();
+  const img = makeBillboard(HAY_BALE_PNG, 1.3, 0.8);
+  img.position.set(0,0.40,0);
+  group.add(img);
+
+  // Collision proxy: (same as before)
+  const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.9), new THREE.MeshBasicMaterial({visible:false}));
+  proxy.position.set(0,0.275,0);
+  group.add(proxy);
+
+  group.position.z = z;
+  group.userData = {
+    kind:'low',
+    scroll:true,
+    bounds:{ sx:1.1, sy:0.55, sz:0.9, cy:0.275 }
+  };
+  return group;
 }
+
 function makeGate(z){
-  const arch=new THREE.Group(); arch.userData={kind:'high',scroll:true};
-  const postsMat=new THREE.MeshStandardMaterial({color:0x1266cc,metalness:0.2,roughness:0.4});
-  const postL=new THREE.Mesh(new THREE.BoxGeometry(0.10,1.0,0.18),postsMat);postL.position.set(-0.9,0.5,0);arch.add(postL);
-  const postR=postL.clone();postR.position.x=0.9;arch.add(postR);
-  const banner=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.14,0.1),new THREE.MeshStandardMaterial({color:0x10c97b,emissive:0x10c97b,emissiveIntensity:0.25}));
-  banner.position.set(0,0.82,0);arch.add(banner);
-  arch.position.z=z;
-  // bounds tuned to require a slide (cannot be jumped over)
-  arch.userData.bounds={sx:1.8,sy:0.38,sz:0.9,cy:0.82};
-  return arch;
+  // Visual: single PNG that includes posts + the "OLD TOWN IZZA CITY COWBOY SALOON" entry sign artwork
+  const group = new THREE.Group();
+  const img = makeBillboard(OLD_TOWN_GATE_PNG, 2.2, 1.2);
+  img.position.set(0,0.82,0);
+  group.add(img);
+
+  // Collision proxy requiring SLIDE (cannot be jumped over)
+  const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.38,0.9), new THREE.MeshBasicMaterial({visible:false}));
+  proxy.position.set(0,0.82,0);
+  group.add(proxy);
+
+  group.position.z = z;
+  group.userData = {
+    kind:'high',
+    scroll:true,
+    bounds:{ sx:1.8, sy:0.38, sz:0.9, cy:0.82 }
+  };
+  return group;
 }
+
 function isTooCloseToOther(z){
   for(const o of obstacles){ if(!o) continue; if (Math.abs(o.position.z - z) < MIN_OBSTACLE_GAP) return true; }
   return false;
 }
 function spawnObstacle(z){
-  // find a clear slot
   let targetZ=z, guard=0;
   while(isTooCloseToOther(targetZ) && guard++<6){ targetZ -= (MIN_OBSTACLE_GAP+2); }
   const node = (Math.random()<0.5) ? makeBale(targetZ) : makeGate(targetZ);
   scene.add(node); obstacles.push(node);
 }
 
-/* initial stretch with adaptive spacing */
+/* initial stretch with bigger spacing */
 let zCursor=-35;
 for(let i=0;i<38;i++){
   if(Math.random()<COIN_CHANCE) spawnCoin(zCursor-6);
   if(Math.random()<OBSTACLE_CHANCE) spawnObstacle(zCursor-10);
-  zCursor -= spacingForVel(0.18); // start spacing based on initial speed
+  zCursor -= (BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + Math.random()*10);
 }
 
 /* keep some coins ahead */
@@ -354,9 +403,9 @@ spawnCoinsAheadBuffer();
 
 /* Game state */
 let running=false,over=false;
-let vel=0.18;
+let vel=0.18;            // starting scroll speed
 let dist=0;
-let sessionIzza=0; // value gained (25 per pickup)
+let sessionIzza=0;       // value gained (25 per pickup)
 let best=parseInt(localStorage.getItem('runnerHighScore')||'0',10)||0;
 const scoreEl=document.getElementById('scoreEl');
 
@@ -414,7 +463,7 @@ document.getElementById('startBtn').onclick = ()=>{
   running = true; over=false;
 };
 document.getElementById('lbBtn').onclick = ()=>{ location.href = withAuth('/izza-game/minigames#leaderboard'); };
-document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click();};
+document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click(); };
 document.getElementById('retryBtn').onclick = ()=>{ location.href = withAuth(location.pathname); };
 document.getElementById('exitBtn').href = withAuth('/izza-game/minigames');
 document.getElementById('backArcadeBtn').href = withAuth('/izza-game/minigames');
@@ -498,13 +547,14 @@ function tick(now){
   }
   if (Math.random()<0.03) spawnCoinsAheadBuffer();
 
-  // Obstacles — recycle with ADAPTIVE spacing, strict & clear collisions
+  // Obstacles — recycle with spacing that grows as speed increases
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
 
     if (o.position.z > 8){
-      // choose new location well behind and ensure spacing grows with speed
-      let newZ = o.position.z - (TRACK_LOOP + spacingForVel(vel));
+      // widen gap as speed grows (vel factor), plus randomness
+      let extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + (vel*45) + Math.random()*36;
+      let newZ = o.position.z - (TRACK_LOOP + extraGap);
       let guard=0;
       while(isTooCloseToOther(newZ) && guard++<6){ newZ -= (MIN_OBSTACLE_GAP+2); }
       o.position.z = newZ;
@@ -518,13 +568,10 @@ function tick(now){
       const isBale = (o.userData.kind==='low');
       const isGate = (o.userData.kind==='high');
 
-      // Clear, non-ambiguous rules:
-      // - Bale: must be HIGH enough (jump). If not high enough when hit -> trip.
-      // - Gate: must be LOW enough (slide). If not low enough when hit -> trip.
       const postureBad = (isBale && player.position.y < 1.05) || (isGate && player.position.y > 0.60);
 
       if (hitAABB && postureBad){
-        gameOver(); // IMMEDIATE stop and overlay
+        gameOver();
         return;
       }
     }
