@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="color-scheme" content="light">
 
-  <!-- Persist/leaderboard base (already used across your app) -->
+  <!-- Persist/leaderboard base -->
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
   <script src="/static/game/js/izza-persist.js"></script>
 
@@ -31,8 +31,8 @@
     /* HUD */
     .hud{
       position:fixed; inset:10px 10px auto 10px;
-      display:flex; flex-wrap:wrap; align-items:center; gap:6px; z-index:20;
-      max-width:calc(100vw - 120px);
+      display:flex; flex-wrap:wrap; align-items:center; gap:6px; z-index:30;
+      max-width:calc(100vw - 130px);
     }
     .pill{
       display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px;
@@ -46,7 +46,7 @@
     }
     .btn:hover{filter:brightness(1.04)}
     .score{
-      position:fixed; right:8px; top:8px; z-index:20; font-size:22px; font-weight:800; letter-spacing:0.5px;
+      position:fixed; right:8px; top:8px; z-index:30; font-size:24px; font-weight:800; letter-spacing:0.5px;
       padding:6px 10px; background:var(--chip-bg); border:1px solid var(--line);
       border-radius:12px; backdrop-filter:blur(6px);
     }
@@ -56,9 +56,9 @@
       .btn{font-size:13px; padding:8px 12px}
     }
 
-    /* Start & GameOver overlays */
+    /* Overlays */
     .overlay{
-      position:fixed; inset:0; display:grid; place-items:center; z-index:30; background:rgba(255,255,255,.35);
+      position:fixed; inset:0; display:grid; place-items:center; z-index:40; background:rgba(255,255,255,.35);
       opacity:0; pointer-events:none; transition:opacity .25s ease;
     }
     .overlay.show{opacity:1; pointer-events:auto;}
@@ -76,25 +76,27 @@
 
     #gameCanvas{position:fixed; inset:0; width:100vw; height:100vh; display:block;}
 
-    /* Avatar preview (keep size, turn background fully green) */
+    /* Avatar preview */
     .avatar-corner{
-      position:fixed; left:12px; bottom:12px; width:90px; height:90px; z-index:15; pointer-events:none;
+      position:fixed; left:12px; bottom:12px; width:90px; height:90px; z-index:25; pointer-events:none;
       border-radius:12px; border:1px solid var(--line);
       background:linear-gradient(var(--grass), var(--grass));
       display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);
     }
     canvas#avatarCursor{width:82px; height:82px; image-rendering:pixelated;}
 
-    /* Make bottom strip green all the way to screen edge */
+    /* Make bottom area fully grass green (cover safe-area too) */
     .bottom-grass{
-      position:fixed; left:0; right:0; bottom:0; height:160px; z-index:5;
+      position:fixed; left:0; right:0; bottom:0; height:max(20vh, 210px); z-index:10;
       background:var(--grass);
       pointer-events:none;
     }
 
+    /* Tips – pushed below pills so they never overlap */
     .tips{
-      position:fixed; left:12px; top:56px; z-index:20; color:#0b2b4b; font-weight:700; font-size:12px;
+      position:fixed; left:10px; top:58px; z-index:30; color:#0b2b4b; font-weight:700; font-size:12px;
       background:var(--chip-bg); border:1px solid var(--line); border-radius:10px; padding:6px 8px; backdrop-filter:blur(6px);
+      max-width:min(680px, 92vw);
     }
   </style>
 </head>
@@ -143,7 +145,7 @@
       <div class="center-row">
         <button id="retryBtn" class="btn">↻ Retry</button>
         <button id="overLbBtn" class="btn">🏆 Leaderboard</button>
-        <a class="btn" href="/izza-game/minigames">↩︎ Back to Arcade</a>
+        <a id="backArcadeBtn" class="btn" href="/izza-game/minigames">↩︎ Back to Arcade</a>
       </div>
     </div>
   </div>
@@ -152,11 +154,14 @@
 /* -----------------------------
    USER + PERSIST BOOTSTRAP
 ------------------------------*/
-(function ensureUser(){
+(function ensureUserAndToken(){
   try{
     const params = new URLSearchParams(location.search);
     let u = (params.get('u') || '').toString().trim();
+    let t = (params.get('t') || '').toString().trim();
     if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
+    if (!t) t = (localStorage.getItem('izzaTokenT') || '').toString().trim();
+
     if (!u) {
       const raw = localStorage.getItem('piAuthUser');
       if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
@@ -168,8 +173,17 @@
       try { localStorage.setItem('izzaUserU', u); } catch(_){}
       try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
     }
+    if (t) { try { localStorage.setItem('izzaTokenT', t); } catch(_){} }
   }catch(_){}
 })();
+function withAuth(urlPath){
+  const url = new URL(urlPath, location.origin);
+  const T = localStorage.getItem('izzaTokenT')||'';
+  const U = localStorage.getItem('izzaUserU')||'';
+  if (T) url.searchParams.set('t', T);
+  if (U) url.searchParams.set('u', U);
+  return url.pathname + (url.search || '');
+}
 
 /* Helpers consistent with Arena */
 const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
@@ -283,6 +297,7 @@ function _drawOverlay(ctx, svg, box, per=1, flip=false){
   ctx.restore(); return true;
 }
 
+/* Front avatar (preview) */
 async function buildAvatarCanvas(dstCtx, size, profile){
   const DW=size,DH=size,X=0,Y=0;
   const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
@@ -327,8 +342,6 @@ async function buildAvatarCanvas(dstCtx, size, profile){
     dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
   }
 }
-
-/* Compose avatar + overlays (front) */
 async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   await buildAvatarCanvas(dstCtx, size, profile);
   const k = (size>0 ? size/BASE_SZ : 1);
@@ -337,10 +350,10 @@ async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   if(chest){ _drawOverlay(dstCtx, chest.svg, _scaleBox(BOX.chest,k), 1); }
   if(arms){ _drawOverlay(dstCtx, arms.svg, _scaleBox(BOX.arms,k), 1); }
   if(head){ _drawOverlay(dstCtx, head.svg, _scaleBox(BOX.head,k), 1); }
-  if(hands){ _drawOverlay(dstCtx, hands.svg, _scaleBox(BOX.hands,k), 1); } // preview shows hands/weapon
+  if(hands){ _drawOverlay(dstCtx, hands.svg, _scaleBox(BOX.hands,k), 1); }
 }
 
-/* Utility: average color inside ellipse on a canvas (skip transparent pixels) */
+/* Utility: sample main color in ellipse */
 function sampleAverageColorInEllipse(ctx, cx, cy, rx, ry){
   const w=ctx.canvas.width, h=ctx.canvas.height;
   const xmin=Math.max(0, Math.floor(cx-rx)), xmax=Math.min(w-1, Math.ceil(cx+rx));
@@ -358,16 +371,14 @@ function sampleAverageColorInEllipse(ctx, cx, cy, rx, ry){
     }
   }
   if(n===0) return null;
-  return rgbToHex({r:Math.round(r/n), g:Math.round(g/n), b:Math.round(b/n)});
+  const toHex=v=>v.toString(16).padStart(2,'0');
+  return '#'+toHex(Math.round(r/n))+toHex(Math.round(g/n))+toHex(Math.round(b/n));
 }
 
-/* Build and then "backify" the avatar WITH GEAR for the in-game texture.
-   Backify = compose body + overlays (excluding HANDS), mirror, then wipe face and refill
-   using head/helmet dominant color, or hair mid-tone if no head overlay. */
+/* Backified in-game sprite using head color or hair tone for the fill */
 async function buildBackAvatar(size){
   const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
 
-  // 1) Compose to a source canvas WITHOUT hands
   const src = document.createElement('canvas'); src.width=src.height=size;
   const sctx = src.getContext('2d',{willReadFrequently:true}); sctx.imageSmoothingEnabled=false;
 
@@ -380,25 +391,18 @@ async function buildBackAvatar(size){
   if(arms){ _drawOverlay(sctx, arms.svg, _scaleBox(BOX.arms,k), 1); }
   if(head){ _drawOverlay(sctx, head.svg, _scaleBox(BOX.head,k), 1); }
 
-  // Face ellipse (on source/back have same coords)
   const cx=size*0.52, cy=size*0.28, rx=size*0.18, ry=size*0.15;
-
-  // Decide fill color: head overlay dominant or hair mid-tone
   let fillCol = null;
-  if (head && head.svg){
-    fillCol = sampleAverageColorInEllipse(sctx, cx, cy, rx, ry);
-  }
+  if (head && head.svg) fillCol = sampleAverageColorInEllipse(sctx, cx, cy, rx, ry);
   if (!fillCol){
     const hairTone = (HAIR_TO[ (profile.hair_color||'black') ]||HAIR_TO.black);
-    fillCol = hairTone[1]; // mid-tone
+    fillCol = hairTone[1];
   }
 
-  // 2) Mirror to simulate back view
   const back = document.createElement('canvas'); back.width=back.height=size;
   const bctx = back.getContext('2d',{willReadFrequently:true}); bctx.imageSmoothingEnabled=false;
   bctx.save(); bctx.scale(-1,1); bctx.drawImage(src, -size, 0, size, size); bctx.restore();
 
-  // 3) Wipe face region, then refill with chosen color (no hole)
   bctx.save(); bctx.globalCompositeOperation='destination-out';
   bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill(); bctx.restore();
 
@@ -409,7 +413,7 @@ async function buildBackAvatar(size){
 }
 
 /* -----------------------------
-   AUDIO (SFX via WebAudio)
+   AUDIO
 ------------------------------*/
 const audio = {
   ctx:null, bg:null, gain:null, muted:false,
@@ -460,7 +464,7 @@ document.getElementById('muteBtn').addEventListener('click', ()=>{
 });
 
 /* -----------------------------
-   THREE.js GAME — Daytime Meadow
+   THREE.js GAME — Meadow
 ------------------------------*/
 const canvas = document.getElementById('gameCanvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
@@ -472,25 +476,31 @@ const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 2000
 camera.position.set(0, 1.05, 3.8);
 scene.fog = new THREE.Fog(0xbfe8ff, 22, 80);
 
-/* Sun + sky */
+/* Sun + sky + sunshine */
 {
-  const hemi = new THREE.HemisphereLight(0xbfe8ff, 0x22aa44, 0.8); scene.add(hemi);
-  const sun  = new THREE.DirectionalLight(0xffffff, 1.04); sun.position.set(5,8,3); scene.add(sun);
-  const skyGeo = new THREE.SphereGeometry(900, 24, 16);
-  const skyMat = new THREE.MeshBasicMaterial({ color:0xbfe8ff, side:THREE.BackSide });
-  const sky = new THREE.Mesh(skyGeo, skyMat); scene.add(sky);
+  const hemi = new THREE.HemisphereLight(0xbfe8ff, 0x22aa44, 0.9); scene.add(hemi);
+  const sunDir  = new THREE.DirectionalLight(0xffffff, 1.05); sunDir.position.set(5,8,3); scene.add(sunDir);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), new THREE.MeshBasicMaterial({ color:0xbfe8ff, side:THREE.BackSide }));
+  scene.add(sky);
+
+  // visible sunshine disk
+  const sunGeo = new THREE.SphereGeometry(3.2, 24, 12);
+  const sunMat = new THREE.MeshBasicMaterial({ color:0xfff2a6, transparent:true, opacity:0.9 });
+  const sun = new THREE.Mesh(sunGeo, sunMat);
+  sun.position.set(-20, 35, -120);
+  scene.add(sun);
 }
 
-/* Ground (bright neon grass) */
+/* Ground (grass) */
 const grassMat = new THREE.MeshLambertMaterial({ color:0x27ff66 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 2000), grassMat);
 ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
 
-/* Infinite-looking path: a ring of segments recycled behind the player */
+/* Path — ring of segments recycled behind the player (endless) */
 const PATH_SEGMENTS = [];
 const PATH_SPACING = 5.0;
-const PATH_COUNT = 80;                         // number of visible segments
-const PATH_LOOP = PATH_SPACING * PATH_COUNT;   // recycle distance
+const PATH_COUNT = 90;
+const PATH_LOOP = PATH_SPACING * PATH_COUNT;
 (function buildPath(){
   const mat = new THREE.MeshStandardMaterial({ color:0xd7b97a, roughness:0.9, metalness:0.0 });
   for(let i=0;i<PATH_COUNT;i++){
@@ -500,24 +510,53 @@ const PATH_LOOP = PATH_SPACING * PATH_COUNT;   // recycle distance
   }
 })();
 
-/* Scenery blocks */
-(function hedges(){
-  const hedgeMat = new THREE.MeshLambertMaterial({ color:0x12ca49 });
-  for(let i=0;i<80;i++){
-    const h = new THREE.Mesh(new THREE.BoxGeometry(1.6, Math.random()*1.2+0.8, 1.6), hedgeMat);
-    h.position.set( (Math.random()<0.5?-1:1)*(3.0+Math.random()*3.0), h.geometry.parameters.height/2, -i*16-8 - Math.random()*8);
-    scene.add(h);
+/* Simple low-poly animals to replace blocks */
+function makeCow(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.6,0.5), new THREE.MeshLambertMaterial({ color:0xffffff }));
+  const spots = new THREE.Mesh(new THREE.BoxGeometry(1.25,0.62,0.52), new THREE.MeshLambertMaterial({ color:0x333333, transparent:true, opacity:0.12 }));
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.35,0.35,0.35), new THREE.MeshLambertMaterial({ color:0xffffff }));
+  head.position.set(0.7,0.25,0);
+  const legsMat = new THREE.MeshLambertMaterial({ color:0x222222 });
+  for(const x of [-0.4,0.4]) for(const z of [-0.18,0.18]){
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.4,0.12), legsMat);
+    leg.position.set(x, -0.3, z); g.add(leg);
+  }
+  body.add(spots);
+  g.add(body); g.add(head);
+  return g;
+}
+function makePig(){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.0,0.55,0.5), new THREE.MeshLambertMaterial({ color:0xffb3c1 }));
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32,0.32,0.32), new THREE.MeshLambertMaterial({ color:0xffb3c1 }));
+  head.position.set(0.65,0.20,0);
+  const legsMat = new THREE.MeshLambertMaterial({ color:0xe38aa0 });
+  for(const x of [-0.35,0.35]) for(const z of [-0.18,0.18]){
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.36,0.12), legsMat);
+    leg.position.set(x, -0.28, z); g.add(leg);
+  }
+  g.add(body); g.add(head);
+  return g;
+}
+(function populateAnimals(){
+  for(let i=0;i<28;i++){
+    const a = (Math.random()<0.5?makeCow():makePig());
+    const side = (Math.random()<0.5?-1:1);
+    a.position.set(side*(3.2+Math.random()*3.2), 0.35, -10 - Math.random()*180);
+    // spread several clusters along the course
+    a.userData.kind='animal';
+    scene.add(a);
   }
 })();
 
-/* Avatar canvases (preview) */
+/* Avatar preview */
 const avatarCanvas = document.getElementById('avatarCursor');
 const avCtx = avatarCanvas.getContext('2d', { willReadFrequently:true });
 avCtx.imageSmoothingEnabled=false;
-/* Build preview (front) ASAP */
 (function(){ const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}'); buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile); })();
 
-/* Build backified canvas for the in-game player — async */
+/* Backified canvas for in-game player */
 const backCanvasPlaceholder = document.createElement('canvas'); backCanvasPlaceholder.width=backCanvasPlaceholder.height=96;
 const backTex = new THREE.CanvasTexture(backCanvasPlaceholder);
 backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter;
@@ -526,14 +565,14 @@ backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter
   backTex.image = c; backTex.needsUpdate = true;
 })();
 
-/* Player: smaller (about half old size), overlays already baked into texture */
+/* Player — smaller */
 const player = new THREE.Mesh(
   new THREE.PlaneGeometry(0.28,0.28),
   new THREE.MeshBasicMaterial({ map: backTex, transparent:true })
 );
 player.position.set(0, 0.78, 0); scene.add(player);
 
-/* ——— Coins ——— */
+/* Coins */
 function makeCoinTexture(){
   const s=128, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
   const ctx=cnv.getContext('2d');
@@ -550,11 +589,11 @@ const coinMat = new THREE.MeshStandardMaterial({ map: coinTex, metalness:0.85, r
 
 const obstacles=[]; const coins=[];
 
-/* spawn helpers — wider spacing + endless track */
-const TRACK_LOOP = 900;               // obstacle recycle loop length
-const OBSTACLE_SPACING = 28;          // wider than before
+/* Spawning — endless + adaptive spacing */
+const TRACK_LOOP = 900;
+const BASE_OBSTACLE_SPACING = 26;
 const COIN_CHANCE = 0.6;
-const OBSTACLE_CHANCE = 0.45;
+const OBSTACLE_CHANCE = 0.5;
 
 function spawnCoin(z){
   const m = new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05, 32), coinMat);
@@ -565,32 +604,37 @@ function spawnObstacle(z){
   if (Math.random()<0.5){
     const bale = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),
       new THREE.MeshStandardMaterial({ color:0xe6c15a, roughness:0.9, metalness:0.1 }));
-    bale.position.set(0,0.28,z); bale.userData.kind='low'; scene.add(bale); obstacles.push(bale);
+    bale.position.set(0,0.275,z); bale.userData.kind='low'; bale.userData.bounds={sx:1.1,sy:0.55,sz:0.9,cy:0.275};
+    scene.add(bale); obstacles.push(bale);
   }else{
-    const arch = new THREE.Group();
+    // Wider + lower gate so sliding required
+    const arch = new THREE.Group(); arch.userData.kind='high';
     const postsMat = new THREE.MeshStandardMaterial({ color:0x1266cc, metalness:0.2, roughness:0.4 });
-    const postL = new THREE.Mesh(new THREE.BoxGeometry(0.12,1.6,0.2), postsMat); postL.position.set(-0.7,0.8,0); arch.add(postL);
-    const postR = postL.clone(); postR.position.x=0.7; arch.add(postR);
-    const banner = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.18,0.1),
+    const postL = new THREE.Mesh(new THREE.BoxGeometry(0.12,1.2,0.2), postsMat); postL.position.set(-1.0,0.6,0); arch.add(postL);
+    const postR = postL.clone(); postR.position.x=1.0; arch.add(postR);
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(2.0,0.18,0.1),
       new THREE.MeshStandardMaterial({ color:0x10c97b, emissive:0x10c97b, emissiveIntensity:0.25 }));
-    banner.position.set(0,1.35,0); arch.add(banner);
-    arch.position.z=z; arch.userData.kind='high'; scene.add(arch); obstacles.push(arch);
+    banner.position.set(0,0.95,0); arch.add(banner);
+    arch.position.z=z;
+    // bounds for collision
+    arch.userData.bounds={sx:2.0,sy:0.5,sz:0.9,cy:0.95};
+    scene.add(arch); obstacles.push(arch);
   }
 }
 
-/* initial stretch with larger spacing */
-let zCursor = -40;
-for(let i=0;i<40;i++){
+/* initial stretch with mix */
+let zCursor = -35;
+for(let i=0;i<42;i++){
   if (Math.random() < COIN_CHANCE) spawnCoin(zCursor - 6);
   if (Math.random() < OBSTACLE_CHANCE) spawnObstacle(zCursor - 10);
-  zCursor -= (OBSTACLE_SPACING + Math.random()*8);
+  zCursor -= (BASE_OBSTACLE_SPACING + Math.random()*8);
 }
 
-/* continuous coin trickle ahead */
+/* keep some coins ahead */
 function spawnCoinsAheadBuffer(){
-  const ahead = coins.filter(c=>c.position.z< -60).length;
+  const ahead = coins.filter(c=>c.position.z< -40).length;
   for(let k=ahead; k<8; k++){
-    spawnCoin(-200 - Math.random()*600);
+    spawnCoin(-160 - Math.random()*520);
   }
 }
 spawnCoinsAheadBuffer();
@@ -599,13 +643,12 @@ spawnCoinsAheadBuffer();
 let running=false, over=false;
 let vel = 0.18;
 let dist = 0;
-let sessionCoins = 0;
+let sessionIzza = 0; // in-game coins value (25 per pickup)
 let best = parseInt(localStorage.getItem('runnerHighScore')||'0',10) || 0;
 const scoreEl = document.getElementById('scoreEl');
 
 /* Jump / Slide */
-let jumpT = 0;     // 0..1
-let slideT = 0;    // 0..1
+let jumpT = 0, slideT = 0;
 function doJump(){ if (over || !running) return; if (jumpT>0 || slideT>0) return; jumpT = 1; audio.blip({f1:520,f2:980,dur:0.24}); }
 function doSlide(){ if (over || !running) return; if (slideT>0 || jumpT>0) return; slideT = 1; audio.thump({f:95,dur:0.20}); }
 
@@ -629,7 +672,7 @@ function aabbHit(px, py, pz, bx, by, bz, sx, sy, sz){
   return Math.abs(px-bx) < (sx/2) && Math.abs(py-by) < (sy/2) && Math.abs(pz-bz) < (sz/2);
 }
 
-/* Wallet helpers */
+/* Wallet helpers (25 per pickup) */
 function addCoins(n){
   const cur = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
   const next = Math.max(0, cur + (n|0));
@@ -637,8 +680,8 @@ function addCoins(n){
   window.dispatchEvent(new Event('izza-coins-changed'));
   document.getElementById('coins').textContent = String(next);
 }
-function addCraftingCreditsFromCoins(sessionCoins){
-  const gain = Math.floor(sessionCoins / 1000);
+function addCraftingCreditsFromIzza(totalIzzaGained){
+  const gain = Math.floor(totalIzzaGained / 1000);
   if (gain<=0) return 0;
   const cur = readCraftAny();
   const next = cur + gain;
@@ -666,19 +709,13 @@ document.getElementById('startBtn').onclick = ()=>{
   audio.bgm().catch(()=>{});
   running = true; over=false;
 };
-document.getElementById('lbBtn').onclick = ()=>{
-  location.href = '/izza-game/minigames?t='+(localStorage.getItem('izzaTokenT')||'')+'&u='+(localStorage.getItem('izzaUserU')||'')+'#leaderboard';
-};
+document.getElementById('lbBtn').onclick = ()=>{ location.href = withAuth('/izza-game/minigames#leaderboard'); };
 document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click(); };
-document.getElementById('retryBtn').onclick = ()=>{ location.reload(); };
-document.getElementById('exitBtn').href = (()=>{
-  const url = new URL('/izza-game/minigames', location.origin);
-  const T = localStorage.getItem('izzaTokenT')||''; const U=localStorage.getItem('izzaUserU')||'';
-  if (T) url.searchParams.set('t',T); if (U) url.searchParams.set('u',U);
-  return url.pathname + (url.search || '');
-})();
+document.getElementById('retryBtn').onclick = ()=>{ location.href = withAuth(location.pathname); };
+document.getElementById('exitBtn').href = withAuth('/izza-game/minigames');
+document.getElementById('backArcadeBtn').href = withAuth('/izza-game/minigames');
 
-/* Tiny coin sparkle */
+/* Sparkle */
 const sparkleMat = new THREE.PointsMaterial({ size:0.06, color:0xfff2b0 });
 function sparkle(x,y,z){
   const geo = new THREE.BufferGeometry();
@@ -707,20 +744,20 @@ function tick(now){
   const dt = Math.min(40, now - last) / 16.666;
   last = now;
 
-  // keep back texture live
   backTex.needsUpdate = true;
 
   if (!running || over) return;
 
+  // speed up slightly
   vel += 0.00025 * dt;
 
-  // move world toward camera
+  // move world
   scene.traverse(obj=>{
     if (obj===player || obj===camera || obj===ground) return;
     if (obj.isMesh || obj.isGroup || obj.isPoints) obj.position.z += vel * dt * 1.3;
   });
 
-  // recycle path segments for endless track look
+  // recycle path
   for (const seg of PATH_SEGMENTS){
     if (seg.position.z > 6){
       seg.position.z -= PATH_LOOP;
@@ -730,7 +767,7 @@ function tick(now){
   dist += vel * dt * 3.0;
   scoreEl.textContent = String(dist|0);
 
-  // Jump arc
+  // Jump/Slide animation
   if (jumpT > 0){
     jumpT = Math.max(0, jumpT - 0.042*dt);
     const j = Math.sin((1-jumpT)*Math.PI);
@@ -747,26 +784,39 @@ function tick(now){
     c.position.y = 0.82 + Math.sin(now*0.006 + i)*0.05;
     if (c.position.z > 2){ scene.remove(c); coins.splice(i,1); continue; }
     if (aabbHit(0, player.position.y, 0.2, c.position.x, c.position.y, c.position.z, 0.65,0.65,0.7)){
-      sessionCoins += 1; addCoins(1); audio.blip({f1:760,f2:1350,dur:0.12}); sparkle(c.position.x,c.position.y,c.position.z);
+      // 25 per coin
+      addCoins(25);
+      sessionIzza += 25;
+      audio.blip({f1:760,f2:1350,dur:0.12}); sparkle(c.position.x,c.position.y,c.position.z);
       scene.remove(c); coins.splice(i,1);
     }
   }
-
-  // Keep coins ahead stocked
   if (Math.random()<0.03) spawnCoinsAheadBuffer();
 
-  // Obstacles — endless via recycle
+  // Obstacles (endless): recycle and occasionally change type; spacing grows with speed
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
+
     if (o.position.z > 8){
-      o.position.z -= TRACK_LOOP + Math.random()*40; // recycle far back for endless track
+      // 30% chance to replace with other type to keep variety
+      if (Math.random()<0.3){
+        scene.remove(o); obstacles.splice(i,1); i--;
+        spawnObstacle(-200 - Math.random()*TRACK_LOOP);
+        continue;
+      }
+      const extraGap = BASE_OBSTACLE_SPACING + (vel*40) + Math.random()*30;
+      o.position.z -= (TRACK_LOOP + extraGap);
       continue;
     }
-    if (o.userData.kind==='low'){
-      const hit = aabbHit(0, player.position.y, 0.2, o.position.x, 0.28, o.position.z, 1.1, 0.55, 0.9) && player.position.y < 1.05;
-      if (hit) return gameOver();
-    } else {
-      const hit = aabbHit(0, player.position.y, 0.2, o.position.x||0, 1.2, o.position.z, 1.4, 0.5, 0.9) && player.position.y > 0.7;
+
+    // collision using stored bounds
+    if (o.userData && o.userData.bounds){
+      const b=o.userData.bounds;
+      const hit = aabbHit(0, player.position.y, 0.2, o.position.x||0, b.cy, o.position.z, b.sx, b.sy, b.sz) &&
+                  (
+                    (o.userData.kind==='low'  && player.position.y < 1.05) ||     // hit bale if not jumping high enough
+                    (o.userData.kind==='high' && player.position.y > 0.60)        // hit gate if not sliding low enough
+                  );
       if (hit) return gameOver();
     }
   }
@@ -779,10 +829,10 @@ async function gameOver(){
   const finalScore = dist|0;
   best = Math.max(best|0, finalScore);
   localStorage.setItem('runnerHighScore', String(best));
-  const gainedCC = addCraftingCreditsFromCoins(sessionCoins);
+  const gainedCC = addCraftingCreditsFromIzza(sessionIzza);
   try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
   try{ await submitLeaderboard(best); }catch(_){}
-  const stats = `Distance: ${finalScore} • Coins: ${sessionCoins} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
+  const stats = `Distance: ${finalScore} • IZZA gained: ${sessionIzza} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
   document.getElementById('overStats').textContent = stats;
   document.getElementById('overOverlay').classList.add('show');
 }
@@ -799,7 +849,7 @@ window.addEventListener('resize', ()=>{
   renderer.render(scene, camera);
 })();
 
-/* Update avatar when equipment changes — rebuild both front preview and back sprite */
+/* Rebuild avatar texture when equipment changes */
 window.addEventListener('izza-inventory-changed', async ()=>{
   const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
   await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile);
