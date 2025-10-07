@@ -168,7 +168,7 @@
       try { localStorage.setItem('izzaUserU', u); } catch(_){}
       try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
     }
-    if (t) { try { localStorage.setItem('izzaTokenT', t); } catch(_){ }
+    if (t) { try { localStorage.setItem('izzaTokenT', t); } catch(_){ } }  <!-- ← add this brace -->
   }catch(_){}
 })();
 function withAuth(urlPath){
