@@ -391,7 +391,14 @@ window.addEventListener('izza-crafting-changed', paintWallet, {passive:true});
 
 /* ===== Draw mode preference ===== */
 const DRAW_KEY='izza_sol_draw';
-function getDrawPref(){ const v=parseInt(localStorage.getItem(DRAW_KEY)||'1',10); return (v===3)?3:1; }
+/* CHANGED: default to Draw-1 for new players (without overwriting existing saves) */
+const DEFAULT_DRAW_MODE = 1;
+function getDrawPref(){
+  const raw = localStorage.getItem(DRAW_KEY);
+  if (raw==null) return (DEFAULT_DRAW_MODE===3 ? 3 : 1);
+  const v = parseInt(raw||'1',10);
+  return (v===3)?3:1;
+}
 function setDrawPref(n){ localStorage.setItem(DRAW_KEY, String(n===3?3:1)); }
 
 /* ===== Solitaire core ===== */
@@ -412,28 +419,63 @@ const P={ stock:[], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
 let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
 let FAN=26;
 
-// 5 minute hard cap
+/* NEW: small bias toward friendlier opening deals */
+const EASY_DEAL_TRIES = 15;
+
+// 10 minute hard cap (already increased from 5 earlier)
 const MAX_MS = 600000;
 
 function cssVarInt(name,fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
 function fmtTime(ms){ const s=Math.max(0,Math.floor(ms/1000)); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return `${String(m).padStart(2,'0')}:${ss}`; }
 
-function layoutNew(){
-  for(let i=0;i<4;i++) P.f[i]=[];
-  for(let i=0;i<7;i++) P.t[i]=[];
-  P.waste=[]; P.stock=makeDeck();
-  moves=0; ended=false; winTs=null; elMoves.textContent='0';
-
-  FAN=cssVarInt('--fanY',26);
-
-  // deal tableau
-  for(let col=0; col<7; col++){
-    for(let n=0; n<=col; n++){
-      const c=P.stock.pop(); P.t[col].push(c);
-      c.face=(n===col);
+/* NEW: light “is this deal startable?” checks */
+function canMoveBetweenTableau(){
+  for (let i=0;i<7;i++){
+    const A = P.t[i]; if(!A.length) continue;
+    const a = A[A.length-1]; if(!a.face) continue;
+    for (let j=0;j<7;j++){
+      if(i===j) continue;
+      const B = P.t[j];
+      if (!B.length) { if (a.rank===13) return true; continue; }
+      const b = B[B.length-1];
+      if (a.face && b.face && a.color!==b.color && a.rank===b.rank-1) return true;
     }
   }
-  P.stock.forEach(c=>c.face=false);
+  return false;
+}
+function canStartAnyFoundation(){
+  for (let i=0;i<7;i++){
+    const pile=P.t[i];
+    if(pile.length && pile[pile.length-1].face && pile[pile.length-1].rank===1) return true;
+  }
+  return false;
+}
+
+function layoutNew(){
+  /* CHANGED: try a few shuffles until we get a start with at least one legal move or an Ace up top */
+  let tries = Math.max(0, EASY_DEAL_TRIES|0);
+  while (true) {
+    for(let i=0;i<4;i++) P.f[i]=[];
+    for(let i=0;i<7;i++) P.t[i]=[];
+    P.waste=[]; P.stock=makeDeck();
+    moves=0; ended=false; winTs=null; elMoves.textContent='0';
+
+    FAN=cssVarInt('--fanY',26);
+
+    // deal tableau
+    for(let col=0; col<7; col++){
+      for(let n=0; n<=col; n++){
+        const c=P.stock.pop(); P.t[col].push(c);
+        c.face=(n===col);
+      }
+    }
+    P.stock.forEach(c=>c.face=false);
+
+    if (tries>0 && !(canMoveBetweenTableau() || canStartAnyFoundation())) {
+      tries--; continue;
+    }
+    break;
+  }
 
   if(timerId) clearInterval(timerId);
   startTs=Date.now(); elTime.textContent='00:00';
@@ -478,15 +520,13 @@ function renderAll(){
       placeXY(el, i*gap, 0);
       el.dataset.where='w';
 
-      // --- surgical: ensure only the top waste card can receive input ---
+      // ensure only the top waste card can receive input
       if (idx !== P.waste.length - 1) {
         el.dataset.locked='1';
-        el.style.pointerEvents='none';   // non-top waste card never grabs the touch
+        el.style.pointerEvents='none';
       } else {
-        el.style.pointerEvents='auto';   // top waste card is playable
+        el.style.pointerEvents='auto';
       }
-      // -------------------------------------------------------------------
-
       wEl.appendChild(el);
     }
   }
