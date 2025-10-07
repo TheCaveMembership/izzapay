@@ -339,7 +339,7 @@ function makeBale(z){
   // --- simple 3D body behind the PNG (keeps 3D look) ---
   // pale yellow hay color
   const bodyGeo = new THREE.BoxGeometry(1.10, 0.55, 0.55);
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xF6E889 }); // pale hay
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xE5C15A });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.position.set(0, 0.275, -0.08); // push back slightly so PNG sits in front
   body.castShadow = false; body.receiveShadow = false;
