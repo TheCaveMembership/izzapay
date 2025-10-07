@@ -1121,6 +1121,19 @@ function readLocal(gameId, periodKey){
       }
 
       async function fetchServerLeaders(gameId, periodKey){
+  // ⚠️ IMPORTANT: prefer IZZA_LEADERBOARD.top which canonicalizes periods and fans out across mirrors.
+  // This fixes the “I only see myself” issue caused by sending `period=alltime` directly to the server.
+  try{
+    const p = (String(periodKey||'alltime').toLowerCase() === 'alltime') ? 'all' : String(periodKey||'day').toLowerCase();
+    if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.top === 'function'){
+      const r = await IZZA_LEADERBOARD.top({ game: gameId, limit: 20, period: p });
+      if (r && r.ok && r.data && Array.isArray(r.data.rows)){
+        return r.data.rows;
+      }
+    }
+  }catch(_){}
+
+  // Fallback: same-origin endpoint (kept for back-compat and offline mirrors)
   try{
     const qp = periodKey ? `&period=${encodeURIComponent(periodKey)}` : '';
     const url = withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}${qp}&limit=20`);
@@ -1221,7 +1234,7 @@ function readLocal(gameId, periodKey){
   if (seedFromLegacy){ harvestLegacyScores(gameId); }
   elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
 
-  // 1) Try server for the requested period
+  // 1) Try server for the requested period (now via unified shim)
   let rows = await fetchServerLeaders(gameId, period);
 
   // 2) If server returned rows, cache them locally for persistence
