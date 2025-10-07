@@ -336,13 +336,25 @@ function makeBillboard(path, w, h){
 function makeBale(z){
   const group = new THREE.Group();
 
+  // --- simple 3D body behind the PNG (keeps 3D look) ---
+  // a rounded-ish box that sits slightly behind the billboard
+  const bodyGeo = new THREE.BoxGeometry(1.10, 0.55, 0.55);
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xD8B45A }); // hay yellow
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.set(0, 0.275, -0.06);        // tiny push back so PNG sits in front
+  body.castShadow = false; body.receiveShadow = false;
+  group.add(body);
+
   // Visual: billboard PNG (full image)
   const img = makeBillboard(HAY_BALE_PNG, 1.4, 0.9);
   img.position.set(0,0.45,0);
   group.add(img);
 
-  // Collision proxy (invisible)
-  const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.9), new THREE.MeshBasicMaterial({visible:false}));
+  // --- Invisible collision proxy (slightly deeper to avoid tunneling) ---
+  const proxy = new THREE.Mesh(
+    new THREE.BoxGeometry(1.10, 0.55, 1.20), // <- sz a bit deeper than before
+    new THREE.MeshBasicMaterial({visible:false})
+  );
   proxy.position.set(0,0.275,0);
   group.add(proxy);
 
@@ -350,7 +362,8 @@ function makeBale(z){
   group.userData = {
     kind:'low',
     scroll:true,
-    bounds:{ sx:1.1, sy:0.55, sz:0.9, cy:0.275 }
+    // store bounds used by the AABB check below
+    bounds:{ sx:1.10, sy:0.55, sz:1.20, cy:0.275 }
   };
   return group;
 }
@@ -403,7 +416,21 @@ function spawnCoinsAheadBuffer(){
 }
 spawnCoinsAheadBuffer();
 
+  function coinTargetCount(){
+  // Base of 8 coins visible ahead; scale gently with speed.
+  // You can tune the 18 to show more/less growth.
+  return 8 + Math.floor(vel * 18);
+}
+function topUpCoins(){
+  const need = coinTargetCount();
+  const haveAhead = coins.filter(c => c.position.z < -40).length;
+  for (let k = haveAhead; k < need; k++){
+    spawnCoin(-160 - Math.random()*520);
+  }
+}
+
 /* Game state */
+const ACCEL = 0.00014;  // slower ramp-up than 0.00025
 let running=false,over=false;
 let vel=0.18;            // starting scroll speed
 let dist=0;
@@ -503,8 +530,8 @@ function tick(now){
 
   if (!running || over) return;
 
-  // speed up slightly
-  vel += 0.00025 * dt;
+  // speed up slightly (tunable)
+vel += ACCEL * dt;
 
   // Move only things flagged to scroll (path, coins, obstacles) and billboard them toward camera
   scene.traverse(obj=>{
@@ -556,7 +583,7 @@ function tick(now){
       scene.remove(c); coins.splice(i,1);
     }
   }
-  if (Math.random()<0.03) spawnCoinsAheadBuffer();
+  if (Math.random()<0.03) topUpCoins();
 
   // Obstacles — recycle with spacing that grows as speed increases
   for (let i=0;i<obstacles.length;i++){
