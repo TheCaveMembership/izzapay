@@ -960,7 +960,7 @@ function makeLeaderboardScore(elapsedMs,moves){
   return (base*1000 + tie)|0;
 }
 async function submitLeaderboard(score){
-  const gameKey=`${LB_GAME_ID}::${lbVariant()}`;
+  const gameKey=LB_GAME_ID;
   try{
     if(window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit==='function'){
       await IZZA_LEADERBOARD.submit({game:gameKey, score:score|0});
