@@ -260,23 +260,54 @@ const PATH_SEGMENTS=[],PATH_SPACING=5.0,PATH_COUNT=90,PATH_LOOP=PATH_SPACING*PAT
   for(let i=0;i<PATH_COUNT;i++){
     const seg=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.02,4.5),mat);
     seg.position.set(0,0.01,-i*PATH_SPACING-5);
+    seg.userData.scroll = true; // scroll with world
     scene.add(seg);PATH_SEGMENTS.push(seg);
   }
 })();
 
-/* Animals — fewer & both sides face inward; all are root-level so they advance correctly */
-function makeCow(){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.6,0.5),new THREE.MeshLambertMaterial({color:0xffffff}));const spots=new THREE.Mesh(new THREE.BoxGeometry(1.25,0.62,0.52),new THREE.MeshLambertMaterial({color:0x333333,transparent:true,opacity:0.12}));const head=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.35,0.35),new THREE.MeshLambertMaterial({color:0xffffff}));head.position.set(0.7,0.25,0);const legsMat=new THREE.MeshLambertMaterial({color:0x222222});for(const x of [-0.4,0.4])for(const z of [-0.18,0.18]){const leg=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.4,0.12),legsMat);leg.position.set(x,-0.3,z);g.add(leg);}body.add(spots);g.add(body);g.add(head);return g;}
-function makePig(){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.55,0.5),new THREE.MeshLambertMaterial({color:0xffb3c1}));const head=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.32,0.32),new THREE.MeshLambertMaterial({color:0xffb3c1}));head.position.set(0.65,0.20,0);const legsMat=new THREE.MeshLambertMaterial({color:0xe38aa0});for(const x of [-0.35,0.35])for(const z of [-0.18,0.18]){const leg=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.36,0.12),legsMat);leg.position.set(x,-0.28,z);g.add(leg);}g.add(body);g.add(head);return g;}
+/* Animals — decorations: NEVER scrolled; spaced a bit more for realism */
+function makeCow(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.6,0.5),new THREE.MeshLambertMaterial({color:0xffffff}));
+  const spots=new THREE.Mesh(new THREE.BoxGeometry(1.25,0.62,0.52),new THREE.MeshLambertMaterial({color:0x333333,transparent:true,opacity:0.12}));
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.35,0.35),new THREE.MeshLambertMaterial({color:0xffffff}));
+  head.position.set(0.7,0.25,0);
+  const legsMat=new THREE.MeshLambertMaterial({color:0x222222});
+  for(const x of [-0.4,0.4]) for(const z of [-0.18,0.18]){
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.4,0.12),legsMat);
+    leg.position.set(x,-0.3,z); g.add(leg);
+  }
+  body.add(spots);
+  g.add(body); g.add(head);
+  g.userData.kind='animal';
+  // IMPORTANT: no g.userData.scroll flag -> they never move with the world
+  return g;
+}
+function makePig(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.55,0.5),new THREE.MeshLambertMaterial({color:0xffb3c1}));
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.32,0.32),new THREE.MeshLambertMaterial({color:0xffb3c1}));
+  head.position.set(0.65,0.20,0);
+  const legsMat=new THREE.MeshLambertMaterial({color:0xe38aa0});
+  for(const x of [-0.35,0.35]) for(const z of [-0.18,0.18]){
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.36,0.12),legsMat);
+    leg.position.set(x,-0.28,z); g.add(leg);
+  }
+  g.add(body); g.add(head);
+  g.userData.kind='animal';
+  return g;
+}
 (function populateAnimals(){
-  const COUNT=12;
+  const COUNT=14;
   for(let i=0;i<COUNT;i++){
     const a=(Math.random()<0.5?makeCow():makePig());
     const side=(Math.random()<0.5?-1:1);
-    const x=side*(3.2+Math.random()*3.2);
-    a.position.set(x,0.35,-10-Math.random()*180);
+    const x=side*(3.6+Math.random()*3.6);               // a bit farther from track
+    const z=-10 - Math.random()*180;
+    a.position.set(x,0.35,z);
     a.rotation.y = (x>0) ? Math.PI : 0; // face inward
-    a.userData.kind='animal';
-    scene.add(a); // root child of scene
+    // NOTE: not flagged to scroll, so they remain fixed decorations
+    scene.add(a);
   }
 })();
 
@@ -301,37 +332,48 @@ const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughne
 
 const obstacles=[],coins=[];
 
-/* Spawning — more space from the start */
+/* Spawning — more space from the start + no overlap */
 const TRACK_LOOP=900;
-const BASE_OBSTACLE_SPACING=36;           // ⬅ farther apart overall
-const INITIAL_SPREAD_EXTRA=12;            // ⬅ extra gap at the very start
+const BASE_OBSTACLE_SPACING=36;
+const INITIAL_SPREAD_EXTRA=12;
+const MIN_OBSTACLE_GAP=14;         // hard minimum between obstacles (prevents "bale + gate together")
 const COIN_CHANCE=0.6;
 const OBSTACLE_CHANCE=0.55;
 
 function spawnCoin(z){
   const m=new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05,32),coinMat);
-  m.rotation.x=Math.PI/2;m.position.set(0,0.82,z);m.userData.kind='coin';scene.add(m);coins.push(m);
+  m.rotation.x=Math.PI/2;m.position.set(0,0.82,z);
+  m.userData.kind='coin'; m.userData.scroll = true;
+  scene.add(m);coins.push(m);
+}
+function makeBale(z){
+  const bale=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),new THREE.MeshStandardMaterial({color:0xe6c15a,roughness:0.9,metalness:0.1}));
+  bale.position.set(0,0.275,z);
+  bale.userData={kind:'low',bounds:{sx:1.1,sy:0.55,sz:0.9,cy:0.275},scroll:true};
+  return bale;
+}
+function makeGate(z){
+  const arch=new THREE.Group(); arch.userData={kind:'high',scroll:true};
+  const postsMat=new THREE.MeshStandardMaterial({color:0x1266cc,metalness:0.2,roughness:0.4});
+  const postL=new THREE.Mesh(new THREE.BoxGeometry(0.10,1.0,0.18),postsMat);postL.position.set(-0.9,0.5,0);arch.add(postL);
+  const postR=postL.clone();postR.position.x=0.9;arch.add(postR);
+  const banner=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.14,0.1),new THREE.MeshStandardMaterial({color:0x10c97b,emissive:0x10c97b,emissiveIntensity:0.25}));
+  banner.position.set(0,0.82,0);arch.add(banner);
+  arch.position.z=z;
+  // bounds tuned to require a slide (cannot be jumped over)
+  arch.userData.bounds={sx:1.8,sy:0.38,sz:0.9,cy:0.82};
+  return arch;
+}
+function isTooCloseToOther(z){
+  for(const o of obstacles){ if(!o) continue; if (Math.abs(o.position.z - z) < MIN_OBSTACLE_GAP) return true; }
+  return false;
 }
 function spawnObstacle(z){
-  if(Math.random()<0.5){
-    // hay bale (jump)
-    const bale=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),new THREE.MeshStandardMaterial({color:0xe6c15a,roughness:0.9,metalness:0.1}));
-    bale.position.set(0,0.275,z); bale.userData.kind='low';
-    bale.userData.bounds={sx:1.1,sy:0.55,sz:0.9,cy:0.275};
-    scene.add(bale);obstacles.push(bale);
-  }else{
-    // smaller & lower gate (slide required)
-    const arch=new THREE.Group(); arch.userData.kind='high';
-    const postsMat=new THREE.MeshStandardMaterial({color:0x1266cc,metalness:0.2,roughness:0.4});
-    const postL=new THREE.Mesh(new THREE.BoxGeometry(0.10,1.0,0.18),postsMat);postL.position.set(-0.9,0.5,0);arch.add(postL);
-    const postR=postL.clone();postR.position.x=0.9;arch.add(postR);
-    const banner=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.14,0.1),new THREE.MeshStandardMaterial({color:0x10c97b,emissive:0x10c97b,emissiveIntensity:0.25}));
-    banner.position.set(0,0.82,0);arch.add(banner);
-    arch.position.z=z;
-    // bounds tuned to collide unless sliding low
-    arch.userData.bounds={sx:1.8,sy:0.38,sz:0.9,cy:0.82};
-    scene.add(arch);obstacles.push(arch);
-  }
+  // find a clear slot
+  let targetZ=z, guard=0;
+  while(isTooCloseToOther(targetZ) && guard++<6){ targetZ -= (MIN_OBSTACLE_GAP+2); }
+  const node = (Math.random()<0.5) ? makeBale(targetZ) : makeGate(targetZ);
+  scene.add(node); obstacles.push(node);
 }
 
 /* initial stretch with bigger spacing */
@@ -452,10 +494,13 @@ function tick(now){
   // speed up slightly
   vel += 0.00025 * dt;
 
-  // move world (animals on BOTH sides advance toward player, then get passed)
+  // Move only things flagged to scroll (path, coins, obstacles).
+  // Animals (no scroll flag) remain perfectly still decor.
   scene.traverse(obj=>{
     if (obj===player || obj===camera || obj===ground) return;
-    if (obj.isMesh || obj.isGroup || obj.isPoints) obj.position.z += vel * dt * 1.3;
+    if ((obj.isMesh || obj.isGroup || obj.isPoints) && obj.userData && obj.userData.scroll === true){
+      obj.position.z += vel * dt * 1.3;
+    }
   });
 
   // recycle path
@@ -493,19 +538,17 @@ function tick(now){
   }
   if (Math.random()<0.03) spawnCoinsAheadBuffer();
 
-  // Obstacles (endless): recycle and adjust spacing; strict collision stops immediately
+  // Obstacles — recycle with spacing, strict & clear collisions
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
 
     if (o.position.z > 8){
-      // variety to keep things fresh
-      if (Math.random()<0.3){
-        scene.remove(o); obstacles.splice(i,1); i--;
-        spawnObstacle(-200 - Math.random()*TRACK_LOOP);
-        continue;
-      }
-      const extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + (vel*45) + Math.random()*36;
-      o.position.z -= (TRACK_LOOP + extraGap);
+      // choose new location well behind and ensure spacing
+      let extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + (vel*45) + Math.random()*36;
+      let newZ = o.position.z - (TRACK_LOOP + extraGap);
+      let guard=0;
+      while(isTooCloseToOther(newZ) && guard++<6){ newZ -= (MIN_OBSTACLE_GAP+2); }
+      o.position.z = newZ;
       continue;
     }
 
@@ -513,13 +556,16 @@ function tick(now){
     if (o.userData && o.userData.bounds){
       const b=o.userData.bounds;
       const hitAABB = aabbHit(0, player.position.y, 0.2, o.position.x||0, b.cy, o.position.z, b.sx, b.sy, b.sz);
-      const postureBad =
-        (o.userData.kind==='low'  && player.position.y < 1.05) ||   // bale: you must be high enough
-        (o.userData.kind==='high' && player.position.y > 0.60);     // gate: you must be low enough
+      const isBale = (o.userData.kind==='low');
+      const isGate = (o.userData.kind==='high');
+
+      // Clear, non-ambiguous rules:
+      // - Bale: must be HIGH enough (jump). If not high enough when hit -> trip.
+      // - Gate: must be LOW enough (slide). If not low enough when hit -> trip.
+      const postureBad = (isBale && player.position.y < 1.05) || (isGate && player.position.y > 0.60);
 
       if (hitAABB && postureBad){
-        // IMMEDIATE stop and show overlay at impact frame
-        gameOver();
+        gameOver(); // IMMEDIATE stop and overlay
         return;
       }
     }
