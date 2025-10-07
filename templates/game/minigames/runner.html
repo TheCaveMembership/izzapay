@@ -121,10 +121,9 @@
       <div class="muted" style="margin-bottom:8px;">
         Swipe ↑ to jump • Swipe ↓ to slide • ↑/↓ on desktop
       </div>
-      <p class="muted" style="margin:4px 0 0">
+      <p class="muted" style="margin-top:0">
         Morning in the Neon Meadows. Leap <b>hay bales</b>, slide under <b>banner gates</b>, and snatch shimmering <b>IZZA Coins</b>.
       </p>
-      <p class="muted" style="margin:6px 0 0"><em>* You must <b>slide under</b> the gates and <b>jump over</b> the hay bales.</em></p>
       <div class="center-row">
         <button id="startBtn" class="btn">▶ Start</button>
         <button id="lbBtn" class="btn">🏆 Leaderboard</button>
@@ -168,7 +167,7 @@
       try { localStorage.setItem('izzaUserU', u); } catch(_){}
       try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
     }
-    if (t) { try { localStorage.setItem('izzaTokenT', t); } catch(_){ } }  <!-- ← add this brace -->
+    if (t) { try { localStorage.setItem('izzaTokenT', t); } catch(_){ } }
   }catch(_){}
 })();
 function withAuth(urlPath){
@@ -200,7 +199,7 @@ const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
 const SKIN_TO={light:["#FFE7D6","#F3C6A7","#D8A187"],medium:["#F1BD94","#D79A73","#B67955"],tan:["#E2A878","#C88756","#9F663C"],dark:["#B9825B","#9A6644","#714A31"],deep:["#8B5A3B","#432818"]};
 const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
 const FEMALE_DRESS_TO={blue:["#7AB6FF","#4E84E3","#2F5CB5"],red:["#FF7A7A","#E24C4C","#B12F2F"],green:["#7DD68A","#4CB56B","#2F7F47"],purple:["#B796FF","#8C6BE0","#6A49B8"],yellow:["#FFE08A","#E7C45A","#B89433"],pink:["#FFA6D6","#E57CB2","#C45C96"],black:["#3A3AD3","#232326","#0E0E10"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],brown:["#A87854","#7C563A","#593D29"],orange:["#FFB46A","#E4873A","#B65E1F"]};
-const HAIR_TO={black:["#2C2C31","#17171B","#0A0A0D"],brown:["#7A5336","#5C3E28","#2F3B1B"],blonde:["#FBE58F","#E5C35A","#B89433"],red:["#E65F35","#B54426","#8E321A"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],blue:["#7AB6FF","#4E84E3","#2F5CB5"],green:["#7DD68A","#4CB56B","#2F7F47"],pink:["#FFA6D6","#E57CB2","#C45C96"]};
+const HAIR_TO={black:["#2C2C31","#17171B","#0A0A0D"],brown:["#7A5336","#5C3E28","#3E2B1B"],blonde:["#FBE58F","#E5C35A","#B89433"],red:["#E65F35","#B54426","#8E321A"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],blue:["#7AB6FF","#4E84E3","#2F5CB5"],green:["#7DD68A","#4CB56B","#2F7F47"],pink:["#FFA6D6","#E57CB2","#C45C96"]};
 function loadImg(src){return new Promise(res=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=()=>res(null);i.src=src;});}
 const hexToRgb=h=>{const n=parseInt(h.replace('#',''),16);return {r:(n>>16)&255,g:(n>>8)&255,b:n&255};};
 const rgbToHex=({r,g,b})=>('#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''));
@@ -266,123 +265,84 @@ const PATH_SEGMENTS=[],PATH_SPACING=5.0,PATH_COUNT=90,PATH_LOOP=PATH_SPACING*PAT
   }
 })();
 
-/* ---------- UI arrow textures ---------- */
-function makeArrowTexture(direction='up'){
-  const w=256, h=128, c=document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx=c.getContext('2d');
-  ctx.fillStyle='rgba(255,255,255,0.9)';
-  ctx.fillRect(0,0,w,h);
-  ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.strokeRect(0.5,0.5,w-1,h-1);
-  ctx.fillStyle='#ff4f6b';
-  ctx.lineJoin='round'; ctx.lineCap='round';
-  ctx.beginPath();
-  if(direction==='up'){
-    // tail
-    ctx.fillRect(w*0.46,h*0.52,w*0.08,h*0.30);
-    // head
-    ctx.moveTo(w*0.50,h*0.20);
-    ctx.lineTo(w*0.70,h*0.52);
-    ctx.lineTo(w*0.30,h*0.52);
-    ctx.closePath();
-  }else{
-    // tail
-    ctx.fillRect(w*0.46,h*0.18,w*0.08,h*0.30);
-    // head
-    ctx.moveTo(w*0.30,h*0.48);
-    ctx.lineTo(w*0.70,h*0.48);
-    ctx.lineTo(w*0.50,h*0.80);
-    ctx.closePath();
-  }
-  ctx.fill();
-  const tex=new THREE.CanvasTexture(c);
-  tex.minFilter=THREE.LinearFilter; tex.magFilter=THREE.LinearFilter;
-  return tex;
-}
-const ARROW_UP_TEX   = makeArrowTexture('up');
-const ARROW_DOWN_TEX = makeArrowTexture('down');
+/* Avatar preview */
+const avatarCanvas=document.getElementById('avatarCursor');
+const avCtx=avatarCanvas.getContext('2d',{willReadFrequently:true});
+avCtx.imageSmoothingEnabled=false;(function(){const profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}');buildAvatarCanvasWithGear(avCtx,avatarCanvas.width,profile);})();
 
-/* ---------- Obstacles & coins ---------- */
+/* Backified canvas for in-game player */
+const backCanvasPlaceholder=document.createElement('canvas');backCanvasPlaceholder.width=backCanvasPlaceholder.height=96;
+const backTex=new THREE.CanvasTexture(backCanvasPlaceholder);backTex.minFilter=THREE.NearestFilter;backTex.magFilter=THREE.NearestFilter;
+(async function(){const c=await buildBackAvatar(96);backTex.image=c;backTex.needsUpdate=true;})();
+
+/* Player */
+const player=new THREE.Mesh(new THREE.PlaneGeometry(0.28,0.28),new THREE.MeshBasicMaterial({map:backTex,transparent:true}));
+player.position.set(0,0.78,0);scene.add(player);
+
+/* Coins */
+function makeCoinTexture(){const s=128,cnv=document.createElement('canvas');cnv.width=cnv.height=s;const ctx=cnv.getContext('2d');const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);g.addColorStop(0,'#fff5c4');g.addColorStop(.45,'#ffd86b');g.addColorStop(1,'#9a6d1c');ctx.fillStyle=g;ctx.beginPath();ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2);ctx.fill();ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.stroke();ctx.fillStyle='rgba(40,30,0,0.85)';ctx.font='700 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('IZ',s/2,s/2);return new THREE.CanvasTexture(cnv);}
+const coinTex=makeCoinTexture();coinTex.anisotropy=4;
+const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughness:0.3,emissive:0x2b1f00,emissiveIntensity:0.2});
+
 const obstacles=[],coins=[];
 
-/* Spawning — adaptive spacing (widens as speed increases) */
+/* Spawning — more space from the start + no overlap */
 const TRACK_LOOP=900;
 const BASE_OBSTACLE_SPACING=36;
 const INITIAL_SPREAD_EXTRA=12;
-const MIN_OBSTACLE_GAP=14; // base minimum; will be increased with speed
+const MIN_OBSTACLE_GAP=14;         // hard minimum between obstacles (prevents "bale + gate together")
 const COIN_CHANCE=0.6;
 const OBSTACLE_CHANCE=0.55;
 
-function currentMinGap(){ return MIN_OBSTACLE_GAP + Math.min(18, vel*90); }
+// Adaptive spacing helper — increases gap as speed rises
+function spacingForVel(v){
+  const base = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA;
+  const speedBonus = 22 + Math.pow(v*90, 1.15); // ramps up as game speeds up
+  return base + speedBonus + Math.random()*36;
+}
 
 function spawnCoin(z){
-  const m=new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05,32),
-    coinMat);
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05,32),coinMat);
   m.rotation.x=Math.PI/2;m.position.set(0,0.82,z);
   m.userData.kind='coin'; m.userData.scroll = true;
   scene.add(m);coins.push(m);
 }
 function makeBale(z){
-  const group=new THREE.Group();
-  // hay
-  const bale=new THREE.Mesh(
-    new THREE.BoxGeometry(1.1,0.55,0.7),
-    new THREE.MeshStandardMaterial({color:0xe6c15a,roughness:0.9,metalness:0.1})
-  );
-  bale.position.set(0,0.275,0);
-  group.add(bale);
-  // red UP arrow plate facing the player
-  const plate=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.36),
-    new THREE.MeshBasicMaterial({map:ARROW_UP_TEX,transparent:true,side:THREE.DoubleSide}));
-  plate.position.set(0,0.48,0.36); // slight in front (+z) toward player
-  group.add(plate);
-
-  group.position.z=z;
-  group.userData={kind:'low',bounds:{sx:1.1,sy:0.55,sz:0.9,cy:0.275},scroll:true};
-  return group;
+  const bale=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),new THREE.MeshStandardMaterial({color:0xe6c15a,roughness:0.9,metalness:0.1}));
+  bale.position.set(0,0.275,z);
+  bale.userData={kind:'low',bounds:{sx:1.1,sy:0.55,sz:0.9,cy:0.275},scroll:true};
+  return bale;
 }
 function makeGate(z){
   const arch=new THREE.Group(); arch.userData={kind:'high',scroll:true};
   const postsMat=new THREE.MeshStandardMaterial({color:0x1266cc,metalness:0.2,roughness:0.4});
   const postL=new THREE.Mesh(new THREE.BoxGeometry(0.10,1.0,0.18),postsMat);postL.position.set(-0.9,0.5,0);arch.add(postL);
   const postR=postL.clone();postR.position.x=0.9;arch.add(postR);
-  const banner=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.14,0.1),
-    new THREE.MeshStandardMaterial({color:0x10c97b,emissive:0x10c97b,emissiveIntensity:0.25}));
+  const banner=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.14,0.1),new THREE.MeshStandardMaterial({color:0x10c97b,emissive:0x10c97b,emissiveIntensity:0.25}));
   banner.position.set(0,0.82,0);arch.add(banner);
-  // large top sign with red DOWN arrow
-  const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.8,0.5),
-    new THREE.MeshBasicMaterial({map:ARROW_DOWN_TEX,transparent:true,side:THREE.DoubleSide}));
-  sign.position.set(0,1.18,0.02);
-  arch.add(sign);
-
   arch.position.z=z;
   // bounds tuned to require a slide (cannot be jumped over)
   arch.userData.bounds={sx:1.8,sy:0.38,sz:0.9,cy:0.82};
   return arch;
 }
 function isTooCloseToOther(z){
-  const minGap=currentMinGap();
-  for(const o of obstacles){ if(!o) continue; if (Math.abs(o.position.z - z) < minGap) return true; }
+  for(const o of obstacles){ if(!o) continue; if (Math.abs(o.position.z - z) < MIN_OBSTACLE_GAP) return true; }
   return false;
 }
 function spawnObstacle(z){
   // find a clear slot
   let targetZ=z, guard=0;
-  while(isTooCloseToOther(targetZ) && guard++<8){ targetZ -= (currentMinGap()+2); }
+  while(isTooCloseToOther(targetZ) && guard++<6){ targetZ -= (MIN_OBSTACLE_GAP+2); }
   const node = (Math.random()<0.5) ? makeBale(targetZ) : makeGate(targetZ);
   scene.add(node); obstacles.push(node);
 }
 
-/* Coins material */
-function makeCoinTexture(){const s=128,cnv=document.createElement('canvas');cnv.width=cnv.height=s;const ctx=cnv.getContext('2d');const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);g.addColorStop(0,'#fff5c4');g.addColorStop(.45,'#ffd86b');g.addColorStop(1,'#9a6d1c');ctx.fillStyle=g;ctx.beginPath();ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2);ctx.fill();ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.stroke();ctx.fillStyle='rgba(40,30,0,0.85)';ctx.font='700 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('IZ',s/2,s/2);return new THREE.CanvasTexture(cnv);}
-const coinTex=makeCoinTexture();coinTex.anisotropy=4;
-const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughness:0.3,emissive:0x2b1f00,emissiveIntensity:0.2});
-
-/* Initial stretch */
+/* initial stretch with adaptive spacing */
 let zCursor=-35;
 for(let i=0;i<38;i++){
   if(Math.random()<COIN_CHANCE) spawnCoin(zCursor-6);
   if(Math.random()<OBSTACLE_CHANCE) spawnObstacle(zCursor-10);
-  zCursor -= (BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + Math.random()*10);
+  zCursor -= spacingForVel(0.18); // start spacing based on initial speed
 }
 
 /* keep some coins ahead */
@@ -395,20 +355,10 @@ spawnCoinsAheadBuffer();
 /* Game state */
 let running=false,over=false;
 let vel=0.18;
-const SPEED_ACCEL=0.00018; // slightly gentler speed curve
 let dist=0;
 let sessionIzza=0; // value gained (25 per pickup)
 let best=parseInt(localStorage.getItem('runnerHighScore')||'0',10)||0;
 const scoreEl=document.getElementById('scoreEl');
-
-/* Backified canvas for in-game player */
-const backCanvasPlaceholder=document.createElement('canvas');backCanvasPlaceholder.width=backCanvasPlaceholder.height=96;
-const backTex=new THREE.CanvasTexture(backCanvasPlaceholder);backTex.minFilter=THREE.NearestFilter;backTex.magFilter=THREE.NearestFilter;
-(async function(){const c=await buildBackAvatar(96);backTex.image=c;backTex.needsUpdate=true;})();
-
-/* Player */
-const player=new THREE.Mesh(new THREE.PlaneGeometry(0.28,0.28),new THREE.MeshBasicMaterial({map:backTex,transparent:true}));
-player.position.set(0,0.78,0);scene.add(player);
 
 /* Jump / Slide */
 let jumpT=0,slideT=0;
@@ -464,7 +414,7 @@ document.getElementById('startBtn').onclick = ()=>{
   running = true; over=false;
 };
 document.getElementById('lbBtn').onclick = ()=>{ location.href = withAuth('/izza-game/minigames#leaderboard'); };
-document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click(); };
+document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click();};
 document.getElementById('retryBtn').onclick = ()=>{ location.href = withAuth(location.pathname); };
 document.getElementById('exitBtn').href = withAuth('/izza-game/minigames');
 document.getElementById('backArcadeBtn').href = withAuth('/izza-game/minigames');
@@ -502,8 +452,8 @@ function tick(now){
 
   if (!running || over) return;
 
-  // gentler speed up
-  vel += SPEED_ACCEL * dt;
+  // speed up slightly
+  vel += 0.00025 * dt;
 
   // Move only things flagged to scroll (path, coins, obstacles).
   scene.traverse(obj=>{
@@ -548,16 +498,15 @@ function tick(now){
   }
   if (Math.random()<0.03) spawnCoinsAheadBuffer();
 
-  // Obstacles — recycle with adaptive spacing; immediate trip on bad posture hit
+  // Obstacles — recycle with ADAPTIVE spacing, strict & clear collisions
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
 
     if (o.position.z > 8){
-      // widen gaps as speed increases
-      const extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + (vel*80) + Math.random()*36;
-      let newZ = o.position.z - (TRACK_LOOP + extraGap);
+      // choose new location well behind and ensure spacing grows with speed
+      let newZ = o.position.z - (TRACK_LOOP + spacingForVel(vel));
       let guard=0;
-      while(isTooCloseToOther(newZ) && guard++<8){ newZ -= (currentMinGap()+2); }
+      while(isTooCloseToOther(newZ) && guard++<6){ newZ -= (MIN_OBSTACLE_GAP+2); }
       o.position.z = newZ;
       continue;
     }
@@ -569,11 +518,13 @@ function tick(now){
       const isBale = (o.userData.kind==='low');
       const isGate = (o.userData.kind==='high');
 
-      // Must jump bales; must slide gates
+      // Clear, non-ambiguous rules:
+      // - Bale: must be HIGH enough (jump). If not high enough when hit -> trip.
+      // - Gate: must be LOW enough (slide). If not low enough when hit -> trip.
       const postureBad = (isBale && player.position.y < 1.05) || (isGate && player.position.y > 0.60);
 
       if (hitAABB && postureBad){
-        gameOver(); // freeze exactly on collision frame; show overlay
+        gameOver(); // IMMEDIATE stop and overlay
         return;
       }
     }
@@ -606,11 +557,6 @@ window.addEventListener('resize', ()=>{
   requestAnimationFrame(renderLoop);
   renderer.render(scene, camera);
 })();
-
-/* Avatar preview (corner) */
-const avatarCanvas=document.getElementById('avatarCursor');
-const avCtx=avatarCanvas.getContext('2d',{willReadFrequently:true});
-avCtx.imageSmoothingEnabled=false;(function(){const profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}');buildAvatarCanvasWithGear(avCtx,avatarCanvas.width,profile);})();
 
 /* Rebuild avatar texture when equipment changes */
 window.addEventListener('izza-inventory-changed', async ()=>{
