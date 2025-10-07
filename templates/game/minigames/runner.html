@@ -65,9 +65,12 @@
     .center-row{display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:10px;}
 
     #gameCanvas{position:fixed; inset:0; width:100vw; height:100vh; display:block;}
+
+    /* Avatar preview (keep size, turn background green/grass) */
     .avatar-corner{
       position:fixed; left:12px; bottom:12px; width:90px; height:90px; z-index:15; pointer-events:none;
-      border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.7);
+      border-radius:12px; border:1px solid var(--line);
+      background:linear-gradient(var(--grass), var(--grass)); /* was white/blue; now green to match ground */
       display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);
     }
     canvas#avatarCursor{width:82px; height:82px; image-rendering:pixelated;}
@@ -317,7 +320,7 @@ async function buildAvatarCanvasWithGear(dstCtx, size, profile){
 }
 
 /* Build and then "backify" the avatar WITH GEAR for the in-game texture.
-   Backify = compose body + overlays (excluding HANDS), mirror, then wipe face area (also removes any helmet/visor features). */
+   Backify = compose body + overlays (excluding HANDS), mirror, then wipe + refill face area. */
 async function buildBackAvatar(size){
   const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
 
@@ -325,10 +328,8 @@ async function buildBackAvatar(size){
   const src = document.createElement('canvas'); src.width=src.height=size;
   const sctx = src.getContext('2d',{willReadFrequently:true}); sctx.imageSmoothingEnabled=false;
 
-  // base body/hair/outfit
   await buildAvatarCanvas(sctx, size, profile);
 
-  // overlays except hands
   const k = (size>0 ? size/BASE_SZ : 1);
   const head=_equippedIn('head'), chest=_equippedIn('chest'), arms=_equippedIn('arms'), legs=_equippedIn('legs');
   if(legs){ _drawOverlay(sctx, legs.svg, _scaleBox(BOX.legs,k), 1); }
@@ -336,15 +337,27 @@ async function buildBackAvatar(size){
   if(arms){ _drawOverlay(sctx, arms.svg, _scaleBox(BOX.arms,k), 1); }
   if(head){ _drawOverlay(sctx, head.svg, _scaleBox(BOX.head,k), 1); }
 
-  // 2) Mirror to simulate back view (flips overlays with the body)
+  // 2) Mirror to simulate back view
   const back = document.createElement('canvas'); back.width=back.height=size;
   const bctx = back.getContext('2d',{willReadFrequently:true}); bctx.imageSmoothingEnabled=false;
   bctx.save(); bctx.scale(-1,1); bctx.drawImage(src, -size, 0, size, size); bctx.restore();
 
-  // 3) Wipe face (eyes/mouth region) AFTER overlays so helmet faces/visors are removed too
+  // 3) Wipe face region, then FILL with the player's skin mid-tone (no transparency hole)
+  const tone=(profile.skin_tone||'light');
+  const fillCol=(SKIN_TO[tone]||SKIN_TO.light)[1]; // mid-tone
+  const cx=size*0.52, cy=size*0.28, rx=size*0.18, ry=size*0.15;
+
+  // erase eyes/mouth/visor
   bctx.save();
   bctx.globalCompositeOperation='destination-out';
-  bctx.beginPath(); bctx.ellipse(size*0.52, size*0.28, size*0.18, size*0.15, 0, 0, Math.PI*2); bctx.fill();
+  bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill();
+  bctx.restore();
+
+  // refill with skin color
+  bctx.save();
+  bctx.globalCompositeOperation='source-over';
+  bctx.fillStyle = fillCol;
+  bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill();
   bctx.restore();
 
   return back;
@@ -428,6 +441,7 @@ const grassMat = new THREE.MeshLambertMaterial({ color:0x27ff66 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 2000), grassMat);
 ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
 
+/* Path segments */
 (function addPath(){
   const mat = new THREE.MeshStandardMaterial({ color:0xd7b97a, roughness:0.9, metalness:0.0 });
   for(let i=0;i<180;i++){
@@ -436,7 +450,7 @@ ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
   }
 })();
 
-/* Some meadow “scenery” cubes as far hedges/trees */
+/* Scenery blocks */
 (function hedges(){
   const hedgeMat = new THREE.MeshLambertMaterial({ color:0x12ca49 });
   for(let i=0;i<80;i++){
@@ -450,10 +464,10 @@ ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
 const avatarCanvas = document.getElementById('avatarCursor');
 const avCtx = avatarCanvas.getContext('2d', { willReadFrequently:true });
 avCtx.imageSmoothingEnabled=false;
-/* Build preview (front) ASAP (no awaiting before buttons) */
+/* Build preview (front) ASAP */
 (function(){ const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}'); buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile); })();
 
-/* Build backified canvas for the in-game player — done asynchronously */
+/* Build backified canvas for the in-game player — async */
 const backCanvasPlaceholder = document.createElement('canvas'); backCanvasPlaceholder.width=backCanvasPlaceholder.height=96;
 const backTex = new THREE.CanvasTexture(backCanvasPlaceholder);
 backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter;
@@ -462,14 +476,14 @@ backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter
   backTex.image = c; backTex.needsUpdate = true;
 })();
 
-/* Smaller player, always showing the “backified” sprite */
+/* Smaller player sprite (was 0.55x0.55) */
 const player = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.55,0.55),
+  new THREE.PlaneGeometry(0.42,0.42),
   new THREE.MeshBasicMaterial({ map: backTex, transparent:true })
 );
 player.position.set(0, 0.78, 0); scene.add(player);
 
-/* ——— Coins: gold IZZA disks ——— */
+/* ——— Coins ——— */
 function makeCoinTexture(){
   const s=128, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
   const ctx=cnv.getContext('2d');
@@ -485,12 +499,18 @@ const coinTex = makeCoinTexture(); coinTex.anisotropy=4;
 const coinMat = new THREE.MeshStandardMaterial({ map: coinTex, metalness:0.85, roughness:0.3, emissive:0x2b1f00, emissiveIntensity:0.2 });
 
 const obstacles=[]; const coins=[];
+
+/* spawn helpers — wider spacing + endless track */
+const TRACK_LOOP = 900;               // recycle length
+const OBSTACLE_SPACING = 28;          // was ~12; now much wider
+const COIN_CHANCE = 0.65;
+const OBSTACLE_CHANCE = 0.45;
+
 function spawnCoin(z){
   const m = new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05, 32), coinMat);
   m.rotation.x = Math.PI/2; m.position.set(0, 0.82, z); m.userData.kind='coin'; scene.add(m); coins.push(m);
 }
 
-/* ——— Obstacles: HAY BALE (jump) & BANNER GATE (slide) ——— */
 function spawnObstacle(z){
   if (Math.random()<0.5){
     const bale = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),
@@ -507,10 +527,24 @@ function spawnObstacle(z){
     arch.position.z=z; arch.userData.kind='high'; scene.add(arch); obstacles.push(arch);
   }
 }
-for(let i=8;i<120;i+=6){
-  if (Math.random() < 0.7) spawnCoin(-i*2);
-  if (Math.random() < 0.55) spawnObstacle(-i*2 - 2);
+
+/* initial stretch with larger spacing */
+let zCursor = -40;
+for(let i=0;i<40;i++){
+  if (Math.random() < COIN_CHANCE) spawnCoin(zCursor - 6);
+  if (Math.random() < OBSTACLE_CHANCE) spawnObstacle(zCursor - 10);
+  zCursor -= (OBSTACLE_SPACING + Math.random()*8);
 }
+
+/* continuous coin trickle ahead */
+function spawnCoinsAheadBuffer(){
+  // keep at least N coins ahead
+  const ahead = coins.filter(c=>c.position.z< -40).length;
+  for(let k=ahead; k<8; k++){
+    spawnCoin(-200 - Math.random()*600);
+  }
+}
+spawnCoinsAheadBuffer();
 
 /* Game state */
 let running=false, over=false;
@@ -520,13 +554,13 @@ let sessionCoins = 0;
 let best = parseInt(localStorage.getItem('runnerHighScore')||'0',10) || 0;
 const scoreEl = document.getElementById('scoreEl');
 
-/* Jump / Slide (exaggerated) */
+/* Jump / Slide */
 let jumpT = 0;     // 0..1
 let slideT = 0;    // 0..1
 function doJump(){ if (over || !running) return; if (jumpT>0 || slideT>0) return; jumpT = 1; audio.blip({f1:520,f2:980,dur:0.24}); }
 function doSlide(){ if (over || !running) return; if (slideT>0 || jumpT>0) return; slideT = 1; audio.thump({f:95,dur:0.20}); }
 
-/* Input (swipes & keys) */
+/* Input */
 (function input(){
   let startY=0, startT=0, swiping=false;
   window.addEventListener('pointerdown', e=>{ swiping=true; startY=e.clientY; startT=performance.now(); }, {passive:true});
@@ -575,7 +609,7 @@ async function submitLeaderboard(score){
   }catch(_){}
 }
 
-/* Start / Over UX — set up immediately (no awaits before) */
+/* Start / Over UX */
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay  = document.getElementById('overOverlay');
 document.getElementById('startBtn').onclick = ()=>{
@@ -595,7 +629,7 @@ document.getElementById('exitBtn').href = (()=>{
   return url.pathname + (url.search || '');
 })();
 
-/* Tiny particle sparkle when picking a coin */
+/* Tiny coin sparkle */
 const sparkleMat = new THREE.PointsMaterial({ size:0.06, color:0xfff2b0 });
 function sparkle(x,y,z){
   const geo = new THREE.BufferGeometry();
@@ -640,7 +674,7 @@ function tick(now){
   dist += vel * dt * 3.0;
   scoreEl.textContent = String(dist|0);
 
-  // Jump arc (higher)
+  // Jump arc
   if (jumpT > 0){
     jumpT = Math.max(0, jumpT - 0.042*dt);
     const j = Math.sin((1-jumpT)*Math.PI);
@@ -662,10 +696,16 @@ function tick(now){
     }
   }
 
-  // Obstacles
+  // Keep coins ahead stocked
+  if (Math.random()<0.03) spawnCoinsAheadBuffer();
+
+  // Obstacles (endless: recycle after passing camera)
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
-    if (o.position.z > 2) continue;
+    if (o.position.z > 8){
+      o.position.z -= TRACK_LOOP + Math.random()*40; // recycle far back for endless track
+      continue;
+    }
     if (o.userData.kind==='low'){
       const hit = aabbHit(0, player.position.y, 0.2, o.position.x, 0.28, o.position.z, 1.1, 0.55, 0.9) && player.position.y < 1.05;
       if (hit) return gameOver();
