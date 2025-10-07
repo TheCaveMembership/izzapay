@@ -103,14 +103,12 @@
       border-radius:12px; background:#fff; border:1px solid rgba(0,0,0,.14);
       box-shadow:0 4px 12px rgba(0,0,0,.28); user-select:none; touch-action:none;
       overflow:hidden;
-      /* --- surgical: kill selection/callout on iOS completely --- */
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
     .card.back{
       background:linear-gradient(180deg,#184a86,#0f2c54);
       border-color:rgba(0,0,0,.28);
     }
-    /* also make all text inside cards unselectable */
     .card *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
 
     .pip{position:absolute; font-weight:900; line-height:1; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -391,7 +389,6 @@ window.addEventListener('izza-crafting-changed', paintWallet, {passive:true});
 
 /* ===== Draw mode preference ===== */
 const DRAW_KEY='izza_sol_draw';
-/* CHANGED: default to Draw-1 for new players (without overwriting existing saves) */
 const DEFAULT_DRAW_MODE = 1;
 function getDrawPref(){
   const raw = localStorage.getItem(DRAW_KEY);
@@ -419,63 +416,225 @@ const P={ stock:[], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
 let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
 let FAN=26;
 
-/* NEW: small bias toward friendlier opening deals */
-const EASY_DEAL_TRIES = 15;
+/* ===== Invisible difficulty scheduler ===== */
+const DIFFQ_KEY='izza_sol_diffq_v1'; // queue of buckets to pop from
+// bucket codes: w5 (≤5m), w7 (5–7m), w10 (7–10m), lose (tough)
+function buildDiffQueue(){
+  const q=[];
+  // 20-games cycle: 55%/25%/10%/10% -> 11/5/2/2
+  for(let i=0;i<11;i++) q.push('w5');
+  for(let i=0;i<5;i++) q.push('w7');
+  for(let i=0;i<2;i++) q.push('w10');
+  for(let i=0;i<2;i++) q.push('lose');
+  // shuffle
+  for(let i=q.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=q[i]; q[i]=q[j]; q[j]=t; }
+  return q;
+}
+function nextBucket(){
+  try{
+    const raw=localStorage.getItem(DIFFQ_KEY);
+    let arr= raw? JSON.parse(raw) : null;
+    if(!Array.isArray(arr) || arr.length===0){ arr=buildDiffQueue(); }
+    const b=arr.shift();
+    localStorage.setItem(DIFFQ_KEY, JSON.stringify(arr));
+    return (b||'w5');
+  }catch(_){ return 'w5'; }
+}
 
-// 10 minute hard cap (already increased from 5 earlier)
+/* ===== Deal heuristics (behind the scenes) ===== */
+// Cheap peek helpers on a P-like state
+function topOfTableau(state){ return state.t.map(col=>col[col.length-1]||null); }
+function countFaceDownBelowTops(state){
+  let n=0;
+  for(const col of state.t){
+    // count face-down cards (all except the last face-up run)
+    for(let i=0;i<col.length-1;i++) if(!col[i].face) n++;
+  }
+  return n;
+}
+function countImmediateTableauMoves(state){
+  const tops=topOfTableau(state).filter(Boolean);
+  let moves=0;
+  for(let i=0;i<tops.length;i++){
+    for(let j=0;j<tops.length;j++){
+      if(i===j) continue;
+      const a=tops[i], b=tops[j];
+      if(a && b){
+        if(a.color!==b.color && a.rank===b.rank-1) moves++;
+      }
+    }
+    // also: can move a King to an empty if any empty exists (none at start), skip
+  }
+  return moves;
+}
+function countTopAcesAndDeuces(state){
+  const tops=topOfTableau(state).filter(Boolean);
+  let aces=0, deuces=0;
+  for(const c of tops){ if(c.rank===1) aces++; if(c.rank===2) deuces++; }
+  return {aces,deuces};
+}
+function firstCycleStockAccess(state, drawMode){
+  // simulate first pass of stock -> waste; count how many of first window cards
+  // would be directly playable onto tableau tops or foundations (naive check).
+  const windowN = drawMode===3 ? 12 : 6; // short window: early access matters most
+  const snapshot = state.stock.slice(-windowN); // top of stock is end of array
+  const tops=topOfTableau(state).filter(Boolean);
+  let playable=0, aces=0;
+  for(let i=snapshot.length-1;i>=0;i--){ // draw order
+    const c=snapshot[i];
+    if(c.rank===1){ playable++; aces++; continue; }
+    // onto foundations if same suit next needed? (start with Ace only at open)
+    // onto tableau any opposite color + one rank lower
+    for(const t of tops){
+      if(!t) continue;
+      if(c.color!==t.color && c.rank===t.rank-1){ playable++; break; }
+    }
+  }
+  return {playable, aces};
+}
+function columnsWithFlipPotential(state){
+  // columns where top can move somewhere and there's a face-down under it
+  let n=0;
+  for(let i=0;i<7;i++){
+    const col=state.t[i]; if(!col.length) continue;
+    const top=col[col.length-1];
+    let hasHidden=false;
+    for(let k=0;k<col.length-1;k++) if(!col[k].face){ hasHidden=true; break; }
+    if(!hasHidden) continue;
+    // can top go to any other top?
+    for(let j=0;j<7;j++){
+      if(i===j) continue;
+      const tgt=state.t[j]; const b=tgt[tgt.length-1];
+      if(!b){
+        if(top.rank===13){ n++; break; }
+      }else if(top.color!==b.color && top.rank===b.rank-1){ n++; break; }
+    }
+  }
+  return n;
+}
+function evaluateOpening(state, drawMode){
+  const moves=countImmediateTableauMoves(state);
+  const {aces,deuces}=countTopAcesAndDeuces(state);
+  const flips=columnsWithFlipPotential(state);
+  const hidden=countFaceDownBelowTops(state);
+  const stockPeek=firstCycleStockAccess(state, drawMode);
+  return {
+    moves, acesTop:aces, deucesTop:deuces,
+    flips, hidden, stockPlayable:stockPeek.playable, stockAces:stockPeek.aces
+  };
+}
+function qualifiesBucket(metrics, bucket){
+  // Looser thresholds at higher minutes; strict for ≤5m. "lose" seeks starvation.
+  if(bucket==='w5'){
+    return (
+      (metrics.acesTop>=1 && metrics.stockAces>=1) &&
+      (metrics.moves>=3) &&
+      (metrics.flips>=2) &&
+      (metrics.stockPlayable>=2)
+    );
+  }
+  if(bucket==='w7'){
+    return (
+      (metrics.acesTop>=1 || metrics.stockAces>=1) &&
+      (metrics.moves>=2) &&
+      (metrics.flips>=1) &&
+      (metrics.stockPlayable>=1)
+    );
+  }
+  if(bucket==='w10'){
+    return (
+      (metrics.moves>=1) &&
+      (metrics.flips>=1 || metrics.stockPlayable>=1)
+    );
+  }
+  // tough: starve early progress
+  if(bucket==='lose'){
+    return (
+      metrics.acesTop===0 &&
+      metrics.stockAces===0 &&
+      metrics.moves===0 &&
+      metrics.stockPlayable===0 &&
+      metrics.flips===0
+    );
+  }
+  return false;
+}
+
+/* ===== Dealing with targeted bucket ===== */
+const EASY_DEAL_TRIES = 15; // baseline from before (kept for fast screening)
+
+// cap tries per bucket so we don't spin forever (kept small for perf)
+const MAX_TRIES_BY_BUCKET = {
+  w5: 1200,
+  w7: 900,
+  w10: 700,
+  lose: 500
+};
+
+// 10 minute hard cap
 const MAX_MS = 600000;
 
 function cssVarInt(name,fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
 function fmtTime(ms){ const s=Math.max(0,Math.floor(ms/1000)); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return `${String(m).padStart(2,'0')}:${ss}`; }
 
-/* NEW: light “is this deal startable?” checks */
-function canMoveBetweenTableau(){
-  for (let i=0;i<7;i++){
-    const A = P.t[i]; if(!A.length) continue;
-    const a = A[A.length-1]; if(!a.face) continue;
-    for (let j=0;j<7;j++){
-      if(i===j) continue;
-      const B = P.t[j];
-      if (!B.length) { if (a.rank===13) return true; continue; }
-      const b = B[B.length-1];
-      if (a.face && b.face && a.color!==b.color && a.rank===b.rank-1) return true;
+function dealIntoStateFromDeck(deck){
+  // returns a lightweight cloned initial state to evaluate,
+  // using same dealing logic as the real game.
+  const S = { stock:[...deck], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
+  // tableau
+  for(let col=0; col<7; col++){
+    for(let n=0; n<=col; n++){
+      const c=S.stock.pop(); S.t[col].push({...c});
+      S.t[col][S.t[col].length-1].face=(n===col);
     }
   }
-  return false;
-}
-function canStartAnyFoundation(){
-  for (let i=0;i<7;i++){
-    const pile=P.t[i];
-    if(pile.length && pile[pile.length-1].face && pile[pile.length-1].rank===1) return true;
-  }
-  return false;
+  S.stock.forEach(c=>c.face=false);
+  return S;
 }
 
+function generateTargetedDeal(bucket, drawMode){
+  const maxTries = MAX_TRIES_BY_BUCKET[bucket] || 800;
+  let bestDeck=null, bestScore=-1; // fallback if no exact qualifier
+  for(let tries=0; tries<maxTries; tries++){
+    const deck=makeDeck();
+    const state=dealIntoStateFromDeck(deck);
+    const m=evaluateOpening(state, drawMode);
+
+    // simple scoring to keep a reasonable fallback if thresholds miss
+    const score = (m.acesTop*3)+(m.stockAces*2)+(m.moves*2)+(m.flips*2)+m.stockPlayable-(m.hidden*0.02);
+    if(qualifiesBucket(m, bucket)) return deck;
+
+    if(score>bestScore){ bestScore=score; bestDeck=deck; }
+  }
+  // fallback: return the best we saw (still pretty nice for w5/w7/w10; for lose it's still rough)
+  return bestDeck || makeDeck();
+}
+
+/* ===== Game flow ===== */
 function layoutNew(){
-  /* CHANGED: try a few shuffles until we get a start with at least one legal move or an Ace up top */
-  let tries = Math.max(0, EASY_DEAL_TRIES|0);
-  while (true) {
-    for(let i=0;i<4;i++) P.f[i]=[];
-    for(let i=0;i<7;i++) P.t[i]=[];
-    P.waste=[]; P.stock=makeDeck();
-    moves=0; ended=false; winTs=null; elMoves.textContent='0';
+  // choose hidden bucket for this round
+  const bucket = nextBucket(); // 'w5' | 'w7' | 'w10' | 'lose'
+  const drawMode = getDrawPref();
 
-    FAN=cssVarInt('--fanY',26);
+  for(let i=0;i<4;i++) P.f[i]=[];
+  for(let i=0;i<7;i++) P.t[i]=[];
+  P.waste=[];
 
-    // deal tableau
-    for(let col=0; col<7; col++){
-      for(let n=0; n<=col; n++){
-        const c=P.stock.pop(); P.t[col].push(c);
-        c.face=(n===col);
-      }
+  // Generate a deck that fits the bucket heuristics (invisible to player)
+  const deck = generateTargetedDeal(bucket, drawMode);
+  P.stock = deck.map(c=>({ ...c, face:false }));
+
+  moves=0; ended=false; winTs=null; elMoves.textContent='0';
+  FAN=cssVarInt('--fanY',26);
+
+  // deal tableau
+  for(let col=0; col<7; col++){
+    for(let n=0; n<=col; n++){
+      const c=P.stock.pop(); P.t[col].push(c);
+      c.face=(n===col);
     }
-    P.stock.forEach(c=>c.face=false);
-
-    if (tries>0 && !(canMoveBetweenTableau() || canStartAnyFoundation())) {
-      tries--; continue;
-    }
-    break;
   }
+  P.stock.forEach(c=>c.face=false);
 
   if(timerId) clearInterval(timerId);
   startTs=Date.now(); elTime.textContent='00:00';
@@ -488,7 +647,7 @@ function layoutNew(){
 
   renderAll();
   showMsg('GO!');
-  paintWallet(); // show current wallet on entry
+  paintWallet();
 }
 
 function showMsg(t){ const m=document.getElementById('bigmsg'); m.textContent=t; m.classList.add('show'); setTimeout(()=>m.classList.remove('show'),850); }
@@ -505,7 +664,7 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (wider + bigger fan; only the top is interactive)
+  // WASTE (only top is interactive; wider fan preserved)
   const wEl=document.getElementById(piles.waste);
   if(P.waste.length){
     const drawMode=getDrawPref();
@@ -520,7 +679,6 @@ function renderAll(){
       placeXY(el, i*gap, 0);
       el.dataset.where='w';
 
-      // ensure only the top waste card can receive input
       if (idx !== P.waste.length - 1) {
         el.dataset.locked='1';
         el.style.pointerEvents='none';
