@@ -436,7 +436,9 @@ async function paintAvatar(){
   const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
   await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile);
 }
-await paintAvatar();
+/* FIX: no top-level await in non-module script */
+paintAvatar().then(() => { /* ensure first texture upload is fresh */ });
+
 const avatarTex = new THREE.CanvasTexture(avatarCanvas);
 avatarTex.minFilter = THREE.NearestFilter; avatarTex.magFilter = THREE.NearestFilter;
 const player = new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9), new THREE.MeshBasicMaterial({ map: avatarTex, transparent:true }));
