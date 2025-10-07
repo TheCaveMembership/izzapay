@@ -151,7 +151,7 @@
 /* Helpers consistent with Arena */
 const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
 function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_{}); }
+function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){ } }
 function renderWalletFromLS(){ document.getElementById('coins').textContent = String(parseInt(localStorage.getItem('izzaCoins')||'0',10)||0); document.getElementById('craft').textContent = String(readCraftAny()); }
 renderWalletFromLS();
 
@@ -304,29 +304,7 @@ async function buildAvatarCanvas(dstCtx, size, profile){
   }
 }
 
-/* Build and then "backify" the avatar WITH GEAR for the in-game texture.
-   Backify = mirror whole sprite (so equipment is on the back), then remove face features. */
-async function buildBackAvatar(size){
-  // 1) Compose full avatar + overlays
-  const src = document.createElement('canvas'); src.width=src.height=size;
-  const sctx = src.getContext('2d',{willReadFrequently:true}); sctx.imageSmoothingEnabled=false;
-  const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-  await buildAvatarCanvasWithGear(sctx, size, profile);
-
-  // 2) Mirror to simulate back view (also flips equipped overlays)
-  const back = document.createElement('canvas'); back.width=back.height=size;
-  const bctx = back.getContext('2d',{willReadFrequently:true}); bctx.imageSmoothingEnabled=false;
-  bctx.save(); bctx.scale(-1,1); bctx.drawImage(src, -size, 0, size, size); bctx.restore();
-
-  // 3) Remove face features (eyes/mouth) only — no hair cap or shading
-  bctx.save();
-  bctx.globalCompositeOperation='destination-out';
-  bctx.beginPath(); bctx.ellipse(size*0.52, size*0.28, size*0.18, size*0.15, 0, 0, Math.PI*2); bctx.fill();
-  bctx.restore();
-
-  return back;
-}
-
+/* Compose avatar + overlays (front) */
 async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   await buildAvatarCanvas(dstCtx, size, profile);
   const k = (size>0 ? size/BASE_SZ : 1);
@@ -335,7 +313,41 @@ async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   if(chest){ _drawOverlay(dstCtx, chest.svg, _scaleBox(BOX.chest,k), 1); }
   if(arms){ _drawOverlay(dstCtx, arms.svg, _scaleBox(BOX.arms,k), 1); }
   if(head){ _drawOverlay(dstCtx, head.svg, _scaleBox(BOX.head,k), 1); }
-  if(hands){ _drawOverlay(dstCtx, hands.svg, _scaleBox(BOX.hands,k), 1); }
+  if(hands){ _drawOverlay(dstCtx, hands.svg, _scaleBox(BOX.hands,k), 1); } // preview shows hands/weapon
+}
+
+/* Build and then "backify" the avatar WITH GEAR for the in-game texture.
+   Backify = compose body + overlays (excluding HANDS), mirror, then wipe face area (also removes any helmet/visor features). */
+async function buildBackAvatar(size){
+  const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+
+  // 1) Compose to a source canvas WITHOUT hands
+  const src = document.createElement('canvas'); src.width=src.height=size;
+  const sctx = src.getContext('2d',{willReadFrequently:true}); sctx.imageSmoothingEnabled=false;
+
+  // base body/hair/outfit
+  await buildAvatarCanvas(sctx, size, profile);
+
+  // overlays except hands
+  const k = (size>0 ? size/BASE_SZ : 1);
+  const head=_equippedIn('head'), chest=_equippedIn('chest'), arms=_equippedIn('arms'), legs=_equippedIn('legs');
+  if(legs){ _drawOverlay(sctx, legs.svg, _scaleBox(BOX.legs,k), 1); }
+  if(chest){ _drawOverlay(sctx, chest.svg, _scaleBox(BOX.chest,k), 1); }
+  if(arms){ _drawOverlay(sctx, arms.svg, _scaleBox(BOX.arms,k), 1); }
+  if(head){ _drawOverlay(sctx, head.svg, _scaleBox(BOX.head,k), 1); }
+
+  // 2) Mirror to simulate back view (flips overlays with the body)
+  const back = document.createElement('canvas'); back.width=back.height=size;
+  const bctx = back.getContext('2d',{willReadFrequently:true}); bctx.imageSmoothingEnabled=false;
+  bctx.save(); bctx.scale(-1,1); bctx.drawImage(src, -size, 0, size, size); bctx.restore();
+
+  // 3) Wipe face (eyes/mouth region) AFTER overlays so helmet faces/visors are removed too
+  bctx.save();
+  bctx.globalCompositeOperation='destination-out';
+  bctx.beginPath(); bctx.ellipse(size*0.52, size*0.28, size*0.18, size*0.15, 0, 0, Math.PI*2); bctx.fill();
+  bctx.restore();
+
+  return back;
 }
 
 /* -----------------------------
