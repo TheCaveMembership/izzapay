@@ -23,20 +23,16 @@
     html,body{height:100%}
     body{
       margin:0;
-      background:
-        linear-gradient(#c6ecff 0%, #bfe8ff 40%, #99d6ff 100%) no-repeat;
+      background:linear-gradient(#c6ecff 0%, #bfe8ff 40%, #99d6ff 100%) no-repeat;
       color:var(--txt); font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       overflow:hidden;
     }
 
     /* HUD */
-    .hud{
-      position:fixed; inset:12px 12px auto 12px; display:flex; align-items:center; gap:8px; z-index:20;
-    }
+    .hud{ position:fixed; inset:12px 12px auto 12px; display:flex; align-items:center; gap:8px; z-index:20; }
     .pill{
       display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
-      background:var(--chip-bg); border:1px solid var(--line); font-weight:700; font-size:13px;
-      backdrop-filter:blur(6px);
+      background:var(--chip-bg); border:1px solid var(--line); font-weight:700; font-size:13px; backdrop-filter:blur(6px);
     }
     .pill .v{min-width:48px; text-align:right;}
     .btn{
@@ -44,10 +40,8 @@
       background:var(--chip-bg); border:1px solid var(--line); color:#0b2b4b; cursor:pointer; user-select:none; font-weight:700;
     }
     .btn:hover{filter:brightness(1.04)}
-
     .score{
-      position:fixed; right:12px; top:12px; z-index:20;
-      font-size:32px; font-weight:800; letter-spacing:0.5px;
+      position:fixed; right:12px; top:12px; z-index:20; font-size:32px; font-weight:800; letter-spacing:0.5px;
       padding:10px 14px; background:var(--chip-bg); border:1px solid var(--line);
       border-radius:12px; backdrop-filter:blur(6px);
     }
@@ -217,7 +211,7 @@ function overlayTint(img, hex, strength=1.0){
   const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
   function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
   for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
-    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov[d[i+2],t.b];
+    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
     d[i]=Math.round(d[i]*(1-strength)+r*strength);
     d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
     d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
@@ -226,7 +220,7 @@ function overlayTint(img, hex, strength=1.0){
   return oc;
 }
 
-/* Equipped overlays (same slots/logic) — used for avatar texture */
+/* Inventory helpers for overlays */
 function _invRead(){
   try{
     const iz = (window.IZZA && IZZA.api && IZZA.api.getInventory && IZZA.api.getInventory()) || null;
@@ -310,37 +304,27 @@ async function buildAvatarCanvas(dstCtx, size, profile){
   }
 }
 
-/* Build and then "backify" the avatar for the in-game texture */
+/* Build and then "backify" the avatar WITH GEAR for the in-game texture.
+   Backify = mirror whole sprite (so equipment is on the back), then remove face features. */
 async function buildBackAvatar(size){
-  const tmp = document.createElement('canvas'); tmp.width=tmp.height=size;
-  const tctx = tmp.getContext('2d',{willReadFrequently:true}); tctx.imageSmoothingEnabled=false;
+  // 1) Compose full avatar + overlays
+  const src = document.createElement('canvas'); src.width=src.height=size;
+  const sctx = src.getContext('2d',{willReadFrequently:true}); sctx.imageSmoothingEnabled=false;
   const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-  await buildAvatarCanvas(tctx, size, profile);
+  await buildAvatarCanvasWithGear(sctx, size, profile);
 
-  // BACKIFY: remove facial features + suggest back-of-head & shoulders
-  const ctx = tctx;
-  // paint a soft oval over the face area to hide eyes/mouth
-  ctx.save();
-  ctx.globalCompositeOperation='source-over';
-  ctx.fillStyle='rgba(255,255,255,0.9)';
-  ctx.globalCompositeOperation='destination-out'; // punch out any dark features
-  ctx.beginPath(); ctx.ellipse(size*0.52, size*0.28, size*0.18, size*0.15, 0, 0, Math.PI*2); ctx.fill();
-  ctx.restore();
+  // 2) Mirror to simulate back view (also flips equipped overlays)
+  const back = document.createElement('canvas'); back.width=back.height=size;
+  const bctx = back.getContext('2d',{willReadFrequently:true}); bctx.imageSmoothingEnabled=false;
+  bctx.save(); bctx.scale(-1,1); bctx.drawImage(src, -size, 0, size, size); bctx.restore();
 
-  // draw a “hair back” cap
-  ctx.save();
-  ctx.fillStyle='rgba(0,0,0,.22)';
-  ctx.beginPath(); ctx.ellipse(size*0.50, size*0.28, size*0.22, size*0.18, 0, 0, Math.PI*2); ctx.fill();
-  ctx.restore();
+  // 3) Remove face features (eyes/mouth) only — no hair cap or shading
+  bctx.save();
+  bctx.globalCompositeOperation='destination-out';
+  bctx.beginPath(); bctx.ellipse(size*0.52, size*0.28, size*0.18, size*0.15, 0, 0, Math.PI*2); bctx.fill();
+  bctx.restore();
 
-  // add shoulder/back shading
-  const grad = ctx.createLinearGradient(0,size*0.45,0,size*0.85);
-  grad.addColorStop(0,'rgba(0,0,0,0.08)');
-  grad.addColorStop(1,'rgba(0,0,0,0.18)');
-  ctx.fillStyle=grad;
-  ctx.fillRect(size*0.25, size*0.45, size*0.50, size*0.35);
-
-  return tmp; // canvas
+  return back;
 }
 
 async function buildAvatarCanvasWithGear(dstCtx, size, profile){
@@ -421,9 +405,7 @@ scene.fog = new THREE.Fog(0xbfe8ff, 22, 80);
 /* Sun + sky */
 {
   const hemi = new THREE.HemisphereLight(0xbfe8ff, 0x22aa44, 0.8); scene.add(hemi);
-  const sun  = new THREE.DirectionalLight(0xffffff, 1.04); sun.position.set(5,8,3); sun.castShadow=false; scene.add(sun);
-
-  // simple skydome
+  const sun  = new THREE.DirectionalLight(0xffffff, 1.04); sun.position.set(5,8,3); scene.add(sun);
   const skyGeo = new THREE.SphereGeometry(900, 24, 16);
   const skyMat = new THREE.MeshBasicMaterial({ color:0xbfe8ff, side:THREE.BackSide });
   const sky = new THREE.Mesh(skyGeo, skyMat); scene.add(sky);
@@ -452,18 +434,21 @@ ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
   }
 })();
 
-/* Avatar canvases */
+/* Avatar canvases (preview) */
 const avatarCanvas = document.getElementById('avatarCursor');
 const avCtx = avatarCanvas.getContext('2d', { willReadFrequently:true });
 avCtx.imageSmoothingEnabled=false;
+/* Build preview (front) ASAP (no awaiting before buttons) */
+(function(){ const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}'); buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile); })();
 
-/* Build preview (front) */
-(async function(){ const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}'); await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile); })();
-
-/* Build backified canvas for the in-game player */
-const backCanvas = await (async()=>{ const c = await buildBackAvatar(96); return c; })();
-const backTex = new THREE.CanvasTexture(backCanvas);
+/* Build backified canvas for the in-game player — done asynchronously */
+const backCanvasPlaceholder = document.createElement('canvas'); backCanvasPlaceholder.width=backCanvasPlaceholder.height=96;
+const backTex = new THREE.CanvasTexture(backCanvasPlaceholder);
 backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter;
+(async function(){
+  const c = await buildBackAvatar(96);
+  backTex.image = c; backTex.needsUpdate = true;
+})();
 
 /* Smaller player, always showing the “backified” sprite */
 const player = new THREE.Mesh(
@@ -496,12 +481,10 @@ function spawnCoin(z){
 /* ——— Obstacles: HAY BALE (jump) & BANNER GATE (slide) ——— */
 function spawnObstacle(z){
   if (Math.random()<0.5){
-    // HAY BALE (jump)
     const bale = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),
       new THREE.MeshStandardMaterial({ color:0xe6c15a, roughness:0.9, metalness:0.1 }));
     bale.position.set(0,0.28,z); bale.userData.kind='low'; scene.add(bale); obstacles.push(bale);
   }else{
-    // BANNER GATE (slide)
     const arch = new THREE.Group();
     const postsMat = new THREE.MeshStandardMaterial({ color:0x1266cc, metalness:0.2, roughness:0.4 });
     const postL = new THREE.Mesh(new THREE.BoxGeometry(0.12,1.6,0.2), postsMat); postL.position.set(-0.7,0.8,0); arch.add(postL);
@@ -528,16 +511,8 @@ const scoreEl = document.getElementById('scoreEl');
 /* Jump / Slide (exaggerated) */
 let jumpT = 0;     // 0..1
 let slideT = 0;    // 0..1
-function doJump(){
-  if (over || !running) return;
-  if (jumpT>0 || slideT>0) return;
-  jumpT = 1; audio.blip({f1:520,f2:980,dur:0.24});
-}
-function doSlide(){
-  if (over || !running) return;
-  if (slideT>0 || jumpT>0) return;
-  slideT = 1; audio.thump({f:95,dur:0.20});
-}
+function doJump(){ if (over || !running) return; if (jumpT>0 || slideT>0) return; jumpT = 1; audio.blip({f1:520,f2:980,dur:0.24}); }
+function doSlide(){ if (over || !running) return; if (slideT>0 || jumpT>0) return; slideT = 1; audio.thump({f:95,dur:0.20}); }
 
 /* Input (swipes & keys) */
 (function input(){
@@ -546,9 +521,7 @@ function doSlide(){
   window.addEventListener('pointerup', e=>{
     if(!swiping) return; swiping=false;
     const dy = e.clientY - startY, dt = performance.now()-startT;
-    if (Math.abs(dy)>40 && dt<400){
-      if (dy<0) doJump(); else doSlide();
-    }
+    if (Math.abs(dy)>40 && dt<400){ if (dy<0) doJump(); else doSlide(); }
   }, {passive:true});
   window.addEventListener('keydown', (e)=>{
     if (e.key==='ArrowUp' || e.key==='w' || e.key===' ') doJump();
@@ -590,7 +563,7 @@ async function submitLeaderboard(score){
   }catch(_){}
 }
 
-/* Start / Over UX */
+/* Start / Over UX — set up immediately (no awaits before) */
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay  = document.getElementById('overOverlay');
 document.getElementById('startBtn').onclick = ()=>{
@@ -639,7 +612,7 @@ function tick(now){
   const dt = Math.min(40, now - last) / 16.666;
   last = now;
 
-  // keep textures live
+  // keep back texture live
   backTex.needsUpdate = true;
 
   if (!running || over) return;
