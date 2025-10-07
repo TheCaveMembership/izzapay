@@ -125,8 +125,8 @@
         Morning in the Neon Meadows. Leap <b>hay bales</b>, slide under <b>banner gates</b>, and snatch shimmering <b>IZZA Coins</b>.
       </p>
       <div class="center-row">
-        <button id="startBtn" class="btn">▶ Start</button>
-        <button id="lbBtn" class="btn">🏆 Leaderboard</button>
+        <button id="startBtn" class="btn" type="button">▶ Start</button>
+        <button id="lbBtn" class="btn" type="button">🏆 Leaderboard</button>
       </div>
     </div>
   </div>
@@ -137,8 +137,8 @@
       <h1 style="margin:0 0 12px">You Tripped!</h1>
       <div class="muted" id="overStats">Distance: 0 • IZZA gained: 0 • Best: 0</div>
       <div class="center-row">
-        <button id="retryBtn" class="btn">↻ Retry</button>
-        <button id="overLbBtn" class="btn">🏆 Leaderboard</button>
+        <button id="retryBtn" class="btn" type="button">↻ Retry</button>
+        <button id="overLbBtn" class="btn" type="button">🏆 Leaderboard</button>
         <a id="backArcadeBtn" class="btn" href="/izza-game/minigames">↩︎ Back to Arcade</a>
       </div>
     </div>
@@ -473,11 +473,17 @@ async function submitLeaderboard(score){
 /* Start / Over UX */
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay  = document.getElementById('overOverlay');
-document.getElementById('startBtn').onclick = ()=>{
+
+function startGame(){
+  // guarantee audio init & overlay removal in same user gesture
+  try{ audio.ensure(); audio.bgm(); }catch(_){}
   startOverlay.classList.remove('show');
-  audio.bgm().catch(()=>{});
-  running = true; over=false;
-};
+  startOverlay.style.pointerEvents = 'none';
+  startOverlay.style.display = 'none';
+  running = true; over = false;
+}
+document.getElementById('startBtn')?.addEventListener('click', startGame, {passive:true});
+
 document.getElementById('lbBtn').onclick = ()=>{ location.href = withAuth('/izza-game/minigames#leaderboard'); };
 document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click(); };
 document.getElementById('retryBtn').onclick = ()=>{ location.href = withAuth(location.pathname); };
