@@ -29,21 +29,31 @@
     }
 
     /* HUD */
-    .hud{ position:fixed; inset:12px 12px auto 12px; display:flex; align-items:center; gap:8px; z-index:20; }
-    .pill{
-      display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
-      background:var(--chip-bg); border:1px solid var(--line); font-weight:700; font-size:13px; backdrop-filter:blur(6px);
+    .hud{
+      position:fixed; inset:10px 10px auto 10px;
+      display:flex; flex-wrap:wrap; align-items:center; gap:6px; z-index:20;
+      max-width:calc(100vw - 120px);
     }
-    .pill .v{min-width:48px; text-align:right;}
+    .pill{
+      display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px;
+      background:var(--chip-bg); border:1px solid var(--line); font-weight:700; font-size:12px; backdrop-filter:blur(6px);
+      white-space:nowrap;
+    }
+    .pill .v{min-width:36px; text-align:right;}
     .btn{
-      display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:10px;
-      background:var(--chip-bg); border:1px solid var(--line); color:#0b2b4b; cursor:pointer; user-select:none; font-weight:700;
+      display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:10px;
+      background:var(--chip-bg); border:1px solid var(--line); color:#0b2b4b; cursor:pointer; user-select:none; font-weight:700; font-size:12px;
     }
     .btn:hover{filter:brightness(1.04)}
     .score{
-      position:fixed; right:12px; top:12px; z-index:20; font-size:32px; font-weight:800; letter-spacing:0.5px;
-      padding:10px 14px; background:var(--chip-bg); border:1px solid var(--line);
+      position:fixed; right:8px; top:8px; z-index:20; font-size:22px; font-weight:800; letter-spacing:0.5px;
+      padding:6px 10px; background:var(--chip-bg); border:1px solid var(--line);
       border-radius:12px; backdrop-filter:blur(6px);
+    }
+    @media (min-width:420px){
+      .score{font-size:26px; padding:8px 12px}
+      .pill{font-size:13px; padding:8px 12px}
+      .btn{font-size:13px; padding:8px 12px}
     }
 
     /* Start & GameOver overlays */
@@ -66,17 +76,24 @@
 
     #gameCanvas{position:fixed; inset:0; width:100vw; height:100vh; display:block;}
 
-    /* Avatar preview (keep size, turn background green/grass) */
+    /* Avatar preview (keep size, turn background fully green) */
     .avatar-corner{
       position:fixed; left:12px; bottom:12px; width:90px; height:90px; z-index:15; pointer-events:none;
       border-radius:12px; border:1px solid var(--line);
-      background:linear-gradient(var(--grass), var(--grass)); /* was white/blue; now green to match ground */
+      background:linear-gradient(var(--grass), var(--grass));
       display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);
     }
     canvas#avatarCursor{width:82px; height:82px; image-rendering:pixelated;}
 
+    /* Make bottom strip green all the way to screen edge */
+    .bottom-grass{
+      position:fixed; left:0; right:0; bottom:0; height:160px; z-index:5;
+      background:var(--grass);
+      pointer-events:none;
+    }
+
     .tips{
-      position:fixed; left:12px; top:64px; z-index:20; color:#0b2b4b; font-weight:700; font-size:12px;
+      position:fixed; left:12px; top:56px; z-index:20; color:#0b2b4b; font-weight:700; font-size:12px;
       background:var(--chip-bg); border:1px solid var(--line); border-radius:10px; padding:6px 8px; backdrop-filter:blur(6px);
     }
   </style>
@@ -98,6 +115,9 @@
   <div class="avatar-corner">
     <canvas id="avatarCursor" width="96" height="96"></canvas>
   </div>
+
+  <!-- Green footer slab -->
+  <div class="bottom-grass"></div>
 
   <!-- Start Overlay -->
   <div id="startOverlay" class="overlay show">
@@ -180,6 +200,7 @@ const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28
 
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+const rgbToHex=({r,g,b})=>('#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''));
 const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
 const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
 
@@ -319,8 +340,30 @@ async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   if(hands){ _drawOverlay(dstCtx, hands.svg, _scaleBox(BOX.hands,k), 1); } // preview shows hands/weapon
 }
 
+/* Utility: average color inside ellipse on a canvas (skip transparent pixels) */
+function sampleAverageColorInEllipse(ctx, cx, cy, rx, ry){
+  const w=ctx.canvas.width, h=ctx.canvas.height;
+  const xmin=Math.max(0, Math.floor(cx-rx)), xmax=Math.min(w-1, Math.ceil(cx+rx));
+  const ymin=Math.max(0, Math.floor(cy-ry)), ymax=Math.min(h-1, Math.ceil(cy+ry));
+  let r=0,g=0,b=0,n=0;
+  const id=ctx.getImageData(xmin,ymin,(xmax-xmin+1),(ymax-ymin+1)), d=id.data;
+  const rx2=rx*rx, ry2=ry*ry;
+  for(let y=0;y<=ymax-ymin;y++){
+    for(let x=0;x<=xmax-xmin;x++){
+      const dx=x+xmin-cx, dy=y+ymin-cy;
+      if((dx*dx)/rx2 + (dy*dy)/ry2 > 1) continue;
+      const i=(y*(xmax-xmin+1)+x)*4;
+      const a=d[i+3]; if(a<8) continue;
+      r+=d[i]; g+=d[i+1]; b+=d[i+2]; n++;
+    }
+  }
+  if(n===0) return null;
+  return rgbToHex({r:Math.round(r/n), g:Math.round(g/n), b:Math.round(b/n)});
+}
+
 /* Build and then "backify" the avatar WITH GEAR for the in-game texture.
-   Backify = compose body + overlays (excluding HANDS), mirror, then wipe + refill face area. */
+   Backify = compose body + overlays (excluding HANDS), mirror, then wipe face and refill
+   using head/helmet dominant color, or hair mid-tone if no head overlay. */
 async function buildBackAvatar(size){
   const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
 
@@ -337,28 +380,30 @@ async function buildBackAvatar(size){
   if(arms){ _drawOverlay(sctx, arms.svg, _scaleBox(BOX.arms,k), 1); }
   if(head){ _drawOverlay(sctx, head.svg, _scaleBox(BOX.head,k), 1); }
 
+  // Face ellipse (on source/back have same coords)
+  const cx=size*0.52, cy=size*0.28, rx=size*0.18, ry=size*0.15;
+
+  // Decide fill color: head overlay dominant or hair mid-tone
+  let fillCol = null;
+  if (head && head.svg){
+    fillCol = sampleAverageColorInEllipse(sctx, cx, cy, rx, ry);
+  }
+  if (!fillCol){
+    const hairTone = (HAIR_TO[ (profile.hair_color||'black') ]||HAIR_TO.black);
+    fillCol = hairTone[1]; // mid-tone
+  }
+
   // 2) Mirror to simulate back view
   const back = document.createElement('canvas'); back.width=back.height=size;
   const bctx = back.getContext('2d',{willReadFrequently:true}); bctx.imageSmoothingEnabled=false;
   bctx.save(); bctx.scale(-1,1); bctx.drawImage(src, -size, 0, size, size); bctx.restore();
 
-  // 3) Wipe face region, then FILL with the player's skin mid-tone (no transparency hole)
-  const tone=(profile.skin_tone||'light');
-  const fillCol=(SKIN_TO[tone]||SKIN_TO.light)[1]; // mid-tone
-  const cx=size*0.52, cy=size*0.28, rx=size*0.18, ry=size*0.15;
+  // 3) Wipe face region, then refill with chosen color (no hole)
+  bctx.save(); bctx.globalCompositeOperation='destination-out';
+  bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill(); bctx.restore();
 
-  // erase eyes/mouth/visor
-  bctx.save();
-  bctx.globalCompositeOperation='destination-out';
-  bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill();
-  bctx.restore();
-
-  // refill with skin color
-  bctx.save();
-  bctx.globalCompositeOperation='source-over';
-  bctx.fillStyle = fillCol;
-  bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill();
-  bctx.restore();
+  bctx.save(); bctx.globalCompositeOperation='source-over'; bctx.fillStyle = fillCol;
+  bctx.beginPath(); bctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bctx.fill(); bctx.restore();
 
   return back;
 }
@@ -436,17 +481,22 @@ scene.fog = new THREE.Fog(0xbfe8ff, 22, 80);
   const sky = new THREE.Mesh(skyGeo, skyMat); scene.add(sky);
 }
 
-/* Ground (bright neon grass) + dirt path strip */
+/* Ground (bright neon grass) */
 const grassMat = new THREE.MeshLambertMaterial({ color:0x27ff66 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 2000), grassMat);
 ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
 
-/* Path segments */
-(function addPath(){
+/* Infinite-looking path: a ring of segments recycled behind the player */
+const PATH_SEGMENTS = [];
+const PATH_SPACING = 5.0;
+const PATH_COUNT = 80;                         // number of visible segments
+const PATH_LOOP = PATH_SPACING * PATH_COUNT;   // recycle distance
+(function buildPath(){
   const mat = new THREE.MeshStandardMaterial({ color:0xd7b97a, roughness:0.9, metalness:0.0 });
-  for(let i=0;i<180;i++){
+  for(let i=0;i<PATH_COUNT;i++){
     const seg = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.02, 4.5), mat);
-    seg.position.set(0, 0.01, -i*10-5); scene.add(seg);
+    seg.position.set(0, 0.01, -i*PATH_SPACING - 5);
+    scene.add(seg); PATH_SEGMENTS.push(seg);
   }
 })();
 
@@ -476,9 +526,9 @@ backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter
   backTex.image = c; backTex.needsUpdate = true;
 })();
 
-/* Smaller player sprite (was 0.55x0.55) */
+/* Player: smaller (about half old size), overlays already baked into texture */
 const player = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.42,0.42),
+  new THREE.PlaneGeometry(0.28,0.28),
   new THREE.MeshBasicMaterial({ map: backTex, transparent:true })
 );
 player.position.set(0, 0.78, 0); scene.add(player);
@@ -501,9 +551,9 @@ const coinMat = new THREE.MeshStandardMaterial({ map: coinTex, metalness:0.85, r
 const obstacles=[]; const coins=[];
 
 /* spawn helpers — wider spacing + endless track */
-const TRACK_LOOP = 900;               // recycle length
-const OBSTACLE_SPACING = 28;          // was ~12; now much wider
-const COIN_CHANCE = 0.65;
+const TRACK_LOOP = 900;               // obstacle recycle loop length
+const OBSTACLE_SPACING = 28;          // wider than before
+const COIN_CHANCE = 0.6;
 const OBSTACLE_CHANCE = 0.45;
 
 function spawnCoin(z){
@@ -538,8 +588,7 @@ for(let i=0;i<40;i++){
 
 /* continuous coin trickle ahead */
 function spawnCoinsAheadBuffer(){
-  // keep at least N coins ahead
-  const ahead = coins.filter(c=>c.position.z< -40).length;
+  const ahead = coins.filter(c=>c.position.z< -60).length;
   for(let k=ahead; k<8; k++){
     spawnCoin(-200 - Math.random()*600);
   }
@@ -671,6 +720,13 @@ function tick(now){
     if (obj.isMesh || obj.isGroup || obj.isPoints) obj.position.z += vel * dt * 1.3;
   });
 
+  // recycle path segments for endless track look
+  for (const seg of PATH_SEGMENTS){
+    if (seg.position.z > 6){
+      seg.position.z -= PATH_LOOP;
+    }
+  }
+
   dist += vel * dt * 3.0;
   scoreEl.textContent = String(dist|0);
 
@@ -699,7 +755,7 @@ function tick(now){
   // Keep coins ahead stocked
   if (Math.random()<0.03) spawnCoinsAheadBuffer();
 
-  // Obstacles (endless: recycle after passing camera)
+  // Obstacles — endless via recycle
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
     if (o.position.z > 8){
