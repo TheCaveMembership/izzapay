@@ -296,19 +296,8 @@ const backTex=new THREE.CanvasTexture(backCanvasPlaceholder);backTex.minFilter=T
 const player=new THREE.Mesh(new THREE.PlaneGeometry(0.28,0.28),new THREE.MeshBasicMaterial({map:backTex,transparent:true}));
 player.position.set(0,0.78,0);scene.add(player);
 
-/* Coins (unchanged structure — only color richer gold) */
-function makeCoinTexture(){
-  const s=128,cnv=document.createElement('canvas');cnv.width=cnv.height=s;const ctx=cnv.getContext('2d');
-  const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);
-  g.addColorStop(0,'#fff1a8');   // more golden highlight
-  g.addColorStop(.45,'#ffcf3a'); // richer mid gold
-  g.addColorStop(1,'#a87400');   // deeper rim
-  ctx.fillStyle=g;
-  ctx.beginPath();ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2);ctx.fill();
-  ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.stroke();
-  ctx.fillStyle='rgba(40,30,0,0.85)';ctx.font='700 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('IZ',s/2,s/2);
-  return new THREE.CanvasTexture(cnv);
-}
+/* Coins (unchanged) */
+function makeCoinTexture(){const s=128,cnv=document.createElement('canvas');cnv.width=cnv.height=s;const ctx=cnv.getContext('2d');const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);g.addColorStop(0,'#fff5c4');g.addColorStop(.45,'#ffd86b');g.addColorStop(1,'#9a6d1c');ctx.fillStyle=g;ctx.beginPath();ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2);ctx.fill();ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.stroke();ctx.fillStyle='rgba(40,30,0,0.85)';ctx.font='700 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('IZ',s/2,s/2);return new THREE.CanvasTexture(cnv);}
 const coinTex=makeCoinTexture();coinTex.anisotropy=4;
 const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughness:0.3,emissive:0x2b1f00,emissiveIntensity:0.2});
 
@@ -352,16 +341,16 @@ function makeBale(z){
   img.position.set(0,0.45,0);
   group.add(img);
 
-  // Collision proxy (invisible) — raised & taller to overlap player's center Y
-  const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.95,0.9), new THREE.MeshBasicMaterial({visible:false}));
-  proxy.position.set(0,0.45,0);
+  // Collision proxy (invisible)
+  const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.9), new THREE.MeshBasicMaterial({visible:false}));
+  proxy.position.set(0,0.275,0);
   group.add(proxy);
 
   group.position.z = z;
   group.userData = {
     kind:'low',
     scroll:true,
-    bounds:{ sx:1.2, sy:0.95, sz:0.9, cy:0.45 }
+    bounds:{ sx:1.1, sy:0.55, sz:0.9, cy:0.275 }
   };
   return group;
 }
@@ -407,11 +396,10 @@ for(let i=0;i<38;i++){
   zCursor -= (BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + Math.random()*10);
 }
 
-/* keep some coins ahead — dynamic with speed/distance */
+/* keep some coins ahead */
 function spawnCoinsAheadBuffer(){
   const ahead=coins.filter(c=>c.position.z< -40).length;
-  const target = 8 + Math.floor(vel*20) + Math.floor(dist/300); // more coins later/faster
-  for(let k=ahead;k<target;k++) spawnCoin(-160 - Math.random()*520);
+  for(let k=ahead;k<8;k++) spawnCoin(-160 - Math.random()*520);
 }
 spawnCoinsAheadBuffer();
 
@@ -568,15 +556,15 @@ function tick(now){
       scene.remove(c); coins.splice(i,1);
     }
   }
-  if (Math.random() < (0.03 + Math.min(0.12, vel*0.2))) spawnCoinsAheadBuffer(); // call a bit more often at speed
+  if (Math.random()<0.03) spawnCoinsAheadBuffer();
 
   // Obstacles — recycle with spacing that grows as speed increases
   for (let i=0;i<obstacles.length;i++){
     const o = obstacles[i]; if (!o) continue;
 
     if (o.position.z > 8){
-      // widen gap more as speed grows, plus small baseline cushion
-      let extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + 10 + (vel*80) + Math.random()*36;
+      // widen gap as speed grows (vel factor), plus randomness
+      let extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + (vel*45) + Math.random()*36;
       let newZ = o.position.z - (TRACK_LOOP + extraGap);
       let guard=0;
       while(isTooCloseToOther(newZ) && guard++<6){ newZ -= (MIN_OBSTACLE_GAP+2); }
