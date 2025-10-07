@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>IZZA RUNNER — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="color-scheme" content="dark light">
+  <meta name="color-scheme" content="light">
 
   <!-- Persist/leaderboard base (already used across your app) -->
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
@@ -15,17 +15,16 @@
 
   <style>
     :root{
-      --bg:#070a12; --txt:#e8f1ff; --line:#20283a; --muted:#97a6c3;
-      --chip-bg:rgba(255,255,255,.05); --card:rgba(12,16,26,.92);
-      --accent:#59a8ff; --accent-2:#7ef1c9; --danger:#ff6a7a; --gold:#ffd86b;
-      --rail:#0e1322; --rail-line:#2f7cf3; --beam:#24407a;
+      --bg:#bfe8ff; --txt:#112; --line:#d7e5ff; --muted:#51607b;
+      --chip-bg:rgba(255,255,255,.7); --card:rgba(255,255,255,.92);
+      --accent:#1c7dff; --accent-2:#10c97b; --danger:#ff4f6b; --gold:#ffd86b;
+      --grass:#27ff66; --grass-d:#12ca49; --path:#d7b97a; --path-d:#c39f4f;
     }
     html,body{height:100%}
     body{
       margin:0;
       background:
-        radial-gradient(1200px 600px at 50% -10%, #132041 0%, var(--bg) 60%) no-repeat,
-        linear-gradient(#0b0f1b,#0b0f1b) no-repeat;
+        linear-gradient(#c6ecff 0%, #bfe8ff 40%, #99d6ff 100%) no-repeat;
       color:var(--txt); font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       overflow:hidden;
     }
@@ -36,15 +35,15 @@
     }
     .pill{
       display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
-      background:var(--chip-bg); border:1px solid var(--line); font-weight:600; font-size:13px;
+      background:var(--chip-bg); border:1px solid var(--line); font-weight:700; font-size:13px;
       backdrop-filter:blur(6px);
     }
     .pill .v{min-width:48px; text-align:right;}
     .btn{
       display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:10px;
-      background:var(--chip-bg); border:1px solid var(--line); color:inherit; cursor:pointer; user-select:none;
+      background:var(--chip-bg); border:1px solid var(--line); color:#0b2b4b; cursor:pointer; user-select:none; font-weight:700;
     }
-    .btn:hover{filter:brightness(1.08)}
+    .btn:hover{filter:brightness(1.04)}
 
     .score{
       position:fixed; right:12px; top:12px; z-index:20;
@@ -55,47 +54,38 @@
 
     /* Start & GameOver overlays */
     .overlay{
-      position:fixed; inset:0; display:grid; place-items:center; z-index:30; background:rgba(0,0,0,.55);
+      position:fixed; inset:0; display:grid; place-items:center; z-index:30; background:rgba(255,255,255,.35);
       opacity:0; pointer-events:none; transition:opacity .25s ease;
     }
     .overlay.show{opacity:1; pointer-events:auto;}
     .panel{
       width:min(92vw,740px); background:var(--card); border:1px solid var(--line); border-radius:18px;
-      padding:16px; overflow:hidden;
-      box-shadow:0 30px 120px rgba(0,0,0,.45);
+      padding:16px; overflow:hidden; box-shadow:0 30px 120px rgba(0,0,0,.15);
     }
     .hero{
-      height:240px; border-radius:12px; border:1px solid:var(--line);
-      background:#0e1220 url('/static/game/img/runner_start.jpg') center/cover no-repeat; margin-bottom:12px;
+      height:220px; border-radius:12px; border:1px solid var(--line);
+      background:linear-gradient(#a9ffcb,#b7f0ff) center/cover no-repeat; margin-bottom:12px;
     }
     .panel h1{margin:8px 0 4px; font-size:28px;}
     .muted{color:var(--muted); font-size:14px;}
     .center-row{display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:10px;}
 
-    /* Canvas and avatar corner (same sizing as Arena) */
     #gameCanvas{position:fixed; inset:0; width:100vw; height:100vh; display:block;}
     .avatar-corner{
-      position:fixed; left:12px; bottom:12px; width:96px; height:96px; z-index:15; pointer-events:none;
-      border-radius:12px; border:1px solid var(--line); background:rgba(0,0,0,.35);
+      position:fixed; left:12px; bottom:12px; width:90px; height:90px; z-index:15; pointer-events:none;
+      border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.7);
       display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);
     }
-    canvas#avatarCursor{width:88px; height:88px; image-rendering:pixelated;}
+    canvas#avatarCursor{width:82px; height:82px; image-rendering:pixelated;}
 
-    /* Tiny instructions */
     .tips{
-      position:fixed; left:12px; top:64px; z-index:20; color:var(--muted); font-size:12px;
+      position:fixed; left:12px; top:64px; z-index:20; color:#0b2b4b; font-weight:700; font-size:12px;
       background:var(--chip-bg); border:1px solid var(--line); border-radius:10px; padding:6px 8px; backdrop-filter:blur(6px);
     }
-
-    /* Subway vignette */
-    .vignette{position:fixed; inset:0; pointer-events:none; background:
-      radial-gradient(1200px 600px at 50% -80px, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%);
-      z-index:10;}
   </style>
 </head>
-<body class="cw-blue theme-a">
+<body>
   <canvas id="gameCanvas"></canvas>
-  <div class="vignette"></div>
 
   <!-- HUD -->
   <div class="hud">
@@ -107,7 +97,7 @@
   <div class="tips">Swipe ↑ to jump • Swipe ↓ to slide • ↑/↓ on desktop</div>
   <div class="score" id="scoreEl">0</div>
 
-  <!-- Avatar preview (same look as arena) -->
+  <!-- Avatar preview -->
   <div class="avatar-corner">
     <canvas id="avatarCursor" width="96" height="96"></canvas>
   </div>
@@ -116,10 +106,10 @@
   <div id="startOverlay" class="overlay show">
     <div class="panel">
       <div class="hero"></div>
-      <h1>IZZA RUNNER</h1>
+      <h1>IZZA RUNNER — Meadow Dash</h1>
       <p class="muted">
-        Night. IZZA Neon Subway. You’re couriering a block of encrypted credits through maintenance tunnels while
-        <b>Sentinel drones</b> deploy <b>beam gates</b> and <b>barricade slabs</b> to stop you. Jump the slabs, slide the gates, and grab gold IZZA coins left by allies.
+        Morning in the Neon Meadows. You’re sprint-couriering craft credits across fields of charged grass.
+        Leap <b>hay bales</b>, slide <b>banner gates</b>, and snatch shimmering <b>IZZA Coins</b> dropped by friends.
       </p>
       <div class="center-row">
         <button id="startBtn" class="btn">▶ Start</button>
@@ -131,7 +121,7 @@
   <!-- Game Over Overlay -->
   <div id="overOverlay" class="overlay">
     <div class="panel" id="overPanel">
-      <h1 style="margin:0 0 12px">Runner Down</h1>
+      <h1 style="margin:0 0 12px">You Tripped!</h1>
       <div class="muted" id="overStats">Distance: 0 • Coins: 0 • Best: 0</div>
       <div class="center-row">
         <button id="retryBtn" class="btn">↻ Retry</button>
@@ -167,7 +157,7 @@
 /* Helpers consistent with Arena */
 const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
 function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){} }
+function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_{}); }
 function renderWalletFromLS(){ document.getElementById('coins').textContent = String(parseInt(localStorage.getItem('izzaCoins')||'0',10)||0); document.getElementById('craft').textContent = String(readCraftAny()); }
 renderWalletFromLS();
 
@@ -179,7 +169,6 @@ renderWalletFromLS();
 
 /* -----------------------------
    AVATAR BUILDER (same as Arena)
-   — billboarded onto a 3D plane
 ------------------------------*/
 const SPRITES = {
   body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
@@ -228,7 +217,7 @@ function overlayTint(img, hex, strength=1.0){
   const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
   function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
   for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
-    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov[d[i+2],t.b];
     d[i]=Math.round(d[i]*(1-strength)+r*strength);
     d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
     d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
@@ -320,6 +309,40 @@ async function buildAvatarCanvas(dstCtx, size, profile){
     dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
   }
 }
+
+/* Build and then "backify" the avatar for the in-game texture */
+async function buildBackAvatar(size){
+  const tmp = document.createElement('canvas'); tmp.width=tmp.height=size;
+  const tctx = tmp.getContext('2d',{willReadFrequently:true}); tctx.imageSmoothingEnabled=false;
+  const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+  await buildAvatarCanvas(tctx, size, profile);
+
+  // BACKIFY: remove facial features + suggest back-of-head & shoulders
+  const ctx = tctx;
+  // paint a soft oval over the face area to hide eyes/mouth
+  ctx.save();
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='rgba(255,255,255,0.9)';
+  ctx.globalCompositeOperation='destination-out'; // punch out any dark features
+  ctx.beginPath(); ctx.ellipse(size*0.52, size*0.28, size*0.18, size*0.15, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // draw a “hair back” cap
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,.22)';
+  ctx.beginPath(); ctx.ellipse(size*0.50, size*0.28, size*0.22, size*0.18, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // add shoulder/back shading
+  const grad = ctx.createLinearGradient(0,size*0.45,0,size*0.85);
+  grad.addColorStop(0,'rgba(0,0,0,0.08)');
+  grad.addColorStop(1,'rgba(0,0,0,0.18)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(size*0.25, size*0.45, size*0.50, size*0.35);
+
+  return tmp; // canvas
+}
+
 async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   await buildAvatarCanvas(dstCtx, size, profile);
   const k = (size>0 ? size/BASE_SZ : 1);
@@ -339,7 +362,7 @@ const audio = {
   ensure(){
     if (this.ctx) return;
     const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    const gain = ctx.createGain(); gain.gain.value = 0.85; gain.connect(ctx.destination);
+    const gain = ctx.createGain(); gain.gain.value = 0.7; gain.connect(ctx.destination);
     this.ctx = ctx; this.gain=gain;
   },
   blip({f1=440,f2=880,dur=0.18}={}){
@@ -374,7 +397,7 @@ const audio = {
   },
   setMuted(flag){
     this.muted=!!flag; if(!this.ctx) return;
-    this.gain.gain.setTargetAtTime(this.muted?0:0.85, this.ctx.currentTime, 0.05);
+    this.gain.gain.setTargetAtTime(this.muted?0:0.7, this.ctx.currentTime, 0.05);
   }
 };
 document.getElementById('muteBtn').addEventListener('click', ()=>{
@@ -383,7 +406,7 @@ document.getElementById('muteBtn').addEventListener('click', ()=>{
 });
 
 /* -----------------------------
-   THREE.js GAME
+   THREE.js GAME — Daytime Meadow
 ------------------------------*/
 const canvas = document.getElementById('gameCanvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
@@ -392,72 +415,62 @@ renderer.setSize(innerWidth, innerHeight);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 2000);
-camera.position.set(0, 1.1, 3.6);
-scene.fog = new THREE.Fog(0x0b0e15, 14, 40);
+camera.position.set(0, 1.05, 3.8);
+scene.fog = new THREE.Fog(0xbfe8ff, 22, 80);
 
-/* Lights */
+/* Sun + sky */
 {
-  const al = new THREE.AmbientLight(0x6b84ff, .65); scene.add(al);
-  const dl = new THREE.DirectionalLight(0xffffff, 0.95); dl.position.set(2,6,4); scene.add(dl);
-  const rim = new THREE.DirectionalLight(0x66d0ff, 0.7); rim.position.set(-2,5,-3); scene.add(rim);
+  const hemi = new THREE.HemisphereLight(0xbfe8ff, 0x22aa44, 0.8); scene.add(hemi);
+  const sun  = new THREE.DirectionalLight(0xffffff, 1.04); sun.position.set(5,8,3); sun.castShadow=false; scene.add(sun);
+
+  // simple skydome
+  const skyGeo = new THREE.SphereGeometry(900, 24, 16);
+  const skyMat = new THREE.MeshBasicMaterial({ color:0xbfe8ff, side:THREE.BackSide });
+  const sky = new THREE.Mesh(skyGeo, skyMat); scene.add(sky);
 }
 
-/* Subway rails + tunnel */
-const groundMat = new THREE.MeshStandardMaterial({ color:0x0f1424, metalness:0.2, roughness:0.85 });
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(18, 2000), groundMat);
+/* Ground (bright neon grass) + dirt path strip */
+const grassMat = new THREE.MeshLambertMaterial({ color:0x27ff66 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 2000), grassMat);
 ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
 
-(function rails(){
-  const railMat = new THREE.MeshStandardMaterial({ color:0x0b1222, emissive:0x060b18, roughness:0.9 });
-  const tieMat  = new THREE.MeshStandardMaterial({ color:0x141c2c, roughness:0.8 });
-  const glowMat = new THREE.MeshBasicMaterial({ color:0x2f7cf3 });
-  // ties
-  for(let i=0;i<250;i++){
-    const tie = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.04,0.12), tieMat);
-    tie.position.set(0,0.02,-i*7-4); scene.add(tie);
-  }
-  // rails
-  const r1 = new THREE.Mesh(new THREE.BoxGeometry(0.08,0.08,2000), railMat); r1.position.set(-0.9,0.07,-1000); scene.add(r1);
-  const r2 = new THREE.Mesh(new THREE.BoxGeometry(0.08,0.08,2000), railMat); r2.position.set( 0.9,0.07,-1000); scene.add(r2);
-  // center glow line
-  for(let i=0;i<140;i++){
-    const g = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.01,2), glowMat);
-    g.position.set(0, 0.008, -i*7-6); scene.add(g);
+(function addPath(){
+  const mat = new THREE.MeshStandardMaterial({ color:0xd7b97a, roughness:0.9, metalness:0.0 });
+  for(let i=0;i<180;i++){
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.02, 4.5), mat);
+    seg.position.set(0, 0.01, -i*10-5); scene.add(seg);
   }
 })();
 
-(function tunnel(){
-  // repeating tunnel ribs
-  const ribMat = new THREE.MeshStandardMaterial({ color:0x0f1524, emissive:0x0b1632, roughness:0.6, metalness:0.15 });
-  for(let i=0;i<120;i++){
-    const arch = new THREE.Mesh(new THREE.BoxGeometry(6.2, 2.6, 0.12), ribMat);
-    arch.position.set(0,1.4,-i*7-6); scene.add(arch);
-    const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.18,2.6, 0.12), ribMat); sideL.position.set(-3.1,1.4,-i*7-6); scene.add(sideL);
-    const sideR = sideL.clone(); sideR.position.x = 3.1; scene.add(sideR);
+/* Some meadow “scenery” cubes as far hedges/trees */
+(function hedges(){
+  const hedgeMat = new THREE.MeshLambertMaterial({ color:0x12ca49 });
+  for(let i=0;i<80;i++){
+    const h = new THREE.Mesh(new THREE.BoxGeometry(1.6, Math.random()*1.2+0.8, 1.6), hedgeMat);
+    h.position.set( (Math.random()<0.5?-1:1)*(3.0+Math.random()*3.0), h.geometry.parameters.height/2, -i*16-8 - Math.random()*8);
+    scene.add(h);
   }
 })();
 
-/* Player billboard (avatar texture) */
+/* Avatar canvases */
 const avatarCanvas = document.getElementById('avatarCursor');
 const avCtx = avatarCanvas.getContext('2d', { willReadFrequently:true });
 avCtx.imageSmoothingEnabled=false;
-async function paintAvatar(){
-  const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
-  await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile);
-}
-paintAvatar(); // FIX: no top-level await (this previously blocked Start)
 
-const avatarTex = new THREE.CanvasTexture(avatarCanvas);
-avatarTex.minFilter = THREE.NearestFilter; avatarTex.magFilter = THREE.NearestFilter;
+/* Build preview (front) */
+(async function(){ const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}'); await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile); })();
 
-// smaller avatar, facing AWAY from camera
+/* Build backified canvas for the in-game player */
+const backCanvas = await (async()=>{ const c = await buildBackAvatar(96); return c; })();
+const backTex = new THREE.CanvasTexture(backCanvas);
+backTex.minFilter = THREE.NearestFilter; backTex.magFilter = THREE.NearestFilter;
+
+/* Smaller player, always showing the “backified” sprite */
 const player = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.7,0.7),
-  new THREE.MeshBasicMaterial({ map: avatarTex, transparent:true, side: THREE.DoubleSide })
+  new THREE.PlaneGeometry(0.55,0.55),
+  new THREE.MeshBasicMaterial({ map: backTex, transparent:true })
 );
-player.position.set(0, 0.85, 0);
-player.rotation.y = Math.PI;         // back to camera
-scene.add(player);
+player.position.set(0, 0.78, 0); scene.add(player);
 
 /* ——— Coins: gold IZZA disks ——— */
 function makeCoinTexture(){
@@ -466,78 +479,64 @@ function makeCoinTexture(){
   const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);
   g.addColorStop(0,'#fff5c4'); g.addColorStop(.45,'#ffd86b'); g.addColorStop(1,'#9a6d1c');
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2); ctx.fill();
-  // rim
   ctx.lineWidth=6; ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.stroke();
-  // IZZA text / mark
   ctx.fillStyle='rgba(40,30,0,0.85)'; ctx.font='700 48px Inter, Arial';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText('IZ', s/2, s/2);
+  ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('IZ', s/2, s/2);
   return new THREE.CanvasTexture(cnv);
 }
+const coinTex = makeCoinTexture(); coinTex.anisotropy=4;
+const coinMat = new THREE.MeshStandardMaterial({ map: coinTex, metalness:0.85, roughness:0.3, emissive:0x2b1f00, emissiveIntensity:0.2 });
 
-const coinTex = makeCoinTexture();
-coinTex.anisotropy = 4;
-const coinMat = new THREE.MeshStandardMaterial({
-  map: coinTex, metalness:0.85, roughness:0.3, emissive:0x2b1f00, emissiveIntensity:0.25
-});
+const obstacles=[]; const coins=[];
 function spawnCoin(z){
-  // thin cylinder like a coin
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.06, 32), coinMat);
-  m.rotation.x = Math.PI/2; // face camera while spinning
-  m.position.set(0, 0.9, z);
-  m.userData.kind='coin';
-  scene.add(m); coins.push(m);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05, 32), coinMat);
+  m.rotation.x = Math.PI/2; m.position.set(0, 0.82, z); m.userData.kind='coin'; scene.add(m); coins.push(m);
 }
 
-/* ——— Obstacles: slabs (low) & beam gates (high) ——— */
-const obstacles = [];
-const coins = [];
+/* ——— Obstacles: HAY BALE (jump) & BANNER GATE (slide) ——— */
 function spawnObstacle(z){
   if (Math.random()<0.5){
-    // LOW BARRICADE SLAB (jump)
-    const m = new THREE.Mesh(
-      new THREE.BoxGeometry(1.25, 0.55, 0.7),
-      new THREE.MeshStandardMaterial({ color:0x1f2b46, roughness:0.9, metalness:0.15, emissive:0x0a1124 })
-    );
-    m.position.set(0, 0.35, z);
-    m.userData.kind='low'; m.userData.aabb=[1.25,0.55,0.8];
-    scene.add(m); obstacles.push(m);
-  } else {
-    // HIGH BEAM GATE (slide)
-    const frameMat = new THREE.MeshStandardMaterial({ color:0x111a2f, roughness:0.6 });
-    const beamMat  = new THREE.MeshStandardMaterial({ color:0x2a3f86, emissive:0x2840ff, emissiveIntensity:0.35, metalness:0.4, roughness:0.4 });
+    // HAY BALE (jump)
+    const bale = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.7),
+      new THREE.MeshStandardMaterial({ color:0xe6c15a, roughness:0.9, metalness:0.1 }));
+    bale.position.set(0,0.28,z); bale.userData.kind='low'; scene.add(bale); obstacles.push(bale);
+  }else{
+    // BANNER GATE (slide)
     const arch = new THREE.Group();
-    const top = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.2, 0.6), frameMat); top.position.set(0,1.7,0); arch.add(top);
-    const beam= new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.12, 0.55), beamMat); beam.position.set(0,1.35,0); arch.add(beam);
-    arch.position.z = z; arch.userData.kind='high'; arch.userData.aabb=[1.25,0.6,0.8]; arch.userData.center=[0,1.45,0];
-    scene.add(arch); obstacles.push(arch);
+    const postsMat = new THREE.MeshStandardMaterial({ color:0x1266cc, metalness:0.2, roughness:0.4 });
+    const postL = new THREE.Mesh(new THREE.BoxGeometry(0.12,1.6,0.2), postsMat); postL.position.set(-0.7,0.8,0); arch.add(postL);
+    const postR = postL.clone(); postR.position.x=0.7; arch.add(postR);
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.18,0.1),
+      new THREE.MeshStandardMaterial({ color:0x10c97b, emissive:0x10c97b, emissiveIntensity:0.25 }));
+    banner.position.set(0,1.35,0); arch.add(banner);
+    arch.position.z=z; arch.userData.kind='high'; scene.add(arch); obstacles.push(arch);
   }
 }
 for(let i=8;i<120;i+=6){
-  if (Math.random() < 0.6) spawnCoin(-i*2);
+  if (Math.random() < 0.7) spawnCoin(-i*2);
   if (Math.random() < 0.55) spawnObstacle(-i*2 - 2);
 }
 
 /* Game state */
 let running=false, over=false;
-let vel = 0.19;
+let vel = 0.18;
 let dist = 0;
 let sessionCoins = 0;
 let best = parseInt(localStorage.getItem('runnerHighScore')||'0',10) || 0;
 const scoreEl = document.getElementById('scoreEl');
 
-/* Jump / Slide (more exaggerated) */
+/* Jump / Slide (exaggerated) */
 let jumpT = 0;     // 0..1
 let slideT = 0;    // 0..1
 function doJump(){
   if (over || !running) return;
   if (jumpT>0 || slideT>0) return;
-  jumpT = 1; audio.blip({f1:520,f2:980,dur:0.25});
+  jumpT = 1; audio.blip({f1:520,f2:980,dur:0.24});
 }
 function doSlide(){
   if (over || !running) return;
   if (slideT>0 || jumpT>0) return;
-  slideT = 1; audio.thump({f:90,dur:0.20});
+  slideT = 1; audio.thump({f:95,dur:0.20});
 }
 
 /* Input (swipes & keys) */
@@ -611,85 +610,6 @@ document.getElementById('exitBtn').href = (()=>{
   return url.pathname + (url.search || '');
 })();
 
-/* Main loop */
-let last = performance.now();
-function tick(now){
-  requestAnimationFrame(tick);
-  const dt = Math.min(40, now - last) / 16.666; // normalize steps
-  last = now;
-
-  // Keep avatar texture fresh
-  avatarTex.needsUpdate = true;
-
-  if (!running || over) return;
-
-  // Increase difficulty slowly
-  vel += 0.00028 * dt;
-
-  // Advance world
-  scene.traverse(obj=>{
-    if (obj === player || obj === camera || obj === ground) return;
-    if (obj.isMesh || obj.isGroup) obj.position.z += vel * dt * 1.35;
-  });
-
-  dist += vel * dt * 3.1;
-  scoreEl.textContent = String(dist|0);
-
-  // Jump parabola (higher)
-  if (jumpT > 0){
-    jumpT = Math.max(0, jumpT - 0.042*dt);
-    const j = Math.sin((1-jumpT)*Math.PI); // 0..1..0
-    const airBoost = 1.45;                 // higher
-    player.position.y = 0.85 + j*airBoost;
-  } else {
-    player.position.y = (slideT>0) ? 0.45 : 0.85; // lower slide
-  }
-    // Slide timer (linger a bit)
-  if (slideT > 0){
-    slideT = Math.max(0, slideT - 0.055*dt);
-  }
-
-  // Coins (spin + bob)
-  for (let i=coins.length-1; i>=0; i--){
-    const c = coins[i];
-    if (!c) continue;
-    c.rotation.z += 0.2 * dt;
-    c.position.y = 0.9 + Math.sin(now*0.006 + i) * 0.05;
-
-    if (c.position.z > 2){
-      scene.remove(c); coins.splice(i,1);
-      continue;
-    }
-
-    // collect
-    if (aabbHit(0, player.position.y, 0.2, c.position.x, c.position.y, c.position.z, 0.7,0.7,0.7)){
-      sessionCoins += 1; addCoins(1);
-      audio.blip({f1:760,f2:1350,dur:0.12});
-      sparkle(c.position.x, c.position.y, c.position.z); // small FX
-      scene.remove(c); coins.splice(i,1);
-    }
-  }
-
-  // Obstacles (tighter collisions)
-  const pz = 0.2;
-  for (let i=0;i<obstacles.length;i++){
-    const o = obstacles[i];
-    if (!o) continue;
-    if (o.position.z > 2) continue;
-
-    if (o.userData.kind==='low'){
-      // slab center at y≈0.35
-      const hit = aabbHit(0, player.position.y, pz, o.position.x, 0.35, o.position.z, 1.25, 0.55, 0.9) && player.position.y < 1.15;
-      if (hit) return gameOver();
-    } else {
-      // beam gate around y≈1.45
-      const hit = aabbHit(0, player.position.y, pz, o.position.x||0, 1.45, o.position.z, 1.25, 0.6, 0.9) && player.position.y > 0.75;
-      if (hit) return gameOver();
-    }
-  }
-}
-requestAnimationFrame(tick);
-
 /* Tiny particle sparkle when picking a coin */
 const sparkleMat = new THREE.PointsMaterial({ size:0.06, color:0xfff2b0 });
 function sparkle(x,y,z){
@@ -712,19 +632,75 @@ function sparkle(x,y,z){
   })();
 }
 
+/* Main loop */
+let last = performance.now();
+function tick(now){
+  requestAnimationFrame(tick);
+  const dt = Math.min(40, now - last) / 16.666;
+  last = now;
+
+  // keep textures live
+  backTex.needsUpdate = true;
+
+  if (!running || over) return;
+
+  vel += 0.00025 * dt;
+
+  // move world toward camera
+  scene.traverse(obj=>{
+    if (obj===player || obj===camera || obj===ground) return;
+    if (obj.isMesh || obj.isGroup || obj.isPoints) obj.position.z += vel * dt * 1.3;
+  });
+
+  dist += vel * dt * 3.0;
+  scoreEl.textContent = String(dist|0);
+
+  // Jump arc (higher)
+  if (jumpT > 0){
+    jumpT = Math.max(0, jumpT - 0.042*dt);
+    const j = Math.sin((1-jumpT)*Math.PI);
+    player.position.y = 0.78 + j*1.35;
+  } else {
+    player.position.y = (slideT>0) ? 0.40 : 0.78;
+  }
+  if (slideT > 0){ slideT = Math.max(0, slideT - 0.055*dt); }
+
+  // Coins
+  for (let i=coins.length-1; i>=0; i--){
+    const c = coins[i]; if (!c) continue;
+    c.rotation.z += 0.2 * dt;
+    c.position.y = 0.82 + Math.sin(now*0.006 + i)*0.05;
+    if (c.position.z > 2){ scene.remove(c); coins.splice(i,1); continue; }
+    if (aabbHit(0, player.position.y, 0.2, c.position.x, c.position.y, c.position.z, 0.65,0.65,0.7)){
+      sessionCoins += 1; addCoins(1); audio.blip({f1:760,f2:1350,dur:0.12}); sparkle(c.position.x,c.position.y,c.position.z);
+      scene.remove(c); coins.splice(i,1);
+    }
+  }
+
+  // Obstacles
+  for (let i=0;i<obstacles.length;i++){
+    const o = obstacles[i]; if (!o) continue;
+    if (o.position.z > 2) continue;
+    if (o.userData.kind==='low'){
+      const hit = aabbHit(0, player.position.y, 0.2, o.position.x, 0.28, o.position.z, 1.1, 0.55, 0.9) && player.position.y < 1.05;
+      if (hit) return gameOver();
+    } else {
+      const hit = aabbHit(0, player.position.y, 0.2, o.position.x||0, 1.2, o.position.z, 1.4, 0.5, 0.9) && player.position.y > 0.7;
+      if (hit) return gameOver();
+    }
+  }
+}
+requestAnimationFrame(tick);
+
 /* Game over */
 async function gameOver(){
   over = true; running=false;
   const finalScore = dist|0;
   best = Math.max(best|0, finalScore);
   localStorage.setItem('runnerHighScore', String(best));
-
-  // 1 craft credit per 1,000 session coins
   const gainedCC = addCraftingCreditsFromCoins(sessionCoins);
-
   try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
   try{ await submitLeaderboard(best); }catch(_){}
-
   const stats = `Distance: ${finalScore} • Coins: ${sessionCoins} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
   document.getElementById('overStats').textContent = stats;
   document.getElementById('overOverlay').classList.add('show');
@@ -736,16 +712,18 @@ window.addEventListener('resize', ()=>{
   renderer.setSize(innerWidth, innerHeight);
 });
 
-/* Render pass (separate from logic, keeps HUD smooth) */
+/* Render pass */
 (function renderLoop(){
   requestAnimationFrame(renderLoop);
   renderer.render(scene, camera);
 })();
 
-/* Keep avatar texture current when equipment changes */
+/* Update avatar when equipment changes — rebuild both front preview and back sprite */
 window.addEventListener('izza-inventory-changed', async ()=>{
-  await paintAvatar();
-  avatarTex.needsUpdate = true;
+  const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+  await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile);
+  const fresh = await buildBackAvatar(96);
+  backTex.image = fresh; backTex.needsUpdate = true;
 }, {passive:true});
 </script>
 </body>
