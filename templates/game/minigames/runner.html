@@ -261,7 +261,7 @@ function loadTex(path, repeatX=1, repeatY=1){
 }
 
 /* Ground — textured grass */
-const GRASS_TEX = loadTex('/static/game/textures/runner/grass.png', 16, 200); // replace with final art later
+const GRASS_TEX = loadTex('/static/game/textures/grass.png', 16, 200); // replace with final art later
 const ground=new THREE.Mesh(
   new THREE.PlaneGeometry(40,2000),
   new THREE.MeshLambertMaterial({map:GRASS_TEX})
@@ -269,15 +269,14 @@ const ground=new THREE.Mesh(
 ground.rotation.x=-Math.PI/2;ground.position.z=-1000;scene.add(ground);
 
 /* Path — textured segments (moving track) */
-const TRACK_TEX = loadTex('/static/game/textures/runner/track.png', 1, 1); // final art later
+const TRACK_TEX = loadTex('/static/game/textures/track.png', 1, 1); // final art later
 const PATH_SEGMENTS=[],PATH_SPACING=5.0,PATH_COUNT=90,PATH_LOOP=PATH_SPACING*PATH_COUNT;
 (function buildPath(){
   const mat=new THREE.MeshBasicMaterial({map:TRACK_TEX, transparent:true, alphaTest:0.01});
   for(let i=0;i<PATH_COUNT;i++){
-    // thin plane that reads the track PNG
     const seg=new THREE.Mesh(new THREE.PlaneGeometry(1.6,4.6),mat);
     seg.position.set(0,0.011,-i*PATH_SPACING-5);
-    seg.rotation.x = -Math.PI/2; // lay flat on ground
+    seg.rotation.x = -Math.PI/2;
     seg.userData.scroll = true;
     scene.add(seg);PATH_SEGMENTS.push(seg);
   }
@@ -304,13 +303,13 @@ const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughne
 
 const obstacles=[],coins=[];
 
-/* PNG art placeholders for obstacles */
-const HAY_BALE_PNG = '/static/game/textures/runner/hay_bale.png';              // TODO: provide final art
-const OLD_TOWN_GATE_PNG = '/static/game/textures/runner/old_town_gate.png';    // TODO: provide final art
+/* PNG art files for obstacles (billboards) */
+const HAY_BALE_PNG = '/static/game/textures/hay_bale.png';
+const OLD_TOWN_GATE_PNG = '/static/game/textures/old_town_gate.png';
 
 /* Spawning — tuned spacing (scales with speed) */
 const TRACK_LOOP=900;
-const BASE_OBSTACLE_SPACING=42;       // a bit wider base spacing
+const BASE_OBSTACLE_SPACING=42;       // wider base spacing
 const INITIAL_SPREAD_EXTRA=16;        // safer early runway
 const MIN_OBSTACLE_GAP=18;            // never stack obstacles too close
 const COIN_CHANCE=0.6;
@@ -330,17 +329,19 @@ function makeBillboard(path, w, h){
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat);
   mesh.material.depthWrite = true;
   mesh.material.side = THREE.DoubleSide;
+  mesh.userData.billboard = true; // will face the camera each frame
   return mesh;
 }
 
 function makeBale(z){
-  // Visual: billboard PNG
   const group = new THREE.Group();
-  const img = makeBillboard(HAY_BALE_PNG, 1.3, 0.8);
-  img.position.set(0,0.40,0);
+
+  // Visual: billboard PNG (full image)
+  const img = makeBillboard(HAY_BALE_PNG, 1.4, 0.9);
+  img.position.set(0,0.45,0);
   group.add(img);
 
-  // Collision proxy: (same as before)
+  // Collision proxy (invisible)
   const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,0.9), new THREE.MeshBasicMaterial({visible:false}));
   proxy.position.set(0,0.275,0);
   group.add(proxy);
@@ -355,13 +356,14 @@ function makeBale(z){
 }
 
 function makeGate(z){
-  // Visual: single PNG that includes posts + the "OLD TOWN IZZA CITY COWBOY SALOON" entry sign artwork
   const group = new THREE.Group();
-  const img = makeBillboard(OLD_TOWN_GATE_PNG, 2.2, 1.2);
+
+  // Visual: billboard PNG for the Old Town saloon entry sign
+  const img = makeBillboard(OLD_TOWN_GATE_PNG, 2.4, 1.3);
   img.position.set(0,0.82,0);
   group.add(img);
 
-  // Collision proxy requiring SLIDE (cannot be jumped over)
+  // Collision proxy (requires slide)
   const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.38,0.9), new THREE.MeshBasicMaterial({visible:false}));
   proxy.position.set(0,0.82,0);
   group.add(proxy);
@@ -504,11 +506,20 @@ function tick(now){
   // speed up slightly
   vel += 0.00025 * dt;
 
-  // Move only things flagged to scroll (path, coins, obstacles).
+  // Move only things flagged to scroll (path, coins, obstacles) and billboard them toward camera
   scene.traverse(obj=>{
     if (obj===player || obj===camera || obj===ground) return;
+
+    // Scroll world pieces
     if ((obj.isMesh || obj.isGroup || obj.isPoints) && obj.userData && obj.userData.scroll === true){
       obj.position.z += vel * dt * 1.3;
+    }
+
+    // Make billboard meshes face camera (hay bales / gate PNG planes)
+    if (obj.userData && obj.userData.billboard){
+      // keep upright: match camera on XZ, preserve Y
+      tmpVec.set(camera.position.x, obj.position.y, camera.position.z);
+      obj.lookAt(tmpVec);
     }
   });
 
@@ -577,6 +588,7 @@ function tick(now){
     }
   }
 }
+const tmpVec = new THREE.Vector3();
 requestAnimationFrame(tick);
 
 /* Game over — immediate freeze & overlay */
