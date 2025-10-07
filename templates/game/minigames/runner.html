@@ -1,0 +1,669 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IZZA RUNNER — IZZA GAME</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="color-scheme" content="dark light">
+
+  <!-- Persist/leaderboard base (already used across your app) -->
+  <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
+  <script src="/static/game/js/izza-persist.js"></script>
+
+  <!-- Three.js (render-only; no extras needed) -->
+  <script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0b0e15; --txt: #e8f1ff; --line: #2a3347; --muted:#98a8c3;
+      --chip-bg: rgba(255,255,255,.04); --card: rgba(16,20,29,.9);
+      --accent: #4ea1ff; --accent-2: #7ef1c9; --danger:#ff6a7a;
+      --gold: #ffd86b;
+    }
+    html, body { height:100%; }
+    body {
+      margin:0; background: radial-gradient(1200px 600px at 50% -10%, #14203a 0%, #0b0e15 60%);
+      color:var(--txt); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      overflow:hidden;
+    }
+
+    /* HUD */
+    .hud {
+      position:fixed; inset:12px 12px auto 12px; display:flex; align-items:center; gap:8px; z-index:20;
+    }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
+      background:var(--chip-bg); border:1px solid var(--line); font-weight:600; font-size:13px;
+      backdrop-filter: blur(6px);
+    }
+    .pill .v { min-width:48px; text-align:right; }
+    .btn {
+      display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:10px;
+      background:var(--chip-bg); border:1px solid var(--line); color:inherit; cursor:pointer; user-select:none;
+    }
+    .btn:hover { filter: brightness(1.08); }
+
+    .score {
+      position:fixed; right:12px; top:12px; z-index:20;
+      font-size:32px; font-weight:800; letter-spacing:0.5px;
+      padding:10px 14px; background:var(--chip-bg); border:1px solid var(--line);
+      border-radius:12px; backdrop-filter: blur(6px);
+    }
+
+    /* Start & GameOver overlays */
+    .overlay {
+      position:fixed; inset:0; display:grid; place-items:center; z-index:30; background:rgba(0,0,0,.55);
+      opacity:0; pointer-events:none; transition:opacity .25s ease;
+    }
+    .overlay.show { opacity:1; pointer-events:auto; }
+    .panel {
+      width:min(92vw, 720px); background:var(--card); border:1px solid var(--line); border-radius:18px;
+      padding:16px; overflow:hidden;
+    }
+    .hero {
+      height:240px; border-radius:12px; border:1px solid var(--line); background:#0e1220 url('/static/game/img/runner_start.jpg') center/cover no-repeat;
+      margin-bottom:12px;
+    }
+    .panel h1 { margin:8px 0 4px; font-size:28px; }
+    .muted { color:var(--muted); font-size:14px; }
+
+    .center-row{ display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:10px; }
+
+    /* Canvas and avatar corner (same sizing as Arena) */
+    #gameCanvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+    .avatar-corner {
+      position:fixed; left:12px; bottom:12px; width:96px; height:96px; z-index:15; pointer-events:none;
+      border-radius:12px; border:1px solid var(--line); background:rgba(0,0,0,.35);
+      display:flex; align-items:center; justify-content:center; backdrop-filter: blur(6px);
+    }
+    canvas#avatarCursor { width:88px; height:88px; image-rendering:pixelated; }
+
+    /* Tiny instructions */
+    .tips {
+      position:fixed; left:12px; top:64px; z-index:20; color:var(--muted); font-size:12px;
+      background:var(--chip-bg); border:1px solid var(--line); border-radius:10px; padding:6px 8px; backdrop-filter: blur(6px);
+    }
+  </style>
+</head>
+<body class="cw-blue theme-a">
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- HUD -->
+  <div class="hud">
+    <div class="pill">IZZA Coins: <span id="coins" class="v">0</span></div>
+    <div class="pill">Craft Credits: <span id="craft" class="v">0</span></div>
+    <button id="muteBtn" class="btn" type="button">🔊 Sound</button>
+    <a id="exitBtn" class="btn" href="/izza-game/minigames">↩︎ Exit</a>
+  </div>
+  <div class="tips">Swipe ↑ to jump • Swipe ↓ to slide • ↑/↓ on desktop</div>
+  <div class="score" id="scoreEl">0</div>
+
+  <!-- Avatar preview (same look as arena) -->
+  <div class="avatar-corner">
+    <canvas id="avatarCursor" width="96" height="96"></canvas>
+  </div>
+
+  <!-- Start Overlay -->
+  <div id="startOverlay" class="overlay show">
+    <div class="panel">
+      <div class="hero"></div>
+      <h1>IZZA RUNNER</h1>
+      <p class="muted">Sprint through neon streets, vault obstacles, slide under barriers, and stack those IZZA Coins.</p>
+      <div class="center-row">
+        <button id="startBtn" class="btn">▶ Start</button>
+        <button id="lbBtn" class="btn">🏆 Leaderboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Over Overlay -->
+  <div id="overOverlay" class="overlay">
+    <div class="panel" id="overPanel">
+      <h1 style="margin:0 0 12px">Game Over</h1>
+      <div class="muted" id="overStats">Distance: 0 • Coins: 0 • Best: 0</div>
+      <div class="center-row">
+        <button id="retryBtn" class="btn">↻ Retry</button>
+        <button id="overLbBtn" class="btn">🏆 Leaderboard</button>
+        <a class="btn" href="/izza-game/minigames">↩︎ Back to Arcade</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* -----------------------------
+   USER + PERSIST BOOTSTRAP
+------------------------------*/
+(function ensureUser(){
+  try{
+    const params = new URLSearchParams(location.search);
+    let u = (params.get('u') || '').toString().trim();
+    if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
+    if (!u) {
+      const raw = localStorage.getItem('piAuthUser');
+      if (raw) { try { u = (JSON.parse(raw)||{}).username || ''; } catch(_){} }
+    }
+    if (u) {
+      u = u.replace(/^@+/, '').toLowerCase();
+      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+      window.izzaUserKey = { get: () => u };
+      try { localStorage.setItem('izzaUserU', u); } catch(_){}
+      try { if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); } catch(_){}
+    }
+  }catch(_){}
+})();
+
+/* Helpers consistent with Arena */
+const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
+function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
+function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){} }
+function renderWalletFromLS(){ document.getElementById('coins').textContent = String(parseInt(localStorage.getItem('izzaCoins')||'0',10)||0); document.getElementById('craft').textContent = String(readCraftAny()); }
+renderWalletFromLS();
+
+/* Load latest snapshot on entry */
+(async function hydrate(){
+  try{
+    if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+  }catch(_){}
+  renderWalletFromLS();
+})();
+
+/* -----------------------------
+   AVATAR BUILDER (same as Arena)
+   — billboarded onto a 3D plane
+------------------------------*/
+const SPRITES = {
+  body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
+  hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
+  outfit:{ street:"/static/game/sprites/outfit/street.png", athletic:"/static/game/sprites/outfit/athletic.png", luxury:"/static/game/sprites/outfit/luxury.png" }
+};
+const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
+const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A73","#B67955"], tan:["#E2A878","#C88756","#9F663C"], dark:["#B9825B","#9A6644","#714A31"], deep:["#8B5A3B","#432818"] };
+const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3AD3","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
+const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+
+function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
+const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+
+function extractThreeToneRamp(img){
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const d=c.getImageData(0,0,w,h).data, samples=[];
+  for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; samples.push({r,g,b,L:lum(r,g,b)}); }
+  if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+  samples.sort((a,b)=>a.L-b.L);
+  const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+  return [pick(0.2),pick(0.55),pick(0.85)];
+}
+function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
+  const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const id=c.getImageData(0,0,w,h), d=id.data; let changed=0;
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3]===0) continue;
+    const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
+    for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+    if(score<=tolerance){ const t=to[best]||to[1]||to[0]; if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++; d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b; }
+  }
+  c.putImageData(id,0,0);
+  return {canvas:oc, changedPixels:changed};
+}
+function overlayTint(img, hex, strength=1.0){
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+  function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+  for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+    d[i]=Math.round(d[i]*(1-strength)+r*strength);
+    d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+    d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+  }
+  c.putImageData(id,0,0);
+  return oc;
+}
+
+/* Equipped overlays (same slots/logic) — used for avatar texture */
+function _invRead(){
+  try{
+    const iz = (window.IZZA && IZZA.api && IZZA.api.getInventory && IZZA.api.getInventory()) || null;
+    if (iz) return JSON.parse(JSON.stringify(iz));
+  }catch(_){}
+  try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; }
+}
+function _isEquipped(entry){ return !!(entry && (entry.equipped===true || entry.equip===true || (typeof entry.equippedCount==='number' && entry.equippedCount>0))); }
+function _equippedIn(slot){
+  const inv = _invRead();
+  for(const k in inv){
+    const it = inv[k]; if(!it) continue;
+    if ((it.slot||'').toLowerCase()===slot && _isEquipped(it)){
+      const svg = (it.overlaySvg && String(it.overlaySvg).trim()) || (it.iconSvg && String(it.iconSvg).trim()) || '';
+      return { key:k, it, svg };
+    }
+  }
+  return null;
+}
+const BOX = Object.freeze({
+  head:{ w:44,h:44, ox:48,oy:24, scale:1.12 },
+  chest:{w:46,h:46, ox:48,oy:56, scale:1.15 },
+  arms:{ w:56,h:44, ox:48,oy:46, scale:1.15 },
+  legs:{ w:54,h:46, ox:48,oy:74, scale:1.18 },
+  hands:{w:64,h:46, ox:60,oy:64, scale:1.34 }
+});
+const BASE_SZ = 96;
+function _scaleBox(b,k){ return { w:Math.round((b.w||0)*k), h:Math.round((b.h||0)*k), ox:Math.round((b.ox||0)*k), oy:Math.round((b.oy||0)*k), scale:b.scale }; }
+const _svgCache = new Map();
+function _svgToImg(svg){ if(!svg) return null; if(_svgCache.has(svg)) return _svgCache.get(svg); const img=new Image(); img.decoding='async'; img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg); _svgCache.set(svg,img); return img; }
+function _drawOverlay(ctx, svg, box, per=1, flip=false){
+  if(!svg) return false; const img=_svgToImg(svg); if(!img || !img.complete) return false;
+  ctx.save(); ctx.imageSmoothingEnabled=false; ctx.translate(box.ox|0, box.oy|0); if(flip) ctx.scale(-1,1);
+  const w=Math.max(8,box.w|0), h=Math.max(8,box.h|0); const s=(box.scale||1)*(per||1); if(s!==1) ctx.scale(s,s);
+  try{ ctx.drawImage(img, -w/2, -h/2, w, h); }catch(_){}
+  ctx.restore(); return true;
+}
+
+async function buildAvatarCanvas(dstCtx, size, profile){
+  const DW=size,DH=size,X=0,Y=0;
+  const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
+  const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
+  const femaleOut=profile.female_outfit_color||'blue';
+
+  let body=null;
+  if(type==='female'){
+    const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
+    const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
+    body = await loadImg(femaleWide) || await loadImg(femaleSlim);
+  }
+  if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
+
+  const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
+  const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
+
+  let bodyCanvas;
+  if(body){
+    const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
+    const swapped=paletteSwap(body, SKIN_BASE, targetSkin, 4000);
+    bodyCanvas=swapped.canvas;
+    if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
+  }
+
+  if(type==='female' && bodyCanvas){
+    const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+    const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
+    bodyCanvas=reDress.canvas;
+    if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
+  }
+
+  dstCtx.clearRect(0,0,DW,DH);
+  if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
+  if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+  if(hair){
+    const detected=extractThreeToneRamp(hair), target=HAIR_TO[hairCol]||HAIR_TO.black;
+    const swap=paletteSwap(hair, detected, target, 4000);
+    let hairCanvas=swap.canvas;
+    if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
+    const hairY=(type==='female' && hairKey==='buzz') ? (Y-4) : Y;
+    dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
+  }
+}
+async function buildAvatarCanvasWithGear(dstCtx, size, profile){
+  await buildAvatarCanvas(dstCtx, size, profile);
+  const k = (size>0 ? size/BASE_SZ : 1);
+  const head=_equippedIn('head'), chest=_equippedIn('chest'), arms=_equippedIn('arms'), legs=_equippedIn('legs'), hands=_equippedIn('hands');
+  if(legs){ _drawOverlay(dstCtx, legs.svg, _scaleBox(BOX.legs,k), 1); }
+  if(chest){ _drawOverlay(dstCtx, chest.svg, _scaleBox(BOX.chest,k), 1); }
+  if(arms){ _drawOverlay(dstCtx, arms.svg, _scaleBox(BOX.arms,k), 1); }
+  if(head){ _drawOverlay(dstCtx, head.svg, _scaleBox(BOX.head,k), 1); }
+  if(hands){ _drawOverlay(dstCtx, hands.svg, _scaleBox(BOX.hands,k), 1); }
+}
+
+/* -----------------------------
+   AUDIO (SFX via WebAudio)
+------------------------------*/
+const audio = {
+  ctx: null,
+  bg: null,
+  gain: null,
+  muted: false,
+  ensure(){
+    if (this.ctx) return;
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const gain = ctx.createGain(); gain.gain.value = 0.85; gain.connect(ctx.destination);
+    this.ctx = ctx; this.gain=gain;
+  },
+  // quick synths
+  blip({f1=440,f2=880, dur=0.18}={}){
+    if (this.muted) return;
+    this.ensure();
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator(); o.type='triangle';
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0.0001,t);
+    o.connect(g); g.connect(this.gain);
+    o.frequency.setValueAtTime(f1,t); o.frequency.exponentialRampToValueAtTime(f2, t+dur*0.8);
+    g.gain.exponentialRampToValueAtTime(0.6, t+0.02); g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.start(t); o.stop(t+dur);
+  },
+  thump({f=110, dur=0.2}={}){
+    if (this.muted) return;
+    this.ensure();
+    const t=this.ctx.currentTime;
+    const o=this.ctx.createOscillator(); o.type='sine';
+    const g=this.ctx.createGain(); o.connect(g); g.connect(this.gain);
+    o.frequency.setValueAtTime(f,t); o.frequency.exponentialRampToValueAtTime(55,t+dur);
+    g.gain.setValueAtTime(0.7,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.start(t); o.stop(t+dur);
+  },
+  async bgm(){
+    if (this.muted) return;
+    this.ensure();
+    if (this.bg){ try{ this.bg.stop(); }catch(_){} this.bg=null; }
+    // Your track: static/game/audio/izza_runner_theme.mp3
+    try{
+      const res = await fetch('/static/game/audio/izza_runner_theme.mp3', {cache:'force-cache'});
+      const buf = await res.arrayBuffer();
+      const ab = await this.ctx.decodeAudioData(buf);
+      const src = this.ctx.createBufferSource(); src.buffer = ab;
+      src.loop = true; src.connect(this.gain); src.start();
+      this.bg = src;
+    }catch(_){ /* if missing, continue silently */ }
+  },
+  setMuted(flag){
+    this.muted = !!flag;
+    if (!this.ctx) return;
+    this.gain.gain.setTargetAtTime(this.muted?0:0.85, this.ctx.currentTime, 0.05);
+  }
+};
+document.getElementById('muteBtn').addEventListener('click', ()=>{
+  audio.setMuted(!audio.muted);
+  document.getElementById('muteBtn').textContent = audio.muted ? '🔈 Muted' : '🔊 Sound';
+});
+
+/* -----------------------------
+   THREE.js GAME
+------------------------------*/
+const canvas = document.getElementById('gameCanvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+renderer.setSize(innerWidth, innerHeight);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 2000);
+camera.position.set(0, 1.15, 3.5);
+scene.fog = new THREE.Fog(0x0b0e15, 18, 42);
+
+/* Lights */
+{
+  const al = new THREE.AmbientLight(0x7090ff, 0.6); scene.add(al);
+  const dl = new THREE.DirectionalLight(0xffffff, 0.9); dl.position.set(2,6,4); scene.add(dl);
+  const rim = new THREE.DirectionalLight(0x66d0ff, 0.6); rim.position.set(-2,5,-3); scene.add(rim);
+}
+
+/* Ground / lane */
+const groundMat = new THREE.MeshStandardMaterial({ color:0x121826, metalness:0.1, roughness:0.8 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(18, 2000), groundMat);
+ground.rotation.x = -Math.PI/2; ground.position.z = -1000; scene.add(ground);
+
+/* Neon lane lines */
+(function addLaneLines(){
+  const mat = new THREE.MeshBasicMaterial({ color:0x2f7cf3 });
+  for(let i=0;i<140;i++){
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.04,0.01,2), mat);
+    m.position.set(0, 0.006, -i*7-6); scene.add(m);
+  }
+})();
+
+/* City canyon */
+(function addSides(){
+  const matL = new THREE.MeshStandardMaterial({ color:0x0f1524, emissive:0x0b1632, roughness:0.6 });
+  const matR = new THREE.MeshStandardMaterial({ color:0x0f1524, emissive:0x0b1632, roughness:0.6 });
+  for(let i=0;i<90;i++){
+    const b1 = new THREE.Mesh(new THREE.BoxGeometry(2, THREE.MathUtils.randFloat(2,6), 2), matL);
+    b1.position.set(-2.7, b1.geometry.parameters.height/2, -i*10-8 - Math.random()*3); scene.add(b1);
+    const b2 = new THREE.Mesh(new THREE.BoxGeometry(2, THREE.MathUtils.randFloat(2,6), 2), matR);
+    b2.position.set( 2.7, b2.geometry.parameters.height/2, -i*9-5 - Math.random()*4); scene.add(b2);
+  }
+})();
+
+/* Player billboard (avatar texture) */
+const avatarCanvas = document.getElementById('avatarCursor');
+const avCtx = avatarCanvas.getContext('2d', { willReadFrequently:true });
+avCtx.imageSmoothingEnabled=false;
+async function paintAvatar(){
+  const profile = JSON.parse(localStorage.getItem('izzaCharacter')||'{}');
+  await buildAvatarCanvasWithGear(avCtx, avatarCanvas.width, profile);
+}
+await paintAvatar();
+const avatarTex = new THREE.CanvasTexture(avatarCanvas);
+avatarTex.minFilter = THREE.NearestFilter; avatarTex.magFilter = THREE.NearestFilter;
+const player = new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9), new THREE.MeshBasicMaterial({ map: avatarTex, transparent:true }));
+player.position.set(0, 0.9, 0); scene.add(player);
+
+/* Obstacle + coin pools */
+const obstacles = [];
+const coins = [];
+const coinMat = new THREE.MeshStandardMaterial({ color:0xffd86b, metalness:0.65, roughness:0.35, emissive:0x2b1f00 });
+const coinGeo = new THREE.TorusGeometry(0.18, 0.06, 12, 24);
+
+function spawnCoin(z){
+  const m = new THREE.Mesh(coinGeo, coinMat);
+  m.position.set(0, 0.9, z);
+  scene.add(m); coins.push(m);
+}
+function spawnObstacle(z){
+  const type = Math.random()<0.5 ? 'low' : 'high';
+  if (type==='low'){
+    // low box to JUMP over
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.6, 0.8), new THREE.MeshStandardMaterial({ color:0x283449, metalness:0.2, roughness:0.9 }));
+    m.position.set(0, 0.3, z); m.userData.kind='low'; scene.add(m); obstacles.push(m);
+  } else {
+    // overhead to SLIDE under
+    const arch = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 0.8), new THREE.MeshStandardMaterial({ color:0x1f2a40, metalness:0.2, roughness:0.9, emissive:0x112244 }));
+    arch.position.set(0, 1.4, z); arch.userData.kind='high'; scene.add(arch); obstacles.push(arch);
+  }
+}
+for(let i=8;i<120;i+=6){
+  if (Math.random() < 0.6) spawnCoin(-i*2);
+  if (Math.random() < 0.55) spawnObstacle(-i*2 - 2);
+}
+
+/* Game state */
+let running=false, over=false;
+let vel = 0.18;
+let dist = 0;           // meters (approx)
+let sessionCoins = 0;   // coins collected this run
+let best = parseInt(localStorage.getItem('runnerHighScore')||'0',10) || 0;
+const scoreEl = document.getElementById('scoreEl');
+
+/* Jump / Slide */
+let jumpT = 0;     // 0..1
+let slideT = 0;    // 0..1
+function doJump(){
+  if (over || !running) return;
+  if (jumpT>0) return; // already mid-air
+  jumpT = 1; audio.blip({f1:520,f2:880,dur:0.22});
+}
+function doSlide(){
+  if (over || !running) return;
+  if (slideT>0) return;
+  slideT = 1; audio.thump({f:90,dur:0.18});
+}
+
+/* Input (swipes & keys) */
+(function input(){
+  let startY=0, startT=0, swiping=false;
+  window.addEventListener('pointerdown', e=>{ swiping=true; startY=e.clientY; startT=performance.now(); }, {passive:true});
+  window.addEventListener('pointerup', e=>{
+    if(!swiping) return; swiping=false;
+    const dy = e.clientY - startY, dt = performance.now()-startT;
+    if (Math.abs(dy)>40 && dt<400){
+      if (dy<0) doJump(); else doSlide();
+    }
+  }, {passive:true});
+  window.addEventListener('keydown', (e)=>{
+    if (e.key==='ArrowUp' || e.key==='w' || e.key===' ') doJump();
+    if (e.key==='ArrowDown' || e.key==='s') doSlide();
+  });
+})();
+
+/* Collision helper */
+function aabbHit(px, py, pz, bx, by, bz, sx, sy, sz){
+  return Math.abs(px-bx) < (sx/2) && Math.abs(py-by) < (sy/2) && Math.abs(pz-bz) < (sz/2);
+}
+
+/* Wallet helpers */
+function addCoins(n){
+  const cur = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
+  const next = Math.max(0, cur + (n|0));
+  localStorage.setItem('izzaCoins', String(next));
+  window.dispatchEvent(new Event('izza-coins-changed'));
+  document.getElementById('coins').textContent = String(next);
+}
+function addCraftingCreditsFromCoins(sessionCoins){
+  const gain = Math.floor(sessionCoins / 1000);
+  if (gain<=0) return 0;
+  const cur = readCraftAny();
+  const next = cur + gain;
+  writeCraftAll(next);
+  document.getElementById('craft').textContent = String(next);
+  return gain;
+}
+
+/* Leaderboard */
+async function submitLeaderboard(score){
+  try{
+    if (window.IZZA_LEADERBOARD?.submit){
+      await IZZA_LEADERBOARD.submit({ game:'runner', score: Math.max(0, score|0), hi: Math.max(0, best|0) });
+    } else {
+      // legacy safety
+      await fetch('/izza-game/api/leaderboard/submit', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ game:'runner', score:score|0 }) });
+    }
+  }catch(_){}
+}
+
+/* Start / Over UX */
+const startOverlay = document.getElementById('startOverlay');
+const overOverlay  = document.getElementById('overOverlay');
+document.getElementById('startBtn').onclick = async ()=>{
+  startOverlay.classList.remove('show');
+  audio.bgm().catch(()=>{});
+  running = true; over=false;
+};
+document.getElementById('lbBtn').onclick = ()=>{ location.href = '/izza-game/minigames?t='+(localStorage.getItem('izzaTokenT')||'')+'&u='+(localStorage.getItem('izzaUserU')||'')+'#leaderboard'; };
+document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lbBtn').click(); };
+document.getElementById('retryBtn').onclick = ()=>{ location.reload(); };
+document.getElementById('exitBtn').href = (()=>{
+  const url = new URL('/izza-game/minigames', location.origin);
+  const T = localStorage.getItem('izzaTokenT')||''; const U=localStorage.getItem('izzaUserU')||'';
+  if (T) url.searchParams.set('t',T); if (U) url.searchParams.set('u',U);
+  return url.pathname + (url.search || '');
+})();
+
+/* Main loop */
+let last = performance.now();
+function tick(now){
+  requestAnimationFrame(tick);
+  const dt = Math.min(40, now - last) / 16.666; // normalize steps
+  last = now;
+
+  // Animate avatar texture if the canvas changed
+  avatarTex.needsUpdate = true;
+
+  if (!running || over) return;
+
+  // Increase difficulty slowly
+  vel += 0.00025 * dt;
+
+  // Advance world
+  scene.traverse(obj=>{
+    if (obj === player || obj === camera || obj === ground) return;
+    if (obj.isMesh) obj.position.z += vel * dt * 1.4;
+  });
+
+  dist += vel * dt * 3.0; // arbitrary scaling to feel good
+  scoreEl.textContent = String(dist|0);
+
+  // Jump parabola
+  if (jumpT > 0){
+    jumpT = Math.max(0, jumpT - 0.045*dt);
+    const j = Math.sin((1-jumpT)*Math.PI); // 0..1..0
+    player.position.y = 0.9 + j*0.9;
+  } else {
+    player.position.y = (slideT>0) ? 0.65 : 0.9;
+  }
+  // Slide timer
+  if (slideT > 0){ slideT = Math.max(0, slideT - 0.06*dt); }
+
+  // Coins
+  for (let i=coins.length-1; i>=0; i--){
+    const c = coins[i];
+    c.rotation.y += 0.18*dt;
+    if (c.position.z > 2){ scene.remove(c); coins.splice(i,1); continue; }
+    if (aabbHit(0, player.position.y, 0.2, c.position.x, c.position.y, c.position.z, 0.6,0.6,0.6)){
+      // collect
+      sessionCoins += 1; addCoins(1);
+      audio.blip({f1:700,f2:1200,dur:0.12});
+      scene.remove(c); coins.splice(i,1);
+    }
+  }
+
+  // Obstacles
+  for (let i=0;i<obstacles.length;i++){
+    const o = obstacles[i];
+    if (o.position.z > 2) continue;
+    if (o.userData.kind==='low'){
+      // must jump: if player y low -> hit
+      const hit = aabbHit(0, player.position.y, 0.2, o.position.x, 0.3, o.position.z, 1.2, 0.6, 0.9) && player.position.y < 1.1;
+      if (hit) return gameOver();
+    } else {
+      // overhead — must slide: if player high -> hit
+      const hit = aabbHit(0, player.position.y, 0.2, o.position.x, 1.4, o.position.z, 1.2, 0.6, 0.9) && player.position.y > 0.8;
+      if (hit) return gameOver();
+    }
+  }
+}
+requestAnimationFrame(tick);
+
+/* Game over */
+async function gameOver(){
+  over = true; running=false;
+  const finalScore = dist|0;
+  best = Math.max(best|0, finalScore);
+  localStorage.setItem('runnerHighScore', String(best));
+
+  // Session conversions: 1 craft credit per 1,000 session coins
+  const gainedCC = addCraftingCreditsFromCoins(sessionCoins);
+
+  // Persist snapshot (wallet + credits) and submit leaderboard
+  try{
+    if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
+  }catch(_){}
+  try{ await submitLeaderboard(best); }catch(_){}
+
+  // Show overlay
+  const stats = `Distance: ${finalScore} • Coins: ${sessionCoins} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
+  document.getElementById('overStats').textContent = stats;
+  document.getElementById('overOverlay').classList.add('show');
+}
+
+/* Resize */
+window.addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* Render pass (separate from logic, keeps HUD smooth) */
+(function renderLoop(){
+  requestAnimationFrame(renderLoop);
+  renderer.render(scene, camera);
+})();
+
+/* Keep avatar texture current when equipment changes */
+window.addEventListener('izza-inventory-changed', async ()=>{ await paintAvatar(); avatarTex.needsUpdate = true; }, {passive:true});
+
+</script>
+</body>
+</html>
