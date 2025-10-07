@@ -327,7 +327,7 @@ function makeBillboard(path, w, h){
   const tex = loadTex(path, 1, 1);
   const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, alphaTest:0.01});
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat);
-  mesh.material.depthWrite = true;
+  mesh.material.depthWrite = false;
   mesh.material.side = THREE.DoubleSide;
   mesh.userData.billboard = true; // will face the camera each frame
   return mesh;
@@ -337,33 +337,36 @@ function makeBale(z){
   const group = new THREE.Group();
 
   // --- simple 3D body behind the PNG (keeps 3D look) ---
-  // a rounded-ish box that sits slightly behind the billboard
+  // pale yellow hay color
   const bodyGeo = new THREE.BoxGeometry(1.10, 0.55, 0.55);
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xD8B45A }); // hay yellow
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xF6E889 }); // pale hay
   const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.set(0, 0.275, -0.06);        // tiny push back so PNG sits in front
+  body.position.set(0, 0.275, -0.08); // push back slightly so PNG sits in front
   body.castShadow = false; body.receiveShadow = false;
+  body.renderOrder = 1;
   group.add(body);
 
   // Visual: billboard PNG (full image)
   const img = makeBillboard(HAY_BALE_PNG, 1.4, 0.9);
   img.position.set(0,0.45,0);
+  img.renderOrder = 2;               // draw after the body
   group.add(img);
 
-  // --- Invisible collision proxy (slightly deeper to avoid tunneling) ---
+  // --- Invisible collision proxy (taller + centered higher) ---
+  // make the hitbox cover standing player center so you MUST jump
   const proxy = new THREE.Mesh(
-    new THREE.BoxGeometry(1.10, 0.55, 1.20), // <- sz a bit deeper than before
+    new THREE.BoxGeometry(1.10, 0.90, 1.20), // height up from 0.55 -> 0.90
     new THREE.MeshBasicMaterial({visible:false})
   );
-  proxy.position.set(0,0.275,0);
+  proxy.position.set(0, 0.45, 0);          // move center up from 0.275 -> 0.45
   group.add(proxy);
 
   group.position.z = z;
   group.userData = {
     kind:'low',
     scroll:true,
-    // store bounds used by the AABB check below
-    bounds:{ sx:1.10, sy:0.55, sz:1.20, cy:0.275 }
+    // bounds used by AABB below (must match proxy above)
+    bounds:{ sx:1.10, sy:0.90, sz:1.20, cy:0.45 }
   };
   return group;
 }
