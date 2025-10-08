@@ -1464,11 +1464,33 @@ def merchant_items(slug):
         ADMIN_PI_USERNAME=os.getenv("ADMIN_PI_USERNAME"),
     )
 
+# ===== MERCHANT & ITEM SCHEMA UPGRADES (dynamic pricing + browse visibility) =====
+def _ensure_items_dynamic_columns():
+    with conn() as cx:
+        cols = [r[1] for r in cx.execute("PRAGMA table_info(items)").fetchall()]
+        # Pricing/routing fields used by dynamic checkout
+        if "dynamic_price_mode" not in cols:
+            cx.execute("ALTER TABLE items ADD COLUMN dynamic_price_mode TEXT")  # e.g. 'pi_dynamic', 'fixed' (NULL means fixed)
+        if "dynamic_payload_json" not in cols:
+            cx.execute("ALTER TABLE items ADD COLUMN dynamic_payload_json TEXT")  # optional JSON (caps, kind, etc.)
+        if "min_pi_price" not in cols:
+            cx.execute("ALTER TABLE items ADD COLUMN min_pi_price REAL")         # optional floor for dynamic override
+        if "max_pi_price" not in cols:
+            cx.execute("ALTER TABLE items ADD COLUMN max_pi_price REAL")         # optional ceiling for dynamic override
+
+def _ensure_merchants_visibility_column():
+    with conn() as cx:
+        cols = [r[1] for r in cx.execute("PRAGMA table_info(merchants)").fetchall()]
+        if "visible_in_browse" not in cols:
+            cx.execute("ALTER TABLE merchants ADD COLUMN visible_in_browse INTEGER NOT NULL DEFAULT 1")  # 1=show (default), 0=hide
+
 @app.post("/merchant/<slug>/items/new")
 def merchant_new_item(slug):
     u, m = require_merchant_owner(slug)
     if isinstance(u, Response):
         return u
+    # ensure columns exist (idempotent)
+    _ensure_items_dynamic_columns()
 
     data = request.form
     title        = data.get("title", "").strip()
@@ -1508,12 +1530,13 @@ def merchant_new_item(slug):
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
-
-@app.post("/merchant/<slug>/items/update")
+    @app.post("/merchant/<slug>/items/update")
 def merchant_update_item(slug):
     u, m = require_merchant_owner(slug)
     if isinstance(u, Response): return u
     data = request.form
+    # ensure columns exist (idempotent)
+    _ensure_items_dynamic_columns()
     try:
         item_id = int(data.get("item_id"))
     except (TypeError, ValueError):
@@ -1524,6 +1547,20 @@ def merchant_update_item(slug):
     image_url = (data.get("image_url") or "").strip()
     description = (data.get("description") or "").strip()
     crafted_item_id = (data.get("crafted_item_id") or "").strip()
+
+        # --- Optional dynamic pricing fields ---
+    dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None   # e.g. 'pi_dynamic'
+    dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None # optional JSON string
+    try:
+        min_pi_price = float((data.get("min_pi_price") or "").strip() or "0")
+    except ValueError:
+        min_pi_price = None
+    try:
+        max_pi_price = float((data.get("max_pi_price") or "").strip() or "0")
+    except ValueError:
+        max_pi_price = None
+    if min_pi_price == 0: min_pi_price = None
+    if max_pi_price == 0: max_pi_price = None
 
     try:
         pi_price = float((data.get("pi_price") or "").strip() or "0")
@@ -1539,7 +1576,7 @@ def merchant_update_item(slug):
     with conn() as cx:
         it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=?", (item_id, m["id"])).fetchone()
         if not it: abort(404)
-        cx.execute(
+                cx.execute(
             """UPDATE items
                SET title=?,
                    sku=?,
@@ -1548,7 +1585,11 @@ def merchant_update_item(slug):
                    pi_price=?,
                    stock_qty=?,
                    fulfillment_kind=?,
-                   crafted_item_id=?
+                   crafted_item_id=?,
+                   dynamic_price_mode=?,
+                   dynamic_payload_json=?,
+                   min_pi_price=?,
+                   max_pi_price=?
                WHERE id=? AND merchant_id=?""",
             (title or it["title"],
              sku or it["sku"],
@@ -1558,9 +1599,12 @@ def merchant_update_item(slug):
              (stock_qty if stock_qty >= 0 else it["stock_qty"]),
              fulfillment_kind,
              (crafted_item_id or None),
+             dynamic_price_mode,
+             dynamic_payload_json,
+             min_pi_price,
+             max_pi_price,
              item_id, m["id"])
         )
-
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
 
@@ -3034,3 +3078,5 @@ def success():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False)
+
+
