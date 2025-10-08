@@ -720,7 +720,6 @@ if (P.waste.length){
   const N = Math.min(drawMode, P.waste.length);
   const start = P.waste.length - N;
 
-  // same spacing as before, just mirrored
   const gap = (drawMode === 3)
     ? Math.max(18, Math.round(cssVarInt('--cardW',86) * 0.42))
     : 0;
@@ -729,17 +728,20 @@ if (P.waste.length){
     const idx = start + i;
     const c = P.waste[idx]; c.face = true;
     const el = spawnCard(c);
+
+    // mark location for drag logic
     el.dataset.where = 'w';
 
-    // z-index increases toward the right; top (playable) card is on the right
+    // layering: leftmost is lowest, rightmost (top) is highest
     el.style.zIndex = 10 + i;
 
-    // anchor to the RIGHT edge of the waste pile and fan leftwards
-    el.style.left = '';
-    el.style.right = '0';
-    placeXY(el, -(N - 1 - i) * gap, 0);
+    // ABSOLUTE FROM THE RIGHT (mirror of your old left-anchored fan)
+    el.style.top = '0';
+    el.style.left = 'auto';     // override spawnCard's default
+    el.style.right = ((N - 1 - i) * gap) + 'px';
+    el.style.transform = '';    // make sure no stray transform is applied
 
-    // only the top waste card is playable; others are visual only
+    // only the rightmost (top) card is playable; the others are visual only
     if (idx !== P.waste.length - 1){
       el.dataset.locked = '1';
       el.style.pointerEvents = 'none';
