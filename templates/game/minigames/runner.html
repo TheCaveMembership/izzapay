@@ -186,12 +186,38 @@ function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) l
 function renderWalletFromLS(){ document.getElementById('coins').textContent = String(parseInt(localStorage.getItem('izzaCoins')||'0',10)||0); document.getElementById('craft').textContent = String(readCraftAny()); }
 renderWalletFromLS();
 
-/* Load latest snapshot + leaderboard hydrate on entry */
-(async function hydrate(){
-  try{ if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
-  try{ if (window.IZZA_LEADERBOARD?.hydrate) await IZZA_LEADERBOARD.hydrate(); }catch(_){}
-  renderWalletFromLS();
-})();
+/* --- HYDRATE SHARED WALLET + SAVE ON EXIT (match basketball) --- */
+async function hydrateWalletOnEntry(){
+  try{
+    // optional handoff (from another page)
+    const raw = sessionStorage.getItem('izzaWalletHandoff');
+    if (raw){
+      const s = JSON.parse(raw);
+      if (s && s.ts && Date.now() - s.ts < 120000){
+        localStorage.setItem('izzaCoins', String(s.coins|0));
+        localStorage.setItem('izzaCrafting', String(s.craft|0));
+      }
+    }
+    // pull latest from server
+    if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+    // (optional) hydrate leaderboard like before
+    if (window.IZZA_LEADERBOARD?.hydrate) await IZZA_LEADERBOARD.hydrate();
+    // paint HUD
+    renderWalletFromLS();
+  }catch(e){ console.warn('runner hydrate failed', e); }
+}
+
+async function persistWalletOnExit(){
+  try{
+    // keep all craft keys in sync
+    writeCraftAll(readCraftAny());
+    if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
+  }catch(e){ console.warn('runner save failed', e); }
+}
+
+window.addEventListener('DOMContentLoaded', hydrateWalletOnEntry);
+window.addEventListener('pagehide', persistWalletOnExit);
+window.addEventListener('beforeunload', persistWalletOnExit);
 
 /* -------- Avatar builder (unchanged for visuals) -------- */
 const SPRITES={body:{default:"/static/game/sprites/body/default.png",street_a:"/static/game/sprites/body/street_a.png",street_b:"/static/game/sprites/body/street_b.png"},hair:{short:"/static/game/sprites/hair/short.png",buzz:"/static/game/sprites/hair/buzz.png",long:"/static/game/sprites/hair/long.png"},outfit:{street:"/static/game/sprites/outfit/street.png",athletic:"/static/game/sprites/outfit/athletic.png",luxury:"/static/game/sprites/outfit/luxury.png"}};
