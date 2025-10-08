@@ -713,31 +713,43 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (only top is interactive; wider fan preserved)
-  const wEl=document.getElementById(piles.waste);
-  if(P.waste.length){
-    const drawMode=getDrawPref();
-    const N=Math.min(drawMode, P.waste.length);
-    const start=P.waste.length - N;
-    const gap = (drawMode===3) ? Math.max(18, Math.round(cssVarInt('--cardW',86)*0.42)) : 0;
-    for(let i=0;i<N;i++){
-      const idx=start+i;
-      const c=P.waste[idx]; c.face=true;
-      const el=spawnCard(c);
-      el.style.zIndex=10+i;
-      placeXY(el, i*gap, 0);
-      el.dataset.where='w';
+  // WASTE (draw-3: right-aligned fan; only the top is interactive)
+const wEl = document.getElementById(piles.waste);
+if (P.waste.length){
+  const drawMode = getDrawPref();
+  const N = Math.min(drawMode, P.waste.length);
+  const start = P.waste.length - N;
 
-      if (idx !== P.waste.length - 1) {
-        el.dataset.locked='1';
-        el.style.pointerEvents='none';
-      } else {
-        el.style.pointerEvents='auto';
-      }
-      wEl.appendChild(el);
+  // same spacing as before, just mirrored
+  const gap = (drawMode === 3)
+    ? Math.max(18, Math.round(cssVarInt('--cardW',86) * 0.42))
+    : 0;
+
+  for (let i = 0; i < N; i++){
+    const idx = start + i;
+    const c = P.waste[idx]; c.face = true;
+    const el = spawnCard(c);
+    el.dataset.where = 'w';
+
+    // z-index increases toward the right; top (playable) card is on the right
+    el.style.zIndex = 10 + i;
+
+    // anchor to the RIGHT edge of the waste pile and fan leftwards
+    el.style.left = '';
+    el.style.right = '0';
+    placeXY(el, -(N - 1 - i) * gap, 0);
+
+    // only the top waste card is playable; others are visual only
+    if (idx !== P.waste.length - 1){
+      el.dataset.locked = '1';
+      el.style.pointerEvents = 'none';
+    } else {
+      el.style.pointerEvents = 'auto';
     }
-  }
 
+    wEl.appendChild(el);
+  }
+}
   // FOUNDATIONS
   for(let i=0;i<4;i++){
     const fEl=document.getElementById(piles.f[i]);
