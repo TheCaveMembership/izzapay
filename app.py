@@ -1489,19 +1489,52 @@ def merchant_new_item(slug):
     u, m = require_merchant_owner(slug)
     if isinstance(u, Response):
         return u
-    # ensure columns exist (idempotent)
+
+    # Ensure dynamic columns exist (idempotent)
     _ensure_items_dynamic_columns()
 
     data = request.form
-    title        = data.get("title", "").strip()
-    sku          = data.get("sku", "").strip()
-    image_url    = data.get("image_url", "").strip()
-    description  = data.get("description", "").strip()
-    pi_price     = data.get("pi_price", "0").strip()
-    stock_qty    = data.get("stock_qty", "0").strip()
-    allow_backorder = 1 if data.get("allow_backorder") else 0
-    crafted_item_id = data.get("crafted_item_id") or None
+
+    title           = (data.get("title") or "").strip()
+    sku             = (data.get("sku") or "").strip()
+    image_url       = (data.get("image_url") or "").strip()
+    description     = (data.get("description") or "").strip()
+    crafted_item_id = (data.get("crafted_item_id") or "").strip() or None
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
+
+    # Fixed price fields
+    try:
+        pi_price = float((data.get("pi_price") or "0").strip())
+    except ValueError:
+        pi_price = 0.0
+    try:
+        stock_qty = int((data.get("stock_qty") or "0").strip())
+    except ValueError:
+        stock_qty = 0
+    allow_backorder = 1 if data.get("allow_backorder") else 0
+
+    # Optional dynamic pricing fields
+    dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None
+    dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None
+    # Normalize payload to compact JSON if provided; on error, drop it
+    if dynamic_payload_json:
+        try:
+            dynamic_payload_json = json.dumps(json.loads(dynamic_payload_json), separators=(",", ":"))
+        except Exception:
+            dynamic_payload_json = None
+
+    def _float_or_none(v):
+        s = (v or "").strip()
+        if not s:
+            return None
+        try:
+            x = float(s)
+            return x if x != 0 else None
+        except ValueError:
+            return None
+
+    min_pi_price = _float_or_none(data.get("min_pi_price"))
+    max_pi_price = _float_or_none(data.get("max_pi_price"))
 
     link_id = uuid.uuid4().hex[:8]
 
@@ -1510,9 +1543,10 @@ def merchant_new_item(slug):
             """INSERT INTO items(
                  merchant_id, link_id, title, sku, image_url, description,
                  pi_price, stock_qty, allow_backorder, active,
-                 fulfillment_kind, crafted_item_id
+                 fulfillment_kind, crafted_item_id,
+                 dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price
                )
-               VALUES(?,?,?,?,?,?,?,?,?,1,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)""",
             (
                 m["id"],
                 link_id,
@@ -1524,44 +1558,62 @@ def merchant_new_item(slug):
                 int(stock_qty),
                 int(allow_backorder),
                 fulfillment_kind,
-                (crafted_item_id or None),
+                crafted_item_id,
+                dynamic_price_mode,
+                dynamic_payload_json,
+                min_pi_price,
+                max_pi_price,
             )
         )
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
-    @app.post("/merchant/<slug>/items/update")
+
+
+@app.post("/merchant/<slug>/items/update")
 def merchant_update_item(slug):
     u, m = require_merchant_owner(slug)
-    if isinstance(u, Response): return u
-    data = request.form
-    # ensure columns exist (idempotent)
+    if isinstance(u, Response):
+        return u
+
+    # Ensure dynamic columns exist (idempotent)
     _ensure_items_dynamic_columns()
+
+    data = request.form
     try:
         item_id = int(data.get("item_id"))
     except (TypeError, ValueError):
         abort(400)
 
-    title = (data.get("title") or "").strip()
-    sku   = (data.get("sku") or "").strip()
-    image_url = (data.get("image_url") or "").strip()
-    description = (data.get("description") or "").strip()
+    title           = (data.get("title") or "").strip()
+    sku             = (data.get("sku") or "").strip()
+    image_url       = (data.get("image_url") or "").strip()
+    description     = (data.get("description") or "").strip()
     crafted_item_id = (data.get("crafted_item_id") or "").strip()
 
-        # --- Optional dynamic pricing fields ---
-    dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None   # e.g. 'pi_dynamic'
-    dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None # optional JSON string
-    try:
-        min_pi_price = float((data.get("min_pi_price") or "").strip() or "0")
-    except ValueError:
-        min_pi_price = None
-    try:
-        max_pi_price = float((data.get("max_pi_price") or "").strip() or "0")
-    except ValueError:
-        max_pi_price = None
-    if min_pi_price == 0: min_pi_price = None
-    if max_pi_price == 0: max_pi_price = None
+    # Optional dynamic pricing fields (store as-is, NULL if blank)
+    dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None
+    dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None
+    if dynamic_payload_json:
+        try:
+            dynamic_payload_json = json.dumps(json.loads(dynamic_payload_json), separators=(",", ":"))
+        except Exception:
+            dynamic_payload_json = None
 
+    def _float_or_none(v):
+        s = (v or "").strip()
+        if not s:
+            return None
+        try:
+            x = float(s)
+            return x if x != 0 else None
+        except ValueError:
+            return None
+
+    min_pi_price = _float_or_none(data.get("min_pi_price"))
+    max_pi_price = _float_or_none(data.get("max_pi_price"))
+
+    # Fixed fields
     try:
         pi_price = float((data.get("pi_price") or "").strip() or "0")
     except ValueError:
@@ -1574,9 +1626,14 @@ def merchant_update_item(slug):
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
 
     with conn() as cx:
-        it = cx.execute("SELECT * FROM items WHERE id=? AND merchant_id=?", (item_id, m["id"])).fetchone()
-        if not it: abort(404)
-                cx.execute(
+        it = cx.execute(
+            "SELECT * FROM items WHERE id=? AND merchant_id=?",
+            (item_id, m["id"])
+        ).fetchone()
+        if not it:
+            abort(404)
+
+        cx.execute(
             """UPDATE items
                SET title=?,
                    sku=?,
@@ -1591,23 +1648,26 @@ def merchant_update_item(slug):
                    min_pi_price=?,
                    max_pi_price=?
                WHERE id=? AND merchant_id=?""",
-            (title or it["title"],
-             sku or it["sku"],
-             image_url or (it["image_url"] or ""),
-             description or (it["description"] or ""),
-             (pi_price if pi_price > 0 else it["pi_price"]),
-             (stock_qty if stock_qty >= 0 else it["stock_qty"]),
-             fulfillment_kind,
-             (crafted_item_id or None),
-             dynamic_price_mode,
-             dynamic_payload_json,
-             min_pi_price,
-             max_pi_price,
-             item_id, m["id"])
+            (
+                title or it["title"],
+                sku or it["sku"],
+                image_url or (it["image_url"] or ""),
+                description or (it["description"] or ""),
+                (pi_price if pi_price > 0 else it["pi_price"]),
+                (stock_qty if stock_qty >= 0 else it["stock_qty"]),
+                fulfillment_kind,
+                (crafted_item_id or None),
+                dynamic_price_mode,
+                dynamic_payload_json,
+                min_pi_price,
+                max_pi_price,
+                item_id,
+                m["id"],
+            )
         )
+
     tok = get_bearer_token_from_request()
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
-
 @app.post("/merchant/<slug>/items/delete")
 def merchant_delete_item(slug):
     u, m = require_merchant_owner(slug)
