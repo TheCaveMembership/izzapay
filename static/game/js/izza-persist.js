@@ -52,58 +52,6 @@
       const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
     }catch{ return {}; }
   }
-    // ----- ART CACHE for big SVG fields (keeps snapshots tiny) -----
-  function artCacheKey(itemKey){ return 'izzaItemArt::' + String(itemKey||''); }
-
-  function cacheItemArt(itemKey, it){
-    try{
-      if (!itemKey || !it || typeof it!=='object') return;
-      const icon    = (typeof it.iconSvg==='string'    && it.iconSvg)    ? it.iconSvg    : null;
-      const overlay = (typeof it.overlaySvg==='string' && it.overlaySvg) ? it.overlaySvg : null;
-      if (!icon && !overlay) return;
-      const cur = JSON.parse(localStorage.getItem(artCacheKey(itemKey))||'{}');
-      const next = { iconSvg: icon || cur.iconSvg || null, overlaySvg: overlay || cur.overlaySvg || null };
-      localStorage.setItem(artCacheKey(itemKey), JSON.stringify(next));
-    }catch(_){}
-  }
-
-  function restoreItemArt(itemKey, it){
-    try{
-      if (!itemKey || !it || typeof it!=='object') return it;
-      const raw = localStorage.getItem(artCacheKey(itemKey));
-      if (!raw) return it;
-      const { iconSvg, overlaySvg } = JSON.parse(raw)||{};
-      if (iconSvg && !it.iconSvg) it.iconSvg = iconSvg;
-      if (overlaySvg && !it.overlaySvg) it.overlaySvg = overlaySvg;
-      return it;
-    }catch(_){ return it; }
-  }
-
-  function stripInventoryForSave(inv){
-    try{
-      if (!inv || typeof inv!=='object') return {};
-      const out = {};
-      for (const [k, it] of Object.entries(inv)){
-        if (!it || typeof it!=='object'){ out[k] = it; continue; }
-        // 1) keep the art locally
-        cacheItemArt(k, it);
-        // 2) copy everything except the huge svg strings
-        const { iconSvg, overlaySvg, ...rest } = it;
-        out[k] = rest;
-      }
-      return out;
-    }catch(_){ return {}; }
-  }
-
-  function restoreArtFromCache(inv){
-    try{
-      if (!inv || typeof inv!=='object') return inv||{};
-      for (const [k, it] of Object.entries(inv)){
-        restoreItemArt(k, it);
-      }
-      return inv;
-    }catch(_){ return inv||{}; }
-  }
   function readCoinsOnHand(){
     try{
       if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
@@ -155,7 +103,7 @@ function readLeaderboardLocals(){
   }catch(_){}
   return out;
 }
-    // ---------- snapshot builder ----------
+  // ---------- snapshot builder ----------
   function buildSnapshot(){
     const u      = userKey();
     const bank   = readBank(u);
@@ -168,10 +116,7 @@ function readLeaderboardLocals(){
       ? IZZA.api.getMissionState()
       : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
 
-    const craftingCredits = readCraftingCredits();
-
-    // ✅ keep payload lean: art is cached locally, not posted
-    const invSlim = stripInventoryForSave(inv);
+    const craftingCredits = readCraftingCredits(); // already computed
 
     return {
       version: 1,
@@ -179,7 +124,7 @@ function readLeaderboardLocals(){
       coins: onHand|0,
       missions: missions|0,
       missionState: missionState || {},
-      inventory: invSlim, // <-- no iconSvg/overlaySvg in the payload
+      inventory: inv || {},
       bank: bank || { coins:0, items:{}, ammo:{} },
       craftingCredits: craftingCredits|0,
       leaderboard: readLeaderboardLocals(),
@@ -232,26 +177,14 @@ function readLeaderboardLocals(){
     try{
       if (!seed) return;
 
-            // INVENTORY
-if (seed.inventory && typeof seed.inventory === 'object'){
-  try{
-    // Build what we'll install ONCE: merge cache -> full items
-    let toInstall = JSON.parse(JSON.stringify(seed.inventory));
-    toInstall = restoreArtFromCache(toInstall);
-
-    if (IZZA?.api?.setInventory) IZZA.api.setInventory(toInstall);
-    else localStorage.setItem('izzaInventory', JSON.stringify(toInstall));
-
-    // (Optional) ensure cache has anything new the server sent (harmless)
-    try{
-      for (const [k, it] of Object.entries(toInstall||{})){
-        cacheItemArt(k, it);
+      // INVENTORY
+      if (seed.inventory && typeof seed.inventory === 'object'){
+        try{
+          if (IZZA?.api?.setInventory) IZZA.api.setInventory(seed.inventory);
+          else localStorage.setItem('izzaInventory', JSON.stringify(seed.inventory));
+          try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+        }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
-    }catch(_){}
-
-    try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-  }catch(e){ console.warn('[persist] inv hydrate failed', e); }
-}
 
       // WALLET COINS (on-hand) — take the GREATER of local vs server, then push up later if local won
       if (Number.isFinite(seed.coins)){
@@ -365,39 +298,21 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
   }
 
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
-  function invMeaningfullyEmpty(inv){
-  try{
-    if (!inv || typeof inv!=='object') return true;
-    for (const it of Object.values(inv)){
-      if (!it || typeof it!=='object') continue;
-      // treat any actually-owned/equipped/positive-count item as "real"
-      const cnt = Number(it.count)||0;
-      const owned = it.owned === true || it.equipped === true || cnt > 0;
-      if (owned) return false;
-    }
-    return true; // only templates / zeros
-  }catch{ return true; }
-}
-
-function looksEmpty(s){
-  try{
-    if (!s || typeof s!=='object') return true;
-
-    const invEmpty  = invMeaningfullyEmpty(s.inventory);
-
-    const bankEmpty = !s.bank || (
-      ((s.bank.coins|0)===0) &&
-      (!s.bank.items || !Object.keys(s.bank.items).length) &&
-      (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
-    );
-
-    const walletZero    = (s.coins|0)===0;
-    const heartsUnknown = (s.player?.heartsSegs==null);
-    const creditsZero   = (s.craftingCredits|0)===0;
-
-    return walletZero && bankEmpty && invEmpty && heartsUnknown && creditsZero;
-  }catch{ return true; }
-}
+  function looksEmpty(s){
+    try{
+      if (!s || typeof s!=='object') return true;
+      const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
+      const bankEmpty = !s.bank || (
+        ((s.bank.coins|0)===0) &&
+        (!s.bank.items || !Object.keys(s.bank.items).length) &&
+        (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
+      );
+      const walletZero   = (s.coins|0)===0;
+      const heartsUnknown= (s.player?.heartsSegs==null);
+      const creditsZero  = (s.craftingCredits|0)===0; // <— NEW
+      return walletZero && bankEmpty && invEmpty && heartsUnknown && creditsZero;
+    }catch{ return true; }
+  }
 
   const Persist = {
     async load(){
@@ -772,14 +687,6 @@ function looksEmpty(s){
     if (Date.now() < freezeUntil) return;
 
     const snap = buildSnapshot();
-
-    // prevent saving a downgrade over a good server snapshot
-if (serverSeed && !looksEmpty(serverSeed)) {
-  if (invMeaningfullyEmpty(snap.inventory) && !invMeaningfullyEmpty(serverSeed.inventory)) {
-    console.log('[persist] skip save: empty-ish local inventory vs non-empty server', reason);
-    return;
-  }
-}
 
     // never push blank over a non-empty server
     if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
