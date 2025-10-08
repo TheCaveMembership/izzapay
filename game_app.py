@@ -1110,7 +1110,7 @@ _issue_credit(
     source='earned',
     uniq=uniq  # keeps idempotency if order_id present
 )
-        return _json_ok(granted=amount)
+        return _ok(granted=amount)
 
 @crafting_api.post("/credits/list")
 def crafting_credits_list():
