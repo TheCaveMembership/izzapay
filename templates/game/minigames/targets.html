@@ -720,25 +720,36 @@ if (P.waste.length){
   const N = Math.min(drawMode, P.waste.length);
   const start = P.waste.length - N;
 
-  // same spacing as before (tweak if you want tighter/looser)
+  // debug once to confirm we're actually in draw-3
+  console.debug('[WASTE]', { drawMode, N, wasteLen: P.waste.length });
+
   const gap = (drawMode === 3)
     ? Math.max(18, Math.round(cssVarInt('--cardW', 86) * 0.42))
     : 0;
+
+  // measure the pile width once (after it’s in the DOM)
+  const pileWidth = wEl.clientWidth || 0;
 
   for (let i = 0; i < N; i++){
     const idx = start + i;
     const c = P.waste[idx]; c.face = true;
     const el = spawnCard(c);
     el.dataset.where = 'w';
-
-    // z-order left → right (rightmost is the real top)
     el.style.zIndex = 10 + i;
 
-    // ANCHOR TO RIGHT, NO TRANSFORM
+    // make sure no leftover transform or right/left conflicts
+    el.style.transform = '';
+    el.style.right = '';
+    el.style.left = '0';
     el.style.top = '0';
-    el.style.left = 'auto';
-    el.style.right = ((N - 1 - i) * gap) + 'px';
-    el.style.transform = ''; // important: clear any translate
+
+    // compute left so the stack is right-aligned and fans left
+    // left = (pileWidth - cardWidth) - offset
+    // we need card width; ask the element after it’s created:
+    const cardW = el.offsetWidth || cssVarInt('--cardW', 86);
+    const offset = (N - 1 - i) * gap;
+    const left = Math.max(0, (pileWidth - cardW) - offset);
+    el.style.left = left + 'px';
 
     // only the rightmost (true top) is interactive
     if (idx !== P.waste.length - 1){
