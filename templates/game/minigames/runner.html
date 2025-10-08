@@ -297,7 +297,7 @@ const player=new THREE.Mesh(new THREE.PlaneGeometry(0.28,0.28),new THREE.MeshBas
 player.position.set(0,0.78,0);scene.add(player);
 
 /* Coins (image texture) */
-const COIN_FACE_TEX = texLoader.load('/static/game/textures/izzacoingold');
+const COIN_FACE_TEX = texLoader.load('/static/game/textures/izzacoingold.png');
 const coinFaceMat = new THREE.MeshStandardMaterial({map: COIN_FACE_TEX, metalness:0.9, roughness:0.25, emissive:0x2b1f00, emissiveIntensity:0.2});
 const coinEdgeMat = new THREE.MeshStandardMaterial({color:0x8c6b20, metalness:0.85, roughness:0.3});
 
