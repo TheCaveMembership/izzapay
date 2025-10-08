@@ -215,7 +215,7 @@
     (async function reconcileIfNeeded(){
       const sp = new URLSearchParams(location.search);
       if(sp.get('craftPaid')==='1'){
-        try { await api('/api/crafting/credits/reconcile'); } catch {}
+        try { await api('api/crafting/credits/reconcile', { method: 'POST' }); } catch {}
       }
     })();
 
