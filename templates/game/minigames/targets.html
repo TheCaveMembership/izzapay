@@ -713,14 +713,21 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // --- WASTE (draw-1/3) — right-aligned fan that always fits the cell ---
+  // WASTE (draw-3, right-aligned fan; only the rightmost is playable)
 const wEl = document.getElementById(piles.waste);
 if (P.waste.length){
   const drawMode = getDrawPref();
   const N = Math.min(drawMode, P.waste.length);
   const start = P.waste.length - N;
 
-  // measure the pile width
+  // debug once to confirm we're actually in draw-3
+  console.debug('[WASTE]', { drawMode, N, wasteLen: P.waste.length });
+
+  const gap = (drawMode === 3)
+    ? Math.max(18, Math.round(cssVarInt('--cardW', 86) * 0.42))
+    : 0;
+
+  // measure the pile width once (after it’s in the DOM)
   const pileWidth = wEl.clientWidth || 0;
 
   for (let i = 0; i < N; i++){
@@ -730,24 +737,19 @@ if (P.waste.length){
     el.dataset.where = 'w';
     el.style.zIndex = 10 + i;
 
-    // reset any leftover positioning
+    // make sure no leftover transform or right/left conflicts
     el.style.transform = '';
-    el.style.left = '';
-    el.style.top = '0';
     el.style.right = '';
+    el.style.left = '0';
+    el.style.top = '0';
 
-    // append first so offsetWidth is real
-    wEl.appendChild(el);
+    // compute left so the stack is right-aligned and fans left
+    // left = (pileWidth - cardWidth) - offset
+    // we need card width; ask the element after it’s created:
     const cardW = el.offsetWidth || cssVarInt('--cardW', 86);
-
-    // desired gap (pretty), then compress to fit the waste cell if needed
-    const desiredGap = (drawMode === 3) ? Math.max(14, Math.round(cardW * 0.42)) : 0;
-    const available = Math.max(0, pileWidth - cardW);
-    const gap = (N > 1) ? Math.min(desiredGap, Math.floor(available / (N - 1))) : 0;
-
-    // right-align and fan left
-    // rightmost (top) card gets right: 0; next gets +gap; etc.
-    el.style.right = ((N - 1 - i) * gap) + 'px';
+    const offset = (N - 1 - i) * gap;
+    const left = Math.max(0, (pileWidth - cardW) - offset);
+    el.style.left = left + 'px';
 
     // only the rightmost (true top) is interactive
     if (idx !== P.waste.length - 1){
@@ -756,6 +758,8 @@ if (P.waste.length){
     } else {
       el.style.pointerEvents = 'auto';
     }
+
+    wEl.appendChild(el);
   }
 }
   // FOUNDATIONS
