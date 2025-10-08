@@ -1090,27 +1090,36 @@ def crafting_credit_grant():
     with conn() as cx:
         user_id = None
         if username:
-            r = cx.execute("SELECT id FROM users WHERE lower(pi_username)=lower(?)", (username,)).fetchone()
-            if r: user_id = int(r["id"])
+            r = cx.execute(
+                "SELECT id FROM users WHERE lower(pi_username)=lower(?)",
+                (username,)
+            ).fetchone()
+            if r:
+                user_id = int(r["id"])
         if not user_id:
             u = current_user_row()
-            if u: user_id = int(u["id"])
+            if u:
+                user_id = int(u["id"])
         if not user_id:
             return _json_err("user-not-found")
 
         uniq = f"order:{int(order_id)}" if order_id else None
+
+        # Ledger v1 balance
         _credit_add(cx, user_id, +amount, reason="single-mint", uniq=uniq)
+
         # Also issue one v2 "base" credit so new mint flow can use it
-_issue_credit(
-    cx,
-    user_id,
-    value_ic=BASE_IC,  # 500 IC basic credit
-    tier='base',
-    caps={'allowFx': False, 'maxMeterLevel': 1},
-    source='earned',
-    uniq=uniq  # keeps idempotency if order_id present
-)
-        return _ok(granted=amount)
+        _issue_credit(
+            cx,
+            user_id,
+            value_ic=BASE_IC,  # 500 IC basic credit
+            tier="base",
+            caps={"allowFx": False, "maxMeterLevel": 1},
+            source="earned",
+            uniq=uniq,  # keeps idempotency if order_id present
+        )
+
+        return _json_ok(granted=amount)
 
 @crafting_api.post("/credits/list")
 def crafting_credits_list():
