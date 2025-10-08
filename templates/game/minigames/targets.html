@@ -154,7 +154,7 @@
 
     /* --- WASTE area widened earlier --- */
     #rowTop .cell.wasteWide{ grid-column: span 2; }
-    #waste{ padding-right: 6px; }
+    #waste{ padding-left:6px; padding-right:0; }
 
     /* Kill selection/callout for entire arena (extra safety) */
     .arena, .arena *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
@@ -713,14 +713,14 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (draw-3, right-aligned fan; only the rightmost is playable)
+  // WASTE (draw-3: right-aligned fan; only the top is interactive)
 const wEl = document.getElementById(piles.waste);
 if (P.waste.length){
   const drawMode = getDrawPref();
   const N = Math.min(drawMode, P.waste.length);
   const start = P.waste.length - N;
 
-  // same spacing you had, just mirrored
+  // same spacing as old left-side fan
   const gap = (drawMode === 3)
     ? Math.max(18, Math.round(cssVarInt('--cardW', 86) * 0.42))
     : 0;
@@ -729,21 +729,18 @@ if (P.waste.length){
     const idx = start + i;
     const c = P.waste[idx]; c.face = true;
     const el = spawnCard(c);
-
-    // mark origin for drag/tap logic
     el.dataset.where = 'w';
 
-    // z-stack increases left→right; rightmost is top/interactive
+    // layer left→right, top card is on the RIGHT
     el.style.zIndex = 10 + i;
 
-    // MIRROR: hard-anchor to the right edge; fan leftwards.
-    // (No translate(); avoids the “upside-down / clipped” issue.)
+    // anchor to right, then shift left (mirror of old fan)
+    el.style.left = '';
+    el.style.right = '0';
     el.style.top = '0';
-    el.style.left = 'auto';           // override spawnCard's default left:0
-    el.style.right = ((N - 1 - i) * gap) + 'px';
-    el.style.transform = '';          // be sure no leftover transform exists
+    placeXY(el, -(N - 1 - i) * gap, 0);
 
-    // only the rightmost card (true top of waste) is playable
+    // only the rightmost (true top) is playable
     if (idx !== P.waste.length - 1){
       el.dataset.locked = '1';
       el.style.pointerEvents = 'none';
