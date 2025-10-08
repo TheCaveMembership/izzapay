@@ -364,21 +364,39 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
   }
 
   // “blank” means: wallet 0 AND bank empty AND inventory empty AND no heartsKnown
-  function looksEmpty(s){
-    try{
-      if (!s || typeof s!=='object') return true;
-      const invEmpty  = !s.inventory || !Object.keys(s.inventory).length;
-      const bankEmpty = !s.bank || (
-        ((s.bank.coins|0)===0) &&
-        (!s.bank.items || !Object.keys(s.bank.items).length) &&
-        (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
-      );
-      const walletZero   = (s.coins|0)===0;
-      const heartsUnknown= (s.player?.heartsSegs==null);
-      const creditsZero  = (s.craftingCredits|0)===0; // <— NEW
-      return walletZero && bankEmpty && invEmpty && heartsUnknown && creditsZero;
-    }catch{ return true; }
-  }
+  function invMeaningfullyEmpty(inv){
+  try{
+    if (!inv || typeof inv!=='object') return true;
+    for (const it of Object.values(inv)){
+      if (!it || typeof it!=='object') continue;
+      // treat any actually-owned/equipped/positive-count item as "real"
+      const cnt = Number(it.count)||0;
+      const owned = it.owned === true || it.equipped === true || cnt > 0;
+      if (owned) return false;
+    }
+    return true; // only templates / zeros
+  }catch{ return true; }
+}
+
+function looksEmpty(s){
+  try{
+    if (!s || typeof s!=='object') return true;
+
+    const invEmpty  = invMeaningfullyEmpty(s.inventory);
+
+    const bankEmpty = !s.bank || (
+      ((s.bank.coins|0)===0) &&
+      (!s.bank.items || !Object.keys(s.bank.items).length) &&
+      (!s.bank.ammo  || !Object.keys(s.bank.ammo).length)
+    );
+
+    const walletZero    = (s.coins|0)===0;
+    const heartsUnknown = (s.player?.heartsSegs==null);
+    const creditsZero   = (s.craftingCredits|0)===0;
+
+    return walletZero && bankEmpty && invEmpty && heartsUnknown && creditsZero;
+  }catch{ return true; }
+}
 
   const Persist = {
     async load(){
@@ -753,6 +771,14 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
     if (Date.now() < freezeUntil) return;
 
     const snap = buildSnapshot();
+
+    // prevent saving a downgrade over a good server snapshot
+if (serverSeed && !looksEmpty(serverSeed)) {
+  if (invMeaningfullyEmpty(snap.inventory) && !invMeaningfullyEmpty(serverSeed.inventory)) {
+    console.log('[persist] skip save: empty-ish local inventory vs non-empty server', reason);
+    return;
+  }
+}
 
     // never push blank over a non-empty server
     if (serverSeed && !looksEmpty(serverSeed) && looksEmpty(snap)) {
