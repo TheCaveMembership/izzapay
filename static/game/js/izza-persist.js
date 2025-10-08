@@ -338,6 +338,143 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
     }
   };
   window.IZZA_PERSIST = Persist;
+/* ===== IZZA Crafting Split Shim (drop into izza-persist.js, loads everywhere) ===== */
+(function(){
+  if (window.IZZA_CRAFT && window.IZZA_CRAFT.__v === 1) return; // already installed
+
+  const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
+  const SPLIT_KEY  = 'izzaCraftingSplit'; // { earned: number, purchased: number }
+  const clampN = v => (Number.isFinite(v) ? Math.max(0, (v|0)) : 0);
+
+  function readSplit(){
+    try{
+      const j = JSON.parse(localStorage.getItem(SPLIT_KEY) || 'null');
+      if (j && typeof j === 'object') {
+        return { earned: clampN(j.earned), purchased: clampN(j.purchased) };
+      }
+    }catch(_){}
+    // Seed from legacy total (no split yet)
+    const legacy = CRAFT_KEYS
+      .map(k => parseInt(localStorage.getItem(k)||'0',10))
+      .filter(Number.isFinite).reduce((a,b)=>Math.max(a,b),0) | 0;
+    return { earned: clampN(legacy), purchased: 0 };
+  }
+
+  function writeSplit(next){
+    const n = { earned: clampN(next.earned), purchased: clampN(next.purchased) };
+    try{ localStorage.setItem(SPLIT_KEY, JSON.stringify(n)); }catch(_){}
+    // Back-compat: write combined total to legacy keys
+    const total = n.earned + n.purchased;
+    for(const k of CRAFT_KEYS){ try{ localStorage.setItem(k, String(total)); }catch(_){} }
+    // Standard IZZA notifies
+    try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ crafting: total } })); }catch(_){}
+  }
+
+  function totalFromSplit(s){ return clampN(s.earned) + clampN(s.purchased); }
+
+  function persistNow(){
+    try{
+      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+        return IZZA_PERSIST.save();
+      }
+      if (typeof window._izzaForceSave === 'function'){
+        window._izzaForceSave();
+      }
+    }catch(_){}
+    return Promise.resolve();
+  }
+
+  // Public API (used by shop/checkout or admin tools)
+  const API = {
+    __v: 1,
+    read(){ const s = readSplit(); return { ...s, total: totalFromSplit(s) }; },
+    // Mini-games should not need to call this; they will be auto-routed (see monkey patch).
+    earn(count=1){
+      const s = readSplit();
+      s.earned = clampN(s.earned + clampN(count));
+      writeSplit(s);
+      return persistNow();
+    },
+    // Use this from purchase flow only; it NEVER touches `earned`
+    purchase(count=1){
+      const s = readSplit();
+      s.purchased = clampN(s.purchased + clampN(count));
+      writeSplit(s);
+      return persistNow();
+    }
+  };
+  window.IZZA_CRAFT = API;
+
+  /* ---- Monkey-patch legacy writes so old game code “just works” ----
+   * If a mini-game sets any of the classic craft keys (directly or via helpers),
+   * we compute the delta and book it to EARNED by default.
+   * Purchases can temporarily opt-in via IZZA_CRAFT.__purchaseMode.
+   */
+  const _setItem = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = function(k, v){
+    try{
+      if (CRAFT_KEYS.includes(k)){
+        const s = readSplit();
+        const nextTotal = clampN(parseInt(v,10) || 0);
+        const curTotal  = totalFromSplit(s);
+        if (nextTotal !== curTotal){
+          const delta = nextTotal - curTotal;
+          if (delta > 0){
+            // Decide which bucket to increment
+            if (window.IZZA_CRAFT && window.IZZA_CRAFT.__purchaseMode === true){
+              s.purchased = clampN(s.purchased + delta);
+            } else {
+              s.earned = clampN(s.earned + delta);
+            }
+            writeSplit(s);
+            // Don’t forward the write; we already updated compat keys above
+            return;
+          } else {
+            // Reductions: take from purchased first, then earned
+            let need = Math.abs(delta);
+            const takePurchased = Math.min(s.purchased, need); s.purchased -= takePurchased; need -= takePurchased;
+            const takeEarned    = Math.min(s.earned, need);    s.earned    -= takeEarned;
+            writeSplit(s);
+            return;
+          }
+        }
+      }
+    }catch(_){}
+    return _setItem(k, v);
+  };
+
+  // Purchase helper: run a function while routing deltas to purchased
+  API.withPurchase = async function(fn){
+    try{
+      window.IZZA_CRAFT.__purchaseMode = true;
+      return await Promise.resolve().then(fn);
+    } finally {
+      window.IZZA_CRAFT.__purchaseMode = false;
+    }
+  };
+
+  // Make sure legacy reads show the combined value everywhere
+  function syncLegacyFromSplit(){
+    const s = readSplit(); const total = totalFromSplit(s);
+    for (const k of CRAFT_KEYS){ try{ _setItem(k, String(total)); }catch(_){} }
+  }
+  syncLegacyFromSplit();
+
+  // Persist on leave/visibility (works in Arena & all mini-games)
+  const persistHandler = ()=>{ try{ persistNow(); }catch(_){} };
+  window.addEventListener('pagehide',    persistHandler, { passive:true });
+  document.addEventListener('visibilitychange', ()=>{ if (document.hidden) persistHandler(); }, { passive:true });
+
+  // Optional: listen for split changes from other tabs
+  window.addEventListener('storage', (e)=>{
+    if (!e) return;
+    if (e.key === SPLIT_KEY || (e.key && CRAFT_KEYS.includes(e.key))) {
+      syncLegacyFromSplit();
+      try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+    }
+  }, { passive:true });
+})();
     // ---------- Leaderboard shim (uses same endpoints mini-games/Arena expect) ----------
   function bearerHeaders(base) {
     const h = Object.assign({'content-type':'application/json'}, base||{});
