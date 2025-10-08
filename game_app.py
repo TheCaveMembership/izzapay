@@ -787,6 +787,113 @@ def _ensure_credit_tables(cx):
     );
     """)
 
+# ========= DRAFTS & PER-CREDIT (v2) =========
+def _ensure_draft_tables(cx):
+    cx.executescript("""
+    CREATE TABLE IF NOT EXISTS crafting_drafts(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      config TEXT NOT NULL,     -- JSON of {category,part,name,featureFlags,featureLevels,...}
+      price_pi REAL NOT NULL,
+      price_ic INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',  -- 'open'|'minted'
+      crafted_item_id INTEGER,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_crafting_drafts_user ON crafting_drafts(user_id);
+    """)
+
+def _draft_upsert(cx, user_id: int, config: dict):
+    _ensure_draft_tables(cx)
+    price = _price_from_config(config or {})
+    # upsert: keep only one 'open' draft per user (or create a new)
+    row = cx.execute("SELECT id FROM crafting_drafts WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
+                     (user_id,)).fetchone()
+    if row:
+        cx.execute("""UPDATE crafting_drafts
+                      SET config=?, price_pi=?, price_ic=?, updated_at=CURRENT_TIMESTAMP
+                      WHERE id=?""",
+                   (json.dumps(config), price['pi'], price['ic'], row['id']))
+        draft_id = row['id']
+    else:
+        cx.execute("""INSERT INTO crafting_drafts(user_id, config, price_pi, price_ic)
+                      VALUES(?,?,?,?)""",
+                   (user_id, json.dumps(config), price['pi'], price['ic']))
+        draft_id = cx.execute("SELECT last_insert_rowid() AS id").fetchone()['id']
+    return draft_id, price
+
+def _draft_get(cx, draft_id: int):
+    _ensure_draft_tables(cx)
+    row = cx.execute("""SELECT id, user_id, config, price_pi, price_ic, status, crafted_item_id
+                        FROM crafting_drafts WHERE id=?""", (draft_id,)).fetchone()
+    if not row:
+        return None
+    cfg = {}
+    try:
+        cfg = json.loads(row['config'] or "{}")
+    except Exception:
+        cfg = {}
+    return {
+        'id': row['id'],
+        'user_id': row['user_id'],
+        'config': cfg,
+        'price': {'pi': float(row['price_pi']), 'ic': int(row['price_ic'])},
+        'status': row['status'],
+        'crafted_item_id': row['crafted_item_id']
+    }
+
+def _ensure_credit_tables_v2(cx):
+    cx.executescript("""
+    CREATE TABLE IF NOT EXISTS crafting_credits_v2(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      value_ic INTEGER NOT NULL,      -- how much this credit covers in IC
+      tier TEXT,                      -- 'base'|'pro'|etc (optional)
+      caps TEXT,                      -- JSON: {"allowFx":bool,"maxMeterLevel":int}
+      state TEXT NOT NULL DEFAULT 'available',  -- 'available'|'used'
+      reserved_draft_id INTEGER,
+      source TEXT,                    -- 'earned'|'purchase'|<gateway>
+      uniq TEXT UNIQUE,               -- idempotency key (e.g., order:<id>)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      used_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_crafting_credits_v2_user ON crafting_credits_v2(user_id, state);
+    """)
+
+def _issue_credit(cx, user_id: int, value_ic: int, tier: str, caps: dict, source: str, uniq: str|None):
+    _ensure_credit_tables_v2(cx)
+    if uniq:
+        exists = cx.execute("SELECT 1 FROM crafting_credits_v2 WHERE uniq=?", (uniq,)).fetchone()
+        if exists:
+            return
+    cx.execute("""INSERT INTO crafting_credits_v2(user_id, value_ic, tier, caps, state, source, uniq)
+                  VALUES(?,?,?,?, 'available', ?, ?)""",
+               (user_id, int(value_ic), (tier or ''), json.dumps(caps or {}), (source or ''), uniq))
+
+def _list_available_credits(cx, user_id: int):
+    _ensure_credit_tables_v2(cx)
+    rows = cx.execute("""SELECT id, value_ic, tier, COALESCE(caps,'{}') AS caps
+                         FROM crafting_credits_v2
+                         WHERE user_id=? AND state='available'
+                         ORDER BY value_ic ASC, id ASC""", (user_id,)).fetchall()
+    out = []
+    for r in rows:
+        c = {}
+        try: c = json.loads(r['caps'] or "{}")
+        except: c = {}
+        out.append({'id': r['id'], 'value_ic': int(r['value_ic']), 'tier': r['tier'], 'caps': c})
+    return out
+
+def _use_credit(cx, credit_id: int, draft_id: int):
+    _ensure_credit_tables_v2(cx)
+    cx.execute("""UPDATE crafting_credits_v2
+                  SET state='used', reserved_draft_id=?, used_at=CURRENT_TIMESTAMP
+                  WHERE id=? AND state='available'""", (draft_id, credit_id))
+    # success check
+    row = cx.execute("SELECT changes() AS c").fetchone()
+    return bool(row and int(row['c']) > 0)
+
 def _credit_add(cx, user_id:int, delta:int, reason:str, uniq:str|None=None):
     if delta == 0:
         return
@@ -820,6 +927,67 @@ def _json_ok(**kw):
 def _json_err(reason="unknown"):
     return jsonify({"ok": False, "reason": str(reason)}), 400
 
+# ========= PRICE RULES (mirror of client) =========
+COIN_PER_PI = 2000
+BASE_PI = 0.25           # base visual price in Pi
+BASE_IC = 500            # base IC (kept for reference)
+TOGGLE_INC_PI = 0.15     # per-toggle (and per extra meter level) in Pi
+
+def _allowed_for(category: str, part: str):
+    c = (category or '').lower()
+    p = (part or '').lower()
+    if c == 'weapon' and (p in ('gun', 'hands')):
+        return {'toggles': ['dmgBoost','fireRate','tracerFx','autoFire'],
+                'meters':  ['dmgBoost','fireRate']}
+    if c == 'weapon' and p == 'melee':
+        return {'toggles': ['dmgBoost','swingRate','swingFx'],
+                'meters':  ['dmgBoost','swingRate']}
+    if c == 'armour' and p == 'legs':
+        return {'toggles': ['speedBoost'], 'meters': ['speedBoost']}
+    if c == 'armour' and p in ('helmet','vest'):
+        return {'toggles': ['dmgReduction'], 'meters': ['dmgReduction']}
+    return {'toggles': [], 'meters': []}
+
+def _price_from_config(cfg: dict):
+    """Return {'pi': float, 'ic': int} based on config {category, part, featureFlags, featureLevels}."""
+    F = (cfg or {}).get('featureFlags') or {}
+    L = (cfg or {}).get('featureLevels') or {}
+    allow = _allowed_for(cfg.get('category',''), cfg.get('part',''))
+
+    pi = BASE_PI
+    for key in allow['toggles']:
+        if not F.get(key): 
+            continue
+        pi += TOGGLE_INC_PI
+        if key in allow['meters']:
+            lvl = int(L.get(key) or 1)
+            if lvl > 1:
+                pi += TOGGLE_INC_PI * (lvl - 1)
+
+    ic = round(pi * COIN_PER_PI)
+    return {'pi': round(pi, 2), 'ic': int(ic)}
+
+def _config_allowed_by_caps(cfg: dict, caps: dict):
+    """
+    caps: {'allowFx': bool, 'maxMeterLevel': int}
+    - Disallow FX/autoFire if allowFx is False
+    - Enforce meter level ceilings
+    """
+    caps = caps or {}
+    allow_fx = bool(caps.get('allowFx', False))
+    max_lvl  = int(caps.get('maxMeterLevel', 1))
+    F = (cfg or {}).get('featureFlags') or {}
+    L = (cfg or {}).get('featureLevels') or {}
+
+    if not allow_fx and (F.get('tracerFx') or F.get('swingFx') or F.get('autoFire')):
+        return False
+    for _, lvl in (L or {}).items():
+        try:
+            if int(lvl) > max_lvl:
+                return False
+        except Exception:
+            return False
+    return True
 
 @crafting_api.post("/ai_svg")
 def crafting_ai_svg():
@@ -855,6 +1023,31 @@ def crafting_mine():
 
 # Create-product-from-craft helper (prefills the merchant form)
 craft_prefill_bp = Blueprint("craft_prefill_bp", __name__)
+
+@crafting_api.post("/draft")
+def crafting_draft_upsert():
+    u = current_user_row()
+    if not u:
+        return _json_err("not_logged_in")
+    data = request.get_json(silent=True) or {}
+    config = data.get("config") or {}
+    with conn() as cx:
+        draft_id, price = _draft_upsert(cx, int(u["id"]), config)
+        return _json_ok(draftId=draft_id, price=price)
+
+@crafting_api.get("/draft/<int:draft_id>")
+def crafting_draft_get(draft_id: int):
+    u = current_user_row()
+    if not u:
+        return _json_err("not_logged_in")
+    with conn() as cx:
+        d = _draft_get(cx, draft_id)
+        if not d or int(d['user_id']) != int(u['id']):
+            return _json_err("not_found")
+        # recompute price just in case rules changed
+        fresh = _price_from_config(d['config'])
+        d['price'] = fresh
+        return _json_ok(draft=d, price=fresh)
 
 @craft_prefill_bp.post("/api/merchant/create_product_from_craft")
 def create_product_from_craft():
@@ -907,8 +1100,150 @@ def crafting_credit_grant():
 
         uniq = f"order:{int(order_id)}" if order_id else None
         _credit_add(cx, user_id, +amount, reason="single-mint", uniq=uniq)
+        # Also issue one v2 "base" credit so new mint flow can use it
+_issue_credit(
+    cx,
+    user_id,
+    value_ic=BASE_IC,  # 500 IC basic credit
+    tier='base',
+    caps={'allowFx': False, 'maxMeterLevel': 1},
+    source='earned',
+    uniq=uniq  # keeps idempotency if order_id present
+)
         return _json_ok(granted=amount)
 
+@crafting_api.post("/credits/list")
+def crafting_credits_list():
+    u = current_user_row()
+    if not u:
+        return _json_err("not_logged_in")
+    with conn() as cx:
+        rows = _list_available_credits(cx, int(u['id']))
+        return _json_ok(credits=rows)
+
+@crafting_api.post("/credits/quote")
+def crafting_credits_quote():
+    u = current_user_row()
+    if not u:
+        return _json_err("not_logged_in")
+    data = request.get_json(silent=True) or {}
+    draft_id = int(data.get("draftId") or 0)
+    if draft_id <= 0:
+        return _json_err("bad_draft")
+    with conn() as cx:
+        d = _draft_get(cx, draft_id)
+        if not d or int(d['user_id']) != int(u['id']):
+            return _json_err("not_found")
+        price = _price_from_config(d['config'])
+        avail = _list_available_credits(cx, int(u['id']))
+        eligible = [c['id'] for c in avail
+                    if int(c['value_ic']) >= int(price['ic']) and _config_allowed_by_caps(d['config'], c['caps'])]
+        return _json_ok(price=price, eligibleCredits=eligible)
+
+@crafting_api.post("/credits/issue")
+def crafting_credit_issue():
+    """
+    Issue a per-credit voucher (used by merchant on successful Pi payment).
+    JSON: { username?, value_ic, tier, caps, source, uniq }
+    """
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip().lstrip("@")
+    value_ic = int(data.get("value_ic") or 0)
+    tier     = (data.get("tier") or "pro").strip()
+    caps     = data.get("caps") or {}
+    source   = (data.get("source") or "purchase").strip()
+    uniq     = (data.get("uniq") or None)
+
+    if value_ic <= 0:
+        return _json_err("bad_amount")
+
+    # Resolve user_id
+    with conn() as cx:
+        user_id = None
+        if username:
+            r = cx.execute("SELECT id FROM users WHERE lower(pi_username)=lower(?)", (username,)).fetchone()
+            if r: user_id = int(r["id"])
+        if not user_id:
+            u = current_user_row()
+            if u: user_id = int(u["id"])
+        if not user_id:
+            return _json_err("user-not-found")
+
+        _issue_credit(cx, user_id, value_ic=value_ic, tier=tier, caps=caps, source=source, uniq=uniq)
+        return _json_ok(issued=value_ic, tier=tier)
+
+@crafting_api.post("/mint")
+def crafting_mint():
+    u = current_user_row()
+    if not u:
+        return _json_err("not_logged_in")
+    data = request.get_json(silent=True) or {}
+    draft_id = int(data.get("draftId") or 0)
+    if draft_id <= 0:
+        return _json_err("bad_draft")
+
+    with conn() as cx:
+        d = _draft_get(cx, draft_id)
+        if not d or int(d['user_id']) != int(u['id']):
+            return _json_err("not_found")
+        if d['status'] == 'minted':
+            return _json_ok(already=True, craftedId=d['crafted_item_id'])
+
+        # choose smallest eligible credit
+        price = _price_from_config(d['config'])
+        avail = _list_available_credits(cx, int(u['id']))
+        candidates = [c for c in avail
+                      if int(c['value_ic']) >= int(price['ic']) and _config_allowed_by_caps(d['config'], c['caps'])]
+        candidates.sort(key=lambda x: (int(x['value_ic']), int(x['id'])))
+        if not candidates:
+            return _json_err("insufficient-credit")
+        chosen = candidates[0]
+
+        # mark used (atomic-ish)
+        if not _use_credit(cx, int(chosen['id']), draft_id):
+            return _json_err("credit-race")  # was consumed concurrently
+
+        # persist crafted item
+        cx.execute("""
+          CREATE TABLE IF NOT EXISTS crafted_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT,
+            svg TEXT,
+            sku TEXT,
+            image TEXT,
+            meta TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        """)
+
+        cfg = d['config'] or {}
+        name = (cfg.get('name') or 'Untitled')[:160]
+        category = (cfg.get('category') or '')[:40]
+        part = (cfg.get('part') or '')[:20]
+        # SVG comes from client normalize; store what client posts later if needed
+        svg = (cfg.get('svg') or '')
+        meta = {
+            'category': category,
+            'part': part,
+            'featureFlags': cfg.get('featureFlags') or {},
+            'featureLevels': cfg.get('featureLevels') or {},
+            'tracerPreset': cfg.get('tracerPreset'),
+            'swingPreset':  cfg.get('swingPreset'),
+            'price_ic': price['ic'],
+            'price_pi': price['pi']
+        }
+        cx.execute(
+            "INSERT INTO crafted_items(user_id, name, svg, sku, image, meta) VALUES(?,?,?,?,?,?)",
+            (int(u['id']), name, svg, '', '', json.dumps(meta))
+        )
+        crafted_id = cx.execute("SELECT last_insert_rowid() AS id").fetchone()['id']
+
+        # close draft
+        cx.execute("UPDATE crafting_drafts SET status='minted', crafted_item_id=? WHERE id=?",
+                   (crafted_id, draft_id))
+
+        return _json_ok(craftedId=crafted_id, creditId=chosen['id'])
 
 @crafting_api.post("/mine")
 def crafting_mine_post():
