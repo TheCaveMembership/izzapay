@@ -233,24 +233,25 @@ function readLeaderboardLocals(){
       if (!seed) return;
 
             // INVENTORY
-      if (seed.inventory && typeof seed.inventory === 'object'){
-        try{
-          // Install server inventory
-          if (IZZA?.api?.setInventory) IZZA.api.setInventory(seed.inventory);
-          else localStorage.setItem('izzaInventory', JSON.stringify(seed.inventory));
+if (seed.inventory && typeof seed.inventory === 'object'){
+  try{
+    // Build what we'll install ONCE: merge cache -> full items
+    let toInstall = JSON.parse(JSON.stringify(seed.inventory));
+    toInstall = restoreArtFromCache(toInstall);
 
-          // Immediately restore cached art so UI has icons/overlays
-          try{
-            const cur = IZZA?.api?.getInventory ? (IZZA.api.getInventory()||{}) :
-              JSON.parse(localStorage.getItem('izzaInventory')||'{}');
-            restoreArtFromCache(cur);
-            if (IZZA?.api?.setInventory) IZZA.api.setInventory(cur);
-            else localStorage.setItem('izzaInventory', JSON.stringify(cur));
-          }catch(_){}
+    if (IZZA?.api?.setInventory) IZZA.api.setInventory(toInstall);
+    else localStorage.setItem('izzaInventory', JSON.stringify(toInstall));
 
-          try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
-        }catch(e){ console.warn('[persist] inv hydrate failed', e); }
+    // (Optional) ensure cache has anything new the server sent (harmless)
+    try{
+      for (const [k, it] of Object.entries(toInstall||{})){
+        cacheItemArt(k, it);
       }
+    }catch(_){}
+
+    try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
+  }catch(e){ console.warn('[persist] inv hydrate failed', e); }
+}
 
       // WALLET COINS (on-hand) — take the GREATER of local vs server, then push up later if local won
       if (Number.isFinite(seed.coins)){
