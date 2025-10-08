@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from db import conn
 import requests  # <-- ADDED for LibreTranslate proxy
 import time
-import uuid  # <-- ADD THIS
 
 load_dotenv()
 
@@ -813,64 +812,6 @@ def _credit_get(cx, user_id:int) -> int:
     row = cx.execute("SELECT balance FROM crafting_credits WHERE user_id=?", (user_id,)).fetchone()
     return int(row["balance"]) if row and row["balance"] is not None else 0
 
-# ========= CRAFTING CREDITS: buckets + quotes (new) =========
-def _ensure_credit_bucket_tables(cx):
-    cx.executescript("""
-    CREATE TABLE IF NOT EXISTS user_credit_buckets(
-      user_id INTEGER NOT NULL,
-      unit_value_ic INTEGER NOT NULL,   -- how much player paid per credit at issuance
-      qty INTEGER NOT NULL DEFAULT 0,   -- number of credits of this grade
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(user_id, unit_value_ic)
-    );
-
-    CREATE TABLE IF NOT EXISTS craft_quotes(
-      id TEXT PRIMARY KEY,              -- uuid
-      user_id INTEGER NOT NULL,
-      sku TEXT NOT NULL,
-      qty INTEGER NOT NULL,
-      price_ic INTEGER NOT NULL,        -- total IC price for this craft
-      min_unit_value_ic INTEGER NOT NULL, -- floor: credit grade required (>=)
-      expires_at INTEGER NOT NULL,      -- unix ms
-      used_at INTEGER                   -- null until consumed
-    );
-
-    CREATE TABLE IF NOT EXISTS craft_spend_ledger(
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      quote_id TEXT NOT NULL UNIQUE,
-      sku TEXT NOT NULL,
-      qty INTEGER NOT NULL,
-      spent_ic INTEGER NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-
-# -------- Server-owned pricebook + helpers (new) --------
-# sku → (unit_price_ic, min_unit_value_ic)
-_PRICEBOOK = {
-    "craft:cardboard_box": (25, 1),
-    "craft:pumpkin_mask":  (60, 2),
-    "craft:pumpkin_set":   (180, 2),
-    "craft:single_mint": (40, 1),  # base price for single mint / visual craft
-}
-
-def _compute_craft_price(sku: str, qty: int):
-    p = _PRICEBOOK.get(sku)
-    if not p:
-        raise ValueError("unknown_sku")
-    unit_price, min_floor = p
-    return unit_price * max(1, qty), int(min_floor)
-
-def _now_ms():
-    return int(time.time() * 1000)
-
-def _quote_ttl_ms():
-    return 5 * 60 * 1000  # 5 minutes
-
-def _new_quote_id():
-    return uuid.uuid4().hex
-
 def _json_ok(**kw):
     out = {"ok": True}
     out.update(kw)
@@ -911,152 +852,6 @@ def crafting_mine():
         current_app.logger.exception("crafting_mine failed")
         return _json_err("server_error")
 
-@crafting_api.get("/credits")
-def crafting_credits_get():
-    u = current_user_row()
-    if not u:
-        return _json_ok(balance=0, buckets=[])
-    with conn() as cx:
-        _ensure_credit_bucket_tables(cx)
-        rows = cx.execute(
-            "SELECT unit_value_ic, qty FROM user_credit_buckets WHERE user_id=? AND qty>0 ORDER BY unit_value_ic",
-            (u["id"],)
-        ).fetchall()
-        total = sum(int(r["qty"]) for r in rows)
-        buckets = [{"unit_value_ic": int(r["unit_value_ic"]), "qty": int(r["qty"])} for r in rows]
-        return _json_ok(balance=total, buckets=buckets)
-
-@crafting_api.get("/collectibles")
-def crafting_collectibles_get():
-    # Core v3 expects this; ok to return empty map for now.
-    return _json_ok(items={})
-
-@crafting_api.post("/quote")
-def crafting_quote():
-    u = current_user_row()
-    if not u:
-        return _json_err("not_logged_in")
-    j = request.get_json(force=True) or {}
-    sku = (j.get("sku") or "").strip()
-    qty = int(j.get("qty") or 1)
-
-    try:
-        price_ic, floor_ic = _compute_craft_price(sku, qty)
-    except ValueError:
-        return _json_err("unknown_sku")
-
-    qid = _new_quote_id()
-    expires = _now_ms() + _quote_ttl_ms()
-
-    with conn() as cx:
-        _ensure_credit_bucket_tables(cx)
-        cx.execute(
-            "INSERT INTO craft_quotes(id, user_id, sku, qty, price_ic, min_unit_value_ic, expires_at) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (qid, u["id"], sku, qty, price_ic, floor_ic, expires)
-        )
-    return _json_ok(quote_id=qid, price_ic=price_ic, min_unit_value_ic=floor_ic, expires_at=expires)
-
-
-@crafting_api.post("/validate")
-def crafting_validate():
-    u = current_user_row()
-    if not u:
-        return _json_err("not_logged_in")
-    qid = (request.get_json(force=True) or {}).get("quote_id")
-    if not qid:
-        return _json_err("missing_quote")
-
-    with conn() as cx:
-        row = cx.execute(
-            "SELECT id, price_ic, min_unit_value_ic, expires_at, used_at "
-            "FROM craft_quotes WHERE id=? AND user_id=?",
-            (qid, u["id"])
-        ).fetchone()
-        if not row:
-            return _json_err("not_found")
-        if row["used_at"]:
-            return _json_err("already_used")
-        if int(row["expires_at"]) < _now_ms():
-            return _json_err("expired")
-
-        return _json_ok(
-            quote_id=qid,
-            price_ic=int(row["price_ic"]),
-            min_unit_value_ic=int(row["min_unit_value_ic"]),
-            expires_at=int(row["expires_at"])
-        )
-
-
-@crafting_api.post("/pay_ic")
-def crafting_pay_ic():
-    u = current_user_row()
-    if not u:
-        return _json_err("not_logged_in")
-    qid = (request.get_json(force=True) or {}).get("quote_id")
-    if not qid:
-        return _json_err("missing_quote")
-
-    with conn() as cx:
-        _ensure_credit_bucket_tables(cx)
-
-        # Begin transactional section
-        cx.execute("BEGIN IMMEDIATE")
-
-        q = cx.execute(
-            "SELECT sku, qty, price_ic, min_unit_value_ic, expires_at, used_at "
-            "FROM craft_quotes WHERE id=? AND user_id=?",
-            (qid, u["id"])
-        ).fetchone()
-        if not q:
-            cx.execute("ROLLBACK"); return _json_err("not_found")
-        if q["used_at"]:
-            cx.execute("ROLLBACK"); return _json_err("already_used")
-        if int(q["expires_at"]) < _now_ms():
-            cx.execute("ROLLBACK"); return _json_err("expired")
-
-        need  = int(q["price_ic"])
-        floor = int(q["min_unit_value_ic"])
-
-        rows = cx.execute(
-            "SELECT unit_value_ic, qty FROM user_credit_buckets "
-            "WHERE user_id=? AND unit_value_ic>=? AND qty>0 "
-            "ORDER BY unit_value_ic ASC",
-            (u["id"], floor)
-        ).fetchall()
-
-        remaining = need
-        to_update = []
-        for r in rows:
-            if remaining <= 0: break
-            have = int(r["qty"])
-            take = min(have, remaining)
-            if take > 0:
-                to_update.append((int(r["unit_value_ic"]), take))
-                remaining -= take
-
-        if remaining > 0:
-            cx.execute("ROLLBACK")
-            return _json_err("insufficient_eligible")
-
-        # Apply deductions
-        for unit_value_ic, take in to_update:
-            cx.execute(
-                "UPDATE user_credit_buckets SET qty = qty - ? "
-                "WHERE user_id=? AND unit_value_ic=? AND qty>=?",
-                (take, u["id"], unit_value_ic, take)
-            )
-
-        # Mark quote used + ledger entry
-        cx.execute("UPDATE craft_quotes SET used_at=? WHERE id=?", (_now_ms(), qid))
-        cx.execute(
-            "INSERT INTO craft_spend_ledger(user_id, quote_id, sku, qty, spent_ic) VALUES(?,?,?,?,?)",
-            (u["id"], qid, q["sku"], q["qty"], need)
-        )
-
-        cx.execute("COMMIT")
-        return _json_ok(spent_ic=need, quote_id=qid)
-
 
 # Create-product-from-craft helper (prefills the merchant form)
 craft_prefill_bp = Blueprint("craft_prefill_bp", __name__)
@@ -1093,46 +888,26 @@ def create_product_from_craft():
 def crafting_credit_grant():
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip().lstrip("@")
-    amount   = int(data.get("amount") or 0)          # number of credits to grant
-    unit_val = int(data.get("unit_value_ic") or 1)   # how much the player paid per credit
+    amount   = int(data.get("amount") or 0)
     order_id = data.get("order_id")
-    if amount <= 0 or unit_val <= 0:
+    if amount <= 0:
         return _json_err("bad-amount")
 
+    # Resolve user_id either from username or current session
     with conn() as cx:
-        _ensure_credit_bucket_tables(cx)
-
-        # resolve user_id
         user_id = None
         if username:
             r = cx.execute("SELECT id FROM users WHERE lower(pi_username)=lower(?)", (username,)).fetchone()
-            if r:
-                user_id = int(r["id"])
+            if r: user_id = int(r["id"])
         if not user_id:
             u = current_user_row()
-            if u:
-                user_id = int(u["id"])
+            if u: user_id = int(u["id"])
         if not user_id:
             return _json_err("user-not-found")
 
-        # idempotency using legacy ledger uniq
         uniq = f"order:{int(order_id)}" if order_id else None
-        if uniq:
-            row = cx.execute("SELECT 1 FROM crafting_credit_ledger WHERE uniq=?", (uniq,)).fetchone()
-            if row:
-                return _json_ok(granted=0)
-
-        # legacy mirror for visibility
         _credit_add(cx, user_id, +amount, reason="single-mint", uniq=uniq)
-
-        # bucketed grant
-        cx.execute("""
-          INSERT INTO user_credit_buckets(user_id, unit_value_ic, qty)
-          VALUES(?,?,?)
-          ON CONFLICT(user_id,unit_value_ic) DO UPDATE SET qty = qty + excluded.qty
-        """, (user_id, unit_val, amount))
-
-        return _json_ok(granted=amount, unit_value_ic=unit_val)
+        return _json_ok(granted=amount)
 
 
 @crafting_api.post("/mine")
