@@ -57,12 +57,16 @@
       min-height:520px;
       border:1px solid var(--line); border-radius:14px; background:#042b1d;
       overflow:hidden;
+      background:
+        #042b1d
+        url("/static/game/images/solitaire-bg-bright.jpg")
+        center/cover no-repeat fixed;
     }
     @media (max-width:640px){
       .arena{ height:calc(100vh - 96px - var(--safe-b)); min-height:520px; }
     }
 
-    /* HUD — no draw control here (moved to start screen) */
+    /* HUD */
     .hud{position:absolute;left:10px;right:10px;top:calc(8px + var(--safe-t));z-index:9;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:nowrap}
     .hud .left,.hud .right{display:flex;gap:8px;align-items:center;min-width:0}
     .pill{background:var(--hud);border:1px solid var(--hudLine);backdrop-filter:blur(6px);
@@ -79,8 +83,11 @@
       display:grid; gap:var(--gutter);
       grid-template-rows:auto 1fr;
       overflow:auto; padding-bottom:calc(10px + var(--safe-b));
-      border-radius:12px; background:#0e5b3f;
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+      border-radius:12px; background: rgba(14, 91, 63, 0.82);
+      backdrop-filter: blur(3px);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.06),
+        inset 0 12px 40px rgba(0,0,0,.18);
     }
     .row{display:grid;grid-template-columns:repeat(7, minmax(0,1fr));gap:var(--gutter)}
     .row .cell{
@@ -94,16 +101,32 @@
       position:absolute; left:8px; top:6px; color:#9bd7b2; font-size:10px; pointer-events:none;
       letter-spacing:.5px
     }
-    .row .cell.foundation > span{opacity:.85}
-    .pile{position:relative;width:100%;height:100%}
+
+    /* Foundation placeholders: big GOLD "A" */
+    .row .cell.foundation > span{ display:none; }
+    .row .cell.foundation::after{
+      content: 'A';
+      position: absolute;
+      left: 50%; top: 50%; transform: translate(-50%, -50%);
+      font-weight: 1000;
+      font-size: calc(var(--cardW) * 0.72);
+      color: #ffd86b; /* GOLD */
+      text-shadow:
+        0 2px 0 rgba(0,0,0,.12),
+        0 10px 24px rgba(0,0,0,.35);
+      pointer-events: none;
+    }
 
     /* Cards */
+    .pile{position:relative;width:100%;height:100%}
     .card{
       position:absolute; width:var(--cardW); height:var(--cardH);
       border-radius:12px; background:#fff; border:1px solid rgba(0,0,0,.14);
-      box-shadow:0 4px 12px rgba(0,0,0,.28); user-select:none; touch-action:none;
-      overflow:hidden;
-      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+      box-shadow:
+        0 6px 16px rgba(0,0,0,.28),
+        0 1px 0 rgba(255,255,255,.6) inset;
+      user-select:none; touch-action:none; overflow:hidden;
+      -webkit-user-select:none; -webkit-touch-callout:none;
     }
     .card.back{
       background:linear-gradient(180deg,#184a86,#0f2c54);
@@ -114,10 +137,9 @@
     .pip{position:absolute; font-weight:900; line-height:1; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
     .pip.tl{left:8px; top:6px}
     .pip.br{right:8px; bottom:6px; transform:rotate(180deg)}
-    .pip .rank{display:block; font-size:calc(var(--cardW) * 0.23)}
-    .pip .suit{display:block; font-size:calc(var(--cardW) * 0.20); margin-top:2px}
-    .centerSuit{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-      font-size:calc(var(--cardW) * 0.45); opacity:.16}
+    .pip .rank{display:block; font-size:calc(var(--cardW) * 0.32); letter-spacing:.2px}
+    .pip .suit{display:block; font-size:calc(var(--cardW) * 0.22); margin-top:1px; opacity:.9}
+    .centerSuit{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:calc(var(--cardW) * 0.58); opacity:.12}
     .red{color:#c31e2e} .black{color:#111}
 
     .being-dragged{visibility:hidden}
@@ -152,70 +174,17 @@
     .chip input{appearance:none; width:14px; height:14px; border-radius:50%; border:1px solid var(--line); display:inline-block}
     .chip input:checked{background:#5bd68a}
 
-    /* --- WASTE area widened earlier --- */
+    /* Layout tweaks */
     #rowTop .cell.wasteWide{ grid-column: span 2; }
     #waste{ padding-right: 6px; }
 
-    /* Kill selection/callout for entire arena (extra safety) */
+    /* Labels: Stock shows GOLD "D"; Waste shows nothing */
+    #rowTop .cell .slotLabel{ font-weight:900; letter-spacing:.2px; }
+    #rowTop .cell .stockLbl{ color:#ffd86b; }       /* GOLD D */
+    #rowTop .cell.wasteWide > span{ display:none; } /* Hide waste label entirely */
+
+    /* Kill selection */
     .arena, .arena *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-    /* ===== IZZA SOLITAIRE — visual polish only ===== */
-
-/* Brighter felt bg image behind the board */
-.arena{
-  background:
-    #042b1d
-    url("/static/game/images/solitaire-bg-bright.jpg")
-    center/cover no-repeat fixed;
-}
-
-/* Give the board a subtle glass card table feel on top of the bg */
-.board{
-  background: rgba(14, 91, 63, 0.82);
-  backdrop-filter: blur(3px);
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,.06),
-    inset 0 12px 40px rgba(0,0,0,.18);
-}
-
-/* Card corner text: larger rank, tidy suit, crisper weight */
-.card .pip .rank{
-  font-size: calc(var(--cardW) * 0.32);    /* was ~0.23 */
-  letter-spacing: .2px;
-}
-.card .pip .suit{
-  font-size: calc(var(--cardW) * 0.22);    /* was ~0.20 */
-  margin-top: 1px;
-  opacity: .9;
-}
-
-/* Slightly larger faint center suit like premium solitaire UIs */
-.card .centerSuit{
-  font-size: calc(var(--cardW) * 0.58);    /* was ~0.45 */
-  opacity: .12;
-}
-
-/* Foundation placeholders: show big "A" and hide tiny labels */
-.row .cell.foundation > span{ display:none; }
-.row .cell.foundation::after{
-  content: 'A';
-  position: absolute;
-  left: 50%; top: 50%; transform: translate(-50%, -50%);
-  font-weight: 1000;
-  font-size: calc(var(--cardW) * 0.72);
-  color: rgba(255,255,255,.92);
-  text-shadow:
-    0 2px 0 rgba(0,0,0,.12),
-    0 10px 24px rgba(0,0,0,.35);
-  pointer-events: none;
-}
-
-/* Touch of depth on cards so the larger pips still feel premium */
-.card{
-  border-radius: 12px;
-  box-shadow:
-    0 6px 16px rgba(0,0,0,.28),
-    0 1px 0 rgba(255,255,255,.6) inset;
-}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -244,8 +213,8 @@
       <div id="board" class="board" aria-label="Solitaire board">
         <!-- Row 1: stock + waste(2 cols) + 4 foundations -->
         <div class="row" id="rowTop">
-          <div class="cell"><div class="pile" id="stock"></div><span>STOCK</span></div>
-          <div class="cell wasteWide"><div class="pile" id="waste"></div><span>WASTE</span></div>
+          <div class="cell"><div class="pile" id="stock"></div><span class="slotLabel stockLbl">D</span></div>
+          <div class="cell wasteWide"><div class="pile" id="waste"></div><span class="slotLabel wasteLbl"></span></div>
           <div class="cell foundation"><div class="pile" id="f1"></div><span>♠ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
           <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
@@ -351,15 +320,12 @@
     }
   }catch(_){}
   function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
-
-  // Ensure ALL nav links (arena/city/game) carry t & u
   document.querySelectorAll('a').forEach(a=>{
     const href=a.getAttribute('href')||'';
     if(href.startsWith('/izza-game/') || href.startsWith('/izza-city') || href.startsWith('/izza')){
       a.href = withAuth(href);
     }
   });
-
   document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>a.href = withAuth(a.getAttribute('href')));
   window._withAuth = withAuth;
 })();
@@ -419,7 +385,7 @@
   window._wallet={ readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon };
 })();
 
-/* ===== Responsive 7-col sizing ===== */
+/* ===== Responsive sizing ===== */
 function sizeBoard(){
   const board=document.querySelector('.board');
   if(!board) return;
@@ -474,18 +440,15 @@ const P={ stock:[], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
 let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
 let FAN=26;
 
-/* ===== Invisible difficulty scheduler ===== */
-const DIFFQ_KEY='izza_sol_diffq_v1'; // queue of buckets to pop from
-// bucket codes: w5 (≤5m), w7 (5–7m), w10 (7–10m), lose (tough)
+/* ===== Difficulty queue (easier bias, no “lose”) ===== */
+const DIFFQ_KEY='izza_sol_diffq_v1';
 function buildDiffQueue(){
   const q=[];
-  // 20-games cycle: 55%/25%/10%/10% -> 11/5/2/2
-  for(let i=0;i<11;i++) q.push('w5');
-  for(let i=0;i<5;i++) q.push('w7');
-  for(let i=0;i<2;i++) q.push('w10');
-  for(let i=0;i<2;i++) q.push('lose');
+  // 80% super-easy (w5), 20% easy (w7)
+  for(let i=0;i<16;i++) q.push('w5');
+  for(let i=0;i<4;i++) q.push('w7');
   // shuffle
-  for(let i=q.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=q[i]; q[i]=q[j]; q[j]=t; }
+  for(let i=q.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [q[i],q[j]]=[q[j],q[i]]; }
   return q;
 }
 function nextBucket(){
@@ -499,13 +462,11 @@ function nextBucket(){
   }catch(_){ return 'w5'; }
 }
 
-/* ===== Deal heuristics (behind the scenes) ===== */
-// Cheap peek helpers on a P-like state
+/* ===== Deal heuristics ===== */
 function topOfTableau(state){ return state.t.map(col=>col[col.length-1]||null); }
 function countFaceDownBelowTops(state){
   let n=0;
   for(const col of state.t){
-    // count face-down cards (all except the last face-up run)
     for(let i=0;i<col.length-1;i++) if(!col[i].face) n++;
   }
   return n;
@@ -517,11 +478,8 @@ function countImmediateTableauMoves(state){
     for(let j=0;j<tops.length;j++){
       if(i===j) continue;
       const a=tops[i], b=tops[j];
-      if(a && b){
-        if(a.color!==b.color && a.rank===b.rank-1) moves++;
-      }
+      if(a && b && a.color!==b.color && a.rank===b.rank-1) moves++;
     }
-    // also: can move a King to an empty if any empty exists (none at start), skip
   }
   return moves;
 }
@@ -532,17 +490,13 @@ function countTopAcesAndDeuces(state){
   return {aces,deuces};
 }
 function firstCycleStockAccess(state, drawMode){
-  // simulate first pass of stock -> waste; count how many of first window cards
-  // would be directly playable onto tableau tops or foundations (naive check).
-  const windowN = drawMode===3 ? 12 : 6; // short window: early access matters most
-  const snapshot = state.stock.slice(-windowN); // top of stock is end of array
+  const windowN = drawMode===3 ? 12 : 6;
+  const snapshot = state.stock.slice(-windowN);
   const tops=topOfTableau(state).filter(Boolean);
   let playable=0, aces=0;
-  for(let i=snapshot.length-1;i>=0;i--){ // draw order
+  for(let i=snapshot.length-1;i>=0;i--){
     const c=snapshot[i];
     if(c.rank===1){ playable++; aces++; continue; }
-    // onto foundations if same suit next needed? (start with Ace only at open)
-    // onto tableau any opposite color + one rank lower
     for(const t of tops){
       if(!t) continue;
       if(c.color!==t.color && c.rank===t.rank-1){ playable++; break; }
@@ -551,7 +505,6 @@ function firstCycleStockAccess(state, drawMode){
   return {playable, aces};
 }
 function columnsWithFlipPotential(state){
-  // columns where top can move somewhere and there's a face-down under it
   let n=0;
   for(let i=0;i<7;i++){
     const col=state.t[i]; if(!col.length) continue;
@@ -559,13 +512,11 @@ function columnsWithFlipPotential(state){
     let hasHidden=false;
     for(let k=0;k<col.length-1;k++) if(!col[k].face){ hasHidden=true; break; }
     if(!hasHidden) continue;
-    // can top go to any other top?
     for(let j=0;j<7;j++){
       if(i===j) continue;
       const tgt=state.t[j]; const b=tgt[tgt.length-1];
-      if(!b){
-        if(top.rank===13){ n++; break; }
-      }else if(top.color!==b.color && top.rank===b.rank-1){ n++; break; }
+      if(!b){ if(top.rank===13){ n++; break; } }
+      else if(top.color!==b.color && top.rank===b.rank-1){ n++; break; }
     }
   }
   return n;
@@ -581,65 +532,46 @@ function evaluateOpening(state, drawMode){
     flips, hidden, stockPlayable:stockPeek.playable, stockAces:stockPeek.aces
   };
 }
-function qualifiesBucket(metrics, bucket){
-  // Looser thresholds at higher minutes; strict for ≤5m. "lose" seeks starvation.
+
+/* Easy thresholds */
+function qualifiesBucket(m, bucket){
   if(bucket==='w5'){
     return (
-      (metrics.acesTop>=1 && metrics.stockAces>=1) &&
-      (metrics.moves>=3) &&
-      (metrics.flips>=2) &&
-      (metrics.stockPlayable>=2)
+      (m.acesTop>=1 && m.stockAces>=1) &&
+      (m.moves>=3) &&
+      (m.flips>=2) &&
+      (m.stockPlayable>=2)
     );
   }
   if(bucket==='w7'){
     return (
-      (metrics.acesTop>=1 || metrics.stockAces>=1) &&
-      (metrics.moves>=2) &&
-      (metrics.flips>=1) &&
-      (metrics.stockPlayable>=1)
-    );
-  }
-  if(bucket==='w10'){
-    return (
-      (metrics.moves>=1) &&
-      (metrics.flips>=1 || metrics.stockPlayable>=1)
-    );
-  }
-  // tough: starve early progress
-  if(bucket==='lose'){
-    return (
-      metrics.acesTop===0 &&
-      metrics.stockAces===0 &&
-      metrics.moves===0 &&
-      metrics.stockPlayable===0 &&
-      metrics.flips===0
+      (m.acesTop>=1 || m.stockAces>=1) &&
+      (m.moves>=2) &&
+      (m.flips>=1) &&
+      (m.stockPlayable>=1)
     );
   }
   return false;
 }
 
-/* ===== Dealing with targeted bucket ===== */
-const EASY_DEAL_TRIES = 15; // baseline from before (kept for fast screening)
+/* Safety predicate: reject starved openings entirely */
+function safeOpening(m){
+  // Must have at least one immediate progress vector and at least one ace in sight
+  return (
+    (m.moves>=1 || m.flips>=1 || m.stockPlayable>=1) &&
+    (m.acesTop>=1 || m.stockAces>=1)
+  );
+}
 
-// cap tries per bucket so we don't spin forever (kept small for perf)
-const MAX_TRIES_BY_BUCKET = {
-  w5: 1200,
-  w7: 900,
-  w10: 700,
-  lose: 500
-};
-
-// 10 minute hard cap
+/* ===== Deal generation (easier, no “guaranteed lose”) ===== */
+const MAX_TRIES_BY_BUCKET = { w5: 1500, w7: 1100 };
 const MAX_MS = 600000;
 
 function cssVarInt(name,fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
 function fmtTime(ms){ const s=Math.max(0,Math.floor(ms/1000)); const m=(s/60)|0; const ss=String(s%60).padStart(2,'0'); return `${String(m).padStart(2,'0')}:${ss}`; }
 
 function dealIntoStateFromDeck(deck){
-  // returns a lightweight cloned initial state to evaluate,
-  // using same dealing logic as the real game.
   const S = { stock:[...deck], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
-  // tableau
   for(let col=0; col<7; col++){
     for(let n=0; n<=col; n++){
       const c=S.stock.pop(); S.t[col].push({...c});
@@ -651,34 +583,43 @@ function dealIntoStateFromDeck(deck){
 }
 
 function generateTargetedDeal(bucket, drawMode){
-  const maxTries = MAX_TRIES_BY_BUCKET[bucket] || 800;
-  let bestDeck=null, bestScore=-1; // fallback if no exact qualifier
+  const maxTries = MAX_TRIES_BY_BUCKET[bucket] || 1000;
+  let bestDeck=null, bestScore=-1;
   for(let tries=0; tries<maxTries; tries++){
     const deck=makeDeck();
     const state=dealIntoStateFromDeck(deck);
     const m=evaluateOpening(state, drawMode);
 
-    // simple scoring to keep a reasonable fallback if thresholds miss
-    const score = (m.acesTop*3)+(m.stockAces*2)+(m.moves*2)+(m.flips*2)+m.stockPlayable-(m.hidden*0.02);
+    // Reject starved starts outright
+    if(!safeOpening(m)) continue;
+
+    // Prefer the requested easy bucket
     if(qualifiesBucket(m, bucket)) return deck;
 
+    // Score for fallback (still easy-ish)
+    const score = (m.acesTop*3)+(m.stockAces*2)+(m.moves*2)+(m.flips*2)+m.stockPlayable-(m.hidden*0.02);
     if(score>bestScore){ bestScore=score; bestDeck=deck; }
   }
-  // fallback: return the best we saw (still pretty nice for w5/w7/w10; for lose it's still rough)
-  return bestDeck || makeDeck();
+  // As a last step, if we somehow didn’t hit the exact bucket, we still return a “safe” opening
+  if(bestDeck) return bestDeck;
+
+  // Final safeguard: loop until safeOpening (should hit very fast)
+  while(true){
+    const deck=makeDeck();
+    const m=evaluateOpening(dealIntoStateFromDeck(deck), drawMode);
+    if(safeOpening(m)) return deck;
+  }
 }
 
 /* ===== Game flow ===== */
 function layoutNew(){
-  // choose hidden bucket for this round
-  const bucket = nextBucket(); // 'w5' | 'w7' | 'w10' | 'lose'
+  const bucket = nextBucket(); // 'w5' | 'w7'
   const drawMode = getDrawPref();
 
   for(let i=0;i<4;i++) P.f[i]=[];
   for(let i=0;i<7;i++) P.t[i]=[];
   P.waste=[];
 
-  // Generate a deck that fits the bucket heuristics (invisible to player)
   const deck = generateTargetedDeal(bucket, drawMode);
   P.stock = deck.map(c=>({ ...c, face:false }));
 
@@ -722,7 +663,7 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (only top is interactive; wider fan preserved)
+  // WASTE
   const wEl=document.getElementById(piles.waste);
   if(P.waste.length){
     const drawMode=getDrawPref();
@@ -802,7 +743,7 @@ function acceptOnTableau(cards,destIdx){
   return head.color!==t.color && head.rank===t.rank-1;
 }
 
-/* ----- DRAW from stock (recycle + draw-1/3) ----- */
+/* ----- DRAW from stock ----- */
 function recycleWasteToStock(){ while(P.waste.length){ const c=P.waste.pop(); c.face=false; P.stock.push(c); } }
 function onDraw(){
   if(!P.stock.length && P.waste.length) recycleWasteToStock();
@@ -874,7 +815,7 @@ const dragLayer=document.getElementById('dragLayer');
 function enableDrag(){
   document.querySelectorAll('.card').forEach(el=>{
     if(el.classList.contains('back')) return;
-    if(el.dataset.locked==='1') return; // non-top waste is visual only
+    if(el.dataset.locked==='1') return;
     el.onpointerdown=(e)=>{
       if(ended) return;
       const where=el.dataset.where || inferWhere(el);
@@ -954,7 +895,6 @@ function onDragEnd(e){
       placed=tryPlaceToFoundation(dragRun.run.cards[0], fIdx);
     }
   }else{
-    // TAP: try to auto-send this top card to foundation
     const id=dragRun.srcId;
     if(id) placed = autoMoveCardToFoundation(id);
   }
@@ -1029,7 +969,6 @@ async function submitLeaderboard(score){
         body:JSON.stringify({game:gameKey, score:score|0})
       }).catch(()=>{});
     }
-    // local cache
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:score|0, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
@@ -1094,7 +1033,7 @@ document.getElementById('rulesBtn').addEventListener('click', ()=>rulesEl.classL
 document.getElementById('rulesClose').addEventListener('click', ()=>rulesEl.classList.remove('show'), {passive:true});
 rulesEl.addEventListener('click', (e)=>{ if(e.target===rulesEl) rulesEl.classList.remove('show'); }, {passive:true});
 
-/* Back to Arcade (and other pages): sync + save first, preserve auth */
+/* Back links: sync + save first */
 document.querySelectorAll('#backBtn,#backBtn2,#startBack,a').forEach(a=>{
   a.addEventListener('click', async (e)=>{
     const href=a.getAttribute('href')||'';
