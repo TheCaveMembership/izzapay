@@ -174,25 +174,16 @@
 
 <script>
 (function(){
-  // ========= Template data (server-rendered) =========
-  const sessionId    = "{{ session_id|e }}";
-  const expectedPi   = {{ expected_pi if expected_pi else 0 }}; // initial server calc (for display)
-  const cartMode     = {{ 'true' if cart_mode else 'false' }};
-  const sandbox      = {{ 'true' if PI_SANDBOX else 'false' }};
-  const appId        = "{{ PI_APP_ID or '' }}";
-  const storeName    = "{{ (i.business_name if i else (m.business_name if m is defined and m else 'IZZA PAY')) | e }}";
-  const redirectSlug = "{{ slug if slug else '' }}";
+  const sessionId   = "{{ session_id|e }}";
+  const amount      = {{ expected_pi if expected_pi else 0 }};
+  const cartMode    = {{ 'true' if cart_mode else 'false' }};
+  const sandbox     = {{ 'true' if PI_SANDBOX else 'false' }};
+  const appId       = "{{ PI_APP_ID or '' }}";
+  const storeName   = "{{ (i.business_name if i else (m.business_name if m is defined and m else 'IZZA PAY')) | e }}";
+  const redirectSlug= "{{ slug if slug else '' }}";
 
-  // Optional item metadata (if a single-item checkout)
-  const itemId       = {{ (i.id if i else 'null') }};
-  const itemSku      = "{{ (i.sku if i else '') | e }}";
-  const craftedItemId= "{{ (i.crafted_item_id if i and i.crafted_item_id else '') | e }}";
-  const merchantSlug = "{{ (m.slug if m is defined and m else (i.merchant_slug if i and i.merchant_slug else '')) | e }}";
-  const fulfillmentKind = "{{ (i.fulfillment_kind if i and i.fulfillment_kind else '') | e }}"; // 'crafting' for credits/items
-
-  // ========= DOM =========
-  const btn   = document.getElementById('payBtn');
-  const msg   = document.getElementById('msg');
+  const btn = document.getElementById('payBtn');
+  const msg = document.getElementById('msg');
 
   const emailEl = document.getElementById('buyer_email');
   const nameEl  = document.getElementById('buyer_name');
@@ -207,7 +198,6 @@
 
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
 
-  // ========= Pi SDK =========
   function initPi(){
     try{
       if (!window.Pi || !Pi.init) return false;
@@ -217,7 +207,7 @@
     }catch(e){ return false; }
   }
 
-  // Recovery: complete previous stuck payments before starting new one
+  /* === EXACT ADD: run completion for a previously stuck payment before starting a new one === */
   function onIncompletePaymentFound(payment){
     try{
       var pid  = payment && (payment.identifier || payment.paymentId || payment.id);
@@ -286,123 +276,68 @@
     };
   }
 
-  // ========= Dynamic pricing quote (server authority) =========
-  // This lets YOUR store apply dynamic pricing for IZZA Crafting items/credit,
-  // without affecting other merchants (server decides when it applies).
-  async function fetchServerQuote(){
-    try{
-      const r = await fetch('/api/checkout/quote', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          session_id: sessionId,
-          // Hints for your backend to decide dynamic rules:
-          item_id: itemId,
-          sku: itemSku,
-          merchant_slug: merchantSlug,
-          crafted_item_id: craftedItemId,
-          fulfillment_kind: fulfillmentKind, // "crafting" for credits/items
-          cart_mode: !!cartMode
-        })
-      });
-      if(!r.ok) throw new Error('quote_bad_status');
-      const j = await r.json();
-      // Expected shape (server-controlled):
-      // { ok:true, amount_pi: 0.1234567, allow_dynamic:true|false, memo?:string, metadata?:{...} }
-      if(!j || !j.ok) throw new Error('quote_not_ok');
-      return j;
-    }catch(e){
-      return null; // fall back to expectedPi if quote fails
-    }
-  }
-
-  // ========= Kickoff =========
   initPi();
 
-  btn?.addEventListener('click', async function(){
+  btn?.addEventListener('click', function(){
     const emailVal = (emailEl?.value || '').trim();
     if (!emailVal){
       setMsg('Please enter your email before continuing.');
-      emailEl?.focus(); return;
+      emailEl?.focus();
+      return;
     }
+
     if (!window.Pi || !Pi.createPayment){
-      setMsg("Open this page in the Pi Browser."); return;
+      setMsg("Open this page in the Pi Browser.");
+      return;
     }
 
     setMsg('Opening Pi payment…');
 
-    try{
-      await ensureAuth();
+    ensureAuth().then(() => {
+      const memo = (storeName ? (storeName + ' — ') : '') +
+                   (cartMode ? 'Cart' : 'Order') + ' ' + sessionId.slice(0, 8);
 
-      // 1) Ask server for the authoritative amount (dynamic pricing if applicable)
-      const quote = await fetchServerQuote();
-      const amount = (quote && typeof quote.amount_pi === 'number' && quote.amount_pi > 0)
-        ? quote.amount_pi
-        : expectedPi;
-
-      // 2) Build memo + metadata for fulfillment
-      const defaultMemo = (storeName ? (storeName + ' — ') : '') +
-                          (cartMode ? 'Cart' : 'Order') + ' ' + sessionId.slice(0, 8);
-
-      const memo = (quote && quote.memo) ? String(quote.memo) : defaultMemo;
-
-      // Core metadata (server uses this to settle, grant collectibles, mint in-game, etc.)
-      const baseMeta = {
-        session_id: sessionId,
-        cart_mode: !!cartMode,
-        // single-item hints (if not cart):
-        item_id: itemId || null,
-        sku: itemSku || '',
-        merchant_slug: merchantSlug || '',
-        fulfillment_kind: fulfillmentKind || '',
-        // crafted linkage (lets server mint collectible + grant in-game)
-        crafted_item_id: craftedItemId || '',
-        crafted: !!(fulfillmentKind === 'crafting' || craftedItemId)
+      const paymentData = {
+        amount: amount,
+        memo: memo,
+        metadata: { session_id: sessionId }
       };
 
-      // Allow server to add extra metadata in quote (will not overwrite base keys unless it must)
-      const mergedMeta = Object.assign({}, baseMeta, (quote && quote.metadata) || {});
-
-      // 3) Create payment
-      Pi.createPayment(
-        { amount, memo, metadata: mergedMeta },
-        {
-          onReadyForServerApproval: function(paymentId){
-            fetch('/api/pi/approve', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ paymentId, session_id: sessionId })
-            });
-          },
-          onReadyForServerCompletion: function(paymentId, txid){
-            fetch('/api/pi/complete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                paymentId, session_id: sessionId, txid,
-                buyer: buyerPayload(),
-                shipping: shippingPayload()
-              })
+      Pi.createPayment(paymentData, {
+        onReadyForServerApproval: function(paymentId){
+          fetch('/api/pi/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId, session_id: sessionId })
+          });
+        },
+        onReadyForServerCompletion: function(paymentId, txid){
+          fetch('/api/pi/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paymentId, session_id: sessionId, txid,
+              buyer: buyerPayload(),
+              shipping: shippingPayload()
             })
-            .then(r => r.json())
-            .then(res => {
-              const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
-              const target = (res && (res.redirect_url || res.buyer_status_url)) || fallback;
-              window.location.href = target;
-            })
-            .catch(() => {
-              const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
-              window.location.href = fallback;
-            });
-          },
-          onCancel: function(){ setMsg("Payment canceled."); },
-          onError:  function(){ setMsg("Please try again."); }
-        }
-      );
-    }catch(_){
+          })
+          .then(r => r.json())
+          .then(res => {
+            const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
+            const target = (res && (res.redirect_url || res.buyer_status_url)) || fallback;
+            window.location.href = target;
+          })
+          .catch(() => {
+            const fallback = redirectSlug ? `/store/${redirectSlug}?success=1` : '/success';
+            window.location.href = fallback;
+          });
+        },
+        onCancel: function(){ setMsg("Payment canceled."); },
+        onError:  function(){ setMsg("Please try again."); }
+      });
+    }).catch(() => {
       setMsg("Please try again.");
-    }
+    });
   });
 })();
 </script>
