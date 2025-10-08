@@ -499,6 +499,47 @@
                       <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item…">{{ it.description or '' }}</textarea>
                       <small class="note">Shown on your product page.</small>
                     </div>
+                    <!-- Dynamic Crafting checkout -->
+<div class="card" style="padding:12px;margin:6px 0">
+  <div class="h2" style="font-size:16px;margin:0 0 8px">Crafting Checkout</div>
+
+  <label class="ip-label" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <input type="checkbox" name="craft_dyn_enabled" value="1" {% if it.craft_dyn_enabled %}checked{% endif %}>
+    Enable dynamic Pi price when opened with a Crafting draft link
+  </label>
+  <small class="note" style="display:block;margin:-2px 0 10px">
+    When enabled, if the buyer arrives with <code>?draftId=123</code>, the checkout will fetch the draft’s quote and show that Pi price.
+  </small>
+
+  <div class="field-inline">
+    <div class="field">
+      <label class="ip-label">Mode</label>
+      <select class="ip-select craft-mode" name="craft_dyn_mode" data-for="{{ it.id }}">
+        <option value="auto_quote" {% if it.craft_dyn_mode=='auto_quote' %}selected{% endif %}>Auto (use draft’s quoted IC → Pi)</option>
+        <option value="fixed_ic" {% if it.craft_dyn_mode=='fixed_ic' %}selected{% endif %}>Fixed voucher value (IC)</option>
+      </select>
+      <small class="note">“Auto” uses the draft’s feature flags/levels to compute price. “Fixed” always issues the IC value below.</small>
+    </div>
+    <div class="field">
+      <label class="ip-label">Fixed voucher value (IC)</label>
+      <input class="ip-input craft-fixed-ic" name="craft_dyn_ic" inputmode="numeric"
+             value="{{ it.craft_dyn_ic or 500 }}" data-for="{{ it.id }}">
+      <small class="note">Only used when Mode = Fixed.</small>
+    </div>
+  </div>
+
+  <div class="field-inline">
+    <div class="field">
+      <label class="ip-label">Floor price (Pi, optional)</label>
+      <input class="ip-input" name="craft_dyn_floor_pi" inputmode="decimal" value="{{ '%.7f'|format(it.craft_dyn_floor_pi) if it.craft_dyn_floor_pi is defined else '' }}">
+      <small class="note">If set, dynamic Pi price will never display below this floor.</small>
+    </div>
+    <div class="field">
+      <label class="ip-label">Notes (admin only)</label>
+      <input class="ip-input" name="craft_dyn_notes" value="{{ it.craft_dyn_notes or '' }}">
+    </div>
+  </div>
+</div>
                     <div class="field">
   <label class="ip-label">Crafting Land item</label>
   <div class="row" style="gap:8px;align-items:center">
@@ -923,6 +964,21 @@
       svgTA.value = PREFILL.svg;
       previewBtn && previewBtn.click();
     }
+  })();
+      // Crafting dynamic mode UI toggles (hide fixed IC when auto mode)
+  (function(){
+    function syncRow(rowId){
+      const mode = document.querySelector(`select.craft-mode[data-for="${rowId}"]`);
+      const ic   = document.querySelector(`input.craft-fixed-ic[data-for="${rowId}"]`);
+      if(!mode || !ic) return;
+      const isFixed = (mode.value === 'fixed_ic');
+      ic.closest('.field').style.display = isFixed ? '' : 'none';
+    }
+    document.querySelectorAll('select.craft-mode').forEach(sel=>{
+      const id = sel.getAttribute('data-for');
+      syncRow(id);
+      sel.addEventListener('change', ()=>syncRow(id));
+    });
   })();
   // Progressive enhancement: delete store -> confirm -> POST -> redirect
   (function(){
