@@ -304,49 +304,72 @@
     let timerEl = null, bannerEl = null, rafId = 0;
 
     function mkTimerHud(){
-      if (timerEl) return timerEl;
-      const el = document.createElement('div');
-      el.id = 'izzaChaseTimer';
-      Object.assign(el.style, {
-        position:'fixed', left:'50%', top:'18px', transform:'translateX(-50%)',
-        zIndex: 10050, padding:'6px 12px', borderRadius:'10px',
-        background: 'rgba(0,0,0,.5)', border:'1px solid rgba(255,255,255,.35)',
-        color:'#fff', font:'600 16px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
-        letterSpacing:'0.4px', textShadow:'0 1px 2px rgba(0,0,0,.6)', display:'none'
-      });
-      el.textContent = 'POLICE CHASE — 0.0s';
-      document.body.appendChild(el);
-      timerEl = el;
-      return el;
-    }
+  if (timerEl) return timerEl;
+  const el = document.createElement('div');
+  el.id = 'izzaChaseTimer';
+  Object.assign(el.style, {
+    position:'fixed',
+    left:'50%',
+    transform:'translateX(-50%)',
+    // sit just above the chat input
+    bottom:'calc(var(--chat-input-height, 64px) + 12px + env(safe-area-inset-bottom))',
+    zIndex:10050,
+    padding:'4px 10px',
+    borderRadius:'10px',
+    background:'rgba(0,0,0,.55)',
+    border:'1px solid rgba(255,255,255,.35)',
+    color:'#fff',
+    font:'600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+    letterSpacing:'0.3px',
+    textShadow:'0 1px 2px rgba(0,0,0,.6)',
+    display:'none',
+    pointerEvents:'none' // don’t block taps
+  });
+  el.textContent = 'POLICE CHASE — 0.0s';
+  document.body.appendChild(el);
+  timerEl = el;
+  return el;
+}
 
-    function mkResultBanner(){
-      if (bannerEl) return bannerEl;
-      const el = document.createElement('div');
-      el.id = 'izzaChaseResult';
-      Object.assign(el.style, {
-        position:'fixed', left:'50%', top:'30%', transform:'translate(-50%, -30%)',
-        zIndex: 10060, padding:'16px 20px', borderRadius:'14px',
-        background:'linear-gradient(135deg, #07f 0%, #6f0 50%, #ff0 100%)',
-        boxShadow:'0 12px 40px rgba(0,0,0,.45)',
-        color:'#0a0a0a', font:'800 22px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
-        letterSpacing:'0.6px', textAlign:'center', display:'none', border:'2px solid rgba(255,255,255,.85)'
-      });
-      el.innerHTML = `
-        <div style="font-size:14px; font-weight:700; opacity:.85; margin-bottom:6px; text-transform:uppercase;">
-          IZZA CITY
-        </div>
-        <div style="font-size:22px; font-weight:900; text-transform:uppercase;">
-          Police Chase <span style="white-space:nowrap;">TIME</span>:
-        </div>
-        <div id="izzaChaseResultTime" style="font-size:32px; font-weight:1000; margin-top:6px;">
-          0.0s
-        </div>
-      `;
-      document.body.appendChild(el);
-      bannerEl = el;
-      return el;
-    }
+function mkResultBanner(){
+  if (bannerEl) return bannerEl;
+  const el = document.createElement('div');
+  el.id = 'izzaChaseResult';
+  Object.assign(el.style, {
+    position:'fixed',
+    left:'50%',
+    transform:'translateX(-50%)',
+    // also sit just above the chat input
+    bottom:'calc(var(--chat-input-height, 64px) + 12px + env(safe-area-inset-bottom))',
+    zIndex:10060,
+    padding:'10px 12px',              // ~half the old padding
+    borderRadius:'12px',
+    background:'linear-gradient(135deg, #07f 0%, #6f0 50%, #ff0 100%)',
+    boxShadow:'0 10px 28px rgba(0,0,0,.40)',
+    color:'#0a0a0a',
+    font:'800 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+    letterSpacing:'0.4px',
+    textAlign:'center',
+    display:'none',
+    border:'2px solid rgba(255,255,255,.85)',
+    pointerEvents:'none',
+    maxWidth:'min(86vw, 520px)'
+  });
+  el.innerHTML = `
+    <div style="font-size:11px; font-weight:800; opacity:.85; margin-bottom:4px; text-transform:uppercase;">
+      IZZA CITY
+    </div>
+    <div style="font-size:13px; font-weight:900; text-transform:uppercase;">
+      Police Chase <span style="white-space:nowrap;">TIME</span>:
+    </div>
+    <div id="izzaChaseResultTime" style="font-size:16px; font-weight:1000; margin-top:4px;">
+      0.0s
+    </div>
+  `;
+  document.body.appendChild(el);
+  bannerEl = el;
+  return el;
+}
 
     // ---- Timer state ---------------------------------------------------------
     let chasing = false;
