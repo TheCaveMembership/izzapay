@@ -1086,6 +1086,7 @@ def pi_clear_pending():
         return {"ok": True, "cleared": True, "payment_id": (pay_id or None), "session_id": (session_id or None)}
     except Exception:
         return {"ok": False, "error": "server_error"}, 500
+        
 # NEW: Same-origin proxy to your LibreTranslate service
 @app.post("/api/translate")
 def api_translate():
