@@ -10,6 +10,27 @@ const PAY_BASE  = 'https://izzapay.onrender.com';
 const gameApi = (p) => `${GAME_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 const payApi  = (p) => `${PAY_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 
+// --- Quote/Pay constants for secure craft spend ---
+const MINT_SKU = 'craft:single_mint';     // <-- make sure this exists in _PRICEBOOK on the server
+const MINT_QTY = 1;                        // one craft per pay
+
+// Tiny JSON wrapper (same-origin, include cookies)
+async function api(path, body){
+  const r = await fetch(gameApi(path), {
+    method: 'POST',
+    headers: { 'content-type':'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body || {})
+  });
+  let j = {};
+  try { j = await r.json(); } catch {}
+  if (!r.ok || !j || j.ok === false) {
+    const reason = (j && (j.reason || j.error)) || ('HTTP ' + r.status);
+    throw new Error(reason);
+  }
+  return j;
+}
+
 // ----------------------------------------------------------------------------------------
 
 // --- AI prompt guidance (slot-aware + style/animation aware, no bg) ---
@@ -294,6 +315,10 @@ function composeAIPrompt(userPrompt, part, { style='realistic', animate=false } 
     canUseVisuals: false,
     createSub: 'setup',
     mintCredits: 0,
+        // secure craft payment state
+    quoteId: null,             // server-issued quote id
+    quotedPriceIC: 0,          // price_ic returned by server
+    payLocked: false,          // UI locked between quote → pay
 
     // FX presets
     tracerPreset: 'comet',
@@ -1003,12 +1028,42 @@ async function reconcileCraftCredits(){
   }catch(_){ /* soft-fail */ }
 }
 
-async function payWithIC(amountIC){
-  const cur = getIC();
-  if (cur < amountIC) return { ok:false, reason:'not-enough-ic' };
-  setIC(cur - amountIC);
-  try{ await serverJSON(gameApi('/api/crafting/ic/debit'), { method:'POST', body:JSON.stringify({ amount:amountIC }) }); }catch{}
-  return { ok:true };
+// Get a server quote for the current craft
+async function getCraftQuote(){
+  // You can later vary the SKU by category/part or features;
+  // for now we use a single-mint SKU on the server’s _PRICEBOOK.
+  const j = await api('/api/crafting/quote', { sku: MINT_SKU, qty: MINT_QTY });
+  STATE.quoteId = j.quote_id;
+  STATE.quotedPriceIC = j.price_ic | 0;
+  STATE.payLocked = true;
+  return j;
+}
+
+// (Optional) sanity check before paying; harmless to skip on a fast path
+async function validateQuote(qid){
+  return await api('/api/crafting/validate', { quote_id: qid });
+}
+
+// Pay (spend eligible credits) against the quote
+async function payQuote(qid){
+  const j = await api('/api/crafting/pay_ic', { quote_id: qid });
+  // success means credits were spent on the server
+  return j;
+}
+
+// Refresh local badge from authoritative server buckets
+async function refreshCreditsFromServer(){
+  try{
+    const j = await fetch(gameApi('/api/crafting/credits'), { credentials:'include' }).then(r=>r.json()).catch(()=>null);
+    if (j && j.ok && Number.isFinite(j.balance)){
+      // Persist singles only (local mirror) for your existing badge logic
+      setCraftingCredits(j.balance | 0);
+      STATE.mintCredits   = j.balance | 0;
+      STATE.canUseVisuals = (STATE.mintCredits | 0) > 0;
+      updateTabsHeaderCredits();
+      _syncVisualsTabStyle();
+    }
+  }catch(_){}
 }
 
 /* --- REQUIRED-FIELDS VALIDATION (Create tab only) --- */
@@ -1996,6 +2051,7 @@ function unmount(){
 
 /* ---------- Single purchase buttons ---------- */
 async function handleBuySingle(kind, enforceForm){
+  // Require basic form fields so SKU/metadata make sense
   if (enforceForm && !isCreateFormValid()){
     const status = document.getElementById('payStatus');
     if (status) status.textContent = 'Fill Category, Part/Type, and Item Name first.';
@@ -2003,31 +2059,62 @@ async function handleBuySingle(kind, enforceForm){
     return;
   }
 
-  const usePi = (kind === 'pi');
+  const status = document.getElementById('payStatus');
 
-  if (usePi) {
-    const status = document.getElementById('payStatus');
+  // Pi path unchanged for now (you can later switch this to server-quoted Pi, too)
+  if (kind === 'pi'){
     if (status) status.textContent = 'Opening IZZA Pay checkout…';
-    // Keep Pi checkout fixed at base for now
     location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
     return;
   }
 
-  // Dynamic IC total based on toggles + levels
-  const total = calcDynamicPrice().ic;
-  const res = await payWithIC(total);
+  // ===== SECURE IC FLOW: QUOTE → VALIDATE → PAY =====
+  try{
+    // 1) Ask server for authoritative price + floor (min_unit_value_ic)
+    if (status) status.textContent = 'Getting quote…';
+    const q = await getCraftQuote();  // sets STATE.quoteId, STATE.quotedPriceIC, STATE.payLocked
 
-  const status = document.getElementById('payStatus');
-  if (res && res.ok){
-    applyCreditState((STATE.mintCredits|0) + 1);
+    // 2) (Optional) validate while we update the UI
+    try { await validateQuote(STATE.quoteId); } catch(_){}
+
+    // Update button labels to reflect the server price (not the UI est.)
+    const payICBtn = document.getElementById('payIC');
+    if (payICBtn) payICBtn.textContent = `Confirm ${STATE.quotedPriceIC.toLocaleString()} IC`;
+
+    if (status) status.textContent = 'Confirm to spend your eligible credits…';
+
+    // 3) Second click actually spends (or single confirm if you prefer – here we do immediate)
+    const pay = await payQuote(STATE.quoteId);
+
+    // 4) Success → refresh credit badge from server and unlock Visuals
+    await refreshCreditsFromServer();
+
+    // Grant exactly one visual credit in local UI model (server is source-of-truth)
+    applyCreditState((STATE.mintCredits|0)); // already synced in refresh; call to update badges/UI
+
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    if (status) status.textContent = 'Paid ✓ — visual credit granted.';
-    updateTabsHeaderCredits();
     STATE.createSub = 'setup';
+    STATE.payLocked = false;
+    STATE.quoteId = null;
+    STATE.quotedPriceIC = 0;
+
+    if (status) status.textContent = 'Paid ✓ — visual credit granted.';
+
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
-  } else {
-    if (status) status.textContent='Payment failed.';
+
+  }catch(e){
+    STATE.payLocked = false;
+    if (status){
+      const msg = String(e && e.message || e || 'Payment failed');
+      const map = {
+        'expired':'Quote expired — try again.',
+        'already_used':'This quote was already used.',
+        'insufficient_eligible':'Not enough eligible credits for this item.',
+        'unknown_sku':'Server missing pricebook entry for this SKU.'
+      };
+      status.textContent = map[msg] || ('Payment failed: ' + msg);
+    }
   }
 }
 
@@ -2482,8 +2569,10 @@ function bindInside(){
   const icTotal = root.querySelector('#totalIcDisp');
   if (piTotal) piTotal.textContent = `${totals.pi} Pi`;
   if (icTotal) icTotal.textContent = `${totals.ic.toLocaleString()} IC`;
-  const icBtn = document.getElementById('payIC');
-  if (icBtn) icBtn.textContent = `Pay ${totals.ic.toLocaleString()} IC`;
+  if (icBtn) {
+  const labelIC = (STATE.quotedPriceIC|0) > 0 ? STATE.quotedPriceIC : totals.ic;
+  icBtn.textContent = `${STATE.payLocked ? 'Confirm' : 'Pay'} ${labelIC.toLocaleString()} IC`;
+}
   const piBtn = document.getElementById('payPi');
   if (piBtn) piBtn.textContent = `Pay ${totals.pi} Pi`;
 
