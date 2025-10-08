@@ -1994,14 +1994,35 @@ def checkout(link_id):
         next_url = f"/checkout/{link_id}?qty={qty}"
         return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
 
-    # Create a session tied to this user
+        # Create a session tied to this user
     sid = uuid.uuid4().hex
-    expected = qpi(Decimal(str(i["pi_price"])) * Decimal(str(qty)))
+
+    # --- Dynamic price override (?p=... &ctx=...) ---
+    unit_price = Decimal(str(i["pi_price"]))  # default to item price
+    try:
+        override_raw = (request.args.get("p") or "").strip()
+        # Only honor override if item is marked dynamic
+        mode = (i["dynamic_price_mode"] if "dynamic_price_mode" in i.keys() else None)
+        if override_raw and mode == "pi_dynamic":
+            ov = Decimal(str(override_raw))
+            # clamp to optional min/max if present
+            minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
+            maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
+            if minp is not None and ov < minp: ov = minp
+            if maxp is not None and ov > maxp: ov = maxp
+            if ov > 0:
+                unit_price = ov
+    except Exception:
+        pass
+
+    expected = qpi(unit_price * Decimal(str(qty)))
+    dynamic_ctx = (request.args.get("ctx") or "").strip()
 
     line_items = json.dumps([{
         "item_id": int(i["id"]),
         "qty": int(qty),
-        "price": float(i["pi_price"]),
+        "price": float(unit_price),
+        "dynamic_ctx": dynamic_ctx or ""
     }])
 
     with conn() as cx:
