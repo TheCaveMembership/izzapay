@@ -158,6 +158,55 @@
 
     /* Kill selection/callout for entire arena (extra safety) */
     .arena, .arena *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+    /* --- Larger, bolder corner marks (numbers/suits) --- */
+.pip .rank{ font-size:calc(var(--cardW) * 0.34); letter-spacing:-0.02em; }
+.pip .suit{ font-size:calc(var(--cardW) * 0.28); margin-top:1px; }
+.pip.tl{ left:6px; top:4px; }
+.pip.br{ right:6px; bottom:4px; transform:rotate(180deg); }
+.centerSuit{ font-size:calc(var(--cardW) * 0.40); opacity:.12; }
+
+/* --- Layout: put stock on far right, waste just left of it --- */
+#rowTop{
+  display:grid;
+  grid-template-columns:repeat(7, minmax(0,1fr));
+  grid-template-areas:"f1 f2 f3 f4 waste waste stock";
+  gap:var(--gutter);
+}
+#rowTop .cell.foundation.f1{ grid-area:f1; }
+#rowTop .cell.foundation.f2{ grid-area:f2; }
+#rowTop .cell.foundation.f3{ grid-area:f3; }
+#rowTop .cell.foundation.f4{ grid-area:f4; }
+#rowTop .cell.waste{ grid-area:waste; }
+#rowTop .cell.stock{ grid-area:stock; }
+
+/* Keep the “wide” waste fan you already had */
+#rowTop .cell.wasteWide{ grid-column:auto; } /* area controls span now */
+
+/* --- Foundation placeholders: show a big gold A on empty piles --- */
+#rowTop .cell.foundation{
+  position:relative;
+  background:rgba(255,255,255,.035);
+  border:1px dashed rgba(255,255,255,.22);
+}
+#rowTop .cell.foundation > span{ display:none; } /* hide tiny label */
+#rowTop .cell.foundation::after{
+  content:'A';
+  position:absolute;
+  left:50%; top:50%;
+  transform:translate(-50%, -50%);
+  font-weight:900;
+  font-size:calc(var(--cardW) * 0.70);
+  color:#d8b74c;              /* warm “gold” */
+  text-shadow:0 2px 8px rgba(0,0,0,.35);
+  opacity:.95;
+  pointer-events:none;
+}
+
+/* Optional: tidy card back contrast slightly for the right-side stock */
+.card.back{
+  background:linear-gradient(180deg,#1b4f96,#0f2c54);
+  border-color:rgba(0,0,0,.30);
+}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -186,14 +235,14 @@
       <div id="board" class="board" aria-label="Solitaire board">
         <!-- Row 1: stock + waste(2 cols) + 4 foundations -->
         <div class="row" id="rowTop">
-          <div class="cell"><div class="pile" id="stock"></div><span>STOCK</span></div>
-          <div class="cell wasteWide"><div class="pile" id="waste"></div><span>WASTE</span></div>
-          <div class="cell foundation"><div class="pile" id="f1"></div><span>♠ FOUND.</span></div>
-          <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
-          <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
-          <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUND.</span></div>
-          <div class="cell" style="display:none"></div>
-        </div>
+  <div class="cell foundation f1"><div class="pile" id="f1"></div><span>FOUND.</span></div>
+  <div class="cell foundation f2"><div class="pile" id="f2"></div><span>FOUND.</span></div>
+  <div class="cell foundation f3"><div class="pile" id="f3"></div><span>FOUND.</span></div>
+  <div class="cell foundation f4"><div class="pile" id="f4"></div><span>FOUND.</span></div>
+  <div class="cell waste wasteWide"><div class="pile" id="waste"></div><span>WASTE</span></div>
+  <div class="cell stock"><div class="pile" id="stock"></div><span>STOCK</span></div>
+  <div class="cell" style="display:none"></div>
+</div>
 
         <!-- Row 2: seven tableau columns -->
         <div class="row" id="rowBottom">
