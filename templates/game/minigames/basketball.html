@@ -69,8 +69,28 @@
     .startCard{background:rgba(0,0,0,.6);border:1px solid var(--hudLine);border-radius:14px;padding:18px;
       display:flex;flex-direction:column;gap:10px;align-items:center}
     .startBtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-    .startBtn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);font-weight:800}
-    .startBtn.secondary{opacity:.95}
+
+    /* START button — neon pink */
+    .startBtn{
+      padding:10px 16px;
+      border-radius:10px;
+      border:1px solid #ff3ad6;
+      background:#ff00cc;
+      color:#fff;
+      font-weight:900;
+      letter-spacing:.3px;
+      text-shadow:0 1px 10px rgba(0,0,0,.35);
+      box-shadow:
+        0 0 18px rgba(255,0,204,.60),
+        0 0 42px rgba(255,0,204,.35);
+    }
+    .startBtn:hover{
+      filter:brightness(1.08) saturate(1.1);
+      box-shadow:
+        0 0 24px rgba(255,0,204,.85),
+        0 0 56px rgba(255,0,204,.45);
+    }
+    .startBtn.secondary{ display:none !important; }
 
     /* Swish juice */
     @keyframes net-swish{0%{transform:translateY(0) scaleY(1) rotate(0)}35%{transform:translateY(4px) scaleY(1.12) rotate(-2deg)}65%{transform:translateY(2px) scaleY(1.06) rotate(1deg)}100%{transform:translateY(0) scaleY(1) rotate(0)}}
@@ -152,10 +172,8 @@
       <div id="startOverlay" class="startOverlay" aria-live="polite">
         <div class="startCard">
           <div class="startBtns">
-            <button id="chooseBgBtn" class="startBtn secondary">CUSTOM BACKGROUND</button>
             <button id="startBtn" class="startBtn">START</button>
           </div>
-          <input id="bgUpload" type="file" accept="image/*" style="display:none">
         </div>
       </div>
 
@@ -316,7 +334,7 @@
     function parseWalletResponse(j){ if(!j||typeof j!=='object') return {coins:0,crafting:0}; if('coins' in j || 'crafting' in j || 'credits' in j) return {coins:Number(j.coins)||0, crafting:Number(j.crafting??j.credits)||0}; if(j.wallet) return parseWalletResponse(j.wallet); if(j.balance) return parseWalletResponse(j.balance); return {coins:0,crafting:0}; }
     const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){} }
+    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
     function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
@@ -333,7 +351,7 @@
     const rim=document.getElementById('rim'), net=document.getElementById('net'), boardGroup=document.getElementById('boardGroup'), bgImage=document.getElementById('bgImage');
     const bigmsg=document.getElementById('bigmsg'), arenaEl=document.getElementById('arena');
     const scoreEl=document.getElementById('score'), streakEl=document.getElementById('streak'), timeEl=document.getElementById('time'), coinsRunEl=document.getElementById('coinsRun');
-    const startBtn=document.getElementById('startBtn'), chooseBgBtn=document.getElementById('chooseBgBtn'), bgUpload=document.getElementById('bgUpload');
+    const startBtn=document.getElementById('startBtn');
     const fxSwish=document.getElementById('fxSwish'), fxMiss=document.getElementById('fxMiss');
     const bgmEl=document.getElementById('bgm');
 
@@ -602,25 +620,11 @@ function upsertArenaLedger(gameId, score){
       return out;
     }
 
-    /* ===== Background handling (overlay only) ===== */
+    /* ===== Background handling (fixed default, no uploads) ===== */
     function setBgHref(href){ if(!href) return; try{ bgImage.setAttribute('href', href); }catch(_){} }
-    function initBackgroundFromStorageOrParam(){
-      const p=new URLSearchParams(location.search);
-      const paramBg=p.get('bg');
-      const data=localStorage.getItem('izzaBallBgUserData')||'';
-      const href = data || paramBg || '/static/game/img/basketball/izza_city_bg.jpg';
-      setBgHref(href);
+    function initBackgroundFixed(){
+      setBgHref('/static/game/img/basketball/izza_city_bg.jpg');
     }
-    chooseBgBtn.addEventListener('click', ()=> bgUpload.click(), {passive:true});
-    bgUpload.addEventListener('change', (e)=>{
-      const f=e.target.files && e.target.files[0]; if(!f) return;
-      const reader=new FileReader();
-      reader.onload = () => {
-        const dataUrl=reader.result; setBgHref(dataUrl);
-        try{ localStorage.setItem('izzaBallBgUserData', dataUrl); }catch(_){}
-      };
-      reader.readAsDataURL(f);
-    }, {passive:true});
 
     /* ===== Boot/listeners (unchanged + init bg here) ===== */
     function consumeWalletHandoff(maxAgeMs=120000){
@@ -646,7 +650,7 @@ function upsertArenaLedger(gameId, score){
     window.addEventListener('pagehide', ()=>{ if(walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){ try{ IZZA_PERSIST.save(); walletDirty=false; }catch(_){} } });
 
     // Early BG paint (even before pressing Start)
-    initBackgroundFromStorageOrParam();
+    initBackgroundFixed();
 
     // START button (same flow + avatar paint + audio start)
     startBtn.addEventListener('click', async ()=>{
@@ -881,8 +885,7 @@ const CRAFT_WEAPON = 1.00;
       }, { passive:true });
     })();
 
-    // Early query param support
-    (function earlyBg(){ const p=new URLSearchParams(location.search); const paramBg=p.get('bg'); if(paramBg) try{ bgImage.setAttribute('href', paramBg); }catch(_){} })();
+    // (removed earlyBg param override)
   })();
   </script>
 </body>
