@@ -52,6 +52,58 @@
       const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
     }catch{ return {}; }
   }
+    // ----- ART CACHE for big SVG fields (keeps snapshots tiny) -----
+  function artCacheKey(itemKey){ return 'izzaItemArt::' + String(itemKey||''); }
+
+  function cacheItemArt(itemKey, it){
+    try{
+      if (!itemKey || !it || typeof it!=='object') return;
+      const icon    = (typeof it.iconSvg==='string'    && it.iconSvg)    ? it.iconSvg    : null;
+      const overlay = (typeof it.overlaySvg==='string' && it.overlaySvg) ? it.overlaySvg : null;
+      if (!icon && !overlay) return;
+      const cur = JSON.parse(localStorage.getItem(artCacheKey(itemKey))||'{}');
+      const next = { iconSvg: icon || cur.iconSvg || null, overlaySvg: overlay || cur.overlaySvg || null };
+      localStorage.setItem(artCacheKey(itemKey), JSON.stringify(next));
+    }catch(_){}
+  }
+
+  function restoreItemArt(itemKey, it){
+    try{
+      if (!itemKey || !it || typeof it!=='object') return it;
+      const raw = localStorage.getItem(artCacheKey(itemKey));
+      if (!raw) return it;
+      const { iconSvg, overlaySvg } = JSON.parse(raw)||{};
+      if (iconSvg && !it.iconSvg) it.iconSvg = iconSvg;
+      if (overlaySvg && !it.overlaySvg) it.overlaySvg = overlaySvg;
+      return it;
+    }catch(_){ return it; }
+  }
+
+  function stripInventoryForSave(inv){
+    try{
+      if (!inv || typeof inv!=='object') return {};
+      const out = {};
+      for (const [k, it] of Object.entries(inv)){
+        if (!it || typeof it!=='object'){ out[k] = it; continue; }
+        // 1) keep the art locally
+        cacheItemArt(k, it);
+        // 2) copy everything except the huge svg strings
+        const { iconSvg, overlaySvg, ...rest } = it;
+        out[k] = rest;
+      }
+      return out;
+    }catch(_){ return {}; }
+  }
+
+  function restoreArtFromCache(inv){
+    try{
+      if (!inv || typeof inv!=='object') return inv||{};
+      for (const [k, it] of Object.entries(inv)){
+        restoreItemArt(k, it);
+      }
+      return inv;
+    }catch(_){ return inv||{}; }
+  }
   function readCoinsOnHand(){
     try{
       if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
@@ -103,7 +155,7 @@ function readLeaderboardLocals(){
   }catch(_){}
   return out;
 }
-  // ---------- snapshot builder ----------
+    // ---------- snapshot builder ----------
   function buildSnapshot(){
     const u      = userKey();
     const bank   = readBank(u);
@@ -116,7 +168,10 @@ function readLeaderboardLocals(){
       ? IZZA.api.getMissionState()
       : (JSON.parse(localStorage.getItem('izzaMissionState')||'{}'));
 
-    const craftingCredits = readCraftingCredits(); // already computed
+    const craftingCredits = readCraftingCredits();
+
+    // ✅ keep payload lean: art is cached locally, not posted
+    const invSlim = stripInventoryForSave(inv);
 
     return {
       version: 1,
@@ -124,7 +179,7 @@ function readLeaderboardLocals(){
       coins: onHand|0,
       missions: missions|0,
       missionState: missionState || {},
-      inventory: inv || {},
+      inventory: invSlim, // <-- no iconSvg/overlaySvg in the payload
       bank: bank || { coins:0, items:{}, ammo:{} },
       craftingCredits: craftingCredits|0,
       leaderboard: readLeaderboardLocals(),
@@ -177,11 +232,22 @@ function readLeaderboardLocals(){
     try{
       if (!seed) return;
 
-      // INVENTORY
+            // INVENTORY
       if (seed.inventory && typeof seed.inventory === 'object'){
         try{
+          // Install server inventory
           if (IZZA?.api?.setInventory) IZZA.api.setInventory(seed.inventory);
           else localStorage.setItem('izzaInventory', JSON.stringify(seed.inventory));
+
+          // Immediately restore cached art so UI has icons/overlays
+          try{
+            const cur = IZZA?.api?.getInventory ? (IZZA.api.getInventory()||{}) :
+              JSON.parse(localStorage.getItem('izzaInventory')||'{}');
+            restoreArtFromCache(cur);
+            if (IZZA?.api?.setInventory) IZZA.api.setInventory(cur);
+            else localStorage.setItem('izzaInventory', JSON.stringify(cur));
+          }catch(_){}
+
           try{ window.dispatchEvent(new Event('izza-inventory-changed')); }catch{}
         }catch(e){ console.warn('[persist] inv hydrate failed', e); }
       }
