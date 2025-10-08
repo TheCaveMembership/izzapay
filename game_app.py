@@ -852,6 +852,7 @@ _PRICEBOOK = {
     "craft:cardboard_box": (25, 1),
     "craft:pumpkin_mask":  (60, 2),
     "craft:pumpkin_set":   (180, 2),
+    "craft:single_mint": (40, 1),  # base price for single mint / visual craft
 }
 
 def _compute_craft_price(sku: str, qty: int):
