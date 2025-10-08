@@ -713,15 +713,16 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (draw-3: right-aligned fan; only the top is interactive)
+  // WASTE (draw-3, right-aligned fan; only the rightmost is playable)
 const wEl = document.getElementById(piles.waste);
 if (P.waste.length){
   const drawMode = getDrawPref();
   const N = Math.min(drawMode, P.waste.length);
   const start = P.waste.length - N;
 
+  // same spacing you had, just mirrored
   const gap = (drawMode === 3)
-    ? Math.max(18, Math.round(cssVarInt('--cardW',86) * 0.42))
+    ? Math.max(18, Math.round(cssVarInt('--cardW', 86) * 0.42))
     : 0;
 
   for (let i = 0; i < N; i++){
@@ -729,19 +730,20 @@ if (P.waste.length){
     const c = P.waste[idx]; c.face = true;
     const el = spawnCard(c);
 
-    // mark location for drag logic
+    // mark origin for drag/tap logic
     el.dataset.where = 'w';
 
-    // layering: leftmost is lowest, rightmost (top) is highest
+    // z-stack increases left→right; rightmost is top/interactive
     el.style.zIndex = 10 + i;
 
-    // ABSOLUTE FROM THE RIGHT (mirror of your old left-anchored fan)
+    // MIRROR: hard-anchor to the right edge; fan leftwards.
+    // (No translate(); avoids the “upside-down / clipped” issue.)
     el.style.top = '0';
-    el.style.left = 'auto';     // override spawnCard's default
+    el.style.left = 'auto';           // override spawnCard's default left:0
     el.style.right = ((N - 1 - i) * gap) + 'px';
-    el.style.transform = '';    // make sure no stray transform is applied
+    el.style.transform = '';          // be sure no leftover transform exists
 
-    // only the rightmost (top) card is playable; the others are visual only
+    // only the rightmost card (true top of waste) is playable
     if (idx !== P.waste.length - 1){
       el.dataset.locked = '1';
       el.style.pointerEvents = 'none';
