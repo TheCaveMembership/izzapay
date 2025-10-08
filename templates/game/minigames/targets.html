@@ -713,14 +713,14 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (draw-3: right-aligned fan; only the top is interactive)
+  // WASTE (draw-3, right-aligned fan; only the rightmost is playable)
 const wEl = document.getElementById(piles.waste);
 if (P.waste.length){
   const drawMode = getDrawPref();
   const N = Math.min(drawMode, P.waste.length);
   const start = P.waste.length - N;
 
-  // same spacing as old left-side fan
+  // same spacing as before (tweak if you want tighter/looser)
   const gap = (drawMode === 3)
     ? Math.max(18, Math.round(cssVarInt('--cardW', 86) * 0.42))
     : 0;
@@ -731,16 +731,16 @@ if (P.waste.length){
     const el = spawnCard(c);
     el.dataset.where = 'w';
 
-    // layer left→right, top card is on the RIGHT
+    // z-order left → right (rightmost is the real top)
     el.style.zIndex = 10 + i;
 
-    // anchor to right, then shift left (mirror of old fan)
-    el.style.left = '';
-    el.style.right = '0';
+    // ANCHOR TO RIGHT, NO TRANSFORM
     el.style.top = '0';
-    placeXY(el, -(N - 1 - i) * gap, 0);
+    el.style.left = 'auto';
+    el.style.right = ((N - 1 - i) * gap) + 'px';
+    el.style.transform = ''; // important: clear any translate
 
-    // only the rightmost (true top) is playable
+    // only the rightmost (true top) is interactive
     if (idx !== P.waste.length - 1){
       el.dataset.locked = '1';
       el.style.pointerEvents = 'none';
