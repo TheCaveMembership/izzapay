@@ -296,10 +296,10 @@ const backTex=new THREE.CanvasTexture(backCanvasPlaceholder);backTex.minFilter=T
 const player=new THREE.Mesh(new THREE.PlaneGeometry(0.28,0.28),new THREE.MeshBasicMaterial({map:backTex,transparent:true}));
 player.position.set(0,0.78,0);scene.add(player);
 
-/* Coins (unchanged) */
-function makeCoinTexture(){const s=128,cnv=document.createElement('canvas');cnv.width=cnv.height=s;const ctx=cnv.getContext('2d');const g=ctx.createRadialGradient(s*.45,s*.45,6,s*.55,s*.55,s*.6);g.addColorStop(0,'#fff5c4');g.addColorStop(.45,'#ffd86b');g.addColorStop(1,'#9a6d1c');ctx.fillStyle=g;ctx.beginPath();ctx.arc(s/2,s/2,s*0.46,0,Math.PI*2);ctx.fill();ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.stroke();ctx.fillStyle='rgba(40,30,0,0.85)';ctx.font='700 48px Inter, Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('IZ',s/2,s/2);return new THREE.CanvasTexture(cnv);}
-const coinTex=makeCoinTexture();coinTex.anisotropy=4;
-const coinMat=new THREE.MeshStandardMaterial({map:coinTex,metalness:0.85,roughness:0.3,emissive:0x2b1f00,emissiveIntensity:0.2});
+/* Coins (image texture) */
+const COIN_FACE_TEX = texLoader.load('/static/game/textures/izzacoingold');
+const coinFaceMat = new THREE.MeshStandardMaterial({map: COIN_FACE_TEX, metalness:0.9, roughness:0.25, emissive:0x2b1f00, emissiveIntensity:0.2});
+const coinEdgeMat = new THREE.MeshStandardMaterial({color:0x8c6b20, metalness:0.85, roughness:0.3});
 
 const obstacles=[],coins=[];
 
@@ -316,7 +316,8 @@ const COIN_CHANCE=0.6;
 const OBSTACLE_CHANCE=0.55;
 
 function spawnCoin(z){
-  const m=new THREE.Mesh(new THREE.CylinderGeometry(0.20,0.20,0.05,32),coinMat);
+  const geo = new THREE.CylinderGeometry(0.20,0.20,0.05,64);
+  const m=new THREE.Mesh(geo,[coinEdgeMat,coinFaceMat,coinFaceMat]);
   m.rotation.x=Math.PI/2;m.position.set(0,0.82,z);
   m.userData.kind='coin'; m.userData.scroll = true;
   scene.add(m);coins.push(m);
@@ -337,13 +338,15 @@ function makeBale(z){
   const group = new THREE.Group();
 
   // --- simple 3D body behind the PNG (keeps 3D look) ---
-  // pale yellow hay color
   const bodyGeo = new THREE.BoxGeometry(1.10, 0.55, 0.55);
+  const HAY3D_TEX = texLoader.load('/static/game/textures/hay3D.png');
+  HAY3D_TEX.wrapS = HAY3D_TEX.wrapT = THREE.RepeatWrapping;
+  HAY3D_TEX.repeat.set(2.5,1.4);
   const bodyMat = new THREE.MeshStandardMaterial({
-  color: 0xE5C15A,
-  roughness: 0.8,
-  metalness: 0.0
-});
+    map: HAY3D_TEX,
+    roughness: 0.8,
+    metalness: 0.0
+  });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.position.set(0, 0.275, -0.08); // push back slightly so PNG sits in front
   body.castShadow = false; body.receiveShadow = false;
@@ -357,19 +360,17 @@ function makeBale(z){
   group.add(img);
 
   // --- Invisible collision proxy (taller + centered higher) ---
-  // make the hitbox cover standing player center so you MUST jump
   const proxy = new THREE.Mesh(
-    new THREE.BoxGeometry(1.10, 0.90, 1.20), // height up from 0.55 -> 0.90
+    new THREE.BoxGeometry(1.10, 0.90, 1.20),
     new THREE.MeshBasicMaterial({visible:false})
   );
-  proxy.position.set(0, 0.45, 0);          // move center up from 0.275 -> 0.45
+  proxy.position.set(0, 0.45, 0);
   group.add(proxy);
 
   group.position.z = z;
   group.userData = {
     kind:'low',
     scroll:true,
-    // bounds used by AABB below (must match proxy above)
     bounds:{ sx:1.10, sy:0.90, sz:1.20, cy:0.45 }
   };
   return group;
