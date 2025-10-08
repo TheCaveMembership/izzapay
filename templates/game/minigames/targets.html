@@ -723,35 +723,32 @@ if (P.waste.length){
   // debug once to confirm we're actually in draw-3
   console.debug('[WASTE]', { drawMode, N, wasteLen: P.waste.length });
 
-    const gap = (drawMode === 3)
-    ? Math.max(18, Math.round(cssVarInt('--cardW', 86) * 0.42))
-    : 0;
+    const gap = (drawMode===3) ? Math.max(18, Math.round(cssVarInt('--cardW',86)*0.42)) : 0;
 
-  for (let i = 0; i < N; i++){
-    const idx = start + i;
-    const c = P.waste[idx]; c.face = true;
-    const el = spawnCard(c);
-    el.dataset.where = 'w';
-    el.style.zIndex = 10 + i;
+for (let i = 0; i < N; i++) {
+  const idx = start + i;
+  const c = P.waste[idx]; c.face = true;
 
-    // reset any leftover positioning
-    el.style.transform = '';
-    el.style.left = '';              // clear left
-    el.style.top = '0';
-    // fan LEFT while keeping the top card on the RIGHT
-    // older cards get larger right offset
-    el.style.right = ((N - 1 - i) * gap) + 'px';
+  const el = spawnCard(c);
+  el.dataset.where = 'w';
+  el.style.zIndex = 10 + i;
 
-    // only the rightmost (true top) is interactive
-    if (idx !== P.waste.length - 1){
-      el.dataset.locked = '1';
-      el.style.pointerEvents = 'none';
-    } else {
-      el.style.pointerEvents = 'auto';
-    }
+  // mirror to the right: clear left/transform; offset using RIGHT
+  el.style.transform = '';
+  el.style.left = '';
+  el.style.top = '0';
+  el.style.right = ((N - 1 - i) * gap) + 'px';
 
-    wEl.appendChild(el);
+  // only the true top (rightmost) is interactive
+  if (idx !== P.waste.length - 1) {
+    el.dataset.locked = '1';
+    el.style.pointerEvents = 'none';
+  } else {
+    el.style.pointerEvents = 'auto';
   }
+
+  wEl.appendChild(el);
+}
 }
   // FOUNDATIONS
   for(let i=0;i<4;i++){
