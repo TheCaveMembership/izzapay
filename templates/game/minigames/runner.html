@@ -189,7 +189,7 @@ renderWalletFromLS();
 /* --- HYDRATE SHARED WALLET + SAVE ON EXIT (match basketball) --- */
 async function hydrateWalletOnEntry(){
   try{
-    // optional handoff (from another page)
+    // optional handoff
     const raw = sessionStorage.getItem('izzaWalletHandoff');
     if (raw){
       const s = JSON.parse(raw);
@@ -198,11 +198,19 @@ async function hydrateWalletOnEntry(){
         localStorage.setItem('izzaCrafting', String(s.craft|0));
       }
     }
-    // pull latest from server
+
+    // ⚡ wait for persist to fully load first
+    if (window.IZZA_PERSIST?.ready) {
+      await IZZA_PERSIST.ready;   // new line (basketball has this)
+    }
+
+    // now pull latest wallet snapshot
     if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
-    // (optional) hydrate leaderboard like before
+
+    // hydrate leaderboard if available
     if (window.IZZA_LEADERBOARD?.hydrate) await IZZA_LEADERBOARD.hydrate();
-    // paint HUD
+
+    // now show correct balance on HUD
     renderWalletFromLS();
   }catch(e){ console.warn('runner hydrate failed', e); }
 }
