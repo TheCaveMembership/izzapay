@@ -154,58 +154,67 @@
 
     /* --- WASTE area widened earlier --- */
     #rowTop .cell.wasteWide{ grid-column: span 2; }
-    #waste{ padding-left:6px; padding-right:0; }
+    #waste{ padding-right: 6px; }
 
     /* Kill selection/callout for entire arena (extra safety) */
     .arena, .arena *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-    /* --- Larger, bolder corner marks (numbers/suits) --- */
-.pip .rank{ font-size:calc(var(--cardW) * 0.34); letter-spacing:-0.02em; }
-.pip .suit{ font-size:calc(var(--cardW) * 0.28); margin-top:1px; }
-.pip.tl{ left:6px; top:4px; }
-.pip.br{ right:6px; bottom:4px; transform:rotate(180deg); }
-.centerSuit{ font-size:calc(var(--cardW) * 0.40); opacity:.12; }
+    /* ===== IZZA SOLITAIRE — visual polish only ===== */
 
-/* --- Layout: put stock on far right, waste just left of it --- */
-#rowTop{
-  display:grid;
-  grid-template-columns:repeat(7, minmax(0,1fr));
-  grid-template-areas:"f1 f2 f3 f4 waste waste stock";
-  gap:var(--gutter);
-}
-#rowTop .cell.foundation.f1{ grid-area:f1; }
-#rowTop .cell.foundation.f2{ grid-area:f2; }
-#rowTop .cell.foundation.f3{ grid-area:f3; }
-#rowTop .cell.foundation.f4{ grid-area:f4; }
-#rowTop .cell.waste{ grid-area:waste; }
-#rowTop .cell.stock{ grid-area:stock; }
-
-/* Keep the “wide” waste fan you already had */
-#rowTop .cell.wasteWide{ grid-column:auto; } /* area controls span now */
-
-/* --- Foundation placeholders: show a big gold A on empty piles --- */
-#rowTop .cell.foundation{
-  position:relative;
-  background:rgba(255,255,255,.035);
-  border:1px dashed rgba(255,255,255,.22);
-}
-#rowTop .cell.foundation > span{ display:none; } /* hide tiny label */
-#rowTop .cell.foundation::after{
-  content:'A';
-  position:absolute;
-  left:50%; top:50%;
-  transform:translate(-50%, -50%);
-  font-weight:900;
-  font-size:calc(var(--cardW) * 0.70);
-  color:#d8b74c;              /* warm “gold” */
-  text-shadow:0 2px 8px rgba(0,0,0,.35);
-  opacity:.95;
-  pointer-events:none;
+/* Brighter felt bg image behind the board */
+.arena{
+  background:
+    #042b1d
+    url("/static/game/images/solitaire-bg-bright.jpg")
+    center/cover no-repeat fixed;
 }
 
-/* Optional: tidy card back contrast slightly for the right-side stock */
-.card.back{
-  background:linear-gradient(180deg,#1b4f96,#0f2c54);
-  border-color:rgba(0,0,0,.30);
+/* Give the board a subtle glass card table feel on top of the bg */
+.board{
+  background: rgba(14, 91, 63, 0.82);
+  backdrop-filter: blur(3px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.06),
+    inset 0 12px 40px rgba(0,0,0,.18);
+}
+
+/* Card corner text: larger rank, tidy suit, crisper weight */
+.card .pip .rank{
+  font-size: calc(var(--cardW) * 0.32);    /* was ~0.23 */
+  letter-spacing: .2px;
+}
+.card .pip .suit{
+  font-size: calc(var(--cardW) * 0.22);    /* was ~0.20 */
+  margin-top: 1px;
+  opacity: .9;
+}
+
+/* Slightly larger faint center suit like premium solitaire UIs */
+.card .centerSuit{
+  font-size: calc(var(--cardW) * 0.58);    /* was ~0.45 */
+  opacity: .12;
+}
+
+/* Foundation placeholders: show big "A" and hide tiny labels */
+.row .cell.foundation > span{ display:none; }
+.row .cell.foundation::after{
+  content: 'A';
+  position: absolute;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-weight: 1000;
+  font-size: calc(var(--cardW) * 0.72);
+  color: rgba(255,255,255,.92);
+  text-shadow:
+    0 2px 0 rgba(0,0,0,.12),
+    0 10px 24px rgba(0,0,0,.35);
+  pointer-events: none;
+}
+
+/* Touch of depth on cards so the larger pips still feel premium */
+.card{
+  border-radius: 12px;
+  box-shadow:
+    0 6px 16px rgba(0,0,0,.28),
+    0 1px 0 rgba(255,255,255,.6) inset;
 }
   </style>
 </head>
@@ -235,14 +244,14 @@
       <div id="board" class="board" aria-label="Solitaire board">
         <!-- Row 1: stock + waste(2 cols) + 4 foundations -->
         <div class="row" id="rowTop">
-  <div class="cell foundation f1"><div class="pile" id="f1"></div><span>FOUND.</span></div>
-  <div class="cell foundation f2"><div class="pile" id="f2"></div><span>FOUND.</span></div>
-  <div class="cell foundation f3"><div class="pile" id="f3"></div><span>FOUND.</span></div>
-  <div class="cell foundation f4"><div class="pile" id="f4"></div><span>FOUND.</span></div>
-  <div class="cell waste wasteWide"><div class="pile" id="waste"></div><span>WASTE</span></div>
-  <div class="cell stock"><div class="pile" id="stock"></div><span>STOCK</span></div>
-  <div class="cell" style="display:none"></div>
-</div>
+          <div class="cell"><div class="pile" id="stock"></div><span>STOCK</span></div>
+          <div class="cell wasteWide"><div class="pile" id="waste"></div><span>WASTE</span></div>
+          <div class="cell foundation"><div class="pile" id="f1"></div><span>♠ FOUND.</span></div>
+          <div class="cell foundation"><div class="pile" id="f2"></div><span>♥ FOUND.</span></div>
+          <div class="cell foundation"><div class="pile" id="f3"></div><span>♣ FOUND.</span></div>
+          <div class="cell foundation"><div class="pile" id="f4"></div><span>♦ FOUND.</span></div>
+          <div class="cell" style="display:none"></div>
+        </div>
 
         <!-- Row 2: seven tableau columns -->
         <div class="row" id="rowBottom">
@@ -713,43 +722,31 @@ function renderAll(){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE (draw-3, right-aligned fan; only the rightmost is playable)
-const wEl = document.getElementById(piles.waste);
-if (P.waste.length){
-  const drawMode = getDrawPref();
-  const N = Math.min(drawMode, P.waste.length);
-  const start = P.waste.length - N;
-
-  // debug once to confirm we're actually in draw-3
-  console.debug('[WASTE]', { drawMode, N, wasteLen: P.waste.length });
-
+  // WASTE (only top is interactive; wider fan preserved)
+  const wEl=document.getElementById(piles.waste);
+  if(P.waste.length){
+    const drawMode=getDrawPref();
+    const N=Math.min(drawMode, P.waste.length);
+    const start=P.waste.length - N;
     const gap = (drawMode===3) ? Math.max(18, Math.round(cssVarInt('--cardW',86)*0.42)) : 0;
+    for(let i=0;i<N;i++){
+      const idx=start+i;
+      const c=P.waste[idx]; c.face=true;
+      const el=spawnCard(c);
+      el.style.zIndex=10+i;
+      placeXY(el, i*gap, 0);
+      el.dataset.where='w';
 
-for (let i = 0; i < N; i++) {
-  const idx = start + i;
-  const c = P.waste[idx]; c.face = true;
-
-  const el = spawnCard(c);
-  el.dataset.where = 'w';
-  el.style.zIndex = 10 + i;
-
-  // mirror to the right: clear left/transform; offset using RIGHT
-  el.style.transform = '';
-  el.style.left = '';
-  el.style.top = '0';
-  el.style.right = ((N - 1 - i) * gap) + 'px';
-
-  // only the true top (rightmost) is interactive
-  if (idx !== P.waste.length - 1) {
-    el.dataset.locked = '1';
-    el.style.pointerEvents = 'none';
-  } else {
-    el.style.pointerEvents = 'auto';
+      if (idx !== P.waste.length - 1) {
+        el.dataset.locked='1';
+        el.style.pointerEvents='none';
+      } else {
+        el.style.pointerEvents='auto';
+      }
+      wEl.appendChild(el);
+    }
   }
 
-  wEl.appendChild(el);
-}
-}
   // FOUNDATIONS
   for(let i=0;i<4;i++){
     const fEl=document.getElementById(piles.f[i]);
