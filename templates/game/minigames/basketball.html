@@ -334,8 +334,12 @@
     function parseWalletResponse(j){ if(!j||typeof j!=='object') return {coins:0,crafting:0}; if('coins' in j || 'crafting' in j || 'credits' in j) return {coins:Number(j.coins)||0, crafting:Number(j.crafting??j.credits)||0}; if(j.wallet) return parseWalletResponse(j.wallet); if(j.balance) return parseWalletResponse(j.balance); return {coins:0,crafting:0}; }
     const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-    function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
-    function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+    function writeCraftAll(v){
+  const n = Math.max(0, v|0);
+  for(const k of CRAFT_KEYS) localStorage.setItem(k, String(n));
+  try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+}
+function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
     function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 
     async function ensureSession(){
