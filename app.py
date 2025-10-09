@@ -384,12 +384,16 @@ def crafting_redeem_code():
 
 # --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
 @app.post("/api/mint_codes/consume")
-def consume_mint_code(u):
+def consume_mint_code():
     ensure_voucher_tables()
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
     if not code:
         return jsonify(ok=False, reason="invalid"), 400
+
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
 
     now = int(time.time())
     with conn() as cx:
