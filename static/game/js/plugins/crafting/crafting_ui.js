@@ -2017,7 +2017,7 @@ function unmount(){
   STATE.mounted=false;
 }
 
-/* ---------- Single purchase buttons ---------- */
+/* ---------- Single purchase buttons (value-capped) ---------- */
 async function handleBuySingle(kind, enforceForm){
   if (enforceForm && !isCreateFormValid()){
     const status = document.getElementById('payStatus');
@@ -2027,45 +2027,74 @@ async function handleBuySingle(kind, enforceForm){
   }
 
   const usePi = (kind === 'pi');
+  const status = document.getElementById('payStatus');
 
   if (usePi) {
-  const status = document.getElementById('payStatus');
-  if (status) status.textContent = 'Opening IZZA Pay checkout…';
+    if (status) status.textContent = 'Opening IZZA Pay checkout…';
 
-  // compute the dynamic total in Pi
-  const totals = calcDynamicPrice();              // { pi, ic }
-  const pricePi = Number(totals.pi).toFixed(2);   // e.g. 0.45
-  const ctx = JSON.stringify({
-    cat: STATE.currentCategory,
-    part: STATE.currentPart,
-    flags: STATE.featureFlags,
-    levels: STATE.featureLevels
-  });
+    // Compute the dynamic totals right now (this is the cap snapshot)
+    const totals  = calcDynamicPrice();          // { pi, ic }
+    const pricePi = Number(totals.pi).toFixed(2);
+    const icCap   = totals.ic | 0;               // ← exact IC value snapshot
 
-  // send the dynamic price directly to IZZA PAY checkout
-  const url = `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}?p=${encodeURIComponent(pricePi)}&ctx=${encodeURIComponent(ctx)}`;
-  location.href = url;
-  return;
-}
+    // Carry context for your records/debug (unchanged)
+    const ctx = JSON.stringify({
+      cat:    STATE.currentCategory,
+      part:   STATE.currentPart,
+      flags:  STATE.featureFlags,
+      levels: STATE.featureLevels,
+      name:   STATE.currentName || ''
+    });
 
-  // Dynamic IC total based on toggles + levels
-  const total = calcDynamicPrice().ic;
-  const res = await payWithIC(total);
+    // Send both dynamic price and the IC cap snapshot to IZZA PAY
+    // (izzapay should persist this cap with the resulting credit/voucher)
+    const url =
+      `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}`
+      + `?p=${encodeURIComponent(pricePi)}`
+      + `&ic=${encodeURIComponent(icCap)}`
+      + `&ctx=${encodeURIComponent(ctx)}`;
 
-  const status = document.getElementById('payStatus');
+    location.href = url;
+    return;
+  }
+
+  // ---- IC flow: debit & grant a value-capped credit locally ----
+  const totals = calcDynamicPrice();
+  const totalIC = totals.ic | 0;                 // dynamic IC charge + cap snapshot
+
+  const res = await payWithIC(totalIC);
+
   if (res && res.ok){
-    applyCreditState((STATE.mintCredits|0) + 1);
+    // If the wallet helper exists, store a value-capped credit.
+    // Otherwise, fall back to your existing simple counter.
+    if (typeof walletAddCredit === 'function'){
+      walletAddCredit({
+        capIC: totalIC,
+        source: 'ic',
+        meta: {
+          cat:    STATE.currentCategory,
+          part:   STATE.currentPart,
+          flags:  STATE.featureFlags,
+          levels: STATE.featureLevels,
+          name:   STATE.currentName || ''
+        }
+      });
+    } else {
+      // Legacy fallback: keeps badge count working, but without cap enforcement.
+      applyCreditState((STATE.mintCredits|0) + 1);
+    }
+
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    if (status) status.textContent = 'Paid ✓ — visual credit granted.';
+    if (status) status.textContent = `Paid ✓ — visual credit granted (cap: ${totalIC.toLocaleString()} IC).`;
     updateTabsHeaderCredits();
     STATE.createSub = 'setup';
+
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
     if (status) status.textContent='Payment failed.';
   }
 }
-
 /* ---------- Visuals tab highlight ---------- */
 function _syncVisualsTabStyle(){
   try{
@@ -2085,7 +2114,38 @@ function _syncVisualsTabStyle(){
     }
   }catch(_){}
 }
+/* ===== Value-capped credits (client) ===== */
+const WALLET_KEY = 'izzaCreditWallet';
+function _walletRead(){ try{ return JSON.parse(localStorage.getItem(WALLET_KEY)||'[]'); }catch{ return []; } }
+function _walletWrite(arr){ try{ localStorage.setItem(WALLET_KEY, JSON.stringify(arr||[])); }catch{} }
 
+function walletAddCredit({ capIC, source='ic', meta={} }){
+  const w = _walletRead();
+  const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+  w.push({ id, capIC: Math.max(0, capIC|0), source, meta });
+  _walletWrite(w);
+  // keep UI badge in sync with your existing counter
+  applyCreditState((STATE.mintCredits|0) + 1);
+  return id;
+}
+
+function walletFindCover(icCost){
+  const w = _walletRead();
+  const fits = w.filter(c => (c.capIC|0) >= (icCost|0));
+  if (!fits.length) return null;
+  fits.sort((a,b)=> (a.capIC|0) - (b.capIC|0)); // smallest that covers
+  return fits[0]; // {id, capIC, ...}
+}
+
+function walletBurn(id){
+  const w = _walletRead();
+  const i = w.findIndex(x => x.id === id);
+  if (i >= 0){
+    w.splice(i,1);
+    _walletWrite(w);
+    applyCreditState(Math.max(0, (STATE.mintCredits|0) - 1), 'burn');
+  }
+}
 /* ---------- Bind inside current tab ---------- */
 function bindInside(){
   const root = STATE.root;
@@ -2411,33 +2471,33 @@ function bindInside(){
     Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10) || 100)
   );
 
-  // ---- Credit planning (value-aware) ----
-  // Your dynamic craft price in IC (already includes toggles/meters)
-  const recipe = {
-    icCost: calcDynamicPrice().ic,
-    creditRule: 'any' // change per item if needed: 'any' | 'earned' | 'purchased'
-  };
+  // ---- Credit planning (value-capped) ----
+  const icCost = calcDynamicPrice().ic;
 
-  // Plan: prefer burning earned first
-  const plan = (window.IZZA_CRAFT && IZZA_CRAFT.plan)
-    ? IZZA_CRAFT.plan(recipe.icCost, { allow: recipe.creditRule, prefer: 'earned' })
-    : { ok:false, missingIC: recipe.icCost, use:{} };
+  let usingWalletCredit = false;
+  let walletCredit = walletFindCover(icCost); // null or {id, capIC}
+  let usingValueStore = false;                // fallback to IZZA_CRAFT if no capped credit
+  let plan = null;
+  let reserved = false;
 
-  if (!plan.ok){
-    const msg = (recipe.creditRule === 'earned')
-      ? `You need ${plan.missingIC} more IC in earned credits for this item.`
-      : (recipe.creditRule === 'purchased')
-        ? `You need ${plan.missingIC} more IC in purchased credits for this item.`
-        : `You’re short ${plan.missingIC} IC in credits.`;
-    craftStatus.textContent = msg;
-    return;
-  }
+  if (walletCredit){
+    // A value-capped credit exists and covers this craft
+    usingWalletCredit = true;
+  } else {
+    // Fallback to legacy store, unchanged behavior
+    plan = (window.IZZA_CRAFT && IZZA_CRAFT.plan)
+      ? IZZA_CRAFT.plan(icCost, { allow: 'any', prefer: 'earned' })
+      : { ok:false, missingIC: icCost, use:{} };
 
-  // Reserve (consume) now; if we fail later we’ll refund
-  const reserved = (window.IZZA_CRAFT && IZZA_CRAFT.consume) ? IZZA_CRAFT.consume(plan) : false;
-  if (!reserved){
-    craftStatus.textContent = 'Could not reserve credits. Try again.';
-    return;
+    if (!plan.ok){
+      craftStatus.textContent =
+        `This item costs ${icCost} IC, but you don’t have a credit that covers it. ` +
+        `Reduce features or buy a higher-value credit.`;
+      return;
+    }
+    usingValueStore = true;
+    reserved = (window.IZZA_CRAFT && IZZA_CRAFT.consume) ? IZZA_CRAFT.consume(plan) : false;
+    if (!reserved){ craftStatus.textContent = 'Could not reserve credits. Try again.'; return; }
   }
 
   try{
@@ -2472,6 +2532,16 @@ function bindInside(){
 
     // ---- SUCCESS: Minted ----
     craftStatus.textContent = 'Crafted ✓';
+    if (usingWalletCredit && walletCredit){
+      walletBurn(walletCredit.id);
+    } else if (usingValueStore){
+      try{
+        const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
+        setCraftingCredits(r.total|0, 'burn');
+      }catch(_){}
+    }
+    updateTabsHeaderCredits();
+    _syncVisualsTabStyle();
 
     // Persist the crafted item server-side (get craftedId if possible)
     let craftedId = injected.id || null;
