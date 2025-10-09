@@ -124,7 +124,7 @@ COIN_PER_PI = 2000  # must match the game economy
 CREDIT_PI_VALUE = float(os.getenv("CREDIT_PI_VALUE", "0.70"))  # each credit is worth up to 0.70π
 # Where to send buyers after a successful “izza-game-crafting” purchase
 # --- Crafting credits v2 defaults (purchase/voucher) ---
-_BASE_IC_VALUE = 1  # how many "IC" a single credit carries
+_BASE_IC_VALUE = 500  # match earned-credit baseline (500 IC = 0.25π)
 _PURCHASE_CAPS = {"maxVisuals": 1}  # tweak as needed by your crafting app
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
@@ -404,6 +404,7 @@ def crafting_redeem_code():
         return jsonify(ok=False, reason="invalid"), 400
 
     ensure_voucher_tables()
+
     import time
     with conn() as cx:
         rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
@@ -412,25 +413,62 @@ def crafting_redeem_code():
         if rec["status"] != "issued":
             return jsonify(ok=False, reason="used"), 409
 
-        # Mark consumed first to be idempotent
+        # Mark consumed first (idempotent behavior)
         cx.execute(
             "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
             (int(time.time()), code)
         )
 
-        # v2 credit on redeem (idempotent via uniq)
-        _issue_credit_v2(cx, int(u["id"]),
-                         value_ic=_BASE_IC_VALUE,
-                         tier="pro",
-                         caps=_PURCHASE_CAPS,
-                         source="voucher",
-                         uniq=f"voucher:{code}")
+    # --- Compute value_ic and pi_paid using session/payment hints ---
+    value_ic = _BASE_IC_VALUE
+    pi_paid = 0.0
 
+    try:
+        # Prefer sessions.expected_pi
+        if rec["session_id"]:
+            with conn() as cx2:
+                srow = cx2.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
+            if srow and srow["expected_pi"]:
+                pi_paid = float(srow["expected_pi"] or 0.0)
+
+        # Fallback: best-effort sum of related orders (replace with your own mapping if you track it)
+        if (not pi_paid) and rec["payment_id"]:
+            with conn() as cx2:
+                rows = cx2.execute(
+                    "SELECT pi_amount FROM orders "
+                    "WHERE pi_tx_hash IS NOT NULL AND buyer_token IS NOT NULL "
+                    "AND pi_tx_hash IN (SELECT pi_tx_hash FROM orders WHERE buyer_token IN "
+                    "(SELECT buyer_token FROM orders ORDER BY id DESC LIMIT 1))"
+                ).fetchall()
+            pi_paid = sum(float(r["pi_amount"] or 0.0) for r in (rows or []))
+    except Exception:
+        pi_paid = 0.0
+
+    if pi_paid > 0:
+        value_ic = max(_BASE_IC_VALUE, int(round(pi_paid * COIN_PER_PI)))
+
+    # v2 credit (idempotent via uniq)
+    with conn() as cx:
+        _issue_credit_v2(
+            cx, int(u["id"]),
+            value_ic=value_ic,
+            tier="pro",
+            caps=_PURCHASE_CAPS,
+            source="voucher",
+            uniq=f"voucher:{code}"
+        )
+
+    # Legacy mirror count (v1 counter)
     credits = int(rec["credits"] or 1)
-    newbal = add_ic_credits(int(u["id"]), credits)  # legacy mirror
+    newbal = add_ic_credits(int(u["id"]), credits)
 
-    return jsonify(ok=True, creditsAdded=credits, balance=newbal)
-
+    return jsonify(
+        ok=True,
+        credits=credits,
+        valueICPerCredit=value_ic,
+        piPaidPerCredit=pi_paid,  # 0.0 if unknown
+        balance=newbal
+    )
 # --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
@@ -452,7 +490,12 @@ def consume_mint_code():
             (int(time.time()), code)
         )
 
-    return jsonify(ok=True, creditsAdded=int(rec["credits"] or 1))
+    return jsonify(
+        ok=True,
+        credits=int(rec["credits"] or 1)
+        # intentionally omit valueICPerCredit / piPaidPerCredit here,
+        # since consume is a low-level administrative endpoint
+    )
 
 @app.post("/api/crafting/set_dynamic_price")
 def set_dynamic_price():
@@ -996,8 +1039,6 @@ def get_bearer_token_from_request() -> str | None:
     return None
 
 # ----------------- HELPERS -----------------
-COIN_PER_PI = 2000
-BASE_CREDIT_IC = 500  # 0.25π baseline for earned credits
 
 def _consume_v2_credit_for(user_id: int, required_ic: int):
     """
