@@ -2029,47 +2029,48 @@ async function handleBuySingle(kind, enforceForm){
   const usePi = (kind === 'pi');
 
   if (usePi) {
-  const status = document.getElementById('payStatus');
-  if (status) status.textContent = 'Opening IZZA Pay checkout…';
+    const status = document.getElementById('payStatus');
+    if (status) status.textContent = 'Opening IZZA Pay checkout…';
 
-  // compute the dynamic total in Pi
-  const totals = calcDynamicPrice();              // { pi, ic }
-  const pricePi = Number(totals.pi).toFixed(2);   // e.g. 0.45
-  const ctx = JSON.stringify({
-    cat: STATE.currentCategory,
-    part: STATE.currentPart,
-    flags: STATE.featureFlags,
-    levels: STATE.featureLevels
-  });
+    // compute the dynamic total in Pi
+    const totals  = calcDynamicPrice();            // { pi, ic }
+    const pricePi = Number(totals.pi).toFixed(2);  // e.g. 0.45
+    const ctx = JSON.stringify({
+      cat: STATE.currentCategory,
+      part: STATE.currentPart,
+      flags: STATE.featureFlags,
+      levels: STATE.featureLevels
+    });
 
-  // send the dynamic price directly to IZZA PAY checkout
-  const url = `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}?p=${encodeURIComponent(pricePi)}&ctx=${encodeURIComponent(ctx)}`;
-  location.href = url;
-  return;
-}
+    // send the dynamic price directly to IZZA PAY checkout
+    const url = `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}?p=${encodeURIComponent(pricePi)}&ctx=${encodeURIComponent(ctx)}`;
+    location.href = url;
+    return;
+  }
 
   // --- IC path (single credit via IZZA Coins) ---
-const totalIC = calcDynamicPrice().ic | 0;     // dynamic IC based on toggles/meters
-const pay     = await payWithIC(totalIC);
+  const totalIC = calcDynamicPrice().ic | 0;   // dynamic IC based on toggles/meters
+  const pay     = await payWithIC(totalIC);
 
-const statusEl = document.getElementById('payStatus');
+  const statusEl = document.getElementById('payStatus');
 
-if (pay && pay.ok){
-  // 1) Grant a UI "mint credit" count for the badge (one craft attempt)
-  applyCreditState((STATE.mintCredits|0) + 1);
+  if (pay && pay.ok){
+    // 1) Grant a UI "mint credit" count for the badge (one craft attempt)
+    applyCreditState((STATE.mintCredits|0) + 1);
 
-  // 2) IMPORTANT: record this as PURCHASED *value* in the planner (IC amount actually paid)
-  try { window.IZZA_CRAFT?.purchase(totalIC); } catch {}
+    // 2) Record the **IC value** (not “earned”) so planner can burn correctly
+    try { window.IZZA_CRAFT?.purchase(totalIC); } catch {}
 
-  // 3) UI updates
-  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-  if (statusEl) statusEl.textContent = 'Paid ✓ — visual credit granted.';
-  updateTabsHeaderCredits();
-  STATE.createSub = 'setup';
-  const host = STATE.root?.querySelector('#craftTabs');
-  if (host){ host.innerHTML = renderCreate(); bindInside(); }
-} else {
-  if (statusEl) statusEl.textContent = 'Payment failed.';
+    // 3) UI updates
+    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+    if (statusEl) statusEl.textContent = 'Paid ✓ — visual credit granted.';
+    updateTabsHeaderCredits();
+    STATE.createSub = 'setup';
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){ host.innerHTML = renderCreate(); bindInside(); }
+  } else {
+    if (statusEl) statusEl.textContent = 'Payment failed.';
+  }
 }
 
 /* ---------- Visuals tab highlight ---------- */
@@ -2177,47 +2178,48 @@ function bindInside(){
   const redeemStat  = root.querySelector('#redeemStatus');
 
   if (redeemBtn){
-    redeemBtn.addEventListener('click', async ()=>{
-      const code = redeemInput?.value || '';
-      if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
-        redeemStat.textContent = 'Enter a valid code.';
-        return;
-      }
-      redeemBtn.disabled = true;
-      redeemStat.textContent = 'Checking code…';
+  redeemBtn.addEventListener('click', async ()=>{
+    const code = redeemInput?.value || '';
+    if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
+      redeemStat.textContent = 'Enter a valid code.';
+      return;
+    }
+    redeemBtn.disabled = true;
+    redeemStat.textContent = 'Checking code…';
 
-      const r = await redeemVoucher(code);
-      redeemBtn.disabled = false;
+    const r = await redeemVoucher(code);
+    redeemBtn.disabled = false;
 
-      if (r && r.ok){
-  const n = (r.creditsAdded|0) || 1;
+    if (r && r.ok){
+      const n = (r.creditsAdded|0) || 1;
 
-  // Figure out the IC value attached to this voucher/purchase.
-  // Prefer server-provided value; fall back to Pi→IC or base per-credit IC.
-  const icValue =
-    (r.valueIC|0) ||
-    (r.icValue|0) ||
-    (r.piPaid ? Math.round(r.piPaid * COIN_PER_PI) : 0) ||
-    (n * COSTS.PER_ITEM_IC);
+      // Figure out the IC value attached to this voucher/purchase.
+      const icValue =
+        (r.valueIC|0) ||
+        (r.icValue|0) ||
+        (r.piPaid ? Math.round(r.piPaid * COIN_PER_PI) : 0) ||
+        (n * COSTS.PER_ITEM_IC);
 
-  // 1) Badge/legacy mirrors (counts)
-  applyCreditState((STATE.mintCredits|0) + n);
-  updateTabsHeaderCredits();
+      // 1) Badge/legacy mirrors (counts)
+      applyCreditState((STATE.mintCredits|0) + n);
+      updateTabsHeaderCredits();
 
-  // 2) Planner store gets the *value* so plan() can spend it against icCost
-  try { window.IZZA_CRAFT?.purchase(icValue); } catch {}
+      // 2) Planner store gets the *value* so plan() can spend it against icCost
+      try { window.IZZA_CRAFT?.purchase(icValue); } catch {}
 
-  // 3) Keep the mirrors synced with split total if available
-  try {
-    const snap = window.IZZA_CRAFT?.read?.();
-    if (snap && Number.isFinite(snap.total)) setCraftingCredits(snap.total|0);
-  } catch {}
+      // 3) Keep the mirrors synced with split total if available
+      try {
+        const snap = window.IZZA_CRAFT?.read?.();
+        if (snap && Number.isFinite(snap.total)) setCraftingCredits(snap.total|0);
+      } catch {}
 
-  redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
-} else {
-  const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
-  redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
-}
+      redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+    } else {
+      const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
+      redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+    }
+  }); // <-- add this
+}      // <-- and this
 
   const itemName = root.querySelector('#itemName');
   if (itemName){
