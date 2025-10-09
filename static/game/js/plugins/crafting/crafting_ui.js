@@ -974,22 +974,45 @@ async function serverJSON(url, opts = {}) {
 }
 
 /* ---- Single source of truth for voucher redemption (izzapay) ---- */
-async function redeemMintCode(codeRaw){
-  try{
-    const code = String(codeRaw||'').trim().toUpperCase();
-    const r = await fetch(payApi('/api/mint_codes/consume'), {
-      method:'POST',
-      headers:{ 'content-type':'application/json' },
-      body: JSON.stringify({ code })
-    });
-    let j = {};
-    try { j = await r.json(); } catch {}
-    if (r.ok && j && j.ok) return j; // { ok:true, creditsAdded: 1 }
-    return { ok:false,
-             reason: j.reason || (r.status===404?'invalid' : r.status===400?'used' : 'network') };
-  }catch(_){
-    return { ok:false, reason:'network' };
+async function redeemVoucher(codeRaw){
+  const code = String(codeRaw||'').trim().toUpperCase();
+
+  // Try with IZZA Pay session cookie first (Option A)
+  let r = await fetch(payApi('/api/mint_codes/consume'), {
+    method: 'POST',
+    credentials: 'include',                    // send izzapay cookie
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+
+  // If the session cookie isn't present and we get 401, fall back to the Pi token
+  if (r.status === 401) {
+    const t = localStorage.getItem('piAccessToken') || '';
+    if (t) {
+      r = await fetch(payApi('/api/mint_codes/consume'), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer ' + t
+        },
+        body: JSON.stringify({ code })
+      });
+    }
   }
+
+  let j = {};
+  try { j = await r.json(); } catch {}
+  if (r.ok && j && j.ok) return j; // { ok:true, creditsAdded, balance? }
+
+  return {
+    ok: false,
+    reason:
+      (j && j.reason) ||
+      (r.status === 404 ? 'invalid'
+       : r.status === 409 ? 'used'
+       : r.status === 401 ? 'auth_required'
+       : 'network')
+  };
 }
 
 /* --- credit reconcile (server-first) --- */
@@ -2157,7 +2180,7 @@ function bindInside(){
       redeemBtn.disabled = true;
       redeemStat.textContent = 'Checking code…';
 
-      const r = await redeemMintCode(code);
+      const r = await redeemVoucher(code);
       redeemBtn.disabled = false;
 
       if (r && r.ok){
