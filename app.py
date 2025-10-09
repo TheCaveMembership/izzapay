@@ -2189,13 +2189,17 @@ def checkout(link_id):
     sid = uuid.uuid4().hex
 
     # --- Dynamic price override (?p=... &ctx=...) ---
-    unit_price = Decimal(str(i["pi_price"]))  # default
-    # Safely initialize these so later checks can't NameError
-    override_raw = (request.args.get("p") or "").strip()
-    mode = (i["dynamic_price_mode"] if "dynamic_price_mode" in i.keys() else None)
+    unit_price = Decimal(str(i["pi_price"]))  # default to item price
 
-    try:
-        if override_raw and mode == "pi_dynamic":
+    override_raw = (request.args.get("p") or "").strip()
+
+    # Safe fetch from sqlite3.Row
+    mode_val = (i["dynamic_price_mode"] if "dynamic_price_mode" in i.keys() else None)
+    mode = (str(mode_val or "")).strip().lower()
+
+    # 1) Honor explicit ?p=... only when item is dynamic
+    if override_raw and mode == "pi_dynamic":
+        try:
             ov = Decimal(str(override_raw))
             minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
             maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
@@ -2203,14 +2207,11 @@ def checkout(link_id):
             if maxp is not None and ov > maxp: ov = maxp
             if ov > 0:
                 unit_price = ov
-    except Exception:
-        pass
+        except Exception:
+            pass
 
-    # We'll accept ctx from querystring if present; otherwise we may fill from stored override.
-    dynamic_ctx_arg = (request.args.get("ctx") or "").strip()
-    dynamic_ctx = dynamic_ctx_arg
-
-    # <-- consume stored override when no ?p=... is present -->
+    # 2) Fallback to a stored override when no ?p=
+    stored_ctx = ""
     if (not override_raw) and (mode == "pi_dynamic"):
         try:
             with conn() as cx:
@@ -2221,25 +2222,24 @@ def checkout(link_id):
 
             if o and float(o["price_pi"]) > 0:
                 ov = Decimal(str(o["price_pi"]))
-
                 minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
                 maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
                 if minp is not None and ov < minp: ov = minp
                 if maxp is not None and ov > maxp: ov = maxp
-
                 unit_price = ov
-
-                # carry ctx forward only if not already provided via query
-                if not dynamic_ctx_arg:
-                    dynamic_ctx = (o["ctx"] or "")
+                stored_ctx = (o["ctx"] or "")
 
                 # one-shot: clear so reloads don't reapply old price
                 with conn() as cx:
-                    cx.execute("DELETE FROM dynamic_overrides WHERE user_id=? AND link_id=?",
-                               (int(u["id"]), link_id))
+                    cx.execute(
+                        "DELETE FROM dynamic_overrides WHERE user_id=? AND link_id=?",
+                        (int(u["id"]), link_id)
+                    )
         except Exception as e:
             print("dynamic_override_lookup_failed", e)
-    # <-- end stored override -->
+
+    # 3) Final context (query wins; else stored; else empty)
+    dynamic_ctx = (request.args.get("ctx") or stored_ctx or "").strip()
 
     expected = qpi(unit_price * Decimal(str(qty)))
 
@@ -2247,7 +2247,7 @@ def checkout(link_id):
         "item_id": int(i["id"]),
         "qty": int(qty),
         "price": float(unit_price),
-        "dynamic_ctx": dynamic_ctx or ""
+        "dynamic_ctx": dynamic_ctx
     }])
 
     with conn() as cx:
