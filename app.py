@@ -2160,6 +2160,12 @@ def checkout_cart(cid):
 
 from urllib.parse import quote  # make sure this is near the top of the file
 
+# put these near your other module-level constants
+FORCE_DYNAMIC_FOR_MERCHANT_SLUGS = {"izza-game-crafting"}   # add more slugs if needed
+FORCE_DYNAMIC_FOR_MERCHANT_IDS   = set()                     # e.g. {1, 42}
+MIN_PI_DEFAULT = Decimal("0.01")
+MAX_PI_DEFAULT = Decimal("1000000")
+
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
     with conn() as cx:
@@ -2187,27 +2193,38 @@ def checkout(link_id):
         # preserve ALL incoming params (p, ctx, qty, etc.)
         raw_qs   = request.query_string.decode("utf-8")  # already encoded
         next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
-        # IMPORTANT: encode next_url so &ctx and others stay inside 'next' param
-        wrapped  = quote(next_url, safe="")
+        wrapped  = quote(next_url, safe="")              # keep whole URL inside ?next=
         return redirect(f"/store/{i['mslug']}/signin?next={wrapped}")
 
     # Create a session tied to this user
     sid = uuid.uuid4().hex
 
     # --- Dynamic price override (?p=... &ctx=...) ---
-    unit_price  = Decimal(str(i["pi_price"]))  # default to item price
+    unit_price   = Decimal(str(i["pi_price"]))  # default to item price
     override_raw = (request.args.get("p") or "").strip()
 
-    # Safe fetch from sqlite3.Row
+    # Current mode from DB (may be empty)
     mode_val = (i["dynamic_price_mode"] if "dynamic_price_mode" in i.keys() else None)
     mode = (str(mode_val or "")).strip().lower()
 
-    # 1) Honor explicit ?p=... only when item is dynamic
+    # Force dynamic pricing for admin store(s)
+    force_dynamic = (i["mslug"] in FORCE_DYNAMIC_FOR_MERCHANT_SLUGS) or (int(i["mid"]) in FORCE_DYNAMIC_FOR_MERCHANT_IDS)
+    if force_dynamic:
+        mode = "pi_dynamic"
+
+    # Min/Max bounds (use defaults if empty when dynamic)
+    def _to_dec_or_none(v):
+        return Decimal(str(v)) if v is not None else None
+
+    minp_db = _to_dec_or_none(i["min_pi_price"]) if "min_pi_price" in i.keys() else None
+    maxp_db = _to_dec_or_none(i["max_pi_price"]) if "max_pi_price" in i.keys() else None
+    minp = minp_db if minp_db is not None else (MIN_PI_DEFAULT if mode == "pi_dynamic" else None)
+    maxp = maxp_db if maxp_db is not None else (MAX_PI_DEFAULT if mode == "pi_dynamic" else None)
+
+    # 1) Honor explicit ?p=... only when item is (now) dynamic
     if override_raw and mode == "pi_dynamic":
         try:
             ov = Decimal(str(override_raw))
-            minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
-            maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
             if minp is not None and ov < minp: ov = minp
             if maxp is not None and ov > maxp: ov = maxp
             if ov > 0:
@@ -2224,16 +2241,12 @@ def checkout(link_id):
                     "SELECT price_pi, ctx FROM dynamic_overrides WHERE user_id=? AND link_id=?",
                     (int(u["id"]), link_id)
                 ).fetchone()
-
             if o and float(o["price_pi"]) > 0:
                 ov = Decimal(str(o["price_pi"]))
-                minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
-                maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
                 if minp is not None and ov < minp: ov = minp
                 if maxp is not None and ov > maxp: ov = maxp
                 unit_price = ov
                 stored_ctx = (o["ctx"] or "")
-
                 # one-shot: clear so reloads don't reapply old price
                 with conn() as cx:
                     cx.execute(
@@ -2246,21 +2259,20 @@ def checkout(link_id):
     # 3) Final context (query wins; else stored; else empty)
     dynamic_ctx = (request.args.get("ctx") or stored_ctx or "").strip()
 
-    # --- DEBUG: see why override may not apply ---
+    # Debug snapshot
     try:
-        minp_dbg = i["min_pi_price"] if ("min_pi_price" in i.keys()) else None
-        maxp_dbg = i["max_pi_price"] if ("max_pi_price" in i.keys()) else None
+        print("checkout_debug", {
+            "link_id": link_id,
+            "forced_dynamic": force_dynamic,
+            "mode": mode,
+            "override_raw": override_raw,
+            "unit_price": str(unit_price),
+            "min": (str(minp) if minp is not None else None),
+            "max": (str(maxp) if maxp is not None else None),
+            "dynamic_ctx": dynamic_ctx
+        })
     except Exception:
-        minp_dbg = maxp_dbg = None
-    print("checkout_debug", {
-        "link_id": link_id,
-        "mode": mode,
-        "override_raw": override_raw,
-        "unit_price": str(unit_price),
-        "min": minp_dbg,
-        "max": maxp_dbg,
-        "dynamic_ctx": dynamic_ctx
-    })
+        pass
 
     expected = qpi(unit_price * Decimal(str(qty)))
 
