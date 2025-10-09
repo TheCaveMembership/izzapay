@@ -2160,6 +2160,8 @@ def checkout_cart(cid):
 
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
+    from urllib.parse import urlencode  # local import so this function is self-contained
+
     with conn() as cx:
         i = cx.execute("""
            SELECT items.*,
@@ -2181,17 +2183,17 @@ def checkout(link_id):
 
     # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
     u = current_user_row()
-if not u:
-    # keep ALL incoming params (e.g., p and ctx from Crafting), not just qty
-    next_qs  = urlencode(request.args.to_dict(flat=True))
-    next_url = f"/checkout/{link_id}" + (f"?{next_qs}" if next_qs else "")
-    return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
+    if not u:
+        # keep ALL incoming params (e.g., p and ctx from Crafting), not just qty
+        next_qs  = urlencode(request.args.to_dict(flat=True))
+        next_url = f"/checkout/{link_id}" + (f"?{next_qs}" if next_qs else "")
+        return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
+
     # Create a session tied to this user
     sid = uuid.uuid4().hex
 
     # --- Dynamic price override (?p=... &ctx=...) ---
     unit_price = Decimal(str(i["pi_price"]))  # default to item price
-
     override_raw = (request.args.get("p") or "").strip()
 
     # Safe fetch from sqlite3.Row
