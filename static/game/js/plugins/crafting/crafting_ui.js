@@ -1006,45 +1006,67 @@ async function serverJSON(url, opts = {}) {
   return await r.json().catch(() => ({}));
 }
 
-/* ---- Single source of truth for voucher redemption (izzapay) ---- */
+/* ---- Single source of truth for voucher redemption (GAME server) ----
+   NOTE: This replaces the old version that hit /api/mint_codes/consume on PAY.
+   Success payload is normalized to:
+     { ok:true, creditsAdded:number, valueIC:number, valuePi:number, status:'redeemed' }
+*/
 async function redeemVoucher(codeRaw){
-  const code = String(codeRaw||'').trim().toUpperCase();
+  const code = String(codeRaw || '').trim().toUpperCase();
+  if (!code) return { ok:false, reason:'invalid' };
 
-  // Try with IZZA Pay session cookie first (Option A)
-  let r = await fetch(payApi('/api/mint_codes/consume'), {
-    method: 'POST',
-    credentials: 'include',                    // send izzapay cookie
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code })
-  });
-
-  // If the session cookie isn't present and we get 401, fall back to the Pi token
-  if (r.status === 401) {
-    const t = localStorage.getItem('piAccessToken') || '';
-    if (t) {
-      r = await fetch(payApi('/api/mint_codes/consume'), {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'authorization': 'Bearer ' + t
-        },
-        body: JSON.stringify({ code })
-      });
-    }
+  let r, j = {};
+  try{
+    r = await fetch(gameApi('/api/crafting/code/redeem'), {
+      method: 'POST',
+      credentials: 'include',                 // use the game session (user context)
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code })
+    });
+  }catch{
+    return { ok:false, reason:'network' };
   }
 
-  let j = {};
   try { j = await r.json(); } catch {}
-  if (r.ok && j && j.ok) return j; // { ok:true, creditsAdded, balance? }
+
+  // Map common server outcomes -> stable client contract
+  if (!r.ok){
+    // Prefer explicit server reason if present
+    const sr = (j && (j.reason || j.error || j.msg)) ? String(j.reason || j.error || j.msg).toLowerCase() : '';
+    if (r.status === 401) return { ok:false, reason:'auth_required' };
+    if (r.status === 404 || /not\s*found|invalid/i.test(sr)) return { ok:false, reason:'invalid' };
+    if (r.status === 409 || /used|consumed/i.test(sr))       return { ok:false, reason:'used' };
+    if (r.status === 410 || /expired/i.test(sr))             return { ok:false, reason:'expired' };
+    return { ok:false, reason:'network' };
+  }
+
+  // Success: normalize the payload
+  // Server may return various shapes; extract conservatively:
+  const credits =
+    (j.creditsAdded|0) || (j.credits|0) || (j.credit|0) || 1;
+
+  const valueICRaw =
+    (j.valueIC|0) || (j.icValue|0) ||
+    (typeof j.ic === 'number' ? j.ic|0 : 0);
+
+  const valuePiRaw =
+    (typeof j.valuePi === 'number' ? j.valuePi :
+     typeof j.piPaid  === 'number' ? j.piPaid  :
+     undefined);
+
+  // If server didn’t include value, fall back to base per-credit value
+  const fallbackIC = credits * 500;              // 0.25 Pi = 500 IC per base credit
+  const valueIC    = Number.isFinite(valueICRaw) && valueICRaw > 0 ? valueICRaw : fallbackIC;
+  const valuePi    = (typeof valuePiRaw === 'number' && isFinite(valuePiRaw) && valuePiRaw > 0)
+                      ? valuePiRaw
+                      : (valueIC / 2000);        // 1 Pi = 2000 IC
 
   return {
-    ok: false,
-    reason:
-      (j && j.reason) ||
-      (r.status === 404 ? 'invalid'
-       : r.status === 409 ? 'used'
-       : r.status === 401 ? 'auth_required'
-       : 'network')
+    ok: true,
+    status: 'redeemed',
+    creditsAdded: credits,
+    valueIC,
+    valuePi
   };
 }
 
