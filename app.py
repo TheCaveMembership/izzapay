@@ -2548,47 +2548,6 @@ def voucher_new():
 
     html = HTML_TMPL.replace("__CODE__", code).replace("__BACK__", back_to_game)
     return Response(html, headers={"Content-Type": "text/html; charset=utf-8"})
-
-@app.post("/api/mint_codes/consume")
-def consume_mint_code():
-    ensure_voucher_tables()
-    data = request.get_json(silent=True) or {}
-    code = (data.get("code") or "").strip().upper()
-    if not code:
-        return jsonify(ok=False, reason="invalid"), 400
-
-    u = current_user_row()
-    if not u:
-        return jsonify(ok=False, reason="auth_required"), 401
-
-    now = int(time.time())
-    with conn() as cx:
-        rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
-        if not rec:
-            return jsonify(ok=False, reason="invalid"), 404
-        if rec["status"] != "issued":
-            return jsonify(ok=False, reason="used"), 409
-
-        cx.execute(
-            "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
-            (now, code)
-        )
-
-        # v2 credit on consume (idempotent via uniq)
-        credits = int(rec["credits"] or 1)
-        _issue_credit_v2(
-            cx, int(u["id"]),
-            value_ic=credits,
-            tier="pro",
-            caps=_PURCHASE_CAPS,
-            source="voucher",
-            uniq=f"voucher:{code}"
-        )
-
-        # optional legacy mirror
-        newbal = add_ic_credits(int(u["id"]), credits)
-
-    return jsonify(ok=True, creditsAdded=credits, balance=newbal)
     
 # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
