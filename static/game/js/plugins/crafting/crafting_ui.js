@@ -2396,118 +2396,154 @@ function bindInside(){
   });
 
   btnMint && btnMint.addEventListener('click', async ()=>{
-    craftStatus.textContent = '';
+  craftStatus.textContent = '';
 
-    const nm = moderateName(STATE.currentName);
-    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+  // Basic validations
+  const nm = moderateName(STATE.currentName);
+  if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+  if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-    const hasCredit  = totalMintCredits() > 0;
-    if (!hasCredit){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+  // Listing prefs
+  const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+  const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+  const priceIC    = Math.max(
+    COSTS.SHOP_MIN_IC,
+    Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10) || 100)
+  );
+
+  // ---- Credit planning (value-aware) ----
+  // Your dynamic craft price in IC (already includes toggles/meters)
+  const recipe = {
+    icCost: calcDynamicPrice().ic,
+    creditRule: 'any' // change per item if needed: 'any' | 'earned' | 'purchased'
+  };
+
+  // Plan: prefer burning earned first
+  const plan = (window.IZZA_CRAFT && IZZA_CRAFT.plan)
+    ? IZZA_CRAFT.plan(recipe.icCost, { allow: recipe.creditRule, prefer: 'earned' })
+    : { ok:false, missingIC: recipe.icCost, use:{} };
+
+  if (!plan.ok){
+    const msg = (recipe.creditRule === 'earned')
+      ? `You need ${plan.missingIC} more IC in earned credits for this item.`
+      : (recipe.creditRule === 'purchased')
+        ? `You need ${plan.missingIC} more IC in purchased credits for this item.`
+        : `You’re short ${plan.missingIC} IC in credits.`;
+    craftStatus.textContent = msg;
+    return;
+  }
+
+  // Reserve (consume) now; if we fail later we’ll refund
+  const reserved = (window.IZZA_CRAFT && IZZA_CRAFT.consume) ? IZZA_CRAFT.consume(plan) : false;
+  if (!reserved){
+    craftStatus.textContent = 'Could not reserve credits. Try again.';
+    return;
+  }
+
+  try{
+    // Normalize the art for the correct slot
+    const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+
+    // Inject into game (your armoury hook)
+    const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+      ? window.ArmourPacks.injectCraftedItem({
+          name: STATE.currentName,
+          category: STATE.currentCategory,
+          part: STATE.currentPart,
+          svg: normalizedForSlot,
+          priceIC,
+          sellInShop,
+          sellInPi,
+          featureFlags: STATE.featureFlags,
+          tracerPreset: STATE.tracerPreset,
+          swingPreset: STATE.swingPreset
+        })
+      : { ok:false, reason:'armour-packs-hook-missing' };
+
+    if (!(injected && injected.ok)){
+      // Refund what we reserved
+      try{
+        if (plan?.use?.purchasedCredits) IZZA_CRAFT.purchase(plan.use.purchasedCredits);
+        if (plan?.use?.earnedCredits)    IZZA_CRAFT.earn(plan.use.earnedCredits);
+      }catch(_){}
+      craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
       return;
     }
-    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
-    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+    // ---- SUCCESS: Minted ----
+    craftStatus.textContent = 'Crafted ✓';
 
-    try{
-      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
-
-      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-        ? window.ArmourPacks.injectCraftedItem({
+    // Persist the crafted item server-side (get craftedId if possible)
+    let craftedId = injected.id || null;
+    try {
+      const u = encodeURIComponent(
+        (window?.IZZA?.player?.username) ||
+        (window?.IZZA?.me?.username)     ||
+        localStorage.getItem('izzaPlayer') ||
+        localStorage.getItem('pi_username') ||
+        ''
+      );
+      if (u) {
+        const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
+          method: 'POST',
+          body: JSON.stringify({
             name: STATE.currentName,
             category: STATE.currentCategory,
             part: STATE.currentPart,
             svg: normalizedForSlot,
-            priceIC,
-            sellInShop,
-            sellInPi,
-            featureFlags: STATE.featureFlags,
-            tracerPreset: STATE.tracerPreset,
-            swingPreset: STATE.swingPreset
+            sku: '',
+            image: ''
           })
-        : { ok:false, reason:'armour-packs-hook-missing' };
-
-      if (injected && injected.ok){
-        // ---- SUCCESS: Minted ----
-        craftStatus.textContent = 'Crafted ✓';
-
-        // Handle credit burn (single or package)
-        if (STATE.packageCredits && STATE.packageCredits.items > 0){
-          STATE.packageCredits.items -= 1;
-          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-        } else if (typeof STATE.mintCredits === 'number') {
-          STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
-        }
-        STATE.canUseVisuals = totalMintCredits() > 0;
-        // Persist singles to storage + refresh header badge now that we burned a credit
-        setCraftingCredits(STATE.mintCredits | 0, 'burn');   // allow downgrade only on burn
-        updateTabsHeaderCredits();                   // updates the “Create Item” badge
-        _syncVisualsTabStyle();                      // reflect whether Visuals should be enabled
-
-        // Persist + get craftedId (from inject OR server)
-        let craftedId = injected.id || null;
-        try {
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-          }
-        } catch(e) {
-          console.warn('[craft] persist failed:', e);
-        }
-
-        // Mirror into My Creations + optional refresh
-        try { mirrorInjectedInventoryToMine(injected); } catch {}
-        try { hydrateMine(); } catch {}
-
-        // After a successful Mint: return to Setup
-        STATE.createSub = 'setup';
-        const host = STATE.root?.querySelector('#craftTabs');
-        if (host){
-          host.innerHTML = renderCreate();
-          bindInside();
-          bindFeatureMeters(STATE.root);
-          _syncVisualsTabStyle();
-        }
-
-        // Optional IZZA Pay merchant handoff
-        if (sellInPi && craftedId) {
-          const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
-          try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
-          const qs = new URLSearchParams({ attach: String(craftedId) });
-          try {
-            const t = localStorage.getItem('izzaBearer') || '';
-            if (t) qs.set('t', t);
-          } catch {}
-          location.href = `/merchant?${qs.toString()}`;
-        }
-      } else {
-        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+        });
+        if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
       }
-    }catch(e){
-      craftStatus.textContent = 'Error crafting: ' + e.message;
+    } catch(e) {
+      console.warn('[craft] persist failed:', e);
     }
-  }); // <-- closes btnMint handler
 
+    // Mirror into My Creations + optional refresh
+    try { mirrorInjectedInventoryToMine(injected); } catch {}
+    try { hydrateMine(); } catch {}
+
+    // Refresh credits badge/visuals from split store (legacy mirrors stay in sync)
+    try{
+      const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
+      setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
+      STATE.canUseVisuals = (r.total|0) > 0;
+      updateTabsHeaderCredits();
+      _syncVisualsTabStyle();
+    }catch(_){}
+
+    // Return to Setup after successful mint
+    STATE.createSub = 'setup';
+    const host = STATE.root?.querySelector('#craftTabs');
+    if (host){
+      host.innerHTML = renderCreate();
+      bindInside();
+      bindFeatureMeters(STATE.root);
+      _syncVisualsTabStyle();
+    }
+
+    // Optional IZZA Pay merchant handoff
+    if (sellInPi && craftedId) {
+      const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+      try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
+      const qs = new URLSearchParams({ attach: String(craftedId) });
+      try {
+        const t = localStorage.getItem('izzaBearer') || '';
+        if (t) qs.set('t', t);
+      } catch {}
+      location.href = `/merchant?${qs.toString()}`;
+    }
+  }catch(e){
+    // Refund on any thrown error
+    try{
+      if (plan?.use?.purchasedCredits) IZZA_CRAFT.purchase(plan.use.purchasedCredits);
+      if (plan?.use?.earnedCredits)    IZZA_CRAFT.earn(plan.use.earnedCredits);
+    }catch(_){}
+    craftStatus.textContent = 'Error crafting: ' + (e?.message || e);
+  }
+}); // <-- closes btnMint handler
   // finally, wire sliders/meters + presets on initial render
   bindFeatureMeters(STATE.root);
 
