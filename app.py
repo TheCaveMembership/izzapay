@@ -90,6 +90,20 @@ with conn() as cx:
           claimed_at INTEGER NOT NULL
         )
     """)
+
+with conn() as cx:
+    cx.execute("""
+      CREATE TABLE IF NOT EXISTS dynamic_overrides(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        link_id TEXT NOT NULL,
+        price_pi REAL NOT NULL,
+        ctx TEXT,
+        created_at INTEGER NOT NULL,
+        UNIQUE(user_id, link_id)
+      )
+    """)
+    
     cx.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_collectible_claims ON collectible_claims(order_id, user_id)")
 # ----------------- ENV -----------------
 load_dotenv()
@@ -366,6 +380,30 @@ def crafting_redeem_code():
     newbal = add_ic_credits(int(u["id"]), credits)  # legacy mirror
 
     return jsonify(ok=True, creditsAdded=credits, balance=newbal)
+
+@app.post("/api/crafting/set_dynamic_price")
+def set_dynamic_price():
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
+    data = request.get_json(silent=True) or {}
+    link_id = (data.get("link_id") or "").strip()
+    ctx     = (data.get("ctx") or "").strip()
+    try:
+        price = float(data.get("price_pi"))
+    except Exception:
+        return jsonify(ok=False, reason="bad_price"), 400
+    if not link_id or price <= 0:
+        return jsonify(ok=False, reason="missing_params"), 400
+
+    with conn() as cx:
+        cx.execute("""
+          INSERT INTO dynamic_overrides(user_id, link_id, price_pi, ctx, created_at)
+          VALUES(?,?,?,?,strftime('%s','now'))
+          ON CONFLICT(user_id, link_id)
+          DO UPDATE SET price_pi=excluded.price_pi, ctx=excluded.ctx, created_at=excluded.created_at
+        """, (u["id"], link_id, price, ctx))
+    return jsonify(ok=True)
 
 # --------------------------- MERCHANT ROUTES ------------------------------------
 @merchant_api.post("/create_product_from_craft")
@@ -2144,22 +2182,21 @@ def checkout(link_id):
     # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
     u = current_user_row()
     if not u:
-        # Send them to the store sign-in (keeps branding) and bounce back here
         next_url = f"/checkout/{link_id}?qty={qty}"
         return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
 
-        # Create a session tied to this user
+    # Create a session tied to this user
     sid = uuid.uuid4().hex
 
     # --- Dynamic price override (?p=... &ctx=...) ---
-    unit_price = Decimal(str(i["pi_price"]))  # default to item price
+    unit_price = Decimal(str(i["pi_price"]))  # default
+    # Safely initialize these so later checks can't NameError
+    override_raw = (request.args.get("p") or "").strip()
+    mode = (i["dynamic_price_mode"] if "dynamic_price_mode" in i.keys() else None)
+
     try:
-        override_raw = (request.args.get("p") or "").strip()
-        # Only honor override if item is marked dynamic
-        mode = (i["dynamic_price_mode"] if "dynamic_price_mode" in i.keys() else None)
         if override_raw and mode == "pi_dynamic":
             ov = Decimal(str(override_raw))
-            # clamp to optional min/max if present
             minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
             maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
             if minp is not None and ov < minp: ov = minp
@@ -2169,8 +2206,42 @@ def checkout(link_id):
     except Exception:
         pass
 
+    # We'll accept ctx from querystring if present; otherwise we may fill from stored override.
+    dynamic_ctx_arg = (request.args.get("ctx") or "").strip()
+    dynamic_ctx = dynamic_ctx_arg
+
+    # <-- consume stored override when no ?p=... is present -->
+    if (not override_raw) and (mode == "pi_dynamic"):
+        try:
+            with conn() as cx:
+                o = cx.execute(
+                    "SELECT price_pi, ctx FROM dynamic_overrides WHERE user_id=? AND link_id=?",
+                    (int(u["id"]), link_id)
+                ).fetchone()
+
+            if o and float(o["price_pi"]) > 0:
+                ov = Decimal(str(o["price_pi"]))
+
+                minp = Decimal(str(i["min_pi_price"])) if ("min_pi_price" in i.keys() and i["min_pi_price"] is not None) else None
+                maxp = Decimal(str(i["max_pi_price"])) if ("max_pi_price" in i.keys() and i["max_pi_price"] is not None) else None
+                if minp is not None and ov < minp: ov = minp
+                if maxp is not None and ov > maxp: ov = maxp
+
+                unit_price = ov
+
+                # carry ctx forward only if not already provided via query
+                if not dynamic_ctx_arg:
+                    dynamic_ctx = (o["ctx"] or "")
+
+                # one-shot: clear so reloads don't reapply old price
+                with conn() as cx:
+                    cx.execute("DELETE FROM dynamic_overrides WHERE user_id=? AND link_id=?",
+                               (int(u["id"]), link_id))
+        except Exception as e:
+            print("dynamic_override_lookup_failed", e)
+    # <-- end stored override -->
+
     expected = qpi(unit_price * Decimal(str(qty)))
-    dynamic_ctx = (request.args.get("ctx") or "").strip()
 
     line_items = json.dumps([{
         "item_id": int(i["id"]),
@@ -2406,17 +2477,17 @@ def voucher_new():
 
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
-    u = current_user_row()
-    if not u:
-        return jsonify(ok=False, reason="auth_required"), 401
-
     ensure_voucher_tables()
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
     if not code:
         return jsonify(ok=False, reason="invalid"), 400
 
-    import time
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
+
+    now = int(time.time())
     with conn() as cx:
         rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
         if not rec:
@@ -2426,18 +2497,24 @@ def consume_mint_code():
 
         cx.execute(
             "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
-            (int(time.time()), code)
+            (now, code)
         )
 
         # v2 credit on consume (idempotent via uniq)
-        _issue_credit_v2(cx, int(u["id"]),
-                         value_ic=_BASE_IC_VALUE,
-                         tier="pro",
-                         caps=_PURCHASE_CAPS,
-                         source="voucher",
-                         uniq=f"voucher:{code}")
+        credits = int(rec["credits"] or 1)
+        _issue_credit_v2(
+            cx, int(u["id"]),
+            value_ic=credits,
+            tier="pro",
+            caps=_PURCHASE_CAPS,
+            source="voucher",
+            uniq=f"voucher:{code}"
+        )
 
-    return jsonify(ok=True, creditsAdded=int(rec["credits"] or 1))
+        # optional legacy mirror
+        newbal = add_ic_credits(int(u["id"]), credits)
+
+    return jsonify(ok=True, creditsAdded=credits, balance=newbal)
     
 # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
