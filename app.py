@@ -2179,13 +2179,19 @@ def checkout(link_id):
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
-    # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
-    u = current_user_row()
-    if not u:
-        # keep ALL incoming params (p, ctx, qty, etc.) exactly as the browser sent them
-        raw_qs = request.query_string.decode("utf-8")  # already URL-encoded
-        next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
-        return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
+    from urllib.parse import quote  # make sure this import is at the top of your file
+
+# REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
+u = current_user_row()
+if not u:
+    # preserve ALL incoming params (p, ctx, qty, etc.)
+    raw_qs   = request.query_string.decode("utf-8")  # already encoded
+    next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
+    
+    # IMPORTANT: encode next_url so &ctx and others stay inside 'next' param
+    wrapped  = quote(next_url, safe="")
+    
+    return redirect(f"/store/{i['mslug']}/signin?next={wrapped}")
 
     # Create a session tied to this user
     sid = uuid.uuid4().hex
