@@ -1,7 +1,7 @@
 import os, json, uuid, time, hmac, base64, hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta, datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 import shutil
 import requests
 import mimetypes
@@ -2181,10 +2181,11 @@ def checkout(link_id):
 
     # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
     u = current_user_row()
-    if not u:
-        next_url = f"/checkout/{link_id}?qty={qty}"
-        return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
-
+if not u:
+    # keep ALL incoming params (e.g., p and ctx from Crafting), not just qty
+    next_qs  = urlencode(request.args.to_dict(flat=True))
+    next_url = f"/checkout/{link_id}" + (f"?{next_qs}" if next_qs else "")
+    return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
     # Create a session tied to this user
     sid = uuid.uuid4().hex
 
