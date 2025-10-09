@@ -2158,6 +2158,8 @@ def checkout_cart(cid):
         slug=m["slug"], # for redirect after payment
     )
 
+from urllib.parse import quote  # make sure this is near the top of the file
+
 @app.get("/checkout/<link_id>")
 def checkout(link_id):
     with conn() as cx:
@@ -2179,19 +2181,17 @@ def checkout(link_id):
     if i["stock_qty"] <= 0 and not i["allow_backorder"]:
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
-    from urllib.parse import quote  # make sure this import is at the top of your file
+    # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
+    u = current_user_row()
+    if not u:
+        # preserve ALL incoming params (p, ctx, qty, etc.)
+        raw_qs   = request.query_string.decode("utf-8")  # already encoded
+        next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
 
-# REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
-u = current_user_row()
-if not u:
-    # preserve ALL incoming params (p, ctx, qty, etc.)
-    raw_qs   = request.query_string.decode("utf-8")  # already encoded
-    next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
-    
-    # IMPORTANT: encode next_url so &ctx and others stay inside 'next' param
-    wrapped  = quote(next_url, safe="")
-    
-    return redirect(f"/store/{i['mslug']}/signin?next={wrapped}")
+        # IMPORTANT: encode next_url so &ctx and others stay inside 'next' param
+        wrapped  = quote(next_url, safe="")
+
+        return redirect(f"/store/{i['mslug']}/signin?next={wrapped}")
 
     # Create a session tied to this user
     sid = uuid.uuid4().hex
