@@ -2396,24 +2396,49 @@ function bindInside(){
   });
 
   btnMint && btnMint.addEventListener('click', async ()=>{
-    craftStatus.textContent = '';
+  craftStatus.textContent = '';
 
-    const nm = moderateName(STATE.currentName);
-    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+  const nm = moderateName(STATE.currentName);
+  if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-    const hasCredit  = totalMintCredits() > 0;
-    if (!hasCredit){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
-      return;
+  const hasCredit  = totalMintCredits() > 0;
+  if (!hasCredit){
+    craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+    return;
+  }
+  if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+
+  const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+  const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+  const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+
+  try{
+    // ⬇️⬇️ INSERT THIS BLOCK HERE (right before normalize/inject) ⬇️⬇️
+    const totals  = calcDynamicPrice(); // { pi, ic } – pi reflects toggles/levels
+    // server will reject if the player’s credit tier/value < totals.pi
+    const debit = await serverJSON(gameApi('/api/crafting/ic/debit'), {
+      method: 'POST',
+      body: JSON.stringify({
+        cost_pi: totals.pi,                  // authoritative price check
+        item: {                              // (optional) helpful for server logs/rules
+          category: STATE.currentCategory,
+          part: STATE.currentPart,
+          flags: STATE.featureFlags,
+          levels: STATE.featureLevels
+        }
+      })
+    });
+    if (!debit || !debit.ok){
+      craftStatus.textContent =
+        (debit && debit.reason === 'credit_too_low')
+          ? 'Your crafting credit is too low for this item. Reduce features or buy a higher-value credit.'
+          : 'Could not debit crafting credit.';
+      return; // ❌ stop mint flow
     }
-    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
+    // ⬆️⬆️ END INSERT ⬆️⬆️
 
-    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
-    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
-
-    try{
-      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+    const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+    // ... (rest of your existing injection + success handling stays as-is)
 
       const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
         ? window.ArmourPacks.injectCraftedItem({
