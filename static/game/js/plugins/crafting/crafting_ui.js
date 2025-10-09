@@ -5,7 +5,7 @@
 const GAME_BASE = 'https://izzagame.onrender.com';
 // IZZA Pay side (checkout, voucher codes, Pi approval/complete)
 const PAY_BASE  = 'https://izzapay.onrender.com';
-
+const SINGLE_MINT_LINK_ID = 'd0b811e8'; // your single-use mint item
 // Build absolute URLs to the correct origin
 const gameApi = (p) => `${GAME_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 const payApi  = (p) => `${PAY_BASE}${String(p || '').replace(/^\/+/, '/')}`;
@@ -2006,12 +2006,24 @@ async function handleBuySingle(kind, enforceForm){
   const usePi = (kind === 'pi');
 
   if (usePi) {
-    const status = document.getElementById('payStatus');
-    if (status) status.textContent = 'Opening IZZA Pay checkout…';
-    // Keep Pi checkout fixed at base for now
-    location.href = 'https://izzapay.onrender.com/checkout/d0b811e8';
-    return;
-  }
+  const status = document.getElementById('payStatus');
+  if (status) status.textContent = 'Opening IZZA Pay checkout…';
+
+  // compute the dynamic total in Pi
+  const totals = calcDynamicPrice();              // { pi, ic }
+  const pricePi = Number(totals.pi).toFixed(2);   // e.g. 0.45
+  const ctx = JSON.stringify({
+    cat: STATE.currentCategory,
+    part: STATE.currentPart,
+    flags: STATE.featureFlags,
+    levels: STATE.featureLevels
+  });
+
+  // send the dynamic price directly to IZZA PAY checkout
+  const url = `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}?p=${encodeURIComponent(pricePi)}&ctx=${encodeURIComponent(ctx)}`;
+  location.href = url;
+  return;
+}
 
   // Dynamic IC total based on toggles + levels
   const total = calcDynamicPrice().ic;
