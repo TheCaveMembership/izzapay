@@ -13,7 +13,6 @@ from flask import (
     redirect, session, abort, Response, Blueprint, jsonify
 )
 # ---- Auth helper for Pi-token routes ----
-from izza_game_auth import with_user  # use this if your Pi multiplayer API uses izza_game_auth
 from dotenv import load_dotenv
 from emailer import send_email
 from payments import split_amounts
