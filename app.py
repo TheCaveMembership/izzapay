@@ -222,42 +222,90 @@ from math import ceil
 
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
+    """
+    Debits a mint by consuming ONE credit:
+
+    Preferred (v2):
+      - If cost_ic or cost_pi provided, consume the smallest available v2 credit
+        whose value_ic >= required_ic (best fit). Returns v2_consumed payload.
+
+    Fallback (legacy):
+      - If no suitable v2 credit, fall back to the old 'users.ic_credits' counter.
+        Uses CREDIT_PI_VALUE to compute how many legacy credits are required.
+    """
     u = current_user_row()
-    if not u: return _err("auth_required")
+    if not u:
+        return _err("auth_required")
 
     data = request.get_json(silent=True) or {}
 
-    # The actual mint price in π (server will enforce)
+    # Accept price in IC (recommended) or in Pi
     try:
-        cost_pi = float(data.get("cost_pi") or 0)
+        cost_ic = int(data.get("cost_ic") or 0)
+    except Exception:
+        cost_ic = 0
+
+    try:
+        cost_pi = float(data.get("cost_pi") or 0.0)
     except Exception:
         cost_pi = 0.0
 
-    # existing field, but we will override when cost_pi is given
+    # Convert π → IC if needed
+    if cost_ic <= 0 and cost_pi > 0:
+        cost_ic = max(1, int(round(cost_pi * COIN_PER_PI)))
+
+    # ---- Preferred path: consume a v2 credit if we know the price ----
+    if cost_ic > 0:
+        consumed = _consume_v2_credit_for(int(u["id"]), required_ic=cost_ic)
+        if consumed:
+            # v2 success: report what we used and remaining v2 count
+            return _ok(
+                debited=True,
+                mode="v2",
+                required_ic=cost_ic,
+                v2_consumed={
+                    "id": consumed["id"],
+                    "value_ic": int(consumed["value_ic"]),
+                    "tier": consumed.get("tier"),
+                    "source": consumed.get("source"),
+                    "used_at": int(time.time()),
+                },
+                v2_available=_available_v2_credits_count(int(u["id"]))
+            )
+
+        # No suitable v2 credit -> fall through to legacy (if client allows)
+        # (kept for back-compat with old clients that still expect legacy credits)
+        # If you want to *hard require* v2, uncomment the next line:
+        # return _err("insufficient_v2_credit")
+
+    # ---- Legacy back-compat path (no price or v2 not available) ----
     try:
         amt_requested = int(data.get("amount") or 0)
     except Exception:
         amt_requested = 0
 
     if cost_pi > 0:
-        # Compute credits required for this mint
-        required = max(1, ceil(cost_pi / max(1e-9, CREDIT_PI_VALUE)))
-        # Ignore client-sent amount if it’s lower than what’s required
-        amt = required
+        # convert price in π into a count of legacy credits, using CREDIT_PI_VALUE
+        required_legacy = max(1, ceil(cost_pi / max(1e-9, CREDIT_PI_VALUE)))
+        amt = required_legacy
     else:
-        # Back-compat path (no price sent); behaves like before
         amt = amt_requested
 
     if amt <= 0:
         return _err("bad_amount")
 
-    # Enforce user has enough credits
     bal = get_ic_credits(int(u["id"]))
     if bal < amt:
         return _err("insufficient_credits")
 
     newbal = add_ic_credits(int(u["id"]), -amt)
-    return _ok(debited=True, amount=amt, balance=newbal, cost_pi=cost_pi, credit_value_pi=CREDIT_PI_VALUE)
+    return _ok(
+        debited=True,
+        mode="legacy",
+        amount=amt,
+        balance=newbal,
+        credit_value_pi=CREDIT_PI_VALUE
+    )
 
 @crafting_api.get("/credits")
 def crafting_ic_balance():
@@ -325,18 +373,30 @@ def crafting_ic_reconcile():
 def crafting_credits_status():
     u = current_user_row()
     if not u: return _err("auth_required")
+    uid = int(u["id"])
     with conn() as cx:
         _ensure_credit_tables_v2(cx)
         row = cx.execute(
-            "SELECT COUNT(*) AS n FROM crafting_credits_v2 WHERE user_id=? AND state='available'",
-            (int(u["id"]),)
+            "SELECT COUNT(*) AS n, COALESCE(SUM(value_ic),0) AS sum_ic "
+            "FROM crafting_credits_v2 WHERE user_id=? AND state='available'",
+            (uid,)
         ).fetchone()
-        v2 = int(row["n"] or 0)
-        # legacy fallback
-        v1 = get_ic_credits(int(u["id"]))
-    # Prefer v2 if present (avoids double counting)
-    total = v2 if v2 > 0 else v1
-    return _ok(credits=total, v2=v2, v1=v1)
+        v2_count = int(row["n"] or 0)
+        v2_sum_ic = int(row["sum_ic"] or 0)
+        # legacy fallback count
+        v1_count = get_ic_credits(uid)
+
+    # Prefer v2 counts; if none, fall back to legacy
+    total_count = v2_count if v2_count > 0 else v1_count
+
+    approx_pi = (v2_sum_ic / float(COIN_PER_PI)) if v2_sum_ic > 0 else 0.0
+    return _ok(
+        credits=total_count,
+        v2=v2_count,
+        v1=v1_count,
+        value_ic=v2_sum_ic,
+        value_pi=approx_pi
+    )
 
 @crafting_api.post("/credits/claim_order")
 def crafting_ic_claim_order():
@@ -404,7 +464,6 @@ def crafting_redeem_code():
         return jsonify(ok=False, reason="invalid"), 400
 
     ensure_voucher_tables()
-
     import time
     with conn() as cx:
         rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
@@ -413,41 +472,45 @@ def crafting_redeem_code():
         if rec["status"] != "issued":
             return jsonify(ok=False, reason="used"), 409
 
-        # Mark consumed first (idempotent behavior)
+        # Mark consumed first to make idempotent
         cx.execute(
             "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
             (int(time.time()), code)
         )
 
-    # --- Compute value_ic and pi_paid using session/payment hints ---
-    value_ic = _BASE_IC_VALUE
-    pi_paid = 0.0
+    # ---- Compute the per-credit value from the originating payment/session ----
+    value_ic = _BASE_IC_VALUE   # floor
+    pi_paid  = 0.0
 
     try:
-        # Prefer sessions.expected_pi
+        # Prefer session.expected_pi (exact at checkout)
         if rec["session_id"]:
             with conn() as cx2:
-                srow = cx2.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
-            if srow and srow["expected_pi"]:
+                srow = cx2.execute(
+                    "SELECT expected_pi FROM sessions WHERE id=?",
+                    (rec["session_id"],)
+                ).fetchone()
+            if srow and srow["expected_pi"] is not None:
                 pi_paid = float(srow["expected_pi"] or 0.0)
 
-        # Fallback: best-effort sum of related orders (replace with your own mapping if you track it)
-        if (not pi_paid) and rec["payment_id"]:
+        # Fallback: derive from orders tied to the same payment (best-effort)
+        if not pi_paid and rec["payment_id"]:
             with conn() as cx2:
                 rows = cx2.execute(
                     "SELECT pi_amount FROM orders "
                     "WHERE pi_tx_hash IS NOT NULL AND buyer_token IS NOT NULL "
-                    "AND pi_tx_hash IN (SELECT pi_tx_hash FROM orders WHERE buyer_token IN "
-                    "(SELECT buyer_token FROM orders ORDER BY id DESC LIMIT 1))"
+                    "AND pi_tx_hash IN (SELECT pi_tx_hash FROM orders "
+                    "WHERE buyer_token IN (SELECT buyer_token FROM orders ORDER BY id DESC LIMIT 1))"
                 ).fetchall()
             pi_paid = sum(float(r["pi_amount"] or 0.0) for r in (rows or []))
     except Exception:
         pi_paid = 0.0
 
     if pi_paid > 0:
+        # Convert π → IC using your economy rate
         value_ic = max(_BASE_IC_VALUE, int(round(pi_paid * COIN_PER_PI)))
 
-    # v2 credit (idempotent via uniq)
+    # v2 credit on redeem (idempotent via uniq)
     with conn() as cx:
         _issue_credit_v2(
             cx, int(u["id"]),
@@ -458,7 +521,7 @@ def crafting_redeem_code():
             uniq=f"voucher:{code}"
         )
 
-    # Legacy mirror count (v1 counter)
+    # legacy mirror counter (count only, keeps old UI stable)
     credits = int(rec["credits"] or 1)
     newbal = add_ic_credits(int(u["id"]), credits)
 
@@ -466,7 +529,7 @@ def crafting_redeem_code():
         ok=True,
         credits=credits,
         valueICPerCredit=value_ic,
-        piPaidPerCredit=pi_paid,  # 0.0 if unknown
+        piPaidPerCredit=pi_paid,   # 0.0 if unknown
         balance=newbal
     )
 # --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
@@ -490,11 +553,38 @@ def consume_mint_code():
             (int(time.time()), code)
         )
 
+    # Compute value like in /code/redeem
+    value_ic = _BASE_IC_VALUE
+    pi_paid  = 0.0
+    try:
+        if rec["session_id"]:
+            with conn() as cx2:
+                srow = cx2.execute(
+                    "SELECT expected_pi FROM sessions WHERE id=?",
+                    (rec["session_id"],)
+                ).fetchone()
+            if srow and srow["expected_pi"] is not None:
+                pi_paid = float(srow["expected_pi"] or 0.0)
+        if not pi_paid and rec["payment_id"]:
+            with conn() as cx2:
+                rows = cx2.execute(
+                    "SELECT pi_amount FROM orders "
+                    "WHERE pi_tx_hash IS NOT NULL AND buyer_token IS NOT NULL "
+                    "AND pi_tx_hash IN (SELECT pi_tx_hash FROM orders "
+                    "WHERE buyer_token IN (SELECT buyer_token FROM orders ORDER BY id DESC LIMIT 1))"
+                ).fetchall()
+            pi_paid = sum(float(r["pi_amount"] or 0.0) for r in (rows or []))
+    except Exception:
+        pi_paid = 0.0
+
+    if pi_paid > 0:
+        value_ic = max(_BASE_IC_VALUE, int(round(pi_paid * COIN_PER_PI)))
+
     return jsonify(
         ok=True,
-        credits=int(rec["credits"] or 1)
-        # intentionally omit valueICPerCredit / piPaidPerCredit here,
-        # since consume is a low-level administrative endpoint
+        credits=int(rec["credits"] or 1),
+        valueICPerCredit=value_ic,
+        piPaidPerCredit=pi_paid
     )
 
 @app.post("/api/crafting/set_dynamic_price")
