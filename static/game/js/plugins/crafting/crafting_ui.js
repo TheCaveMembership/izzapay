@@ -786,8 +786,9 @@ function applyCreditState(n){
   const next = Math.max(0, n|0);
   STATE.mintCredits   = next;
   STATE.canUseVisuals = next > 0;
-  setCraftingCredits(next);           // <— persist + notify
+  setCraftingCredits(next);           // persist + notify
   updateTabsHeaderCredits();
+  updateCreditSummary();              // <— NEW
 }
 function totalMintCredits(){
   const singles = (STATE.mintCredits | 0);
@@ -818,6 +819,38 @@ function updateTabsHeaderCredits(){
     } else {
       wrap.textContent = label;
     }
+  }catch(_){}
+}
+
+ // Convert all current credits into IC + Pi display
+function _readCreditTotalsIC(){
+  // Prefer split store (earned/purchased) if available
+  try{
+    const snap = window.IZZA_CRAFT?.read?.();
+    if (snap && Number.isFinite(snap.total)) return Math.max(0, snap.total|0);
+  }catch{}
+  // Fallback: approximate via "mint credits" count
+  try{
+    const singles = (STATE.mintCredits|0);
+    return singles * COSTS.PER_ITEM_IC; // best-effort if planner store not available
+  }catch{}
+  return 0;
+}
+function formatPi(n){ return (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2); }
+
+// Initial text for the summary (used by render)
+function creditSummaryText(){
+  const ic = _readCreditTotalsIC();
+  const pi = ic / COIN_PER_PI;
+  return `Credits Value: ${ic.toLocaleString()} IC • ${formatPi(pi)} Pi`;
+}
+
+// Update the DOM node when values change
+function updateCreditSummary(){
+  try{
+    const el = STATE.root?.querySelector('#cl-credit-summary');
+    if (!el) return;
+    el.textContent = creditSummaryText();
   }catch(_){}
 }
 
@@ -1311,10 +1344,21 @@ function renderTabs(){
        </span>`
     : '';
 
+  // The summary text node
+  const summary = `
+    <div id="cl-credit-summary"
+         style="font-size:12px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-left:10px">
+      ${creditSummaryText()}
+    </div>`;
+
   return `
-    <div style="display:flex; gap:8px; padding:10px; border-bottom:1px solid #2a3550; background:#0f1624">
-      <button class="ghost" data-tab="packages">Packages</button>
-      <button class="ghost" data-tab="create">Create Item${badge}</button>
+    <div style="display:flex;align-items:center;gap:8px;padding:10px;border-bottom:1px solid #2a3550;background:#0f1624">
+      <!-- Tabs on the right side block -->
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <button class="ghost" data-tab="packages">Packages</button>
+        <button class="ghost" data-tab="create">Create Item${badge}</button>
+        ${summary} <!-- ⇦ sits to the RIGHT of Create Item -->
+      </div>
     </div>`;
 }
 
@@ -1956,6 +2000,7 @@ async function mount(rootSel){
         STATE.canUseVisuals = local > 0;
       }
       updateTabsHeaderCredits();
+      updateCreditSummary();
     }
   }catch(_){
     // network/parse error -> stick with local
@@ -1977,6 +2022,7 @@ async function mount(rootSel){
       STATE.canUseVisuals = local > 0;
     }
     updateTabsHeaderCredits();
+    updateCreditSummary();
   }
   // ----------------------------------------------------------------
 
@@ -2203,6 +2249,7 @@ function bindInside(){
       // 1) Badge/legacy mirrors (counts)
       applyCreditState((STATE.mintCredits|0) + n);
       updateTabsHeaderCredits();
+      updateCreditSummary();
 
       // 2) Planner store gets the *value* so plan() can spend it against icCost
       try { window.IZZA_CRAFT?.purchase(icValue); } catch {}
@@ -2533,13 +2580,14 @@ function bindInside(){
     try { hydrateMine(); } catch {}
 
     // Refresh credits badge/visuals from split store (legacy mirrors stay in sync)
-    try{
-      const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
-      setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
-      STATE.canUseVisuals = (r.total|0) > 0;
-      updateTabsHeaderCredits();
-      _syncVisualsTabStyle();
-    }catch(_){}
+try{
+  const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
+  setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
+  STATE.canUseVisuals = (r.total|0) > 0;
+  updateTabsHeaderCredits();
+  updateCreditSummary();           // <-- ADD THIS LINE
+  _syncVisualsTabStyle();
+}catch(_){}
 
     // Return to Setup after successful mint
     STATE.createSub = 'setup';
