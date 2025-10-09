@@ -119,6 +119,8 @@ LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstr
 # ⚠️ Single-use crafting credit identifier.
 # This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
 SINGLE_CREDIT_LINK_ID = "d0b811e8"
+# top of file (ENV)
+CREDIT_PI_VALUE = float(os.getenv("CREDIT_PI_VALUE", "0.70"))  # each credit is worth up to 0.70π
 # Where to send buyers after a successful “izza-game-crafting” purchase
 # --- Crafting credits v2 defaults (purchase/voucher) ---
 _BASE_IC_VALUE = 1  # how many "IC" a single credit carries
@@ -215,16 +217,46 @@ def _grant_crafting_item(to_user_id: int | None, crafted_id: str | None, qty: in
         pass
 
 # --------------------------- CRAFTING ROUTES ------------------------------------
+from math import ceil
+
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
     u = current_user_row()
     if not u: return _err("auth_required")
+
     data = request.get_json(silent=True) or {}
-    try: amt = int(data.get("amount") or 0)
-    except Exception: amt = 0
-    if amt <= 0: return _err("bad_amount")
+
+    # The actual mint price in π (server will enforce)
+    try:
+        cost_pi = float(data.get("cost_pi") or 0)
+    except Exception:
+        cost_pi = 0.0
+
+    # existing field, but we will override when cost_pi is given
+    try:
+        amt_requested = int(data.get("amount") or 0)
+    except Exception:
+        amt_requested = 0
+
+    if cost_pi > 0:
+        # Compute credits required for this mint
+        required = max(1, ceil(cost_pi / max(1e-9, CREDIT_PI_VALUE)))
+        # Ignore client-sent amount if it’s lower than what’s required
+        amt = required
+    else:
+        # Back-compat path (no price sent); behaves like before
+        amt = amt_requested
+
+    if amt <= 0:
+        return _err("bad_amount")
+
+    # Enforce user has enough credits
+    bal = get_ic_credits(int(u["id"]))
+    if bal < amt:
+        return _err("insufficient_credits")
+
     newbal = add_ic_credits(int(u["id"]), -amt)
-    return _ok(debited=True, amount=amt, balance=newbal)
+    return _ok(debited=True, amount=amt, balance=newbal, cost_pi=cost_pi, credit_value_pi=CREDIT_PI_VALUE)
 
 @crafting_api.get("/credits")
 def crafting_ic_balance():
