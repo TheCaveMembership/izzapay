@@ -2182,12 +2182,12 @@ def checkout(link_id):
         return render_template("checkout.html", sold_out=True, i=i, colorway=i["colorway"])
 
     # REQUIRE app sign-in (same behavior as /checkout/cart/<cid>)
-    u = current_user_row()
-    if not u:
-        # keep ALL incoming params (e.g., p and ctx from Crafting), not just qty
-        next_qs  = urlencode(request.args.to_dict(flat=True))
-        next_url = f"/checkout/{link_id}" + (f"?{next_qs}" if next_qs else "")
-        return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
+u = current_user_row()
+if not u:
+    # keep ALL incoming params (p, ctx, qty, etc.) exactly as the browser sent them
+    raw_qs = request.query_string.decode("utf-8")  # already URL-encoded
+    next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
+    return redirect(f"/store/{i['mslug']}/signin?next={next_url}")
 
     # Create a session tied to this user
     sid = uuid.uuid4().hex
