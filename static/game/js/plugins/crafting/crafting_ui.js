@@ -1,12 +1,17 @@
 // /static/game/js/plugins/crafting/crafting_ui.js
 
-// ========================= BASE HELPERS (single source of truth) =========================
-// Core/Game side (AI, credits, crafting data)
-const GAME_BASE = 'https://izzagame.onrender.com';
+// ========================= BASE HELPERS (single source of // Core/Game side (AI, credits, crafting data)
+const GAME_BASE = (() => {
+  // Prefer same-origin; only fall back if you truly host the game API elsewhere.
+  const same = location.origin;
+  // Optional hard fallback if you really have a separate game API:
+  const alt  = 'https://izzagame.onrender.com';
+  return same.includes('izzapay.onrender.com') ? same : same || alt;
+})();
+
 // IZZA Pay side (checkout, voucher codes, Pi approval/complete)
 const PAY_BASE  = 'https://izzapay.onrender.com';
-const SINGLE_MINT_LINK_ID = 'd0b811e8'; // your single-use mint item
-// Build absolute URLs to the correct origin
+
 const gameApi = (p) => `${GAME_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 const payApi  = (p) => `${PAY_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 
