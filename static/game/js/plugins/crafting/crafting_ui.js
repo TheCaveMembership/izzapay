@@ -2395,118 +2395,165 @@ function bindInside(){
     const m = root.querySelector('#btnMint'); if (m) m.style.display = 'inline-block';
   });
 
-  btnMint && btnMint.addEventListener('click', async ()=>{
-    craftStatus.textContent = '';
+  // btnMint: full handler with value-gated server debit
+btnMint && btnMint.addEventListener('click', async ()=>{
+  // === [A] Prefight / UI validations =======================================
+  craftStatus.textContent = '';
 
-    const nm = moderateName(STATE.currentName);
-    if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
+  const nm = moderateName(STATE.currentName);
+  if (!nm.ok){ craftStatus.textContent = nm.reason; return; }
 
-    const hasCredit  = totalMintCredits() > 0;
-    if (!hasCredit){
-      craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+  const hasCredit  = totalMintCredits() > 0;
+  if (!hasCredit){
+    craftStatus.textContent = 'Please pay (Pi or IC) first, or buy a package.';
+    return;
+  }
+  if (!STATE.currentSVG){
+    craftStatus.textContent = 'Add/Preview SVG first.';
+    return;
+  }
+
+  // read selling options (unchanged)
+  const sellInShop = !!root.querySelector('#sellInShop')?.checked;
+  const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
+  const priceIC    = Math.max(
+    COSTS.SHOP_MIN_IC,
+    Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100)
+  );
+
+  // === [B] Server-enforced debit (value-gated credit) =======================
+  // calcDynamicPrice() must return { pi, ic } for this item
+  const totals = calcDynamicPrice(); // { pi, ic }
+  try{
+    const r = await fetch(gameApi('/api/crafting/ic/debit'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ cost_pi: totals.pi })   // server converts π → required IC
+    });
+    const j = await r.json();
+
+    // Failure cases: include “insufficient_credit_value” (value too low)
+    if (!r.ok || !j || !j.ok){
+      if (j && (j.reason === 'insufficient_credit_value')) {
+        craftStatus.textContent =
+          `This item costs ${totals.ic.toLocaleString()} IC, ` +
+          `but your available crafting credits don’t have enough value. ` +
+          `Earn or purchase a higher-tier crafting credit to mint this item.`;
+      } else if (j && j.reason === 'insufficient_credits') {
+        craftStatus.textContent = 'Not enough crafting credits. Please buy or earn more.';
+      } else if (j && j.reason === 'auth_required') {
+        craftStatus.textContent = 'Please sign in again.';
+      } else {
+        craftStatus.textContent = 'Unable to mint right now. Please try again.';
+      }
       return;
     }
-    if (!STATE.currentSVG){ craftStatus.textContent = 'Add/Preview SVG first.'; return; }
 
-    const sellInShop = !!root.querySelector('#sellInShop')?.checked;
-    const sellInPi   = !!root.querySelector('#sellInPi')?.checked;
-    const priceIC    = Math.max(COSTS.SHOP_MIN_IC, Math.min(COSTS.SHOP_MAX_IC, parseInt(root.querySelector('#shopPrice')?.value||'100',10)||100));
+    // Optional: if API returns a balance mirror, you can sync local counters here
+    // if (typeof j.balance === 'number') { STATE.mintCredits = j.balance; }
+  } catch (e){
+    craftStatus.textContent = 'Network error. Please try again.';
+    return;
+  }
 
-    try{
-      const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+  // === [C] Normalize + inject into game (unchanged) =========================
+  try{
+    const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
-      const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-        ? window.ArmourPacks.injectCraftedItem({
-            name: STATE.currentName,
-            category: STATE.currentCategory,
-            part: STATE.currentPart,
-            svg: normalizedForSlot,
-            priceIC,
-            sellInShop,
-            sellInPi,
-            featureFlags: STATE.featureFlags,
-            tracerPreset: STATE.tracerPreset,
-            swingPreset: STATE.swingPreset
-          })
-        : { ok:false, reason:'armour-packs-hook-missing' };
+    const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
+      ? window.ArmourPacks.injectCraftedItem({
+          name: STATE.currentName,
+          category: STATE.currentCategory,
+          part: STATE.currentPart,
+          svg: normalizedForSlot,
+          priceIC,
+          sellInShop,
+          sellInPi,
+          featureFlags: STATE.featureFlags,
+          tracerPreset: STATE.tracerPreset,
+          swingPreset: STATE.swingPreset
+        })
+      : { ok:false, reason:'armour-packs-hook-missing' };
 
-      if (injected && injected.ok){
-        // ---- SUCCESS: Minted ----
-        craftStatus.textContent = 'Crafted ✓';
+    if (injected && injected.ok){
+      // === [D] Success UX + local credit mirrors ============================
+      craftStatus.textContent = 'Crafted ✓';
 
-        // Handle credit burn (single or package)
-        if (STATE.packageCredits && STATE.packageCredits.items > 0){
-          STATE.packageCredits.items -= 1;
-          if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
-        } else if (typeof STATE.mintCredits === 'number') {
-          STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
-        }
-        STATE.canUseVisuals = totalMintCredits() > 0;
-        // Persist singles to storage + refresh header badge now that we burned a credit
-        setCraftingCredits(STATE.mintCredits | 0, 'burn');   // allow downgrade only on burn
-        updateTabsHeaderCredits();                   // updates the “Create Item” badge
-        _syncVisualsTabStyle();                      // reflect whether Visuals should be enabled
-
-        // Persist + get craftedId (from inject OR server)
-        let craftedId = injected.id || null;
-        try {
-          const u = encodeURIComponent(
-            (window?.IZZA?.player?.username)
-            || (window?.IZZA?.me?.username)
-            || localStorage.getItem('izzaPlayer')
-            || localStorage.getItem('pi_username')
-            || ''
-          );
-          if (u) {
-            const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
-              method: 'POST',
-              body: JSON.stringify({
-                                name: STATE.currentName,
-                category: STATE.currentCategory,
-                part: STATE.currentPart,
-                svg: normalizedForSlot,
-                sku: '',
-                image: ''
-              })
-            });
-            if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-          }
-        } catch(e) {
-          console.warn('[craft] persist failed:', e);
-        }
-
-        // Mirror into My Creations + optional refresh
-        try { mirrorInjectedInventoryToMine(injected); } catch {}
-        try { hydrateMine(); } catch {}
-
-        // After a successful Mint: return to Setup
-        STATE.createSub = 'setup';
-        const host = STATE.root?.querySelector('#craftTabs');
-        if (host){
-          host.innerHTML = renderCreate();
-          bindInside();
-          bindFeatureMeters(STATE.root);
-          _syncVisualsTabStyle();
-        }
-
-        // Optional IZZA Pay merchant handoff
-        if (sellInPi && craftedId) {
-          const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
-          try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
-          const qs = new URLSearchParams({ attach: String(craftedId) });
-          try {
-            const t = localStorage.getItem('izzaBearer') || '';
-            if (t) qs.set('t', t);
-          } catch {}
-          location.href = `/merchant?${qs.toString()}`;
-        }
-      } else {
-        craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+      // burn local credit mirror (legacy counter / package)
+      if (STATE.packageCredits && STATE.packageCredits.items > 0){
+        STATE.packageCredits.items -= 1;
+        if (STATE.packageCredits.items <= 0) STATE.packageCredits = null;
+      } else if (typeof STATE.mintCredits === 'number') {
+        STATE.mintCredits = Math.max(0, (STATE.mintCredits|0) - 1);
       }
-    }catch(e){
-      craftStatus.textContent = 'Error crafting: ' + e.message;
+      STATE.canUseVisuals = totalMintCredits() > 0;
+
+      // persist mirrors / refresh badges immediately
+      setCraftingCredits(STATE.mintCredits | 0, 'burn');   // allow downgrade only on burn
+      updateTabsHeaderCredits();                           // updates “Create Item” badge
+      _syncVisualsTabStyle();                              // toggle visuals enabled state
+
+      // === [E] Persist crafted item on server; capture craftedId ============
+      let craftedId = injected.id || null;
+      try {
+        const u = encodeURIComponent(
+          (window?.IZZA?.player?.username)
+          || (window?.IZZA?.me?.username)
+          || localStorage.getItem('izzaPlayer')
+          || localStorage.getItem('pi_username')
+          || ''
+        );
+        if (u) {
+          const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
+            method: 'POST',
+            body: JSON.stringify({
+              name: STATE.currentName,
+              category: STATE.currentCategory,
+              part: STATE.currentPart,
+              svg: normalizedForSlot,
+              sku: '',
+              image: ''
+            })
+          });
+          if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
+        }
+      } catch(e) {
+        console.warn('[craft] persist failed:', e);
+      }
+
+      // === [F] Mirror into “My Creations” + refresh =========================
+      try { mirrorInjectedInventoryToMine(injected); } catch {}
+      try { hydrateMine(); } catch {}
+
+      // === [G] Return UI to Setup tab ======================================
+      STATE.createSub = 'setup';
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){
+        host.innerHTML = renderCreate();
+        bindInside();
+        bindFeatureMeters(STATE.root);
+        _syncVisualsTabStyle();
+      }
+
+      // === [H] Optional merchant handoff to IZZA Pay ========================
+      if (sellInPi && craftedId) {
+        const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+        try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
+        const qs = new URLSearchParams({ attach: String(craftedId) });
+        try {
+          const t = localStorage.getItem('izzaBearer') || '';
+          if (t) qs.set('t', t);
+        } catch {}
+        location.href = `/merchant?${qs.toString()}`;
+      }
+    } else {
+      craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
     }
-  }); // <-- closes btnMint handler
+  } catch(e){
+    craftStatus.textContent = 'Error crafting: ' + e.message;
+  }
+}); // === [/btnMint handler end] ===============================================
 
   // finally, wire sliders/meters + presets on initial render
   bindFeatureMeters(STATE.root);
