@@ -12,6 +12,8 @@ from flask import (
     Flask, request, render_template, render_template_string,
     redirect, session, abort, Response, Blueprint, jsonify
 )
+# ---- Auth helper for Pi-token routes ----
+from izza_game_auth import with_user  # use this if your Pi multiplayer API uses izza_game_auth
 from dotenv import load_dotenv
 from emailer import send_email
 from payments import split_amounts
@@ -378,6 +380,43 @@ def crafting_redeem_code():
 
     credits = int(rec["credits"] or 1)
     newbal = add_ic_credits(int(u["id"]), credits)  # legacy mirror
+
+    return jsonify(ok=True, creditsAdded=credits, balance=newbal)
+
+# --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
+@app.post("/api/mint_codes/consume")
+@with_user
+def consume_mint_code(u):
+    ensure_voucher_tables()
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip().upper()
+    if not code:
+        return jsonify(ok=False, reason="invalid"), 400
+
+    now = int(time.time())
+    with conn() as cx:
+        rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
+        if not rec:
+            return jsonify(ok=False, reason="invalid"), 404
+        if rec["status"] != "issued":
+            return jsonify(ok=False, reason="used"), 409
+
+        cx.execute(
+            "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
+            (now, code)
+        )
+
+        credits = int(rec["credits"] or 1)
+        _issue_credit_v2(
+            cx, int(u["id"]),
+            value_ic=credits,
+            tier="pro",
+            caps=_PURCHASE_CAPS,
+            source="voucher",
+            uniq=f"voucher:{code}"
+        )
+
+        newbal = add_ic_credits(int(u["id"]), credits)
 
     return jsonify(ok=True, creditsAdded=credits, balance=newbal)
 
