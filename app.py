@@ -2246,7 +2246,16 @@ def checkout(link_id):
             print("dynamic_override_lookup_failed", e)
 
     # 3) Final context (query wins; else stored; else empty)
-    dynamic_ctx = (request.args.get("ctx") or stored_ctx or "").strip()
+dynamic_ctx = (request.args.get("ctx") or stored_ctx or "").strip()
+
+print("checkout_debug",
+      dict(link_id=link_id,
+           mode=mode,
+           override_raw=override_raw,
+           unit_price=str(unit_price),
+           min=i.get("min_pi_price") if hasattr(i, "get") else i["min_pi_price"] if "min_pi_price" in i.keys() else None,
+           max=i.get("max_pi_price") if hasattr(i, "get") else i["max_pi_price"] if "max_pi_price" in i.keys() else None,
+           dynamic_ctx=dynamic_ctx))
 
     expected = qpi(unit_price * Decimal(str(qty)))
 
