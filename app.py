@@ -119,6 +119,7 @@ LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstr
 # ⚠️ Single-use crafting credit identifier.
 # This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
 SINGLE_CREDIT_LINK_ID = "d0b811e8"
+COIN_PER_PI = 2000  # must match the game economy
 # top of file (ENV)
 CREDIT_PI_VALUE = float(os.getenv("CREDIT_PI_VALUE", "0.70"))  # each credit is worth up to 0.70π
 # Where to send buyers after a successful “izza-game-crafting” purchase
@@ -274,7 +275,7 @@ def crafting_ic_reconcile():
 
     with conn() as cx:
         rows = cx.execute("""
-            SELECT o.id, o.qty
+            SELECT o.id, o.qty, o.pi_amount
             FROM orders o
             JOIN items i ON i.id = o.item_id
             WHERE o.buyer_user_id = ?
@@ -289,15 +290,26 @@ def crafting_ic_reconcile():
         if total_new > 0:
             # v2 purchased credits (idempotent per-order via uniq)
             for r in rows:
-                uniq = f"order:{int(r['id'])}"
-                _issue_credit_v2(cx, uid,
-                                 value_ic=_BASE_IC_VALUE,
-                                 tier="pro",
-                                 caps=_PURCHASE_CAPS,
-                                 source="purchase",
-                                 uniq=uniq)
-            # (Optional back-compat) mirror to legacy counter & mark claims
+                oid = int(r["id"])
+                uniq = f"order:{oid}"
+
+                # Stamp credit value from the actual paid π amount
+                paid_pi = float(r["pi_amount"] or 0.0)
+                value_ic = max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
+
+                _issue_credit_v2(
+                    cx, uid,
+                    value_ic=value_ic,
+                    tier="pro",
+                    caps=_PURCHASE_CAPS,
+                    source="purchase",
+                    uniq=uniq
+                )
+
+            # (Optional legacy mirror counter)
             newbal = add_ic_credits(uid, total_new)
+
+            # mark each order as claimed (prevents duplicates)
             now = int(time.time())
             for r in rows:
                 cx.execute(
@@ -342,7 +354,7 @@ def crafting_ic_claim_order():
     uid = int(u["id"])
     with conn() as cx:
         r = cx.execute("""
-            SELECT o.id, o.qty
+            SELECT o.id, o.qty, o.pi_amount
             FROM orders o
             JOIN items i ON i.id = o.item_id
             WHERE o.id = ? AND o.buyer_user_id = ? AND o.status='paid' AND i.link_id = ?
@@ -359,14 +371,19 @@ def crafting_ic_claim_order():
         qty = int(r["qty"] or 1)
 
         # v2 purchased credit (idempotent via uniq)
-        _issue_credit_v2(cx, uid,
-                         value_ic=_BASE_IC_VALUE,
-                         tier="pro",
-                         caps=_PURCHASE_CAPS,
-                         source="purchase",
-                         uniq=f"order:{oid}")
+        paid_pi = float(r["pi_amount"] or 0.0)
+        value_ic = max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
 
-        # (Optional back-compat mirror)
+        _issue_credit_v2(
+            cx, uid,
+            value_ic=value_ic,
+            tier="pro",
+            caps=_PURCHASE_CAPS,
+            source="purchase",
+            uniq=f"order:{oid}"
+        )
+
+        # (Optional legacy mirror)
         newbal = add_ic_credits(uid, qty)
 
         cx.execute(
@@ -979,6 +996,44 @@ def get_bearer_token_from_request() -> str | None:
     return None
 
 # ----------------- HELPERS -----------------
+COIN_PER_PI = 2000
+BASE_CREDIT_IC = 500  # 0.25π baseline for earned credits
+
+def _consume_v2_credit_for(user_id: int, required_ic: int):
+    """
+    Pick the smallest available v2 credit whose value_ic >= required_ic (best-fit),
+    mark it used, and return the consumed row (dict). If none qualifies, return None.
+    """
+    with conn() as cx:
+        rows = cx.execute("""
+            SELECT id, value_ic, tier, source, created_at
+            FROM crafting_credits_v2
+            WHERE user_id=? AND state='available'
+            ORDER BY value_ic ASC, id ASC
+        """, (int(user_id),)).fetchall()
+
+        pick = None
+        for r in rows:
+            if int(r["value_ic"] or 0) >= int(required_ic):
+                pick = r
+                break
+        if not pick:
+            return None
+
+        cx.execute("""
+            UPDATE crafting_credits_v2
+            SET state='used', used_at=strftime('%s','now')
+            WHERE id=? AND user_id=? AND state='available'
+        """, (int(pick["id"]), int(user_id)))
+        return dict(pick)
+
+def _available_v2_credits_count(user_id: int) -> int:
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) AS n FROM crafting_credits_v2 WHERE user_id=? AND state='available'",
+            (int(user_id),)
+        ).fetchone()
+    return int(row["n"] or 0)
 # === Crafting v2 per-credit helpers (purchase vouchers) =======================
 def _ensure_credit_tables_v2(cx):
     cx.executescript("""
