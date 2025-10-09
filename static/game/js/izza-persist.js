@@ -406,6 +406,108 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
   };
   window.IZZA_CRAFT = API;
 
+    /* ===== Valuation + Spend Planner (earned v2 fixed @ 500 IC / 0.25π) ===== */
+  const VAL = {
+    earnedICPerCredit: 500,         // v2: fixed
+    earnedPiPerCredit: 0.25,        // fixed (for display/receipts)
+    // purchased credits can be valued differently; default to 500 unless server/checkout sets it
+    _purchasedICPerCredit: parseInt(localStorage.getItem('izzaCraftPurchIC')||'500',10) || 500
+  };
+
+  // Allow the shop/checkout to set the purchased-credit valuation (e.g., dynamic PI → IC)
+  API.setPurchasedICPerCredit = function(ic){
+    const n = (parseInt(ic,10) || 0);
+    if (n > 0) {
+      VAL._purchasedICPerCredit = n;
+      try { localStorage.setItem('izzaCraftPurchIC', String(n)); } catch(_){}
+      try { window.dispatchEvent(new Event('izza-crafting-changed')); } catch(_){}
+    }
+  };
+
+  // Current "allowance" expressed in IC that can be covered by each bucket
+  API.allowanceIC = function(){
+    const s = API.read(); // { earned, purchased, total }
+    return {
+      earnedIC:    (s.earned|0)    * VAL.earnedICPerCredit,
+      purchasedIC: (s.purchased|0) * VAL._purchasedICPerCredit,
+      totalIC:     (s.earned|0)*VAL.earnedICPerCredit + (s.purchased|0)*VAL._purchasedICPerCredit
+    };
+  };
+
+  /*
+   * Plan a spend:
+   *  - costIC: recipe price in IC
+   *  - policy:
+   *      { allow: 'any'|'earned'|'purchased', prefer?: 'earned'|'purchased' }
+   *      You can also pass item meta: { tags?:string[], id?:string }, we keep it for future rules.
+   */
+  API.plan = function(costIC, policy){
+    const cost = (parseInt(costIC,10)||0);
+    if (cost <= 0) return { ok:false, reason:'invalid_cost' };
+
+    const allow  = (policy && policy.allow)  || 'any';
+    const prefer = (policy && policy.prefer) || 'earned';
+
+    const { earnedIC, purchasedIC } = API.allowanceIC();
+    let useEarnedIC = 0, usePurchIC = 0;
+
+    function takeEarned(x){
+      const can = Math.min(x, earnedIC - useEarnedIC);
+      useEarnedIC += Math.max(0, can);
+    }
+    function takePurch(x){
+      const can = Math.min(x, purchasedIC - usePurchIC);
+      usePurchIC += Math.max(0, can);
+    }
+
+    if (allow === 'earned') {
+      takeEarned(cost);
+    } else if (allow === 'purchased') {
+      takePurch(cost);
+    } else {
+      // 'any' — follow preference
+      if (prefer === 'earned') {
+        takeEarned(cost);
+        takePurch(cost - useEarnedIC);
+      } else {
+        takePurch(cost);
+        takeEarned(cost - usePurchIC);
+      }
+    }
+
+    const covered = useEarnedIC + usePurchIC;
+    const ok = (covered >= cost);
+
+    // translate IC back to "credits" to subtract from split
+    const needEarnedCredits   = Math.ceil(useEarnedIC / VAL.earnedICPerCredit);
+    const needPurchasedCredit = Math.ceil(usePurchIC / VAL._purchasedICPerCredit);
+
+    return {
+      ok,
+      coveredIC: covered,
+      missingIC: Math.max(0, cost - covered),
+      use: {
+        earnedIC: useEarnedIC,
+        purchasedIC: usePurchIC,
+        earnedCredits:   needEarnedCredits,
+        purchasedCredits:needPurchasedCredit
+      },
+      reason: ok ? 'ok' : 'insufficient_credits'
+    };
+  };
+
+  // Commit the plan (deducts from split, emits the same events your UI already listens to)
+  API.consume = function(plan){
+    if (!plan || !plan.ok) return false;
+    const s = readSplit();
+    if (plan.use.earnedCredits)   s.earned    = Math.max(0, (s.earned|0)    - (plan.use.earnedCredits|0));
+    if (plan.use.purchasedCredits)s.purchased = Math.max(0, (s.purchased|0) - (plan.use.purchasedCredits|0));
+    writeSplit(s);
+    // persist like the rest of the shim
+    persistNow();
+    return true;
+  };
+
   /* ---- Monkey-patch legacy writes so old game code “just works” ----
    * If a mini-game sets any of the classic craft keys (directly or via helpers),
    * we compute the delta and book it to EARNED by default.
