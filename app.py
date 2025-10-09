@@ -384,7 +384,6 @@ def crafting_redeem_code():
 
 # --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
 @app.post("/api/mint_codes/consume")
-@with_user
 def consume_mint_code(u):
     ensure_voucher_tables()
     data = request.get_json(silent=True) or {}
