@@ -72,6 +72,12 @@ def ensure_voucher_tables():
                 consumed_at INTEGER
             )
         """)
+        # --- NEW: add columns for dynamic value (idempotent) ---
+        cols = {r["name"] for r in cx.execute("PRAGMA table_info(mint_codes)")}
+        if "value_pi" not in cols:
+            cx.execute("ALTER TABLE mint_codes ADD COLUMN value_pi REAL")
+        if "value_ic" not in cols:
+            cx.execute("ALTER TABLE mint_codes ADD COLUMN value_ic INTEGER")
 
 # Create the “already-claimed” ledger once on boot (not inside other functions)
 with conn() as cx:
@@ -412,30 +418,56 @@ def crafting_redeem_code():
         if rec["status"] != "issued":
             return jsonify(ok=False, reason="used"), 409
 
-        # Mark consumed first to be idempotent
+        # Mark consumed first (idempotent)
         cx.execute(
             "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
             (int(time.time()), code)
         )
 
+        # Prefer the stamped value_ic; fallback to computing from session/payment; final fallback = baseline
+        v_ic = int(rec["value_ic"] or 0)
+
+        if v_ic <= 0:
+            # Try to compute from originating session/payment
+            paid_pi = float(rec["value_pi"] or 0.0)
+            if paid_pi <= 0.0:
+                try:
+                    srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
+                    if srow and srow["expected_pi"] is not None:
+                        paid_pi = float(srow["expected_pi"])
+                except Exception:
+                    pass
+            if paid_pi <= 0.0:
+                try:
+                    r = fetch_pi_payment(rec["payment_id"])
+                    if r.status_code == 200:
+                        paid_pi = float(r.json().get("amount") or 0.0)
+                except Exception:
+                    pass
+            try:
+                v_ic = max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
+            except Exception:
+                v_ic = _BASE_IC_VALUE
+
         # v2 credit on redeem (idempotent via uniq)
         _issue_credit_v2(cx, int(u["id"]),
-                         value_ic=_BASE_IC_VALUE,
+                         value_ic=int(v_ic),
                          tier="pro",
                          caps=_PURCHASE_CAPS,
                          source="voucher",
                          uniq=f"voucher:{code}")
 
-    credits = int(rec["credits"] or 1)
-    newbal = add_ic_credits(int(u["id"]), credits)  # legacy mirror
+    credits = int(rec["credits"] or 1)  # legacy mirror count
+    newbal = add_ic_credits(int(u["id"]), credits)  # keep legacy counter in sync
 
-    return jsonify(ok=True, creditsAdded=credits, balance=newbal)
+    return jsonify(ok=True, creditsAdded=credits, balance=newbal, icValue=v_ic)
 
 # --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
     ensure_voucher_tables()
-    code = (request.get_json(silent=True) or {}).get("code", "").strip().upper()
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip().upper()
     if not code:
         return jsonify(ok=False, reason="invalid"), 400
 
@@ -452,31 +484,46 @@ def consume_mint_code():
             (int(time.time()), code)
         )
 
-    return jsonify(ok=True, creditsAdded=int(rec["credits"] or 1))
+        # Extract or compute value for this mint code
+        value_pi = float(rec["value_pi"] or 0.0)
+        value_ic = int(rec["value_ic"] or 0)
 
-@app.post("/api/crafting/set_dynamic_price")
-def set_dynamic_price():
-    u = current_user_row()
-    if not u:
-        return jsonify(ok=False, reason="auth_required"), 401
-    data = request.get_json(silent=True) or {}
-    link_id = (data.get("link_id") or "").strip()
-    ctx     = (data.get("ctx") or "").strip()
-    try:
-        price = float(data.get("price_pi"))
-    except Exception:
-        return jsonify(ok=False, reason="bad_price"), 400
-    if not link_id or price <= 0:
-        return jsonify(ok=False, reason="missing_params"), 400
+        if value_ic <= 0:
+            # Attempt recovery from recorded session/payment info
+            if value_pi <= 0:
+                try:
+                    srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
+                    if srow and srow["expected_pi"] is not None:
+                        value_pi = float(srow["expected_pi"])
+                except Exception:
+                    pass
+            if value_pi <= 0:
+                try:
+                    r = fetch_pi_payment(rec["payment_id"])
+                    if r.status_code == 200:
+                        value_pi = float(r.json().get("amount") or 0.0)
+                except Exception:
+                    pass
 
-    with conn() as cx:
-        cx.execute("""
-          INSERT INTO dynamic_overrides(user_id, link_id, price_pi, ctx, created_at)
-          VALUES(?,?,?,?,strftime('%s','now'))
-          ON CONFLICT(user_id, link_id)
-          DO UPDATE SET price_pi=excluded.price_pi, ctx=excluded.ctx, created_at=excluded.created_at
-        """, (u["id"], link_id, price, ctx))
-    return jsonify(ok=True)
+            try:
+                value_ic = max(_BASE_IC_VALUE, int(round(value_pi * COIN_PER_PI)))
+            except Exception:
+                value_ic = _BASE_IC_VALUE
+
+        # Update the stored row for transparency
+        cx.execute(
+            "UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
+            (float(value_pi), int(value_ic), code)
+        )
+
+    # Response payload includes both credit count and value
+    return jsonify(
+        ok=True,
+        status="consumed",
+        creditsAdded=int(rec["credits"] or 1),
+        valuePi=round(value_pi, 4),
+        valueIC=value_ic
+    )
 
 # --------------------------- MERCHANT ROUTES ------------------------------------
 @merchant_api.post("/create_product_from_craft")
@@ -2429,14 +2476,36 @@ def voucher_new():
             return "<h2>Link expired</h2>", 410
         cx.execute("UPDATE voucher_redirects SET used=1 WHERE token=?", (tok,))
 
+    # Derive value from the originating session/payment
+    paid_pi = 0.0
+    try:
+        with conn() as cx:
+            s = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (row["session_id"],)).fetchone()
+        if s and s["expected_pi"] is not None:
+            paid_pi = float(s["expected_pi"])
+        else:
+            # Fallback: ask Pi (best effort)
+            r = fetch_pi_payment(row["payment_id"])
+            if r.status_code == 200:
+                paid_pi = float(r.json().get("amount") or 0.0)
+    except Exception:
+        pass
+
+    # Compute IC value consistently with purchase flow
+    try:
+        ic_value = max(_BASE_IC_VALUE, int(round(float(paid_pi) * COIN_PER_PI)))
+    except Exception:
+        ic_value = _BASE_IC_VALUE
+
     # generate a fresh, single-use code
     import secrets, time
     code = ("IZZA-" + secrets.token_hex(6)).upper()
+
     with conn() as cx:
         cx.execute(
-            """INSERT INTO mint_codes(code, credits, status, payment_id, session_id, created_at)
-               VALUES (?,?,?,?,?,?)""",
-            (code, 1, "issued", row["payment_id"], row["session_id"], int(time.time()))
+            """INSERT INTO mint_codes(code, credits, status, payment_id, session_id, created_at, value_pi, value_ic)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (code, 1, "issued", row["payment_id"], row["session_id"], int(time.time()), float(paid_pi), int(ic_value))
         )
 
     # Build the "Return" target:
