@@ -2187,17 +2187,15 @@ def checkout(link_id):
         # preserve ALL incoming params (p, ctx, qty, etc.)
         raw_qs   = request.query_string.decode("utf-8")  # already encoded
         next_url = f"/checkout/{link_id}" + (f"?{raw_qs}" if raw_qs else "")
-
         # IMPORTANT: encode next_url so &ctx and others stay inside 'next' param
         wrapped  = quote(next_url, safe="")
-
         return redirect(f"/store/{i['mslug']}/signin?next={wrapped}")
 
     # Create a session tied to this user
     sid = uuid.uuid4().hex
 
     # --- Dynamic price override (?p=... &ctx=...) ---
-    unit_price = Decimal(str(i["pi_price"]))  # default to item price
+    unit_price  = Decimal(str(i["pi_price"]))  # default to item price
     override_raw = (request.args.get("p") or "").strip()
 
     # Safe fetch from sqlite3.Row
@@ -2246,16 +2244,23 @@ def checkout(link_id):
             print("dynamic_override_lookup_failed", e)
 
     # 3) Final context (query wins; else stored; else empty)
-dynamic_ctx = (request.args.get("ctx") or stored_ctx or "").strip()
+    dynamic_ctx = (request.args.get("ctx") or stored_ctx or "").strip()
 
-print("checkout_debug",
-      dict(link_id=link_id,
-           mode=mode,
-           override_raw=override_raw,
-           unit_price=str(unit_price),
-           min=i.get("min_pi_price") if hasattr(i, "get") else i["min_pi_price"] if "min_pi_price" in i.keys() else None,
-           max=i.get("max_pi_price") if hasattr(i, "get") else i["max_pi_price"] if "max_pi_price" in i.keys() else None,
-           dynamic_ctx=dynamic_ctx))
+    # --- DEBUG: see why override may not apply ---
+    try:
+        minp_dbg = i["min_pi_price"] if ("min_pi_price" in i.keys()) else None
+        maxp_dbg = i["max_pi_price"] if ("max_pi_price" in i.keys()) else None
+    except Exception:
+        minp_dbg = maxp_dbg = None
+    print("checkout_debug", {
+        "link_id": link_id,
+        "mode": mode,
+        "override_raw": override_raw,
+        "unit_price": str(unit_price),
+        "min": minp_dbg,
+        "max": maxp_dbg,
+        "dynamic_ctx": dynamic_ctx
+    })
 
     expected = qpi(unit_price * Decimal(str(qty)))
 
