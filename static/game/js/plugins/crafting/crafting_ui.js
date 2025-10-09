@@ -973,21 +973,35 @@ async function serverJSON(url, opts = {}) {
   return await r.json().catch(() => ({}));
 }
 
-/* ---- Single source of truth for voucher redemption (game crafting) ---- */
+/* ---- Single source of truth for voucher redemption (izzapay) ---- */
 async function redeemVoucher(codeRaw){
-  const code = String(codeRaw || '').trim().toUpperCase();
+  const code = String(codeRaw||'').trim().toUpperCase();
 
-  // New single endpoint — server handles auth/session + any izzapay handoffs
-  const r = await fetch(gameApi('/crafting/code/redeem'), {
+  // Try with IZZA Pay session cookie first (Option A)
+  let r = await fetch(payApi('/api/mint_codes/consume'), {
     method: 'POST',
-    credentials: 'include',
+    credentials: 'include',                    // send izzapay cookie
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code })
   });
 
+  // If the session cookie isn't present and we get 401, fall back to the Pi token
+  if (r.status === 401) {
+    const t = localStorage.getItem('piAccessToken') || '';
+    if (t) {
+      r = await fetch(payApi('/api/mint_codes/consume'), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer ' + t
+        },
+        body: JSON.stringify({ code })
+      });
+    }
+  }
+
   let j = {};
   try { j = await r.json(); } catch {}
-
   if (r.ok && j && j.ok) return j; // { ok:true, creditsAdded, balance? }
 
   return {
@@ -1000,6 +1014,7 @@ async function redeemVoucher(codeRaw){
        : 'network')
   };
 }
+
 /* --- credit reconcile (server-first) --- */
 async function reconcileCraftCredits(){
   try{
