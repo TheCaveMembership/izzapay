@@ -427,11 +427,73 @@ def crafting_ic_claim_order():
 
     return _ok(awarded=True, amount=qty, credits=newbal)
 
+# --- shared helpers for both voucher endpoints -------------------------------
+
+def _compute_value_ic(cx, rec):
+    """Compute value_ic the same way crafting_redeem_code() does."""
+    v_ic = int(rec.get("value_ic") or 0)
+    if v_ic > 0:
+        return v_ic
+
+    paid_pi = float(rec.get("value_pi") or 0.0)
+    if paid_pi <= 0.0:
+        try:
+            srow = cx.execute(
+                "SELECT expected_pi FROM sessions WHERE id=?",
+                (rec.get("session_id"),)
+            ).fetchone()
+            if srow and srow["expected_pi"] is not None:
+                paid_pi = float(srow["expected_pi"])
+        except Exception:
+            pass
+
+    if paid_pi <= 0.0:
+        try:
+            r = fetch_pi_payment(rec.get("payment_id"))
+            if r.status_code == 200:
+                paid_pi = float(r.json().get("amount") or 0.0)
+        except Exception:
+            pass
+
+    try:
+        return max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
+    except Exception:
+        return _BASE_IC_VALUE
+
+
+def _auth_user_cookie_or_bearer():
+    """
+    Resolve a user record using either the normal session/cookie,
+    or an Authorization: Bearer <token> header. Return user row or None.
+    """
+    u = current_user_row()
+    if u:
+        return u
+
+    # Bearer token path (Pi access token)
+    hdr = (request.headers.get("Authorization") or "").strip()
+    if hdr.lower().startswith("bearer "):
+        token = hdr[7:].strip()
+        try:
+            # You may already have a util to map token -> user
+            # Replace 'user_from_access_token' with your verifier.
+            u = user_from_access_token(token)
+            if u:
+                return u
+        except Exception:
+            pass
+
+    return None
+
+
+# --- /code/redeem (cookie auth)  --------------------------------------------
+
 @crafting_api.post("/code/redeem")
 def crafting_redeem_code():
     u = current_user_row()
     if not u:
         return _err("auth_required")
+
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
     if not code:
@@ -452,32 +514,19 @@ def crafting_redeem_code():
             (int(time.time()), code)
         )
 
-        # Prefer the stamped value_ic; fallback to computing from session/payment; final fallback = baseline
-        v_ic = int(rec["value_ic"] or 0)
+        # Compute value_ic EXACTLY like before
+        v_ic = _compute_value_ic(cx, rec)
 
-        if v_ic <= 0:
-            # Try to compute from originating session/payment
-            paid_pi = float(rec["value_pi"] or 0.0)
-            if paid_pi <= 0.0:
-                try:
-                    srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
-                    if srow and srow["expected_pi"] is not None:
-                        paid_pi = float(srow["expected_pi"])
-                except Exception:
-                    pass
-            if paid_pi <= 0.0:
-                try:
-                    r = fetch_pi_payment(rec["payment_id"])
-                    if r.status_code == 200:
-                        paid_pi = float(r.json().get("amount") or 0.0)
-                except Exception:
-                    pass
-            try:
-                v_ic = max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
-            except Exception:
-                v_ic = _BASE_IC_VALUE
+        # Persist computed values back onto the row for transparency
+        try:
+            cx.execute(
+                "UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
+                (float(rec.get("value_pi") or 0.0), int(v_ic), code)
+            )
+        except Exception:
+            pass
 
-        # v2 credit on redeem (idempotent via uniq)
+        # v2 value-capped credit (idempotent via uniq)
         _issue_credit_v2(cx, int(u["id"]),
                          value_ic=int(v_ic),
                          tier="pro",
@@ -485,15 +534,24 @@ def crafting_redeem_code():
                          source="voucher",
                          uniq=f"voucher:{code}")
 
-    credits = int(rec["credits"] or 1)  # legacy mirror count
-    newbal = add_ic_credits(int(u["id"]), credits)  # keep legacy counter in sync
+    # Legacy mirror counter (non-decreasing)
+    credits = int(rec.get("credits") or 1)
+    newbal = add_ic_credits(int(u["id"]), credits)
 
     return jsonify(ok=True, creditsAdded=credits, balance=newbal, icValue=v_ic)
 
-# --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
+
+# --- /api/mint_codes/consume (cookie OR bearer auth) ------------------------
+
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
     ensure_voucher_tables()
+
+    # Auth: cookie session or Bearer token
+    u = _auth_user_cookie_or_bearer()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
+
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
     if not code:
@@ -507,52 +565,43 @@ def consume_mint_code():
         if rec["status"] != "issued":
             return jsonify(ok=False, reason="used"), 409
 
+        # Mark consumed (transactionally in your env; here single cx is fine)
         cx.execute(
-            "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
-            (int(time.time()), code)
+            "UPDATE mint_codes SET status='consumed', consumed_at=?, consumed_by=? WHERE code=?",
+            (int(time.time()), int(u["id"]), code)
         )
 
-        # Extract or compute value for this mint code
-        value_pi = float(rec["value_pi"] or 0.0)
-        value_ic = int(rec["value_ic"] or 0)
+        # Compute value_ic identical to crafting_redeem_code
+        v_ic = _compute_value_ic(cx, rec)
 
-        if value_ic <= 0:
-            # Attempt recovery from recorded session/payment info
-            if value_pi <= 0:
-                try:
-                    srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
-                    if srow and srow["expected_pi"] is not None:
-                        value_pi = float(srow["expected_pi"])
-                except Exception:
-                    pass
-            if value_pi <= 0:
-                try:
-                    r = fetch_pi_payment(rec["payment_id"])
-                    if r.status_code == 200:
-                        value_pi = float(r.json().get("amount") or 0.0)
-                except Exception:
-                    pass
+        # Store computed values for transparency
+        try:
+            cx.execute(
+                "UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
+                (float(rec.get("value_pi") or 0.0), int(v_ic), code)
+            )
+        except Exception:
+            pass
 
-            try:
-                value_ic = max(_BASE_IC_VALUE, int(round(value_pi * COIN_PER_PI)))
-            except Exception:
-                value_ic = _BASE_IC_VALUE
+        # Grant value-capped credit v2 (idempotent via uniq = voucher:CODE)
+        _issue_credit_v2(cx, int(u["id"]),
+                         value_ic=int(v_ic),
+                         tier="pro",
+                         caps=_PURCHASE_CAPS,
+                         source="voucher",
+                         uniq=f"voucher:{code}")
 
-        # Update the stored row for transparency
-        cx.execute(
-            "UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
-            (float(value_pi), int(value_ic), code)
-        )
+    # Keep legacy mirror count in sync so old UIs don’t break
+    credits = int(rec.get("credits") or 1)
+    balance = add_ic_credits(int(u["id"]), credits)
 
-    # Response payload includes both credit count and value
+    # Frontend expects ok + creditsAdded (and often ignores the rest)
     return jsonify(
         ok=True,
-        status="consumed",
-        creditsAdded=int(rec["credits"] or 1),
-        valuePi=round(value_pi, 4),
-        valueIC=value_ic
+        creditsAdded=credits,
+        balance=balance,
+        icValue=int(v_ic)
     )
-
 # --------------------------- MERCHANT ROUTES ------------------------------------
 @merchant_api.post("/create_product_from_craft")
 def create_product_from_craft():
@@ -1071,8 +1120,6 @@ def get_bearer_token_from_request() -> str | None:
     return None
 
 # ----------------- HELPERS -----------------
-COIN_PER_PI = 2000
-BASE_CREDIT_IC = 500  # 0.25π baseline for earned credits
 
 def _consume_v2_credit_for(user_id: int, required_ic: int):
     """
