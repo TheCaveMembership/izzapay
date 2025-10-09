@@ -2048,22 +2048,28 @@ async function handleBuySingle(kind, enforceForm){
   return;
 }
 
-  // Dynamic IC total based on toggles + levels
-  const total = calcDynamicPrice().ic;
-  const res = await payWithIC(total);
+  // --- IC path (single credit via IZZA Coins) ---
+const totalIC = calcDynamicPrice().ic | 0;     // dynamic IC based on toggles/meters
+const pay     = await payWithIC(totalIC);
 
-  const status = document.getElementById('payStatus');
-  if (res && res.ok){
-    applyCreditState((STATE.mintCredits|0) + 1);
-    STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    if (status) status.textContent = 'Paid ✓ — visual credit granted.';
-    updateTabsHeaderCredits();
-    STATE.createSub = 'setup';
-    const host = STATE.root?.querySelector('#craftTabs');
-    if (host){ host.innerHTML = renderCreate(); bindInside(); }
-  } else {
-    if (status) status.textContent='Payment failed.';
-  }
+const statusEl = document.getElementById('payStatus');
+
+if (pay && pay.ok){
+  // 1) Grant a UI "mint credit" count for the badge (one craft attempt)
+  applyCreditState((STATE.mintCredits|0) + 1);
+
+  // 2) IMPORTANT: record this as PURCHASED *value* in the planner (IC amount actually paid)
+  try { window.IZZA_CRAFT?.purchase(totalIC); } catch {}
+
+  // 3) UI updates
+  STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
+  if (statusEl) statusEl.textContent = 'Paid ✓ — visual credit granted.';
+  updateTabsHeaderCredits();
+  STATE.createSub = 'setup';
+  const host = STATE.root?.querySelector('#craftTabs');
+  if (host){ host.innerHTML = renderCreate(); bindInside(); }
+} else {
+  if (statusEl) statusEl.textContent = 'Payment failed.';
 }
 
 /* ---------- Visuals tab highlight ---------- */
@@ -2184,15 +2190,34 @@ function bindInside(){
       redeemBtn.disabled = false;
 
       if (r && r.ok){
-        applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1));
-        updateTabsHeaderCredits();
-        redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
-      } else {
-        const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
-        redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
-      }
-    }, { passive:true });
-  }
+  const n = (r.creditsAdded|0) || 1;
+
+  // Figure out the IC value attached to this voucher/purchase.
+  // Prefer server-provided value; fall back to Pi→IC or base per-credit IC.
+  const icValue =
+    (r.valueIC|0) ||
+    (r.icValue|0) ||
+    (r.piPaid ? Math.round(r.piPaid * COIN_PER_PI) : 0) ||
+    (n * COSTS.PER_ITEM_IC);
+
+  // 1) Badge/legacy mirrors (counts)
+  applyCreditState((STATE.mintCredits|0) + n);
+  updateTabsHeaderCredits();
+
+  // 2) Planner store gets the *value* so plan() can spend it against icCost
+  try { window.IZZA_CRAFT?.purchase(icValue); } catch {}
+
+  // 3) Keep the mirrors synced with split total if available
+  try {
+    const snap = window.IZZA_CRAFT?.read?.();
+    if (snap && Number.isFinite(snap.total)) setCraftingCredits(snap.total|0);
+  } catch {}
+
+  redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+} else {
+  const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
+  redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+}
 
   const itemName = root.querySelector('#itemName');
   if (itemName){
