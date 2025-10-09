@@ -92,7 +92,7 @@
         .then(function(auth){
           // cache minimal identity locally for client UI
           try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
-
+          try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
           // Server session + next = character creation (first-time) with destination
           const form = document.createElement('form');
           form.method = 'POST';
