@@ -65,7 +65,7 @@
   const msg = document.getElementById('msg');
   const err = document.getElementById('err');
   const envWarn = document.getElementById('envWarn');
-  const nextUrl = "{{ next_url|e }}";
+  const nextUrl = {{ next_url|tojson }};
   const postUrl = "/auth/exchange/store?next=" + encodeURIComponent(nextUrl);
   const sandbox = {{ 'true' if sandbox else 'false' }};
 
