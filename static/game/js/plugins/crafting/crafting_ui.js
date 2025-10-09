@@ -1,17 +1,12 @@
 // /static/game/js/plugins/crafting/crafting_ui.js
 
-// ========================= BASE HELPERS (single source of // Core/Game side (AI, credits, crafting data)
-const GAME_BASE = (() => {
-  // Prefer same-origin; only fall back if you truly host the game API elsewhere.
-  const same = location.origin;
-  // Optional hard fallback if you really have a separate game API:
-  const alt  = 'https://izzagame.onrender.com';
-  return same.includes('izzapay.onrender.com') ? same : same || alt;
-})();
-
+// ========================= BASE HELPERS (single source of truth) =========================
+// Core/Game side (AI, credits, crafting data)
+const GAME_BASE = 'https://izzagame.onrender.com';
 // IZZA Pay side (checkout, voucher codes, Pi approval/complete)
 const PAY_BASE  = 'https://izzapay.onrender.com';
-
+const SINGLE_MINT_LINK_ID = 'd0b811e8'; // your single-use mint item
+// Build absolute URLs to the correct origin
 const gameApi = (p) => `${GAME_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 const payApi  = (p) => `${PAY_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 
@@ -791,9 +786,8 @@ function applyCreditState(n){
   const next = Math.max(0, n|0);
   STATE.mintCredits   = next;
   STATE.canUseVisuals = next > 0;
-  setCraftingCredits(next);           // persist + notify
+  setCraftingCredits(next);           // <— persist + notify
   updateTabsHeaderCredits();
-  updateCreditSummary();              // <— NEW
 }
 function totalMintCredits(){
   const singles = (STATE.mintCredits | 0);
@@ -824,38 +818,6 @@ function updateTabsHeaderCredits(){
     } else {
       wrap.textContent = label;
     }
-  }catch(_){}
-}
-
- // Convert all current credits into IC + Pi display
-function _readCreditTotalsIC(){
-  // Prefer split store (earned/purchased) if available
-  try{
-    const snap = window.IZZA_CRAFT?.read?.();
-    if (snap && Number.isFinite(snap.total)) return Math.max(0, snap.total|0);
-  }catch{}
-  // Fallback: approximate via "mint credits" count
-  try{
-    const singles = (STATE.mintCredits|0);
-    return singles * COSTS.PER_ITEM_IC; // best-effort if planner store not available
-  }catch{}
-  return 0;
-}
-function formatPi(n){ return (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2); }
-
-// Initial text for the summary (used by render)
-function creditSummaryText(){
-  const ic = _readCreditTotalsIC();
-  const pi = ic / COIN_PER_PI;
-  return `Credits Value: ${ic.toLocaleString()} IC • ${formatPi(pi)} Pi`;
-}
-
-// Update the DOM node when values change
-function updateCreditSummary(){
-  try{
-    const el = STATE.root?.querySelector('#cl-credit-summary');
-    if (!el) return;
-    el.textContent = creditSummaryText();
   }catch(_){}
 }
 
@@ -1011,123 +973,48 @@ async function serverJSON(url, opts = {}) {
   return await r.json().catch(() => ({}));
 }
 
-/* ---- Single source of truth voucher redemption (robust) ----
-   Order:
-     1) Try game redeem (same-origin session)
-     2) If invalid/not found there, try pay consume with cookie/bearer
-     3) If pay OK, ask game to grant credits idempotently
-   Normalized success: { ok:true, status:'redeemed', creditsAdded, valueIC, valuePi }
-   Normalized failures: { ok:false, reason: 'invalid'|'used'|'expired'|'auth_required'|'network' }
-*/
+/* ---- Single source of truth for voucher redemption (izzapay) ---- */
 async function redeemVoucher(codeRaw){
-  const code = String(codeRaw || '').trim().toUpperCase();
-  if (!code) return { ok:false, reason:'invalid' };
+  const code = String(codeRaw||'').trim().toUpperCase();
 
-  const COIN_PER_PI = 2000;
-  const BASE_IC_PER_CREDIT = 500;
+  // Try with IZZA Pay session cookie first (Option A)
+  let r = await fetch(payApi('/api/mint_codes/consume'), {
+    method: 'POST',
+    credentials: 'include',                    // send izzapay cookie
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
 
-  const toJSON = async (r) => { try{ return await r.json(); }catch{ return {}; } };
-  const pickCredits = (j) => (j.creditsAdded|0) || (j.credits|0) || (j.credit|0) || 1;
-  const pickValueIC = (j, credits) => {
-    const v = (j.valueIC|0) || (j.icValue|0) || (typeof j.ic === 'number' ? (j.ic|0) : 0);
-    return (Number.isFinite(v) && v > 0) ? v : credits * BASE_IC_PER_CREDIT;
-  };
-  const pickValuePi = (j, valueIC) => {
-    const v = (typeof j.valuePi === 'number' ? j.valuePi
-            : typeof j.piPaid  === 'number' ? j.piPaid
-            : undefined);
-    return (typeof v === 'number' && isFinite(v) && v > 0) ? v : (valueIC / COIN_PER_PI);
-  };
-
-  // 1) Primary: redeem on GAME (keeps logic server-side and in-session)
-  try{
-    const r = await fetch(gameApi('/api/crafting/code/redeem'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ code })
-    });
-    const j = await toJSON(r);
-
-    if (r.ok && (j.ok || j.status === 'redeemed')){
-      const credits = pickCredits(j);
-      const valueIC = pickValueIC(j, credits);
-      const valuePi = pickValuePi(j, valueIC);
-      return { ok:true, status:'redeemed', creditsAdded:credits, valueIC, valuePi };
+  // If the session cookie isn't present and we get 401, fall back to the Pi token
+  if (r.status === 401) {
+    const t = localStorage.getItem('piAccessToken') || '';
+    if (t) {
+      r = await fetch(payApi('/api/mint_codes/consume'), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer ' + t
+        },
+        body: JSON.stringify({ code })
+      });
     }
-
-    // Map common negatives
-    if (r.status === 401) return { ok:false, reason:'auth_required' };
-    const sr = String(j.reason || j.error || j.msg || '').toLowerCase();
-    if (r.status === 409 || /used|consumed/.test(sr)) return { ok:false, reason:'used' };
-    if (r.status === 410 || /expired/.test(sr))       return { ok:false, reason:'expired' };
-
-    // Only fall through to PAY for invalid/not-found;
-    // all other errors are treated as network-ish
-    if (r.status !== 404 && !/invalid|not\s*found/.test(sr)) {
-      return { ok:false, reason:'network' };
-    }
-  }catch{
-    // network issue to game -> we’ll try PAY next
   }
 
-  // 2) Fallback: consume on PAY (cookie first, then bearer)
-  let payResp, payJSON = {};
-  const tryPayConsume = async (headers) => {
-    const r = await fetch(payApi('/api/mint_codes/consume'), {
-      method: 'POST',
-      credentials: headers ? 'omit' : 'include', // cookie if no explicit headers
-      headers: Object.assign({ 'content-type': 'application/json' }, headers || {}),
-      body: JSON.stringify({ code })
-    });
-    return [r, await toJSON(r)];
+  let j = {};
+  try { j = await r.json(); } catch {}
+  if (r.ok && j && j.ok) return j; // { ok:true, creditsAdded, balance? }
+
+  return {
+    ok: false,
+    reason:
+      (j && j.reason) ||
+      (r.status === 404 ? 'invalid'
+       : r.status === 409 ? 'used'
+       : r.status === 401 ? 'auth_required'
+       : 'network')
   };
-
-  // 2a) With PAY cookie
-  [payResp, payJSON] = await tryPayConsume(null);
-  // 2b) If unauthorized, try with bearer from localStorage
-  if (payResp.status === 401) {
-    const t = localStorage.getItem('piAccessToken') || localStorage.getItem('izzaBearer') || '';
-    if (t) [payResp, payJSON] = await tryPayConsume({ authorization: 'Bearer ' + t });
-  }
-
-  if (!payResp.ok || !(payJSON.ok || payJSON.status === 'consumed')) {
-    const rsn = String(payJSON.reason || payJSON.error || '').toLowerCase();
-    if (payResp.status === 409 || /used|consumed/.test(rsn)) return { ok:false, reason:'used' };
-    if (payResp.status === 404 || /invalid|not\s*found/.test(rsn)) return { ok:false, reason:'invalid' };
-    if (payResp.status === 401) return { ok:false, reason:'auth_required' };
-    return { ok:false, reason:'network' };
-  }
-
-  // 3) Tell GAME to grant credits (idempotent; reconcile will also catch it)
-  const credits = pickCredits(payJSON);
-  const valueIC = pickValueIC(payJSON, credits);
-  const valuePi = pickValuePi(payJSON, valueIC);
-
-  try{
-    const g = await fetch(gameApi('/api/crafting/credits/grant'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        source: 'voucher',
-        code,
-        credits,
-        valueIC,
-        valuePi,
-        payRef: payJSON.ref || payJSON.paymentId || null
-      })
-    });
-    // If already granted (409), still treat as success
-    if (!g.ok && g.status !== 409) {
-      // Soft-fail: UI can reconcile later; payment has already been consumed
-    }
-  }catch{
-    // Soft-fail; reconcile endpoint covers eventual consistency
-  }
-
-  return { ok:true, status:'redeemed', creditsAdded:credits, valueIC, valuePi };
 }
+
 /* --- credit reconcile (server-first) --- */
 async function reconcileCraftCredits(){
   try{
@@ -1424,21 +1311,10 @@ function renderTabs(){
        </span>`
     : '';
 
-  // The summary text node
-  const summary = `
-    <div id="cl-credit-summary"
-         style="font-size:12px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-left:10px">
-      ${creditSummaryText()}
-    </div>`;
-
   return `
-    <div style="display:flex;align-items:center;gap:8px;padding:10px;border-bottom:1px solid #2a3550;background:#0f1624">
-      <!-- Tabs on the right side block -->
-      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-        <button class="ghost" data-tab="packages">Packages</button>
-        <button class="ghost" data-tab="create">Create Item${badge}</button>
-        ${summary} <!-- ⇦ sits to the RIGHT of Create Item -->
-      </div>
+    <div style="display:flex; gap:8px; padding:10px; border-bottom:1px solid #2a3550; background:#0f1624">
+      <button class="ghost" data-tab="packages">Packages</button>
+      <button class="ghost" data-tab="create">Create Item${badge}</button>
     </div>`;
 }
 
@@ -2080,7 +1956,6 @@ async function mount(rootSel){
         STATE.canUseVisuals = local > 0;
       }
       updateTabsHeaderCredits();
-      updateCreditSummary();
     }
   }catch(_){
     // network/parse error -> stick with local
@@ -2102,7 +1977,6 @@ async function mount(rootSel){
       STATE.canUseVisuals = local > 0;
     }
     updateTabsHeaderCredits();
-    updateCreditSummary();
   }
   // ----------------------------------------------------------------
 
@@ -2155,47 +2029,40 @@ async function handleBuySingle(kind, enforceForm){
   const usePi = (kind === 'pi');
 
   if (usePi) {
-    const status = document.getElementById('payStatus');
-    if (status) status.textContent = 'Opening IZZA Pay checkout…';
+  const status = document.getElementById('payStatus');
+  if (status) status.textContent = 'Opening IZZA Pay checkout…';
 
-    // compute the dynamic total in Pi
-    const totals  = calcDynamicPrice();            // { pi, ic }
-    const pricePi = Number(totals.pi).toFixed(2);  // e.g. 0.45
-    const ctx = JSON.stringify({
-      cat: STATE.currentCategory,
-      part: STATE.currentPart,
-      flags: STATE.featureFlags,
-      levels: STATE.featureLevels
-    });
+  // compute the dynamic total in Pi
+  const totals = calcDynamicPrice();              // { pi, ic }
+  const pricePi = Number(totals.pi).toFixed(2);   // e.g. 0.45
+  const ctx = JSON.stringify({
+    cat: STATE.currentCategory,
+    part: STATE.currentPart,
+    flags: STATE.featureFlags,
+    levels: STATE.featureLevels
+  });
 
-    // send the dynamic price directly to IZZA PAY checkout
-    const url = `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}?p=${encodeURIComponent(pricePi)}&ctx=${encodeURIComponent(ctx)}`;
-    location.href = url;
-    return;
-  }
+  // send the dynamic price directly to IZZA PAY checkout
+  const url = `${PAY_BASE}/checkout/${SINGLE_MINT_LINK_ID}?p=${encodeURIComponent(pricePi)}&ctx=${encodeURIComponent(ctx)}`;
+  location.href = url;
+  return;
+}
 
-  // --- IC path (single credit via IZZA Coins) ---
-  const totalIC = calcDynamicPrice().ic | 0;   // dynamic IC based on toggles/meters
-  const pay     = await payWithIC(totalIC);
+  // Dynamic IC total based on toggles + levels
+  const total = calcDynamicPrice().ic;
+  const res = await payWithIC(total);
 
-  const statusEl = document.getElementById('payStatus');
-
-  if (pay && pay.ok){
-    // 1) Grant a UI "mint credit" count for the badge (one craft attempt)
+  const status = document.getElementById('payStatus');
+  if (res && res.ok){
     applyCreditState((STATE.mintCredits|0) + 1);
-
-    // 2) Record the **IC value** (not “earned”) so planner can burn correctly
-    try { window.IZZA_CRAFT?.purchase(totalIC); } catch {}
-
-    // 3) UI updates
     STATE.aiAttemptsLeft = COSTS.AI_ATTEMPTS;
-    if (statusEl) statusEl.textContent = 'Paid ✓ — visual credit granted.';
+    if (status) status.textContent = 'Paid ✓ — visual credit granted.';
     updateTabsHeaderCredits();
     STATE.createSub = 'setup';
     const host = STATE.root?.querySelector('#craftTabs');
     if (host){ host.innerHTML = renderCreate(); bindInside(); }
   } else {
-    if (statusEl) statusEl.textContent = 'Payment failed.';
+    if (status) status.textContent='Payment failed.';
   }
 }
 
@@ -2304,49 +2171,28 @@ function bindInside(){
   const redeemStat  = root.querySelector('#redeemStatus');
 
   if (redeemBtn){
-  redeemBtn.addEventListener('click', async ()=>{
-    const code = redeemInput?.value || '';
-    if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
-      redeemStat.textContent = 'Enter a valid code.';
-      return;
-    }
-    redeemBtn.disabled = true;
-    redeemStat.textContent = 'Checking code…';
+    redeemBtn.addEventListener('click', async ()=>{
+      const code = redeemInput?.value || '';
+      if (!/^[A-Z0-9-]{8,36}$/i.test(code)) {
+        redeemStat.textContent = 'Enter a valid code.';
+        return;
+      }
+      redeemBtn.disabled = true;
+      redeemStat.textContent = 'Checking code…';
 
-    const r = await redeemVoucher(code);
-    redeemBtn.disabled = false;
+      const r = await redeemVoucher(code);
+      redeemBtn.disabled = false;
 
-    if (r && r.ok){
-      const n = (r.creditsAdded|0) || 1;
-
-      // Figure out the IC value attached to this voucher/purchase.
-      const icValue =
-        (r.valueIC|0) ||
-        (r.icValue|0) ||
-        (r.piPaid ? Math.round(r.piPaid * COIN_PER_PI) : 0) ||
-        (n * COSTS.PER_ITEM_IC);
-
-      // 1) Badge/legacy mirrors (counts)
-      applyCreditState((STATE.mintCredits|0) + n);
-      updateTabsHeaderCredits();
-      updateCreditSummary();
-
-      // 2) Planner store gets the *value* so plan() can spend it against icCost
-      try { window.IZZA_CRAFT?.purchase(icValue); } catch {}
-
-      // 3) Keep the mirrors synced with split total if available
-      try {
-        const snap = window.IZZA_CRAFT?.read?.();
-        if (snap && Number.isFinite(snap.total)) setCraftingCredits(snap.total|0);
-      } catch {}
-
-      redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
-    } else {
-      const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
-      redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
-    }
-  }); // <-- add this
-}      // <-- and this
+      if (r && r.ok){
+        applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1));
+        updateTabsHeaderCredits();
+        redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
+      } else {
+        const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
+        redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+      }
+    }, { passive:true });
+  }
 
   const itemName = root.querySelector('#itemName');
   if (itemName){
@@ -2660,14 +2506,13 @@ function bindInside(){
     try { hydrateMine(); } catch {}
 
     // Refresh credits badge/visuals from split store (legacy mirrors stay in sync)
-try{
-  const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
-  setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
-  STATE.canUseVisuals = (r.total|0) > 0;
-  updateTabsHeaderCredits();
-  updateCreditSummary();           // <-- ADD THIS LINE
-  _syncVisualsTabStyle();
-}catch(_){}
+    try{
+      const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
+      setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
+      STATE.canUseVisuals = (r.total|0) > 0;
+      updateTabsHeaderCredits();
+      _syncVisualsTabStyle();
+    }catch(_){}
 
     // Return to Setup after successful mint
     STATE.createSub = 'setup';
