@@ -1011,70 +1011,123 @@ async function serverJSON(url, opts = {}) {
   return await r.json().catch(() => ({}));
 }
 
-/* ---- Single source of truth for voucher redemption (GAME server) ----
-   NOTE: This replaces the old version that hit /api/mint_codes/consume on PAY.
-   Success payload is normalized to:
-     { ok:true, creditsAdded:number, valueIC:number, valuePi:number, status:'redeemed' }
+/* ---- Single source of truth voucher redemption (robust) ----
+   Order:
+     1) Try game redeem (same-origin session)
+     2) If invalid/not found there, try pay consume with cookie/bearer
+     3) If pay OK, ask game to grant credits idempotently
+   Normalized success: { ok:true, status:'redeemed', creditsAdded, valueIC, valuePi }
+   Normalized failures: { ok:false, reason: 'invalid'|'used'|'expired'|'auth_required'|'network' }
 */
 async function redeemVoucher(codeRaw){
   const code = String(codeRaw || '').trim().toUpperCase();
   if (!code) return { ok:false, reason:'invalid' };
 
-  let r, j = {};
+  const COIN_PER_PI = 2000;
+  const BASE_IC_PER_CREDIT = 500;
+
+  const toJSON = async (r) => { try{ return await r.json(); }catch{ return {}; } };
+  const pickCredits = (j) => (j.creditsAdded|0) || (j.credits|0) || (j.credit|0) || 1;
+  const pickValueIC = (j, credits) => {
+    const v = (j.valueIC|0) || (j.icValue|0) || (typeof j.ic === 'number' ? (j.ic|0) : 0);
+    return (Number.isFinite(v) && v > 0) ? v : credits * BASE_IC_PER_CREDIT;
+  };
+  const pickValuePi = (j, valueIC) => {
+    const v = (typeof j.valuePi === 'number' ? j.valuePi
+            : typeof j.piPaid  === 'number' ? j.piPaid
+            : undefined);
+    return (typeof v === 'number' && isFinite(v) && v > 0) ? v : (valueIC / COIN_PER_PI);
+  };
+
+  // 1) Primary: redeem on GAME (keeps logic server-side and in-session)
   try{
-    r = await fetch(gameApi('/api/crafting/code/redeem'), {
+    const r = await fetch(gameApi('/api/crafting/code/redeem'), {
       method: 'POST',
-      credentials: 'include',                 // use the game session (user context)
+      credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code })
     });
-  }catch{
-    return { ok:false, reason:'network' };
-  }
+    const j = await toJSON(r);
 
-  try { j = await r.json(); } catch {}
+    if (r.ok && (j.ok || j.status === 'redeemed')){
+      const credits = pickCredits(j);
+      const valueIC = pickValueIC(j, credits);
+      const valuePi = pickValuePi(j, valueIC);
+      return { ok:true, status:'redeemed', creditsAdded:credits, valueIC, valuePi };
+    }
 
-  // Map common server outcomes -> stable client contract
-  if (!r.ok){
-    // Prefer explicit server reason if present
-    const sr = (j && (j.reason || j.error || j.msg)) ? String(j.reason || j.error || j.msg).toLowerCase() : '';
+    // Map common negatives
     if (r.status === 401) return { ok:false, reason:'auth_required' };
-    if (r.status === 404 || /not\s*found|invalid/i.test(sr)) return { ok:false, reason:'invalid' };
-    if (r.status === 409 || /used|consumed/i.test(sr))       return { ok:false, reason:'used' };
-    if (r.status === 410 || /expired/i.test(sr))             return { ok:false, reason:'expired' };
+    const sr = String(j.reason || j.error || j.msg || '').toLowerCase();
+    if (r.status === 409 || /used|consumed/.test(sr)) return { ok:false, reason:'used' };
+    if (r.status === 410 || /expired/.test(sr))       return { ok:false, reason:'expired' };
+
+    // Only fall through to PAY for invalid/not-found;
+    // all other errors are treated as network-ish
+    if (r.status !== 404 && !/invalid|not\s*found/.test(sr)) {
+      return { ok:false, reason:'network' };
+    }
+  }catch{
+    // network issue to game -> we’ll try PAY next
+  }
+
+  // 2) Fallback: consume on PAY (cookie first, then bearer)
+  let payResp, payJSON = {};
+  const tryPayConsume = async (headers) => {
+    const r = await fetch(payApi('/api/mint_codes/consume'), {
+      method: 'POST',
+      credentials: headers ? 'omit' : 'include', // cookie if no explicit headers
+      headers: Object.assign({ 'content-type': 'application/json' }, headers || {}),
+      body: JSON.stringify({ code })
+    });
+    return [r, await toJSON(r)];
+  };
+
+  // 2a) With PAY cookie
+  [payResp, payJSON] = await tryPayConsume(null);
+  // 2b) If unauthorized, try with bearer from localStorage
+  if (payResp.status === 401) {
+    const t = localStorage.getItem('piAccessToken') || localStorage.getItem('izzaBearer') || '';
+    if (t) [payResp, payJSON] = await tryPayConsume({ authorization: 'Bearer ' + t });
+  }
+
+  if (!payResp.ok || !(payJSON.ok || payJSON.status === 'consumed')) {
+    const rsn = String(payJSON.reason || payJSON.error || '').toLowerCase();
+    if (payResp.status === 409 || /used|consumed/.test(rsn)) return { ok:false, reason:'used' };
+    if (payResp.status === 404 || /invalid|not\s*found/.test(rsn)) return { ok:false, reason:'invalid' };
+    if (payResp.status === 401) return { ok:false, reason:'auth_required' };
     return { ok:false, reason:'network' };
   }
 
-  // Success: normalize the payload
-  // Server may return various shapes; extract conservatively:
-  const credits =
-    (j.creditsAdded|0) || (j.credits|0) || (j.credit|0) || 1;
+  // 3) Tell GAME to grant credits (idempotent; reconcile will also catch it)
+  const credits = pickCredits(payJSON);
+  const valueIC = pickValueIC(payJSON, credits);
+  const valuePi = pickValuePi(payJSON, valueIC);
 
-  const valueICRaw =
-    (j.valueIC|0) || (j.icValue|0) ||
-    (typeof j.ic === 'number' ? j.ic|0 : 0);
+  try{
+    const g = await fetch(gameApi('/api/crafting/credits/grant'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        source: 'voucher',
+        code,
+        credits,
+        valueIC,
+        valuePi,
+        payRef: payJSON.ref || payJSON.paymentId || null
+      })
+    });
+    // If already granted (409), still treat as success
+    if (!g.ok && g.status !== 409) {
+      // Soft-fail: UI can reconcile later; payment has already been consumed
+    }
+  }catch{
+    // Soft-fail; reconcile endpoint covers eventual consistency
+  }
 
-  const valuePiRaw =
-    (typeof j.valuePi === 'number' ? j.valuePi :
-     typeof j.piPaid  === 'number' ? j.piPaid  :
-     undefined);
-
-  // If server didn’t include value, fall back to base per-credit value
-  const fallbackIC = credits * 500;              // 0.25 Pi = 500 IC per base credit
-  const valueIC    = Number.isFinite(valueICRaw) && valueICRaw > 0 ? valueICRaw : fallbackIC;
-  const valuePi    = (typeof valuePiRaw === 'number' && isFinite(valuePiRaw) && valuePiRaw > 0)
-                      ? valuePiRaw
-                      : (valueIC / 2000);        // 1 Pi = 2000 IC
-
-  return {
-    ok: true,
-    status: 'redeemed',
-    creditsAdded: credits,
-    valueIC,
-    valuePi
-  };
+  return { ok:true, status:'redeemed', creditsAdded:credits, valueIC, valuePi };
 }
-
 /* --- credit reconcile (server-first) --- */
 async function reconcileCraftCredits(){
   try{
