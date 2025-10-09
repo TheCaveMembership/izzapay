@@ -81,7 +81,16 @@ with conn() as cx:
         claimed_at INTEGER NOT NULL
       )
     """)
-
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS collectible_claims(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          order_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          claimed_at INTEGER NOT NULL
+        )
+    """)
+    cx.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_collectible_claims ON collectible_claims(order_id, user_id)")
 # ----------------- ENV -----------------
 load_dotenv()
 PI_SANDBOX    = os.getenv("PI_SANDBOX", "false").lower() == "true"
@@ -96,7 +105,9 @@ LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstr
 # This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
 SINGLE_CREDIT_LINK_ID = "d0b811e8"
 # Where to send buyers after a successful “izza-game-crafting” purchase
-
+# --- Crafting credits v2 defaults (purchase/voucher) ---
+_BASE_IC_VALUE = 1  # how many "IC" a single credit carries
+_PURCHASE_CAPS = {"maxVisuals": 1}  # tweak as needed by your crafting app
 try:
     PI_USD_RATE = float(os.getenv("PI_USD_RATE", "0").strip())
 except Exception:
@@ -210,8 +221,10 @@ def crafting_ic_balance():
 @crafting_api.post("/credits/reconcile")
 def crafting_ic_reconcile():
     u = current_user_row()
-    if not u: return _err("auth_required")
+    if not u:
+        return _err("auth_required")
     uid = int(u["id"])
+
     with conn() as cx:
         rows = cx.execute("""
             SELECT o.id, o.qty
@@ -227,6 +240,16 @@ def crafting_ic_reconcile():
 
         total_new = sum(int(r["qty"] or 0) for r in rows)
         if total_new > 0:
+            # v2 purchased credits (idempotent per-order via uniq)
+            for r in rows:
+                uniq = f"order:{int(r['id'])}"
+                _issue_credit_v2(cx, uid,
+                                 value_ic=_BASE_IC_VALUE,
+                                 tier="pro",
+                                 caps=_PURCHASE_CAPS,
+                                 source="purchase",
+                                 uniq=uniq)
+            # (Optional back-compat) mirror to legacy counter & mark claims
             newbal = add_ic_credits(uid, total_new)
             now = int(time.time())
             for r in rows:
@@ -236,16 +259,38 @@ def crafting_ic_reconcile():
                 )
         else:
             newbal = get_ic_credits(uid)
+
     return _ok(reconciled=True, awarded=(total_new if rows else 0), credits=newbal)
+
+@crafting_api.post("/credits/status")
+def crafting_credits_status():
+    u = current_user_row()
+    if not u: return _err("auth_required")
+    with conn() as cx:
+        _ensure_credit_tables_v2(cx)
+        row = cx.execute(
+            "SELECT COUNT(*) AS n FROM crafting_credits_v2 WHERE user_id=? AND state='available'",
+            (int(u["id"]),)
+        ).fetchone()
+        v2 = int(row["n"] or 0)
+        # legacy fallback
+        v1 = get_ic_credits(int(u["id"]))
+    # Prefer v2 if present (avoids double counting)
+    total = v2 if v2 > 0 else v1
+    return _ok(credits=total, v2=v2, v1=v1)
 
 @crafting_api.post("/credits/claim_order")
 def crafting_ic_claim_order():
     u = current_user_row()
-    if not u: return _err("auth_required")
+    if not u:
+        return _err("auth_required")
     data = request.get_json(silent=True) or {}
-    try: oid = int(data.get("order_id") or 0)
-    except Exception: oid = 0
-    if oid <= 0: return _err("bad_id")
+    try:
+        oid = int(data.get("order_id") or 0)
+    except Exception:
+        oid = 0
+    if oid <= 0:
+        return _err("bad_id")
 
     uid = int(u["id"])
     with conn() as cx:
@@ -256,7 +301,8 @@ def crafting_ic_claim_order():
             WHERE o.id = ? AND o.buyer_user_id = ? AND o.status='paid' AND i.link_id = ?
         """, (oid, uid, SINGLE_CREDIT_LINK_ID)).fetchone()
 
-        if not r: return _err("not_eligible")
+        if not r:
+            return _err("not_eligible")
 
         dup = cx.execute("SELECT 1 FROM crafting_credit_claims WHERE order_id=?", (oid,)).fetchone()
         if dup:
@@ -264,11 +310,23 @@ def crafting_ic_claim_order():
             return _ok(already=True, credits=bal)
 
         qty = int(r["qty"] or 1)
+
+        # v2 purchased credit (idempotent via uniq)
+        _issue_credit_v2(cx, uid,
+                         value_ic=_BASE_IC_VALUE,
+                         tier="pro",
+                         caps=_PURCHASE_CAPS,
+                         source="purchase",
+                         uniq=f"order:{oid}")
+
+        # (Optional back-compat mirror)
         newbal = add_ic_credits(uid, qty)
+
         cx.execute(
             "INSERT INTO crafting_credit_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
             (oid, uid, int(time.time()))
         )
+
     return _ok(awarded=True, amount=qty, credits=newbal)
 
 @crafting_api.post("/code/redeem")
@@ -288,7 +346,6 @@ def crafting_redeem_code():
         if not rec:
             return jsonify(ok=False, reason="invalid"), 404
         if rec["status"] != "issued":
-            # could be 'consumed' (used) or anything else → treat as used
             return jsonify(ok=False, reason="used"), 409
 
         # Mark consumed first to be idempotent
@@ -297,9 +354,16 @@ def crafting_redeem_code():
             (int(time.time()), code)
         )
 
-    # Add one mint credit (or whatever the code carries)
+        # v2 credit on redeem (idempotent via uniq)
+        _issue_credit_v2(cx, int(u["id"]),
+                         value_ic=_BASE_IC_VALUE,
+                         tier="pro",
+                         caps=_PURCHASE_CAPS,
+                         source="voucher",
+                         uniq=f"voucher:{code}")
+
     credits = int(rec["credits"] or 1)
-    newbal = add_ic_credits(int(u["id"]), credits)
+    newbal = add_ic_credits(int(u["id"]), credits)  # legacy mirror
 
     return jsonify(ok=True, creditsAdded=credits, balance=newbal)
 
@@ -821,6 +885,35 @@ def get_bearer_token_from_request() -> str | None:
     return None
 
 # ----------------- HELPERS -----------------
+# === Crafting v2 per-credit helpers (purchase vouchers) =======================
+def _ensure_credit_tables_v2(cx):
+    cx.executescript("""
+    CREATE TABLE IF NOT EXISTS crafting_credits_v2(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      value_ic INTEGER NOT NULL,
+      tier TEXT,
+      caps TEXT,
+      state TEXT NOT NULL DEFAULT 'available',
+      reserved_draft_id INTEGER,
+      source TEXT,
+      uniq TEXT UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      used_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_crafting_credits_v2_user ON crafting_credits_v2(user_id, state);
+    """)
+
+def _issue_credit_v2(cx, user_id:int, *, value_ic:int, tier:str="pro",
+                     caps:dict|None=None, source:str="purchase", uniq:str|None=None):
+    _ensure_credit_tables_v2(cx)
+    if uniq:
+        exists = cx.execute("SELECT 1 FROM crafting_credits_v2 WHERE uniq=?", (uniq,)).fetchone()
+        if exists:
+            return
+    cx.execute("""INSERT INTO crafting_credits_v2(user_id, value_ic, tier, caps, state, source, uniq)
+                  VALUES(?,?,?,?, 'available', ?, ?)""",
+               (int(user_id), int(value_ic), (tier or ''), json.dumps(caps or {}), source, uniq))
 def current_user_row():
     uid = session.get("user_id")
     if not uid:
@@ -2313,10 +2406,16 @@ def voucher_new():
 
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
+
     ensure_voucher_tables()
-    code = (request.get_json(silent=True) or {}).get("code", "").strip().upper()
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip().upper()
     if not code:
         return jsonify(ok=False, reason="invalid"), 400
+
     import time
     with conn() as cx:
         rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
@@ -2324,10 +2423,20 @@ def consume_mint_code():
             return jsonify(ok=False, reason="invalid"), 404
         if rec["status"] != "issued":
             return jsonify(ok=False, reason="used"), 409
+
         cx.execute(
             "UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
             (int(time.time()), code)
         )
+
+        # v2 credit on consume (idempotent via uniq)
+        _issue_credit_v2(cx, int(u["id"]),
+                         value_ic=_BASE_IC_VALUE,
+                         tier="pro",
+                         caps=_PURCHASE_CAPS,
+                         source="voucher",
+                         uniq=f"voucher:{code}")
+
     return jsonify(ok=True, creditsAdded=int(rec["credits"] or 1))
     
 # ----------------- PI PAYMENTS (approve/complete) -----------------
