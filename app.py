@@ -229,41 +229,69 @@ from math import ceil
 @crafting_api.post("/ic/debit")
 def crafting_ic_debit():
     u = current_user_row()
-    if not u: return _err("auth_required")
+    if not u:
+        return _err("auth_required")
 
     data = request.get_json(silent=True) or {}
 
-    # The actual mint price in π (server will enforce)
+    # Optional exact mint price in π from client (server enforced)
     try:
         cost_pi = float(data.get("cost_pi") or 0)
     except Exception:
         cost_pi = 0.0
 
-    # existing field, but we will override when cost_pi is given
+    # Legacy path amount (client suggested), used only if no cost_pi and no v2
     try:
         amt_requested = int(data.get("amount") or 0)
     except Exception:
         amt_requested = 0
 
+    # If we have a price, convert to required IC and try v2 first
     if cost_pi > 0:
-        # Compute credits required for this mint
-        required = max(1, ceil(cost_pi / max(1e-9, CREDIT_PI_VALUE)))
-        # Ignore client-sent amount if it’s lower than what’s required
-        amt = required
-    else:
-        # Back-compat path (no price sent); behaves like before
-        amt = amt_requested
+        required_ic = max(_BASE_IC_VALUE, int(round(cost_pi * COIN_PER_PI)))
 
+        # Try to consume a best-fit v2 credit
+        used = _consume_v2_credit_for(int(u["id"]), required_ic)
+        if used:
+            # Success: v2 covers it; legacy balance untouched
+            return _ok(
+                debited=True,
+                amount=1,                     # one v2 credit consumed
+                balance=get_ic_credits(int(u["id"])),  # legacy mirror unchanged
+                cost_pi=cost_pi,
+                credit_value_pi=CREDIT_PI_VALUE,       # legacy constant for clients still showing it
+                spent_ic=int(used["value_ic"]),
+                spent_tier=used.get("tier"),
+                spent_source=used.get("source"),
+                v2=True
+            )
+
+        # No v2 big enough — fall back to legacy “counted” credits
+        required_legacy = max(1, int((required_ic + int(round(COIN_PER_PI*CREDIT_PI_VALUE)) - 1) // int(round(COIN_PER_PI*CREDIT_PI_VALUE))))
+        bal = get_ic_credits(int(u["id"]))
+        if bal < required_legacy:
+            return _err("insufficient_credits")
+        newbal = add_ic_credits(int(u["id"]), -required_legacy)
+        return _ok(
+            debited=True,
+            amount=required_legacy,
+            balance=newbal,
+            cost_pi=cost_pi,
+            credit_value_pi=CREDIT_PI_VALUE,
+            v2=False
+        )
+
+    # -------- Back-compat: no cost_pi provided --------
+    amt = amt_requested
     if amt <= 0:
         return _err("bad_amount")
 
-    # Enforce user has enough credits
     bal = get_ic_credits(int(u["id"]))
     if bal < amt:
         return _err("insufficient_credits")
 
     newbal = add_ic_credits(int(u["id"]), -amt)
-    return _ok(debited=True, amount=amt, balance=newbal, cost_pi=cost_pi, credit_value_pi=CREDIT_PI_VALUE)
+    return _ok(debited=True, amount=amt, balance=newbal, cost_pi=0.0, credit_value_pi=CREDIT_PI_VALUE, v2=False)
 
 @crafting_api.get("/credits")
 def crafting_ic_balance():
