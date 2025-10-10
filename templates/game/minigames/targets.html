@@ -1170,24 +1170,30 @@ const CRAFT_ON_WIN = 1;
 function currentSolitaireGameId(){
   return getDrawPref() === 3 ? 'targets::d3' : 'targets::d1';
 }
-function makeLeaderboardScore(elapsedMs, moves){
-  const base = Math.max(0, 3600000 - Math.max(0, elapsedMs|0)); // 0..3,600,000
-  const tie  = Math.max(0, 1000 - Math.min(1000, moves|0));     // 0..1000
-  return Math.round(base * 1000 + tie);
+// Legacy sort helper (higher = better). We sort by time elsewhere.
+function makeLeaderboardScore(elapsedMs){
+  return Math.max(0, 3_600_000 - (elapsedMs|0));
 }
 
-/* >>> updated to post exactly like basketball <<< */
-async function submitLeaderboard({score, elapsedMs, moves}){
+async function submitLeaderboard({ elapsedMs, moves }){
   const gameKey = currentSolitaireGameId();
+  const score   = makeLeaderboardScore(elapsedMs); // legacy sortable field if any mirror needs it
+
   try{
     await fetch(_withAuth('/izza-game/api/leaderboard'), {
-      method:'POST', credentials:'include',
-      headers: (typeof bearerHeaders==='function'? bearerHeaders() : {'content-type':'application/json'}),
-      body: JSON.stringify({ game: gameKey, score })
+      method:'POST',
+      credentials:'include',
+      headers:(typeof bearerHeaders==='function'? bearerHeaders() : {'content-type':'application/json'}),
+      body:JSON.stringify({
+        game:  gameKey,
+        score: score,          // optional legacy
+        timeMs: elapsedMs|0,   // <-- canonical
+        moves:  moves|0        // <-- canonical
+      })
     }).catch(()=>{});
   }catch(_){}
 
-  // local cache mirrors (kept as-is)
+  // local cache mirrors (unchanged, but now preserve time/moves too)
   const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
   const row={u, s:score, t:elapsedMs|0, m:moves|0, ts:Date.now()};
   const z=n=>String(n).padStart(2,'0'); const d=new Date();
@@ -1198,12 +1204,22 @@ async function submitLeaderboard({score, elapsedMs, moves}){
       for(let i=0;i<arr.length;i++){
         if(arr[i]?.u===r.u){
           found=true;
-          if((arr[i].s|0)<(r.s|0)) arr[i]=r;
+          // keep the best (lowest time) when we have raw t, else fall back to legacy score
+          const a=arr[i], b=r;
+          const aBest = (a.t!=null && b.t!=null) ? (a.t <= b.t) : ((a.s|0) >= (b.s|0));
+          if(!aBest) arr[i]=r;
           break;
         }
       }
       if(!found) arr.push(r);
-      arr.sort((a,b)=>b.s-a.s);
+      // sort: time asc if present; else legacy score desc
+      arr.sort((A,B)=>{
+        if(A.t!=null && B.t!=null){
+          if(A.t!==B.t) return A.t - B.t;
+          return (A.m|0) - (B.m|0);
+        }
+        return (B.s|0) - (A.s|0);
+      });
       localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
     }catch(_){}
   }
@@ -1232,13 +1248,12 @@ function endGame(won){
   let coinsDelta=0, craftDelta=0;
 
   if(won){
-    coinsDelta=COINS_ON_WIN; craftDelta=CRAFT_ON_WIN;
-    _wallet.writeCoins(coinsStart + coinsDelta);
-    _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
-    _wallet.saveSoon();
-    const score=makeLeaderboardScore(elapsed, moves);
-    submitLeaderboard({score, elapsedMs: elapsed, moves});
-  }
+  coinsDelta=COINS_ON_WIN; craftDelta=CRAFT_ON_WIN;
+  _wallet.writeCoins(coinsStart + coinsDelta);
+  _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
+  _wallet.saveSoon();
+  submitLeaderboard({ elapsedMs: elapsed, moves });
+}
 
   resText.textContent=won?'WIN':'Game Ended';
   resTime.textContent=fmtTime(elapsed);
