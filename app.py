@@ -2623,7 +2623,8 @@ def voucher_new():
 
     # generate a fresh, single-use code
     import secrets, time
-    code = ("IZZA-" + secrets.token_hex(6)).upper()
+base = ("IZZA-" + secrets.token_hex(6)).upper()
+code = f"{base}-IC{int(ic_value)}"
 
     with conn() as cx:
         cx.execute(
@@ -2809,7 +2810,11 @@ def voucher_new():
 </body>
 </html>"""
 
-    html = HTML_TMPL.replace("__CODE__", code).replace("__BACK__", back_to_game)
+    html = (HTML_TMPL
+        .replace("__CODE__", code)
+        .replace("__IC__", str(int(ic_value)))
+        .replace("__PI__", f"{float(paid_pi):.4f}")
+        .replace("__BACK__", back_to_game))
     return Response(html, headers={"Content-Type": "text/html; charset=utf-8"})
     
 # ----------------- PI PAYMENTS (approve/complete) -----------------
