@@ -1227,69 +1227,127 @@ function readLocal(gameId, periodKey){
       function readLocalLeaders(gameId, periodKey){
         return readLocal(gameId, periodKey).slice(0,20);
       }
+      // [LB-SOL-HELPERS] — add these just above loadAndRender
+      const SOL_MAX_MS = 3600000; // 60 min cap used when encoding solitaire scores
+
+      function fmtMMSS(ms){
+        const s = Math.max(0, Math.floor(ms/1000));
+        const m = (s/60)|0;
+        const ss = String(s%60).padStart(2,'0');
+        return `${String(m).padStart(2,'0')}:${ss}`;
+      }
+
+      // If server saved a signed 32-bit, recover the unsigned original
+      function normalizeScore(x){
+        let n = Number(x);
+        if (!Number.isFinite(n)) return 0;
+        return (n < 0) ? (n >>> 0) : (n|0);
+      }
+
+      // Decode IZZA Solitaire score back into elapsed time + moves
+      function decodeSolitaireScore(raw){
+        const n = normalizeScore(raw);
+        const tie  = n % 1000;                // 0..1000
+        const base = (n - tie) / 1000;        // 0..3,600,000
+        const elapsedMs = Math.max(0, SOL_MAX_MS - base);
+        const moves     = Math.max(0, 1000 - tie);
+        return { elapsedMs, moves };
+      }
 
       async function loadAndRender(seedFromLegacy=false){
-  const gameId = elGame.value || 'basketball';
-  if (seedFromLegacy){ harvestLegacyScores(gameId); }
-  elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
+        const gameId = elGame.value || 'basketball';
+        const isSolitaire = String(gameId).startsWith('targets'); // targets::d1 / targets::d3
 
-  // 1) Try server for the requested period (now via unified shim)
-  let rows = await fetchServerLeaders(gameId, period);
+        if (seedFromLegacy){ harvestLegacyScores(gameId); }
+        elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
 
-  // 2) If server returned rows, cache them locally for persistence
-  if (rows && rows.length){
-    const norm = normRows(rows);
-    saveLocal(gameId, period, stampFor(period), norm);
-  } else {
-    // 3) If empty, fall back to our local cache for this period
-    rows = readLocalLeaders(gameId, period);
+        // 1) Try server for the requested period (now via unified shim)
+        let rows = await fetchServerLeaders(gameId, period);
 
-    // 4) Still empty? Try server ALL-TIME, then cache locally for alltime
-    if (!rows || !rows.length){
-      const all = await fetchServerLeaders(gameId, 'alltime');
-      if (all && all.length){
-        const norm = normRows(all);
-        saveLocal(gameId, 'alltime', '', norm);
-        // If user is on Daily/Monthly/Yearly, we’ll still *show* something:
-        rows = norm;
-      }
-    }
-
-    // 5) Last-ditch: seed from legacy “last score”
-    if ((!rows || !rows.length) && seedFromLegacy){
-      try{
-        const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
-        if (hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
-          upsertLocalLedger(gameId, (hint.score||hint.s)|0);
+        // 2) If server returned rows, cache them locally for persistence
+        if (rows && rows.length){
+          const norm = normRows(rows);
+          saveLocal(gameId, period, stampFor(period), norm);
+        } else {
+          // 3) If empty, fall back to our local cache for this period
           rows = readLocalLeaders(gameId, period);
+
+          // 4) Still empty? Try server ALL-TIME, then cache locally for alltime
+          if (!rows || !rows.length){
+            const all = await fetchServerLeaders(gameId, 'alltime');
+            if (all && all.length){
+              const norm = normRows(all);
+              saveLocal(gameId, 'alltime', '', norm);
+              // If user is on Daily/Monthly/Yearly, we’ll still *show* something:
+              rows = norm;
+            }
+          }
+
+          // 5) Last-ditch: seed from legacy “last score”
+          if ((!rows || !rows.length) && seedFromLegacy){
+            try{
+              const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
+              if (hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
+                upsertLocalLedger(gameId, (hint.score||hint.s)|0);
+                rows = readLocalLeaders(gameId, period);
+              }
+            }catch(_){}
+          }
         }
-      }catch(_){}
-    }
-  }
 
-  rows = normRows(rows||[]);
-  if(!rows.length){
-    elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
-    return;
-  }
+        rows = normRows(rows||[]).map(r => ({ u:r.u, s: normalizeScore(r.s) }));
+        if(!rows.length){
+          elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
+          return;
+        }
 
-  const me = meUsername();
-  const html = [
-    `<table class="lb-table"><thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead><tbody>`
-  ];
-  rows.slice(0,20).forEach((r,i)=>{
-    const isMe = me && r.u && String(r.u).toLowerCase()===me;
-    html.push(
-      `<tr class="${isMe?'lb-row-me':''}">
-         <td>${i+1}</td>
-         <td>${r.u||'—'}</td>
-         <td>${(r.s|0)}</td>
-       </tr>`
-    );
-  });
-  html.push(`</tbody></table>`);
-  elBody.innerHTML = html.join('');
-}
+        const me = meUsername();
+        const html = [];
+
+        if (isSolitaire){
+          // Solitaire: show Time + Moves
+          html.push(
+            `<table class="lb-table">
+               <thead>
+                 <tr><th style="width:64px">#</th><th>Player</th><th>Time</th><th>Moves</th></tr>
+               </thead><tbody>`
+          );
+          rows.slice(0,20).forEach((r,i)=>{
+            const { elapsedMs, moves } = decodeSolitaireScore(r.s);
+            const isMe = me && r.u && String(r.u).toLowerCase()===me;
+            html.push(
+              `<tr class="${isMe?'lb-row-me':''}">
+                 <td>${i+1}</td>
+                 <td>${r.u||'—'}</td>
+                 <td>${fmtMMSS(elapsedMs)}</td>
+                 <td>${moves}</td>
+               </tr>`
+            );
+          });
+          html.push(`</tbody></table>`);
+        } else {
+          // Other games: show raw Score
+          html.push(
+            `<table class="lb-table">
+               <thead>
+                 <tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr>
+               </thead><tbody>`
+          );
+          rows.slice(0,20).forEach((r,i)=>{
+            const isMe = me && r.u && String(r.u).toLowerCase()===me;
+            html.push(
+              `<tr class="${isMe?'lb-row-me':''}">
+                 <td>${i+1}</td>
+                 <td>${r.u||'—'}</td>
+                 <td>${r.s|0}</td>
+               </tr>`
+            );
+          });
+          html.push(`</tbody></table>`);
+        }
+
+        elBody.innerHTML = html.join('');
+      }
     })();
   })();
   </script>
