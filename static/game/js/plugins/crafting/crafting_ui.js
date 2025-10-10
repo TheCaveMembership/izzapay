@@ -1887,6 +1887,7 @@ async function mount(rootSel){
   if (!root) return;
   STATE.root = root;
   STATE.mounted = true;
+  loadWalletSnapshot(); // ensure any capped credits survive refresh / Pi Browser bounce
 
   // 1) Seed credits immediately from persisted storage (survive close/reopen)
   try{
@@ -2114,6 +2115,33 @@ function _syncVisualsTabStyle(){
     }
   }catch(_){}
 }
+
+// Pull an IC cap off a voucher string like: IZZA-ABCDEF-IC2900
+function parseICFromVoucher(raw){
+  const s = String(raw||'').toUpperCase();
+  const m = s.match(/-IC(\d+)\b/);
+  return m ? parseInt(m[1],10) || 0 : 0;
+}
+
+// Optional: snapshot wallet to survive reloads / iOS tab swaps
+function persistWalletSnapshot(){
+  try {
+    const w = _walletRead(); // uses helpers below
+    localStorage.setItem('izzaCreditWalletSnapshot', JSON.stringify(w||[]));
+    if (window.IZZA?.persist) window.IZZA.persist('creditWallet', w);
+  } catch(_) {}
+}
+function loadWalletSnapshot(){
+  try{
+    let w = null;
+    if (window.IZZA?.read) w = window.IZZA.read('creditWallet');
+    if (!Array.isArray(w)) {
+      w = JSON.parse(localStorage.getItem('izzaCreditWalletSnapshot')||'[]');
+    }
+    if (Array.isArray(w) && w.length) _walletWrite(w);
+  }catch(_){}
+}
+  
 /* ===== Value-capped credits (client) ===== */
 const WALLET_KEY = 'izzaCreditWallet';
 function _walletRead(){ try{ return JSON.parse(localStorage.getItem(WALLET_KEY)||'[]'); }catch{ return []; } }
@@ -2244,10 +2272,29 @@ function bindInside(){
       redeemBtn.disabled = false;
 
       if (r && r.ok){
-        applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1));
-        updateTabsHeaderCredits();
-        redeemStat.textContent = 'Redeemed ✓ — mint credit added.';
-      } else {
+  // Prefer server value, else parse from the code itself
+  const capFromServer = (typeof r.value_ic === 'number') ? r.value_ic : parseInt(r.value_ic||'',10);
+  const capFromCode   = parseICFromVoucher(code);
+  const capIC = (Number.isFinite(capFromServer) && capFromServer>0) ? capFromServer
+               : (capFromCode>0 ? capFromCode : 0);
+
+  if (capIC > 0 && typeof walletAddCredit === 'function'){
+    walletAddCredit({
+      capIC,
+      source: 'voucher',
+      meta: { code: String(code||'').trim() }
+    });
+    persistWalletSnapshot();
+    redeemStat.textContent = `Redeemed ✓ — credit saved (cap: ${capIC.toLocaleString()} IC).`;
+  } else {
+    // fallback: keep legacy counter so the badge still shows a credit
+    applyCreditState((STATE.mintCredits|0) + (r.creditsAdded||1));
+    redeemStat.textContent = 'Redeemed ✓ — basic credit added.';
+  }
+
+  updateTabsHeaderCredits();
+  _syncVisualsTabStyle?.();
+} else {
         const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
         redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
       }
