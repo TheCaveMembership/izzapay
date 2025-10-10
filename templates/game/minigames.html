@@ -1309,7 +1309,12 @@ async function loadAndRender(seedFromLegacy=false){
     }
   }
 
-  rows = normRows(rows||[]).map(r => ({ u:r.u, s: normalizeScore(r.s) }));
+  rows = normRows(rows||[]).map(r => ({
+  u: r.u,
+  s: normalizeScore(r.s),
+  t: (r.t ?? null),
+  m: (r.m ?? null)
+}));
   if(!rows.length){
     elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
     return;
