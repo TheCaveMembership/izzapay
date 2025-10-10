@@ -1159,7 +1159,9 @@ function readLocal(gameId, periodKey){
 function normRows(rows){
   return (rows||[]).map(r => ({
     u: (r.u ?? r.user ?? '—'),
-    s: (r.s ?? r.score ?? 0)|0
+    s: (r.s ?? r.score ?? 0)|0,
+    t: (r.t ?? r.timeMs ?? null),   // keep raw time if present
+    m: (r.m ?? r.moves  ?? null)    // keep raw moves if present
   }));
 }
 
@@ -1238,6 +1240,17 @@ function fmtMMSS(ms){
   return `${String(m).padStart(2,'0')}:${ss}`;
 }
 
+function sortSolitaireRows(rows){
+  return (rows||[]).slice().sort((a,b)=>{
+    const at = (a.t!=null)?a.t:decodeSolitaireScore(a.s).elapsedMs;
+    const bt = (b.t!=null)?b.t:decodeSolitaireScore(b.s).elapsedMs;
+    if(at!==bt) return at - bt;
+    const am = (a.m!=null)?a.m:decodeSolitaireScore(a.s).moves;
+    const bm = (b.m!=null)?b.m:decodeSolitaireScore(b.s).moves;
+    return am - bm;
+  });
+}
+      
 // DBs/mirrors sometimes return signed 32-bit. Recover unsigned if needed.
 function normalizeScore(x){
   let n = Number(x);
@@ -1313,18 +1326,19 @@ async function loadAndRender(seedFromLegacy=false){
            <tr><th style="width:64px">#</th><th>Player</th><th>Time</th><th>Moves</th></tr>
          </thead><tbody>`
     );
-    rows.slice(0,20).forEach((r,i)=>{
-      const { elapsedMs, moves } = decodeSolitaireScore(r.s);
-      const isMe = me && r.u && String(r.u).toLowerCase()===me;
-      html.push(
-        `<tr class="${isMe?'lb-row-me':''}">
-           <td>${i+1}</td>
-           <td>${r.u||'—'}</td>
-           <td>${fmtMMSS(elapsedMs)}</td>
-           <td>${moves}</td>
-         </tr>`
-      );
-    });
+    sortSolitaireRows(rows).slice(0,20).forEach((r,i)=>{
+  const elapsedMs = (r.t!=null) ? r.t : decodeSolitaireScore(r.s).elapsedMs;
+  const moves     = (r.m!=null) ? r.m : decodeSolitaireScore(r.s).moves;
+  const isMe = me && r.u && String(r.u).toLowerCase()===me;
+  html.push(
+    `<tr class="${isMe?'lb-row-me':''}">
+       <td>${i+1}</td>
+       <td>${r.u||'—'}</td>
+       <td>${fmtMMSS(elapsedMs)}</td>
+       <td>${moves}</td>
+     </tr>`
+  );
+});
     html.push(`</tbody></table>`);
   } else {
     // Other games: raw Score
