@@ -2601,46 +2601,61 @@ def voucher_new():
         cx.execute("UPDATE voucher_redirects SET used=1 WHERE token=?", (tok,))
 
     # Derive value from the originating session/payment
-    paid_pi = 0.0
-    try:
-        with conn() as cx:
-            s = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (row["session_id"],)).fetchone()
-        if s and s["expected_pi"] is not None:
-            paid_pi = float(s["expected_pi"])
-        else:
-            # Fallback: ask Pi (best effort)
-            r = fetch_pi_payment(row["payment_id"])
-            if r.status_code == 200:
-                paid_pi = float(r.json().get("amount") or 0.0)
-    except Exception:
-        pass
+paid_pi = 0.0
+try:
+    with conn() as cx:
+        s = cx.execute(
+            "SELECT expected_pi FROM sessions WHERE id=?",
+            (row["session_id"],)
+        ).fetchone()
+    if s and s["expected_pi"] is not None:
+        paid_pi = float(s["expected_pi"])
+    else:
+        # Fallback: ask Pi (best effort)
+        r = fetch_pi_payment(row["payment_id"])
+        if r.status_code == 200:
+            paid_pi = float(r.json().get("amount") or 0.0)
+except Exception:
+    pass
 
-    # Compute IC value consistently with purchase flow
-    try:
-        ic_value = max(_BASE_IC_VALUE, int(round(float(paid_pi) * COIN_PER_PI)))
-    except Exception:
-        ic_value = _BASE_IC_VALUE
+# Compute IC value consistently with purchase flow
+try:
+    ic_value = max(_BASE_IC_VALUE, int(round(float(paid_pi) * COIN_PER_PI)))
+except Exception:
+    ic_value = _BASE_IC_VALUE
 
-    # generate a fresh, single-use code
-    import secrets, time
+# generate a fresh, single-use code (now embedding the IC value)
+import secrets, time
 base = ("IZZA-" + secrets.token_hex(6)).upper()
 code = f"{base}-IC{int(ic_value)}"
 
-    with conn() as cx:
-        cx.execute(
-            """INSERT INTO mint_codes(code, credits, status, payment_id, session_id, created_at, value_pi, value_ic)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (code, 1, "issued", row["payment_id"], row["session_id"], int(time.time()), float(paid_pi), int(ic_value))
-        )
+with conn() as cx:
+    cx.execute(
+        """
+        INSERT INTO mint_codes
+          (code, credits, status, payment_id, session_id, created_at, value_pi, value_ic)
+        VALUES (?,?,?,?,?,?,?,?)
+        """,
+        (
+            code,
+            1,
+            "issued",
+            row["payment_id"],
+            row["session_id"],
+            int(time.time()),
+            float(paid_pi),
+            int(ic_value),
+        ),
+    )
 
-    # Build the "Return" target:
-    # Prefer a fresh short-lived token; fall back to bare /izza-game/auth (which should handle auth).
-    try:
-        u = current_user_row()
-        tok_param = mint_login_token(u["id"]) if u else None
-    except Exception:
-        tok_param = None
-    back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
+# Build the "Return" target:
+# Prefer a fresh short-lived token; fall back to bare /izza-game/auth (which should handle auth).
+try:
+    u = current_user_row()
+    tok_param = mint_login_token(u["id"]) if u else None
+except Exception:
+    tok_param = None
+back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
 
     # Plain template; we swap __CODE__ and __BACK__ after.
     HTML_TMPL = r"""<!doctype html>
