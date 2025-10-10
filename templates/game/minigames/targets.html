@@ -750,35 +750,33 @@ function isSolvableDeck(deck, drawMode, timeBudgetMs=80, nodeBudget=12000){
 
 // ======= Deal chooser: keep your easy bias, but require a solvable deck =======
 function generateSolvableDeal(drawMode, bucket){
-  // Try your targeted easy generator first, but only accept if solver confirms
-  const tryOrder = [];
-  for(let i=0;i<50;i++) tryOrder.push('target');
-  for(let i=0;i<150;i++) tryOrder.push('pure');
+  // try to keep your "easy" bias: 1 targeted candidate, then 2 pure shuffles (repeat)
+  // ramp solver budget over time; NEVER accept an unproven deck
+  let attempt = 0;
+  while (true) {
+    // choose candidate style
+    const mode = (attempt % 3 === 0) ? 'target' : 'pure';
+    const deck = (mode === 'target')
+      ? generateTargetedDeckCandidate(bucket, drawMode)
+      : makeDeck();
 
-  for(let i=tryOrder.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [tryOrder[i],tryOrder[j]]=[tryOrder[j],tryOrder[i]]; }
+    // ramp budgets every 30 tries
+    const phase = Math.floor(attempt / 30);
+    const timeBudgetMs =
+      phase === 0 ? 80  :
+      phase === 1 ? 120 :
+      phase === 2 ? 180 : 220;
+    const nodeBudget =
+      phase === 0 ? 12000 :
+      phase === 1 ? 24000 :
+      phase === 2 ? 40000 : 65000;
 
-  let bestDeck=null;
-  for(const mode of tryOrder){
-    let deck;
-    if(mode==='target'){
-      deck = generateTargetedDeckCandidate(bucket, drawMode); // small helper below
-    }else{
-      deck = makeDeck();
+    if (isSolvableDeck(deck, drawMode, timeBudgetMs, nodeBudget)) {
+      return deck; // <-- ONLY way out
     }
-    if(isSolvableDeck(deck, drawMode)){
-      return deck;
-    }
-    // keep one decent fallback in case we exhaust budget
-    if(!bestDeck) bestDeck = deck;
+    attempt++;
   }
-  // If we somehow failed, last resort: loop until solvable
-  for(let hard=0; hard<2000; hard++){
-    const d=makeDeck();
-    if(isSolvableDeck(d, drawMode)) return d;
-  }
-  return bestDeck || makeDeck();
 }
-
 // Small helper: reuse your opening evaluator to bias “easy”, but do NOT accept without solver
 function generateTargetedDeckCandidate(bucket, drawMode){
   let candidate=null, bestScore=-1;
