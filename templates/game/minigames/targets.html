@@ -953,27 +953,28 @@ const CRAFT_ON_WIN = 1;
 function currentSolitaireGameId(){
   return getDrawPref() === 3 ? 'targets::d3' : 'targets::d1';
 }
-function makeLeaderboardScore(elapsedMs,moves){
-  const base=3600000 - Math.max(0,elapsedMs|0);
-  const tie=Math.max(0,1000 - Math.min(1000,moves|0));
-  return (base*1000 + tie)|0;
+function makeLeaderboardScore(elapsedMs, moves){
+  const base = Math.max(0, 3600000 - Math.max(0, elapsedMs|0)); // 0..3,600,000
+  const tie  = Math.max(0, 1000 - Math.min(1000, moves|0));     // 0..1000
+  // DON'T use |0 here — it overflows int32. Keep it a JS Number.
+  return Math.round(base * 1000 + tie);
 }
 async function submitLeaderboard(score){
   const gameKey = currentSolitaireGameId();  // <-- was 'targets'
   try{
     if (window.IZZA_LEADERBOARD?.submit){
-      await IZZA_LEADERBOARD.submit({ game: gameKey, score: score|0 });
+      await IZZA_LEADERBOARD.submit({ game: gameKey, score: score });
     } else {
       await fetch(_withAuth('/izza-game/api/leaderboard/submit'), {
         method:'POST', credentials:'include',
         headers:{'content-type':'application/json'},
-        body: JSON.stringify({ game: gameKey, score: score|0 })
+        body: JSON.stringify({ game: gameKey, score: score })
       }).catch(()=>{});
     }
 
     // local cache mirrors the same gameKey (works with colons)
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
-    const row={u, s:score|0, ts:Date.now()};
+    const row={u, s:score, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
     const stamps={day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear())};
     function upsertHigh(key,r){
