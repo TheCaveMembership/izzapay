@@ -959,28 +959,36 @@ function makeLeaderboardScore(elapsedMs, moves){
   // DON'T use |0 here — it overflows int32. Keep it a JS Number.
   return Math.round(base * 1000 + tie);
 }
-async function submitLeaderboard(score){
-  const gameKey = currentSolitaireGameId();  // <-- was 'targets'
+
+/* >>>> FIX: include exact time & moves when submitting and caching */
+async function submitLeaderboard({score, elapsedMs, moves}){
+  const gameKey = currentSolitaireGameId();
   try{
     if (window.IZZA_LEADERBOARD?.submit){
-      await IZZA_LEADERBOARD.submit({ game: gameKey, score: score });
+      await IZZA_LEADERBOARD.submit({ game: gameKey, score, timeMs: elapsedMs|0, moves: moves|0 });
     } else {
       await fetch(_withAuth('/izza-game/api/leaderboard/submit'), {
         method:'POST', credentials:'include',
         headers:{'content-type':'application/json'},
-        body: JSON.stringify({ game: gameKey, score: score })
+        body: JSON.stringify({ game: gameKey, score, timeMs: elapsedMs|0, moves: moves|0 })
       }).catch(()=>{});
     }
 
-    // local cache mirrors the same gameKey (works with colons)
+    // local cache mirrors same key and stores time/moves for correct display
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
-    const row={u, s:score, ts:Date.now()};
+    const row={u, s:score, t:elapsedMs|0, m:moves|0, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
     const stamps={day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear())};
     function upsertHigh(key,r){
       try{
         const arr=JSON.parse(localStorage.getItem(key)||'[]'); let found=false;
-        for(let i=0;i<arr.length;i++){ if(arr[i]?.u===r.u){ found=true; if((arr[i].s|0)<(r.s|0)) arr[i]=r; break; } }
+        for(let i=0;i<arr.length;i++){
+          if(arr[i]?.u===r.u){
+            found=true;
+            if((arr[i].s|0)<(r.s|0)) arr[i]=r; // replace only if score higher
+            break;
+          }
+        }
         if(!found) arr.push(r);
         arr.sort((a,b)=>b.s-a.s);
         localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
@@ -990,9 +998,10 @@ async function submitLeaderboard(score){
     upsertHigh(`${baseKey}::alltime`, row);
     upsertHigh(`${baseKey}::day::${stamps.day}`, row);
     upsertHigh(`${baseKey}::month::${stamps.month}`, row);
-    upsertHigh(`${baseKey}::year::${stamps.year}`);
+    upsertHigh(`${baseKey}::year::${stamps.year}`, row); // keep year too
   }catch(_){}
 }
+/* <<<< FIX end */
 
 /* ===== End / overlay ===== */
 const endEl=document.getElementById('end');
@@ -1016,7 +1025,8 @@ function endGame(won){
     _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
     _wallet.saveSoon();
     const score=makeLeaderboardScore(elapsed, moves);
-    submitLeaderboard(score);
+    /* pass exact time & moves */
+    submitLeaderboard({score, elapsedMs: elapsed, moves});
   }
 
   resText.textContent=won?'WIN':'Game Ended';
