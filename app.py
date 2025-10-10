@@ -2590,74 +2590,77 @@ def checkout(link_id):
 @app.get("/voucher/new")
 def voucher_new():
     ensure_voucher_tables()
+
     tok = request.args.get("token", "").strip()
     if not tok:
         return "<h2>Link expired</h2>", 410
 
+    # consume redirect token
     with conn() as cx:
-        row = cx.execute("SELECT * FROM voucher_redirects WHERE token=? AND used=0", (tok,)).fetchone()
+        row = cx.execute(
+            "SELECT * FROM voucher_redirects WHERE token=? AND used=0",
+            (tok,),
+        ).fetchone()
         if not row:
             return "<h2>Link expired</h2>", 410
         cx.execute("UPDATE voucher_redirects SET used=1 WHERE token=?", (tok,))
 
-    # Derive value from the originating session/payment
-paid_pi = 0.0
-try:
+    # ----- derive paid_pi from session or Pi API -----
+    paid_pi = 0.0
+    try:
+        with conn() as cx:
+            s = cx.execute(
+                "SELECT expected_pi FROM sessions WHERE id=?",
+                (row["session_id"],),
+            ).fetchone()
+        if s and s["expected_pi"] is not None:
+            paid_pi = float(s["expected_pi"])
+        else:
+            r = fetch_pi_payment(row["payment_id"])
+            if r.status_code == 200:
+                paid_pi = float(r.json().get("amount") or 0.0)
+    except Exception:
+        pass
+
+    # ----- compute dynamic IC value (fallback to base) -----
+    try:
+        ic_value = max(_BASE_IC_VALUE, int(round(float(paid_pi) * COIN_PER_PI)))
+    except Exception:
+        ic_value = _BASE_IC_VALUE
+
+    # ----- mint a fresh code that embeds the IC value -----
+    import secrets, time
+    base = ("IZZA-" + secrets.token_hex(6)).upper()
+    code = f"{base}-IC{int(ic_value)}"
+
     with conn() as cx:
-        s = cx.execute(
-            "SELECT expected_pi FROM sessions WHERE id=?",
-            (row["session_id"],)
-        ).fetchone()
-    if s and s["expected_pi"] is not None:
-        paid_pi = float(s["expected_pi"])
-    else:
-        # Fallback: ask Pi (best effort)
-        r = fetch_pi_payment(row["payment_id"])
-        if r.status_code == 200:
-            paid_pi = float(r.json().get("amount") or 0.0)
-except Exception:
-    pass
+        cx.execute(
+            """
+            INSERT INTO mint_codes
+              (code, credits, status, payment_id, session_id, created_at, value_pi, value_ic)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                code,
+                1,
+                "issued",
+                row["payment_id"],
+                row["session_id"],
+                int(time.time()),
+                float(paid_pi),
+                int(ic_value),
+            ),
+        )
 
-# Compute IC value consistently with purchase flow
-try:
-    ic_value = max(_BASE_IC_VALUE, int(round(float(paid_pi) * COIN_PER_PI)))
-except Exception:
-    ic_value = _BASE_IC_VALUE
+    # ----- build return target back to game -----
+    try:
+        u = current_user_row()
+        tok_param = mint_login_token(u["id"]) if u else None
+    except Exception:
+        tok_param = None
+    back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
 
-# generate a fresh, single-use code (now embedding the IC value)
-import secrets, time
-base = ("IZZA-" + secrets.token_hex(6)).upper()
-code = f"{base}-IC{int(ic_value)}"
-
-with conn() as cx:
-    cx.execute(
-        """
-        INSERT INTO mint_codes
-          (code, credits, status, payment_id, session_id, created_at, value_pi, value_ic)
-        VALUES (?,?,?,?,?,?,?,?)
-        """,
-        (
-            code,
-            1,
-            "issued",
-            row["payment_id"],
-            row["session_id"],
-            int(time.time()),
-            float(paid_pi),
-            int(ic_value),
-        ),
-    )
-
-# Build the "Return" target:
-# Prefer a fresh short-lived token; fall back to bare /izza-game/auth (which should handle auth).
-try:
-    u = current_user_row()
-    tok_param = mint_login_token(u["id"]) if u else None
-except Exception:
-    tok_param = None
-back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
-
-    # Plain template; we swap __CODE__ and __BACK__ after.
+    # ----- voucher page (plain HTML; we replace tokens below) -----
     HTML_TMPL = r"""<!doctype html>
 <html lang="en" data-no-global-i18n="0">
 <head>
@@ -2665,57 +2668,39 @@ back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Voucher Unlocked • IZZA PAY</title>
   <style>
-    :root {
-      --bg:#0b0f17; --panel:#0f1522; --border:#2a3550;
-      --text:#e7ecff; --muted:#a7b0c9; --accent:#7b5cff; --accent-2:#1bd760;
-    }
+    :root { --bg:#0b0f17; --panel:#0f1522; --border:#2a3550; --text:#e7ecff; --muted:#a7b0c9; --accent:#7b5cff; --accent-2:#1bd760; }
     html,body { height:100%; background:radial-gradient(1200px 60% at 50% -10%, #152037 0%, var(--bg) 60%) fixed; }
-    body {
-      margin:0; color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
-      display:flex; align-items:flex-start; justify-content:center; padding:20px;
-      overflow-x:hidden;
-    }
-    .wrap { position:relative; width:min(720px, 94vw); margin-top:8vh; } /* << moved up */
-    .card {
-      background:linear-gradient(180deg, rgba(19,28,48,.7), rgba(14,20,34,.9));
-      border:1px solid var(--border); border-radius:16px; padding:18px 18px 16px;
-      box-shadow:0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
-      backdrop-filter:saturate(120%) blur(2px); position:relative; z-index:2;
-    }
+    body { margin:0; color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+           display:flex; align-items:flex-start; justify-content:center; padding:20px; overflow-x:hidden; }
+    .wrap { position:relative; width:min(720px, 94vw); margin-top:8vh; }
+    .card { background:linear-gradient(180deg, rgba(19,28,48,.7), rgba(14,20,34,.9));
+            border:1px solid var(--border); border-radius:16px; padding:18px 18px 16px;
+            box-shadow:0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
+            backdrop-filter:saturate(120%) blur(2px); position:relative; z-index:2; }
     .hdr { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
-    .logo {
-      font-weight:900; letter-spacing:.5px; font-size:18px;
-      background: linear-gradient(90deg, #ff84e8, #7b5cff, #1bd760);
-      -webkit-background-clip:text; background-clip:text; color:transparent;
-      text-shadow:0 0 10px rgba(123,92,255,.25);
-    }
+    .logo { font-weight:900; letter-spacing:.5px; font-size:18px;
+            background: linear-gradient(90deg, #ff84e8, #7b5cff, #1bd760);
+            -webkit-background-clip:text; background-clip:text; color:transparent;
+            text-shadow:0 0 10px rgba(123,92,255,.25); }
     .title { font-size:22px; font-weight:800; margin:4px 0 2px; }
     .sub   { color:var(--muted); }
-    .code {
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-      margin-top:12px; padding:14px 14px; background:#0b0f17; border:1px dashed #415082; border-radius:12px;
-      font:700 20px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      letter-spacing:1px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);
-    }
+    .code { display:flex; align-items:center; justify-content:space-between; gap:10px;
+            margin-top:12px; padding:14px 14px; background:#0b0f17; border:1px dashed #415082; border-radius:12px;
+            font:700 20px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+            letter-spacing:1px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02); }
     .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
-    .btn {
-      appearance:none; border:1px solid var(--border); background:var(--panel); color:var(--text);
-      border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer;
-      transition:transform .05s ease, box-shadow .2s ease, border-color .2s ease;
-      text-decoration:none; display:inline-block;
-    }
+    .btn { appearance:none; border:1px solid var(--border); background:var(--panel); color:var(--text);
+           border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer;
+           transition:transform .05s ease, box-shadow .2s ease, border-color .2s ease;
+           text-decoration:none; display:inline-block; }
     .btn:hover { border-color:#4b5e8c; box-shadow:0 6px 22px rgba(0,0,0,.35); }
     .btn:active { transform:translateY(1px); }
     .btn.primary { background:linear-gradient(180deg, #17233d, #101a2f); border-color:#345094; }
     .btn.success { background:linear-gradient(180deg, #0e2919, #0a2215); border-color:#1bd76055; color:#b8ffd1; }
     .foot { margin-top:12px; color:var(--muted); font-size:12px; }
-    .badge {
-      display:inline-block; border:1px solid #1bd760; color:#b8ffd1; background:#0b2b17;
-      padding:4px 8px; border-radius:8px; font-weight:800; font-size:12px; margin-left:6px;
-    }
-    canvas.confetti, canvas.fireworks {
-      position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:1;
-    }
+    .badge { display:inline-block; border:1px solid #1bd760; color:#b8ffd1; background:#0b2b17;
+             padding:4px 8px; border-radius:8px; font-weight:800; font-size:12px; margin-left:6px; }
+    canvas.confetti, canvas.fireworks { position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:1; }
     canvas.fireworks { z-index:0; mix-blend-mode:screen; opacity:.75; }
   </style>
 </head>
@@ -2731,7 +2716,10 @@ back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
       </div>
 
       <div class="title">You got a Crafting Credit! 💥</div>
-      <div class="sub">Use this code in the Crafting UI to add <strong>1 mint credit</strong>.</div>
+      <div class="sub">
+        Use this code in the Crafting UI to add <strong>1 mint credit</strong>.
+        <span class="badge">IC Value: <span id="icv">__IC__</span></span>
+      </div>
 
       <div class="code">
         <span id="vcode">__CODE__</span>
@@ -2754,12 +2742,12 @@ back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
   <script>
   const $ = (sel)=>document.querySelector(sel);
 
-  $("#moreBtn").addEventListener("click", ()=>{
+  $("#moreBtn")?.addEventListener("click", ()=>{
     const el = $("#howto");
     el.style.display = el.style.display === "none" ? "block" : "none";
   });
 
-  $("#copyBtn").addEventListener("click", async ()=>{
+  $("#copyBtn")?.addEventListener("click", async ()=>{
     try {
       await navigator.clipboard.writeText($("#vcode").textContent.trim());
       $("#copyBtn").textContent = "Copied ✓";
@@ -2825,13 +2813,14 @@ back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
 </body>
 </html>"""
 
-    html = (HTML_TMPL
+    html = (
+        HTML_TMPL
         .replace("__CODE__", code)
         .replace("__IC__", str(int(ic_value)))
         .replace("__PI__", f"{float(paid_pi):.4f}")
-        .replace("__BACK__", back_to_game))
+        .replace("__BACK__", back_to_game)
+    )
     return Response(html, headers={"Content-Type": "text/html; charset=utf-8"})
-    
 # ----------------- PI PAYMENTS (approve/complete) -----------------
 @app.post("/api/pi/approve")
 def pi_approve():
