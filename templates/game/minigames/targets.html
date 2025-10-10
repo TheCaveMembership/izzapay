@@ -1038,20 +1038,35 @@ document.getElementById('rulesBtn').addEventListener('click', ()=>rulesEl.classL
 document.getElementById('rulesClose').addEventListener('click', ()=>rulesEl.classList.remove('show'), {passive:true});
 rulesEl.addEventListener('click', (e)=>{ if(e.target===rulesEl) rulesEl.classList.remove('show'); }, {passive:true});
 
-/* Back links: sync + save first */
-document.querySelectorAll('#backBtn,#backBtn2,#startBack,a').forEach(a=>{
+/* Back links: sync + save first (exclude #backBtn2 here) */
+document.querySelectorAll('#backBtn,#startBack,a:not(#backBtn2)').forEach(a=>{
   a.addEventListener('click', async (e)=>{
-    const href=a.getAttribute('href')||'';
-    if(href.startsWith('/')){
+    const href = a.getAttribute('href') || '';
+    if (href.startsWith('/')){
       e.preventDefault();
       try{
         await _wallet.syncFromPersist();
         await IZZA_PERSIST?.save?.();
       }catch(_){}
-      location.href=_withAuth(href);
+      location.href = _withAuth(href);
     }
   }, {passive:false});
 });
+
+/* [SOL-END-BACK] End overlay’s Return-to-Arcade: force minigames path */
+(function(){
+  const endBack = document.getElementById('backBtn2');
+  if (endBack){
+    endBack.addEventListener('click', async (e)=>{
+      e.preventDefault();
+      try{
+        await _wallet.syncFromPersist();
+        await IZZA_PERSIST?.save?.();
+      }catch(_){}
+      location.assign(_withAuth('/izza-game/minigames'));
+    }, {passive:false});
+  }
+})();
 
 /* ===== Start screen wiring ===== */
 (function(){
