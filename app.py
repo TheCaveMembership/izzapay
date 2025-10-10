@@ -250,38 +250,26 @@ def crafting_ic_debit():
     if cost_pi > 0:
         required_ic = max(_BASE_IC_VALUE, int(round(cost_pi * COIN_PER_PI)))
 
-        # Try to consume a best-fit v2 credit
+        # Try to consume a best-fit v2 credit (must be >= required_ic)
         used = _consume_v2_credit_for(int(u["id"]), required_ic)
         if used:
             # Success: v2 covers it; legacy balance untouched
             return _ok(
                 debited=True,
-                amount=1,                     # one v2 credit consumed
-                balance=get_ic_credits(int(u["id"])),  # legacy mirror unchanged
+                amount=1,                                  # one v2 credit consumed
+                balance=get_ic_credits(int(u["id"])),      # legacy mirror unchanged
                 cost_pi=cost_pi,
-                credit_value_pi=CREDIT_PI_VALUE,       # legacy constant for clients still showing it
+                credit_value_pi=CREDIT_PI_VALUE,           # legacy label support
                 spent_ic=int(used["value_ic"]),
                 spent_tier=used.get("tier"),
                 spent_source=used.get("source"),
                 v2=True
             )
 
-        # No v2 big enough — fall back to legacy “counted” credits
-        required_legacy = max(1, int((required_ic + int(round(COIN_PER_PI*CREDIT_PI_VALUE)) - 1) // int(round(COIN_PER_PI*CREDIT_PI_VALUE))))
-        bal = get_ic_credits(int(u["id"]))
-        if bal < required_legacy:
-            return _err("insufficient_credits")
-        newbal = add_ic_credits(int(u["id"]), -required_legacy)
-        return _ok(
-            debited=True,
-            amount=required_legacy,
-            balance=newbal,
-            cost_pi=cost_pi,
-            credit_value_pi=CREDIT_PI_VALUE,
-            v2=False
-        )
+        # STRICT: do not fall back to legacy counted credits for priced mints
+        return _err("insufficient_credits")
 
-    # -------- Back-compat: no cost_pi provided --------
+    # -------- Back-compat: no cost_pi provided (legacy counted credits) --------
     amt = amt_requested
     if amt <= 0:
         return _err("bad_amount")
@@ -452,15 +440,18 @@ def crafting_redeem_code():
             (int(time.time()), code)
         )
 
-        # Prefer the stamped value_ic; fallback to computing from session/payment; final fallback = baseline
+        # Compute & STAMP value onto the voucher row
         v_ic = int(rec["value_ic"] or 0)
+        paid_pi = float(rec["value_pi"] or 0.0)
 
         if v_ic <= 0:
-            # Try to compute from originating session/payment
-            paid_pi = float(rec["value_pi"] or 0.0)
+            # Recover paid_pi from session, then from Pi API, then fallback
             if paid_pi <= 0.0:
                 try:
-                    srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
+                    srow = cx.execute(
+                        "SELECT expected_pi FROM sessions WHERE id=?",
+                        (rec["session_id"],)
+                    ).fetchone()
                     if srow and srow["expected_pi"] is not None:
                         paid_pi = float(srow["expected_pi"])
                 except Exception:
@@ -476,6 +467,34 @@ def crafting_redeem_code():
                 v_ic = max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
             except Exception:
                 v_ic = _BASE_IC_VALUE
+        else:
+            # Backfill paid_pi if voucher already had value_ic but no value_pi
+            if paid_pi <= 0.0:
+                try:
+                    srow = cx.execute(
+                        "SELECT expected_pi FROM sessions WHERE id=?",
+                        (rec["session_id"],)
+                    ).fetchone()
+                    if srow and srow["expected_pi"] is not None:
+                        paid_pi = float(srow["expected_pi"])
+                except Exception:
+                    pass
+                if paid_pi <= 0.0:
+                    try:
+                        r = fetch_pi_payment(rec["payment_id"])
+                        if r.status_code == 200:
+                            paid_pi = float(r.json().get("amount") or 0.0)
+                    except Exception:
+                        pass
+
+        # Persist the stamp for transparency/idempotency
+        try:
+            cx.execute(
+                "UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
+                (float(paid_pi or 0.0), int(v_ic), code)
+            )
+        except Exception:
+            pass
 
         # v2 credit on redeem (idempotent via uniq)
         _issue_credit_v2(cx, int(u["id"]),
@@ -552,7 +571,6 @@ def consume_mint_code():
         valuePi=round(value_pi, 4),
         valueIC=value_ic
     )
-
 # --------------------------- MERCHANT ROUTES ------------------------------------
 @merchant_api.post("/create_product_from_craft")
 def create_product_from_craft():
@@ -1071,8 +1089,81 @@ def get_bearer_token_from_request() -> str | None:
     return None
 
 # ----------------- HELPERS -----------------
-COIN_PER_PI = 2000
-BASE_CREDIT_IC = 500  # 0.25π baseline for earned credits
+def _redeem_and_issue_credit(cx, user_id: int, code: str):
+    import time
+    rec = cx.execute("SELECT * FROM mint_codes WHERE code=?", (code,)).fetchone()
+    if not rec:
+        return {"ok": False, "status": 404, "reason": "invalid"}
+
+    if rec["status"] != "issued":
+        return {"ok": False, "status": 409, "reason": "used"}
+
+    # Mark consumed (idempotent-ish)
+    cx.execute("UPDATE mint_codes SET status='consumed', consumed_at=? WHERE code=?",
+               (int(time.time()), code))
+
+    # --- Compute + STAMP value onto the voucher row (same logic we discussed) ---
+    v_ic = int(rec["value_ic"] or 0)
+    paid_pi = float(rec["value_pi"] or 0.0)
+
+    if v_ic <= 0:
+        if paid_pi <= 0.0:
+            try:
+                srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?",
+                                  (rec["session_id"],)).fetchone()
+                if srow and srow["expected_pi"] is not None:
+                    paid_pi = float(srow["expected_pi"])
+            except Exception:
+                pass
+        if paid_pi <= 0.0:
+            try:
+                r = fetch_pi_payment(rec["payment_id"])
+                if r.status_code == 200:
+                    paid_pi = float(r.json().get("amount") or 0.0)
+            except Exception:
+                pass
+        try:
+            v_ic = max(_BASE_IC_VALUE, int(round(paid_pi * COIN_PER_PI)))
+        except Exception:
+            v_ic = _BASE_IC_VALUE
+    else:
+        # backfill value_pi if missing
+        if paid_pi <= 0.0:
+            try:
+                srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?",
+                                  (rec["session_id"],)).fetchone()
+                if srow and srow["expected_pi"] is not None:
+                    paid_pi = float(srow["expected_pi"])
+            except Exception:
+                pass
+            if paid_pi <= 0.0:
+                try:
+                    r = fetch_pi_payment(rec["payment_id"])
+                    if r.status_code == 200:
+                        paid_pi = float(r.json().get("amount") or 0.0)
+                except Exception:
+                    pass
+
+    # Persist the stamp
+    try:
+        cx.execute("UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
+                   (float(paid_pi or 0.0), int(v_ic), code))
+    except Exception:
+        pass
+
+    # Issue v2 credit with the stamped value (idempotent via uniq)
+    _issue_credit_v2(cx, int(user_id),
+                     value_ic=int(v_ic),
+                     tier="pro",
+                     caps=_PURCHASE_CAPS,
+                     source="voucher",
+                     uniq=f"voucher:{code}")
+
+    # legacy mirror count
+    credits = int(rec["credits"] or 1)
+    newbal = add_ic_credits(int(user_id), credits)
+
+    return {"ok": True, "status": 200, "creditsAdded": credits, "balance": newbal, "icValue": v_ic}
 
 def _consume_v2_credit_for(user_id: int, required_ic: int):
     """
