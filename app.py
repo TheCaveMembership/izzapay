@@ -510,8 +510,14 @@ def crafting_redeem_code():
     return jsonify(ok=True, creditsAdded=credits, balance=newbal, icValue=v_ic)
 
 # --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
+# --------------------------- VOUCHER CONSUME (TOKEN AUTH) --------------------
 @app.post("/api/mint_codes/consume")
 def consume_mint_code():
+    # Require internal token so browser can’t call this by accident
+    tok = request.headers.get("X-Internal-Token") or ""
+    if tok != (os.environ.get("INTERNAL_STAMP_TOKEN") or ""):
+        return jsonify(ok=False, reason="forbidden"), 403
+
     ensure_voucher_tables()
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
@@ -531,15 +537,16 @@ def consume_mint_code():
             (int(time.time()), code)
         )
 
-        # Extract or compute value for this mint code
         value_pi = float(rec["value_pi"] or 0.0)
         value_ic = int(rec["value_ic"] or 0)
 
         if value_ic <= 0:
-            # Attempt recovery from recorded session/payment info
             if value_pi <= 0:
                 try:
-                    srow = cx.execute("SELECT expected_pi FROM sessions WHERE id=?", (rec["session_id"],)).fetchone()
+                    srow = cx.execute(
+                        "SELECT expected_pi FROM sessions WHERE id=?",
+                        (rec["session_id"],)
+                    ).fetchone()
                     if srow and srow["expected_pi"] is not None:
                         value_pi = float(srow["expected_pi"])
                 except Exception:
@@ -557,13 +564,11 @@ def consume_mint_code():
             except Exception:
                 value_ic = _BASE_IC_VALUE
 
-        # Update the stored row for transparency
         cx.execute(
             "UPDATE mint_codes SET value_pi=?, value_ic=? WHERE code=?",
             (float(value_pi), int(value_ic), code)
         )
 
-    # Response payload includes both credit count and value
     return jsonify(
         ok=True,
         status="consumed",
