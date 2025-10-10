@@ -859,6 +859,8 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
           user:  (typeof userParamPair === 'function') ? userParamPair() : '',
           game:  body.game || guessGameId(),
           score: (body.score|0) || 0,
+          timeMs: (body.timeMs|0) || null,
+          moves:  (body.moves|0)  || null,
           // keep legacy stamps if present (server may ignore or use them)
           daily:   body.daily   || null,
           monthly: body.monthly || null,
