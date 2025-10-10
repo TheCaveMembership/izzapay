@@ -1171,13 +1171,15 @@ function currentSolitaireGameId(){
   return getDrawPref() === 3 ? 'targets::d3' : 'targets::d1';
 }
 // Legacy sort helper (higher = better). We sort by time elsewhere.
-function makeLeaderboardScore(elapsedMs){
-  return Math.max(0, 3_600_000 - (elapsedMs|0));
+function makeLeaderboardScorePacked(elapsedMs, moves){
+  const base = Math.max(0, 3_600_000 - (elapsedMs|0));          // bigger = faster
+  const tie  = Math.max(0, Math.min(999, 1000 - ((moves|0)||0))); // fewer moves = bigger
+  return (base * 1000) + tie;
 }
 
 async function submitLeaderboard({ elapsedMs, moves }){
   const gameKey = currentSolitaireGameId();
-  const score   = makeLeaderboardScore(elapsedMs); // legacy sortable field if any mirror needs it
+  const score = makeLeaderboardScorePacked(elapsedMs, moves);
 
   try{
     await fetch(_withAuth('/izza-game/api/leaderboard'), {
