@@ -782,12 +782,12 @@ function __applyStatsToNewestCraft(){
 })();
 
 /* Credit badge helpers */
-function applyCreditState(n){
-  const next = Math.max(0, n|0);
-  STATE.mintCredits   = next;
-  STATE.canUseVisuals = next > 0;
-  setCraftingCredits(next);           // <— persist + notify
-  updateTabsHeaderCredits();
+function applyCreditState(n, mode){
+   const next = Math.max(0, n|0);
+   STATE.mintCredits   = next;
+   STATE.canUseVisuals = next > 0;
+   setCraftingCredits(next, mode);     // <— allow "burn" to actually downgrade mirrors
+   updateTabsHeaderCredits();
 }
 function totalMintCredits(){
   const singles = (STATE.mintCredits | 0);
