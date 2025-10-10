@@ -328,6 +328,16 @@
   });
   document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>a.href = withAuth(a.getAttribute('href')));
   window._withAuth = withAuth;
+
+  /* >>> add bearerHeaders like basketball <<< */
+  window.bearerHeaders = function(b){
+    const h=Object.assign({'content-type':'application/json'}, b||{});
+    try{
+      const tok=localStorage.getItem('izzaBearer')||'';
+      if(tok) h.authorization='Bearer '+tok;
+    }catch(_){}
+    return h;
+  };
 })();
 
 /* ===== Wallet helpers ===== */
@@ -556,7 +566,6 @@ function qualifiesBucket(m, bucket){
 
 /* Safety predicate: reject starved openings entirely */
 function safeOpening(m){
-  // Must have at least one immediate progress vector and at least one ace in sight
   return (
     (m.moves>=1 || m.flips>=1 || m.stockPlayable>=1) &&
     (m.acesTop>=1 || m.stockAces>=1)
@@ -590,20 +599,14 @@ function generateTargetedDeal(bucket, drawMode){
     const state=dealIntoStateFromDeck(deck);
     const m=evaluateOpening(state, drawMode);
 
-    // Reject starved starts outright
     if(!safeOpening(m)) continue;
-
-    // Prefer the requested easy bucket
     if(qualifiesBucket(m, bucket)) return deck;
 
-    // Score for fallback (still easy-ish)
     const score = (m.acesTop*3)+(m.stockAces*2)+(m.moves*2)+(m.flips*2)+m.stockPlayable-(m.hidden*0.02);
     if(score>bestScore){ bestScore=score; bestDeck=deck; }
   }
-  // As a last step, if we somehow didn’t hit the exact bucket, we still return a “safe” opening
   if(bestDeck) return bestDeck;
 
-  // Final safeguard: loop until safeOpening (should hit very fast)
   while(true){
     const deck=makeDeck();
     const m=evaluateOpening(dealIntoStateFromDeck(deck), drawMode);
@@ -613,7 +616,7 @@ function generateTargetedDeal(bucket, drawMode){
 
 /* ===== Game flow ===== */
 function layoutNew(){
-  const bucket = nextBucket(); // 'w5' | 'w7'
+  const bucket = nextBucket();
   const drawMode = getDrawPref();
 
   for(let i=0;i<4;i++) P.f[i]=[];
@@ -626,7 +629,6 @@ function layoutNew(){
   moves=0; ended=false; winTs=null; elMoves.textContent='0';
   FAN=cssVarInt('--fanY',26);
 
-  // deal tableau
   for(let col=0; col<7; col++){
     for(let n=0; n<=col; n++){
       const c=P.stock.pop(); P.t[col].push(c);
@@ -657,13 +659,11 @@ function renderAll(){
   const piles={ stock:'stock', waste:'waste', t:['t1','t2','t3','t4','t5','t6','t7'], f:['f1','f2','f3','f4'] };
   [...document.querySelectorAll('.pile')].forEach(p=>p.innerHTML='');
 
-  // STOCK (clickable even when empty to recycle)
   const sEl=document.getElementById(piles.stock);
   if(P.stock.length || P.waste.length){
     const back=spawnCardBack(); back.addEventListener('click', onDraw, {passive:true}); sEl.appendChild(back);
   }
 
-  // WASTE
   const wEl=document.getElementById(piles.waste);
   if(P.waste.length){
     const drawMode=getDrawPref();
@@ -688,13 +688,11 @@ function renderAll(){
     }
   }
 
-  // FOUNDATIONS
   for(let i=0;i<4;i++){
     const fEl=document.getElementById(piles.f[i]);
     P.f[i].forEach((c,k)=>{ const el=spawnCard(c); el.dataset.where='f'; el.dataset.fidx=String(i); el.style.zIndex=k+1; placeStack(el,k*12); fEl.appendChild(el); });
   }
 
-  // TABLEAU
   for(let i=0;i<7;i++){
     const col=P.t[i], tEl=document.getElementById(piles.t[i]);
     col.forEach((c,k)=>{
@@ -956,52 +954,47 @@ function currentSolitaireGameId(){
 function makeLeaderboardScore(elapsedMs, moves){
   const base = Math.max(0, 3600000 - Math.max(0, elapsedMs|0)); // 0..3,600,000
   const tie  = Math.max(0, 1000 - Math.min(1000, moves|0));     // 0..1000
-  // DON'T use |0 here — it overflows int32. Keep it a JS Number.
   return Math.round(base * 1000 + tie);
 }
 
-/* >>>> FIX: include exact time & moves when submitting and caching */
+/* >>> updated to post exactly like basketball <<< */
 async function submitLeaderboard({score, elapsedMs, moves}){
   const gameKey = currentSolitaireGameId();
   try{
-    if (window.IZZA_LEADERBOARD?.submit){
-      await IZZA_LEADERBOARD.submit({ game: gameKey, score, timeMs: elapsedMs|0, moves: moves|0 });
-    } else {
-      await fetch(_withAuth('/izza-game/api/leaderboard/submit'), {
-        method:'POST', credentials:'include',
-        headers:{'content-type':'application/json'},
-        body: JSON.stringify({ game: gameKey, score, timeMs: elapsedMs|0, moves: moves|0 })
-      }).catch(()=>{});
-    }
-
-    // local cache mirrors same key and stores time/moves for correct display
-    const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
-    const row={u, s:score, t:elapsedMs|0, m:moves|0, ts:Date.now()};
-    const z=n=>String(n).padStart(2,'0'); const d=new Date();
-    const stamps={day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear())};
-    function upsertHigh(key,r){
-      try{
-        const arr=JSON.parse(localStorage.getItem(key)||'[]'); let found=false;
-        for(let i=0;i<arr.length;i++){
-          if(arr[i]?.u===r.u){
-            found=true;
-            if((arr[i].s|0)<(r.s|0)) arr[i]=r; // replace only if score higher
-            break;
-          }
-        }
-        if(!found) arr.push(r);
-        arr.sort((a,b)=>b.s-a.s);
-        localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
-      }catch(_){}
-    }
-    const baseKey = `izzaLb2::${gameKey}`;
-    upsertHigh(`${baseKey}::alltime`, row);
-    upsertHigh(`${baseKey}::day::${stamps.day}`, row);
-    upsertHigh(`${baseKey}::month::${stamps.month}`, row);
-    upsertHigh(`${baseKey}::year::${stamps.year}`, row); // keep year too
+    await fetch(_withAuth('/izza-game/api/leaderboard'), {
+      method:'POST', credentials:'include',
+      headers: (typeof bearerHeaders==='function'? bearerHeaders() : {'content-type':'application/json'}),
+      body: JSON.stringify({ game: gameKey, score })
+    }).catch(()=>{});
   }catch(_){}
+
+  // local cache mirrors (kept as-is)
+  const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
+  const row={u, s:score, t:elapsedMs|0, m:moves|0, ts:Date.now()};
+  const z=n=>String(n).padStart(2,'0'); const d=new Date();
+  const stamps={day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear())};
+  function upsertHigh(key,r){
+    try{
+      const arr=JSON.parse(localStorage.getItem(key)||'[]'); let found=false;
+      for(let i=0;i<arr.length;i++){
+        if(arr[i]?.u===r.u){
+          found=true;
+          if((arr[i].s|0)<(r.s|0)) arr[i]=r;
+          break;
+        }
+      }
+      if(!found) arr.push(r);
+      arr.sort((a,b)=>b.s-a.s);
+      localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
+    }catch(_){}
+  }
+  const baseKey = `izzaLb2::${gameKey}`;
+  upsertHigh(`${baseKey}::alltime`, row);
+  upsertHigh(`${baseKey}::day::${stamps.day}`, row);
+  upsertHigh(`${baseKey}::month::${stamps.month}`, row);
+  upsertHigh(`${baseKey}::year::${stamps.year}`, row);
+  try{ await IZZA_PERSIST?.save?.(); }catch(_){}
 }
-/* <<<< FIX end */
 
 /* ===== End / overlay ===== */
 const endEl=document.getElementById('end');
@@ -1025,7 +1018,6 @@ function endGame(won){
     _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
     _wallet.saveSoon();
     const score=makeLeaderboardScore(elapsed, moves);
-    /* pass exact time & moves */
     submitLeaderboard({score, elapsedMs: elapsed, moves});
   }
 
