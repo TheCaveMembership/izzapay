@@ -993,16 +993,11 @@ function currentSolitaireGameId(){
   return getDrawPref() === 3 ? 'targets::d3' : 'targets::d1';
 }
 
-const SOL_MAX_MS = 3_600_000; // 60 minutes
-// Bigger is better for sorting, but represents a faster time.
-function makeSpeedScore(elapsedMs){
-  return Math.max(0, SOL_MAX_MS - (elapsedMs|0));
-}
-
 async function submitLeaderboard({ elapsedMs }){
   const gameKey = currentSolitaireGameId();
-  const score = makeSpeedScore(elapsedMs);
+  const ms = Math.max(0, elapsedMs|0);  // canonical time in ms
 
+  // Server write: send the real time in both fields
   try{
     await fetch(_withAuth('/izza-game/api/leaderboard'), {
       method:'POST',
@@ -1010,45 +1005,57 @@ async function submitLeaderboard({ elapsedMs }){
       headers:(typeof bearerHeaders==='function'? bearerHeaders() : {'content-type':'application/json'}),
       body:JSON.stringify({
         game:  gameKey,
-        score: score,        // used by server to rank (higher = faster)
-        timeMs: elapsedMs|0  // canonical time for display
+        score: ms,     // mirror ms so any consumer using "score" still shows the true time
+        timeMs: ms,    // canonical
+        kind: 'time'   // harmless hint; safe if ignored
       })
     }).catch(()=>{});
   }catch(_){}
 
-  // Local LB mirror (fresh start): keep time for sorting
+  // Local mirror: keep s === t === ms
   const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
-  const row={u, s:score, t:elapsedMs|0, ts:Date.now()};
+  const row={u, s:ms, t:ms, ts:Date.now()};
   const z=n=>String(n).padStart(2,'0'); const d=new Date();
-  const stamps={day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear())};
+  const stamps={
+    day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
+    month:`${d.getFullYear()}-${z(d.getMonth()+1)}`,
+    year:String(d.getFullYear())
+  };
+
   function upsertHigh(key,r){
     try{
-      const arr=JSON.parse(localStorage.getItem(key)||'[]'); let found=false;
+      const arr=JSON.parse(localStorage.getItem(key)||'[]');
+      let found=false;
       for(let i=0;i<arr.length;i++){
         if(arr[i]?.u===r.u){
           found=true;
-          const a=arr[i], b=r;
-          const aBest = (a.t!=null && b.t!=null) ? (a.t <= b.t) : ((a.s|0) >= (b.s|0));
-          if(!aBest) arr[i]=r;
+          // Keep the better (lower) time
+          const aTime = (arr[i].t!=null ? arr[i].t : (arr[i].s|0));
+          const bTime = (r.t!=null ? r.t : (r.s|0));
+          const aIsBetter = aTime <= bTime;
+          if(!aIsBetter) arr[i]=r;
           break;
         }
       }
       if(!found) arr.push(r);
+
+      // Sort ASC by time (lower = better)
       arr.sort((A,B)=>{
-        if(A.t!=null && B.t!=null){
-          if(A.t!==B.t) return A.t - B.t; // lower time first
-          return 0;
-        }
-        return (B.s|0) - (A.s|0);
+        const a = (A.t!=null ? A.t : (A.s|0));
+        const b = (B.t!=null ? B.t : (B.s|0));
+        return a - b;
       });
+
       localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
     }catch(_){}
   }
+
   const baseKey = `izzaLb2::${gameKey}`;
   upsertHigh(`${baseKey}::alltime`, row);
   upsertHigh(`${baseKey}::day::${stamps.day}`, row);
   upsertHigh(`${baseKey}::month::${stamps.month}`, row);
   upsertHigh(`${baseKey}::year::${stamps.year}`, row);
+
   try{ await IZZA_PERSIST?.save?.(); }catch(_){}
 }
 
