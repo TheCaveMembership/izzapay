@@ -239,7 +239,7 @@
       <!-- Start Screen -->
       <div id="start" class="startOverlay show" aria-hidden="false">
         <div class="startSheet">
-          <h2 style="margin:0 0 6px">IZZA Solitaire — Klondike</h2>
+          <h2 style="margin:0 0 6px">IZZA Solitaire</h2>
           <p class="muted" style="margin:0 0 10px">Choose your deal and start. You can view the rules any time.</p>
           <div class="drawSelect" style="margin:8px 0 2px">
             <span class="pill">Deal:</span>
@@ -260,7 +260,7 @@
       <!-- Rules -->
       <div id="rules" class="rulesOverlay" aria-hidden="true">
         <div class="cardPanel" style="max-width:680px">
-          <h3 style="margin:0 0 8px">How to play Solitaire (Klondike)</h3>
+          <h3 style="margin:0 0 8px">How to play Solitaire</h3>
           <ol style="margin:8px 0 0; padding-left:18px; line-height:1.45">
             <li>Build down in alternating colors on the 7 tableau columns.</li>
             <li>Only a King (K) may be moved to an empty tableau column.</li>
@@ -450,132 +450,7 @@ const P={ stock:[], waste:[], f:[[],[],[],[]], t:[[],[],[],[],[],[],[]] };
 let dragRun=null, startTs=null, timerId=null, moves=0, ended=false, winTs=null;
 let FAN=26;
 
-/* ===== Difficulty queue (easier bias, no “lose”) ===== */
-const DIFFQ_KEY='izza_sol_diffq_v1';
-function buildDiffQueue(){
-  const q=[];
-  // 80% super-easy (w5), 20% easy (w7)
-  for(let i=0;i<16;i++) q.push('w5');
-  for(let i=0;i<4;i++) q.push('w7');
-  // shuffle
-  for(let i=q.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [q[i],q[j]]=[q[j],q[i]]; }
-  return q;
-}
-function nextBucket(){
-  try{
-    const raw=localStorage.getItem(DIFFQ_KEY);
-    let arr= raw? JSON.parse(raw) : null;
-    if(!Array.isArray(arr) || arr.length===0){ arr=buildDiffQueue(); }
-    const b=arr.shift();
-    localStorage.setItem(DIFFQ_KEY, JSON.stringify(arr));
-    return (b||'w5');
-  }catch(_){ return 'w5'; }
-}
-
-/* ===== Deal heuristics ===== */
-function topOfTableau(state){ return state.t.map(col=>col[col.length-1]||null); }
-function countFaceDownBelowTops(state){
-  let n=0;
-  for(const col of state.t){
-    for(let i=0;i<col.length-1;i++) if(!col[i].face) n++;
-  }
-  return n;
-}
-function countImmediateTableauMoves(state){
-  const tops=topOfTableau(state).filter(Boolean);
-  let moves=0;
-  for(let i=0;i<tops.length;i++){
-    for(let j=0;j<tops.length;j++){
-      if(i===j) continue;
-      const a=tops[i], b=tops[j];
-      if(a && b && a.color!==b.color && a.rank===b.rank-1) moves++;
-    }
-  }
-  return moves;
-}
-function countTopAcesAndDeuces(state){
-  const tops=topOfTableau(state).filter(Boolean);
-  let aces=0, deuces=0;
-  for(const c of tops){ if(c.rank===1) aces++; if(c.rank===2) deuces++; }
-  return {aces,deuces};
-}
-function firstCycleStockAccess(state, drawMode){
-  const windowN = drawMode===3 ? 12 : 6;
-  const snapshot = state.stock.slice(-windowN);
-  const tops=topOfTableau(state).filter(Boolean);
-  let playable=0, aces=0;
-  for(let i=snapshot.length-1;i>=0;i--){
-    const c=snapshot[i];
-    if(c.rank===1){ playable++; aces++; continue; }
-    for(const t of tops){
-      if(!t) continue;
-      if(c.color!==t.color && c.rank===t.rank-1){ playable++; break; }
-    }
-  }
-  return {playable, aces};
-}
-function columnsWithFlipPotential(state){
-  let n=0;
-  for(let i=0;i<7;i++){
-    const col=state.t[i]; if(!col.length) continue;
-    const top=col[col.length-1];
-    let hasHidden=false;
-    for(let k=0;k<col.length-1;k++) if(!col[k].face){ hasHidden=true; break; }
-    if(!hasHidden) continue;
-    for(let j=0;j<7;j++){
-      if(i===j) continue;
-      const tgt=state.t[j]; const b=tgt[tgt.length-1];
-      if(!b){ if(top.rank===13){ n++; break; } }
-      else if(top.color!==b.color && top.rank===b.rank-1){ n++; break; }
-    }
-  }
-  return n;
-}
-function evaluateOpening(state, drawMode){
-  const moves=countImmediateTableauMoves(state);
-  const {aces,deuces}=countTopAcesAndDeuces(state);
-  const flips=columnsWithFlipPotential(state);
-  const hidden=countFaceDownBelowTops(state);
-  const stockPeek=firstCycleStockAccess(state, drawMode);
-  return {
-    moves, acesTop:aces, deucesTop:deuces,
-    flips, hidden, stockPlayable:stockPeek.playable, stockAces:stockPeek.aces
-  };
-}
-
-/* Easy thresholds */
-function qualifiesBucket(m, bucket){
-  if(bucket==='w5'){
-    return (
-      (m.acesTop>=1 && m.stockAces>=1) &&
-      (m.moves>=3) &&
-      (m.flips>=2) &&
-      (m.stockPlayable>=2)
-    );
-  }
-  if(bucket==='w7'){
-    return (
-      (m.acesTop>=1 || m.stockAces>=1) &&
-      (m.moves>=2) &&
-      (m.flips>=1) &&
-      (m.stockPlayable>=1)
-    );
-  }
-  return false;
-}
-
-/* Safety predicate: reject starved openings entirely */
-function safeOpening(m){
-  return (
-    (m.moves>=1 || m.flips>=1 || m.stockPlayable>=1) &&
-    (m.acesTop>=1 || m.stockAces>=1)
-  );
-}
-// ======= SOLVER: verify a deal is winnable (Draw-1 or Draw-3) =======
-// The solver uses: greedy auto-foundation, legal tableau moves, stock draws,
-// waste recycle, face-down flips when exposed. It’s a bounded DFS with
-// memoization and a compact state signature for speed.
-
+/* ======= SOLVER: verify a deal is winnable (Draw-1 or Draw-3) ======= */
 function cloneState(S){
   return {
     stock: S.stock.map(c=>({...c})),
@@ -607,7 +482,7 @@ function canStackRun(head, destTop){
   return head.color!==destTop.color && head.rank===destTop.rank-1;
 }
 function normalizeAuto(S){
-  // Flip any newly exposed top face-down to face-up
+  // Flip newly exposed tops to face-up
   for(let i=0;i<7;i++){
     const p=S.t[i];
     if(p.length && !p[p.length-1].face) p[p.length-1].face = true;
@@ -635,7 +510,6 @@ function normalizeAuto(S){
       if(canGoF(top, S.f)){
         S.f[suitIndex(top.suit)].push(top);
         p.pop();
-        // flip now-exposed
         if(p.length && !p[p.length-1].face) p[p.length-1].face=true;
         moved=true;
       }
@@ -647,8 +521,6 @@ function isWin(S){
   return S.f[0].length===13 && S.f[1].length===13 && S.f[2].length===13 && S.f[3].length===13;
 }
 function sigOf(S, drawMode){
-  // Compact signature: foundation heights, tableau shapes, stock len, waste window info.
-  // We do not need perfect hashing, just enough to prune repeat positions.
   const fHeights = S.f.map(p=>p.length).join(',');
   const tTops = S.t.map(p=>{
     if(!p.length) return 'e';
@@ -658,7 +530,6 @@ function sigOf(S, drawMode){
     return `${fd}_${top.rank}${top.color[0]}`;
   }).join('|');
   const stockLen = S.stock.length;
-  // Waste summary: top card id plus modulo window position helps in Draw-3
   const wasteTop = S.waste.length ? S.waste[S.waste.length-1].id : 'n';
   return `${drawMode};F=${fHeights};T=${tTops};S=${stockLen};W=${wasteTop}`;
 }
@@ -680,7 +551,6 @@ function generateMoves(S, drawMode){
           const N=cloneState(S);
           const take=N.t[i].splice(k);
           N.t[j].push(...take);
-          // flip exposed if needed
           if(N.t[i].length && !N.t[i][N.t[i].length-1].face) N.t[i][N.t[i].length-1].face=true;
           next.push(normalizeAuto(N));
         }
@@ -720,7 +590,6 @@ function generateMoves(S, drawMode){
   return next;
 }
 function isSolvableDeck(deck, drawMode, timeBudgetMs=80, nodeBudget=12000){
-  // Build initial state
   const root = normalizeAuto(dealIntoStateFromDeck_forSolver(deck));
   if(isWin(root)) return true;
 
@@ -728,7 +597,6 @@ function isSolvableDeck(deck, drawMode, timeBudgetMs=80, nodeBudget=12000){
   const t0 = performance.now();
   let nodes = 0;
 
-  // Iterative DFS with small frontier bias
   const stack = [root];
   while(stack.length){
     if(performance.now()-t0 > timeBudgetMs) return false;
@@ -742,57 +610,34 @@ function isSolvableDeck(deck, drawMode, timeBudgetMs=80, nodeBudget=12000){
     if(isWin(S)) return true;
 
     const moves = generateMoves(S, drawMode);
-    // Simple ordering: push larger tableau exposures later, foundations first already done in normalizeAuto
     for(const n of moves) stack.push(n);
   }
   return false;
 }
 
-// ======= Deal chooser: keep your easy bias, but require a solvable deck =======
-function generateSolvableDeal(drawMode, bucket){
-  // try to keep your "easy" bias: 1 targeted candidate, then 2 pure shuffles (repeat)
-  // ramp solver budget over time; NEVER accept an unproven deck
+/* ===== Always-winnable deal generator (no difficulty logic) ===== */
+function generateSolvableDeal(drawMode){
   let attempt = 0;
   while (true) {
-    // choose candidate style
-    const mode = (attempt % 3 === 0) ? 'target' : 'pure';
-    const deck = (mode === 'target')
-      ? generateTargetedDeckCandidate(bucket, drawMode)
-      : makeDeck();
-
-    // ramp budgets every 30 tries
-    const phase = Math.floor(attempt / 30);
+    const deck = makeDeck(); // pure random shuffle
+    const phase = Math.floor(attempt / 40);
     const timeBudgetMs =
       phase === 0 ? 80  :
-      phase === 1 ? 120 :
-      phase === 2 ? 180 : 220;
+      phase === 1 ? 140 :
+      phase === 2 ? 220 : 300;
     const nodeBudget =
       phase === 0 ? 12000 :
-      phase === 1 ? 24000 :
-      phase === 2 ? 40000 : 65000;
+      phase === 1 ? 28000 :
+      phase === 2 ? 50000 : 80000;
 
     if (isSolvableDeck(deck, drawMode, timeBudgetMs, nodeBudget)) {
-      return deck; // <-- ONLY way out
+      return deck;
     }
     attempt++;
   }
 }
-// Small helper: reuse your opening evaluator to bias “easy”, but do NOT accept without solver
-function generateTargetedDeckCandidate(bucket, drawMode){
-  let candidate=null, bestScore=-1;
-  for(let tries=0; tries<140; tries++){
-    const deck=makeDeck();
-    const S=dealIntoStateFromDeck(deck);
-    const m=evaluateOpening(S, drawMode);
-    if(!safeOpening(m)) continue;
-    if(qualifiesBucket(m, bucket)) return deck;
-    const score = (m.acesTop*3)+(m.stockAces*2)+(m.moves*2)+(m.flips*2)+m.stockPlayable-(m.hidden*0.02);
-    if(score>bestScore){ bestScore=score; candidate=deck; }
-  }
-  return candidate || makeDeck();
-}
-/* ===== Deal generation (easier, no “guaranteed lose”) ===== */
-const MAX_TRIES_BY_BUCKET = { w5: 1500, w7: 1100 };
+
+/* ===== Deal generation constants ===== */
 const MAX_MS = 600000;
 
 function cssVarInt(name,fallback){ const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n=parseInt(v,10); return Number.isFinite(n)?n:fallback; }
@@ -810,39 +655,15 @@ function dealIntoStateFromDeck(deck){
   return S;
 }
 
-function generateTargetedDeal(bucket, drawMode){
-  const maxTries = MAX_TRIES_BY_BUCKET[bucket] || 1000;
-  let bestDeck=null, bestScore=-1;
-  for(let tries=0; tries<maxTries; tries++){
-    const deck=makeDeck();
-    const state=dealIntoStateFromDeck(deck);
-    const m=evaluateOpening(state, drawMode);
-
-    if(!safeOpening(m)) continue;
-    if(qualifiesBucket(m, bucket)) return deck;
-
-    const score = (m.acesTop*3)+(m.stockAces*2)+(m.moves*2)+(m.flips*2)+m.stockPlayable-(m.hidden*0.02);
-    if(score>bestScore){ bestScore=score; bestDeck=deck; }
-  }
-  if(bestDeck) return bestDeck;
-
-  while(true){
-    const deck=makeDeck();
-    const m=evaluateOpening(dealIntoStateFromDeck(deck), drawMode);
-    if(safeOpening(m)) return deck;
-  }
-}
-
 /* ===== Game flow ===== */
 function layoutNew(){
-  const bucket = nextBucket();
   const drawMode = getDrawPref();
 
   for(let i=0;i<4;i++) P.f[i]=[];
   for(let i=0;i<7;i++) P.t[i]=[];
   P.waste=[];
 
-  const deck = generateSolvableDeal(drawMode, bucket);
+  const deck = generateSolvableDeal(drawMode);
   P.stock = deck.map(c=>({ ...c, face:false }));
 
   moves=0; ended=false; winTs=null; elMoves.textContent='0';
@@ -1167,19 +988,20 @@ function checkWin(){
 /* ===== Rewards & Leaderboard (WIN ONLY) ===== */
 const COINS_ON_WIN = 1000;
 const CRAFT_ON_WIN = 1;
+// Keep existing leaderboard keywords for IZZA LB Targets
 function currentSolitaireGameId(){
   return getDrawPref() === 3 ? 'targets::d3' : 'targets::d1';
 }
-// Legacy sort helper (higher = better). We sort by time elsewhere.
-function makeLeaderboardScorePacked(elapsedMs, moves){
-  const base = Math.max(0, 3_600_000 - (elapsedMs|0));          // bigger = faster
-  const tie  = Math.max(0, Math.min(999, 1000 - ((moves|0)||0))); // fewer moves = bigger
-  return (base * 1000) + tie;
+
+const SOL_MAX_MS = 3_600_000; // 60 minutes
+// Bigger is better for sorting, but represents a faster time.
+function makeSpeedScore(elapsedMs){
+  return Math.max(0, SOL_MAX_MS - (elapsedMs|0));
 }
 
-async function submitLeaderboard({ elapsedMs, moves }){
+async function submitLeaderboard({ elapsedMs }){
   const gameKey = currentSolitaireGameId();
-  const score = makeLeaderboardScorePacked(elapsedMs, moves);
+  const score = makeSpeedScore(elapsedMs);
 
   try{
     await fetch(_withAuth('/izza-game/api/leaderboard'), {
@@ -1188,16 +1010,15 @@ async function submitLeaderboard({ elapsedMs, moves }){
       headers:(typeof bearerHeaders==='function'? bearerHeaders() : {'content-type':'application/json'}),
       body:JSON.stringify({
         game:  gameKey,
-        score: score,          // optional legacy
-        timeMs: elapsedMs|0,   // <-- canonical
-        moves:  moves|0        // <-- canonical
+        score: score,        // used by server to rank (higher = faster)
+        timeMs: elapsedMs|0  // canonical time for display
       })
     }).catch(()=>{});
   }catch(_){}
 
-  // local cache mirrors (unchanged, but now preserve time/moves too)
+  // Local LB mirror (fresh start): keep time for sorting
   const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
-  const row={u, s:score, t:elapsedMs|0, m:moves|0, ts:Date.now()};
+  const row={u, s:score, t:elapsedMs|0, ts:Date.now()};
   const z=n=>String(n).padStart(2,'0'); const d=new Date();
   const stamps={day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear())};
   function upsertHigh(key,r){
@@ -1206,7 +1027,6 @@ async function submitLeaderboard({ elapsedMs, moves }){
       for(let i=0;i<arr.length;i++){
         if(arr[i]?.u===r.u){
           found=true;
-          // keep the best (lowest time) when we have raw t, else fall back to legacy score
           const a=arr[i], b=r;
           const aBest = (a.t!=null && b.t!=null) ? (a.t <= b.t) : ((a.s|0) >= (b.s|0));
           if(!aBest) arr[i]=r;
@@ -1214,11 +1034,10 @@ async function submitLeaderboard({ elapsedMs, moves }){
         }
       }
       if(!found) arr.push(r);
-      // sort: time asc if present; else legacy score desc
       arr.sort((A,B)=>{
         if(A.t!=null && B.t!=null){
-          if(A.t!==B.t) return A.t - B.t;
-          return (A.m|0) - (B.m|0);
+          if(A.t!==B.t) return A.t - B.t; // lower time first
+          return 0;
         }
         return (B.s|0) - (A.s|0);
       });
@@ -1250,12 +1069,12 @@ function endGame(won){
   let coinsDelta=0, craftDelta=0;
 
   if(won){
-  coinsDelta=COINS_ON_WIN; craftDelta=CRAFT_ON_WIN;
-  _wallet.writeCoins(coinsStart + coinsDelta);
-  _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
-  _wallet.saveSoon();
-  submitLeaderboard({ elapsedMs: elapsed, moves });
-}
+    coinsDelta=COINS_ON_WIN; craftDelta=CRAFT_ON_WIN;
+    _wallet.writeCoins(coinsStart + coinsDelta);
+    _wallet.writeCraftAll(_wallet.readCraftAny() + craftDelta);
+    _wallet.saveSoon();
+    submitLeaderboard({ elapsedMs: elapsed });
+  }
 
   resText.textContent=won?'WIN':'Game Ended';
   resTime.textContent=fmtTime(elapsed);
@@ -1301,7 +1120,7 @@ document.querySelectorAll('#backBtn,#startBack,a:not(#backBtn2)').forEach(a=>{
         await _wallet.syncFromPersist();
         await IZZA_PERSIST?.save?.();
       }catch(_){}
-      location.assign(_withAuth('/izza-game/minigames'));
+        location.assign(_withAuth('/izza-game/minigames'));
     }, {passive:false});
   }
 })();
@@ -1334,6 +1153,18 @@ document.querySelectorAll('#backBtn,#startBack,a:not(#backBtn2)').forEach(a=>{
   try{
     await _wallet.syncFromPersist();
   }catch(_){}
+  // Fresh start for local IZZA LB Targets caches (targets::d1 / targets::d3)
+  (function clearOldSolitaireLocalLB(){
+    try{
+      const oldKeys = [];
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i) || '';
+        if (/^izzaLb2::(targets::d1|targets::d3)/.test(k)) oldKeys.push(k);
+      }
+      oldKeys.forEach(k => localStorage.removeItem(k));
+    }catch(_){}
+  })();
+
   sizeBoard();
   paintWallet();
 })();
