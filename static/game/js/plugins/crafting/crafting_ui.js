@@ -1780,10 +1780,11 @@ async function hydrateMine(){
       const id = btn.dataset.stats;
       if (id) openStatsModal(id);
     }, { passive:true });
-}
-
-/* ---------- Marketplace (internal) ---------- */
-async function fetchMarketplace(){
+  });
+} // <-- closes hydrateMine()
+ 
+ /* ---------- Marketplace (internal) ---------- */
+ async function fetchMarketplace(){
   try{
     const j = await serverJSON(gameApi('/api/marketplace/list'));
     return (j && j.ok && Array.isArray(j.bundles)) ? j.bundles : [];
