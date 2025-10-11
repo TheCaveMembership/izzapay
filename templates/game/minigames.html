@@ -1323,27 +1323,28 @@ async function loadAndRender(seedFromLegacy=false){
   const me = meUsername();
   const html = [];
 
-  if (isSolitaire){
-    // Solitaire: Time + Moves
+    if (isSolitaire){
+    // Solitaire: show "Score" only, where Score == Moves (visual change only)
     html.push(
       `<table class="lb-table">
          <thead>
-           <tr><th style="width:64px">#</th><th>Player</th><th>Time</th><th>Moves</th></tr>
+           <tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr>
          </thead><tbody>`
     );
+
+    // Keep the same sort (best by time, then by moves), only the display changes
     sortSolitaireRows(rows).slice(0,20).forEach((r,i)=>{
-  const elapsedMs = (r.t!=null) ? r.t : decodeSolitaireScore(r.s).elapsedMs;
-  const moves     = (r.m!=null) ? r.m : decodeSolitaireScore(r.s).moves;
-  const isMe = me && r.u && String(r.u).toLowerCase()===me;
-  html.push(
-    `<tr class="${isMe?'lb-row-me':''}">
-       <td>${i+1}</td>
-       <td>${r.u||'—'}</td>
-       <td>${fmtMMSS(elapsedMs)}</td>
-       <td>${moves}</td>
-     </tr>`
-  );
-});
+      const moves = (r.m!=null) ? r.m : decodeSolitaireScore(r.s).moves;
+      const isMe = me && r.u && String(r.u).toLowerCase()===me;
+      html.push(
+        `<tr class="${isMe ? 'lb-row-me' : ''}">
+           <td>${i+1}</td>
+           <td>${r.u || '—'}</td>
+           <td>${moves}</td>
+         </tr>`
+      );
+    });
+
     html.push(`</tbody></table>`);
   } else {
     // Other games: raw Score
