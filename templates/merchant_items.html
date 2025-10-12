@@ -866,119 +866,122 @@ function toAbsoluteUrl(u){
 
 // Guard + ensure we have a real URL (PNG if possible, else raw SVG) before submit
 (function(){
-  const form = document.querySelector('#create-product form'); if(!form) return;
+  const form = document.querySelector('#create-product form'); 
+  if(!form) return;
 
+  // Use "cover" so tall/wide SVGs don't become skinny bars
   function svgToPngBlob(svgString, size = 512, timeoutMs = 8000){
-  return new Promise((resolve, reject)=>{
-    try{
-      let s = (svgString || '').trim();
-      if(!s) return reject(new Error('empty_svg'));
+    return new Promise((resolve, reject)=>{
+      try{
+        let s = (svgString || '').trim();
+        if(!s) return reject(new Error('empty_svg'));
+        if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+        if(!/viewBox=/i.test(s) && !/width=/i.test(s))
+          s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
 
-      // Normalize for Safari
-      if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-      if(!/viewBox=/i.test(s) && !/width=/i.test(s))
-        s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
+        const svgBlob = new Blob([s], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(svgBlob);
 
-      // Safari bug: data-URL + filters taints the canvas.
-      // Use a Blob URL instead.
-      const svgBlob = new Blob([s], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(svgBlob);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
 
-      const img = new Image();
-      img.crossOrigin = 'anonymous';          // extra safety
-      img.decoding = 'async';
-      img.onload = () => {
-        try{
-          const w = size, h = size;
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          const ctx = canvas.getContext('2d');
+        const cleanup = ()=>{ try{ URL.revokeObjectURL(url); }catch(_){} };
 
-          // white bg to avoid dark-mode translucency artifacts
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0,0,w,h);
+        img.onload = () => {
+          try{
+            const w = size, h = size;
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
 
-          const scale = Math.min(w / img.width, h / img.height);
-          const dw = img.width * scale, dh = img.height * scale;
-          const dx = (w - dw)/2, dy = (h - dh)/2;
-          ctx.drawImage(img, dx, dy, dw, dh);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0,0,w,h);
 
-          canvas.toBlob((blob)=>{
-            URL.revokeObjectURL(url);
-            if(!blob) return reject(new Error('png_blob_failed'));
-            resolve(blob);
-          }, 'image/png', 0.92);
-        }catch(e){
-          URL.revokeObjectURL(url);
-          reject(e);
-        }
-      };
-      img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('svg_img_load_failed')); };
+            // COVER the square (no thin line)
+            const scale = Math.max(w / img.width, h / img.height);
+            const dw = img.width * scale, dh = img.height * scale;
+            const dx = (w - dw) / 2, dy = (h - dh) / 2;
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, dx, dy, dw, dh);
 
-      // Timeout guard
-      const t = setTimeout(()=>{ try{URL.revokeObjectURL(url);}catch(_){}
-        reject(new Error('png_timeout'));
-      }, timeoutMs);
+            canvas.toBlob((blob)=>{
+              cleanup();
+              if(!blob) return reject(new Error('png_blob_failed'));
+              resolve(blob);
+            }, 'image/png', 0.92);
+          }catch(e){
+            cleanup();
+            reject(e);
+          }
+        };
+        img.onerror = ()=>{ cleanup(); reject(new Error('svg_img_load_failed')); };
 
-      img.onload = (function(orig){ return function(){ clearTimeout(t); return orig.apply(this, arguments); }; })(img.onload);
-      img.src = url;
-    }catch(err){ reject(err); }
-  });
-}
+        const t = setTimeout(()=>{ cleanup(); reject(new Error('png_timeout')); }, timeoutMs);
+        const origOnload = img.onload;
+        img.onload = function(){ clearTimeout(t); return origOnload.apply(this, arguments); };
 
+        img.src = url;
+      }catch(err){ reject(err); }
+    });
+  }
+
+  // Submit handler (kept same, just lives INSIDE this IIFE)
   form.addEventListener('submit', async (e) => {
-  const priceEl = form.querySelector('input[name="pi_price"]');
-  const titleEl = form.querySelector('input[name="title"]');
-  const imgIn   = document.getElementById('itUrl');
-  const svgTA   = document.getElementById('svgCode');
+    const priceEl = form.querySelector('input[name="pi_price"]');
+    const titleEl = form.querySelector('input[name="title"]');
+    const imgIn   = document.getElementById('itUrl');
+    const svgTA   = document.getElementById('svgCode');
 
-  // Basic validation
-  const v = (priceEl?.value || '').trim();
-  const price = Number(v);
-  if (!titleEl?.value.trim()){
-    e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
-  }
-  if (!v || isNaN(price) || price <= 0){
-    e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
-  }
+    // Basic validation
+    const v = (priceEl?.value || '').trim();
+    const price = Number(v);
+    if (!titleEl?.value.trim()){
+      e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
+    }
+    if (!v || isNaN(price) || price <= 0){
+      e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
+    }
 
-  // Block saving data:/blob: even if there is no SVG
-  const existing = (imgIn?.value || '').trim();
-  if (existing && /^data:|^blob:/i.test(existing)) {
+    // Block saving data:/blob:
+    const existing = (imgIn?.value || '').trim();
+    if (existing && /^data:|^blob:/i.test(existing)) {
+      e.preventDefault();
+      alert('That image URL can’t be saved. Please upload or paste a normal https:// URL.');
+      return false;
+    }
+
+    // If there is SVG but no usable HTTPS image yet → rasterize & upload PNG
+    const needRealUrl = !!(svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)));
+    if (!needRealUrl) return;
+
     e.preventDefault();
-    alert('That image URL can’t be saved. Please upload or paste a normal https:// URL.');
-    return false;
-  }
+    const svg = svgTA.value.trim();
 
-  // If there is SVG but no usable HTTPS image yet → rasterize & upload PNG
-const needRealUrl = !!(svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)));
-if (!needRealUrl) return;
-
-e.preventDefault();
-const svg = svgTA.value.trim();
-
-try {
-  const blob = await svgToPngBlob(svg, 512, 8000);
-  const file = new File([blob], 'preview.png', { type: 'image/png' });
-  const uploadedPng = await uploadTo('/upload', file);
-  imgIn.value = toAbsoluteUrl(uploadedPng).trim();
-  if (!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_png_url');
-  form.submit(); return;
-} catch (_) {
-  // Fallback: upload raw SVG so we still store a permanent URL
-  try{
-    const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
-    const svgFile = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
-    const uploadedSvg = await uploadTo('/upload', svgFile);
-    imgIn.value = toAbsoluteUrl(uploadedSvg).trim();
-    if (!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_svg_url');
-    form.submit(); return;
-  }catch(_){
-    alert('Couldn’t convert or upload your SVG. Upload/paste a PNG/JPG URL, or try again.');
-    return false;
-  }
-}
-  })();
+    try {
+      const blob = await svgToPngBlob(svg, 512, 8000);
+      const file = new File([blob], 'preview.png', { type: 'image/png' });
+      const uploadedPng = await uploadTo('/upload', file);
+      imgIn.value = toAbsoluteUrl(uploadedPng).trim();
+      if (!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_png_url');
+      form.submit(); return;
+    } catch (_) {
+      // Fallback: upload raw SVG so we still store a permanent URL
+      try{
+        const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
+        const svgFile = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
+        const uploadedSvg = await uploadTo('/upload', svgFile);
+        imgIn.value = toAbsoluteUrl(uploadedSvg).trim();
+        if (!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_svg_url');
+        form.submit(); return;
+      }catch(_){
+        alert('Couldn’t convert or upload your SVG. Upload/paste a PNG/JPG URL, or try again.');
+        return false;
+      }
+    }
+  });
+})();
     // Toggle inline product editor
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-edit-toggle]'); if(!btn) return;
@@ -1047,9 +1050,11 @@ try {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0,0,w,h);
 
-      const scale = Math.min(w / img.width, h / img.height);
+      const scale = Math.max(w / img.width, h / img.height);   // fill the square
       const dw = img.width * scale, dh = img.height * scale;
-      const dx = (w - dw)/2, dy = (h - dh)/2;
+      const dx = (w - dw) / 2,       dy = (h - dh) / 2;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, dx, dy, dw, dh);
 
       return await new Promise((resolve, reject)=>{
@@ -1337,7 +1342,7 @@ function previewSvg(svgString){
               const ctx = canvas.getContext('2d');
               ctx.fillStyle = '#ffffff';
               ctx.fillRect(0,0,w,h);
-              const scale = Math.min(w / img.width, h / img.height);
+              const scale = Math.max(w / img.width, h / img.height); // cover, no letterboxing
               const dw = img.width * scale;
               const dh = img.height * scale;
               const dx = (w - dw)/2, dy = (h - dh)/2;
