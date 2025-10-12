@@ -602,6 +602,15 @@
     try{
       const params = new URLSearchParams(location.search);
       let u = (params.get('u') || '').toString().trim();
+
+      // ✅ ADDED: seed from server-side username on first render
+      if (!u) {
+        try {
+          const serverU = {{ (username or (m and m.owner_username) or '') | tojson }};
+          if (serverU) u = String(serverU);
+        } catch(_) {}
+      }
+
       if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
       if (!u){
         const raw = localStorage.getItem('piAuthUser');
@@ -611,6 +620,7 @@
         u = u.replace(/^@+/, '').toLowerCase();
         window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username: u });
         window.izzaUserKey = { get(){ return u; } };
+        try { localStorage.setItem('izzaUserU', u); } catch(_){}
       }
     }catch(_){}
   })();
@@ -958,12 +968,20 @@
     return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
   }
 
-  // Robust username resolver: ?u -> __IZZA_PROFILE__ -> local fallbacks
+  // Robust username resolver: ?u -> __IZZA_PROFILE__ -> local fallbacks (+ server embed)
   function who(){
     const q = (new URLSearchParams(location.search).get('u') || '').trim();
     if (q) return q.replace(/^@+/, '').toLowerCase();
+
     const p = window.__IZZA_PROFILE__||{};
     if (p.username) return String(p.username).toLowerCase();
+
+    // ✅ ADDED: server-side username as a last-resort fallback
+    try {
+      const serverU = {{ (username or (m and m.owner_username) or '') | tojson }};
+      if (serverU) return String(serverU).toLowerCase();
+    } catch(_){}
+
     try{
       const lsU = (localStorage.getItem('izzaUserU') || '').trim();
       if (lsU) return lsU.replace(/^@+/, '').toLowerCase();
