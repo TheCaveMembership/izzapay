@@ -596,26 +596,39 @@
     {% endif %}
   </div>
 
-  <!-- NEW: seed username for crafting fetch + server hints -->
   <script>
-  (function(){
-    try{
-      const params = new URLSearchParams(location.search);
-      let u = (params.get('u') || '').toString().trim();
-      if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
-      if (!u){
-        const raw = localStorage.getItem('piAuthUser');
-        if (raw){ try{ u = (JSON.parse(raw)||{}).username || ''; }catch(_){ } }
-      }
-      if (u){
-        u = u.replace(/^@+/, '').toLowerCase();
-        window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username: u });
-        window.izzaUserKey = { get(){ return u; } };
-      }
-    }catch(_){}
-  })();
-  </script>
+/**
+ * Inject server-known username → window & localStorage
+ * Requires the template to render `username` (empty string if not signed in)
+ */
+(function(){
+  try{
+    // Prefer ?u=… for testing; otherwise use server-rendered username
+    var SRV_USER = {{ (username or '') | tojson }};
+    var qsU = new URLSearchParams(location.search).get('u');
 
+    function norm(u){ return (u||'').toString().trim().replace(/^@+/, '').toLowerCase(); }
+
+    var u = norm(qsU || SRV_USER);
+
+    if (u){
+      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username: u });
+      window.izzaUserKey = { get(){ return u; } };
+      try{ localStorage.setItem('izzaUserU', u); }catch(_){}
+    }else{
+      // Optional UX hint when no username could be resolved
+      var sel = document.getElementById('craftedSelect');
+      if (sel){
+        sel.innerHTML = '';
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No username available — add ?u=<username> to test';
+        sel.appendChild(opt);
+      }
+    }
+  }catch(_){}
+})();
+</script>
   <script>
   // Proxy external images so they always render (and allow local uploads too)
   function proxied(url){
