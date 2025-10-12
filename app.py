@@ -149,6 +149,8 @@ MEDIA_PREFIX = "/media"
 
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "svg"}
+    # make sure .svg serves as image/svg+xml on this platform
+mimetypes.add_type("image/svg+xml", ".svg")
 
 def _normalize_ext(fmt: str) -> str:
     if not fmt: return ""
@@ -703,6 +705,118 @@ def collectibles_claim():
         "crafted_item_id": r["crafted_id"],
         "qty": int(r["qty"] or 1)
     })
+
+import re
+
+def _ext_from_ctype(ctype: str) -> str:
+    if not ctype:
+        return ""
+    c = ctype.split(";", 1)[0].strip().lower()
+    if c == "image/jpeg":   return "jpg"
+    if c == "image/svg+xml":return "svg"
+    if c.startswith("image/"): return c.split("/", 1)[1]
+    return ""
+
+def _hash_name(data: bytes, ext: str) -> str:
+    h = hashlib.sha256(data).hexdigest()[:32]
+    ext = (ext or "").lower().lstrip(".")
+    return f"{h}.{ext}" if ext else h
+
+@app.post("/upload")
+def upload():
+    # require signed-in user (matches the rest of your app)
+    u = current_user_row()
+    if not u:
+        return _err("auth_required")
+
+    # 1) multipart form: file input named "file"
+    if "file" in request.files:
+        f = request.files["file"]
+        ctype = (f.mimetype or "").lower()
+        filename = secure_filename(f.filename or "")
+        ext = _ext_from_ctype(ctype) or (filename.rsplit(".", 1)[-1].lower() if "." in filename else "")
+        if ext not in ALLOWED_EXTENSIONS:
+            return _err("unsupported_type")
+        data = f.read()
+        if not data:
+            return _err("empty_file")
+
+        # Light SVG hardening
+        if ext == "svg":
+            txt = data.decode("utf-8", errors="ignore")
+            txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I|re.S)
+            txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
+            data = txt.encode("utf-8")
+
+        name = _hash_name(data, ext)
+        with open(os.path.join(UPLOAD_DIR, name), "wb") as out:
+            out.write(data)
+        return _ok(url=f"{MEDIA_PREFIX}/{name}")
+
+    # 2) JSON body with data URL: { "data_url": "data:image/svg+xml;utf8,<svg...>" }
+    payload = request.get_json(silent=True) or {}
+    data_url = (payload.get("data_url") or "").strip()
+    if data_url.startswith("data:"):
+        try:
+            header, body = data_url.split(",", 1)
+            ctype = header.split(":", 1)[1].split(";")[0].strip().lower()
+            ext = _ext_from_ctype(ctype) or "bin"
+            if ext not in ALLOWED_EXTENSIONS:
+                return _err("unsupported_type")
+            if ";base64" in header.lower():
+                data = base64.b64decode(body)
+            else:
+                data = body.encode("utf-8")  # utf8 path (e.g., inline SVG)
+
+            if not data:
+                return _err("empty_data_url")
+
+            if ext == "svg":
+                txt = data.decode("utf-8", errors="ignore")
+                txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I|re.S)
+                txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
+                data = txt.encode("utf-8")
+
+            name = _hash_name(data, ext)
+            with open(os.path.join(UPLOAD_DIR, name), "wb") as out:
+                out.write(data)
+            return _ok(url=f"{MEDIA_PREFIX}/{name}")
+        except Exception:
+            return _err("bad_data_url")
+
+    # (optional) JSON with image_url to fetch server-side
+    image_url = (payload.get("image_url") or "").strip()
+    if image_url:
+        try:
+            pr = urlparse(image_url)
+            if pr.scheme not in ("http", "https"):
+                return _err("bad_image_url_scheme")
+            r = requests.get(image_url, timeout=12)
+            if r.status_code != 200:
+                return _err(f"fetch_failed:{r.status_code}")
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            ext = _ext_from_ctype(ctype) or (pr.path.rsplit(".", 1)[-1].lower() if "." in pr.path else "")
+            if ext not in ALLOWED_EXTENSIONS:
+                return _err("unsupported_type")
+            data = r.content or b""
+            if not data:
+                return _err("empty_fetch")
+
+            if ext == "svg":
+                txt = data.decode("utf-8", errors="ignore")
+                txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I|re.S)
+                txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
+                data = txt.encode("utf-8")
+
+            name = _hash_name(data, ext)
+            with open(os.path.join(UPLOAD_DIR, name), "wb") as out:
+                out.write(data)
+            return _ok(url=f"{MEDIA_PREFIX}/{name}")
+        except Exception:
+            return _err("fetch_error")
+
+    return _err("no_file_or_data")
+
 # ================== /Crafting UI â Flask bridge ==================
 @app.get(f"{MEDIA_PREFIX}/<path:filename>")
 def media(filename):
