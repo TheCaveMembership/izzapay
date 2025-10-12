@@ -602,15 +602,6 @@
     try{
       const params = new URLSearchParams(location.search);
       let u = (params.get('u') || '').toString().trim();
-
-      // ✅ ADDED: seed from server-side username on first render
-      if (!u) {
-        try {
-          const serverU = {{ (username or (m and m.owner_username) or '') | tojson }};
-          if (serverU) u = String(serverU);
-        } catch(_) {}
-      }
-
       if (!u) u = (localStorage.getItem('izzaUserU') || '').toString().trim();
       if (!u){
         const raw = localStorage.getItem('piAuthUser');
@@ -620,7 +611,6 @@
         u = u.replace(/^@+/, '').toLowerCase();
         window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username: u });
         window.izzaUserKey = { get(){ return u; } };
-        try { localStorage.setItem('izzaUserU', u); } catch(_){}
       }
     }catch(_){}
   })();
@@ -946,42 +936,17 @@
   })();
   </script>
 
-  <!-- NEW: Robust Crafting Land integration (replaces old block) -->
+  <!-- ONLY use the canonical game state endpoint for crafted items -->
 <script>
 (function(){
   const GAME_BASE = 'https://izzagame.onrender.com';
-  const DIRECT_ENDPOINT = GAME_BASE + '/api/crafting/mine';
-  const RELAY_ENDPOINTS = [
-    '/izza-game/api/crafting/mine',
-    '/api/crafting/mine'
-  ];
 
-  // State snapshot endpoints (fallback)
-  const STATE_DIRECT = (u)=> `${GAME_BASE}/api/state/${encodeURIComponent(u)}?prefer=lastGood`;
-  const STATE_RELAYS = (u)=> [
-    `/izza-game/api/state/${encodeURIComponent(u)}?prefer=lastGood`,
-    `/api/state/${encodeURIComponent(u)}?prefer=lastGood`
-  ];
-
-  function getToken(){
-    const inp = document.querySelector('input[name="t"]');
-    return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
-  }
-
-  // Robust username resolver: ?u -> __IZZA_PROFILE__ -> local fallbacks (+ server embed)
+  // Who is the player? (?u=cammac preferred; otherwise local hints)
   function who(){
     const q = (new URLSearchParams(location.search).get('u') || '').trim();
     if (q) return q.replace(/^@+/, '').toLowerCase();
-
     const p = window.__IZZA_PROFILE__||{};
     if (p.username) return String(p.username).toLowerCase();
-
-    // ✅ ADDED: server-side username as a last-resort fallback
-    try {
-      const serverU = {{ (username or (m and m.owner_username) or '') | tojson }};
-      if (serverU) return String(serverU).toLowerCase();
-    } catch(_){}
-
     try{
       const lsU = (localStorage.getItem('izzaUserU') || '').trim();
       if (lsU) return lsU.replace(/^@+/, '').toLowerCase();
@@ -996,93 +961,45 @@
     return '';
   }
 
-  async function tryFetch(url, headers){
-    const r = await fetch(url, { headers, credentials:'include' });
-    if(!r.ok) throw new Error('fetch_failed');
-    const j = await r.json();
-    if (!j || j.ok !== true || !Array.isArray(j.items)) throw new Error('bad_shape');
-    return j.items;
+  // Fetch the single, canonical snapshot
+  async function fetchState(user){
+    if (!user) return null;
+    const url = `${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`;
+    const r = await fetch(url, { credentials:'omit' });
+    if (!r.ok) throw new Error('state_fetch_failed');
+    return r.json();
   }
 
-  // Pull crafted items from any plausible snapshot shape
-  function extractCraftedFromSnapshot(j){
-    const candidates = [
-      j && j.player && j.player.crafted,
-      j && j.player && j.player.inventory && j.player.inventory.crafted,
-      j && j.inventory && j.inventory.crafted,
-      j && j.crafted,
-      j && j.persist && j.persist.crafted,
-      j && j.crafting && j.crafting.inventory && j.crafting.inventory.crafted,
-      j && j.items && j.items.crafted
-    ].filter(Boolean);
+  // Build a "crafted items" list from the snapshot inventory object
+  function itemsFromState(j){
+    // Inventory can be at root.inventory or player.inventory
+    const inv = (j && j.inventory) || (j && j.player && j.player.inventory) || {};
+    const out = [];
+    Object.entries(inv).forEach(([key, val])=>{
+      if (!val || typeof val !== 'object') return;
+      const count = Number(val.count || 0);
+      const equippable = !!val.equippable;
+      const isGameItem = equippable || ['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
+      if (!isGameItem && count <= 0) return;
 
-    const src = candidates.find(a => Array.isArray(a) && a.length) || [];
-    return src.map(x => ({
-      id:   String(x.id || x.key || x.uuid || x.slug || x.draft_id || x.itemId || ''),
-      title: x.name || x.title || x.displayName || 'Crafted Item',
-      img:  x.image || x.image_url || x.icon || x.preview || (x.art && (x.art.image || x.art.url)) || '',
-      sku:  x.sku || x.shortcode || (x.meta && x.meta.sku) || '',
-      svg:  x.svg || x.overlaySvg || x.iconSvg || (x.meta && x.meta.svg) || ''
-    })).filter(it => it.id);
-  }
+      const id    = key;
+      const title = val.name || key;
+      // Prefer inline SVGs so we can preview in the UI even if there's no image URL
+      const svg   = val.iconSvg || val.overlaySvg || (val.icon && (val.icon.svg || val.icon)) || '';
+      const img   = val.image || val.image_url || ''; // rarely present
+      const sku   = val.sku || '';
 
-  // Fallback: build crafted list from state snapshot (prefer public, then relays)
-  async function fetchFromState(user, headers){
-    if (!user) return [];
-
-    // Public snapshot (no credentials) — avoids CORS/auth issues
-    try{
-      const r = await fetch(STATE_DIRECT(user), { credentials:'omit' });
-      if (r.ok){
-        const j = await r.json();
-        const items = extractCraftedFromSnapshot(j);
-        if (items.length) return items;
-      }
-    }catch(_){}
-
-    // Same-origin relays (with headers/credentials)
-    for (const u of STATE_RELAYS(user)){
-      try{
-        const r = await fetch(u, { headers, credentials:'include' });
-        if(!r.ok) continue;
-        const j = await r.json();
-        const items = extractCraftedFromSnapshot(j);
-        if (items.length) return items;
-      }catch(_){}
-    }
-    return [];
-  }
-
-  async function fetchCrafted(){
-    const bearer = getToken();
-    const user   = who();
-    const headers = {};
-    if (bearer) headers['Authorization'] = 'Bearer ' + bearer;
-    if (user)   headers['X-IZZA-USER']   = user;
-
-    const candidates = [DIRECT_ENDPOINT, ...RELAY_ENDPOINTS];
-    let items = [];
-    for (const base of candidates){
-      try{
-        const u = user ? (base.includes('?') ? '&' : '?') + 'u=' + encodeURIComponent(user) : '';
-        items = await tryFetch(base + u, headers);
-        break;
-      }catch(_){}
-    }
-
-    // Fallback to snapshot if API returns empty or fails
-    if (!items || items.length === 0){
-      items = await fetchFromState(user, headers);
-    }
-    return items || [];
+      out.push({ id, title, img, sku, svg });
+    });
+    return out;
   }
 
   function normalizeItem(raw){
-    const id = String(raw.id || raw.uuid || raw.slug || raw.draft_id || '');
-    const title = raw.title || raw.name || ('Item ' + id);
-    const img = raw.img || raw.image || raw.image_url || raw.thumbnail || raw.thumbnail_url || '';
-    const sku = raw.sku || raw.shortcode || '';
-    const svg = raw.svg || raw.svg_code || '';
+    const id = String(raw.id || '');
+    const title = raw.title || ('Item ' + id);
+    const img = raw.img || '';
+    const sku = raw.sku || '';
+    const svg = raw.svg || '';
     return { id, title, img, sku, svg };
   }
 
@@ -1151,9 +1068,14 @@
     if(btn){
       btn.addEventListener('click', async ()=>{
         btn.disabled = true; btn.textContent = 'Refreshing…';
-        const fresh = await fetchCrafted();
-        fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
-        btn.disabled = false; btn.textContent = 'Refresh';
+        try{
+          const user = who();
+          const state = await fetchState(user);
+          const fresh = itemsFromState(state);
+          fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
+        }finally{
+          btn.disabled = false; btn.textContent = 'Refresh';
+        }
       });
     }
   }
@@ -1184,9 +1106,15 @@
   }
 
   (async function init(){
-    const items = await fetchCrafted();
-    wireCreate(items);
-    wireEdit(items);
+    try{
+      const user = who();
+      const state = await fetchState(user);
+      const items = itemsFromState(state);
+      wireCreate(items);
+      wireEdit(items);
+    }catch(_){
+      // If state fetch fails, leave selects empty (UI still functions)
+    }
   })();
 })();
 </script>
