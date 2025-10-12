@@ -148,7 +148,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 MEDIA_PREFIX = "/media"
 
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "svg"}
 
 def _normalize_ext(fmt: str) -> str:
     if not fmt: return ""
