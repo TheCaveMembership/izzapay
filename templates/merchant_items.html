@@ -1030,20 +1030,29 @@
     return u;
   }
 
-  // --- NEW: preview SVG directly (and overwrite blob when replaced)
-  // replace your previewSvg() with this:
+  // --- FIXED: inline SVG renderer (works in Pi Browser / iPhone Safari)
 function previewSvg(svgString){
   try{
+    const el = document.getElementById('itThumb');
+    if(!el) return;
     let s = (svgString || '').trim();
     if(!s) return;
 
-    // make sure it has namespace and some sizing so Safari draws it
+    // Normalize so Safari always draws it
     if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    if(!/viewBox=/i.test(s) && !/width=/i.test(s)) s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
+    if(!/viewBox=/i.test(s) && !/width=/i.test(s))
+      s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
 
-    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
-    setThumb('itThumb', url); // your existing helper
-  }catch(_){}
+    // Directly inject it (instead of <img>) so iOS renders inline SVG properly
+    el.innerHTML = s;
+    el.style.background = '#fff';
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.justifyContent = 'center';
+    el.style.border = '1px solid var(--line)';
+  }catch(e){
+    console.error('SVG render failed', e);
+  }
 }
 
   // Only put id/title in the <option>
@@ -1107,17 +1116,16 @@ function previewSvg(svgString){
       if (skuEl)   skuEl.value   = sku || '';
       if (svgTA)   svgTA.value   = svg || '';
 
-      if (svg){ // Prefer SVG and persist it by uploading
+      if (svg){
   (async ()=>{
     try{
       const blob = new Blob([svg], { type: 'image/svg+xml' });
       const file = new File([blob], `${id}.svg`, { type: 'image/svg+xml' });
-      const uploadedUrl = await uploadTo('/upload', file);  // reuses your existing upload helper
+      const uploadedUrl = await uploadTo('/upload', file);
       const prox = proxied(uploadedUrl);
-      if (imageEl) imageEl.value = prox; // persist so it shows in list/storefront
-      setThumb('itThumb', prox);
+      if (imageEl) imageEl.value = prox;
+      previewSvg(svg); // render inline for iPhone Safari
     }catch(_){
-      // Fallback: local preview only if upload fails
       previewSvg(svg);
       if (imageEl) imageEl.value = '';
     }
