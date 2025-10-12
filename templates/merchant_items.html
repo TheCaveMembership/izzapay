@@ -401,8 +401,8 @@
   function setThumb(id, url){
     const el=document.getElementById(id); if(!el) return;
     el.innerHTML='';
-    const img=new Image(); img.src=url;
-    img.onload=()=>{ if(url.startsWith('blob:')) try{URL.revokeObjectURL(url)}catch{} };
+    const img=new Image(); img.src=url; img.loading='lazy'; img.referrerPolicy='no-referrer';
+    img.onerror=()=>{ el.innerHTML='<span class="muted" style="font-size:12px">—</span>'; };
     el.appendChild(img);
   }
 
@@ -431,67 +431,101 @@
     const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
   })();
 
-  // ---------- SVG helpers (force intrinsic size; transparent PNG) ----------
+  // ---------- SVG helpers ----------
   function svgNormalize(s, px=512){
     let x=(s||'').trim(); if(!x) return '';
-    // ensure xmlns + viewBox
+    if(!/^\s*<svg[\s>]/i.test(x)) return ''; // not an svg
     if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
     if(!/viewBox=/i.test(x)){
-      // If width/height exist, build a viewBox; otherwise default square
       const w=(x.match(/width="([\d.]+)"/i)||[])[1];
       const h=(x.match(/height="([\d.]+)"/i)||[])[1];
       if(w && h) x=x.replace('<svg','<svg viewBox="0 0 '+Number(w)+' '+Number(h)+'"');
       else x=x.replace('<svg','<svg viewBox="0 0 512 512"');
     }
-    // set width/height explicitly so the rasterizer has non-zero natural size
-    if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"');
-    else x=x.replace('<svg','<svg width="'+px+'"');
-    if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"');
-    else x=x.replace('<svg','<svg height="'+px+'"');
-    // keep aspect; crop to square (cover)
+    // explicit size to avoid 0×0 natural size in <img> or when rasterizing
+    if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"'); else x=x.replace('<svg','<svg width="'+px+'"');
+    if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"'); else x=x.replace('<svg','<svg height="'+px+'"');
     if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
     return x;
   }
 
-  async function svgToPngBlob(svgString, size=512, timeoutMs=8000){
-    const s = svgNormalize(svgString, size); if(!s) throw new Error('empty_svg');
-    const blob = new Blob([s], {type:'image/svg+xml'}); const url = URL.createObjectURL(blob);
-    try{
-      // Use Image() so we keep it simple and consistent across mobile browsers
-      const img = new Image(); img.crossOrigin='anonymous'; img.decoding='async';
-      const loaded = new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('svg_img_load_failed')); });
-      const t=setTimeout(()=>{ try{URL.revokeObjectURL(url)}catch{} }, timeoutMs);
-      img.src=url; await loaded; clearTimeout(t);
-
-      // draw with transparent background
-      const w=size,h=size, cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h;
-      const ctx=cvs.getContext('2d');
-      const scale=Math.max(w/img.width, h/img.height); // cover
-      const dw=img.width*scale, dh=img.height*scale, dx=(w-dw)/2, dy=(h-dh)/2;
-      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-      ctx.drawImage(img,dx,dy,dw,dh);
-      return await new Promise((res,rej)=>cvs.toBlob(b=>b?res(b):rej(new Error('png_blob_failed')),'image/png',0.92));
-    } finally { try{URL.revokeObjectURL(url)}catch{} }
-  }
-
-  function previewInlineSvg(targetId, svg){
-    const el=document.getElementById(targetId); if(!el) return;
-    const s=svgNormalize(svg); if(!s) return;
-    el.innerHTML=s;
+  // Inline an SVG string into a container
+  function injectSvg(container, svgString, px=80){
+    const el = (typeof container==='string') ? $(container) : container;
+    const s = svgNormalize(svgString, px);
+    if(!el || !s) return false;
+    el.innerHTML = s;
     el.style.background='transparent';
-    el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center';
-    el.style.border='1px solid var(--line)';
+    return true;
   }
+
+  // Fetch an SVG by URL and inject it
+  async function injectSvgFromUrl(container, url, px=80){
+    try{
+      const r = await fetch(url, {credentials:'omit', cache:'force-cache'});
+      if(!r.ok) throw new Error('fetch_fail');
+      const ct = (r.headers.get('content-type')||'').toLowerCase();
+      if(!ct.includes('svg')) throw new Error('not_svg');
+      const svg = await r.text();
+      return injectSvg(container, svg, px);
+    }catch{ return false; }
+  }
+
+  // ---------- Image URL verifier ----------
+  // Usage in console: window.testImageUrl('https://…')
+  window.testImageUrl = async function testImageUrl(url){
+    try{
+      const r = await fetch(url, {method:'GET', credentials:'omit', cache:'no-cache'});
+      const ct = r.headers.get('content-type')||'';
+      const sz = Number(r.headers.get('content-length')||0);
+      const ok = r.ok;
+      const txt = ct.includes('svg') ? (await r.clone().text()).slice(0,120) : '';
+      alert(`OK: ${ok}\nContent-Type: ${ct}\nSize: ${sz}\nURL: ${url}\n${txt ? 'SVG snippet: ' + txt.replace(/\n/g,' ') : ''}`);
+      return {ok, ct, sz};
+    }catch(e){
+      alert('Fetch failed: ' + (e&&e.message||e));
+      return {ok:false, error:String(e)};
+    }
+  };
+
+  // Long-press any thumbnail .itimg to verify its actual URL
+  (function(){
+    let pressTimer=null;
+    document.addEventListener('touchstart', e=>{
+      const box=e.target.closest('.itimg'); if(!box) return;
+      clearTimeout(pressTimer);
+      pressTimer=setTimeout(()=>{
+        const img=box.querySelector('img'); 
+        let url = img ? new URL(img.src, location.href) : null;
+        let src = url ? (url.searchParams.get('src')||img.src) : '';
+        if(src) window.testImageUrl(decodeURIComponent(src));
+      },650);
+    }, {passive:true});
+    document.addEventListener('touchend', ()=>clearTimeout(pressTimer), {passive:true});
+  })();
 
   // ---------- copy buttons ----------
-  document.addEventListener('click',(e)=>{ const t=e.target; if(t && t.matches('[data-copy]')){ copyFrom(t.getAttribute('data-copy')); t.textContent='Copied'; setTimeout(()=>t.textContent='Copy', 1200); } });
+  document.addEventListener('click',(e)=>{
+    const t=e.target;
+    if(t && t.matches('[data-copy]')){
+      copyFrom(t.getAttribute('data-copy'));
+      t.textContent='Copied';
+      setTimeout(()=>t.textContent='Copy', 1200);
+    }
+  });
 
   // ---------- logo upload ----------
   (function(){
     const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
     if(!file||!btn||!inp) return;
     file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
-    btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }catch{ alert('Upload failed. You can paste a URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
+    btn.addEventListener('click', async ()=>{
+      if(!file.files?.[0]){ inp.focus(); return; }
+      btn.disabled=true; btn.textContent='Uploading…';
+      try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }
+      catch{ alert('Upload failed. You can paste a URL instead.'); }
+      finally{ btn.disabled=false; btn.textContent='Upload'; }
+    });
     inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
     if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
   })();
@@ -501,44 +535,27 @@
     const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
     if(!file||!btn||!inp) return;
     file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
-    btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }catch{ alert('Upload failed. You can paste an image URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
+    btn.addEventListener('click', async ()=>{
+      if(!file.files?.[0]){ inp.focus(); return; }
+      btn.disabled=true; btn.textContent='Uploading…';
+      try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }
+      catch{ alert('Upload failed. You can paste an image URL instead.'); }
+      finally{ btn.disabled=false; btn.textContent='Upload'; }
+    });
     inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
   })();
 
-  // ---------- product form handler (auto SVG→PNG on submit) ----------
+  // ---------- Create Product: guard + keep crafted SVG ----------
   (function(){
     const form = document.querySelector('#create-product form'); if(!form) return;
     form.addEventListener('submit', async (e)=>{
       const title=form.querySelector('input[name="title"]');
       const priceEl=form.querySelector('input[name="pi_price"]');
-      const imgIn=$('#itUrl'); const svgHidden=$('#svgCode');
       const price=Number((priceEl?.value||'').trim());
       if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
       if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
-
-      const existing=(imgIn?.value||'').trim();
-      const hasSvg = !!(svgHidden && svgHidden.value.trim());
-      const needUrl = !existing || /^data:|^blob:/i.test(existing) || !/^https?:\/\//i.test(existing);
-      if(!(hasSvg && needUrl)) return;
-
-      e.preventDefault();
-      try{
-        const blob=await svgToPngBlob(svgHidden.value.trim(), 512, 8000);
-        const file=new File([blob],'listing.png',{type:'image/png'});
-        const uploaded=await uploadTo('/upload', file);
-        imgIn.value=ABS(uploaded).trim();
-        form.submit();
-      }catch{
-        try{
-          const raw=new Blob([svgNormalize(svgHidden.value.trim(),512)],{type:'image/svg+xml'});
-          const file=new File([raw],'image.svg',{type:'image/svg+xml'});
-          const uploaded=await uploadTo('/upload', file);
-          imgIn.value=ABS(uploaded).trim();
-          form.submit();
-        }catch{
-          alert('Couldn’t convert or upload your crafted image. Try again or upload a PNG/JPG.');
-        }
-      }
+      // No forced PNG conversion anymore. We keep svg_code (hidden) for rendering later.
+      // If user pasted an image URL, it will still be used by server.
     });
   })();
 
@@ -567,7 +584,7 @@
     },{passive:false});
   })();
 
-  // ---------- Crafting Land linker (auto preview + auto PNG upload) ----------
+  // ---------- Crafting Land linker ----------
   (function(){
     const GAME_BASE='https://izzagame.onrender.com';
     const who=()=>{
@@ -593,7 +610,6 @@
       }); return out;
     }
     function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
-
     let CRAFT_ITEMS={};
     function fillSelect(sel, items, currentId, isEdit){
       if(!sel) return;
@@ -612,21 +628,25 @@
       const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
       const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
 
-      async function setFromSvg(svg, id){
+      function setFromSvg(svg, id){
         svgHidden.value = svg || '';
         if(svg){
-          previewInlineSvg('itThumb', svg);
-          try{
-            const b=await svgToPngBlob(svg,512);
-            const f=new File([b], `${id||'crafted'}.png`, {type:'image/png'});
-            const url=await uploadTo('/upload', f);
-            if(imgIn) imgIn.value=ABS(url);
-            setThumb('itThumb', proxy(url));
-          }catch{/* form submit will retry */}
+          // show inline now (same look everywhere)
+          injectSvg('#itThumb', svg, 80);
+          // (optional) still set a URL so the server has something in image_url if required
+          // Fallback: upload raw SVG so we have a permanent URL
+          (async()=>{
+            try{
+              const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
+              const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
+              const url=await uploadTo('/upload', file);
+              if(imgIn) imgIn.value=ABS(url);
+            }catch{/* ignore */}
+          })();
         }
       }
 
-      function onChange(){
+      async function onChange(){
         const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
         const it=CRAFT_ITEMS[id]||{};
         if(titleEl) titleEl.value = it.title || titleEl.value;
@@ -634,11 +654,17 @@
         if(it.svg){ setFromSvg(it.svg, id); }
         else if(it.img){
           const u=ABS(ipfsToHttp(it.img)).trim();
-          if(imgIn) imgIn.value=u;
-          setThumb('itThumb', proxy(u));
-          svgHidden.value='';
+          if(/\.svg(\?|$)/i.test(u)){ // inline SVG image URLs too
+            await injectSvgFromUrl('#itThumb', u, 80);
+            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
+          }else{
+            if(imgIn) imgIn.value=u;
+            setThumb('itThumb', proxy(u));
+            svgHidden.value='';
+          }
         }
       }
+
       sel.addEventListener('change', onChange);
 
       const btn=$('#refreshCrafted');
@@ -669,8 +695,30 @@
     })();
   })();
 
+  // ---------- After content: render SVGs inline for thumbnails in the table ----------
+  (async function enhanceListThumbs(){
+    const boxes = $all('.itimg');
+    await Promise.all(boxes.map(async box=>{
+      const img = box.querySelector('img');
+      if(!img) return;
+      // the src is /uimg?src=<encoded real url>
+      let u;
+      try{
+        const p = new URL(img.src, location.href);
+        u = p.searchParams.get('src') || img.src;
+      }catch{ u = img.src; }
+      const real = decodeURIComponent(u||'');
+      if(/\.svg(\?|$)/i.test(real)){
+        // Replace <img> with inline SVG (same look as preview)
+        const ok = await injectSvgFromUrl(box, real, 80);
+        if(!ok){ /* leave the <img> if we failed */ }
+      }
+    }));
+  })();
+
   // ---------- mount ----------
-  (function(){ /* after definitions */ wireColorways(); })();
+  wireColorways();
+
 })();
 </script>
 </body>
