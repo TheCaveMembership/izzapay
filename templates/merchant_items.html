@@ -35,7 +35,6 @@
     .picker .thumb img{width:100%;height:100%;object-fit:cover}
     .itimg{width:80px;height:80px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center}
     .itimg img{width:100%;height:100%;object-fit:cover}
-    /* let injected inline SVG fill the thumb */
     .itimg svg{width:100%;height:100%;display:block}
     .table-wrap{width:100%;overflow-x:auto}
     table{width:100%;border-collapse:collapse;min-width:780px}
@@ -62,6 +61,7 @@
 {% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
 <body class="{{ cw }} theme-a">
   <div class="wrap">
+
     <div class="topbar">
       <div class="brand">
         <img src="/static/izzapay-mark.svg" class="brand-mark" alt="IZZA mark">
@@ -69,19 +69,28 @@
       </div>
       <div class="actions">
         <a class="ip-btn ghost" href="/explore">View Stores</a>
-        {% if not setup_mode and m %}<a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">View My Sales</a>{% endif %}
-        {% if username and ADMIN_PI_USERNAME and (username|lower == ADMIN_PI_USERNAME|lower) %}<a class="ip-btn ghost" href="/admin{{ t and ('?t=' ~ t) or '' }}">Admin</a>{% endif %}
+        {% if not setup_mode and m %}
+          <a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">View My Sales</a>
+        {% endif %}
+        {% if username and ADMIN_PI_USERNAME and (username|lower == ADMIN_PI_USERNAME|lower) %}
+          <a class="ip-btn ghost" href="/admin{{ t and ('?t=' ~ t) or '' }}">Admin</a>
+        {% endif %}
       </div>
     </div>
 
     {% if setup_mode %}
       <div class="h1">Create your IZZA PAY Store</div>
-      {% if username %}<p class="muted" style="margin-top:-6px">Signed in as <strong>@{{ username }}</strong></p>{% endif %}
-      {% if error %}<div class="card" style="border-color:#7a2c2c;background:rgba(122,44,44,.15);margin-bottom:10px"><div>{{ error }}</div></div>{% endif %}
+      {% if username %}
+        <p class="muted" style="margin-top:-6px">Signed in as <strong>@{{ username }}</strong></p>
+      {% endif %}
+      {% if error %}
+        <div class="card" style="border-color:#7a2c2c;background:rgba(122,44,44,.15);margin-bottom:10px"><div>{{ error }}</div></div>
+      {% endif %}
 
       <form class="grid" method="post" action="/merchant/setup">
         <input type="hidden" name="t" value="{{ t or '' }}">
         <input type="hidden" name="colorway" id="colorway" value="{{ cw }}">
+
         <div class="card stack">
           <div class="field"><label class="ip-label">Store name</label><input class="ip-input" name="business_name" placeholder="Your store name" required></div>
           <div class="field">
@@ -97,6 +106,7 @@
           </div>
           <div class="field"><label class="ip-label">Pi handle (optional)</label><input class="ip-input" name="pi_handle" placeholder="@your-pi-handle"></div>
           <div class="field"><label class="ip-label">Theme mode</label><select class="ip-select" name="theme_mode"><option value="dark" selected>Dark</option><option value="light">Light</option></select></div>
+
           <div class="field">
             <label class="ip-label">Logo</label>
             <div class="picker card">
@@ -105,6 +115,7 @@
               <div class="field" style="margin-top:6px"><input class="ip-input" id="logoUrl" name="logo_url" placeholder="https://… (or paste a logo URL)"></div>
             </div>
           </div>
+
           <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn" type="submit">Save &amp; Continue</button></div>
         </div>
 
@@ -112,12 +123,16 @@
           <div class="muted" style="font-weight:600">Look &amp; Feel</div>
           <div class="theme-swatches" data-colorpicker>
             {% for c in ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
-            <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}"><div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div><small>{{ c.split('-')[1] | capitalize }}</small></div>
+              <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}">
+                <div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+                <small>{{ c.split('-')[1] | capitalize }}</small>
+              </div>
             {% endfor %}
           </div>
           <p class="muted" style="margin-top:8px">Tap a color to preview instantly. We’ll save this choice with your store.</p>
         </div>
       </form>
+
     {% else %}
 
       <div class="h1">{{ m.business_name }}</div>
@@ -165,7 +180,10 @@
           <div class="muted" style="font-weight:600">Colorway</div>
           <div class="theme-swatches" id="edit-swatches" data-colorpicker>
             {% for c in ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
-            <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}"><div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div><small>{{ c.split('-')[1] | capitalize }}</small></div>
+              <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}">
+                <div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+                <small>{{ c.split('-')[1] | capitalize }}</small>
+              </div>
             {% endfor %}
           </div>
 
@@ -185,6 +203,8 @@
         <div class="h2">Create Product</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
           <input type="hidden" name="t" value="{{ t or '' }}">
+          <!-- keep crafted SVG for inventory usage -->
+          <input type="hidden" id="svgCode" name="svg_code" value="">
           <div class="field-inline">
             <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" required></div>
             <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku"></div>
@@ -210,15 +230,6 @@
               <button type="button" class="ip-btn" id="itUploadBtn">Upload</button>
             </div>
             <input class="ip-input" id="itUrl" name="image_url" placeholder="https://… (or paste an image URL)">
-          </div>
-
-          <div class="field" style="margin-top:8px">
-            <label class="ip-label">SVG code (optional)</label>
-            <textarea class="ip-textarea" id="svgCode" rows="6" placeholder="<svg>…</svg>"></textarea>
-            <small class="note">Click Preview to render it; we’ll upload a PNG for the listing when possible.</small>
-            <div class="row" style="justify-content:flex-end;margin-top:6px">
-              <button class="ip-btn ghost tiny" type="button" id="previewSvgBtn">Preview SVG</button>
-            </div>
           </div>
 
           <div class="field">
@@ -353,6 +364,7 @@
           <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn danger" type="submit">Delete Store</button></div>
         </form>
       </div>
+
     {% endif %}
   </div>
 
@@ -365,7 +377,7 @@
     const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
     const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
 
-    // ---------- username → window/localStorage (used by crafting) ----------
+    // ---------- username (for crafting state fetch) ----------
     try{
       const SRV_USER = {{ (username or '') | tojson }};
       const qsU = new URLSearchParams(location.search).get('u');
@@ -388,7 +400,7 @@
     }
     function setThumb(id, url){ const el=document.getElementById(id); if(!el) return; el.innerHTML=''; const img=new Image(); img.src=url; img.onload=()=>{ if(url.startsWith('blob:')) try{URL.revokeObjectURL(url)}catch{} }; el.appendChild(img); }
 
-    // ---------- colorway pickers (setup + edit) ----------
+    // ---------- colorway pickers ----------
     function wireColorways(){
       $all('[data-colorpicker]').forEach(wrap=>{
         wrap.querySelectorAll('.swatch').forEach(sw=>{
@@ -413,11 +425,12 @@
       const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
     })();
 
-    // ---------- svg helpers (single source of truth) ----------
+    // ---------- SVG helpers (transparent PNG) ----------
     function svgNormalize(s){
       let x=(s||'').trim(); if(!x) return '';
       if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
       if(!/viewBox=/i.test(x) && !/width=/i.test(x)) x=x.replace('<svg','<svg viewBox="0 0 512 512"');
+      // keep aspect; crop to square (cover)
       if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
       return x;
     }
@@ -430,8 +443,9 @@
         const t=setTimeout(()=>{ try{URL.revokeObjectURL(url)}catch{} }, timeoutMs);
         img.src=url; await loaded; clearTimeout(t);
         const w=size,h=size, cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h;
-        const ctx=cvs.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
-        const scale=Math.max(w/img.width, h/img.height); // COVER
+        const ctx=cvs.getContext('2d');
+        // DO NOT fill background: keep transparent
+        const scale=Math.max(w/img.width, h/img.height); // cover
         const dw=img.width*scale, dh=img.height*scale, dx=(w-dw)/2, dy=(h-dh)/2;
         ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(img,dx,dy,dw,dh);
         return await new Promise((res,rej)=>cvs.toBlob(b=>b?res(b):rej(new Error('png_blob_failed')),'image/png',0.92));
@@ -440,7 +454,7 @@
     function previewInlineSvg(targetId, svg){
       const el=document.getElementById(targetId); if(!el) return;
       const s=svgNormalize(svg); if(!s) return;
-      el.innerHTML=s; el.style.background='#fff'; el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center'; el.style.border='1px solid var(--line)';
+      el.innerHTML=s; el.style.background='transparent'; el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center'; el.style.border='1px solid var(--line)';
     }
 
     // ---------- copy buttons ----------
@@ -465,72 +479,45 @@
       inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
     })();
 
-    // ---------- product form guard + SVG → PNG ----------
+    // ---------- product form handler (auto SVG→PNG on submit) ----------
     (function(){
       const form = document.querySelector('#create-product form'); if(!form) return;
       form.addEventListener('submit', async (e)=>{
         const title=form.querySelector('input[name="title"]');
         const priceEl=form.querySelector('input[name="pi_price"]');
-        const imgIn=$('#itUrl'); const svgTA=$('#svgCode');
+        const imgIn=$('#itUrl'); const svgHidden=$('#svgCode');
         const price=Number((priceEl?.value||'').trim());
         if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
         if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
 
         const existing=(imgIn?.value||'').trim();
-        if(existing && /^data:|^blob:/i.test(existing)){ e.preventDefault(); alert('That image URL can’t be saved. Please upload or paste a normal https:// URL.'); return false; }
+        const hasSvg = !!(svgHidden && svgHidden.value.trim());
+        const needUrl = !existing || /^data:|^blob:/i.test(existing) || !/^https?:\/\//i.test(existing);
 
-        const hasSvg = !!(svgTA && svgTA.value.trim());
-        const needUrl = !existing || /^data:|^blob:/i.test(existing);
-        if(!(hasSvg && needUrl)) return;
+        if(!(hasSvg && needUrl)) return; // nothing to do
 
         e.preventDefault();
-        const svg=svgTA.value.trim();
+        const svg=svgHidden.value.trim();
         try{
           const blob=await svgToPngBlob(svg, 512, 8000);
-          const file=new File([blob],'preview.png',{type:'image/png'});
+          const file=new File([blob],'listing.png',{type:'image/png'});
           const uploaded=await uploadTo('/upload', file);
           imgIn.value=ABS(uploaded).trim();
           if(!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_png_url');
           form.submit();
         }catch{
+          // last resort: store raw SVG so there is at least a permanent URL
           try{
             const raw=new Blob([svgNormalize(svg)],{type:'image/svg+xml'});
             const file=new File([raw],'image.svg',{type:'image/svg+xml'});
             const uploaded=await uploadTo('/upload', file);
             imgIn.value=ABS(uploaded).trim();
-            if(!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_svg_url');
             form.submit();
           }catch{
-            alert('Couldn’t convert or upload your SVG. Upload/paste a PNG/JPG URL, or try again.');
+            alert('Couldn’t convert or upload your crafted image. Try again or upload a PNG/JPG.');
           }
         }
       });
-
-      // Preview button
-      const previewBtn=$('#previewSvgBtn'), ta=$('#svgCode'), thumbId='itThumb', imgIn=$('#itUrl');
-      if(previewBtn && ta){
-        previewBtn.addEventListener('click', async ()=>{
-          const svg=(ta.value||'').trim(); if(!svg){ alert('No SVG code to preview.'); return; }
-          previewInlineSvg(thumbId, svg);
-          try{
-            const blob=await svgToPngBlob(svg,512,8000);
-            const file=new File([blob],'preview.png',{type:'image/png'});
-            const url=await uploadTo('/upload', file);
-            imgIn.value=ABS(url).trim();
-            setThumb(thumbId, proxy(url));
-          }catch{
-            try{
-              const raw=new Blob([svgNormalize(svg)],{type:'image/svg+xml'});
-              const file=new File([raw],'image.svg',{type:'image/svg+xml'});
-              const url=await uploadTo('/upload', file);
-              imgIn.value=ABS(url).trim();
-              setThumb(thumbId, proxy(url));
-            }catch{
-              alert('Preview failed to upload. You can still paste an image URL or try again.');
-            }
-          }
-        });
-      }
     })();
 
     // ---------- inline editor toggles ----------
@@ -558,7 +545,7 @@
       },{passive:false});
     })();
 
-    // ---------- Crafting Land linker ----------
+    // ---------- Crafting Land linker (auto preview + auto PNG upload) ----------
     (function(){
       const GAME_BASE='https://izzagame.onrender.com';
       const who=()=>{
@@ -600,21 +587,50 @@
       (function wireCreate(){
         const sel=$('#craftedSelect'); if(!sel) return;
         const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
+        const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
+
+        async function setFromSvg(svg, id){
+          svgHidden.value = svg || '';
+          if(svg){
+            // show now
+            previewInlineSvg('itThumb', svg);
+            // upload transparent PNG in background and set image_url
+            try{
+              const b=await svgToPngBlob(svg,512);
+              const f=new File([b], `${id||'crafted'}.png`, {type:'image/png'});
+              const url=await uploadTo('/upload', f);
+              if(imgIn) imgIn.value=ABS(url);
+              setThumb('itThumb', proxy(url));
+            }catch(_){
+              // no-op; form submit path will retry
+            }
+          }
+        }
+
         function onChange(){
           const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
-          const it=CRAFT_ITEMS[id]||{}; const titleEl=document.querySelector('#create-product form input[name="title"]');
-          const skuEl=document.querySelector('#create-product form input[name="sku"]');
-          const imgIn=$('#itUrl'); const svgTA=$('#svgCode');
+          const it=CRAFT_ITEMS[id]||{};
           if(titleEl) titleEl.value = it.title || titleEl.value;
-          if(skuEl) skuEl.value = it.sku || '';
-          if(svgTA) svgTA.value = it.svg || '';
-          if(it.svg){ previewInlineSvg('itThumb', it.svg);
-            (async()=>{ try{ const b=await svgToPngBlob(it.svg,512); const f=new File([b], `${id}.png`, {type:'image/png'}); const url=await uploadTo('/upload', f); if(imgIn) imgIn.value=ABS(url); setThumb('itThumb', proxy(url)); }catch{} })();
-          }else if(it.img){ if(imgIn) imgIn.value=ABS(ipfsToHttp(it.img)).trim(); setThumb('itThumb', proxy(it.img)); }
+          if(skuEl)   skuEl.value   = it.sku || '';
+          if(it.svg){ setFromSvg(it.svg, id); }
+          else if(it.img){
+            const u=ABS(ipfsToHttp(it.img)).trim();
+            if(imgIn) imgIn.value=u;
+            setThumb('itThumb', proxy(u));
+            svgHidden.value=''; // nothing to keep
+          }
         }
         sel.addEventListener('change', onChange);
-        const btn=$('#refreshCrafted'); if(btn){ btn.addEventListener('click', async ()=>{ btn.disabled=true; btn.textContent='Refreshing…'; try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); } finally { btn.disabled=false; btn.textContent='Refresh'; } }); }
-        // initial fill
+
+        const btn=$('#refreshCrafted');
+        if(btn){
+          btn.addEventListener('click', async ()=>{
+            btn.disabled=true; btn.textContent='Refreshing…';
+            try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
+            finally{ btn.disabled=false; btn.textContent='Refresh'; }
+          });
+        }
+
         (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
       })();
 
@@ -629,7 +645,6 @@
             if(tEl) tEl.value = it.title || tEl.value;
             if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
           });
-          // async fill once global list is ready
           (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
         });
       })();
