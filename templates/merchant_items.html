@@ -369,291 +369,309 @@
   </div>
 
   <script>
-  (function(){
-    // ---------- tiny utils ----------
-    const $ = s => document.querySelector(s);
-    const $all = s => Array.from(document.querySelectorAll(s));
-    const ABS = u => { try{ if(!u) return ''; if(/^https?:\/\//i.test(u)) return u; if(u.startsWith('/')) return location.origin.replace(/\/$/,'')+u; return new URL(u, location.origin).href; }catch{ return u; } };
-    const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
-    const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
+(function(){
+  // ---------- tiny utils ----------
+  const $ = s => document.querySelector(s);
+  const $all = s => Array.from(document.querySelectorAll(s));
+  const ABS = u => { try{ if(!u) return ''; if(/^https?:\/\//i.test(u)) return u; if(u.startsWith('/')) return location.origin.replace(/\/$/,'')+u; return new URL(u, location.origin).href; }catch{ return u; } };
+  const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
+  const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
 
-    // ---------- username (for crafting state fetch) ----------
-    try{
-      const SRV_USER = {{ (username or '') | tojson }};
-      const qsU = new URLSearchParams(location.search).get('u');
-      const norm = u => (u||'').toString().trim().replace(/^@+/, '').toLowerCase();
-      const u = norm(qsU || SRV_USER);
-      if (u){ window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username:u }); try{ localStorage.setItem('izzaUserU', u);}catch{} }
-      else{ const sel=$('#craftedSelect'); if(sel){ sel.innerHTML=''; const o=document.createElement('option'); o.value=''; o.textContent='No username — add ?u=<username> to test'; sel.appendChild(o);} }
-    }catch{}
+  // ---------- username (for crafting state fetch) ----------
+  try{
+    const SRV_USER = {{ (username or '') | tojson }};
+    const qsU = new URLSearchParams(location.search).get('u');
+    const norm = u => (u||'').toString().trim().replace(/^@+/, '').toLowerCase();
+    const u = norm(qsU || SRV_USER);
+    if (u){ window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username:u }); try{ localStorage.setItem('izzaUserU', u);}catch{} }
+    else{ const sel=$('#craftedSelect'); if(sel){ sel.innerHTML=''; const o=document.createElement('option'); o.value=''; o.textContent='No username — add ?u=<username> to test'; sel.appendChild(o);} }
+  }catch{}
 
-    // ---------- uploads ----------
-    const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
-    async function uploadTo(path, file){
-      const fd=new FormData(); fd.append('file', file);
-      const t=token(); const url = path + (t ? (path.includes('?')?'&':'?') + 't='+encodeURIComponent(t) : '');
-      const headers={}; if(t) headers['Authorization']='Bearer '+t;
-      const r=await fetch(url,{method:'POST',body:fd,headers,credentials:'include'});
-      if(!r.ok) throw new Error('upload failed');
-      const j=await r.json(); if(!j.ok||!j.url) throw new Error('bad response');
-      return j.url;
-    }
-    function setThumb(id, url){ const el=document.getElementById(id); if(!el) return; el.innerHTML=''; const img=new Image(); img.src=url; img.onload=()=>{ if(url.startsWith('blob:')) try{URL.revokeObjectURL(url)}catch{} }; el.appendChild(img); }
+  // ---------- uploads ----------
+  const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
+  async function uploadTo(path, file){
+    const fd=new FormData(); fd.append('file', file);
+    const t=token(); const url = path + (t ? (path.includes('?')?'&':'?') + 't='+encodeURIComponent(t) : '');
+    const headers={}; if(t) headers['Authorization']='Bearer '+t;
+    const r=await fetch(url,{method:'POST',body:fd,headers,credentials:'include'});
+    if(!r.ok) throw new Error('upload failed');
+    const j=await r.json(); if(!j.ok||!j.url) throw new Error('bad response');
+    return j.url;
+  }
+  function setThumb(id, url){
+    const el=document.getElementById(id); if(!el) return;
+    el.innerHTML='';
+    const img=new Image(); img.src=url;
+    img.onload=()=>{ if(url.startsWith('blob:')) try{URL.revokeObjectURL(url)}catch{} };
+    el.appendChild(img);
+  }
 
-    // ---------- colorway pickers ----------
-    function wireColorways(){
-      $all('[data-colorpicker]').forEach(wrap=>{
-        wrap.querySelectorAll('.swatch').forEach(sw=>{
-          sw.addEventListener('click',()=>{
-            document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
-            wrap.querySelectorAll('.swatch').forEach(s=>s.classList.remove('selected'));
-            const cw=sw.getAttribute('data-cw'); if(!cw) return;
-            document.body.classList.add(cw); sw.classList.add('selected');
-            const hidden = $('#colorway') || $('#edit-colorway'); if(hidden) hidden.value=cw;
-          });
+  // ---------- colorway pickers ----------
+  function wireColorways(){
+    $all('[data-colorpicker]').forEach(wrap=>{
+      wrap.querySelectorAll('.swatch').forEach(sw=>{
+        sw.addEventListener('click',()=>{
+          document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
+          wrap.querySelectorAll('.swatch').forEach(s=>s.classList.remove('selected'));
+          const cw=sw.getAttribute('data-cw'); if(!cw) return;
+          document.body.classList.add(cw); sw.classList.add('selected');
+          const hidden = $('#colorway') || $('#edit-colorway'); if(hidden) hidden.value=cw;
         });
       });
-    }
+    });
+  }
 
-    // ---------- slug normalization ----------
-    function normSlug(v){
-      return (v||'').toLowerCase().trim().replace(/[\s_]+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-+| -+$/g,'');
-    }
-    (function wireSlugs(){
-      const setupEl = $('#slugInput'); if(setupEl){ setupEl.addEventListener('input',()=>{ const n=normSlug(setupEl.value); if(setupEl.value!==n) setupEl.value=n; }); setupEl.closest('form')?.addEventListener('submit',()=>{ setupEl.value=normSlug(setupEl.value); }); }
-      const editEl = $('#editSlugInput'); if(editEl){ editEl.addEventListener('input',()=>{ const n=normSlug(editEl.value); if(editEl.value!==n) editEl.value=n; }); editEl.closest('form')?.addEventListener('submit',()=>{ editEl.value=normSlug(editEl.value); }); }
-      const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
-    })();
+  // ---------- slug normalization ----------
+  function normSlug(v){
+    return (v||'').toLowerCase().trim().replace(/[\s_]+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-+| -+$/g,'');
+  }
+  (function wireSlugs(){
+    const setupEl = $('#slugInput'); if(setupEl){ setupEl.addEventListener('input',()=>{ const n=normSlug(setupEl.value); if(setupEl.value!==n) setupEl.value=n; }); setupEl.closest('form')?.addEventListener('submit',()=>{ setupEl.value=normSlug(setupEl.value); }); }
+    const editEl = $('#editSlugInput'); if(editEl){ editEl.addEventListener('input',()=>{ const n=normSlug(editEl.value); if(editEl.value!==n) editEl.value=n; }); editEl.closest('form')?.addEventListener('submit',()=>{ editEl.value=normSlug(editEl.value); }); }
+    const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
+  })();
 
-    // ---------- SVG helpers (transparent PNG) ----------
-    function svgNormalize(s){
-      let x=(s||'').trim(); if(!x) return '';
-      if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
-      if(!/viewBox=/i.test(x) && !/width=/i.test(x)) x=x.replace('<svg','<svg viewBox="0 0 512 512"');
-      // keep aspect; crop to square (cover)
-      if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
-      return x;
+  // ---------- SVG helpers (force intrinsic size; transparent PNG) ----------
+  function svgNormalize(s, px=512){
+    let x=(s||'').trim(); if(!x) return '';
+    // ensure xmlns + viewBox
+    if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+    if(!/viewBox=/i.test(x)){
+      // If width/height exist, build a viewBox; otherwise default square
+      const w=(x.match(/width="([\d.]+)"/i)||[])[1];
+      const h=(x.match(/height="([\d.]+)"/i)||[])[1];
+      if(w && h) x=x.replace('<svg','<svg viewBox="0 0 '+Number(w)+' '+Number(h)+'"');
+      else x=x.replace('<svg','<svg viewBox="0 0 512 512"');
     }
-    async function svgToPngBlob(svgString, size=512, timeoutMs=8000){
-      const s = svgNormalize(svgString); if(!s) throw new Error('empty_svg');
-      const blob = new Blob([s], {type:'image/svg+xml'}); const url = URL.createObjectURL(blob);
+    // set width/height explicitly so the rasterizer has non-zero natural size
+    if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"');
+    else x=x.replace('<svg','<svg width="'+px+'"');
+    if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"');
+    else x=x.replace('<svg','<svg height="'+px+'"');
+    // keep aspect; crop to square (cover)
+    if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
+    return x;
+  }
+
+  async function svgToPngBlob(svgString, size=512, timeoutMs=8000){
+    const s = svgNormalize(svgString, size); if(!s) throw new Error('empty_svg');
+    const blob = new Blob([s], {type:'image/svg+xml'}); const url = URL.createObjectURL(blob);
+    try{
+      // Use Image() so we keep it simple and consistent across mobile browsers
+      const img = new Image(); img.crossOrigin='anonymous'; img.decoding='async';
+      const loaded = new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('svg_img_load_failed')); });
+      const t=setTimeout(()=>{ try{URL.revokeObjectURL(url)}catch{} }, timeoutMs);
+      img.src=url; await loaded; clearTimeout(t);
+
+      // draw with transparent background
+      const w=size,h=size, cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h;
+      const ctx=cvs.getContext('2d');
+      const scale=Math.max(w/img.width, h/img.height); // cover
+      const dw=img.width*scale, dh=img.height*scale, dx=(w-dw)/2, dy=(h-dh)/2;
+      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+      ctx.drawImage(img,dx,dy,dw,dh);
+      return await new Promise((res,rej)=>cvs.toBlob(b=>b?res(b):rej(new Error('png_blob_failed')),'image/png',0.92));
+    } finally { try{URL.revokeObjectURL(url)}catch{} }
+  }
+
+  function previewInlineSvg(targetId, svg){
+    const el=document.getElementById(targetId); if(!el) return;
+    const s=svgNormalize(svg); if(!s) return;
+    el.innerHTML=s;
+    el.style.background='transparent';
+    el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center';
+    el.style.border='1px solid var(--line)';
+  }
+
+  // ---------- copy buttons ----------
+  document.addEventListener('click',(e)=>{ const t=e.target; if(t && t.matches('[data-copy]')){ copyFrom(t.getAttribute('data-copy')); t.textContent='Copied'; setTimeout(()=>t.textContent='Copy', 1200); } });
+
+  // ---------- logo upload ----------
+  (function(){
+    const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
+    if(!file||!btn||!inp) return;
+    file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
+    btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }catch{ alert('Upload failed. You can paste a URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
+    inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
+    if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
+  })();
+
+  // ---------- item image upload ----------
+  (function(){
+    const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
+    if(!file||!btn||!inp) return;
+    file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
+    btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }catch{ alert('Upload failed. You can paste an image URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
+    inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
+  })();
+
+  // ---------- product form handler (auto SVG→PNG on submit) ----------
+  (function(){
+    const form = document.querySelector('#create-product form'); if(!form) return;
+    form.addEventListener('submit', async (e)=>{
+      const title=form.querySelector('input[name="title"]');
+      const priceEl=form.querySelector('input[name="pi_price"]');
+      const imgIn=$('#itUrl'); const svgHidden=$('#svgCode');
+      const price=Number((priceEl?.value||'').trim());
+      if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
+      if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
+
+      const existing=(imgIn?.value||'').trim();
+      const hasSvg = !!(svgHidden && svgHidden.value.trim());
+      const needUrl = !existing || /^data:|^blob:/i.test(existing) || !/^https?:\/\//i.test(existing);
+      if(!(hasSvg && needUrl)) return;
+
+      e.preventDefault();
       try{
-        const img = new Image(); img.crossOrigin='anonymous'; img.decoding='async';
-        const loaded = new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('svg_img_load_failed')); });
-        const t=setTimeout(()=>{ try{URL.revokeObjectURL(url)}catch{} }, timeoutMs);
-        img.src=url; await loaded; clearTimeout(t);
-        const w=size,h=size, cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h;
-        const ctx=cvs.getContext('2d');
-        // DO NOT fill background: keep transparent
-        const scale=Math.max(w/img.width, h/img.height); // cover
-        const dw=img.width*scale, dh=img.height*scale, dx=(w-dw)/2, dy=(h-dh)/2;
-        ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(img,dx,dy,dw,dh);
-        return await new Promise((res,rej)=>cvs.toBlob(b=>b?res(b):rej(new Error('png_blob_failed')),'image/png',0.92));
-      } finally { try{URL.revokeObjectURL(url)}catch{} }
-    }
-    function previewInlineSvg(targetId, svg){
-      const el=document.getElementById(targetId); if(!el) return;
-      const s=svgNormalize(svg); if(!s) return;
-      el.innerHTML=s; el.style.background='transparent'; el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center'; el.style.border='1px solid var(--line)';
-    }
-
-    // ---------- copy buttons ----------
-    document.addEventListener('click',(e)=>{ const t=e.target; if(t && t.matches('[data-copy]')){ copyFrom(t.getAttribute('data-copy')); t.textContent='Copied'; setTimeout(()=>t.textContent='Copy', 1200); } });
-
-    // ---------- logo upload ----------
-    (function(){
-      const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
-      if(!file||!btn||!inp) return;
-      file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
-      btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }catch{ alert('Upload failed. You can paste a URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
-      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
-      if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
-    })();
-
-    // ---------- item image upload ----------
-    (function(){
-      const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
-      if(!file||!btn||!inp) return;
-      file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
-      btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }catch{ alert('Upload failed. You can paste an image URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
-      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
-    })();
-
-    // ---------- product form handler (auto SVG→PNG on submit) ----------
-    (function(){
-      const form = document.querySelector('#create-product form'); if(!form) return;
-      form.addEventListener('submit', async (e)=>{
-        const title=form.querySelector('input[name="title"]');
-        const priceEl=form.querySelector('input[name="pi_price"]');
-        const imgIn=$('#itUrl'); const svgHidden=$('#svgCode');
-        const price=Number((priceEl?.value||'').trim());
-        if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
-        if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
-
-        const existing=(imgIn?.value||'').trim();
-        const hasSvg = !!(svgHidden && svgHidden.value.trim());
-        const needUrl = !existing || /^data:|^blob:/i.test(existing) || !/^https?:\/\//i.test(existing);
-
-        if(!(hasSvg && needUrl)) return; // nothing to do
-
-        e.preventDefault();
-        const svg=svgHidden.value.trim();
+        const blob=await svgToPngBlob(svgHidden.value.trim(), 512, 8000);
+        const file=new File([blob],'listing.png',{type:'image/png'});
+        const uploaded=await uploadTo('/upload', file);
+        imgIn.value=ABS(uploaded).trim();
+        form.submit();
+      }catch{
         try{
-          const blob=await svgToPngBlob(svg, 512, 8000);
-          const file=new File([blob],'listing.png',{type:'image/png'});
+          const raw=new Blob([svgNormalize(svgHidden.value.trim(),512)],{type:'image/svg+xml'});
+          const file=new File([raw],'image.svg',{type:'image/svg+xml'});
           const uploaded=await uploadTo('/upload', file);
           imgIn.value=ABS(uploaded).trim();
-          if(!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_png_url');
           form.submit();
         }catch{
-          // last resort: store raw SVG so there is at least a permanent URL
-          try{
-            const raw=new Blob([svgNormalize(svg)],{type:'image/svg+xml'});
-            const file=new File([raw],'image.svg',{type:'image/svg+xml'});
-            const uploaded=await uploadTo('/upload', file);
-            imgIn.value=ABS(uploaded).trim();
-            form.submit();
-          }catch{
-            alert('Couldn’t convert or upload your crafted image. Try again or upload a PNG/JPG.');
-          }
+          alert('Couldn’t convert or upload your crafted image. Try again or upload a PNG/JPG.');
         }
+      }
+    });
+  })();
+
+  // ---------- inline editor toggles ----------
+  document.addEventListener('click',(e)=>{
+    const btn=e.target.closest('[data-edit-toggle]'); if(!btn) return;
+    const id=btn.getAttribute('data-edit-toggle'); const row=document.getElementById('edit-row-'+id); if(!row) return;
+    row.style.display = (row.style.display==='none'||!row.style.display) ? 'table-row' : 'none';
+  });
+
+  // ---------- delete store progressive enhancement ----------
+  (function(){
+    const form=$('#deleteStoreForm'); if(!form) return;
+    form.addEventListener('submit', async (e)=>{
+      if(!confirm('Are you sure you want to delete this store? This cannot be undone.')){ e.preventDefault(); return false; }
+      e.preventDefault();
+      const fd=new FormData(form);
+      try{
+        const r=await fetch(form.action,{method:'POST',body:fd,credentials:'include'});
+        if(r.ok){
+          let dest='/signin?fresh=1'; try{ const j=await r.clone().json(); if(j&&j.redirect) dest=j.redirect; }catch{}
+          if(!dest) dest=fd.get('redirect')||'/signin?fresh=1';
+          location.replace(dest);
+        }else{ form.submit(); }
+      }catch{ form.submit(); }
+    },{passive:false});
+  })();
+
+  // ---------- Crafting Land linker (auto preview + auto PNG upload) ----------
+  (function(){
+    const GAME_BASE='https://izzagame.onrender.com';
+    const who=()=>{
+      const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
+      const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
+      try{ const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase(); }catch{}
+      try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j&&j.username) return String(j.username).toLowerCase(); } }catch{}
+      return '';
+    };
+    async function fetchState(user){
+      if(!user) return null;
+      const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
+      if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
+    }
+    function itemsFromState(j){
+      const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
+      const out=[]; Object.entries(inv).forEach(([key,val])=>{
+        if(!val||typeof val!=='object') return;
+        const count=Number(val.count||0), equippable=!!val.equippable;
+        const isGameItem=equippable||['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
+        if(!isGameItem && count<=0) return;
+        out.push({ id:key, title:val.name||key, img:val.image||val.image_url||'', sku:val.sku||'', svg:val.iconSvg||val.overlaySvg||(val.icon&&(val.icon.svg||val.icon))||'' });
+      }); return out;
+    }
+    function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
+
+    let CRAFT_ITEMS={};
+    function fillSelect(sel, items, currentId, isEdit){
+      if(!sel) return;
+      sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —'; sel.appendChild(opt0);
+      items.forEach(it=>{ const o=document.createElement('option'); o.value=String(it.id); o.textContent=it.title||it.id; if(currentId && String(currentId)===String(it.id)) o.selected=true; sel.appendChild(o); });
+      CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
+    }
+    function markAsCrafting(hidId,fkId,catId,val){
+      const hid=document.getElementById(hidId), fk=document.getElementById(fkId), cat=document.getElementById(catId);
+      if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
+    }
+
+    // Create form wiring
+    (function wireCreate(){
+      const sel=$('#craftedSelect'); if(!sel) return;
+      const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
+      const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
+
+      async function setFromSvg(svg, id){
+        svgHidden.value = svg || '';
+        if(svg){
+          previewInlineSvg('itThumb', svg);
+          try{
+            const b=await svgToPngBlob(svg,512);
+            const f=new File([b], `${id||'crafted'}.png`, {type:'image/png'});
+            const url=await uploadTo('/upload', f);
+            if(imgIn) imgIn.value=ABS(url);
+            setThumb('itThumb', proxy(url));
+          }catch{/* form submit will retry */}
+        }
+      }
+
+      function onChange(){
+        const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
+        const it=CRAFT_ITEMS[id]||{};
+        if(titleEl) titleEl.value = it.title || titleEl.value;
+        if(skuEl)   skuEl.value   = it.sku || '';
+        if(it.svg){ setFromSvg(it.svg, id); }
+        else if(it.img){
+          const u=ABS(ipfsToHttp(it.img)).trim();
+          if(imgIn) imgIn.value=u;
+          setThumb('itThumb', proxy(u));
+          svgHidden.value='';
+        }
+      }
+      sel.addEventListener('change', onChange);
+
+      const btn=$('#refreshCrafted');
+      if(btn){
+        btn.addEventListener('click', async ()=>{
+          btn.disabled=true; btn.textContent='Refreshing…';
+          try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
+          finally{ btn.disabled=false; btn.textContent='Refresh'; }
+        });
+      }
+
+      (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
+    })();
+
+    // Edit rows wiring
+    (function wireEdit(){
+      $all('.craftedEditSelect').forEach(sel=>{
+        const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
+        const cur = document.getElementById(hidId)?.value || '';
+        sel.addEventListener('change', ()=>{
+          const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
+          const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
+          if(tEl) tEl.value = it.title || tEl.value;
+          if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
+        });
+        (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
       });
     })();
-
-    // ---------- inline editor toggles ----------
-    document.addEventListener('click',(e)=>{
-      const btn=e.target.closest('[data-edit-toggle]'); if(!btn) return;
-      const id=btn.getAttribute('data-edit-toggle'); const row=document.getElementById('edit-row-'+id); if(!row) return;
-      row.style.display = (row.style.display==='none'||!row.style.display) ? 'table-row' : 'none';
-    });
-
-    // ---------- delete store progressive enhancement ----------
-    (function(){
-      const form=$('#deleteStoreForm'); if(!form) return;
-      form.addEventListener('submit', async (e)=>{
-        if(!confirm('Are you sure you want to delete this store? This cannot be undone.')){ e.preventDefault(); return false; }
-        e.preventDefault();
-        const fd=new FormData(form);
-        try{
-          const r=await fetch(form.action,{method:'POST',body:fd,credentials:'include'});
-          if(r.ok){
-            let dest='/signin?fresh=1'; try{ const j=await r.clone().json(); if(j&&j.redirect) dest=j.redirect; }catch{}
-            if(!dest) dest=fd.get('redirect')||'/signin?fresh=1';
-            location.replace(dest);
-          }else{ form.submit(); }
-        }catch{ form.submit(); }
-      },{passive:false});
-    })();
-
-    // ---------- Crafting Land linker (auto preview + auto PNG upload) ----------
-    (function(){
-      const GAME_BASE='https://izzagame.onrender.com';
-      const who=()=>{
-        const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
-        const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
-        try{ const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase(); }catch{}
-        try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j&&j.username) return String(j.username).toLowerCase(); } }catch{}
-        return '';
-      };
-      async function fetchState(user){
-        if(!user) return null;
-        const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
-        if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
-      }
-      function itemsFromState(j){
-        const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
-        const out=[]; Object.entries(inv).forEach(([key,val])=>{
-          if(!val||typeof val!=='object') return;
-          const count=Number(val.count||0), equippable=!!val.equippable;
-          const isGameItem=equippable||['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
-          if(!isGameItem && count<=0) return;
-          out.push({ id:key, title:val.name||key, img:val.image||val.image_url||'', sku:val.sku||'', svg:val.iconSvg||val.overlaySvg||(val.icon&&(val.icon.svg||val.icon))||'' });
-        }); return out;
-      }
-      function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
-      let CRAFT_ITEMS={};
-      function fillSelect(sel, items, currentId, isEdit){
-        if(!sel) return;
-        sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —'; sel.appendChild(opt0);
-        items.forEach(it=>{ const o=document.createElement('option'); o.value=String(it.id); o.textContent=it.title||it.id; if(currentId && String(currentId)===String(it.id)) o.selected=true; sel.appendChild(o); });
-        CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
-      }
-      function markAsCrafting(hidId,fkId,catId,val){
-        const hid=document.getElementById(hidId), fk=document.getElementById(fkId), cat=document.getElementById(catId);
-        if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
-      }
-
-      // Create form wiring
-      (function wireCreate(){
-        const sel=$('#craftedSelect'); if(!sel) return;
-        const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
-        const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
-
-        async function setFromSvg(svg, id){
-          svgHidden.value = svg || '';
-          if(svg){
-            // show now
-            previewInlineSvg('itThumb', svg);
-            // upload transparent PNG in background and set image_url
-            try{
-              const b=await svgToPngBlob(svg,512);
-              const f=new File([b], `${id||'crafted'}.png`, {type:'image/png'});
-              const url=await uploadTo('/upload', f);
-              if(imgIn) imgIn.value=ABS(url);
-              setThumb('itThumb', proxy(url));
-            }catch(_){
-              // no-op; form submit path will retry
-            }
-          }
-        }
-
-        function onChange(){
-          const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
-          const it=CRAFT_ITEMS[id]||{};
-          if(titleEl) titleEl.value = it.title || titleEl.value;
-          if(skuEl)   skuEl.value   = it.sku || '';
-          if(it.svg){ setFromSvg(it.svg, id); }
-          else if(it.img){
-            const u=ABS(ipfsToHttp(it.img)).trim();
-            if(imgIn) imgIn.value=u;
-            setThumb('itThumb', proxy(u));
-            svgHidden.value=''; // nothing to keep
-          }
-        }
-        sel.addEventListener('change', onChange);
-
-        const btn=$('#refreshCrafted');
-        if(btn){
-          btn.addEventListener('click', async ()=>{
-            btn.disabled=true; btn.textContent='Refreshing…';
-            try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
-            finally{ btn.disabled=false; btn.textContent='Refresh'; }
-          });
-        }
-
-        (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
-      })();
-
-      // Edit rows wiring
-      (function wireEdit(){
-        $all('.craftedEditSelect').forEach(sel=>{
-          const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
-          const cur = document.getElementById(hidId)?.value || '';
-          sel.addEventListener('change', ()=>{
-            const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
-            const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
-            if(tEl) tEl.value = it.title || tEl.value;
-            if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
-          });
-          (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
-        });
-      })();
-    })();
-
-    // ---------- mount ----------
-    wireColorways();
-
   })();
-  </script>
+
+  // ---------- mount ----------
+  (function(){ /* after definitions */ wireColorways(); })();
+})();
+</script>
 </body>
 </html>
