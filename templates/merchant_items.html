@@ -937,7 +937,7 @@
   </script>
 
   <!-- NEW: Robust Crafting Land integration (replaces old block) -->
-  <script>
+<script>
 (function(){
   const GAME_BASE = 'https://izzagame.onrender.com';
   const DIRECT_ENDPOINT = GAME_BASE + '/api/crafting/mine';
@@ -957,9 +957,25 @@
     const inp = document.querySelector('input[name="t"]');
     return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
   }
+
+  // Robust username resolver: ?u -> __IZZA_PROFILE__ -> local fallbacks
   function who(){
+    const q = (new URLSearchParams(location.search).get('u') || '').trim();
+    if (q) return q.replace(/^@+/, '').toLowerCase();
     const p = window.__IZZA_PROFILE__||{};
-    return (p.username||'').toString();
+    if (p.username) return String(p.username).toLowerCase();
+    try{
+      const lsU = (localStorage.getItem('izzaUserU') || '').trim();
+      if (lsU) return lsU.replace(/^@+/, '').toLowerCase();
+    }catch(_){}
+    try{
+      const raw = localStorage.getItem('piAuthUser');
+      if (raw){
+        const j = JSON.parse(raw);
+        if (j && j.username) return String(j.username).toLowerCase();
+      }
+    }catch(_){}
+    return '';
   }
 
   async function tryFetch(url, headers){
@@ -970,27 +986,50 @@
     return j.items;
   }
 
-  // Fallback: build crafted list from state snapshot
+  // Pull crafted items from any plausible snapshot shape
+  function extractCraftedFromSnapshot(j){
+    const candidates = [
+      j && j.player && j.player.crafted,
+      j && j.player && j.player.inventory && j.player.inventory.crafted,
+      j && j.inventory && j.inventory.crafted,
+      j && j.crafted,
+      j && j.persist && j.persist.crafted,
+      j && j.crafting && j.crafting.inventory && j.crafting.inventory.crafted,
+      j && j.items && j.items.crafted
+    ].filter(Boolean);
+
+    const src = candidates.find(a => Array.isArray(a) && a.length) || [];
+    return src.map(x => ({
+      id:   String(x.id || x.key || x.uuid || x.slug || x.draft_id || x.itemId || ''),
+      title: x.name || x.title || x.displayName || 'Crafted Item',
+      img:  x.image || x.image_url || x.icon || x.preview || (x.art && (x.art.image || x.art.url)) || '',
+      sku:  x.sku || x.shortcode || (x.meta && x.meta.sku) || '',
+      svg:  x.svg || x.overlaySvg || x.iconSvg || (x.meta && x.meta.svg) || ''
+    })).filter(it => it.id);
+  }
+
+  // Fallback: build crafted list from state snapshot (prefer public, then relays)
   async function fetchFromState(user, headers){
-    const candidates = [STATE_DIRECT(user), ...STATE_RELAYS(user)];
-    for (const u of candidates){
+    if (!user) return [];
+
+    // Public snapshot (no credentials) — avoids CORS/auth issues
+    try{
+      const r = await fetch(STATE_DIRECT(user), { credentials:'omit' });
+      if (r.ok){
+        const j = await r.json();
+        const items = extractCraftedFromSnapshot(j);
+        if (items.length) return items;
+      }
+    }catch(_){}
+
+    // Same-origin relays (with headers/credentials)
+    for (const u of STATE_RELAYS(user)){
       try{
         const r = await fetch(u, { headers, credentials:'include' });
         if(!r.ok) continue;
         const j = await r.json();
-        const src =
-          (j && j.player && j.player.crafted) ||
-          (j && j.crafted) ||
-          (j && j.inventory && j.inventory.crafted) ||
-          [];
-        if (!Array.isArray(src) || !src.length) continue;
-        return src.map(x => ({
-          id:   String(x.id || x.key || x.uuid || x.slug || ''),
-          title: x.name || x.title || 'Crafted Item',
-          img:  x.image || x.image_url || '',
-          sku:  x.sku || '',
-          svg:  x.svg || x.overlaySvg || x.iconSvg || ''
-        }));
+        const items = extractCraftedFromSnapshot(j);
+        if (items.length) return items;
       }catch(_){}
     }
     return [];
@@ -1012,6 +1051,8 @@
         break;
       }catch(_){}
     }
+
+    // Fallback to snapshot if API returns empty or fails
     if (!items || items.length === 0){
       items = await fetchFromState(user, headers);
     }
