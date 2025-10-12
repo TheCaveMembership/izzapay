@@ -938,162 +938,198 @@
 
   <!-- NEW: Robust Crafting Land integration (replaces old block) -->
   <script>
-  (function(){
-    const GAME_BASE = 'https://izzagame.onrender.com';
-    const DIRECT_ENDPOINT = GAME_BASE + '/api/crafting/mine';
-    const RELAY_ENDPOINTS = [
-      '/izza-game/api/crafting/mine',
-      '/api/crafting/mine'
-    ];
+(function(){
+  const GAME_BASE = 'https://izzagame.onrender.com';
+  const DIRECT_ENDPOINT = GAME_BASE + '/api/crafting/mine';
+  const RELAY_ENDPOINTS = [
+    '/izza-game/api/crafting/mine',
+    '/api/crafting/mine'
+  ];
 
-    function getToken(){
-      const inp = document.querySelector('input[name="t"]');
-      return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
+  // State snapshot endpoints (fallback)
+  const STATE_DIRECT = (u)=> `${GAME_BASE}/api/state/${encodeURIComponent(u)}?prefer=lastGood`;
+  const STATE_RELAYS = (u)=> [
+    `/izza-game/api/state/${encodeURIComponent(u)}?prefer=lastGood`,
+    `/api/state/${encodeURIComponent(u)}?prefer=lastGood`
+  ];
+
+  function getToken(){
+    const inp = document.querySelector('input[name="t"]');
+    return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
+  }
+  function who(){
+    const p = window.__IZZA_PROFILE__||{};
+    return (p.username||'').toString();
+  }
+
+  async function tryFetch(url, headers){
+    const r = await fetch(url, { headers, credentials:'include' });
+    if(!r.ok) throw new Error('fetch_failed');
+    const j = await r.json();
+    if (!j || j.ok !== true || !Array.isArray(j.items)) throw new Error('bad_shape');
+    return j.items;
+  }
+
+  // Fallback: build crafted list from state snapshot
+  async function fetchFromState(user, headers){
+    const candidates = [STATE_DIRECT(user), ...STATE_RELAYS(user)];
+    for (const u of candidates){
+      try{
+        const r = await fetch(u, { headers, credentials:'include' });
+        if(!r.ok) continue;
+        const j = await r.json();
+        const src =
+          (j && j.player && j.player.crafted) ||
+          (j && j.crafted) ||
+          (j && j.inventory && j.inventory.crafted) ||
+          [];
+        if (!Array.isArray(src) || !src.length) continue;
+        return src.map(x => ({
+          id:   String(x.id || x.key || x.uuid || x.slug || ''),
+          title: x.name || x.title || 'Crafted Item',
+          img:  x.image || x.image_url || '',
+          sku:  x.sku || '',
+          svg:  x.svg || x.overlaySvg || x.iconSvg || ''
+        }));
+      }catch(_){}
     }
-    function who(){
-      const p = window.__IZZA_PROFILE__||{};
-      return (p.username||'').toString();
+    return [];
+  }
+
+  async function fetchCrafted(){
+    const bearer = getToken();
+    const user   = who();
+    const headers = {};
+    if (bearer) headers['Authorization'] = 'Bearer ' + bearer;
+    if (user)   headers['X-IZZA-USER']   = user;
+
+    const candidates = [DIRECT_ENDPOINT, ...RELAY_ENDPOINTS];
+    let items = [];
+    for (const base of candidates){
+      try{
+        const u = user ? (base.includes('?') ? '&' : '?') + 'u=' + encodeURIComponent(user) : '';
+        items = await tryFetch(base + u, headers);
+        break;
+      }catch(_){}
     }
-
-    async function tryFetch(url, headers){
-      const r = await fetch(url, { headers, credentials:'include' });
-      if(!r.ok) throw new Error('fetch_failed');
-      const j = await r.json();
-      if (!j || j.ok !== true || !Array.isArray(j.items)) throw new Error('bad_shape');
-      return j.items;
+    if (!items || items.length === 0){
+      items = await fetchFromState(user, headers);
     }
+    return items || [];
+  }
 
-    async function fetchCrafted(){
-      const bearer = getToken();
-      const user   = who();
-      const headers = {};
-      if (bearer) headers['Authorization'] = 'Bearer ' + bearer;
-      if (user)   headers['X-IZZA-USER']   = user;
+  function normalizeItem(raw){
+    const id = String(raw.id || raw.uuid || raw.slug || raw.draft_id || '');
+    const title = raw.title || raw.name || ('Item ' + id);
+    const img = raw.img || raw.image || raw.image_url || raw.thumbnail || raw.thumbnail_url || '';
+    const sku = raw.sku || raw.shortcode || '';
+    const svg = raw.svg || raw.svg_code || '';
+    return { id, title, img, sku, svg };
+  }
 
-      const candidates = [DIRECT_ENDPOINT, ...RELAY_ENDPOINTS];
-      let lastErr;
-      for (const base of candidates){
-        try{
-          const u = user ? (base.includes('?') ? '&' : '?') + 'u=' + encodeURIComponent(user) : '';
-          return await tryFetch(base + u, headers);
-        }catch(e){ lastErr = e; }
-      }
-      console.warn('[Crafting] failed to load items', lastErr);
-      return [];
-    }
+  function fillSelect(sel, items, currentId, isEdit){
+    if(!sel) return;
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '— ' + (isEdit ? 'None' : 'Select a crafted item') + ' —';
+    sel.appendChild(opt0);
+    items.map(normalizeItem).forEach(it=>{
+      const o = document.createElement('option');
+      o.value = it.id;
+      o.textContent = it.title;
+      o.dataset.image = it.img;
+      o.dataset.sku = it.sku;
+      o.dataset.title = it.title;
+      o.dataset.svg = it.svg;
+      if (currentId && String(currentId) === String(it.id)) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
 
-    function normalizeItem(raw){
-      const id = String(raw.id || raw.uuid || raw.slug || raw.draft_id || '');
-      const title = raw.name || raw.title || ('Item ' + id);
-      const img = raw.image || raw.image_url || raw.thumbnail || raw.thumbnail_url || '';
-      const sku = raw.sku || raw.shortcode || '';
-      const svg = raw.svg || raw.svg_code || '';
-      return { id, title, img, sku, svg };
-    }
+  function markAsCrafting(hidId, fkId, catId, value){
+    const hid = document.getElementById(hidId);
+    const fk  = document.getElementById(fkId);
+    const cat = document.getElementById(catId);
+    if (hid) hid.value = value || '';
+    if (fk)  fk.value  = value ? 'crafting' : '';
+    if (cat) cat.value = value ? 'digital_collectible' : '';
+  }
 
-    function fillSelect(sel, items, currentId, isEdit){
-      if(!sel) return;
-      sel.innerHTML = '';
-      const opt0 = document.createElement('option');
-      opt0.value = '';
-      opt0.textContent = '— ' + (isEdit ? 'None' : 'Select a crafted item') + ' —';
-      sel.appendChild(opt0);
-      items.map(normalizeItem).forEach(it=>{
-        const o = document.createElement('option');
-        o.value = it.id;
-        o.textContent = it.title;
-        o.dataset.image = it.img;
-        o.dataset.sku = it.sku;
-        o.dataset.title = it.title;
-        o.dataset.svg = it.svg;
-        if (currentId && String(currentId) === String(it.id)) o.selected = true;
-        sel.appendChild(o);
+  function wireCreate(items){
+    const sel = document.getElementById('craftedSelect');
+    const hid = 'crafted_item_id';
+    const fk  = 'fulfillment_kind';
+    const cat = 'category';
+    if(!sel) return;
+
+    fillSelect(sel, items, (document.getElementById(hid)||{}).value, false);
+
+    sel.addEventListener('change', ()=>{
+      const v = sel.value || '';
+      markAsCrafting(hid, fk, cat, v);
+      if(!v) return;
+      const opt = sel.selectedOptions && sel.selectedOptions[0];
+      const title = opt?.dataset.title || '';
+      const img   = opt?.dataset.image || '';
+      const sku   = opt?.dataset.sku || '';
+      const svg   = opt?.dataset.svg || '';
+
+      const form   = document.querySelector('#create-product form');
+      const titleEl= form?.querySelector('input[name="title"]');
+      const imageEl= document.getElementById('itUrl');
+      const skuEl  = form?.querySelector('input[name="sku"]');
+      const svgTA  = document.getElementById('svgCode');
+      const svgBtn = document.getElementById('previewSvgBtn');
+
+      if (titleEl && !titleEl.value) titleEl.value = title;
+      if (imageEl && !imageEl.value && img){ imageEl.value = img; setThumb('itThumb', proxied(img)); }
+      if (skuEl   && !skuEl.value && sku){ skuEl.value = sku; }
+      if (svgTA   && !svgTA.value && svg){ svgTA.value = svg; svgBtn && svgBtn.click(); }
+    });
+
+    const btn = document.getElementById('refreshCrafted');
+    if(btn){
+      btn.addEventListener('click', async ()=>{
+        btn.disabled = true; btn.textContent = 'Refreshing…';
+        const fresh = await fetchCrafted();
+        fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
+        btn.disabled = false; btn.textContent = 'Refresh';
       });
     }
+  }
 
-    function markAsCrafting(hidId, fkId, catId, value){
-      const hid = document.getElementById(hidId);
-      const fk  = document.getElementById(fkId);
-      const cat = document.getElementById(catId);
-      if (hid) hid.value = value || '';
-      if (fk)  fk.value  = value ? 'crafting' : '';
-      if (cat) cat.value = value ? 'digital_collectible' : '';
-    }
+  function wireEdit(items){
+    document.querySelectorAll('.craftedEditSelect').forEach(sel=>{
+      const row = sel.closest('tr'); if(!row) return;
+      const id  = sel.getAttribute('data-item-id');
+      const hidId = 'crafted_item_id_' + id;
+      const fkId  = 'fulfillment_kind_' + id;
+      const catId = 'category_' + id;
 
-    function wireCreate(items){
-      const sel = document.getElementById('craftedSelect');
-      const hid = 'crafted_item_id';
-      const fk  = 'fulfillment_kind';
-      const cat = 'category';
-
-      if(!sel) return;
-      fillSelect(sel, items, (document.getElementById(hid)||{}).value, false);
+      const curVal = (document.getElementById(hidId)||{}).value || '';
+      fillSelect(sel, items, curVal, true);
 
       sel.addEventListener('change', ()=>{
         const v = sel.value || '';
-        markAsCrafting(hid, fk, cat, v);
+        markAsCrafting(hidId, fkId, catId, v);
         if(!v) return;
         const opt = sel.selectedOptions && sel.selectedOptions[0];
-        const title = opt?.dataset.title || '';
-        const img   = opt?.dataset.image || '';
-        const sku   = opt?.dataset.sku || '';
-        const svg   = opt?.dataset.svg || '';
-
-        const form   = document.querySelector('#create-product form');
-        const titleEl= form?.querySelector('input[name="title"]');
-        const imageEl= document.getElementById('itUrl');
-        const skuEl  = form?.querySelector('input[name="sku"]');
-        const svgTA  = document.getElementById('svgCode');
-        const svgBtn = document.getElementById('previewSvgBtn');
-
-        if (titleEl && !titleEl.value) titleEl.value = title;
-        if (imageEl && !imageEl.value && img){ imageEl.value = img; setThumb('itThumb', proxied(img)); }
-        if (skuEl   && !skuEl.value && sku){ skuEl.value = sku; }
-        if (svgTA   && !svgTA.value && svg){ svgTA.value = svg; svgBtn && svgBtn.click(); }
+        if(!opt) return;
+        const tEl = row.querySelector('input[name="title"]');
+        const iEl = row.querySelector('input[name="image_url"]');
+        if (tEl && !tEl.value && opt.dataset.title) tEl.value = opt.dataset.title;
+        if (iEl && !iEl.value && opt.dataset.image) iEl.value = opt.dataset.image;
       });
+    });
+  }
 
-      const btn = document.getElementById('refreshCrafted');
-      if(btn){
-        btn.addEventListener('click', async ()=>{
-          btn.disabled = true; btn.textContent = 'Refreshing…';
-          const fresh = await fetchCrafted();
-          fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
-          btn.disabled = false; btn.textContent = 'Refresh';
-        });
-      }
-    }
-
-    function wireEdit(items){
-      document.querySelectorAll('.craftedEditSelect').forEach(sel=>{
-        const row = sel.closest('tr'); if(!row) return;
-        const id  = sel.getAttribute('data-item-id');
-        const hidId = 'crafted_item_id_' + id;
-        const fkId  = 'fulfillment_kind_' + id;
-        const catId = 'category_' + id;
-
-        const curVal = (document.getElementById(hidId)||{}).value || '';
-        fillSelect(sel, items, curVal, true);
-
-        sel.addEventListener('change', ()=>{
-          const v = sel.value || '';
-          markAsCrafting(hidId, fkId, catId, v);
-          if(!v) return;
-          const opt = sel.selectedOptions && sel.selectedOptions[0];
-          if(!opt) return;
-          const tEl = row.querySelector('input[name="title"]');
-          const iEl = row.querySelector('input[name="image_url"]');
-          if (tEl && !tEl.value && opt.dataset.title) tEl.value = opt.dataset.title;
-          if (iEl && !iEl.value && opt.dataset.image) iEl.value = opt.dataset.image;
-        });
-      });
-    }
-
-    (async function init(){
-      const items = await fetchCrafted();
-      wireCreate(items);
-      wireEdit(items);
-    })();
+  (async function init(){
+    const items = await fetchCrafted();
+    wireCreate(items);
+    wireEdit(items);
   })();
-  </script>
+})();
+</script>
 </body>
 </html>
