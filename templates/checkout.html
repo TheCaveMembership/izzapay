@@ -82,16 +82,17 @@
         <ul class="summary-list">
           {% if cart_mode and (rows is defined) and rows %}
             {% for r in rows %}
-              {% set r_svg = (r.svg_code or '') | trim %}
+              {% set _raw = (r.svg_code or '') | trim %}
+              {% set r_svg = (_raw and (_raw.split('</svg>')[0] ~ '</svg>')) or '' %}
               {% set r_img = (r.image_url or '') | trim %}
               <li class="summary-item">
                 <div class="thumb">
                   {% if r_svg %}
                     {{ r_svg | safe }}
+                  {% elif r_img and not (r_img|lower).endswith('.svg') %}
+                    <img src="/uimg?src={{ r_img | urlencode }}" alt="">
                   {% elif r_img and (r_img|lower).endswith('.svg') %}
                     <object type="image/svg+xml" data="{{ r_img }}"></object>
-                  {% elif r_img %}
-                    <img src="/uimg?src={{ r_img | urlencode }}" alt="">
                   {% endif %}
                 </div>
                 <div style="flex:1">
@@ -101,16 +102,17 @@
               </li>
             {% endfor %}
           {% else %}
-            {% set i_svg = (i.svg_code or '') | trim %}
-            {% set i_img = (i.image_url or '') | trim %}
+            {% set _raw = (i and i.svg_code) or '' %}
+            {% set i_svg = (_raw and (_raw.split('</svg>')[0] ~ '</svg>')) or '' %}
+            {% set i_img = (i and i.image_url) and i.image_url.strip() or '' %}
             <li class="summary-item">
               <div class="thumb">
                 {% if i_svg %}
                   {{ i_svg | safe }}
+                {% elif i_img and not (i_img|lower).endswith('.svg') %}
+                  <img src="/uimg?src={{ i_img | urlencode }}" alt="">
                 {% elif i_img and (i_img|lower).endswith('.svg') %}
                   <object type="image/svg+xml" data="{{ i_img }}"></object>
-                {% elif i_img %}
-                  <img src="/uimg?src={{ i_img | urlencode }}" alt="">
                 {% endif %}
               </div>
               <div style="flex:1">
