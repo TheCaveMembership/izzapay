@@ -1954,31 +1954,31 @@ def merchant_new_item(slug):
 
     with conn() as cx:
         cx.execute(
-            """INSERT INTO items(
-                 merchant_id, link_id, title, sku, image_url, description,
-                 pi_price, stock_qty, allow_backorder, active,
-                 fulfillment_kind, crafted_item_id,
-                 dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price
-               )
-               VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)""",
-            (
-                m["id"],
-                link_id,
-                title,
-                sku,
-                image_url,
-                description,
-                float(pi_price),
-                int(stock_qty),
-                int(allow_backorder),
-                fulfillment_kind,
-                crafted_item_id,
-                dynamic_price_mode,
-                dynamic_payload_json,
-                min_pi_price,
-                max_pi_price,
-            )
-        )
+    """INSERT INTO items(
+         merchant_id, link_id, title, sku, image_url, description,
+         pi_price, stock_qty, allow_backorder, active,
+         fulfillment_kind, crafted_item_id,
+         dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price
+       )
+       VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)""",   # <-- now 15 ? to match 16 cols (1 is literal)
+    (
+        m["id"],
+        link_id,
+        title,
+        sku,
+        image_url,
+        description,
+        float(pi_price),
+        int(stock_qty),
+        int(allow_backorder),
+        fulfillment_kind,
+        crafted_item_id,
+        dynamic_price_mode,
+        dynamic_payload_json,
+        min_pi_price,
+        max_pi_price,
+    )
+)
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
