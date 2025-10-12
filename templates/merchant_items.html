@@ -869,24 +869,27 @@
     row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
   });
 
-  // ===== SVG preview: renders raw <svg> string into the image thumb =====
-  (function(){
-    const btn = document.getElementById('previewSvgBtn');
-    const ta  = document.getElementById('svgCode');
-    if (!btn || !ta) return;
-    btn.addEventListener('click', ()=>{
-      const raw = (ta.value || '').trim();
-      if (!raw) return;
-      try {
-        const blob = new Blob([raw], { type: 'image/svg+xml' });
-        const url  = URL.createObjectURL(blob);
-        setThumb('itThumb', url);
-      } catch(e){
-        alert('Could not preview SVG.');
-      }
-    });
-  })();
+  // ===== SVG preview: direct data URI version (works on Safari/iPhone too) =====
+(function(){
+  const btn = document.getElementById('previewSvgBtn');
+  const ta  = document.getElementById('svgCode');
+  if (!btn || !ta) return;
 
+  btn.addEventListener('click', ()=>{
+    let svg = (ta.value || '').trim();
+    if (!svg) return alert('No SVG code to preview.');
+
+    // Ensure minimal required attributes so it always renders
+    if (!/xmlns=/i.test(svg)) svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    if (!/viewBox=/i.test(svg) && !/width=/i.test(svg))
+      svg = svg.replace('<svg', '<svg viewBox="0 0 512 512"');
+
+    // Encode as a data URL
+    const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    setThumb('itThumb', dataUrl);
+  });
+})();
+    
   // ===== Prefill from session (set by /api/merchant/create_product_from_craft) =====
   (function(){
     const PREFILL = {{ (PREFILL or {}) | tojson | safe }};
