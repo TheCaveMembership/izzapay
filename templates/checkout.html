@@ -40,7 +40,7 @@
     .summary-list{margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:8px}
     .summary-item{display:flex; align-items:center; gap:10px}
     .thumb{width:40px; height:40px; border-radius:8px; border:1px solid var(--line); overflow:hidden; background:#0001; flex:0 0 40px}
-    .thumb img{width:100%; height:100%; object-fit:cover}
+    .thumb img, .thumb svg, .thumb object{width:100%; height:100%; display:block; object-fit:cover}
     .title{font-weight:700}
     .qty{color:var(--muted); font-size:.9rem}
   </style>
@@ -82,9 +82,17 @@
         <ul class="summary-list">
           {% if cart_mode and (rows is defined) and rows %}
             {% for r in rows %}
+              {% set r_svg = (r.svg_code or '') | trim %}
+              {% set r_img = (r.image_url or '') | trim %}
               <li class="summary-item">
                 <div class="thumb">
-                  {% if r.image_url %}<img src="/uimg?src={{ r.image_url | urlencode }}" alt="">{% endif %}
+                  {% if r_svg %}
+                    {{ r_svg | safe }}
+                  {% elif r_img and (r_img|lower).endswith('.svg') %}
+                    <object type="image/svg+xml" data="{{ r_img }}"></object>
+                  {% elif r_img %}
+                    <img src="/uimg?src={{ r_img | urlencode }}" alt="">
+                  {% endif %}
                 </div>
                 <div style="flex:1">
                   <div class="title">{{ r.title }}</div>
@@ -93,9 +101,17 @@
               </li>
             {% endfor %}
           {% else %}
+            {% set i_svg = (i.svg_code or '') | trim %}
+            {% set i_img = (i.image_url or '') | trim %}
             <li class="summary-item">
               <div class="thumb">
-                {% if i and i.image_url %}<img src="/uimg?src={{ i.image_url | urlencode }}" alt="">{% endif %}
+                {% if i_svg %}
+                  {{ i_svg | safe }}
+                {% elif i_img and (i_img|lower).endswith('.svg') %}
+                  <object type="image/svg+xml" data="{{ i_img }}"></object>
+                {% elif i_img %}
+                  <img src="/uimg?src={{ i_img | urlencode }}" alt="">
+                {% endif %}
               </div>
               <div style="flex:1">
                 <div class="title">{{ i.title if i else 'Item' }}</div>
