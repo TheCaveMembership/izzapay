@@ -428,14 +428,21 @@
             {% for it in items %}
               <tr>
                 <td>
-                  <div class="itimg">
-                    {% if it.image_url %}
-                      <img src="/uimg?src={{ it.image_url | urlencode }}" alt="">
-                    {% else %}
-                      <span class="muted" style="font-size:12px">—</span>
-                    {% endif %}
-                  </div>
-                </td>
+  {% set img = (it.image_url or '') | trim %}
+  <div class="itimg">
+    {% if img %}
+      <img
+        src="/uimg?src={{ img | urlencode }}"
+        alt=""
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())"
+      >
+    {% else %}
+      <span class="muted" style="font-size:12px">—</span>
+    {% endif %}
+  </div>
+</td>
                 <td>
   {{ it.title }}
   {% if it.fulfillment_kind == 'crafting' %}
@@ -857,11 +864,10 @@ function toAbsoluteUrl(u){
     });
   })();
 
-  // Guard + ensure we have a real URL (PNG if possible, else raw SVG) before submit
+// Guard + ensure we have a real URL (PNG if possible, else raw SVG) before submit
 (function(){
   const form = document.querySelector('#create-product form'); if(!form) return;
 
-  // small helper: rasterize SVG → PNG blob with timeout (handles iOS failures)
   function svgToPngBlob(svgString, size=512, timeoutMs=2000){
     return Promise.race([
       new Promise((resolve, reject)=>{
@@ -871,7 +877,6 @@ function toAbsoluteUrl(u){
           if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
           if(!/viewBox=/i.test(s) && !/width=/i.test(s))
             s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
-
           const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
           const img = new Image();
           img.onload = () => {
@@ -924,10 +929,18 @@ function toAbsoluteUrl(u){
 
     // 1) Try PNG (best for thumbs, avoids SVG filtering issues via /uimg)
     try{
-      const blob = await svgToPngBlob(svg, 512, 2500);
+      const blob = await svgToPngBlob(svg, 512, 4000); // give iOS a bit more time
       const file = new File([blob], 'preview.png', { type: 'image/png' });
       const uploadedPng = await uploadTo('/upload', file);
-      imgIn.value = toAbsoluteUrl(uploadedPng);         // use PNG URL
+
+      // ✅ Inserted guard (PNG branch)
+      imgIn.value = toAbsoluteUrl(uploadedPng);
+      imgIn.value = (imgIn.value || '').trim();
+      if (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)) {
+        alert('We couldn’t attach the image yet. Please tap Preview SVG once and try Add Item again.');
+        return false;
+      }
+
       form.submit();
       return;
     }catch(_){ /* fall through */ }
@@ -937,7 +950,15 @@ function toAbsoluteUrl(u){
       const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
       const file = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
       const uploadedSvg = await uploadTo('/upload', file);
-      imgIn.value = toAbsoluteUrl(uploadedSvg);         // use SVG URL
+
+      // ✅ Inserted guard (SVG branch)
+      imgIn.value = toAbsoluteUrl(uploadedSvg);
+      imgIn.value = (imgIn.value || '').trim();
+      if (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)) {
+        alert('We couldn’t attach the image yet. Please tap Preview SVG once and try Add Item again.');
+        return false;
+      }
+
       form.submit();
       return;
     }catch(err){
@@ -1320,7 +1341,7 @@ function previewSvg(svgString){
     }
   })();
 } else if (rawUrl){
-      if (imageEl) imageEl.value = rawUrl;              // <-- store RAW
+      if (imageEl) imageEl.value = toAbsoluteUrl(rawUrl).trim();              // <-- store RAW
       setThumb('itThumb', proxied(rawUrl));             // preview via proxy
     }else{
       // Nothing to preview; leave thumb as-is
@@ -1366,7 +1387,7 @@ function previewSvg(svgString){
 
       if (iEl){
         const rawUrl = ipfsToHttp(item.img || '');    // <-- RAW
-        if (rawUrl) iEl.value = rawUrl;
+        if (rawUrl) iEl.value = toAbsoluteUrl(rawUrl).trim();
       }
     });
   });
