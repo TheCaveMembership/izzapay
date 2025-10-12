@@ -369,360 +369,357 @@
   </div>
 
     <script>
-  (function(){
-    // ---------- tiny utils ----------
-    const $ = s => document.querySelector(s);
-    const $all = s => Array.from(document.querySelectorAll(s));
-    const ABS = u => { try{ if(!u) return ''; if(/^https?:\/\//i.test(u)) return u; if(u.startsWith('/')) return location.origin.replace(/\/$/,'')+u; return new URL(u, location.origin).href; }catch{ return u; } };
-    const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
-    const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
+(function(){
+  // ---------- tiny utils ----------
+  const $ = s => document.querySelector(s);
+  const $all = s => Array.from(document.querySelectorAll(s));
+  const ABS = u => { try{ if(!u) return ''; if(/^https?:\/\//i.test(u)) return u; if(u.startsWith('/')) return location.origin.replace(/\/$/,'')+u; return new URL(u, location.origin).href; }catch{ return u; } };
+  const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
+  const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
 
-    // ---------- username (for crafting state fetch) ----------
-    try{
-      const SRV_USER = {{ (username or '') | tojson }};
-      const qsU = new URLSearchParams(location.search).get('u');
-      const norm = u => (u||'').toString().trim().replace(/^@+/, '').toLowerCase();
-      const u = norm(qsU || SRV_USER);
-      if (u){ window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username:u }); try{ localStorage.setItem('izzaUserU', u);}catch{} }
-      else{ const sel=$('#craftedSelect'); if(sel){ sel.innerHTML=''; const o=document.createElement('option'); o.value=''; o.textContent='No username — add ?u=<username> to test'; sel.appendChild(o);} }
-    }catch{}
+  // ---------- username (for crafting state fetch) ----------
+  try{
+    const SRV_USER = {{ (username or '') | tojson }};
+    const qsU = new URLSearchParams(location.search).get('u');
+    const norm = u => (u||'').toString().trim().replace(/^@+/, '').toLowerCase();
+    const u = norm(qsU || SRV_USER);
+    if (u){ window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username:u }); try{ localStorage.setItem('izzaUserU', u);}catch{} }
+    else{ const sel=$('#craftedSelect'); if(sel){ sel.innerHTML=''; const o=document.createElement('option'); o.value=''; o.textContent='No username — add ?u=<username> to test'; sel.appendChild(o);} }
+  }catch{}
 
-    // ---------- uploads ----------
-    const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
-    async function uploadTo(path, file){
-      const fd=new FormData(); fd.append('file', file);
-      const t=token(); const url = path + (t ? (path.includes('?')?'&':'?') + 't='+encodeURIComponent(t) : '');
-      const headers={}; if(t) headers['Authorization']='Bearer '+t;
-      const r=await fetch(url,{method:'POST',body:fd,headers,credentials:'include'});
-      if(!r.ok) throw new Error('upload failed');
-      const j=await r.json(); if(!j.ok||!j.url) throw new Error('bad response');
-      return j.url;
-    }
-    function setThumb(id, url){ const el=document.getElementById(id); if(!el) return; el.innerHTML=''; const img=new Image(); img.src=url; img.onload=()=>{ if(url.startsWith('blob:')) try{URL.revokeObjectURL(url)}catch{}; el.removeAttribute('data-bad'); }; img.onerror=()=>{ el.setAttribute('data-bad','1'); }; el.appendChild(img); }
+  // ---------- uploads ----------
+  const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
+  async function uploadTo(path, file){
+    const fd=new FormData(); fd.append('file', file);
+    const t=token(); const url = path + (t ? (path.includes('?')?'&':'?') + 't='+encodeURIComponent(t) : '');
+    const headers={}; if(t) headers['Authorization']='Bearer '+t;
+    const r=await fetch(url,{method:'POST',body:fd,headers,credentials:'include'});
+    if(!r.ok) throw new Error('upload failed');
+    const j=await r.json(); if(!j.ok||!j.url) throw new Error('bad response');
+    return j.url;
+  }
+  function setThumb(id, url){
+    const el=document.getElementById(id); if(!el) return;
+    el.innerHTML='';
+    const img=new Image(); img.src=url; img.loading='lazy'; img.referrerPolicy='no-referrer';
+    img.onerror=()=>{ el.innerHTML='<span class="muted" style="font-size:12px">—</span>'; };
+    el.appendChild(img);
+  }
 
-    // Optional: verify that a given URL is really an image via proxy
-    async function verifyImage(url){
-      if(!url) return false;
-      try{
-        const res = await fetch(proxy(url), { method:'GET', credentials:'omit' });
-        if(!res.ok) return false;
-        const ct = (res.headers.get('content-type')||'').toLowerCase();
-        return ct.startsWith('image/');
-      }catch{ return false; }
-    }
-
-    // ---------- colorway pickers ----------
-    function wireColorways(){
-      $all('[data-colorpicker]').forEach(wrap=>{
-        wrap.querySelectorAll('.swatch').forEach(sw=>{
-          sw.addEventListener('click',()=>{
-            document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
-            wrap.querySelectorAll('.swatch').forEach(s=>s.classList.remove('selected'));
-            const cw=sw.getAttribute('data-cw'); if(!cw) return;
-            document.body.classList.add(cw); sw.classList.add('selected');
-            const hidden = $('#colorway') || $('#edit-colorway'); if(hidden) hidden.value=cw;
-          });
+  // ---------- colorway pickers ----------
+  function wireColorways(){
+    $all('[data-colorpicker]').forEach(wrap=>{
+      wrap.querySelectorAll('.swatch').forEach(sw=>{
+        sw.addEventListener('click',()=>{
+          document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
+          wrap.querySelectorAll('.swatch').forEach(s=>s.classList.remove('selected'));
+          const cw=sw.getAttribute('data-cw'); if(!cw) return;
+          document.body.classList.add(cw); sw.classList.add('selected');
+          const hidden = $('#colorway') || $('#edit-colorway'); if(hidden) hidden.value=cw;
         });
       });
-    }
-
-    // ---------- slug normalization ----------
-    function normSlug(v){
-      return (v||'').toLowerCase().trim().replace(/[\s_]+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-+| -+$/g,'');
-    }
-    (function wireSlugs(){
-      const setupEl = $('#slugInput'); if(setupEl){ setupEl.addEventListener('input',()=>{ const n=normSlug(setupEl.value); if(setupEl.value!==n) setupEl.value=n; }); setupEl.closest('form')?.addEventListener('submit',()=>{ setupEl.value=normSlug(setupEl.value); }); }
-      const editEl = $('#editSlugInput'); if(editEl){ editEl.addEventListener('input',()=>{ const n=normSlug(editEl.value); if(editEl.value!==n) editEl.value=n; }); editEl.closest('form')?.addEventListener('submit',()=>{ editEl.value=normSlug(editEl.value); }); }
-      const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
-    })();
-
-    // ---------- SVG helpers (sanitize → transparent PNG) ----------
-    // Remove prolog/doctype and make sure there is exactly one <svg>…</svg> root.
-    function sanitizeSvg(raw){
-      let s=(raw||'').trim();
-      if(!s) return '';
-      // strip XML prolog / doctype
-      s = s.replace(/<\?xml[\s\S]*?\?>/gi,'').replace(/<!doctype[\s\S]*?>/gi,'').trim();
-      // keep only the first <svg>…</svg>
-      const m = s.match(/<svg[\s\S]*?<\/svg>/i);
-      s = m ? m[0] : s;
-      // ensure required attrs
-      if(!/xmlns=/i.test(s)) s = s.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
-      if(!/viewBox=/i.test(s) && !/width=/i.test(s)) s = s.replace('<svg','<svg viewBox="0 0 512 512"');
-      if(!/preserveAspectRatio=/i.test(s)) s = s.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
-      return s.trim();
-    }
-
-    async function svgToPngBlob(svgString, size=512, timeoutMs=10000){
-      const s = sanitizeSvg(svgString); if(!s) throw new Error('empty_svg');
-      const blob = new Blob([s], {type:'image/svg+xml'});
-      const url = URL.createObjectURL(blob);
-      try{
-        const img = new Image(); img.crossOrigin='anonymous'; img.decoding='async';
-        const loaded = new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('svg_img_load_failed')); });
-        const tm = setTimeout(()=>{ try{URL.revokeObjectURL(url)}catch{}; }, timeoutMs);
-        img.src=url; await loaded; clearTimeout(tm);
-        const w=size,h=size, cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h;
-        const ctx=cvs.getContext('2d');
-        // transparent background
-        ctx.clearRect(0,0,w,h);
-        const scale=Math.max(w/img.width, h/img.height); // cover
-        const dw=img.width*scale, dh=img.height*scale, dx=(w-dw)/2, dy=(h-dh)/2;
-        ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(img,dx,dy,dw,dh);
-        return await new Promise((res,rej)=>cvs.toBlob(b=>b?res(b):rej(new Error('png_blob_failed')),'image/png',0.92));
-      } finally { try{URL.revokeObjectURL(url)}catch{} }
-    }
-
-    function previewInlineSvg(targetId, svg){
-      const el=document.getElementById(targetId); if(!el) return;
-      const s=sanitizeSvg(svg); if(!s) return;
-      el.innerHTML=s; el.style.background='transparent'; el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center'; el.style.border='1px solid var(--line)';
-      el.removeAttribute('data-bad');
-    }
-
-    // ---------- copy buttons ----------
-    document.addEventListener('click',(e)=>{ const t=e.target; if(t && t.matches('[data-copy]')){ copyFrom(t.getAttribute('data-copy')); t.textContent='Copied'; setTimeout(()=>t.textContent='Copy', 1200); } });
-
-    // ---------- logo upload ----------
-    (function(){
-      const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
-      if(!file||!btn||!inp) return;
-      file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
-      btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }catch{ alert('Upload failed. You can paste a URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
-      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
-      if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
-    })();
-
-    // ---------- item image upload ----------
-    (function(){
-      const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
-      if(!file||!btn||!inp) return;
-      file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
-      btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }catch{ alert('Upload failed. You can paste an image URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
-      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
-    })();
-
-    // ---------- product form handler (force PNG; await conversions) ----------
-    (function(){
-      const form = document.querySelector('#create-product form'); if(!form) return;
-      const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const addBtn=$('#addItemBtn'); let pendingImgPromise=null;
-
-      async function ensurePngFromSvg(svg, nameHint){
-        const clean = sanitizeSvg(svg);
-        const blob = await svgToPngBlob(clean, 512);
-        const file = new File([blob], `${nameHint||'crafted'}.png`, {type:'image/png'});
-        const url = await uploadTo('/upload', file);
-        return ABS(url).trim();
-      }
-
-      // Gate the submit until any background upload is finished and verified
-      async function waitForPending(){
-        if(pendingImgPromise){
-          try{
-            addBtn && (addBtn.disabled=true);
-            const u = await pendingImgPromise;
-            if(imgIn && u) imgIn.value = u;
-          } finally {
-            addBtn && (addBtn.disabled=false);
-            pendingImgPromise=null;
-          }
-        }
-      }
-
-      form.addEventListener('submit', async (e)=>{
-        const title=form.querySelector('input[name="title"]');
-        const priceEl=form.querySelector('input[name="pi_price"]');
-        const price=Number((priceEl?.value||'').trim());
-        if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
-        if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
-
-        // wait for any in-progress PNG upload
-        if(pendingImgPromise){ e.preventDefault(); await waitForPending(); form.submit(); return; }
-
-        const existing=(imgIn?.value||'').trim();
-        const hasSvg = !!(svgHidden && svgHidden.value.trim());
-
-        // If we already have a https image URL that verifies, just submit.
-        if(existing && /^https?:\/\//i.test(existing)){
-          const ok = await verifyImage(existing);
-          if(ok) return;
-          // if it looks bad but we have SVG, we’ll regenerate
-        }
-
-        // If we have SVG, we must convert to PNG now (do NOT fall back to saving raw SVG).
-        if(hasSvg){
-          e.preventDefault();
-          try{
-            addBtn && (addBtn.disabled=true); addBtn && (addBtn.textContent='Processing image…');
-            const url = await ensurePngFromSvg(svgHidden.value, 'listing');
-            imgIn.value = url;
-            const ok = await verifyImage(url);
-            if(!ok) throw new Error('png_verify_failed');
-            addBtn && (addBtn.textContent='Add Item');
-            form.submit();
-          }catch(err){
-            addBtn && (addBtn.textContent='Add Item'); addBtn && (addBtn.disabled=false);
-            alert('Couldn’t convert your crafted SVG into a PNG. Please try again or upload a PNG/JPG manually.');
-          }
-          return;
-        }
-
-        // No svg and no good image → block submit
-        if(!existing || !/^https?:\/\//i.test(existing)){
-          e.preventDefault();
-          alert('Please provide an image (PNG/JPG) for the product.');
-          return;
-        }
-      });
-
-      // expose helpers for the crafting hook below
-      window.__IZZA_IMG_HELPERS__ = { ensurePngFromSvg, waitForPending, setPending:(p)=>{ pendingImgPromise=p; } };
-    })();
-
-    // ---------- inline editor toggles ----------
-    document.addEventListener('click',(e)=>{
-      const btn=e.target.closest('[data-edit-toggle]'); if(!btn) return;
-      const id=btn.getAttribute('data-edit-toggle'); const row=document.getElementById('edit-row-'+id); if(!row) return;
-      row.style.display = (row.style.display==='none'||!row.style.display) ? 'table-row' : 'none';
     });
+  }
 
-    // ---------- delete store progressive enhancement ----------
-    (function(){
-      const form=$('#deleteStoreForm'); if(!form) return;
-      form.addEventListener('submit', async (e)=>{
-        if(!confirm('Are you sure you want to delete this store? This cannot be undone.')){ e.preventDefault(); return false; }
-        e.preventDefault();
-        const fd=new FormData(form);
-        try{
-          const r=await fetch(form.action,{method:'POST',body:fd,credentials:'include'});
-          if(r.ok){
-            let dest='/signin?fresh=1'; try{ const j=await r.clone().json(); if(j&&j.redirect) dest=j.redirect; }catch{}
-            if(!dest) dest=fd.get('redirect')||'/signin?fresh=1';
-            location.replace(dest);
-          }else{ form.submit(); }
-        }catch{ form.submit(); }
-      },{passive:false});
-    })();
+  // ---------- slug normalization ----------
+  function normSlug(v){
+    return (v||'').toLowerCase().trim().replace(/[\s_]+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-+| -+$/g,'');
+  }
+  (function wireSlugs(){
+    const setupEl = $('#slugInput'); if(setupEl){ setupEl.addEventListener('input',()=>{ const n=normSlug(setupEl.value); if(setupEl.value!==n) setupEl.value=n; }); setupEl.closest('form')?.addEventListener('submit',()=>{ setupEl.value=normSlug(setupEl.value); }); }
+    const editEl = $('#editSlugInput'); if(editEl){ editEl.addEventListener('input',()=>{ const n=normSlug(editEl.value); if(editEl.value!==n) editEl.value=n; }); editEl.closest('form')?.addEventListener('submit',()=>{ editEl.value=normSlug(editEl.value); }); }
+    const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
+  })();
 
-    // ---------- Crafting Land linker (auto preview + guaranteed PNG) ----------
-    (function(){
-      const GAME_BASE='https://izzagame.onrender.com';
-      const who=()=>{
-        const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
-        const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
-        try{ const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase(); }catch{}
-        try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j&&j.username) return String(j.username).toLowerCase(); } }catch{}
-        return '';
-      };
-      async function fetchState(user){
-        if(!user) return null;
-        const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
-        if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
-      }
-      function itemsFromState(j){
-        const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
-        const out=[]; Object.entries(inv).forEach(([key,val])=>{
-          if(!val||typeof val!=='object') return;
-          const count=Number(val.count||0), equippable=!!val.equippable;
-          const isGameItem=equippable||['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
-          if(!isGameItem && count<=0) return;
-          out.push({ id:key, title:val.name||key, img:val.image||val.image_url||'', sku:val.sku||'', svg:val.iconSvg||val.overlaySvg||(val.icon&&(val.icon.svg||val.icon))||'' });
-        }); return out;
-      }
-      function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
-      let CRAFT_ITEMS={};
-      function fillSelect(sel, items, currentId, isEdit){
-        if(!sel) return;
-        sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —'; sel.appendChild(opt0);
-        items.forEach(it=>{ const o=document.createElement('option'); o.value=String(it.id); o.textContent=it.title||it.id; if(currentId && String(currentId)===String(it.id)) o.selected=true; sel.appendChild(o); });
-        CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
-      }
-      function markAsCrafting(hidId,fkId,catId,val){
-        const hid=document.getElementById(hidId), fk=document.getElementById(fkId), cat=document.getElementById(catId);
-        if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
-      }
+  // ---------- SVG helpers ----------
+  function svgNormalize(s, px=512){
+    let x=(s||'').trim(); if(!x) return '';
+    if(!/^\s*<svg[\s>]/i.test(x)) return ''; // not an svg
+    if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+    if(!/viewBox=/i.test(x)){
+      const w=(x.match(/width="([\d.]+)"/i)||[])[1];
+      const h=(x.match(/height="([\d.]+)"/i)||[])[1];
+      if(w && h) x=x.replace('<svg','<svg viewBox="0 0 '+Number(w)+' '+Number(h)+'"');
+      else x=x.replace('<svg','<svg viewBox="0 0 512 512"');
+    }
+    // explicit size to avoid 0×0 natural size in <img> or when rasterizing
+    if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"'); else x=x.replace('<svg','<svg width="'+px+'"');
+    if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"'); else x=x.replace('<svg','<svg height="'+px+'"');
+    if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
+    return x;
+  }
 
-      // Create form wiring
-      (function wireCreate(){
-        const sel=$('#craftedSelect'); if(!sel) return;
-        const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
-        const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
+  // Inline an SVG string into a container
+  function injectSvg(container, svgString, px=80){
+    const el = (typeof container==='string') ? $(container) : container;
+    const s = svgNormalize(svgString, px);
+    if(!el || !s) return false;
+    el.innerHTML = s;
+    el.style.background='transparent';
+    return true;
+  }
 
-        async function setFromSvg(svg, id){
-          const { ensurePngFromSvg, setPending } = window.__IZZA_IMG_HELPERS__ || {};
-          const clean = sanitizeSvg(svg);
-          svgHidden.value = clean;
+  // Fetch an SVG by URL and inject it
+  async function injectSvgFromUrl(container, url, px=80){
+    try{
+      const r = await fetch(url, {credentials:'omit', cache:'force-cache'});
+      if(!r.ok) throw new Error('fetch_fail');
+      const ct = (r.headers.get('content-type')||'').toLowerCase();
+      if(!ct.includes('svg')) throw new Error('not_svg');
+      const svg = await r.text();
+      return injectSvg(container, svg, px);
+    }catch{ return false; }
+  }
 
-          // Show immediate inline preview
-          previewInlineSvg('itThumb', clean);
+  // ---------- Image URL verifier ----------
+  // Usage in console: window.testImageUrl('https://…')
+  window.testImageUrl = async function testImageUrl(url){
+    try{
+      const r = await fetch(url, {method:'GET', credentials:'omit', cache:'no-cache'});
+      const ct = r.headers.get('content-type')||'';
+      const sz = Number(r.headers.get('content-length')||0);
+      const ok = r.ok;
+      const txt = ct.includes('svg') ? (await r.clone().text()).slice(0,120) : '';
+      alert(`OK: ${ok}\nContent-Type: ${ct}\nSize: ${sz}\nURL: ${url}\n${txt ? 'SVG snippet: ' + txt.replace(/\n/g,' ') : ''}`);
+      return {ok, ct, sz};
+    }catch(e){
+      alert('Fetch failed: ' + (e&&e.message||e));
+      return {ok:false, error:String(e)};
+    }
+  };
 
-          // Start the PNG upload and hold the submit until it's done
-          const p = (async ()=> {
+  // Long-press any thumbnail .itimg to verify its actual URL
+  (function(){
+    let pressTimer=null;
+    document.addEventListener('touchstart', e=>{
+      const box=e.target.closest('.itimg'); if(!box) return;
+      clearTimeout(pressTimer);
+      pressTimer=setTimeout(()=>{
+        const img=box.querySelector('img'); 
+        let url = img ? new URL(img.src, location.href) : null;
+        let src = url ? (url.searchParams.get('src')||img.src) : '';
+        if(src) window.testImageUrl(decodeURIComponent(src));
+      },650);
+    }, {passive:true});
+    document.addEventListener('touchend', ()=>clearTimeout(pressTimer), {passive:true});
+  })();
+
+  // ---------- copy buttons ----------
+  document.addEventListener('click',(e)=>{
+    const t=e.target;
+    if(t && t.matches('[data-copy]')){
+      copyFrom(t.getAttribute('data-copy'));
+      t.textContent='Copied';
+      setTimeout(()=>t.textContent='Copy', 1200);
+    }
+  });
+
+  // ---------- logo upload ----------
+  (function(){
+    const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
+    if(!file||!btn||!inp) return;
+    file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
+    btn.addEventListener('click', async ()=>{
+      if(!file.files?.[0]){ inp.focus(); return; }
+      btn.disabled=true; btn.textContent='Uploading…';
+      try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }
+      catch{ alert('Upload failed. You can paste a URL instead.'); }
+      finally{ btn.disabled=false; btn.textContent='Upload'; }
+    });
+    inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
+    if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
+  })();
+
+  // ---------- item image upload ----------
+  (function(){
+    const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
+    if(!file||!btn||!inp) return;
+    file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
+    btn.addEventListener('click', async ()=>{
+      if(!file.files?.[0]){ inp.focus(); return; }
+      btn.disabled=true; btn.textContent='Uploading…';
+      try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }
+      catch{ alert('Upload failed. You can paste an image URL instead.'); }
+      finally{ btn.disabled=false; btn.textContent='Upload'; }
+    });
+    inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
+  })();
+
+  // ---------- Create Product: guard + keep crafted SVG ----------
+  (function(){
+    const form = document.querySelector('#create-product form'); if(!form) return;
+    form.addEventListener('submit', async (e)=>{
+      const title=form.querySelector('input[name="title"]');
+      const priceEl=form.querySelector('input[name="pi_price"]');
+      const price=Number((priceEl?.value||'').trim());
+      if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
+      if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
+      // No forced PNG conversion anymore. We keep svg_code (hidden) for rendering later.
+      // If user pasted an image URL, it will still be used by server.
+    });
+  })();
+
+  // ---------- inline editor toggles ----------
+  document.addEventListener('click',(e)=>{
+    const btn=e.target.closest('[data-edit-toggle]'); if(!btn) return;
+    const id=btn.getAttribute('data-edit-toggle'); const row=document.getElementById('edit-row-'+id); if(!row) return;
+    row.style.display = (row.style.display==='none'||!row.style.display) ? 'table-row' : 'none';
+  });
+
+  // ---------- delete store progressive enhancement ----------
+  (function(){
+    const form=$('#deleteStoreForm'); if(!form) return;
+    form.addEventListener('submit', async (e)=>{
+      if(!confirm('Are you sure you want to delete this store? This cannot be undone.')){ e.preventDefault(); return false; }
+      e.preventDefault();
+      const fd=new FormData(form);
+      try{
+        const r=await fetch(form.action,{method:'POST',body:fd,credentials:'include'});
+        if(r.ok){
+          let dest='/signin?fresh=1'; try{ const j=await r.clone().json(); if(j&&j.redirect) dest=j.redirect; }catch{}
+          if(!dest) dest=fd.get('redirect')||'/signin?fresh=1';
+          location.replace(dest);
+        }else{ form.submit(); }
+      }catch{ form.submit(); }
+    },{passive:false});
+  })();
+
+  // ---------- Crafting Land linker ----------
+  (function(){
+    const GAME_BASE='https://izzagame.onrender.com';
+    const who=()=>{
+      const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
+      const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
+      try{ const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase(); }catch{}
+      try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j&&j.username) return String(j.username).toLowerCase(); } }catch{}
+      return '';
+    };
+    async function fetchState(user){
+      if(!user) return null;
+      const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
+      if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
+    }
+    function itemsFromState(j){
+      const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
+      const out=[]; Object.entries(inv).forEach(([key,val])=>{
+        if(!val||typeof val!=='object') return;
+        const count=Number(val.count||0), equippable=!!val.equippable;
+        const isGameItem=equippable||['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
+        if(!isGameItem && count<=0) return;
+        out.push({ id:key, title:val.name||key, img:val.image||val.image_url||'', sku:val.sku||'', svg:val.iconSvg||val.overlaySvg||(val.icon&&(val.icon.svg||val.icon))||'' });
+      }); return out;
+    }
+    function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
+    let CRAFT_ITEMS={};
+    function fillSelect(sel, items, currentId, isEdit){
+      if(!sel) return;
+      sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —'; sel.appendChild(opt0);
+      items.forEach(it=>{ const o=document.createElement('option'); o.value=String(it.id); o.textContent=it.title||it.id; if(currentId && String(currentId)===String(it.id)) o.selected=true; sel.appendChild(o); });
+      CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
+    }
+    function markAsCrafting(hidId,fkId,catId,val){
+      const hid=document.getElementById(hidId), fk=document.getElementById(fkId), cat=document.getElementById(catId);
+      if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
+    }
+
+    // Create form wiring
+    (function wireCreate(){
+      const sel=$('#craftedSelect'); if(!sel) return;
+      const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
+      const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
+
+      function setFromSvg(svg, id){
+        svgHidden.value = svg || '';
+        if(svg){
+          // show inline now (same look everywhere)
+          injectSvg('#itThumb', svg, 80);
+          // (optional) still set a URL so the server has something in image_url if required
+          // Fallback: upload raw SVG so we have a permanent URL
+          (async()=>{
             try{
-              const url = await ensurePngFromSvg(clean, id||'crafted');
-              if(imgIn) imgIn.value = ABS(url);
-              setThumb('itThumb', proxy(url));
-              const ok = await verifyImage(url);
-              if(!ok) throw new Error('verify_failed');
-              return url;
-            }catch(e){
-              // Mark preview as bad so it’s obvious something failed
-              const el = document.getElementById('itThumb'); if(el) el.setAttribute('data-bad','1');
-              throw e;
-            }
+              const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
+              const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
+              const url=await uploadTo('/upload', file);
+              if(imgIn) imgIn.value=ABS(url);
+            }catch{/* ignore */}
           })();
-
-          setPending && setPending(p);
-          try{ await p; }catch{}
         }
+      }
 
-        function onChange(){
-          const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
-          const it=CRAFT_ITEMS[id]||{};
-          if(titleEl) titleEl.value = it.title || titleEl.value;
-          if(skuEl)   skuEl.value   = it.sku || '';
-          if(it.svg){ setFromSvg(it.svg, id); }
-          else if(it.img){
-            const u=ABS(ipfsToHttp(it.img)).trim();
+      async function onChange(){
+        const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
+        const it=CRAFT_ITEMS[id]||{};
+        if(titleEl) titleEl.value = it.title || titleEl.value;
+        if(skuEl)   skuEl.value   = it.sku || '';
+        if(it.svg){ setFromSvg(it.svg, id); }
+        else if(it.img){
+          const u=ABS(ipfsToHttp(it.img)).trim();
+          if(/\.svg(\?|$)/i.test(u)){ // inline SVG image URLs too
+            await injectSvgFromUrl('#itThumb', u, 80);
+            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
+          }else{
             if(imgIn) imgIn.value=u;
             setThumb('itThumb', proxy(u));
-            svgHidden.value=''; // nothing to keep
+            svgHidden.value='';
           }
         }
-        sel.addEventListener('change', onChange);
+      }
 
-        const btn=$('#refreshCrafted');
-        if(btn){
-          btn.addEventListener('click', async ()=>{
-            btn.disabled=true; btn.textContent='Refreshing…';
-            try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
-            finally{ btn.disabled=false; btn.textContent='Refresh'; }
-          });
-        }
+      sel.addEventListener('change', onChange);
 
-        (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
-      })();
-
-      // Edit rows wiring (leave as-is; storefront uses saved image_url)
-      (function wireEdit(){
-        $all('.craftedEditSelect').forEach(sel=>{
-          const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
-          const cur = document.getElementById(hidId)?.value || '';
-          sel.addEventListener('change', ()=>{
-            const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
-            const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
-            if(tEl) tEl.value = it.title || tEl.value;
-            if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
-          });
-          (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
+      const btn=$('#refreshCrafted');
+      if(btn){
+        btn.addEventListener('click', async ()=>{
+          btn.disabled=true; btn.textContent='Refreshing…';
+          try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
+          finally{ btn.disabled=false; btn.textContent='Refresh'; }
         });
-      })();
+      }
+
+      (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
     })();
 
-    // ---------- mount ----------
-    wireColorways();
-
+    // Edit rows wiring
+    (function wireEdit(){
+      $all('.craftedEditSelect').forEach(sel=>{
+        const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
+        const cur = document.getElementById(hidId)?.value || '';
+        sel.addEventListener('change', ()=>{
+          const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
+          const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
+          if(tEl) tEl.value = it.title || tEl.value;
+          if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
+        });
+        (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
+      });
+    })();
   })();
-  </script>
+
+  // ---------- After content: render SVGs inline for thumbnails in the table ----------
+  (async function enhanceListThumbs(){
+    const boxes = $all('.itimg');
+    await Promise.all(boxes.map(async box=>{
+      const img = box.querySelector('img');
+      if(!img) return;
+      // the src is /uimg?src=<encoded real url>
+      let u;
+      try{
+        const p = new URL(img.src, location.href);
+        u = p.searchParams.get('src') || img.src;
+      }catch{ u = img.src; }
+      const real = decodeURIComponent(u||'');
+      if(/\.svg(\?|$)/i.test(real)){
+        // Replace <img> with inline SVG (same look as preview)
+        const ok = await injectSvgFromUrl(box, real, 80);
+        if(!ok){ /* leave the <img> if we failed */ }
+      }
+    }));
+  })();
+
+  // ---------- mount ----------
+  wireColorways();
+
+})();
+</script>
 </body>
 </html>
