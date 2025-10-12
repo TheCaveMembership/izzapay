@@ -6,86 +6,55 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    html,body{max-width:100%;overflow-x:hidden;}
+    html,body{max-width:100%;overflow-x:hidden}
     body{font-family:Arial,Helvetica,sans-serif;margin:0}
-
     .wrap{max-width:960px;margin:0 auto;padding:16px}
-    @media (min-width:640px){ .wrap{padding:24px} }
-
-    .topbar{
-      display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
-      padding:8px 0; position:sticky; top:0; z-index:10;
-      background:rgba(11,15,23,.9); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
-    }
-
-    /* ===== Brand strip (dashboard & setup) ===== */
+    @media (min-width:640px){.wrap{padding:24px}}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 0;position:sticky;top:0;z-index:10;background:rgba(11,15,23,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
     .brand{display:flex;align-items:center;gap:10px;min-width:0}
     .brand-mark{width:48px;height:48px;object-fit:contain}
     .brand-word{height:36px;filter:brightness(1.06) contrast(1.02)}
-    @media (max-width:380px){
-      .brand-mark{width:40px;height:40px}
-      .brand-word{height:30px}
-    }
-
+    @media (max-width:380px){.brand-mark{width:40px;height:40px}.brand-word{height:30px}}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
     .actions a{white-space:nowrap}
-
-    .grid{display:grid; gap:12px; grid-template-columns: 1fr;}
-    @media (min-width:900px){ .grid{ grid-template-columns: 380px 1fr; align-items:start; } }
-
+    .grid{display:grid;gap:12px;grid-template-columns:1fr}
+    @media (min-width:900px){.grid{grid-template-columns:380px 1fr;align-items:start}}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
     .h1{font-size:24px;font-weight:800;margin:2px 0 10px}
     .h2{font-size:18px;font-weight:800;margin:0 0 10px}
     .muted{color:var(--muted)}
-
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .stack{display:flex;flex-direction:column;gap:8px}
-
     .field{display:flex;flex-direction:column;gap:6px}
     .field-inline{display:grid;gap:10px;grid-template-columns:1fr}
-    @media (min-width:600px){ .field-inline{grid-template-columns:1fr 1fr} }
+    @media (min-width:600px){.field-inline{grid-template-columns:1fr 1fr}}
     .ip-input,.ip-select,.ip-textarea{width:100%}
-
-    .pickers{ display:grid; gap:12px; grid-template-columns:1fr; }
-    @media (min-width:700px){ .pickers{ grid-template-columns:1fr 1fr; } }
-    .picker .thumb{
-      width:100%; height:120px; border:1px solid var(--line); border-radius:10px;
-      background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden;
-    }
-    .picker .thumb img{ width:100%; height:100%; object-fit:cover }
-
-    .itimg{ width:80px;height:80px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center }
+    .pickers{display:grid;gap:12px;grid-template-columns:1fr}
+    @media (min-width:700px){.pickers{grid-template-columns:1fr 1fr}}
+    .picker .thumb{width:100%;height:120px;border:1px solid var(--line);border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .picker .thumb img{width:100%;height:100%;object-fit:cover}
+    .itimg{width:80px;height:80px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;display:flex;align-items:center;justify-content:center}
     .itimg img{width:100%;height:100%;object-fit:cover}
-
-    .table-wrap{width:100%; overflow-x:auto}
-    table{width:100%;border-collapse:collapse; min-width:780px}
+    /* let injected inline SVG fill the thumb */
+    .itimg svg{width:100%;height:100%;display:block}
+    .table-wrap{width:100%;overflow-x:auto}
+    table{width:100%;border-collapse:collapse;min-width:780px}
     th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
     th{color:var(--muted);font-weight:600}
-
     .theme-swatches{display:flex;gap:10px;flex-wrap:wrap}
-    .swatch{
-      width:120px; padding:8px; border:1px solid var(--line); border-radius:10px; cursor:pointer;
-      display:flex; flex-direction:column; gap:6px; align-items:center; background:var(--card)
-    }
-    .swatch .preview{ width:100%; height:60px; border-radius:8px; border:1px solid var(--line); }
+    .swatch{width:120px;padding:8px;border:1px solid var(--line);border-radius:10px;cursor:pointer;display:flex;flex-direction:column;gap:6px;align-items:center;background:var(--card)}
+    .swatch .preview{width:100%;height:60px;border-radius:8px;border:1px solid var(--line)}
     .swatch small{color:var(--muted)}
-    .swatch.selected{outline:2px solid var(--accent);}
-
-    .link-chip{
-      display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;
-      padding:8px; border:1px solid var(--line); border-radius:10px; background:var(--card)
-    }
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
-    .btn-row{display:flex; gap:8px; flex-wrap:wrap}
-    .tiny{font-size:.9rem; padding:8px 10px}
-
+    .swatch.selected{outline:2px solid var(--accent)}
+    .link-chip{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+    .tiny{font-size:.9rem;padding:8px 10px}
     .edit-row{background:rgba(255,255,255,.02)}
     .sep{height:1px;background:var(--line);margin:10px 0}
     .actions-col{min-width:180px}
     .danger{background:#7a2c2c;color:#fff}
-
-    .hint{font-size:12px;color:var(--muted)}
-    .note{font-size:12px;color:var(--muted);margin-top:4px}
+    .hint,.note{font-size:12px;color:var(--muted)}
     .warn{color:#ffb86b}
     .success{color:#5ad49e}
   </style>
@@ -93,7 +62,6 @@
 {% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
 <body class="{{ cw }} theme-a">
   <div class="wrap">
-
     <div class="topbar">
       <div class="brand">
         <img src="/static/izzapay-mark.svg" class="brand-mark" alt="IZZA mark">
@@ -101,134 +69,59 @@
       </div>
       <div class="actions">
         <a class="ip-btn ghost" href="/explore">View Stores</a>
-        {% if not setup_mode and m %}
-          <a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">View My Sales</a>
-        {% endif %}
-        {% if username and ADMIN_PI_USERNAME and (username|lower == ADMIN_PI_USERNAME|lower) %}
-          <a class="ip-btn ghost" href="/admin{{ t and ('?t=' ~ t) or '' }}">Admin</a>
-        {% endif %}
+        {% if not setup_mode and m %}<a class="ip-btn ghost" href="/merchant/{{ m.slug }}/orders{% if t %}?t={{ t }}{% endif %}">View My Sales</a>{% endif %}
+        {% if username and ADMIN_PI_USERNAME and (username|lower == ADMIN_PI_USERNAME|lower) %}<a class="ip-btn ghost" href="/admin{{ t and ('?t=' ~ t) or '' }}">Admin</a>{% endif %}
       </div>
     </div>
 
     {% if setup_mode %}
       <div class="h1">Create your IZZA PAY Store</div>
-      {% if username %}
-        <p class="muted" style="margin-top:-6px">Signed in as <strong>@{{ username }}</strong></p>
-      {% endif %}
+      {% if username %}<p class="muted" style="margin-top:-6px">Signed in as <strong>@{{ username }}</strong></p>{% endif %}
+      {% if error %}<div class="card" style="border-color:#7a2c2c;background:rgba(122,44,44,.15);margin-bottom:10px"><div>{{ error }}</div></div>{% endif %}
 
-      {% if error %}
-        <div class="card" style="border-color:#7a2c2c;background:rgba(122,44,44,.15);margin-bottom:10px">
-          <div>{{ error }}</div>
-        </div>
-      {% endif %}
-
-      <!-- SETUP FORM -->
       <form class="grid" method="post" action="/merchant/setup">
         <input type="hidden" name="t" value="{{ t or '' }}">
         <input type="hidden" name="colorway" id="colorway" value="{{ cw }}">
-
         <div class="card stack">
+          <div class="field"><label class="ip-label">Store name</label><input class="ip-input" name="business_name" placeholder="Your store name" required></div>
           <div class="field">
-            <label class="ip-label">Store name</label>
-            <input class="ip-input" name="business_name" placeholder="Your store name" required>
+            <label class="ip-label">Store slug <span class="muted">(optional)</span></label>
+            <input class="ip-input" id="slugInput" name="slug" placeholder="your-handle" inputmode="latin" autocapitalize="none" spellcheck="false" pattern="[a-z0-9-]+" maxlength="40">
+            <small class="muted">Your storefront URL will be <code>/store/&lt;slug&gt;</code>.</small>
           </div>
-
-          <!-- Store slug (short URL name) -->
-          <div class="field">
-            <label class="ip-label">Store slug <span class="muted">(short URL name)</span> <span class="muted">(optional)</span></label>
-            <input class="ip-input" id="slugInput" name="slug"
-                   placeholder="your-handle"
-                   inputmode="latin"
-                   autocapitalize="none"
-                   spellcheck="false"
-                   pattern="[a-z0-9-]+"
-                   maxlength="40">
-            <small class="muted">
-              A “slug” is the short name in your URL (letters, numbers, and hyphens only).
-              Your storefront URL will be <code>/store/&lt;slug&gt;</code>.
-            </small>
-          </div>
-
-          <div class="field">
-            <label class="ip-label">Order notifications email</label>
-            <input class="ip-input" name="reply_to_email" type="email" placeholder="you@example.com" required>
-          </div>
-
+          <div class="field"><label class="ip-label">Order notifications email</label><input class="ip-input" name="reply_to_email" type="email" placeholder="you@example.com" required></div>
           <div class="field">
             <label class="ip-label">Pi wallet public key</label>
             <input class="ip-input" name="pi_wallet_address" placeholder="G… (56 characters)" maxlength="56" required>
             <small class="muted">Must start with <strong>G</strong> and be exactly 56 characters.</small>
           </div>
-
+          <div class="field"><label class="ip-label">Pi handle (optional)</label><input class="ip-input" name="pi_handle" placeholder="@your-pi-handle"></div>
+          <div class="field"><label class="ip-label">Theme mode</label><select class="ip-select" name="theme_mode"><option value="dark" selected>Dark</option><option value="light">Light</option></select></div>
           <div class="field">
-            <label class="ip-label">Pi handle (optional)</label>
-            <input class="ip-input" name="pi_handle" placeholder="@your-pi-handle">
-          </div>
-
-          <div class="field">
-            <label class="ip-label">Theme mode</label>
-            <select class="ip-select" name="theme_mode">
-              <option value="dark" selected>Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label class="ip-label">Images</label>
-            <div class="pickers">
-              <div class="picker card">
-                <div class="muted" style="font-weight:600;margin-bottom:6px">Logo</div>
-                <div class="thumb" id="logoThumb"><span class="muted">Preview</span></div>
-                <div class="row">
-                  <input type="file" id="logoFile" accept="image/*" style="flex:1" />
-                  <button class="ip-btn" type="button" id="logoUploadBtn">Upload</button>
-                </div>
-                <div class="field" style="margin-top:6px">
-                  <input class="ip-input" id="logoUrl" name="logo_url" placeholder="https://… (or paste a logo URL)">
-                </div>
-              </div>
+            <label class="ip-label">Logo</label>
+            <div class="picker card">
+              <div class="thumb" id="logoThumb"><span class="muted">Preview</span></div>
+              <div class="row"><input type="file" id="logoFile" accept="image/*" style="flex:1"/><button class="ip-btn" type="button" id="logoUploadBtn">Upload</button></div>
+              <div class="field" style="margin-top:6px"><input class="ip-input" id="logoUrl" name="logo_url" placeholder="https://… (or paste a logo URL)"></div>
             </div>
           </div>
-
-          <div class="row" style="justify-content:flex-end;margin-top:4px">
-            <button class="ip-btn" type="submit">Save &amp; Continue</button>
-          </div>
+          <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn" type="submit">Save &amp; Continue</button></div>
         </div>
 
         <div class="card stack">
           <div class="muted" style="font-weight:600">Look &amp; Feel</div>
-          <div class="theme-swatches">
-            <div class="swatch" data-cw="cw-blue">
-              <div class="preview theme-preview cw-blue theme-a">
-                <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div><small>Blue</small>
-            </div>
-            <div class="swatch" data-cw="cw-mint">
-              <div class="preview theme-preview cw-mint theme-a">
-                <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div><small>Mint</small>
-            </div>
-            <div class="swatch" data-cw="cw-purple">
-              <div class="preview theme-preview cw-purple theme-a">
-                <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div><small>Purple</small>
-            </div>
-            <div class="swatch" data-cw="cw-amber">
-              <div class="preview theme-preview cw-amber theme-a">
-                <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-              </div><small>Amber</small>
-            </div>
+          <div class="theme-swatches" data-colorpicker>
+            {% for c in ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
+            <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}"><div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div><small>{{ c.split('-')[1] | capitalize }}</small></div>
+            {% endfor %}
           </div>
-          <p class="muted" style="margin-top:8px">
-            Tap a color to preview instantly. We’ll save this choice with your store.
-          </p>
+          <p class="muted" style="margin-top:8px">Tap a color to preview instantly. We’ll save this choice with your store.</p>
         </div>
       </form>
-
     {% else %}
+
       <div class="h1">{{ m.business_name }}</div>
 
-      <!-- EDIT STORE SETTINGS -->
       {% set can_edit_slug = slug_edit_allowed if slug_edit_allowed is defined else False %}
       {% set next_edit = slug_next_edit_at if slug_next_edit_at is defined else None %}
 
@@ -238,64 +131,27 @@
           <input type="hidden" name="t" value="{{ t or '' }}">
           <input type="hidden" name="colorway" id="edit-colorway" value="{{ cw }}">
           <div class="field-inline">
-            <div class="field">
-              <label class="ip-label">Store name</label>
-              <input class="ip-input" name="business_name" value="{{ m.business_name or '' }}" required>
-            </div>
-            <div class="field">
-              <label class="ip-label">Order notifications email</label>
-              <input class="ip-input" name="reply_to_email" type="email" value="{{ m.reply_to_email or '' }}" required>
-            </div>
+            <div class="field"><label class="ip-label">Store name</label><input class="ip-input" name="business_name" value="{{ m.business_name or '' }}" required></div>
+            <div class="field"><label class="ip-label">Order notifications email</label><input class="ip-input" name="reply_to_email" type="email" value="{{ m.reply_to_email or '' }}" required></div>
           </div>
-
           <div class="field-inline">
-            <div class="field">
-              <label class="ip-label">Pi wallet public key</label>
-              <input class="ip-input" name="pi_wallet_address" value="{{ m.pi_wallet_address or '' }}" maxlength="56" required>
-            </div>
-            <div class="field">
-              <label class="ip-label">Pi handle</label>
-              <input class="ip-input" name="pi_handle" value="{{ m.pi_handle or '' }}">
-            </div>
+            <div class="field"><label class="ip-label">Pi wallet public key</label><input class="ip-input" name="pi_wallet_address" value="{{ m.pi_wallet_address or '' }}" maxlength="56" required></div>
+            <div class="field"><label class="ip-label">Pi handle</label><input class="ip-input" name="pi_handle" value="{{ m.pi_handle or '' }}"></div>
           </div>
-
-          <!-- Editable slug with 15-day rule -->
           <div class="field">
-            <label class="ip-label">
-              Store slug <span class="muted">(short URL name)</span>
-            </label>
+            <label class="ip-label">Store slug <span class="muted">(short URL name)</span></label>
             <div class="row" style="align-items:flex-start">
-              <input class="ip-input" id="editSlugInput" name="slug"
-                     value="{{ m.slug }}"
-                     inputmode="latin"
-                     autocapitalize="none"
-                     spellcheck="false"
-                     pattern="[a-z0-9-]+"
-                     maxlength="40"
-                     {% if not can_edit_slug %}disabled{% endif %}>
-              <button class="ip-btn ghost" type="button" id="enableSlugBtn"
-                      data-allowed="{{ '1' if can_edit_slug else '0' }}">
-                {% if can_edit_slug %}Edit slug{% else %}Locked{% endif %}
-              </button>
+              <input class="ip-input" id="editSlugInput" name="slug" value="{{ m.slug }}" inputmode="latin" autocapitalize="none" spellcheck="false" pattern="[a-z0-9-]+" maxlength="40" {% if not can_edit_slug %}disabled{% endif %}>
+              <button class="ip-btn ghost" type="button" id="enableSlugBtn" data-allowed="{{ '1' if can_edit_slug else '0' }}">{% if can_edit_slug %}Edit slug{% else %}Locked{% endif %}</button>
             </div>
             <small id="slugEditHint" class="hint">
-              {% if can_edit_slug %}
-                You can only edit your slug every 15 days. Choose carefully.
-              {% else %}
-                You can only edit your slug every 15 days.
-                {% if next_edit %}
-                  Next edit available: <strong>{{ next_edit }}</strong>.
-                {% endif %}
-              {% endif %}
-              Allowed characters: a–z, 0–9, hyphen. No spaces.
+              {% if can_edit_slug %}You can only edit your slug every 15 days. Choose carefully.{% else %}
+                You can only edit your slug every 15 days.{% if next_edit %} Next edit available: <strong>{{ next_edit }}</strong>.{% endif %}
+              {% endif %} Allowed characters: a–z, 0–9, hyphen. No spaces.
             </small>
           </div>
-
           <div class="field-inline">
-            <div class="field">
-              <label class="ip-label">Logo URL</label>
-              <input class="ip-input" name="logo_url" value="{{ m.logo_url or '' }}">
-            </div>
+            <div class="field"><label class="ip-label">Logo URL</label><input class="ip-input" name="logo_url" value="{{ m.logo_url or '' }}"></div>
             <div class="field">
               <label class="ip-label">Theme mode</label>
               <select class="ip-select" name="theme_mode">
@@ -307,88 +163,64 @@
 
           <div class="sep"></div>
           <div class="muted" style="font-weight:600">Colorway</div>
-          <div class="theme-swatches" id="edit-swatches">
-            {% set choices = ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
-            {% for c in choices %}
-              <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}">
-                <div class="preview theme-preview {{ c }} theme-a">
-                  <div class="blk"></div><div class="blk"></div><div class="blk"></div>
-                </div><small>{{ c.split('-')[1] | capitalize }}</small>
-              </div>
+          <div class="theme-swatches" id="edit-swatches" data-colorpicker>
+            {% for c in ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
+            <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}"><div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div><small>{{ c.split('-')[1] | capitalize }}</small></div>
             {% endfor %}
           </div>
 
-          <div class="row" style="justify-content:flex-end;margin-top:4px">
-            <button class="ip-btn" type="submit">Save Changes</button>
-          </div>
+          <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn" type="submit">Save Changes</button></div>
         </form>
       </div>
 
-      <!-- STOREFRONT LINK -->
       <div class="card" style="margin-bottom:12px">
         <div class="h2">Your Storefront</div>
         <div class="row" style="align-items:center;gap:10px">
-          <div class="link-chip">
-            <span class="muted">URL</span>
-            <span class="mono" id="storeUrl">{{ APP_BASE_URL }}/store/{{ m.slug }}</span>
-          </div>
-          <div class="btn-row">
-            <a class="ip-btn tiny" target="_blank" href="/store/{{ m.slug }}">Open</a>
-            <button class="ip-btn ghost tiny" type="button" data-copy="#storeUrl">Copy</button>
-          </div>
+          <div class="link-chip"><span class="muted">URL</span><span class="mono" id="storeUrl">{{ APP_BASE_URL }}/store/{{ m.slug }}</span></div>
+          <div class="btn-row"><a class="ip-btn tiny" target="_blank" href="/store/{{ m.slug }}">Open</a><button class="ip-btn ghost tiny" type="button" data-copy="#storeUrl">Copy</button></div>
         </div>
       </div>
 
-      <!-- CREATE PRODUCT -->
       <div class="card" id="create-product">
         <div class="h2">Create Product</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
           <input type="hidden" name="t" value="{{ t or '' }}">
           <div class="field-inline">
-            <div class="field">
-              <label class="ip-label">Title</label>
-              <input class="ip-input" name="title" required>
-            </div>
-            <div class="field">
-              <label class="ip-label">SKU</label>
-              <input class="ip-input" name="sku">
-            </div>
+            <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" required></div>
+            <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku"></div>
           </div>
-<!-- Crafting Land Linker -->
-<div class="field">
-  <label class="ip-label">Attach Crafting Land item (optional)</label>
-  <div class="row" style="gap:8px;align-items:center">
-    <select class="ip-select" id="craftedSelect">
-      <option value="">— Select a crafted item —</option>
-    </select>
-    <button type="button" class="ip-btn ghost tiny" id="refreshCrafted">Refresh</button>
-  </div>
-  <input type="hidden" name="crafted_item_id" id="crafted_item_id">
-  <!-- NEW: mark as crafting + digital collectible when selected -->
-  <input type="hidden" name="fulfillment_kind" id="fulfillment_kind" value="">
-  <input type="hidden" name="category" id="category" value="">
-  <small class="note">When attached, this product is marked as an in-game item.</small>
-</div>
+
+          <div class="field">
+            <label class="ip-label">Attach Crafting Land item (optional)</label>
+            <div class="row" style="gap:8px;align-items:center">
+              <select class="ip-select" id="craftedSelect"><option value="">— Select a crafted item —</option></select>
+              <button type="button" class="ip-btn ghost tiny" id="refreshCrafted">Refresh</button>
+            </div>
+            <input type="hidden" name="crafted_item_id" id="crafted_item_id">
+            <input type="hidden" name="fulfillment_kind" id="fulfillment_kind" value="">
+            <input type="hidden" name="category" id="category" value="">
+            <small class="note">When attached, this product is marked as an in-game item.</small>
+          </div>
+
           <div class="field">
             <label class="ip-label">Image</label>
             <div class="row" style="gap:8px;align-items:center">
               <div class="itimg" id="itThumb"><span class="muted" style="font-size:12px">Preview</span></div>
-              <input type="file" id="itFile" accept="image/*" />
+              <input type="file" id="itFile" accept="image/*"/>
               <button type="button" class="ip-btn" id="itUploadBtn">Upload</button>
             </div>
             <input class="ip-input" id="itUrl" name="image_url" placeholder="https://… (or paste an image URL)">
-            </div>
-            <!-- SVG Code (optional; used when coming from Crafting Land) -->
-<div class="field" style="margin-top:8px">
-  <label class="ip-label">SVG code (optional)</label>
-  <textarea class="ip-textarea" id="svgCode" rows="6" placeholder="<svg>…</svg>"></textarea>
-  <small class="note">If provided, click Preview to render it as the product image. You can still upload a PNG/JPG later.</small>
-  <div class="row" style="justify-content:flex-end;margin-top:6px">
-    <button class="ip-btn ghost tiny" type="button" id="previewSvgBtn">Preview SVG</button>
-  </div>
-</div>
+          </div>
 
-          <!-- Item Description -->
+          <div class="field" style="margin-top:8px">
+            <label class="ip-label">SVG code (optional)</label>
+            <textarea class="ip-textarea" id="svgCode" rows="6" placeholder="<svg>…</svg>"></textarea>
+            <small class="note">Click Preview to render it; we’ll upload a PNG for the listing when possible.</small>
+            <div class="row" style="justify-content:flex-end;margin-top:6px">
+              <button class="ip-btn ghost tiny" type="button" id="previewSvgBtn">Preview SVG</button>
+            </div>
+          </div>
+
           <div class="field">
             <label class="ip-label">Item Description</label>
             <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item, condition, size, shipping notes, etc."></textarea>
@@ -396,173 +228,105 @@
           </div>
 
           <div class="field-inline">
-            <div class="field">
-              <label class="ip-label">Price (Pi)</label>
-              <input class="ip-input" name="pi_price" inputmode="decimal" placeholder="0.1" required>
-            </div>
-            <div class="field">
-              <label class="ip-label">Stock Qty</label>
-              <input class="ip-input" name="stock_qty" inputmode="numeric" placeholder="10">
-            </div>
+            <div class="field"><label class="ip-label">Price (Pi)</label><input class="ip-input" name="pi_price" inputmode="decimal" placeholder="0.1" required></div>
+            <div class="field"><label class="ip-label">Stock Qty</label><input class="ip-input" name="stock_qty" inputmode="numeric" placeholder="10"></div>
           </div>
 
-          <label class="ip-label" style="display:flex;gap:6px;align-items:center">
-            <input type="checkbox" name="allow_backorder" value="1"> Allow backorder
-          </label>
+          <label class="ip-label" style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="allow_backorder" value="1"> Allow backorder</label>
 
-          <div class="row" style="justify-content:flex-end">
-            <button class="ip-btn" type="submit" id="addItemBtn">Add Item</button>
-          </div>
+          <div class="row" style="justify-content:flex-end"><button class="ip-btn" type="submit" id="addItemBtn">Add Item</button></div>
         </form>
       </div>
 
-      <!-- LIST -->
       <div class="card" style="margin-top:12px;">
         <div class="h2">Products</div>
         <div class="table-wrap">
           <table>
-            <thead>
-              <tr><th>Image</th><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Buy Now Link</th><th class="actions-col">Actions</th></tr>
-            </thead>
+            <thead><tr><th>Image</th><th>Title</th><th>Price (Pi)</th><th>Stock</th><th>Buy Now Link</th><th class="actions-col">Actions</th></tr></thead>
             <tbody>
             {% for it in items %}
               <tr>
                 <td>
-  {% set img = (it.image_url or '') | trim %}
-  <div class="itimg">
-    {% if img %}
-      <img
-        src="/uimg?src={{ img | urlencode }}"
-        alt=""
-        loading="lazy"
-        referrerpolicy="no-referrer"
-        onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())"
-      >
-    {% else %}
-      <span class="muted" style="font-size:12px">—</span>
-    {% endif %}
-  </div>
-</td>
-                <td>
-  {{ it.title }}
-  {% if it.fulfillment_kind == 'crafting' %}
-    <span class="mono" style="font-size:11px; padding:2px 6px; border:1px solid var(--line); border-radius:6px; margin-left:6px;">Game</span>
-  {% endif %}
-</td>
+                  {% set img = (it.image_url or '') | trim %}
+                  <div class="itimg">
+                    {% if img %}
+                      <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+                           onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
+                    {% else %}<span class="muted" style="font-size:12px">—</span>{% endif %}
+                  </div>
+                </td>
+                <td>{{ it.title }}{% if it.fulfillment_kind == 'crafting' %} <span class="mono" style="font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;margin-left:6px;">Game</span>{% endif %}</td>
                 <td>{{ '%.7f'|format(it.pi_price) }}</td>
                 <td>{{ it.stock_qty }}</td>
                 <td>
                   <div class="row" style="align-items:center;gap:8px">
-                    <div class="link-chip">
-                      <span class="mono" id="lnk-{{ it.link_id }}">{{ APP_BASE_URL }}/checkout/{{ it.link_id }}</span>
-                    </div>
-                    <div class="btn-row">
-                      <a class="ip-btn tiny" target="_blank" href="/checkout/{{ it.link_id }}">Open</a>
-                      <button class="ip-btn ghost tiny" type="button" data-copy="#lnk-{{ it.link_id }}">Copy</button>
-                    </div>
+                    <div class="link-chip"><span class="mono" id="lnk-{{ it.link_id }}">{{ APP_BASE_URL }}/checkout/{{ it.link_id }}</span></div>
+                    <div class="btn-row"><a class="ip-btn tiny" target="_blank" href="/checkout/{{ it.link_id }}">Open</a><button class="ip-btn ghost tiny" type="button" data-copy="#lnk-{{ it.link_id }}">Copy</button></div>
                   </div>
                 </td>
                 <td class="actions-col">
                   <div class="btn-row" style="flex-direction:column;align-items:stretch">
                     <button class="ip-btn tiny" type="button" data-edit-toggle="{{ it.id }}">Edit</button>
                     <form method="post" action="/merchant/{{ m.slug }}/items/delete{% if t %}?t={{ t }}{% endif %}" onsubmit="return confirm('Delete this product? This cannot be undone.');">
-                      <input type="hidden" name="item_id" value="{{ it.id }}">
-                      <input type="hidden" name="t" value="{{ t or '' }}">
+                      <input type="hidden" name="item_id" value="{{ it.id }}"><input type="hidden" name="t" value="{{ t or '' }}">
                       <button class="ip-btn tiny danger" type="submit">Delete</button>
                     </form>
                   </div>
                 </td>
               </tr>
-              <!-- inline editor row -->
               <tr class="edit-row" id="edit-row-{{ it.id }}" style="display:none">
                 <td colspan="6">
                   <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/update{% if t %}?t={{ t }}{% endif %}">
-                    <input type="hidden" name="t" value="{{ t or '' }}">
-                    <input type="hidden" name="item_id" value="{{ it.id }}">
+                    <input type="hidden" name="t" value="{{ t or '' }}"><input type="hidden" name="item_id" value="{{ it.id }}">
                     <div class="field-inline">
-                      <div class="field">
-                        <label class="ip-label">Title</label>
-                        <input class="ip-input" name="title" value="{{ it.title }}">
-                      </div>
-                      <div class="field">
-                        <label class="ip-label">SKU</label>
-                        <input class="ip-input" name="sku" value="{{ it.sku }}">
-                      </div>
+                      <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" value="{{ it.title }}"></div>
+                      <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku" value="{{ it.sku }}"></div>
                     </div>
                     <div class="field-inline">
-                      <div class="field">
-                        <label class="ip-label">Price (Pi)</label>
-                        <input class="ip-input" name="pi_price" inputmode="decimal" value="{{ '%.7f'|format(it.pi_price) }}">
+                      <div class="field"><label class="ip-label">Price (Pi)</label><input class="ip-input" name="pi_price" inputmode="decimal" value="{{ '%.7f'|format(it.pi_price) }}"></div>
+                      <div class="field"><label class="ip-label">Stock Qty</label><input class="ip-input" name="stock_qty" inputmode="numeric" value="{{ it.stock_qty }}"></div>
+                    </div>
+                    <div class="field"><label class="ip-label">Image URL</label><input class="ip-input" name="image_url" value="{{ it.image_url or '' }}"></div>
+                    <div class="field"><label class="ip-label">Item Description</label><textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item…">{{ it.description or '' }}</textarea><small class="note">Shown on your product page.</small></div>
+
+                    <div class="card" style="padding:12px;margin:6px 0">
+                      <div class="h2" style="font-size:16px;margin:0 0 8px">Crafting Checkout</div>
+                      <label class="ip-label" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                        <input type="checkbox" name="craft_dyn_enabled" value="1" {% if it.craft_dyn_enabled %}checked{% endif %}> Enable dynamic Pi price when opened with a Crafting draft link
+                      </label>
+                      <small class="note" style="display:block;margin:-2px 0 10px">If buyer arrives with <code>?draftId=123</code>, checkout uses the draft’s quote.</small>
+                      <div class="field-inline">
+                        <div class="field">
+                          <label class="ip-label">Mode</label>
+                          <select class="ip-select craft-mode" name="craft_dyn_mode" data-for="{{ it.id }}">
+                            <option value="auto_quote" {% if it.craft_dyn_mode=='auto_quote' %}selected{% endif %}>Auto (quoted IC → Pi)</option>
+                            <option value="fixed_ic" {% if it.craft_dyn_mode=='fixed_ic' %}selected{% endif %}>Fixed voucher value (IC)</option>
+                          </select>
+                          <small class="note">“Auto” uses the draft’s features; “Fixed” always uses the value below.</small>
+                        </div>
+                        <div class="field">
+                          <label class="ip-label">Fixed voucher value (IC)</label>
+                          <input class="ip-input craft-fixed-ic" name="craft_dyn_ic" inputmode="numeric" value="{{ it.craft_dyn_ic or 500 }}" data-for="{{ it.id }}">
+                          <small class="note">Only used when Mode = Fixed.</small>
+                        </div>
                       </div>
-                      <div class="field">
-                        <label class="ip-label">Stock Qty</label>
-                        <input class="ip-input" name="stock_qty" inputmode="numeric" value="{{ it.stock_qty }}">
+                      <div class="field-inline">
+                        <div class="field"><label class="ip-label">Floor price (Pi, optional)</label><input class="ip-input" name="craft_dyn_floor_pi" inputmode="decimal" value="{{ '%.7f'|format(it.craft_dyn_floor_pi) if it.craft_dyn_floor_pi is defined else '' }}"></div>
+                        <div class="field"><label class="ip-label">Notes (admin only)</label><input class="ip-input" name="craft_dyn_notes" value="{{ it.craft_dyn_notes or '' }}"></div>
                       </div>
                     </div>
+
                     <div class="field">
-                      <label class="ip-label">Image URL</label>
-                      <input class="ip-input" name="image_url" value="{{ it.image_url or '' }}">
+                      <label class="ip-label">Crafting Land item</label>
+                      <div class="row" style="gap:8px;align-items:center">
+                        <select class="ip-select craftedEditSelect" data-item-id="{{ it.id }}"><option value="">— None —</option></select>
+                      </div>
+                      <input type="hidden" name="crafted_item_id" id="crafted_item_id_{{ it.id }}" value="{{ it.crafted_item_id or '' }}">
+                      <input type="hidden" name="fulfillment_kind" id="fulfillment_kind_{{ it.id }}" value="{{ it.fulfillment_kind or '' }}">
+                      <input type="hidden" name="category" id="category_{{ it.id }}" value="{{ it.category or '' }}">
+                      <small class="note">Leave empty to treat as a normal (physical) item.</small>
                     </div>
-                    <!-- Item Description (edit) -->
-                    <div class="field">
-                      <label class="ip-label">Item Description</label>
-                      <textarea class="ip-textarea" name="description" rows="4" placeholder="Describe the item…">{{ it.description or '' }}</textarea>
-                      <small class="note">Shown on your product page.</small>
-                    </div>
-                    <!-- Dynamic Crafting checkout -->
-<div class="card" style="padding:12px;margin:6px 0">
-  <div class="h2" style="font-size:16px;margin:0 0 8px">Crafting Checkout</div>
 
-  <label class="ip-label" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-    <input type="checkbox" name="craft_dyn_enabled" value="1" {% if it.craft_dyn_enabled %}checked{% endif %}>
-    Enable dynamic Pi price when opened with a Crafting draft link
-  </label>
-  <small class="note" style="display:block;margin:-2px 0 10px">
-    When enabled, if the buyer arrives with <code>?draftId=123</code>, the checkout will fetch the draft’s quote and show that Pi price.
-  </small>
-
-  <div class="field-inline">
-    <div class="field">
-      <label class="ip-label">Mode</label>
-      <select class="ip-select craft-mode" name="craft_dyn_mode" data-for="{{ it.id }}">
-        <option value="auto_quote" {% if it.craft_dyn_mode=='auto_quote' %}selected{% endif %}>Auto (use draft’s quoted IC → Pi)</option>
-        <option value="fixed_ic" {% if it.craft_dyn_mode=='fixed_ic' %}selected{% endif %}>Fixed voucher value (IC)</option>
-      </select>
-      <small class="note">“Auto” uses the draft’s feature flags/levels to compute price. “Fixed” always issues the IC value below.</small>
-    </div>
-    <div class="field">
-      <label class="ip-label">Fixed voucher value (IC)</label>
-      <input class="ip-input craft-fixed-ic" name="craft_dyn_ic" inputmode="numeric"
-             value="{{ it.craft_dyn_ic or 500 }}" data-for="{{ it.id }}">
-      <small class="note">Only used when Mode = Fixed.</small>
-    </div>
-  </div>
-
-  <div class="field-inline">
-    <div class="field">
-      <label class="ip-label">Floor price (Pi, optional)</label>
-      <input class="ip-input" name="craft_dyn_floor_pi" inputmode="decimal" value="{{ '%.7f'|format(it.craft_dyn_floor_pi) if it.craft_dyn_floor_pi is defined else '' }}">
-      <small class="note">If set, dynamic Pi price will never display below this floor.</small>
-    </div>
-    <div class="field">
-      <label class="ip-label">Notes (admin only)</label>
-      <input class="ip-input" name="craft_dyn_notes" value="{{ it.craft_dyn_notes or '' }}">
-    </div>
-  </div>
-</div>
-                    <div class="field">
-  <label class="ip-label">Crafting Land item</label>
-  <div class="row" style="gap:8px;align-items:center">
-    <select class="ip-select craftedEditSelect" data-item-id="{{ it.id }}">
-      <option value="">— None —</option>
-    </select>
-  </div>
-  <input type="hidden" name="crafted_item_id" id="crafted_item_id_{{ it.id }}" value="{{ it.crafted_item_id or '' }}">
-  <!-- NEW (edit): keep fulfillment + category in sync -->
-  <input type="hidden" name="fulfillment_kind" id="fulfillment_kind_{{ it.id }}" value="{{ it.fulfillment_kind or '' }}">
-  <input type="hidden" name="category" id="category_{{ it.id }}" value="{{ it.category or '' }}">
-  <small class="note">Leave empty to treat as a normal (physical) item.</small>
-</div>
                     <div class="row" style="justify-content:flex-end">
                       <button class="ip-btn ghost tiny" type="button" data-edit-toggle="{{ it.id }}">Cancel</button>
                       <button class="ip-btn tiny" type="submit">Save</button>
@@ -576,863 +340,305 @@
         </div>
       </div>
 
-      <!-- DANGER ZONE: DELETE STORE (moved to the very bottom) -->
-      <div class="card" id="danger-zone" style="margin:12px 0 0 0;">
+      <div class="card" id="danger-zone" style="margin:12px 0 0 0">
         <div class="h2" style="color:#ffb86b">Danger Zone</div>
-        <p class="muted" style="margin-top:-2px">
-          Deleting your store will permanently remove <strong>all store information and items</strong>.
-          This cannot be undone.
-        </p>
+        <p class="muted" style="margin-top:-2px">Deleting your store will permanently remove <strong>all store information and items</strong>. This cannot be undone.</p>
         <ul class="muted" style="margin:6px 0 12px;padding-left:18px">
           <li>Make sure you’ve <strong>processed delivery for any purchased physical items</strong>.</li>
           <li>Confirm any open sales are completed or refunded as needed.</li>
         </ul>
         <form class="stack" id="deleteStoreForm" method="post" action="/merchant/{{ m.slug }}/delete{% if t %}?t={{ t }}{% endif %}">
-          <input type="hidden" name="t" value="{{ t or '' }}">
-          <!-- where to go after successful deletion -->
-          <input type="hidden" name="redirect" value="/signin?fresh=1">
-          <label class="ip-label" style="display:flex;gap:8px;align-items:flex-start">
-            <input type="checkbox" name="acknowledge" value="1" required>
-            <span>I understand this action is permanent and I have cleaned current sales and processed delivery of any purchased physical items.</span>
-          </label>
-          <div class="row" style="justify-content:flex-end;margin-top:4px">
-            <button class="ip-btn danger" type="submit">Delete Store</button>
-          </div>
+          <input type="hidden" name="t" value="{{ t or '' }}"><input type="hidden" name="redirect" value="/signin?fresh=1">
+          <label class="ip-label" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="acknowledge" value="1" required> <span>I understand this action is permanent and I have cleaned current sales and processed delivery of any purchased physical items.</span></label>
+          <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn danger" type="submit">Delete Store</button></div>
         </form>
       </div>
     {% endif %}
   </div>
 
   <script>
-/**
- * Inject server-known username → window & localStorage
- * Requires the template to render `username` (empty string if not signed in)
- */
-(function(){
-  try{
-    // Prefer ?u=… for testing; otherwise use server-rendered username
-    var SRV_USER = {{ (username or '') | tojson }};
-    var qsU = new URLSearchParams(location.search).get('u');
-
-    function norm(u){ return (u||'').toString().trim().replace(/^@+/, '').toLowerCase(); }
-
-    var u = norm(qsU || SRV_USER);
-
-    if (u){
-      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username: u });
-      window.izzaUserKey = { get(){ return u; } };
-      try{ localStorage.setItem('izzaUserU', u); }catch(_){}
-    }else{
-      // Optional UX hint when no username could be resolved
-      var sel = document.getElementById('craftedSelect');
-      if (sel){
-        sel.innerHTML = '';
-        var opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = 'No username available — add ?u=<username> to test';
-        sel.appendChild(opt);
-      }
-    }
-  }catch(_){}
-})();
-</script>
-  <script>
-  // Proxy external images so they always render (and allow local uploads too)
-function proxied(url){
-  const v = (url || '').trim();
-  if (!v) return '';
-  // already proxied or data/blob → return as-is
-  if (v.startsWith('/uimg?src=') || v.startsWith('data:') || v.startsWith('blob:')) return v;
-  // local relative paths (including uploads like /uploads/…) → return as-is
-  if (v.startsWith('/')) return v;
-
-  try {
-    const u = new URL(v, location.origin);
-    if (u.protocol === 'http:' || u.protocol === 'https:') {
-      return '/uimg?src=' + encodeURIComponent(u.href);
-    }
-  } catch(_) {}
-  return v;
-}
-  function setThumb(id, url){
-    const el = document.getElementById(id);
-    if(!el) return; el.innerHTML = '';
-    const img = document.createElement('img');
-    img.src = url;
-    img.onload = () => {
-      if (url.startsWith('blob:')) try { URL.revokeObjectURL(url); } catch(_){}
-    };
-    el.appendChild(img);
-  }
-
-  // Carry/derive short-lived bearer for uploads
-  function getToken() {
-    const inp = document.querySelector('input[name="t"]');
-    return (inp && inp.value) || new URLSearchParams(location.search).get('t') || '';
-  }
-  async function uploadTo(path, file){
-    const fd = new FormData(); fd.append('file', file);
-    const t = getToken();
-    const url = path + (t ? (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(t) : '');
-    const headers = {}; if (t) headers['Authorization'] = 'Bearer ' + t;
-    const r = await fetch(url, { method: 'POST', body: fd, headers, credentials: 'include' });
-    if(!r.ok){
-      let msg = 'upload failed'; try { const j = await r.json(); if (j?.error) msg += ` (${j.error})`; } catch(_){}
-      throw new Error(msg);
-    }
-    const j = await r.json(); if(!j.ok || !j.url) throw new Error('bad response');
-    return j.url;
-  }
-
-function toAbsoluteUrl(u){
-  try{
-    if(!u) return '';
-    if(/^https?:\/\//i.test(u)) return u;
-    if(u.startsWith('/')) return location.origin.replace(/\/$/, '') + u;
-    // last resort: resolve relative against current page
-    return new URL(u, location.origin).href;
-  }catch(_){ return u; }
-}
-    
-  // Copy helper
-  function copyFromSelector(sel){
-    const el = document.querySelector(sel); if(!el) return;
-    const text = el.textContent.trim();
-    if(!navigator.clipboard){
-      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
-      ta.select(); try{ document.execCommand('copy'); }catch(e){} document.body.removeChild(ta); return;
-    }
-    navigator.clipboard.writeText(text);
-  }
-  document.addEventListener('click', (e)=>{
-    const t = e.target;
-    if(t && t.matches('[data-copy]')){
-      const sel = t.getAttribute('data-copy');
-      if(sel){ copyFromSelector(sel); t.textContent='Copied'; setTimeout(()=>t.textContent='Copy', 1200); }
-    }
-  });
-
-  // Logo upload + preview (instant preview on file select)
   (function(){
-    const file = document.getElementById('logoFile');
-    const btn  = document.getElementById('logoUploadBtn');
-    const inp  = document.getElementById('logoUrl');
-    if(!file || !btn || !inp) return;
+    // ---------- tiny utils ----------
+    const $ = s => document.querySelector(s);
+    const $all = s => Array.from(document.querySelectorAll(s));
+    const ABS = u => { try{ if(!u) return ''; if(/^https?:\/\//i.test(u)) return u; if(u.startsWith('/')) return location.origin.replace(/\/$/,'')+u; return new URL(u, location.origin).href; }catch{ return u; } };
+    const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
+    const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
 
-    file.addEventListener('change', ()=>{
-      const f = file.files && file.files[0];
-      if (f){ setThumb('logoThumb', URL.createObjectURL(f)); }
-    });
+    // ---------- username → window/localStorage (used by crafting) ----------
+    try{
+      const SRV_USER = {{ (username or '') | tojson }};
+      const qsU = new URLSearchParams(location.search).get('u');
+      const norm = u => (u||'').toString().trim().replace(/^@+/, '').toLowerCase();
+      const u = norm(qsU || SRV_USER);
+      if (u){ window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__||{}, { username:u }); try{ localStorage.setItem('izzaUserU', u);}catch{} }
+      else{ const sel=$('#craftedSelect'); if(sel){ sel.innerHTML=''; const o=document.createElement('option'); o.value=''; o.textContent='No username — add ?u=<username> to test'; sel.appendChild(o);} }
+    }catch{}
 
-    btn.addEventListener('click', async () => {
-      if(!file.files || !file.files[0]){ inp.focus(); return; }
-      btn.disabled = true; btn.textContent = 'Uploading…';
-      try{
-        const url = await uploadTo('/upload', file.files[0]);
-        inp.value = toAbsoluteUrl(url); setThumb('logoThumb', proxied(url));
-      }catch(e){ alert('Upload failed. You can paste a URL instead.'); }
-      finally{ btn.disabled = false; btn.textContent = 'Upload'; }
-    });
-    inp.addEventListener('input', () => {
-      const v = proxied(inp.value); if(v) setThumb('logoThumb', v);
-    });
-    if (inp.value) { const v = proxied(inp.value); if (v) setThumb('logoThumb', v); }
-  })();
+    // ---------- uploads ----------
+    const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
+    async function uploadTo(path, file){
+      const fd=new FormData(); fd.append('file', file);
+      const t=token(); const url = path + (t ? (path.includes('?')?'&':'?') + 't='+encodeURIComponent(t) : '');
+      const headers={}; if(t) headers['Authorization']='Bearer '+t;
+      const r=await fetch(url,{method:'POST',body:fd,headers,credentials:'include'});
+      if(!r.ok) throw new Error('upload failed');
+      const j=await r.json(); if(!j.ok||!j.url) throw new Error('bad response');
+      return j.url;
+    }
+    function setThumb(id, url){ const el=document.getElementById(id); if(!el) return; el.innerHTML=''; const img=new Image(); img.src=url; img.onload=()=>{ if(url.startsWith('blob:')) try{URL.revokeObjectURL(url)}catch{} }; el.appendChild(img); }
 
-  // Item upload + preview (instant preview on file select)
-  (function(){
-    const file = document.getElementById('itFile');
-    const btn  = document.getElementById('itUploadBtn');
-    const inp  = document.getElementById('itUrl');
-    const thumbId = 'itThumb';
-    if(!file || !btn || !inp) return;
-
-    file.addEventListener('change', ()=>{
-      const f = file.files && file.files[0];
-      if (f){ setThumb(thumbId, URL.createObjectURL(f)); }
-    });
-
-    btn.addEventListener('click', async () => {
-      if(!file.files || !file.files[0]){ inp.focus(); return; }
-      btn.disabled = true; btn.textContent = 'Uploading…';
-      try{
-        const url = await uploadTo('/upload', file.files[0]);
-        inp.value = toAbsoluteUrl(url);
-        setThumb(thumbId, proxied(url));
-      }catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
-      finally{ btn.disabled = false; btn.textContent = 'Upload'; }
-    });
-    inp.addEventListener('input', () => {
-      const v = proxied(inp.value); if(v) setThumb(thumbId, v);
-    });
-  })();
-
-  // Colorway picker (setup)
-  (function(){
-    const swatches = document.querySelectorAll('.swatch');
-    const hidden = document.getElementById('colorway');
-    const body = document.body;
-    swatches.forEach(sw => {
-      if(hidden && sw.getAttribute('data-cw') === hidden.value){ sw.classList.add('selected'); }
-    });
-    swatches.forEach(sw => {
-      sw.addEventListener('click', () => {
-        body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
-        swatches.forEach(s=>s.classList.remove('selected'));
-        const cw = sw.getAttribute('data-cw'); if(cw) {
-          body.classList.add(cw); if(hidden) hidden.value = cw; sw.classList.add('selected');
-        }
-      });
-    });
-  })();
-
-  // Colorway picker (edit)
-  (function(){
-    const wrap = document.getElementById('edit-swatches'); if(!wrap) return;
-    const hidden = document.getElementById('edit-colorway');
-    const body = document.body;
-    const swatches = wrap.querySelectorAll('.swatch');
-    swatches.forEach(sw=>{
-      sw.addEventListener('click', ()=>{
-        body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
-        swatches.forEach(s=>s.classList.remove('selected'));
-        const cw = sw.getAttribute('data-cw');
-        if(cw){ body.classList.add(cw); hidden.value = cw; sw.classList.add('selected'); }
-      });
-    });
-  })();
-
-  // Slug helpers, guards, etc. (unchanged) ...
-
-  function normalizeSlug(raw){
-    let v = (raw || '').toLowerCase();
-    v = v.trim();
-    v = v.replace(/[\s_]+/g, '-');
-    v = v.replace(/[^a-z0-9-]/g, '');
-    v = v.replace(/-+/g, '-');
-    v = v.replace(/^-+/, '').replace(/-+$/, '');
-    return v;
-  }
-  (function(){
-    const setupEl = document.getElementById('slugInput');
-    if (setupEl){
-      setupEl.addEventListener('input', ()=> {
-        const n = normalizeSlug(setupEl.value);
-        if (setupEl.value !== n) setupEl.value = n;
-      });
-      const form = setupEl.closest('form');
-      if (form){
-        form.addEventListener('submit', ()=> {
-          setupEl.value = normalizeSlug(setupEl.value);
+    // ---------- colorway pickers (setup + edit) ----------
+    function wireColorways(){
+      $all('[data-colorpicker]').forEach(wrap=>{
+        wrap.querySelectorAll('.swatch').forEach(sw=>{
+          sw.addEventListener('click',()=>{
+            document.body.classList.remove('cw-blue','cw-mint','cw-purple','cw-amber');
+            wrap.querySelectorAll('.swatch').forEach(s=>s.classList.remove('selected'));
+            const cw=sw.getAttribute('data-cw'); if(!cw) return;
+            document.body.classList.add(cw); sw.classList.add('selected');
+            const hidden = $('#colorway') || $('#edit-colorway'); if(hidden) hidden.value=cw;
+          });
         });
-      }
-    }
-
-    const editEl = document.getElementById('editSlugInput');
-    if (editEl){
-      editEl.addEventListener('input', ()=> {
-        const n = normalizeSlug(editEl.value);
-        if (editEl.value !== n) editEl.value = n;
       });
-      const form = editEl.closest('form');
-      if (form){
-        form.addEventListener('submit', ()=> {
-          editEl.value = normalizeSlug(editEl.value);
-        });
-      }
     }
-  })();
 
-  (function(){
-    const btn = document.getElementById('enableSlugBtn');
-    const input = document.getElementById('editSlugInput');
-    const hint = document.getElementById('slugEditHint');
-    if (!btn || !input || !hint) return;
-    const allowed = btn.getAttribute('data-allowed') === '1';
-    btn.addEventListener('click', ()=>{
-      if (!allowed){
-        hint.classList.add('warn');
-        hint.textContent = hint.textContent || 'You can only edit your slug every 15 days.';
-        return;
-      }
-      if (!input.disabled) return;
-      input.disabled = false;
-      input.focus();
-      btn.textContent = 'Slug unlocked';
-      hint.classList.add('warn');
-      hint.textContent = 'You can only edit your slug every 15 days. Choose carefully.';
-    });
-  })();
+    // ---------- slug normalization ----------
+    function normSlug(v){
+      return (v||'').toLowerCase().trim().replace(/[\s_]+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-+| -+$/g,'');
+    }
+    (function wireSlugs(){
+      const setupEl = $('#slugInput'); if(setupEl){ setupEl.addEventListener('input',()=>{ const n=normSlug(setupEl.value); if(setupEl.value!==n) setupEl.value=n; }); setupEl.closest('form')?.addEventListener('submit',()=>{ setupEl.value=normSlug(setupEl.value); }); }
+      const editEl = $('#editSlugInput'); if(editEl){ editEl.addEventListener('input',()=>{ const n=normSlug(editEl.value); if(editEl.value!==n) editEl.value=n; }); editEl.closest('form')?.addEventListener('submit',()=>{ editEl.value=normSlug(editEl.value); }); }
+      const btn=$('#enableSlugBtn'), hint=$('#slugEditHint'); if(btn && editEl && hint){ const allowed = btn.getAttribute('data-allowed')==='1'; btn.addEventListener('click',()=>{ if(!allowed){ hint.classList.add('warn'); return; } if(editEl.disabled){ editEl.disabled=false; editEl.focus(); btn.textContent='Slug unlocked'; hint.classList.add('warn'); } }); }
+    })();
 
-// Guard + ensure we have a real URL (PNG if possible, else raw SVG) before submit
-(function(){
-  const form = document.querySelector('#create-product form'); 
-  if(!form) return;
-
-  // Use "cover" so tall/wide SVGs don't become skinny bars
-  function svgToPngBlob(svgString, size = 512, timeoutMs = 8000){
-    return new Promise((resolve, reject)=>{
+    // ---------- svg helpers (single source of truth) ----------
+    function svgNormalize(s){
+      let x=(s||'').trim(); if(!x) return '';
+      if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+      if(!/viewBox=/i.test(x) && !/width=/i.test(x)) x=x.replace('<svg','<svg viewBox="0 0 512 512"');
+      if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
+      return x;
+    }
+    async function svgToPngBlob(svgString, size=512, timeoutMs=8000){
+      const s = svgNormalize(svgString); if(!s) throw new Error('empty_svg');
+      const blob = new Blob([s], {type:'image/svg+xml'}); const url = URL.createObjectURL(blob);
       try{
-        let s = (svgString || '').trim();
-        if(!s) return reject(new Error('empty_svg'));
-        if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-        if(!/viewBox=/i.test(s) && !/width=/i.test(s))
-          s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
-
-        const svgBlob = new Blob([s], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(svgBlob);
-
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.decoding = 'async';
-
-        const cleanup = ()=>{ try{ URL.revokeObjectURL(url); }catch(_){} };
-
-        img.onload = () => {
-          try{
-            const w = size, h = size;
-            const canvas = document.createElement('canvas');
-            canvas.width = w; canvas.height = h;
-            const ctx = canvas.getContext('2d');
-
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0,0,w,h);
-
-            // COVER the square (no thin line)
-            const scale = Math.max(w / img.width, h / img.height);
-            const dw = img.width * scale, dh = img.height * scale;
-            const dx = (w - dw) / 2, dy = (h - dh) / 2;
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(img, dx, dy, dw, dh);
-
-            canvas.toBlob((blob)=>{
-              cleanup();
-              if(!blob) return reject(new Error('png_blob_failed'));
-              resolve(blob);
-            }, 'image/png', 0.92);
-          }catch(e){
-            cleanup();
-            reject(e);
-          }
-        };
-        img.onerror = ()=>{ cleanup(); reject(new Error('svg_img_load_failed')); };
-
-        const t = setTimeout(()=>{ cleanup(); reject(new Error('png_timeout')); }, timeoutMs);
-        const origOnload = img.onload;
-        img.onload = function(){ clearTimeout(t); return origOnload.apply(this, arguments); };
-
-        img.src = url;
-      }catch(err){ reject(err); }
-    });
-  }
-
-  // Submit handler (kept same, just lives INSIDE this IIFE)
-  form.addEventListener('submit', async (e) => {
-    const priceEl = form.querySelector('input[name="pi_price"]');
-    const titleEl = form.querySelector('input[name="title"]');
-    const imgIn   = document.getElementById('itUrl');
-    const svgTA   = document.getElementById('svgCode');
-
-    // Basic validation
-    const v = (priceEl?.value || '').trim();
-    const price = Number(v);
-    if (!titleEl?.value.trim()){
-      e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
+        const img = new Image(); img.crossOrigin='anonymous'; img.decoding='async';
+        const loaded = new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('svg_img_load_failed')); });
+        const t=setTimeout(()=>{ try{URL.revokeObjectURL(url)}catch{} }, timeoutMs);
+        img.src=url; await loaded; clearTimeout(t);
+        const w=size,h=size, cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h;
+        const ctx=cvs.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+        const scale=Math.max(w/img.width, h/img.height); // COVER
+        const dw=img.width*scale, dh=img.height*scale, dx=(w-dw)/2, dy=(h-dh)/2;
+        ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(img,dx,dy,dw,dh);
+        return await new Promise((res,rej)=>cvs.toBlob(b=>b?res(b):rej(new Error('png_blob_failed')),'image/png',0.92));
+      } finally { try{URL.revokeObjectURL(url)}catch{} }
     }
-    if (!v || isNaN(price) || price <= 0){
-      e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
+    function previewInlineSvg(targetId, svg){
+      const el=document.getElementById(targetId); if(!el) return;
+      const s=svgNormalize(svg); if(!s) return;
+      el.innerHTML=s; el.style.background='#fff'; el.style.display='flex'; el.style.alignItems='center'; el.style.justifyContent='center'; el.style.border='1px solid var(--line)';
     }
 
-    // Block saving data:/blob:
-    const existing = (imgIn?.value || '').trim();
-    if (existing && /^data:|^blob:/i.test(existing)) {
-      e.preventDefault();
-      alert('That image URL can’t be saved. Please upload or paste a normal https:// URL.');
-      return false;
-    }
+    // ---------- copy buttons ----------
+    document.addEventListener('click',(e)=>{ const t=e.target; if(t && t.matches('[data-copy]')){ copyFrom(t.getAttribute('data-copy')); t.textContent='Copied'; setTimeout(()=>t.textContent='Copy', 1200); } });
 
-    // If there is SVG but no usable HTTPS image yet → rasterize & upload PNG
-    const needRealUrl = !!(svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)));
-    if (!needRealUrl) return;
+    // ---------- logo upload ----------
+    (function(){
+      const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
+      if(!file||!btn||!inp) return;
+      file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
+      btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }catch{ alert('Upload failed. You can paste a URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
+      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
+      if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
+    })();
 
-    e.preventDefault();
-    const svg = svgTA.value.trim();
+    // ---------- item image upload ----------
+    (function(){
+      const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
+      if(!file||!btn||!inp) return;
+      file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
+      btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } btn.disabled=true; btn.textContent='Uploading…'; try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb(thumbId, proxy(url)); }catch{ alert('Upload failed. You can paste an image URL instead.'); } finally{ btn.disabled=false; btn.textContent='Upload'; } });
+      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
+    })();
 
-    try {
-      const blob = await svgToPngBlob(svg, 512, 8000);
-      const file = new File([blob], 'preview.png', { type: 'image/png' });
-      const uploadedPng = await uploadTo('/upload', file);
-      imgIn.value = toAbsoluteUrl(uploadedPng).trim();
-      if (!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_png_url');
-      form.submit(); return;
-    } catch (_) {
-      // Fallback: upload raw SVG so we still store a permanent URL
-      try{
-        const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
-        const svgFile = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
-        const uploadedSvg = await uploadTo('/upload', svgFile);
-        imgIn.value = toAbsoluteUrl(uploadedSvg).trim();
-        if (!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_svg_url');
-        form.submit(); return;
-      }catch(_){
-        alert('Couldn’t convert or upload your SVG. Upload/paste a PNG/JPG URL, or try again.');
-        return false;
-      }
-    }
-  });
-})();
-    // Toggle inline product editor
-  document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('[data-edit-toggle]'); if(!btn) return;
-    const id = btn.getAttribute('data-edit-toggle');
-    const row = document.getElementById('edit-row-' + id); if(!row) return;
-    row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
-  });
+    // ---------- product form guard + SVG → PNG ----------
+    (function(){
+      const form = document.querySelector('#create-product form'); if(!form) return;
+      form.addEventListener('submit', async (e)=>{
+        const title=form.querySelector('input[name="title"]');
+        const priceEl=form.querySelector('input[name="pi_price"]');
+        const imgIn=$('#itUrl'); const svgTA=$('#svgCode');
+        const price=Number((priceEl?.value||'').trim());
+        if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
+        if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
 
-  // ===== SVG preview (inline inject) + ensure image_url is persisted (PNG rasterize) =====
-(function(){
-  const btn    = document.getElementById('previewSvgBtn');
-  const ta     = document.getElementById('svgCode');
-  const imgIn  = document.getElementById('itUrl');
-  const thumbId = 'itThumb';
-  if (!btn || !ta) return;
+        const existing=(imgIn?.value||'').trim();
+        if(existing && /^data:|^blob:/i.test(existing)){ e.preventDefault(); alert('That image URL can’t be saved. Please upload or paste a normal https:// URL.'); return false; }
 
-  // Inline preview (inject SVG into the thumb so Safari renders it reliably)
-  function previewSvgInline(svgString){
-    try{
-      const el = document.getElementById(thumbId);
-      if(!el) return;
-      let s = (svgString || '').trim();
-      if(!s) return;
-      if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-      if(!/viewBox=/i.test(s) && !/width=/i.test(s))
-        s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
-      el.innerHTML = s;
-      el.style.background = '#fff';
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-      el.style.border = '1px solid var(--line)';
-    }catch(e){ console.error('SVG render failed', e); }
-  }
+        const hasSvg = !!(svgTA && svgTA.value.trim());
+        const needUrl = !existing || /^data:|^blob:/i.test(existing);
+        if(!(hasSvg && needUrl)) return;
 
-  // Rasterize SVG → PNG using a Blob URL (safer than data: on iOS)
-  async function svgToPngBlob(svgString, size = 512, timeoutMs = 8000){
-    let s = (svgString || '').trim();
-    if(!s) throw new Error('empty_svg');
-    if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    if(!/viewBox=/i.test(s) && !/width=/i.test(s))
-      s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
-
-    const svgBlob = new Blob([s], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(svgBlob);
-
-    try{
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.decoding = 'async';
-
-      const loaded = new Promise((resolve, reject)=>{
-        img.onload = resolve;
-        img.onerror = ()=>reject(new Error('svg_img_load_failed'));
-      });
-
-      const t = setTimeout(()=>{ try{URL.revokeObjectURL(url);}catch(_){} }, timeoutMs);
-      img.src = url;
-      await loaded;
-      clearTimeout(t);
-
-      const w = size, h = size;
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0,0,w,h);
-
-      const scale = Math.max(w / img.width, h / img.height);   // fill the square
-      const dw = img.width * scale, dh = img.height * scale;
-      const dx = (w - dw) / 2,       dy = (h - dh) / 2;
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, dx, dy, dw, dh);
-
-      return await new Promise((resolve, reject)=>{
-        canvas.toBlob(b=> b ? resolve(b) : reject(new Error('png_blob_failed')), 'image/png', 0.92);
-      });
-    } finally {
-      try{ URL.revokeObjectURL(url); }catch(_){}
-    }
-  }
-
-  btn.addEventListener('click', async ()=>{
-    const svg = (ta.value || '').trim();
-    if (!svg) { alert('No SVG code to preview.'); return; }
-
-    // 1) Show inline preview immediately
-    previewSvgInline(svg);
-
-    // 2) Try to persist a PNG thumbnail; if that fails, persist raw SVG
-    try{
-      const blob = await svgToPngBlob(svg, 512, 8000);
-      const file = new File([blob], 'preview.png', { type: 'image/png' });
-      const uploadedUrl = await uploadTo('/upload', file);
-      imgIn.value = toAbsoluteUrl(uploadedUrl).trim();
-      setThumb(thumbId, proxied(uploadedUrl));
-    }catch(_){
-      try{
-        const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
-        const svgFile = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
-        const uploadedSvg = await uploadTo('/upload', svgFile);
-        imgIn.value = toAbsoluteUrl(uploadedSvg).trim();
-        setThumb(thumbId, proxied(uploadedSvg));
-      }catch(_){
-        alert('Preview failed to upload. You can still paste an image URL or try again.');
-      }
-    }
-  }); // ← close addEventListener properly
-
-})(); // ← close IIFE
-    
-  // ===== Prefill from session (set by /api/merchant/create_product_from_craft) =====
-  (function(){
-    const PREFILL = {{ (PREFILL or {}) | tojson | safe }};
-    if (!PREFILL || Object.keys(PREFILL).length === 0) return;
-
-    const form = document.querySelector('#create-product form');
-    if (!form) return;
-
-    const titleEl = form.querySelector('input[name="title"]');
-    const descEl  = form.querySelector('textarea[name="description"]');
-    const svgTA   = document.getElementById('svgCode');
-    const previewBtn = document.getElementById('previewSvgBtn');
-
-    if (titleEl && !titleEl.value && PREFILL.title) titleEl.value = PREFILL.title;
-    if (descEl  && !descEl.value  && PREFILL.description) descEl.value = PREFILL.description;
-
-    if (svgTA && PREFILL.svg) {
-      svgTA.value = PREFILL.svg;
-      previewBtn && previewBtn.click();
-    }
-  })();
-
-  // Crafting dynamic mode UI toggles (hide fixed IC when auto mode)
-  (function(){
-    function syncRow(rowId){
-      const mode = document.querySelector(`select.craft-mode[data-for="${rowId}"]`);
-      const ic   = document.querySelector(`input.craft-fixed-ic[data-for="${rowId}"]`);
-      if(!mode || !ic) return;
-      const isFixed = (mode.value === 'fixed_ic');
-      ic.closest('.field').style.display = isFixed ? '' : 'none';
-    }
-    document.querySelectorAll('select.craft-mode').forEach(sel=>{
-      const id = sel.getAttribute('data-for');
-      syncRow(id);
-      sel.addEventListener('change', ()=>syncRow(id));
-    });
-  })();
-
-  // Progressive enhancement: delete store -> confirm -> POST -> redirect
-  (function(){
-    const form = document.getElementById('deleteStoreForm');
-    if(!form) return;
-    form.addEventListener('submit', async (e)=>{
-      const ok = confirm('Are you sure you want to delete this store? This will delete all store info and items. Make sure you have processed delivery of any purchased physical items. This cannot be undone.');
-      if(!ok) { e.preventDefault(); return false; }
-      e.preventDefault();
-      const fd = new FormData(form);
-      try{
-        const r = await fetch(form.action, { method:'POST', body:fd, credentials:'include' });
-        if(r.ok){
-          let dest = '/signin?fresh=1';
-          try { const j = await r.clone().json(); if (j && j.redirect) dest = j.redirect; } catch(_){}
-          if (!dest) dest = fd.get('redirect') || '/signin?fresh=1';
-          location.replace(dest);
-        }else{
+        e.preventDefault();
+        const svg=svgTA.value.trim();
+        try{
+          const blob=await svgToPngBlob(svg, 512, 8000);
+          const file=new File([blob],'preview.png',{type:'image/png'});
+          const uploaded=await uploadTo('/upload', file);
+          imgIn.value=ABS(uploaded).trim();
+          if(!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_png_url');
           form.submit();
+        }catch{
+          try{
+            const raw=new Blob([svgNormalize(svg)],{type:'image/svg+xml'});
+            const file=new File([raw],'image.svg',{type:'image/svg+xml'});
+            const uploaded=await uploadTo('/upload', file);
+            imgIn.value=ABS(uploaded).trim();
+            if(!/^https?:\/\//i.test(imgIn.value)) throw new Error('bad_svg_url');
+            form.submit();
+          }catch{
+            alert('Couldn’t convert or upload your SVG. Upload/paste a PNG/JPG URL, or try again.');
+          }
         }
-      }catch(_){ form.submit(); }
-    }, { passive:false });
+      });
+
+      // Preview button
+      const previewBtn=$('#previewSvgBtn'), ta=$('#svgCode'), thumbId='itThumb', imgIn=$('#itUrl');
+      if(previewBtn && ta){
+        previewBtn.addEventListener('click', async ()=>{
+          const svg=(ta.value||'').trim(); if(!svg){ alert('No SVG code to preview.'); return; }
+          previewInlineSvg(thumbId, svg);
+          try{
+            const blob=await svgToPngBlob(svg,512,8000);
+            const file=new File([blob],'preview.png',{type:'image/png'});
+            const url=await uploadTo('/upload', file);
+            imgIn.value=ABS(url).trim();
+            setThumb(thumbId, proxy(url));
+          }catch{
+            try{
+              const raw=new Blob([svgNormalize(svg)],{type:'image/svg+xml'});
+              const file=new File([raw],'image.svg',{type:'image/svg+xml'});
+              const url=await uploadTo('/upload', file);
+              imgIn.value=ABS(url).trim();
+              setThumb(thumbId, proxy(url));
+            }catch{
+              alert('Preview failed to upload. You can still paste an image URL or try again.');
+            }
+          }
+        });
+      }
+    })();
+
+    // ---------- inline editor toggles ----------
+    document.addEventListener('click',(e)=>{
+      const btn=e.target.closest('[data-edit-toggle]'); if(!btn) return;
+      const id=btn.getAttribute('data-edit-toggle'); const row=document.getElementById('edit-row-'+id); if(!row) return;
+      row.style.display = (row.style.display==='none'||!row.style.display) ? 'table-row' : 'none';
+    });
+
+    // ---------- delete store progressive enhancement ----------
+    (function(){
+      const form=$('#deleteStoreForm'); if(!form) return;
+      form.addEventListener('submit', async (e)=>{
+        if(!confirm('Are you sure you want to delete this store? This cannot be undone.')){ e.preventDefault(); return false; }
+        e.preventDefault();
+        const fd=new FormData(form);
+        try{
+          const r=await fetch(form.action,{method:'POST',body:fd,credentials:'include'});
+          if(r.ok){
+            let dest='/signin?fresh=1'; try{ const j=await r.clone().json(); if(j&&j.redirect) dest=j.redirect; }catch{}
+            if(!dest) dest=fd.get('redirect')||'/signin?fresh=1';
+            location.replace(dest);
+          }else{ form.submit(); }
+        }catch{ form.submit(); }
+      },{passive:false});
+    })();
+
+    // ---------- Crafting Land linker ----------
+    (function(){
+      const GAME_BASE='https://izzagame.onrender.com';
+      const who=()=>{
+        const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
+        const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
+        try{ const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase(); }catch{}
+        try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j&&j.username) return String(j.username).toLowerCase(); } }catch{}
+        return '';
+      };
+      async function fetchState(user){
+        if(!user) return null;
+        const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
+        if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
+      }
+      function itemsFromState(j){
+        const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
+        const out=[]; Object.entries(inv).forEach(([key,val])=>{
+          if(!val||typeof val!=='object') return;
+          const count=Number(val.count||0), equippable=!!val.equippable;
+          const isGameItem=equippable||['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
+          if(!isGameItem && count<=0) return;
+          out.push({ id:key, title:val.name||key, img:val.image||val.image_url||'', sku:val.sku||'', svg:val.iconSvg||val.overlaySvg||(val.icon&&(val.icon.svg||val.icon))||'' });
+        }); return out;
+      }
+      function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
+      let CRAFT_ITEMS={};
+      function fillSelect(sel, items, currentId, isEdit){
+        if(!sel) return;
+        sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —'; sel.appendChild(opt0);
+        items.forEach(it=>{ const o=document.createElement('option'); o.value=String(it.id); o.textContent=it.title||it.id; if(currentId && String(currentId)===String(it.id)) o.selected=true; sel.appendChild(o); });
+        CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
+      }
+      function markAsCrafting(hidId,fkId,catId,val){
+        const hid=document.getElementById(hidId), fk=document.getElementById(fkId), cat=document.getElementById(catId);
+        if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
+      }
+
+      // Create form wiring
+      (function wireCreate(){
+        const sel=$('#craftedSelect'); if(!sel) return;
+        const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
+        function onChange(){
+          const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
+          const it=CRAFT_ITEMS[id]||{}; const titleEl=document.querySelector('#create-product form input[name="title"]');
+          const skuEl=document.querySelector('#create-product form input[name="sku"]');
+          const imgIn=$('#itUrl'); const svgTA=$('#svgCode');
+          if(titleEl) titleEl.value = it.title || titleEl.value;
+          if(skuEl) skuEl.value = it.sku || '';
+          if(svgTA) svgTA.value = it.svg || '';
+          if(it.svg){ previewInlineSvg('itThumb', it.svg);
+            (async()=>{ try{ const b=await svgToPngBlob(it.svg,512); const f=new File([b], `${id}.png`, {type:'image/png'}); const url=await uploadTo('/upload', f); if(imgIn) imgIn.value=ABS(url); setThumb('itThumb', proxy(url)); }catch{} })();
+          }else if(it.img){ if(imgIn) imgIn.value=ABS(ipfsToHttp(it.img)).trim(); setThumb('itThumb', proxy(it.img)); }
+        }
+        sel.addEventListener('change', onChange);
+        const btn=$('#refreshCrafted'); if(btn){ btn.addEventListener('click', async ()=>{ btn.disabled=true; btn.textContent='Refreshing…'; try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); } finally { btn.disabled=false; btn.textContent='Refresh'; } }); }
+        // initial fill
+        (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
+      })();
+
+      // Edit rows wiring
+      (function wireEdit(){
+        $all('.craftedEditSelect').forEach(sel=>{
+          const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
+          const cur = document.getElementById(hidId)?.value || '';
+          sel.addEventListener('change', ()=>{
+            const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
+            const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
+            if(tEl) tEl.value = it.title || tEl.value;
+            if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
+          });
+          // async fill once global list is ready
+          (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
+        });
+      })();
+    })();
+
+    // ---------- mount ----------
+    wireColorways();
+
   })();
   </script>
-
-  <!-- ONLY use the canonical game state endpoint for crafted items -->
-<script>
-(function(){
-  const GAME_BASE = 'https://izzagame.onrender.com';
-
-  // Who is the player? (?u=cammac preferred; otherwise local hints)
-  function who(){
-    const q = (new URLSearchParams(location.search).get('u') || '').trim();
-    if (q) return q.replace(/^@+/, '').toLowerCase();
-    const p = window.__IZZA_PROFILE__||{};
-    if (p.username) return String(p.username).toLowerCase();
-    try{
-      const lsU = (localStorage.getItem('izzaUserU') || '').trim();
-      if (lsU) return lsU.replace(/^@+/, '').toLowerCase();
-    }catch(_){}
-    try{
-      const raw = localStorage.getItem('piAuthUser');
-      if (raw){
-        const j = JSON.parse(raw);
-        if (j && j.username) return String(j.username).toLowerCase();
-      }
-    }catch(_){}
-    return '';
-  }
-
-  // Fetch the single, canonical snapshot
-  async function fetchState(user){
-    if (!user) return null;
-    const url = `${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`;
-    const r = await fetch(url, { credentials:'omit' });
-    if (!r.ok) throw new Error('state_fetch_failed');
-    return r.json();
-  }
-
-  // Build a "crafted items" list from the snapshot inventory object
-  function itemsFromState(j){
-    const inv = (j && j.inventory) || (j && j.player && j.player.inventory) || {};
-    const out = [];
-    Object.entries(inv).forEach(([key, val])=>{
-      if (!val || typeof val !== 'object') return;
-      const count = Number(val.count || 0);
-      const equippable = !!val.equippable;
-      const isGameItem = equippable || ['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
-      if (!isGameItem && count <= 0) return;
-
-      const id    = key;
-      const title = val.name || key;
-      const svg   = val.iconSvg || val.overlaySvg || (val.icon && (val.icon.svg || val.icon)) || '';
-      const img   = val.image || val.image_url || '';
-      const sku   = val.sku || '';
-
-      out.push({ id, title, img, sku, svg });
-    });
-    return out;
-  }
-
-  function normalizeItem(raw){
-    const id = String(raw.id || '');
-    const title = raw.title || ('Item ' + id);
-    const img = raw.img || '';
-    const sku = raw.sku || '';
-    const svg = raw.svg || '';
-    return { id, title, img, sku, svg };
-  }
-
-  // --- NEW: keep a memory map so we don't stuff big SVGs into <option data-*>
-  let CRAFT_ITEMS = {};  // { id: {id,title,img,sku,svg}, ... }
-
-  // --- NEW: gateway IPFS to HTTP for preview
-  function ipfsToHttp(u){
-    if(!u) return '';
-    if(/^ipfs:\/\//i.test(u)){
-      const cid = u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,'');
-      return 'https://ipfs.io/ipfs/' + cid;
-    }
-    return u;
-  }
-
-  // --- FIXED: inline SVG renderer (works in Pi Browser / iPhone Safari)
-function previewSvg(svgString){
-  try{
-    const el = document.getElementById('itThumb');
-    if(!el) return;
-    let s = (svgString || '').trim();
-    if(!s) return;
-
-    // Normalize so Safari always draws it
-    if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    if(!/viewBox=/i.test(s) && !/width=/i.test(s))
-      s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
-
-    // Directly inject it (instead of <img>) so iOS renders inline SVG properly
-    el.innerHTML = s;
-    el.style.background = '#fff';
-    el.style.display = 'flex';
-    el.style.alignItems = 'center';
-    el.style.justifyContent = 'center';
-    el.style.border = '1px solid var(--line)';
-  }catch(e){
-    console.error('SVG render failed', e);
-  }
-}
-
-  // Only put id/title in the <option>
-  function fillSelect(sel, items, currentId, isEdit){
-    if(!sel) return;
-    sel.innerHTML = '';
-    const opt0 = document.createElement('option');
-    opt0.value = '';
-    opt0.textContent = '— ' + (isEdit ? 'None' : 'Select a crafted item') + ' —';
-    sel.appendChild(opt0);
-
-    items.map(normalizeItem).forEach(it=>{
-      const o = document.createElement('option');
-      o.value = String(it.id);
-      o.textContent = it.title || it.id;
-      if (currentId && String(currentId) === String(it.id)) o.selected = true;
-      sel.appendChild(o);
-    });
-
-    // Refresh the map every time we fill the select
-    CRAFT_ITEMS = Object.fromEntries(items.map(it => [String(it.id), normalizeItem(it)]));
-  }
-
-  function markAsCrafting(hidId, fkId, catId, value){
-    const hid = document.getElementById(hidId);
-    const fk  = document.getElementById(fkId);
-    const cat = document.getElementById(catId);
-    if (hid) hid.value = value || '';
-    if (fk)  fk.value  = value ? 'crafting' : '';
-    if (cat) cat.value = value ? 'digital_collectible' : '';
-  }
-
-  function wireCreate(items){
-  const sel = document.getElementById('craftedSelect');
-  const hid = 'crafted_item_id';
-  const fk  = 'fulfillment_kind';
-  const cat = 'category';
-  if(!sel) return;
-
-  fillSelect(sel, items, (document.getElementById(hid)||{}).value, false);
-
-  sel.addEventListener('change', ()=>{
-    const id = sel.value || '';
-    markAsCrafting(hid, fk, cat, id);
-    if(!id) return;
-
-    const item    = CRAFT_ITEMS[id] || {};
-    const title   = item.title || '';
-    const sku     = item.sku || '';
-    const svg     = item.svg || '';
-    const rawUrl  = ipfsToHttp(item.img || '');        // <-- RAW url, not proxied
-
-    const form    = document.querySelector('#create-product form');
-    const titleEl = form?.querySelector('input[name="title"]');
-    const imageEl = document.getElementById('itUrl');
-    const skuEl   = form?.querySelector('input[name="sku"]');
-    const svgTA   = document.getElementById('svgCode');
-
-    // ALWAYS overwrite with the newly selected item (prevents stale previews)
-    if (titleEl) titleEl.value = title || titleEl.value;
-    if (skuEl)   skuEl.value   = sku || '';
-    if (svgTA)   svgTA.value   = svg || '';
-
-    if (svg){
-  (async ()=>{
-    try{
-      // Rasterize SVG → PNG for reliable list/thumbnail display
-      async function svgToPngBlob(svgString, size=512){
-        return new Promise((resolve, reject)=>{
-          try{
-            let s = (svgString || '').trim();
-            if(!s) return reject(new Error('empty_svg'));
-            if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-            if(!/viewBox=/i.test(s) && !/width=/i.test(s))
-              s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
-
-            const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
-            const img = new Image();
-            img.onload = () => {
-              const w = 512, h = 512;
-              const canvas = document.createElement('canvas');
-              canvas.width = w; canvas.height = h;
-              const ctx = canvas.getContext('2d');
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(0,0,w,h);
-              const scale = Math.max(w / img.width, h / img.height); // cover, no letterboxing
-              const dw = img.width * scale;
-              const dh = img.height * scale;
-              const dx = (w - dw)/2, dy = (h - dh)/2;
-              ctx.drawImage(img, dx, dy, dw, dh);
-              canvas.toBlob((blob)=> blob ? resolve(blob) : reject(new Error('png_blob_failed')), 'image/png', 0.92);
-            };
-            img.onerror = ()=>reject(new Error('svg_img_load_failed'));
-            img.decoding = 'async';
-            img.src = url;
-          }catch(e){ reject(e); }
-        });
-      }
-
-      const pngBlob = await svgToPngBlob(svg, 512);
-      const file = new File([pngBlob], `${id}.png`, { type: 'image/png' });
-      const uploadedUrl = await uploadTo('/upload', file);
-      if (imageEl) imageEl.value = toAbsoluteUrl(uploadedUrl);         // <-- store PNG URL
-      setThumb('itThumb', proxied(uploadedUrl));        // preview via proxy
-      previewSvg(svg);                                  // inline render to match preview
-    }catch(_){
-      // still show inline preview even if PNG flow fails
-      previewSvg(svg);
-      if (imageEl) imageEl.value = '';
-    }
-  })();
-} else if (rawUrl){
-      if (imageEl) imageEl.value = toAbsoluteUrl(rawUrl).trim();              // <-- store RAW
-      setThumb('itThumb', proxied(rawUrl));             // preview via proxy
-    }else{
-      // Nothing to preview; leave thumb as-is
-    }
-  });
-
-  const btn = document.getElementById('refreshCrafted');
-  if(btn){
-    btn.addEventListener('click', async ()=>{
-      btn.disabled = true; btn.textContent = 'Refreshing…';
-      try{
-        const user = who();
-        const state = await fetchState(user);
-        const fresh = itemsFromState(state);
-        fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
-      }finally{
-        btn.disabled = false; btn.textContent = 'Refresh';
-      }
-    });
-  }
-}
-  function wireEdit(items){
-  document.querySelectorAll('.craftedEditSelect').forEach(sel=>{
-    const row = sel.closest('tr'); if(!row) return;
-    const id  = sel.getAttribute('data-item-id');
-    const hidId = 'crafted_item_id_' + id;
-    const fkId  = 'fulfillment_kind_' + id;
-    const catId = 'category_' + id;
-
-    const curVal = (document.getElementById(hidId)||{}).value || '';
-    fillSelect(sel, items, curVal, true);
-
-    sel.addEventListener('change', ()=>{
-      const v = sel.value || '';
-      markAsCrafting(hidId, fkId, catId, v);
-      if(!v) return;
-
-      const item = CRAFT_ITEMS[v] || {};
-      const tEl  = row.querySelector('input[name="title"]');
-      const iEl  = row.querySelector('input[name="image_url"]');
-
-      if (tEl) tEl.value = item.title || tEl.value;
-
-      if (iEl){
-        const rawUrl = ipfsToHttp(item.img || '');    // <-- RAW
-        if (rawUrl) iEl.value = toAbsoluteUrl(rawUrl).trim();
-      }
-    });
-  });
-}
-
-  (async function init(){
-    try{
-      const user = who();
-      const state = await fetchState(user);
-      const items = itemsFromState(state);
-      wireCreate(items);
-      wireEdit(items);
-    }catch(_){
-      // If state fetch fails, leave selects empty (UI still functions)
-    }
-  })();
-})();
-</script>
 </body>
 </html>
