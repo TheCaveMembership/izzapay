@@ -258,25 +258,12 @@
             {% for it in items %}
               <tr>
                 <td>
+                  {% set img = (it.image_url or '') | trim %}
                   <div class="itimg">
-                    {# For crafted items: render ONLY inline SVG, no URL/object/raster fallback #}
-                    {% if it.fulfillment_kind == 'crafting' %}
-                      {% set svg = (it.svg_code or '') | trim %}
-                      {% if svg %}
-                        {{ svg | safe }}
-                      {% else %}
-                        <span class="muted" style="font-size:12px">—</span>
-                      {% endif %}
-                    {% else %}
-                      {# Non-crafted items keep showing their image URL preview #}
-                      {% set img = (it.image_url or '') | trim %}
-                      {% if img %}
-                        <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
-                             onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
-                      {% else %}
-                        <span class="muted" style="font-size:12px">—</span>
-                      {% endif %}
-                    {% endif %}
+                    {% if img %}
+                      <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+                           onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
+                    {% else %}<span class="muted" style="font-size:12px">—</span>{% endif %}
                   </div>
                 </td>
                 <td>{{ it.title }}{% if it.fulfillment_kind == 'crafting' %} <span class="mono" style="font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;margin-left:6px;">Game</span>{% endif %}</td>
@@ -447,7 +434,7 @@
   // ---------- SVG helpers ----------
   function svgNormalize(s, px=512){
     let x=(s||'').trim(); if(!x) return '';
-    if(!/^\s*<svg[\s>]/i.test(x)) return '';
+    if(!/^\s*<svg[\s>]/i.test(x)) return ''; // not an svg
     if(!/xmlns=/i.test(x)) x=x.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
     if(!/viewBox=/i.test(x)){
       const w=(x.match(/width="([\d.]+)"/i)||[])[1];
@@ -455,11 +442,14 @@
       if(w && h) x=x.replace('<svg','<svg viewBox="0 0 '+Number(w)+' '+Number(h)+'"');
       else x=x.replace('<svg','<svg viewBox="0 0 512 512"');
     }
+    // explicit size to avoid 0×0 natural size in <img> or when rasterizing
     if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"'); else x=x.replace('<svg','<svg width="'+px+'"');
     if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"'); else x=x.replace('<svg','<svg height="'+px+'"');
     if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
     return x;
   }
+
+  // Inline an SVG string into a container
   function injectSvg(container, svgString, px=80){
     const el = (typeof container==='string') ? $(container) : container;
     const s = svgNormalize(svgString, px);
@@ -468,6 +458,8 @@
     el.style.background='transparent';
     return true;
   }
+
+  // Fetch an SVG by URL and inject it
   async function injectSvgFromUrl(container, url, px=80){
     try{
       const r = await fetch(url, {credentials:'omit', cache:'force-cache'});
@@ -480,6 +472,7 @@
   }
 
   // ---------- Image URL verifier ----------
+  // Usage in console: window.testImageUrl('https://…')
   window.testImageUrl = async function testImageUrl(url){
     try{
       const r = await fetch(url, {method:'GET', credentials:'omit', cache:'no-cache'});
@@ -495,6 +488,7 @@
     }
   };
 
+  // Long-press any thumbnail .itimg to verify its actual URL
   (function(){
     let pressTimer=null;
     document.addEventListener('touchstart', e=>{
@@ -551,7 +545,7 @@
     inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
   })();
 
-  // ---------- Create Product: guard + keep crafted SVG (no raster fallback) ----------
+  // ---------- Create Product: guard + keep crafted SVG ----------
   (function(){
     const form = document.querySelector('#create-product form'); if(!form) return;
     form.addEventListener('submit', async (e)=>{
@@ -560,7 +554,8 @@
       const price=Number((priceEl?.value||'').trim());
       if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
       if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
-      // We keep svg_code as-is; no conversion to URL for crafted items.
+      // No forced PNG conversion anymore. We keep svg_code (hidden) for rendering later.
+      // If user pasted an image URL, it will still be used by server.
     });
   })();
 
@@ -627,18 +622,27 @@
       if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
     }
 
-    // Create form wiring — NO raster fallback for crafted items
+    // Create form wiring
     (function wireCreate(){
       const sel=$('#craftedSelect'); if(!sel) return;
       const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
       const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
 
-      function setFromSvg(svg){
+      function setFromSvg(svg, id){
         svgHidden.value = svg || '';
         if(svg){
-          injectSvg('#itThumb', svg, 80); // preview inline
-        }else{
-          const box=document.getElementById('itThumb'); if(box) box.innerHTML='<span class="muted" style="font-size:12px">—</span>';
+          // show inline now (same look everywhere)
+          injectSvg('#itThumb', svg, 80);
+          // (optional) still set a URL so the server has something in image_url if required
+          // Fallback: upload raw SVG so we have a permanent URL
+          (async()=>{
+            try{
+              const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
+              const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
+              const url=await uploadTo('/upload', file);
+              if(imgIn) imgIn.value=ABS(url);
+            }catch{/* ignore */}
+          })();
         }
       }
 
@@ -646,28 +650,18 @@
         const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
         const it=CRAFT_ITEMS[id]||{};
         if(titleEl) titleEl.value = it.title || titleEl.value;
-              if(skuEl)   skuEl.value   = it.sku || '';
-        if(it.svg){
-          setFromSvg(it.svg);
-          // do not set image_url for crafted items
-          if(imgIn) imgIn.value='';
-        }else if(it.img){
+        if(skuEl)   skuEl.value   = it.sku || '';
+        if(it.svg){ setFromSvg(it.svg, id); }
+        else if(it.img){
           const u=ABS(ipfsToHttp(it.img)).trim();
-          if(/\.svg(\?|$)/i.test(u)){
-            try{
-              const r=await fetch(u,{credentials:'omit',cache:'no-store'});
-              const text=await r.text();
-              setFromSvg(text);        // raw inline SVG
-              if(imgIn) imgIn.value=''; // ensure no raster URL is saved
-            }catch{ setFromSvg(''); }
+          if(/\.svg(\?|$)/i.test(u)){ // inline SVG image URLs too
+            await injectSvgFromUrl('#itThumb', u, 80);
+            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
           }else{
-            // Crafted item but only raster image present -> NO fallback; keep empty
-            setFromSvg('');
-            if(imgIn) imgIn.value='';
+            if(imgIn) imgIn.value=u;
+            setThumb('itThumb', proxy(u));
+            svgHidden.value='';
           }
-        }else{
-          setFromSvg('');
-          if(imgIn) imgIn.value='';
         }
       }
 
@@ -677,64 +671,37 @@
       if(btn){
         btn.addEventListener('click', async ()=>{
           btn.disabled=true; btn.textContent='Refreshing…';
-          try{
-            const user=who();
-            const state=await fetchState(user);
-            fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
-          }finally{
-            btn.disabled=false; btn.textContent='Refresh';
-          }
+          try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
+          finally{ btn.disabled=false; btn.textContent='Refresh'; }
         });
       }
 
-      (async()=>{
-        try{
-          const user=who();
-          const state=await fetchState(user);
-          fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
-        }catch{}
-      })();
+      (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
     })();
 
-    // Edit rows wiring (no raster fallback for crafted items)
+    // Edit rows wiring
     (function wireEdit(){
       $all('.craftedEditSelect').forEach(sel=>{
-        const row=sel.closest('tr');
-        const id=sel.getAttribute('data-item-id');
-        const hidId='crafted_item_id_'+id;
-        const fkId='fulfillment_kind_'+id;
-        const catId='category_'+id;
+        const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
         const cur = document.getElementById(hidId)?.value || '';
-
         sel.addEventListener('change', ()=>{
-          const v=sel.value||'';
-          markAsCrafting(hidId,fkId,catId,v);
-          if(!v) return;
-          const it=CRAFT_ITEMS[v]||{};
-          const tEl=row.querySelector('input[name="title"]');
-          const iEl=row.querySelector('input[name="image_url"]');
+          const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
+          const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
           if(tEl) tEl.value = it.title || tEl.value;
-          // Do NOT set image_url for crafted items
-          if(iEl) iEl.value = '';
+          if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
         });
-
-        (async()=>{
-          try{
-            const user=who();
-            const state=await fetchState(user);
-            const items=itemsFromState(state);
-            fillSelect(sel, items, cur, true);
-          }catch{}
-        })();
+        (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
       });
     })();
   })();
 
-  // Enhance non-crafted rows that point to SVG URLs (crafted rows already inline)
+  // ---------- After content: render SVGs inline for thumbnails in the table ----------
   (async function enhanceListThumbs(){
     const boxes = $all('.itimg');
     await Promise.all(boxes.map(async box=>{
-      const img = box.querySelector('img'); if(!img) return;
+      const img = box.querySelector('img');
+      if(!img) return;
+      // the src is /uimg?src=<encoded real url>
       let u;
       try{
         const p = new URL(img.src, location.href);
@@ -742,8 +709,9 @@
       }catch{ u = img.src; }
       const real = decodeURIComponent(u||'');
       if(/\.svg(\?|$)/i.test(real)){
+        // Replace <img> with inline SVG (same look as preview)
         const ok = await injectSvgFromUrl(box, real, 80);
-        if(!ok){ /* leave as-is for non-crafted */ }
+        if(!ok){ /* leave the <img> if we failed */ }
       }
     }));
   })();
