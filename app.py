@@ -5,6 +5,7 @@ from urllib.parse import urlparse, urlencode
 import shutil
 import requests
 import mimetypes
+mimetypes.add_type("image/svg+xml", ".svg")
 from io import BytesIO
 from PIL import Image
 from werkzeug.utils import secure_filename
@@ -149,8 +150,6 @@ MEDIA_PREFIX = "/media"
 
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "svg"}
-    # make sure .svg serves as image/svg+xml on this platform
-mimetypes.add_type("image/svg+xml", ".svg")
 
 def _normalize_ext(fmt: str) -> str:
     if not fmt: return ""
@@ -705,118 +704,6 @@ def collectibles_claim():
         "crafted_item_id": r["crafted_id"],
         "qty": int(r["qty"] or 1)
     })
-
-import re
-
-def _ext_from_ctype(ctype: str) -> str:
-    if not ctype:
-        return ""
-    c = ctype.split(";", 1)[0].strip().lower()
-    if c == "image/jpeg":   return "jpg"
-    if c == "image/svg+xml":return "svg"
-    if c.startswith("image/"): return c.split("/", 1)[1]
-    return ""
-
-def _hash_name(data: bytes, ext: str) -> str:
-    h = hashlib.sha256(data).hexdigest()[:32]
-    ext = (ext or "").lower().lstrip(".")
-    return f"{h}.{ext}" if ext else h
-
-@app.post("/upload")
-def upload():
-    # require signed-in user (matches the rest of your app)
-    u = current_user_row()
-    if not u:
-        return _err("auth_required")
-
-    # 1) multipart form: file input named "file"
-    if "file" in request.files:
-        f = request.files["file"]
-        ctype = (f.mimetype or "").lower()
-        filename = secure_filename(f.filename or "")
-        ext = _ext_from_ctype(ctype) or (filename.rsplit(".", 1)[-1].lower() if "." in filename else "")
-        if ext not in ALLOWED_EXTENSIONS:
-            return _err("unsupported_type")
-        data = f.read()
-        if not data:
-            return _err("empty_file")
-
-        # Light SVG hardening
-        if ext == "svg":
-            txt = data.decode("utf-8", errors="ignore")
-            txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I|re.S)
-            txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
-            data = txt.encode("utf-8")
-
-        name = _hash_name(data, ext)
-        with open(os.path.join(UPLOAD_DIR, name), "wb") as out:
-            out.write(data)
-        return _ok(url=f"{MEDIA_PREFIX}/{name}")
-
-    # 2) JSON body with data URL: { "data_url": "data:image/svg+xml;utf8,<svg...>" }
-    payload = request.get_json(silent=True) or {}
-    data_url = (payload.get("data_url") or "").strip()
-    if data_url.startswith("data:"):
-        try:
-            header, body = data_url.split(",", 1)
-            ctype = header.split(":", 1)[1].split(";")[0].strip().lower()
-            ext = _ext_from_ctype(ctype) or "bin"
-            if ext not in ALLOWED_EXTENSIONS:
-                return _err("unsupported_type")
-            if ";base64" in header.lower():
-                data = base64.b64decode(body)
-            else:
-                data = body.encode("utf-8")  # utf8 path (e.g., inline SVG)
-
-            if not data:
-                return _err("empty_data_url")
-
-            if ext == "svg":
-                txt = data.decode("utf-8", errors="ignore")
-                txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I|re.S)
-                txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
-                data = txt.encode("utf-8")
-
-            name = _hash_name(data, ext)
-            with open(os.path.join(UPLOAD_DIR, name), "wb") as out:
-                out.write(data)
-            return _ok(url=f"{MEDIA_PREFIX}/{name}")
-        except Exception:
-            return _err("bad_data_url")
-
-    # (optional) JSON with image_url to fetch server-side
-    image_url = (payload.get("image_url") or "").strip()
-    if image_url:
-        try:
-            pr = urlparse(image_url)
-            if pr.scheme not in ("http", "https"):
-                return _err("bad_image_url_scheme")
-            r = requests.get(image_url, timeout=12)
-            if r.status_code != 200:
-                return _err(f"fetch_failed:{r.status_code}")
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            ext = _ext_from_ctype(ctype) or (pr.path.rsplit(".", 1)[-1].lower() if "." in pr.path else "")
-            if ext not in ALLOWED_EXTENSIONS:
-                return _err("unsupported_type")
-            data = r.content or b""
-            if not data:
-                return _err("empty_fetch")
-
-            if ext == "svg":
-                txt = data.decode("utf-8", errors="ignore")
-                txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I|re.S)
-                txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
-                data = txt.encode("utf-8")
-
-            name = _hash_name(data, ext)
-            with open(os.path.join(UPLOAD_DIR, name), "wb") as out:
-                out.write(data)
-            return _ok(url=f"{MEDIA_PREFIX}/{name}")
-        except Exception:
-            return _err("fetch_error")
-
-    return _err("no_file_or_data")
-
 # ================== /Crafting UI â Flask bridge ==================
 @app.get(f"{MEDIA_PREFIX}/<path:filename>")
 def media(filename):
@@ -3340,9 +3227,63 @@ def _allowed_ext(filename: str) -> bool:
 
 @app.post("/upload")
 def upload():
+    import re
     u = current_user_row()
     if not u:
         return {"ok": False, "error": "auth_required"}, 401
+
+    def _save_bytes(data: bytes, ext: str):
+        # deterministic name by content hash
+        try:
+            digest = hashlib.sha256(data).hexdigest()
+        except Exception:
+            digest = uuid.uuid4().hex
+        name = secure_filename(f"{digest[:32]}.{ext.lower().lstrip('.')}")
+        path = os.path.join(UPLOAD_DIR, name)
+        if not os.path.exists(path):
+            with open(path, "wb") as out:
+                out.write(data)
+        return f"{MEDIA_PREFIX}/{name}"
+
+    def _sanitize_svg_bytes(b: bytes) -> bytes:
+        # very light SVG hardening (strip <script> and inline event handlers)
+        try:
+            txt = b.decode("utf-8", errors="ignore")
+            txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I | re.S)
+            txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
+            return txt.encode("utf-8")
+        except Exception:
+            return b
+
+    # -------- Case A: JSON body with data_url (e.g. data:image/svg+xml;utf8,<svg...>) --------
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        data_url = (payload.get("data_url") or "").strip()
+        if data_url.startswith("data:"):
+            try:
+                header, body = data_url.split(",", 1)
+                ctype = header.split(":", 1)[1].split(";", 1)[0].lower()
+                if ctype not in ("image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"):
+                    return {"ok": False, "error": "unsupported_type"}, 400
+                if ";base64" in header.lower():
+                    raw = base64.b64decode(body)
+                else:
+                    # utf-8 (typically for inline SVG text)
+                    raw = body.encode("utf-8")
+                if ctype == "image/svg+xml":
+                    raw = _sanitize_svg_bytes(raw)
+                    url = _save_bytes(raw, "svg")
+                    return {"ok": True, "url": url}, 200
+                # For bitmap data URLs, we can optionally feed through Pillow for normalization,
+                # but simplest is just save with the right extension:
+                ext = {"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"}[ctype]
+                url = _save_bytes(raw, ext)
+                return {"ok": True, "url": url}, 200
+            except Exception:
+                return {"ok": False, "error": "bad_data_url"}, 400
+        # If JSON but no data_url, fall through to usual multipart handling error
+
+    # -------- Case B: Multipart file upload --------
     if "file" not in request.files:
         return {"ok": False, "error": "missing_file_field"}, 400
 
@@ -3350,7 +3291,7 @@ def upload():
     if not f or not f.filename:
         return {"ok": False, "error": "empty_file"}, 400
 
-    # Read file bytes once
+    # Read once
     try:
         raw = f.read()
         if not raw:
@@ -3358,37 +3299,47 @@ def upload():
     except Exception:
         return {"ok": False, "error": "read_failed"}, 400
 
+    # Detect content type / extension
+    ctype = (f.mimetype or "").lower()
+    filename_ext = (f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else "")
+    # Prefer mimetype when clear
+    if ctype == "image/svg+xml" or filename_ext == "svg" or raw.lstrip().startswith(b"<svg"):
+        # ---- SVG path (skip Pillow) ----
+        if "svg" not in ALLOWED_EXTENSIONS:
+            return {"ok": False, "error": "unsupported_type"}, 400
+        raw = _sanitize_svg_bytes(raw)
+        url = _save_bytes(raw, "svg")
+        return {"ok": True, "url": url}, 200
+
+    # ---- Bitmap path (use Pillow exactly like your original) ----
     from io import BytesIO
     bio = BytesIO(raw)
 
-    # Validate & open image
     try:
         img = Image.open(bio)
-        img.verify()  # quick integrity check
+        img.verify()
     except Exception:
         return {"ok": False, "error": "invalid_image"}, 400
 
-    # Reopen for actual processing (verify() invalidates parser state)
     bio.seek(0)
     try:
         img = Image.open(bio)
     except Exception:
         return {"ok": False, "error": "reopen_failed"}, 400
 
-    # Normalize format -> extension
     fmt = (img.format or "").upper()
     ext = "jpg" if fmt == "JPEG" else fmt.lower()
     if ext not in ALLOWED_EXTENSIONS:
         return {"ok": False, "error": "unsupported_format"}, 400
 
-    # Correct orientation & strip EXIF by recreating the image
+    # Correct orientation & strip EXIF
     try:
         from PIL import ImageOps
         img = ImageOps.exif_transpose(img)
     except Exception:
         pass
 
-    # Downscale if too large (keeps aspect)
+    # Downscale if too large
     MAX_DIM = 2048
     try:
         if max(img.size) > MAX_DIM:
@@ -3396,10 +3347,7 @@ def upload():
     except Exception:
         pass
 
-    # Animated GIFs: keep original bytes to preserve animation
     is_animated_gif = (fmt == "GIF" and getattr(img, "is_animated", False))
-    out_bytes = None
-
     if is_animated_gif:
         out_bytes = raw
         ext = "gif"
@@ -3408,7 +3356,6 @@ def upload():
         has_alpha = ("A" in mode) or (mode in ("RGBA", "LA", "P"))
         buf = BytesIO()
         save_kwargs = {}
-
         if ext == "jpg":
             if has_alpha or mode not in ("RGB",):
                 img = img.convert("RGB")
@@ -3426,28 +3373,9 @@ def upload():
             img.save(buf, format="WEBP", **save_kwargs)
         else:
             buf = BytesIO(raw)
-
         out_bytes = buf.getvalue()
 
-    # Deterministic filename by content-hash (prevents duplicates)
-    try:
-        digest = hashlib.sha256(out_bytes).hexdigest()
-    except Exception:
-        digest = uuid.uuid4().hex
-
-    unique_name = f"{digest[:32]}.{ext}"
-    safe_name = secure_filename(unique_name)
-    path = os.path.join(UPLOAD_DIR, safe_name)
-
-    if not os.path.exists(path):
-        try:
-            with open(path, "wb") as out:
-                out.write(out_bytes)
-        except Exception:
-            return {"ok": False, "error": "save_failed"}, 500
-
-    # IMPORTANT: return a /media URL (not /static), so files persist across deploys
-    url = f"{MEDIA_PREFIX}/{safe_name}"
+    url = _save_bytes(out_bytes, ext)
     return {"ok": True, "url": url}, 200
 
 # ----------------- IMAGE PROXY -----------------
