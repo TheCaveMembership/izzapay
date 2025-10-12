@@ -126,17 +126,20 @@
   <div class="grid">
     {% for it in items %}
       {% set sold_out = (it.stock_qty <= 0 and not it.allow_backorder) %}
-      {% set svg = (it.svg_code or '') | trim %}
+      {# sanitize inline svg to the first <svg>…</svg> only #}
+      {% set _raw = (it.svg_code or '') | trim %}
+      {% set svg = (_raw and (_raw.split('</svg>')[0] ~ '</svg>')) or '' %}
       {% set img = (it.image_url or '') | trim %}
       <div class="card {% if sold_out %}is-soldout{% endif %}">
         <div class="itimg">
           {% if svg %}
             {{ svg | safe }}
-          {% elif img and (img|lower).endswith('.svg') %}
-            <!-- if only an external .svg URL exists, still avoid rasterizing -->
-            <object type="image/svg+xml" data="{{ img }}"></object>
-          {% elif img %}
+          {% elif img and not (img|lower).endswith('.svg') %}
+            <!-- only raster fallback if no inline svg -->
             <img src="/uimg?src={{ img | urlencode }}" alt="">
+          {% elif img and (img|lower).endswith('.svg') %}
+            <!-- if the only thing we have is an external .svg URL -->
+            <object type="image/svg+xml" data="{{ img }}"></object>
           {% else %}
             <div style="width:100%;height:100%;background:#cbd5e1"></div>
           {% endif %}
