@@ -1003,16 +1003,16 @@ with conn() as cx:
     """)
 
 with conn() as cx:
-    # items table patches for crafted linkage & description
     it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
     if "description" not in it_cols:
         cx.execute("ALTER TABLE items ADD COLUMN description TEXT")
     if "fulfillment_kind" not in it_cols:
-        # 'physical' (default) | 'crafting'
         cx.execute("ALTER TABLE items ADD COLUMN fulfillment_kind TEXT DEFAULT 'physical'")
     if "crafted_item_id" not in it_cols:
-        # opaque string from Crafting Land (id/slug/uuid)
         cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id TEXT")
+    # ⬇️ NEW: persist inline SVG for crafted items
+    if "svg_code" not in it_cols:
+        cx.execute("ALTER TABLE items ADD COLUMN svg_code TEXT")
 
     # sessions table patches (ALWAYS run; do NOT nest under crafted_item_id)
     scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
@@ -1910,13 +1910,22 @@ def merchant_new_item(slug):
 
     data = request.form
 
-    title           = (data.get("title") or "").strip()
-    sku             = (data.get("sku") or "").strip()
-    image_url       = (data.get("image_url") or "").strip()
-    image_url       = _coerce_image_url_to_media(image_url)   # ← add this
-    description     = (data.get("description") or "").strip()
-    crafted_item_id = (data.get("crafted_item_id") or "").strip() or None
+    title            = (data.get("title") or "").strip()
+    sku              = (data.get("sku") or "").strip()
+
+    image_url        = (data.get("image_url") or "").strip()
+    image_url        = _coerce_image_url_to_media(image_url)
+
+    # NEW: inline SVG from the dashboard's hidden field
+    svg_code         = (data.get("svg_code") or "").strip()
+
+    description      = (data.get("description") or "").strip()
+    crafted_item_id  = (data.get("crafted_item_id") or "").strip() or None
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
+
+    # If it's a crafted item and we have SVG, enforce SVG-only rendering
+    if crafted_item_id and svg_code:
+        image_url = ""
 
     # Fixed price fields
     try:
@@ -1939,7 +1948,7 @@ def merchant_new_item(slug):
         except Exception:
             dynamic_payload_json = None
 
-    def _float_or_none(v):
+    def _float_or_none(v: str | None):
         s = (v or "").strip()
         if not s:
             return None
@@ -1956,35 +1965,38 @@ def merchant_new_item(slug):
 
     with conn() as cx:
         cx.execute(
-    """INSERT INTO items(
-         merchant_id, link_id, title, sku, image_url, description,
-         pi_price, stock_qty, allow_backorder, active,
-         fulfillment_kind, crafted_item_id,
-         dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price
-       )
-       VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)""",   # <-- now 15 ? to match 16 cols (1 is literal)
-    (
-        m["id"],
-        link_id,
-        title,
-        sku,
-        image_url,
-        description,
-        float(pi_price),
-        int(stock_qty),
-        int(allow_backorder),
-        fulfillment_kind,
-        crafted_item_id,
-        dynamic_price_mode,
-        dynamic_payload_json,
-        min_pi_price,
-        max_pi_price,
-    )
-)
+            """
+            INSERT INTO items(
+              merchant_id, link_id, title, sku,
+              image_url, svg_code,
+              description, pi_price, stock_qty, allow_backorder, active,
+              fulfillment_kind, crafted_item_id,
+              dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price
+            )
+            VALUES(?,?,?,?, ?,?, ?,?,?,?,1, ?,?, ?,?,?,?)
+            """,
+            (
+                m["id"],
+                link_id,
+                title,
+                sku,
+                image_url,
+                svg_code,
+                description,
+                float(pi_price),
+                int(stock_qty),
+                int(allow_backorder),
+                fulfillment_kind,
+                crafted_item_id,
+                dynamic_price_mode,
+                dynamic_payload_json,
+                min_pi_price,
+                max_pi_price,
+            )
+        )
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
-
 
 @app.post("/merchant/<slug>/items/update")
 def merchant_update_item(slug):
@@ -2001,12 +2013,12 @@ def merchant_update_item(slug):
     except (TypeError, ValueError):
         abort(400)
 
-    title           = (data.get("title") or "").strip()
-    sku             = (data.get("sku") or "").strip()
-    image_url       = (data.get("image_url") or "").strip()
-    image_url       = _coerce_image_url_to_media(image_url)   # ← add this
-    description     = (data.get("description") or "").strip()
-    crafted_item_id = (data.get("crafted_item_id") or "").strip()
+    title            = (data.get("title") or "").strip()
+    sku              = (data.get("sku") or "").strip()
+    image_url_raw    = (data.get("image_url") or "").strip()
+    description      = (data.get("description") or "").strip()
+    crafted_item_id  = (data.get("crafted_item_id") or "").strip()
+    svg_code_in      = (data.get("svg_code") or "").strip()   # ← NEW
 
     # Optional dynamic pricing fields (store as-is, NULL if blank)
     dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None
@@ -2050,11 +2062,29 @@ def merchant_update_item(slug):
         if not it:
             abort(404)
 
+        # Coerce/normalize the image URL only if we intend to keep one
+        image_url = _coerce_image_url_to_media(image_url_raw) if image_url_raw else (it["image_url"] or "")
+
+        # Persist/retain svg_code:
+        # - if merchant sent a new svg_code, use it
+        # - else keep existing (unless they explicitly clear it by sending a single "-")
+        if svg_code_in == "-":
+            svg_code = ""  # explicit clear knob if you want to support it
+        elif svg_code_in:
+            svg_code = svg_code_in
+        else:
+            svg_code = (it["svg_code"] if "svg_code" in it.keys() else None)
+
+        # ENFORCE: crafted items should ONLY use SVG → blank image_url when svg_code present
+        if fulfillment_kind == "crafting" and svg_code:
+            image_url = ""
+
         cx.execute(
             """UPDATE items
                SET title=?,
                    sku=?,
                    image_url=?,
+                   svg_code=?,              -- ← NEW
                    description=?,
                    pi_price=?,
                    stock_qty=?,
@@ -2064,11 +2094,12 @@ def merchant_update_item(slug):
                    dynamic_payload_json=?,
                    min_pi_price=?,
                    max_pi_price=?
-               WHERE id=? AND merchant_id=?""",
+             WHERE id=? AND merchant_id=?""",
             (
                 title or it["title"],
                 sku or it["sku"],
-                image_url or (it["image_url"] or ""),
+                image_url,
+                svg_code,
                 description or (it["description"] or ""),
                 (pi_price if pi_price > 0 else it["pi_price"]),
                 (stock_qty if stock_qty >= 0 else it["stock_qty"]),
