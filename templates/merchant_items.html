@@ -904,70 +904,57 @@ function toAbsoluteUrl(u){
   }
 
   form.addEventListener('submit', async (e) => {
-    const priceEl = form.querySelector('input[name="pi_price"]');
-    const titleEl = form.querySelector('input[name="title"]');
-    const imgIn   = document.getElementById('itUrl');
-    const svgTA   = document.getElementById('svgCode');
+  const priceEl = form.querySelector('input[name="pi_price"]');
+  const titleEl = form.querySelector('input[name="title"]');
+  const imgIn   = document.getElementById('itUrl');
+  const svgTA   = document.getElementById('svgCode');
 
-    // Basic validation
-    const v = (priceEl?.value || '').trim();
-    const price = Number(v);
-    if(!titleEl?.value.trim()){
-      e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
-    }
-    if(!v || isNaN(price) || price <= 0){
-      e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
-    }
+  // Basic validation
+  const v = (priceEl?.value || '').trim();
+  const price = Number(v);
+  if (!titleEl?.value.trim()){
+    e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
+  }
+  if (!v || isNaN(price) || price <= 0){
+    e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
+  }
 
-    // Need an upload if we have SVG but no usable image_url yet
-    const needRealUrl = svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value));
-    if (!needRealUrl) return; // let submit proceed
+  // Block saving data:/blob: even if there is no SVG
+  const existing = (imgIn?.value || '').trim();
+  if (existing && /^data:|^blob:/i.test(existing)) {
+    e.preventDefault();
+    alert('That image URL can’t be saved. Please upload or paste a normal https:// URL.');
+    return false;
+  }
 
-    e.preventDefault(); // hold submit until we set image_url
+  // If there is SVG but no usable HTTPS image yet → rasterize & upload PNG
+  const needRealUrl = !!(svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)));
+  if (!needRealUrl) return; // let submit proceed normally
 
-    const svg = svgTA.value.trim();
+  e.preventDefault(); // hold submit while we create a PNG
 
-    // 1) Try PNG (best for thumbs, avoids SVG filtering issues via /uimg)
-    try{
-      const blob = await svgToPngBlob(svg, 512, 4000); // give iOS a bit more time
-      const file = new File([blob], 'preview.png', { type: 'image/png' });
-      const uploadedPng = await uploadTo('/upload', file);
+  const svg = svgTA.value.trim();
 
-      // ✅ Inserted guard (PNG branch)
-      imgIn.value = toAbsoluteUrl(uploadedPng);
-      imgIn.value = (imgIn.value || '').trim();
-      if (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)) {
-        alert('We couldn’t attach the image yet. Please tap Preview SVG once and try Add Item again.');
-        return false;
-      }
+  try {
+    const blob = await svgToPngBlob(svg, 512, 6000); // slightly longer timeout for iOS
+    const file = new File([blob], 'preview.png', { type: 'image/png' });
+    const uploadedPng = await uploadTo('/upload', file);
 
-      form.submit();
-      return;
-    }catch(_){ /* fall through */ }
-
-    // 2) Fallback: upload raw SVG as a file so we still get a real URL
-    try{
-      const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
-      const file = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
-      const uploadedSvg = await uploadTo('/upload', file);
-
-      // ✅ Inserted guard (SVG branch)
-      imgIn.value = toAbsoluteUrl(uploadedSvg);
-      imgIn.value = (imgIn.value || '').trim();
-      if (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)) {
-        alert('We couldn’t attach the image yet. Please tap Preview SVG once and try Add Item again.');
-        return false;
-      }
-
-      form.submit();
-      return;
-    }catch(err){
-      // 3) Final: block submit so we don't save a product with a blank image
+    imgIn.value = toAbsoluteUrl(uploadedPng).trim();
+    if (!imgIn.value || /^data:|^blob:/i.test(imgIn.value)) {
       alert('We couldn’t attach the image yet. Please tap Preview SVG once and try Add Item again.');
       return false;
     }
-  });
-})();
+
+    form.submit();
+    return;
+  } catch (err) {
+    e.preventDefault();
+    alert('Couldn’t convert your SVG to PNG. Tap “Preview SVG” first, or upload/paste a PNG/JPG URL.');
+    return false;
+  }
+});
+  })();
     // Toggle inline product editor
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-edit-toggle]'); if(!btn) return;
