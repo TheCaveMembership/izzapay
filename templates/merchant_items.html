@@ -1097,15 +1097,27 @@
       if (skuEl)   skuEl.value   = sku || '';
       if (svgTA)   svgTA.value   = svg || '';
 
-      if (svg){               // Prefer inline SVG when available
-        previewSvg(svg);
-        if (imageEl) imageEl.value = ''; // keep image field empty when using svg preview
-      }else if (imgUrl){
-        if (imageEl) imageEl.value = imgUrl;
-        setThumb('itThumb', imgUrl);
-      }else{
-        // Nothing to preview; leave thumb as-is
-      }
+      if (svg){ // Prefer SVG and persist it by uploading
+  (async ()=>{
+    try{
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const file = new File([blob], `${id}.svg`, { type: 'image/svg+xml' });
+      const uploadedUrl = await uploadTo('/upload', file);  // reuses your existing upload helper
+      const prox = proxied(uploadedUrl);
+      if (imageEl) imageEl.value = prox; // persist so it shows in list/storefront
+      setThumb('itThumb', prox);
+    }catch(_){
+      // Fallback: local preview only if upload fails
+      previewSvg(svg);
+      if (imageEl) imageEl.value = '';
+    }
+  })();
+}else if (imgUrl){
+  if (imageEl) imageEl.value = imgUrl;
+  setThumb('itThumb', imgUrl);
+}else{
+  // Nothing to preview; leave thumb as-is
+}
     });
 
     const btn = document.getElementById('refreshCrafted');
