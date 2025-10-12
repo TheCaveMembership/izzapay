@@ -847,9 +847,47 @@ function proxied(url){
     });
   })();
 
-  // Guard + ensure SVG is uploaded before submit
+  // Guard + ensure we have a real URL (PNG if possible, else raw SVG) before submit
 (function(){
   const form = document.querySelector('#create-product form'); if(!form) return;
+
+  // small helper: rasterize SVG → PNG blob with timeout (handles iOS failures)
+  function svgToPngBlob(svgString, size=512, timeoutMs=2000){
+    return Promise.race([
+      new Promise((resolve, reject)=>{
+        try{
+          let s = (svgString || '').trim();
+          if(!s) return reject(new Error('empty_svg'));
+          if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+          if(!/viewBox=/i.test(s) && !/width=/i.test(s))
+            s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
+
+          const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+          const img = new Image();
+          img.onload = () => {
+            try{
+              const w = size, h = size;
+              const canvas = document.createElement('canvas');
+              canvas.width = w; canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0,0,w,h);
+              const scale = Math.min(w / img.width, h / img.height);
+              const dw = img.width * scale, dh = img.height * scale;
+              const dx = (w - dw)/2, dy = (h - dh)/2;
+              ctx.drawImage(img, dx, dy, dw, dh);
+              canvas.toBlob((blob)=> blob ? resolve(blob) : reject(new Error('png_blob_failed')), 'image/png', 0.92);
+            }catch(err){ reject(err); }
+          };
+          img.onerror = ()=>reject(new Error('svg_img_load_failed'));
+          img.decoding = 'async';
+          img.src = svgUrl;
+        }catch(err){ reject(err); }
+      }),
+      new Promise((_, reject)=>setTimeout(()=>reject(new Error('png_timeout')), timeoutMs))
+    ]);
+  }
+
   form.addEventListener('submit', async (e) => {
     const priceEl = form.querySelector('input[name="pi_price"]');
     const titleEl = form.querySelector('input[name="title"]');
@@ -866,20 +904,36 @@ function proxied(url){
       e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
     }
 
-    // If user has SVG code but no usable image_url yet → upload the SVG now
-    const needsUpload = svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value));
-    if (needsUpload){
-      e.preventDefault(); // hold the native submit
-      try{
-        const svg = svgTA.value.trim();
-        const blob = new Blob([svg], { type: 'image/svg+xml' });
-        const file = new File([blob], 'inline.svg', { type: 'image/svg+xml' });
-        const uploadedUrl = await uploadTo('/upload', file);
-        imgIn.value = uploadedUrl;                  // <-- store RAW
-      }catch(_){
-        // If upload fails we still submit so you see server-side error or can retry
-      }
-      form.submit(); // resume
+    // Need an upload if we have SVG but no usable image_url yet
+    const needRealUrl = svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value));
+    if (!needRealUrl) return; // let submit proceed
+
+    e.preventDefault(); // hold submit until we set image_url
+
+    const svg = svgTA.value.trim();
+
+    // 1) Try PNG (best for thumbs, avoids SVG filtering issues via /uimg)
+    try{
+      const blob = await svgToPngBlob(svg, 512, 2500);
+      const file = new File([blob], 'preview.png', { type: 'image/png' });
+      const uploadedPng = await uploadTo('/upload', file);
+      imgIn.value = uploadedPng;         // use PNG URL
+      form.submit();
+      return;
+    }catch(_){ /* fall through */ }
+
+    // 2) Fallback: upload raw SVG as a file so we still get a real URL
+    try{
+      const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
+      const file = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
+      const uploadedSvg = await uploadTo('/upload', file);
+      imgIn.value = uploadedSvg;         // use SVG URL
+      form.submit();
+      return;
+    }catch(err){
+      // 3) Final: block submit so we don't save a product with a blank image
+      alert('We couldn’t attach the image yet. Please tap Preview SVG once and try Add Item again.');
+      return false;
     }
   });
 })();
