@@ -843,23 +843,42 @@
     });
   })();
 
-  // Guard: price + title before Add Item
-  (function(){
-    const form = document.querySelector('#create-product form'); if(!form) return;
-    form.addEventListener('submit', (e) => {
-      const priceEl = form.querySelector('input[name="pi_price"]');
-      const titleEl = form.querySelector('input[name="title"]');
-      const v = (priceEl?.value || '').trim();
-      const price = Number(v);
-      if(!titleEl?.value.trim()){
-        e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
+  // Guard + ensure SVG is uploaded before submit
+(function(){
+  const form = document.querySelector('#create-product form'); if(!form) return;
+  form.addEventListener('submit', async (e) => {
+    const priceEl = form.querySelector('input[name="pi_price"]');
+    const titleEl = form.querySelector('input[name="title"]');
+    const imgIn   = document.getElementById('itUrl');
+    const svgTA   = document.getElementById('svgCode');
+
+    // Basic validation
+    const v = (priceEl?.value || '').trim();
+    const price = Number(v);
+    if(!titleEl?.value.trim()){
+      e.preventDefault(); alert('Please add a product title.'); titleEl?.focus(); return false;
+    }
+    if(!v || isNaN(price) || price <= 0){
+      e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
+    }
+
+    // If user has SVG code but no usable image_url yet → upload the SVG now
+    const needsUpload = svgTA && svgTA.value.trim() && imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value));
+    if (needsUpload){
+      e.preventDefault(); // hold the native submit
+      try{
+        const svg = svgTA.value.trim();
+        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const file = new File([blob], 'inline.svg', { type: 'image/svg+xml' });
+        const uploadedUrl = await uploadTo('/upload', file);
+        imgIn.value = proxied(uploadedUrl);
+      }catch(_){
+        // If upload fails we still submit so you see server-side error or can retry
       }
-      if(!v || isNaN(price) || price <= 0){
-        e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false;
-      }
-      return true;
-    });
-  })();
+      form.submit(); // resume
+    }
+  });
+})();
 
     // Toggle inline product editor
   document.addEventListener('click', (e)=>{
@@ -869,24 +888,29 @@
     row.style.display = (row.style.display === 'none' || !row.style.display) ? 'table-row' : 'none';
   });
 
-  // ===== SVG preview: direct data URI version (works on Safari/iPhone too) =====
+  // ===== SVG preview (inline inject) + ensure image_url is persisted =====
 (function(){
-  const btn = document.getElementById('previewSvgBtn');
-  const ta  = document.getElementById('svgCode');
+  const btn   = document.getElementById('previewSvgBtn');
+  const ta    = document.getElementById('svgCode');
+  const imgIn = document.getElementById('itUrl');
   if (!btn || !ta) return;
 
-  btn.addEventListener('click', ()=>{
+  btn.addEventListener('click', async ()=>{
     let svg = (ta.value || '').trim();
-    if (!svg) return alert('No SVG code to preview.');
+    if (!svg) { alert('No SVG code to preview.'); return; }
 
-    // Ensure minimal required attributes so it always renders
-    if (!/xmlns=/i.test(svg)) svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    if (!/viewBox=/i.test(svg) && !/width=/i.test(svg))
-      svg = svg.replace('<svg', '<svg viewBox="0 0 512 512"');
+    // Render inline (works reliably on iPhone/Pi Browser)
+    previewSvg(svg);
 
-    // Encode as a data URL
-    const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-    setThumb('itThumb', dataUrl);
+    // If image_url is empty (or a data/blob), upload the SVG so the form has a real URL
+    if (imgIn && (!imgIn.value || /^data:|^blob:/i.test(imgIn.value))) {
+      try{
+        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const file = new File([blob], 'inline.svg', { type: 'image/svg+xml' });
+        const uploadedUrl = await uploadTo('/upload', file);
+        imgIn.value = proxied(uploadedUrl);
+      }catch(_){ /* silent – preview still shows inline; submit hook will try again */ }
+    }
   });
 })();
     
