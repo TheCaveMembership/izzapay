@@ -79,7 +79,6 @@
     </div>
 
     {% if setup_mode %}
-      <!-- setup form unchanged -->
       <div class="h1">Create your IZZA PAY Store</div>
       {% if username %}
         <p class="muted" style="margin-top:-6px">Signed in as <strong>@{{ username }}</strong></p>
@@ -91,7 +90,47 @@
       <form class="grid" method="post" action="/merchant/setup">
         <input type="hidden" name="t" value="{{ t or '' }}">
         <input type="hidden" name="colorway" id="colorway" value="{{ cw }}">
-        <!-- ... rest of setup form unchanged ... -->
+
+        <div class="card stack">
+          <div class="field"><label class="ip-label">Store name</label><input class="ip-input" name="business_name" placeholder="Your store name" required></div>
+          <div class="field">
+            <label class="ip-label">Store slug <span class="muted">(optional)</span></label>
+            <input class="ip-input" id="slugInput" name="slug" placeholder="your-handle" inputmode="latin" autocapitalize="none" spellcheck="false" pattern="[a-z0-9-]+" maxlength="40">
+            <small class="muted">Your storefront URL will be <code>/store/&lt;slug&gt;</code>.</small>
+          </div>
+          <div class="field"><label class="ip-label">Order notifications email</label><input class="ip-input" name="reply_to_email" type="email" placeholder="you@example.com" required></div>
+          <div class="field">
+            <label class="ip-label">Pi wallet public key</label>
+            <input class="ip-input" name="pi_wallet_address" placeholder="G… (56 characters)" maxlength="56" required>
+            <small class="muted">Must start with <strong>G</strong> and be exactly 56 characters.</small>
+          </div>
+          <div class="field"><label class="ip-label">Pi handle (optional)</label><input class="ip-input" name="pi_handle" placeholder="@your-pi-handle"></div>
+          <div class="field"><label class="ip-label">Theme mode</label><select class="ip-select" name="theme_mode"><option value="dark" selected>Dark</option><option value="light">Light</option></select></div>
+
+          <div class="field">
+            <label class="ip-label">Logo</label>
+            <div class="picker card">
+              <div class="thumb" id="logoThumb"><span class="muted">Preview</span></div>
+              <div class="row"><input type="file" id="logoFile" accept="image/*" style="flex:1"/><button class="ip-btn" type="button" id="logoUploadBtn">Upload</button></div>
+              <div class="field" style="margin-top:6px"><input class="ip-input" id="logoUrl" name="logo_url" placeholder="https://… (or paste a logo URL)"></div>
+            </div>
+          </div>
+
+          <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn" type="submit">Save &amp; Continue</button></div>
+        </div>
+
+        <div class="card stack">
+          <div class="muted" style="font-weight:600">Look &amp; Feel</div>
+          <div class="theme-swatches" data-colorpicker>
+            {% for c in ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
+              <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}">
+                <div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+                <small>{{ c.split('-')[1] | capitalize }}</small>
+              </div>
+            {% endfor %}
+          </div>
+          <p class="muted" style="margin-top:8px">Tap a color to preview instantly. We’ll save this choice with your store.</p>
+        </div>
       </form>
 
     {% else %}
@@ -106,7 +145,48 @@
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/update{% if t %}?t={{ t }}{% endif %}">
           <input type="hidden" name="t" value="{{ t or '' }}">
           <input type="hidden" name="colorway" id="edit-colorway" value="{{ cw }}">
-          <!-- ... settings fields unchanged ... -->
+          <div class="field-inline">
+            <div class="field"><label class="ip-label">Store name</label><input class="ip-input" name="business_name" value="{{ m.business_name or '' }}" required></div>
+            <div class="field"><label class="ip-label">Order notifications email</label><input class="ip-input" name="reply_to_email" type="email" value="{{ m.reply_to_email or '' }}" required></div>
+          </div>
+          <div class="field-inline">
+            <div class="field"><label class="ip-label">Pi wallet public key</label><input class="ip-input" name="pi_wallet_address" value="{{ m.pi_wallet_address or '' }}" maxlength="56" required></div>
+            <div class="field"><label class="ip-label">Pi handle</label><input class="ip-input" name="pi_handle" value="{{ m.pi_handle or '' }}"></div>
+          </div>
+          <div class="field">
+            <label class="ip-label">Store slug <span class="muted">(short URL name)</span></label>
+            <div class="row" style="align-items:flex-start">
+              <input class="ip-input" id="editSlugInput" name="slug" value="{{ m.slug }}" inputmode="latin" autocapitalize="none" spellcheck="false" pattern="[a-z0-9-]+" maxlength="40" {% if not can_edit_slug %}disabled{% endif %}>
+              <button class="ip-btn ghost" type="button" id="enableSlugBtn" data-allowed="{{ '1' if can_edit_slug else '0' }}">{% if can_edit_slug %}Edit slug{% else %}Locked{% endif %}</button>
+            </div>
+            <small id="slugEditHint" class="hint">
+              {% if can_edit_slug %}You can only edit your slug every 15 days. Choose carefully.{% else %}
+                You can only edit your slug every 15 days.{% if next_edit %} Next edit available: <strong>{{ next_edit }}</strong>.{% endif %}
+              {% endif %} Allowed characters: a–z, 0–9, hyphen. No spaces.
+            </small>
+          </div>
+          <div class="field-inline">
+            <div class="field"><label class="ip-label">Logo URL</label><input class="ip-input" name="logo_url" value="{{ m.logo_url or '' }}"></div>
+            <div class="field">
+              <label class="ip-label">Theme mode</label>
+              <select class="ip-select" name="theme_mode">
+                <option value="dark" {% if m.theme_mode=='dark' %}selected{% endif %}>Dark</option>
+                <option value="light" {% if m.theme_mode=='light' %}selected{% endif %}>Light</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="sep"></div>
+          <div class="muted" style="font-weight:600">Colorway</div>
+          <div class="theme-swatches" id="edit-swatches" data-colorpicker>
+            {% for c in ['cw-blue','cw-mint','cw-purple','cw-amber'] %}
+              <div class="swatch {% if cw==c %}selected{% endif %}" data-cw="{{ c }}">
+                <div class="preview theme-preview {{ c }} theme-a"><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+                <small>{{ c.split('-')[1] | capitalize }}</small>
+              </div>
+            {% endfor %}
+          </div>
+
           <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="ip-btn" type="submit">Save Changes</button></div>
         </form>
       </div>
@@ -123,7 +203,7 @@
         <div class="h2">Create Product</div>
         <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/new{% if t %}?t={{ t }}{% endif %}">
           <input type="hidden" name="t" value="{{ t or '' }}">
-          <!-- SOURCE OF TRUTH: full inline SVG goes here -->
+          <!-- keep crafted SVG for inventory usage -->
           <input type="hidden" id="svgCode" name="svg_code" value="">
           <div class="field-inline">
             <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" required></div>
@@ -209,8 +289,6 @@
                 <td colspan="6">
                   <form class="stack" method="post" action="/merchant/{{ m.slug }}/items/update{% if t %}?t={{ t }}{% endif %}">
                     <input type="hidden" name="t" value="{{ t or '' }}"><input type="hidden" name="item_id" value="{{ it.id }}">
-                    <!-- keep svg_code on updates too -->
-                    <input type="hidden" name="svg_code" id="svg_code_{{ it.id }}" value="{{ it.svg_code or '' }}">
                     <div class="field-inline">
                       <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" value="{{ it.title }}"></div>
                       <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku" value="{{ it.sku }}"></div>
@@ -309,7 +387,7 @@
     else{ const sel=$('#craftedSelect'); if(sel){ sel.innerHTML=''; const o=document.createElement('option'); o.value=''; o.textContent='No username — add ?u=<username> to test'; sel.appendChild(o);} }
   }catch{}
 
-  // ---------- uploads (used only for raster images / logos) ----------
+  // ---------- uploads ----------
   const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
   async function uploadTo(path, file){
     const fd=new FormData(); fd.append('file', file);
@@ -364,11 +442,14 @@
       if(w && h) x=x.replace('<svg','<svg viewBox="0 0 '+Number(w)+' '+Number(h)+'"');
       else x=x.replace('<svg','<svg viewBox="0 0 512 512"');
     }
+    // explicit size to avoid 0×0 natural size in <img> or when rasterizing
     if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"'); else x=x.replace('<svg','<svg width="'+px+'"');
     if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"'); else x=x.replace('<svg','<svg height="'+px+'"');
     if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
     return x;
   }
+
+  // Inline an SVG string into a container
   function injectSvg(container, svgString, px=80){
     const el = (typeof container==='string') ? $(container) : container;
     const s = svgNormalize(svgString, px);
@@ -377,6 +458,8 @@
     el.style.background='transparent';
     return true;
   }
+
+  // Fetch an SVG by URL and inject it
   async function injectSvgFromUrl(container, url, px=80){
     try{
       const r = await fetch(url, {credentials:'omit', cache:'force-cache'});
@@ -388,7 +471,8 @@
     }catch{ return false; }
   }
 
-  // ---------- Image URL verifier (dev only) ----------
+  // ---------- Image URL verifier ----------
+  // Usage in console: window.testImageUrl('https://…')
   window.testImageUrl = async function testImageUrl(url){
     try{
       const r = await fetch(url, {method:'GET', credentials:'omit', cache:'no-cache'});
@@ -446,7 +530,7 @@
     if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
   })();
 
-  // ---------- item image upload (for raster images only) ----------
+  // ---------- item image upload ----------
   (function(){
     const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
     if(!file||!btn||!inp) return;
@@ -468,16 +552,10 @@
       const title=form.querySelector('input[name="title"]');
       const priceEl=form.querySelector('input[name="pi_price"]');
       const price=Number((priceEl?.value||'').trim());
-      const svgHidden=form.querySelector('#svgCode');
-      const imgInp=form.querySelector('#itUrl');
-
       if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
       if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
-
-      // If we have SVG, **do not** send any image_url; keep only svg_code.
-      if(svgHidden && svgHidden.value.trim()){
-        if(imgInp) imgInp.value = '';
-      }
+      // No forced PNG conversion anymore. We keep svg_code (hidden) for rendering later.
+      // If user pasted an image URL, it will still be used by server.
     });
   })();
 
@@ -550,10 +628,22 @@
       const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
       const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
 
-      function setFromSvg(svg){
-        // **No upload, no URL conversion**
+      function setFromSvg(svg, id){
         svgHidden.value = svg || '';
-        if(svg){ injectSvg('#itThumb', svg, 80); }
+        if(svg){
+          // show inline now (same look everywhere)
+          injectSvg('#itThumb', svg, 80);
+          // (optional) still set a URL so the server has something in image_url if required
+          // Fallback: upload raw SVG so we have a permanent URL
+          (async()=>{
+            try{
+              const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
+              const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
+              const url=await uploadTo('/upload', file);
+              if(imgIn) imgIn.value=ABS(url);
+            }catch{/* ignore */}
+          })();
+        }
       }
 
       async function onChange(){
@@ -561,23 +651,13 @@
         const it=CRAFT_ITEMS[id]||{};
         if(titleEl) titleEl.value = it.title || titleEl.value;
         if(skuEl)   skuEl.value   = it.sku || '';
-        if(it.svg){
-          setFromSvg(it.svg);
-          if(imgIn) imgIn.value = ''; // ensure no raster URL gets sent
-        }else if(it.img){
+        if(it.svg){ setFromSvg(it.svg, id); }
+        else if(it.img){
           const u=ABS(ipfsToHttp(it.img)).trim();
-          if(/\.svg(\?|$)/i.test(u)){
-            // Inline the remote SVG and store raw text in svg_code
-            try{
-              await injectSvgFromUrl('#itThumb', u, 80);
-              const r=await fetch(u,{credentials:'omit'}); const txt=await r.text();
-              setFromSvg(txt);
-              if(imgIn) imgIn.value = '';
-            }catch{
-              // if fetch fails, leave as-is; user can upload raster manually
-            }
+          if(/\.svg(\?|$)/i.test(u)){ // inline SVG image URLs too
+            await injectSvgFromUrl('#itThumb', u, 80);
+            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
           }else{
-            // raster image path; keep as image_url, clear svg_code
             if(imgIn) imgIn.value=u;
             setThumb('itThumb', proxy(u));
             svgHidden.value='';
@@ -599,44 +679,29 @@
       (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
     })();
 
-    // Edit rows wiring (keep svg_code when picking crafted item)
+    // Edit rows wiring
     (function wireEdit(){
       $all('.craftedEditSelect').forEach(sel=>{
-        const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id');
-        const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
-        const svgHidId='svg_code_'+id;
+        const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
         const cur = document.getElementById(hidId)?.value || '';
-
-        sel.addEventListener('change', async ()=>{
+        sel.addEventListener('change', ()=>{
           const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
-          const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]'); const svgEl=document.getElementById(svgHidId);
+          const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
           if(tEl) tEl.value = it.title || tEl.value;
-          if(it.svg){
-            if(svgEl) svgEl.value = it.svg;
-            if(iEl) iEl.value = '';
-          }else if(iEl && it.img){
-            const u=ABS(ipfsToHttp(it.img)).trim();
-            if(/\.svg(\?|$)/i.test(u)){
-              try{ const r=await fetch(u,{credentials:'omit'}); const txt=await r.text(); if(svgEl) svgEl.value=txt; if(iEl) iEl.value=''; }catch{}
-            }else{
-              iEl.value = u; if(svgEl) svgEl.value='';
-            }
-          }
+          if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
         });
-
         (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
       });
     })();
   })();
 
-  // ---------- After content: (kept) inline SVGs for URL thumbs if needed ----------
+  // ---------- After content: render SVGs inline for thumbnails in the table ----------
   (async function enhanceListThumbs(){
-    const $ = s => document.querySelector(s);
-    const $all = s => Array.from(document.querySelectorAll(s));
     const boxes = $all('.itimg');
     await Promise.all(boxes.map(async box=>{
       const img = box.querySelector('img');
       if(!img) return;
+      // the src is /uimg?src=<encoded real url>
       let u;
       try{
         const p = new URL(img.src, location.href);
@@ -644,6 +709,7 @@
       }catch{ u = img.src; }
       const real = decodeURIComponent(u||'');
       if(/\.svg(\?|$)/i.test(real)){
+        // Replace <img> with inline SVG (same look as preview)
         const ok = await injectSvgFromUrl(box, real, 80);
         if(!ok){ /* leave the <img> if we failed */ }
       }
