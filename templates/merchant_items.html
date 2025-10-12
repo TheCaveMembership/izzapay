@@ -631,18 +631,22 @@
 </script>
   <script>
   // Proxy external images so they always render (and allow local uploads too)
-  function proxied(url){
-    const v = (url || '').trim();
-    if (!v) return '';
-    if (v.startsWith('/') || v.startsWith('data:') || v.startsWith('blob:')) return v;
-    try {
-      const u = new URL(v, location.origin);
-      if (u.protocol === 'http:' || u.protocol === 'https:') {
-        return '/uimg?src=' + encodeURIComponent(u.href);
-      }
-    } catch(_) {}
-    return v;
-  }
+function proxied(url){
+  const v = (url || '').trim();
+  if (!v) return '';
+  // already proxied or data/blob → return as-is
+  if (v.startsWith('/uimg?src=') || v.startsWith('data:') || v.startsWith('blob:')) return v;
+  // local relative paths (including uploads like /uploads/…) → return as-is
+  if (v.startsWith('/')) return v;
+
+  try {
+    const u = new URL(v, location.origin);
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      return '/uimg?src=' + encodeURIComponent(u.href);
+    }
+  } catch(_) {}
+  return v;
+}
   function setThumb(id, url){
     const el = document.getElementById(id);
     if(!el) return; el.innerHTML = '';
@@ -871,7 +875,7 @@
         const blob = new Blob([svg], { type: 'image/svg+xml' });
         const file = new File([blob], 'inline.svg', { type: 'image/svg+xml' });
         const uploadedUrl = await uploadTo('/upload', file);
-        imgIn.value = proxied(uploadedUrl);
+        imgIn.value = uploadedUrl;                  // <-- store RAW
       }catch(_){
         // If upload fails we still submit so you see server-side error or can retry
       }
@@ -879,7 +883,6 @@
     }
   });
 })();
-
     // Toggle inline product editor
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-edit-toggle]'); if(!btn) return;
@@ -908,7 +911,9 @@
         const blob = new Blob([svg], { type: 'image/svg+xml' });
         const file = new File([blob], 'inline.svg', { type: 'image/svg+xml' });
         const uploadedUrl = await uploadTo('/upload', file);
-        imgIn.value = proxied(uploadedUrl);
+        imgIn.value = uploadedUrl;                 // <-- store RAW
+        // optional: also set the visible thumb via proxy
+        setThumb('itThumb', proxied(uploadedUrl));
       }catch(_){ /* silent – preview still shows inline; submit hook will try again */ }
     }
   });
@@ -1110,103 +1115,103 @@ function previewSvg(svgString){
   }
 
   function wireCreate(items){
-    const sel = document.getElementById('craftedSelect');
-    const hid = 'crafted_item_id';
-    const fk  = 'fulfillment_kind';
-    const cat = 'category';
-    if(!sel) return;
+  const sel = document.getElementById('craftedSelect');
+  const hid = 'crafted_item_id';
+  const fk  = 'fulfillment_kind';
+  const cat = 'category';
+  if(!sel) return;
 
-    fillSelect(sel, items, (document.getElementById(hid)||{}).value, false);
+  fillSelect(sel, items, (document.getElementById(hid)||{}).value, false);
+
+  sel.addEventListener('change', ()=>{
+    const id = sel.value || '';
+    markAsCrafting(hid, fk, cat, id);
+    if(!id) return;
+
+    const item    = CRAFT_ITEMS[id] || {};
+    const title   = item.title || '';
+    const sku     = item.sku || '';
+    const svg     = item.svg || '';
+    const rawUrl  = ipfsToHttp(item.img || '');        // <-- RAW url, not proxied
+
+    const form    = document.querySelector('#create-product form');
+    const titleEl = form?.querySelector('input[name="title"]');
+    const imageEl = document.getElementById('itUrl');
+    const skuEl   = form?.querySelector('input[name="sku"]');
+    const svgTA   = document.getElementById('svgCode');
+
+    // ALWAYS overwrite with the newly selected item (prevents stale previews)
+    if (titleEl) titleEl.value = title || titleEl.value;
+    if (skuEl)   skuEl.value   = sku || '';
+    if (svgTA)   svgTA.value   = svg || '';
+
+    if (svg){
+      (async ()=>{
+        try{
+          const blob = new Blob([svg], { type: 'image/svg+xml' });
+          const file = new File([blob], `${id}.svg`, { type: 'image/svg+xml' });
+          const uploadedUrl = await uploadTo('/upload', file);
+          if (imageEl) imageEl.value = uploadedUrl;     // <-- store RAW
+          setThumb('itThumb', proxied(uploadedUrl));    // preview via proxy
+          previewSvg(svg);                               // inline render for iOS
+        }catch(_){
+          // still show inline preview even if upload fails
+          previewSvg(svg);
+          if (imageEl) imageEl.value = '';
+        }
+      })();
+    }else if (rawUrl){
+      if (imageEl) imageEl.value = rawUrl;              // <-- store RAW
+      setThumb('itThumb', proxied(rawUrl));             // preview via proxy
+    }else{
+      // Nothing to preview; leave thumb as-is
+    }
+  });
+
+  const btn = document.getElementById('refreshCrafted');
+  if(btn){
+    btn.addEventListener('click', async ()=>{
+      btn.disabled = true; btn.textContent = 'Refreshing…';
+      try{
+        const user = who();
+        const state = await fetchState(user);
+        const fresh = itemsFromState(state);
+        fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
+      }finally{
+        btn.disabled = false; btn.textContent = 'Refresh';
+      }
+    });
+  }
+}
+  function wireEdit(items){
+  document.querySelectorAll('.craftedEditSelect').forEach(sel=>{
+    const row = sel.closest('tr'); if(!row) return;
+    const id  = sel.getAttribute('data-item-id');
+    const hidId = 'crafted_item_id_' + id;
+    const fkId  = 'fulfillment_kind_' + id;
+    const catId = 'category_' + id;
+
+    const curVal = (document.getElementById(hidId)||{}).value || '';
+    fillSelect(sel, items, curVal, true);
 
     sel.addEventListener('change', ()=>{
-      const id = sel.value || '';
-      markAsCrafting(hid, fk, cat, id);
-      if(!id) return;
+      const v = sel.value || '';
+      markAsCrafting(hidId, fkId, catId, v);
+      if(!v) return;
 
-      const item   = CRAFT_ITEMS[id] || {};
-      const title  = item.title || '';
-      const sku    = item.sku || '';
-      const svg    = item.svg || '';
-      const imgUrl = proxied(ipfsToHttp(item.img || ''));
+      const item = CRAFT_ITEMS[v] || {};
+      const tEl  = row.querySelector('input[name="title"]');
+      const iEl  = row.querySelector('input[name="image_url"]');
 
-      const form    = document.querySelector('#create-product form');
-      const titleEl = form?.querySelector('input[name="title"]');
-      const imageEl = document.getElementById('itUrl');
-      const skuEl   = form?.querySelector('input[name="sku"]');
-      const svgTA   = document.getElementById('svgCode');
+      if (tEl) tEl.value = item.title || tEl.value;
 
-      // ALWAYS overwrite with the newly selected item (prevents stale previews)
-      if (titleEl) titleEl.value = title || titleEl.value;
-      if (skuEl)   skuEl.value   = sku || '';
-      if (svgTA)   svgTA.value   = svg || '';
-
-      if (svg){
-  (async ()=>{
-    try{
-      const blob = new Blob([svg], { type: 'image/svg+xml' });
-      const file = new File([blob], `${id}.svg`, { type: 'image/svg+xml' });
-      const uploadedUrl = await uploadTo('/upload', file);
-      const prox = proxied(uploadedUrl);
-      if (imageEl) imageEl.value = prox;
-      previewSvg(svg); // render inline for iPhone Safari
-    }catch(_){
-      previewSvg(svg);
-      if (imageEl) imageEl.value = '';
-    }
-  })();
-}else if (imgUrl){
-  if (imageEl) imageEl.value = imgUrl;
-  setThumb('itThumb', imgUrl);
-}else{
-  // Nothing to preview; leave thumb as-is
+      if (iEl){
+        const rawUrl = ipfsToHttp(item.img || '');    // <-- RAW
+        if (rawUrl) iEl.value = rawUrl;
+      }
+    });
+  });
 }
-    });
-
-    const btn = document.getElementById('refreshCrafted');
-    if(btn){
-      btn.addEventListener('click', async ()=>{
-        btn.disabled = true; btn.textContent = 'Refreshing…';
-        try{
-          const user = who();
-          const state = await fetchState(user);
-          const fresh = itemsFromState(state);
-          fillSelect(sel, fresh, (document.getElementById(hid)||{}).value, false);
-        }finally{
-          btn.disabled = false; btn.textContent = 'Refresh';
-        }
-      });
-    }
-  }
-
-  function wireEdit(items){
-    document.querySelectorAll('.craftedEditSelect').forEach(sel=>{
-      const row = sel.closest('tr'); if(!row) return;
-      const id  = sel.getAttribute('data-item-id');
-      const hidId = 'crafted_item_id_' + id;
-      const fkId  = 'fulfillment_kind_' + id;
-      const catId = 'category_' + id;
-
-      const curVal = (document.getElementById(hidId)||{}).value || '';
-      fillSelect(sel, items, curVal, true);
-
-      sel.addEventListener('change', ()=>{
-        const v = sel.value || '';
-        markAsCrafting(hidId, fkId, catId, v);
-        if(!v) return;
-
-        const item = CRAFT_ITEMS[v] || {};
-        const tEl  = row.querySelector('input[name="title"]');
-        const iEl  = row.querySelector('input[name="image_url"]');
-
-        if (tEl) tEl.value = item.title || tEl.value;
-        // In edit rows we only set the URL field; preview thumb belongs to the create form
-        if (iEl){
-          const url = proxied(ipfsToHttp(item.img || ''));
-          if (url) iEl.value = url;
-        }
-      });
-    });
-  }
 
   (async function init(){
     try{
