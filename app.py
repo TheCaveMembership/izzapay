@@ -1913,6 +1913,7 @@ def merchant_new_item(slug):
     title           = (data.get("title") or "").strip()
     sku             = (data.get("sku") or "").strip()
     image_url       = (data.get("image_url") or "").strip()
+    image_url       = _coerce_image_url_to_media(image_url)   # ← add this
     description     = (data.get("description") or "").strip()
     crafted_item_id = (data.get("crafted_item_id") or "").strip() or None
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
@@ -2003,6 +2004,7 @@ def merchant_update_item(slug):
     title           = (data.get("title") or "").strip()
     sku             = (data.get("sku") or "").strip()
     image_url       = (data.get("image_url") or "").strip()
+    image_url       = _coerce_image_url_to_media(image_url)   # ← add this
     description     = (data.get("description") or "").strip()
     crafted_item_id = (data.get("crafted_item_id") or "").strip()
 
@@ -3274,14 +3276,13 @@ def upload():
                     raw = _sanitize_svg_bytes(raw)
                     url = _save_bytes(raw, "svg")
                     return {"ok": True, "url": url}, 200
-                # For bitmap data URLs, we can optionally feed through Pillow for normalization,
-                # but simplest is just save with the right extension:
+                # For bitmap data URLs just save with the right extension
                 ext = {"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"}[ctype]
                 url = _save_bytes(raw, ext)
                 return {"ok": True, "url": url}, 200
             except Exception:
                 return {"ok": False, "error": "bad_data_url"}, 400
-        # If JSON but no data_url, fall through to usual multipart handling error
+        # If JSON but no data_url, fall through to multipart handling
 
     # -------- Case B: Multipart file upload --------
     if "file" not in request.files:
@@ -3302,16 +3303,16 @@ def upload():
     # Detect content type / extension
     ctype = (f.mimetype or "").lower()
     filename_ext = (f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else "")
-    # Prefer mimetype when clear
+
+    # SVG path (skip Pillow)
     if ctype == "image/svg+xml" or filename_ext == "svg" or raw.lstrip().startswith(b"<svg"):
-        # ---- SVG path (skip Pillow) ----
         if "svg" not in ALLOWED_EXTENSIONS:
             return {"ok": False, "error": "unsupported_type"}, 400
         raw = _sanitize_svg_bytes(raw)
         url = _save_bytes(raw, "svg")
         return {"ok": True, "url": url}, 200
 
-    # ---- Bitmap path (use Pillow exactly like your original) ----
+    # ---- Bitmap path (use Pillow, like original) ----
     from io import BytesIO
     bio = BytesIO(raw)
 
@@ -3378,6 +3379,62 @@ def upload():
     url = _save_bytes(out_bytes, ext)
     return {"ok": True, "url": url}, 200
 
+
+# Helper to normalize inline SVG / data: URL into /media URL for items
+def _coerce_image_url_to_media(url_or_markup: str) -> str:
+    import re
+    s = (url_or_markup or "").strip()
+    if not s:
+        return ""
+    # already a local media/static or https: link
+    if s.startswith(("/media/", "/static/", "https://")):
+        return s
+
+    # data: URL → write to /media
+    if s.startswith("data:"):
+        try:
+            header, body = s.split(",", 1)
+            ctype = header.split(":", 1)[1].split(";", 1)[0].lower()
+            if ctype not in ("image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"):
+                return ""
+            raw = base64.b64decode(body) if ";base64" in header.lower() else body.encode("utf-8")
+            ext = {"image/svg+xml":"svg","image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"}[ctype]
+            # sanitize svg
+            if ext == "svg":
+                t = raw.decode("utf-8", errors="ignore")
+                t = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", t, flags=re.I | re.S)
+                t = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", t, flags=re.I)
+                raw = t.encode("utf-8")
+            digest = hashlib.sha256(raw).hexdigest()
+            name = secure_filename(f"{digest[:32]}.{ext}")
+            path = os.path.join(UPLOAD_DIR, name)
+            if not os.path.exists(path):
+                with open(path, "wb") as out:
+                    out.write(raw)
+            return f"{MEDIA_PREFIX}/{name}"
+        except Exception:
+            return ""
+
+    # raw inline <svg> markup → write to /media
+    if s.lstrip().lower().startswith("<svg"):
+        t = s
+        t = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", t, flags=re.I | re.S)
+        t = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", t, flags=re.I)
+        raw = t.encode("utf-8")
+        try:
+            digest = hashlib.sha256(raw).hexdigest()
+        except Exception:
+            digest = uuid.uuid4().hex
+        name = secure_filename(f"{digest[:32]}.svg")
+        path = os.path.join(UPLOAD_DIR, name)
+        if not os.path.exists(path):
+            with open(path, "wb") as out:
+                out.write(raw)
+        return f"{MEDIA_PREFIX}/{name}"
+
+    return s  # leave other strings alone
+
+
 # ----------------- IMAGE PROXY -----------------
 _TRANSPARENT_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
@@ -3389,6 +3446,29 @@ def uimg():
     src = (request.args.get("src") or "").strip()
     if not src:
         return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+
+    # NEW: allow safe data: URLs directly (used by dashboard previews)
+    if src.startswith("data:"):
+        try:
+            header, body = src.split(",", 1)
+            ctype = header.split(":", 1)[1].split(";", 1)[0].lower()
+            if ctype not in ("image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"):
+                return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+            if ";base64" in header.lower():
+                raw = base64.b64decode(body)
+            else:
+                raw = body.encode("utf-8")
+            # light SVG sanitize
+            if ctype == "image/svg+xml":
+                import re
+                txt = raw.decode("utf-8", errors="ignore")
+                txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I | re.S)
+                txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
+                raw = txt.encode("utf-8")
+            return Response(raw, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=60"})
+        except Exception:
+            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+
     try:
         u = urlparse(src)
     except Exception:
