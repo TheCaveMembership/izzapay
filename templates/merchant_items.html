@@ -1028,13 +1028,20 @@
   }
 
   // --- NEW: preview SVG directly (and overwrite blob when replaced)
-  function previewSvg(svgString){
-    try{
-      const blob = new Blob([svgString], { type: 'image/svg+xml' });
-      const url  = URL.createObjectURL(blob);
-      setThumb('itThumb', url);
-    }catch(_){}
-  }
+  // replace your previewSvg() with this:
+function previewSvg(svgString){
+  try{
+    let s = (svgString || '').trim();
+    if(!s) return;
+
+    // make sure it has namespace and some sizing so Safari draws it
+    if(!/xmlns=/i.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    if(!/viewBox=/i.test(s) && !/width=/i.test(s)) s = s.replace('<svg', '<svg viewBox="0 0 512 512"');
+
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+    setThumb('itThumb', url); // your existing helper
+  }catch(_){}
+}
 
   // Only put id/title in the <option>
   function fillSelect(sel, items, currentId, isEdit){
