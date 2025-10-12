@@ -677,6 +677,16 @@ function proxied(url){
     return j.url;
   }
 
+function toAbsoluteUrl(u){
+  try{
+    if(!u) return '';
+    if(/^https?:\/\//i.test(u)) return u;
+    if(u.startsWith('/')) return location.origin.replace(/\/$/, '') + u;
+    // last resort: resolve relative against current page
+    return new URL(u, location.origin).href;
+  }catch(_){ return u; }
+}
+    
   // Copy helper
   function copyFromSelector(sel){
     const el = document.querySelector(sel); if(!el) return;
@@ -712,7 +722,7 @@ function proxied(url){
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{
         const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url; setThumb('logoThumb', proxied(url));
+        inp.value = toAbsoluteUrl(url); setThumb('logoThumb', proxied(url));
       }catch(e){ alert('Upload failed. You can paste a URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
     });
@@ -740,7 +750,7 @@ function proxied(url){
       btn.disabled = true; btn.textContent = 'Uploading…';
       try{
         const url = await uploadTo('/upload', file.files[0]);
-        inp.value = url;
+        inp.value = toAbsoluteUrl(url);
         setThumb(thumbId, proxied(url));
       }catch(e){ alert('Upload failed. You can paste an image URL instead.'); }
       finally{ btn.disabled = false; btn.textContent = 'Upload'; }
@@ -917,7 +927,7 @@ function proxied(url){
       const blob = await svgToPngBlob(svg, 512, 2500);
       const file = new File([blob], 'preview.png', { type: 'image/png' });
       const uploadedPng = await uploadTo('/upload', file);
-      imgIn.value = uploadedPng;         // use PNG URL
+      imgIn.value = toAbsoluteUrl(uploadedPng);         // use PNG URL
       form.submit();
       return;
     }catch(_){ /* fall through */ }
@@ -927,7 +937,7 @@ function proxied(url){
       const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
       const file = new File([svgBlob], 'image.svg', { type: 'image/svg+xml' });
       const uploadedSvg = await uploadTo('/upload', file);
-      imgIn.value = uploadedSvg;         // use SVG URL
+      imgIn.value = toAbsoluteUrl(uploadedSvg);         // use SVG URL
       form.submit();
       return;
     }catch(err){
@@ -1026,7 +1036,7 @@ function proxied(url){
       const blob = await svgToPngBlob(svg, 512);
       const file = new File([blob], 'preview.png', { type: 'image/png' });
       const uploadedUrl = await uploadTo('/upload', file); // existing helper
-      if (imgIn) imgIn.value = uploadedUrl;                // <-- store PNG URL
+      if (imgIn) imgIn.value = toAbsoluteUrl(uploadedUrl);                // <-- store PNG URL
       setThumb(thumbId, proxied(uploadedUrl));             // show via proxy in the thumb
     }catch(err){
       // Fallback: keep inline preview; user can still submit (server-side may handle svg later)
@@ -1300,7 +1310,7 @@ function previewSvg(svgString){
       const pngBlob = await svgToPngBlob(svg, 512);
       const file = new File([pngBlob], `${id}.png`, { type: 'image/png' });
       const uploadedUrl = await uploadTo('/upload', file);
-      if (imageEl) imageEl.value = uploadedUrl;         // <-- store PNG URL
+      if (imageEl) imageEl.value = toAbsoluteUrl(uploadedUrl);         // <-- store PNG URL
       setThumb('itThumb', proxied(uploadedUrl));        // preview via proxy
       previewSvg(svg);                                  // inline render to match preview
     }catch(_){
