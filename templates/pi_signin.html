@@ -254,7 +254,7 @@
       });
     });
 
-    // activate markers when sections enter viewport
+        // activate markers when sections enter viewport
     const sectionMap = {};
     marks.forEach(m=>{
       const id=m.getAttribute('data-target');
@@ -275,9 +275,11 @@
     },{rootMargin:'-40% 0px -55% 0px', threshold:.05});
 
     ['s-city','s-arcade','s-build','s-craft','s-missions','s-battles','s-store-cta','s-sell','s-custom','s-collect']
-      .forEach(id=>{ const el=document.getElementById(id); if(el) watch.observe        (el));
+      .forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) watch.observe(el);
       });
-    })();
+  })();
   </script>
 
   <!-- Bottom chips: Language selector + Privacy link -->
