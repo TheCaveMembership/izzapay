@@ -208,6 +208,9 @@
           <input type="hidden" id="svgCode" name="svg_code" value="">
           <input type="hidden" name="crafted_part" id="crafted_part">
           <input type="hidden" name="meta_type" id="meta_type" value="">
+          <input type="hidden" name="craft_ic_cost" id="craft_ic_cost" value="">
+          <input type="hidden" name="craft_dyn_mode" id="craft_dyn_mode" value="fixed_ic">
+          <input type="hidden" name="craft_dyn_ic"   id="craft_dyn_ic"   value="">
           <div class="field-inline">
             <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" required></div>
             <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku"></div>
@@ -612,7 +615,15 @@
       const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
       if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
     }
-
+// Fetch crafted item details from your backend (expects price_ic, svg, meta)
+async function fetchCraftedDetails(craftedId){
+  if(!craftedId) return null;
+  // implement this endpoint on the server to return { ok, svg, meta:{price_ic,...} }
+  const r = await fetch(`/api/crafted/${encodeURIComponent(craftedId)}`, { credentials: 'include' });
+  if(!r.ok) return null;
+  const j = await r.json().catch(()=>null);
+  return j && j.ok ? j : null;
+}
     // --- helpers used by itemsFromState
     function normalizeCategory(rawType, rawCategory){
       const t = String(rawType || '').toLowerCase();
@@ -737,28 +748,45 @@
       }
 
       async function onChange(){
-        const id=sel.value||'';
-        markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
-        if(!id) return;
+  const id = sel.value || '';
+  markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
+  if(!id) return;
 
-        const it=CRAFT_ITEMS[id]||{};
-        if(titleEl) titleEl.value = it.title || titleEl.value;
-        if(skuEl)   skuEl.value   = it.sku || '';
+  const it = CRAFT_ITEMS[id] || {};
+  if(titleEl) titleEl.value = it.title || titleEl.value;
+  if(skuEl)   skuEl.value   = it.sku || '';
 
-        if(it.svg){
-          setFromSvg(it.svg, id);
-        }else if(it.img){
-          const u=ABS(ipfsToHttp(it.img)).trim();
-          if(/\.svg(\?|$)/i.test(u)){
-            await injectSvgFromUrl('#itThumb', u, 80);
-            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
-          }else{
-            if(imgIn) imgIn.value=u;
-            setThumb('itThumb', proxy(u));
-            svgHidden.value='';
-          }
-        }
-      }
+  // 1) Ask server for true mint cost + canonical svg/meta
+  const det = await fetchCraftedDetails(id);
+  const meta = (det && det.meta) || {};
+  const priceIC = Number(meta.price_ic || 0);
+
+  // 2) Fill the hidden IC fields so the server can persist them on create
+  const icEl  = document.getElementById('craft_ic_cost');
+  const modeEl= document.getElementById('craft_dyn_mode');
+  const icDyn = document.getElementById('craft_dyn_ic');
+  if(icEl)  icEl.value   = priceIC > 0 ? String(priceIC) : '';
+  if(modeEl) modeEl.value= 'fixed_ic';
+  if(icDyn) icDyn.value  = priceIC > 0 ? String(priceIC) : '';
+
+  // 3) Prefer the canonical SVG from server; fallback to what came from state
+  const svgFromServer = det && det.svg || '';
+  if(svgFromServer){
+    setFromSvg(svgFromServer, id);
+  }else if(it.svg){
+    setFromSvg(it.svg, id);
+  }else if(it.img){
+    const u=ABS(ipfsToHttp(it.img)).trim();
+    if(/\.svg(\?|$)/i.test(u)){
+      await injectSvgFromUrl('#itThumb', u, 80);
+      svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
+    }else{
+      if(imgIn) imgIn.value=u;
+      setThumb('itThumb', proxy(u));
+      svgHidden.value='';
+    }
+  }
+}
 
       sel.addEventListener('change', onChange);
 
