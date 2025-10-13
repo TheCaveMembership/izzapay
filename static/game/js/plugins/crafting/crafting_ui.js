@@ -2272,7 +2272,91 @@ function bindInside(){
       redeemBtn.disabled = false;
 
       if (r && r.ok){
-  // Prefer server value, else parse from the code itself
+  // 1) Crafted-item voucher path (prefill + wallet credit + jump to visuals)
+  if (String(r.kind||'').toLowerCase() === 'crafted_item'){
+    // Cap IC for this exact item
+    const capIC = (typeof r.value_ic === 'number') ? r.value_ic
+                 : parseInt(r.value_ic||'', 10) || 0;
+
+    if (capIC > 0 && typeof walletAddCredit === 'function'){
+      walletAddCredit({
+        capIC,
+        source: 'voucher',
+        meta: { code: String(code||'').trim(), crafted: true }
+      });
+      persistWalletSnapshot();
+    } else {
+      // fallback to legacy badge counter so the user can still mint
+      applyCreditState((STATE.mintCredits|0) + 1);
+    }
+
+    // Prefill the craft with meta + svg
+    try{
+      const meta = r.meta || {};
+      STATE.currentName     = meta.name || STATE.currentName || 'Purchased Item';
+      STATE.currentCategory = meta.category || STATE.currentCategory || 'armour';
+      STATE.currentPart     = meta.part || STATE.currentPart || 'helmet';
+
+      // Merge feature flags + meters (only keys we know)
+      if (meta.featureFlags && typeof meta.featureFlags === 'object'){
+        Object.keys(STATE.featureFlags).forEach(k=>{
+          if (k in meta.featureFlags) STATE.featureFlags[k] = !!meta.featureFlags[k];
+        });
+      }
+      if (meta.featureLevels && typeof meta.featureLevels === 'object'){
+        Object.keys(meta.featureLevels).forEach(k=>{
+          const v = parseInt(meta.featureLevels[k], 10);
+          if (Number.isFinite(v)) STATE.featureLevels[k] = Math.max(1, Math.min(3, v));
+        });
+      }
+
+      // Sanitize + normalize SVG into the right slot viewBox
+      const cleanedSvg = sanitizeSVG(r.svg || '');
+      if (cleanedSvg){
+        STATE.currentSVG = normalizeSvgForSlot(cleanedSvg, STATE.currentPart);
+      }
+
+      // Jump to Create → Visuals, paint everything, enable Mint
+      STATE.createSub = 'visuals';
+      const host = STATE.root?.querySelector('#craftTabs');
+      if (host){
+        host.innerHTML = renderCreate();
+        bindInside();
+        bindFeatureMeters(STATE.root);
+        _syncVisualsTabStyle();
+        // push fields into UI
+        const itemName = document.getElementById('itemName');
+        if (itemName) itemName.value = STATE.currentName;
+        const svgIn = document.getElementById('svgIn');
+        const prevHost = document.getElementById('svgPreview');
+        if (svgIn) svgIn.value = STATE.currentSVG || '';
+        if (prevHost){
+          if (STATE.currentSVG){
+            prevHost.innerHTML = STATE.currentSVG;
+            const s = prevHost.querySelector('svg');
+            if (s){ s.style.maxWidth='100%'; s.style.height='auto'; s.style.display='block'; s.setAttribute('preserveAspectRatio','xMidYMid meet'); }
+          } else {
+            prevHost.innerHTML = '<div style="opacity:.6;font-size:12px">No preview</div>';
+          }
+        }
+        const btnMint = document.getElementById('btnMint');
+        if (btnMint) btnMint.style.display = 'inline-block';
+      }
+
+      // Nice status
+      redeemStat.textContent = `Redeemed ✓ — item loaded. You can mint it now.`;
+
+      // Done
+      updateTabsHeaderCredits();
+      _syncVisualsTabStyle?.();
+      return;
+    }catch(e){
+      console.warn('[voucher] crafted_item prefill failed', e);
+      // Fall through to generic success below if something went wrong
+    }
+  }
+
+  // 2) Generic credit voucher (legacy) — keep your current behavior
   const capFromServer = (typeof r.value_ic === 'number') ? r.value_ic : parseInt(r.value_ic||'',10);
   const capFromCode   = parseICFromVoucher(code);
   const capIC = (Number.isFinite(capFromServer) && capFromServer>0) ? capFromServer
@@ -2295,9 +2379,9 @@ function bindInside(){
   updateTabsHeaderCredits();
   _syncVisualsTabStyle?.();
 } else {
-        const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', network:'Network error.' };
-        redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
-      }
+  const reasons = { invalid:'Code not found.', used:'Code already used.', expired:'Code expired.', auth_required:'Sign in required.', network:'Network error.' };
+  redeemStat.textContent = reasons[r?.reason] || 'Unable to redeem this code.';
+}
     }, { passive:true });
   }
 
