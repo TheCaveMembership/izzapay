@@ -77,7 +77,6 @@
     .mark.purple .dot{background:#2a1f4a}
     .mark.active.gold .dot{background:var(--gold1); box-shadow:0 0 14px 2px rgba(255,207,77,.55)}
     .mark.active.purple .dot{background:var(--piPurple2); box-shadow:0 0 14px 2px rgba(183,132,255,.55)}
-    /* Keep rails visible on phones; hide the marker nav on narrow to declutter */
     @media (max-width:980px){ .railNav{display:none} }
 
     /* Reveal */
@@ -86,6 +85,18 @@
 
     /* Bigger IZZA PAY logo under hero words */
     .hero-logo{height:clamp(58px,12vw,110px);margin:10px auto 8px;display:block;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
+
+    /* ↓↓↓ ADDITION: hard-center the IZZA PAY logo on mobile ↓↓↓ */
+    @media (max-width: 768px) {
+      #s-hero .hero-logo{
+        position: relative;
+        left: 50%;
+        transform: translateX(-50%);
+        display: block;
+        margin: 6px 0 8px; /* optional tighter gap */
+      }
+    }
+    /* ↑↑↑ END ADDITION ↑↑↑ */
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -225,13 +236,11 @@
   <!-- Scroll reveals + rail glow + marker activation -->
   <script>
   (function(){
-    // reveal on scroll
     const io=new IntersectionObserver((entries)=>{
       entries.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('show'); });
     },{threshold:.15});
     document.querySelectorAll('.reveal').forEach(n=>io.observe(n));
 
-    // side rails glow with progress
     const L=document.getElementById('railL'), R=document.getElementById('railR');
     function onScroll(){
       const doc=document.documentElement;
@@ -243,7 +252,6 @@
     }
     onScroll(); window.addEventListener('scroll', onScroll, {passive:true});
 
-    // clickable markers -> smooth scroll
     const marks=[...document.querySelectorAll('.railNav .mark')];
     marks.forEach(m=>{
       m.addEventListener('click', (e)=>{
@@ -254,7 +262,6 @@
       });
     });
 
-    // activate markers when sections enter viewport
     const sectionMap = {};
     marks.forEach(m=>{
       const id=m.getAttribute('data-target');
@@ -282,10 +289,9 @@
   })();
   </script>
 
-  <!-- Bottom chips: Language selector + Privacy link -->
+  <!-- Bottom chips -->
   <script>
   (function(){
-    // ---- language chip ----
     var KEY='izzaLang';
     var choices=[['af','Afrikaans'],['ar','العربية'],['bn','বাংলা'],['bg','Български'],['ca','Català'],
       ['cs','Čeština'],['da','Dansk'],['de','Deutsch'],['el','Ελληνικά'],['en','English'],
@@ -306,28 +312,17 @@
       }catch(_){}
     }
 
-    // container for both chips
     var wrap=document.createElement('div');
-    Object.assign(wrap.style,{
-      position:'fixed',right:'10px',bottom:'10px',zIndex:'9999',
-      display:'flex',gap:'8px',alignItems:'center'
-    });
+    Object.assign(wrap.style,{position:'fixed',right:'10px',bottom:'10px',zIndex:'9999',display:'flex',gap:'8px',alignItems:'center'});
 
-    // language chip
     var langChip=document.createElement('div');
-    Object.assign(langChip.style,{
-      background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',
-      padding:'6px 8px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',
-      boxShadow:'0 6px 18px rgba(0,0,0,.35)'
-    });
+    Object.assign(langChip.style,{background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',padding:'6px 8px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',boxShadow:'0 6px 18px rgba(0,0,0,.35)'});
     var lab=document.createElement('span'); lab.textContent='Language: ';
     var sel=document.createElement('select'); sel.id='hsLang';
     choices.forEach(function(c){ var o=document.createElement('option'); o.value=c[0]; o.textContent=c[1]; sel.appendChild(o); });
-    sel.value=getLang();
-    sel.addEventListener('change',function(){ setLang(this.value); });
+    sel.value=getLang(); sel.addEventListener('change',function(){ setLang(this.value); });
     langChip.appendChild(lab); langChip.appendChild(sel);
 
-    // privacy chip (matches language chip style)
     var privacyChip=document.createElement('a');
     privacyChip.href='/privacy'; privacyChip.textContent='Privacy';
     Object.assign(privacyChip.style,{
