@@ -3002,84 +3002,76 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            # --- inside the for li in lines loop, after you computed it, qty, etc. ---
+            # --- Crafted-item voucher creation block (INSIDE the for-loop) ---
+            if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
+                try:
+                    crafted_id = str(it["crafted_item_id"]).strip()
 
-if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
-    try:
-        crafted_id = str(it["crafted_item_id"]).strip()
+                    # Pull the crafted item details (svg + meta)
+                    with conn() as cx2:
+                        c_row = cx2.execute(
+                            "SELECT id, name, COALESCE(svg,'') AS svg, COALESCE(meta,'{}') AS meta "
+                            "FROM crafted_items WHERE id=?", (crafted_id,)
+                        ).fetchone()
 
-        # Pull the crafted item details (svg + meta) so we can replicate later
-        with conn() as cx2:
-            c_row = cx2.execute(
-                "SELECT id, name, COALESCE(svg,'') AS svg, COALESCE(meta,'{}') AS meta "
-                "FROM crafted_items WHERE id=?", (crafted_id,)
-            ).fetchone()
+                    c_svg = (c_row["svg"] if c_row else "") or ""
+                    try:
+                        c_meta = json.loads(c_row["meta"]) if c_row and c_row["meta"] else {}
+                    except Exception:
+                        c_meta = {}
 
-        # Fallbacks
-        c_svg = (c_row["svg"] if c_row else "") or ""
-        try:
-            c_meta = json.loads(c_row["meta"]) if c_row and c_row["meta"] else {}
-        except Exception:
-            c_meta = {}
+                    ic_needed = int(c_meta.get("price_ic") or 500)
 
-        # IC value needed to mint this item (fallback to 500 if missing)
-        ic_needed = int(c_meta.get("price_ic") or 500)
+                    # One voucher per quantity purchased
+                    for _ in range(qty):
+                        token = uuid.uuid4().hex
+                        payload = {
+                            "kind": "crafted_item",
+                            "title": it.get("title") or (c_row and c_row["name"]) or "Crafted Item",
+                            "crafted_item_id": crafted_id,
+                            "ic": ic_needed,
+                            "meta": c_meta,
+                            "svg": c_svg
+                        }
 
-        # One voucher per quantity purchased
-        for _ in range(qty):
-            token = uuid.uuid4().hex
+                        with conn() as cx2:
+                            cx2.execute("""
+                                CREATE TABLE IF NOT EXISTS vouchers(
+                                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  token TEXT UNIQUE NOT NULL,
+                                  user_id INTEGER,
+                                  kind TEXT NOT NULL,
+                                  payload TEXT NOT NULL,
+                                  used INTEGER NOT NULL DEFAULT 0,
+                                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                  used_at TIMESTAMP
+                                )
+                            """)
+                            cx2.execute(
+                                "INSERT INTO vouchers(token, user_id, kind, payload) VALUES(?,?,?,?)",
+                                (token, int(buyer_user_id) if buyer_user_id else None,
+                                 "crafted_item", json.dumps(payload))
+                            )
 
-            payload = {
-                "kind": "crafted_item",
-                "title": it.get("title") or (c_row and c_row["name"]) or "Crafted Item",
-                "crafted_item_id": crafted_id,
-                "ic": ic_needed,
-                # Keep both high-level config and raw SVG so the game can recreate perfectly
-                "meta": c_meta,         # includes featureFlags/featureLevels/category/part if you stored them
-                "svg": c_svg
-            }
+                            cx2.execute("""
+                                CREATE TABLE IF NOT EXISTS voucher_redirects(
+                                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  session_id INTEGER NOT NULL,
+                                  token TEXT NOT NULL,
+                                  used INTEGER NOT NULL DEFAULT 0,
+                                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                )
+                            """)
+                            cx2.execute(
+                                "INSERT INTO voucher_redirects(session_id, token) VALUES(?,?)",
+                                (s["id"], token)
+                            )
+                except Exception:
+                    # never fail checkout on voucher generation errors
+                    pass
 
-            with conn() as cx2:
-                # Store a redeemable voucher row (use your existing table/shape if you already have one)
-                cx2.execute("""
-                    CREATE TABLE IF NOT EXISTS vouchers(
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      token TEXT UNIQUE NOT NULL,
-                      user_id INTEGER,            -- may be NULL at fulfill time
-                      kind TEXT NOT NULL,         -- 'credit', 'crafted_item', ...
-                      payload TEXT NOT NULL,      -- JSON blob
-                      used INTEGER NOT NULL DEFAULT 0,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                      used_at TIMESTAMP
-                    )
-                """)
-                cx2.execute(
-                    "INSERT INTO vouchers(token, user_id, kind, payload) VALUES(?,?,?,?)",
-                    (token, int(buyer_user_id) if buyer_user_id else None, "crafted_item", json.dumps(payload))
-                )
-
-                # Keep your existing redirect helper table so we can bounce buyer to voucher page
-                cx2.execute("""
-                    CREATE TABLE IF NOT EXISTS voucher_redirects(
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      session_id INTEGER NOT NULL,
-                      token TEXT NOT NULL,
-                      used INTEGER NOT NULL DEFAULT 0,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                cx2.execute(
-                    "INSERT INTO voucher_redirects(session_id, token) VALUES(?,?)",
-                    (s["id"], token)
-                )
-
-    except Exception:
-        # never fail checkout on voucher generation errors
-        pass
-
-            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
+            # --- IC CREDITS: award credits (still inside the loop) ---
             try:
-                # Strategy 1: crafted_item_id like "ic:<amount>" (e.g., "ic:500")
                 cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
                 awarded = 0
                 if cid.startswith("ic:"):
@@ -3091,7 +3083,6 @@ if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
                         awarded = unit * qty
                         add_ic_credits(int(buyer_user_id), awarded)
 
-                # Strategy 2 (fallback): SKU like "IC500" or "ic_500"
                 if not awarded:
                     sku = (it["sku"] or "").strip().lower() if it else ""
                     if sku.startswith("ic"):
@@ -3105,44 +3096,25 @@ if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
             except Exception:
                 pass
 
-            # Create order row for this line
+            # Create order row (still inside the loop)
             buyer_token = uuid.uuid4().hex
             cur = cx.execute(
                 """INSERT INTO orders(
-                     merchant_id,
-                     item_id,
-                     qty,
-                     buyer_email,
-                     buyer_name,
-                     shipping_json,
-                     pi_amount,
-                     pi_fee,
-                     pi_merchant_net,
-                     pi_tx_hash,
-                     payout_status,
-                     status,
-                     buyer_token,
-                     buyer_user_id
+                     merchant_id, item_id, qty, buyer_email, buyer_name, shipping_json,
+                     pi_amount, pi_fee, pi_merchant_net, pi_tx_hash,
+                     payout_status, status, buyer_token, buyer_user_id
                    )
                    VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
                 (
-                    s["merchant_id"],
-                    (it["id"] if it else None),
-                    qty,
-                    buyer_email,
-                    buyer_name,
-                    json.dumps(shipping),
-                    float(line_gross),
-                    float(line_fee),
-                    float(line_net),
-                    tx_hash,
-                    buyer_token,
-                    buyer_user_id,
+                    s["merchant_id"], (it["id"] if it else None), qty,
+                    buyer_email, buyer_name, json.dumps(shipping),
+                    float(line_gross), float(line_fee), float(line_net), tx_hash,
+                    buyer_token, buyer_user_id,
                 ),
             )
             created_order_ids.append(cur.lastrowid)
 
-            # Mark as "claimed" so any collectibles UI doesn't prompt again
+            # Collectible claim stamp (still inside the loop)
             try:
                 cx.execute("""
                     CREATE TABLE IF NOT EXISTS collectible_claims(
@@ -3165,7 +3137,7 @@ if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
             except Exception:
                 pass
 
-        # Mark the session as paid
+        # Mark the session as paid (AFTER the loop, still inside the same `with`)
         cx.execute(
             "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
             (tx_hash, s["id"])
@@ -3889,10 +3861,11 @@ def merchant_payout(slug):
 def buyer_status(token):
     with conn() as cx:
         o = cx.execute("SELECT * FROM orders WHERE buyer_token=?", (token,)).fetchone()
-    if not o: abort(404)
+    if not o:
+        abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()  # <-- tuple fixed
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()  # <-- tuple fixed
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 
