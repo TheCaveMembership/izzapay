@@ -687,24 +687,35 @@ vel += ACCEL * dt;
 const tmpVec = new THREE.Vector3();
 requestAnimationFrame(tick);
 
-/* Game over — immediate freeze & overlay */
-async function gameOver(){
-  over = true; running = false;
+/* Game over — show overlay first, persist in background */
+function gameOver(){
+  if (over) return;               // guard against double-trigger
+  over = true; 
+  running = false;
+
   const finalScore = dist|0;
   best = Math.max(best|0, finalScore);
   localStorage.setItem('runnerHighScore', String(best));
+
   const gainedCC = addCraftingCreditsFromIzza(sessionIzza);
 
-  // Save immediately at game-over
-  try{
-    if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
-    if (window.IZZA_PERSIST?.saveWallet) await IZZA_PERSIST.saveWallet();
-  }catch(_){}
-
-  try{ await submitLeaderboard(best); }catch(_){}
+  // ✅ Update UI immediately (don’t block on network)
   const stats = `Distance: ${finalScore} • IZZA gained: ${sessionIzza} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
-  document.getElementById('overStats').textContent = stats;
-  overOverlay.classList.add('show');
+  const statsEl = document.getElementById('overStats');
+  if (statsEl) statsEl.textContent = stats;
+
+  const overlay = document.getElementById('overOverlay');
+  if (overlay) overlay.classList.add('show');
+
+  // 🔄 Persist & leaderboard in the background
+  (async ()=>{
+    try{
+      if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
+      if (window.IZZA_PERSIST?.saveWallet) await IZZA_PERSIST.saveWallet();
+    }catch(e){ console.warn('runner save failed', e); }
+
+    try{ await submitLeaderboard(best); }catch(e){ console.warn('lb submit failed', e); }
+  })();
 }
 /* Resize */
 window.addEventListener('resize', ()=>{
