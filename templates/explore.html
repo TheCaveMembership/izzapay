@@ -35,29 +35,48 @@
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
     .logo{width:40px;height:40px;border-radius:8px;border:1px solid var(--line);object-fit:cover;background:#0001}
     /* product image frame with overlay support */
-    .thumb-wrap{
-      width:100%;
-      height:160px;
-      border-radius:10px;
-      border:1px solid var(--line);
-      overflow:hidden;
-      background:#0001;
-      position:relative;
-    }
-    /* frame already has height:160px */
-.thumb-wrap.is-svg { background: transparent; position: relative; }
-.thumb-wrap.is-svg .svg-thumb{
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
+.thumb-wrap {
+  width: 100%;
+  height: 160px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: #0001;
+  position: relative;
 }
 
-/* let the SVG grow big but keep aspect ratio */
-.thumb-wrap.is-svg .svg-thumb svg{
+/* normal product images (unchanged) */
+.thumb-wrap img.thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* crafted SVGs — transparent background, centered, scaled nicely */
+.thumb-wrap.is-svg {
+  background: transparent !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.thumb-wrap.is-svg .svg-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.thumb-wrap.is-svg .svg-thumb svg {
   display: block;
   max-width: 90%;
   max-height: 90%;
-  width: auto;   /* don't force distortion */
-  height: auto;  /* don't force distortion */
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
     /* Greyscale/dim when sold out */
     .is-soldout .thumb-wrap img.thumb{
