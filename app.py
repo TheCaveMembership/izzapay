@@ -3040,7 +3040,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
             # Create order row for this line
             buyer_token = uuid.uuid4().hex
-                        cur = cx.execute(
+            cur = cx.execute(
                 """INSERT INTO orders(
                      merchant_id,
                      item_id,
@@ -3252,6 +3252,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         )
 
     return resp
+
+
 @app.post("/payment/cancel")
 def payment_cancel():
     """
@@ -3277,9 +3279,11 @@ def payment_error():
     """
     return payment_cancel()
 
+
 # ----------------- UPLOADS -----------------
 def _allowed_ext(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 @app.post("/upload")
 def upload():
@@ -3571,18 +3575,22 @@ def uimg():
 
     return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
+
 # ----------------- POLICIES / STATIC PAGES -----------------
 @app.get("/validation-key.txt")
 def validation_key():
     return app.send_static_file("validation-key.txt")
 
+
 @app.get("/privacy")
 def privacy():
     return render_template("privacy.html")
 
+
 @app.get("/terms")
 def terms():
     return render_template("terms.html")
+
 
 # ----------------- ORDERS PAGE (Purchases + Merchant stats) -----------------
 def _merchant_30d_stats(merchant_id: int):
@@ -3646,6 +3654,7 @@ def _merchant_30d_stats(merchant_id: int):
         "usd_rate": usd_rate,
         "usd_estimate": usd_estimate,
     }
+
 
 @app.get("/orders")
 def orders_page():
@@ -3717,6 +3726,7 @@ def orders_page():
         payout_sent=(request.args.get("payout") == "sent"),
         t=tok,   # <-- pass token
     )
+
 
 # Trigger payout email (manual payout by app owner)
 @app.post("/merchant/<slug>/payout")
@@ -3806,6 +3816,7 @@ def merchant_payout(slug):
         q += f"&t={tok}"
     return redirect(f"/merchant/{m['slug']}/orders{q}")
 
+
 # ----------------- BUYER STATUS / SUCCESS -----------------
 @app.get("/o/<token>")
 def buyer_status(token):
@@ -3816,6 +3827,7 @@ def buyer_status(token):
         i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()  # <-- tuple fixed
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
+
 
 @app.get("/success")
 def success():
