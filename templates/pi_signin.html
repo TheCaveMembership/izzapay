@@ -6,18 +6,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    /* ===== Dark Neon Web3 Theme (page-local) ===== */
     html,body{max-width:100%;overflow-x:hidden}
     :root{
       --bg:#0a0d16; --panel:#0e1220; --card:rgba(18,22,35,.88);
       --line:#1e2740; --txt:#e8f1ff; --muted:#98a6c7;
-      --accent:#6be1ff; --accent2:#10c97b; --accent3:#b784ff; --hot:#ff4f6b;
-      --glow: 0 0 32px rgba(107,225,255,.45), 0 0 64px rgba(183,132,255,.25);
-      --ring: 0 0 0 2px rgba(107,225,255,.25), 0 0 30px rgba(107,225,255,.35) inset;
+      --gold:#f7c84d; --gold2:#ffb23a; --aqua:#6be1ff; --vio:#b784ff; --mint:#10c97b;
+      --glow: 0 0 32px rgba(247,200,77,.35), 0 0 64px rgba(107,225,255,.20);
+      --ring: 0 0 0 2px rgba(247,200,77,.28), 0 0 30px rgba(107,225,255,.25) inset;
     }
-    body{font-family:Inter,Arial,Helvetica,sans-serif;background:radial-gradient(1200px 800px at 70% -10%, #162045 0%, #0a0d16 56%) fixed, var(--bg); color:var(--txt); margin:0}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 88px}
-    @media (min-width:720px){ .wrap{padding:24px 24px 120px} }
+    body{
+      font-family:Inter,Arial,Helvetica,sans-serif;
+      background:
+        radial-gradient(1200px 800px at 70% -10%, #182250 0%, #0a0d16 56%) fixed,
+        var(--bg);
+      color:var(--txt); margin:0
+    }
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
+    @media (min-width:720px){ .wrap{padding:24px 24px 140px} }
 
     /* Top bar */
     .topbar{
@@ -27,20 +32,21 @@
       backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
     }
     .brand{display:flex;align-items:center;gap:10px}
+    .brand a{display:inline-flex;align-items:center}
     .brand-word{height:36px;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .ip-btn, .ip-btn.ghost{
+    .ip-btn,.ip-btn.ghost{
       display:inline-flex;align-items:center;justify-content:center;gap:8px;
       padding:12px 16px;border-radius:12px; font-weight:600; letter-spacing:.2px; cursor:pointer; text-decoration:none;
       border:1px solid transparent; transition:transform .12s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease, color .12s ease;
     }
-    .ip-btn { background:linear-gradient(180deg,#4aa8ff,#3c7dff); color:white; box-shadow:var(--glow); }
-    .ip-btn:hover{ transform:translateY(-1px); }
-    .ip-btn:active{ transform:translateY(0); }
-    .ip-btn.ghost{ background:transparent; border-color:#2a3550; color:#cfe0ff; }
-    .ip-btn.ghost:hover{ border-color:#3f4e79; box-shadow:0 0 0 2px rgba(63,78,121,.35) inset; }
+    .ip-btn{ background:linear-gradient(180deg,#4aa8ff,#3c7dff); color:#fff; box-shadow:var(--glow) }
+    .ip-btn:hover{ transform:translateY(-1px) }
+    .ip-btn:active{ transform:translateY(0) }
+    .ip-btn.ghost{ background:transparent; border-color:#2a3550; color:#cfe0ff }
+    .ip-btn.ghost:hover{ border-color:#3f4e79; box-shadow:0 0 0 2px rgba(63,78,121,.35) inset }
 
-    /* Cards and text */
+    /* Cards & text */
     .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
     @media (min-width:720px){ .card{padding:20px} }
     h1{margin:0 0 10px;font-size:28px;line-height:1.15}
@@ -50,48 +56,46 @@
     .pillrow{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0}
     .ip-pill{background:#10172a;border:1px solid #243055;color:#cfe0ff;border-radius:999px;padding:6px 10px;font-size:12px}
 
-    /* ===== HERO: Animated “X” Hub ===== */
+    /* HERO with animated X */
     .hero{position:relative;margin-top:14px;display:grid;gap:14px}
-    .hub{
-      position:relative;background:linear-gradient(180deg,#0c1224,#0a0d16);
-      border:1px solid var(--line); border-radius:18px; padding:22px; overflow:hidden;
-    }
+    .hub{position:relative;background:linear-gradient(180deg,#0c1224,#0a0d16);
+      border:1px solid var(--line); border-radius:18px; padding:22px; overflow:hidden}
     .hub-inner{position:relative; z-index:1; display:grid; gap:16px}
     .hub-grid{display:grid; gap:12px}
-    @media (min-width:900px){
-      .hero{grid-template-columns:1.2fr .9fr}
-      .hub-grid{grid-template-columns:1fr 1fr}
-    }
+    @media (min-width:900px){ .hero{grid-template-columns:1.2fr .9fr} .hub-grid{grid-template-columns:1fr 1fr} }
 
-    /* SVG X overlays */
-    .x-bg{position:absolute; inset:0; z-index:0; pointer-events:none; opacity:.9}
+    .x-bg{position:absolute; inset:0; z-index:0; pointer-events:none; opacity:.85}
     .x-hotspot{position:absolute; display:block; border-radius:12px}
-    .x-hotspot:focus-visible{outline: none; box-shadow:var(--ring)}
-    /* hotspots map to beams and nodes */
-    .hs-left{left:6%; top:50%; width:44%; height:18%; transform:translateY(-50%) rotate(-16deg)}
-    .hs-right{right:6%; top:50%; width:44%; height:18%; transform:translateY(-50%) rotate(16deg)}
-    .hs-node{left:50%; top:50%; width:130px; height:130px; transform:translate(-50%,-50%); border-radius:50%}
+    .x-hotspot:focus-visible{outline:none; box-shadow:var(--ring)}
+    .hs-left{left:6%; top:54%; width:44%; height:18%; transform:translateY(-50%) rotate(-16deg)}
+    .hs-right{right:6%; top:54%; width:44%; height:18%; transform:translateY(-50%) rotate(16deg)}
+    .hs-node{left:50%; top:62%; width:130px; height:130px; transform:translate(-50%,-50%); border-radius:50%}
     .hs-bottom{left:50%; bottom:10%; width:260px; height:54px; transform:translateX(-50%)}
 
     .cta-row{display:flex;gap:10px;flex-wrap:wrap}
     .cta-note{font-size:13px;color:var(--muted)}
-
-    /* Feature bullets */
     .features{display:grid;gap:12px}
     .feature{background:rgba(20,26,43,.6); border:1px solid #1c2646; border-radius:14px; padding:12px}
     .feature strong{color:#e8f1ff}
 
-    /* Footer note */
     .footnote{font-size:12px;color:#8ea3d1}
 
-    /* Tiny glow animation */
+    /* Sticky gold conduit on the left */
+    .rail-wrap{position:sticky; top:74px; height:0; z-index:0}
+    .rail{position:absolute; left:-24px; top:0; bottom:-800px; width:8px; background:linear-gradient(180deg, transparent 0, #2e2530 8%, transparent 100%) }
+    @media (max-width:900px){ .rail{display:none} }
+
+    /* Scroll reveal */
+    .reveal{opacity:0; transform:translateY(18px); transition:opacity .5s ease, transform .5s ease}
+    .reveal.show{opacity:1; transform:translateY(0)}
+
+    /* Pulse */
     @keyframes pulseGlow{
-      0%{filter:drop-shadow(0 0 0 rgba(107,225,255,.0))}
-      50%{filter:drop-shadow(0 0 16px rgba(107,225,255,.45))}
-      100%{filter:drop-shadow(0 0 0 rgba(107,225,255,.0))}
+      0%{filter:drop-shadow(0 0 0 rgba(247,200,77,0))}
+      50%{filter:drop-shadow(0 0 16px rgba(247,200,77,.55))}
+      100%{filter:drop-shadow(0 0 0 rgba(247,200,77,0))}
     }
     .pulse{animation:pulseGlow 2.2s ease-in-out infinite}
-
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -101,7 +105,9 @@
     <!-- Top bar -->
     <div class="topbar">
       <div class="brand">
-        <img src="/static/izzapay-word.svg" class="brand-word" alt="IZZA PAY wordmark">
+        <a href="/" aria-label="IZZA PAY — Home">
+          <img src="/static/izzapay-word.svg" class="brand-word" alt="IZZA PAY wordmark">
+        </a>
       </div>
       <div class="actions">
         <a class="ip-btn ghost" href="/explore">Browse Stores</a>
@@ -109,71 +115,70 @@
       </div>
     </div>
 
-    <!-- HERO: Ecosystem hub with animated X -->
+    <!-- Sticky decorative rail -->
+    <div class="rail-wrap" aria-hidden="true">
+      <div class="rail" id="rail"></div>
+    </div>
+
+    <!-- HERO -->
     <section class="hero" aria-label="IZZA Ecosystem Hub">
       <div class="hub">
 
-        <!-- Animated SVG background “X” -->
+        <!-- Gold-electric X -->
         <svg class="x-bg" viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
-            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+            <linearGradient id="goldGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#f7c84d"/>
+              <stop offset="1" stop-color="#ffb23a"/>
+            </linearGradient>
+            <linearGradient id="aquaGrad" x1="1" y1="0" x2="0" y2="1">
               <stop offset="0" stop-color="#6be1ff"/>
               <stop offset="1" stop-color="#b784ff"/>
-            </linearGradient>
-            <linearGradient id="g2" x1="1" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#10c97b"/>
-              <stop offset="1" stop-color="#6be1ff"/>
             </linearGradient>
             <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur stdDeviation="8" result="b"/>
               <feMerge>
-                <feMergeNode in="b"/>
-                <feMergeNode in="b"/>
-                <feMergeNode in="SourceGraphic"/>
+                <feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/>
               </feMerge>
             </filter>
           </defs>
-
-          <!-- Beam 1 -->
+          <!-- Beam 1 (gold) -->
           <g filter="url(#glow)" opacity=".95">
-            <path d="M80 140 L1120 480" stroke="url(#g1)" stroke-width="16" stroke-linecap="round" />
-            <path d="M80 160 L1120 500" stroke="url(#g1)" stroke-width="3" stroke-linecap="round" opacity=".5">
+            <path d="M80 160 L1120 480" stroke="url(#goldGrad)" stroke-width="16" stroke-linecap="round"/>
+            <path d="M80 180 L1120 500" stroke="url(#goldGrad)" stroke-width="3" stroke-linecap="round" opacity=".5">
               <animate attributeName="stroke-dasharray" values="0 200; 120 200; 0 200" dur="3s" repeatCount="indefinite"/>
             </path>
           </g>
-
-          <!-- Beam 2 -->
+          <!-- Beam 2 (aqua/violet) -->
           <g filter="url(#glow)" opacity=".95">
-            <path d="M1120 140 L80 480" stroke="url(#g2)" stroke-width="16" stroke-linecap="round" />
-            <path d="M1120 160 L80 500" stroke="url(#g2)" stroke-width="3" stroke-linecap="round" opacity=".5">
+            <path d="M1120 160 L80 480" stroke="url(#aquaGrad)" stroke-width="16" stroke-linecap="round"/>
+            <path d="M1120 180 L80 500" stroke="url(#aquaGrad)" stroke-width="3" stroke-linecap="round" opacity=".5">
               <animate attributeName="stroke-dasharray" values="0 200; 120 200; 0 200" dur="3s" repeatCount="indefinite" begin=".6s"/>
             </path>
           </g>
-
-          <!-- Center node -->
+          <!-- Center node placed lower so it doesn't sit under the headline -->
           <g filter="url(#glow)">
-            <circle cx="600" cy="320" r="54" fill="url(#g1)" opacity=".85"/>
-            <circle cx="600" cy="320" r="78" fill="none" stroke="#6be1ff" stroke-opacity=".25">
-              <animate attributeName="r" values="70;90;70" dur="4s" repeatCount="indefinite"/>
+            <circle cx="600" cy="380" r="46" fill="url(#goldGrad)" opacity=".9"/>
+            <circle cx="600" cy="380" r="70" fill="none" stroke="#f7c84d" stroke-opacity=".25">
+              <animate attributeName="r" values="65;85;65" dur="4s" repeatCount="indefinite"/>
             </circle>
           </g>
         </svg>
 
-        <!-- Invisible clickable hotspots mapped to routes -->
-        <a class="x-hotspot hs-left" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City"></a>
-        <a class="x-hotspot hs-right" href="/izza-game/auth?dest=minigames" aria-label="Play IZZA Arcade"></a>
+        <!-- Click hotspots -->
+        <a class="x-hotspot hs-left"  href="/izza-game/auth?dest=city"       aria-label="Enter IZZA City"></a>
+        <a class="x-hotspot hs-right" href="/izza-game/auth?dest=minigames"  aria-label="Play IZZA Arcade"></a>
         <button id="piSignInBtn" class="x-hotspot hs-node" aria-label="Authorize with Pi" title="Authorize with Pi"></button>
         <a class="x-hotspot hs-bottom" href="/orders" aria-label="View My Purchases"></a>
 
-        <!-- Content over the X -->
+        <!-- Content -->
         <div class="hub-inner">
           <div class="hub-grid">
-            <div>
+            <div class="reveal">
               <h1 class="pulse">Build, sell, and play in IZZA</h1>
-              <p>Craft AI-SVG items inside IZZA, list them as digital collectibles, and get paid in Pi. Buyers equip items in game, including armor that reduces damage and fully automatic guns that change play. Your creativity becomes value inside the IZZA ecosystem.</p>
+              <p>Craft AI-SVG items inside IZZA, list them as digital collectibles, and get paid in Pi. Buyers equip items in game — from damage-reducing armor to fully automatic guns. Your creativity becomes value across the IZZA ecosystem.</p>
               <div class="pillrow">
                 <span class="ip-pill">Pi SDK v2</span>
-                <span class="ip-pill">1% app fee</span>
                 <span class="ip-pill">99% to merchant</span>
                 <span class="ip-pill">IZZA API</span>
               </div>
@@ -181,57 +186,57 @@
                 <button id="piSignInBtn_clone" class="ip-btn">Authorize with Pi</button>
                 <a class="ip-btn ghost" href="/orders">View My Purchases</a>
               </div>
-              <p class="cta-note">Authorize to create your merchant store, add products, and manage sales. You can also jump into the game to start earning crafting credits.</p>
+              <p class="cta-note">Authorize to create your merchant store, add products, and manage sales — or jump into the game to start earning crafting credits.</p>
               <p id="msg" class="muted"></p>
               <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
             </div>
 
             <div class="features">
-              <div class="feature">
+              <div class="feature reveal">
                 <strong>Craft & Sell</strong>
-                <p>Create AI-SVG items, mint as collectibles, and sell for Pi. Your store is live instantly inside IZZA PAY.</p>
+                <p>Create AI-SVG items, mint as collectibles, and sell for Pi. Your store goes live instantly in IZZA PAY.</p>
               </div>
-              <div class="feature">
+              <div class="feature reveal">
                 <strong>Equip & Play</strong>
-                <p>Purchased items are usable across IZZA City and IZZA Arcade. Armor lowers damage, weapons change your strategy, cosmetics flex your style.</p>
+                <p>Purchased items are usable across IZZA City and IZZA Arcade. Armor lowers damage; weapons and cosmetics change how you play.</p>
               </div>
-              <div class="feature">
+              <div class="feature reveal">
                 <strong>Earn & Compete</strong>
-                <p>Play to earn IZZA Coins and Crafting Credits. Set records on IZZA leaderboards, including longest police chase in IZZA City.</p>
+                <p>Play to earn IZZA Coins and Crafting Credits. Climb IZZA leaderboards, including the longest police chase in IZZA City.</p>
               </div>
-              <div class="feature">
+              <div class="feature reveal">
                 <strong>Creator Dashboard</strong>
-                <p>Track transactions, manage products, and see sales analytics with Pi-authenticated access.</p>
+                <p>Track transactions, manage products, and analyze sales with Pi-authenticated access.</p>
               </div>
             </div>
           </div>
 
-          <div class="cta-row" style="margin-top:8px">
-            <a class="ip-btn" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City">🏙️ Enter IZZA City</a>
-            <a class="ip-btn ghost" href="/izza-game/auth?dest=minigames" aria-label="Play IZZA Arcade">🎯 Play IZZA Arcade</a>
+          <div class="cta-row reveal" style="margin-top:8px">
+            <a class="ip-btn" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City">Enter IZZA City</a>
+            <a class="ip-btn ghost" href="/izza-game/auth?dest=minigames" aria-label="Play IZZA Arcade">Play IZZA Arcade</a>
           </div>
-          <p class="footnote">Tip, the glowing X is interactive. Left beam opens IZZA City, right beam opens IZZA Arcade, center orb authorizes with Pi, bottom bar opens your purchases.</p>
+          <p class="footnote">Pro tip: the glowing X is interactive. Left beam opens IZZA City, right beam opens IZZA Arcade, center orb authorizes with Pi, bottom bar opens your purchases.</p>
         </div>
       </div>
 
-      <!-- Secondary card: How it works -->
-      <div class="card">
+      <!-- How it works (reveals on scroll) -->
+      <div class="card reveal">
         <h2>How it works</h2>
         <ol style="margin:6px 0 0;padding-left:18px">
-          <li style="margin:10px 0"><strong>Authorize with Pi.</strong> You stay inside Pi Browser and connect securely.</li>
-          <li style="margin:10px 0"><strong>Create your store.</strong> Add products, set Pi pricing, customize your theme and fonts.</li>
+          <li style="margin:10px 0"><strong>Authorize with Pi.</strong> Stay inside Pi Browser and connect securely.</li>
+          <li style="margin:10px 0"><strong>Create your store.</strong> Add products, set Pi pricing, choose your theme and fonts.</li>
           <li style="margin:10px 0"><strong>Craft items in-game.</strong> Earn Crafting Credits and IZZA Coins, generate AI-SVG items, mint as collectibles.</li>
-          <li style="margin:10px 0"><strong>Sell to players.</strong> Buyers equip items across IZZA City and IZZA Arcade, value flows through real gameplay.</li>
+          <li style="margin:10px 0"><strong>Sell to players.</strong> Buyers equip items across IZZA City and Arcade — value flows through real gameplay.</li>
         </ol>
       </div>
     </section>
 
   </div>
 
-  <!-- ===== Pi SDK auth (kept, with clone button wiring) ===== -->
+  <!-- Pi SDK auth (kept) -->
   <script>
   (function(){
-    const btnMain = document.getElementById('piSignInBtn');
+    const btnMain  = document.getElementById('piSignInBtn');
     const btnClone = document.getElementById('piSignInBtn_clone');
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
@@ -274,7 +279,32 @@
   })();
   </script>
 
-  <!-- ===== Language selector chip (unchanged) ===== -->
+  <!-- Scroll reveal + rail glow -->
+  <script>
+  (function(){
+    const io = new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{
+        if(e.isIntersecting) e.target.classList.add('show');
+      });
+    }, {threshold:.15});
+    document.querySelectorAll('.reveal').forEach(n=>io.observe(n));
+
+    // rail glow lengthens as you scroll
+    const rail = document.getElementById('rail');
+    function onScroll(){
+      if(!rail) return;
+      const doc = document.documentElement;
+      const max = doc.scrollHeight - doc.clientHeight;
+      const p = Math.max(0, Math.min(1, (doc.scrollTop||0) / (max||1)));
+      rail.style.boxShadow = `0 0 ${8+40*p}px ${p*16}px rgba(247,200,77,${.25+.35*p})`;
+      rail.style.background = `linear-gradient(180deg, transparent 0, rgba(247,200,77,${.15+.25*p}) 14%, rgba(107,225,255,${.10+.20*p}) 55%, transparent 100%)`;
+    }
+    onScroll();
+    window.addEventListener('scroll', onScroll, {passive:true});
+  })();
+  </script>
+
+  <!-- Language selector (unchanged) -->
   <script>
   (function(){
     var KEY='izzaLang';
@@ -308,7 +338,7 @@
   })();
   </script>
 
-  <!-- ===== Translation bootstrap (unchanged) ===== -->
+  <!-- Translation bootstrap (unchanged) -->
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
@@ -319,9 +349,7 @@
       });
       const j = await r.json();
       return (j && j.ok && typeof j.text === 'string') ? j.text : text;
-    } catch {
-      return text;
-    }
+    } catch { return text; }
   };
   </script>
   <script>
