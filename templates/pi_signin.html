@@ -86,16 +86,14 @@
     /* Bigger IZZA PAY logo under hero words */
     .hero-logo{height:clamp(58px,12vw,110px);margin:10px auto 8px;display:block;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
 
-    /* ↓↓↓ ADDITION: hard-center the IZZA PAY logo on mobile ↓↓↓ */
-    @media (max-width: 768px) {
-      #s-hero .hero-logo{
-        position: relative;
-        left: 50%;
-        transform: translateX(-50%);
-        display: block;
-        margin: 6px 0 8px; /* optional tighter gap */
-      }
-    }
+    /* Mobile: nudge the IZZA PAY logo to the right */
+@media (max-width: 768px){
+  #s-hero .hero-logo{
+    display:block;
+    margin:10px auto 8px;     /* keeps it centered baseline */
+    transform: translateX(12px);  /* push right; tweak 8–24px as you like */
+  }
+}
     /* ↑↑↑ END ADDITION ↑↑↑ */
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
