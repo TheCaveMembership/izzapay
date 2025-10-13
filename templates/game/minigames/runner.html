@@ -186,10 +186,35 @@ function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) l
 function renderWalletFromLS(){ document.getElementById('coins').textContent = String(parseInt(localStorage.getItem('izzaCoins')||'0',10)||0); document.getElementById('craft').textContent = String(readCraftAny()); }
 renderWalletFromLS();
 
-/* --- HYDRATE SHARED WALLET + SAVE ON EXIT (match basketball) --- */
+/* --- LIVE WALLET SYNC: keeps coins & craft consistent between games --- */
+async function syncLiveWallet(){
+  try{
+    // wait for persist readiness if not yet
+    if (window.IZZA_PERSIST?.ready) await IZZA_PERSIST.ready;
+    if (!window.IZZA_PERSIST?.getWallet) return;
+
+    const live = await IZZA_PERSIST.getWallet();
+    if (!live) return;
+
+    // update coins
+    if (typeof live.coins === 'number'){
+      localStorage.setItem('izzaCoins', String(live.coins|0));
+      document.getElementById('coins').textContent = String(live.coins|0);
+    }
+
+    // update craft credits
+    if (typeof live.craftingCredits === 'number'){
+      writeCraftAll(live.craftingCredits|0);
+      document.getElementById('craft').textContent = String(live.craftingCredits|0);
+    }
+
+  }catch(e){ console.warn('runner sync wallet failed', e); }
+}
+
+/* --- HYDRATE SHARED WALLET ON ENTRY (now includes live sync) --- */
 async function hydrateWalletOnEntry(){
   try{
-    // optional handoff
+    // optional handoff (recent in-memory sync)
     const raw = sessionStorage.getItem('izzaWalletHandoff');
     if (raw){
       const s = JSON.parse(raw);
@@ -199,27 +224,29 @@ async function hydrateWalletOnEntry(){
       }
     }
 
-    // ⚡ wait for persist to fully load first
-    if (window.IZZA_PERSIST?.ready) {
-      await IZZA_PERSIST.ready;   // new line (basketball has this)
-    }
+    // wait for persist to be ready
+    if (window.IZZA_PERSIST?.ready) await IZZA_PERSIST.ready;
 
-    // now pull latest wallet snapshot
+    // load base snapshot
     if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
 
-    // hydrate leaderboard if available
+    // hydrate leaderboard
     if (window.IZZA_LEADERBOARD?.hydrate) await IZZA_LEADERBOARD.hydrate();
 
-    // now show correct balance on HUD
+    // 🔥 pull latest wallet data from persist
+    await syncLiveWallet();
+
+    // render HUD
     renderWalletFromLS();
   }catch(e){ console.warn('runner hydrate failed', e); }
 }
 
+/* --- SAVE UPDATED WALLET ON EXIT --- */
 async function persistWalletOnExit(){
   try{
-    // keep all craft keys in sync
     writeCraftAll(readCraftAny());
     if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
+    if (window.IZZA_PERSIST?.saveWallet) await IZZA_PERSIST.saveWallet(); // 🔥 ensures final sync
   }catch(e){ console.warn('runner save failed', e); }
 }
 
@@ -667,13 +694,18 @@ async function gameOver(){
   best = Math.max(best|0, finalScore);
   localStorage.setItem('runnerHighScore', String(best));
   const gainedCC = addCraftingCreditsFromIzza(sessionIzza);
-  try{ if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+
+  // Save immediately at game-over
+  try{
+    if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
+    if (window.IZZA_PERSIST?.saveWallet) await IZZA_PERSIST.saveWallet();
+  }catch(_){}
+
   try{ await submitLeaderboard(best); }catch(_){}
   const stats = `Distance: ${finalScore} • IZZA gained: ${sessionIzza} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
   document.getElementById('overStats').textContent = stats;
   overOverlay.classList.add('show');
 }
-
 /* Resize */
 window.addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
