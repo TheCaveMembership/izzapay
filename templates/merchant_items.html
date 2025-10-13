@@ -258,14 +258,19 @@
             {% for it in items %}
               <tr>
                 <td>
-                  {% set img = (it.image_url or '') | trim %}
-                  <div class="itimg">
-                    {% if img %}
-                      <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
-                           onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
-                    {% else %}<span class="muted" style="font-size:12px">—</span>{% endif %}
-                  </div>
-                </td>
+  {% set svg = (it.svg_code or '') | trim %}
+  {% set img = (it.image_url or '') | trim %}
+  <div class="itimg" data-no-i18n="1">
+    {% if svg %}
+      {{ svg | safe }}
+    {% elif img %}
+      <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+           onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
+    {% else %}
+      <span class="muted" style="font-size:12px">—</span>
+    {% endif %}
+  </div>
+</td>
                 <td>{{ it.title }}{% if it.fulfillment_kind == 'crafting' %} <span class="mono" style="font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;margin-left:6px;">Game</span>{% endif %}</td>
                 <td>{{ '%.7f'|format(it.pi_price) }}</td>
                 <td>{{ it.stock_qty }}</td>
