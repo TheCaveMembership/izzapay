@@ -3002,13 +3002,80 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            # === Grant in-game item if applicable ===
-            if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
-                try:
-                    _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
-                except Exception:
-                    # don't fail checkout on grant error
-                    pass
+            # --- inside the for li in lines loop, after you computed it, qty, etc. ---
+
+if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
+    try:
+        crafted_id = str(it["crafted_item_id"]).strip()
+
+        # Pull the crafted item details (svg + meta) so we can replicate later
+        with conn() as cx2:
+            c_row = cx2.execute(
+                "SELECT id, name, COALESCE(svg,'') AS svg, COALESCE(meta,'{}') AS meta "
+                "FROM crafted_items WHERE id=?", (crafted_id,)
+            ).fetchone()
+
+        # Fallbacks
+        c_svg = (c_row["svg"] if c_row else "") or ""
+        try:
+            c_meta = json.loads(c_row["meta"]) if c_row and c_row["meta"] else {}
+        except Exception:
+            c_meta = {}
+
+        # IC value needed to mint this item (fallback to 500 if missing)
+        ic_needed = int(c_meta.get("price_ic") or 500)
+
+        # One voucher per quantity purchased
+        for _ in range(qty):
+            token = uuid.uuid4().hex
+
+            payload = {
+                "kind": "crafted_item",
+                "title": it.get("title") or (c_row and c_row["name"]) or "Crafted Item",
+                "crafted_item_id": crafted_id,
+                "ic": ic_needed,
+                # Keep both high-level config and raw SVG so the game can recreate perfectly
+                "meta": c_meta,         # includes featureFlags/featureLevels/category/part if you stored them
+                "svg": c_svg
+            }
+
+            with conn() as cx2:
+                # Store a redeemable voucher row (use your existing table/shape if you already have one)
+                cx2.execute("""
+                    CREATE TABLE IF NOT EXISTS vouchers(
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      token TEXT UNIQUE NOT NULL,
+                      user_id INTEGER,            -- may be NULL at fulfill time
+                      kind TEXT NOT NULL,         -- 'credit', 'crafted_item', ...
+                      payload TEXT NOT NULL,      -- JSON blob
+                      used INTEGER NOT NULL DEFAULT 0,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                      used_at TIMESTAMP
+                    )
+                """)
+                cx2.execute(
+                    "INSERT INTO vouchers(token, user_id, kind, payload) VALUES(?,?,?,?)",
+                    (token, int(buyer_user_id) if buyer_user_id else None, "crafted_item", json.dumps(payload))
+                )
+
+                # Keep your existing redirect helper table so we can bounce buyer to voucher page
+                cx2.execute("""
+                    CREATE TABLE IF NOT EXISTS voucher_redirects(
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      session_id INTEGER NOT NULL,
+                      token TEXT NOT NULL,
+                      used INTEGER NOT NULL DEFAULT 0,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cx2.execute(
+                    "INSERT INTO voucher_redirects(session_id, token) VALUES(?,?)",
+                    (s["id"], token)
+                )
+
+    except Exception:
+        # never fail checkout on voucher generation errors
+        pass
 
             # --- IC CREDITS: award credits for special crafted ids or SKUs ---
             try:
