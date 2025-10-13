@@ -44,23 +44,20 @@
       background:#0001;
       position:relative;
     }
-    .thumb-wrap img.thumb{
-      width:100%;
-      height:100%;
-      object-fit:cover;
-      display:block;
-    }
-    .thumb-wrap.is-svg {
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    /* frame already has height:160px */
+.thumb-wrap.is-svg { background: transparent; position: relative; }
+.thumb-wrap.is-svg .svg-thumb{
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
 }
 
-.svg-thumb svg {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+/* let the SVG grow big but keep aspect ratio */
+.thumb-wrap.is-svg .svg-thumb svg{
+  display: block;
+  max-width: 90%;
+  max-height: 90%;
+  width: auto;   /* don't force distortion */
+  height: auto;  /* don't force distortion */
 }
     /* Greyscale/dim when sold out */
     .is-soldout .thumb-wrap img.thumb{
@@ -186,5 +183,24 @@
       <p class="muted">No products found.</p>
     {% endif %}
   </div>
+  <script>
+(function(){
+  document.querySelectorAll('.thumb-wrap.is-svg .svg-thumb svg').forEach(svg=>{
+    try{
+      // If the SVG has fixed width/height, they override CSS. Remove them.
+      const w = svg.getAttribute('width'), h = svg.getAttribute('height');
+      if (!svg.hasAttribute('viewBox')) {
+        // derive a sensible viewBox if missing
+        const vw = parseFloat(w)||512, vh = parseFloat(h)||512;
+        svg.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+      }
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      // ensure it scales nicely inside the frame
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    }catch{}
+  });
+})();
+</script>
 </body>
 </html>
