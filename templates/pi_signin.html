@@ -2,43 +2,102 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Sign in with Pi — IZZA PAY</title>
+  <title>IZZA PAY — Sign in with Pi</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    /* Page-specific tweaks */
-    html,body{max-width:100%;overflow-x:hidden;}
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+    /* ===== Dark Neon Web3 Theme (page-local) ===== */
+    html,body{max-width:100%;overflow-x:hidden}
+    :root{
+      --bg:#0a0d16; --panel:#0e1220; --card:rgba(18,22,35,.88);
+      --line:#1e2740; --txt:#e8f1ff; --muted:#98a6c7;
+      --accent:#6be1ff; --accent2:#10c97b; --accent3:#b784ff; --hot:#ff4f6b;
+      --glow: 0 0 32px rgba(107,225,255,.45), 0 0 64px rgba(183,132,255,.25);
+      --ring: 0 0 0 2px rgba(107,225,255,.25), 0 0 30px rgba(107,225,255,.35) inset;
+    }
+    body{font-family:Inter,Arial,Helvetica,sans-serif;background:radial-gradient(1200px 800px at 70% -10%, #162045 0%, #0a0d16 56%) fixed, var(--bg); color:var(--txt); margin:0}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 88px}
+    @media (min-width:720px){ .wrap{padding:24px 24px 120px} }
 
-    .wrap{max-width:980px;margin:0 auto;padding:16px}
-    @media (min-width:640px){ .wrap{padding:24px} }
-
+    /* Top bar */
     .topbar{
-      display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
-      padding:8px 0; position:sticky; top:0; z-index:10;
-      background:rgba(11,15,23,.9); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+      display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+      padding:10px 0; position:sticky; top:0; z-index:50;
+      background:linear-gradient(180deg, rgba(10,13,22,.95), rgba(10,13,22,.70));
+      backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+    }
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand-word{height:36px;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .ip-btn, .ip-btn.ghost{
+      display:inline-flex;align-items:center;justify-content:center;gap:8px;
+      padding:12px 16px;border-radius:12px; font-weight:600; letter-spacing:.2px; cursor:pointer; text-decoration:none;
+      border:1px solid transparent; transition:transform .12s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .ip-btn { background:linear-gradient(180deg,#4aa8ff,#3c7dff); color:white; box-shadow:var(--glow); }
+    .ip-btn:hover{ transform:translateY(-1px); }
+    .ip-btn:active{ transform:translateY(0); }
+    .ip-btn.ghost{ background:transparent; border-color:#2a3550; color:#cfe0ff; }
+    .ip-btn.ghost:hover{ border-color:#3f4e79; box-shadow:0 0 0 2px rgba(63,78,121,.35) inset; }
+
+    /* Cards and text */
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+    @media (min-width:720px){ .card{padding:20px} }
+    h1{margin:0 0 10px;font-size:28px;line-height:1.15}
+    h2{margin:0 0 8px;font-size:20px}
+    p{color:var(--muted);margin:8px 0}
+    .muted{color:var(--muted)}
+    .pillrow{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0}
+    .ip-pill{background:#10172a;border:1px solid #243055;color:#cfe0ff;border-radius:999px;padding:6px 10px;font-size:12px}
+
+    /* ===== HERO: Animated “X” Hub ===== */
+    .hero{position:relative;margin-top:14px;display:grid;gap:14px}
+    .hub{
+      position:relative;background:linear-gradient(180deg,#0c1224,#0a0d16);
+      border:1px solid var(--line); border-radius:18px; padding:22px; overflow:hidden;
+    }
+    .hub-inner{position:relative; z-index:1; display:grid; gap:16px}
+    .hub-grid{display:grid; gap:12px}
+    @media (min-width:900px){
+      .hero{grid-template-columns:1.2fr .9fr}
+      .hub-grid{grid-template-columns:1fr 1fr}
     }
 
-    /* Brand strip */
-    .brand{display:flex;align-items:center}
-    .brand-word{height:36px;filter:brightness(1.06) contrast(1.02)}
+    /* SVG X overlays */
+    .x-bg{position:absolute; inset:0; z-index:0; pointer-events:none; opacity:.9}
+    .x-hotspot{position:absolute; display:block; border-radius:12px}
+    .x-hotspot:focus-visible{outline: none; box-shadow:var(--ring)}
+    /* hotspots map to beams and nodes */
+    .hs-left{left:6%; top:50%; width:44%; height:18%; transform:translateY(-50%) rotate(-16deg)}
+    .hs-right{right:6%; top:50%; width:44%; height:18%; transform:translateY(-50%) rotate(16deg)}
+    .hs-node{left:50%; top:50%; width:130px; height:130px; transform:translate(-50%,-50%); border-radius:50%}
+    .hs-bottom{left:50%; bottom:10%; width:260px; height:54px; transform:translateX(-50%)}
 
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .actions a{white-space:nowrap}
-
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
-    .pillrow{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 16px}
-    h1{margin:0 0 8px;font-size:28px;line-height:1.15}
-    p{color:var(--muted);margin:6px 0}
-    .muted{color:var(--muted)}
-    .hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+    .cta-row{display:flex;gap:10px;flex-wrap:wrap}
     .cta-note{font-size:13px;color:var(--muted)}
-    .stack{display:flex;flex-direction:column;gap:8px}
+
+    /* Feature bullets */
+    .features{display:grid;gap:12px}
+    .feature{background:rgba(20,26,43,.6); border:1px solid #1c2646; border-radius:14px; padding:12px}
+    .feature strong{color:#e8f1ff}
+
+    /* Footer note */
+    .footnote{font-size:12px;color:#8ea3d1}
+
+    /* Tiny glow animation */
+    @keyframes pulseGlow{
+      0%{filter:drop-shadow(0 0 0 rgba(107,225,255,.0))}
+      50%{filter:drop-shadow(0 0 16px rgba(107,225,255,.45))}
+      100%{filter:drop-shadow(0 0 0 rgba(107,225,255,.0))}
+    }
+    .pulse{animation:pulseGlow 2.2s ease-in-out infinite}
+
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body class="cw-blue theme-a">
   <div class="wrap">
+
     <!-- Top bar -->
     <div class="topbar">
       <div class="brand">
@@ -50,67 +109,130 @@
       </div>
     </div>
 
-    <!-- Sign-in card -->
-    <div class="card" style="margin-top:12px">
-      <h1>Sign in with Pi</h1>
-      <p>Create your merchant store, add products, and accept Pi in minutes.</p>
+    <!-- HERO: Ecosystem hub with animated X -->
+    <section class="hero" aria-label="IZZA Ecosystem Hub">
+      <div class="hub">
 
-      <div class="pillrow">
-        <span class="ip-pill">1% app fee</span>
-        <span class="ip-pill">99% to merchant</span>
-        <span class="ip-pill">Pi SDK v2</span>
+        <!-- Animated SVG background “X” -->
+        <svg class="x-bg" viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#6be1ff"/>
+              <stop offset="1" stop-color="#b784ff"/>
+            </linearGradient>
+            <linearGradient id="g2" x1="1" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#10c97b"/>
+              <stop offset="1" stop-color="#6be1ff"/>
+            </linearGradient>
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="8" result="b"/>
+              <feMerge>
+                <feMergeNode in="b"/>
+                <feMergeNode in="b"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+
+          <!-- Beam 1 -->
+          <g filter="url(#glow)" opacity=".95">
+            <path d="M80 140 L1120 480" stroke="url(#g1)" stroke-width="16" stroke-linecap="round" />
+            <path d="M80 160 L1120 500" stroke="url(#g1)" stroke-width="3" stroke-linecap="round" opacity=".5">
+              <animate attributeName="stroke-dasharray" values="0 200; 120 200; 0 200" dur="3s" repeatCount="indefinite"/>
+            </path>
+          </g>
+
+          <!-- Beam 2 -->
+          <g filter="url(#glow)" opacity=".95">
+            <path d="M1120 140 L80 480" stroke="url(#g2)" stroke-width="16" stroke-linecap="round" />
+            <path d="M1120 160 L80 500" stroke="url(#g2)" stroke-width="3" stroke-linecap="round" opacity=".5">
+              <animate attributeName="stroke-dasharray" values="0 200; 120 200; 0 200" dur="3s" repeatCount="indefinite" begin=".6s"/>
+            </path>
+          </g>
+
+          <!-- Center node -->
+          <g filter="url(#glow)">
+            <circle cx="600" cy="320" r="54" fill="url(#g1)" opacity=".85"/>
+            <circle cx="600" cy="320" r="78" fill="none" stroke="#6be1ff" stroke-opacity=".25">
+              <animate attributeName="r" values="70;90;70" dur="4s" repeatCount="indefinite"/>
+            </circle>
+          </g>
+        </svg>
+
+        <!-- Invisible clickable hotspots mapped to routes -->
+        <a class="x-hotspot hs-left" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City"></a>
+        <a class="x-hotspot hs-right" href="/izza-game/auth?dest=minigames" aria-label="Play IZZA Arcade"></a>
+        <button id="piSignInBtn" class="x-hotspot hs-node" aria-label="Authorize with Pi" title="Authorize with Pi"></button>
+        <a class="x-hotspot hs-bottom" href="/orders" aria-label="View My Purchases"></a>
+
+        <!-- Content over the X -->
+        <div class="hub-inner">
+          <div class="hub-grid">
+            <div>
+              <h1 class="pulse">Build, sell, and play in IZZA</h1>
+              <p>Craft AI-SVG items inside IZZA, list them as digital collectibles, and get paid in Pi. Buyers equip items in game, including armor that reduces damage and fully automatic guns that change play. Your creativity becomes value inside the IZZA ecosystem.</p>
+              <div class="pillrow">
+                <span class="ip-pill">Pi SDK v2</span>
+                <span class="ip-pill">1% app fee</span>
+                <span class="ip-pill">99% to merchant</span>
+                <span class="ip-pill">IZZA API</span>
+              </div>
+              <div class="cta-row" style="margin-top:12px">
+                <button id="piSignInBtn_clone" class="ip-btn">Authorize with Pi</button>
+                <a class="ip-btn ghost" href="/orders">View My Purchases</a>
+              </div>
+              <p class="cta-note">Authorize to create your merchant store, add products, and manage sales. You can also jump into the game to start earning crafting credits.</p>
+              <p id="msg" class="muted"></p>
+              <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
+            </div>
+
+            <div class="features">
+              <div class="feature">
+                <strong>Craft & Sell</strong>
+                <p>Create AI-SVG items, mint as collectibles, and sell for Pi. Your store is live instantly inside IZZA PAY.</p>
+              </div>
+              <div class="feature">
+                <strong>Equip & Play</strong>
+                <p>Purchased items are usable across IZZA City and IZZA Arcade. Armor lowers damage, weapons change your strategy, cosmetics flex your style.</p>
+              </div>
+              <div class="feature">
+                <strong>Earn & Compete</strong>
+                <p>Play to earn IZZA Coins and Crafting Credits. Set records on IZZA leaderboards, including longest police chase in IZZA City.</p>
+              </div>
+              <div class="feature">
+                <strong>Creator Dashboard</strong>
+                <p>Track transactions, manage products, and see sales analytics with Pi-authenticated access.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="cta-row" style="margin-top:8px">
+            <a class="ip-btn" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City">🏙️ Enter IZZA City</a>
+            <a class="ip-btn ghost" href="/izza-game/auth?dest=minigames" aria-label="Play IZZA Arcade">🎯 Play IZZA Arcade</a>
+          </div>
+          <p class="footnote">Tip, the glowing X is interactive. Left beam opens IZZA City, right beam opens IZZA Arcade, center orb authorizes with Pi, bottom bar opens your purchases.</p>
+        </div>
       </div>
 
-      <div class="hero-actions">
-        <button id="piSignInBtn" class="ip-btn">Authorize with Pi</button>
-        <a class="ip-btn ghost" href="/orders">View My Purchases</a>
-        <a class="ip-btn ghost" href="/explore">See Stores</a>
+      <!-- Secondary card: How it works -->
+      <div class="card">
+        <h2>How it works</h2>
+        <ol style="margin:6px 0 0;padding-left:18px">
+          <li style="margin:10px 0"><strong>Authorize with Pi.</strong> You stay inside Pi Browser and connect securely.</li>
+          <li style="margin:10px 0"><strong>Create your store.</strong> Add products, set Pi pricing, customize your theme and fonts.</li>
+          <li style="margin:10px 0"><strong>Craft items in-game.</strong> Earn Crafting Credits and IZZA Coins, generate AI-SVG items, mint as collectibles.</li>
+          <li style="margin:10px 0"><strong>Sell to players.</strong> Buyers equip items across IZZA City and IZZA Arcade, value flows through real gameplay.</li>
+        </ol>
       </div>
+    </section>
 
-      <!-- GAME ENTRY -->
-      <div class="stack" style="margin-top:12px">
-        <!-- Renamed primary entry -->
-        <a class="ip-btn" href="/izza-game/auth?dest=city" aria-label="Enter IZZA City">🏙️ Enter IZZA City</a>
-
-        <!-- New Mini Games entry -->
-        <a class="ip-btn ghost" href="/izza-game/auth?dest=minigames" aria-label="Play Mini Games">🎯 Play Mini Games</a>
-        <p class="cta-note">* Earn item crafting credits and in-game currency</p>
-      </div>
-
-      <!-- Notes -->
-      <p class="muted" style="margin-top:6px;font-size:13px">
-        * Sales can be viewed through your merchant dashboard. Authorize with Pi above!
-      </p>
-      <p class="muted" style="margin-top:6px;font-size:13px">
-        🎮 If you’re not signed in when entering the game, you’ll be asked to authorize with Pi first.
-      </p>
-
-      <p id="msg" class="muted"></p>
-      <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
-    </div>
-
-    <!-- How it works -->
-    <div class="card" style="margin-top:14px">
-      <ol style="margin:0;padding-left:18px">
-        <li style="margin:8px 0">
-          <strong>Authorize with Pi.</strong>
-          <span class="muted">You’ll stay inside the Pi Browser.</span>
-        </li>
-        <li style="margin:8px 0">
-          <strong>Create your store &amp; add products.</strong>
-          <span class="muted">Upload images, set prices, and pick a theme and fonts.</span>
-        </li>
-        <li style="margin:8px 0">
-          <strong>Share your store link.</strong>
-          <span class="muted">Customers sign in with Pi and pay instantly.</span>
-        </li>
-      </ol>
-    </div>
   </div>
 
+  <!-- ===== Pi SDK auth (kept, with clone button wiring) ===== -->
   <script>
   (function(){
-    const btn = document.getElementById('piSignInBtn');
+    const btnMain = document.getElementById('piSignInBtn');
+    const btnClone = document.getElementById('piSignInBtn_clone');
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
     const postUrl = "/auth/exchange";
@@ -124,9 +246,9 @@
       try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
       catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
     }
-    if (!initPi()) setMsg("Open in Pi Browser or refresh. (Pi SDK not ready)");
+    if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
 
-    btn?.addEventListener('click', function(){
+    function doAuth(){
       setErr('');
       if (!window.Pi || !Pi.authenticate) { setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
       setMsg("Requesting authorization…");
@@ -146,11 +268,13 @@
           setMsg("Authorization failed. Please try again.");
           setErr(e?.message || String(e));
         });
-    });
+    }
+    btnMain?.addEventListener('click', doAuth);
+    btnClone?.addEventListener('click', doAuth);
   })();
   </script>
 
-  <!-- Language selector chip -->
+  <!-- ===== Language selector chip (unchanged) ===== -->
   <script>
   (function(){
     var KEY='izzaLang';
@@ -184,7 +308,7 @@
   })();
   </script>
 
-  <!-- Translation bootstrap -->
+  <!-- ===== Translation bootstrap (unchanged) ===== -->
   <script>
   window.TRANSLATE_TEXT = async (text, from, to) => {
     try {
