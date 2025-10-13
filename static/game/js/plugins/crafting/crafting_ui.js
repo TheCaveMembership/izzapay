@@ -2632,110 +2632,133 @@ function bindInside(){
   }
 
   try{
-    // Normalize the art for the correct slot
-    const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
+    // ---- Normalize art + persist crafted item with exact mint cost ----
+const normalizedForSlot = normalizeSvgForSlot(STATE.currentSVG, STATE.currentPart);
 
-    // Inject into game (your armoury hook)
-    const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem==='function')
-      ? window.ArmourPacks.injectCraftedItem({
-          name: STATE.currentName,
-          category: STATE.currentCategory,
-          part: STATE.currentPart,
-          svg: normalizedForSlot,
-          priceIC,
-          sellInShop,
-          sellInPi,
-          featureFlags: STATE.featureFlags,
-          tracerPreset: STATE.tracerPreset,
-          swingPreset: STATE.swingPreset
-        })
-      : { ok:false, reason:'armour-packs-hook-missing' };
+// Exact dynamic IC cost snapshot for THIS mint
+const icCost  = calcDynamicPrice().ic;
+const priceIC = icCost; // keep naming consistent with injector
 
-    if (!(injected && injected.ok)){
-      // Refund what we reserved
-      try{
-        if (plan?.use?.purchasedCredits) IZZA_CRAFT.purchase(plan.use.purchasedCredits);
-        if (plan?.use?.earnedCredits)    IZZA_CRAFT.earn(plan.use.earnedCredits);
-      }catch(_){}
-      craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
-      return;
+// Resolve current username once for the POST
+const uParam = encodeURIComponent(
+  (window?.IZZA?.player?.username) ||
+  (window?.IZZA?.me?.username)     ||
+  localStorage.getItem('izzaPlayer') ||
+  localStorage.getItem('pi_username') ||
+  ''
+);
+
+// Persist server-side FIRST so price_ic is saved alongside the SVG/meta
+let craftedId = null;
+try {
+  if (uParam) {
+    const persistResp = await serverJSON(gameApi(`/api/crafting/mine?u=${uParam}`), {
+      method: 'POST',
+      body: JSON.stringify({
+        name:     STATE.currentName,
+        category: STATE.currentCategory,
+        part:     STATE.currentPart,
+        svg:      normalizedForSlot,
+
+        // NEW: save the exact mint cost so future vouchers equal the true mint price
+        price_ic: priceIC,
+
+        // Helpful meta the voucher/UI can use to prefill and reapply stats/FX
+        meta: {
+          featureFlags:  STATE.featureFlags,
+          featureLevels: STATE.featureLevels,
+          tracerPreset:  STATE.tracerPreset,
+          swingPreset:   STATE.swingPreset,
+          aiStyle:       STATE.aiStyle,
+          wantAnimation: !!STATE.wantAnimation
+        }
+      })
+    });
+
+    if (persistResp && persistResp.ok && persistResp.id) {
+      craftedId = persistResp.id; // we’ll carry this forward (and for merchant handoff)
     }
+  }
+} catch(e) {
+  console.warn('[craft] initial persist failed (will still try to mint):', e);
+}
 
-    // ---- SUCCESS: Minted ----
-    craftStatus.textContent = 'Crafted ✓';
-    if (usingWalletCredit && walletCredit){
-      walletBurn(walletCredit.id);
-    } else if (usingValueStore){
-      try{
-        const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
-        setCraftingCredits(r.total|0, 'burn');
-      }catch(_){}
-    }
-    updateTabsHeaderCredits();
-    _syncVisualsTabStyle();
+// ---- Inject into game (armoury hook) ----
+const injected = (window.ArmourPacks && typeof window.ArmourPacks.injectCraftedItem === 'function')
+  ? window.ArmourPacks.injectCraftedItem({
+      name:       STATE.currentName,
+      category:   STATE.currentCategory,
+      part:       STATE.currentPart,
+      svg:        normalizedForSlot,
+      priceIC,                        // pass the exact IC cost to the engine, too
+      sellInShop,
+      sellInPi,
+      featureFlags:  STATE.featureFlags,
+      tracerPreset:  STATE.tracerPreset,
+      swingPreset:   STATE.swingPreset
+    })
+  : { ok:false, reason:'armour-packs-hook-missing' };
 
-    // Persist the crafted item server-side (get craftedId if possible)
-    let craftedId = injected.id || null;
-    try {
-      const u = encodeURIComponent(
-        (window?.IZZA?.player?.username) ||
-        (window?.IZZA?.me?.username)     ||
-        localStorage.getItem('izzaPlayer') ||
-        localStorage.getItem('pi_username') ||
-        ''
-      );
-      if (u) {
-        const resp = await serverJSON(gameApi(`/api/crafting/mine?u=${u}`), {
-          method: 'POST',
-          body: JSON.stringify({
-            name: STATE.currentName,
-            category: STATE.currentCategory,
-            part: STATE.currentPart,
-            svg: normalizedForSlot,
-            sku: '',
-            image: ''
-          })
-        });
-        if (resp && resp.ok && resp.id && !craftedId) craftedId = resp.id;
-      }
-    } catch(e) {
-      console.warn('[craft] persist failed:', e);
-    }
+if (!(injected && injected.ok)){
+  // Refund what we reserved
+  try{
+    if (plan?.use?.purchasedCredits) IZZA_CRAFT.purchase(plan.use.purchasedCredits);
+    if (plan?.use?.earnedCredits)    IZZA_CRAFT.earn(plan.use.earnedCredits);
+  }catch(_){}
+  craftStatus.textContent = 'Mint failed: ' + (injected?.reason || 'armour hook missing');
+  return;
+}
 
-    // Mirror into My Creations + optional refresh
-    try { mirrorInjectedInventoryToMine(injected); } catch {}
-    try { hydrateMine(); } catch {}
+// ---- SUCCESS: Minted ----
+craftStatus.textContent = 'Crafted ✓';
+if (usingWalletCredit && walletCredit){
+  walletBurn(walletCredit.id);
+} else if (usingValueStore){
+  try{
+    const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
+    setCraftingCredits(r.total|0, 'burn');
+  }catch(_){}
+}
+updateTabsHeaderCredits();
+_syncVisualsTabStyle();
 
-    // Refresh credits badge/visuals from split store (legacy mirrors stay in sync)
-    try{
-      const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
-      setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
-      STATE.canUseVisuals = (r.total|0) > 0;
-      updateTabsHeaderCredits();
-      _syncVisualsTabStyle();
-    }catch(_){}
+// If the armoury returned an id, prefer it as craftedId
+if (!craftedId && injected.id) craftedId = injected.id;
 
-    // Return to Setup after successful mint
-    STATE.createSub = 'setup';
-    const host = STATE.root?.querySelector('#craftTabs');
-    if (host){
-      host.innerHTML = renderCreate();
-      bindInside();
-      bindFeatureMeters(STATE.root);
-      _syncVisualsTabStyle();
-    }
+// Mirror into My Creations + optional refresh
+try { mirrorInjectedInventoryToMine(injected); } catch {}
+try { hydrateMine(); } catch {}
 
-    // Optional IZZA Pay merchant handoff
-    if (sellInPi && craftedId) {
-      const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
-      try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
-      const qs = new URLSearchParams({ attach: String(craftedId) });
-      try {
-        const t = localStorage.getItem('izzaBearer') || '';
-        if (t) qs.set('t', t);
-      } catch {}
-      location.href = `/merchant?${qs.toString()}`;
-    }
+// Refresh credits badge/visuals from split store (legacy mirrors stay in sync)
+try{
+  const r = (window.IZZA_CRAFT && IZZA_CRAFT.read) ? IZZA_CRAFT.read() : { total:0 };
+  setCraftingCredits(r.total|0, 'burn'); // mirrors combined total into legacy LS + cookie
+  STATE.canUseVisuals = (r.total|0) > 0;
+  updateTabsHeaderCredits();
+  _syncVisualsTabStyle();
+} catch(_){}
+
+// Return to Setup after successful mint
+STATE.createSub = 'setup';
+const host = STATE.root?.querySelector('#craftTabs');
+if (host){
+  host.innerHTML = renderCreate();
+  bindInside();
+  bindFeatureMeters(STATE.root);
+  _syncVisualsTabStyle();
+}
+
+// Optional IZZA Pay merchant handoff
+if (sellInPi && craftedId) {
+  const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
+  try { BUS?.emit?.('merchant-handoff', { craftedId }); } catch {}
+  const qs = new URLSearchParams({ attach: String(craftedId) });
+  try {
+    const t = localStorage.getItem('izzaBearer') || '';
+    if (t) qs.set('t', t);
+  } catch {}
+  location.href = `/merchant?${qs.toString()}`;
+}
   }catch(e){
     // Refund on any thrown error
     try{
