@@ -2976,7 +2976,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             pass
         return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
-    # we only reach here if lines exist
     item_ids = [int(li["item_id"]) for li in lines]
     with conn() as cx:
         placeholders = ",".join("?" for _ in item_ids)
@@ -3003,16 +3002,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            # === Auto-grant crafted items purchased from IZZA merchant stores ===
-            if it and (it.get("fulfillment_kind") == "crafting") and it.get("crafted_item_id") and buyer_user_id:
+            # === Grant in-game item if applicable ===
+            if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
                 try:
-                    # 1) Grant to the buyer’s in-game inventory
-                    _grant_crafting_item(int(buyer_user_id), it["crafted_item_id"], qty)
+                    _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
                 except Exception:
-                    # never fail checkout on grant errors
+                    # don't fail checkout on grant error
                     pass
 
-            # --- IC CREDITS (legacy paths): award credits for special crafted ids or SKUs ---
+            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
             try:
                 # Strategy 1: crafted_item_id like "ic:<amount>" (e.g., "ic:500")
                 cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
@@ -3075,24 +3073,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     buyer_user_id,
                 ),
             )
-            order_id = cur.lastrowid
-            created_order_ids.append(order_id)
-
-            # 2) Mark as "claimed" so the collectibles UI doesn’t ask again
-            if it and (it.get("fulfillment_kind") == "crafting") and it.get("crafted_item_id") and buyer_user_id:
-                try:
-                    dup = cx.execute(
-                        "SELECT 1 FROM collectible_claims WHERE order_id=? AND user_id=?",
-                        (order_id, int(buyer_user_id))
-                    ).fetchone()
-                    if not dup:
-                        import time as _time
-                        cx.execute(
-                            "INSERT INTO collectible_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
-                            (order_id, int(buyer_user_id), int(_time.time()))
-                        )
-                except Exception:
-                    pass
+            created_order_ids.append(cur.lastrowid)
 
         # Mark the session as paid
         cx.execute(
@@ -3132,11 +3113,47 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         )
 
         merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
+
+        shipping_html = ""
+        if isinstance(shipping, dict):
+            name   = (shipping.get("name") or "").strip()
+            email  = (shipping.get("email") or "").strip()
+            phone  = (shipping.get("phone") or "").strip()
+            addr1  = (shipping.get("address") or "").strip()
+            addr2  = (shipping.get("address2") or "").strip()
+            city   = (shipping.get("city") or "").strip()
+            state  = (shipping.get("state") or "").strip()
+            postal = (shipping.get("postal_code") or "").strip()
+            country= (shipping.get("country") or "").strip()
+            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
+            if any_shipping:
+                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
+                locality_parts = [p for p in [city, state] if p]
+                locality_line = ", ".join(locality_parts)
+                if postal:
+                    locality_line = (locality_line + " " if locality_line else "") + postal
+                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
+                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
+                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
+                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
+                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
+                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
+                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
+                shipping_html = "".join(block)
+
+        # Email subjects
+        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
+        if suffix:
+            subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
+        else:
+            subj_buyer = f"Your order at {m['business_name']} is confirmed"
+
+        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
+
         if buyer_email:
             send_email(
                 buyer_email,
-                (f"Your order at {m['business_name']} is confirmed"
-                 f"{f' [{len(display_rows)} items]' if len(display_rows)>1 else ''}"),
+                subj_buyer,
                 f"""
                     <h2>Thanks for your order!</h2>
                     <p><strong>Store:</strong> {m['business_name']}</p>
@@ -3186,12 +3203,13 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     # Build the JSON response once
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
 
-    # One-time cookie to cue the game UI. Flag for izza-game-crafting or single-credit product
+    # One-time cookie to cue the game to open Create → Visuals (only when relevant)
     should_flag = False
     try:
         if slug == "izza-game-crafting":
             should_flag = True
         else:
+            # If this order includes the single-use crafting product, also flag
             for li in lines:
                 it = by_id.get(int(li["item_id"]))
                 if it and str(it.get("link_id") or "") == SINGLE_CREDIT_LINK_ID:
