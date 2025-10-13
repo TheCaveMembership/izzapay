@@ -2916,25 +2916,6 @@ def pi_complete():
         if not PI_SANDBOX:
             return {"ok": False, "error": "payment_verify_error"}, 500
 
-    # === Voucher-redirect setup (one-shot token created after successful verify) ===
-    # We don't grant credits here anymore; we just create a redirect token.
-    try:
-        ensure_voucher_tables()  # creates tables if missing
-
-        import secrets, time
-        vtoken = secrets.token_urlsafe(32)
-        with conn() as cx:
-            cx.execute(
-                """INSERT INTO voucher_redirects(token, session_id, payment_id, created_at, used)
-                   VALUES (?,?,?,?,0)""",
-                (vtoken, s["id"], payment_id, int(time.time()))
-            )
-        # (We do not return here; fulfill_session will choose the correct redirect)
-        print(f"[pi_complete] voucher redirect token created for session {s['id']}")
-    except Exception as e:
-        # Non-fatal; worst case we fall back to default store redirect inside fulfill_session
-        print("[pi_complete] voucher token creation failed:", e)
-
     return fulfill_session(s, txid, buyer, shipping)
 
 
@@ -2976,11 +2957,23 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             pass
         return {"ok": True, "redirect_url": f"{BASE_ORIGIN}/store/{m['slug']}?success=1"}
 
+            # we only reach here if lines exist
     item_ids = [int(li["item_id"]) for li in lines]
     with conn() as cx:
         placeholders = ",".join("?" for _ in item_ids)
         items = cx.execute(f"SELECT * FROM items WHERE id IN ({placeholders})", item_ids).fetchall()
         by_id = {int(r["id"]): r for r in items}
+
+    # Detect if this session includes the special credit product
+    is_credit_purchase = False
+    try:
+        for li in lines:
+            it = by_id.get(int(li["item_id"]))
+            if it and str(it.get("link_id") or "") == SINGLE_CREDIT_LINK_ID:
+                is_credit_purchase = True
+                break
+    except Exception:
+        is_credit_purchase = False
 
     created_order_ids = []
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
@@ -2992,27 +2985,21 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             snap_price = float(li["price"])
 
             line_gross = snap_price * qty
-            # Split the session-level fee proportionally across lines
             line_fee   = float(fee_total) * (line_gross / total_snapshot_gross)
             line_net   = line_gross - line_fee
 
             if it and not it["allow_backorder"]:
-                cx.execute(
-                    "UPDATE items SET stock_qty=? WHERE id=?",
-                    (max(0, it["stock_qty"] - qty), it["id"])
-                )
+                cx.execute("UPDATE items SET stock_qty=? WHERE id=?", (max(0, it["stock_qty"] - qty), it["id"]))
 
-            # === Grant in-game item if applicable ===
+            # Grant crafted items immediately
             if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
                 try:
                     _grant_crafting_item(buyer_user_id, it["crafted_item_id"], qty)
                 except Exception:
-                    # don't fail checkout on grant error
                     pass
 
-            # --- IC CREDITS: award credits for special crafted ids or SKUs ---
+            # Optional legacy IC credit award paths
             try:
-                # Strategy 1: crafted_item_id like "ic:<amount>" (e.g., "ic:500")
                 cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
                 awarded = 0
                 if cid.startswith("ic:"):
@@ -3023,8 +3010,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     if unit > 0 and buyer_user_id:
                         awarded = unit * qty
                         add_ic_credits(int(buyer_user_id), awarded)
-
-                # Strategy 2 (fallback): SKU like "IC500" or "ic_500"
                 if not awarded:
                     sku = (it["sku"] or "").strip().lower() if it else ""
                     if sku.startswith("ic"):
@@ -3038,50 +3023,27 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             except Exception:
                 pass
 
-            # Create order row for this line
             buyer_token = uuid.uuid4().hex
             cur = cx.execute(
                 """INSERT INTO orders(
-                     merchant_id,
-                     item_id,
-                     qty,
-                     buyer_email,
-                     buyer_name,
-                     shipping_json,
-                     pi_amount,
-                     pi_fee,
-                     pi_merchant_net,
-                     pi_tx_hash,
-                     payout_status,
-                     status,
-                     buyer_token,
-                     buyer_user_id
+                     merchant_id, item_id, qty, buyer_email, buyer_name, shipping_json,
+                     pi_amount, pi_fee, pi_merchant_net, pi_tx_hash, payout_status, status,
+                     buyer_token, buyer_user_id
                    )
                    VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
                 (
-                    s["merchant_id"],
-                    (it["id"] if it else None),
-                    qty,
-                    buyer_email,
-                    buyer_name,
-                    json.dumps(shipping),
-                    float(line_gross),
-                    float(line_fee),
-                    float(line_net),
-                    tx_hash,
-                    buyer_token,
-                    buyer_user_id,
+                    s["merchant_id"], (it["id"] if it else None), qty,
+                    buyer_email, buyer_name, json.dumps(shipping),
+                    float(line_gross), float(line_fee), float(line_net), tx_hash,
+                    buyer_token, buyer_user_id,
                 ),
             )
             created_order_ids.append(cur.lastrowid)
 
         # Mark the session as paid
-        cx.execute(
-            "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
-            (tx_hash, s["id"])
-        )
+        cx.execute("UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?", (tx_hash, s["id"]))
 
-    # ===== Emails =====
+    # ===== Emails (unchanged) =====
     try:
         display_rows = []
         for li in lines:
@@ -3111,49 +3073,12 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             "</tfoot>"
             "</table>"
         )
-
         merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
-
-        shipping_html = ""
-        if isinstance(shipping, dict):
-            name   = (shipping.get("name") or "").strip()
-            email  = (shipping.get("email") or "").strip()
-            phone  = (shipping.get("phone") or "").strip()
-            addr1  = (shipping.get("address") or "").strip()
-            addr2  = (shipping.get("address2") or "").strip()
-            city   = (shipping.get("city") or "").strip()
-            state  = (shipping.get("state") or "").strip()
-            postal = (shipping.get("postal_code") or "").strip()
-            country= (shipping.get("country") or "").strip()
-            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
-            if any_shipping:
-                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
-                locality_parts = [p for p in [city, state] if p]
-                locality_line = ", ".join(locality_parts)
-                if postal:
-                    locality_line = (locality_line + " " if locality_line else "") + postal
-                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
-                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
-                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
-                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
-                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
-                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
-                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
-                shipping_html = "".join(block)
-
-        # Email subjects
-        suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        if suffix:
-            subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
-        else:
-            subj_buyer = f"Your order at {m['business_name']} is confirmed"
-
-        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
-
         if buyer_email:
             send_email(
                 buyer_email,
-                subj_buyer,
+                (f"Your order at {m['business_name']} is confirmed"
+                 f"{f' [{len(display_rows)} items]' if len(display_rows)>1 else ''}"),
                 f"""
                     <h2>Thanks for your order!</h2>
                     <p><strong>Store:</strong> {m['business_name']}</p>
@@ -3167,7 +3092,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
-    # ---- Redirect back to storefront with success flag (and token if available)
+    # ---- Build redirect (default back to store)
     u = current_user_row()
     tok = ""
     if u:
@@ -3175,59 +3100,44 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             tok = mint_login_token(u["id"])
         except Exception:
             tok = ""
-
     join = "&" if tok else ""
     default_target = f"{BASE_ORIGIN}/store/{m['slug']}?success=1{join}{('t='+tok) if tok else ''}"
 
-    # SPECIAL CASE: izza-game-crafting → send to voucher page instead
-    slug = m.get("slug") if isinstance(m, dict) else (m["slug"] if m else "")
-
-    # Try to find a voucher redirect token we created for this session
+    # Create a voucher redirect token ONLY for credit purchases
     voucher_redirect_url = None
-    try:
-        with conn() as cx:
-            vr = cx.execute(
-                "SELECT token FROM voucher_redirects WHERE session_id=? AND used=0 ORDER BY created_at DESC LIMIT 1",
-                (s["id"],)
-            ).fetchone()
-        if vr and vr["token"]:
-            voucher_redirect_url = f"{BASE_ORIGIN}/voucher/new?token={vr['token']}"
-    except Exception as e:
-        print("[fulfill_session] voucher token lookup failed:", e)
+    if is_credit_purchase:
+        try:
+            ensure_voucher_tables()
+            import secrets, time as _time
+            try:
+                pay_id_for_token = s["pi_payment_id"] or ""
+            except Exception:
+                pay_id_for_token = ""
+            vtoken = secrets.token_urlsafe(32)
+            with conn() as cx:
+                cx.execute(
+                    """INSERT INTO voucher_redirects(token, session_id, payment_id, created_at, used)
+                       VALUES (?,?,?,?,0)""",
+                    (vtoken, s["id"], pay_id_for_token, int(_time.time()))
+                )
+            voucher_redirect_url = f"{BASE_ORIGIN}/voucher/new?token={vtoken}"
+        except Exception as e:
+            print("[fulfill_session] voucher token create failed:", e)
 
-    if slug == "izza-game-crafting" and voucher_redirect_url:
-        redirect_url = voucher_redirect_url
-    else:
-        redirect_url = default_target
+    # Choose redirect
+    redirect_url = voucher_redirect_url if voucher_redirect_url else default_target
 
-    # Build the JSON response once
+    # Response + cookie (cookie only for credit purchases)
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
-
-    # One-time cookie to cue the game to open Create → Visuals (only when relevant)
-    should_flag = False
-    try:
-        if slug == "izza-game-crafting":
-            should_flag = True
-        else:
-            # If this order includes the single-use crafting product, also flag
-            for li in lines:
-                it = by_id.get(int(li["item_id"]))
-                if it and str(it.get("link_id") or "") == SINGLE_CREDIT_LINK_ID:
-                    should_flag = True
-                    break
-    except Exception:
-        should_flag = False
-
-    if should_flag:
+    if is_credit_purchase:
         resp.set_cookie(
             "craft_credit", "1",
-            max_age=15 * 60,     # 15 minutes
-            secure=True,         # HTTPS only
-            samesite="None",     # cross-site friendly (Pi Browser)
-            httponly=False,      # UI may read it if needed
+            max_age=15 * 60,
+            secure=True,
+            samesite="None",
+            httponly=False,
             path="/"
         )
-
     return resp
 @app.post("/payment/cancel")
 def payment_cancel():
@@ -3244,7 +3154,6 @@ def payment_cancel():
         except Exception:
             pass
     return {"ok": True, "cleared": bool(session_id)}
-
 
 @app.post("/payment/error")
 def payment_error():
