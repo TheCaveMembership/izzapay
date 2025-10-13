@@ -24,7 +24,7 @@
     .h2{font-size:18px;font-weight:800;margin:0 0 10px}
     .muted{color:var(--muted)}
     .row{display:flex;gap:10px;flex-wrap:wrap}
-    .stack{display:flex;flex-direction:column;gap:8px}
+    .stack{display:flex;flex-direction:column;gap:6px}
     .field{display:flex;flex-direction:column;gap:6px}
     .field-inline{display:grid;gap:10px;grid-template-columns:1fr}
     @media (min-width:600px){.field-inline{grid-template-columns:1fr 1fr}}
@@ -248,6 +248,17 @@
             <div class="field"><label class="ip-label">Price (Pi)</label><input class="ip-input" name="pi_price" inputmode="decimal" placeholder="0.1" required></div>
             <div class="field"><label class="ip-label">Stock Qty</label><input class="ip-input" name="stock_qty" inputmode="numeric" placeholder="10"></div>
           </div>
+
+          <!-- BEGIN: Voucher explainer + live IC preview (for crafted items) -->
+          <div class="field" id="voucherInfo" style="display:none">
+            <div class="note" id="voucherExplainer">
+              Buyers will get a <strong>single-use crafting voucher</strong> equal to your product’s Pi price, converted to IC.
+              They’ll redeem it to mint this item, then return to copy the SVG shown on their voucher page.
+            </div>
+            <div class="note" id="voucherCalc" style="margin-top:6px"></div>
+            <div class="note" id="mintCostNote" style="margin-top:6px"></div>
+          </div>
+          <!-- END: Voucher explainer -->
 
           <label class="ip-label" style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="allow_backorder" value="1"> Allow backorder</label>
 
@@ -601,6 +612,7 @@
     // ---------- Crafting Land linker --------- //
   (function(){
     const GAME_BASE='https://izzagame.onrender.com';
+    const IC_PER_PI = 2000; // display-only conversion for seller/buyer expectations
 
     const who=()=>{
       const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
@@ -615,15 +627,16 @@
       const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
       if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
     }
-// Fetch crafted item details from your backend (expects price_ic, svg, meta)
-async function fetchCraftedDetails(craftedId){
-  if(!craftedId) return null;
-  // implement this endpoint on the server to return { ok, svg, meta:{price_ic,...} }
-  const r = await fetch(`/api/crafted/${encodeURIComponent(craftedId)}`, { credentials: 'include' });
-  if(!r.ok) return null;
-  const j = await r.json().catch(()=>null);
-  return j && j.ok ? j : null;
-}
+
+    // Fetch crafted item details from your backend (expects price_ic, svg, meta)
+    async function fetchCraftedDetails(craftedId){
+      if(!craftedId) return null;
+      const r = await fetch(`/api/crafted/${encodeURIComponent(craftedId)}`, { credentials: 'include' });
+      if(!r.ok) return null;
+      const j = await r.json().catch(()=>null);
+      return j && j.ok ? j : null;
+    }
+
     // --- helpers used by itemsFromState
     function normalizeCategory(rawType, rawCategory){
       const t = String(rawType || '').toLowerCase();
@@ -732,6 +745,36 @@ async function fetchCraftedDetails(craftedId){
       const titleEl=$('#create-product form input[name="title"]');
       const skuEl=$('#create-product form input[name="sku"]');
 
+      // Voucher info UI
+      const priceInput = $('#create-product input[name="pi_price"]');
+      const craftedIdInput = $('#crafted_item_id');
+      const infoWrap = $('#voucherInfo');
+      const voucherCalc = $('#voucherCalc');
+      const mintCostNote = $('#mintCostNote');
+
+      function fmt(n){ try{ return Number(n).toLocaleString(); }catch{ return String(n); } }
+
+      function updateVoucherPreview(){
+        const hasCraft = !!(craftedIdInput?.value || '').trim();
+        const pi = parseFloat((priceInput?.value || '').trim());
+        if(!infoWrap) return;
+        if(!hasCraft){
+          infoWrap.style.display='none';
+          voucherCalc.textContent='';
+          mintCostNote.textContent='';
+          return;
+        }
+        infoWrap.style.display='';
+        if(pi && !isNaN(pi) && pi>0){
+          const ic = Math.round(pi * IC_PER_PI);
+          voucherCalc.textContent = `Buyers will receive a single-use voucher worth approximately ${fmt(ic)} IC (based on ${IC_PER_PI} IC per 1 π).`;
+        }else{
+          voucherCalc.textContent = '';
+        }
+        const icCost = parseInt(($('#craft_ic_cost')?.value || '').trim() || '0', 10);
+        mintCostNote.textContent = icCost>0 ? `Average mint cost for this item: ~ ${fmt(icCost)} IC.` : '';
+      }
+
       function setFromSvg(svg, id){
         svgHidden.value = svg || '';
         if(svg){
@@ -748,47 +791,50 @@ async function fetchCraftedDetails(craftedId){
       }
 
       async function onChange(){
-  const id = sel.value || '';
-  markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
-  if(!id) return;
+        const id = sel.value || '';
+        markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
+        if(!id){ updateVoucherPreview(); return; }
 
-  const it = CRAFT_ITEMS[id] || {};
-  if(titleEl) titleEl.value = it.title || titleEl.value;
-  if(skuEl)   skuEl.value   = it.sku || '';
+        const it = CRAFT_ITEMS[id] || {};
+        if(titleEl) titleEl.value = it.title || titleEl.value;
+        if(skuEl)   skuEl.value   = it.sku || '';
 
-  // 1) Ask server for true mint cost + canonical svg/meta
-  const det = await fetchCraftedDetails(id);
-  const meta = (det && det.meta) || {};
-  const priceIC = Number(meta.price_ic || 0);
+        // 1) Ask server for true mint cost + canonical svg/meta
+        const det = await fetchCraftedDetails(id);
+        const meta = (det && det.meta) || {};
+        const priceIC = Number(meta.price_ic || 0);
 
-  // 2) Fill the hidden IC fields so the server can persist them on create
-  const icEl  = document.getElementById('craft_ic_cost');
-  const modeEl= document.getElementById('craft_dyn_mode');
-  const icDyn = document.getElementById('craft_dyn_ic');
-  if(icEl)  icEl.value   = priceIC > 0 ? String(priceIC) : '';
-  if(modeEl) modeEl.value= 'fixed_ic';
-  if(icDyn) icDyn.value  = priceIC > 0 ? String(priceIC) : '';
+        // 2) Fill the hidden IC fields so the server can persist them on create
+        const icEl  = document.getElementById('craft_ic_cost');
+        const modeEl= document.getElementById('craft_dyn_mode');
+        const icDyn = document.getElementById('craft_dyn_ic');
+        if(icEl)  icEl.value   = priceIC > 0 ? String(priceIC) : '';
+        if(modeEl) modeEl.value= 'fixed_ic';
+        if(icDyn) icDyn.value  = priceIC > 0 ? String(priceIC) : '';
 
-  // 3) Prefer the canonical SVG from server; fallback to what came from state
-  const svgFromServer = det && det.svg || '';
-  if(svgFromServer){
-    setFromSvg(svgFromServer, id);
-  }else if(it.svg){
-    setFromSvg(it.svg, id);
-  }else if(it.img){
-    const u=ABS(ipfsToHttp(it.img)).trim();
-    if(/\.svg(\?|$)/i.test(u)){
-      await injectSvgFromUrl('#itThumb', u, 80);
-      svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
-    }else{
-      if(imgIn) imgIn.value=u;
-      setThumb('itThumb', proxy(u));
-      svgHidden.value='';
-    }
-  }
-}
+        // 3) Prefer the canonical SVG from server; fallback to what came from state
+        const svgFromServer = det && det.svg || '';
+        if(svgFromServer){
+          setFromSvg(svgFromServer, id);
+        }else if(it.svg){
+          setFromSvg(it.svg, id);
+        }else if(it.img){
+          const u=ABS(ipfsToHttp(it.img)).trim();
+          if(/\.svg(\?|$)/i.test(u)){
+            await injectSvgFromUrl('#itThumb', u, 80);
+            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
+          }else{
+            if(imgIn) imgIn.value=u;
+            setThumb('itThumb', proxy(u));
+            svgHidden.value='';
+          }
+        }
+
+        updateVoucherPreview();
+      }
 
       sel.addEventListener('change', onChange);
+      priceInput?.addEventListener('input', updateVoucherPreview);
 
       const btn=$('#refreshCrafted');
       if(btn){
@@ -808,6 +854,8 @@ async function fetchCraftedDetails(craftedId){
         const user=who();
         const state=await fetchState(user);
         fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
+        // Initial voucher preview state
+        updateVoucherPreview();
       }catch{} })();
     })();
 
