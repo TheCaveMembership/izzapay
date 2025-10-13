@@ -3040,7 +3040,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
             # Create order row for this line
             buyer_token = uuid.uuid4().hex
-            cur = cx.execute(
+                        cur = cx.execute(
                 """INSERT INTO orders(
                      merchant_id,
                      item_id,
@@ -3074,29 +3074,29 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 ),
             )
             created_order_ids.append(cur.lastrowid)
-            # --- Auto-grant crafted items purchased from IZZA merchant stores ---
-if it and (it.get("fulfillment_kind") == "crafting") and it.get("crafted_item_id") and buyer_user_id:
-    try:
-        # 1) Grant to the buyer’s in-game inventory (same helper as the manual mint/claim flow)
-        _grant_crafting_item(int(buyer_user_id), it["crafted_item_id"], qty)
-    except Exception:
-        # never fail checkout on grant errors
-        pass
 
-    # 2) Mark as "claimed" so any collectibles UI doesn't prompt again
-    try:
-        dup = cx.execute(
-            "SELECT 1 FROM collectible_claims WHERE order_id=? AND user_id=?",
-            (cur.lastrowid, int(buyer_user_id))
-        ).fetchone()
-        if not dup:
-            import time as _time
-            cx.execute(
-                "INSERT INTO collectible_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
-                (cur.lastrowid, int(buyer_user_id), int(_time.time()))
-            )
-    except Exception:
-        pass
+            # Mark as "claimed" so any collectibles UI doesn't prompt again
+            try:
+                cx.execute("""
+                    CREATE TABLE IF NOT EXISTS collectible_claims(
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      order_id INTEGER NOT NULL,
+                      user_id  INTEGER NOT NULL,
+                      claimed_at INTEGER NOT NULL
+                    )
+                """)
+                dup = cx.execute(
+                    "SELECT 1 FROM collectible_claims WHERE order_id=? AND user_id=?",
+                    (cur.lastrowid, int(buyer_user_id) if buyer_user_id else None)
+                ).fetchone()
+                if (buyer_user_id is not None) and not dup:
+                    import time as _time
+                    cx.execute(
+                        "INSERT INTO collectible_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
+                        (cur.lastrowid, int(buyer_user_id), int(_time.time()))
+                    )
+            except Exception:
+                pass
 
         # Mark the session as paid
         cx.execute(
